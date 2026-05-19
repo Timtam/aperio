@@ -55,6 +55,7 @@ pub fn run() {
             commands::create_color_label,
             commands::update_color_label,
             commands::delete_color_label,
+            commands::search,
         ])
         .setup(move |_app| {
             // Future phases register the sync engine and plugin manager here.

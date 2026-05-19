@@ -379,7 +379,7 @@ fn row_to_event_result(row: &rusqlite::Row<'_>) -> rusqlite::Result<cal_core::Re
     Ok(row_to_event(row))
 }
 
-fn row_to_event(row: &rusqlite::Row<'_>) -> cal_core::Result<Event> {
+pub(crate) fn row_to_event(row: &rusqlite::Row<'_>) -> cal_core::Result<Event> {
     let id = req_text(row, 0)?;
     let calendar_id = req_text(row, 1)?;
     let title = req_text(row, 2)?;

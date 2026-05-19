@@ -15,8 +15,13 @@ import { useDialogState } from '../state/DialogState';
  * the view knows what's currently focused.
  */
 export function useDialogShortcuts(): void {
-  const { openEventDialog, openTaskDialog, openQuickAdd, mode } =
-    useDialogState();
+  const {
+    openEventDialog,
+    openTaskDialog,
+    openQuickAdd,
+    openSearch,
+    mode,
+  } = useDialogState();
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -26,6 +31,11 @@ export function useDialogShortcuts(): void {
 
       const cmd = e.ctrlKey || e.metaKey;
 
+      if (cmd && !e.shiftKey && e.key.toLowerCase() === 'f') {
+        e.preventDefault();
+        openSearch();
+        return;
+      }
       if (cmd && e.shiftKey && e.key.toLowerCase() === 'n') {
         e.preventDefault();
         openTaskDialog(null);
@@ -45,7 +55,7 @@ export function useDialogShortcuts(): void {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [mode.kind, openEventDialog, openTaskDialog, openQuickAdd]);
+  }, [mode.kind, openEventDialog, openTaskDialog, openQuickAdd, openSearch]);
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {

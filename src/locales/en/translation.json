@@ -23,6 +23,7 @@
     "next": "Next",
     "today": "Today",
     "create": "Create",
+    "search": "Search",
     "quickAdd": "Quick add",
     "newEvent": "New event",
     "newTask": "New task",
@@ -167,6 +168,23 @@
     "quickAdd": {
       "title": "Quick add event",
       "moreDetails": "More details …"
+    },
+    "search": {
+      "title": "Search",
+      "field": "Search events and tasks",
+      "placeholder": "Type to search …",
+      "results": "Search results",
+      "searching": "Searching …",
+      "resultCount_zero": "No results",
+      "resultCount_one": "1 result",
+      "resultCount_other": "{{count}} results",
+      "noResults": "No results for the current query.",
+      "kindEvent": "Event",
+      "kindTask": "Task",
+      "eventSecondary": "{{date}}, calendar: {{calendar}}",
+      "taskSecondary": "Task list: {{list}}",
+      "eventAria": "Event: {{title}}, {{secondary}}",
+      "taskAria": "Task: {{title}}, {{secondary}}"
     }
   },
   "sidebar": {

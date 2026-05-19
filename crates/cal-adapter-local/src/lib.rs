@@ -17,7 +17,10 @@
 mod calendars;
 mod color_labels;
 mod mapping;
+mod search;
 mod tasks;
+
+pub use search::SearchResults;
 
 use std::sync::{Arc, Mutex};
 
@@ -105,9 +108,11 @@ pub(crate) mod test_support {
         let conn = Connection::open_in_memory().expect("open in-memory");
         conn.execute_batch("PRAGMA foreign_keys = ON;")
             .expect("enable fk");
-        conn.execute_batch(SCHEMA).expect("apply schema");
+        conn.execute_batch(SCHEMA_V1).expect("apply v1 schema");
+        conn.execute_batch(SCHEMA_V2).expect("apply v2 schema");
         Arc::new(Mutex::new(conn))
     }
 
-    const SCHEMA: &str = include_str!("../../../src-tauri/src/db/sql/0001_init.sql");
+    const SCHEMA_V1: &str = include_str!("../../../src-tauri/src/db/sql/0001_init.sql");
+    const SCHEMA_V2: &str = include_str!("../../../src-tauri/src/db/sql/0002_search.sql");
 }

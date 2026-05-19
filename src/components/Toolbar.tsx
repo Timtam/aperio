@@ -31,7 +31,8 @@ export function Toolbar() {
   const { t } = useTranslation();
   const fmt = useDateFormat();
   const { view, setView, anchor, jumpToToday, goPrev, goNext } = useViewState();
-  const { openEventDialog, openTaskDialog, openQuickAdd } = useDialogState();
+  const { openEventDialog, openTaskDialog, openQuickAdd, openSearch } =
+    useDialogState();
 
   return (
     <div
@@ -95,6 +96,14 @@ export function Toolbar() {
         aria-label={t('toolbar.create')}
         className="toolbar__group toolbar__group--create"
       >
+        <button
+          type="button"
+          onClick={() => openSearch()}
+          aria-label={t('toolbar.search')}
+          title={t('toolbar.search') + ' (Ctrl+F)'}
+        >
+          🔎
+        </button>
         <button
           type="button"
           onClick={() => openQuickAdd()}

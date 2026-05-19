@@ -8,12 +8,14 @@
 
 mod calendars;
 mod color_labels;
+mod search;
 mod tasks;
 
 use serde::Serialize;
 
 pub use calendars::*;
 pub use color_labels::*;
+pub use search::*;
 pub use tasks::*;
 
 /// Frontend-friendly error envelope.

@@ -2,6 +2,7 @@ import { useDialogState } from '../state/DialogState';
 import { ColorLabelDialog } from './ColorLabelDialog';
 import { EventDialog } from './EventDialog';
 import { QuickAddDialog } from './QuickAddDialog';
+import { SearchDialog } from './SearchDialog';
 import { TaskDialog } from './TaskDialog';
 
 /**
@@ -35,6 +36,8 @@ export function DialogHost() {
       return <QuickAddDialog isOpen onClose={close} />;
     case 'colorLabels':
       return <ColorLabelDialog isOpen onClose={close} />;
+    case 'search':
+      return <SearchDialog isOpen onClose={close} />;
     case 'none':
     default:
       return null;

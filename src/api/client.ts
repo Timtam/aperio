@@ -11,6 +11,7 @@ import type {
   ColorLabel,
   CommandError,
   NewEvent,
+  SearchResults,
   Task,
   TaskList,
 } from './types';
@@ -120,3 +121,8 @@ export const updateColorLabel = (label: ColorLabel) =>
 
 export const deleteColorLabel = (id: string) =>
   invoke<void>('delete_color_label', { id });
+
+// ── Search ─────────────────────────────────────────────────────────────────
+
+export const search = (query: string) =>
+  invoke<SearchResults>('search', { query });

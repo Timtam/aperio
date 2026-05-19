@@ -23,7 +23,8 @@ export type DialogMode =
   | { kind: 'event'; event: CalendarEvent | null; calendarId?: string }
   | { kind: 'task'; task: Task | null; listId?: string }
   | { kind: 'quickAdd' }
-  | { kind: 'colorLabels' };
+  | { kind: 'colorLabels' }
+  | { kind: 'search' };
 
 interface DialogStateValue {
   mode: DialogMode;
@@ -34,6 +35,7 @@ interface DialogStateValue {
   openTaskDialog: (task?: Task | null, listId?: string) => void;
   openQuickAdd: () => void;
   openColorLabels: () => void;
+  openSearch: () => void;
   close: () => void;
 }
 
@@ -80,6 +82,11 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     setMode({ kind: 'colorLabels' });
   }, []);
 
+  const openSearch = useCallback(() => {
+    captureTrigger();
+    setMode({ kind: 'search' });
+  }, []);
+
   const close = useCallback(() => {
     const target = triggerRef.current;
     triggerRef.current = null;
@@ -101,6 +108,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openTaskDialog,
       openQuickAdd,
       openColorLabels,
+      openSearch,
       close,
     }),
     [
@@ -109,6 +117,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openTaskDialog,
       openQuickAdd,
       openColorLabels,
+      openSearch,
       close,
     ],
   );

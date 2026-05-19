@@ -11,17 +11,23 @@
 
 use super::{DbError, DbHandle, DbResult};
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 1;
+pub const CURRENT_SCHEMA_VERSION: u32 = 2;
 
 struct Migration {
     target: u32,
     sql: &'static str,
 }
 
-const MIGRATIONS: &[Migration] = &[Migration {
-    target: 1,
-    sql: include_str!("sql/0001_init.sql"),
-}];
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        target: 1,
+        sql: include_str!("sql/0001_init.sql"),
+    },
+    Migration {
+        target: 2,
+        sql: include_str!("sql/0002_search.sql"),
+    },
+];
 
 pub(super) fn run(db: &DbHandle) -> DbResult<()> {
     // Read current version first; if we're already at target, do nothing

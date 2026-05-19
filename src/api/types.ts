@@ -114,6 +114,11 @@ export interface ColorLabel {
   hex: string;
 }
 
+export interface SearchResults {
+  events: CalendarEvent[];
+  tasks: Task[];
+}
+
 export interface CommandError {
   code:
     | 'auth'

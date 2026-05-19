@@ -361,7 +361,7 @@ fn parse_deadline_type(s: &str) -> cal_core::Result<DeadlineType> {
     })
 }
 
-fn row_to_task(row: &rusqlite::Row<'_>) -> cal_core::Result<Task> {
+pub(crate) fn row_to_task(row: &rusqlite::Row<'_>) -> cal_core::Result<Task> {
     let id = req_text(row, 0)?;
     let list_id = req_text(row, 1)?;
     let parent_id = opt_text(row, 2)?;

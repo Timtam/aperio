@@ -23,6 +23,7 @@
     "next": "Vor",
     "today": "Heute",
     "create": "Erstellen",
+    "search": "Suchen",
     "quickAdd": "Schnell anlegen",
     "newEvent": "Neuer Termin",
     "newTask": "Neue Aufgabe",
@@ -167,6 +168,23 @@
     "quickAdd": {
       "title": "Termin schnell anlegen",
       "moreDetails": "Weitere Details …"
+    },
+    "search": {
+      "title": "Suche",
+      "field": "Termine und Aufgaben durchsuchen",
+      "placeholder": "Begriff eingeben …",
+      "results": "Suchergebnisse",
+      "searching": "Wird gesucht …",
+      "resultCount_zero": "Keine Ergebnisse",
+      "resultCount_one": "1 Ergebnis",
+      "resultCount_other": "{{count}} Ergebnisse",
+      "noResults": "Keine Ergebnisse für die aktuelle Suche.",
+      "kindEvent": "Termin",
+      "kindTask": "Aufgabe",
+      "eventSecondary": "{{date}}, Kalender: {{calendar}}",
+      "taskSecondary": "Aufgabenliste: {{list}}",
+      "eventAria": "Termin: {{title}}, {{secondary}}",
+      "taskAria": "Aufgabe: {{title}}, {{secondary}}"
     }
   },
   "sidebar": {
