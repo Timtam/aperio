@@ -4,6 +4,9 @@
       "invalidHex": "Please enter a valid hex value, e.g. #e53935."
     }
   },
+  "actions": {
+    "duplicated": "\"{{title}}\" duplicated."
+  },
   "app": {
     "title": "Aperio",
     "unknownView": "Unknown view: {{view}}",
@@ -168,6 +171,21 @@
     "quickAdd": {
       "title": "Quick add event",
       "moreDetails": "More details …"
+    },
+    "moveCopy": {
+      "titleEvent": "Move or copy event \"{{title}}\"",
+      "titleTask": "Move or copy task \"{{title}}\"",
+      "modeLabel": "Action",
+      "modeMove": "Move",
+      "modeCopy": "Copy",
+      "targetCalendar": "Target calendar",
+      "targetList": "Target list",
+      "currentSuffix": "(current)",
+      "targetRequired": "Please pick a target.",
+      "submitMove": "Move",
+      "submitCopy": "Copy",
+      "moved": "\"{{title}}\" moved.",
+      "copied": "\"{{title}}\" copied."
     },
     "search": {
       "title": "Search",

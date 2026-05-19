@@ -1,6 +1,7 @@
 import { useDialogState } from '../state/DialogState';
 import { ColorLabelDialog } from './ColorLabelDialog';
 import { EventDialog } from './EventDialog';
+import { MoveCopyDialog } from './MoveCopyDialog';
 import { QuickAddDialog } from './QuickAddDialog';
 import { SearchDialog } from './SearchDialog';
 import { TaskDialog } from './TaskDialog';
@@ -38,6 +39,10 @@ export function DialogHost() {
       return <ColorLabelDialog isOpen onClose={close} />;
     case 'search':
       return <SearchDialog isOpen onClose={close} />;
+    case 'moveCopy':
+      return (
+        <MoveCopyDialog isOpen onClose={close} target={mode.target} />
+      );
     case 'none':
     default:
       return null;

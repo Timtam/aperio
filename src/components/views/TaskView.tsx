@@ -17,6 +17,7 @@ import { useCalendarStore } from '../../state/CalendarStore';
 import { useDialogState } from '../../state/DialogState';
 import { useTasks } from '../../state/useTasks';
 import type { Task, TaskStatus } from '../../api/types';
+import { duplicateTask } from '../MoveCopyDialog';
 
 /**
  * Dedicated task view — flat listbox of tasks with visual group
@@ -43,7 +44,7 @@ export function TaskView() {
   const { tasks, taskListById, loading } = useTasks();
   const { colorLabels } = useCalendarStore();
   const labelById = useMemo(() => labelsLookup(colorLabels), [colorLabels]);
-  const { openTaskDialog } = useDialogState();
+  const { openTaskDialog, openMoveCopy } = useDialogState();
 
   // Flatten the task buckets into a single options array, interleaved
   // with separator entries. focusIndex points at the *task* index in
@@ -92,7 +93,25 @@ export function TaskView() {
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key.toLowerCase() === 'd' && !e.shiftKey && !e.altKey) {
+          e.preventDefault();
+          const task = flatTasks[focusIndex];
+          if (task) {
+            void duplicateTask(task).then(() =>
+              announce(t('actions.duplicated', { title: task.title })),
+            );
+          }
+        }
+        return;
+      }
+      if (e.altKey) return;
+      if (e.shiftKey && e.key.toLowerCase() === 'm') {
+        e.preventDefault();
+        const task = flatTasks[focusIndex];
+        if (task) openMoveCopy({ kind: 'task', task });
+        return;
+      }
       if (flatTasks.length === 0) return;
       switch (e.key) {
         case 'ArrowDown':
@@ -128,7 +147,15 @@ export function TaskView() {
           return;
       }
     },
-    [flatTasks, focusIndex, toggleStatus, openTaskDialog],
+    [
+      flatTasks,
+      focusIndex,
+      toggleStatus,
+      openTaskDialog,
+      openMoveCopy,
+      announce,
+      t,
+    ],
   );
 
   return (

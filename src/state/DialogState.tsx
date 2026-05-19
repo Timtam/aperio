@@ -18,13 +18,18 @@ import type { CalendarEvent, Task } from '../api/types';
  * have to know about the internals — the render path picks the right
  * component to show.
  */
+export type MoveCopyTarget =
+  | { kind: 'event'; event: CalendarEvent }
+  | { kind: 'task'; task: Task };
+
 export type DialogMode =
   | { kind: 'none' }
   | { kind: 'event'; event: CalendarEvent | null; calendarId?: string }
   | { kind: 'task'; task: Task | null; listId?: string }
   | { kind: 'quickAdd' }
   | { kind: 'colorLabels' }
-  | { kind: 'search' };
+  | { kind: 'search' }
+  | { kind: 'moveCopy'; target: MoveCopyTarget };
 
 interface DialogStateValue {
   mode: DialogMode;
@@ -36,6 +41,7 @@ interface DialogStateValue {
   openQuickAdd: () => void;
   openColorLabels: () => void;
   openSearch: () => void;
+  openMoveCopy: (target: MoveCopyTarget) => void;
   close: () => void;
 }
 
@@ -87,6 +93,11 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     setMode({ kind: 'search' });
   }, []);
 
+  const openMoveCopy = useCallback((target: MoveCopyTarget) => {
+    captureTrigger();
+    setMode({ kind: 'moveCopy', target });
+  }, []);
+
   const close = useCallback(() => {
     const target = triggerRef.current;
     triggerRef.current = null;
@@ -109,6 +120,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openQuickAdd,
       openColorLabels,
       openSearch,
+      openMoveCopy,
       close,
     }),
     [
@@ -118,6 +130,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openQuickAdd,
       openColorLabels,
       openSearch,
+      openMoveCopy,
       close,
     ],
   );

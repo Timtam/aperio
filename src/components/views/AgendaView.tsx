@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { CalendarEvent } from '../../api/types';
+import { useAnnouncer } from '../../a11y/Announcer';
 import { useAutoFocus } from '../../hooks/useAutoFocus';
 import { localDateKey } from '../../intl/dateKey';
 import { useDateFormat } from '../../intl/dateFormat';
@@ -11,6 +12,7 @@ import { useDialogState } from '../../state/DialogState';
 import { useEvents } from '../../state/useEvents';
 import { useViewState } from '../../state/ViewState';
 import { visibleRange } from '../../state/viewMath';
+import { duplicateEvent } from '../MoveCopyDialog';
 
 /**
  * Agenda — flat, chronologically ordered listbox of events with visual
@@ -30,9 +32,10 @@ import { visibleRange } from '../../state/viewMath';
  */
 export function AgendaView() {
   const { t } = useTranslation();
+  const announce = useAnnouncer();
   const { anchor } = useViewState();
   const fmt = useDateFormat();
-  const { openEventDialog } = useDialogState();
+  const { openEventDialog, openMoveCopy } = useDialogState();
 
   const range = useMemo(() => visibleRange('agenda', anchor), [anchor]);
   const { events, calendarById, loading } = useEvents(range);
@@ -53,7 +56,25 @@ export function AgendaView() {
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key.toLowerCase() === 'd' && !e.shiftKey && !e.altKey) {
+          e.preventDefault();
+          const ev = events[focusIndex];
+          if (ev) {
+            void duplicateEvent(ev).then(() =>
+              announce(t('actions.duplicated', { title: ev.title })),
+            );
+          }
+        }
+        return;
+      }
+      if (e.altKey) return;
+      if (e.shiftKey && e.key.toLowerCase() === 'm') {
+        e.preventDefault();
+        const ev = events[focusIndex];
+        if (ev) openMoveCopy({ kind: 'event', event: ev });
+        return;
+      }
       if (events.length === 0) return;
       switch (e.key) {
         case 'ArrowDown':
@@ -84,7 +105,7 @@ export function AgendaView() {
           return;
       }
     },
-    [events, focusIndex, openEventDialog],
+    [events, focusIndex, openEventDialog, openMoveCopy, announce, t],
   );
 
   return (

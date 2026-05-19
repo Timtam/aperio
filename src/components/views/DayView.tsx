@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { isSameDay } from 'date-fns';
 
+import { useAnnouncer } from '../../a11y/Announcer';
 import { useAutoFocus } from '../../hooks/useAutoFocus';
 import { useDateFormat } from '../../intl/dateFormat';
 import { labelsLookup, resolveEventColor } from '../../intl/eventColor';
@@ -10,6 +11,7 @@ import { useDialogState } from '../../state/DialogState';
 import { useEvents } from '../../state/useEvents';
 import { useViewState } from '../../state/ViewState';
 import { visibleRange } from '../../state/viewMath';
+import { duplicateEvent } from '../MoveCopyDialog';
 
 /**
  * Day view — flat listbox of the focused day's events.
@@ -29,8 +31,9 @@ import { visibleRange } from '../../state/viewMath';
 export function DayView() {
   const { t } = useTranslation();
   const fmt = useDateFormat();
+  const announce = useAnnouncer();
   const { anchor } = useViewState();
-  const { openEventDialog } = useDialogState();
+  const { openEventDialog, openMoveCopy } = useDialogState();
 
   const range = useMemo(() => visibleRange('day', anchor), [anchor]);
   const { events, calendarById, loading } = useEvents(range);
@@ -58,7 +61,30 @@ export function DayView() {
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      // Ctrl+D duplicates the focused event in place; Shift+M opens
+      // the move/copy dialog. Bare keys cover the rest of the listbox
+      // navigation.
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key.toLowerCase() === 'd' && !e.shiftKey && !e.altKey) {
+          e.preventDefault();
+          const ev = dayEvents[focusIndex];
+          if (ev) {
+            void duplicateEvent(ev).then(() =>
+              announce(
+                t('actions.duplicated', { title: ev.title }),
+              ),
+            );
+          }
+        }
+        return;
+      }
+      if (e.altKey) return;
+      if (e.shiftKey && e.key.toLowerCase() === 'm') {
+        e.preventDefault();
+        const ev = dayEvents[focusIndex];
+        if (ev) openMoveCopy({ kind: 'event', event: ev });
+        return;
+      }
       if (dayEvents.length === 0) return;
       switch (e.key) {
         case 'ArrowDown':
@@ -89,7 +115,7 @@ export function DayView() {
           return;
       }
     },
-    [dayEvents, focusIndex, openEventDialog],
+    [dayEvents, focusIndex, openEventDialog, openMoveCopy, announce, t],
   );
 
   const today = useMemo(() => new Date(), []);
