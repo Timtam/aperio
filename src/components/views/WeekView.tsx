@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { addDays, isSameDay, startOfWeek } from 'date-fns';
 
 import { useAutoFocus } from '../../hooks/useAutoFocus';
+import { localDateKey } from '../../intl/dateKey';
 import { useDateFormat } from '../../intl/dateFormat';
 import { useDialogState } from '../../state/DialogState';
 import { useEvents } from '../../state/useEvents';
@@ -235,7 +236,9 @@ export function WeekView() {
 }
 
 function keyOf(d: Date): string {
-  return d.toISOString().slice(0, 10);
+  // Local YYYY-MM-DD — see `localDateKey` for why this can't be
+  // toISOString().slice(0, 10).
+  return localDateKey(d);
 }
 
 function groupEventsByDay(

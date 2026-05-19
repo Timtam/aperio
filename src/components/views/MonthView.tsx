@@ -11,6 +11,7 @@ import {
 } from 'date-fns';
 
 import { useAutoFocus } from '../../hooks/useAutoFocus';
+import { localDateKey } from '../../intl/dateKey';
 import { useDateFormat } from '../../intl/dateFormat';
 import { useDialogState } from '../../state/DialogState';
 import { useEvents } from '../../state/useEvents';
@@ -238,7 +239,8 @@ function buildMonthGrid(anchor: Date): Date[] {
 }
 
 function keyOf(d: Date): string {
-  return d.toISOString().slice(0, 10);
+  // Local YYYY-MM-DD — see `localDateKey`.
+  return localDateKey(d);
 }
 
 function groupEventsByDay(events: CalendarEvent[]): Map<string, CalendarEvent[]> {

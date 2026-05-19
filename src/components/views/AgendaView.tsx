@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 
 import type { CalendarEvent } from '../../api/types';
 import { useAutoFocus } from '../../hooks/useAutoFocus';
+import { localDateKey } from '../../intl/dateKey';
 import { useDateFormat } from '../../intl/dateFormat';
 import { useDialogState } from '../../state/DialogState';
 import { useEvents } from '../../state/useEvents';
@@ -141,7 +142,7 @@ function renderEvents(
 
   events.forEach((ev, i) => {
     const start = new Date(ev.start);
-    const dayKey = start.toISOString().slice(0, 10);
+    const dayKey = localDateKey(start);
 
     // Visual-only day separator. aria-hidden so the screen reader
     // never reads it; the date is encoded into each option's aria-label.
