@@ -1,4 +1,9 @@
 {
+  "common": {
+    "colorComposer": {
+      "invalidHex": "Please enter a valid hex value, e.g. #e53935."
+    }
+  },
   "app": {
     "title": "Aperio",
     "unknownView": "Unknown view: {{view}}",
@@ -37,7 +42,12 @@
     "close": "Close",
     "colorLabels": {
       "title": "Color labels",
-      "empty": "No color labels yet.",
+      "existingHeading_zero": "Existing color labels",
+      "existingHeading_one": "Existing color labels (1)",
+      "existingHeading_other": "Existing color labels ({{count}})",
+      "newHeading": "Add a new color label",
+      "editHeading": "Edit \"{{name}}\"",
+      "emptyHint": "No color labels yet — add your first below.",
       "nameRequired": "Please enter a name.",
       "create": "Create",
       "created": "Label \"{{name}}\" created.",
@@ -46,6 +56,9 @@
       "renameLabel": "Rename \"{{name}}\"",
       "colorLabel": "Color for \"{{name}}\"",
       "deleteLabel": "Delete \"{{name}}\"",
+      "deleteAction": "Delete",
+      "listLabel": "Existing color labels",
+      "optionLabel": "{{name}}, color {{hex}}",
       "fields": {
         "name": "Name",
         "color": "Color"

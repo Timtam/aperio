@@ -541,17 +541,82 @@ button:disabled {
   overflow: auto;
 }
 
+.color-labels__section {
+  /* Tab stop carries the heading announcement, but the visual treatment
+     stays subtle so the section feels like part of the form, not a
+     button. The focus ring still appears via the global :focus-visible
+     rule. */
+  padding: var(--space-1);
+  margin: 0 calc(var(--space-1) * -1);
+  border-radius: var(--radius-sm);
+}
+
+.color-labels__heading {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-fg-muted);
+  margin: 0 0 var(--space-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .color-labels__empty {
   color: var(--color-fg-muted);
-  text-align: center;
-  padding: var(--space-2);
+  font-style: italic;
+  margin: 0 0 var(--space-2);
 }
 
 .color-labels__row {
   display: grid;
-  grid-template-columns: 16px 1fr 44px auto auto;
+  grid-template-columns: 16px 1fr auto;
   align-items: center;
   gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.color-labels__row--focused {
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.color-labels__name {
+  font-weight: 500;
+}
+
+.color-labels__hex {
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  font-size: var(--font-size-xs);
+  color: var(--color-fg-muted);
+}
+
+.color-labels__edit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.color-composer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.color-composer__hex {
+  width: 9ch;
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  font-size: var(--font-size-sm);
+}
+
+.color-composer__swatch {
+  width: 36px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
 }
 
 .color-labels__swatch {
@@ -567,12 +632,11 @@ button:disabled {
 
 .color-labels__create {
   display: grid;
-  grid-template-columns: 1fr 44px auto;
+  grid-template-columns: 1fr auto auto;
   gap: var(--space-2);
   align-items: end;
-  margin-top: var(--space-3);
-  padding-top: var(--space-3);
-  border-top: 1px solid var(--color-border);
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
 }
 
 /* Tint the task row's left border with the resolved color label / list

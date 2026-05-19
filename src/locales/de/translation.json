@@ -1,4 +1,9 @@
 {
+  "common": {
+    "colorComposer": {
+      "invalidHex": "Bitte einen gültigen Hex-Wert eingeben, z. B. #e53935."
+    }
+  },
   "app": {
     "title": "Aperio",
     "unknownView": "Unbekannte Ansicht: {{view}}",
@@ -37,7 +42,12 @@
     "close": "Schließen",
     "colorLabels": {
       "title": "Farb-Labels",
-      "empty": "Noch keine Farb-Labels angelegt.",
+      "existingHeading_zero": "Vorhandene Farb-Labels",
+      "existingHeading_one": "Vorhandene Farb-Labels (1)",
+      "existingHeading_other": "Vorhandene Farb-Labels ({{count}})",
+      "newHeading": "Neues Farb-Label anlegen",
+      "editHeading": "Label „{{name}}\" bearbeiten",
+      "emptyHint": "Noch keine Farb-Labels — lege unten dein erstes an.",
       "nameRequired": "Bitte gib einen Namen ein.",
       "create": "Anlegen",
       "created": "Label „{{name}}\" wurde angelegt.",
@@ -46,6 +56,9 @@
       "renameLabel": "Name von „{{name}}\" bearbeiten",
       "colorLabel": "Farbe von „{{name}}\" wählen",
       "deleteLabel": "Label „{{name}}\" löschen",
+      "deleteAction": "Löschen",
+      "listLabel": "Vorhandene Farb-Labels",
+      "optionLabel": "{{name}}, Farbe {{hex}}",
       "fields": {
         "name": "Name",
         "color": "Farbe"
