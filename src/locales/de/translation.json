@@ -1,9 +1,20 @@
 {
   "app": {
     "title": "Aperio",
-    "phase0": {
-      "intro": "Phase 0 – Projekt-Skelett steht. Daten, Adapter und Synchronisation folgen.",
-      "invokeError": "Backend-Aufruf fehlgeschlagen: {{error}}"
+    "phase1": {
+      "intro": "Phase 1 – lokaler CRUD-Loop. Lege Kalender und Termine an, um die Verkabelung zu testen.",
+      "calendars": "Kalender",
+      "events": "Termine",
+      "noCalendars": "Noch kein Kalender vorhanden.",
+      "noEvents": "Keine Termine in den nächsten 30 Tagen.",
+      "selectCalendarFirst": "Wähle zuerst einen Kalender.",
+      "newCalendar": "Neuer lokaler Kalender",
+      "newEvent": "Neuer Termin",
+      "deleteCalendarA11y": "Kalender „{{name}}\" löschen",
+      "smokeEventTitle": "Testtermin",
+      "calendarCreated": "Kalender „{{name}}\" wurde angelegt.",
+      "calendarDeleted": "Kalender wurde gelöscht.",
+      "eventCreated": "Termin „{{title}}\" wurde angelegt."
     }
   }
 }

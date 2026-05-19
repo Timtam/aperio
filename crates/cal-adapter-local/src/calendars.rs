@@ -1,0 +1,586 @@
+//! `CalendarFeature` implementation plus local-only management methods
+//! (`create_calendar`, `update_calendar`, `delete_calendar`).
+//!
+//! The trait methods are designed for external providers where calendars
+//! pre-exist on the server. Local calendars are user-created, so we expose
+//! inherent methods on [`LocalAdapter`] for those — they are not part of
+//! the public adapter trait surface.
+
+use async_trait::async_trait;
+use cal_core::{
+    Calendar, CalendarFeature, ContainerColor, DateRange, Event, EventRecurrence, FreeBusy,
+    NewEvent, Reminder, SoundConfig,
+};
+use chrono::{DateTime, Utc};
+use rusqlite::{params, OptionalExtension};
+use uuid::Uuid;
+
+use crate::mapping::{
+    decode_json, encode_json, fmt_utc, opt_text, parse_utc, read_bool, read_container_color,
+    read_sound, req_text, write_container_color, write_sound,
+};
+use crate::{map_sql_err, LocalAdapter, SOURCE_ID};
+
+impl LocalAdapter {
+    /// Create a new local calendar. Returns the freshly-inserted row.
+    pub fn create_calendar(
+        &self,
+        name: &str,
+        color: Option<ContainerColor>,
+        default_sound: Option<SoundConfig>,
+    ) -> cal_core::Result<Calendar> {
+        let id = Uuid::new_v4().to_string();
+        let now = Utc::now();
+        let now_s = fmt_utc(&now);
+        let (color_hex, color_source) = write_container_color(&color);
+        let default_sound_json = write_sound(&default_sound)?;
+
+        self.db
+            .lock()
+            .expect("db mutex poisoned")
+            .execute(
+                "INSERT INTO calendars (
+                    id, source, name, color_hex, color_source, read_only,
+                    default_sound, created_at, updated_at
+                 ) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)",
+                params![
+                    id,
+                    SOURCE_ID,
+                    name,
+                    color_hex,
+                    color_source,
+                    default_sound_json,
+                    now_s,
+                    now_s,
+                ],
+            )
+            .map_err(map_sql_err)?;
+
+        Ok(Calendar {
+            id,
+            name: name.to_string(),
+            color,
+            read_only: false,
+            default_sound,
+        })
+    }
+
+    /// Rename a calendar and/or change its color/sound.
+    pub fn update_calendar(&self, calendar: Calendar) -> cal_core::Result<Calendar> {
+        let now_s = fmt_utc(&Utc::now());
+        let (color_hex, color_source) = write_container_color(&calendar.color);
+        let default_sound_json = write_sound(&calendar.default_sound)?;
+
+        let changed = self
+            .db
+            .lock()
+            .expect("db mutex poisoned")
+            .execute(
+                "UPDATE calendars
+                    SET name = ?, color_hex = ?, color_source = ?,
+                        default_sound = ?, updated_at = ?
+                  WHERE id = ?",
+                params![
+                    calendar.name,
+                    color_hex,
+                    color_source,
+                    default_sound_json,
+                    now_s,
+                    calendar.id,
+                ],
+            )
+            .map_err(map_sql_err)?;
+
+        if changed == 0 {
+            return Err(cal_core::Error::NotFound(format!(
+                "calendar '{}' not found",
+                calendar.id
+            )));
+        }
+        Ok(calendar)
+    }
+
+    /// Delete a calendar. Events are removed via `ON DELETE CASCADE`.
+    pub fn delete_calendar(&self, id: &str) -> cal_core::Result<()> {
+        let changed = self
+            .db
+            .lock()
+            .expect("db mutex poisoned")
+            .execute("DELETE FROM calendars WHERE id = ?", params![id])
+            .map_err(map_sql_err)?;
+        if changed == 0 {
+            return Err(cal_core::Error::NotFound(format!(
+                "calendar '{id}' not found"
+            )));
+        }
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl CalendarFeature for LocalAdapter {
+    async fn list_calendars(&self) -> cal_core::Result<Vec<Calendar>> {
+        let conn = self.db().lock().expect("db mutex poisoned");
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, name, color_hex, color_source, read_only, default_sound
+                   FROM calendars
+                  ORDER BY name COLLATE NOCASE",
+            )
+            .map_err(map_sql_err)?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    req_text(row, 0),
+                    req_text(row, 1),
+                    read_container_color(row, 2, 3),
+                    read_bool(row, 4),
+                    read_sound(row, 5),
+                ))
+            })
+            .map_err(map_sql_err)?;
+
+        let mut out = Vec::new();
+        for r in rows {
+            let (id, name, color, read_only, sound) = r.map_err(map_sql_err)?;
+            out.push(Calendar {
+                id: id?,
+                name: name?,
+                color: color?,
+                read_only: read_only?,
+                default_sound: sound?,
+            });
+        }
+        Ok(out)
+    }
+
+    async fn get_events(
+        &self,
+        calendar_id: &str,
+        range: DateRange,
+    ) -> cal_core::Result<Vec<Event>> {
+        let conn = self.db().lock().expect("db mutex poisoned");
+        // Phase 1: simple temporal filter. Recurrence expansion (RRULE)
+        // happens in Phase 4 once we wire up an evaluator — for now we
+        // return rows whose stored start/end intersect the requested range.
+        let mut stmt = conn.prepare(EVENT_SELECT_PREFIX).map_err(map_sql_err)?;
+
+        let start_s = fmt_utc(&range.start);
+        let end_s = fmt_utc(&range.end);
+        let rows = stmt
+            .query_map(params![calendar_id, end_s, start_s], row_to_event_result)
+            .map_err(map_sql_err)?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r.map_err(map_sql_err)??);
+        }
+        Ok(out)
+    }
+
+    async fn create_event(&self, calendar_id: &str, event: NewEvent) -> cal_core::Result<Event> {
+        let id = Uuid::new_v4().to_string();
+        let now = Utc::now();
+        let stored = persist_new_event(self, calendar_id, &id, now, event)?;
+        Ok(stored)
+    }
+
+    async fn update_event(&self, event: Event) -> cal_core::Result<Event> {
+        let now = Utc::now();
+        let mut event = event;
+        event.updated_at = now;
+
+        let conn = self.db().lock().expect("db mutex poisoned");
+        let reminders_json = encode_json(&event.reminders)?;
+        let attendees_json = encode_json(&event.attendees)?;
+        let sound_json = write_sound(&event.sound)?;
+        let (rrule, exceptions) = split_recurrence(&event.recurrence)?;
+
+        let changed = conn
+            .execute(
+                "UPDATE events
+                    SET calendar_id = ?, title = ?, description = ?, location = ?,
+                        start_utc = ?, end_utc = ?, all_day = ?, rrule = ?,
+                        rrule_exceptions = ?, color_label_id = ?,
+                        reminders = ?, sound = ?, attendees = ?,
+                        updated_at = ?, etag = ?
+                  WHERE id = ?",
+                params![
+                    event.calendar_id,
+                    event.title,
+                    event.description,
+                    event.location,
+                    fmt_utc(&event.start),
+                    fmt_utc(&event.end),
+                    event.all_day as i64,
+                    rrule,
+                    exceptions,
+                    event.color_label.as_ref().map(|c| c.as_str()),
+                    reminders_json,
+                    sound_json,
+                    attendees_json,
+                    fmt_utc(&event.updated_at),
+                    event.etag,
+                    event.id,
+                ],
+            )
+            .map_err(map_sql_err)?;
+
+        if changed == 0 {
+            return Err(cal_core::Error::NotFound(format!(
+                "event '{}' not found",
+                event.id
+            )));
+        }
+        Ok(event)
+    }
+
+    async fn delete_event(&self, event_id: &str) -> cal_core::Result<()> {
+        let conn = self.db().lock().expect("db mutex poisoned");
+        let changed = conn
+            .execute("DELETE FROM events WHERE id = ?", params![event_id])
+            .map_err(map_sql_err)?;
+        if changed == 0 {
+            return Err(cal_core::Error::NotFound(format!(
+                "event '{event_id}' not found"
+            )));
+        }
+        Ok(())
+    }
+
+    async fn get_free_busy(
+        &self,
+        _emails: &[&str],
+        _range: DateRange,
+    ) -> cal_core::Result<Vec<FreeBusy>> {
+        // Local calendars have no notion of remote attendees, so a free/busy
+        // lookup is meaningless. We return an empty list rather than an
+        // error so a unified "across all adapters" query stays simple.
+        Ok(Vec::new())
+    }
+
+    fn calendar_color(&self, calendar_id: &str) -> Option<ContainerColor> {
+        let conn = self.db().lock().expect("db mutex poisoned");
+        conn.query_row(
+            "SELECT color_hex, color_source FROM calendars WHERE id = ?",
+            params![calendar_id],
+            |row| Ok(read_container_color(row, 0, 1)),
+        )
+        .optional()
+        .ok()
+        .flatten()
+        .and_then(|res| res.ok())
+        .flatten()
+    }
+}
+
+const EVENT_SELECT_PREFIX: &str =
+    "SELECT id, calendar_id, title, description, location, start_utc, end_utc,
+            all_day, rrule, rrule_exceptions, color_label_id, reminders, sound,
+            attendees, created_at, updated_at, etag
+       FROM events
+      WHERE calendar_id = ?
+        AND start_utc < ?
+        AND end_utc   > ?
+      ORDER BY start_utc";
+
+fn split_recurrence(
+    rec: &Option<EventRecurrence>,
+) -> cal_core::Result<(Option<String>, Option<String>)> {
+    match rec {
+        None => Ok((None, None)),
+        Some(r) => {
+            let exc = encode_json(&r.exceptions)?;
+            Ok((Some(r.rrule.clone()), Some(exc)))
+        }
+    }
+}
+
+fn combine_recurrence(
+    rrule: Option<String>,
+    exceptions: Option<String>,
+) -> cal_core::Result<Option<EventRecurrence>> {
+    match rrule {
+        None => Ok(None),
+        Some(rrule) => {
+            let exceptions: Vec<DateTime<Utc>> = match exceptions {
+                None => Vec::new(),
+                Some(s) => decode_json(&s)?,
+            };
+            Ok(Some(EventRecurrence { rrule, exceptions }))
+        }
+    }
+}
+
+fn persist_new_event(
+    adapter: &LocalAdapter,
+    calendar_id: &str,
+    id: &str,
+    now: DateTime<Utc>,
+    event: NewEvent,
+) -> cal_core::Result<Event> {
+    let reminders_json = encode_json(&event.reminders)?;
+    let attendees_json = encode_json(&event.attendees)?;
+    let sound_json = write_sound(&event.sound)?;
+    let (rrule, exceptions) = split_recurrence(&event.recurrence)?;
+
+    let now_s = fmt_utc(&now);
+    adapter
+        .db()
+        .lock()
+        .expect("db mutex poisoned")
+        .execute(
+            "INSERT INTO events (
+                id, calendar_id, title, description, location, start_utc,
+                end_utc, all_day, rrule, rrule_exceptions, color_label_id,
+                reminders, sound, attendees, created_at, updated_at, etag
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+            params![
+                id,
+                calendar_id,
+                event.title,
+                event.description,
+                event.location,
+                fmt_utc(&event.start),
+                fmt_utc(&event.end),
+                event.all_day as i64,
+                rrule,
+                exceptions,
+                event.color_label.as_ref().map(|c| c.as_str()),
+                reminders_json,
+                sound_json,
+                attendees_json,
+                now_s,
+                now_s,
+            ],
+        )
+        .map_err(map_sql_err)?;
+
+    Ok(Event {
+        id: id.to_string(),
+        calendar_id: calendar_id.to_string(),
+        title: event.title,
+        description: event.description,
+        location: event.location,
+        start: event.start,
+        end: event.end,
+        all_day: event.all_day,
+        recurrence: event.recurrence,
+        color_label: event.color_label,
+        reminders: event.reminders,
+        sound: event.sound,
+        attendees: event.attendees,
+        created_at: now,
+        updated_at: now,
+        etag: None,
+    })
+}
+
+fn row_to_event_result(row: &rusqlite::Row<'_>) -> rusqlite::Result<cal_core::Result<Event>> {
+    Ok(row_to_event(row))
+}
+
+fn row_to_event(row: &rusqlite::Row<'_>) -> cal_core::Result<Event> {
+    let id = req_text(row, 0)?;
+    let calendar_id = req_text(row, 1)?;
+    let title = req_text(row, 2)?;
+    let description = opt_text(row, 3)?;
+    let location = opt_text(row, 4)?;
+    let start = parse_utc(&req_text(row, 5)?)?;
+    let end = parse_utc(&req_text(row, 6)?)?;
+    let all_day = read_bool(row, 7)?;
+    let rrule = opt_text(row, 8)?;
+    let exceptions = opt_text(row, 9)?;
+    let color_label = opt_text(row, 10)?.map(cal_core::ColorLabelId);
+    let reminders: Vec<Reminder> = decode_json(&req_text(row, 11)?)?;
+    let sound = read_sound(row, 12)?;
+    let attendees: Vec<String> = decode_json(&req_text(row, 13)?)?;
+    let created_at = parse_utc(&req_text(row, 14)?)?;
+    let updated_at = parse_utc(&req_text(row, 15)?)?;
+    let etag = opt_text(row, 16)?;
+    let recurrence = combine_recurrence(rrule, exceptions)?;
+
+    Ok(Event {
+        id,
+        calendar_id,
+        title,
+        description,
+        location,
+        start,
+        end,
+        all_day,
+        recurrence,
+        color_label,
+        reminders,
+        sound,
+        attendees,
+        created_at,
+        updated_at,
+        etag,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::open_test_db;
+    use cal_core::{Adapter, CalendarFeature, Capability, ColorSource, Credentials};
+    use chrono::Duration;
+
+    fn make_adapter() -> LocalAdapter {
+        LocalAdapter::new(open_test_db())
+    }
+
+    #[tokio::test]
+    async fn create_and_list_calendar() {
+        let a = make_adapter();
+        let cal = a
+            .create_calendar(
+                "Work",
+                Some(ContainerColor {
+                    hex: "#1e88e5".into(),
+                    source: ColorSource::Custom,
+                }),
+                None,
+            )
+            .unwrap();
+        let cals = a.list_calendars().await.unwrap();
+        assert_eq!(cals.len(), 1);
+        assert_eq!(cals[0].id, cal.id);
+        assert_eq!(cals[0].name, "Work");
+        assert_eq!(
+            cals[0].color.as_ref().map(|c| c.hex.as_str()),
+            Some("#1e88e5")
+        );
+    }
+
+    #[tokio::test]
+    async fn rename_calendar() {
+        let a = make_adapter();
+        let mut cal = a.create_calendar("Work", None, None).unwrap();
+        cal.name = "Office".into();
+        a.update_calendar(cal.clone()).unwrap();
+        let cals = a.list_calendars().await.unwrap();
+        assert_eq!(cals[0].name, "Office");
+    }
+
+    #[tokio::test]
+    async fn delete_calendar_cascades_events() {
+        let a = make_adapter();
+        let cal = a.create_calendar("Work", None, None).unwrap();
+        let start = Utc::now();
+        a.create_event(
+            &cal.id,
+            NewEvent {
+                title: "Standup".into(),
+                description: None,
+                location: None,
+                start,
+                end: start + Duration::minutes(15),
+                all_day: false,
+                recurrence: None,
+                color_label: None,
+                reminders: vec![],
+                sound: None,
+                attendees: vec![],
+            },
+        )
+        .await
+        .unwrap();
+
+        a.delete_calendar(&cal.id).unwrap();
+
+        // Calendar gone, events gone (FK cascade).
+        let cals = a.list_calendars().await.unwrap();
+        assert!(cals.is_empty());
+        let conn = a.db().lock().unwrap();
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM events", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0);
+    }
+
+    #[tokio::test]
+    async fn event_range_query_is_temporal_intersection() {
+        let a = make_adapter();
+        let cal = a.create_calendar("Work", None, None).unwrap();
+        let base = "2026-05-19T10:00:00Z".parse::<DateTime<Utc>>().unwrap();
+        let mk = |offset_h: i64| NewEvent {
+            title: format!("E{offset_h}"),
+            description: None,
+            location: None,
+            start: base + Duration::hours(offset_h),
+            end: base + Duration::hours(offset_h + 1),
+            all_day: false,
+            recurrence: None,
+            color_label: None,
+            reminders: vec![],
+            sound: None,
+            attendees: vec![],
+        };
+        for h in [0, 5, 24] {
+            a.create_event(&cal.id, mk(h)).await.unwrap();
+        }
+
+        // Range that covers only the first two events.
+        let range = DateRange {
+            start: base - Duration::hours(1),
+            end: base + Duration::hours(8),
+        };
+        let evs = a.get_events(&cal.id, range).await.unwrap();
+        assert_eq!(evs.len(), 2);
+        assert_eq!(evs[0].title, "E0");
+        assert_eq!(evs[1].title, "E5");
+    }
+
+    #[tokio::test]
+    async fn update_event_persists_changes() {
+        let a = make_adapter();
+        let cal = a.create_calendar("Work", None, None).unwrap();
+        let start = Utc::now();
+        let mut ev = a
+            .create_event(
+                &cal.id,
+                NewEvent {
+                    title: "Standup".into(),
+                    description: None,
+                    location: None,
+                    start,
+                    end: start + Duration::minutes(15),
+                    all_day: false,
+                    recurrence: None,
+                    color_label: None,
+                    reminders: vec![],
+                    sound: None,
+                    attendees: vec![],
+                },
+            )
+            .await
+            .unwrap();
+        ev.title = "Daily Standup".into();
+        let saved = a.update_event(ev.clone()).await.unwrap();
+        assert_eq!(saved.title, "Daily Standup");
+
+        let range = DateRange {
+            start: start - Duration::hours(1),
+            end: start + Duration::hours(1),
+        };
+        let evs = a.get_events(&cal.id, range).await.unwrap();
+        assert_eq!(evs[0].title, "Daily Standup");
+    }
+
+    #[tokio::test]
+    async fn delete_event_returns_not_found_when_missing() {
+        let a = make_adapter();
+        let err = a.delete_event("does-not-exist").await.unwrap_err();
+        assert!(matches!(err, cal_core::Error::NotFound(_)));
+    }
+
+    #[tokio::test]
+    async fn authenticate_is_a_noop_for_local() {
+        let a = make_adapter();
+        let token = a.authenticate(Credentials::default()).await.unwrap();
+        assert!(token.access_token.is_empty());
+        assert!(a.capabilities().contains(&Capability::Calendar));
+        assert!(a.capabilities().contains(&Capability::Tasks));
+    }
+}

@@ -27,9 +27,17 @@ dirs.workspace = true
 anyhow.workspace = true
 
 cal-core.workspace = true
+cal-adapter-local.workspace = true
+
+rusqlite.workspace = true
+chrono.workspace = true
+async-trait.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 tempfile = "3"
+tokio = { workspace = true }
 
 [features]
 # Default: plugins are loaded dynamically as shared libraries (desktop).

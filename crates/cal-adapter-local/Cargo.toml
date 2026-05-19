@@ -6,6 +6,18 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Aperio — stub for cal-adapter-local (Phase 0; full implementation lands in a later phase)."
+description = "Aperio — local calendar and task adapter backed by SQLite."
 
 [dependencies]
+cal-core.workspace = true
+
+async-trait.workspace = true
+chrono.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true }

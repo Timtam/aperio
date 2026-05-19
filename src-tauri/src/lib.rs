@@ -1,13 +1,17 @@
-//! Aperio — Tauri backend (Phase 0).
+//! Aperio — Tauri backend.
 //!
-//! At this phase the backend only carries the app skeleton and the
-//! portable data-path resolver. The SQLite layer, Tauri commands, sync
-//! engine, and plugin manager arrive in later phases.
+//! Phase 1 wires up the local SQLite store, the local calendar/task
+//! adapter, and a first round of Tauri commands for CRUD. The plugin
+//! manager, sync engine, and external adapters arrive in later phases.
 
+pub mod commands;
+pub mod db;
 mod paths;
 
+pub use db::{DbError, DbHandle, DbResult, SharedConn};
 pub use paths::{resolve_data_dir, DataDirKind, DataDirResolution};
 
+use cal_adapter_local::LocalAdapter;
 use tracing::info;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -21,10 +25,35 @@ pub fn run() {
         "resolved data directory"
     );
 
+    let db_path = data_dir.path.join("aperio.sqlite");
+    let db = DbHandle::open(&db_path).expect("failed to open local database");
+    info!(path = %db_path.display(), "opened local database");
+
+    // The Tauri backend owns the connection. Subsystems (calendar adapter,
+    // sync engine, plugin manager) take an `Arc` clone of the same mutex.
+    let local_adapter = LocalAdapter::new(db.shared());
+
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![app_info])
+        .manage(local_adapter)
+        .invoke_handler(tauri::generate_handler![
+            app_info,
+            commands::list_calendars,
+            commands::create_calendar,
+            commands::delete_calendar,
+            commands::get_events,
+            commands::create_event,
+            commands::update_event,
+            commands::delete_event,
+            commands::list_task_lists,
+            commands::create_task_list,
+            commands::delete_task_list,
+            commands::get_tasks,
+            commands::create_task,
+            commands::update_task,
+            commands::delete_task,
+        ])
         .setup(move |_app| {
-            // Later phases register the SQLite layer and plugin manager here.
+            // Future phases register the sync engine and plugin manager here.
             Ok(())
         })
         .run(tauri::generate_context!())

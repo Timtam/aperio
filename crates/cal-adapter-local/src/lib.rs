@@ -1,1 +1,112 @@
-//! cal-adapter-local — stub. Will be implemented in a later phase.
+//! Local calendar and task adapter backed by SQLite.
+//!
+//! This adapter is the simplest of the bunch: it owns no network code, no
+//! OAuth flow, and no provider quirks. It exists for two reasons:
+//!
+//! 1. To give users a place for fully local calendars and task lists that
+//!    never leave the device unless the user opts into the event-log sync
+//!    (DESIGN.md section 6, "Lokale Kalender").
+//! 2. To serve as the reference implementation of the [`cal_core`] adapter
+//!    traits so the other adapters can be measured against the same shape.
+//!
+//! Migrations are intentionally **not** the adapter's concern. The caller
+//! (the Tauri backend) opens the database, applies migrations, and hands
+//! the connection in. The adapter assumes the schema from
+//! `src-tauri/src/db/sql/0001_init.sql` is present.
+
+mod calendars;
+mod mapping;
+mod tasks;
+
+use std::sync::{Arc, Mutex};
+
+use async_trait::async_trait;
+use cal_core::{
+    Adapter, AdapterSource, AuthToken, Capability, Credentials, Error as CoreError, Result,
+};
+use rusqlite::Connection;
+
+/// Identifier used as `AdapterSource` for all rows owned by this adapter.
+pub const SOURCE_ID: &str = "local";
+
+/// Shared SQLite connection handle.
+///
+/// We accept the connection from outside so the Tauri backend can keep a
+/// single `Arc<Mutex<Connection>>` across all subsystems (settings,
+/// adapters, sync, …). SQLite serialises writes anyway, so a single
+/// connection under a mutex is the simplest correct choice.
+pub type SharedConn = Arc<Mutex<Connection>>;
+
+/// Local-only calendar and task adapter.
+pub struct LocalAdapter {
+    db: SharedConn,
+    source: AdapterSource,
+    capabilities: Vec<Capability>,
+}
+
+impl LocalAdapter {
+    /// Construct an adapter bound to an existing migrated database.
+    pub fn new(db: SharedConn) -> Self {
+        Self {
+            db,
+            source: AdapterSource::new(SOURCE_ID),
+            capabilities: vec![Capability::Calendar, Capability::Tasks],
+        }
+    }
+
+    /// The source identifier used for every row this adapter owns.
+    pub fn source(&self) -> &AdapterSource {
+        &self.source
+    }
+
+    pub(crate) fn db(&self) -> &SharedConn {
+        &self.db
+    }
+}
+
+#[async_trait]
+impl Adapter for LocalAdapter {
+    async fn authenticate(&self, _credentials: Credentials) -> Result<AuthToken> {
+        // No remote auth — local calendars are always "authenticated".
+        Ok(AuthToken::default())
+    }
+
+    fn capabilities(&self) -> &[Capability] {
+        &self.capabilities
+    }
+}
+
+/// Convert any `rusqlite::Error` into a `cal_core::Error::Internal` with the
+/// original message preserved.
+pub(crate) fn map_sql_err(err: rusqlite::Error) -> CoreError {
+    CoreError::internal(err.to_string())
+}
+
+/// Convert a `serde_json` error into a `cal_core::Error::Internal`.
+pub(crate) fn map_json_err(err: serde_json::Error) -> CoreError {
+    CoreError::internal(format!("json: {err}"))
+}
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    //! Helpers for unit tests.
+
+    use std::sync::{Arc, Mutex};
+
+    use rusqlite::Connection;
+
+    /// Open an in-memory connection populated with the Phase-1 schema.
+    ///
+    /// The schema SQL is included from the Tauri backend so this crate
+    /// stays free of a hard dependency on `aperio` while the schema text
+    /// remains a single source of truth.
+    pub fn open_test_db() -> super::SharedConn {
+        let conn = Connection::open_in_memory().expect("open in-memory");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("enable fk");
+        conn.execute_batch(SCHEMA).expect("apply schema");
+        Arc::new(Mutex::new(conn))
+    }
+
+    const SCHEMA: &str = include_str!("../../../src-tauri/src/db/sql/0001_init.sql");
+}

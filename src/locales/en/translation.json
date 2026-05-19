@@ -1,9 +1,20 @@
 {
   "app": {
     "title": "Aperio",
-    "phase0": {
-      "intro": "Phase 0 – project skeleton up. Data, adapters and sync follow.",
-      "invokeError": "Backend call failed: {{error}}"
+    "phase1": {
+      "intro": "Phase 1 — local CRUD loop. Create calendars and events to exercise the wiring.",
+      "calendars": "Calendars",
+      "events": "Events",
+      "noCalendars": "No calendars yet.",
+      "noEvents": "No events in the next 30 days.",
+      "selectCalendarFirst": "Pick a calendar first.",
+      "newCalendar": "New local calendar",
+      "newEvent": "New event",
+      "deleteCalendarA11y": "Delete calendar \"{{name}}\"",
+      "smokeEventTitle": "Test event",
+      "calendarCreated": "Calendar \"{{name}}\" created.",
+      "calendarDeleted": "Calendar deleted.",
+      "eventCreated": "Event \"{{title}}\" created."
     }
   }
 }
