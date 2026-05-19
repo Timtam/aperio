@@ -9,6 +9,7 @@ import { useTranslation } from 'react-i18next';
 
 import { useAnnouncer } from '../a11y/Announcer';
 import {
+  addEventExdate,
   createEvent as apiCreateEvent,
   deleteEventById,
   isCommandError,
@@ -54,6 +55,26 @@ interface FormState {
   colorLabel: string | null;
 }
 
+/**
+ * Scope of edit/delete when the user opened a single occurrence of a
+ * recurring series. `series` mutates the master row (and therefore
+ * every future occurrence); `occurrence` adds the original date to
+ * the series' EXDATE list and either creates an override standalone
+ * event (edit) or simply skips that date (delete).
+ */
+type EditScope = 'series' | 'occurrence';
+
+/** True when the id carries the synthetic `@ISO` suffix from `expandEvent`. */
+function isOccurrenceId(id: string): boolean {
+  return id.includes('@');
+}
+
+/** Extract the original ISO start from a synthetic occurrence id. */
+function occurrenceIsoFromId(id: string): string | null {
+  const idx = id.indexOf('@');
+  return idx >= 0 ? id.slice(idx + 1) : null;
+}
+
 export function EventDialog({
   isOpen,
   onClose,
@@ -74,6 +95,12 @@ export function EventDialog({
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // When editing a single occurrence of a recurring series the user
+  // can apply changes to just this occurrence (creates an EXDATE +
+  // standalone override) or to the whole series.
+  const isOccurrence = isEdit && !!event && isOccurrenceId(event.id);
+  const [editScope, setEditScope] = useState<EditScope>('occurrence');
+
   // Reset the form whenever the dialog is opened with new context. We
   // key on isOpen + initialState; isOpen=false keeps the previous form
   // around briefly while the close animation runs (if we ever add one).
@@ -81,6 +108,7 @@ export function EventDialog({
     if (isOpen) {
       setForm(initialState);
       setError(null);
+      setEditScope('occurrence');
     }
   }, [isOpen, initialState]);
 
@@ -124,12 +152,39 @@ export function EventDialog({
       setSubmitting(true);
       try {
         if (isEdit && event) {
-          // Editing a recurring occurrence edits the whole series. The
-          // synthetic per-occurrence id from `expandAll` carries an "@"
-          // suffix — strip it to get the original series row id.
           const seriesId = event.id.includes('@')
             ? event.id.split('@')[0]
             : event.id;
+
+          if (isOccurrence && editScope === 'occurrence' && event.recurrence) {
+            // Single-instance override: add the original date to the
+            // series EXDATE list, then create a standalone event with
+            // the user's modified fields.
+            const occIso = occurrenceIsoFromId(event.id);
+            if (occIso) {
+              await addEventExdate(seriesId, occIso);
+              await apiCreateEvent({
+                calendar_id: form.calendarId,
+                title: trimmedTitle,
+                description: form.description.trim() || null,
+                location: form.location.trim() || null,
+                start,
+                end,
+                all_day: form.allDay,
+                recurrence: null,
+                color_label: form.colorLabel,
+                reminders: [],
+                sound: null,
+                attendees: [],
+              });
+              announce(
+                t('dialogs.event.occurrenceUpdated', { title: trimmedTitle }),
+              );
+              onClose();
+              return;
+            }
+          }
+
           const updated: CalendarEvent = {
             ...event,
             id: seriesId,
@@ -173,7 +228,7 @@ export function EventDialog({
         setSubmitting(false);
       }
     },
-    [form, isEdit, event, announce, onClose, t],
+    [form, isEdit, event, isOccurrence, editScope, announce, onClose, t],
   );
 
   const onDelete = useCallback(async () => {
@@ -184,6 +239,15 @@ export function EventDialog({
       const seriesId = event.id.includes('@')
         ? event.id.split('@')[0]
         : event.id;
+      if (isOccurrence && editScope === 'occurrence' && event.recurrence) {
+        const occIso = occurrenceIsoFromId(event.id);
+        if (occIso) {
+          await addEventExdate(seriesId, occIso);
+          announce(t('dialogs.event.occurrenceDeleted', { title: event.title }));
+          onClose();
+          return;
+        }
+      }
       await deleteEventById(seriesId);
       announce(t('dialogs.event.deleted', { title: event.title }));
       onClose();
@@ -196,7 +260,7 @@ export function EventDialog({
     } finally {
       setSubmitting(false);
     }
-  }, [event, announce, onClose, t]);
+  }, [event, isOccurrence, editScope, announce, onClose, t]);
 
   const title = isEdit ? t('dialogs.event.editTitle') : t('dialogs.event.newTitle');
 
@@ -350,7 +414,33 @@ export function EventDialog({
           onChange={(rrule) => update('rrule', rrule)}
         />
 
-        {isEdit && event?.recurrence && (
+        {isOccurrence && (
+          <fieldset className="form__field">
+            <legend className="form__label">
+              {t('dialogs.event.scope.label')}
+            </legend>
+            <label className="form__field form__field--inline">
+              <input
+                type="radio"
+                name="event-scope"
+                checked={editScope === 'occurrence'}
+                onChange={() => setEditScope('occurrence')}
+              />
+              <span>{t('dialogs.event.scope.occurrence')}</span>
+            </label>
+            <label className="form__field form__field--inline">
+              <input
+                type="radio"
+                name="event-scope"
+                checked={editScope === 'series'}
+                onChange={() => setEditScope('series')}
+              />
+              <span>{t('dialogs.event.scope.series')}</span>
+            </label>
+          </fieldset>
+        )}
+
+        {isEdit && event?.recurrence && !isOccurrence && (
           <p className="form__hint">
             {t('dialogs.event.recurrence.editsSeries')}
           </p>

@@ -20,7 +20,7 @@ mod mapping;
 mod search;
 mod tasks;
 
-pub use search::{SearchFilters, SearchKind, SearchResults};
+pub use search::{EventTypeFilter, SearchFilters, SearchKind, SearchResults};
 
 use std::sync::{Arc, Mutex};
 

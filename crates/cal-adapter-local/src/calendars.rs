@@ -115,6 +115,57 @@ impl LocalAdapter {
         }
         Ok(())
     }
+
+    /// Append a single date to a recurring event's EXDATE list so the
+    /// expansion engine skips that occurrence. Used by the UI's
+    /// "edit / delete this occurrence only" flow — the master row's
+    /// other columns (start, title, ...) are left untouched.
+    pub fn add_event_exdate(
+        &self,
+        event_id: &str,
+        occurrence_utc: DateTime<Utc>,
+    ) -> cal_core::Result<()> {
+        let conn = self.db().lock().expect("db mutex poisoned");
+        let row: Option<(Option<String>, Option<String>)> = conn
+            .query_row(
+                "SELECT rrule, rrule_exceptions FROM events WHERE id = ?",
+                params![event_id],
+                |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, Option<String>>(1)?)),
+            )
+            .optional()
+            .map_err(map_sql_err)?;
+
+        let (rrule, exceptions) = match row {
+            Some(v) => v,
+            None => {
+                return Err(cal_core::Error::NotFound(format!(
+                    "event '{event_id}' not found"
+                )))
+            }
+        };
+        if rrule.is_none() {
+            return Err(cal_core::Error::InvalidInput(format!(
+                "event '{event_id}' is not recurring"
+            )));
+        }
+
+        let mut list: Vec<DateTime<Utc>> = match exceptions {
+            None => Vec::new(),
+            Some(s) => decode_json(&s)?,
+        };
+        if !list.iter().any(|d| *d == occurrence_utc) {
+            list.push(occurrence_utc);
+        }
+        let exc_json = encode_json(&list)?;
+        let now_s = fmt_utc(&Utc::now());
+
+        conn.execute(
+            "UPDATE events SET rrule_exceptions = ?, updated_at = ? WHERE id = ?",
+            params![exc_json, now_s, event_id],
+        )
+        .map_err(map_sql_err)?;
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -573,6 +624,78 @@ mod tests {
         let a = make_adapter();
         let err = a.delete_event("does-not-exist").await.unwrap_err();
         assert!(matches!(err, cal_core::Error::NotFound(_)));
+    }
+
+    #[tokio::test]
+    async fn add_event_exdate_appends_and_dedups() {
+        let a = make_adapter();
+        let cal = a.create_calendar("Work", None, None).unwrap();
+        let start = Utc::now();
+        let ev = a
+            .create_event(
+                &cal.id,
+                NewEvent {
+                    title: "Weekly".into(),
+                    description: None,
+                    location: None,
+                    start,
+                    end: start + Duration::hours(1),
+                    all_day: false,
+                    recurrence: Some(EventRecurrence {
+                        rrule: "FREQ=WEEKLY".into(),
+                        exceptions: vec![],
+                    }),
+                    color_label: None,
+                    reminders: vec![],
+                    sound: None,
+                    attendees: vec![],
+                },
+            )
+            .await
+            .unwrap();
+
+        let occ = start + Duration::days(7);
+        a.add_event_exdate(&ev.id, occ).unwrap();
+        // Calling a second time with the same date must not duplicate.
+        a.add_event_exdate(&ev.id, occ).unwrap();
+
+        let range = DateRange {
+            start: start - Duration::hours(1),
+            end: start + Duration::hours(1),
+        };
+        let evs = a.get_events(&cal.id, range).await.unwrap();
+        let stored = evs.into_iter().find(|e| e.id == ev.id).unwrap();
+        let exceptions = stored.recurrence.unwrap().exceptions;
+        assert_eq!(exceptions.len(), 1);
+        assert_eq!(exceptions[0], occ);
+    }
+
+    #[tokio::test]
+    async fn add_event_exdate_rejects_non_recurring() {
+        let a = make_adapter();
+        let cal = a.create_calendar("Work", None, None).unwrap();
+        let start = Utc::now();
+        let ev = a
+            .create_event(
+                &cal.id,
+                NewEvent {
+                    title: "Once".into(),
+                    description: None,
+                    location: None,
+                    start,
+                    end: start + Duration::hours(1),
+                    all_day: false,
+                    recurrence: None,
+                    color_label: None,
+                    reminders: vec![],
+                    sound: None,
+                    attendees: vec![],
+                },
+            )
+            .await
+            .unwrap();
+        let err = a.add_event_exdate(&ev.id, start).unwrap_err();
+        assert!(matches!(err, cal_core::Error::InvalidInput(_)));
     }
 
     #[tokio::test]

@@ -12,9 +12,10 @@ import { useAutoFocus } from '../hooks/useAutoFocus';
 import {
   search as apiSearch,
   isCommandError,
+  type EventTypeFilter,
   type SearchKind,
 } from '../api/client';
-import type { CalendarEvent, Task } from '../api/types';
+import type { CalendarEvent, Task, TaskStatus } from '../api/types';
 import { useCalendarStore } from '../state/CalendarStore';
 import { useDateFormat } from '../intl/dateFormat';
 import { useDialogState } from '../state/DialogState';
@@ -61,6 +62,12 @@ export function SearchDialog({ isOpen, onClose }: SearchDialogProps) {
   const [selectedListIds, setSelectedListIds] = useState<Set<string>>(
     () => new Set(),
   );
+  const [since, setSince] = useState('');
+  const [until, setUntil] = useState('');
+  const [eventType, setEventType] = useState<EventTypeFilter>('any');
+  const [selectedTaskStatuses, setSelectedTaskStatuses] = useState<
+    Set<TaskStatus>
+  >(() => new Set());
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(false);
@@ -121,8 +128,24 @@ export function SearchDialog({ isOpen, onClose }: SearchDialogProps) {
       '|' +
       [...selectedCalendarIds].sort().join(',') +
       '|' +
-      [...selectedListIds].sort().join(','),
-    [kind, selectedCalendarIds, selectedListIds],
+      [...selectedListIds].sort().join(',') +
+      '|' +
+      since +
+      '|' +
+      until +
+      '|' +
+      eventType +
+      '|' +
+      [...selectedTaskStatuses].sort().join(','),
+    [
+      kind,
+      selectedCalendarIds,
+      selectedListIds,
+      since,
+      until,
+      eventType,
+      selectedTaskStatuses,
+    ],
   );
   useEffect(() => {
     const trimmed = query.trim();
@@ -141,6 +164,13 @@ export function SearchDialog({ isOpen, onClose }: SearchDialogProps) {
           selectedCalendarIds.size > 0 ? [...selectedCalendarIds] : undefined,
         list_ids:
           selectedListIds.size > 0 ? [...selectedListIds] : undefined,
+        since: since ? `${since}T00:00:00Z` : undefined,
+        until: until ? `${until}T23:59:59Z` : undefined,
+        event_type: eventType,
+        task_statuses:
+          selectedTaskStatuses.size > 0
+            ? [...selectedTaskStatuses]
+            : undefined,
       })
         .then((res) => {
           // Skip stale results — another keystroke may have moved on.
@@ -331,6 +361,91 @@ export function SearchDialog({ isOpen, onClose }: SearchDialogProps) {
               ))}
             </fieldset>
           )}
+
+          <fieldset className="form__field">
+            <legend className="form__label">
+              {t('dialogs.search.rangeLabel')}
+            </legend>
+            <div className="form__row">
+              <label className="form__field">
+                <span className="form__label">
+                  {t('dialogs.search.sinceLabel')}
+                </span>
+                <input
+                  type="date"
+                  value={since}
+                  onChange={(e) => setSince(e.target.value)}
+                />
+              </label>
+              <label className="form__field">
+                <span className="form__label">
+                  {t('dialogs.search.untilLabel')}
+                </span>
+                <input
+                  type="date"
+                  value={until}
+                  onChange={(e) => setUntil(e.target.value)}
+                />
+              </label>
+            </div>
+          </fieldset>
+
+          {kind !== 'tasks' && (
+            <fieldset className="form__field">
+              <legend className="form__label">
+                {t('dialogs.search.eventTypeLabel')}
+              </legend>
+              {(['any', 'single', 'recurring', 'all_day'] as const).map(
+                (etype) => (
+                  <label
+                    key={etype}
+                    className="form__field form__field--inline"
+                  >
+                    <input
+                      type="radio"
+                      name="search-event-type"
+                      checked={eventType === etype}
+                      onChange={() => setEventType(etype)}
+                    />
+                    <span>{t(`dialogs.search.eventType.${etype}`)}</span>
+                  </label>
+                ),
+              )}
+            </fieldset>
+          )}
+
+          {kind !== 'events' && (
+            <fieldset className="form__field">
+              <legend className="form__label">
+                {t('dialogs.search.taskStatusLabel')}
+              </legend>
+              <p className="form__hint">
+                {t('dialogs.search.containersHint')}
+              </p>
+              {(
+                ['open', 'in_progress', 'completed', 'cancelled'] as const
+              ).map((status) => (
+                <label
+                  key={status}
+                  className="form__field form__field--inline"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedTaskStatuses.has(status)}
+                    onChange={(e) => {
+                      setSelectedTaskStatuses((prev) => {
+                        const next = new Set(prev);
+                        if (e.target.checked) next.add(status);
+                        else next.delete(status);
+                        return next;
+                      });
+                    }}
+                  />
+                  <span>{t(`dialogs.task.status.${statusKey(status)}`)}</span>
+                </label>
+              ))}
+            </fieldset>
+          )}
         </details>
 
         <p
@@ -407,4 +522,10 @@ export function SearchDialog({ isOpen, onClose }: SearchDialogProps) {
       </div>
     </Modal>
   );
+}
+
+/** Map a TaskStatus value to the camelCase key used by the task dialog
+ *  translations (e.g. `in_progress` → `inProgress`). */
+function statusKey(status: TaskStatus): string {
+  return status === 'in_progress' ? 'inProgress' : status;
 }

@@ -4,12 +4,9 @@ import { useTranslation } from 'react-i18next';
  * Recurrence editor for tasks.
  *
  * Tasks model recurrence as a structured value (frequency + interval +
- * optional weekdays + optional end), not as an RRULE string — the
- * generator runs server-side after completion, so we never need full
- * RFC 5545 expressiveness. Compared to the event selector this widget
- * is intentionally smaller; the rest of the spec's surface (day-of-
- * month, count-based end) belongs to the sync wave when those fields
- * become observable through external adapters.
+ * optional weekdays / day-of-month + optional end), not as an RRULE
+ * string — the generator runs server-side after completion, so we never
+ * need full RFC 5545 expressiveness.
  */
 export type TaskFreq = 'NONE' | 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY';
 
@@ -17,6 +14,8 @@ export interface TaskRecurrenceValue {
   freq: TaskFreq;
   interval: number;
   byDay: string[]; // ISO weekday short names, "MO".."SU"
+  /** 1..31, only meaningful when freq = 'MONTHLY' and value > 0. */
+  dayOfMonth: number;
   endMode: 'NEVER' | 'UNTIL';
   until: string; // YYYY-MM-DD, only meaningful when endMode = 'UNTIL'
 }
@@ -25,6 +24,7 @@ export const TASK_RECURRENCE_DEFAULT: TaskRecurrenceValue = {
   freq: 'NONE',
   interval: 1,
   byDay: [],
+  dayOfMonth: 0,
   endMode: 'NEVER',
   until: '',
 };
@@ -124,6 +124,30 @@ export function TaskRecurrenceSelector({
             </fieldset>
           )}
 
+          {value.freq === 'MONTHLY' && (
+            <label className="form__field">
+              <span className="form__label">
+                {t('dialogs.task.recurrence.dayOfMonthLabel')}
+              </span>
+              <input
+                type="number"
+                min={0}
+                max={31}
+                value={value.dayOfMonth || ''}
+                placeholder={t('dialogs.task.recurrence.dayOfMonthPlaceholder')}
+                onChange={(e) => {
+                  const n = Number(e.target.value);
+                  update({
+                    dayOfMonth: Number.isFinite(n) && n > 0 && n <= 31 ? n : 0,
+                  });
+                }}
+              />
+              <span className="form__hint">
+                {t('dialogs.task.recurrence.dayOfMonthHint')}
+              </span>
+            </label>
+          )}
+
           <label className="form__field">
             <span className="form__label">
               {t('dialogs.task.recurrence.endLabel')}
@@ -205,7 +229,10 @@ export function toBackend(
       value.freq === 'WEEKLY' && value.byDay.length > 0
         ? value.byDay.map((d) => WEEKDAY_TO_BACKEND[d]).filter(Boolean)
         : null,
-    day_of_month: null,
+    day_of_month:
+      value.freq === 'MONTHLY' && value.dayOfMonth > 0
+        ? value.dayOfMonth
+        : null,
     end,
   };
 }
@@ -236,6 +263,10 @@ export function fromBackend(raw: unknown): TaskRecurrenceValue {
     freq: validFreq,
     interval: Math.max(1, r.interval ?? 1),
     byDay,
+    dayOfMonth:
+      typeof r.day_of_month === 'number' && r.day_of_month >= 1 && r.day_of_month <= 31
+        ? r.day_of_month
+        : 0,
     endMode,
     until,
   };

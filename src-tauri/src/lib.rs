@@ -44,6 +44,7 @@ pub fn run() {
             commands::create_event,
             commands::update_event,
             commands::delete_event,
+            commands::add_event_exdate,
             commands::list_task_lists,
             commands::create_task_list,
             commands::delete_task_list,

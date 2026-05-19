@@ -80,6 +80,13 @@
       "created": "Event \"{{title}}\" created.",
       "updated": "Event \"{{title}}\" updated.",
       "deleted": "Event \"{{title}}\" deleted.",
+      "occurrenceUpdated": "This occurrence of \"{{title}}\" was changed.",
+      "occurrenceDeleted": "This occurrence of \"{{title}}\" was deleted.",
+      "scope": {
+        "label": "Apply to",
+        "occurrence": "This occurrence only",
+        "series": "Whole series"
+      },
       "fields": {
         "title": "Title",
         "calendar": "Calendar",
@@ -196,7 +203,10 @@
           "never": "Never",
           "until": "On date"
         },
-        "untilLabel": "End date"
+        "untilLabel": "End date",
+        "dayOfMonthLabel": "Day of month",
+        "dayOfMonthPlaceholder": "Auto",
+        "dayOfMonthHint": "Leave empty to use the completion day. Values past the end of a short month are clamped (e.g. 31 → February's last day)."
       }
     },
     "quickAdd": {
@@ -243,7 +253,18 @@
       },
       "calendarsLabel": "Calendars",
       "listsLabel": "Task lists",
-      "containersHint": "Empty = no restriction."
+      "containersHint": "Empty = no restriction.",
+      "rangeLabel": "Date range",
+      "sinceLabel": "From",
+      "untilLabel": "Until",
+      "eventTypeLabel": "Event type",
+      "eventType": {
+        "any": "Any",
+        "single": "Single events",
+        "recurring": "Recurring",
+        "all_day": "All-day"
+      },
+      "taskStatusLabel": "Task status"
     }
   },
   "sidebar": {

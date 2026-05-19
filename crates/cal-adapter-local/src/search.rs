@@ -18,10 +18,9 @@ use crate::LocalAdapter;
 
 /// Optional filter applied on top of the full-text query.
 ///
-/// `kind` narrows the result to events, tasks or both (`Both` is the
-/// default). The id lists, when non-empty, restrict hits to those
-/// containers; an empty vector means "no restriction" (i.e. include
-/// every calendar / list).
+/// All fields are additive: an empty list / `None` / `Any` means no
+/// restriction on that dimension. Backend SQL appends WHERE clauses
+/// only for the fields that are actually set.
 #[derive(Debug, Default, Deserialize)]
 pub struct SearchFilters {
     #[serde(default)]
@@ -30,6 +29,20 @@ pub struct SearchFilters {
     pub calendar_ids: Vec<String>,
     #[serde(default)]
     pub list_ids: Vec<String>,
+    /// ISO 8601 lower bound. Applies to event start_utc and to the
+    /// task's scheduled / deadline date (whichever is set).
+    #[serde(default)]
+    pub since: Option<String>,
+    /// ISO 8601 upper bound (inclusive day).
+    #[serde(default)]
+    pub until: Option<String>,
+    /// Event-type filter — ignored when `kind = Tasks`.
+    #[serde(default)]
+    pub event_type: EventTypeFilter,
+    /// Task-status whitelist — ignored when `kind = Events`. Empty
+    /// vector = no restriction.
+    #[serde(default)]
+    pub task_statuses: Vec<String>,
 }
 
 #[derive(Debug, Default, Deserialize, PartialEq, Eq)]
@@ -39,6 +52,16 @@ pub enum SearchKind {
     Both,
     Events,
     Tasks,
+}
+
+#[derive(Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum EventTypeFilter {
+    #[default]
+    Any,
+    Single,
+    Recurring,
+    AllDay,
 }
 
 /// Combined hit list returned by [`LocalAdapter::search`].
@@ -70,7 +93,37 @@ impl LocalAdapter {
         let events = if filters.kind == SearchKind::Tasks {
             Vec::new()
         } else {
-            let (extra_sql, extra_binds) = in_clause("e.calendar_id", &filters.calendar_ids);
+            let mut clauses = Vec::<String>::new();
+            let mut binds: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+            binds.push(Box::new(prepared.clone()));
+
+            if !filters.calendar_ids.is_empty() {
+                clauses.push(in_placeholders("e.calendar_id", filters.calendar_ids.len()));
+                for id in &filters.calendar_ids {
+                    binds.push(Box::new(id.clone()));
+                }
+            }
+            if let Some(since) = &filters.since {
+                clauses.push(" AND e.start_utc >= ?".into());
+                binds.push(Box::new(since.clone()));
+            }
+            if let Some(until) = &filters.until {
+                clauses.push(" AND e.start_utc <= ?".into());
+                binds.push(Box::new(until.clone()));
+            }
+            match filters.event_type {
+                EventTypeFilter::Any => {}
+                EventTypeFilter::Single => {
+                    clauses.push(" AND e.rrule IS NULL AND e.all_day = 0".into());
+                }
+                EventTypeFilter::Recurring => {
+                    clauses.push(" AND e.rrule IS NOT NULL".into());
+                }
+                EventTypeFilter::AllDay => {
+                    clauses.push(" AND e.all_day = 1".into());
+                }
+            }
+            let where_extra = clauses.concat();
             let sql = format!(
                 "SELECT e.id, e.calendar_id, e.title, e.description, e.location,
                         e.start_utc, e.end_utc, e.all_day, e.rrule, e.rrule_exceptions,
@@ -78,20 +131,16 @@ impl LocalAdapter {
                         e.created_at, e.updated_at, e.etag
                    FROM events_fts f
                    JOIN events e ON e.id = f.id
-                  WHERE events_fts MATCH ?{extra_sql}
+                  WHERE events_fts MATCH ?{where_extra}
                   ORDER BY rank
                   LIMIT ?"
             );
+            binds.push(Box::new(LIMIT as i64));
             let mut stmt = conn.prepare(&sql).map_err(map_sql_err)?;
-            // Bind: MATCH query, then each calendar_id, then LIMIT.
-            let mut binds: Vec<&dyn rusqlite::ToSql> = vec![&prepared];
-            for id in &extra_binds {
-                binds.push(id as &dyn rusqlite::ToSql);
-            }
-            let limit_i = LIMIT as i64;
-            binds.push(&limit_i);
+            let bind_refs: Vec<&dyn rusqlite::ToSql> =
+                binds.iter().map(|b| b.as_ref()).collect();
             let rows = stmt
-                .query_map(rusqlite::params_from_iter(binds), |row| {
+                .query_map(rusqlite::params_from_iter(bind_refs), |row| {
                     Ok(row_to_event(row))
                 })
                 .map_err(map_sql_err)?;
@@ -105,7 +154,41 @@ impl LocalAdapter {
         let tasks = if filters.kind == SearchKind::Events {
             Vec::new()
         } else {
-            let (extra_sql, extra_binds) = in_clause("t.list_id", &filters.list_ids);
+            let mut clauses = Vec::<String>::new();
+            let mut binds: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+            binds.push(Box::new(prepared.clone()));
+
+            if !filters.list_ids.is_empty() {
+                clauses.push(in_placeholders("t.list_id", filters.list_ids.len()));
+                for id in &filters.list_ids {
+                    binds.push(Box::new(id.clone()));
+                }
+            }
+            // Date range: a task matches if its scheduled or deadline
+            // date falls inside the window. Tasks with no date at all
+            // are excluded when a range is active — they can't be
+            // shown as "in this period".
+            if let Some(since) = &filters.since {
+                clauses.push(
+                    " AND COALESCE(t.scheduled_date, t.deadline_date) >= ?".into(),
+                );
+                let date_part = iso_date_part(since);
+                binds.push(Box::new(date_part));
+            }
+            if let Some(until) = &filters.until {
+                clauses.push(
+                    " AND COALESCE(t.scheduled_date, t.deadline_date) <= ?".into(),
+                );
+                let date_part = iso_date_part(until);
+                binds.push(Box::new(date_part));
+            }
+            if !filters.task_statuses.is_empty() {
+                clauses.push(in_placeholders("t.status", filters.task_statuses.len()));
+                for s in &filters.task_statuses {
+                    binds.push(Box::new(s.clone()));
+                }
+            }
+            let where_extra = clauses.concat();
             let sql = format!(
                 "SELECT t.id, t.list_id, t.parent_id, t.title, t.description,
                         t.status, t.priority, t.scheduled_date, t.deadline_type,
@@ -114,19 +197,16 @@ impl LocalAdapter {
                         t.etag
                    FROM tasks_fts f
                    JOIN tasks t ON t.id = f.id
-                  WHERE tasks_fts MATCH ?{extra_sql}
+                  WHERE tasks_fts MATCH ?{where_extra}
                   ORDER BY rank
                   LIMIT ?"
             );
+            binds.push(Box::new(LIMIT as i64));
             let mut stmt = conn.prepare(&sql).map_err(map_sql_err)?;
-            let mut binds: Vec<&dyn rusqlite::ToSql> = vec![&prepared];
-            for id in &extra_binds {
-                binds.push(id as &dyn rusqlite::ToSql);
-            }
-            let limit_i = LIMIT as i64;
-            binds.push(&limit_i);
+            let bind_refs: Vec<&dyn rusqlite::ToSql> =
+                binds.iter().map(|b| b.as_ref()).collect();
             let rows = stmt
-                .query_map(rusqlite::params_from_iter(binds), |row| {
+                .query_map(rusqlite::params_from_iter(bind_refs), |row| {
                     Ok(row_to_task(row))
                 })
                 .map_err(map_sql_err)?;
@@ -142,17 +222,17 @@ impl LocalAdapter {
 }
 
 /// Build a ` AND column IN (?, ?, …)` clause for an arbitrary number
-/// of ids, returning the SQL fragment and the list of placeholders'
-/// values. Empty list ⇒ empty clause, no restriction applied.
-fn in_clause(column: &str, ids: &[String]) -> (String, Vec<String>) {
-    if ids.is_empty() {
-        return (String::new(), Vec::new());
-    }
-    let placeholders = std::iter::repeat("?")
-        .take(ids.len())
-        .collect::<Vec<_>>()
-        .join(",");
-    (format!(" AND {column} IN ({placeholders})"), ids.to_vec())
+/// of values. Caller is responsible for binding the values in the same
+/// order they appear in the original list.
+fn in_placeholders(column: &str, n: usize) -> String {
+    let placeholders = std::iter::repeat("?").take(n).collect::<Vec<_>>().join(",");
+    format!(" AND {column} IN ({placeholders})")
+}
+
+/// Truncate an ISO 8601 datetime string to its YYYY-MM-DD prefix so it
+/// can be compared against task date columns (which store dates only).
+fn iso_date_part(iso: &str) -> String {
+    iso.get(..10).unwrap_or(iso).to_string()
 }
 
 /// Translate raw user input into an FTS5 query.
@@ -411,6 +491,95 @@ mod tests {
         // verbatim and matches.
         let hits = a.search_default("\"AND\"").unwrap();
         assert_eq!(hits.events.len(), 1);
+    }
+
+    #[test]
+    fn event_type_filter_distinguishes_recurring_and_single() {
+        let (a, cal, _list) = adapter_with_data();
+        block(a.create_event(&cal, make_event("Plain"))).unwrap();
+        let mut recurring = make_event("Plain");
+        recurring.recurrence = Some(cal_core::EventRecurrence {
+            rrule: "FREQ=WEEKLY".into(),
+            exceptions: vec![],
+        });
+        block(a.create_event(&cal, recurring)).unwrap();
+
+        let only_single = a
+            .search(
+                "plain",
+                &SearchFilters {
+                    event_type: EventTypeFilter::Single,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(only_single.events.len(), 1);
+        assert!(only_single.events[0].recurrence.is_none());
+
+        let only_recurring = a
+            .search(
+                "plain",
+                &SearchFilters {
+                    event_type: EventTypeFilter::Recurring,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(only_recurring.events.len(), 1);
+        assert!(only_recurring.events[0].recurrence.is_some());
+    }
+
+    #[test]
+    fn task_status_filter_restricts_results() {
+        let (a, _cal, list) = adapter_with_data();
+        let mut open = make_task("Ping");
+        open.status = TaskStatus::Open;
+        block(a.create_task(&list, open)).unwrap();
+        let mut completed = make_task("Ping");
+        completed.status = TaskStatus::Completed;
+        block(a.create_task(&list, completed)).unwrap();
+
+        let only_completed = a
+            .search(
+                "ping",
+                &SearchFilters {
+                    task_statuses: vec!["completed".into()],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(only_completed.tasks.len(), 1);
+        assert!(matches!(
+            only_completed.tasks[0].status,
+            TaskStatus::Completed
+        ));
+    }
+
+    #[test]
+    fn date_range_filter_restricts_events() {
+        let (a, cal, _list) = adapter_with_data();
+        let mut soon = make_event("Window");
+        soon.start = Utc::now() + Duration::days(2);
+        soon.end = soon.start + Duration::hours(1);
+        block(a.create_event(&cal, soon)).unwrap();
+        let mut later = make_event("Window");
+        later.start = Utc::now() + Duration::days(30);
+        later.end = later.start + Duration::hours(1);
+        block(a.create_event(&cal, later)).unwrap();
+
+        let bound_lo = (Utc::now() + Duration::days(1)).to_rfc3339();
+        let bound_hi = (Utc::now() + Duration::days(7)).to_rfc3339();
+        let in_window = a
+            .search(
+                "window",
+                &SearchFilters {
+                    since: Some(bound_lo),
+                    until: Some(bound_hi),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(in_window.events.len(), 1);
     }
 
     #[test]

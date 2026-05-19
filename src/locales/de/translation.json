@@ -80,6 +80,13 @@
       "created": "Termin „{{title}}\" wurde angelegt.",
       "updated": "Termin „{{title}}\" wurde aktualisiert.",
       "deleted": "Termin „{{title}}\" wurde gelöscht.",
+      "occurrenceUpdated": "Dieser Einzeltermin von „{{title}}\" wurde geändert.",
+      "occurrenceDeleted": "Dieser Einzeltermin von „{{title}}\" wurde gelöscht.",
+      "scope": {
+        "label": "Anwenden auf",
+        "occurrence": "Nur diesen Termin",
+        "series": "Ganze Serie"
+      },
       "fields": {
         "title": "Titel",
         "calendar": "Kalender",
@@ -196,7 +203,10 @@
           "never": "Nie",
           "until": "Bis Datum"
         },
-        "untilLabel": "Ende-Datum"
+        "untilLabel": "Ende-Datum",
+        "dayOfMonthLabel": "Tag im Monat",
+        "dayOfMonthPlaceholder": "Automatisch",
+        "dayOfMonthHint": "Leer = es wird der Erledigungstag verwendet. Werte über den Monatsende hinaus werden gekappt (z. B. 31 → Februar-Ende)."
       }
     },
     "quickAdd": {
@@ -243,7 +253,18 @@
       },
       "calendarsLabel": "Kalender",
       "listsLabel": "Aufgabenlisten",
-      "containersHint": "Leer = keine Einschränkung."
+      "containersHint": "Leer = keine Einschränkung.",
+      "rangeLabel": "Zeitraum",
+      "sinceLabel": "Von",
+      "untilLabel": "Bis",
+      "eventTypeLabel": "Termintyp",
+      "eventType": {
+        "any": "Beliebig",
+        "single": "Einzeltermine",
+        "recurring": "Serientermine",
+        "all_day": "Ganztägig"
+      },
+      "taskStatusLabel": "Aufgabenstatus"
     }
   },
   "sidebar": {

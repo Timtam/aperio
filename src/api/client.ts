@@ -65,6 +65,12 @@ export const updateEvent = (event: CalendarEvent) =>
 export const deleteEventById = (id: string) =>
   invoke<void>('delete_event', { id });
 
+/** Append `occurrence` to a recurring event's EXDATE list. Used when
+ *  the user deletes or overrides a single occurrence — the master row
+ *  stays intact and the expansion engine simply skips that date. */
+export const addEventExdate = (id: string, occurrence: string) =>
+  invoke<void>('add_event_exdate', { id, occurrence });
+
 // ── Task lists & tasks ─────────────────────────────────────────────────────
 
 export const listTaskLists = () => invoke<TaskList[]>('list_task_lists');
@@ -126,10 +132,20 @@ export const deleteColorLabel = (id: string) =>
 
 export type SearchKind = 'both' | 'events' | 'tasks';
 
+export type EventTypeFilter = 'any' | 'single' | 'recurring' | 'all_day';
+
 export interface SearchFilters {
   kind?: SearchKind;
   calendar_ids?: string[];
   list_ids?: string[];
+  /** ISO 8601 lower bound (date or datetime). */
+  since?: string | null;
+  /** ISO 8601 upper bound (date or datetime). */
+  until?: string | null;
+  /** Event-type filter — ignored when `kind = 'tasks'`. */
+  event_type?: EventTypeFilter;
+  /** Task-status whitelist — empty means no restriction. */
+  task_statuses?: Task['status'][];
 }
 
 export const search = (query: string, filters?: SearchFilters) =>

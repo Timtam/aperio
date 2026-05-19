@@ -79,6 +79,15 @@ pub async fn delete_event(adapter: State<'_, LocalAdapter>, id: String) -> Comma
     Ok(adapter.delete_event(&id).await?)
 }
 
+#[tauri::command]
+pub async fn add_event_exdate(
+    adapter: State<'_, LocalAdapter>,
+    id: String,
+    occurrence: DateTime<Utc>,
+) -> CommandResult<()> {
+    Ok(adapter.add_event_exdate(&id, occurrence)?)
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Smoke test: round-trip a calendar + event through the command layer
 // using an in-memory adapter. Mirrors what the frontend will do at startup.
