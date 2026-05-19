@@ -1,0 +1,76 @@
+/*
+ * Phase 0 styling — intentionally minimal. The full design system
+ * (dark mode, tokens, Tailwind, etc.) lands in Phase 2.
+ *
+ * The "native-feel" defaults from DESIGN.md section 15 matter even now:
+ *  - no text selection on non-editable elements
+ *  - no browser caret in non-input regions
+ *  - no overscroll bouncing
+ *  - a stable, visible focus ring (custom — not the browser default)
+ */
+
+:root {
+  font-family: system-ui, -apple-system, 'Segoe UI', 'SF Pro Text', sans-serif;
+  color-scheme: light dark;
+  --focus-ring: 0 0 0 2px #1e88e5;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  overscroll-behavior: none;
+}
+
+body {
+  user-select: none;
+  cursor: default;
+}
+
+input,
+textarea,
+[contenteditable='true'] {
+  user-select: text;
+  cursor: text;
+}
+
+a,
+button {
+  cursor: pointer;
+}
+
+:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.app-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.app-header {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid rgba(127, 127, 127, 0.25);
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.app-main {
+  padding: 1rem;
+  overflow: auto;
+}
+
+.error {
+  color: #c62828;
+}

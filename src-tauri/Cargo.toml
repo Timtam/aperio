@@ -1,0 +1,39 @@
+[package]
+name = "aperio"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Aperio — accessible, cross-platform calendar and task application."
+default-run = "aperio"
+
+[[bin]]
+name = "aperio"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+dirs.workspace = true
+anyhow.workspace = true
+
+cal-core.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+
+[features]
+# Default: plugins are loaded dynamically as shared libraries (desktop).
+default = ["dynamic-plugins"]
+dynamic-plugins = []
+# Mobile targets (section 25.1): compile all adapters in statically.
+static-plugins = []

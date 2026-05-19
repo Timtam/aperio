@@ -1,0 +1,9 @@
+{
+  "app": {
+    "title": "Aperio",
+    "phase0": {
+      "intro": "Phase 0 – project skeleton up. Data, adapters and sync follow.",
+      "invokeError": "Backend call failed: {{error}}"
+    }
+  }
+}

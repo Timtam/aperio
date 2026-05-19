@@ -1,0 +1,11 @@
+[package]
+name = "cal-adapter-microsoft-graph"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Aperio — stub for cal-adapter-microsoft-graph (Phase 0; full implementation lands in a later phase)."
+
+[dependencies]

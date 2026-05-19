@@ -1,0 +1,11 @@
+[package]
+name = "cal-adapter-vikunja"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Aperio — stub for cal-adapter-vikunja (Phase 0; full implementation lands in a later phase)."
+
+[dependencies]
