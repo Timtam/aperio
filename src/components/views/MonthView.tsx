@@ -12,6 +12,7 @@ import {
 
 import { useAutoFocus } from '../../hooks/useAutoFocus';
 import { useDateFormat } from '../../intl/dateFormat';
+import { useDialogState } from '../../state/DialogState';
 import { useEvents } from '../../state/useEvents';
 import { useViewState } from '../../state/ViewState';
 import { visibleRange } from '../../state/viewMath';
@@ -35,6 +36,7 @@ export function MonthView() {
   const { t } = useTranslation();
   const fmt = useDateFormat();
   const { anchor, setAnchor, goPrev, goNext } = useViewState();
+  const { openEventDialog } = useDialogState();
 
   const cells = useMemo(() => buildMonthGrid(anchor), [anchor]);
   const range = useMemo(() => visibleRange('month', anchor), [anchor]);
@@ -90,11 +92,33 @@ export function MonthView() {
           e.preventDefault();
           goNext();
           return;
+        case 'Enter':
+        case ' ':
+        case 'Spacebar': {
+          e.preventDefault();
+          const focusedDay = cells[focusIndex];
+          const evs = eventsByDay.get(keyOf(focusedDay)) ?? [];
+          if (evs.length > 0) {
+            openEventDialog(evs[0]);
+          } else {
+            openEventDialog(null);
+          }
+          return;
+        }
         default:
           return;
       }
     },
-    [anchor, setAnchor, goPrev, goNext],
+    [
+      anchor,
+      setAnchor,
+      goPrev,
+      goNext,
+      cells,
+      focusIndex,
+      eventsByDay,
+      openEventDialog,
+    ],
   );
 
   const today = useMemo(() => new Date(), []);

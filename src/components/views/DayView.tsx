@@ -4,6 +4,7 @@ import { isSameDay } from 'date-fns';
 
 import { useAutoFocus } from '../../hooks/useAutoFocus';
 import { useDateFormat } from '../../intl/dateFormat';
+import { useDialogState } from '../../state/DialogState';
 import { useEvents } from '../../state/useEvents';
 import { useViewState } from '../../state/ViewState';
 import { visibleRange } from '../../state/viewMath';
@@ -27,6 +28,7 @@ export function DayView() {
   const { t } = useTranslation();
   const fmt = useDateFormat();
   const { anchor } = useViewState();
+  const { openEventDialog } = useDialogState();
 
   const range = useMemo(() => visibleRange('day', anchor), [anchor]);
   const { events, calendarById } = useEvents(range);
@@ -71,11 +73,19 @@ export function DayView() {
           e.preventDefault();
           setFocusIndex(dayEvents.length - 1);
           return;
+        case 'Enter':
+        case ' ':
+        case 'Spacebar': {
+          e.preventDefault();
+          const ev = dayEvents[focusIndex];
+          if (ev) openEventDialog(ev);
+          return;
+        }
         default:
           return;
       }
     },
-    [dayEvents.length],
+    [dayEvents, focusIndex, openEventDialog],
   );
 
   const today = useMemo(() => new Date(), []);

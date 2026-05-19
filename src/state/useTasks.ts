@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { getTasks } from '../api/client';
 import type { Task } from '../api/types';
 import { useCalendarStore } from './CalendarStore';
+import { useDialogState } from './DialogState';
 
 /**
  * Pull tasks from every selected task list and return the aggregated list.
@@ -14,8 +15,12 @@ import { useCalendarStore } from './CalendarStore';
  */
 export function useTasks() {
   const { selectedTaskListIds, taskLists } = useCalendarStore();
+  const { mode } = useDialogState();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(false);
+
+  // Re-fetch when a dialog closes — see useEvents for the rationale.
+  const dialogClosed = mode.kind === 'none';
 
   const idsKey = useMemo(
     () => [...selectedTaskListIds].sort().join(' '),
@@ -52,7 +57,7 @@ export function useTasks() {
     return () => {
       cancelled = true;
     };
-  }, [idsKey, selectedTaskListIds]);
+  }, [idsKey, selectedTaskListIds, dialogClosed]);
 
   const taskListById = useMemo(() => {
     const map = new Map<string, (typeof taskLists)[number]>();

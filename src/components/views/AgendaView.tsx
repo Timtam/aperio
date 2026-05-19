@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import type { CalendarEvent } from '../../api/types';
 import { useAutoFocus } from '../../hooks/useAutoFocus';
 import { useDateFormat } from '../../intl/dateFormat';
+import { useDialogState } from '../../state/DialogState';
 import { useEvents } from '../../state/useEvents';
 import { useViewState } from '../../state/ViewState';
 import { visibleRange } from '../../state/viewMath';
@@ -28,6 +29,7 @@ export function AgendaView() {
   const { t } = useTranslation();
   const { anchor } = useViewState();
   const fmt = useDateFormat();
+  const { openEventDialog } = useDialogState();
 
   const range = useMemo(() => visibleRange('agenda', anchor), [anchor]);
   const { events, calendarById } = useEvents(range);
@@ -65,11 +67,19 @@ export function AgendaView() {
           e.preventDefault();
           setFocusIndex(events.length - 1);
           return;
+        case 'Enter':
+        case ' ':
+        case 'Spacebar': {
+          e.preventDefault();
+          const ev = events[focusIndex];
+          if (ev) openEventDialog(ev);
+          return;
+        }
         default:
           return;
       }
     },
-    [events.length],
+    [events, focusIndex, openEventDialog],
   );
 
   return (

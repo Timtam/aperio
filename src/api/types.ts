@@ -84,6 +84,7 @@ export interface TaskList {
 
 export type TaskStatus = 'open' | 'in_progress' | 'completed' | 'cancelled';
 export type TaskPriority = 'low' | 'medium' | 'high';
+export type DeadlineType = 'on' | 'by';
 
 export interface Task {
   id: string;

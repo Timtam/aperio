@@ -17,6 +17,10 @@
     "prev": "Previous",
     "next": "Next",
     "today": "Today",
+    "create": "Create",
+    "quickAdd": "Quick add",
+    "newEvent": "New event",
+    "newTask": "New task",
     "views": {
       "day": "Day",
       "week": "Week",
@@ -24,6 +28,77 @@
       "year": "Year",
       "agenda": "Agenda",
       "tasks": "Tasks"
+    }
+  },
+  "dialogs": {
+    "cancel": "Cancel",
+    "save": "Save",
+    "create": "Create",
+    "event": {
+      "newTitle": "New event",
+      "editTitle": "Edit event",
+      "titleRequired": "Please enter a title.",
+      "calendarRequired": "Please pick a calendar.",
+      "dateInvalid": "The date is invalid.",
+      "endBeforeStart": "The end must be after the start.",
+      "pickCalendar": "Pick a calendar …",
+      "delete": "Delete",
+      "created": "Event \"{{title}}\" created.",
+      "updated": "Event \"{{title}}\" updated.",
+      "deleted": "Event \"{{title}}\" deleted.",
+      "fields": {
+        "title": "Title",
+        "calendar": "Calendar",
+        "allDay": "All day",
+        "startDate": "Start date",
+        "startTime": "Start time",
+        "endDate": "End date",
+        "endTime": "End time",
+        "location": "Location",
+        "description": "Description"
+      }
+    },
+    "task": {
+      "newTitle": "New task",
+      "editTitle": "Edit task",
+      "titleRequired": "Please enter a title.",
+      "listRequired": "Please pick a list.",
+      "pickList": "Pick a list …",
+      "delete": "Delete",
+      "created": "Task \"{{title}}\" created.",
+      "updated": "Task \"{{title}}\" updated.",
+      "deleted": "Task \"{{title}}\" deleted.",
+      "fields": {
+        "title": "Title",
+        "list": "List",
+        "status": "Status",
+        "priority": "Priority",
+        "deadlineMode": "Deadline",
+        "date": "Date",
+        "time": "Time",
+        "description": "Description"
+      },
+      "status": {
+        "open": "Open",
+        "inProgress": "In progress",
+        "completed": "Completed",
+        "cancelled": "Cancelled"
+      },
+      "priority": {
+        "low": "Low",
+        "medium": "Medium",
+        "high": "High"
+      },
+      "deadline": {
+        "none": "No date",
+        "scheduled": "Scheduled day",
+        "on": "Concrete deadline",
+        "by": "Due by"
+      }
+    },
+    "quickAdd": {
+      "title": "Quick add event",
+      "moreDetails": "More details …"
     }
   },
   "sidebar": {

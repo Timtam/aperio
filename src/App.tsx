@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next';
 
 import { AnnouncerProvider } from './a11y/Announcer';
+import { DialogHost } from './components/DialogHost';
 import { Sidebar } from './components/Sidebar';
 import { TitleBar } from './components/TitleBar';
 import { Toolbar } from './components/Toolbar';
@@ -10,29 +11,25 @@ import { MonthView } from './components/views/MonthView';
 import { TaskView } from './components/views/TaskView';
 import { WeekView } from './components/views/WeekView';
 import { YearView } from './components/views/YearView';
+import { useDialogShortcuts } from './hooks/useDialogShortcuts';
 import { useRegionFocus } from './hooks/useRegionFocus';
 import { useSuppressBrowserDefaults } from './hooks/useSuppressBrowserDefaults';
 import { CalendarStoreProvider } from './state/CalendarStore';
+import { DialogStateProvider } from './state/DialogState';
 import { ViewStateProvider, useViewShortcuts, useViewState } from './state/ViewState';
 
 /**
  * Root component.
  *
- * `role="application"` lives on the outermost wrapper, *not* inside the
- * Shell, so every descendant — including the announcer's `aria-live`
- * regions — sits inside the application boundary. If the live regions
- * were rendered as siblings of `role="application"`, NVDA would drop
- * out of focus mode whenever an announcement landed, defeating the
- * point of the role (DESIGN.md section 3.2.1).
- *
  * Provider order:
- *  1. AnnouncerProvider — every child can call `useAnnouncer()`.
- *  2. CalendarStoreProvider — owns the calendars/task-lists registry
- *     plus their selection state.
- *  3. ViewStateProvider — owns the active view + anchor date.
+ *  1. AnnouncerProvider
+ *  2. CalendarStoreProvider — owns calendars/task-lists + selection.
+ *  3. ViewStateProvider — owns active view + anchor date.
+ *  4. DialogStateProvider — owns which dialog (if any) is open.
  *
- * `useSuppressBrowserDefaults` and `useRegionFocus` are pure window
- * listeners, so they live at the root.
+ * `role="application"` stays on the outermost wrapper so portaled
+ * dialogs and announcer live regions all sit inside the application
+ * boundary.
  */
 export function App() {
   useSuppressBrowserDefaults();
@@ -48,7 +45,10 @@ export function App() {
       <AnnouncerProvider>
         <CalendarStoreProvider>
           <ViewStateProvider>
-            <Shell />
+            <DialogStateProvider>
+              <Shell />
+              <DialogHost />
+            </DialogStateProvider>
           </ViewStateProvider>
         </CalendarStoreProvider>
       </AnnouncerProvider>
@@ -58,6 +58,7 @@ export function App() {
 
 function Shell() {
   useViewShortcuts();
+  useDialogShortcuts();
 
   return (
     <>

@@ -91,7 +91,11 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
     setSelectedTaskListIds((prev) => reconcileSelection(prev, list));
   }, []);
 
-  // Initial load: pull both lists in parallel, then drop the loading flag.
+  // Initial load: pull both lists in parallel, then drop the loading
+  // flag. The store doesn't auto-refresh on dialog close (we don't yet
+  // have one of our own — and creating containers happens through the
+  // Sidebar, which calls refresh* directly). When the dialog system
+  // grows a container-management dialog, it can call these helpers too.
   useEffect(() => {
     let cancelled = false;
     Promise.allSettled([refreshCalendars(), refreshTaskLists()]).then(() => {

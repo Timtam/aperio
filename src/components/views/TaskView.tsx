@@ -12,6 +12,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { useAnnouncer } from '../../a11y/Announcer';
 import { useAutoFocus } from '../../hooks/useAutoFocus';
 import { useDateFormat } from '../../intl/dateFormat';
+import { useDialogState } from '../../state/DialogState';
 import { useTasks } from '../../state/useTasks';
 import type { Task, TaskStatus } from '../../api/types';
 
@@ -38,6 +39,7 @@ export function TaskView() {
   const fmt = useDateFormat();
   const announce = useAnnouncer();
   const { tasks, taskListById } = useTasks();
+  const { openTaskDialog } = useDialogState();
 
   // Flatten the task buckets into a single options array, interleaved
   // with separator entries. focusIndex points at the *task* index in
@@ -112,11 +114,17 @@ export function TaskView() {
           if (task) void toggleStatus(task);
           return;
         }
+        case 'Enter': {
+          e.preventDefault();
+          const task = flatTasks[focusIndex];
+          if (task) openTaskDialog(task);
+          return;
+        }
         default:
           return;
       }
     },
-    [flatTasks, focusIndex, toggleStatus],
+    [flatTasks, focusIndex, toggleStatus, openTaskDialog],
   );
 
   return (

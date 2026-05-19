@@ -1,0 +1,422 @@
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type FormEvent,
+} from 'react';
+import { useTranslation } from 'react-i18next';
+
+import { useAnnouncer } from '../a11y/Announcer';
+import {
+  createEvent as apiCreateEvent,
+  deleteEventById,
+  isCommandError,
+  updateEvent as apiUpdateEvent,
+} from '../api/client';
+import type { CalendarEvent } from '../api/types';
+import { useCalendarStore } from '../state/CalendarStore';
+import { Modal } from './Modal';
+
+/**
+ * Event create / edit dialog.
+ *
+ * Phase 4a covers the core fields from DESIGN.md section 7.2: title
+ * (required), start/end (date + time), all-day toggle, location,
+ * description, calendar. Recurrence, color labels, reminders, attendees,
+ * and video-conference links land in subsequent waves.
+ *
+ * Pass `event=null` to create a new event; pass an existing event to
+ * edit it. The dialog handles both with the same form.
+ */
+export interface EventDialogProps {
+  isOpen: boolean;
+  onClose: () => void;
+  event: CalendarEvent | null;
+  /** Pre-selected calendar when creating a new event. */
+  defaultCalendarId?: string;
+}
+
+interface FormState {
+  title: string;
+  calendarId: string;
+  startDate: string;
+  startTime: string;
+  endDate: string;
+  endTime: string;
+  allDay: boolean;
+  location: string;
+  description: string;
+}
+
+export function EventDialog({
+  isOpen,
+  onClose,
+  event,
+  defaultCalendarId,
+}: EventDialogProps) {
+  const { t } = useTranslation();
+  const announce = useAnnouncer();
+  const { calendars } = useCalendarStore();
+
+  const isEdit = event !== null;
+  const initialState = useMemo<FormState>(
+    () => buildInitialState(event, defaultCalendarId, calendars),
+    [event, defaultCalendarId, calendars],
+  );
+
+  const [form, setForm] = useState<FormState>(initialState);
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  // Reset the form whenever the dialog is opened with new context. We
+  // key on isOpen + initialState; isOpen=false keeps the previous form
+  // around briefly while the close animation runs (if we ever add one).
+  useEffect(() => {
+    if (isOpen) {
+      setForm(initialState);
+      setError(null);
+    }
+  }, [isOpen, initialState]);
+
+  const update = useCallback(
+    <K extends keyof FormState>(key: K, value: FormState[K]) => {
+      setForm((prev) => ({ ...prev, [key]: value }));
+    },
+    [],
+  );
+
+  const onSubmit = useCallback(
+    async (e: FormEvent) => {
+      e.preventDefault();
+      setError(null);
+
+      const trimmedTitle = form.title.trim();
+      if (!trimmedTitle) {
+        setError(t('dialogs.event.titleRequired'));
+        return;
+      }
+      if (!form.calendarId) {
+        setError(t('dialogs.event.calendarRequired'));
+        return;
+      }
+
+      const start = toIso(form.startDate, form.startTime, form.allDay);
+      const end = toIso(form.endDate, form.endTime, form.allDay);
+      if (!start || !end) {
+        setError(t('dialogs.event.dateInvalid'));
+        return;
+      }
+      if (new Date(end).getTime() < new Date(start).getTime()) {
+        setError(t('dialogs.event.endBeforeStart'));
+        return;
+      }
+
+      setSubmitting(true);
+      try {
+        if (isEdit && event) {
+          const updated: CalendarEvent = {
+            ...event,
+            title: trimmedTitle,
+            calendar_id: form.calendarId,
+            start,
+            end,
+            all_day: form.allDay,
+            location: form.location.trim() || null,
+            description: form.description.trim() || null,
+          };
+          await apiUpdateEvent(updated);
+          announce(t('dialogs.event.updated', { title: trimmedTitle }));
+        } else {
+          await apiCreateEvent({
+            calendar_id: form.calendarId,
+            title: trimmedTitle,
+            description: form.description.trim() || null,
+            location: form.location.trim() || null,
+            start,
+            end,
+            all_day: form.allDay,
+            recurrence: null,
+            color_label: null,
+            reminders: [],
+            sound: null,
+            attendees: [],
+          });
+          announce(t('dialogs.event.created', { title: trimmedTitle }));
+        }
+        onClose();
+      } catch (err) {
+        if (isCommandError(err)) {
+          setError(`${err.code}: ${err.message}`);
+        } else {
+          setError(String(err));
+        }
+      } finally {
+        setSubmitting(false);
+      }
+    },
+    [form, isEdit, event, announce, onClose, t],
+  );
+
+  const onDelete = useCallback(async () => {
+    if (!event) return;
+    setError(null);
+    setSubmitting(true);
+    try {
+      await deleteEventById(event.id);
+      announce(t('dialogs.event.deleted', { title: event.title }));
+      onClose();
+    } catch (err) {
+      if (isCommandError(err)) {
+        setError(`${err.code}: ${err.message}`);
+      } else {
+        setError(String(err));
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  }, [event, announce, onClose, t]);
+
+  const title = isEdit ? t('dialogs.event.editTitle') : t('dialogs.event.newTitle');
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title={title}
+      className="modal--form"
+      dismissOnBackdrop={false}
+    >
+      <form onSubmit={onSubmit} className="form">
+        <label className="form__field">
+          <span className="form__label">{t('dialogs.event.fields.title')}</span>
+          <input
+            type="text"
+            value={form.title}
+            onChange={(e) => update('title', e.target.value)}
+            required
+            autoComplete="off"
+          />
+        </label>
+
+        <label className="form__field">
+          <span className="form__label">
+            {t('dialogs.event.fields.calendar')}
+          </span>
+          <select
+            value={form.calendarId}
+            onChange={(e) => update('calendarId', e.target.value)}
+            required
+          >
+            <option value="" disabled>
+              {t('dialogs.event.pickCalendar')}
+            </option>
+            {calendars.map((cal) => (
+              <option key={cal.id} value={cal.id}>
+                {cal.name}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="form__field form__field--inline">
+          <input
+            type="checkbox"
+            checked={form.allDay}
+            onChange={(e) => update('allDay', e.target.checked)}
+          />
+          <span>{t('dialogs.event.fields.allDay')}</span>
+        </label>
+
+        <div className="form__row">
+          <label className="form__field">
+            <span className="form__label">
+              {t('dialogs.event.fields.startDate')}
+            </span>
+            <input
+              type="date"
+              value={form.startDate}
+              onChange={(e) => update('startDate', e.target.value)}
+              required
+            />
+          </label>
+          {!form.allDay && (
+            <label className="form__field">
+              <span className="form__label">
+                {t('dialogs.event.fields.startTime')}
+              </span>
+              <input
+                type="time"
+                value={form.startTime}
+                onChange={(e) => update('startTime', e.target.value)}
+                required
+              />
+            </label>
+          )}
+        </div>
+
+        <div className="form__row">
+          <label className="form__field">
+            <span className="form__label">
+              {t('dialogs.event.fields.endDate')}
+            </span>
+            <input
+              type="date"
+              value={form.endDate}
+              onChange={(e) => update('endDate', e.target.value)}
+              required
+            />
+          </label>
+          {!form.allDay && (
+            <label className="form__field">
+              <span className="form__label">
+                {t('dialogs.event.fields.endTime')}
+              </span>
+              <input
+                type="time"
+                value={form.endTime}
+                onChange={(e) => update('endTime', e.target.value)}
+                required
+              />
+            </label>
+          )}
+        </div>
+
+        <label className="form__field">
+          <span className="form__label">
+            {t('dialogs.event.fields.location')}
+          </span>
+          <input
+            type="text"
+            value={form.location}
+            onChange={(e) => update('location', e.target.value)}
+            autoComplete="off"
+          />
+        </label>
+
+        <label className="form__field">
+          <span className="form__label">
+            {t('dialogs.event.fields.description')}
+          </span>
+          <textarea
+            value={form.description}
+            onChange={(e) => update('description', e.target.value)}
+            rows={4}
+          />
+        </label>
+
+        {error && (
+          <p role="alert" className="form__error">
+            {error}
+          </p>
+        )}
+
+        <div className="form__actions">
+          {isEdit && (
+            <button
+              type="button"
+              onClick={onDelete}
+              disabled={submitting}
+              className="form__action form__action--danger"
+            >
+              {t('dialogs.event.delete')}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={submitting}
+            className="form__action"
+          >
+            {t('dialogs.cancel')}
+          </button>
+          <button
+            type="submit"
+            disabled={submitting}
+            className="form__action form__action--primary"
+          >
+            {isEdit ? t('dialogs.save') : t('dialogs.create')}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function buildInitialState(
+  event: CalendarEvent | null,
+  defaultCalendarId: string | undefined,
+  calendars: { id: string }[],
+): FormState {
+  if (event) {
+    const start = new Date(event.start);
+    const end = new Date(event.end);
+    return {
+      title: event.title,
+      calendarId: event.calendar_id,
+      startDate: dateInput(start),
+      startTime: timeInput(start),
+      endDate: dateInput(end),
+      endTime: timeInput(end),
+      allDay: event.all_day,
+      location: event.location ?? '',
+      description: event.description ?? '',
+    };
+  }
+
+  // New event: default to a 1-hour slot starting at the next full hour.
+  const now = new Date();
+  const start = new Date(now);
+  start.setMinutes(0, 0, 0);
+  start.setHours(start.getHours() + 1);
+  const end = new Date(start);
+  end.setHours(end.getHours() + 1);
+
+  const fallbackCalendar = defaultCalendarId ?? calendars[0]?.id ?? '';
+
+  return {
+    title: '',
+    calendarId: fallbackCalendar,
+    startDate: dateInput(start),
+    startTime: timeInput(start),
+    endDate: dateInput(end),
+    endTime: timeInput(end),
+    allDay: false,
+    location: '',
+    description: '',
+  };
+}
+
+function dateInput(d: Date): string {
+  // `<input type="date">` expects ISO 8601 YYYY-MM-DD, always in local
+  // time. Build it from the local components rather than `toISOString()`
+  // which uses UTC and can shift the day on timezones east of GMT.
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function timeInput(d: Date): string {
+  const h = String(d.getHours()).padStart(2, '0');
+  const m = String(d.getMinutes()).padStart(2, '0');
+  return `${h}:${m}`;
+}
+
+function toIso(
+  date: string,
+  time: string,
+  allDay: boolean,
+): string | null {
+  if (!date) return null;
+  const [y, m, d] = date.split('-').map(Number);
+  if (!y || !m || !d) return null;
+  let hours = 0;
+  let minutes = 0;
+  if (!allDay) {
+    const parts = time.split(':').map(Number);
+    if (parts.length < 2 || parts.some(Number.isNaN)) return null;
+    [hours, minutes] = parts;
+  }
+  return new Date(y, m - 1, d, hours, minutes, 0).toISOString();
+}

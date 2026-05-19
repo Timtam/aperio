@@ -17,6 +17,10 @@
     "prev": "Zurück",
     "next": "Vor",
     "today": "Heute",
+    "create": "Erstellen",
+    "quickAdd": "Schnell anlegen",
+    "newEvent": "Neuer Termin",
+    "newTask": "Neue Aufgabe",
     "views": {
       "day": "Tag",
       "week": "Woche",
@@ -24,6 +28,77 @@
       "year": "Jahr",
       "agenda": "Agenda",
       "tasks": "Aufgaben"
+    }
+  },
+  "dialogs": {
+    "cancel": "Abbrechen",
+    "save": "Speichern",
+    "create": "Anlegen",
+    "event": {
+      "newTitle": "Neuer Termin",
+      "editTitle": "Termin bearbeiten",
+      "titleRequired": "Bitte gib einen Titel ein.",
+      "calendarRequired": "Bitte wähle einen Kalender.",
+      "dateInvalid": "Das angegebene Datum ist ungültig.",
+      "endBeforeStart": "Das Ende muss nach dem Start liegen.",
+      "pickCalendar": "Kalender wählen …",
+      "delete": "Löschen",
+      "created": "Termin „{{title}}\" wurde angelegt.",
+      "updated": "Termin „{{title}}\" wurde aktualisiert.",
+      "deleted": "Termin „{{title}}\" wurde gelöscht.",
+      "fields": {
+        "title": "Titel",
+        "calendar": "Kalender",
+        "allDay": "Ganztägig",
+        "startDate": "Startdatum",
+        "startTime": "Startzeit",
+        "endDate": "Enddatum",
+        "endTime": "Endzeit",
+        "location": "Ort",
+        "description": "Beschreibung"
+      }
+    },
+    "task": {
+      "newTitle": "Neue Aufgabe",
+      "editTitle": "Aufgabe bearbeiten",
+      "titleRequired": "Bitte gib einen Titel ein.",
+      "listRequired": "Bitte wähle eine Liste.",
+      "pickList": "Liste wählen …",
+      "delete": "Löschen",
+      "created": "Aufgabe „{{title}}\" wurde angelegt.",
+      "updated": "Aufgabe „{{title}}\" wurde aktualisiert.",
+      "deleted": "Aufgabe „{{title}}\" wurde gelöscht.",
+      "fields": {
+        "title": "Titel",
+        "list": "Liste",
+        "status": "Status",
+        "priority": "Priorität",
+        "deadlineMode": "Termin",
+        "date": "Datum",
+        "time": "Uhrzeit",
+        "description": "Beschreibung"
+      },
+      "status": {
+        "open": "Offen",
+        "inProgress": "In Bearbeitung",
+        "completed": "Erledigt",
+        "cancelled": "Abgebrochen"
+      },
+      "priority": {
+        "low": "Niedrig",
+        "medium": "Mittel",
+        "high": "Hoch"
+      },
+      "deadline": {
+        "none": "Ohne Datum",
+        "scheduled": "Geplanter Tag",
+        "on": "Konkrete Deadline",
+        "by": "Muss bis zum"
+      }
+    },
+    "quickAdd": {
+      "title": "Termin schnell anlegen",
+      "moreDetails": "Weitere Details …"
     }
   },
   "sidebar": {

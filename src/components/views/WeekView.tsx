@@ -4,6 +4,7 @@ import { addDays, isSameDay, startOfWeek } from 'date-fns';
 
 import { useAutoFocus } from '../../hooks/useAutoFocus';
 import { useDateFormat } from '../../intl/dateFormat';
+import { useDialogState } from '../../state/DialogState';
 import { useEvents } from '../../state/useEvents';
 import { useViewState } from '../../state/ViewState';
 import { visibleRange } from '../../state/viewMath';
@@ -43,6 +44,7 @@ export function WeekView() {
   const { t } = useTranslation();
   const fmt = useDateFormat();
   const { anchor, setAnchor, goPrev, goNext } = useViewState();
+  const { openEventDialog } = useDialogState();
 
   const range = useMemo(() => visibleRange('week', anchor), [anchor]);
   const { events, calendarById } = useEvents(range);
@@ -103,11 +105,37 @@ export function WeekView() {
           e.preventDefault();
           setAnchor(addDays(weekStart, 6));
           return;
+        case 'Enter':
+        case ' ':
+        case 'Spacebar': {
+          // Enter on a focused cell with events: open the first one.
+          // Pressing Enter on an empty cell opens the quick-create
+          // event dialog pre-seeded with that day.
+          e.preventDefault();
+          const focusedDay = days[focusIndex];
+          const evs = eventsByDay.get(keyOf(focusedDay)) ?? [];
+          if (evs.length > 0) {
+            openEventDialog(evs[0]);
+          } else {
+            openEventDialog(null);
+          }
+          return;
+        }
         default:
           return;
       }
     },
-    [anchor, weekStart, setAnchor, goPrev, goNext],
+    [
+      anchor,
+      weekStart,
+      setAnchor,
+      goPrev,
+      goNext,
+      days,
+      focusIndex,
+      eventsByDay,
+      openEventDialog,
+    ],
   );
 
   const today = useMemo(() => new Date(), []);

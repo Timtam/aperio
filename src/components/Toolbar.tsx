@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next';
 
 import { useDateFormat } from '../intl/dateFormat';
+import { useDialogState } from '../state/DialogState';
 import { useViewState } from '../state/ViewState';
 import { VIEWS, type ViewId } from '../state/viewMath';
 
@@ -30,6 +31,7 @@ export function Toolbar() {
   const { t } = useTranslation();
   const fmt = useDateFormat();
   const { view, setView, anchor, jumpToToday, goPrev, goNext } = useViewState();
+  const { openEventDialog, openTaskDialog, openQuickAdd } = useDialogState();
 
   return (
     <div
@@ -86,6 +88,34 @@ export function Toolbar() {
 
       <div className="toolbar__anchor" aria-live="off">
         {fmt.format(anchor, 'PPPP')}
+      </div>
+
+      <div
+        role="group"
+        aria-label={t('toolbar.create')}
+        className="toolbar__group toolbar__group--create"
+      >
+        <button
+          type="button"
+          onClick={() => openQuickAdd()}
+          title={t('toolbar.quickAdd') + ' (N)'}
+        >
+          {t('toolbar.quickAdd')}
+        </button>
+        <button
+          type="button"
+          onClick={() => openEventDialog(null)}
+          title={t('toolbar.newEvent') + ' (Ctrl+N)'}
+        >
+          {t('toolbar.newEvent')}
+        </button>
+        <button
+          type="button"
+          onClick={() => openTaskDialog(null)}
+          title={t('toolbar.newTask') + ' (Ctrl+Shift+N)'}
+        >
+          {t('toolbar.newTask')}
+        </button>
       </div>
     </div>
   );
