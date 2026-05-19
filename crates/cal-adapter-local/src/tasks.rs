@@ -2,10 +2,11 @@
 
 use async_trait::async_trait;
 use cal_core::{
-    ColorLabelId, ContainerColor, DeadlineType, NewTask, Reminder, SoundConfig, Task, TaskList,
-    TaskPriority, TaskRecurrence, TaskStatus, TasksFeature,
+    ColorLabelId, ContainerColor, DeadlineType, NewTask, RecurrenceEnd, RecurrenceFrequency,
+    Reminder, SoundConfig, Task, TaskList, TaskPriority, TaskRecurrence, TaskStatus, TasksFeature,
+    Weekday,
 };
-use chrono::Utc;
+use chrono::{Datelike, Days, Months, NaiveDate, Utc};
 use rusqlite::params;
 use uuid::Uuid;
 
@@ -95,6 +96,158 @@ impl LocalAdapter {
             )));
         }
         Ok(list)
+    }
+
+    /// Read just the current status of a task by id. Used by
+    /// `update_task` to detect the open→completed transition that
+    /// triggers recurrence spawning.
+    fn read_task_status(&self, id: &str) -> cal_core::Result<Option<TaskStatus>> {
+        let conn = self.db().lock().expect("db mutex poisoned");
+        let raw: Option<String> = conn
+            .query_row(
+                "SELECT status FROM tasks WHERE id = ?",
+                params![id],
+                |row| row.get(0),
+            )
+            .ok();
+        match raw {
+            None => Ok(None),
+            Some(s) => Ok(Some(parse_task_status(&s)?)),
+        }
+    }
+
+    /// On completion of a recurring task, create the next instance.
+    ///
+    /// The new row inherits everything from the template except the id,
+    /// dates (advanced by `recurrence.frequency` × `interval`), and
+    /// completion state (reset to open).
+    ///
+    /// Returns `Ok(None)` when:
+    /// - the recurrence rule has hit its `end` boundary, or
+    /// - the task has no date at all (nothing to advance — a recurring
+    ///   backlog task does not make sense).
+    fn spawn_next_recurring_task(
+        &self,
+        template: &Task,
+        recurrence: &TaskRecurrence,
+    ) -> cal_core::Result<Option<Task>> {
+        // Anchor date: prefer scheduled_date, fall back to deadline_date.
+        // Without either we can't compute a follow-up.
+        let anchor = template.scheduled_date.or(template.deadline_date);
+        let Some(anchor) = anchor else {
+            return Ok(None);
+        };
+
+        let next_date = match advance(anchor, recurrence) {
+            Some(d) => d,
+            None => return Ok(None),
+        };
+
+        // End boundary check.
+        if let Some(end) = &recurrence.end {
+            match end {
+                RecurrenceEnd::Never => {}
+                RecurrenceEnd::OnDate { date } => {
+                    if next_date > *date {
+                        return Ok(None);
+                    }
+                }
+                RecurrenceEnd::After { .. } => {
+                    // Not tracked yet — needs an occurrence counter on
+                    // the task row. Treat as Never for now; counted
+                    // recurrence lands with the sync layer in Phase 7.
+                }
+            }
+        }
+
+        let new = NewTask {
+            title: template.title.clone(),
+            description: template.description.clone(),
+            status: TaskStatus::Open,
+            priority: template.priority,
+            scheduled_date: template.scheduled_date.map(|_| next_date),
+            deadline_type: template.deadline_type,
+            deadline_date: template.deadline_date.map(|_| next_date),
+            deadline_time: template.deadline_time,
+            recurrence: Some(recurrence.clone()),
+            parent_id: None,
+            color_label: template.color_label.clone(),
+            reminders: template.reminders.clone(),
+            sound: template.sound.clone(),
+        };
+        let task = self.create_task_sync(&template.list_id, new)?;
+        Ok(Some(task))
+    }
+
+    /// Synchronous variant of `create_task` for the recurrence spawner.
+    /// `TasksFeature::create_task` is async to match the trait shape
+    /// shared with network-backed adapters, but the local adapter does
+    /// no IO that benefits from async — duplicating the body here
+    /// avoids dragging a runtime handle through the call.
+    fn create_task_sync(&self, list_id: &str, task: NewTask) -> cal_core::Result<Task> {
+        let id = Uuid::new_v4().to_string();
+        let now = Utc::now();
+        let now_s = fmt_utc(&now);
+        let reminders_json = encode_json(&task.reminders)?;
+        let recurrence_json = task.recurrence.as_ref().map(encode_json).transpose()?;
+        let sound_json = write_sound(&task.sound)?;
+        let status = task_status_str(task.status);
+        let priority = task_priority_str(task.priority);
+        let deadline_type = task.deadline_type.map(deadline_type_str);
+
+        self.db()
+            .lock()
+            .expect("db mutex poisoned")
+            .execute(
+                "INSERT INTO tasks (
+                    id, list_id, parent_id, title, description, status, priority,
+                    scheduled_date, deadline_type, deadline_date, deadline_time,
+                    recurrence, color_label_id, reminders, sound,
+                    created_at, updated_at, completed_at, etag
+                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)",
+                params![
+                    id,
+                    list_id,
+                    task.parent_id,
+                    task.title,
+                    task.description,
+                    status,
+                    priority,
+                    task.scheduled_date.as_ref().map(fmt_date),
+                    deadline_type,
+                    task.deadline_date.as_ref().map(fmt_date),
+                    task.deadline_time.as_ref().map(fmt_time),
+                    recurrence_json,
+                    task.color_label.as_ref().map(|c| c.as_str()),
+                    reminders_json,
+                    sound_json,
+                    now_s,
+                    now_s,
+                ],
+            )
+            .map_err(map_sql_err)?;
+
+        Ok(Task {
+            id,
+            list_id: list_id.to_string(),
+            title: task.title,
+            description: task.description,
+            status: task.status,
+            priority: task.priority,
+            scheduled_date: task.scheduled_date,
+            deadline_type: task.deadline_type,
+            deadline_date: task.deadline_date,
+            deadline_time: task.deadline_time,
+            recurrence: task.recurrence,
+            parent_id: task.parent_id,
+            color_label: task.color_label,
+            reminders: task.reminders,
+            sound: task.sound,
+            created_at: now,
+            updated_at: now,
+            completed_at: None,
+            etag: None,
+        })
     }
 
     pub fn delete_task_list(&self, id: &str) -> cal_core::Result<()> {
@@ -233,6 +386,11 @@ impl TasksFeature for LocalAdapter {
     }
 
     async fn update_task(&self, task: Task) -> cal_core::Result<Task> {
+        // If this update completes a recurring task, generate the next
+        // instance afterwards. We snapshot the previous status before
+        // the write so we can detect the transition reliably.
+        let prev_status = self.read_task_status(&task.id)?;
+
         let now = Utc::now();
         let mut task = task;
         task.updated_at = now;
@@ -283,6 +441,23 @@ impl TasksFeature for LocalAdapter {
                 task.id
             )));
         }
+
+        // Recurrence: when a recurring task transitions into Completed
+        // (and was not already there) the template generates its next
+        // instance. The "post-completion, not pre" semantics matches
+        // DESIGN.md section 9.6.
+        if task.status == TaskStatus::Completed && prev_status != Some(TaskStatus::Completed) {
+            if let Some(recurrence) = task.recurrence.clone() {
+                if let Some(next) = self.spawn_next_recurring_task(&task, &recurrence)? {
+                    // We don't return the next task — the caller wired
+                    // the existing one. The new row shows up on the
+                    // next list refresh, which views already trigger
+                    // on dialog close.
+                    let _ = next;
+                }
+            }
+        }
+
         Ok(task)
     }
 
@@ -309,6 +484,88 @@ const TASK_SELECT: &str = "SELECT id, list_id, parent_id, title, description, st
        FROM tasks
       WHERE list_id = ?
       ORDER BY COALESCE(scheduled_date, deadline_date, ''), created_at";
+
+/// Compute the next occurrence date for a recurring task.
+///
+/// Honours `interval` (every N days/weeks/months/years) and, for
+/// weekly rules with `day_of_week` set, snaps forward to the next
+/// listed weekday relative to the anchor. `day_of_month` for monthly
+/// rules is respected verbatim, clamped to the target month's length
+/// (e.g. the 31st in February becomes the last day of February).
+pub(crate) fn advance(anchor: NaiveDate, rule: &TaskRecurrence) -> Option<NaiveDate> {
+    let interval = rule.interval.max(1) as i64;
+    match rule.frequency {
+        RecurrenceFrequency::Daily => anchor.checked_add_days(Days::new(interval as u64)),
+        RecurrenceFrequency::Weekly => {
+            if let Some(days) = rule.day_of_week.as_ref().filter(|d| !d.is_empty()) {
+                next_weekday_after(anchor, days, interval as u64)
+            } else {
+                anchor.checked_add_days(Days::new(7 * interval as u64))
+            }
+        }
+        RecurrenceFrequency::Monthly => {
+            let next = anchor.checked_add_months(Months::new(interval as u32))?;
+            if let Some(d) = rule.day_of_month {
+                clamp_to_month(next.year(), next.month(), d.into())
+            } else {
+                Some(next)
+            }
+        }
+        RecurrenceFrequency::Yearly => anchor.checked_add_months(Months::new(12 * interval as u32)),
+    }
+}
+
+/// Within the same week (or the next interval-week block), find the
+/// first weekday listed in `days` after the anchor.
+fn next_weekday_after(
+    anchor: NaiveDate,
+    days: &[Weekday],
+    interval_weeks: u64,
+) -> Option<NaiveDate> {
+    let allowed: Vec<u32> = days.iter().map(|w| weekday_to_iso(*w)).collect();
+    if allowed.is_empty() {
+        return None;
+    }
+    // Step day by day up to 7 days; if none of the next 7 days match,
+    // jump to the start of the interval-week block after.
+    for offset in 1..=7 {
+        let candidate = anchor.checked_add_days(Days::new(offset))?;
+        let iso = candidate.weekday().number_from_monday();
+        if allowed.contains(&iso) {
+            return Some(candidate);
+        }
+    }
+    // Fallback for interval > 1: skip the whole gap.
+    anchor.checked_add_days(Days::new(7 * interval_weeks.max(1)))
+}
+
+fn weekday_to_iso(w: Weekday) -> u32 {
+    match w {
+        Weekday::Monday => 1,
+        Weekday::Tuesday => 2,
+        Weekday::Wednesday => 3,
+        Weekday::Thursday => 4,
+        Weekday::Friday => 5,
+        Weekday::Saturday => 6,
+        Weekday::Sunday => 7,
+    }
+}
+
+fn clamp_to_month(year: i32, month: u32, day: u32) -> Option<NaiveDate> {
+    let last = last_day_of_month(year, month);
+    NaiveDate::from_ymd_opt(year, month, day.min(last))
+}
+
+fn last_day_of_month(year: i32, month: u32) -> u32 {
+    // First day of the next month minus one.
+    let (ny, nm) = if month == 12 {
+        (year + 1, 1)
+    } else {
+        (year, month + 1)
+    };
+    let first_next = NaiveDate::from_ymd_opt(ny, nm, 1).unwrap();
+    first_next.pred_opt().unwrap().day()
+}
 
 fn task_status_str(s: TaskStatus) -> &'static str {
     match s {
@@ -503,6 +760,121 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM tasks", [], |r| r.get(0))
             .unwrap();
         assert_eq!(n, 0);
+    }
+
+    #[tokio::test]
+    async fn completing_recurring_task_spawns_next() {
+        let (a, list) = adapter_with_list();
+        let anchor = NaiveDate::from_ymd_opt(2026, 5, 19).unwrap();
+        let mut nt = mk_task("Water plants");
+        nt.scheduled_date = Some(anchor);
+        nt.recurrence = Some(TaskRecurrence {
+            frequency: RecurrenceFrequency::Daily,
+            interval: 3,
+            day_of_week: None,
+            day_of_month: None,
+            end: None,
+        });
+        let original = a.create_task(&list.id, nt).await.unwrap();
+
+        // Complete the task.
+        let mut completed = original.clone();
+        completed.status = TaskStatus::Completed;
+        completed.completed_at = Some(Utc::now());
+        a.update_task(completed).await.unwrap();
+
+        // Now there should be two tasks: the original (completed) plus
+        // a new open one three days later.
+        let tasks = a.get_tasks(&list.id).await.unwrap();
+        assert_eq!(tasks.len(), 2);
+        let next = tasks
+            .iter()
+            .find(|t| t.status == TaskStatus::Open)
+            .expect("should have a fresh open task");
+        assert_eq!(
+            next.scheduled_date,
+            Some(NaiveDate::from_ymd_opt(2026, 5, 22).unwrap()),
+        );
+    }
+
+    #[tokio::test]
+    async fn weekly_recurrence_picks_next_listed_weekday() {
+        let (a, list) = adapter_with_list();
+        // 2026-05-19 is a Tuesday.
+        let anchor = NaiveDate::from_ymd_opt(2026, 5, 19).unwrap();
+        let mut nt = mk_task("Standup");
+        nt.scheduled_date = Some(anchor);
+        nt.recurrence = Some(TaskRecurrence {
+            frequency: RecurrenceFrequency::Weekly,
+            interval: 1,
+            day_of_week: Some(vec![Weekday::Thursday]),
+            day_of_month: None,
+            end: None,
+        });
+        let original = a.create_task(&list.id, nt).await.unwrap();
+
+        let mut completed = original.clone();
+        completed.status = TaskStatus::Completed;
+        a.update_task(completed).await.unwrap();
+
+        let tasks = a.get_tasks(&list.id).await.unwrap();
+        let next = tasks.iter().find(|t| t.status == TaskStatus::Open).unwrap();
+        // Tuesday → next Thursday = 21 May.
+        assert_eq!(
+            next.scheduled_date,
+            Some(NaiveDate::from_ymd_opt(2026, 5, 21).unwrap()),
+        );
+    }
+
+    #[tokio::test]
+    async fn recurrence_end_on_date_stops_spawning() {
+        let (a, list) = adapter_with_list();
+        let anchor = NaiveDate::from_ymd_opt(2026, 5, 19).unwrap();
+        let mut nt = mk_task("One last time");
+        nt.scheduled_date = Some(anchor);
+        nt.recurrence = Some(TaskRecurrence {
+            frequency: RecurrenceFrequency::Daily,
+            interval: 1,
+            day_of_week: None,
+            day_of_month: None,
+            end: Some(RecurrenceEnd::OnDate {
+                date: NaiveDate::from_ymd_opt(2026, 5, 19).unwrap(),
+            }),
+        });
+        let original = a.create_task(&list.id, nt).await.unwrap();
+
+        let mut completed = original;
+        completed.status = TaskStatus::Completed;
+        a.update_task(completed).await.unwrap();
+
+        // The next would be 20 May, past the end date — nothing spawned.
+        let tasks = a.get_tasks(&list.id).await.unwrap();
+        assert_eq!(tasks.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn re_completing_completed_task_does_not_double_spawn() {
+        let (a, list) = adapter_with_list();
+        let anchor = NaiveDate::from_ymd_opt(2026, 5, 19).unwrap();
+        let mut nt = mk_task("Daily");
+        nt.scheduled_date = Some(anchor);
+        nt.recurrence = Some(TaskRecurrence {
+            frequency: RecurrenceFrequency::Daily,
+            interval: 1,
+            day_of_week: None,
+            day_of_month: None,
+            end: None,
+        });
+        let original = a.create_task(&list.id, nt).await.unwrap();
+
+        let mut completed = original.clone();
+        completed.status = TaskStatus::Completed;
+        let after_first = a.update_task(completed).await.unwrap();
+        // Save again — status hasn't changed, no second spawn.
+        a.update_task(after_first).await.unwrap();
+
+        let tasks = a.get_tasks(&list.id).await.unwrap();
+        assert_eq!(tasks.len(), 2);
     }
 
     #[tokio::test]

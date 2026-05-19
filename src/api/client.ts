@@ -124,5 +124,13 @@ export const deleteColorLabel = (id: string) =>
 
 // ── Search ─────────────────────────────────────────────────────────────────
 
-export const search = (query: string) =>
-  invoke<SearchResults>('search', { query });
+export type SearchKind = 'both' | 'events' | 'tasks';
+
+export interface SearchFilters {
+  kind?: SearchKind;
+  calendar_ids?: string[];
+  list_ids?: string[];
+}
+
+export const search = (query: string, filters?: SearchFilters) =>
+  invoke<SearchResults>('search', { query, filters: filters ?? null });

@@ -16,6 +16,13 @@ import { invoke } from '@tauri-apps/api/core';
 import type { DeadlineType, Task, TaskPriority, TaskStatus } from '../api/types';
 import { useCalendarStore } from '../state/CalendarStore';
 import { Modal } from './Modal';
+import {
+  fromBackend as recurrenceFromBackend,
+  toBackend as recurrenceToBackend,
+  TaskRecurrenceSelector,
+  TASK_RECURRENCE_DEFAULT,
+  type TaskRecurrenceValue,
+} from './TaskRecurrenceSelector';
 
 /**
  * Task create / edit dialog (DESIGN.md section 9.9).
@@ -45,6 +52,7 @@ interface FormState {
   time: string;
   description: string;
   colorLabel: string | null;
+  recurrence: TaskRecurrenceValue;
 }
 
 export function TaskDialog({
@@ -112,6 +120,7 @@ export function TaskDialog({
             deadline_type,
             deadline_date,
             deadline_time,
+            recurrence: recurrenceToBackend(form.recurrence),
             description: form.description.trim() || null,
             color_label: form.colorLabel,
             completed_at:
@@ -132,7 +141,7 @@ export function TaskDialog({
             deadline_type,
             deadline_date,
             deadline_time,
-            recurrence: null,
+            recurrence: recurrenceToBackend(form.recurrence),
             parent_id: null,
             color_label: form.colorLabel,
             reminders: [],
@@ -316,6 +325,11 @@ export function TaskDialog({
           />
         </label>
 
+        <TaskRecurrenceSelector
+          value={form.recurrence}
+          onChange={(recurrence) => update('recurrence', recurrence)}
+        />
+
         <label className="form__field">
           <span className="form__label">
             {t('dialogs.task.fields.colorLabel')}
@@ -399,6 +413,7 @@ function buildInitialState(
       time: task.deadline_time?.slice(0, 5) ?? '09:00',
       description: task.description ?? '',
       colorLabel: task.color_label ?? null,
+      recurrence: recurrenceFromBackend(task.recurrence),
     };
   }
   return {
@@ -411,6 +426,7 @@ function buildInitialState(
     time: '09:00',
     description: '',
     colorLabel: null,
+    recurrence: { ...TASK_RECURRENCE_DEFAULT },
   };
 }
 

@@ -166,6 +166,37 @@
         "scheduled": "Scheduled day",
         "on": "Concrete deadline",
         "by": "Due by"
+      },
+      "recurrence": {
+        "label": "Repeat",
+        "none": "Does not repeat",
+        "daily": "Daily",
+        "weekly": "Weekly",
+        "monthly": "Monthly",
+        "yearly": "Yearly",
+        "intervalLabel": "Every how many {{unit}}",
+        "unit": {
+          "DAILY": "days",
+          "WEEKLY": "weeks",
+          "MONTHLY": "months",
+          "YEARLY": "years"
+        },
+        "weekdays": "Weekdays",
+        "short": {
+          "mon": "Mon",
+          "tue": "Tue",
+          "wed": "Wed",
+          "thu": "Thu",
+          "fri": "Fri",
+          "sat": "Sat",
+          "sun": "Sun"
+        },
+        "endLabel": "End",
+        "end": {
+          "never": "Never",
+          "until": "On date"
+        },
+        "untilLabel": "End date"
       }
     },
     "quickAdd": {
@@ -202,7 +233,17 @@
       "eventSecondary": "{{date}}, calendar: {{calendar}}",
       "taskSecondary": "Task list: {{list}}",
       "eventAria": "Event: {{title}}, {{secondary}}",
-      "taskAria": "Task: {{title}}, {{secondary}}"
+      "taskAria": "Task: {{title}}, {{secondary}}",
+      "filtersTitle": "Filters",
+      "kindLabel": "Result type",
+      "kind": {
+        "both": "Both",
+        "events": "Events only",
+        "tasks": "Tasks only"
+      },
+      "calendarsLabel": "Calendars",
+      "listsLabel": "Task lists",
+      "containersHint": "Empty = no restriction."
     }
   },
   "sidebar": {

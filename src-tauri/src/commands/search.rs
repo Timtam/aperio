@@ -1,6 +1,6 @@
 //! Full-text search command.
 
-use cal_adapter_local::{LocalAdapter, SearchResults};
+use cal_adapter_local::{LocalAdapter, SearchFilters, SearchResults};
 use tauri::State;
 
 use super::CommandResult;
@@ -9,6 +9,8 @@ use super::CommandResult;
 pub async fn search(
     adapter: State<'_, LocalAdapter>,
     query: String,
+    filters: Option<SearchFilters>,
 ) -> CommandResult<SearchResults> {
-    Ok(adapter.search(&query)?)
+    let filters = filters.unwrap_or_default();
+    Ok(adapter.search(&query, &filters)?)
 }

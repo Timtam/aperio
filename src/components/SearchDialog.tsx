@@ -9,7 +9,11 @@ import {
 import { useTranslation } from 'react-i18next';
 
 import { useAutoFocus } from '../hooks/useAutoFocus';
-import { search as apiSearch, isCommandError } from '../api/client';
+import {
+  search as apiSearch,
+  isCommandError,
+  type SearchKind,
+} from '../api/client';
 import type { CalendarEvent, Task } from '../api/types';
 import { useCalendarStore } from '../state/CalendarStore';
 import { useDateFormat } from '../intl/dateFormat';
@@ -50,6 +54,13 @@ export function SearchDialog({ isOpen, onClose }: SearchDialogProps) {
   const { openEventDialog, openTaskDialog } = useDialogState();
 
   const [query, setQuery] = useState('');
+  const [kind, setKind] = useState<SearchKind>('both');
+  const [selectedCalendarIds, setSelectedCalendarIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [selectedListIds, setSelectedListIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(false);
@@ -100,8 +111,19 @@ export function SearchDialog({ isOpen, onClose }: SearchDialogProps) {
     return out;
   }, [events, tasks, t, fmt, calendarsById, listsById]);
 
-  // Debounced search.
+  // Debounced search. Re-fires whenever the query or any filter
+  // changes — the user sees the result list narrow immediately when
+  // they tick a calendar or flip the kind toggle.
   const lastQueryRef = useRef('');
+  const filterKey = useMemo(
+    () =>
+      kind +
+      '|' +
+      [...selectedCalendarIds].sort().join(',') +
+      '|' +
+      [...selectedListIds].sort().join(','),
+    [kind, selectedCalendarIds, selectedListIds],
+  );
   useEffect(() => {
     const trimmed = query.trim();
     lastQueryRef.current = trimmed;
@@ -113,7 +135,13 @@ export function SearchDialog({ isOpen, onClose }: SearchDialogProps) {
     }
     setLoading(true);
     const handle = window.setTimeout(() => {
-      apiSearch(trimmed)
+      apiSearch(trimmed, {
+        kind,
+        calendar_ids:
+          selectedCalendarIds.size > 0 ? [...selectedCalendarIds] : undefined,
+        list_ids:
+          selectedListIds.size > 0 ? [...selectedListIds] : undefined,
+      })
         .then((res) => {
           // Skip stale results — another keystroke may have moved on.
           if (lastQueryRef.current !== trimmed) return;
@@ -134,7 +162,10 @@ export function SearchDialog({ isOpen, onClose }: SearchDialogProps) {
         });
     }, 200);
     return () => window.clearTimeout(handle);
-  }, [query]);
+    // filterKey captures everything below — but we list the originals
+    // so React's dep-check stays happy with exhaustive-deps.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, filterKey]);
 
   // Clamp focus when the result list shrinks.
   useEffect(() => {
@@ -216,6 +247,91 @@ export function SearchDialog({ isOpen, onClose }: SearchDialogProps) {
             placeholder={t('dialogs.search.placeholder')}
           />
         </label>
+
+        <details className="search-filters">
+          <summary>{t('dialogs.search.filtersTitle')}</summary>
+          <fieldset className="form__field">
+            <legend className="form__label">
+              {t('dialogs.search.kindLabel')}
+            </legend>
+            {(['both', 'events', 'tasks'] as const).map((k) => (
+              <label
+                key={k}
+                className="form__field form__field--inline"
+              >
+                <input
+                  type="radio"
+                  name="search-kind"
+                  checked={kind === k}
+                  onChange={() => setKind(k)}
+                />
+                <span>{t(`dialogs.search.kind.${k}`)}</span>
+              </label>
+            ))}
+          </fieldset>
+
+          {kind !== 'tasks' && calendars.length > 0 && (
+            <fieldset className="form__field">
+              <legend className="form__label">
+                {t('dialogs.search.calendarsLabel')}
+              </legend>
+              <p className="form__hint">
+                {t('dialogs.search.containersHint')}
+              </p>
+              {calendars.map((c) => (
+                <label
+                  key={c.id}
+                  className="form__field form__field--inline"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedCalendarIds.has(c.id)}
+                    onChange={(e) => {
+                      setSelectedCalendarIds((prev) => {
+                        const next = new Set(prev);
+                        if (e.target.checked) next.add(c.id);
+                        else next.delete(c.id);
+                        return next;
+                      });
+                    }}
+                  />
+                  <span>{c.name}</span>
+                </label>
+              ))}
+            </fieldset>
+          )}
+
+          {kind !== 'events' && taskLists.length > 0 && (
+            <fieldset className="form__field">
+              <legend className="form__label">
+                {t('dialogs.search.listsLabel')}
+              </legend>
+              <p className="form__hint">
+                {t('dialogs.search.containersHint')}
+              </p>
+              {taskLists.map((l) => (
+                <label
+                  key={l.id}
+                  className="form__field form__field--inline"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedListIds.has(l.id)}
+                    onChange={(e) => {
+                      setSelectedListIds((prev) => {
+                        const next = new Set(prev);
+                        if (e.target.checked) next.add(l.id);
+                        else next.delete(l.id);
+                        return next;
+                      });
+                    }}
+                  />
+                  <span>{l.name}</span>
+                </label>
+              ))}
+            </fieldset>
+          )}
+        </details>
 
         <p
           className="sr-only"

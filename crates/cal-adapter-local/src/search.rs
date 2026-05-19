@@ -9,13 +9,37 @@
 //! editor, it is a free-text field.
 
 use cal_core::{Event, Task};
-use rusqlite::params;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::calendars::row_to_event;
 use crate::map_sql_err;
 use crate::tasks::row_to_task;
 use crate::LocalAdapter;
+
+/// Optional filter applied on top of the full-text query.
+///
+/// `kind` narrows the result to events, tasks or both (`Both` is the
+/// default). The id lists, when non-empty, restrict hits to those
+/// containers; an empty vector means "no restriction" (i.e. include
+/// every calendar / list).
+#[derive(Debug, Default, Deserialize)]
+pub struct SearchFilters {
+    #[serde(default)]
+    pub kind: SearchKind,
+    #[serde(default)]
+    pub calendar_ids: Vec<String>,
+    #[serde(default)]
+    pub list_ids: Vec<String>,
+}
+
+#[derive(Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum SearchKind {
+    #[default]
+    Both,
+    Events,
+    Tasks,
+}
 
 /// Combined hit list returned by [`LocalAdapter::search`].
 #[derive(Debug, Serialize)]
@@ -28,7 +52,7 @@ impl LocalAdapter {
     /// Run a single user query against both the events_fts and
     /// tasks_fts indexes. Returns the matching rows in full so the UI
     /// can render them without a second round-trip.
-    pub fn search(&self, query: &str) -> cal_core::Result<SearchResults> {
+    pub fn search(&self, query: &str, filters: &SearchFilters) -> cal_core::Result<SearchResults> {
         let prepared = prepare_query(query);
         if prepared.is_empty() {
             return Ok(SearchResults {
@@ -43,29 +67,46 @@ impl LocalAdapter {
         // anything beyond that and the user should refine the query.
         const LIMIT: usize = 200;
 
-        let mut events_stmt = conn
-            .prepare(
+        let events = if filters.kind == SearchKind::Tasks {
+            Vec::new()
+        } else {
+            let (extra_sql, extra_binds) = in_clause("e.calendar_id", &filters.calendar_ids);
+            let sql = format!(
                 "SELECT e.id, e.calendar_id, e.title, e.description, e.location,
                         e.start_utc, e.end_utc, e.all_day, e.rrule, e.rrule_exceptions,
                         e.color_label_id, e.reminders, e.sound, e.attendees,
                         e.created_at, e.updated_at, e.etag
                    FROM events_fts f
                    JOIN events e ON e.id = f.id
-                  WHERE events_fts MATCH ?
+                  WHERE events_fts MATCH ?{extra_sql}
                   ORDER BY rank
-                  LIMIT ?",
-            )
-            .map_err(map_sql_err)?;
-        let event_rows = events_stmt
-            .query_map(params![prepared, LIMIT as i64], |row| Ok(row_to_event(row)))
-            .map_err(map_sql_err)?;
-        let mut events = Vec::new();
-        for r in event_rows {
-            events.push(r.map_err(map_sql_err)??);
-        }
+                  LIMIT ?"
+            );
+            let mut stmt = conn.prepare(&sql).map_err(map_sql_err)?;
+            // Bind: MATCH query, then each calendar_id, then LIMIT.
+            let mut binds: Vec<&dyn rusqlite::ToSql> = vec![&prepared];
+            for id in &extra_binds {
+                binds.push(id as &dyn rusqlite::ToSql);
+            }
+            let limit_i = LIMIT as i64;
+            binds.push(&limit_i);
+            let rows = stmt
+                .query_map(rusqlite::params_from_iter(binds), |row| {
+                    Ok(row_to_event(row))
+                })
+                .map_err(map_sql_err)?;
+            let mut out = Vec::new();
+            for r in rows {
+                out.push(r.map_err(map_sql_err)??);
+            }
+            out
+        };
 
-        let mut tasks_stmt = conn
-            .prepare(
+        let tasks = if filters.kind == SearchKind::Events {
+            Vec::new()
+        } else {
+            let (extra_sql, extra_binds) = in_clause("t.list_id", &filters.list_ids);
+            let sql = format!(
                 "SELECT t.id, t.list_id, t.parent_id, t.title, t.description,
                         t.status, t.priority, t.scheduled_date, t.deadline_type,
                         t.deadline_date, t.deadline_time, t.recurrence, t.color_label_id,
@@ -73,21 +114,45 @@ impl LocalAdapter {
                         t.etag
                    FROM tasks_fts f
                    JOIN tasks t ON t.id = f.id
-                  WHERE tasks_fts MATCH ?
+                  WHERE tasks_fts MATCH ?{extra_sql}
                   ORDER BY rank
-                  LIMIT ?",
-            )
-            .map_err(map_sql_err)?;
-        let task_rows = tasks_stmt
-            .query_map(params![prepared, LIMIT as i64], |row| Ok(row_to_task(row)))
-            .map_err(map_sql_err)?;
-        let mut tasks = Vec::new();
-        for r in task_rows {
-            tasks.push(r.map_err(map_sql_err)??);
-        }
+                  LIMIT ?"
+            );
+            let mut stmt = conn.prepare(&sql).map_err(map_sql_err)?;
+            let mut binds: Vec<&dyn rusqlite::ToSql> = vec![&prepared];
+            for id in &extra_binds {
+                binds.push(id as &dyn rusqlite::ToSql);
+            }
+            let limit_i = LIMIT as i64;
+            binds.push(&limit_i);
+            let rows = stmt
+                .query_map(rusqlite::params_from_iter(binds), |row| {
+                    Ok(row_to_task(row))
+                })
+                .map_err(map_sql_err)?;
+            let mut out = Vec::new();
+            for r in rows {
+                out.push(r.map_err(map_sql_err)??);
+            }
+            out
+        };
 
         Ok(SearchResults { events, tasks })
     }
+}
+
+/// Build a ` AND column IN (?, ?, …)` clause for an arbitrary number
+/// of ids, returning the SQL fragment and the list of placeholders'
+/// values. Empty list ⇒ empty clause, no restriction applied.
+fn in_clause(column: &str, ids: &[String]) -> (String, Vec<String>) {
+    if ids.is_empty() {
+        return (String::new(), Vec::new());
+    }
+    let placeholders = std::iter::repeat("?")
+        .take(ids.len())
+        .collect::<Vec<_>>()
+        .join(",");
+    (format!(" AND {column} IN ({placeholders})"), ids.to_vec())
 }
 
 /// Translate raw user input into an FTS5 query.
@@ -179,11 +244,100 @@ mod tests {
             .block_on(f)
     }
 
+    /// Test shorthand: search with no filters.
+    impl LocalAdapter {
+        fn search_default(&self, q: &str) -> cal_core::Result<SearchResults> {
+            self.search(q, &SearchFilters::default())
+        }
+    }
+
+    #[test]
+    fn kind_filter_excludes_other_side() {
+        let (a, cal, list) = adapter_with_data();
+        block(a.create_event(&cal, make_event("Match"))).unwrap();
+        block(a.create_task(&list, make_task("Match"))).unwrap();
+
+        let only_events = a
+            .search(
+                "match",
+                &SearchFilters {
+                    kind: SearchKind::Events,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(only_events.events.len(), 1);
+        assert!(only_events.tasks.is_empty());
+
+        let only_tasks = a
+            .search(
+                "match",
+                &SearchFilters {
+                    kind: SearchKind::Tasks,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(only_tasks.events.is_empty());
+        assert_eq!(only_tasks.tasks.len(), 1);
+    }
+
+    #[test]
+    fn calendar_id_filter_restricts_events() {
+        let (a, cal_a, _list) = adapter_with_data();
+        let cal_b = a.create_calendar("Other", None, None).unwrap();
+        block(a.create_event(&cal_a, make_event("Sync"))).unwrap();
+        block(a.create_event(&cal_b.id, make_event("Sync"))).unwrap();
+
+        let only_a = a
+            .search(
+                "sync",
+                &SearchFilters {
+                    calendar_ids: vec![cal_a.clone()],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(only_a.events.len(), 1);
+        assert_eq!(only_a.events[0].calendar_id, cal_a);
+
+        let both = a
+            .search(
+                "sync",
+                &SearchFilters {
+                    calendar_ids: vec![cal_a, cal_b.id],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(both.events.len(), 2);
+    }
+
+    #[test]
+    fn list_id_filter_restricts_tasks() {
+        let (a, _cal, list_a) = adapter_with_data();
+        let list_b = a.create_task_list("Other", None, None, None).unwrap();
+        block(a.create_task(&list_a, make_task("Buy"))).unwrap();
+        block(a.create_task(&list_b.id, make_task("Buy"))).unwrap();
+
+        let only_a = a
+            .search(
+                "buy",
+                &SearchFilters {
+                    list_ids: vec![list_a.clone()],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(only_a.tasks.len(), 1);
+        assert_eq!(only_a.tasks[0].list_id, list_a);
+    }
+
     #[test]
     fn finds_event_by_title_prefix() {
         let (a, cal, _list) = adapter_with_data();
         block(a.create_event(&cal, make_event("Team meeting"))).unwrap();
-        let hits = a.search("team").unwrap();
+        let hits = a.search_default("team").unwrap();
         assert_eq!(hits.events.len(), 1);
         assert_eq!(hits.events[0].title, "Team meeting");
     }
@@ -192,7 +346,7 @@ mod tests {
     fn finds_task_by_title_prefix() {
         let (a, _cal, list) = adapter_with_data();
         block(a.create_task(&list, make_task("Write report"))).unwrap();
-        let hits = a.search("rep").unwrap();
+        let hits = a.search_default("rep").unwrap();
         assert_eq!(hits.tasks.len(), 1);
         assert_eq!(hits.tasks[0].title, "Write report");
     }
@@ -203,7 +357,7 @@ mod tests {
         block(a.create_event(&cal, make_event("Team standup meeting"))).unwrap();
         block(a.create_event(&cal, make_event("Yoga class"))).unwrap();
         // Both words must match.
-        let hits = a.search("team meeting").unwrap();
+        let hits = a.search_default("team meeting").unwrap();
         assert_eq!(hits.events.len(), 1);
         assert_eq!(hits.events[0].title, "Team standup meeting");
     }
@@ -215,7 +369,7 @@ mod tests {
             .create_calendar("Birthdays", Some(ContainerColor::custom("#fb8c00")), None)
             .unwrap();
         block(a.create_event(&other.id, make_event("Cake"))).unwrap();
-        let hits = a.search("birthday").unwrap();
+        let hits = a.search_default("birthday").unwrap();
         assert_eq!(hits.events.len(), 1);
     }
 
@@ -223,7 +377,7 @@ mod tests {
     fn renaming_calendar_updates_index() {
         let (a, cal, _list) = adapter_with_data();
         block(a.create_event(&cal, make_event("Sync"))).unwrap();
-        let hits_before = a.search("work").unwrap();
+        let hits_before = a.search_default("work").unwrap();
         assert_eq!(hits_before.events.len(), 1);
 
         // Rename the calendar — the fts trigger should propagate the
@@ -233,9 +387,9 @@ mod tests {
         work.name = "Office".into();
         a.update_calendar(work).unwrap();
 
-        let hits_after_old = a.search("work").unwrap();
+        let hits_after_old = a.search_default("work").unwrap();
         assert_eq!(hits_after_old.events.len(), 0);
-        let hits_after_new = a.search("office").unwrap();
+        let hits_after_new = a.search_default("office").unwrap();
         assert_eq!(hits_after_new.events.len(), 1);
     }
 
@@ -243,7 +397,7 @@ mod tests {
     fn empty_query_returns_empty_results() {
         let (a, cal, _list) = adapter_with_data();
         block(a.create_event(&cal, make_event("X"))).unwrap();
-        let hits = a.search("   ").unwrap();
+        let hits = a.search_default("   ").unwrap();
         assert!(hits.events.is_empty());
         assert!(hits.tasks.is_empty());
     }
@@ -255,7 +409,7 @@ mod tests {
         // Without stripping, "AND" would be parsed as an FTS operator
         // and the query would fail. With stripping, it is searched
         // verbatim and matches.
-        let hits = a.search("\"AND\"").unwrap();
+        let hits = a.search_default("\"AND\"").unwrap();
         assert_eq!(hits.events.len(), 1);
     }
 
@@ -264,7 +418,7 @@ mod tests {
         let (a, cal, _list) = adapter_with_data();
         let ev = block(a.create_event(&cal, make_event("Standup"))).unwrap();
         block(a.delete_event(&ev.id)).unwrap();
-        let hits = a.search("standup").unwrap();
+        let hits = a.search_default("standup").unwrap();
         assert!(hits.events.is_empty());
     }
 }

@@ -166,6 +166,37 @@
         "scheduled": "Geplanter Tag",
         "on": "Konkrete Deadline",
         "by": "Muss bis zum"
+      },
+      "recurrence": {
+        "label": "Wiederholung",
+        "none": "Keine",
+        "daily": "Täglich",
+        "weekly": "Wöchentlich",
+        "monthly": "Monatlich",
+        "yearly": "Jährlich",
+        "intervalLabel": "Alle wie viele {{unit}}",
+        "unit": {
+          "DAILY": "Tage",
+          "WEEKLY": "Wochen",
+          "MONTHLY": "Monate",
+          "YEARLY": "Jahre"
+        },
+        "weekdays": "Wochentage",
+        "short": {
+          "mon": "Mo",
+          "tue": "Di",
+          "wed": "Mi",
+          "thu": "Do",
+          "fri": "Fr",
+          "sat": "Sa",
+          "sun": "So"
+        },
+        "endLabel": "Ende",
+        "end": {
+          "never": "Nie",
+          "until": "Bis Datum"
+        },
+        "untilLabel": "Ende-Datum"
       }
     },
     "quickAdd": {
@@ -202,7 +233,17 @@
       "eventSecondary": "{{date}}, Kalender: {{calendar}}",
       "taskSecondary": "Aufgabenliste: {{list}}",
       "eventAria": "Termin: {{title}}, {{secondary}}",
-      "taskAria": "Aufgabe: {{title}}, {{secondary}}"
+      "taskAria": "Aufgabe: {{title}}, {{secondary}}",
+      "filtersTitle": "Filter",
+      "kindLabel": "Treffer-Typ",
+      "kind": {
+        "both": "Beide",
+        "events": "Nur Termine",
+        "tasks": "Nur Aufgaben"
+      },
+      "calendarsLabel": "Kalender",
+      "listsLabel": "Aufgabenlisten",
+      "containersHint": "Leer = keine Einschränkung."
     }
   },
   "sidebar": {
