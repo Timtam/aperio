@@ -1,6 +1,13 @@
 {
   "app": {
     "title": "Aperio",
+    "titleBar": {
+      "windowControls": "Window controls",
+      "minimize": "Minimize",
+      "maximize": "Maximize",
+      "restore": "Restore",
+      "close": "Close"
+    },
     "phase1": {
       "intro": "Phase 1 — local CRUD loop. Create calendars and events to exercise the wiring.",
       "calendars": "Calendars",

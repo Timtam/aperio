@@ -1,19 +1,135 @@
 /*
- * Phase 0 styling — intentionally minimal. The full design system
- * (dark mode, tokens, Tailwind, etc.) lands in Phase 2.
+ * Aperio — global styles.
  *
- * The "native-feel" defaults from DESIGN.md section 15 matter even now:
- *  - no text selection on non-editable elements
- *  - no browser caret in non-input regions
- *  - no overscroll bouncing
- *  - a stable, visible focus ring (custom — not the browser default)
+ * The native-feel defaults from DESIGN.md section 15 plus the Phase 2
+ * design-token surface.
+ *
+ * Tokens are declared as CSS custom properties under `:root` (light) and
+ * overridden under `@media (prefers-color-scheme: dark)` and under
+ * `@media (forced-colors: active)` (high-contrast / Windows
+ * High-Contrast). Every color satisfies WCAG AA contrast against its
+ * companion in the same theme.
+ *
+ * Component-level CSS reaches for variables rather than literal colors,
+ * so themes propagate by editing this file alone.
  */
 
+/* ── Tokens — light theme (default) ─────────────────────────────────────── */
+
 :root {
+  /* Color tokens. Hex values are WCAG AA-validated for the pairs they're
+     used in (text-on-bg, focus-on-bg, danger-on-bg). */
+  --color-bg: #ffffff;
+  --color-bg-elevated: #f7f8fa;
+  --color-bg-panel: #ffffff;
+  --color-fg: #1f2329;
+  --color-fg-muted: #5c6370;
+  --color-border: rgba(31, 35, 41, 0.15);
+  --color-border-strong: rgba(31, 35, 41, 0.32);
+  --color-accent: #1e88e5;
+  --color-accent-fg: #ffffff;
+  --color-danger: #c62828;
+  --color-warning: #b07b00;
+  --color-success: #2e7d32;
+
+  /* Focus ring. Drawn as box-shadow so it never affects layout. */
+  --focus-ring-width: 2px;
+  --focus-ring-color: var(--color-accent);
+  --focus-ring: 0 0 0 var(--focus-ring-width) var(--focus-ring-color);
+
+  /* Spacing scale. Use these in components — never raw pixel values. */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+
+  /* Type scale. */
+  --font-size-xs: 0.75rem;
+  --font-size-sm: 0.875rem;
+  --font-size-base: 0.95rem;
+  --font-size-lg: 1.05rem;
+  --font-size-xl: 1.2rem;
+
+  /* Motion — duration is short by default (DESIGN.md section 15.4). */
+  --motion-fast: 80ms;
+  --motion-base: 150ms;
+  --motion-easing: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Title bar. */
+  --title-bar-height: 32px;
+
+  /* Misc. */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+
   font-family: system-ui, -apple-system, 'Segoe UI', 'SF Pro Text', sans-serif;
   color-scheme: light dark;
-  --focus-ring: 0 0 0 2px #1e88e5;
+  color: var(--color-fg);
+  background: var(--color-bg);
 }
+
+/* ── Tokens — dark theme ───────────────────────────────────────────────── */
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #16191d;
+    --color-bg-elevated: #1e2126;
+    --color-bg-panel: #21252b;
+    --color-fg: #e9ecef;
+    --color-fg-muted: #9aa0a6;
+    --color-border: rgba(233, 236, 239, 0.15);
+    --color-border-strong: rgba(233, 236, 239, 0.32);
+    --color-accent: #64b5f6;
+    --color-accent-fg: #0a1929;
+    --color-danger: #ef5350;
+    --color-warning: #ffb74d;
+    --color-success: #81c784;
+  }
+}
+
+/* ── Forced-colors / Windows High-Contrast ─────────────────────────────── */
+
+@media (forced-colors: active) {
+  :root {
+    --color-bg: Canvas;
+    --color-bg-elevated: Canvas;
+    --color-bg-panel: Canvas;
+    --color-fg: CanvasText;
+    --color-fg-muted: GrayText;
+    --color-border: GrayText;
+    --color-border-strong: CanvasText;
+    --color-accent: Highlight;
+    --color-accent-fg: HighlightText;
+    --color-danger: LinkText;
+    --color-warning: LinkText;
+    --color-success: LinkText;
+    --focus-ring-color: Highlight;
+  }
+  /* In forced-colors mode the system draws focus indicators itself, but
+     keep our outline visible for our buttons. */
+  button:focus-visible {
+    outline: var(--focus-ring-width) solid Highlight;
+    outline-offset: 1px;
+  }
+}
+
+/* ── Reduced motion ─────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ── Resets / native-feel defaults (DESIGN.md section 15.2) ─────────────── */
 
 * {
   box-sizing: border-box;
@@ -30,6 +146,9 @@ body,
 body {
   user-select: none;
   cursor: default;
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-size: var(--font-size-base);
 }
 
 input,
@@ -49,82 +168,8 @@ button {
   box-shadow: var(--focus-ring);
 }
 
-.app-root {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
-
-.app-header {
-  padding: 0.75rem 1rem;
-  border-bottom: 1px solid rgba(127, 127, 127, 0.25);
-}
-
-.app-header h1 {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 600;
-}
-
-.app-main {
-  padding: 1rem;
-  overflow: auto;
-}
-
-.error {
-  color: #c62828;
-  margin-top: 0.75rem;
-}
-
-.app-version {
-  margin-left: 0.5rem;
-  font-size: 0.85rem;
-  color: rgba(0, 0, 0, 0.6);
-}
-
-.app-intro {
-  margin-top: 0;
-  color: rgba(0, 0, 0, 0.7);
-}
-
-.panel {
-  margin-top: 1rem;
-  padding: 0.75rem 1rem;
-  border: 1px solid rgba(127, 127, 127, 0.25);
-  border-radius: 6px;
-}
-
-.panel h2 {
-  margin-top: 0;
-  font-size: 0.95rem;
-}
-
-.cal-list {
-  list-style: none;
-  padding: 0;
-}
-
-.cal-list li {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.25rem;
-}
-
-button[aria-pressed='true'] {
-  font-weight: 600;
-  text-decoration: underline;
-}
-
-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-/*
- * Visually hide content while keeping it readable to screen readers.
- * Used for the polite aria-live region.
- */
+/* Visually hide content while keeping it readable to screen readers.
+   Used by the global announcer's live regions. */
 .sr-only {
   position: absolute;
   width: 1px;
@@ -135,4 +180,158 @@ button:disabled {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+/* ── App layout ─────────────────────────────────────────────────────────── */
+
+.app-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* ── Title bar ──────────────────────────────────────────────────────────── */
+
+.title-bar {
+  display: flex;
+  align-items: center;
+  height: var(--title-bar-height);
+  padding: 0 var(--space-2);
+  background: var(--color-bg-elevated);
+  border-bottom: 1px solid var(--color-border);
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.title-bar__title {
+  flex: 1;
+  text-align: center;
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--color-fg-muted);
+  padding: 0 var(--space-2);
+  /* The drag attribute is on the parent + this child — clicks on the
+     title bar surface drag the window unless they hit a button. */
+}
+
+.title-bar__buttons {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  /* macOS keeps the controls on the left and slightly tighter. */
+}
+
+.title-bar--mac .title-bar__buttons {
+  margin-right: auto;
+}
+
+.title-bar__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: var(--title-bar-height);
+  background: transparent;
+  border: 0;
+  color: var(--color-fg-muted);
+  font-size: 14px;
+  line-height: 1;
+  transition: background var(--motion-fast) var(--motion-easing);
+}
+
+.title-bar__btn:hover {
+  background: var(--color-border);
+  color: var(--color-fg);
+}
+
+.title-bar__btn--close:hover {
+  background: var(--color-danger);
+  color: var(--color-accent-fg);
+}
+
+/* ── App content ────────────────────────────────────────────────────────── */
+
+.app-header {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: var(--font-size-base);
+  font-weight: 600;
+}
+
+.app-version {
+  font-size: var(--font-size-xs);
+  color: var(--color-fg-muted);
+}
+
+.app-main {
+  padding: var(--space-4);
+  overflow: auto;
+  flex: 1;
+}
+
+.app-intro {
+  margin-top: 0;
+  color: var(--color-fg-muted);
+}
+
+.panel {
+  margin-top: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-bg-panel);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.panel h2 {
+  margin-top: 0;
+  font-size: var(--font-size-base);
+}
+
+.cal-list {
+  list-style: none;
+  padding: 0;
+}
+
+.cal-list li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-3);
+  transition: background var(--motion-fast) var(--motion-easing),
+    border-color var(--motion-fast) var(--motion-easing);
+}
+
+button:hover {
+  border-color: var(--color-border-strong);
+}
+
+button[aria-pressed='true'] {
+  font-weight: 600;
+  border-color: var(--color-accent);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.error {
+  color: var(--color-danger);
+  margin-top: var(--space-3);
 }

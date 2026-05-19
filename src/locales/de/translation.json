@@ -1,6 +1,13 @@
 {
   "app": {
     "title": "Aperio",
+    "titleBar": {
+      "windowControls": "Fenster-Steuerung",
+      "minimize": "Minimieren",
+      "maximize": "Maximieren",
+      "restore": "Wiederherstellen",
+      "close": "Schließen"
+    },
     "phase1": {
       "intro": "Phase 1 – lokaler CRUD-Loop. Lege Kalender und Termine an, um die Verkabelung zu testen.",
       "calendars": "Kalender",

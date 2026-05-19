@@ -2,6 +2,10 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 
+import { AnnouncerProvider, useAnnouncer } from './a11y/Announcer';
+import { TitleBar } from './components/TitleBar';
+import { useSuppressBrowserDefaults } from './hooks/useSuppressBrowserDefaults';
+import { useDateFormat } from './intl/dateFormat';
 import {
   createCalendar,
   createEvent,
@@ -17,40 +21,53 @@ type AppInfo = {
   version: string;
 };
 
+export function App() {
+  useSuppressBrowserDefaults();
+  return (
+    <AnnouncerProvider>
+      <Shell />
+    </AnnouncerProvider>
+  );
+}
+
 /**
- * Phase 1 app shell — a single screen that exercises the full CRUD loop.
+ * Phase 1+2 app shell.
  *
  * Architectural markers that must survive future refactors:
  *  - `role="application"` on the root element (DESIGN.md section 3.2.1)
  *    so screen readers stay in focus mode.
  *  - `aria-label` carrying the product name.
- *  - A global polite `aria-live` region for status announcements (the
- *    same region will host navigation announcements once Phase 2 lands).
+ *  - Global polite + assertive `aria-live` regions, supplied by
+ *    [`AnnouncerProvider`].
+ *  - Custom title bar (no system decorations), platform-aware button
+ *    placement.
  *
- * This screen is intentionally bare — the real calendar views, sidebar,
- * and full keyboard model land in Phase 3. The point of Phase 1 is to
- * prove the wiring from UI → Tauri command → adapter → SQLite → back.
+ * The Phase 1 smoke screen is still the body. Phase 3 replaces it with
+ * the real calendar views.
  */
-export function App() {
+function Shell() {
   const { t } = useTranslation();
+  const announce = useAnnouncer();
+  const fmt = useDateFormat();
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [calendars, setCalendars] = useState<Calendar[]>([]);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [selectedCalendar, setSelectedCalendar] = useState<string | null>(null);
-  const [status, setStatus] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
 
-  const announce = useCallback((msg: string) => setStatus(msg), []);
+  const handleError = useCallback(
+    (err: unknown) => {
+      if (isCommandError(err)) {
+        setError(`${err.code}: ${err.message}`);
+        announce(`${err.code}: ${err.message}`, 'assertive');
+      } else {
+        setError(String(err));
+        announce(String(err), 'assertive');
+      }
+    },
+    [announce],
+  );
 
-  const handleError = useCallback((err: unknown) => {
-    if (isCommandError(err)) {
-      setError(`${err.code}: ${err.message}`);
-    } else {
-      setError(String(err));
-    }
-  }, []);
-
-  // Initial load: app info + calendars.
   useEffect(() => {
     invoke<AppInfo>('app_info').then(setInfo).catch(handleError);
     listCalendars()
@@ -63,7 +80,6 @@ export function App() {
       .catch(handleError);
   }, [handleError]);
 
-  // Load events when the selected calendar changes.
   useEffect(() => {
     if (!selectedCalendar) {
       setEvents([]);
@@ -142,14 +158,16 @@ export function App() {
   );
 
   return (
-    <div id="app-root" role="application" aria-label="Aperio" className="app-root">
+    <div
+      id="app-root"
+      role="application"
+      aria-label="Aperio"
+      className="app-root"
+    >
+      <TitleBar />
       <header className="app-header">
         <h1>{t('app.title')}</h1>
-        {info && (
-          <span className="app-version">
-            v{info.version}
-          </span>
-        )}
+        {info && <span className="app-version">v{info.version}</span>}
       </header>
 
       <main className="app-main">
@@ -199,7 +217,7 @@ export function App() {
               {events.map((ev) => (
                 <li key={ev.id} role="listitem">
                   <strong>{ev.title}</strong>
-                  <span> — {new Date(ev.start).toLocaleString()}</span>
+                  <span> — {fmt.format(new Date(ev.start), 'PPpp')}</span>
                 </li>
               ))}
             </ul>
@@ -219,15 +237,6 @@ export function App() {
           </p>
         )}
       </main>
-
-      {/*
-        Polite live region. Status messages are mirrored here so screen
-        readers announce them without taking focus. Phase 2 will swap this
-        for a global announcer hook shared across the whole app.
-      */}
-      <div aria-live="polite" aria-atomic="true" className="sr-only">
-        {status}
-      </div>
     </div>
   );
 }
