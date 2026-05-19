@@ -1,27 +1,91 @@
 {
   "app": {
     "title": "Aperio",
+    "unknownView": "Unbekannte Ansicht: {{view}}",
     "titleBar": {
       "windowControls": "Fenster-Steuerung",
       "minimize": "Minimieren",
       "maximize": "Maximieren",
       "restore": "Wiederherstellen",
       "close": "Schließen"
+    }
+  },
+  "toolbar": {
+    "label": "Werkzeugleiste",
+    "viewSwitch": "Ansicht wechseln",
+    "navigation": "Navigation",
+    "prev": "Zurück",
+    "next": "Vor",
+    "today": "Heute",
+    "views": {
+      "day": "Tag",
+      "week": "Woche",
+      "month": "Monat",
+      "year": "Jahr",
+      "agenda": "Agenda",
+      "tasks": "Aufgaben"
+    }
+  },
+  "sidebar": {
+    "label": "Seitenleiste",
+    "calendars": "Kalender",
+    "taskLists": "Aufgabenlisten",
+    "newCalendar": "Neuer Kalender",
+    "newTaskList": "Neue Aufgabenliste",
+    "newCalendarName": "Kalender {{n}}",
+    "newTaskListName": "Liste {{n}}",
+    "calendarCreated": "Kalender „{{name}}\" wurde angelegt.",
+    "calendarDeleted": "Kalender „{{name}}\" wurde gelöscht.",
+    "taskListCreated": "Aufgabenliste „{{name}}\" wurde angelegt.",
+    "deleteCalendar": "Kalender „{{name}}\" löschen"
+  },
+  "views": {
+    "loading": "Lädt …",
+    "allDay": "Ganztags",
+    "week": {
+      "title": "Wochenansicht",
+      "kw": "KW {{week}}",
+      "gridLabel": "Wochenraster",
+      "dayAnnounce_one": "{{day}}, 1 Termin",
+      "dayAnnounce_other": "{{day}}, {{count}} Termine",
+      "eventLabel": "Termin: {{title}}, {{time}}, Kalender: {{calendar}}"
     },
-    "phase1": {
-      "intro": "Phase 1 – lokaler CRUD-Loop. Lege Kalender und Termine an, um die Verkabelung zu testen.",
-      "calendars": "Kalender",
-      "events": "Termine",
-      "noCalendars": "Noch kein Kalender vorhanden.",
-      "noEvents": "Keine Termine in den nächsten 30 Tagen.",
-      "selectCalendarFirst": "Wähle zuerst einen Kalender.",
-      "newCalendar": "Neuer lokaler Kalender",
-      "newEvent": "Neuer Termin",
-      "deleteCalendarA11y": "Kalender „{{name}}\" löschen",
-      "smokeEventTitle": "Testtermin",
-      "calendarCreated": "Kalender „{{name}}\" wurde angelegt.",
-      "calendarDeleted": "Kalender wurde gelöscht.",
-      "eventCreated": "Termin „{{title}}\" wurde angelegt."
+    "day": {
+      "timeGrid": "Zeitraster",
+      "eventLabel": "Termin: {{title}}, {{start}} bis {{end}}, Kalender: {{calendar}}"
+    },
+    "month": {
+      "title": "Monatsansicht",
+      "gridLabel": "Monatsraster",
+      "kwShort": "KW",
+      "dayAnnounce_one": "{{day}}, 1 Termin",
+      "dayAnnounce_other": "{{day}}, {{count}} Termine",
+      "moreEvents_one": "+ 1 weiterer",
+      "moreEvents_other": "+ {{count}} weitere"
+    },
+    "year": {
+      "title": "Jahresansicht",
+      "gridLabel": "Jahresraster",
+      "monthLabel": "{{month}} öffnen"
+    },
+    "agenda": {
+      "title": "Agenda",
+      "empty": "Keine Termine im Zeitraum.",
+      "allDay": "Ganztags",
+      "dayLabel_one": "{{day}}, 1 Termin",
+      "dayLabel_other": "{{day}}, {{count}} Termine",
+      "eventLabel": "{{title}}, {{time}}, Kalender: {{calendar}}"
+    },
+    "tasks": {
+      "title": "Aufgaben",
+      "empty": "Keine Aufgaben.",
+      "backlog": "Backlog",
+      "dueScheduled": "Geplant: {{date}}",
+      "dueDeadline": "Fällig: {{date}}",
+      "dueNone": "Ohne Datum",
+      "toggleLabel": "{{title}} (Liste {{list}}) als erledigt umschalten",
+      "completedAnnounce": "Aufgabe „{{title}}\" als erledigt markiert.",
+      "reopenedAnnounce": "Aufgabe „{{title}}\" wieder geöffnet."
     }
   }
 }

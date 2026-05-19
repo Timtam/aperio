@@ -1,27 +1,91 @@
 {
   "app": {
     "title": "Aperio",
+    "unknownView": "Unknown view: {{view}}",
     "titleBar": {
       "windowControls": "Window controls",
       "minimize": "Minimize",
       "maximize": "Maximize",
       "restore": "Restore",
       "close": "Close"
+    }
+  },
+  "toolbar": {
+    "label": "Toolbar",
+    "viewSwitch": "Switch view",
+    "navigation": "Navigation",
+    "prev": "Previous",
+    "next": "Next",
+    "today": "Today",
+    "views": {
+      "day": "Day",
+      "week": "Week",
+      "month": "Month",
+      "year": "Year",
+      "agenda": "Agenda",
+      "tasks": "Tasks"
+    }
+  },
+  "sidebar": {
+    "label": "Sidebar",
+    "calendars": "Calendars",
+    "taskLists": "Task lists",
+    "newCalendar": "New calendar",
+    "newTaskList": "New task list",
+    "newCalendarName": "Calendar {{n}}",
+    "newTaskListName": "List {{n}}",
+    "calendarCreated": "Calendar \"{{name}}\" created.",
+    "calendarDeleted": "Calendar \"{{name}}\" deleted.",
+    "taskListCreated": "Task list \"{{name}}\" created.",
+    "deleteCalendar": "Delete calendar \"{{name}}\""
+  },
+  "views": {
+    "loading": "Loading …",
+    "allDay": "All day",
+    "week": {
+      "title": "Week view",
+      "kw": "Week {{week}}",
+      "gridLabel": "Week grid",
+      "dayAnnounce_one": "{{day}}, 1 event",
+      "dayAnnounce_other": "{{day}}, {{count}} events",
+      "eventLabel": "Event: {{title}}, {{time}}, calendar: {{calendar}}"
     },
-    "phase1": {
-      "intro": "Phase 1 — local CRUD loop. Create calendars and events to exercise the wiring.",
-      "calendars": "Calendars",
-      "events": "Events",
-      "noCalendars": "No calendars yet.",
-      "noEvents": "No events in the next 30 days.",
-      "selectCalendarFirst": "Pick a calendar first.",
-      "newCalendar": "New local calendar",
-      "newEvent": "New event",
-      "deleteCalendarA11y": "Delete calendar \"{{name}}\"",
-      "smokeEventTitle": "Test event",
-      "calendarCreated": "Calendar \"{{name}}\" created.",
-      "calendarDeleted": "Calendar deleted.",
-      "eventCreated": "Event \"{{title}}\" created."
+    "day": {
+      "timeGrid": "Time grid",
+      "eventLabel": "Event: {{title}}, {{start}} to {{end}}, calendar: {{calendar}}"
+    },
+    "month": {
+      "title": "Month view",
+      "gridLabel": "Month grid",
+      "kwShort": "Wk",
+      "dayAnnounce_one": "{{day}}, 1 event",
+      "dayAnnounce_other": "{{day}}, {{count}} events",
+      "moreEvents_one": "+ 1 more",
+      "moreEvents_other": "+ {{count}} more"
+    },
+    "year": {
+      "title": "Year view",
+      "gridLabel": "Year grid",
+      "monthLabel": "Open {{month}}"
+    },
+    "agenda": {
+      "title": "Agenda",
+      "empty": "No events in this range.",
+      "allDay": "All day",
+      "dayLabel_one": "{{day}}, 1 event",
+      "dayLabel_other": "{{day}}, {{count}} events",
+      "eventLabel": "{{title}}, {{time}}, calendar: {{calendar}}"
+    },
+    "tasks": {
+      "title": "Tasks",
+      "empty": "No tasks.",
+      "backlog": "Backlog",
+      "dueScheduled": "Scheduled: {{date}}",
+      "dueDeadline": "Due: {{date}}",
+      "dueNone": "No date",
+      "toggleLabel": "Toggle done state for {{title}} (list {{list}})",
+      "completedAnnounce": "Task \"{{title}}\" marked complete.",
+      "reopenedAnnounce": "Task \"{{title}}\" reopened."
     }
   }
 }
