@@ -41,7 +41,7 @@ export function MonthView() {
 
   const cells = useMemo(() => buildMonthGrid(anchor), [anchor]);
   const range = useMemo(() => visibleRange('month', anchor), [anchor]);
-  const { events, calendarById } = useEvents(range);
+  const { events, calendarById, loading } = useEvents(range);
 
   const eventsByDay = useMemo(() => groupEventsByDay(events), [events]);
 
@@ -124,7 +124,7 @@ export function MonthView() {
 
   const today = useMemo(() => new Date(), []);
   const rowCount = cells.length / 7;
-  const gridRef = useAutoFocus<HTMLDivElement>();
+  const gridRef = useAutoFocus<HTMLDivElement>(!loading);
 
   return (
     <section className="view view--month" aria-label={t('views.month.title')}>

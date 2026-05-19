@@ -31,7 +31,7 @@ export function DayView() {
   const { openEventDialog } = useDialogState();
 
   const range = useMemo(() => visibleRange('day', anchor), [anchor]);
-  const { events, calendarById } = useEvents(range);
+  const { events, calendarById, loading } = useEvents(range);
 
   const dayEvents = useMemo(
     () => events.filter((ev) => isSameDay(new Date(ev.start), anchor)),
@@ -50,7 +50,7 @@ export function DayView() {
 
   const idPrefix = useId();
   const itemId = (i: number) => `${idPrefix}-item-${i}`;
-  const listRef = useAutoFocus<HTMLUListElement>();
+  const listRef = useAutoFocus<HTMLUListElement>(!loading);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {

@@ -17,7 +17,9 @@ export function useTasks() {
   const { selectedTaskListIds, taskLists } = useCalendarStore();
   const { mode } = useDialogState();
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [loading, setLoading] = useState(false);
+  // Initial loading=true so views can hold off the auto-focus until
+  // the first fetch resolves — same reasoning as useEvents.
+  const [loading, setLoading] = useState(true);
 
   // Re-fetch when a dialog closes — see useEvents for the rationale.
   const dialogClosed = mode.kind === 'none';

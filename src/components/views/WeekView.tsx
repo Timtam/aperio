@@ -48,7 +48,7 @@ export function WeekView() {
   const { openEventDialog } = useDialogState();
 
   const range = useMemo(() => visibleRange('week', anchor), [anchor]);
-  const { events, calendarById } = useEvents(range);
+  const { events, calendarById, loading } = useEvents(range);
 
   const weekStart = useMemo(
     () => startOfWeek(anchor, { weekStartsOn: 1 }),
@@ -141,7 +141,9 @@ export function WeekView() {
 
   const today = useMemo(() => new Date(), []);
   const isoWeek = fmt.isoWeek(weekStart);
-  const gridRef = useAutoFocus<HTMLDivElement>();
+  // Wait for the first fetch before focusing so the screen reader
+  // announces the real day-event count, not the initial empty one.
+  const gridRef = useAutoFocus<HTMLDivElement>(!loading);
 
   return (
     <section className="view view--week" aria-label={t('views.week.title')}>

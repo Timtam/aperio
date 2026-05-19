@@ -1,26 +1,39 @@
 import { useEffect, useRef, type RefObject } from 'react';
 
 /**
- * Focus the referenced element on mount.
+ * Focus the referenced element once it is "ready".
  *
- * Used by every view component so switching to a new view (Ctrl+1..6, a
- * toolbar click, or the initial load) lands keyboard focus inside that
- * view's primary surface — the grid, list, or section — instead of
- * leaving it on `<body>` where arrow keys would do nothing.
+ * Default behaviour (no argument): focuses on mount, the first chance
+ * React has. That's the right choice for views that have no async
+ * dependency — YearView, the Modal body, etc.
  *
- * `preventScroll: true` keeps the page from jumping when the element
- * happens to be off-screen; the view's own scroll handling decides
- * where to put it.
+ * With a `ready` boolean: defers the focus until `ready` first turns
+ * `true`. The grids that depend on `useEvents` / `useTasks` pass
+ * `!loading` so the focus only lands after the data has arrived. That
+ * matters because the cell's `aria-label` carries the event count
+ * ("Wednesday, 14 May, 4 events"); focusing before the fetch resolves
+ * would have the screen reader announce the *initial* empty state and
+ * never re-announce when the real data shows up.
  *
- * The browser's `:focus-visible` heuristic still applies: a programmatic
- * focus following a keyboard event (Ctrl+1) shows the focus ring; one
- * following a mouse click does not. That's the right behaviour for
- * both input modalities.
+ * `preventScroll: true` stops the page from jumping when the target
+ * is off-screen; the view's own scroll handling decides placement.
+ *
+ * The focus fires at most once per mount — toggling `ready` back to
+ * `false` and `true` again will *not* re-focus.
  */
-export function useAutoFocus<T extends HTMLElement>(): RefObject<T> {
+export function useAutoFocus<T extends HTMLElement>(
+  ready: boolean = true,
+): RefObject<T> {
   const ref = useRef<T>(null);
+  const done = useRef(false);
+
   useEffect(() => {
-    ref.current?.focus({ preventScroll: true });
-  }, []);
+    if (done.current) return;
+    if (!ready) return;
+    if (!ref.current) return;
+    ref.current.focus({ preventScroll: true });
+    done.current = true;
+  }, [ready]);
+
   return ref;
 }

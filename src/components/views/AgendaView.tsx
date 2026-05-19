@@ -33,7 +33,7 @@ export function AgendaView() {
   const { openEventDialog } = useDialogState();
 
   const range = useMemo(() => visibleRange('agenda', anchor), [anchor]);
-  const { events, calendarById } = useEvents(range);
+  const { events, calendarById, loading } = useEvents(range);
 
   const [focusIndex, setFocusIndex] = useState(0);
 
@@ -45,7 +45,7 @@ export function AgendaView() {
 
   const idPrefix = useId();
   const itemId = (i: number) => `${idPrefix}-item-${i}`;
-  const listRef = useAutoFocus<HTMLUListElement>();
+  const listRef = useAutoFocus<HTMLUListElement>(!loading);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {

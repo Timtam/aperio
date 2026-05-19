@@ -38,7 +38,7 @@ export function TaskView() {
   const { t } = useTranslation();
   const fmt = useDateFormat();
   const announce = useAnnouncer();
-  const { tasks, taskListById } = useTasks();
+  const { tasks, taskListById, loading } = useTasks();
   const { openTaskDialog } = useDialogState();
 
   // Flatten the task buckets into a single options array, interleaved
@@ -59,7 +59,7 @@ export function TaskView() {
 
   const idPrefix = useId();
   const itemId = (i: number) => `${idPrefix}-item-${i}`;
-  const listRef = useAutoFocus<HTMLUListElement>();
+  const listRef = useAutoFocus<HTMLUListElement>(!loading);
 
   const toggleStatus = useCallback(
     async (task: Task) => {
