@@ -80,7 +80,7 @@ describe('Modal', () => {
     );
   });
 
-  it('restores previous focus on close', () => {
+  it('restores previous focus on close', async () => {
     const trigger = document.createElement('button');
     trigger.textContent = 'open';
     document.body.appendChild(trigger);
@@ -99,6 +99,8 @@ describe('Modal', () => {
         <input aria-label="x" />
       </Modal>,
     );
+    // Focus restoration is deferred to a microtask (see Modal.tsx).
+    await Promise.resolve();
     expect(document.activeElement).toBe(trigger);
   });
 

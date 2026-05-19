@@ -19,9 +19,20 @@ import { createPortal } from 'react-dom';
  * open, and the previously focused element is restored on close.
  *
  * Rendered via a portal so the dialog escapes any `overflow: hidden`
- * ancestor; the portal target is `document.body`. Because `App.tsx`
- * keeps `role="application"` at the very top, the portaled dialog
- * still lives *inside* that application boundary.
+ * ancestor. The portal target is `#app-root` (the element that carries
+ * `role="application"`) — **not** `document.body` — so the dialog stays
+ * inside the application boundary. Portaling to body would push the
+ * dialog out of the application tree and NVDA would fall back to browse
+ * mode whenever the focus moved into the dialog.
+ *
+ * Focus-mode trick (lifted from Synology DSM): the outer container
+ * keeps `role="dialog" aria-modal="true"` so the screen reader still
+ * announces "dialog: <title>" on open. The body, where the actual
+ * form lives, gets its own `role="application"`. Without the inner
+ * application role, NVDA's default for dialog content is browse mode
+ * even with `aria-modal="true"` and `inert` on the rest of the page.
+ * With it, the screen reader stays in focus mode end-to-end and form
+ * fields behave like regular form fields.
  */
 export interface ModalProps {
   isOpen: boolean;
@@ -50,14 +61,22 @@ export function Modal({
   const previouslyFocused = useRef<HTMLElement | null>(null);
   const titleId = useId();
 
-  // Open: snapshot the currently focused element, focus the first
-  // focusable inside the dialog body. The header's close button is
-  // intentionally skipped — landing on it would be jarring; users
-  // expect to start typing immediately. Escape still closes from any
-  // focus point. Close: restore the previous focus.
+  // Open: snapshot the currently focused element and move focus into
+  // the dialog body. Close: restore the snapshot (best-effort).
+  //
+  // Note: by the time this effect runs the caller has typically already
+  // toggled `inert` on the rest of the page, which would have blurred
+  // the trigger. If `activeElement` looks like `<body>` we skip the
+  // snapshot — restoring to body would be worse than doing nothing.
+  // Code that needs a reliable restore (e.g. `DialogState`) captures
+  // the trigger synchronously *before* opening the dialog.
   useEffect(() => {
     if (!isOpen) return;
-    previouslyFocused.current = document.activeElement as HTMLElement | null;
+    const candidate = document.activeElement;
+    previouslyFocused.current =
+      candidate instanceof HTMLElement && candidate !== document.body
+        ? candidate
+        : null;
 
     const dialog = dialogRef.current;
     if (dialog) {
@@ -68,7 +87,13 @@ export function Modal({
     }
 
     return () => {
-      previouslyFocused.current?.focus({ preventScroll: true });
+      const target = previouslyFocused.current;
+      if (!target) return;
+      // Defer past the current React commit so the caller's `inert`
+      // cleanup has time to flush.
+      queueMicrotask(() => {
+        target.focus({ preventScroll: true });
+      });
     };
   }, [isOpen]);
 
@@ -116,6 +141,12 @@ export function Modal({
 
   if (!isOpen) return null;
 
+  const portalTarget =
+    (typeof document !== 'undefined' &&
+      document.getElementById('app-root')) ||
+    (typeof document !== 'undefined' ? document.body : null);
+  if (!portalTarget) return null;
+
   return createPortal(
     <div
       className="modal-backdrop"
@@ -142,10 +173,12 @@ export function Modal({
             ×
           </button>
         </header>
-        <div className="modal__body">{children}</div>
+        <div role="application" className="modal__body">
+          {children}
+        </div>
       </div>
     </div>,
-    document.body,
+    portalTarget,
   );
 }
 

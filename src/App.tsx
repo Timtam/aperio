@@ -15,7 +15,7 @@ import { useDialogShortcuts } from './hooks/useDialogShortcuts';
 import { useRegionFocus } from './hooks/useRegionFocus';
 import { useSuppressBrowserDefaults } from './hooks/useSuppressBrowserDefaults';
 import { CalendarStoreProvider } from './state/CalendarStore';
-import { DialogStateProvider } from './state/DialogState';
+import { DialogStateProvider, useDialogState } from './state/DialogState';
 import { ViewStateProvider, useViewShortcuts, useViewState } from './state/ViewState';
 
 /**
@@ -59,9 +59,23 @@ export function App() {
 function Shell() {
   useViewShortcuts();
   useDialogShortcuts();
+  const { mode } = useDialogState();
+
+  // While a dialog is open the rest of the app is taken out of the
+  // accessibility tree. `aria-modal` on the dialog alone is not enough
+  // — NVDA's heuristics will still let focus on a form control inside
+  // the dialog fall back to browse mode if it can see content outside.
+  // Hiding the shell with `aria-hidden` plus `inert` gives the screen
+  // reader a hard signal that only the dialog subtree is live.
+  const inert = mode.kind !== 'none';
+  const inertProps = inert ? ({ inert: '' } as { inert: '' }) : {};
 
   return (
-    <>
+    <div
+      className="app-shell"
+      aria-hidden={inert || undefined}
+      {...inertProps}
+    >
       <TitleBar />
       <div className="app-body">
         <Sidebar />
@@ -70,7 +84,7 @@ function Shell() {
           <ActiveView />
         </div>
       </div>
-    </>
+    </div>
   );
 }
 
