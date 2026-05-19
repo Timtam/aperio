@@ -1,26 +1,27 @@
-import { useMemo } from 'react';
+import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { isSameDay } from 'date-fns';
 
+import { useAutoFocus } from '../../hooks/useAutoFocus';
 import { useDateFormat } from '../../intl/dateFormat';
 import { useEvents } from '../../state/useEvents';
 import { useViewState } from '../../state/ViewState';
 import { visibleRange } from '../../state/viewMath';
 
-const HOUR_START = 7;
-const HOUR_END = 22;
-
 /**
- * Day view — single-day time grid (DESIGN.md section 3.3, "Tagesansicht").
+ * Day view — flat listbox of the focused day's events.
  *
- * Phase 3 ships the structural shell: a vertical list of one-hour rows,
- * with events anchored to the row that contains their start time. The
- * fine-grained 15-minute slot navigation, keyboard slot focus, and
- * resize-on-drag come with the keyboard-shortcut and dialog wave
- * (Phases 4–5).
+ * Phase 3 keeps it deliberately simple: the events of the active day are
+ * rendered as `role="option"` items inside a `role="listbox"`, with
+ * keyboard navigation via `aria-activedescendant`. The 15-minute slot
+ * grid + slot focus from DESIGN.md section 3.3 returns alongside the
+ * event-creation dialog in a later phase.
  *
- * ARIA model: `role="listbox"` for the column, `role="option"` for each
- * event so screen readers can step through them with Tab.
+ * Why listbox rather than a non-interactive list: with the listbox
+ * pattern the screen reader stays in focus mode and reads the active
+ * option as it changes — just like Week/Month view. A bare
+ * `tabIndex=-1` section lacks a clear interactive role and lets NVDA
+ * fall back to browse mode, which would break arrow navigation.
  */
 export function DayView() {
   const { t } = useTranslation();
@@ -35,100 +36,113 @@ export function DayView() {
     [events, anchor],
   );
 
-  const hours = useMemo(() => {
-    const out: number[] = [];
-    for (let h = HOUR_START; h <= HOUR_END; h++) out.push(h);
-    return out;
-  }, []);
+  const [focusIndex, setFocusIndex] = useState(0);
 
-  const eventsByHour = useMemo(() => {
-    const map = new Map<number, typeof dayEvents>();
-    dayEvents.forEach((ev) => {
-      const startHour = new Date(ev.start).getHours();
-      const bucket = clamp(startHour, HOUR_START, HOUR_END);
-      const existing = map.get(bucket) ?? [];
-      existing.push(ev);
-      map.set(bucket, existing);
-    });
-    return map;
-  }, [dayEvents]);
+  // If the day changes (or events arrive) and the previous focus index
+  // is past the end of the new list, snap back to the last valid item.
+  useEffect(() => {
+    if (focusIndex >= dayEvents.length) {
+      setFocusIndex(Math.max(0, dayEvents.length - 1));
+    }
+  }, [dayEvents.length, focusIndex]);
+
+  const idPrefix = useId();
+  const itemId = (i: number) => `${idPrefix}-item-${i}`;
+  const listRef = useAutoFocus<HTMLUListElement>();
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (dayEvents.length === 0) return;
+      switch (e.key) {
+        case 'ArrowDown':
+          e.preventDefault();
+          setFocusIndex((i) => Math.min(i + 1, dayEvents.length - 1));
+          return;
+        case 'ArrowUp':
+          e.preventDefault();
+          setFocusIndex((i) => Math.max(i - 1, 0));
+          return;
+        case 'Home':
+          e.preventDefault();
+          setFocusIndex(0);
+          return;
+        case 'End':
+          e.preventDefault();
+          setFocusIndex(dayEvents.length - 1);
+          return;
+        default:
+          return;
+      }
+    },
+    [dayEvents.length],
+  );
 
   const today = useMemo(() => new Date(), []);
   const isToday = isSameDay(today, anchor);
 
   return (
-    <section
-      aria-label={fmt.format(anchor, 'PPPP')}
-      className="view view--day"
-    >
+    <section className="view view--day" aria-label={fmt.format(anchor, 'PPPP')}>
       <header className="view__header">
         <h2 aria-current={isToday ? 'date' : undefined}>
           {fmt.format(anchor, 'PPPP')}
         </h2>
       </header>
 
-      <ul role="listbox" aria-label={t('views.day.timeGrid')} className="day-grid">
-        {hours.map((hour) => {
-          const slotEvents = eventsByHour.get(hour) ?? [];
-          return (
-            <li
-              key={hour}
-              role="presentation"
-              className="day-grid__row"
-              data-hour={hour}
-            >
-              <span className="day-grid__hour" aria-hidden="true">
-                {fmt.format(setHour(anchor, hour), 'p')}
-              </span>
-              <div className="day-grid__slots">
-                {slotEvents.map((ev) => {
-                  const cal = calendarById.get(ev.calendar_id);
-                  const startStr = fmt.format(new Date(ev.start), 'p');
-                  const endStr = fmt.format(new Date(ev.end), 'p');
-                  const aria = t('views.day.eventLabel', {
-                    title: ev.title,
-                    start: startStr,
-                    end: endStr,
-                    calendar: cal?.name ?? '—',
-                  });
-                  return (
-                    <div
-                      key={ev.id}
-                      role="option"
-                      aria-selected="false"
-                      aria-label={aria}
-                      tabIndex={0}
-                      className="day-event"
-                      style={
-                        cal?.color
-                          ? ({ '--event-color': cal.color.hex } as React.CSSProperties)
-                          : undefined
-                      }
-                    >
-                      <span className="day-event__time">
-                        {startStr}–{endStr}
-                      </span>
-                      <span className="day-event__title">{ev.title}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </li>
-          );
-        })}
+      <ul
+        ref={listRef}
+        role="listbox"
+        tabIndex={0}
+        aria-label={t('views.day.eventList')}
+        aria-activedescendant={
+          dayEvents.length > 0 ? itemId(focusIndex) : undefined
+        }
+        onKeyDown={handleKeyDown}
+        className="day-list"
+      >
+        {dayEvents.length === 0 ? (
+          <li role="presentation" className="day-list__empty">
+            {t('views.day.empty')}
+          </li>
+        ) : (
+          dayEvents.map((ev, i) => {
+            const cal = calendarById.get(ev.calendar_id);
+            const startStr = fmt.format(new Date(ev.start), 'p');
+            const endStr = fmt.format(new Date(ev.end), 'p');
+            const aria = t('views.day.eventLabel', {
+              title: ev.title,
+              start: startStr,
+              end: endStr,
+              calendar: cal?.name ?? '—',
+            });
+            const focused = i === focusIndex;
+            return (
+              <li
+                key={ev.id}
+                id={itemId(i)}
+                role="option"
+                aria-selected={focused}
+                aria-label={aria}
+                className={
+                  'day-list__item' +
+                  (focused ? ' day-list__item--focused' : '')
+                }
+                style={
+                  cal?.color
+                    ? ({ '--event-color': cal.color.hex } as React.CSSProperties)
+                    : undefined
+                }
+                onClick={() => setFocusIndex(i)}
+              >
+                <span className="day-list__time">
+                  {startStr} – {endStr}
+                </span>
+                <span className="day-list__title">{ev.title}</span>
+              </li>
+            );
+          })
+        )}
       </ul>
     </section>
   );
-}
-
-function setHour(base: Date, hour: number): Date {
-  const d = new Date(base);
-  d.setHours(hour, 0, 0, 0);
-  return d;
-}
-
-function clamp(value: number, min: number, max: number): number {
-  if (value < min) return min;
-  if (value > max) return max;
-  return value;
 }

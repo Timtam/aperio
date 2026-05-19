@@ -52,6 +52,8 @@
     },
     "day": {
       "timeGrid": "Zeitraster",
+      "eventList": "Termine des Tages",
+      "empty": "Keine Termine an diesem Tag.",
       "eventLabel": "Termin: {{title}}, {{start}} bis {{end}}, Kalender: {{calendar}}"
     },
     "month": {
@@ -71,15 +73,20 @@
     "agenda": {
       "title": "Agenda",
       "empty": "Keine Termine im Zeitraum.",
+      "eventList": "Termine in der Agenda",
       "allDay": "Ganztags",
       "dayLabel_one": "{{day}}, 1 Termin",
       "dayLabel_other": "{{day}}, {{count}} Termine",
-      "eventLabel": "{{title}}, {{time}}, Kalender: {{calendar}}"
+      "eventLabel": "{{day}}, {{title}}, {{time}}, Kalender: {{calendar}}"
     },
     "tasks": {
       "title": "Aufgaben",
       "empty": "Keine Aufgaben.",
       "backlog": "Backlog",
+      "taskList": "Aufgabenliste",
+      "stateDone": "erledigt",
+      "stateOpen": "offen",
+      "optionLabel": "{{title}}, Liste {{list}}, {{state}}, {{due}}",
       "dueScheduled": "Geplant: {{date}}",
       "dueDeadline": "Fällig: {{date}}",
       "dueNone": "Ohne Datum",

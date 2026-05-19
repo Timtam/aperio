@@ -1,7 +1,9 @@
-import { useMemo } from 'react';
+import { useCallback, useId, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   addDays,
+  addMonths,
+  addYears,
   endOfMonth,
   endOfWeek,
   isSameDay,
@@ -11,26 +13,27 @@ import {
   startOfWeek,
 } from 'date-fns';
 
+import { useAutoFocus } from '../../hooks/useAutoFocus';
 import { useDateFormat } from '../../intl/dateFormat';
 import { useViewState } from '../../state/ViewState';
 
 /**
- * Year view — 12 mini-month grids.
+ * Year view — 12 mini-month grids as a listbox.
  *
- * Phase 3 keeps it compact: each month is a small read-only grid. Arrow
- * keys move between months (one per column, three per row); Enter jumps
- * to MonthView for the focused month.
+ * Keyboard model from DESIGN.md section 3.3:
+ *  - Left/Right move to the previous/next month, wrapping across years.
+ *  - Up/Down step a whole year while keeping the same month focused.
+ *  - Enter opens the focused month in MonthView.
  *
- * Event counts per day are intentionally *not* shown here. The year view
- * is a planning lens — pulling events for 12 months would be heavy, and
- * the screen real estate doesn't support showing them anyway. A future
- * phase may overlay heat-map dots for "days with events" once we add a
- * lightweight backend count endpoint.
+ * The active month is derived from `anchor.getMonth()`. Changing the
+ * focused month means updating `anchor`, which keeps the view state
+ * coherent with Ctrl+T (today) and Ctrl+Left/Right (period steps from
+ * the global shortcut layer).
  */
 export function YearView() {
   const { t } = useTranslation();
   const fmt = useDateFormat();
-  const { anchor, setView, setAnchor } = useViewState();
+  const { anchor, setAnchor, setView } = useViewState();
 
   const months = useMemo(
     () => Array.from({ length: 12 }, (_, i) => setMonth(anchor, i)),
@@ -38,35 +41,101 @@ export function YearView() {
   );
   const today = useMemo(() => new Date(), []);
 
+  const focusIndex = anchor.getMonth();
+  const idPrefix = useId();
+  const itemId = (i: number) => `${idPrefix}-month-${i}`;
+  const listRef = useAutoFocus<HTMLDivElement>();
+
+  const openMonth = useCallback(
+    (date: Date) => {
+      setAnchor(date);
+      setView('month');
+    },
+    [setAnchor, setView],
+  );
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      switch (e.key) {
+        case 'ArrowLeft':
+          e.preventDefault();
+          setAnchor(addMonths(anchor, -1));
+          return;
+        case 'ArrowRight':
+          e.preventDefault();
+          setAnchor(addMonths(anchor, 1));
+          return;
+        case 'ArrowUp':
+          e.preventDefault();
+          setAnchor(addYears(anchor, -1));
+          return;
+        case 'ArrowDown':
+          e.preventDefault();
+          setAnchor(addYears(anchor, 1));
+          return;
+        case 'Home':
+          e.preventDefault();
+          setAnchor(setMonth(anchor, 0));
+          return;
+        case 'End':
+          e.preventDefault();
+          setAnchor(setMonth(anchor, 11));
+          return;
+        case 'Enter':
+        case ' ':
+        case 'Spacebar':
+          e.preventDefault();
+          openMonth(months[focusIndex]);
+          return;
+        default:
+          return;
+      }
+    },
+    [anchor, setAnchor, openMonth, months, focusIndex],
+  );
+
   return (
     <section className="view view--year" aria-label={t('views.year.title')}>
       <header className="view__header">
         <h2>{fmt.format(anchor, 'yyyy')}</h2>
       </header>
 
-      <div className="year-grid" role="list" aria-label={t('views.year.gridLabel')}>
-        {months.map((month) => {
+      <div
+        ref={listRef}
+        role="listbox"
+        tabIndex={0}
+        aria-label={t('views.year.gridLabel')}
+        aria-activedescendant={itemId(focusIndex)}
+        onKeyDown={handleKeyDown}
+        className="year-grid"
+      >
+        {months.map((month, i) => {
           const cells = buildMiniGrid(month);
           const isCurrentMonth = isSameMonth(month, today);
+          const focused = i === focusIndex;
           return (
-            <button
+            <div
               key={month.toISOString()}
-              type="button"
-              role="listitem"
+              id={itemId(i)}
+              role="option"
+              aria-selected={focused}
+              aria-current={isCurrentMonth ? 'date' : undefined}
               aria-label={t('views.year.monthLabel', {
                 month: fmt.format(month, 'MMMM yyyy'),
               })}
-              aria-current={isCurrentMonth ? 'date' : undefined}
               className={
-                'year-mini' + (isCurrentMonth ? ' year-mini--current' : '')
+                'year-mini' +
+                (isCurrentMonth ? ' year-mini--current' : '') +
+                (focused ? ' year-mini--focused' : '')
               }
-              onClick={() => {
-                setAnchor(month);
-                setView('month');
-              }}
+              onClick={() => openMonth(month)}
+              onDoubleClick={() => openMonth(month)}
             >
-              <span className="year-mini__title">{fmt.format(month, 'MMMM')}</span>
-              <div className="year-mini__grid">
+              <span className="year-mini__title">
+                {fmt.format(month, 'MMMM')}
+              </span>
+              <div className="year-mini__grid" aria-hidden="true">
                 {cells.slice(0, 7).map((d) => (
                   <span key={d.toISOString()} className="year-mini__dow">
                     {fmt.format(d, 'EEEEE')}
@@ -77,16 +146,17 @@ export function YearView() {
                     key={day.toISOString()}
                     className={
                       'year-mini__day' +
-                      (!isSameMonth(day, month) ? ' year-mini__day--outside' : '') +
+                      (!isSameMonth(day, month)
+                        ? ' year-mini__day--outside'
+                        : '') +
                       (isSameDay(day, today) ? ' year-mini__day--today' : '')
                     }
-                    aria-hidden="true"
                   >
                     {fmt.format(day, 'd')}
                   </span>
                 ))}
               </div>
-            </button>
+            </div>
           );
         })}
       </div>

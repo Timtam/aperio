@@ -467,6 +467,19 @@ button:disabled {
   font-size: var(--font-size-lg);
 }
 
+/*
+ * `.view` sections are programmatically focused on view-switch
+ * (useAutoFocus). The screen reader announces the section via its
+ * aria-label; a full-viewport focus ring around the section is just
+ * visual noise. Interactive children inside the view (grids, buttons)
+ * still get their own focus ring as usual.
+ */
+.view:focus-visible,
+.view:focus {
+  outline: none;
+  box-shadow: none;
+}
+
 .view__subtitle {
   color: var(--color-fg-muted);
   font-size: var(--font-size-sm);
@@ -663,9 +676,9 @@ button:disabled {
   color: var(--color-fg-muted);
 }
 
-/* ── Day view ───────────────────────────────────────────────────────────── */
+/* ── Day view (flat listbox) ────────────────────────────────────────────── */
 
-.day-grid {
+.day-list {
   list-style: none;
   margin: var(--space-3) 0 0;
   padding: 0;
@@ -674,43 +687,36 @@ button:disabled {
   overflow: hidden;
 }
 
-.day-grid__row {
-  display: grid;
-  grid-template-columns: 80px 1fr;
-  min-height: 48px;
-  border-top: 1px solid var(--color-border);
-}
-
-.day-grid__row:first-child {
-  border-top: 0;
-}
-
-.day-grid__hour {
-  padding: var(--space-1) var(--space-2);
-  font-size: var(--font-size-xs);
+.day-list__empty {
+  padding: var(--space-3);
   color: var(--color-fg-muted);
-  border-right: 1px solid var(--color-border);
+  text-align: center;
 }
 
-.day-grid__slots {
-  padding: var(--space-1);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
+.day-list__item {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-left: 4px solid var(--event-color, var(--color-accent));
+  border-bottom: 1px solid var(--color-border);
 }
 
-.day-event {
-  background: var(--event-color, var(--color-accent));
-  color: var(--color-accent-fg);
-  padding: var(--space-1) var(--space-2);
-  border-radius: var(--radius-sm);
+.day-list__item:last-child {
+  border-bottom: 0;
+}
+
+.day-list__item--focused {
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+}
+
+.day-list__time {
+  color: var(--color-fg-muted);
   font-size: var(--font-size-sm);
 }
 
-.day-event__time {
-  display: block;
-  font-size: var(--font-size-xs);
-  opacity: 0.85;
+.day-list__title {
+  font-weight: 500;
 }
 
 /* ── Year view ──────────────────────────────────────────────────────────── */
@@ -734,6 +740,11 @@ button:disabled {
 
 .year-mini--current {
   border-color: var(--color-accent);
+}
+
+.year-mini--focused {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
 }
 
 .year-mini__title {
@@ -770,65 +781,87 @@ button:disabled {
   border-radius: 2px;
 }
 
-/* ── Agenda view ────────────────────────────────────────────────────────── */
+/* ── Agenda view (flat listbox with visual day separators) ─────────────── */
 
-.agenda-groups {
+.agenda-list {
   list-style: none;
   padding: 0;
   margin: var(--space-3) 0 0;
 }
 
-.agenda-group {
-  margin-bottom: var(--space-4);
-}
-
-.agenda-group__title {
-  font-size: var(--font-size-sm);
+.agenda-list__empty {
+  padding: var(--space-3);
   color: var(--color-fg-muted);
-  margin: 0 0 var(--space-1);
+  text-align: center;
 }
 
-.agenda-events {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
+.agenda-list__day {
+  margin-top: var(--space-3);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-fg-muted);
+  padding-bottom: var(--space-1);
+  border-bottom: 1px solid var(--color-border);
 }
 
-.agenda-event {
+.agenda-list__day:first-child {
+  margin-top: 0;
+}
+
+.agenda-list__item {
   display: grid;
-  grid-template-columns: 140px 1fr auto;
+  grid-template-columns: 160px 1fr auto;
   gap: var(--space-2);
+  align-items: center;
   padding: var(--space-1) var(--space-2);
+  margin-top: var(--space-1);
   background: var(--color-bg-panel);
   border-left: 4px solid var(--event-color, var(--color-accent));
   border-radius: var(--radius-sm);
 }
 
-.agenda-event__time {
+.agenda-list__item--focused {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.agenda-list__time {
   color: var(--color-fg-muted);
 }
 
-.agenda-event__cal {
+.agenda-list__cal {
   color: var(--color-fg-muted);
   font-size: var(--font-size-xs);
 }
 
-/* ── Task view ──────────────────────────────────────────────────────────── */
+/* ── Task view (listbox) ────────────────────────────────────────────────── */
 
-.task-group {
-  margin-top: var(--space-4);
-}
-
-.task-group ul {
+.task-list {
   list-style: none;
+  margin: var(--space-3) 0 0;
   padding: 0;
-  margin: var(--space-2) 0 0;
 }
 
-.task-row {
+.task-list__empty {
+  padding: var(--space-3);
+  color: var(--color-fg-muted);
+  text-align: center;
+}
+
+.task-list__group {
+  margin-top: var(--space-3);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-fg-muted);
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: var(--space-1);
+}
+
+.task-list__group:first-child {
+  margin-top: 0;
+}
+
+.task-list__item {
   display: grid;
   grid-template-columns: 32px 1fr auto;
   align-items: center;
@@ -837,18 +870,23 @@ button:disabled {
   border-bottom: 1px solid var(--color-border);
 }
 
-.task-row--done .task-row__title {
+.task-list__item--focused {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -1px;
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+}
+
+.task-list__item--done .task-list__title {
   text-decoration: line-through;
   color: var(--color-fg-muted);
 }
 
-.task-row__check {
-  background: transparent;
-  border: 0;
+.task-list__check {
   font-size: var(--font-size-lg);
+  text-align: center;
 }
 
-.task-row__due {
+.task-list__due {
   color: var(--color-fg-muted);
   font-size: var(--font-size-xs);
 }

@@ -106,6 +106,25 @@ describe('useGridNavigation', () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
+  it('ignores arrow keys with a modifier (belongs to global shortcuts)', () => {
+    render(<Harness initialIndex={3} />);
+    fireEvent.keyDown(screen.getByRole('grid'), {
+      key: 'ArrowRight',
+      ctrlKey: true,
+    });
+    expect(focusIndex()).toBe(3);
+    fireEvent.keyDown(screen.getByRole('grid'), {
+      key: 'ArrowRight',
+      metaKey: true,
+    });
+    expect(focusIndex()).toBe(3);
+    fireEvent.keyDown(screen.getByRole('grid'), {
+      key: 'ArrowRight',
+      altKey: true,
+    });
+    expect(focusIndex()).toBe(3);
+  });
+
   it('ignores key presses inside form controls', () => {
     function Combined() {
       const grid = useGridNavigation({ itemCount: 14, rowSize: 7, initialIndex: 3 });

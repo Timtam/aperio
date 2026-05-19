@@ -18,36 +18,25 @@ import { ViewStateProvider, useViewShortcuts, useViewState } from './state/ViewS
 /**
  * Root component.
  *
- * The provider order matters:
+ * `role="application"` lives on the outermost wrapper, *not* inside the
+ * Shell, so every descendant — including the announcer's `aria-live`
+ * regions — sits inside the application boundary. If the live regions
+ * were rendered as siblings of `role="application"`, NVDA would drop
+ * out of focus mode whenever an announcement landed, defeating the
+ * point of the role (DESIGN.md section 3.2.1).
+ *
+ * Provider order:
  *  1. AnnouncerProvider — every child can call `useAnnouncer()`.
  *  2. CalendarStoreProvider — owns the calendars/task-lists registry
- *     plus their selection state. Drives the data hooks.
+ *     plus their selection state.
  *  3. ViewStateProvider — owns the active view + anchor date.
  *
- * `useSuppressBrowserDefaults` and `useRegionFocus` are pure listeners
- * on the window, so they live at the top.
- *
- * DESIGN.md section 3.2.1 requires `role="application"` on the root
- * element — without it screen readers treat the WebView like a web page
- * and intercept keys we need for navigation.
+ * `useSuppressBrowserDefaults` and `useRegionFocus` are pure window
+ * listeners, so they live at the root.
  */
 export function App() {
   useSuppressBrowserDefaults();
   useRegionFocus();
-
-  return (
-    <AnnouncerProvider>
-      <CalendarStoreProvider>
-        <ViewStateProvider>
-          <Shell />
-        </ViewStateProvider>
-      </CalendarStoreProvider>
-    </AnnouncerProvider>
-  );
-}
-
-function Shell() {
-  useViewShortcuts();
 
   return (
     <div
@@ -56,6 +45,22 @@ function Shell() {
       aria-label="Aperio"
       className="app-root"
     >
+      <AnnouncerProvider>
+        <CalendarStoreProvider>
+          <ViewStateProvider>
+            <Shell />
+          </ViewStateProvider>
+        </CalendarStoreProvider>
+      </AnnouncerProvider>
+    </div>
+  );
+}
+
+function Shell() {
+  useViewShortcuts();
+
+  return (
+    <>
       <TitleBar />
       <div className="app-body">
         <Sidebar />
@@ -64,7 +69,7 @@ function Shell() {
           <ActiveView />
         </div>
       </div>
-    </div>
+    </>
   );
 }
 

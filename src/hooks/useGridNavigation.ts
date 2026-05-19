@@ -70,6 +70,11 @@ export function useGridNavigation({
     (e: React.KeyboardEvent) => {
       // Never hijack keys when the user is typing in a form control.
       if (isEditableTarget(e.target)) return;
+      // Modified arrows belong to the global shortcut layer (Ctrl+Left =
+      // previous period, etc.). If we also moved the focus index here, the
+      // shortcut and the cell move would both fire and the anchor would
+      // skip an extra day.
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
 
       switch (e.key) {
         case 'ArrowLeft':

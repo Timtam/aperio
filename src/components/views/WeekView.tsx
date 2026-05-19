@@ -1,10 +1,9 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useCallback, useId, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { addDays, isSameDay, startOfWeek } from 'date-fns';
 
-import { useAnnouncer } from '../../a11y/Announcer';
+import { useAutoFocus } from '../../hooks/useAutoFocus';
 import { useDateFormat } from '../../intl/dateFormat';
-import { useGridNavigation } from '../../hooks/useGridNavigation';
 import { useEvents } from '../../state/useEvents';
 import { useViewState } from '../../state/ViewState';
 import { visibleRange } from '../../state/viewMath';
@@ -18,25 +17,35 @@ import type { CalendarEvent } from '../../api/types';
  * date range (DESIGN.md section 5.2).
  *
  * Screen-reader model (section 3.3, Wochenansicht):
- *  - `role="grid"` on the container.
- *  - `role="gridcell"` per day, `aria-selected` flipped on the focused cell.
- *  - Polite announcement when the focused day changes: full date plus
- *    event count.
+ *  - `role="grid"` on the container, which holds focus permanently and
+ *    announces the active cell via `aria-activedescendant`.
+ *  - `role="gridcell"` per day, with `aria-selected` on the active cell.
  *  - `aria-current="date"` on today's cell.
  *
- * Keyboard: handled by `useGridNavigation` — Left/Right between days,
- * Up/Down between weeks (shifts the anchor and re-fetches). Tab traversal
- * between events inside a day is the browser's default behaviour because
- * each event renders as a focusable button.
+ * Why `aria-activedescendant` instead of a roving tabindex: with roving
+ * tabindex the focused cell's `tabIndex` toggles between `0` and `-1`,
+ * and the DOM focus has to be moved explicitly on each arrow press. If
+ * the focus isn't moved the cell shows as selected (ARIA) but loses the
+ * visual focus ring. The active-descendant pattern keeps DOM focus on
+ * the grid; the cell highlight is pure CSS driven by a class, so there
+ * is no window where "selected" and "highlighted" can disagree.
+ *
+ * Keyboard model:
+ *  - Left/Right move the focused day inside the visible week.
+ *  - Up/Down (and PageUp/PageDown) scroll the week — Outlook convention.
+ *  - Home / End jump to the first / last day of the visible week.
+ *  - Ctrl-modified arrows are handled by the global shortcut layer.
+ *
+ * `anchor` is the single source of truth; the focused cell index is
+ * derived from it. One state update per key press, one render commit.
  */
 export function WeekView() {
   const { t } = useTranslation();
   const fmt = useDateFormat();
-  const announce = useAnnouncer();
-  const { anchor, setAnchor } = useViewState();
+  const { anchor, setAnchor, goPrev, goNext } = useViewState();
 
   const range = useMemo(() => visibleRange('week', anchor), [anchor]);
-  const { events, calendarById, loading } = useEvents(range);
+  const { events, calendarById } = useEvents(range);
 
   const weekStart = useMemo(
     () => startOfWeek(anchor, { weekStartsOn: 1 }),
@@ -47,47 +56,63 @@ export function WeekView() {
     [weekStart],
   );
 
-  const eventsByDay = useMemo(() => groupEventsByDay(events, days), [events, days]);
+  const eventsByDay = useMemo(
+    () => groupEventsByDay(events, days),
+    [events, days],
+  );
 
-  // Focus index: which of the seven cells is currently focused. Persist
-  // across week changes by mapping today's weekday onto the new anchor.
-  const initialIndex = useMemo(() => {
-    const idx = days.findIndex((d) => isSameDay(d, anchor));
-    return idx >= 0 ? idx : 0;
+  const focusIndex = useMemo(() => {
+    const i = days.findIndex((d) => isSameDay(d, anchor));
+    return i >= 0 ? i : 0;
   }, [days, anchor]);
 
-  const { focusIndex, setFocusIndex, handleKeyDown } = useGridNavigation({
-    itemCount: 7,
-    rowSize: 7,
-    initialIndex,
-  });
+  // Unique prefix per WeekView instance, in case there's ever more than
+  // one on screen (e.g. a future side-by-side comparison).
+  const idPrefix = useId();
+  const cellId = (i: number) => `${idPrefix}-cell-${i}`;
 
-  // Sync the anchor when the focused day changes. The hook clamps inside
-  // [0,6]; arrow Up/Down outside that range falls through to the caller,
-  // which we use to shift weeks.
-  useEffect(() => {
-    setAnchor(days[focusIndex]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusIndex]);
-
-  // Announce the focused day when it changes.
-  const lastAnnouncedRef = useRef<string>('');
-  useEffect(() => {
-    const day = days[focusIndex];
-    if (!day) return;
-    const evs = eventsByDay.get(keyOf(day)) ?? [];
-    const label = t('views.week.dayAnnounce', {
-      day: fmt.format(day, 'PPPP'),
-      count: evs.length,
-    });
-    if (label !== lastAnnouncedRef.current) {
-      lastAnnouncedRef.current = label;
-      announce(label);
-    }
-  }, [focusIndex, days, eventsByDay, announce, fmt, t]);
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) {
+        return;
+      }
+      switch (e.key) {
+        case 'ArrowLeft':
+          e.preventDefault();
+          setAnchor(addDays(anchor, -1));
+          return;
+        case 'ArrowRight':
+          e.preventDefault();
+          setAnchor(addDays(anchor, 1));
+          return;
+        case 'ArrowUp':
+        case 'PageUp':
+          e.preventDefault();
+          goPrev();
+          return;
+        case 'ArrowDown':
+        case 'PageDown':
+          e.preventDefault();
+          goNext();
+          return;
+        case 'Home':
+          e.preventDefault();
+          setAnchor(weekStart);
+          return;
+        case 'End':
+          e.preventDefault();
+          setAnchor(addDays(weekStart, 6));
+          return;
+        default:
+          return;
+      }
+    },
+    [anchor, weekStart, setAnchor, goPrev, goNext],
+  );
 
   const today = useMemo(() => new Date(), []);
   const isoWeek = fmt.isoWeek(weekStart);
+  const gridRef = useAutoFocus<HTMLDivElement>();
 
   return (
     <section className="view view--week" aria-label={t('views.week.title')}>
@@ -98,17 +123,17 @@ export function WeekView() {
         </h2>
       </header>
 
-      {loading && <p>{t('views.loading')}</p>}
-
       <div
+        ref={gridRef}
         role="grid"
         aria-label={t('views.week.gridLabel')}
         tabIndex={0}
+        aria-activedescendant={cellId(focusIndex)}
         onKeyDown={handleKeyDown}
         className="week-grid"
       >
         <div role="row" className="week-grid__head">
-          {days.map((day, i) => (
+          {days.map((day) => (
             <div
               key={day.toISOString()}
               role="columnheader"
@@ -116,14 +141,7 @@ export function WeekView() {
               aria-current={isSameDay(day, today) ? 'date' : undefined}
             >
               <span className="week-grid__dow">{fmt.format(day, 'EEE')}</span>
-              <button
-                type="button"
-                className="week-grid__date"
-                aria-label={fmt.format(day, 'PPPP')}
-                onClick={() => setFocusIndex(i)}
-              >
-                {fmt.format(day, 'd')}
-              </button>
+              <span className="week-grid__date">{fmt.format(day, 'd')}</span>
             </div>
           ))}
         </div>
@@ -135,8 +153,8 @@ export function WeekView() {
             return (
               <div
                 key={day.toISOString()}
+                id={cellId(i)}
                 role="gridcell"
-                tabIndex={focused ? 0 : -1}
                 aria-selected={focused}
                 aria-current={isSameDay(day, today) ? 'date' : undefined}
                 aria-label={t('views.week.dayAnnounce', {
@@ -148,7 +166,7 @@ export function WeekView() {
                   (focused ? ' week-grid__cell--focused' : '') +
                   (isSameDay(day, today) ? ' week-grid__cell--today' : '')
                 }
-                onClick={() => setFocusIndex(i)}
+                onClick={() => setAnchor(day)}
               >
                 <ul role="list" className="week-grid__events">
                   {dayEvents.map((ev) => {
@@ -163,8 +181,7 @@ export function WeekView() {
                     });
                     return (
                       <li key={ev.id} role="listitem">
-                        <button
-                          type="button"
+                        <span
                           className="week-event"
                           aria-label={aria}
                           style={
@@ -175,7 +192,7 @@ export function WeekView() {
                         >
                           <span className="week-event__time">{time}</span>
                           <span className="week-event__title">{ev.title}</span>
-                        </button>
+                        </span>
                       </li>
                     );
                   })}

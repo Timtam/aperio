@@ -1,34 +1,82 @@
-import { useMemo } from 'react';
+import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { isSameDay } from 'date-fns';
 
 import type { CalendarEvent } from '../../api/types';
+import { useAutoFocus } from '../../hooks/useAutoFocus';
 import { useDateFormat } from '../../intl/dateFormat';
 import { useEvents } from '../../state/useEvents';
 import { useViewState } from '../../state/ViewState';
 import { visibleRange } from '../../state/viewMath';
 
 /**
- * Chronological event list grouped by day.
+ * Agenda — flat, chronologically ordered listbox of events with visual
+ * day separators.
  *
- * Screen-reader model (DESIGN.md section 3.3, Agenda):
- *  - The outer container is `role="list"`.
- *  - Each day group is a nested `role="listitem"` carrying the day
- *    summary (`aria-label="Wednesday, 14 May 2025, 2 events"`).
- *  - The events themselves are nested `listitem`s with the full event
- *    label.
+ * DESIGN.md section 3.3 calls for a `role="list"` with nested
+ * `role="listitem"` for day groups, but a content list isn't navigable
+ * by arrow keys and tabIndex=-1 on the surrounding section made NVDA
+ * drop out of focus mode. Listbox + `aria-activedescendant` matches the
+ * keyboard model the spec asks for (Arrow Up/Down between events) and
+ * keeps the screen reader in focus mode end-to-end.
+ *
+ * Date context isn't lost: the day label is folded into the option's
+ * `aria-label`, so jumping into the middle of a group still announces
+ * the date. The visual day separators between options are
+ * `aria-hidden` — purely sighted-user affordance.
  */
 export function AgendaView() {
   const { t } = useTranslation();
   const { anchor } = useViewState();
   const fmt = useDateFormat();
-  const range = useMemo(() => visibleRange('agenda', anchor), [anchor]);
-  const { events, calendarById, loading } = useEvents(range);
 
-  const groups = useMemo(() => groupByDay(events), [events]);
+  const range = useMemo(() => visibleRange('agenda', anchor), [anchor]);
+  const { events, calendarById } = useEvents(range);
+
+  const [focusIndex, setFocusIndex] = useState(0);
+
+  useEffect(() => {
+    if (focusIndex >= events.length) {
+      setFocusIndex(Math.max(0, events.length - 1));
+    }
+  }, [events.length, focusIndex]);
+
+  const idPrefix = useId();
+  const itemId = (i: number) => `${idPrefix}-item-${i}`;
+  const listRef = useAutoFocus<HTMLUListElement>();
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (events.length === 0) return;
+      switch (e.key) {
+        case 'ArrowDown':
+          e.preventDefault();
+          setFocusIndex((i) => Math.min(i + 1, events.length - 1));
+          return;
+        case 'ArrowUp':
+          e.preventDefault();
+          setFocusIndex((i) => Math.max(i - 1, 0));
+          return;
+        case 'Home':
+          e.preventDefault();
+          setFocusIndex(0);
+          return;
+        case 'End':
+          e.preventDefault();
+          setFocusIndex(events.length - 1);
+          return;
+        default:
+          return;
+      }
+    },
+    [events.length],
+  );
 
   return (
-    <section aria-label={t('views.agenda.title')} className="view view--agenda">
+    <section
+      aria-label={t('views.agenda.title')}
+      className="view view--agenda"
+    >
       <header className="view__header">
         <h2>{t('views.agenda.title')}</h2>
         <span className="view__subtitle">
@@ -36,85 +84,106 @@ export function AgendaView() {
         </span>
       </header>
 
-      {loading && <p>{t('views.loading')}</p>}
-
-      {!loading && events.length === 0 && (
-        <p>{t('views.agenda.empty')}</p>
-      )}
-
-      <ul role="list" className="agenda-groups">
-        {groups.map((group) => {
-          const dayLabel = fmt.format(group.day, 'PPPP');
-          return (
-            <li
-              key={group.day.toISOString()}
-              role="listitem"
-              aria-label={t('views.agenda.dayLabel', {
-                day: dayLabel,
-                count: group.events.length,
-              })}
-              className="agenda-group"
-            >
-              <h3 className="agenda-group__title">{dayLabel}</h3>
-              <ul role="list" className="agenda-events">
-                {group.events.map((ev) => {
-                  const cal = calendarById.get(ev.calendar_id);
-                  const timeLabel = ev.all_day
-                    ? t('views.agenda.allDay')
-                    : `${fmt.format(new Date(ev.start), 'p')} – ${fmt.format(
-                        new Date(ev.end),
-                        'p',
-                      )}`;
-                  const aria = t('views.agenda.eventLabel', {
-                    title: ev.title,
-                    time: timeLabel,
-                    calendar: cal?.name ?? '—',
-                  });
-                  return (
-                    <li
-                      key={ev.id}
-                      role="listitem"
-                      aria-label={aria}
-                      className="agenda-event"
-                      style={
-                        cal?.color
-                          ? ({ '--event-color': cal.color.hex } as React.CSSProperties)
-                          : undefined
-                      }
-                    >
-                      <span className="agenda-event__time">{timeLabel}</span>
-                      <span className="agenda-event__title">{ev.title}</span>
-                      {cal && (
-                        <span className="agenda-event__cal">{cal.name}</span>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-            </li>
-          );
-        })}
+      <ul
+        ref={listRef}
+        role="listbox"
+        tabIndex={0}
+        aria-label={t('views.agenda.eventList')}
+        aria-activedescendant={
+          events.length > 0 ? itemId(focusIndex) : undefined
+        }
+        onKeyDown={handleKeyDown}
+        className="agenda-list"
+      >
+        {events.length === 0 ? (
+          <li role="presentation" className="agenda-list__empty">
+            {t('views.agenda.empty')}
+          </li>
+        ) : (
+          renderEvents(events, focusIndex, {
+            calendarById,
+            fmt,
+            t,
+            itemId,
+            onSelect: setFocusIndex,
+          })
+        )}
       </ul>
     </section>
   );
 }
 
-interface DayGroup {
-  day: Date;
-  events: CalendarEvent[];
+interface RenderContext {
+  calendarById: Map<string, { name: string; color: { hex: string } | null }>;
+  fmt: ReturnType<typeof useDateFormat>;
+  t: (key: string, vars?: Record<string, unknown>) => string;
+  itemId: (i: number) => string;
+  onSelect: (i: number) => void;
 }
 
-function groupByDay(events: CalendarEvent[]): DayGroup[] {
-  const groups: DayGroup[] = [];
-  events.forEach((ev) => {
-    const day = new Date(ev.start);
-    day.setHours(0, 0, 0, 0);
-    const last = groups[groups.length - 1];
-    if (last && isSameDay(last.day, day)) {
-      last.events.push(ev);
-    } else {
-      groups.push({ day, events: [ev] });
+function renderEvents(
+  events: CalendarEvent[],
+  focusIndex: number,
+  ctx: RenderContext,
+): JSX.Element[] {
+  const out: JSX.Element[] = [];
+  let lastDayKey: string | null = null;
+
+  events.forEach((ev, i) => {
+    const start = new Date(ev.start);
+    const dayKey = start.toISOString().slice(0, 10);
+
+    // Visual-only day separator. aria-hidden so the screen reader
+    // never reads it; the date is encoded into each option's aria-label.
+    if (dayKey !== lastDayKey) {
+      lastDayKey = dayKey;
+      out.push(
+        <li
+          key={`sep-${dayKey}`}
+          role="presentation"
+          aria-hidden="true"
+          className="agenda-list__day"
+        >
+          {ctx.fmt.format(start, 'PPPP')}
+        </li>,
+      );
     }
+
+    const cal = ctx.calendarById.get(ev.calendar_id);
+    const timeLabel = ev.all_day
+      ? ctx.t('views.allDay')
+      : `${ctx.fmt.format(start, 'p')} – ${ctx.fmt.format(new Date(ev.end), 'p')}`;
+    const aria = ctx.t('views.agenda.eventLabel', {
+      day: ctx.fmt.format(start, 'PPPP'),
+      title: ev.title,
+      time: timeLabel,
+      calendar: cal?.name ?? '—',
+    });
+    const focused = i === focusIndex;
+
+    out.push(
+      <li
+        key={ev.id}
+        id={ctx.itemId(i)}
+        role="option"
+        aria-selected={focused}
+        aria-label={aria}
+        className={
+          'agenda-list__item' + (focused ? ' agenda-list__item--focused' : '')
+        }
+        style={
+          cal?.color
+            ? ({ '--event-color': cal.color.hex } as React.CSSProperties)
+            : undefined
+        }
+        onClick={() => ctx.onSelect(i)}
+      >
+        <span className="agenda-list__time">{timeLabel}</span>
+        <span className="agenda-list__title">{ev.title}</span>
+        {cal && <span className="agenda-list__cal">{cal.name}</span>}
+      </li>,
+    );
   });
-  return groups;
+
+  return out;
 }
