@@ -55,3 +55,17 @@ impl ColorLabelId {
         &self.0
     }
 }
+
+/// Full color-label record (section 8).
+///
+/// Labels exist app-wide: any event or task can reference one through
+/// its `color_label` field. The label's `hex` overrides the container's
+/// color when rendering — see `DESIGN.md` section 8.2 for the priority
+/// rules.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ColorLabel {
+    pub id: ColorLabelId,
+    pub name: String,
+    /// Hex color value including the leading `#`, e.g. `#e53935`.
+    pub hex: String,
+}

@@ -34,6 +34,23 @@
     "cancel": "Abbrechen",
     "save": "Speichern",
     "create": "Anlegen",
+    "close": "Schließen",
+    "colorLabels": {
+      "title": "Farb-Labels",
+      "empty": "Noch keine Farb-Labels angelegt.",
+      "nameRequired": "Bitte gib einen Namen ein.",
+      "create": "Anlegen",
+      "created": "Label „{{name}}\" wurde angelegt.",
+      "updated": "Label „{{name}}\" wurde aktualisiert.",
+      "deleted": "Label „{{name}}\" wurde gelöscht.",
+      "renameLabel": "Name von „{{name}}\" bearbeiten",
+      "colorLabel": "Farbe von „{{name}}\" wählen",
+      "deleteLabel": "Label „{{name}}\" löschen",
+      "fields": {
+        "name": "Name",
+        "color": "Farbe"
+      }
+    },
     "event": {
       "newTitle": "Neuer Termin",
       "editTitle": "Termin bearbeiten",
@@ -55,8 +72,10 @@
         "endDate": "Enddatum",
         "endTime": "Endzeit",
         "location": "Ort",
-        "description": "Beschreibung"
+        "description": "Beschreibung",
+        "colorLabel": "Farb-Label"
       },
+      "noColorLabel": "(Kein Label)",
       "recurrence": {
         "label": "Wiederholung",
         "none": "Keine",
@@ -110,8 +129,10 @@
         "deadlineMode": "Termin",
         "date": "Datum",
         "time": "Uhrzeit",
-        "description": "Beschreibung"
+        "description": "Beschreibung",
+        "colorLabel": "Farb-Label"
       },
+      "noColorLabel": "(Kein Label)",
       "status": {
         "open": "Offen",
         "inProgress": "In Bearbeitung",
@@ -146,7 +167,8 @@
     "calendarCreated": "Kalender „{{name}}\" wurde angelegt.",
     "calendarDeleted": "Kalender „{{name}}\" wurde gelöscht.",
     "taskListCreated": "Aufgabenliste „{{name}}\" wurde angelegt.",
-    "deleteCalendar": "Kalender „{{name}}\" löschen"
+    "deleteCalendar": "Kalender „{{name}}\" löschen",
+    "manageColorLabels": "Farb-Labels verwalten"
   },
   "views": {
     "loading": "Lädt …",
@@ -157,13 +179,15 @@
       "gridLabel": "Wochenraster",
       "dayAnnounce_one": "{{day}}, 1 Termin",
       "dayAnnounce_other": "{{day}}, {{count}} Termine",
-      "eventLabel": "Termin: {{title}}, {{time}}, Kalender: {{calendar}}"
+      "eventLabel": "Termin: {{title}}, {{time}}, Kalender: {{calendar}}",
+      "eventLabelWithLabel": "Termin: {{title}}, {{time}}, Kalender: {{calendar}}, Label: {{label}}"
     },
     "day": {
       "timeGrid": "Zeitraster",
       "eventList": "Termine des Tages",
       "empty": "Keine Termine an diesem Tag.",
-      "eventLabel": "Termin: {{title}}, {{start}} bis {{end}}, Kalender: {{calendar}}"
+      "eventLabel": "Termin: {{title}}, {{start}} bis {{end}}, Kalender: {{calendar}}",
+      "eventLabelWithLabel": "Termin: {{title}}, {{start}} bis {{end}}, Kalender: {{calendar}}, Label: {{label}}"
     },
     "month": {
       "title": "Monatsansicht",
@@ -186,7 +210,8 @@
       "allDay": "Ganztags",
       "dayLabel_one": "{{day}}, 1 Termin",
       "dayLabel_other": "{{day}}, {{count}} Termine",
-      "eventLabel": "{{day}}, {{title}}, {{time}}, Kalender: {{calendar}}"
+      "eventLabel": "{{day}}, {{title}}, {{time}}, Kalender: {{calendar}}",
+      "eventLabelWithLabel": "{{day}}, {{title}}, {{time}}, Kalender: {{calendar}}, Label: {{label}}"
     },
     "tasks": {
       "title": "Aufgaben",
@@ -196,6 +221,7 @@
       "stateDone": "erledigt",
       "stateOpen": "offen",
       "optionLabel": "{{title}}, Liste {{list}}, {{state}}, {{due}}",
+      "optionLabelWithLabel": "{{title}}, Liste {{list}}, {{state}}, {{due}}, Label: {{label}}",
       "dueScheduled": "Geplant: {{date}}",
       "dueDeadline": "Fällig: {{date}}",
       "dueNone": "Ohne Datum",

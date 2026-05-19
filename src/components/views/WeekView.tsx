@@ -5,6 +5,8 @@ import { addDays, isSameDay, startOfWeek } from 'date-fns';
 import { useAutoFocus } from '../../hooks/useAutoFocus';
 import { localDateKey } from '../../intl/dateKey';
 import { useDateFormat } from '../../intl/dateFormat';
+import { labelsLookup, resolveEventColor } from '../../intl/eventColor';
+import { useCalendarStore } from '../../state/CalendarStore';
 import { useDialogState } from '../../state/DialogState';
 import { useEvents } from '../../state/useEvents';
 import { useViewState } from '../../state/ViewState';
@@ -49,6 +51,8 @@ export function WeekView() {
 
   const range = useMemo(() => visibleRange('week', anchor), [anchor]);
   const { events, calendarById, loading } = useEvents(range);
+  const { colorLabels } = useCalendarStore();
+  const labelById = useMemo(() => labelsLookup(colorLabels), [colorLabels]);
 
   const weekStart = useMemo(
     () => startOfWeek(anchor, { weekStartsOn: 1 }),
@@ -202,22 +206,30 @@ export function WeekView() {
                 <ul role="list" className="week-grid__events">
                   {dayEvents.map((ev) => {
                     const cal = calendarById.get(ev.calendar_id);
+                    const color = resolveEventColor(ev, calendarById, labelById);
                     const time = ev.all_day
                       ? t('views.allDay')
                       : `${fmt.format(new Date(ev.start), 'p')}`;
-                    const aria = t('views.week.eventLabel', {
-                      title: ev.title,
-                      time,
-                      calendar: cal?.name ?? '—',
-                    });
+                    const aria = color.labelName
+                      ? t('views.week.eventLabelWithLabel', {
+                          title: ev.title,
+                          time,
+                          calendar: cal?.name ?? '—',
+                          label: color.labelName,
+                        })
+                      : t('views.week.eventLabel', {
+                          title: ev.title,
+                          time,
+                          calendar: cal?.name ?? '—',
+                        });
                     return (
                       <li key={ev.id} role="listitem">
                         <span
                           className="week-event"
                           aria-label={aria}
                           style={
-                            cal?.color
-                              ? ({ '--event-color': cal.color.hex } as React.CSSProperties)
+                            color.hex
+                              ? ({ '--event-color': color.hex } as React.CSSProperties)
                               : undefined
                           }
                         >

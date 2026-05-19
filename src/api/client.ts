@@ -8,6 +8,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type {
   Calendar,
   CalendarEvent,
+  ColorLabel,
   CommandError,
   NewEvent,
   Task,
@@ -100,3 +101,22 @@ export interface CreateTaskRequest {
 
 export const createTask = (request: CreateTaskRequest) =>
   invoke<Task>('create_task', { request });
+
+// ── Color labels ───────────────────────────────────────────────────────────
+
+export const listColorLabels = () =>
+  invoke<ColorLabel[]>('list_color_labels');
+
+export interface CreateColorLabelRequest {
+  name: string;
+  hex: string;
+}
+
+export const createColorLabel = (request: CreateColorLabelRequest) =>
+  invoke<ColorLabel>('create_color_label', { request });
+
+export const updateColorLabel = (label: ColorLabel) =>
+  invoke<ColorLabel>('update_color_label', { label });
+
+export const deleteColorLabel = (id: string) =>
+  invoke<void>('delete_color_label', { id });

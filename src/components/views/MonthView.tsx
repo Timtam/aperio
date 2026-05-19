@@ -13,6 +13,8 @@ import {
 import { useAutoFocus } from '../../hooks/useAutoFocus';
 import { localDateKey } from '../../intl/dateKey';
 import { useDateFormat } from '../../intl/dateFormat';
+import { labelsLookup, resolveEventColor } from '../../intl/eventColor';
+import { useCalendarStore } from '../../state/CalendarStore';
 import { useDialogState } from '../../state/DialogState';
 import { useEvents } from '../../state/useEvents';
 import { useViewState } from '../../state/ViewState';
@@ -42,6 +44,8 @@ export function MonthView() {
   const cells = useMemo(() => buildMonthGrid(anchor), [anchor]);
   const range = useMemo(() => visibleRange('month', anchor), [anchor]);
   const { events, calendarById, loading } = useEvents(range);
+  const { colorLabels } = useCalendarStore();
+  const labelById = useMemo(() => labelsLookup(colorLabels), [colorLabels]);
 
   const eventsByDay = useMemo(() => groupEventsByDay(events), [events]);
 
@@ -191,14 +195,18 @@ export function MonthView() {
                       {fmt.format(day, 'd')}
                     </span>
                     {dayEvents.slice(0, 3).map((ev) => {
-                      const cal = calendarById.get(ev.calendar_id);
+                      const color = resolveEventColor(
+                        ev,
+                        calendarById,
+                        labelById,
+                      );
                       return (
                         <span
                           key={ev.id}
                           className="month-event"
                           style={
-                            cal?.color
-                              ? ({ '--event-color': cal.color.hex } as React.CSSProperties)
+                            color.hex
+                              ? ({ '--event-color': color.hex } as React.CSSProperties)
                               : undefined
                           }
                         >

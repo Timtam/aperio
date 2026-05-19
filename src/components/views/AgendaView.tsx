@@ -5,6 +5,8 @@ import type { CalendarEvent } from '../../api/types';
 import { useAutoFocus } from '../../hooks/useAutoFocus';
 import { localDateKey } from '../../intl/dateKey';
 import { useDateFormat } from '../../intl/dateFormat';
+import { labelsLookup, resolveEventColor } from '../../intl/eventColor';
+import { useCalendarStore } from '../../state/CalendarStore';
 import { useDialogState } from '../../state/DialogState';
 import { useEvents } from '../../state/useEvents';
 import { useViewState } from '../../state/ViewState';
@@ -34,6 +36,8 @@ export function AgendaView() {
 
   const range = useMemo(() => visibleRange('agenda', anchor), [anchor]);
   const { events, calendarById, loading } = useEvents(range);
+  const { colorLabels } = useCalendarStore();
+  const labelById = useMemo(() => labelsLookup(colorLabels), [colorLabels]);
 
   const [focusIndex, setFocusIndex] = useState(0);
 
@@ -113,6 +117,7 @@ export function AgendaView() {
         ) : (
           renderEvents(events, focusIndex, {
             calendarById,
+            labelById,
             fmt,
             t,
             itemId,
@@ -125,7 +130,8 @@ export function AgendaView() {
 }
 
 interface RenderContext {
-  calendarById: Map<string, { name: string; color: { hex: string } | null }>;
+  calendarById: Parameters<typeof resolveEventColor>[1];
+  labelById: Parameters<typeof resolveEventColor>[2];
   fmt: ReturnType<typeof useDateFormat>;
   t: (key: string, vars?: Record<string, unknown>) => string;
   itemId: (i: number) => string;
@@ -161,15 +167,24 @@ function renderEvents(
     }
 
     const cal = ctx.calendarById.get(ev.calendar_id);
+    const color = resolveEventColor(ev, ctx.calendarById, ctx.labelById);
     const timeLabel = ev.all_day
       ? ctx.t('views.allDay')
       : `${ctx.fmt.format(start, 'p')} – ${ctx.fmt.format(new Date(ev.end), 'p')}`;
-    const aria = ctx.t('views.agenda.eventLabel', {
-      day: ctx.fmt.format(start, 'PPPP'),
-      title: ev.title,
-      time: timeLabel,
-      calendar: cal?.name ?? '—',
-    });
+    const aria = color.labelName
+      ? ctx.t('views.agenda.eventLabelWithLabel', {
+          day: ctx.fmt.format(start, 'PPPP'),
+          title: ev.title,
+          time: timeLabel,
+          calendar: cal?.name ?? '—',
+          label: color.labelName,
+        })
+      : ctx.t('views.agenda.eventLabel', {
+          day: ctx.fmt.format(start, 'PPPP'),
+          title: ev.title,
+          time: timeLabel,
+          calendar: cal?.name ?? '—',
+        });
     const focused = i === focusIndex;
 
     out.push(
@@ -183,8 +198,8 @@ function renderEvents(
           'agenda-list__item' + (focused ? ' agenda-list__item--focused' : '')
         }
         style={
-          cal?.color
-            ? ({ '--event-color': cal.color.hex } as React.CSSProperties)
+          color.hex
+            ? ({ '--event-color': color.hex } as React.CSSProperties)
             : undefined
         }
         onClick={() => ctx.onSelect(i)}

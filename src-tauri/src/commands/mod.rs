@@ -7,11 +7,13 @@
 //! "conflict" from "auth failure" to render appropriate UI.
 
 mod calendars;
+mod color_labels;
 mod tasks;
 
 use serde::Serialize;
 
 pub use calendars::*;
+pub use color_labels::*;
 pub use tasks::*;
 
 /// Frontend-friendly error envelope.

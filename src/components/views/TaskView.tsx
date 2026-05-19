@@ -12,6 +12,8 @@ import { invoke } from '@tauri-apps/api/core';
 import { useAnnouncer } from '../../a11y/Announcer';
 import { useAutoFocus } from '../../hooks/useAutoFocus';
 import { useDateFormat } from '../../intl/dateFormat';
+import { labelsLookup, resolveTaskColor } from '../../intl/eventColor';
+import { useCalendarStore } from '../../state/CalendarStore';
 import { useDialogState } from '../../state/DialogState';
 import { useTasks } from '../../state/useTasks';
 import type { Task, TaskStatus } from '../../api/types';
@@ -39,6 +41,8 @@ export function TaskView() {
   const fmt = useDateFormat();
   const announce = useAnnouncer();
   const { tasks, taskListById, loading } = useTasks();
+  const { colorLabels } = useCalendarStore();
+  const labelById = useMemo(() => labelsLookup(colorLabels), [colorLabels]);
   const { openTaskDialog } = useDialogState();
 
   // Flatten the task buckets into a single options array, interleaved
@@ -166,14 +170,25 @@ export function TaskView() {
           const focused = index === focusIndex;
           const checked = task.status === 'completed';
           const due = describeDue(task, fmt, t);
-          const aria = t('views.tasks.optionLabel', {
-            title: task.title,
-            list: listName,
-            state: checked
-              ? t('views.tasks.stateDone')
-              : t('views.tasks.stateOpen'),
-            due,
-          });
+          const color = resolveTaskColor(task, taskListById, labelById);
+          const aria = color.labelName
+            ? t('views.tasks.optionLabelWithLabel', {
+                title: task.title,
+                list: listName,
+                state: checked
+                  ? t('views.tasks.stateDone')
+                  : t('views.tasks.stateOpen'),
+                due,
+                label: color.labelName,
+              })
+            : t('views.tasks.optionLabel', {
+                title: task.title,
+                list: listName,
+                state: checked
+                  ? t('views.tasks.stateDone')
+                  : t('views.tasks.stateOpen'),
+                due,
+              });
           return (
             <li
               key={task.id}
@@ -185,6 +200,11 @@ export function TaskView() {
                 'task-list__item' +
                 (focused ? ' task-list__item--focused' : '') +
                 (checked ? ' task-list__item--done' : '')
+              }
+              style={
+                color.hex
+                  ? ({ '--event-color': color.hex } as React.CSSProperties)
+                  : undefined
               }
               onClick={() => {
                 setFocusIndex(index);

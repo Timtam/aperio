@@ -8,6 +8,7 @@ import {
   deleteCalendar,
 } from '../api/client';
 import { useCalendarStore } from '../state/CalendarStore';
+import { useDialogState } from '../state/DialogState';
 
 /**
  * Sidebar: filter for calendars and task lists, plus quick-create
@@ -34,6 +35,7 @@ export function Sidebar() {
     toggleTaskList,
     refreshTaskLists,
   } = useCalendarStore();
+  const { openColorLabels } = useDialogState();
 
   const onCreateCalendar = useCallback(async () => {
     try {
@@ -153,6 +155,16 @@ export function Sidebar() {
           onClick={onCreateTaskList}
         >
           + {t('sidebar.newTaskList')}
+        </button>
+      </section>
+
+      <section className="sidebar__section">
+        <button
+          type="button"
+          className="sidebar__add"
+          onClick={() => openColorLabels()}
+        >
+          {t('sidebar.manageColorLabels')}
         </button>
       </section>
     </aside>

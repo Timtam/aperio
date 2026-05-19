@@ -22,7 +22,8 @@ export type DialogMode =
   | { kind: 'none' }
   | { kind: 'event'; event: CalendarEvent | null; calendarId?: string }
   | { kind: 'task'; task: Task | null; listId?: string }
-  | { kind: 'quickAdd' };
+  | { kind: 'quickAdd' }
+  | { kind: 'colorLabels' };
 
 interface DialogStateValue {
   mode: DialogMode;
@@ -32,6 +33,7 @@ interface DialogStateValue {
   ) => void;
   openTaskDialog: (task?: Task | null, listId?: string) => void;
   openQuickAdd: () => void;
+  openColorLabels: () => void;
   close: () => void;
 }
 
@@ -73,6 +75,11 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     setMode({ kind: 'quickAdd' });
   }, []);
 
+  const openColorLabels = useCallback(() => {
+    captureTrigger();
+    setMode({ kind: 'colorLabels' });
+  }, []);
+
   const close = useCallback(() => {
     const target = triggerRef.current;
     triggerRef.current = null;
@@ -88,8 +95,22 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<DialogStateValue>(
-    () => ({ mode, openEventDialog, openTaskDialog, openQuickAdd, close }),
-    [mode, openEventDialog, openTaskDialog, openQuickAdd, close],
+    () => ({
+      mode,
+      openEventDialog,
+      openTaskDialog,
+      openQuickAdd,
+      openColorLabels,
+      close,
+    }),
+    [
+      mode,
+      openEventDialog,
+      openTaskDialog,
+      openQuickAdd,
+      openColorLabels,
+      close,
+    ],
   );
 
   return (

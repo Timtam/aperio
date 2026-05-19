@@ -15,6 +15,7 @@
 //! `src-tauri/src/db/sql/0001_init.sql` is present.
 
 mod calendars;
+mod color_labels;
 mod mapping;
 mod tasks;
 

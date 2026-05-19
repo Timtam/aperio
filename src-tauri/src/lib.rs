@@ -51,6 +51,10 @@ pub fn run() {
             commands::create_task,
             commands::update_task,
             commands::delete_task,
+            commands::list_color_labels,
+            commands::create_color_label,
+            commands::update_color_label,
+            commands::delete_color_label,
         ])
         .setup(move |_app| {
             // Future phases register the sync engine and plugin manager here.

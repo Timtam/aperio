@@ -1,4 +1,5 @@
 import { useDialogState } from '../state/DialogState';
+import { ColorLabelDialog } from './ColorLabelDialog';
 import { EventDialog } from './EventDialog';
 import { QuickAddDialog } from './QuickAddDialog';
 import { TaskDialog } from './TaskDialog';
@@ -32,6 +33,8 @@ export function DialogHost() {
       );
     case 'quickAdd':
       return <QuickAddDialog isOpen onClose={close} />;
+    case 'colorLabels':
+      return <ColorLabelDialog isOpen onClose={close} />;
     case 'none':
     default:
       return null;

@@ -50,6 +50,8 @@ interface FormState {
   description: string;
   /** RRULE body (without "RRULE:" prefix), or null if non-recurring. */
   rrule: string | null;
+  /** Color-label id, or null. */
+  colorLabel: string | null;
 }
 
 export function EventDialog({
@@ -60,7 +62,7 @@ export function EventDialog({
 }: EventDialogProps) {
   const { t } = useTranslation();
   const announce = useAnnouncer();
-  const { calendars } = useCalendarStore();
+  const { calendars, colorLabels } = useCalendarStore();
 
   const isEdit = event !== null;
   const initialState = useMemo<FormState>(
@@ -139,6 +141,7 @@ export function EventDialog({
             location: form.location.trim() || null,
             description: form.description.trim() || null,
             recurrence,
+            color_label: form.colorLabel,
           };
           await apiUpdateEvent(updated);
           announce(t('dialogs.event.updated', { title: trimmedTitle }));
@@ -152,7 +155,7 @@ export function EventDialog({
             end,
             all_day: form.allDay,
             recurrence,
-            color_label: null,
+            color_label: form.colorLabel,
             reminders: [],
             sound: null,
             attendees: [],
@@ -323,6 +326,25 @@ export function EventDialog({
           />
         </label>
 
+        <label className="form__field">
+          <span className="form__label">
+            {t('dialogs.event.fields.colorLabel')}
+          </span>
+          <select
+            value={form.colorLabel ?? ''}
+            onChange={(e) =>
+              update('colorLabel', e.target.value ? e.target.value : null)
+            }
+          >
+            <option value="">{t('dialogs.event.noColorLabel')}</option>
+            {colorLabels.map((label) => (
+              <option key={label.id} value={label.id}>
+                {label.name}
+              </option>
+            ))}
+          </select>
+        </label>
+
         <RecurrenceSelector
           value={form.rrule}
           onChange={(rrule) => update('rrule', rrule)}
@@ -391,6 +413,7 @@ function buildInitialState(
       location: event.location ?? '',
       description: event.description ?? '',
       rrule: event.recurrence?.rrule ?? null,
+      colorLabel: event.color_label ?? null,
     };
   }
 
@@ -415,6 +438,7 @@ function buildInitialState(
     location: '',
     description: '',
     rrule: null,
+    colorLabel: null,
   };
 }
 

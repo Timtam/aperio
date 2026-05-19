@@ -108,6 +108,12 @@ export interface Task {
   etag: string | null;
 }
 
+export interface ColorLabel {
+  id: string;
+  name: string;
+  hex: string;
+}
+
 export interface CommandError {
   code:
     | 'auth'

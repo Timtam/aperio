@@ -13,7 +13,7 @@ pub use adapter::{
     Adapter, AdapterSource, AuthToken, CalendarFeature, Capability, ContactsFeature, Container,
     Credentials, Reminderable, TasksFeature,
 };
-pub use color::{ColorLabelId, ColorSource, ContainerColor};
+pub use color::{ColorLabel, ColorLabelId, ColorSource, ContainerColor};
 pub use error::{Error, Result};
 pub use reminder::{Reminder, ReminderKind, SoundConfig, SoundSource};
 pub use types::{

@@ -4,6 +4,8 @@ import { isSameDay } from 'date-fns';
 
 import { useAutoFocus } from '../../hooks/useAutoFocus';
 import { useDateFormat } from '../../intl/dateFormat';
+import { labelsLookup, resolveEventColor } from '../../intl/eventColor';
+import { useCalendarStore } from '../../state/CalendarStore';
 import { useDialogState } from '../../state/DialogState';
 import { useEvents } from '../../state/useEvents';
 import { useViewState } from '../../state/ViewState';
@@ -32,6 +34,8 @@ export function DayView() {
 
   const range = useMemo(() => visibleRange('day', anchor), [anchor]);
   const { events, calendarById, loading } = useEvents(range);
+  const { colorLabels } = useCalendarStore();
+  const labelById = useMemo(() => labelsLookup(colorLabels), [colorLabels]);
 
   const dayEvents = useMemo(
     () => events.filter((ev) => isSameDay(new Date(ev.start), anchor)),
@@ -117,14 +121,23 @@ export function DayView() {
         ) : (
           dayEvents.map((ev, i) => {
             const cal = calendarById.get(ev.calendar_id);
+            const color = resolveEventColor(ev, calendarById, labelById);
             const startStr = fmt.format(new Date(ev.start), 'p');
             const endStr = fmt.format(new Date(ev.end), 'p');
-            const aria = t('views.day.eventLabel', {
-              title: ev.title,
-              start: startStr,
-              end: endStr,
-              calendar: cal?.name ?? '—',
-            });
+            const aria = color.labelName
+              ? t('views.day.eventLabelWithLabel', {
+                  title: ev.title,
+                  start: startStr,
+                  end: endStr,
+                  calendar: cal?.name ?? '—',
+                  label: color.labelName,
+                })
+              : t('views.day.eventLabel', {
+                  title: ev.title,
+                  start: startStr,
+                  end: endStr,
+                  calendar: cal?.name ?? '—',
+                });
             const focused = i === focusIndex;
             return (
               <li
@@ -138,8 +151,8 @@ export function DayView() {
                   (focused ? ' day-list__item--focused' : '')
                 }
                 style={
-                  cal?.color
-                    ? ({ '--event-color': cal.color.hex } as React.CSSProperties)
+                  color.hex
+                    ? ({ '--event-color': color.hex } as React.CSSProperties)
                     : undefined
                 }
                 onClick={() => setFocusIndex(i)}

@@ -34,6 +34,23 @@
     "cancel": "Cancel",
     "save": "Save",
     "create": "Create",
+    "close": "Close",
+    "colorLabels": {
+      "title": "Color labels",
+      "empty": "No color labels yet.",
+      "nameRequired": "Please enter a name.",
+      "create": "Create",
+      "created": "Label \"{{name}}\" created.",
+      "updated": "Label \"{{name}}\" updated.",
+      "deleted": "Label \"{{name}}\" deleted.",
+      "renameLabel": "Rename \"{{name}}\"",
+      "colorLabel": "Color for \"{{name}}\"",
+      "deleteLabel": "Delete \"{{name}}\"",
+      "fields": {
+        "name": "Name",
+        "color": "Color"
+      }
+    },
     "event": {
       "newTitle": "New event",
       "editTitle": "Edit event",
@@ -55,8 +72,10 @@
         "endDate": "End date",
         "endTime": "End time",
         "location": "Location",
-        "description": "Description"
+        "description": "Description",
+        "colorLabel": "Color label"
       },
+      "noColorLabel": "(No label)",
       "recurrence": {
         "label": "Repeat",
         "none": "Does not repeat",
@@ -110,8 +129,10 @@
         "deadlineMode": "Deadline",
         "date": "Date",
         "time": "Time",
-        "description": "Description"
+        "description": "Description",
+        "colorLabel": "Color label"
       },
+      "noColorLabel": "(No label)",
       "status": {
         "open": "Open",
         "inProgress": "In progress",
@@ -146,7 +167,8 @@
     "calendarCreated": "Calendar \"{{name}}\" created.",
     "calendarDeleted": "Calendar \"{{name}}\" deleted.",
     "taskListCreated": "Task list \"{{name}}\" created.",
-    "deleteCalendar": "Delete calendar \"{{name}}\""
+    "deleteCalendar": "Delete calendar \"{{name}}\"",
+    "manageColorLabels": "Manage color labels"
   },
   "views": {
     "loading": "Loading …",
@@ -157,13 +179,15 @@
       "gridLabel": "Week grid",
       "dayAnnounce_one": "{{day}}, 1 event",
       "dayAnnounce_other": "{{day}}, {{count}} events",
-      "eventLabel": "Event: {{title}}, {{time}}, calendar: {{calendar}}"
+      "eventLabel": "Event: {{title}}, {{time}}, calendar: {{calendar}}",
+      "eventLabelWithLabel": "Event: {{title}}, {{time}}, calendar: {{calendar}}, label: {{label}}"
     },
     "day": {
       "timeGrid": "Time grid",
       "eventList": "Events on this day",
       "empty": "No events on this day.",
-      "eventLabel": "Event: {{title}}, {{start}} to {{end}}, calendar: {{calendar}}"
+      "eventLabel": "Event: {{title}}, {{start}} to {{end}}, calendar: {{calendar}}",
+      "eventLabelWithLabel": "Event: {{title}}, {{start}} to {{end}}, calendar: {{calendar}}, label: {{label}}"
     },
     "month": {
       "title": "Month view",
@@ -186,7 +210,8 @@
       "allDay": "All day",
       "dayLabel_one": "{{day}}, 1 event",
       "dayLabel_other": "{{day}}, {{count}} events",
-      "eventLabel": "{{day}}, {{title}}, {{time}}, calendar: {{calendar}}"
+      "eventLabel": "{{day}}, {{title}}, {{time}}, calendar: {{calendar}}",
+      "eventLabelWithLabel": "{{day}}, {{title}}, {{time}}, calendar: {{calendar}}, label: {{label}}"
     },
     "tasks": {
       "title": "Tasks",
@@ -196,6 +221,7 @@
       "stateDone": "done",
       "stateOpen": "open",
       "optionLabel": "{{title}}, list {{list}}, {{state}}, {{due}}",
+      "optionLabelWithLabel": "{{title}}, list {{list}}, {{state}}, {{due}}, label: {{label}}",
       "dueScheduled": "Scheduled: {{date}}",
       "dueDeadline": "Due: {{date}}",
       "dueNone": "No date",

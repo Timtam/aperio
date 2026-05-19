@@ -44,6 +44,7 @@ interface FormState {
   date: string;
   time: string;
   description: string;
+  colorLabel: string | null;
 }
 
 export function TaskDialog({
@@ -54,7 +55,7 @@ export function TaskDialog({
 }: TaskDialogProps) {
   const { t } = useTranslation();
   const announce = useAnnouncer();
-  const { taskLists } = useCalendarStore();
+  const { taskLists, colorLabels } = useCalendarStore();
 
   const isEdit = task !== null;
   const initialState = useMemo<FormState>(
@@ -112,6 +113,7 @@ export function TaskDialog({
             deadline_date,
             deadline_time,
             description: form.description.trim() || null,
+            color_label: form.colorLabel,
             completed_at:
               form.status === 'completed'
                 ? task.completed_at ?? new Date().toISOString()
@@ -132,7 +134,7 @@ export function TaskDialog({
             deadline_time,
             recurrence: null,
             parent_id: null,
-            color_label: null,
+            color_label: form.colorLabel,
             reminders: [],
             sound: null,
           });
@@ -314,6 +316,25 @@ export function TaskDialog({
           />
         </label>
 
+        <label className="form__field">
+          <span className="form__label">
+            {t('dialogs.task.fields.colorLabel')}
+          </span>
+          <select
+            value={form.colorLabel ?? ''}
+            onChange={(e) =>
+              update('colorLabel', e.target.value ? e.target.value : null)
+            }
+          >
+            <option value="">{t('dialogs.task.noColorLabel')}</option>
+            {colorLabels.map((label) => (
+              <option key={label.id} value={label.id}>
+                {label.name}
+              </option>
+            ))}
+          </select>
+        </label>
+
         {error && (
           <p role="alert" className="form__error">
             {error}
@@ -377,6 +398,7 @@ function buildInitialState(
         todayInput(),
       time: task.deadline_time?.slice(0, 5) ?? '09:00',
       description: task.description ?? '',
+      colorLabel: task.color_label ?? null,
     };
   }
   return {
@@ -388,6 +410,7 @@ function buildInitialState(
     date: todayInput(),
     time: '09:00',
     description: '',
+    colorLabel: null,
   };
 }
 
