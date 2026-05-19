@@ -18,7 +18,8 @@
     "i18next": "^23",
     "react-i18next": "^14",
     "date-fns": "^3",
-    "date-fns-tz": "^3"
+    "date-fns-tz": "^3",
+    "rrule": "^2.8"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",

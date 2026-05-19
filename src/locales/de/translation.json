@@ -56,6 +56,40 @@
         "endTime": "Endzeit",
         "location": "Ort",
         "description": "Beschreibung"
+      },
+      "recurrence": {
+        "label": "Wiederholung",
+        "none": "Keine",
+        "daily": "Täglich",
+        "weekly": "Wöchentlich",
+        "monthly": "Monatlich",
+        "yearly": "Jährlich",
+        "intervalLabel": "Alle wie viele {{unit}}",
+        "unit": {
+          "DAILY": "Tage",
+          "WEEKLY": "Wochen",
+          "MONTHLY": "Monate",
+          "YEARLY": "Jahre"
+        },
+        "weekdays": "Wochentage",
+        "short": {
+          "mon": "Mo",
+          "tue": "Di",
+          "wed": "Mi",
+          "thu": "Do",
+          "fri": "Fr",
+          "sat": "Sa",
+          "sun": "So"
+        },
+        "endLabel": "Ende",
+        "end": {
+          "never": "Nie",
+          "count": "Nach Anzahl",
+          "until": "Bis Datum"
+        },
+        "countLabel": "Anzahl Vorkommen",
+        "untilLabel": "Ende-Datum",
+        "editsSeries": "Bearbeitungen wirken sich auf die gesamte Serie aus."
       }
     },
     "task": {

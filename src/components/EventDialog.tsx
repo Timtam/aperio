@@ -17,6 +17,7 @@ import {
 import type { CalendarEvent } from '../api/types';
 import { useCalendarStore } from '../state/CalendarStore';
 import { Modal } from './Modal';
+import { RecurrenceSelector } from './RecurrenceSelector';
 
 /**
  * Event create / edit dialog.
@@ -47,6 +48,8 @@ interface FormState {
   allDay: boolean;
   location: string;
   description: string;
+  /** RRULE body (without "RRULE:" prefix), or null if non-recurring. */
+  rrule: string | null;
 }
 
 export function EventDialog({
@@ -112,11 +115,22 @@ export function EventDialog({
         return;
       }
 
+      const recurrence = form.rrule
+        ? { rrule: form.rrule, exceptions: event?.recurrence?.exceptions ?? [] }
+        : null;
+
       setSubmitting(true);
       try {
         if (isEdit && event) {
+          // Editing a recurring occurrence edits the whole series. The
+          // synthetic per-occurrence id from `expandAll` carries an "@"
+          // suffix — strip it to get the original series row id.
+          const seriesId = event.id.includes('@')
+            ? event.id.split('@')[0]
+            : event.id;
           const updated: CalendarEvent = {
             ...event,
+            id: seriesId,
             title: trimmedTitle,
             calendar_id: form.calendarId,
             start,
@@ -124,6 +138,7 @@ export function EventDialog({
             all_day: form.allDay,
             location: form.location.trim() || null,
             description: form.description.trim() || null,
+            recurrence,
           };
           await apiUpdateEvent(updated);
           announce(t('dialogs.event.updated', { title: trimmedTitle }));
@@ -136,7 +151,7 @@ export function EventDialog({
             start,
             end,
             all_day: form.allDay,
-            recurrence: null,
+            recurrence,
             color_label: null,
             reminders: [],
             sound: null,
@@ -163,7 +178,10 @@ export function EventDialog({
     setError(null);
     setSubmitting(true);
     try {
-      await deleteEventById(event.id);
+      const seriesId = event.id.includes('@')
+        ? event.id.split('@')[0]
+        : event.id;
+      await deleteEventById(seriesId);
       announce(t('dialogs.event.deleted', { title: event.title }));
       onClose();
     } catch (err) {
@@ -305,6 +323,17 @@ export function EventDialog({
           />
         </label>
 
+        <RecurrenceSelector
+          value={form.rrule}
+          onChange={(rrule) => update('rrule', rrule)}
+        />
+
+        {isEdit && event?.recurrence && (
+          <p className="form__hint">
+            {t('dialogs.event.recurrence.editsSeries')}
+          </p>
+        )}
+
         {error && (
           <p role="alert" className="form__error">
             {error}
@@ -361,6 +390,7 @@ function buildInitialState(
       allDay: event.all_day,
       location: event.location ?? '',
       description: event.description ?? '',
+      rrule: event.recurrence?.rrule ?? null,
     };
   }
 
@@ -384,6 +414,7 @@ function buildInitialState(
     allDay: false,
     location: '',
     description: '',
+    rrule: null,
   };
 }
 

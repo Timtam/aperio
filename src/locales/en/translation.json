@@ -56,6 +56,40 @@
         "endTime": "End time",
         "location": "Location",
         "description": "Description"
+      },
+      "recurrence": {
+        "label": "Repeat",
+        "none": "Does not repeat",
+        "daily": "Daily",
+        "weekly": "Weekly",
+        "monthly": "Monthly",
+        "yearly": "Yearly",
+        "intervalLabel": "Every how many {{unit}}",
+        "unit": {
+          "DAILY": "days",
+          "WEEKLY": "weeks",
+          "MONTHLY": "months",
+          "YEARLY": "years"
+        },
+        "weekdays": "Weekdays",
+        "short": {
+          "mon": "Mon",
+          "tue": "Tue",
+          "wed": "Wed",
+          "thu": "Thu",
+          "fri": "Fri",
+          "sat": "Sat",
+          "sun": "Sun"
+        },
+        "endLabel": "End",
+        "end": {
+          "never": "Never",
+          "count": "After count",
+          "until": "On date"
+        },
+        "countLabel": "Number of occurrences",
+        "untilLabel": "End date",
+        "editsSeries": "Changes apply to the entire series."
       }
     },
     "task": {
