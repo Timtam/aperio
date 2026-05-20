@@ -14,6 +14,7 @@ import {
   deleteAccount,
   isCommandError,
   listAccounts,
+  testCaldavConnection,
 } from '../api/client';
 import type { Account, AdapterKind } from '../api/types';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -49,7 +50,19 @@ const KIND_ORDER: AdapterKind[] = [
   'todoist',
 ];
 
-const ENABLED_KINDS: ReadonlySet<AdapterKind> = new Set(['local']);
+const ENABLED_KINDS: ReadonlySet<AdapterKind> = new Set(['local', 'caldav']);
+
+interface CaldavFields {
+  serverUrl: string;
+  username: string;
+  password: string;
+}
+
+const EMPTY_CALDAV: CaldavFields = {
+  serverUrl: '',
+  username: '',
+  password: '',
+};
 
 export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
   const { t } = useTranslation();
@@ -63,6 +76,9 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
   const [kind, setKind] = useState<AdapterKind>('local');
   const [displayName, setDisplayName] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testMessage, setTestMessage] = useState<string | null>(null);
+  const [caldav, setCaldav] = useState<CaldavFields>(EMPTY_CALDAV);
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -80,9 +96,17 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
     if (isOpen) refresh();
   }, [isOpen, refresh]);
 
+  const validateCaldav = useCallback((): string | null => {
+    if (!caldav.serverUrl.trim()) return t('dialogs.accounts.serverUrlRequired');
+    if (!caldav.username.trim()) return t('dialogs.accounts.usernameRequired');
+    if (!caldav.password) return t('dialogs.accounts.passwordRequired');
+    return null;
+  }, [caldav, t]);
+
   const onSubmit = useCallback(
     async (e: FormEvent) => {
       e.preventDefault();
+      setTestMessage(null);
       const name = displayName.trim();
       if (!name) {
         setError(t('dialogs.accounts.nameRequired'));
@@ -93,15 +117,33 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
         setError(t('dialogs.accounts.kindUnavailable'));
         return;
       }
+      if (kind === 'caldav') {
+        const v = validateCaldav();
+        if (v) {
+          setError(v);
+          return;
+        }
+      }
       setSubmitting(true);
       setError(null);
       try {
+        const configJson =
+          kind === 'caldav'
+            ? JSON.stringify({
+                server_url: caldav.serverUrl.trim(),
+                username: caldav.username.trim(),
+                auth_kind: 'basic',
+              })
+            : '{}';
         const created = await createAccount({
           adapter_kind: kind,
           display_name: name,
+          config_json: configJson,
+          secret: kind === 'caldav' ? caldav.password : undefined,
         });
         announce(t('dialogs.accounts.created', { name: created.display_name }));
         setDisplayName('');
+        setCaldav(EMPTY_CALDAV);
         refresh();
       } catch (err) {
         if (isCommandError(err)) setError(`${err.code}: ${err.message}`);
@@ -110,8 +152,33 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
         setSubmitting(false);
       }
     },
-    [displayName, kind, announce, refresh, t],
+    [displayName, kind, caldav, validateCaldav, announce, refresh, t],
   );
+
+  const onTestConnection = useCallback(async () => {
+    setTestMessage(null);
+    setError(null);
+    const v = validateCaldav();
+    if (v) {
+      setError(v);
+      return;
+    }
+    setTesting(true);
+    try {
+      await testCaldavConnection(
+        caldav.serverUrl.trim(),
+        caldav.username.trim(),
+        caldav.password,
+      );
+      setTestMessage(t('dialogs.accounts.testOk'));
+      announce(t('dialogs.accounts.testOk'));
+    } catch (err) {
+      if (isCommandError(err)) setError(`${err.code}: ${err.message}`);
+      else setError(String(err));
+    } finally {
+      setTesting(false);
+    }
+  }, [caldav, validateCaldav, announce, t]);
 
   const performDelete = useCallback(
     async (acc: Account) => {
@@ -344,11 +411,97 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
               />
             </label>
 
+            {kind === 'caldav' && (
+              <>
+                <label className="form__field">
+                  <span className="form__label">
+                    {t('dialogs.accounts.serverUrlLabel')}
+                  </span>
+                  <input
+                    type="url"
+                    value={caldav.serverUrl}
+                    onChange={(e) =>
+                      setCaldav((prev) => ({
+                        ...prev,
+                        serverUrl: e.target.value,
+                      }))
+                    }
+                    placeholder={t('dialogs.accounts.serverUrlPlaceholder')}
+                    autoComplete="off"
+                    spellCheck={false}
+                    required
+                  />
+                  <span className="form__hint">
+                    {t('dialogs.accounts.serverUrlHint')}
+                  </span>
+                </label>
+                <label className="form__field">
+                  <span className="form__label">
+                    {t('dialogs.accounts.usernameLabel')}
+                  </span>
+                  <input
+                    type="text"
+                    value={caldav.username}
+                    onChange={(e) =>
+                      setCaldav((prev) => ({
+                        ...prev,
+                        username: e.target.value,
+                      }))
+                    }
+                    autoComplete="username"
+                    spellCheck={false}
+                    required
+                  />
+                </label>
+                <label className="form__field">
+                  <span className="form__label">
+                    {t('dialogs.accounts.passwordLabel')}
+                  </span>
+                  <input
+                    type="password"
+                    value={caldav.password}
+                    onChange={(e) =>
+                      setCaldav((prev) => ({
+                        ...prev,
+                        password: e.target.value,
+                      }))
+                    }
+                    autoComplete="new-password"
+                    required
+                  />
+                  <span className="form__hint">
+                    {t('dialogs.accounts.passwordHint')}
+                  </span>
+                </label>
+                {testMessage && (
+                  <p
+                    role="status"
+                    aria-live="polite"
+                    className="form__hint accounts-test-ok"
+                  >
+                    {testMessage}
+                  </p>
+                )}
+              </>
+            )}
+
             <div className="form__actions">
+              {kind === 'caldav' && (
+                <button
+                  type="button"
+                  className="form__action"
+                  onClick={onTestConnection}
+                  disabled={testing || submitting}
+                >
+                  {testing
+                    ? t('dialogs.accounts.testing')
+                    : t('dialogs.accounts.testConnection')}
+                </button>
+              )}
               <button
                 type="submit"
                 className="form__action form__action--primary"
-                disabled={submitting || !ENABLED_KINDS.has(kind)}
+                disabled={submitting || testing || !ENABLED_KINDS.has(kind)}
               >
                 {t('dialogs.accounts.add')}
               </button>

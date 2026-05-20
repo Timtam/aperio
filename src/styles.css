@@ -520,6 +520,11 @@ button:disabled {
   margin-top: var(--space-3);
 }
 
+.accounts-test-ok {
+  color: var(--color-fg-muted);
+  font-style: italic;
+}
+
 .modal__header {
   display: flex;
   align-items: center;

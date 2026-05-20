@@ -189,6 +189,9 @@ export interface CreateAccountRequest {
   display_name: string;
   /** Optional adapter-specific config; defaults to "{}" backend-side. */
   config_json?: string;
+  /** Secret half of the credentials (CalDAV password etc.).
+   *  Stored only in the platform keychain, never in SQLite. */
+  secret?: string;
 }
 
 export const createAccount = (request: CreateAccountRequest) =>
@@ -196,3 +199,20 @@ export const createAccount = (request: CreateAccountRequest) =>
 
 export const deleteAccount = (id: string) =>
   invoke<void>('delete_account', { id });
+
+/** Adapter-specific CalDAV config JSON shape that lives in
+ *  `accounts.config_json`. Mirrors the backend `CaldavAccountConfig`. */
+export interface CaldavConfig {
+  server_url: string;
+  username: string;
+  auth_kind: 'basic' | 'bearer';
+}
+
+export const testCaldavConnection = (
+  server_url: string,
+  username: string,
+  password: string,
+) =>
+  invoke<void>('test_caldav_connection', {
+    request: { server_url, username, password },
+  });
