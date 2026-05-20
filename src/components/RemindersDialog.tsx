@@ -3,11 +3,11 @@ import {
   useEffect,
   useId,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { useAutoFocus } from '../hooks/useAutoFocus';
 import {
   getEventById,
   getTaskById,
@@ -84,7 +84,17 @@ export function RemindersDialog({ isOpen, onClose }: RemindersDialogProps) {
 
   const idPrefix = useId();
   const itemId = (i: number) => `${idPrefix}-r-${i}`;
-  const listRef = useAutoFocus<HTMLUListElement>(!loading);
+
+  // Two-track focus: the listbox carries the tab stop when there are
+  // rows, otherwise the surrounding section does — so the screen
+  // reader can still hear the heading + empty-state message in an
+  // empty list. Same idea as ColorLabelDialog / AccountsDialog.
+  const listRef = useRef<HTMLUListElement>(null);
+  const sectionRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!isOpen || loading) return;
+    (listRef.current ?? sectionRef.current)?.focus({ preventScroll: true });
+  }, [isOpen, loading, items.length]);
 
   const rows = useMemo(
     () =>
@@ -173,8 +183,21 @@ export function RemindersDialog({ isOpen, onClose }: RemindersDialogProps) {
           </p>
         )}
 
+        <section
+          ref={sectionRef}
+          tabIndex={rows.length === 0 ? 0 : -1}
+          aria-label={t('dialogs.reminders.listLabel')}
+          aria-describedby={
+            rows.length === 0 && !loading
+              ? `${idPrefix}-empty`
+              : undefined
+          }
+          className="reminders-section"
+        >
         {rows.length === 0 && !loading && !error && (
-          <p className="form__hint">{t('dialogs.reminders.empty')}</p>
+          <p id={`${idPrefix}-empty`} className="form__hint">
+            {t('dialogs.reminders.empty')}
+          </p>
         )}
 
         {rows.length > 0 && (
@@ -224,6 +247,7 @@ export function RemindersDialog({ isOpen, onClose }: RemindersDialogProps) {
             })}
           </ul>
         )}
+        </section>
 
         <div className="form__actions">
           <button type="button" onClick={onClose} className="form__action">

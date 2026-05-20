@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useId,
+  useRef,
   useState,
   type FormEvent,
 } from 'react';
@@ -15,7 +16,6 @@ import {
   listAccounts,
 } from '../api/client';
 import type { Account, AdapterKind } from '../api/types';
-import { useAutoFocus } from '../hooks/useAutoFocus';
 import { ConfirmDialog } from './ConfirmDialog';
 import { Modal } from './Modal';
 
@@ -128,8 +128,87 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
     [announce, refresh, t],
   );
 
-  const formRef = useAutoFocus<HTMLInputElement>(!loading);
   const headingId = useId();
+  const optionId = (i: number) => `${headingId}-acc-${i}`;
+
+  // Two-track focus model:
+  //  - When the list has rows, the <ul> takes the tab stop and uses
+  //    aria-activedescendant to spotlight the focused row. Arrow keys
+  //    move the spotlight, Enter / Delete open the confirm dialog
+  //    (no-op for the local row).
+  //  - When the list is empty, the surrounding <section> takes the
+  //    tab stop so the screen reader still hears the heading and the
+  //    empty-state hint instead of skipping straight to the form.
+  const sectionRef = useRef<HTMLElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+  const [focusIndex, setFocusIndex] = useState(0);
+
+  useEffect(() => {
+    if (focusIndex >= accounts.length) {
+      setFocusIndex(Math.max(0, accounts.length - 1));
+    }
+  }, [accounts.length, focusIndex]);
+
+  // Land focus on the listbox (or the section fallback) once the
+  // accounts have loaded, so the user can start arrow-navigating
+  // immediately without first chasing a tab stop.
+  useEffect(() => {
+    if (!isOpen || loading) return;
+    (listRef.current ?? sectionRef.current)?.focus({ preventScroll: true });
+  }, [isOpen, loading, accounts.length]);
+
+  const isLocalAt = (i: number): boolean => {
+    const acc = accounts[i];
+    return !!acc && acc.adapter_kind === 'local' && acc.id === 'local';
+  };
+
+  const tryDelete = useCallback(
+    (i: number) => {
+      const acc = accounts[i];
+      if (!acc) return;
+      if (acc.adapter_kind === 'local' && acc.id === 'local') {
+        announce(t('dialogs.accounts.localCannotDelete'));
+        return;
+      }
+      setConfirmTarget(acc);
+    },
+    [accounts, announce, t],
+  );
+
+  const handleListKey = (e: React.KeyboardEvent<HTMLUListElement>) => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (accounts.length === 0) return;
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault();
+        setFocusIndex((i) => Math.min(i + 1, accounts.length - 1));
+        return;
+      case 'ArrowUp':
+        e.preventDefault();
+        setFocusIndex((i) => Math.max(i - 1, 0));
+        return;
+      case 'Home':
+        e.preventDefault();
+        setFocusIndex(0);
+        return;
+      case 'End':
+        e.preventDefault();
+        setFocusIndex(accounts.length - 1);
+        return;
+      case 'Enter':
+      case ' ':
+      case 'Spacebar':
+      case 'Delete':
+      case 'Backspace':
+        e.preventDefault();
+        tryDelete(focusIndex);
+        return;
+      default:
+        return;
+    }
+  };
+
+  const sectionTabIndex = accounts.length === 0 && !loading ? 0 : -1;
 
   return (
     <Modal
@@ -155,24 +234,60 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
           </p>
         )}
 
-        <section aria-labelledby={`${headingId}-list`} className="accounts-list-section">
+        <section
+          ref={sectionRef}
+          tabIndex={sectionTabIndex}
+          aria-labelledby={`${headingId}-list`}
+          aria-describedby={
+            accounts.length === 0 ? `${headingId}-empty` : undefined
+          }
+          className="accounts-list-section"
+        >
           <h3 id={`${headingId}-list`} className="form__label">
             {t('dialogs.accounts.existingHeading')}
           </h3>
           {accounts.length === 0 && !loading ? (
-            <p className="form__hint">{t('dialogs.accounts.empty')}</p>
+            <p id={`${headingId}-empty`} className="form__hint">
+              {t('dialogs.accounts.empty')}
+            </p>
           ) : (
-            <ul className="accounts-list" role="list">
-              {accounts.map((acc) => {
-                const isLocal = acc.adapter_kind === 'local' && acc.id === 'local';
+            <ul
+              ref={listRef}
+              role="listbox"
+              tabIndex={0}
+              aria-label={t('dialogs.accounts.listLabel')}
+              aria-activedescendant={
+                accounts.length > 0 ? optionId(focusIndex) : undefined
+              }
+              onKeyDown={handleListKey}
+              className="accounts-list"
+            >
+              {accounts.map((acc, i) => {
+                const isLocal = isLocalAt(i);
+                const focused = i === focusIndex;
                 return (
                   <li
                     key={acc.id}
-                    className="accounts-list__item"
-                    aria-label={t('dialogs.accounts.rowLabel', {
-                      name: acc.display_name,
-                      kind: t(`dialogs.accounts.kindName.${acc.adapter_kind}`),
-                    })}
+                    id={optionId(i)}
+                    role="option"
+                    aria-selected={focused}
+                    aria-label={t(
+                      isLocal
+                        ? 'dialogs.accounts.rowLabelLocal'
+                        : 'dialogs.accounts.rowLabel',
+                      {
+                        name: acc.display_name,
+                        kind: t(`dialogs.accounts.kindName.${acc.adapter_kind}`),
+                      },
+                    )}
+                    className={
+                      'accounts-list__item' +
+                      (focused ? ' accounts-list__item--focused' : '')
+                    }
+                    onClick={() => {
+                      setFocusIndex(i);
+                      if (!isLocal) setConfirmTarget(acc);
+                    }}
                   >
                     <span className="accounts-list__name">
                       {acc.display_name}
@@ -180,19 +295,6 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
                     <span className="accounts-list__kind">
                       {t(`dialogs.accounts.kindName.${acc.adapter_kind}`)}
                     </span>
-                    <button
-                      type="button"
-                      className="form__action form__action--danger"
-                      disabled={isLocal}
-                      title={
-                        isLocal
-                          ? t('dialogs.accounts.localCannotDelete')
-                          : undefined
-                      }
-                      onClick={() => setConfirmTarget(acc)}
-                    >
-                      {t('dialogs.accounts.delete')}
-                    </button>
                   </li>
                 );
               })}
@@ -233,7 +335,6 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
                 {t('dialogs.accounts.nameLabel')}
               </span>
               <input
-                ref={formRef}
                 type="text"
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}

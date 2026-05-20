@@ -280,7 +280,9 @@
       "deleteMessage": "Remove account \"{{name}}\"? Local calendars, task lists, events and tasks that belong to it will be deleted too.",
       "created": "Account \"{{name}}\" created.",
       "deleted": "Account \"{{name}}\" removed.",
-      "rowLabel": "{{name}} ({{kind}})",
+      "listLabel": "Connected accounts",
+      "rowLabel": "{{name}} ({{kind}}). Press Enter or Delete to remove.",
+      "rowLabelLocal": "{{name}} ({{kind}}). Cannot be removed.",
       "kindUnavailable": "This adapter type is not available yet.",
       "comingSoon": "coming soon",
       "kindName": {

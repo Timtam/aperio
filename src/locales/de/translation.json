@@ -280,7 +280,9 @@
       "deleteMessage": "Konto „{{name}}\" wirklich entfernen? Zugehörige lokale Kalender, Aufgabenlisten, Termine und Aufgaben werden mitgelöscht.",
       "created": "Konto „{{name}}\" wurde angelegt.",
       "deleted": "Konto „{{name}}\" wurde entfernt.",
-      "rowLabel": "{{name}} ({{kind}})",
+      "listLabel": "Verbundene Konten",
+      "rowLabel": "{{name}} ({{kind}}). Enter oder Entf zum Entfernen.",
+      "rowLabelLocal": "{{name}} ({{kind}}). Kann nicht entfernt werden.",
       "kindUnavailable": "Dieser Adapter-Typ ist noch nicht verfügbar.",
       "comingSoon": "demnächst verfügbar",
       "kindName": {
