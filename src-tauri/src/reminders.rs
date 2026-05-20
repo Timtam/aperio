@@ -106,12 +106,16 @@ impl ReminderScheduler {
         self.invalidate.notify_one();
     }
 
-    /// Snapshot the upcoming reminder triggers for the Ctrl+Shift+R
-    /// overview dialog. Filters out triggers that already fired in
-    /// this process; sorted ascending by trigger time. Results are
-    /// capped at `limit` to keep the dialog snappy.
+    /// Snapshot reminder triggers for the Ctrl+Shift+R overview
+    /// dialog. Includes both already-passed and upcoming triggers
+    /// within a generous window so the user can review what fired
+    /// recently and what is still pending. Sorted ascending by
+    /// trigger time and capped at `limit` to keep the dialog snappy.
     pub fn upcoming(&self, limit: usize) -> Vec<UpcomingReminder> {
-        let mut triggers = self.collect_pending_triggers();
+        let now = Utc::now();
+        let earliest = now - ChronoDuration::days(OVERVIEW_PAST_DAYS);
+        let latest = now + ChronoDuration::days(OVERVIEW_FUTURE_DAYS);
+        let mut triggers = self.collect_triggers_in_window(earliest, latest);
         triggers.sort_by_key(|t| t.trigger_at);
         triggers
             .into_iter()
@@ -157,98 +161,105 @@ impl ReminderScheduler {
         }
     }
 
+    /// Walk events + tasks once and collect every reminder trigger
+    /// whose absolute trigger time falls inside `[earliest, latest]`.
+    /// No filtering for "already fired" — callers layer that on top.
+    fn collect_triggers_in_window(
+        &self,
+        earliest: DateTime<Utc>,
+        latest: DateTime<Utc>,
+    ) -> Vec<Trigger> {
+        let conn = match self.db.lock() {
+            Ok(c) => c,
+            Err(err) => {
+                warn!(?err, "reminder DB mutex poisoned");
+                return Vec::new();
+            }
+        };
+        let mut acc: Vec<Trigger> = Vec::new();
+
+        // Events
+        if let Ok(mut stmt) = conn.prepare(EVENT_QUERY) {
+            if let Ok(mut rows) = stmt.query(params![]) {
+                while let Some(row) = rows.next().unwrap_or(None) {
+                    let id: String = row.get(0).unwrap_or_default();
+                    let title: String = row.get(1).unwrap_or_default();
+                    let start_str: String = row.get(2).unwrap_or_default();
+                    let reminders_json: Option<String> = row.get(3).unwrap_or(None);
+                    let Some(reminders) = parse_reminders(reminders_json.as_deref())
+                    else {
+                        continue;
+                    };
+                    let Ok(start) = start_str.parse::<DateTime<Utc>>() else {
+                        continue;
+                    };
+                    for r in &reminders {
+                        if let Some(at) = trigger_time_for(&r.kind, start) {
+                            if at >= earliest && at <= latest {
+                                acc.push(Trigger {
+                                    item_id: id.clone(),
+                                    item_kind: ItemKind::Event,
+                                    title: title.clone(),
+                                    body: format_event_body(&start),
+                                    trigger_at: at,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Tasks
+        if let Ok(mut stmt) = conn.prepare(TASK_QUERY) {
+            if let Ok(mut rows) = stmt.query(params![]) {
+                while let Some(row) = rows.next().unwrap_or(None) {
+                    let id: String = row.get(0).unwrap_or_default();
+                    let title: String = row.get(1).unwrap_or_default();
+                    let scheduled_date: Option<String> = row.get(2).unwrap_or(None);
+                    let deadline_date: Option<String> = row.get(3).unwrap_or(None);
+                    let deadline_time: Option<String> = row.get(4).unwrap_or(None);
+                    let reminders_json: Option<String> = row.get(5).unwrap_or(None);
+                    let Some(reminders) = parse_reminders(reminders_json.as_deref())
+                    else {
+                        continue;
+                    };
+                    let Some(due) = task_due_time(
+                        scheduled_date.as_deref(),
+                        deadline_date.as_deref(),
+                        deadline_time.as_deref(),
+                    ) else {
+                        continue;
+                    };
+                    for r in &reminders {
+                        if let Some(at) = trigger_time_for(&r.kind, due) {
+                            if at >= earliest && at <= latest {
+                                acc.push(Trigger {
+                                    item_id: id.clone(),
+                                    item_kind: ItemKind::Task,
+                                    title: title.clone(),
+                                    body: format_task_body(&due),
+                                    trigger_at: at,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        acc
+    }
+
     /// Build the list of pending (not-yet-fired, in-the-future or
-    /// just-overdue) reminder triggers across all calendars and lists.
-    /// Returns at most `MAX_HORIZON_DAYS` of lookahead so we never
-    /// produce a giant fan-out from a long-running recurring series.
+    /// just-overdue) reminder triggers for the scheduler. Limited to
+    /// `MAX_HORIZON_DAYS` of lookahead so we don't fan out on long
+    /// recurring series, with a small `GRACE_MINUTES` tolerance for
+    /// just-overdue triggers we still want to deliver.
     fn collect_pending_triggers(&self) -> Vec<Trigger> {
         let now = Utc::now();
-        let horizon = now + ChronoDuration::days(MAX_HORIZON_DAYS);
-        let mut out: Vec<Trigger> = {
-            let conn = match self.db.lock() {
-                Ok(c) => c,
-                Err(err) => {
-                    warn!(?err, "reminder DB mutex poisoned");
-                    return Vec::new();
-                }
-            };
-            let mut acc: Vec<Trigger> = Vec::new();
-
-            // Events
-            if let Ok(mut stmt) = conn.prepare(EVENT_QUERY) {
-                if let Ok(mut rows) = stmt.query(params![]) {
-                    while let Some(row) = rows.next().unwrap_or(None) {
-                        let id: String = row.get(0).unwrap_or_default();
-                        let title: String = row.get(1).unwrap_or_default();
-                        let start_str: String = row.get(2).unwrap_or_default();
-                        let reminders_json: Option<String> = row.get(3).unwrap_or(None);
-                        let Some(reminders) = parse_reminders(reminders_json.as_deref())
-                        else {
-                            continue;
-                        };
-                        let Ok(start) = start_str.parse::<DateTime<Utc>>() else {
-                            continue;
-                        };
-                        for r in &reminders {
-                            if let Some(at) = trigger_time_for(&r.kind, start) {
-                                if at >= now - ChronoDuration::minutes(GRACE_MINUTES)
-                                    && at <= horizon
-                                {
-                                    acc.push(Trigger {
-                                        item_id: id.clone(),
-                                        item_kind: ItemKind::Event,
-                                        title: title.clone(),
-                                        body: format_event_body(&start),
-                                        trigger_at: at,
-                                    });
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Tasks
-            if let Ok(mut stmt) = conn.prepare(TASK_QUERY) {
-                if let Ok(mut rows) = stmt.query(params![]) {
-                    while let Some(row) = rows.next().unwrap_or(None) {
-                        let id: String = row.get(0).unwrap_or_default();
-                        let title: String = row.get(1).unwrap_or_default();
-                        let scheduled_date: Option<String> = row.get(2).unwrap_or(None);
-                        let deadline_date: Option<String> = row.get(3).unwrap_or(None);
-                        let deadline_time: Option<String> = row.get(4).unwrap_or(None);
-                        let reminders_json: Option<String> = row.get(5).unwrap_or(None);
-                        let Some(reminders) = parse_reminders(reminders_json.as_deref())
-                        else {
-                            continue;
-                        };
-                        let Some(due) = task_due_time(
-                            scheduled_date.as_deref(),
-                            deadline_date.as_deref(),
-                            deadline_time.as_deref(),
-                        ) else {
-                            continue;
-                        };
-                        for r in &reminders {
-                            if let Some(at) = trigger_time_for(&r.kind, due) {
-                                if at >= now - ChronoDuration::minutes(GRACE_MINUTES)
-                                    && at <= horizon
-                                {
-                                    acc.push(Trigger {
-                                        item_id: id.clone(),
-                                        item_kind: ItemKind::Task,
-                                        title: title.clone(),
-                                        body: format_task_body(&due),
-                                        trigger_at: at,
-                                    });
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            acc
-        };
+        let earliest = now - ChronoDuration::minutes(GRACE_MINUTES);
+        let latest = now + ChronoDuration::days(MAX_HORIZON_DAYS);
+        let mut out = self.collect_triggers_in_window(earliest, latest);
 
         // Filter out anything we already fired in this process.
         let fired = self.fired.lock().expect("fired set poisoned");
@@ -381,6 +392,13 @@ const MAX_HORIZON_DAYS: i64 = 30;
 /// Above that we treat them as "missed" and skip — usually the
 /// app_start logic will pick them up instead.
 const GRACE_MINUTES: i64 = 5;
+/// How far back the Ctrl+Shift+R overview looks for already-passed
+/// reminders. A week of backlog is enough for "did I miss something
+/// yesterday?" without flooding the list.
+const OVERVIEW_PAST_DAYS: i64 = 7;
+/// How far forward the overview shows upcoming reminders. Longer
+/// than the scheduler horizon so the user can plan ahead.
+const OVERVIEW_FUTURE_DAYS: i64 = 90;
 
 /// SELECT id, title, start_utc, reminders FROM events
 const EVENT_QUERY: &str = "SELECT id, title, start_utc, reminders FROM events";
