@@ -4,6 +4,7 @@ import { addDays, isSameDay, startOfWeek } from 'date-fns';
 
 import { useAnnouncer } from '../../a11y/Announcer';
 import { useAutoFocus } from '../../hooks/useAutoFocus';
+import { useDeferredLoading } from '../../hooks/useDeferredLoading';
 import { useEventTabNavigation } from '../../hooks/useEventTabNavigation';
 import { localDateKey } from '../../intl/dateKey';
 import { useDateFormat } from '../../intl/dateFormat';
@@ -203,14 +204,11 @@ export function WeekView() {
     }
   }, []);
 
-  // Announce "Loading …" once on mount if the first fetch is still in
-  // flight (typical with CalDAV calendars). Refetches after the initial
-  // load happen silently — see useEvents for why `loading` stays false
-  // after the first settle.
+  // Deferred indicator — see DayView for the rationale.
+  const showLoading = useDeferredLoading(loading);
   useEffect(() => {
-    if (loading) announce(t('views.loading'));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (showLoading) announce(t('views.loading'));
+  }, [showLoading, announce, t]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -331,7 +329,7 @@ export function WeekView() {
         </h2>
       </header>
 
-      {loading && (
+      {showLoading && (
         <p className="view__loading" aria-hidden="true">
           {t('views.loading')}
         </p>

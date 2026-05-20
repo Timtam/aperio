@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import type { CalendarEvent } from '../../api/types';
 import { useAnnouncer } from '../../a11y/Announcer';
 import { useAutoFocus } from '../../hooks/useAutoFocus';
+import { useDeferredLoading } from '../../hooks/useDeferredLoading';
 import { localDateKey } from '../../intl/dateKey';
 import { useDateFormat } from '../../intl/dateFormat';
 import { labelsLookup, resolveEventColor } from '../../intl/eventColor';
@@ -70,12 +71,11 @@ export function AgendaView() {
     }
   }, [occurrences.length, focusIndex]);
 
-  // Announce "Loading …" once on mount if we're still fetching. See
-  // DayView for the rationale (mount-only, never on refetches).
+  // Deferred indicator — see DayView for the full rationale.
+  const showLoading = useDeferredLoading(loading);
   useEffect(() => {
-    if (loading) announce(t('views.loading'));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (showLoading) announce(t('views.loading'));
+  }, [showLoading, announce, t]);
 
   const idPrefix = useId();
   const itemId = (i: number) => `${idPrefix}-item-${i}`;
@@ -200,7 +200,7 @@ export function AgendaView() {
         </span>
       </header>
 
-      {loading && (
+      {showLoading && (
         <p className="view__loading" aria-hidden="true">
           {t('views.loading')}
         </p>

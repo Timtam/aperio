@@ -4,6 +4,7 @@ import { isSameDay } from 'date-fns';
 
 import { useAnnouncer } from '../../a11y/Announcer';
 import { useAutoFocus } from '../../hooks/useAutoFocus';
+import { useDeferredLoading } from '../../hooks/useDeferredLoading';
 import { useDateFormat } from '../../intl/dateFormat';
 import { labelsLookup, resolveEventColor } from '../../intl/eventColor';
 import { eventCoversDay, multiDayInfo } from '../../intl/multiDay';
@@ -66,16 +67,16 @@ export function DayView() {
     }
   }, [dayEvents.length, focusIndex]);
 
-  // Announce "Loading …" once on mount if we're still fetching the
-  // very first batch. Subsequent refetches keep `loading` false and
-  // happen silently behind the already-rendered events — we never
-  // want to nag the user with "Loading…" after a CRUD operation.
+  // Loading indicator is gated on `showLoading` (the deferred
+  // variant), not the raw `loading` flag. That way a sub-200ms
+  // local fetch — which is what happens whenever the user switches
+  // views with cached data — never flashes "Lädt …". Only genuine
+  // waits (CalDAV cold start, slow iCal feed) cross the threshold
+  // and surface the indicator + the SR announcement.
+  const showLoading = useDeferredLoading(loading);
   useEffect(() => {
-    if (loading) announce(t('views.loading'));
-    // Mount-only — see the comment above. ESLint can't see that
-    // `loading` only ever flips from true → false.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (showLoading) announce(t('views.loading'));
+  }, [showLoading, announce, t]);
 
   const idPrefix = useId();
   const itemId = (i: number) => `${idPrefix}-item-${i}`;
@@ -209,7 +210,7 @@ export function DayView() {
         </h2>
       </header>
 
-      {loading && (
+      {showLoading && (
         <p className="view__loading" aria-hidden="true">
           {t('views.loading')}
         </p>

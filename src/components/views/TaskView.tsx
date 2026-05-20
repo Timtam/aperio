@@ -11,6 +11,7 @@ import { invoke } from '@tauri-apps/api/core';
 
 import { useAnnouncer } from '../../a11y/Announcer';
 import { useAutoFocus } from '../../hooks/useAutoFocus';
+import { useDeferredLoading } from '../../hooks/useDeferredLoading';
 import { useDateFormat } from '../../intl/dateFormat';
 import { labelsLookup, resolveTaskColor } from '../../intl/eventColor';
 import { useCalendarStore } from '../../state/CalendarStore';
@@ -64,12 +65,11 @@ export function TaskView() {
     }
   }, [flatTasks.length, focusIndex]);
 
-  // Announce "Loading …" once on mount if we're still fetching. See
-  // DayView for the rationale (mount-only, never on refetches).
+  // Deferred indicator — see DayView for the rationale.
+  const showLoading = useDeferredLoading(loading);
   useEffect(() => {
-    if (loading) announce(t('views.loading'));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (showLoading) announce(t('views.loading'));
+  }, [showLoading, announce, t]);
 
   const idPrefix = useId();
   const itemId = (i: number) => `${idPrefix}-item-${i}`;
@@ -208,7 +208,7 @@ export function TaskView() {
         <h2>{t('views.tasks.title')}</h2>
       </header>
 
-      {loading && (
+      {showLoading && (
         <p className="view__loading" aria-hidden="true">
           {t('views.loading')}
         </p>
