@@ -52,12 +52,26 @@ struct ListingCache<T> {
     cached_at: chrono::DateTime<chrono::Utc>,
 }
 
-/// One configured CalDAV account. Cheap to clone — the `Client`
-/// is reference-counted by reqwest and the `Mutex` only protects
+/// One configured CalDAV account. Cheap to clone — the `Client`s
+/// are reference-counted by reqwest and the `Mutex`es only protect
 /// the lazily-cached discovery + listing results.
 pub struct CaldavAdapter {
     credentials: Credentials,
+    /// Used for every "real" CalDAV operation (PROPFIND on
+    /// calendar-home, PROPPATCH, REPORT, PUT, DELETE, …). Follows
+    /// HTTP redirects up to 5 hops so a server's transparent move
+    /// (Nextcloud reverse-proxy reshuffle, iCloud route changes)
+    /// doesn't break the user.
     http: Client,
+    /// Discovery-only client. The well-known step
+    /// (`/.well-known/caldav`) is supposed to land on a 3xx whose
+    /// `Location:` header carries the actual DAV root — and
+    /// `discovery::resolve_well_known` needs to *see* that
+    /// redirect rather than have reqwest swallow it, otherwise it
+    /// would chase the 3xx with a GET and most CalDAV servers
+    /// answer those with 405 / 501. Kept on a separate Client so
+    /// the regular Client can follow redirects safely.
+    http_no_redirect: Client,
     /// Filled on first `discover()` call so subsequent reads don't
     /// re-walk the well-known chain. Cleared when the user changes
     /// credentials (currently by constructing a fresh adapter).
@@ -91,22 +105,30 @@ impl CaldavAdapter {
         credentials: Credentials,
         connect_timeout: Option<Duration>,
     ) -> CaldavResult<Self> {
-        // Disable automatic redirect following — the well-known
-        // discovery step in `discovery::resolve_well_known` *needs*
-        // to see the 301/302 directly to read the Location header.
-        // Letting reqwest swallow the redirect would land us on the
-        // final endpoint with a GET, which most CalDAV servers
-        // answer with 405 / 501, masking the actual flow.
-        // PROPFIND traffic isn't supposed to redirect; if it ever
-        // does, the discovery layer handles it the same way.
+        let connect = connect_timeout.unwrap_or(Duration::from_secs(10));
+        // Production client: follow redirects up to 5 hops. CalDAV
+        // PROPFIND / PROPPATCH / REPORT / PUT / DELETE on a moved
+        // collection should land on the new URL transparently
+        // instead of failing the request.
         let http = Client::builder()
+            .redirect(reqwest::redirect::Policy::limited(5))
+            .connect_timeout(connect)
+            .timeout(Duration::from_secs(30))
+            .build()?;
+        // Discovery client: never auto-follow. The well-known
+        // discovery step needs to see the 301/302 directly to read
+        // the `Location:` header — letting reqwest chase it would
+        // land us on the final endpoint with a GET, which most
+        // CalDAV servers answer with 405 / 501.
+        let http_no_redirect = Client::builder()
             .redirect(reqwest::redirect::Policy::none())
-            .connect_timeout(connect_timeout.unwrap_or(Duration::from_secs(10)))
+            .connect_timeout(connect)
             .timeout(Duration::from_secs(30))
             .build()?;
         Ok(Self {
             credentials,
             http,
+            http_no_redirect,
             discovery: Mutex::new(None),
             calendars_cache: Mutex::new(None),
             task_lists_cache: Mutex::new(None),
@@ -169,7 +191,9 @@ impl CaldavAdapter {
                 return Ok(d.clone());
             }
         }
-        let fresh = discovery::run(&self.http, &self.credentials).await?;
+        // Discovery uses the no-redirect client so the well-known
+        // chain's 3xx can be read directly.
+        let fresh = discovery::run(&self.http_no_redirect, &self.credentials).await?;
         *self.discovery.lock().expect("poison") = Some(fresh.clone());
         Ok(fresh)
     }
