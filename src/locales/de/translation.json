@@ -299,7 +299,8 @@
       "dayAnnounce_one": "{{day}}, 1 Termin",
       "dayAnnounce_other": "{{day}}, {{count}} Termine",
       "eventLabel": "Termin: {{title}}, {{time}}, Kalender: {{calendar}}",
-      "eventLabelWithLabel": "Termin: {{title}}, {{time}}, Kalender: {{calendar}}, Label: {{label}}"
+      "eventLabelWithLabel": "Termin: {{title}}, {{time}}, Kalender: {{calendar}}, Label: {{label}}",
+      "tabAnnounce": "{{day}}: {{title}}"
     },
     "day": {
       "timeGrid": "Zeitraster",
@@ -315,7 +316,8 @@
       "dayAnnounce_one": "{{day}}, 1 Termin",
       "dayAnnounce_other": "{{day}}, {{count}} Termine",
       "moreEvents_one": "+ 1 weiterer",
-      "moreEvents_other": "+ {{count}} weitere"
+      "moreEvents_other": "+ {{count}} weitere",
+      "tabAnnounce": "{{day}}: {{title}}"
     },
     "year": {
       "title": "Jahresansicht",

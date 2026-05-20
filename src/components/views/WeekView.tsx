@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useId, useMemo, useState } from 'react';
+import { useCallback, useId, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { addDays, isSameDay, startOfWeek } from 'date-fns';
 
 import { useAnnouncer } from '../../a11y/Announcer';
 import { useAutoFocus } from '../../hooks/useAutoFocus';
+import { useEventTabNavigation } from '../../hooks/useEventTabNavigation';
 import { localDateKey } from '../../intl/dateKey';
 import { useDateFormat } from '../../intl/dateFormat';
 import { labelsLookup, resolveEventColor } from '../../intl/eventColor';
@@ -85,27 +86,41 @@ export function WeekView() {
     `${idPrefix}-cell-${dayIdx}-ev-${evIdx}`;
 
   // Two-level focus: `null` means the day cell itself is focused (arrow
-  // keys move the day). A number means the user has tabbed into the day
-  // and is focused on the n-th event of that day — Enter opens it,
-  // Delete removes it, Escape returns to the day cell. The index is
-  // reset whenever the focused day changes.
-  const [eventIndex, setEventIndex] = useState<number | null>(null);
-  useEffect(() => {
-    setEventIndex(null);
-  }, [focusIndex]);
-
-  const focusedDayEvents = useMemo(
-    () => eventsByDay.get(keyOf(days[focusIndex])) ?? [],
-    [eventsByDay, days, focusIndex],
+  // keys move the day). A number means the user has tabbed into the
+  // day and is focused on the n-th event of that day — Enter opens it,
+  // Delete removes it, Escape returns to the day cell.
+  //
+  // Tab is handled by the shared hook below: it crosses day boundaries
+  // and moves the anchor for us, so the visual day selection follows
+  // the focused event the way it does in Outlook.
+  const buckets = useMemo(
+    () => days.map((d) => ({ events: eventsByDay.get(keyOf(d)) ?? [] })),
+    [days, eventsByDay],
   );
-  // Clamp when the day's event list shrinks (e.g. after deletion).
-  useEffect(() => {
-    if (eventIndex !== null && eventIndex >= focusedDayEvents.length) {
-      setEventIndex(
-        focusedDayEvents.length > 0 ? focusedDayEvents.length - 1 : null,
+  const focusedDayEvents = buckets[focusIndex]?.events ?? [];
+
+  const dayChangeAnnouncer = useCallback(
+    (newDayIdx: number, ev: CalendarEvent) => {
+      announce(
+        t('views.week.tabAnnounce', {
+          day: fmt.format(days[newDayIdx], 'PPPP'),
+          title: ev.title,
+        }),
       );
-    }
-  }, [focusedDayEvents.length, eventIndex]);
+    },
+    [announce, days, fmt, t],
+  );
+
+  const {
+    eventIndex,
+    clear: clearEventIndex,
+    handleTab,
+  } = useEventTabNavigation({
+    buckets,
+    dayIndex: focusIndex,
+    setDayIndex: (next) => setAnchor(days[next]),
+    onDayChange: dayChangeAnnouncer,
+  });
 
   // Delete confirmation. `confirmTarget` carries the event that the
   // user is about to delete; rendering the dialog conditionally keeps
@@ -135,26 +150,12 @@ export function WeekView() {
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      // Tab / Shift+Tab toggle the second focus level: from the day
-      // cell, Tab steps into the day's events; further Tabs cycle
-      // through them and back to the day. Modifiers other than Shift
-      // are not ours to intercept.
+      // Tab / Shift+Tab walk through *all* events of the visible week
+      // chronologically, crossing day boundaries — the hook moves the
+      // anchor and announces the new day when it does.
       if (e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (focusedDayEvents.length === 0) return; // let browser handle
-        e.preventDefault();
-        if (e.shiftKey) {
-          setEventIndex((i) => {
-            if (i === null) return focusedDayEvents.length - 1;
-            if (i === 0) return null;
-            return i - 1;
-          });
-        } else {
-          setEventIndex((i) => {
-            if (i === null) return 0;
-            if (i >= focusedDayEvents.length - 1) return null;
-            return i + 1;
-          });
-        }
+        const consumed = handleTab(e.shiftKey);
+        if (consumed) e.preventDefault();
         return;
       }
       if (e.ctrlKey || e.metaKey || e.altKey) {
@@ -166,7 +167,7 @@ export function WeekView() {
         const ev = focusedDayEvents[eventIndex];
         if (e.key === 'Escape') {
           e.preventDefault();
-          setEventIndex(null);
+          clearEventIndex();
           return;
         }
         if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
@@ -242,6 +243,8 @@ export function WeekView() {
       eventsByDay,
       focusedDayEvents,
       openEventDialog,
+      handleTab,
+      clearEventIndex,
     ],
   );
 

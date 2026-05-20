@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useState } from 'react';
+import { useCallback, useId, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   addDays,
@@ -12,6 +12,7 @@ import {
 
 import { useAnnouncer } from '../../a11y/Announcer';
 import { useAutoFocus } from '../../hooks/useAutoFocus';
+import { useEventTabNavigation } from '../../hooks/useEventTabNavigation';
 import { localDateKey } from '../../intl/dateKey';
 import { useDateFormat } from '../../intl/dateFormat';
 import { labelsLookup, resolveEventColor } from '../../intl/eventColor';
@@ -63,23 +64,36 @@ export function MonthView() {
   const eventOptionId = (cellIdx: number, evIdx: number) =>
     `${idPrefix}-cell-${cellIdx}-ev-${evIdx}`;
 
-  // Two-level focus mirrors WeekView — see that file for the rationale.
-  const [eventIndex, setEventIndex] = useState<number | null>(null);
-  useEffect(() => {
-    setEventIndex(null);
-  }, [focusIndex]);
-
-  const focusedDayEvents = useMemo(
-    () => eventsByDay.get(keyOf(cells[focusIndex])) ?? [],
-    [eventsByDay, cells, focusIndex],
+  // Two-level focus mirrors WeekView; the tab hook below handles
+  // chronological cycling across cells.
+  const buckets = useMemo(
+    () => cells.map((d) => ({ events: eventsByDay.get(keyOf(d)) ?? [] })),
+    [cells, eventsByDay],
   );
-  useEffect(() => {
-    if (eventIndex !== null && eventIndex >= focusedDayEvents.length) {
-      setEventIndex(
-        focusedDayEvents.length > 0 ? focusedDayEvents.length - 1 : null,
+  const focusedDayEvents = buckets[focusIndex]?.events ?? [];
+
+  const dayChangeAnnouncer = useCallback(
+    (newDayIdx: number, ev: CalendarEvent) => {
+      announce(
+        t('views.month.tabAnnounce', {
+          day: fmt.format(cells[newDayIdx], 'PPPP'),
+          title: ev.title,
+        }),
       );
-    }
-  }, [focusedDayEvents.length, eventIndex]);
+    },
+    [announce, cells, fmt, t],
+  );
+
+  const {
+    eventIndex,
+    clear: clearEventIndex,
+    handleTab,
+  } = useEventTabNavigation({
+    buckets,
+    dayIndex: focusIndex,
+    setDayIndex: (next) => setAnchor(cells[next]),
+    onDayChange: dayChangeAnnouncer,
+  });
 
   const [confirmTarget, setConfirmTarget] = useState<CalendarEvent | null>(
     null,
@@ -104,21 +118,8 @@ export function MonthView() {
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (focusedDayEvents.length === 0) return;
-        e.preventDefault();
-        if (e.shiftKey) {
-          setEventIndex((i) => {
-            if (i === null) return focusedDayEvents.length - 1;
-            if (i === 0) return null;
-            return i - 1;
-          });
-        } else {
-          setEventIndex((i) => {
-            if (i === null) return 0;
-            if (i >= focusedDayEvents.length - 1) return null;
-            return i + 1;
-          });
-        }
+        const consumed = handleTab(e.shiftKey);
+        if (consumed) e.preventDefault();
         return;
       }
       if (e.ctrlKey || e.metaKey || e.altKey) {
@@ -128,7 +129,7 @@ export function MonthView() {
         const ev = focusedDayEvents[eventIndex];
         if (e.key === 'Escape') {
           e.preventDefault();
-          setEventIndex(null);
+          clearEventIndex();
           return;
         }
         if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
@@ -205,6 +206,8 @@ export function MonthView() {
       focusedDayEvents,
       eventsByDay,
       openEventDialog,
+      handleTab,
+      clearEventIndex,
     ],
   );
 
