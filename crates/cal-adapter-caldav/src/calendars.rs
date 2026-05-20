@@ -203,12 +203,19 @@ pub async fn proppatch_displayname(
             },
         });
     }
-    // 207 may still encode a per-property failure inside propstat —
-    // a strict client would parse the multistatus and look for a
-    // non-2xx status on the displayname row. For now we trust the
-    // outer status; if a server reports "200 but actually failed",
-    // the next list_calendars will read the unchanged name and the
-    // user sees the discrepancy.
+    // 207 Multi-Status may still encode a per-property failure
+    // inside `<propstat>`: e.g. iCloud accepts the request envelope
+    // but rejects the displayname change with 403 because the
+    // calendar is shared read-only. Parse the body and surface that.
+    if status == StatusCode::from_u16(207).unwrap() {
+        let body = response.text().await.unwrap_or_default();
+        if let Some(inner) = crate::xml::first_failed_status_code(&body) {
+            return Err(CaldavError::Http {
+                status: inner,
+                message: body.chars().take(200).collect(),
+            });
+        }
+    }
     Ok(())
 }
 
@@ -397,6 +404,36 @@ mod tests {
             .mock("PROPPATCH", "/calendars/alice/work/")
             .with_status(403)
             .with_body("Forbidden")
+            .create_async()
+            .await;
+
+        let url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let err = proppatch_displayname(&client(), &url, "Whatever", &creds(&server.url()))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CaldavError::Http { status: 403, .. }));
+    }
+
+    #[tokio::test]
+    async fn proppatch_displayname_catches_inner_propstat_failure() {
+        // 207 envelope says "request received", but the displayname
+        // propstat inside reports 403 — exactly the shape some
+        // CalDAV servers use for read-only or restricted properties.
+        let multistatus_with_failure = r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/calendars/alice/work/</d:href>
+    <d:propstat>
+      <d:prop><d:displayname/></d:prop>
+      <d:status>HTTP/1.1 403 Forbidden</d:status>
+    </d:propstat>
+  </d:response>
+</d:multistatus>"#;
+        let mut server = Server::new_async().await;
+        server
+            .mock("PROPPATCH", "/calendars/alice/work/")
+            .with_status(207)
+            .with_body(multistatus_with_failure)
             .create_async()
             .await;
 

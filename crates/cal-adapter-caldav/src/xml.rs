@@ -323,6 +323,66 @@ fn capture_text(current: &mut Option<ResponseEntry>, target: TextTarget, text: &
     }
 }
 
+/// Walk a 207 Multi-Status body and return the first `<status>` element
+/// whose HTTP code is **not** in the 2xx range. None means the body
+/// contained only successful statuses (or no status at all — caller
+/// decides whether that's tolerable).
+///
+/// PROPPATCH responses use this: a "207 with a 403 inside on the
+/// displayname propstat" must surface as a real failure, not a silent
+/// success. Some CalDAV servers (notably read-only iCal views from
+/// vendors that advertise PROPPATCH but reject it) take exactly that
+/// shape.
+///
+/// The walker scans every `<status>` regardless of whether it sits
+/// directly inside `<response>` (response-wide status) or inside a
+/// `<propstat>` (per-property-group status). RFC 4918 §9.2.1 allows
+/// both shapes; either form indicates the operation's verdict.
+pub fn first_failed_status_code(body: &str) -> Option<u16> {
+    let mut reader = Reader::from_str(body);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    let mut capture_status = false;
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) => {
+                if local_name_eq(e.name(), b"status") {
+                    capture_status = true;
+                }
+            }
+            Ok(Event::End(e)) => {
+                if local_name_eq(e.name(), b"status") {
+                    capture_status = false;
+                }
+            }
+            Ok(Event::Text(t)) if capture_status => {
+                if let Ok(text) = t.unescape() {
+                    if let Some(code) = parse_http_status_line(&text) {
+                        if !(200..300).contains(&code) {
+                            return Some(code);
+                        }
+                    }
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(_) => return None,
+            _ => {}
+        }
+        buf.clear();
+    }
+    None
+}
+
+/// Pull the integer status code out of a status-line like
+/// `HTTP/1.1 200 OK` or `HTTP/1.1 403 Forbidden`. Tolerant of stray
+/// leading / trailing whitespace.
+fn parse_http_status_line(s: &str) -> Option<u16> {
+    let s = s.trim();
+    let mut parts = s.split_whitespace();
+    parts.next()?; // "HTTP/1.1"
+    parts.next()?.parse().ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -488,5 +548,76 @@ END:VCALENDAR</c:calendar-data>
         let data = entries[0].calendar_data.as_deref().unwrap();
         assert!(data.contains("UID:event-1@aperio"));
         assert!(data.contains("DTSTART:20260520T080000Z"));
+    }
+
+    #[test]
+    fn first_failed_status_finds_inner_403() {
+        // PROPPATCH-shaped response: the outer status is 207, but
+        // the displayname propstat reports 403 Forbidden.
+        let body = r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/calendars/alice/work/</d:href>
+    <d:propstat>
+      <d:prop><d:displayname/></d:prop>
+      <d:status>HTTP/1.1 403 Forbidden</d:status>
+    </d:propstat>
+  </d:response>
+</d:multistatus>"#;
+        assert_eq!(first_failed_status_code(body), Some(403));
+    }
+
+    #[test]
+    fn first_failed_status_ignores_all_2xx() {
+        let body = r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/calendars/alice/work/</d:href>
+    <d:propstat>
+      <d:prop><d:displayname/></d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+</d:multistatus>"#;
+        assert_eq!(first_failed_status_code(body), None);
+    }
+
+    #[test]
+    fn first_failed_status_catches_response_level_failure() {
+        // The `<status>` may live directly inside `<response>` (the
+        // whole resource got the same verdict for every property).
+        let body = r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/calendars/alice/work/</d:href>
+    <d:status>HTTP/1.1 423 Locked</d:status>
+  </d:response>
+</d:multistatus>"#;
+        assert_eq!(first_failed_status_code(body), Some(423));
+    }
+
+    #[test]
+    fn first_failed_status_returns_none_on_empty_body() {
+        assert_eq!(first_failed_status_code(""), None);
+    }
+
+    #[test]
+    fn first_failed_status_returns_first_when_mixed() {
+        // 200 first, 403 second — caller wants the 403.
+        let body = r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/x/</d:href>
+    <d:propstat>
+      <d:prop><d:displayname/></d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+    <d:propstat>
+      <d:prop><d:resourcetype/></d:prop>
+      <d:status>HTTP/1.1 403 Forbidden</d:status>
+    </d:propstat>
+  </d:response>
+</d:multistatus>"#;
+        assert_eq!(first_failed_status_code(body), Some(403));
     }
 }
