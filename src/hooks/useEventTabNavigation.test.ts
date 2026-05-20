@@ -99,6 +99,23 @@ describe('useEventTabNavigation', () => {
     expect(result.result.current.eventIndex).toBe(0);
   });
 
+  it('Shift+Tab from a populated day cell skips the current day', () => {
+    // The day cell logically sits before its own events in the tab
+    // order, so stepping backward lands on the previous day's tail,
+    // not on the current day's last event.
+    const { result, state } = setup([[ev('a'), ev('b')], [ev('c'), ev('d')]], 1);
+    act(() => result.result.current.handleTab(true));
+    expect(state.dayIndex).toBe(0);
+    expect(result.result.current.eventIndex).toBe(1);
+  });
+
+  it('Tab from a populated day cell dives into the current day', () => {
+    const { result, state } = setup([[ev('a'), ev('b')], [ev('c'), ev('d')]], 1);
+    act(() => result.result.current.handleTab(false));
+    expect(state.dayIndex).toBe(1);
+    expect(result.result.current.eventIndex).toBe(0);
+  });
+
   it('skips empty days when walking forward', () => {
     const { result, state } = setup([[ev('a')], [], [ev('c')]], 0);
     act(() => result.result.current.handleTab(false)); // start at 0,0

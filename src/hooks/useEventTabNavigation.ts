@@ -124,13 +124,22 @@ export function useEventTabNavigation(
     [buckets],
   );
 
-  // First Tab from a day cell: pick a sensible entry point. If the
-  // focused day already has events we start at its first event. If
-  // not we walk forward (or backward for Shift+Tab) to the next
-  // populated day so an empty day doesn't dead-end the navigation.
+  // First Tab from a day cell: pick a sensible entry point.
+  //
+  // Tab forward includes the current day — the cell logically sits at
+  // the *start* of the day in the tab order, so the first Tab moves
+  // into that day's first event. Shift+Tab moves backwards by one
+  // step, which lands on the *previous* day's last event (the cell
+  // itself is "before" its own events, so the step before it is the
+  // tail of the prior day). Empty days are skipped in both
+  // directions so navigation never dead-ends.
   const firstEventForward = useCallback(
-    (startDay: number): { dayIdx: number; evIdx: number } | null => {
-      for (let i = 0; i < buckets.length; i++) {
+    (
+      startDay: number,
+      includeStart: boolean,
+    ): { dayIdx: number; evIdx: number } | null => {
+      const offset = includeStart ? 0 : 1;
+      for (let i = offset; i < buckets.length; i++) {
         const idx = (startDay + i) % buckets.length;
         if ((buckets[idx]?.events.length ?? 0) > 0) {
           return { dayIdx: idx, evIdx: 0 };
@@ -142,8 +151,12 @@ export function useEventTabNavigation(
   );
 
   const firstEventBackward = useCallback(
-    (startDay: number): { dayIdx: number; evIdx: number } | null => {
-      for (let i = 0; i < buckets.length; i++) {
+    (
+      startDay: number,
+      includeStart: boolean,
+    ): { dayIdx: number; evIdx: number } | null => {
+      const offset = includeStart ? 0 : 1;
+      for (let i = offset; i < buckets.length; i++) {
         const idx = (startDay - i + buckets.length) % buckets.length;
         const len = buckets[idx]?.events.length ?? 0;
         if (len > 0) return { dayIdx: idx, evIdx: len - 1 };
@@ -172,12 +185,15 @@ export function useEventTabNavigation(
       if (total === 0) return false;
 
       // No event focused yet — pick the entry point. Forward Tab
-      // tries the current day first, then walks ahead; Shift+Tab
-      // walks back from the current day to the closest prior event.
+      // dives into the current day's first event (the day cell sits
+      // "before" its events in the linear tab order). Shift+Tab walks
+      // the other way and lands on the previous day's last event, so
+      // the cell behaves like a fence post between yesterday's tail
+      // and today's head.
       if (eventIndex === null) {
         const next = shift
-          ? firstEventBackward(dayIndex)
-          : firstEventForward(dayIndex);
+          ? firstEventBackward(dayIndex, /* includeStart */ false)
+          : firstEventForward(dayIndex, /* includeStart */ true);
         if (next) apply(next);
         return true;
       }
