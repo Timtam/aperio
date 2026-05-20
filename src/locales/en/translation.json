@@ -44,6 +44,14 @@
     "save": "Save",
     "create": "Create",
     "close": "Close",
+    "confirm": {
+      "cancel": "Cancel",
+      "confirm": "Delete",
+      "deleteEventTitle": "Delete event",
+      "deleteEventMessage": "Delete \"{{title}}\"? This cannot be undone.",
+      "deleteTaskTitle": "Delete task",
+      "deleteTaskMessage": "Delete \"{{title}}\"? This cannot be undone."
+    },
     "colorLabels": {
       "title": "Color labels",
       "existingHeading_zero": "Existing color labels",

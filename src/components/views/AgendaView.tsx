@@ -13,6 +13,8 @@ import { useEvents } from '../../state/useEvents';
 import { useViewState } from '../../state/ViewState';
 import { visibleRange } from '../../state/viewMath';
 import { duplicateEvent } from '../MoveCopyDialog';
+import { ConfirmDialog } from '../ConfirmDialog';
+import { deleteEventById, isCommandError } from '../../api/client';
 
 /**
  * Agenda — flat, chronologically ordered listbox of events with visual
@@ -53,6 +55,26 @@ export function AgendaView() {
   const idPrefix = useId();
   const itemId = (i: number) => `${idPrefix}-item-${i}`;
   const listRef = useAutoFocus<HTMLUListElement>(!loading);
+
+  const [confirmTarget, setConfirmTarget] = useState<CalendarEvent | null>(
+    null,
+  );
+  const performDelete = useCallback(
+    async (ev: CalendarEvent) => {
+      try {
+        const id = ev.id.includes('@') ? ev.id.split('@')[0] : ev.id;
+        await deleteEventById(id);
+        announce(t('dialogs.event.deleted', { title: ev.title }));
+      } catch (err) {
+        if (isCommandError(err)) {
+          announce(`${err.code}: ${err.message}`);
+        } else {
+          announce(String(err));
+        }
+      }
+    },
+    [announce, t],
+  );
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -101,6 +123,13 @@ export function AgendaView() {
           if (ev) openEventDialog(ev);
           return;
         }
+        case 'Delete':
+        case 'Backspace': {
+          e.preventDefault();
+          const ev = events[focusIndex];
+          if (ev) setConfirmTarget(ev);
+          return;
+        }
         default:
           return;
       }
@@ -146,6 +175,18 @@ export function AgendaView() {
           })
         )}
       </ul>
+
+      <ConfirmDialog
+        isOpen={confirmTarget !== null}
+        onClose={() => setConfirmTarget(null)}
+        onConfirm={() => {
+          if (confirmTarget) void performDelete(confirmTarget);
+        }}
+        title={t('dialogs.confirm.deleteEventTitle')}
+        message={t('dialogs.confirm.deleteEventMessage', {
+          title: confirmTarget?.title ?? '',
+        })}
+      />
     </section>
   );
 }

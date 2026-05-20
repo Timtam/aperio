@@ -1,4 +1,4 @@
-import { useCallback, useId, useMemo } from 'react';
+import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   addDays,
@@ -10,6 +10,7 @@ import {
   startOfWeek,
 } from 'date-fns';
 
+import { useAnnouncer } from '../../a11y/Announcer';
 import { useAutoFocus } from '../../hooks/useAutoFocus';
 import { localDateKey } from '../../intl/dateKey';
 import { useDateFormat } from '../../intl/dateFormat';
@@ -20,6 +21,8 @@ import { useEvents } from '../../state/useEvents';
 import { useViewState } from '../../state/ViewState';
 import { visibleRange } from '../../state/viewMath';
 import type { CalendarEvent } from '../../api/types';
+import { ConfirmDialog } from '../ConfirmDialog';
+import { deleteEventById, isCommandError } from '../../api/client';
 
 /**
  * Month view — six-week calendar grid (DESIGN.md section 3.3,
@@ -38,6 +41,7 @@ import type { CalendarEvent } from '../../api/types';
 export function MonthView() {
   const { t } = useTranslation();
   const fmt = useDateFormat();
+  const announce = useAnnouncer();
   const { anchor, setAnchor, goPrev, goNext } = useViewState();
   const { openEventDialog } = useDialogState();
 
@@ -56,11 +60,87 @@ export function MonthView() {
 
   const idPrefix = useId();
   const cellId = (i: number) => `${idPrefix}-cell-${i}`;
+  const eventOptionId = (cellIdx: number, evIdx: number) =>
+    `${idPrefix}-cell-${cellIdx}-ev-${evIdx}`;
+
+  // Two-level focus mirrors WeekView — see that file for the rationale.
+  const [eventIndex, setEventIndex] = useState<number | null>(null);
+  useEffect(() => {
+    setEventIndex(null);
+  }, [focusIndex]);
+
+  const focusedDayEvents = useMemo(
+    () => eventsByDay.get(keyOf(cells[focusIndex])) ?? [],
+    [eventsByDay, cells, focusIndex],
+  );
+  useEffect(() => {
+    if (eventIndex !== null && eventIndex >= focusedDayEvents.length) {
+      setEventIndex(
+        focusedDayEvents.length > 0 ? focusedDayEvents.length - 1 : null,
+      );
+    }
+  }, [focusedDayEvents.length, eventIndex]);
+
+  const [confirmTarget, setConfirmTarget] = useState<CalendarEvent | null>(
+    null,
+  );
+  const performDelete = useCallback(
+    async (ev: CalendarEvent) => {
+      try {
+        const id = ev.id.includes('@') ? ev.id.split('@')[0] : ev.id;
+        await deleteEventById(id);
+        announce(t('dialogs.event.deleted', { title: ev.title }));
+      } catch (err) {
+        if (isCommandError(err)) {
+          announce(`${err.code}: ${err.message}`);
+        } else {
+          announce(String(err));
+        }
+      }
+    },
+    [announce, t],
+  );
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      if (e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (focusedDayEvents.length === 0) return;
+        e.preventDefault();
+        if (e.shiftKey) {
+          setEventIndex((i) => {
+            if (i === null) return focusedDayEvents.length - 1;
+            if (i === 0) return null;
+            return i - 1;
+          });
+        } else {
+          setEventIndex((i) => {
+            if (i === null) return 0;
+            if (i >= focusedDayEvents.length - 1) return null;
+            return i + 1;
+          });
+        }
+        return;
+      }
       if (e.ctrlKey || e.metaKey || e.altKey) {
         return;
+      }
+      if (eventIndex !== null) {
+        const ev = focusedDayEvents[eventIndex];
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          setEventIndex(null);
+          return;
+        }
+        if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+          e.preventDefault();
+          if (ev) openEventDialog(ev);
+          return;
+        }
+        if (e.key === 'Delete' || e.key === 'Backspace') {
+          e.preventDefault();
+          if (ev) setConfirmTarget(ev);
+          return;
+        }
       }
       switch (e.key) {
         case 'ArrowLeft':
@@ -121,6 +201,8 @@ export function MonthView() {
       goNext,
       cells,
       focusIndex,
+      eventIndex,
+      focusedDayEvents,
       eventsByDay,
       openEventDialog,
     ],
@@ -141,7 +223,11 @@ export function MonthView() {
         role="grid"
         aria-label={t('views.month.gridLabel')}
         tabIndex={0}
-        aria-activedescendant={cellId(focusIndex)}
+        aria-activedescendant={
+          eventIndex !== null
+            ? eventOptionId(focusIndex, eventIndex)
+            : cellId(focusIndex)
+        }
         onKeyDown={handleKeyDown}
         className="month-grid"
       >
@@ -194,16 +280,25 @@ export function MonthView() {
                     <span className="month-grid__date">
                       {fmt.format(day, 'd')}
                     </span>
-                    {dayEvents.slice(0, 3).map((ev) => {
+                    {dayEvents.slice(0, 3).map((ev, evIdx) => {
                       const color = resolveEventColor(
                         ev,
                         calendarById,
                         labelById,
                       );
+                      const isFocusedEvent =
+                        focused && eventIndex === evIdx;
                       return (
                         <span
                           key={ev.id}
-                          className="month-event"
+                          id={eventOptionId(flatIndex, evIdx)}
+                          className={
+                            'month-event' +
+                            (isFocusedEvent
+                              ? ' month-event--focused'
+                              : '')
+                          }
+                          aria-selected={isFocusedEvent}
                           style={
                             color.hex
                               ? ({ '--event-color': color.hex } as React.CSSProperties)
@@ -228,6 +323,18 @@ export function MonthView() {
           );
         })}
       </div>
+
+      <ConfirmDialog
+        isOpen={confirmTarget !== null}
+        onClose={() => setConfirmTarget(null)}
+        onConfirm={() => {
+          if (confirmTarget) void performDelete(confirmTarget);
+        }}
+        title={t('dialogs.confirm.deleteEventTitle')}
+        message={t('dialogs.confirm.deleteEventMessage', {
+          title: confirmTarget?.title ?? '',
+        })}
+      />
     </section>
   );
 }

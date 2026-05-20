@@ -1,7 +1,8 @@
-import { useCallback, useId, useMemo } from 'react';
+import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { addDays, isSameDay, startOfWeek } from 'date-fns';
 
+import { useAnnouncer } from '../../a11y/Announcer';
 import { useAutoFocus } from '../../hooks/useAutoFocus';
 import { localDateKey } from '../../intl/dateKey';
 import { useDateFormat } from '../../intl/dateFormat';
@@ -12,6 +13,8 @@ import { useEvents } from '../../state/useEvents';
 import { useViewState } from '../../state/ViewState';
 import { visibleRange } from '../../state/viewMath';
 import type { CalendarEvent } from '../../api/types';
+import { ConfirmDialog } from '../ConfirmDialog';
+import { deleteEventById, isCommandError } from '../../api/client';
 
 /**
  * Week view — the workhorse calendar surface.
@@ -46,6 +49,7 @@ import type { CalendarEvent } from '../../api/types';
 export function WeekView() {
   const { t } = useTranslation();
   const fmt = useDateFormat();
+  const announce = useAnnouncer();
   const { anchor, setAnchor, goPrev, goNext } = useViewState();
   const { openEventDialog } = useDialogState();
 
@@ -77,12 +81,108 @@ export function WeekView() {
   // one on screen (e.g. a future side-by-side comparison).
   const idPrefix = useId();
   const cellId = (i: number) => `${idPrefix}-cell-${i}`;
+  const eventOptionId = (dayIdx: number, evIdx: number) =>
+    `${idPrefix}-cell-${dayIdx}-ev-${evIdx}`;
+
+  // Two-level focus: `null` means the day cell itself is focused (arrow
+  // keys move the day). A number means the user has tabbed into the day
+  // and is focused on the n-th event of that day — Enter opens it,
+  // Delete removes it, Escape returns to the day cell. The index is
+  // reset whenever the focused day changes.
+  const [eventIndex, setEventIndex] = useState<number | null>(null);
+  useEffect(() => {
+    setEventIndex(null);
+  }, [focusIndex]);
+
+  const focusedDayEvents = useMemo(
+    () => eventsByDay.get(keyOf(days[focusIndex])) ?? [],
+    [eventsByDay, days, focusIndex],
+  );
+  // Clamp when the day's event list shrinks (e.g. after deletion).
+  useEffect(() => {
+    if (eventIndex !== null && eventIndex >= focusedDayEvents.length) {
+      setEventIndex(
+        focusedDayEvents.length > 0 ? focusedDayEvents.length - 1 : null,
+      );
+    }
+  }, [focusedDayEvents.length, eventIndex]);
+
+  // Delete confirmation. `confirmTarget` carries the event that the
+  // user is about to delete; rendering the dialog conditionally keeps
+  // its DOM out of the tree until needed.
+  const [confirmTarget, setConfirmTarget] = useState<CalendarEvent | null>(
+    null,
+  );
+  const performDelete = useCallback(
+    async (ev: CalendarEvent) => {
+      try {
+        // Strip the synthetic occurrence suffix — delete always targets
+        // the master row. Single-occurrence delete lives in EventDialog
+        // where the user can pick scope explicitly.
+        const id = ev.id.includes('@') ? ev.id.split('@')[0] : ev.id;
+        await deleteEventById(id);
+        announce(t('dialogs.event.deleted', { title: ev.title }));
+      } catch (err) {
+        if (isCommandError(err)) {
+          announce(`${err.code}: ${err.message}`);
+        } else {
+          announce(String(err));
+        }
+      }
+    },
+    [announce, t],
+  );
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      // Tab / Shift+Tab toggle the second focus level: from the day
+      // cell, Tab steps into the day's events; further Tabs cycle
+      // through them and back to the day. Modifiers other than Shift
+      // are not ours to intercept.
+      if (e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (focusedDayEvents.length === 0) return; // let browser handle
+        e.preventDefault();
+        if (e.shiftKey) {
+          setEventIndex((i) => {
+            if (i === null) return focusedDayEvents.length - 1;
+            if (i === 0) return null;
+            return i - 1;
+          });
+        } else {
+          setEventIndex((i) => {
+            if (i === null) return 0;
+            if (i >= focusedDayEvents.length - 1) return null;
+            return i + 1;
+          });
+        }
+        return;
+      }
       if (e.ctrlKey || e.metaKey || e.altKey) {
         return;
       }
+
+      // Event-level shortcuts when an event inside the cell is focused.
+      if (eventIndex !== null) {
+        const ev = focusedDayEvents[eventIndex];
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          setEventIndex(null);
+          return;
+        }
+        if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+          e.preventDefault();
+          if (ev) openEventDialog(ev);
+          return;
+        }
+        if (e.key === 'Delete' || e.key === 'Backspace') {
+          e.preventDefault();
+          if (ev) setConfirmTarget(ev);
+          return;
+        }
+        // Arrow keys fall through to day navigation below, which will
+        // also reset eventIndex via the focusIndex effect.
+      }
+
       switch (e.key) {
         case 'ArrowLeft':
           e.preventDefault();
@@ -138,7 +238,9 @@ export function WeekView() {
       goNext,
       days,
       focusIndex,
+      eventIndex,
       eventsByDay,
+      focusedDayEvents,
       openEventDialog,
     ],
   );
@@ -163,7 +265,11 @@ export function WeekView() {
         role="grid"
         aria-label={t('views.week.gridLabel')}
         tabIndex={0}
-        aria-activedescendant={cellId(focusIndex)}
+        aria-activedescendant={
+          eventIndex !== null
+            ? eventOptionId(focusIndex, eventIndex)
+            : cellId(focusIndex)
+        }
         onKeyDown={handleKeyDown}
         className="week-grid"
       >
@@ -204,7 +310,7 @@ export function WeekView() {
                 onClick={() => setAnchor(day)}
               >
                 <ul role="list" className="week-grid__events">
-                  {dayEvents.map((ev) => {
+                  {dayEvents.map((ev, evIdx) => {
                     const cal = calendarById.get(ev.calendar_id);
                     const color = resolveEventColor(ev, calendarById, labelById);
                     const time = ev.all_day
@@ -222,11 +328,18 @@ export function WeekView() {
                           time,
                           calendar: cal?.name ?? '—',
                         });
+                    const isFocusedEvent =
+                      focused && eventIndex === evIdx;
                     return (
                       <li key={ev.id} role="listitem">
                         <span
-                          className="week-event"
+                          id={eventOptionId(i, evIdx)}
+                          className={
+                            'week-event' +
+                            (isFocusedEvent ? ' week-event--focused' : '')
+                          }
                           aria-label={aria}
+                          aria-selected={isFocusedEvent}
                           style={
                             color.hex
                               ? ({ '--event-color': color.hex } as React.CSSProperties)
@@ -245,6 +358,18 @@ export function WeekView() {
           })}
         </div>
       </div>
+
+      <ConfirmDialog
+        isOpen={confirmTarget !== null}
+        onClose={() => setConfirmTarget(null)}
+        onConfirm={() => {
+          if (confirmTarget) void performDelete(confirmTarget);
+        }}
+        title={t('dialogs.confirm.deleteEventTitle')}
+        message={t('dialogs.confirm.deleteEventMessage', {
+          title: confirmTarget?.title ?? '',
+        })}
+      />
     </section>
   );
 }

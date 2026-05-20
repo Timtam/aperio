@@ -18,6 +18,8 @@ import { useDialogState } from '../../state/DialogState';
 import { useTasks } from '../../state/useTasks';
 import type { Task, TaskStatus } from '../../api/types';
 import { duplicateTask } from '../MoveCopyDialog';
+import { ConfirmDialog } from '../ConfirmDialog';
+import { isCommandError } from '../../api/client';
 
 /**
  * Dedicated task view — flat listbox of tasks with visual group
@@ -65,6 +67,23 @@ export function TaskView() {
   const idPrefix = useId();
   const itemId = (i: number) => `${idPrefix}-item-${i}`;
   const listRef = useAutoFocus<HTMLUListElement>(!loading);
+
+  const [confirmTarget, setConfirmTarget] = useState<Task | null>(null);
+  const performDelete = useCallback(
+    async (task: Task) => {
+      try {
+        await invoke<void>('delete_task', { id: task.id });
+        announce(t('dialogs.task.deleted', { title: task.title }));
+      } catch (err) {
+        if (isCommandError(err)) {
+          announce(`${err.code}: ${err.message}`);
+        } else {
+          announce(String(err));
+        }
+      }
+    },
+    [announce, t],
+  );
 
   const toggleStatus = useCallback(
     async (task: Task) => {
@@ -141,6 +160,13 @@ export function TaskView() {
           e.preventDefault();
           const task = flatTasks[focusIndex];
           if (task) openTaskDialog(task);
+          return;
+        }
+        case 'Delete':
+        case 'Backspace': {
+          e.preventDefault();
+          const task = flatTasks[focusIndex];
+          if (task) setConfirmTarget(task);
           return;
         }
         default:
@@ -247,6 +273,18 @@ export function TaskView() {
           );
         })}
       </ul>
+
+      <ConfirmDialog
+        isOpen={confirmTarget !== null}
+        onClose={() => setConfirmTarget(null)}
+        onConfirm={() => {
+          if (confirmTarget) void performDelete(confirmTarget);
+        }}
+        title={t('dialogs.confirm.deleteTaskTitle')}
+        message={t('dialogs.confirm.deleteTaskMessage', {
+          title: confirmTarget?.title ?? '',
+        })}
+      />
     </section>
   );
 }

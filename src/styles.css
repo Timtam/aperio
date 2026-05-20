@@ -390,6 +390,16 @@ button:disabled {
   max-width: 680px;
 }
 
+.modal--confirm {
+  max-width: 420px;
+}
+
+.form__message {
+  margin: 0;
+  padding: var(--space-3) var(--space-4) 0;
+  line-height: 1.4;
+}
+
 .modal__header {
   display: flex;
   align-items: center;
@@ -963,6 +973,11 @@ button:disabled {
   font-weight: 500;
 }
 
+.week-event--focused {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: 2px;
+}
+
 /* ── Month view ─────────────────────────────────────────────────────────── */
 
 .month-grid {
@@ -1047,6 +1062,11 @@ button:disabled {
 .month-event--more {
   background: transparent;
   color: var(--color-fg-muted);
+}
+
+.month-event--focused {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: 1px;
 }
 
 /* ── Day view (flat listbox) ────────────────────────────────────────────── */
