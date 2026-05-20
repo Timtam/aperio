@@ -258,7 +258,14 @@ impl IcalAdapter {
     /// crate's typed API doesn't surface X-WR-* properties, so we
     /// scan the lines ourselves and stop at the first match.
     ///
-    /// Fallback: the URL's host. As a last resort, a static label.
+    /// Fallback chain when X-WR-CALNAME is missing:
+    ///   1. last path segment of the URL, sans `.ics` extension
+    ///      — `/.../schulferien-sachsen-anhalt.ics` becomes
+    ///      `schulferien-sachsen-anhalt`. Beats the bare hostname
+    ///      because two feeds from the same provider would otherwise
+    ///      share a name in the sidebar.
+    ///   2. URL host (`feiertage-deutschland.de`).
+    ///   3. The literal "iCal feed" if URL parsing fails entirely.
     fn derive_calendar_name(&self, body: &str) -> String {
         for raw in body.lines() {
             let line = raw.trim();
@@ -276,8 +283,25 @@ impl IcalAdapter {
                 }
             }
         }
-        Url::parse(&self.credentials.config.feed_url)
-            .ok()
+        let parsed = Url::parse(&self.credentials.config.feed_url).ok();
+        // Try the path's filename first — `.ics` files almost always
+        // have a meaningful slug here.
+        if let Some(url) = parsed.as_ref() {
+            if let Some(last) = url
+                .path_segments()
+                .and_then(|segments| segments.rev().find(|s| !s.is_empty()))
+            {
+                let trimmed = last
+                    .strip_suffix(".ics")
+                    .or_else(|| last.strip_suffix(".ICS"))
+                    .or_else(|| last.strip_suffix(".ical"))
+                    .unwrap_or(last);
+                if !trimmed.is_empty() {
+                    return trimmed.to_string();
+                }
+            }
+        }
+        parsed
             .and_then(|u| u.host_str().map(|s| s.to_string()))
             .unwrap_or_else(|| "iCal feed".to_string())
     }
@@ -454,11 +478,37 @@ mod tests {
     }
 
     #[test]
-    fn derive_calendar_name_falls_back_to_host() {
-        let adapter =
-            IcalAdapter::new(cfg("https://example.com/cal.ics")).unwrap();
+    fn derive_calendar_name_falls_back_to_path_slug() {
+        // `schulferien-sachsen-anhalt.ics` doesn't carry an
+        // X-WR-CALNAME but the path-segment fallback yields a
+        // meaningful name; two distinct feeds from the same host
+        // therefore land on distinct sidebar entries.
+        let adapter = IcalAdapter::new(cfg(
+            "https://www.feiertage-deutschland.de/kalender-download/ics/schulferien-sachsen-anhalt.ics",
+        ))
+        .unwrap();
+        let body = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nEND:VCALENDAR\r\n";
+        assert_eq!(
+            adapter.derive_calendar_name(body),
+            "schulferien-sachsen-anhalt"
+        );
+    }
+
+    #[test]
+    fn derive_calendar_name_falls_back_to_host_when_path_is_empty() {
+        // URL ends with a slash — no usable filename. The hostname
+        // is the next-best identifier.
+        let adapter = IcalAdapter::new(cfg("https://example.com/")).unwrap();
         let body = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nEND:VCALENDAR\r\n";
         assert_eq!(adapter.derive_calendar_name(body), "example.com");
+    }
+
+    #[test]
+    fn derive_calendar_name_strips_ics_extension_case_insensitively() {
+        let adapter =
+            IcalAdapter::new(cfg("https://example.com/Holidays.ICS")).unwrap();
+        let body = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nEND:VCALENDAR\r\n";
+        assert_eq!(adapter.derive_calendar_name(body), "Holidays");
     }
 
     #[tokio::test]
