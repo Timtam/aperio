@@ -17,13 +17,15 @@
 //!   - EXDATE      → EventRecurrence.exceptions
 //!   - CREATED     → Event.created_at (fallback: DTSTAMP, then now)
 //!   - LAST-MODIFIED → Event.updated_at (same fallback chain)
+//!   - VALARM       → Event.reminders (RFC 5545 §3.6.6, bidirectional):
+//!                    relative TRIGGER (-PT1H, -P1D, …) → Relative,
+//!                    absolute TRIGGER;VALUE=DATE-TIME    → Absolute,
+//!                    ACTION:EMAIL                       → Email,
+//!                    ACTION:DISPLAY / AUDIO             → Relative or Absolute
 //!
-//! VTODO (tasks), VALARM (reminders), VTIMEZONE, and ATTENDEE
-//! mapping all live behind their own follow-ups — the calendar
-//! feature lands first so the listing/range read can be wired into
-//! the UI; richer mapping is additive on top of this.
+//! VTIMEZONE and ATTENDEE mapping still live behind follow-up tasks.
 
-use cal_core::{Event, EventRecurrence, NewEvent};
+use cal_core::{Event, EventRecurrence, NewEvent, Reminder, ReminderKind};
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use icalendar::{Calendar as ICalendar, Component, DatePerhapsTime, EventLike};
 
@@ -84,6 +86,8 @@ fn map_event(
         .or_else(|| read_utc(ev, "DTSTAMP"))
         .unwrap_or(created);
 
+    let reminders = parse_valarms(ev);
+
     Ok(Event {
         id: uid.to_string(),
         calendar_id: calendar_id.to_string(),
@@ -95,7 +99,7 @@ fn map_event(
         all_day,
         recurrence,
         color_label: None,
-        reminders: Vec::new(),
+        reminders,
         sound: None,
         attendees: Vec::new(),
         created_at: created,
@@ -103,6 +107,139 @@ fn map_event(
         etag: None,
     })
 }
+
+/// Walk every child component on a VEVENT, pick out the VALARMs, and
+/// translate each into a `cal_core::Reminder`. Unknown actions
+/// (PROCEDURE, X-…) are skipped because the local Reminder engine
+/// has no place to land them; the server keeps them on the row
+/// untouched the next time we read the same VEVENT.
+fn parse_valarms(ev: &icalendar::Event) -> Vec<Reminder> {
+    let mut out = Vec::new();
+    for child in ev.components() {
+        if child.component_kind() != "VALARM" {
+            continue;
+        }
+        let action = child
+            .property_value("ACTION")
+            .map(|s| s.to_ascii_uppercase())
+            .unwrap_or_default();
+        let Some(trigger_prop) = child.properties().get("TRIGGER") else {
+            continue;
+        };
+        let kind = match resolve_trigger(trigger_prop, &action) {
+            Some(k) => k,
+            None => continue,
+        };
+        out.push(Reminder { kind, sound: None });
+    }
+    out
+}
+
+/// Decide whether `TRIGGER` carries an absolute date-time or a
+/// relative ISO 8601 duration, and combine that with the ACTION
+/// to pick the right `ReminderKind`.
+fn resolve_trigger(
+    trigger: &icalendar::Property,
+    action: &str,
+) -> Option<ReminderKind> {
+    let raw = trigger.value();
+    let is_absolute = trigger
+        .params()
+        .get("VALUE")
+        .map(|p| p.value().eq_ignore_ascii_case("DATE-TIME"))
+        .unwrap_or(false)
+        || looks_like_compact_utc(raw);
+
+    if is_absolute {
+        // VALUE=DATE-TIME triggers fire at an exact wall-clock time.
+        // Aperio's Email reminder is always relative-to-event, so an
+        // absolute trigger maps to Absolute regardless of action.
+        let at = parse_compact_utc(raw)?;
+        return Some(ReminderKind::Absolute { at });
+    }
+
+    let minutes_before = parse_iso_duration_to_minutes_before(raw)?;
+    if action == "EMAIL" {
+        Some(ReminderKind::Email { minutes_before })
+    } else {
+        // DISPLAY / AUDIO / anything that doesn't say "EMAIL" maps
+        // to a local pop-up reminder. The user can change the kind
+        // in the Aperio editor later.
+        Some(ReminderKind::Relative { minutes_before })
+    }
+}
+
+fn looks_like_compact_utc(s: &str) -> bool {
+    // Crude shape check: 16 chars ending with Z and containing T.
+    // Good enough to disambiguate triggers that don't carry the
+    // VALUE=DATE-TIME parameter (some servers omit it).
+    s.len() == 16 && s.ends_with('Z') && s.contains('T')
+}
+
+fn parse_compact_utc(s: &str) -> Option<DateTime<Utc>> {
+    chrono::NaiveDateTime::parse_from_str(s, "%Y%m%dT%H%M%SZ")
+        .ok()
+        .map(|dt| Utc.from_utc_datetime(&dt))
+}
+
+/// Parse an RFC 5545 ISO 8601 `DURATION` string into Aperio's
+/// "minutes before the reference" convention. iCal's
+/// `TRIGGER:-PT1H` ("fire 1 hour before") becomes
+/// `minutes_before = 60`. A positive iCal duration (fire *after*
+/// the reference) becomes a negative `minutes_before`.
+///
+/// We support the subset of RFC 5545 that real-world servers emit:
+/// optional sign, `P`, optional `<n>D`, optional `T<n>H<n>M<n>S`.
+/// Anything else returns `None` and the caller drops the alarm.
+fn parse_iso_duration_to_minutes_before(raw: &str) -> Option<i64> {
+    let (sign, rest) = if let Some(r) = raw.strip_prefix('-') {
+        (-1i64, r)
+    } else if let Some(r) = raw.strip_prefix('+') {
+        (1i64, r)
+    } else {
+        (1i64, raw)
+    };
+    let rest = rest.strip_prefix('P')?;
+    let (days_part, time_part) = match rest.find('T') {
+        Some(idx) => (&rest[..idx], &rest[idx + 1..]),
+        None => (rest, ""),
+    };
+    let mut total_minutes: i64 = 0;
+    if !days_part.is_empty() {
+        let days: i64 = days_part.strip_suffix('D')?.parse().ok()?;
+        total_minutes += days * 1440;
+    }
+    let mut buf = String::new();
+    for c in time_part.chars() {
+        if c.is_ascii_digit() {
+            buf.push(c);
+            continue;
+        }
+        if buf.is_empty() {
+            return None;
+        }
+        let n: i64 = buf.parse().ok()?;
+        buf.clear();
+        match c {
+            'H' => total_minutes += n * 60,
+            'M' => total_minutes += n,
+            // Round seconds to the nearest minute — Aperio's reminder
+            // resolution is one minute and CalDAV servers very rarely
+            // emit sub-minute triggers.
+            'S' => total_minutes += (n + 30) / 60,
+            _ => return None,
+        }
+    }
+    if !buf.is_empty() {
+        // Trailing digits with no unit suffix — malformed.
+        return None;
+    }
+    // iCal sign convention: negative duration = before reference.
+    // Aperio's minutes_before convention: positive = before.
+    // Flip the sign to get from one to the other.
+    Some(-sign * total_minutes)
+}
+
 
 /// Pull DTSTART and DTEND into UTC. Several shapes are possible:
 ///   - DATE-TIME with explicit UTC ("Z" suffix) — most common
@@ -282,8 +419,55 @@ fn apply_common(ical_ev: &mut icalendar::Event, uid: &str, event: &NewEvent) {
             );
         }
     }
+    // VALARM children — one per Reminder so iCloud's iOS / Alexa
+    // bridge sees the reminders we set, and we keep their default
+    // ones when we round-trip an event we read back.
+    for reminder in &event.reminders {
+        if let Some(alarm) = reminder_to_alarm(reminder, &event.title) {
+            ical_ev.alarm(alarm);
+        }
+    }
     // DTSTAMP is mandatory per RFC 5545 — icalendar adds it
     // automatically on serialise.
+}
+
+/// Translate a `cal_core::Reminder` into a VALARM component. Returns
+/// `None` for kinds that have no iCal equivalent (currently only
+/// `AppStart` — that's an Aperio-local concept the server has no
+/// place for, and forging a fake VALARM would mislead the bridge
+/// devices).
+fn reminder_to_alarm(reminder: &Reminder, fallback_summary: &str) -> Option<icalendar::Alarm> {
+    use icalendar::{Alarm, Trigger};
+
+    let summary = if fallback_summary.is_empty() {
+        "Aperio reminder".to_string()
+    } else {
+        fallback_summary.to_string()
+    };
+
+    match &reminder.kind {
+        ReminderKind::Relative { minutes_before } => {
+            // chrono::Duration is what icalendar's Trigger consumes.
+            // Convert our minutes_before (positive = before) to the
+            // signed iCal duration (negative = before).
+            let dur = chrono::Duration::minutes(-*minutes_before);
+            Some(Alarm::display(&summary, Trigger::from(dur)).done())
+        }
+        ReminderKind::Absolute { at } => {
+            Some(Alarm::display(&summary, Trigger::from(*at)).done())
+        }
+        ReminderKind::Email { minutes_before } => {
+            // icalendar 0.16 doesn't expose a typed `Alarm::email`
+            // constructor yet (the source carries a TODO). We build
+            // a DISPLAY alarm and override ACTION to EMAIL by hand
+            // so the wire format still says ACTION:EMAIL.
+            let dur = chrono::Duration::minutes(-*minutes_before);
+            let mut alarm = Alarm::display(&summary, Trigger::from(dur));
+            alarm.add_property("ACTION", "EMAIL");
+            Some(alarm.done())
+        }
+        ReminderKind::AppStart => None,
+    }
 }
 
 fn format_utc_compact(dt: DateTime<Utc>) -> String {
@@ -433,6 +617,195 @@ END:VCALENDAR\r
             body.contains("DTSTART;VALUE=DATE:20260520"),
             "expected VALUE=DATE DTSTART, got: {body}",
         );
+    }
+
+    #[test]
+    fn reads_icloud_style_display_alarm_one_hour_before() {
+        // Shape iCloud uses for its default reminder: VALARM with
+        // ACTION:DISPLAY + TRIGGER:-PT1H inside the VEVENT.
+        let body = "BEGIN:VCALENDAR\r
+VERSION:2.0\r
+PRODID:-//test//EN\r
+BEGIN:VEVENT\r
+UID:meeting@aperio\r
+SUMMARY:Meeting\r
+DTSTART:20260520T080000Z\r
+DTEND:20260520T090000Z\r
+BEGIN:VALARM\r
+ACTION:DISPLAY\r
+DESCRIPTION:Meeting\r
+TRIGGER:-PT1H\r
+END:VALARM\r
+END:VEVENT\r
+END:VCALENDAR\r
+";
+        let events = parse_calendar_data(body, "cal-1").unwrap();
+        assert_eq!(events.len(), 1);
+        let reminders = &events[0].reminders;
+        assert_eq!(reminders.len(), 1);
+        match &reminders[0].kind {
+            ReminderKind::Relative { minutes_before } => {
+                assert_eq!(*minutes_before, 60);
+            }
+            other => panic!("expected Relative, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn reads_day_before_and_absolute_alarms() {
+        let body = "BEGIN:VCALENDAR\r
+VERSION:2.0\r
+PRODID:-//test//EN\r
+BEGIN:VEVENT\r
+UID:multi-alarm@aperio\r
+SUMMARY:Conference\r
+DTSTART:20260520T080000Z\r
+DTEND:20260520T180000Z\r
+BEGIN:VALARM\r
+ACTION:AUDIO\r
+TRIGGER:-P1D\r
+END:VALARM\r
+BEGIN:VALARM\r
+ACTION:DISPLAY\r
+DESCRIPTION:Pack laptop\r
+TRIGGER;VALUE=DATE-TIME:20260519T200000Z\r
+END:VALARM\r
+END:VEVENT\r
+END:VCALENDAR\r
+";
+        let events = parse_calendar_data(body, "cal-1").unwrap();
+        let reminders = &events[0].reminders;
+        assert_eq!(reminders.len(), 2);
+        assert!(matches!(
+            reminders[0].kind,
+            ReminderKind::Relative { minutes_before: 1440 }
+        ));
+        match &reminders[1].kind {
+            ReminderKind::Absolute { at } => {
+                assert_eq!(
+                    *at,
+                    Utc.with_ymd_and_hms(2026, 5, 19, 20, 0, 0).unwrap()
+                );
+            }
+            other => panic!("expected Absolute, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn maps_email_action_to_email_reminder() {
+        let body = "BEGIN:VCALENDAR\r
+VERSION:2.0\r
+PRODID:-//test//EN\r
+BEGIN:VEVENT\r
+UID:email-alarm@aperio\r
+SUMMARY:Renewal\r
+DTSTART:20260520T080000Z\r
+DTEND:20260520T090000Z\r
+BEGIN:VALARM\r
+ACTION:EMAIL\r
+ATTENDEE:mailto:user@example.com\r
+DESCRIPTION:Renewal due\r
+SUMMARY:Renewal\r
+TRIGGER:-PT15M\r
+END:VALARM\r
+END:VEVENT\r
+END:VCALENDAR\r
+";
+        let events = parse_calendar_data(body, "cal-1").unwrap();
+        match &events[0].reminders[0].kind {
+            ReminderKind::Email { minutes_before } => {
+                assert_eq!(*minutes_before, 15);
+            }
+            other => panic!("expected Email, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn skips_unknown_actions() {
+        let body = "BEGIN:VCALENDAR\r
+VERSION:2.0\r
+PRODID:-//test//EN\r
+BEGIN:VEVENT\r
+UID:procedure@aperio\r
+SUMMARY:Legacy\r
+DTSTART:20260520T080000Z\r
+DTEND:20260520T090000Z\r
+BEGIN:VALARM\r
+ACTION:PROCEDURE\r
+TRIGGER:-PT5M\r
+END:VALARM\r
+BEGIN:VALARM\r
+ACTION:DISPLAY\r
+TRIGGER:-PT10M\r
+END:VALARM\r
+END:VEVENT\r
+END:VCALENDAR\r
+";
+        // We treat PROCEDURE the same as any other DISPLAY-shaped
+        // reminder (relative trigger, local pop-up) because dropping
+        // it would lose information. EMAIL is the only action
+        // category we treat specially.
+        let events = parse_calendar_data(body, "cal-1").unwrap();
+        assert_eq!(events[0].reminders.len(), 2);
+    }
+
+    #[test]
+    fn round_trips_reminders_through_write_then_read() {
+        let event = NewEvent {
+            title: "Sync".into(),
+            description: None,
+            location: None,
+            start: Utc.with_ymd_and_hms(2026, 5, 20, 8, 0, 0).unwrap(),
+            end: Utc.with_ymd_and_hms(2026, 5, 20, 9, 0, 0).unwrap(),
+            all_day: false,
+            recurrence: None,
+            color_label: None,
+            reminders: vec![
+                Reminder {
+                    kind: ReminderKind::Relative { minutes_before: 60 },
+                    sound: None,
+                },
+                Reminder {
+                    kind: ReminderKind::Absolute {
+                        at: Utc.with_ymd_and_hms(2026, 5, 20, 7, 30, 0).unwrap(),
+                    },
+                    sound: None,
+                },
+            ],
+            sound: None,
+            attendees: Vec::new(),
+        };
+        let body = new_event_to_ical("round-trip-uid", &event);
+        let parsed = parse_calendar_data(&body, "cal-1").unwrap();
+        let reminders = &parsed[0].reminders;
+        assert_eq!(reminders.len(), 2);
+        assert!(matches!(
+            reminders[0].kind,
+            ReminderKind::Relative { minutes_before: 60 }
+        ));
+        assert!(matches!(reminders[1].kind, ReminderKind::Absolute { .. }));
+    }
+
+    #[test]
+    fn parses_duration_edge_cases() {
+        assert_eq!(parse_iso_duration_to_minutes_before("-PT1H"), Some(60));
+        assert_eq!(parse_iso_duration_to_minutes_before("-PT15M"), Some(15));
+        assert_eq!(parse_iso_duration_to_minutes_before("-P1D"), Some(1440));
+        assert_eq!(
+            parse_iso_duration_to_minutes_before("-P1DT12H"),
+            Some(1440 + 720)
+        );
+        assert_eq!(
+            parse_iso_duration_to_minutes_before("-PT1H30M"),
+            Some(90)
+        );
+        // No sign = positive iCal duration = fires *after* reference,
+        // so minutes_before is negative.
+        assert_eq!(parse_iso_duration_to_minutes_before("PT15M"), Some(-15));
+        // Garbage input returns None.
+        assert_eq!(parse_iso_duration_to_minutes_before("foo"), None);
+        assert_eq!(parse_iso_duration_to_minutes_before("-PT"), Some(0));
+        assert_eq!(parse_iso_duration_to_minutes_before("-PT5X"), None);
     }
 
     #[test]
