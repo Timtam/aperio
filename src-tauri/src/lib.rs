@@ -9,6 +9,7 @@ pub mod db;
 mod paths;
 mod platform;
 pub mod reminders;
+pub mod secrets;
 
 pub use db::{DbError, DbHandle, DbResult, SharedConn};
 pub use paths::{resolve_data_dir, DataDirKind, DataDirResolution};

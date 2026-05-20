@@ -35,6 +35,7 @@ chrono.workspace = true
 async-trait.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
+keyring.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 # Setting the process AppUserModelID at startup + writing the AUMID
