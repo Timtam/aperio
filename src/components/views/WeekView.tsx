@@ -15,7 +15,12 @@ import { useViewState } from '../../state/ViewState';
 import { visibleRange } from '../../state/viewMath';
 import type { CalendarEvent } from '../../api/types';
 import { ConfirmDialog } from '../ConfirmDialog';
-import { deleteEventById, isCommandError } from '../../api/client';
+import { DeleteEventScopeDialog } from '../DeleteEventScopeDialog';
+import {
+  addEventExdate,
+  deleteEventById,
+  isCommandError,
+} from '../../api/client';
 
 /**
  * Week view — the workhorse calendar surface.
@@ -122,21 +127,34 @@ export function WeekView() {
     onDayChange: dayChangeAnnouncer,
   });
 
-  // Delete confirmation. `confirmTarget` carries the event that the
-  // user is about to delete; rendering the dialog conditionally keeps
-  // its DOM out of the tree until needed.
+  // Delete confirmation. Non-recurring events go through the
+  // straight Confirm dialog; recurring occurrences need a scope
+  // choice ("only this one" vs "the whole series"), so they get
+  // their own three-button dialog.
   const [confirmTarget, setConfirmTarget] = useState<CalendarEvent | null>(
     null,
   );
+  const [scopeTarget, setScopeTarget] = useState<CalendarEvent | null>(null);
+
   const performDelete = useCallback(
-    async (ev: CalendarEvent) => {
+    async (ev: CalendarEvent, scope: 'occurrence' | 'series') => {
       try {
-        // Strip the synthetic occurrence suffix — delete always targets
-        // the master row. Single-occurrence delete lives in EventDialog
-        // where the user can pick scope explicitly.
-        const id = ev.id.includes('@') ? ev.id.split('@')[0] : ev.id;
-        await deleteEventById(id, ev.calendar_id);
-        announce(t('dialogs.event.deleted', { title: ev.title }));
+        if (scope === 'occurrence' && ev.id.includes('@')) {
+          // Mark just this date with an EXDATE on the master so the
+          // expansion engine skips it. The master row stays alive
+          // and every other occurrence keeps appearing.
+          const [seriesId, occIso] = ev.id.split('@');
+          await addEventExdate(seriesId, occIso);
+          announce(
+            t('dialogs.event.occurrenceDeleted', { title: ev.title }),
+          );
+        } else {
+          // Strip the synthetic occurrence suffix — series deletes
+          // always target the master row.
+          const id = ev.id.includes('@') ? ev.id.split('@')[0] : ev.id;
+          await deleteEventById(id, ev.calendar_id);
+          announce(t('dialogs.event.deleted', { title: ev.title }));
+        }
       } catch (err) {
         if (isCommandError(err)) {
           announce(`${err.code}: ${err.message}`);
@@ -147,6 +165,14 @@ export function WeekView() {
     },
     [announce, t],
   );
+
+  const requestDelete = useCallback((ev: CalendarEvent) => {
+    if (ev.id.includes('@') || ev.recurrence) {
+      setScopeTarget(ev);
+    } else {
+      setConfirmTarget(ev);
+    }
+  }, []);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -177,7 +203,7 @@ export function WeekView() {
         }
         if (e.key === 'Delete' || e.key === 'Backspace') {
           e.preventDefault();
-          if (ev) setConfirmTarget(ev);
+          if (ev) requestDelete(ev);
           return;
         }
         // Arrow keys fall through to day navigation below, which will
@@ -248,6 +274,7 @@ export function WeekView() {
       openEventDialog,
       handleTab,
       clearEventIndex,
+      requestDelete,
     ],
   );
 
@@ -369,12 +396,24 @@ export function WeekView() {
         isOpen={confirmTarget !== null}
         onClose={() => setConfirmTarget(null)}
         onConfirm={() => {
-          if (confirmTarget) void performDelete(confirmTarget);
+          if (confirmTarget) void performDelete(confirmTarget, 'series');
         }}
         title={t('dialogs.confirm.deleteEventTitle')}
         message={t('dialogs.confirm.deleteEventMessage', {
           title: confirmTarget?.title ?? '',
         })}
+      />
+
+      <DeleteEventScopeDialog
+        isOpen={scopeTarget !== null}
+        onClose={() => setScopeTarget(null)}
+        title={scopeTarget?.title ?? ''}
+        onOccurrence={() => {
+          if (scopeTarget) void performDelete(scopeTarget, 'occurrence');
+        }}
+        onSeries={() => {
+          if (scopeTarget) void performDelete(scopeTarget, 'series');
+        }}
       />
     </section>
   );

@@ -23,7 +23,12 @@ import { useViewState } from '../../state/ViewState';
 import { visibleRange } from '../../state/viewMath';
 import type { CalendarEvent } from '../../api/types';
 import { ConfirmDialog } from '../ConfirmDialog';
-import { deleteEventById, isCommandError } from '../../api/client';
+import { DeleteEventScopeDialog } from '../DeleteEventScopeDialog';
+import {
+  addEventExdate,
+  deleteEventById,
+  isCommandError,
+} from '../../api/client';
 
 /**
  * Month view — six-week calendar grid (DESIGN.md section 3.3,
@@ -98,12 +103,22 @@ export function MonthView() {
   const [confirmTarget, setConfirmTarget] = useState<CalendarEvent | null>(
     null,
   );
+  const [scopeTarget, setScopeTarget] = useState<CalendarEvent | null>(null);
+
   const performDelete = useCallback(
-    async (ev: CalendarEvent) => {
+    async (ev: CalendarEvent, scope: 'occurrence' | 'series') => {
       try {
-        const id = ev.id.includes('@') ? ev.id.split('@')[0] : ev.id;
-        await deleteEventById(id, ev.calendar_id);
-        announce(t('dialogs.event.deleted', { title: ev.title }));
+        if (scope === 'occurrence' && ev.id.includes('@')) {
+          const [seriesId, occIso] = ev.id.split('@');
+          await addEventExdate(seriesId, occIso);
+          announce(
+            t('dialogs.event.occurrenceDeleted', { title: ev.title }),
+          );
+        } else {
+          const id = ev.id.includes('@') ? ev.id.split('@')[0] : ev.id;
+          await deleteEventById(id, ev.calendar_id);
+          announce(t('dialogs.event.deleted', { title: ev.title }));
+        }
       } catch (err) {
         if (isCommandError(err)) {
           announce(`${err.code}: ${err.message}`);
@@ -114,6 +129,14 @@ export function MonthView() {
     },
     [announce, t],
   );
+
+  const requestDelete = useCallback((ev: CalendarEvent) => {
+    if (ev.id.includes('@') || ev.recurrence) {
+      setScopeTarget(ev);
+    } else {
+      setConfirmTarget(ev);
+    }
+  }, []);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -139,7 +162,7 @@ export function MonthView() {
         }
         if (e.key === 'Delete' || e.key === 'Backspace') {
           e.preventDefault();
-          if (ev) setConfirmTarget(ev);
+          if (ev) requestDelete(ev);
           return;
         }
       }
@@ -210,6 +233,7 @@ export function MonthView() {
       openEventDialog,
       handleTab,
       clearEventIndex,
+      requestDelete,
     ],
   );
 
@@ -367,12 +391,24 @@ export function MonthView() {
         isOpen={confirmTarget !== null}
         onClose={() => setConfirmTarget(null)}
         onConfirm={() => {
-          if (confirmTarget) void performDelete(confirmTarget);
+          if (confirmTarget) void performDelete(confirmTarget, 'series');
         }}
         title={t('dialogs.confirm.deleteEventTitle')}
         message={t('dialogs.confirm.deleteEventMessage', {
           title: confirmTarget?.title ?? '',
         })}
+      />
+
+      <DeleteEventScopeDialog
+        isOpen={scopeTarget !== null}
+        onClose={() => setScopeTarget(null)}
+        title={scopeTarget?.title ?? ''}
+        onOccurrence={() => {
+          if (scopeTarget) void performDelete(scopeTarget, 'occurrence');
+        }}
+        onSeries={() => {
+          if (scopeTarget) void performDelete(scopeTarget, 'series');
+        }}
       />
     </section>
   );

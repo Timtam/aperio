@@ -14,7 +14,12 @@ import { useViewState } from '../../state/ViewState';
 import { visibleRange } from '../../state/viewMath';
 import { duplicateEvent } from '../MoveCopyDialog';
 import { ConfirmDialog } from '../ConfirmDialog';
-import { deleteEventById, isCommandError } from '../../api/client';
+import { DeleteEventScopeDialog } from '../DeleteEventScopeDialog';
+import {
+  addEventExdate,
+  deleteEventById,
+  isCommandError,
+} from '../../api/client';
 
 /**
  * Agenda — flat, chronologically ordered listbox of events with visual
@@ -59,12 +64,22 @@ export function AgendaView() {
   const [confirmTarget, setConfirmTarget] = useState<CalendarEvent | null>(
     null,
   );
+  const [scopeTarget, setScopeTarget] = useState<CalendarEvent | null>(null);
+
   const performDelete = useCallback(
-    async (ev: CalendarEvent) => {
+    async (ev: CalendarEvent, scope: 'occurrence' | 'series') => {
       try {
-        const id = ev.id.includes('@') ? ev.id.split('@')[0] : ev.id;
-        await deleteEventById(id, ev.calendar_id);
-        announce(t('dialogs.event.deleted', { title: ev.title }));
+        if (scope === 'occurrence' && ev.id.includes('@')) {
+          const [seriesId, occIso] = ev.id.split('@');
+          await addEventExdate(seriesId, occIso);
+          announce(
+            t('dialogs.event.occurrenceDeleted', { title: ev.title }),
+          );
+        } else {
+          const id = ev.id.includes('@') ? ev.id.split('@')[0] : ev.id;
+          await deleteEventById(id, ev.calendar_id);
+          announce(t('dialogs.event.deleted', { title: ev.title }));
+        }
       } catch (err) {
         if (isCommandError(err)) {
           announce(`${err.code}: ${err.message}`);
@@ -75,6 +90,14 @@ export function AgendaView() {
     },
     [announce, t],
   );
+
+  const requestDelete = useCallback((ev: CalendarEvent) => {
+    if (ev.id.includes('@') || ev.recurrence) {
+      setScopeTarget(ev);
+    } else {
+      setConfirmTarget(ev);
+    }
+  }, []);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -127,14 +150,14 @@ export function AgendaView() {
         case 'Backspace': {
           e.preventDefault();
           const ev = events[focusIndex];
-          if (ev) setConfirmTarget(ev);
+          if (ev) requestDelete(ev);
           return;
         }
         default:
           return;
       }
     },
-    [events, focusIndex, openEventDialog, openMoveCopy, announce, t],
+    [events, focusIndex, openEventDialog, openMoveCopy, announce, t, requestDelete],
   );
 
   return (
@@ -180,12 +203,24 @@ export function AgendaView() {
         isOpen={confirmTarget !== null}
         onClose={() => setConfirmTarget(null)}
         onConfirm={() => {
-          if (confirmTarget) void performDelete(confirmTarget);
+          if (confirmTarget) void performDelete(confirmTarget, 'series');
         }}
         title={t('dialogs.confirm.deleteEventTitle')}
         message={t('dialogs.confirm.deleteEventMessage', {
           title: confirmTarget?.title ?? '',
         })}
+      />
+
+      <DeleteEventScopeDialog
+        isOpen={scopeTarget !== null}
+        onClose={() => setScopeTarget(null)}
+        title={scopeTarget?.title ?? ''}
+        onOccurrence={() => {
+          if (scopeTarget) void performDelete(scopeTarget, 'occurrence');
+        }}
+        onSeries={() => {
+          if (scopeTarget) void performDelete(scopeTarget, 'series');
+        }}
       />
     </section>
   );

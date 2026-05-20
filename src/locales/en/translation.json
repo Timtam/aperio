@@ -76,6 +76,13 @@
       "deleteTaskTitle": "Delete task",
       "deleteTaskMessage": "Delete \"{{title}}\"? This cannot be undone."
     },
+    "deleteScope": {
+      "title": "Delete recurring event",
+      "message": "\"{{title}}\" is part of a series. Delete just this occurrence, or the whole series?",
+      "occurrence": "This occurrence only",
+      "series": "Whole series",
+      "cancel": "Cancel"
+    },
     "colorLabels": {
       "title": "Color labels",
       "existingHeading_zero": "Existing color labels",

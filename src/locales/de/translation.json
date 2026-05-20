@@ -73,6 +73,13 @@
       "deleteTaskTitle": "Aufgabe löschen",
       "deleteTaskMessage": "„{{title}}\" wirklich löschen? Das kann nicht rückgängig gemacht werden."
     },
+    "deleteScope": {
+      "title": "Serientermin löschen",
+      "message": "„{{title}}\" ist Teil einer Serie. Nur diesen Termin oder die ganze Serie löschen?",
+      "occurrence": "Nur diesen Termin",
+      "series": "Ganze Serie",
+      "cancel": "Abbrechen"
+    },
     "save": "Speichern",
     "create": "Anlegen",
     "close": "Schließen",

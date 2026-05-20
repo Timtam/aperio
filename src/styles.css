@@ -406,6 +406,13 @@ button[aria-disabled='true'] {
   max-width: 420px;
 }
 
+/* The recurring-event delete dialog carries three buttons instead
+   of two, so it needs a bit more horizontal room to keep the
+   labels readable. */
+.modal--confirm-wide {
+  max-width: 540px;
+}
+
 .form__message {
   margin: 0;
   padding: var(--space-3) var(--space-4) 0;
