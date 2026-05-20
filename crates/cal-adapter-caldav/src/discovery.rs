@@ -20,12 +20,13 @@
 //! relative `<href>` values from the server are joined against the
 //! right base.
 
-use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE, HeaderName};
+use reqwest::header::{HeaderValue, CONTENT_TYPE, HeaderName};
 use reqwest::{Client, Method, Response, StatusCode};
 use tracing::debug;
 use url::Url;
 
-use crate::config::{AuthKind, Credentials};
+use crate::auth::auth_header;
+use crate::config::Credentials;
 use crate::error::{CaldavError, CaldavResult};
 use crate::xml::extract_first_nested_href;
 
@@ -222,35 +223,10 @@ async fn expect_207(response: Response) -> CaldavResult<String> {
     response.text().await.map_err(Into::into)
 }
 
-fn auth_header(credentials: &Credentials) -> CaldavResult<HeaderMap> {
-    let mut headers = HeaderMap::new();
-    let value = match credentials.config.auth_kind {
-        AuthKind::Basic => {
-            // RFC 7617 Basic — base64("user:password"). reqwest has a
-            // higher-level basic_auth() but it sets the header once
-            // per call; doing it ourselves lets us share the same
-            // HeaderMap across the discovery hops.
-            use base64::Engine;
-            let token = format!(
-                "{}:{}",
-                credentials.config.username, credentials.secret
-            );
-            let encoded =
-                base64::engine::general_purpose::STANDARD.encode(token.as_bytes());
-            HeaderValue::from_str(&format!("Basic {encoded}"))
-                .map_err(|e| CaldavError::Config(e.to_string()))?
-        }
-        AuthKind::Bearer => HeaderValue::from_str(&format!("Bearer {}", credentials.secret))
-            .map_err(|e| CaldavError::Config(e.to_string()))?,
-    };
-    headers.insert(reqwest::header::AUTHORIZATION, value);
-    Ok(headers)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::CaldavAccountConfig;
+    use crate::config::{AuthKind, CaldavAccountConfig};
     use mockito::Server;
 
     fn creds(server_url: &str) -> Credentials {

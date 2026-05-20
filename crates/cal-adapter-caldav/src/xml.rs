@@ -129,6 +129,200 @@ pub fn extract_first_nested_href(
     Ok(found)
 }
 
+/// One parsed `<response>` block. Captures the bits the calendar
+/// listing and event-range read both need without picking up the
+/// whole tree.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct ResponseEntry {
+    pub href: String,
+    pub displayname: Option<String>,
+    pub etag: Option<String>,
+    /// `true` when the `<resourcetype>` block contains a
+    /// `<C:calendar/>` element from the CalDAV namespace.
+    pub is_calendar: bool,
+    /// `<ical:calendar-color>` or `<C:calendar-color>` value when
+    /// present (servers vary on the namespace).
+    pub calendar_color: Option<String>,
+    /// `name` attribute of every `<comp/>` inside the
+    /// `<supported-calendar-component-set>` block. Empty Vec when the
+    /// property is absent.
+    pub supported_components: Vec<String>,
+    /// Inline iCal body returned by `<calendar-data>` on an
+    /// `addressbook-query` / `calendar-query` REPORT. Empty in plain
+    /// PROPFIND responses.
+    pub calendar_data: Option<String>,
+}
+
+/// Walk a multistatus document and emit one [`ResponseEntry`] per
+/// `<response>` block. State-machine style — quick-xml is fast but
+/// has no DOM, so we collect the bits we care about as the parser
+/// streams through.
+pub fn parse_multistatus(body: &str) -> CaldavResult<Vec<ResponseEntry>> {
+    let mut reader = Reader::from_str(body);
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
+    let mut out: Vec<ResponseEntry> = Vec::new();
+    let mut current: Option<ResponseEntry> = None;
+
+    // Track nesting so we don't pick up properties from outside the
+    // currently-open <response>.
+    let mut in_response = false;
+    let mut in_resourcetype = false;
+    let mut in_supported_set = false;
+    // Where the next text event should land.
+    let mut text_target: TextTarget = TextTarget::None;
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
+                let name = e.name();
+
+                if local_name_eq(name, b"response") {
+                    in_response = true;
+                    current = Some(ResponseEntry::default());
+                    continue;
+                }
+                if !in_response {
+                    continue;
+                }
+                let Some(entry) = current.as_mut() else {
+                    continue;
+                };
+
+                if local_name_eq(name, b"resourcetype") {
+                    in_resourcetype = true;
+                } else if local_name_eq(name, b"supported-calendar-component-set") {
+                    in_supported_set = true;
+                } else if in_resourcetype && local_name_eq(name, b"calendar") {
+                    entry.is_calendar = true;
+                } else if in_supported_set && local_name_eq(name, b"comp") {
+                    // `<comp name="VEVENT"/>` — the value lives in the
+                    // `name` attribute, not in the element text.
+                    for attr in e.attributes().with_checks(false).flatten() {
+                        if attr.key.local_name().as_ref() == b"name" {
+                            if let Ok(v) = attr.unescape_value() {
+                                entry.supported_components.push(v.into_owned());
+                            }
+                        }
+                    }
+                } else if local_name_eq(name, b"href") {
+                    // Only the *direct* <href> child of <response>
+                    // becomes the entry href; nested hrefs (inside
+                    // resourcetype etc.) are ignored.
+                    if !in_resourcetype && entry.href.is_empty() {
+                        text_target = TextTarget::Href;
+                    }
+                } else if local_name_eq(name, b"displayname") {
+                    text_target = TextTarget::Displayname;
+                } else if local_name_eq(name, b"getetag") {
+                    text_target = TextTarget::Etag;
+                } else if local_name_eq(name, b"calendar-color") {
+                    text_target = TextTarget::Color;
+                } else if local_name_eq(name, b"calendar-data") {
+                    text_target = TextTarget::CalendarData;
+                }
+            }
+            Ok(Event::End(e)) => {
+                let name = e.name();
+                if local_name_eq(name, b"response") {
+                    if let Some(entry) = current.take() {
+                        if !entry.href.is_empty() {
+                            out.push(entry);
+                        }
+                    }
+                    in_response = false;
+                    in_resourcetype = false;
+                    in_supported_set = false;
+                    text_target = TextTarget::None;
+                    continue;
+                }
+                if local_name_eq(name, b"resourcetype") {
+                    in_resourcetype = false;
+                } else if local_name_eq(name, b"supported-calendar-component-set") {
+                    in_supported_set = false;
+                } else if !matches!(text_target, TextTarget::None) {
+                    text_target = TextTarget::None;
+                }
+            }
+            Ok(Event::Text(t)) => {
+                if let Ok(text) = t.unescape() {
+                    capture_text(&mut current, text_target, &text);
+                }
+            }
+            Ok(Event::CData(t)) => {
+                // CDATA is rare in CalDAV but Nextcloud emits it for
+                // some XML-unsafe display names. The bytes are
+                // already unescaped.
+                if let Ok(text) = std::str::from_utf8(t.as_ref()) {
+                    capture_text(&mut current, text_target, text);
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(err) => {
+                return Err(CaldavError::Protocol(format!("xml parse: {err}")));
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+    Ok(out)
+}
+
+#[derive(Debug, Clone, Copy)]
+enum TextTarget {
+    None,
+    Href,
+    Displayname,
+    Etag,
+    Color,
+    CalendarData,
+}
+
+fn capture_text(current: &mut Option<ResponseEntry>, target: TextTarget, text: &str) {
+    if matches!(target, TextTarget::None) {
+        return;
+    }
+    let Some(entry) = current.as_mut() else {
+        return;
+    };
+    match target {
+        TextTarget::Href => {
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                entry.href = trimmed.to_string();
+            }
+        }
+        TextTarget::Displayname => {
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                entry.displayname = Some(trimmed.to_string());
+            }
+        }
+        TextTarget::Etag => {
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                entry.etag = Some(trimmed.to_string());
+            }
+        }
+        TextTarget::Color => {
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                entry.calendar_color = Some(trimmed.to_string());
+            }
+        }
+        TextTarget::CalendarData => {
+            // iCal needs CRLF/LF preserved as-is; only collapse the
+            // leading/trailing whitespace the XML pretty-printer
+            // adds around the element body.
+            let stripped = text.trim_matches(|c: char| c == ' ' || c == '\t');
+            if !stripped.is_empty() {
+                entry.calendar_data = Some(stripped.to_string());
+            }
+        }
+        TextTarget::None => {}
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -196,5 +390,103 @@ mod tests {
         let body = r#"<d:multistatus xmlns:d="DAV:"><d:response><d:href>/</d:href></d:response></d:multistatus>"#;
         let href = extract_first_nested_href(body, b"calendar-home-set").unwrap();
         assert!(href.is_none());
+    }
+
+    #[test]
+    fn multistatus_parses_calendar_listing() {
+        // PROPFIND on the calendar-home-set, depth 1. First entry
+        // is the home set itself (not a calendar), the rest are
+        // individual calendars with mixed properties.
+        let body = r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"
+              xmlns:ical="http://apple.com/ns/ical/">
+  <d:response>
+    <d:href>/calendars/alice/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>alice</d:displayname>
+        <d:resourcetype><d:collection/></d:resourcetype>
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/calendars/alice/work/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Work</d:displayname>
+        <d:resourcetype><d:collection/><c:calendar/></d:resourcetype>
+        <ical:calendar-color>#1e88e5</ical:calendar-color>
+        <c:supported-calendar-component-set>
+          <c:comp name="VEVENT"/>
+        </c:supported-calendar-component-set>
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/calendars/alice/tasks/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Tasks</d:displayname>
+        <d:resourcetype><d:collection/><c:calendar/></d:resourcetype>
+        <c:supported-calendar-component-set>
+          <c:comp name="VTODO"/>
+        </c:supported-calendar-component-set>
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+</d:multistatus>"#;
+        let entries = parse_multistatus(body).unwrap();
+        assert_eq!(entries.len(), 3);
+
+        // Home-set entry: collection but not a calendar.
+        assert_eq!(entries[0].href, "/calendars/alice/");
+        assert!(!entries[0].is_calendar);
+        assert_eq!(entries[0].displayname.as_deref(), Some("alice"));
+
+        let work = &entries[1];
+        assert_eq!(work.href, "/calendars/alice/work/");
+        assert!(work.is_calendar);
+        assert_eq!(work.displayname.as_deref(), Some("Work"));
+        assert_eq!(work.calendar_color.as_deref(), Some("#1e88e5"));
+        assert_eq!(work.supported_components, vec!["VEVENT".to_string()]);
+
+        let tasks = &entries[2];
+        assert!(tasks.is_calendar);
+        assert_eq!(tasks.supported_components, vec!["VTODO".to_string()]);
+    }
+
+    #[test]
+    fn multistatus_parses_calendar_data_for_event_query() {
+        let body = r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+  <d:response>
+    <d:href>/calendars/alice/work/event-1.ics</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:getetag>"abc-123"</d:getetag>
+        <c:calendar-data>BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//test//EN
+BEGIN:VEVENT
+UID:event-1@aperio
+SUMMARY:Standup
+DTSTART:20260520T080000Z
+DTEND:20260520T083000Z
+END:VEVENT
+END:VCALENDAR</c:calendar-data>
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+</d:multistatus>"#;
+        let entries = parse_multistatus(body).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].etag.as_deref(), Some("\"abc-123\""));
+        let data = entries[0].calendar_data.as_deref().unwrap();
+        assert!(data.contains("UID:event-1@aperio"));
+        assert!(data.contains("DTSTART:20260520T080000Z"));
     }
 }

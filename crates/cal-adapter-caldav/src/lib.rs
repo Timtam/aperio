@@ -17,15 +17,25 @@
 //! left to the later iterations — at this point the registry layer
 //! that would route through those traits doesn't exist yet either.
 
+mod auth;
+pub mod calendars;
 pub mod config;
 pub mod discovery;
 pub mod error;
+pub mod events;
+pub mod mapping;
 mod xml;
 
 use std::sync::Mutex;
 use std::time::Duration;
 
+use async_trait::async_trait;
+use cal_core::{
+    Adapter, AuthToken, Calendar, CalendarFeature, Capability, ContainerColor, Credentials as CoreCredentials,
+    DateRange, Error as CoreError, Event, FreeBusy, NewEvent, Result as CoreResult,
+};
 use reqwest::Client;
+use url::Url;
 
 pub use config::{AuthKind, CaldavAccountConfig, Credentials};
 pub use discovery::Discovery;
@@ -41,6 +51,10 @@ pub struct CaldavAdapter {
     /// re-walk the well-known chain. Cleared when the user changes
     /// credentials (currently by constructing a fresh adapter).
     discovery: Mutex<Option<Discovery>>,
+    /// Capabilities the adapter declares to the registry. Always
+    /// `[Calendar]` at this point — `TasksFeature` joins once
+    /// VTODO read/write lands in 6b.3.
+    capabilities: Vec<Capability>,
 }
 
 impl CaldavAdapter {
@@ -70,6 +84,7 @@ impl CaldavAdapter {
             credentials,
             http,
             discovery: Mutex::new(None),
+            capabilities: vec![Capability::Calendar],
         })
     }
 
@@ -102,6 +117,112 @@ impl CaldavAdapter {
             .expect("poison")
             .as_ref()
             .map(|d| d.calendar_home_url.clone())
+    }
+}
+
+/// Translate a CalDAV-specific error into the shared `cal_core::Error`
+/// shape so the rest of the app can pattern-match it uniformly.
+fn to_core_error(err: CaldavError) -> CoreError {
+    match err {
+        CaldavError::Network(msg) => CoreError::Network(msg),
+        CaldavError::Http { status, message } => match status {
+            401 | 403 => CoreError::Authentication(message),
+            404 => CoreError::NotFound(message),
+            409 | 412 => CoreError::Conflict(message),
+            _ => CoreError::Protocol(format!("HTTP {status}: {message}")),
+        },
+        CaldavError::Protocol(msg) => CoreError::Protocol(msg),
+        CaldavError::Discovery(msg) => CoreError::Protocol(format!("discovery: {msg}")),
+        CaldavError::Config(msg) => CoreError::InvalidInput(msg),
+    }
+}
+
+#[async_trait]
+impl Adapter for CaldavAdapter {
+    async fn authenticate(&self, _credentials: CoreCredentials) -> CoreResult<AuthToken> {
+        // CalDAV auth happens per request via the Authorization
+        // header — there's no separate token to fetch up front.
+        // Triggering a discovery here doubles as a connection +
+        // credential smoke test so the registry can decide whether
+        // to keep the account active.
+        self.discover().await.map_err(to_core_error)?;
+        Ok(AuthToken::default())
+    }
+
+    fn capabilities(&self) -> &[Capability] {
+        &self.capabilities
+    }
+}
+
+#[async_trait]
+impl CalendarFeature for CaldavAdapter {
+    async fn list_calendars(&self) -> CoreResult<Vec<Calendar>> {
+        let discovery = self.discover().await.map_err(to_core_error)?;
+        calendars::list_calendars(
+            &self.http,
+            &discovery.calendar_home_url,
+            &self.credentials,
+        )
+        .await
+        .map_err(to_core_error)
+    }
+
+    async fn get_events(
+        &self,
+        calendar_id: &str,
+        range: DateRange,
+    ) -> CoreResult<Vec<Event>> {
+        // The calendar id is the absolute collection URL produced
+        // by `list_calendars`. Re-parse it so the request lands at
+        // the exact path the server told us about; falling back to
+        // a join against the discovered home would be too lax.
+        let cal_url = Url::parse(calendar_id)
+            .map_err(|err| CoreError::InvalidInput(err.to_string()))?;
+        events::get_events(&self.http, &cal_url, range, &self.credentials)
+            .await
+            .map_err(to_core_error)
+    }
+
+    async fn create_event(
+        &self,
+        _calendar_id: &str,
+        _event: NewEvent,
+    ) -> CoreResult<Event> {
+        // Lands in Phase 6b.3 — PUT against a generated UID URL.
+        Err(CoreError::Unsupported(
+            "CalDAV create_event is not implemented yet".into(),
+        ))
+    }
+
+    async fn update_event(&self, _event: Event) -> CoreResult<Event> {
+        Err(CoreError::Unsupported(
+            "CalDAV update_event is not implemented yet".into(),
+        ))
+    }
+
+    async fn delete_event(&self, _event_id: &str) -> CoreResult<()> {
+        Err(CoreError::Unsupported(
+            "CalDAV delete_event is not implemented yet".into(),
+        ))
+    }
+
+    async fn get_free_busy(
+        &self,
+        _emails: &[&str],
+        _range: DateRange,
+    ) -> CoreResult<Vec<FreeBusy>> {
+        // CalDAV exposes free-busy at the principal level via a
+        // separate REPORT. Out of scope for the calendar-first
+        // iteration; returning an empty list keeps consumers calm.
+        Ok(Vec::new())
+    }
+
+    fn calendar_color(&self, _calendar_id: &str) -> Option<ContainerColor> {
+        // The color is fetched together with the listing and lives
+        // on the Calendar struct already. A second per-id round-trip
+        // would just duplicate work; consumers should use the value
+        // off the Calendar they got from `list_calendars`.
+        None
     }
 }
 
