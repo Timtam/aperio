@@ -4,6 +4,11 @@ use cal_adapter_caldav::{
     config::{AuthKind, CaldavAccountConfig, Credentials as CaldavCredentials},
     CaldavAdapter,
 };
+use cal_adapter_ews::{
+    discover as ews_discover, discover_client as ews_discover_client,
+    BasicCredentials as EwsCredentials, DiscoveredEndpoints, EwsAccountConfig,
+    EwsAdapter, EwsError,
+};
 use cal_adapter_google::{GoogleAccountConfig, GoogleAdapter};
 use cal_adapter_ical::{
     Credentials as IcalCredentials, IcalAccountConfig, IcalAdapter,
@@ -55,12 +60,17 @@ pub async fn create_account(
     request: CreateAccountRequest,
 ) -> CommandResult<Account> {
     // Reject adapter kinds we have no construction path for yet.
-    // Local, CalDAV and iCal are the supported kinds — the others
-    // surface as an actionable "coming soon" envelope rather than
-    // a half-broken row in the database.
+    // Local, CalDAV, iCal and EWS go through the `create_account`
+    // dispatch (each with a password-style credential); Google and
+    // Microsoft Graph have their own OAuth-shaped entry points. The
+    // remaining kinds surface as an actionable "coming soon" envelope
+    // rather than a half-broken row in the database.
     if !matches!(
         request.adapter_kind,
-        AdapterKind::Local | AdapterKind::Caldav | AdapterKind::Ical
+        AdapterKind::Local
+            | AdapterKind::Caldav
+            | AdapterKind::Ical
+            | AdapterKind::Ews
     ) {
         return Err(CommandError {
             code: "unsupported",
@@ -102,6 +112,25 @@ pub async fn create_account(
                 message: format!("invalid iCal config: {e}"),
             })?;
         smoke_test_ical(&config, request.secret.as_deref()).await?;
+    }
+
+    // EWS smoke-test: a single FindFolder round-trip against the
+    // user-supplied endpoint with Basic auth — surfaces wrong URL,
+    // certificate problems, or wrong credentials before we persist
+    // anything.
+    if request.adapter_kind == AdapterKind::Ews {
+        let Some(secret) = request.secret.as_deref() else {
+            return Err(CommandError {
+                code: "invalid_input",
+                message: "EWS needs a password to authenticate.".into(),
+            });
+        };
+        let config: EwsAccountConfig = serde_json::from_str(&request.config_json)
+            .map_err(|e| CommandError {
+                code: "invalid_input",
+                message: format!("invalid EWS config: {e}"),
+            })?;
+        smoke_test_ews(&config, secret).await?;
     }
 
     let shared = db.shared();
@@ -200,6 +229,26 @@ async fn smoke_test_ical(
     Ok(())
 }
 
+/// Discover-step equivalent for EWS: list calendars against the
+/// supplied endpoint + credentials, drop the result. Same pattern as
+/// `smoke_test_caldav` — it catches wrong URL, wrong password, and
+/// firewall problems ahead of persisting anything.
+async fn smoke_test_ews(
+    config: &EwsAccountConfig,
+    secret: &str,
+) -> Result<(), CommandError> {
+    let credentials = EwsCredentials {
+        username: config.username.clone(),
+        password: secret.to_string(),
+    };
+    let adapter = EwsAdapter::new(config.endpoint.clone(), credentials);
+    adapter
+        .list_calendars()
+        .await
+        .map_err(caldav_core_error_to_command)?;
+    Ok(())
+}
+
 fn ical_error_to_command(err: cal_adapter_ical::IcalError) -> CommandError {
     use cal_adapter_ical::IcalError::*;
     let (code, message) = match err {
@@ -268,6 +317,89 @@ pub struct TestIcalRequest {
     pub feed_url: String,
     pub username: Option<String>,
     pub password: Option<String>,
+}
+
+/// Round-trip an EWS credential check without persisting anything.
+/// Used by AccountsDialog's "Test connection" button on the EWS form.
+#[tauri::command]
+pub async fn test_ews_connection(
+    request: TestEwsRequest,
+) -> CommandResult<()> {
+    let config = EwsAccountConfig {
+        endpoint: request.endpoint,
+        username: request.username,
+        account_label: None,
+    };
+    smoke_test_ews(&config, &request.password).await?;
+    Ok(())
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct TestEwsRequest {
+    pub endpoint: String,
+    pub username: String,
+    pub password: String,
+}
+
+/// Probe the user's domain for an EWS endpoint via POX Autodiscover.
+/// The frontend's "Discover" button calls this with the e-mail
+/// address + password (those are the only inputs Microsoft's
+/// autodiscover surface needs). On success the resolved EWS URL is
+/// echoed back so the dialog can pre-fill the endpoint field.
+///
+/// We return `DiscoveredEndpoints` rather than a bare URL so a later
+/// patch can surface a second result (e.g. OOF / OAB URL) without
+/// having to break the command shape.
+#[tauri::command]
+pub async fn discover_ews_endpoint(
+    request: DiscoverEwsRequest,
+) -> CommandResult<DiscoveredEndpoints> {
+    let email = request.email.trim();
+    if email.is_empty() {
+        return Err(CommandError {
+            code: "invalid_input",
+            message: "Email must not be empty.".into(),
+        });
+    }
+    let password = &request.password;
+    if password.is_empty() {
+        return Err(CommandError {
+            code: "invalid_input",
+            message: "Password must not be empty.".into(),
+        });
+    }
+    let http = ews_discover_client().map_err(ews_discover_error_to_command)?;
+    ews_discover(email, password, &http)
+        .await
+        .map_err(ews_discover_error_to_command)
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct DiscoverEwsRequest {
+    pub email: String,
+    pub password: String,
+}
+
+fn ews_discover_error_to_command(err: EwsError) -> CommandError {
+    use EwsError::*;
+    let (code, message) = match err {
+        Network(m) => ("network", m),
+        Http {
+            status: 401,
+            message,
+        } => ("auth", message),
+        Http { status, message } => (
+            "protocol",
+            format!("Autodiscover HTTP {status}: {message}"),
+        ),
+        Protocol(m) => ("protocol", m),
+        Config(m) => ("invalid_input", m),
+        Soap { code, message } => {
+            ("protocol", format!("Autodiscover SOAP {code}: {message}"))
+        }
+        DiscoveryFailed(m) => ("not_found", m),
+    };
+    CommandError { code, message }
 }
 
 #[tauri::command]

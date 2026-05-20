@@ -94,6 +94,8 @@ pub fn run() {
             commands::delete_account,
             commands::test_caldav_connection,
             commands::test_ical_feed,
+            commands::test_ews_connection,
+            commands::discover_ews_endpoint,
             commands::connect_google_account,
             commands::connect_microsoft_account,
             commands::set_container_name_override,

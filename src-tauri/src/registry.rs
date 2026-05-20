@@ -30,6 +30,7 @@ use cal_adapter_caldav::{
     config::{CaldavAccountConfig, Credentials as CaldavCredentials},
     CaldavAdapter,
 };
+use cal_adapter_ews::{BasicCredentials as EwsCredentials, EwsAccountConfig, EwsAdapter};
 use cal_adapter_google::{GoogleAccountConfig, GoogleAdapter, TokenSet as GoogleTokenSet};
 use cal_adapter_ical::{
     Credentials as IcalCredentials, IcalAccountConfig, IcalAdapter,
@@ -274,6 +275,7 @@ impl AdapterRegistry {
             AdapterKind::Ical => self.register_ical(account),
             AdapterKind::Google => self.register_google(account),
             AdapterKind::MicrosoftGraph => self.register_microsoft_graph(account),
+            AdapterKind::Ews => self.register_ews(account),
             other => Err(RegistryError::Unsupported(format!(
                 "adapter kind '{}' is not wired up yet",
                 other.as_str()
@@ -355,6 +357,31 @@ impl AdapterRegistry {
             config.authority,
             tokens,
         );
+        let arc = Arc::new(adapter);
+        self.external_cal
+            .write()
+            .expect("registry cal poison")
+            .insert(account.id.clone(), arc as Arc<dyn CalendarFeature>);
+        Ok(())
+    }
+
+    /// Wire up an EWS (Exchange Web Services) account. Basic-auth-
+    /// only for the first cut — the keychain holds the password,
+    /// the JSON config holds the endpoint URL + username. EWS doesn't
+    /// expose tasks through the same calendar endpoint we wire up
+    /// here (they live behind a separate `IPF.Task` folder restriction
+    /// + `tasks:` field URIs), so only the calendar feature is
+    /// registered. Phase 6f.2 adds the task side.
+    fn register_ews(&self, account: &Account) -> Result<(), RegistryError> {
+        let config: EwsAccountConfig = serde_json::from_str(&account.config_json)
+            .map_err(|e| RegistryError::Config(e.to_string()))?;
+        let password = secrets::retrieve(&account.id, SecretSlot::Password)
+            .map_err(|e| RegistryError::Secret(format!("missing password: {e}")))?;
+        let credentials = EwsCredentials {
+            username: config.username,
+            password,
+        };
+        let adapter = EwsAdapter::new(config.endpoint, credentials);
         let arc = Arc::new(adapter);
         self.external_cal
             .write()

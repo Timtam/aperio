@@ -244,6 +244,43 @@ export const testIcalFeed = (
     request: { feed_url, username, password },
   });
 
+/** EWS config persisted as JSON in `accounts.config_json`. Mirrors
+ *  the backend `EwsAccountConfig`. The endpoint is the user-supplied
+ *  Exchange Web Services URL (e.g. `https://mail.example.org/EWS/Exchange.asmx`);
+ *  autodiscover lands in a later phase. */
+export interface EwsConfig {
+  endpoint: string;
+  username: string;
+}
+
+export const testEwsConnection = (
+  endpoint: string,
+  username: string,
+  password: string,
+) =>
+  invoke<void>('test_ews_connection', {
+    request: { endpoint, username, password },
+  });
+
+/** Result of an Autodiscover lookup. `account_email` may differ from
+ *  what the user typed if a `<RedirectAddr>` step rewrote the
+ *  identity along the way — the dialog can use it to refill the
+ *  username field. */
+export interface DiscoveredEndpoints {
+  ews_url: string;
+  account_email: string;
+}
+
+/** Walk Microsoft's POX-Autodiscover URL cascade for the user's
+ *  domain to find the matching EWS endpoint. Used by the
+ *  AccountsDialog "Discover" button so users don't have to guess the
+ *  URL themselves. On failure the dialog falls back to the existing
+ *  manual-entry flow. */
+export const discoverEwsEndpoint = (email: string, password: string) =>
+  invoke<DiscoveredEndpoints>('discover_ews_endpoint', {
+    request: { email, password },
+  });
+
 /** Kick off the Google OAuth dance. The backend opens the system
  *  browser to Google's consent screen and blocks until the user
  *  completes the flow (or hits the 5-min timeout). On success the

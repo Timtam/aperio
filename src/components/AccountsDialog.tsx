@@ -14,9 +14,11 @@ import {
   connectMicrosoftAccount,
   createAccount,
   deleteAccount,
+  discoverEwsEndpoint,
   isCommandError,
   listAccounts,
   testCaldavConnection,
+  testEwsConnection,
   testIcalFeed,
 } from '../api/client';
 import type { Account, AdapterKind } from '../api/types';
@@ -60,6 +62,7 @@ const ENABLED_KINDS: ReadonlySet<AdapterKind> = new Set([
   'ical',
   'google',
   'microsoft_graph',
+  'ews',
 ]);
 
 interface CaldavFields {
@@ -106,6 +109,18 @@ const EMPTY_MICROSOFT: MicrosoftFields = {
   authority: 'common',
 };
 
+interface EwsFields {
+  endpoint: string;
+  username: string;
+  password: string;
+}
+
+const EMPTY_EWS: EwsFields = {
+  endpoint: '',
+  username: '',
+  password: '',
+};
+
 export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
   const { t } = useTranslation();
   const announce = useAnnouncer();
@@ -124,11 +139,13 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
   const [displayName, setDisplayName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [discovering, setDiscovering] = useState(false);
   const [testMessage, setTestMessage] = useState<string | null>(null);
   const [caldav, setCaldav] = useState<CaldavFields>(EMPTY_CALDAV);
   const [ical, setIcal] = useState<IcalFields>(EMPTY_ICAL);
   const [google, setGoogle] = useState<GoogleFields>(EMPTY_GOOGLE);
   const [microsoft, setMicrosoft] = useState<MicrosoftFields>(EMPTY_MICROSOFT);
+  const [ews, setEws] = useState<EwsFields>(EMPTY_EWS);
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -173,6 +190,13 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
     return null;
   }, [microsoft, t]);
 
+  const validateEws = useCallback((): string | null => {
+    if (!ews.endpoint.trim()) return t('dialogs.accounts.ewsEndpointRequired');
+    if (!ews.username.trim()) return t('dialogs.accounts.usernameRequired');
+    if (!ews.password) return t('dialogs.accounts.passwordRequired');
+    return null;
+  }, [ews, t]);
+
   const onSubmit = useCallback(
     async (e: FormEvent) => {
       e.preventDefault();
@@ -215,6 +239,13 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
           return;
         }
       }
+      if (kind === 'ews') {
+        const v = validateEws();
+        if (v) {
+          setError(v);
+          return;
+        }
+      }
       setSubmitting(true);
       setError(null);
       try {
@@ -250,13 +281,20 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
                     feed_url: ical.feedUrl.trim(),
                     username: ical.username.trim() || null,
                   })
-                : '{}';
+                : kind === 'ews'
+                  ? JSON.stringify({
+                      endpoint: ews.endpoint.trim(),
+                      username: ews.username.trim(),
+                    })
+                  : '{}';
           const secret =
             kind === 'caldav'
               ? caldav.password
               : kind === 'ical' && ical.password
                 ? ical.password
-                : undefined;
+                : kind === 'ews'
+                  ? ews.password
+                  : undefined;
           created = await createAccount({
             adapter_kind: kind,
             display_name: name,
@@ -270,6 +308,7 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
         setIcal(EMPTY_ICAL);
         setGoogle(EMPTY_GOOGLE);
         setMicrosoft(EMPTY_MICROSOFT);
+        setEws(EMPTY_EWS);
         refresh();
         // Re-fetch the calendar / task-list catalog so the sidebar
         // picks up the new account's containers without the user
@@ -292,10 +331,12 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
       ical,
       google,
       microsoft,
+      ews,
       validateCaldav,
       validateIcal,
       validateGoogle,
       validateMicrosoft,
+      validateEws,
       announce,
       refresh,
       refreshCalendars,
@@ -331,6 +372,17 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
           ical.username.trim() || null,
           ical.password || null,
         );
+      } else if (kind === 'ews') {
+        const v = validateEws();
+        if (v) {
+          setError(v);
+          return;
+        }
+        await testEwsConnection(
+          ews.endpoint.trim(),
+          ews.username.trim(),
+          ews.password,
+        );
       } else {
         return;
       }
@@ -342,7 +394,67 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
     } finally {
       setTesting(false);
     }
-  }, [kind, caldav, ical, validateCaldav, validateIcal, announce, t]);
+  }, [
+    kind,
+    caldav,
+    ical,
+    ews,
+    validateCaldav,
+    validateIcal,
+    validateEws,
+    announce,
+    t,
+  ]);
+
+  /**
+   * Run POX-Autodiscover for the e-mail in the username field and
+   * pre-fill the endpoint URL on success. Requires the user to have
+   * typed at least the username + password — the discovery probe
+   * authenticates with Basic auth using the same credentials the
+   * eventual EWS calls will use.
+   *
+   * Failure-mode UX: we set `error` so the existing error region
+   * surfaces it (with focus restored), and we leave the endpoint
+   * field alone so the user can keep typing it manually.
+   */
+  const onDiscover = useCallback(async () => {
+    setTestMessage(null);
+    setError(null);
+    if (!ews.username.trim()) {
+      setError(t('dialogs.accounts.ewsDiscoverNeedsEmail'));
+      return;
+    }
+    if (!ews.password) {
+      setError(t('dialogs.accounts.ewsDiscoverNeedsPassword'));
+      return;
+    }
+    setDiscovering(true);
+    try {
+      const result = await discoverEwsEndpoint(
+        ews.username.trim(),
+        ews.password,
+      );
+      setEws((prev) => ({
+        ...prev,
+        endpoint: result.ews_url,
+        // If autodiscover took us through a RedirectAddr step, the
+        // canonical login is the one we actually authenticated as —
+        // surface that to the user so the password they typed
+        // matches the username we stored.
+        username: result.account_email,
+      }));
+      const okMsg = t('dialogs.accounts.ewsDiscoverOk', {
+        url: result.ews_url,
+      });
+      setTestMessage(okMsg);
+      announce(okMsg);
+    } catch (err) {
+      if (isCommandError(err)) setError(`${err.code}: ${err.message}`);
+      else setError(String(err));
+    } finally {
+      setDiscovering(false);
+    }
+  }, [ews, announce, t]);
 
   const performDelete = useCallback(
     async (acc: Account) => {
@@ -863,13 +975,110 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
               </>
             )}
 
+            {kind === 'ews' && (
+              <>
+                <label className="form__field">
+                  <span className="form__label">
+                    {t('dialogs.accounts.ewsEndpointLabel')}
+                  </span>
+                  <input
+                    type="url"
+                    value={ews.endpoint}
+                    onChange={(e) =>
+                      setEws((prev) => ({
+                        ...prev,
+                        endpoint: e.target.value,
+                      }))
+                    }
+                    placeholder={t('dialogs.accounts.ewsEndpointPlaceholder')}
+                    autoComplete="off"
+                    spellCheck={false}
+                    required
+                  />
+                  <span className="form__hint">
+                    {t('dialogs.accounts.ewsEndpointHint')}
+                  </span>
+                </label>
+                <label className="form__field">
+                  <span className="form__label">
+                    {t('dialogs.accounts.usernameLabel')}
+                  </span>
+                  <input
+                    type="text"
+                    value={ews.username}
+                    onChange={(e) =>
+                      setEws((prev) => ({
+                        ...prev,
+                        username: e.target.value,
+                      }))
+                    }
+                    autoComplete="username"
+                    spellCheck={false}
+                    required
+                  />
+                  <span className="form__hint">
+                    {t('dialogs.accounts.ewsUsernameHint')}
+                  </span>
+                </label>
+                <label className="form__field">
+                  <span className="form__label">
+                    {t('dialogs.accounts.passwordLabel')}
+                  </span>
+                  <input
+                    type="password"
+                    value={ews.password}
+                    onChange={(e) =>
+                      setEws((prev) => ({
+                        ...prev,
+                        password: e.target.value,
+                      }))
+                    }
+                    autoComplete="new-password"
+                    required
+                  />
+                  <span className="form__hint">
+                    {t('dialogs.accounts.passwordHint')}
+                  </span>
+                </label>
+                <p className="form__hint accounts-google-flow-hint">
+                  {t('dialogs.accounts.ewsReadOnlyHint')}
+                </p>
+                {testMessage && kind === 'ews' && (
+                  <p
+                    role="status"
+                    aria-live="polite"
+                    className="form__hint accounts-test-ok"
+                  >
+                    {testMessage}
+                  </p>
+                )}
+              </>
+            )}
+
             <div className="form__actions">
-              {(kind === 'caldav' || kind === 'ical') && (
+              {kind === 'ews' && (
+                <button
+                  type="button"
+                  className="form__action"
+                  onClick={onDiscover}
+                  aria-disabled={
+                    discovering || testing || submitting || undefined
+                  }
+                  aria-describedby={`${headingId}-discover-help`}
+                >
+                  {discovering
+                    ? t('dialogs.accounts.ewsDiscovering')
+                    : t('dialogs.accounts.ewsDiscover')}
+                </button>
+              )}
+              {(kind === 'caldav' || kind === 'ical' || kind === 'ews') && (
                 <button
                   type="button"
                   className="form__action"
                   onClick={onTestConnection}
-                  aria-disabled={testing || submitting || undefined}
+                  aria-disabled={
+                    testing || submitting || discovering || undefined
+                  }
                 >
                   {testing
                     ? t('dialogs.accounts.testing')
@@ -880,12 +1089,24 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
                 type="submit"
                 className="form__action form__action--primary"
                 aria-disabled={
-                  submitting || testing || !ENABLED_KINDS.has(kind) || undefined
+                  submitting ||
+                  testing ||
+                  discovering ||
+                  !ENABLED_KINDS.has(kind) ||
+                  undefined
                 }
               >
                 {t('dialogs.accounts.add')}
               </button>
             </div>
+            {kind === 'ews' && (
+              <p
+                id={`${headingId}-discover-help`}
+                className="sr-only"
+              >
+                {t('dialogs.accounts.ewsDiscoverSrHint')}
+              </p>
+            )}
           </form>
         </section>
 
