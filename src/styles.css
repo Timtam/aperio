@@ -1135,6 +1135,26 @@ button[aria-disabled='true'] {
   outline-offset: 2px;
 }
 
+/*
+ * Multi-day all-day events repeat in every cell they cover. A subtle
+ * inset border on the leading edge hints that the chip is part of a
+ * span — a more elaborate continuous bar (B) can replace this later
+ * without changing the markup.
+ */
+.week-event--multiday {
+  border-left: 3px solid var(--color-accent-fg);
+  padding-left: calc(var(--space-1) - 2px);
+}
+
+.week-event__span,
+.month-event__span,
+.day-list__span,
+.agenda-list__span {
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.9em;
+}
+
 /* ── Month view ─────────────────────────────────────────────────────────── */
 
 .month-grid {
@@ -1224,6 +1244,12 @@ button[aria-disabled='true'] {
 .month-event--focused {
   outline: 2px solid var(--focus-ring-color);
   outline-offset: 1px;
+}
+
+/* Mirror the WeekView multi-day accent — a leading inset border. */
+.month-event--multiday {
+  border-left: 3px solid var(--color-accent-fg);
+  padding-left: calc(var(--space-1) - 2px);
 }
 
 /* Events past the visible-first-three of a day cell stay in the DOM

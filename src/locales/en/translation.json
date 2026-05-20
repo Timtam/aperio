@@ -385,6 +385,8 @@
   "views": {
     "loading": "Loading …",
     "allDay": "All day",
+    "multiDayCompact": "({{day}}/{{total}})",
+    "multiDaySuffix": ", day {{day}} of {{total}}",
     "week": {
       "title": "Week view",
       "kw": "Week {{week}}",

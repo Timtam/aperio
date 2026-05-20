@@ -7,6 +7,10 @@ import { useAutoFocus } from '../../hooks/useAutoFocus';
 import { localDateKey } from '../../intl/dateKey';
 import { useDateFormat } from '../../intl/dateFormat';
 import { labelsLookup, resolveEventColor } from '../../intl/eventColor';
+import {
+  expandToDayOccurrences,
+  type DayOccurrence,
+} from '../../intl/multiDay';
 import { useCalendarStore } from '../../state/CalendarStore';
 import { useDialogState } from '../../state/DialogState';
 import { useEvents } from '../../state/useEvents';
@@ -49,13 +53,22 @@ export function AgendaView() {
   const { colorLabels } = useCalendarStore();
   const labelById = useMemo(() => labelsLookup(colorLabels), [colorLabels]);
 
+  // Expand multi-day all-day events into one renderable row per
+  // covered day. A 14-day vacation becomes 14 rows, each carrying
+  // "Tag 3 von 14" position info; keyboard focus / Enter / Delete
+  // operate on the underlying event via `occurrences[focusIndex].ev`.
+  const occurrences = useMemo(
+    () => expandToDayOccurrences(events, range),
+    [events, range],
+  );
+
   const [focusIndex, setFocusIndex] = useState(0);
 
   useEffect(() => {
-    if (focusIndex >= events.length) {
-      setFocusIndex(Math.max(0, events.length - 1));
+    if (focusIndex >= occurrences.length) {
+      setFocusIndex(Math.max(0, occurrences.length - 1));
     }
-  }, [events.length, focusIndex]);
+  }, [occurrences.length, focusIndex]);
 
   // Announce "Loading …" once on mount if we're still fetching. See
   // DayView for the rationale (mount-only, never on refetches).
@@ -111,10 +124,10 @@ export function AgendaView() {
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      const ev = occurrences[focusIndex]?.ev;
       if (e.ctrlKey || e.metaKey) {
         if (e.key.toLowerCase() === 'd' && !e.shiftKey && !e.altKey) {
           e.preventDefault();
-          const ev = events[focusIndex];
           if (ev) {
             void duplicateEvent(ev).then(() =>
               announce(t('actions.duplicated', { title: ev.title })),
@@ -126,15 +139,14 @@ export function AgendaView() {
       if (e.altKey) return;
       if (e.shiftKey && e.key.toLowerCase() === 'm') {
         e.preventDefault();
-        const ev = events[focusIndex];
         if (ev) openMoveCopy({ kind: 'event', event: ev });
         return;
       }
-      if (events.length === 0) return;
+      if (occurrences.length === 0) return;
       switch (e.key) {
         case 'ArrowDown':
           e.preventDefault();
-          setFocusIndex((i) => Math.min(i + 1, events.length - 1));
+          setFocusIndex((i) => Math.min(i + 1, occurrences.length - 1));
           return;
         case 'ArrowUp':
           e.preventDefault();
@@ -146,20 +158,18 @@ export function AgendaView() {
           return;
         case 'End':
           e.preventDefault();
-          setFocusIndex(events.length - 1);
+          setFocusIndex(occurrences.length - 1);
           return;
         case 'Enter':
         case ' ':
         case 'Spacebar': {
           e.preventDefault();
-          const ev = events[focusIndex];
           if (ev) openEventDialog(ev);
           return;
         }
         case 'Delete':
         case 'Backspace': {
           e.preventDefault();
-          const ev = events[focusIndex];
           if (ev) requestDelete(ev);
           return;
         }
@@ -167,7 +177,15 @@ export function AgendaView() {
           return;
       }
     },
-    [events, focusIndex, openEventDialog, openMoveCopy, announce, t, requestDelete],
+    [
+      occurrences,
+      focusIndex,
+      openEventDialog,
+      openMoveCopy,
+      announce,
+      t,
+      requestDelete,
+    ],
   );
 
   return (
@@ -194,17 +212,17 @@ export function AgendaView() {
         tabIndex={0}
         aria-label={t('views.agenda.eventList')}
         aria-activedescendant={
-          events.length > 0 ? itemId(focusIndex) : undefined
+          occurrences.length > 0 ? itemId(focusIndex) : undefined
         }
         onKeyDown={handleKeyDown}
         className="agenda-list"
       >
-        {events.length === 0 ? (
+        {occurrences.length === 0 ? (
           <li role="presentation" className="agenda-list__empty">
             {t('views.agenda.empty')}
           </li>
         ) : (
-          renderEvents(events, focusIndex, {
+          renderOccurrences(occurrences, focusIndex, {
             calendarById,
             labelById,
             fmt,
@@ -251,17 +269,17 @@ interface RenderContext {
   onSelect: (i: number) => void;
 }
 
-function renderEvents(
-  events: CalendarEvent[],
+function renderOccurrences(
+  occurrences: DayOccurrence[],
   focusIndex: number,
   ctx: RenderContext,
 ): JSX.Element[] {
   const out: JSX.Element[] = [];
   let lastDayKey: string | null = null;
 
-  events.forEach((ev, i) => {
-    const start = new Date(ev.start);
-    const dayKey = localDateKey(start);
+  occurrences.forEach((occ, i) => {
+    const { ev, day, span } = occ;
+    const dayKey = localDateKey(day);
 
     // Visual-only day separator. aria-hidden so the screen reader
     // never reads it; the date is encoded into each option's aria-label.
@@ -274,7 +292,7 @@ function renderEvents(
           aria-hidden="true"
           className="agenda-list__day"
         >
-          {ctx.fmt.format(start, 'PPPP')}
+          {ctx.fmt.format(day, 'PPPP')}
         </li>,
       );
     }
@@ -283,32 +301,41 @@ function renderEvents(
     const color = resolveEventColor(ev, ctx.calendarById, ctx.labelById);
     const timeLabel = ev.all_day
       ? ctx.t('views.allDay')
-      : `${ctx.fmt.format(start, 'p')} – ${ctx.fmt.format(new Date(ev.end), 'p')}`;
-    const aria = color.labelName
+      : `${ctx.fmt.format(new Date(ev.start), 'p')} – ${ctx.fmt.format(new Date(ev.end), 'p')}`;
+    const ariaBase = color.labelName
       ? ctx.t('views.agenda.eventLabelWithLabel', {
-          day: ctx.fmt.format(start, 'PPPP'),
+          day: ctx.fmt.format(day, 'PPPP'),
           title: ev.title,
           time: timeLabel,
           calendar: cal?.name ?? '—',
           label: color.labelName,
         })
       : ctx.t('views.agenda.eventLabel', {
-          day: ctx.fmt.format(start, 'PPPP'),
+          day: ctx.fmt.format(day, 'PPPP'),
           title: ev.title,
           time: timeLabel,
           calendar: cal?.name ?? '—',
         });
+    const aria = span
+      ? ariaBase +
+        ctx.t('views.multiDaySuffix', {
+          day: span.dayIndex,
+          total: span.totalDays,
+        })
+      : ariaBase;
     const focused = i === focusIndex;
 
     out.push(
       <li
-        key={ev.id}
+        key={`${ev.id}@${dayKey}`}
         id={ctx.itemId(i)}
         role="option"
         aria-selected={focused}
         aria-label={aria}
         className={
-          'agenda-list__item' + (focused ? ' agenda-list__item--focused' : '')
+          'agenda-list__item' +
+          (focused ? ' agenda-list__item--focused' : '') +
+          (span ? ' agenda-list__item--multiday' : '')
         }
         style={
           color.hex
@@ -318,7 +345,18 @@ function renderEvents(
         onClick={() => ctx.onSelect(i)}
       >
         <span className="agenda-list__time">{timeLabel}</span>
-        <span className="agenda-list__title">{ev.title}</span>
+        <span className="agenda-list__title">
+          {ev.title}
+          {span && (
+            <span className="agenda-list__span">
+              {' '}
+              {ctx.t('views.multiDayCompact', {
+                day: span.dayIndex,
+                total: span.totalDays,
+              })}
+            </span>
+          )}
+        </span>
         {cal && <span className="agenda-list__cal">{cal.name}</span>}
       </li>,
     );

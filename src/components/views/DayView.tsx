@@ -6,6 +6,7 @@ import { useAnnouncer } from '../../a11y/Announcer';
 import { useAutoFocus } from '../../hooks/useAutoFocus';
 import { useDateFormat } from '../../intl/dateFormat';
 import { labelsLookup, resolveEventColor } from '../../intl/eventColor';
+import { eventCoversDay, multiDayInfo } from '../../intl/multiDay';
 import { useCalendarStore } from '../../state/CalendarStore';
 import { useDialogState } from '../../state/DialogState';
 import { useEvents } from '../../state/useEvents';
@@ -48,8 +49,10 @@ export function DayView() {
   const { colorLabels } = useCalendarStore();
   const labelById = useMemo(() => labelsLookup(colorLabels), [colorLabels]);
 
+  // Pick up multi-day all-day events on every day of their span — see
+  // intl/multiDay for the rationale.
   const dayEvents = useMemo(
-    () => events.filter((ev) => isSameDay(new Date(ev.start), anchor)),
+    () => events.filter((ev) => eventCoversDay(ev, anchor)),
     [events, anchor],
   );
 
@@ -233,7 +236,8 @@ export function DayView() {
             const color = resolveEventColor(ev, calendarById, labelById);
             const startStr = fmt.format(new Date(ev.start), 'p');
             const endStr = fmt.format(new Date(ev.end), 'p');
-            const aria = color.labelName
+            const span = multiDayInfo(ev, anchor);
+            const ariaBase = color.labelName
               ? t('views.day.eventLabelWithLabel', {
                   title: ev.title,
                   start: startStr,
@@ -247,6 +251,13 @@ export function DayView() {
                   end: endStr,
                   calendar: cal?.name ?? '—',
                 });
+            const aria = span
+              ? ariaBase +
+                t('views.multiDaySuffix', {
+                  day: span.dayIndex,
+                  total: span.totalDays,
+                })
+              : ariaBase;
             const focused = i === focusIndex;
             return (
               <li
@@ -257,7 +268,8 @@ export function DayView() {
                 aria-label={aria}
                 className={
                   'day-list__item' +
-                  (focused ? ' day-list__item--focused' : '')
+                  (focused ? ' day-list__item--focused' : '') +
+                  (span ? ' day-list__item--multiday' : '')
                 }
                 style={
                   color.hex
@@ -267,9 +279,20 @@ export function DayView() {
                 onClick={() => setFocusIndex(i)}
               >
                 <span className="day-list__time">
-                  {startStr} – {endStr}
+                  {ev.all_day ? t('views.allDay') : `${startStr} – ${endStr}`}
                 </span>
-                <span className="day-list__title">{ev.title}</span>
+                <span className="day-list__title">
+                  {ev.title}
+                  {span && (
+                    <span className="day-list__span">
+                      {' '}
+                      {t('views.multiDayCompact', {
+                        day: span.dayIndex,
+                        total: span.totalDays,
+                      })}
+                    </span>
+                  )}
+                </span>
               </li>
             );
           })

@@ -16,6 +16,7 @@ import { useEventTabNavigation } from '../../hooks/useEventTabNavigation';
 import { localDateKey } from '../../intl/dateKey';
 import { useDateFormat } from '../../intl/dateFormat';
 import { labelsLookup, resolveEventColor } from '../../intl/eventColor';
+import { daysCoveredKeys, multiDayInfo } from '../../intl/multiDay';
 import { useCalendarStore } from '../../state/CalendarStore';
 import { useDialogState } from '../../state/DialogState';
 import { useEvents } from '../../state/useEvents';
@@ -349,7 +350,8 @@ export function MonthView() {
                       const time = ev.all_day
                         ? t('views.allDay')
                         : fmt.format(new Date(ev.start), 'p');
-                      const aria = color.labelName
+                      const span = multiDayInfo(ev, day);
+                      const ariaBase = color.labelName
                         ? t('views.week.eventLabelWithLabel', {
                             title: ev.title,
                             time,
@@ -361,6 +363,13 @@ export function MonthView() {
                             time,
                             calendar: cal?.name ?? '—',
                           });
+                      const aria = span
+                        ? ariaBase +
+                          t('views.multiDaySuffix', {
+                            day: span.dayIndex,
+                            total: span.totalDays,
+                          })
+                        : ariaBase;
                       const hidden = evIdx >= 3;
                       return (
                         <span
@@ -371,7 +380,8 @@ export function MonthView() {
                             (isFocusedEvent
                               ? ' month-event--focused'
                               : '') +
-                            (hidden ? ' month-event--overflow' : '')
+                            (hidden ? ' month-event--overflow' : '') +
+                            (span ? ' month-event--multiday' : '')
                           }
                           aria-label={aria}
                           aria-selected={isFocusedEvent}
@@ -382,6 +392,15 @@ export function MonthView() {
                           }
                         >
                           {ev.title}
+                          {span && (
+                            <span className="month-event__span">
+                              {' '}
+                              {t('views.multiDayCompact', {
+                                day: span.dayIndex,
+                                total: span.totalDays,
+                              })}
+                            </span>
+                          )}
                         </span>
                       );
                     })}
@@ -452,10 +471,13 @@ function keyOf(d: Date): string {
 function groupEventsByDay(events: CalendarEvent[]): Map<string, CalendarEvent[]> {
   const map = new Map<string, CalendarEvent[]>();
   events.forEach((ev) => {
-    const k = keyOf(new Date(ev.start));
-    const bucket = map.get(k);
-    if (bucket) bucket.push(ev);
-    else map.set(k, [ev]);
+    // Multi-day all-day events appear in every cell they cover — see
+    // WeekView.groupEventsByDay for the rationale.
+    daysCoveredKeys(ev).forEach((k) => {
+      const bucket = map.get(k);
+      if (bucket) bucket.push(ev);
+      else map.set(k, [ev]);
+    });
   });
   return map;
 }
