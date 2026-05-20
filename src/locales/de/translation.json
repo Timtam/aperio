@@ -430,7 +430,14 @@
     "tree": {
       "accountLabel": "{{name}} ({{kind}})",
       "sectionLabel": "{{name}}",
-      "empty": "Noch keine Kalender oder Aufgabenlisten — über „Konten verwalten\" die Verbindung prüfen."
+      "empty": "Noch keine Kalender oder Aufgabenlisten — über „Konten verwalten\" die Verbindung prüfen.",
+      "contextMenuHint": "Mit den Pfeiltasten navigieren, Leertaste zum Ein-/Ausblenden, Umschalt+F10 oder Menü-Taste für Aktionen."
+    },
+    "taskListDeleted": "Aufgabenliste „{{name}}\" wurde gelöscht.",
+    "menu": {
+      "label": "Aktionen",
+      "rename": "Umbenennen …",
+      "delete": "Löschen"
     }
   },
   "views": {

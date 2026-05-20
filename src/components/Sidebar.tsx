@@ -15,6 +15,7 @@ import {
   createCalendar,
   createTaskList,
   deleteCalendar,
+  deleteTaskList,
   isCommandError,
   renameContainer,
   type ContainerKind,
@@ -130,22 +131,24 @@ export function Sidebar() {
     id: string;
   } | null>(null);
   const [draft, setDraft] = useState('');
-  const [restoreTarget, setRestoreTarget] = useState<{
-    kind: ContainerKind;
-    id: string;
-  } | null>(null);
+  // Set after commit/cancel — kicks the next `useEffect` into
+  // returning DOM focus to the tree container so the aria-active
+  // descendant takes over from the unmounted input. Boolean rather
+  // than the edit target itself: the tree owns the tab stop, all we
+  // need is "should focus go back to the tree?".
+  const [restoreFocusToTree, setRestoreFocusToTree] = useState(false);
+
+  // Ref on the `<div role="tree">` so we can move actual DOM focus
+  // back to it after the rename input unmounts or the context menu
+  // closes. Without this, `aria-activedescendant` stays accurate
+  // but the user loses keyboard control of the tree entirely.
+  const treeRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (!restoreTarget) return;
-    const sel =
-      `[data-rename-target-id="${CSS.escape(restoreTarget.id)}"]` +
-      `[data-rename-target-kind="${restoreTarget.kind}"]`;
-    const btn = document.querySelector(sel);
-    if (btn instanceof HTMLElement) {
-      btn.focus({ preventScroll: true });
-    }
-    setRestoreTarget(null);
-  }, [restoreTarget]);
+    if (!restoreFocusToTree) return;
+    treeRef.current?.focus({ preventScroll: true });
+    setRestoreFocusToTree(false);
+  }, [restoreFocusToTree]);
 
   const startEdit = useCallback(
     (kind: ContainerKind, id: string, currentName: string) => {
@@ -158,10 +161,9 @@ export function Sidebar() {
   const cancelEdit = useCallback(
     (restoreFocus: boolean) => {
       if (!editing) return;
-      const target = restoreFocus ? { ...editing } : null;
       setEditing(null);
       setDraft('');
-      if (target) setRestoreTarget(target);
+      if (restoreFocus) setRestoreFocusToTree(true);
     },
     [editing],
   );
@@ -171,7 +173,6 @@ export function Sidebar() {
       if (!editing) return;
       const { kind, id } = editing;
       const trimmed = draft.trim();
-      const target = restoreFocus ? { kind, id } : null;
       try {
         if (trimmed === '') {
           await clearContainerNameOverride(id, kind);
@@ -201,7 +202,7 @@ export function Sidebar() {
       } finally {
         setEditing(null);
         setDraft('');
-        if (target) setRestoreTarget(target);
+        if (restoreFocus) setRestoreFocusToTree(true);
       }
     },
     [editing, draft, refreshCalendars, refreshTaskLists, announce, t],
@@ -251,6 +252,20 @@ export function Sidebar() {
     [refreshCalendars, announce, t],
   );
 
+  const onDeleteTaskListAction = useCallback(
+    async (id: string, name: string) => {
+      try {
+        await deleteTaskList(id);
+        await refreshTaskLists();
+        announce(t('sidebar.taskListDeleted', { name }));
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('delete_task_list failed', err);
+      }
+    },
+    [refreshTaskLists, announce, t],
+  );
+
   const onCreateTaskList = useCallback(async () => {
     try {
       const list = await createTaskList({
@@ -264,6 +279,81 @@ export function Sidebar() {
       console.warn('create_task_list failed', err);
     }
   }, [taskLists.length, refreshTaskLists, announce, t]);
+
+  // ── Context menu plumbing ────────────────────────────────────────
+  //
+  // The per-row edit/delete buttons used to be Tab stops, which broke
+  // the "single tab stop" invariant the ARIA treeview pattern wants.
+  // Replace them with a context menu: right-click for pointer users,
+  // Shift+F10 or the ContextMenu key for keyboard / screen-reader
+  // users. The menu portal sits at the tree level so the focused
+  // row stays the source of truth via `aria-activedescendant`.
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    items: ContextMenuItem[];
+  } | null>(null);
+
+  const closeContextMenu = useCallback(() => {
+    setContextMenu(null);
+    setRestoreFocusToTree(true);
+  }, []);
+
+  const openContextMenuForLeaf = useCallback(
+    (
+      leaf: LeafNode,
+      accountIsLocal: boolean,
+      anchor: { x: number; y: number },
+    ) => {
+      const items: ContextMenuItem[] = [];
+      const containerKind: ContainerKind =
+        leaf.kind === 'calendars' ? 'calendar' : 'task_list';
+      items.push({
+        id: 'rename',
+        label: t('sidebar.menu.rename'),
+        onActivate: () => {
+          startEdit(containerKind, leaf.containerId, leaf.name);
+        },
+      });
+      // Delete is local-only: external sources have their own
+      // life-cycle (CalDAV's MKCOL/DELETE, Graph's PATCH, …) which
+      // we haven't wired into a one-click sidebar affordance yet.
+      // For external sources the user can still rename, which is
+      // the more common case anyway.
+      if (accountIsLocal) {
+        items.push({
+          id: 'delete',
+          label: t('sidebar.menu.delete'),
+          onActivate: () => {
+            if (leaf.kind === 'calendars') {
+              void onDeleteCalendar(leaf.containerId, leaf.name);
+            } else {
+              void onDeleteTaskListAction(leaf.containerId, leaf.name);
+            }
+          },
+        });
+      }
+      setContextMenu({ x: anchor.x, y: anchor.y, items });
+    },
+    [startEdit, onDeleteCalendar, onDeleteTaskListAction, t],
+  );
+
+  // Helper: find the leaf for a given visible item key. The
+  // keyboard-triggered menu uses this to know what to populate.
+  const findLeafByKey = useCallback(
+    (key: string): { leaf: LeafNode; accountIsLocal: boolean } | null => {
+      for (const account of tree) {
+        const isLocal = account.accountId === 'local';
+        for (const section of account.children) {
+          for (const leaf of section.children) {
+            if (leaf.key === key) return { leaf, accountIsLocal: isLocal };
+          }
+        }
+      }
+      return null;
+    },
+    [tree],
+  );
 
   // ── Multi-toggle: flip every descendant of a parent on/off ───────
   const setManyCalendars = useCallback(
@@ -353,6 +443,52 @@ export function Sidebar() {
           e.preventDefault();
           toggleItem(item);
           return;
+        case 'F10':
+          // Shift+F10 is the keyboard-canonical context-menu trigger
+          // on every desktop OS. Without Shift, F10 falls through (it
+          // moves focus to the OS menu bar on Windows and we don't
+          // want to swallow that).
+          if (e.shiftKey && item.kind === 'leaf') {
+            e.preventDefault();
+            const target = e.currentTarget.querySelector(
+              `#${CSS.escape(itemId(item.key))}`,
+            );
+            const rect =
+              target instanceof HTMLElement
+                ? target.getBoundingClientRect()
+                : null;
+            const ctx = findLeafByKey(item.key);
+            if (ctx && rect) {
+              openContextMenuForLeaf(ctx.leaf, ctx.accountIsLocal, {
+                x: rect.left + 8,
+                y: rect.bottom,
+              });
+            }
+            return;
+          }
+          break;
+        case 'ContextMenu': {
+          // The Menu / ContextMenu key on Windows keyboards. Some
+          // setups also surface it as Shift+F10 above; covering both
+          // here is cheap.
+          if (item.kind !== 'leaf') return;
+          e.preventDefault();
+          const target = e.currentTarget.querySelector(
+            `#${CSS.escape(itemId(item.key))}`,
+          );
+          const rect =
+            target instanceof HTMLElement
+              ? target.getBoundingClientRect()
+              : null;
+          const ctx = findLeafByKey(item.key);
+          if (ctx && rect) {
+            openContextMenuForLeaf(ctx.leaf, ctx.accountIsLocal, {
+              x: rect.left + 8,
+              y: rect.bottom,
+            });
+          }
+          return;
+        }
       }
 
       // Type-ahead: collect printable single chars (no modifiers
@@ -385,7 +521,15 @@ export function Sidebar() {
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [focusedKey, visible, expansion, focusByIndex],
+    [
+      focusedKey,
+      visible,
+      expansion,
+      focusByIndex,
+      findLeafByKey,
+      openContextMenuForLeaf,
+      itemId,
+    ],
   );
 
   // Toggle for both leaves (simple selection) and parents (apply to
@@ -429,18 +573,49 @@ export function Sidebar() {
       data-region="sidebar"
     >
       <h2 className="sidebar__heading">{t('sidebar.containersHeading')}</h2>
+      {/* SR-only hint that describes the tree's interaction model.
+          Surfaces on focus so the user learns the context-menu
+          trigger without it cluttering the visual UI. */}
+      <p id={`${treeId}-hint`} className="sr-only">
+        {t('sidebar.tree.contextMenuHint')}
+      </p>
       {/* The tree itself owns the tab stop. aria-activedescendant
           tells assistive tech which row is "focused" inside the
           tree without React having to focus DOM nodes individually. */}
       <div
+        ref={treeRef}
         role="tree"
         aria-label={t('sidebar.treeLabel')}
+        aria-describedby={`${treeId}-hint`}
         aria-multiselectable="true"
         tabIndex={0}
         onKeyDown={onTreeKey}
         aria-activedescendant={
           focusedKey ? itemId(focusedKey) : undefined
         }
+        onContextMenu={(e) => {
+          // Walk up from the click target to find the originating
+          // treeitem element; we keyed it with `itemId(...)`. If
+          // the click missed every leaf (clicked the padding around
+          // a row), fall through to the OS context menu — there's
+          // nothing actionable here.
+          const target = e.target as HTMLElement;
+          const item = target.closest('[role="treeitem"]');
+          if (!(item instanceof HTMLElement)) return;
+          // Extract the visible-item key from the DOM id. The shape
+          // is `${treeId}-node-${key}` so we just strip the prefix.
+          const prefix = `${treeId}-node-`;
+          if (!item.id.startsWith(prefix)) return;
+          const key = item.id.slice(prefix.length);
+          const ctx = findLeafByKey(key);
+          if (!ctx) return; // not a leaf row — skip the menu
+          e.preventDefault();
+          setFocusedKey(key);
+          openContextMenuForLeaf(ctx.leaf, ctx.accountIsLocal, {
+            x: e.clientX,
+            y: e.clientY,
+          });
+        }}
         className="sidebar__tree"
       >
         {tree.map((account) => (
@@ -454,7 +629,6 @@ export function Sidebar() {
             editing={editing}
             draft={draft}
             onDraftChange={setDraft}
-            onStartEdit={startEdit}
             onCancelEdit={cancelEdit}
             onCommitEdit={commitEdit}
             onEditKey={onEditKey}
@@ -489,10 +663,18 @@ export function Sidebar() {
               if (calIds.length) setManyCalendars(calIds, next);
               if (tlIds.length) setManyTaskLists(tlIds, next);
             }}
-            onDeleteCalendar={onDeleteCalendar}
           />
         ))}
       </div>
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={contextMenu.items}
+          onClose={closeContextMenu}
+          ariaLabel={t('sidebar.menu.label')}
+        />
+      )}
 
       <div className="sidebar__add-row">
         <button
@@ -628,14 +810,12 @@ interface AccountSubtreeProps {
   editing: { kind: ContainerKind; id: string } | null;
   draft: string;
   onDraftChange: (v: string) => void;
-  onStartEdit: (kind: ContainerKind, id: string, name: string) => void;
   onCancelEdit: (restoreFocus: boolean) => void;
   onCommitEdit: (restoreFocus: boolean) => Promise<void>;
   onEditKey: (e: KeyboardEvent<HTMLInputElement>) => void;
   onToggleLeaf: (leaf: LeafNode) => void;
   onToggleSection: (section: SectionNode) => void;
   onToggleAccount: (account: AccountNode) => void;
-  onDeleteCalendar: (id: string, name: string) => void;
 }
 
 function AccountSubtree({
@@ -647,14 +827,12 @@ function AccountSubtree({
   editing,
   draft,
   onDraftChange,
-  onStartEdit,
   onCancelEdit,
   onCommitEdit,
   onEditKey,
   onToggleLeaf,
   onToggleSection,
   onToggleAccount,
-  onDeleteCalendar,
 }: AccountSubtreeProps) {
   const { t } = useTranslation();
   const isOpen = expansion.isExpanded(account.key);
@@ -704,14 +882,11 @@ function AccountSubtree({
             editing={editing}
             draft={draft}
             onDraftChange={onDraftChange}
-            onStartEdit={onStartEdit}
             onCancelEdit={onCancelEdit}
             onCommitEdit={onCommitEdit}
             onEditKey={onEditKey}
             onToggleLeaf={onToggleLeaf}
             onToggleSection={onToggleSection}
-            onDeleteCalendar={onDeleteCalendar}
-            accountIsLocal={account.accountId === 'local'}
           />
         ))}
     </div>
@@ -727,14 +902,11 @@ interface SectionSubtreeProps {
   editing: { kind: ContainerKind; id: string } | null;
   draft: string;
   onDraftChange: (v: string) => void;
-  onStartEdit: (kind: ContainerKind, id: string, name: string) => void;
   onCancelEdit: (restoreFocus: boolean) => void;
   onCommitEdit: (restoreFocus: boolean) => Promise<void>;
   onEditKey: (e: KeyboardEvent<HTMLInputElement>) => void;
   onToggleLeaf: (leaf: LeafNode) => void;
   onToggleSection: (section: SectionNode) => void;
-  onDeleteCalendar: (id: string, name: string) => void;
-  accountIsLocal: boolean;
 }
 
 function SectionSubtree({
@@ -746,14 +918,11 @@ function SectionSubtree({
   editing,
   draft,
   onDraftChange,
-  onStartEdit,
   onCancelEdit,
   onCommitEdit,
   onEditKey,
   onToggleLeaf,
   onToggleSection,
-  onDeleteCalendar,
-  accountIsLocal,
 }: SectionSubtreeProps) {
   const { t } = useTranslation();
   const isOpen = expansion.isExpanded(section.key);
@@ -795,16 +964,10 @@ function SectionSubtree({
             editing={editing}
             draft={draft}
             onDraftChange={onDraftChange}
-            onStartEdit={onStartEdit}
             onCancelEdit={onCancelEdit}
             onCommitEdit={onCommitEdit}
             onEditKey={onEditKey}
             onToggleLeaf={onToggleLeaf}
-            onDeleteCalendar={onDeleteCalendar}
-            // Delete is only ever offered on local calendars — every
-            // other source's deletes are still a per-adapter
-            // operation we haven't fully wired.
-            allowDelete={accountIsLocal && leaf.kind === 'calendars'}
           />
         ))}
     </div>
@@ -819,13 +982,10 @@ interface LeafRowProps {
   editing: { kind: ContainerKind; id: string } | null;
   draft: string;
   onDraftChange: (v: string) => void;
-  onStartEdit: (kind: ContainerKind, id: string, name: string) => void;
   onCancelEdit: (restoreFocus: boolean) => void;
   onCommitEdit: (restoreFocus: boolean) => Promise<void>;
   onEditKey: (e: KeyboardEvent<HTMLInputElement>) => void;
   onToggleLeaf: (leaf: LeafNode) => void;
-  onDeleteCalendar: (id: string, name: string) => void;
-  allowDelete: boolean;
 }
 
 function LeafRow({
@@ -836,13 +996,10 @@ function LeafRow({
   editing,
   draft,
   onDraftChange,
-  onStartEdit,
   onCancelEdit,
   onCommitEdit,
   onEditKey,
   onToggleLeaf,
-  onDeleteCalendar,
-  allowDelete,
 }: LeafRowProps) {
   const { t } = useTranslation();
   const kind: ContainerKind = leaf.kind === 'calendars' ? 'calendar' : 'task_list';
@@ -877,36 +1034,6 @@ function LeafRow({
         <>
           <span className="sidebar__swatch" aria-hidden="true" />
           <span className="sidebar__name">{leaf.name}</span>
-          <button
-            type="button"
-            className="sidebar__edit"
-            data-rename-target-id={leaf.containerId}
-            data-rename-target-kind={kind}
-            // Stop the click from bubbling up to the row's
-            // onPointerSelect handler (which would set focusedKey but
-            // also un-focus the edit button we're about to click).
-            onClick={(e) => {
-              e.stopPropagation();
-              onStartEdit(kind, leaf.containerId, leaf.name);
-            }}
-            aria-label={t('sidebar.renameButton', { name: leaf.name })}
-            title={t('sidebar.renameButtonShort')}
-          >
-            ✎
-          </button>
-          {allowDelete && (
-            <button
-              type="button"
-              className="sidebar__delete"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDeleteCalendar(leaf.containerId, leaf.name);
-              }}
-              aria-label={t('sidebar.deleteCalendar', { name: leaf.name })}
-            >
-              ✕
-            </button>
-          )}
         </>
       )}
     </TreeRow>
@@ -1055,6 +1182,168 @@ function RenameField({
       >
         ✕
       </button>
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Context menu
+// ────────────────────────────────────────────────────────────────────────
+
+interface ContextMenuItem {
+  id: string;
+  label: string;
+  onActivate: () => void;
+}
+
+interface ContextMenuProps {
+  x: number;
+  y: number;
+  items: ContextMenuItem[];
+  onClose: () => void;
+  ariaLabel: string;
+}
+
+/**
+ * Overlay context menu, rendered at the supplied viewport
+ * coordinates. Auto-focuses its first item on mount and traps
+ * keyboard navigation inside the menu until it closes.
+ *
+ * Closing channels back to the parent via `onClose`, which the
+ * Sidebar uses to return DOM focus to the tree container. The
+ * `aria-activedescendant` invariant means the user lands back on
+ * the row they triggered the menu from without us having to track
+ * a separate "return-focus-here" handle.
+ *
+ * Position: we clamp against the viewport so a click near the
+ * bottom-right edge still shows the whole menu. Repositioning
+ * happens in a layout-effect so the user never sees a flash of
+ * off-screen content.
+ */
+function ContextMenu({ x, y, items, onClose, ariaLabel }: ContextMenuProps) {
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const [active, setActive] = useState(0);
+  const [position, setPosition] = useState({ x, y });
+
+  // Clamp position to viewport.
+  useEffect(() => {
+    const el = menuRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const margin = 4;
+    let nx = x;
+    let ny = y;
+    if (nx + rect.width + margin > window.innerWidth) {
+      nx = window.innerWidth - rect.width - margin;
+    }
+    if (ny + rect.height + margin > window.innerHeight) {
+      ny = window.innerHeight - rect.height - margin;
+    }
+    if (nx < margin) nx = margin;
+    if (ny < margin) ny = margin;
+    if (nx !== position.x || ny !== position.y) {
+      setPosition({ x: nx, y: ny });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [x, y]);
+
+  // Auto-focus the first item on mount.
+  useEffect(() => {
+    const el = menuRef.current?.querySelector<HTMLButtonElement>(
+      '[role="menuitem"]',
+    );
+    el?.focus({ preventScroll: true });
+  }, []);
+
+  // Outside-click closes. We use mousedown so clicking the trigger
+  // again doesn't bounce-open the menu.
+  useEffect(() => {
+    function onDocPointerDown(e: PointerEvent) {
+      const target = e.target;
+      if (!(target instanceof Node)) return;
+      if (menuRef.current?.contains(target)) return;
+      onClose();
+    }
+    document.addEventListener('pointerdown', onDocPointerDown);
+    return () => document.removeEventListener('pointerdown', onDocPointerDown);
+  }, [onClose]);
+
+  const onMenuKey = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      onClose();
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      const next = Math.min(active + 1, items.length - 1);
+      setActive(next);
+      const buttons = menuRef.current?.querySelectorAll<HTMLButtonElement>(
+        '[role="menuitem"]',
+      );
+      buttons?.[next]?.focus({ preventScroll: true });
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      const next = Math.max(active - 1, 0);
+      setActive(next);
+      const buttons = menuRef.current?.querySelectorAll<HTMLButtonElement>(
+        '[role="menuitem"]',
+      );
+      buttons?.[next]?.focus({ preventScroll: true });
+      return;
+    }
+    if (e.key === 'Home') {
+      e.preventDefault();
+      setActive(0);
+      const buttons = menuRef.current?.querySelectorAll<HTMLButtonElement>(
+        '[role="menuitem"]',
+      );
+      buttons?.[0]?.focus({ preventScroll: true });
+      return;
+    }
+    if (e.key === 'End') {
+      e.preventDefault();
+      const last = items.length - 1;
+      setActive(last);
+      const buttons = menuRef.current?.querySelectorAll<HTMLButtonElement>(
+        '[role="menuitem"]',
+      );
+      buttons?.[last]?.focus({ preventScroll: true });
+      return;
+    }
+    if (e.key === 'Tab') {
+      // Tab outside a context menu is the canonical "close" gesture.
+      e.preventDefault();
+      onClose();
+    }
+  };
+
+  return (
+    <div
+      ref={menuRef}
+      role="menu"
+      aria-label={ariaLabel}
+      className="sidebar__context-menu"
+      style={{ position: 'fixed', left: position.x, top: position.y }}
+      onKeyDown={onMenuKey}
+    >
+      {items.map((item, i) => (
+        <button
+          key={item.id}
+          type="button"
+          role="menuitem"
+          tabIndex={i === active ? 0 : -1}
+          className="sidebar__context-menu-item"
+          onClick={() => {
+            item.onActivate();
+            onClose();
+          }}
+        >
+          {item.label}
+        </button>
+      ))}
     </div>
   );
 }

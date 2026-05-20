@@ -430,7 +430,14 @@
     "tree": {
       "accountLabel": "{{name}} ({{kind}})",
       "sectionLabel": "{{name}}",
-      "empty": "No calendars or task lists yet — open this account in \"Manage accounts\" to check the connection."
+      "empty": "No calendars or task lists yet — open this account in \"Manage accounts\" to check the connection.",
+      "contextMenuHint": "Use arrow keys to navigate, Space to toggle visibility, Shift+F10 or the Menu key for actions."
+    },
+    "taskListDeleted": "Task list \"{{name}}\" deleted.",
+    "menu": {
+      "label": "Calendar actions",
+      "rename": "Rename …",
+      "delete": "Delete"
     }
   },
   "views": {
