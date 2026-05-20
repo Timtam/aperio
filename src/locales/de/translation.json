@@ -7,6 +7,30 @@
   "actions": {
     "duplicated": "„{{title}}\" wurde dupliziert."
   },
+  "reminders": {
+    "label": "Erinnerungen",
+    "empty": "Keine Erinnerungen gesetzt.",
+    "add": "Erinnerung hinzufügen",
+    "remove": "Entfernen",
+    "removeAria": "Erinnerung {{n}} entfernen",
+    "rowLabel": "Erinnerung {{n}}",
+    "kindLabel": "Typ",
+    "kind": {
+      "relativeEvent": "Vor Beginn",
+      "relativeTask": "Vor Fälligkeit",
+      "absolute": "Zu festem Zeitpunkt",
+      "appStart": "Beim nächsten App-Start nach Fälligkeit"
+    },
+    "amountLabel": "Anzahl",
+    "unitLabel": "Einheit",
+    "unit": {
+      "minutes": "Minuten",
+      "hours": "Stunden",
+      "days": "Tage"
+    },
+    "absoluteAtLabel": "Datum und Uhrzeit",
+    "appStartHint": "Wird beim nächsten App-Start nach Fälligkeit ausgelöst."
+  },
   "app": {
     "title": "Aperio",
     "unknownView": "Unbekannte Ansicht: {{view}}",

@@ -7,6 +7,30 @@
   "actions": {
     "duplicated": "\"{{title}}\" duplicated."
   },
+  "reminders": {
+    "label": "Reminders",
+    "empty": "No reminders set.",
+    "add": "Add reminder",
+    "remove": "Remove",
+    "removeAria": "Remove reminder {{n}}",
+    "rowLabel": "Reminder {{n}}",
+    "kindLabel": "Type",
+    "kind": {
+      "relativeEvent": "Before start",
+      "relativeTask": "Before due",
+      "absolute": "At fixed time",
+      "appStart": "On next app start after due"
+    },
+    "amountLabel": "Amount",
+    "unitLabel": "Unit",
+    "unit": {
+      "minutes": "Minutes",
+      "hours": "Hours",
+      "days": "Days"
+    },
+    "absoluteAtLabel": "Date and time",
+    "appStartHint": "Fires on the next launch after the due time."
+  },
   "app": {
     "title": "Aperio",
     "unknownView": "Unknown view: {{view}}",

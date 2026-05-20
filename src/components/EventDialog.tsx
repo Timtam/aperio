@@ -19,6 +19,8 @@ import type { CalendarEvent } from '../api/types';
 import { useCalendarStore } from '../state/CalendarStore';
 import { Modal } from './Modal';
 import { RecurrenceSelector } from './RecurrenceSelector';
+import { RemindersEditor } from './RemindersEditor';
+import type { Reminder } from '../api/types';
 
 /**
  * Event create / edit dialog.
@@ -59,6 +61,7 @@ interface FormState {
   rrule: string | null;
   /** Color-label id, or null. */
   colorLabel: string | null;
+  reminders: Reminder[];
 }
 
 /**
@@ -180,7 +183,7 @@ export function EventDialog({
                 all_day: form.allDay,
                 recurrence: null,
                 color_label: form.colorLabel,
-                reminders: [],
+                reminders: form.reminders,
                 sound: null,
                 attendees: [],
               });
@@ -204,6 +207,7 @@ export function EventDialog({
             description: form.description.trim() || null,
             recurrence,
             color_label: form.colorLabel,
+            reminders: form.reminders,
           };
           await apiUpdateEvent(updated);
           announce(t('dialogs.event.updated', { title: trimmedTitle }));
@@ -218,7 +222,7 @@ export function EventDialog({
             all_day: form.allDay,
             recurrence,
             color_label: form.colorLabel,
-            reminders: [],
+            reminders: form.reminders,
             sound: null,
             attendees: [],
           });
@@ -421,6 +425,12 @@ export function EventDialog({
           onChange={(rrule) => update('rrule', rrule)}
         />
 
+        <RemindersEditor
+          value={form.reminders}
+          onChange={(next) => update('reminders', next)}
+          mode="event"
+        />
+
         {isOccurrence && (
           <fieldset className="form__field">
             <legend className="form__label">
@@ -512,6 +522,7 @@ function buildInitialState(
       description: event.description ?? '',
       rrule: event.recurrence?.rrule ?? null,
       colorLabel: event.color_label ?? null,
+      reminders: event.reminders ?? [],
     };
   }
 
@@ -548,6 +559,7 @@ function buildInitialState(
     description: '',
     rrule: null,
     colorLabel: null,
+    reminders: [],
   };
 }
 

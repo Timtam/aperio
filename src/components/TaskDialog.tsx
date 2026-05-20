@@ -13,9 +13,16 @@ import {
   isCommandError,
 } from '../api/client';
 import { invoke } from '@tauri-apps/api/core';
-import type { DeadlineType, Task, TaskPriority, TaskStatus } from '../api/types';
+import type {
+  DeadlineType,
+  Reminder,
+  Task,
+  TaskPriority,
+  TaskStatus,
+} from '../api/types';
 import { useCalendarStore } from '../state/CalendarStore';
 import { Modal } from './Modal';
+import { RemindersEditor } from './RemindersEditor';
 import {
   fromBackend as recurrenceFromBackend,
   toBackend as recurrenceToBackend,
@@ -55,6 +62,7 @@ interface FormState {
   description: string;
   colorLabel: string | null;
   recurrence: TaskRecurrenceValue;
+  reminders: Reminder[];
 }
 
 export function TaskDialog({
@@ -126,6 +134,7 @@ export function TaskDialog({
             recurrence: recurrenceToBackend(form.recurrence),
             description: form.description.trim() || null,
             color_label: form.colorLabel,
+            reminders: form.reminders,
             completed_at:
               form.status === 'completed'
                 ? task.completed_at ?? new Date().toISOString()
@@ -147,7 +156,7 @@ export function TaskDialog({
             recurrence: recurrenceToBackend(form.recurrence),
             parent_id: null,
             color_label: form.colorLabel,
-            reminders: [],
+            reminders: form.reminders,
             sound: null,
           });
           announce(t('dialogs.task.created', { title: trimmedTitle }));
@@ -333,6 +342,12 @@ export function TaskDialog({
           onChange={(recurrence) => update('recurrence', recurrence)}
         />
 
+        <RemindersEditor
+          value={form.reminders}
+          onChange={(next) => update('reminders', next)}
+          mode="task"
+        />
+
         <label className="form__field">
           <span className="form__label">
             {t('dialogs.task.fields.colorLabel')}
@@ -418,6 +433,7 @@ function buildInitialState(
       description: task.description ?? '',
       colorLabel: task.color_label ?? null,
       recurrence: recurrenceFromBackend(task.recurrence),
+      reminders: task.reminders ?? [],
     };
   }
   // When the caller anchored us on a day, default to a "scheduled
@@ -434,6 +450,7 @@ function buildInitialState(
     description: '',
     colorLabel: null,
     recurrence: { ...TASK_RECURRENCE_DEFAULT },
+    reminders: [],
   };
 }
 

@@ -400,6 +400,35 @@ button:disabled {
   line-height: 1.4;
 }
 
+.reminders__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  list-style: none;
+  padding: 0;
+  margin: 0 0 var(--space-2);
+}
+
+.reminders__row {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2);
+}
+
+.reminders__row-inner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.reminders__remove {
+  align-self: flex-end;
+}
+
+.reminders__add {
+  align-self: flex-start;
+}
+
 .modal__header {
   display: flex;
   align-items: center;
