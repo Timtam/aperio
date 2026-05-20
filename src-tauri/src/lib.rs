@@ -4,6 +4,7 @@
 //! adapter, and a first round of Tauri commands for CRUD. The plugin
 //! manager, sync engine, and external adapters arrive in later phases.
 
+pub mod accounts;
 pub mod commands;
 pub mod db;
 mod paths;
@@ -47,6 +48,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .manage(local_adapter)
+        .manage(db)
         .invoke_handler(tauri::generate_handler![
             app_info,
             commands::list_calendars,
@@ -72,6 +74,9 @@ pub fn run() {
             commands::delete_color_label,
             commands::search,
             commands::list_upcoming_reminders,
+            commands::list_accounts,
+            commands::create_account,
+            commands::delete_account,
         ])
         .setup(move |app| {
             // Spawn the reminder scheduler on the Tauri/tokio runtime

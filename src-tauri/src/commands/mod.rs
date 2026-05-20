@@ -6,6 +6,7 @@
 //! here, because the frontend needs to distinguish "not found" from
 //! "conflict" from "auth failure" to render appropriate UI.
 
+mod accounts;
 mod calendars;
 mod color_labels;
 mod reminders;
@@ -14,6 +15,7 @@ mod tasks;
 
 use serde::Serialize;
 
+pub use accounts::*;
 pub use calendars::*;
 pub use color_labels::*;
 pub use reminders::*;
