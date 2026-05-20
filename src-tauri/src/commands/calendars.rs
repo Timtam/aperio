@@ -7,6 +7,7 @@ use serde::Deserialize;
 use tauri::State;
 
 use super::CommandResult;
+use crate::reminders::SchedulerHandle;
 
 /// Frontend-supplied payload for creating a local calendar.
 #[derive(Debug, Deserialize)]
@@ -62,30 +63,48 @@ pub struct CreateEventRequest {
 #[tauri::command]
 pub async fn create_event(
     adapter: State<'_, LocalAdapter>,
+    scheduler: State<'_, SchedulerHandle>,
     request: CreateEventRequest,
 ) -> CommandResult<Event> {
-    Ok(adapter
+    let event = adapter
         .create_event(&request.calendar_id, request.event)
-        .await?)
+        .await?;
+    scheduler.invalidate();
+    Ok(event)
 }
 
 #[tauri::command]
-pub async fn update_event(adapter: State<'_, LocalAdapter>, event: Event) -> CommandResult<Event> {
-    Ok(adapter.update_event(event).await?)
+pub async fn update_event(
+    adapter: State<'_, LocalAdapter>,
+    scheduler: State<'_, SchedulerHandle>,
+    event: Event,
+) -> CommandResult<Event> {
+    let event = adapter.update_event(event).await?;
+    scheduler.invalidate();
+    Ok(event)
 }
 
 #[tauri::command]
-pub async fn delete_event(adapter: State<'_, LocalAdapter>, id: String) -> CommandResult<()> {
-    Ok(adapter.delete_event(&id).await?)
+pub async fn delete_event(
+    adapter: State<'_, LocalAdapter>,
+    scheduler: State<'_, SchedulerHandle>,
+    id: String,
+) -> CommandResult<()> {
+    adapter.delete_event(&id).await?;
+    scheduler.invalidate();
+    Ok(())
 }
 
 #[tauri::command]
 pub async fn add_event_exdate(
     adapter: State<'_, LocalAdapter>,
+    scheduler: State<'_, SchedulerHandle>,
     id: String,
     occurrence: DateTime<Utc>,
 ) -> CommandResult<()> {
-    Ok(adapter.add_event_exdate(&id, occurrence)?)
+    adapter.add_event_exdate(&id, occurrence)?;
+    scheduler.invalidate();
+    Ok(())
 }
 
 // ────────────────────────────────────────────────────────────────────────────

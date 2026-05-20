@@ -6,6 +6,7 @@ use serde::Deserialize;
 use tauri::State;
 
 use super::CommandResult;
+use crate::reminders::SchedulerHandle;
 
 #[derive(Debug, Deserialize)]
 pub struct CreateTaskListRequest {
@@ -49,17 +50,32 @@ pub struct CreateTaskRequest {
 #[tauri::command]
 pub async fn create_task(
     adapter: State<'_, LocalAdapter>,
+    scheduler: State<'_, SchedulerHandle>,
     request: CreateTaskRequest,
 ) -> CommandResult<Task> {
-    Ok(adapter.create_task(&request.list_id, request.task).await?)
+    let task = adapter.create_task(&request.list_id, request.task).await?;
+    scheduler.invalidate();
+    Ok(task)
 }
 
 #[tauri::command]
-pub async fn update_task(adapter: State<'_, LocalAdapter>, task: Task) -> CommandResult<Task> {
-    Ok(adapter.update_task(task).await?)
+pub async fn update_task(
+    adapter: State<'_, LocalAdapter>,
+    scheduler: State<'_, SchedulerHandle>,
+    task: Task,
+) -> CommandResult<Task> {
+    let task = adapter.update_task(task).await?;
+    scheduler.invalidate();
+    Ok(task)
 }
 
 #[tauri::command]
-pub async fn delete_task(adapter: State<'_, LocalAdapter>, id: String) -> CommandResult<()> {
-    Ok(adapter.delete_task(&id).await?)
+pub async fn delete_task(
+    adapter: State<'_, LocalAdapter>,
+    scheduler: State<'_, SchedulerHandle>,
+    id: String,
+) -> CommandResult<()> {
+    adapter.delete_task(&id).await?;
+    scheduler.invalidate();
+    Ok(())
 }

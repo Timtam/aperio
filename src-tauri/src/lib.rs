@@ -7,11 +7,14 @@
 pub mod commands;
 pub mod db;
 mod paths;
+pub mod reminders;
 
 pub use db::{DbError, DbHandle, DbResult, SharedConn};
 pub use paths::{resolve_data_dir, DataDirKind, DataDirResolution};
 
 use cal_adapter_local::LocalAdapter;
+use reminders::ReminderScheduler;
+use tauri::Manager;
 use tracing::info;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -32,8 +35,10 @@ pub fn run() {
     // The Tauri backend owns the connection. Subsystems (calendar adapter,
     // sync engine, plugin manager) take an `Arc` clone of the same mutex.
     let local_adapter = LocalAdapter::new(db.shared());
+    let db_for_scheduler = db.shared();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .manage(local_adapter)
         .invoke_handler(tauri::generate_handler![
             app_info,
@@ -58,8 +63,13 @@ pub fn run() {
             commands::delete_color_label,
             commands::search,
         ])
-        .setup(move |_app| {
-            // Future phases register the sync engine and plugin manager here.
+        .setup(move |app| {
+            // Spawn the reminder scheduler on the Tauri/tokio runtime
+            // and register its handle so command modules can call
+            // `invalidate()` after every mutation.
+            let scheduler =
+                ReminderScheduler::spawn(db_for_scheduler.clone(), app.handle().clone());
+            app.manage(scheduler);
             Ok(())
         })
         .run(tauri::generate_context!())
