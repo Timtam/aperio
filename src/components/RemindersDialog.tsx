@@ -97,27 +97,25 @@ export function RemindersDialog({ isOpen, onClose }: RemindersDialogProps) {
 
   const openRow = useCallback(
     async (r: UpcomingReminder) => {
-      onClose();
-      // Fetch the full row by id, then defer the open so the
-      // overview's close has settled before the next dialog mounts
-      // (same pattern as SearchDialog).
+      // Fetch the full row by id then push the matching edit dialog
+      // on top of this one. Closing the edit dialog will pop us back
+      // to the overview, where the user can keep working through the
+      // list. We deliberately do NOT call `onClose` first — that
+      // would empty the stack and the user would land in the shell.
       try {
         if (r.item_kind === 'event') {
           const ev = await getEventById(r.item_id);
-          queueMicrotask(() => openEventDialog(ev ?? null));
+          openEventDialog(ev ?? null);
         } else {
           const task = await getTaskById(r.item_id);
-          queueMicrotask(() => openTaskDialog(task ?? null));
+          openTaskDialog(task ?? null);
         }
       } catch (err) {
-        // Swallow — the overview is already closed; surfacing an
-        // error here would require keeping it open. The user can
-        // re-open via Ctrl+Shift+R.
         // eslint-disable-next-line no-console
         console.warn('failed to load reminder target', err);
       }
     },
-    [onClose, openEventDialog, openTaskDialog],
+    [openEventDialog, openTaskDialog],
   );
 
   const handleKey = (e: React.KeyboardEvent<HTMLUListElement>) => {

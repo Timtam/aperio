@@ -206,20 +206,19 @@ export function SearchDialog({ isOpen, onClose }: SearchDialogProps) {
 
   const openHit = useCallback(
     (hit: Hit) => {
+      // Push the edit dialog on top of the search results; closing
+      // it pops back here so the user can keep clicking through
+      // hits without re-running the query. The dialog stack in
+      // DialogState owns the restore-focus logic.
       if (hit.kind === 'event') {
         const ev = events.find((e) => e.id === hit.id);
-        onClose();
-        // Defer so the search modal finishes closing before we open
-        // the edit one — otherwise the focus restore in DialogState
-        // would land on the search box and immediately be lost again.
-        queueMicrotask(() => openEventDialog(ev ?? null));
+        openEventDialog(ev ?? null);
       } else {
         const task = tasks.find((tk) => tk.id === hit.id);
-        onClose();
-        queueMicrotask(() => openTaskDialog(task ?? null));
+        openTaskDialog(task ?? null);
       }
     },
-    [events, tasks, onClose, openEventDialog, openTaskDialog],
+    [events, tasks, openEventDialog, openTaskDialog],
   );
 
   const handleInputKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
