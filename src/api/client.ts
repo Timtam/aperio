@@ -227,3 +227,19 @@ export const testCaldavConnection = (
   invoke<void>('test_caldav_connection', {
     request: { server_url, username, password },
   });
+
+/** Public-feed config persisted as JSON in `accounts.config_json`.
+ *  Mirrors the backend `IcalAccountConfig`. */
+export interface IcalConfig {
+  feed_url: string;
+  username: string | null;
+}
+
+export const testIcalFeed = (
+  feed_url: string,
+  username: string | null,
+  password: string | null,
+) =>
+  invoke<void>('test_ical_feed', {
+    request: { feed_url, username, password },
+  });

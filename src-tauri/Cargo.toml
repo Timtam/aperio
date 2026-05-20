@@ -30,6 +30,7 @@ anyhow.workspace = true
 cal-core.workspace = true
 cal-adapter-local.workspace = true
 cal-adapter-caldav = { path = "../crates/cal-adapter-caldav" }
+cal-adapter-ical = { path = "../crates/cal-adapter-ical" }
 
 rusqlite.workspace = true
 chrono.workspace = true

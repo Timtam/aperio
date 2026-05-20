@@ -4,6 +4,9 @@ use cal_adapter_caldav::{
     config::{AuthKind, CaldavAccountConfig, Credentials as CaldavCredentials},
     CaldavAdapter,
 };
+use cal_adapter_ical::{
+    Credentials as IcalCredentials, IcalAccountConfig, IcalAdapter,
+};
 use cal_core::CalendarFeature;
 use tauri::State;
 
@@ -50,10 +53,13 @@ pub async fn create_account(
     request: CreateAccountRequest,
 ) -> CommandResult<Account> {
     // Reject adapter kinds we have no construction path for yet.
-    // CalDAV and Local are the two supported kinds — the others
+    // Local, CalDAV and iCal are the supported kinds — the others
     // surface as an actionable "coming soon" envelope rather than
     // a half-broken row in the database.
-    if !matches!(request.adapter_kind, AdapterKind::Local | AdapterKind::Caldav) {
+    if !matches!(
+        request.adapter_kind,
+        AdapterKind::Local | AdapterKind::Caldav | AdapterKind::Ical
+    ) {
         return Err(CommandError {
             code: "unsupported",
             message: format!(
@@ -82,6 +88,18 @@ pub async fn create_account(
                 message: format!("invalid CalDAV config: {e}"),
             })?;
         smoke_test_caldav(&config, secret).await?;
+    }
+
+    // Same idea for iCal: a one-shot HEAD/GET against the feed URL
+    // confirms the URL is reachable and (if Basic auth is provided)
+    // the credentials are accepted. Public feeds run anonymously.
+    if request.adapter_kind == AdapterKind::Ical {
+        let config: IcalAccountConfig = serde_json::from_str(&request.config_json)
+            .map_err(|e| CommandError {
+                code: "invalid_input",
+                message: format!("invalid iCal config: {e}"),
+            })?;
+        smoke_test_ical(&config, request.secret.as_deref()).await?;
     }
 
     let shared = db.shared();
@@ -153,6 +171,44 @@ async fn smoke_test_caldav(
     Ok(())
 }
 
+/// One-shot fetch of the iCal feed. Confirms the URL resolves, the
+/// server answers, and (if credentials are provided) Basic auth is
+/// accepted. The ephemeral adapter is dropped after the call — the
+/// real one gets constructed again from the persisted config so the
+/// request and storage stay in sync.
+async fn smoke_test_ical(
+    config: &IcalAccountConfig,
+    password: Option<&str>,
+) -> Result<(), CommandError> {
+    let credentials = IcalCredentials::new(
+        IcalAccountConfig {
+            feed_url: config.feed_url.clone(),
+            username: config.username.clone(),
+        },
+        password.filter(|s| !s.is_empty()).map(|s| s.to_string()),
+    );
+    let adapter = IcalAdapter::new(credentials).map_err(|err| CommandError {
+        code: "invalid_input",
+        message: err.to_string(),
+    })?;
+    adapter
+        .smoke_test()
+        .await
+        .map_err(|err| ical_error_to_command(err))?;
+    Ok(())
+}
+
+fn ical_error_to_command(err: cal_adapter_ical::IcalError) -> CommandError {
+    use cal_adapter_ical::IcalError::*;
+    let (code, message) = match err {
+        Auth(_) => ("auth", err.to_string()),
+        Url(_) | Config(_) => ("invalid_input", err.to_string()),
+        Parse(_) => ("protocol", err.to_string()),
+        Server(_) | Network(_) => ("network", err.to_string()),
+    };
+    CommandError { code, message }
+}
+
 fn caldav_core_error_to_command(err: cal_core::Error) -> CommandError {
     use cal_core::Error::*;
     let (code, message) = match err {
@@ -189,6 +245,27 @@ pub struct TestCaldavRequest {
     pub server_url: String,
     pub username: String,
     pub password: String,
+}
+
+/// Round-trip a single fetch of the supplied iCal feed without
+/// persisting anything. Same pattern as [`test_caldav_connection`].
+#[tauri::command]
+pub async fn test_ical_feed(
+    request: TestIcalRequest,
+) -> CommandResult<()> {
+    let config = IcalAccountConfig {
+        feed_url: request.feed_url,
+        username: request.username,
+    };
+    smoke_test_ical(&config, request.password.as_deref()).await?;
+    Ok(())
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct TestIcalRequest {
+    pub feed_url: String,
+    pub username: Option<String>,
+    pub password: Option<String>,
 }
 
 #[tauri::command]

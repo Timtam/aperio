@@ -309,11 +309,20 @@ export function EventDialog({
             <option value="" disabled>
               {t('dialogs.event.pickCalendar')}
             </option>
-            {calendars.map((cal) => (
-              <option key={cal.id} value={cal.id}>
-                {cal.name}
-              </option>
-            ))}
+            {/* Read-only calendars (iCal feeds, future shared
+                read-only sources) can't accept new events. Filter
+                them out of the picker so the user doesn't pick one
+                and then hit "Unsupported" on save. The event that
+                triggered the edit might *be* on a read-only
+                calendar, though — keep it in the list in that case
+                so the picker matches `form.calendarId`. */}
+            {calendars
+              .filter((cal) => !cal.read_only || cal.id === form.calendarId)
+              .map((cal) => (
+                <option key={cal.id} value={cal.id}>
+                  {cal.name}
+                </option>
+              ))}
           </select>
         </label>
 

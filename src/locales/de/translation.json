@@ -304,6 +304,13 @@
       "testConnection": "Verbindung prüfen",
       "testing": "Wird geprüft …",
       "testOk": "Die Verbindung funktioniert. Die gefundenen Kalender erscheinen in der Seitenleiste.",
+      "feedUrlLabel": "Feed-URL",
+      "feedUrlPlaceholder": "z. B. https://www.beispiel.de/ferien.ics",
+      "feedUrlHint": "Öffentliche .ics-Adresse. Lesezugriff — Termine aus diesem Feed können in Aperio nicht bearbeitet werden.",
+      "feedUrlRequired": "Bitte gib die Feed-URL ein.",
+      "icalUsernameLabel": "Benutzername (optional)",
+      "icalPasswordLabel": "Passwort (optional)",
+      "icalAuthHint": "Nur ausfüllen, wenn der Feed Basic-Auth verlangt. Öffentliche Feeds bleiben anonym.",
       "kindName": {
         "local": "Lokal",
         "caldav": "CalDAV (iCloud, Nextcloud, …)",

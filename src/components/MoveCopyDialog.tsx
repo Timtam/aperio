@@ -63,10 +63,18 @@ export function MoveCopyDialog({
   const [submitting, setSubmitting] = useState(false);
 
   const containers = useMemo(() => {
+    // Move / copy targets must accept writes — drop read-only
+    // containers (iCal feeds, future shared read-only sources) so
+    // the picker never offers a destination the backend would
+    // reject with "Unsupported".
     if (target.kind === 'event') {
-      return calendars.map((c) => ({ id: c.id, name: c.name }));
+      return calendars
+        .filter((c) => !c.read_only)
+        .map((c) => ({ id: c.id, name: c.name }));
     }
-    return taskLists.map((l) => ({ id: l.id, name: l.name }));
+    return taskLists
+      .filter((l) => !l.read_only)
+      .map((l) => ({ id: l.id, name: l.name }));
   }, [target.kind, calendars, taskLists]);
 
   const itemTitle =

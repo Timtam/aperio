@@ -30,6 +30,9 @@ use cal_adapter_caldav::{
     config::{CaldavAccountConfig, Credentials as CaldavCredentials},
     CaldavAdapter,
 };
+use cal_adapter_ical::{
+    Credentials as IcalCredentials, IcalAccountConfig, IcalAdapter,
+};
 use cal_core::{CalendarFeature, TasksFeature};
 use tracing::warn;
 
@@ -264,6 +267,7 @@ impl AdapterRegistry {
         match account.adapter_kind {
             AdapterKind::Local => Ok(()),
             AdapterKind::Caldav => self.register_caldav(account),
+            AdapterKind::Ical => self.register_ical(account),
             other => Err(RegistryError::Unsupported(format!(
                 "adapter kind '{}' is not wired up yet",
                 other.as_str()
@@ -288,6 +292,31 @@ impl AdapterRegistry {
             .write()
             .expect("registry tasks poison")
             .insert(account.id.clone(), arc as Arc<dyn TasksFeature>);
+        Ok(())
+    }
+
+    /// Wire up an iCal feed account. Only the calendar side is
+    /// registered; iCal feeds don't carry VTODOs in a queryable way,
+    /// so we skip the TasksFeature slot rather than expose a row that
+    /// would always be empty.
+    fn register_ical(&self, account: &Account) -> Result<(), RegistryError> {
+        let config: IcalAccountConfig = serde_json::from_str(&account.config_json)
+            .map_err(|e| RegistryError::Config(e.to_string()))?;
+        // Basic-auth password is optional for iCal — most public feeds
+        // are anonymous. A missing keychain entry is therefore not an
+        // error; an explicit empty string from the secrets store
+        // collapses to None too.
+        let password = secrets::retrieve(&account.id, SecretSlot::Password)
+            .ok()
+            .filter(|s| !s.is_empty());
+        let credentials = IcalCredentials::new(config, password);
+        let adapter = IcalAdapter::new(credentials)
+            .map_err(|e| RegistryError::Construct(e.to_string()))?;
+        let arc = Arc::new(adapter);
+        self.external_cal
+            .write()
+            .expect("registry cal poison")
+            .insert(account.id.clone(), arc as Arc<dyn CalendarFeature>);
         Ok(())
     }
 }

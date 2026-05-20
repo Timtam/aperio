@@ -15,6 +15,7 @@ import {
   isCommandError,
   listAccounts,
   testCaldavConnection,
+  testIcalFeed,
 } from '../api/client';
 import type { Account, AdapterKind } from '../api/types';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -50,7 +51,11 @@ const KIND_ORDER: AdapterKind[] = [
   'todoist',
 ];
 
-const ENABLED_KINDS: ReadonlySet<AdapterKind> = new Set(['local', 'caldav']);
+const ENABLED_KINDS: ReadonlySet<AdapterKind> = new Set([
+  'local',
+  'caldav',
+  'ical',
+]);
 
 interface CaldavFields {
   serverUrl: string;
@@ -60,6 +65,18 @@ interface CaldavFields {
 
 const EMPTY_CALDAV: CaldavFields = {
   serverUrl: '',
+  username: '',
+  password: '',
+};
+
+interface IcalFields {
+  feedUrl: string;
+  username: string;
+  password: string;
+}
+
+const EMPTY_ICAL: IcalFields = {
+  feedUrl: '',
   username: '',
   password: '',
 };
@@ -79,6 +96,7 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
   const [testing, setTesting] = useState(false);
   const [testMessage, setTestMessage] = useState<string | null>(null);
   const [caldav, setCaldav] = useState<CaldavFields>(EMPTY_CALDAV);
+  const [ical, setIcal] = useState<IcalFields>(EMPTY_ICAL);
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -103,6 +121,13 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
     return null;
   }, [caldav, t]);
 
+  const validateIcal = useCallback((): string | null => {
+    // iCal only requires the URL — username + password are optional
+    // (most public feeds are anonymous).
+    if (!ical.feedUrl.trim()) return t('dialogs.accounts.feedUrlRequired');
+    return null;
+  }, [ical, t]);
+
   const onSubmit = useCallback(
     async (e: FormEvent) => {
       e.preventDefault();
@@ -124,6 +149,13 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
           return;
         }
       }
+      if (kind === 'ical') {
+        const v = validateIcal();
+        if (v) {
+          setError(v);
+          return;
+        }
+      }
       setSubmitting(true);
       setError(null);
       try {
@@ -134,16 +166,28 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
                 username: caldav.username.trim(),
                 auth_kind: 'basic',
               })
-            : '{}';
+            : kind === 'ical'
+              ? JSON.stringify({
+                  feed_url: ical.feedUrl.trim(),
+                  username: ical.username.trim() || null,
+                })
+              : '{}';
+        const secret =
+          kind === 'caldav'
+            ? caldav.password
+            : kind === 'ical' && ical.password
+              ? ical.password
+              : undefined;
         const created = await createAccount({
           adapter_kind: kind,
           display_name: name,
           config_json: configJson,
-          secret: kind === 'caldav' ? caldav.password : undefined,
+          secret,
         });
         announce(t('dialogs.accounts.created', { name: created.display_name }));
         setDisplayName('');
         setCaldav(EMPTY_CALDAV);
+        setIcal(EMPTY_ICAL);
         refresh();
       } catch (err) {
         if (isCommandError(err)) setError(`${err.code}: ${err.message}`);
@@ -152,24 +196,49 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
         setSubmitting(false);
       }
     },
-    [displayName, kind, caldav, validateCaldav, announce, refresh, t],
+    [
+      displayName,
+      kind,
+      caldav,
+      ical,
+      validateCaldav,
+      validateIcal,
+      announce,
+      refresh,
+      t,
+    ],
   );
 
   const onTestConnection = useCallback(async () => {
     setTestMessage(null);
     setError(null);
-    const v = validateCaldav();
-    if (v) {
-      setError(v);
-      return;
-    }
     setTesting(true);
     try {
-      await testCaldavConnection(
-        caldav.serverUrl.trim(),
-        caldav.username.trim(),
-        caldav.password,
-      );
+      if (kind === 'caldav') {
+        const v = validateCaldav();
+        if (v) {
+          setError(v);
+          return;
+        }
+        await testCaldavConnection(
+          caldav.serverUrl.trim(),
+          caldav.username.trim(),
+          caldav.password,
+        );
+      } else if (kind === 'ical') {
+        const v = validateIcal();
+        if (v) {
+          setError(v);
+          return;
+        }
+        await testIcalFeed(
+          ical.feedUrl.trim(),
+          ical.username.trim() || null,
+          ical.password || null,
+        );
+      } else {
+        return;
+      }
       setTestMessage(t('dialogs.accounts.testOk'));
       announce(t('dialogs.accounts.testOk'));
     } catch (err) {
@@ -178,7 +247,7 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
     } finally {
       setTesting(false);
     }
-  }, [caldav, validateCaldav, announce, t]);
+  }, [kind, caldav, ical, validateCaldav, validateIcal, announce, t]);
 
   const performDelete = useCallback(
     async (acc: Account) => {
@@ -473,6 +542,78 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
                     {t('dialogs.accounts.passwordHint')}
                   </span>
                 </label>
+                {testMessage && kind === 'caldav' && (
+                  <p
+                    role="status"
+                    aria-live="polite"
+                    className="form__hint accounts-test-ok"
+                  >
+                    {testMessage}
+                  </p>
+                )}
+              </>
+            )}
+
+            {kind === 'ical' && (
+              <>
+                <label className="form__field">
+                  <span className="form__label">
+                    {t('dialogs.accounts.feedUrlLabel')}
+                  </span>
+                  <input
+                    type="url"
+                    value={ical.feedUrl}
+                    onChange={(e) =>
+                      setIcal((prev) => ({
+                        ...prev,
+                        feedUrl: e.target.value,
+                      }))
+                    }
+                    placeholder={t('dialogs.accounts.feedUrlPlaceholder')}
+                    autoComplete="off"
+                    spellCheck={false}
+                    required
+                  />
+                  <span className="form__hint">
+                    {t('dialogs.accounts.feedUrlHint')}
+                  </span>
+                </label>
+                <label className="form__field">
+                  <span className="form__label">
+                    {t('dialogs.accounts.icalUsernameLabel')}
+                  </span>
+                  <input
+                    type="text"
+                    value={ical.username}
+                    onChange={(e) =>
+                      setIcal((prev) => ({
+                        ...prev,
+                        username: e.target.value,
+                      }))
+                    }
+                    autoComplete="username"
+                    spellCheck={false}
+                  />
+                  <span className="form__hint">
+                    {t('dialogs.accounts.icalAuthHint')}
+                  </span>
+                </label>
+                <label className="form__field">
+                  <span className="form__label">
+                    {t('dialogs.accounts.icalPasswordLabel')}
+                  </span>
+                  <input
+                    type="password"
+                    value={ical.password}
+                    onChange={(e) =>
+                      setIcal((prev) => ({
+                        ...prev,
+                        password: e.target.value,
+                      }))
+                    }
+                    autoComplete="new-password"
+                  />
+                </label>
                 {testMessage && (
                   <p
                     role="status"
@@ -486,7 +627,7 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
             )}
 
             <div className="form__actions">
-              {kind === 'caldav' && (
+              {(kind === 'caldav' || kind === 'ical') && (
                 <button
                   type="button"
                   className="form__action"

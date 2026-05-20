@@ -92,6 +92,7 @@ pub fn run() {
             commands::create_account,
             commands::delete_account,
             commands::test_caldav_connection,
+            commands::test_ical_feed,
         ])
         .setup(move |app| {
             // Spawn the reminder scheduler on the Tauri/tokio runtime
