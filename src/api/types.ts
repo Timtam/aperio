@@ -16,6 +16,12 @@ export interface Calendar {
   color: ContainerColor | null;
   read_only: boolean;
   default_sound: SoundConfig | null;
+  /** Account that owns this calendar. `"local"` for the implicit
+   *  local adapter; a UUID for any external account. Backend
+   *  enriches every Calendar with this field via the registry's
+   *  route map so the frontend can group containers by source
+   *  without a second round-trip. */
+  account_id: string;
 }
 
 export interface SoundConfig {
@@ -80,6 +86,9 @@ export interface TaskList {
   default_sound: SoundConfig | null;
   embedded_in_calendar: string | null;
   read_only: boolean;
+  /** Account that owns this task list. Same semantics as
+   *  `Calendar.account_id` — populated by the backend's route map. */
+  account_id: string;
 }
 
 export type TaskStatus = 'open' | 'in_progress' | 'completed' | 'cancelled';

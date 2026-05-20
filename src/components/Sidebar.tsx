@@ -1,6 +1,9 @@
 import {
   useCallback,
   useEffect,
+  useId,
+  useMemo,
+  useRef,
   useState,
   type KeyboardEvent,
 } from 'react';
@@ -18,31 +21,52 @@ import {
 } from '../api/client';
 import { useCalendarStore } from '../state/CalendarStore';
 import { useDialogState } from '../state/DialogState';
+import {
+  accountTriState,
+  buildSidebarTree,
+  parentTriState,
+  type AccountNode,
+  type LeafNode,
+  type SectionNode,
+  type TriState,
+} from '../state/sidebarTree';
+import { useSidebarExpansion } from '../state/useSidebarExpansion';
 
 /**
- * Sidebar: filter for calendars and task lists, plus quick-create
- * actions for local containers.
+ * Sidebar: tree view of accounts → sections (Calendars / Tasks) →
+ * individual containers, with multi-select via space and a single
+ * tab stop on the container (`aria-activedescendant`).
  *
- * Each filter row is a button with `aria-pressed` reflecting whether the
- * container is currently visible. Toggling never deletes — it just hides
- * the source from the main view.
+ * Keyboard model (W3C ARIA APG, treeview multi-select variant):
  *
- * Rename: every row exposes an edit button. Activating it swaps the
- * name into an inline text field; Enter commits the override, Escape
- * cancels, an empty value clears the override and reverts to the
- * source name. The rename never leaves the local DB in this commit;
- * a follow-up wires the trait method that pushes it back to CalDAV
- * (PROPPATCH `DAV:displayname`) / local SQLite for adapters that
- * support it.
+ *   - ↑/↓     move focus between visible items (skipping collapsed
+ *             children)
+ *   - ←       on an open parent: collapse; on a leaf or closed parent:
+ *             move to parent
+ *   - →       on a closed parent: expand; on an open parent: focus
+ *             first child
+ *   - Home    first visible item
+ *   - End     last visible item
+ *   - Space   toggle selection on the focused item. For a parent
+ *             with a `mixed` or `checked` state this clears every
+ *             descendant; for `unchecked` it selects every descendant.
+ *   - Enter   alias for Space
+ *   - a-z     type-ahead: focus the next visible item whose name
+ *             starts with the typed letter
  *
- * The delete button on calendars is intentionally tiny and labelled
- * specifically per row, so screen readers always announce *which*
- * calendar is being removed.
+ * The flat list of visible items is recomputed on every render from
+ * the tree + expansion state. That's O(n) over a handful of dozen
+ * items and saves the alternative book-keeping (DOM walks, refs to
+ * every item) which would be brittler with React's render model.
+ *
+ * Rename, delete, and create are kept as inline actions on the leaf
+ * rows — the structural change is purely in the tree wrapping.
  */
 export function Sidebar() {
   const { t } = useTranslation();
   const announce = useAnnouncer();
   const {
+    accounts,
     calendars,
     selectedCalendarIds,
     toggleCalendar,
@@ -53,24 +77,59 @@ export function Sidebar() {
     refreshTaskLists,
   } = useCalendarStore();
   const { openColorLabels, openAccounts } = useDialogState();
+  const expansion = useSidebarExpansion();
 
-  // Identifies the row currently in edit mode. `null` means "none —
-  // all rows show their static name + buttons". Only one row may be
-  // in edit mode at a time, matching the underlying Modal-or-inline
-  // discipline elsewhere in the app.
+  const tree = useMemo(
+    () =>
+      buildSidebarTree({
+        accounts,
+        calendars,
+        taskLists,
+        selectedCalendarIds,
+        selectedTaskListIds,
+      }),
+    [accounts, calendars, taskLists, selectedCalendarIds, selectedTaskListIds],
+  );
+
+  // Flatten the tree to the list the user can navigate through. Each
+  // entry carries enough context to render itself and to handle a
+  // toggle/expand/collapse action without re-walking the tree. Hidden
+  // children (those of a collapsed parent) are omitted entirely.
+  const visible = useMemo<VisibleItem[]>(
+    () => flattenTree(tree, expansion.isExpanded),
+    [tree, expansion],
+  );
+
+  // ── Active descendant + keyboard navigation ───────────────────────
+  const treeId = useId();
+  const itemId = useCallback(
+    (key: string) => `${treeId}-node-${key}`,
+    [treeId],
+  );
+
+  const [focusedKey, setFocusedKey] = useState<string | null>(null);
+
+  // Once the tree first populates, focus the first item so arrow-key
+  // navigation has a starting point. Don't override an existing
+  // focused key (the user may have already moved around).
+  useEffect(() => {
+    if (focusedKey === null && visible.length > 0) {
+      setFocusedKey(visible[0].key);
+    }
+    // If the focused row disappears (account deleted, section
+    // collapsed), fall back to the closest survivor.
+    if (focusedKey !== null && !visible.some((v) => v.key === focusedKey)) {
+      setFocusedKey(visible[0]?.key ?? null);
+    }
+  }, [visible, focusedKey]);
+
+  // ── Inline rename plumbing ────────────────────────────────────────
+  // Identifies the leaf currently in edit mode (`null` = no edit).
   const [editing, setEditing] = useState<{
     kind: ContainerKind;
     id: string;
   } | null>(null);
   const [draft, setDraft] = useState('');
-
-  // After commit/cancel via keyboard (Enter / Esc) or via the
-  // explicit ✓ / ✕ buttons, focus should land back on the row's
-  // edit button — otherwise React unmounts the input and focus
-  // snaps to <body>, forcing the user to Tab all the way back into
-  // the sidebar. For exits via blur (user clicked somewhere else),
-  // we leave focus alone since the click already chose the
-  // destination.
   const [restoreTarget, setRestoreTarget] = useState<{
     kind: ContainerKind;
     id: string;
@@ -78,8 +137,6 @@ export function Sidebar() {
 
   useEffect(() => {
     if (!restoreTarget) return;
-    // CSS.escape protects against ids that contain special chars
-    // (CalDAV calendar URLs end with `/`, iCal ids contain `:`).
     const sel =
       `[data-rename-target-id="${CSS.escape(restoreTarget.id)}"]` +
       `[data-rename-target-kind="${restoreTarget.kind}"]`;
@@ -117,17 +174,9 @@ export function Sidebar() {
       const target = restoreFocus ? { kind, id } : null;
       try {
         if (trimmed === '') {
-          // Empty input ⇒ revert: drop the local override. We don't
-          // attempt to rename at the source here because "revert" is a
-          // local-only concept — the source already has its source
-          // name, which is what we're going back to.
           await clearContainerNameOverride(id, kind);
           announce(t('sidebar.renameCleared'));
         } else {
-          // Non-empty input ⇒ canonical rename. Backend orchestrates
-          // adapter push vs. local override based on capability and
-          // returns which path it took, so the SR announcement can say
-          // whether the rename reached the server.
           const outcome = await renameContainer(id, kind, trimmed);
           announce(
             t(
@@ -138,8 +187,6 @@ export function Sidebar() {
             ),
           );
         }
-        // Pull fresh container lists so the new name surfaces in the
-        // sidebar (and in every downstream consumer of the store).
         if (kind === 'calendar') {
           await refreshCalendars();
         } else {
@@ -170,12 +217,12 @@ export function Sidebar() {
       if (e.key === 'Escape') {
         e.preventDefault();
         cancelEdit(true);
-        return;
       }
     },
     [commitEdit, cancelEdit],
   );
 
+  // ── Create / delete actions ──────────────────────────────────────
   const onCreateCalendar = useCallback(async () => {
     try {
       const cal = await createCalendar({
@@ -218,82 +265,236 @@ export function Sidebar() {
     }
   }, [taskLists.length, refreshTaskLists, announce, t]);
 
+  // ── Multi-toggle: flip every descendant of a parent on/off ───────
+  const setManyCalendars = useCallback(
+    (ids: string[], next: boolean) => {
+      // Toggle reaches into the store one id at a time — the store
+      // batches the state-update internally because each toggle is
+      // a setState callback.
+      for (const id of ids) {
+        const isOn = selectedCalendarIds.has(id);
+        if (isOn !== next) toggleCalendar(id);
+      }
+    },
+    [selectedCalendarIds, toggleCalendar],
+  );
+  const setManyTaskLists = useCallback(
+    (ids: string[], next: boolean) => {
+      for (const id of ids) {
+        const isOn = selectedTaskListIds.has(id);
+        if (isOn !== next) toggleTaskList(id);
+      }
+    },
+    [selectedTaskListIds, toggleTaskList],
+  );
+
+  // ── Keyboard handler on the tree container ───────────────────────
+  // Type-ahead buffer: collected single-character keypresses within
+  // a 700ms window become a prefix search.
+  const typeBuffer = useRef('');
+  const typeTimer = useRef<number | null>(null);
+
+  const focusByIndex = useCallback(
+    (idx: number) => {
+      if (idx < 0 || idx >= visible.length) return;
+      setFocusedKey(visible[idx].key);
+    },
+    [visible],
+  );
+
+  const onTreeKey = useCallback(
+    (e: KeyboardEvent<HTMLDivElement>) => {
+      if (focusedKey === null || visible.length === 0) return;
+      const idx = visible.findIndex((v) => v.key === focusedKey);
+      if (idx < 0) return;
+      const item = visible[idx];
+
+      switch (e.key) {
+        case 'ArrowDown':
+          e.preventDefault();
+          focusByIndex(Math.min(idx + 1, visible.length - 1));
+          return;
+        case 'ArrowUp':
+          e.preventDefault();
+          focusByIndex(Math.max(idx - 1, 0));
+          return;
+        case 'Home':
+          e.preventDefault();
+          focusByIndex(0);
+          return;
+        case 'End':
+          e.preventDefault();
+          focusByIndex(visible.length - 1);
+          return;
+        case 'ArrowRight':
+          e.preventDefault();
+          if (item.kind === 'leaf') return;
+          if (expansion.isExpanded(item.key)) {
+            // Already open → move to first child if any.
+            const first = visible.find(
+              (v, i) => i > idx && v.parentKey === item.key,
+            );
+            if (first) setFocusedKey(first.key);
+          } else {
+            expansion.setExpanded(item.key, true);
+          }
+          return;
+        case 'ArrowLeft':
+          e.preventDefault();
+          if (item.kind !== 'leaf' && expansion.isExpanded(item.key)) {
+            expansion.setExpanded(item.key, false);
+          } else if (item.parentKey) {
+            setFocusedKey(item.parentKey);
+          }
+          return;
+        case ' ':
+        case 'Spacebar':
+        case 'Enter':
+          e.preventDefault();
+          toggleItem(item);
+          return;
+      }
+
+      // Type-ahead: collect printable single chars (no modifiers
+      // beyond shift), reset on 700ms idle, jump to the next item
+      // whose name starts with the buffer.
+      if (
+        e.key.length === 1 &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        /\S/.test(e.key)
+      ) {
+        typeBuffer.current = (typeBuffer.current + e.key).toLowerCase();
+        if (typeTimer.current !== null) {
+          window.clearTimeout(typeTimer.current);
+        }
+        typeTimer.current = window.setTimeout(() => {
+          typeBuffer.current = '';
+          typeTimer.current = null;
+        }, 700);
+        // Search from the next item, wrapping around. This matches
+        // the "press 'c' twice to skip past the first c-row" pattern
+        // most file managers use.
+        const buf = typeBuffer.current;
+        const ring = [...visible.slice(idx + 1), ...visible.slice(0, idx + 1)];
+        const hit = ring.find((v) =>
+          v.label.toLowerCase().startsWith(buf),
+        );
+        if (hit) setFocusedKey(hit.key);
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [focusedKey, visible, expansion, focusByIndex],
+  );
+
+  // Toggle for both leaves (simple selection) and parents (apply to
+  // all descendants).
+  const toggleItem = useCallback(
+    (item: VisibleItem) => {
+      if (item.kind === 'leaf') {
+        if (item.sectionKind === 'calendars') {
+          toggleCalendar(item.containerId);
+        } else {
+          toggleTaskList(item.containerId);
+        }
+        return;
+      }
+      // Parent: collect the leaves and flip them as a batch.
+      const leaves = collectLeaves(item, tree);
+      const state = leaves.every((l) => l.selected)
+        ? 'checked'
+        : leaves.some((l) => l.selected)
+          ? 'mixed'
+          : 'unchecked';
+      // mixed / checked → turn everything off; unchecked → on.
+      const next = state === 'unchecked';
+      const calIds = leaves
+        .filter((l) => l.kind === 'calendars')
+        .map((l) => l.containerId);
+      const tlIds = leaves
+        .filter((l) => l.kind === 'tasks')
+        .map((l) => l.containerId);
+      if (calIds.length) setManyCalendars(calIds, next);
+      if (tlIds.length) setManyTaskLists(tlIds, next);
+    },
+    [tree, toggleCalendar, toggleTaskList, setManyCalendars, setManyTaskLists],
+  );
+
+  // ── Render ───────────────────────────────────────────────────────
   return (
     <aside
       className="sidebar"
       aria-label={t('sidebar.label')}
       data-region="sidebar"
     >
-      <section aria-labelledby="sb-cal" className="sidebar__section">
-        <h2 id="sb-cal">{t('sidebar.calendars')}</h2>
-        <ul role="list" className="sidebar__list">
-          {calendars.map((cal) => {
-            const checked = selectedCalendarIds.has(cal.id);
-            const isEditing =
-              editing?.kind === 'calendar' && editing.id === cal.id;
-            return (
-              <li key={cal.id} role="listitem" className="sidebar__row">
-                {isEditing ? (
-                  <RenameField
-                    name={cal.name}
-                    value={draft}
-                    onChange={setDraft}
-                    onCommit={commitEdit}
-                    onCancel={cancelEdit}
-                    onKeyDown={onEditKey}
-                    ariaLabel={t('sidebar.renameInputLabel', {
-                      name: cal.name,
-                    })}
-                    hint={t('sidebar.renameHint')}
-                  />
-                ) : (
-                  <>
-                    <button
-                      type="button"
-                      role="checkbox"
-                      aria-checked={checked}
-                      className="sidebar__toggle"
-                      onClick={() => toggleCalendar(cal.id)}
-                      style={
-                        cal.color
-                          ? ({
-                              '--container-color': cal.color.hex,
-                            } as React.CSSProperties)
-                          : undefined
-                      }
-                    >
-                      <span className="sidebar__swatch" aria-hidden="true" />
-                      <span className="sidebar__name">{cal.name}</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="sidebar__edit"
-                      data-rename-target-id={cal.id}
-                      data-rename-target-kind="calendar"
-                      onClick={() => startEdit('calendar', cal.id, cal.name)}
-                      aria-label={t('sidebar.renameButton', {
-                        name: cal.name,
-                      })}
-                      title={t('sidebar.renameButtonShort')}
-                    >
-                      ✎
-                    </button>
-                    <button
-                      type="button"
-                      className="sidebar__delete"
-                      onClick={() => onDeleteCalendar(cal.id, cal.name)}
-                      aria-label={t('sidebar.deleteCalendar', {
-                        name: cal.name,
-                      })}
-                    >
-                      ✕
-                    </button>
-                  </>
-                )}
-              </li>
-            );
-          })}
-        </ul>
+      <h2 className="sidebar__heading">{t('sidebar.containersHeading')}</h2>
+      {/* The tree itself owns the tab stop. aria-activedescendant
+          tells assistive tech which row is "focused" inside the
+          tree without React having to focus DOM nodes individually. */}
+      <div
+        role="tree"
+        aria-label={t('sidebar.treeLabel')}
+        aria-multiselectable="true"
+        tabIndex={0}
+        onKeyDown={onTreeKey}
+        aria-activedescendant={
+          focusedKey ? itemId(focusedKey) : undefined
+        }
+        className="sidebar__tree"
+      >
+        {tree.map((account) => (
+          <AccountSubtree
+            key={account.key}
+            account={account}
+            expansion={expansion}
+            focusedKey={focusedKey}
+            onFocusKey={setFocusedKey}
+            itemId={itemId}
+            editing={editing}
+            draft={draft}
+            onDraftChange={setDraft}
+            onStartEdit={startEdit}
+            onCancelEdit={cancelEdit}
+            onCommitEdit={commitEdit}
+            onEditKey={onEditKey}
+            onToggleLeaf={(leaf) => {
+              if (leaf.kind === 'calendars') {
+                toggleCalendar(leaf.containerId);
+              } else {
+                toggleTaskList(leaf.containerId);
+              }
+            }}
+            onToggleSection={(section) => {
+              const leaves = section.children;
+              const state = parentTriState(leaves);
+              const next = state === 'unchecked';
+              const ids = leaves.map((l) => l.containerId);
+              if (section.kind === 'calendars') {
+                setManyCalendars(ids, next);
+              } else {
+                setManyTaskLists(ids, next);
+              }
+            }}
+            onToggleAccount={(node) => {
+              const leaves = node.children.flatMap((s) => s.children);
+              const state = accountTriState(node);
+              const next = state === 'unchecked';
+              const calIds = leaves
+                .filter((l) => l.kind === 'calendars')
+                .map((l) => l.containerId);
+              const tlIds = leaves
+                .filter((l) => l.kind === 'tasks')
+                .map((l) => l.containerId);
+              if (calIds.length) setManyCalendars(calIds, next);
+              if (tlIds.length) setManyTaskLists(tlIds, next);
+            }}
+            onDeleteCalendar={onDeleteCalendar}
+          />
+        ))}
+      </div>
+
+      <div className="sidebar__add-row">
         <button
           type="button"
           className="sidebar__add"
@@ -301,63 +502,6 @@ export function Sidebar() {
         >
           + {t('sidebar.newCalendar')}
         </button>
-      </section>
-
-      <section aria-labelledby="sb-tl" className="sidebar__section">
-        <h2 id="sb-tl">{t('sidebar.taskLists')}</h2>
-        <ul role="list" className="sidebar__list">
-          {taskLists.map((list) => {
-            const checked = selectedTaskListIds.has(list.id);
-            const isEditing =
-              editing?.kind === 'task_list' && editing.id === list.id;
-            return (
-              <li key={list.id} role="listitem" className="sidebar__row">
-                {isEditing ? (
-                  <RenameField
-                    name={list.name}
-                    value={draft}
-                    onChange={setDraft}
-                    onCommit={commitEdit}
-                    onCancel={cancelEdit}
-                    onKeyDown={onEditKey}
-                    ariaLabel={t('sidebar.renameInputLabel', {
-                      name: list.name,
-                    })}
-                    hint={t('sidebar.renameHint')}
-                  />
-                ) : (
-                  <>
-                    <button
-                      type="button"
-                      role="checkbox"
-                      aria-checked={checked}
-                      className="sidebar__toggle"
-                      onClick={() => toggleTaskList(list.id)}
-                    >
-                      <span className="sidebar__swatch" aria-hidden="true" />
-                      <span className="sidebar__name">{list.name}</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="sidebar__edit"
-                      data-rename-target-id={list.id}
-                      data-rename-target-kind="task_list"
-                      onClick={() =>
-                        startEdit('task_list', list.id, list.name)
-                      }
-                      aria-label={t('sidebar.renameButton', {
-                        name: list.name,
-                      })}
-                      title={t('sidebar.renameButtonShort')}
-                    >
-                      ✎
-                    </button>
-                  </>
-                )}
-              </li>
-            );
-          })}
-        </ul>
         <button
           type="button"
           className="sidebar__add"
@@ -365,7 +509,7 @@ export function Sidebar() {
         >
           + {t('sidebar.newTaskList')}
         </button>
-      </section>
+      </div>
 
       <section className="sidebar__section">
         <button
@@ -387,19 +531,481 @@ export function Sidebar() {
   );
 }
 
+// ────────────────────────────────────────────────────────────────────────
+// Flattened-tree model used for keyboard navigation
+// ────────────────────────────────────────────────────────────────────────
+
+type VisibleItem =
+  | {
+      kind: 'account' | 'section';
+      key: string;
+      label: string;
+      parentKey: string | null;
+      level: 1 | 2;
+      sectionKind?: undefined;
+      containerId?: undefined;
+    }
+  | {
+      kind: 'leaf';
+      key: string;
+      label: string;
+      parentKey: string;
+      level: 3;
+      sectionKind: 'calendars' | 'tasks';
+      containerId: string;
+    };
+
+function flattenTree(
+  tree: AccountNode[],
+  isExpanded: (key: string) => boolean,
+): VisibleItem[] {
+  const out: VisibleItem[] = [];
+  for (const account of tree) {
+    out.push({
+      kind: 'account',
+      key: account.key,
+      label: account.displayName,
+      parentKey: null,
+      level: 1,
+    });
+    if (!isExpanded(account.key)) continue;
+    for (const section of account.children) {
+      out.push({
+        kind: 'section',
+        key: section.key,
+        // Label uses the section's own label key; the real
+        // localised string is resolved at render time.
+        label: section.labelKey,
+        parentKey: account.key,
+        level: 2,
+      });
+      if (!isExpanded(section.key)) continue;
+      for (const leaf of section.children) {
+        out.push({
+          kind: 'leaf',
+          key: leaf.key,
+          label: leaf.name,
+          parentKey: section.key,
+          level: 3,
+          sectionKind: leaf.kind,
+          containerId: leaf.containerId,
+        });
+      }
+    }
+  }
+  return out;
+}
+
+function collectLeaves(
+  parent: VisibleItem,
+  tree: AccountNode[],
+): LeafNode[] {
+  if (parent.kind === 'leaf') return [];
+  // Locate the originating account / section node in the tree by key.
+  for (const account of tree) {
+    if (account.key === parent.key) {
+      return account.children.flatMap((s) => s.children);
+    }
+    for (const section of account.children) {
+      if (section.key === parent.key) {
+        return section.children;
+      }
+    }
+  }
+  return [];
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Subtree rendering
+// ────────────────────────────────────────────────────────────────────────
+
+interface AccountSubtreeProps {
+  account: AccountNode;
+  expansion: ReturnType<typeof useSidebarExpansion>;
+  focusedKey: string | null;
+  onFocusKey: (key: string) => void;
+  itemId: (key: string) => string;
+  editing: { kind: ContainerKind; id: string } | null;
+  draft: string;
+  onDraftChange: (v: string) => void;
+  onStartEdit: (kind: ContainerKind, id: string, name: string) => void;
+  onCancelEdit: (restoreFocus: boolean) => void;
+  onCommitEdit: (restoreFocus: boolean) => Promise<void>;
+  onEditKey: (e: KeyboardEvent<HTMLInputElement>) => void;
+  onToggleLeaf: (leaf: LeafNode) => void;
+  onToggleSection: (section: SectionNode) => void;
+  onToggleAccount: (account: AccountNode) => void;
+  onDeleteCalendar: (id: string, name: string) => void;
+}
+
+function AccountSubtree({
+  account,
+  expansion,
+  focusedKey,
+  onFocusKey,
+  itemId,
+  editing,
+  draft,
+  onDraftChange,
+  onStartEdit,
+  onCancelEdit,
+  onCommitEdit,
+  onEditKey,
+  onToggleLeaf,
+  onToggleSection,
+  onToggleAccount,
+  onDeleteCalendar,
+}: AccountSubtreeProps) {
+  const { t } = useTranslation();
+  const isOpen = expansion.isExpanded(account.key);
+  const state = accountTriState(account);
+
+  return (
+    <div role="group" className="sidebar__account-group">
+      <TreeRow
+        id={itemId(account.key)}
+        level={1}
+        expanded={account.children.length > 0 ? isOpen : undefined}
+        ariaChecked={triStateToAria(state)}
+        focused={focusedKey === account.key}
+        onPointerSelect={() => onFocusKey(account.key)}
+        onToggleSelect={() => onToggleAccount(account)}
+        onToggleExpand={() =>
+          expansion.setExpanded(account.key, !isOpen)
+        }
+        ariaLabel={t('sidebar.tree.accountLabel', {
+          name: account.displayName,
+          kind: t(`dialogs.accounts.kindName.${account.adapterKind}`),
+        })}
+        className="sidebar__row sidebar__row--account"
+      >
+        <span className="sidebar__chevron" aria-hidden="true">
+          {account.children.length === 0 ? '·' : isOpen ? '▾' : '▸'}
+        </span>
+        <span className="sidebar__name">{account.displayName}</span>
+        <span className="sidebar__account-kind" aria-hidden="true">
+          {t(`dialogs.accounts.kindName.${account.adapterKind}`)}
+        </span>
+      </TreeRow>
+      {account.isEmpty && isOpen && (
+        <div role="presentation" className="sidebar__empty-hint">
+          {t('sidebar.tree.empty')}
+        </div>
+      )}
+      {isOpen &&
+        account.children.map((section) => (
+          <SectionSubtree
+            key={section.key}
+            section={section}
+            expansion={expansion}
+            focusedKey={focusedKey}
+            onFocusKey={onFocusKey}
+            itemId={itemId}
+            editing={editing}
+            draft={draft}
+            onDraftChange={onDraftChange}
+            onStartEdit={onStartEdit}
+            onCancelEdit={onCancelEdit}
+            onCommitEdit={onCommitEdit}
+            onEditKey={onEditKey}
+            onToggleLeaf={onToggleLeaf}
+            onToggleSection={onToggleSection}
+            onDeleteCalendar={onDeleteCalendar}
+            accountIsLocal={account.accountId === 'local'}
+          />
+        ))}
+    </div>
+  );
+}
+
+interface SectionSubtreeProps {
+  section: SectionNode;
+  expansion: ReturnType<typeof useSidebarExpansion>;
+  focusedKey: string | null;
+  onFocusKey: (key: string) => void;
+  itemId: (key: string) => string;
+  editing: { kind: ContainerKind; id: string } | null;
+  draft: string;
+  onDraftChange: (v: string) => void;
+  onStartEdit: (kind: ContainerKind, id: string, name: string) => void;
+  onCancelEdit: (restoreFocus: boolean) => void;
+  onCommitEdit: (restoreFocus: boolean) => Promise<void>;
+  onEditKey: (e: KeyboardEvent<HTMLInputElement>) => void;
+  onToggleLeaf: (leaf: LeafNode) => void;
+  onToggleSection: (section: SectionNode) => void;
+  onDeleteCalendar: (id: string, name: string) => void;
+  accountIsLocal: boolean;
+}
+
+function SectionSubtree({
+  section,
+  expansion,
+  focusedKey,
+  onFocusKey,
+  itemId,
+  editing,
+  draft,
+  onDraftChange,
+  onStartEdit,
+  onCancelEdit,
+  onCommitEdit,
+  onEditKey,
+  onToggleLeaf,
+  onToggleSection,
+  onDeleteCalendar,
+  accountIsLocal,
+}: SectionSubtreeProps) {
+  const { t } = useTranslation();
+  const isOpen = expansion.isExpanded(section.key);
+  const state = parentTriState(section.children);
+  const sectionLabel =
+    section.labelKey === 'calendars'
+      ? t('sidebar.calendars')
+      : t('sidebar.taskLists');
+
+  return (
+    <div role="group" className="sidebar__section-group">
+      <TreeRow
+        id={itemId(section.key)}
+        level={2}
+        expanded={section.children.length > 0 ? isOpen : undefined}
+        ariaChecked={triStateToAria(state)}
+        focused={focusedKey === section.key}
+        onPointerSelect={() => onFocusKey(section.key)}
+        onToggleSelect={() => onToggleSection(section)}
+        onToggleExpand={() =>
+          expansion.setExpanded(section.key, !isOpen)
+        }
+        ariaLabel={t('sidebar.tree.sectionLabel', { name: sectionLabel })}
+        className="sidebar__row sidebar__row--section"
+      >
+        <span className="sidebar__chevron" aria-hidden="true">
+          {section.children.length === 0 ? '·' : isOpen ? '▾' : '▸'}
+        </span>
+        <span className="sidebar__name">{sectionLabel}</span>
+      </TreeRow>
+      {isOpen &&
+        section.children.map((leaf) => (
+          <LeafRow
+            key={leaf.key}
+            leaf={leaf}
+            focusedKey={focusedKey}
+            onFocusKey={onFocusKey}
+            itemId={itemId}
+            editing={editing}
+            draft={draft}
+            onDraftChange={onDraftChange}
+            onStartEdit={onStartEdit}
+            onCancelEdit={onCancelEdit}
+            onCommitEdit={onCommitEdit}
+            onEditKey={onEditKey}
+            onToggleLeaf={onToggleLeaf}
+            onDeleteCalendar={onDeleteCalendar}
+            // Delete is only ever offered on local calendars — every
+            // other source's deletes are still a per-adapter
+            // operation we haven't fully wired.
+            allowDelete={accountIsLocal && leaf.kind === 'calendars'}
+          />
+        ))}
+    </div>
+  );
+}
+
+interface LeafRowProps {
+  leaf: LeafNode;
+  focusedKey: string | null;
+  onFocusKey: (key: string) => void;
+  itemId: (key: string) => string;
+  editing: { kind: ContainerKind; id: string } | null;
+  draft: string;
+  onDraftChange: (v: string) => void;
+  onStartEdit: (kind: ContainerKind, id: string, name: string) => void;
+  onCancelEdit: (restoreFocus: boolean) => void;
+  onCommitEdit: (restoreFocus: boolean) => Promise<void>;
+  onEditKey: (e: KeyboardEvent<HTMLInputElement>) => void;
+  onToggleLeaf: (leaf: LeafNode) => void;
+  onDeleteCalendar: (id: string, name: string) => void;
+  allowDelete: boolean;
+}
+
+function LeafRow({
+  leaf,
+  focusedKey,
+  onFocusKey,
+  itemId,
+  editing,
+  draft,
+  onDraftChange,
+  onStartEdit,
+  onCancelEdit,
+  onCommitEdit,
+  onEditKey,
+  onToggleLeaf,
+  onDeleteCalendar,
+  allowDelete,
+}: LeafRowProps) {
+  const { t } = useTranslation();
+  const kind: ContainerKind = leaf.kind === 'calendars' ? 'calendar' : 'task_list';
+  const isEditing = editing?.kind === kind && editing.id === leaf.containerId;
+
+  return (
+    <TreeRow
+      id={itemId(leaf.key)}
+      level={3}
+      ariaChecked={leaf.selected ? 'true' : 'false'}
+      focused={focusedKey === leaf.key}
+      onPointerSelect={() => onFocusKey(leaf.key)}
+      onToggleSelect={() => onToggleLeaf(leaf)}
+      className="sidebar__row sidebar__row--leaf"
+      style={
+        leaf.colorHex
+          ? ({ '--container-color': leaf.colorHex } as React.CSSProperties)
+          : undefined
+      }
+    >
+      {isEditing ? (
+        <RenameField
+          value={draft}
+          onChange={onDraftChange}
+          onCommit={onCommitEdit}
+          onCancel={onCancelEdit}
+          onKeyDown={onEditKey}
+          ariaLabel={t('sidebar.renameInputLabel', { name: leaf.name })}
+          hint={t('sidebar.renameHint')}
+        />
+      ) : (
+        <>
+          <span className="sidebar__swatch" aria-hidden="true" />
+          <span className="sidebar__name">{leaf.name}</span>
+          <button
+            type="button"
+            className="sidebar__edit"
+            data-rename-target-id={leaf.containerId}
+            data-rename-target-kind={kind}
+            // Stop the click from bubbling up to the row's
+            // onPointerSelect handler (which would set focusedKey but
+            // also un-focus the edit button we're about to click).
+            onClick={(e) => {
+              e.stopPropagation();
+              onStartEdit(kind, leaf.containerId, leaf.name);
+            }}
+            aria-label={t('sidebar.renameButton', { name: leaf.name })}
+            title={t('sidebar.renameButtonShort')}
+          >
+            ✎
+          </button>
+          {allowDelete && (
+            <button
+              type="button"
+              className="sidebar__delete"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDeleteCalendar(leaf.containerId, leaf.name);
+              }}
+              aria-label={t('sidebar.deleteCalendar', { name: leaf.name })}
+            >
+              ✕
+            </button>
+          )}
+        </>
+      )}
+    </TreeRow>
+  );
+}
+
+interface TreeRowProps {
+  id: string;
+  level: 1 | 2 | 3;
+  /** Undefined ⇒ no twisty; row has no expand/collapse semantic. */
+  expanded?: boolean;
+  ariaChecked: 'true' | 'false' | 'mixed';
+  focused: boolean;
+  onPointerSelect: () => void;
+  onToggleSelect: () => void;
+  onToggleExpand?: () => void;
+  ariaLabel?: string;
+  className?: string;
+  style?: React.CSSProperties;
+  children: React.ReactNode;
+}
+
 /**
- * Inline rename input. Auto-focuses on mount so the user can start
- * typing immediately; Enter / Escape are handled by the caller. The
- * accompanying hint text explains the empty-value-clears-override
- * semantics inline rather than burying it in a tooltip.
+ * One row in the tree. Renders an element with `role="treeitem"`,
+ * the right `aria-level`, `aria-expanded` (where applicable), and
+ * `aria-checked` for the tristate selection.
  *
- * The `restoreFocus` argument that `onCommit` / `onCancel` receive
- * lets the caller distinguish keyboard / button exits (focus should
- * jump back to the row's edit button) from blur exits (a click
- * already chose where focus lands; don't fight it).
+ * Mouse interactions:
+ *
+ *   - clicking the chevron area (`.sidebar__chevron`) expands /
+ *     collapses; clicking the rest toggles the checkbox.
+ *
+ * We don't put a `tabIndex` on the row — the parent tree owns the
+ * single tab stop. Setting `data-focused="true"` lets the stylesheet
+ * draw the visible focus ring on the right row.
  */
+function TreeRow({
+  id,
+  level,
+  expanded,
+  ariaChecked,
+  focused,
+  onPointerSelect,
+  onToggleSelect,
+  onToggleExpand,
+  ariaLabel,
+  className,
+  style,
+  children,
+}: TreeRowProps) {
+  return (
+    <div
+      id={id}
+      role="treeitem"
+      aria-level={level}
+      aria-expanded={expanded}
+      aria-checked={ariaChecked}
+      aria-label={ariaLabel}
+      data-focused={focused || undefined}
+      className={className}
+      style={style}
+      onClick={(e) => {
+        // Buttons inside the row handle their own clicks (rename /
+        // delete / chevron-area). The fall-through reaches a generic
+        // toggle.
+        const target = e.target as HTMLElement;
+        if (target.closest('button, input')) return;
+        onPointerSelect();
+        if (
+          onToggleExpand &&
+          target.closest('.sidebar__chevron')
+        ) {
+          onToggleExpand();
+          return;
+        }
+        onToggleSelect();
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function triStateToAria(state: TriState): 'true' | 'false' | 'mixed' {
+  switch (state) {
+    case 'checked':
+      return 'true';
+    case 'mixed':
+      return 'mixed';
+    case 'unchecked':
+      return 'false';
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Inline rename field
+// ────────────────────────────────────────────────────────────────────────
+
 function RenameField({
-  name: _name,
   value,
   onChange,
   onCommit,
@@ -408,7 +1014,6 @@ function RenameField({
   ariaLabel,
   hint,
 }: {
-  name: string;
   value: string;
   onChange: (v: string) => void;
   onCommit: (restoreFocus: boolean) => void;
@@ -424,7 +1029,6 @@ function RenameField({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={onKeyDown}
-        // Blur exits: don't override the focus the user just chose.
         onBlur={() => onCommit(false)}
         aria-label={ariaLabel}
         autoFocus
@@ -433,12 +1037,6 @@ function RenameField({
       <span className="sidebar__rename-hint" aria-hidden="true">
         {hint}
       </span>
-      {/* Both buttons are also reachable via Enter / Escape; they
-          exist here for pointer users and as a visible cue that the
-          row is in a special mode. onMouseDown.preventDefault() stops
-          the input from blurring first — otherwise the blur handler
-          would commit before the button's onClick fires, and our
-          restoreFocus flag wouldn't take effect. */}
       <button
         type="button"
         className="sidebar__rename-action"

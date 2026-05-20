@@ -11,7 +11,7 @@
 
 use super::{DbError, DbHandle, DbResult};
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 4;
+pub const CURRENT_SCHEMA_VERSION: u32 = 5;
 
 struct Migration {
     target: u32,
@@ -34,6 +34,10 @@ const MIGRATIONS: &[Migration] = &[
     Migration {
         target: 4,
         sql: include_str!("sql/0004_container_overrides.sql"),
+    },
+    Migration {
+        target: 5,
+        sql: include_str!("sql/0005_user_prefs.sql"),
     },
 ];
 

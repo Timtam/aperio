@@ -13,6 +13,7 @@ mod overrides;
 mod reminders;
 mod search;
 mod tasks;
+mod user_prefs;
 
 use serde::Serialize;
 
@@ -23,6 +24,7 @@ pub use overrides::*;
 pub use reminders::*;
 pub use search::*;
 pub use tasks::*;
+pub use user_prefs::*;
 
 /// Frontend-friendly error envelope.
 ///

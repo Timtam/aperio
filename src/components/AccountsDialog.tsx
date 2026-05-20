@@ -128,7 +128,8 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
   // renders from. We have to nudge it manually after creating or
   // deleting an account — otherwise the new account's calendars
   // wouldn't show up until something else triggers a store refresh.
-  const { refreshCalendars, refreshTaskLists } = useCalendarStore();
+  const { refreshCalendars, refreshTaskLists, refreshAccounts } =
+    useCalendarStore();
 
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
@@ -316,7 +317,11 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
         // here are non-fatal — the account row was already
         // persisted; a stale sidebar fixes itself on the next normal
         // store refresh.
-        void Promise.allSettled([refreshCalendars(), refreshTaskLists()]);
+        void Promise.allSettled([
+          refreshAccounts(),
+          refreshCalendars(),
+          refreshTaskLists(),
+        ]);
       } catch (err) {
         if (isCommandError(err)) setError(`${err.code}: ${err.message}`);
         else setError(String(err));
@@ -465,7 +470,11 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
         refresh();
         // Same as on create: nudge the store so the just-removed
         // account's calendars disappear from the sidebar.
-        void Promise.allSettled([refreshCalendars(), refreshTaskLists()]);
+        void Promise.allSettled([
+          refreshAccounts(),
+          refreshCalendars(),
+          refreshTaskLists(),
+        ]);
       } catch (err) {
         if (isCommandError(err)) setError(`${err.code}: ${err.message}`);
         else setError(String(err));

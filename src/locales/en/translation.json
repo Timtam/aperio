@@ -424,7 +424,14 @@
     "renamedLocalOnly": "Renamed to \"{{name}}\" — locally only (source is read-only).",
     "renameCleared": "Reverted to source name.",
     "manageColorLabels": "Manage color labels",
-    "manageAccounts": "Manage accounts"
+    "manageAccounts": "Manage accounts",
+    "containersHeading": "Containers",
+    "treeLabel": "Accounts, calendars and task lists",
+    "tree": {
+      "accountLabel": "{{name}} ({{kind}})",
+      "sectionLabel": "{{name}}",
+      "empty": "No calendars or task lists yet — open this account in \"Manage accounts\" to check the connection."
+    }
   },
   "views": {
     "loading": "Loading …",

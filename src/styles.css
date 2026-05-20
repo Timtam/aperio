@@ -913,6 +913,89 @@ button[aria-disabled='true'] {
      lines up at the rounded corners. */
   border-radius: var(--radius-sm);
   transition: background 80ms ease;
+  padding: var(--space-1) var(--space-2);
+  cursor: pointer;
+}
+
+/* ────────────────────────────────────────────────────────────────────
+ * Sidebar tree (Phase 6 follow-up: account → section → container)
+ *
+ * The tree owns a single tab stop; the visible "focus" inside it is
+ * the row with `data-focused="true"`. We use an outline rather than
+ * a background swap so it stays visible alongside the hover wash.
+ */
+.sidebar__tree {
+  outline: none;
+}
+
+.sidebar__row[data-focused='true'] {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+/* Indentation per level. Level 1 = account, 2 = section, 3 = leaf. */
+.sidebar__row--account {
+  padding-left: var(--space-2);
+  font-weight: 600;
+}
+.sidebar__row--section {
+  padding-left: calc(var(--space-2) + 1rem);
+  color: var(--color-fg-muted);
+  font-size: var(--font-size-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.sidebar__row--leaf {
+  padding-left: calc(var(--space-2) + 2rem);
+}
+
+.sidebar__chevron {
+  display: inline-flex;
+  width: 1rem;
+  justify-content: center;
+  color: var(--color-fg-muted);
+  flex-shrink: 0;
+}
+
+.sidebar__account-kind {
+  color: var(--color-fg-muted);
+  font-weight: normal;
+  font-size: var(--font-size-xs);
+  margin-left: auto;
+  padding-left: var(--space-2);
+}
+
+.sidebar__empty-hint {
+  color: var(--color-fg-muted);
+  font-size: var(--font-size-sm);
+  padding: var(--space-1) var(--space-4);
+  font-style: italic;
+}
+
+/* The selected name keeps full colour; deselected (or "mixed" on a
+ * parent) is muted + strike-through to mirror the old checkbox
+ * affordance. */
+.sidebar__row[aria-checked='false'] .sidebar__name {
+  color: var(--color-fg-muted);
+  text-decoration: line-through;
+}
+.sidebar__row[aria-checked='mixed'] .sidebar__name {
+  color: var(--color-fg-muted);
+}
+
+.sidebar__heading {
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-fg-muted);
+  margin: 0 0 var(--space-2);
+}
+
+.sidebar__add-row {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding: var(--space-2) 0;
 }
 
 /*

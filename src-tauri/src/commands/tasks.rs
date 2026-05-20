@@ -2,7 +2,7 @@
 
 use cal_adapter_local::LocalAdapter;
 use cal_core::{NewTask, Task, TaskList, TasksFeature};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use super::{CommandError, CommandResult};
@@ -10,6 +10,16 @@ use crate::db::DbHandle;
 use crate::overrides::{apply_to_task_lists, OverridesRepo};
 use crate::registry::{AdapterRegistry, LOCAL_ID};
 use crate::reminders::SchedulerHandle;
+
+/// Wire-format TaskList enriched with the owning account id. Same
+/// shape + rationale as `CalendarRow` — the frontend uses it to
+/// group containers by source for the account-aware sidebar.
+#[derive(Debug, Serialize)]
+pub struct TaskListRow {
+    #[serde(flatten)]
+    pub inner: TaskList,
+    pub account_id: String,
+}
 
 #[derive(Debug, Deserialize)]
 pub struct CreateTaskListRequest {
@@ -22,7 +32,7 @@ pub async fn list_task_lists(
     adapter: State<'_, LocalAdapter>,
     registry: State<'_, AdapterRegistry>,
     db: State<'_, DbHandle>,
-) -> CommandResult<Vec<TaskList>> {
+) -> CommandResult<Vec<TaskListRow>> {
     let local = adapter.list_task_lists().await?;
     for l in &local {
         registry.note_task_list_route(&l.id, LOCAL_ID);
@@ -33,15 +43,31 @@ pub async fn list_task_lists(
     let shared = db.shared();
     let repo = OverridesRepo::new(&shared);
     apply_to_task_lists(&repo, &mut out);
-    Ok(out)
+    Ok(out
+        .into_iter()
+        .map(|list| {
+            let account_id = registry
+                .account_for_task_list(&list.id)
+                .unwrap_or_else(|| LOCAL_ID.to_string());
+            TaskListRow {
+                inner: list,
+                account_id,
+            }
+        })
+        .collect())
 }
 
 #[tauri::command]
 pub async fn create_task_list(
     adapter: State<'_, LocalAdapter>,
     request: CreateTaskListRequest,
-) -> CommandResult<TaskList> {
-    Ok(adapter.create_task_list(&request.name, None, None, request.embedded_in_calendar)?)
+) -> CommandResult<TaskListRow> {
+    let list =
+        adapter.create_task_list(&request.name, None, None, request.embedded_in_calendar)?;
+    Ok(TaskListRow {
+        inner: list,
+        account_id: LOCAL_ID.to_string(),
+    })
 }
 
 #[tauri::command]

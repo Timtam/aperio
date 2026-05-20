@@ -13,6 +13,7 @@ mod platform;
 pub mod registry;
 pub mod reminders;
 pub mod secrets;
+pub mod user_prefs;
 
 pub use db::{DbError, DbHandle, DbResult, SharedConn};
 pub use paths::{resolve_data_dir, DataDirKind, DataDirResolution};
@@ -101,6 +102,9 @@ pub fn run() {
             commands::set_container_name_override,
             commands::clear_container_name_override,
             commands::rename_container,
+            commands::get_user_pref,
+            commands::set_user_pref,
+            commands::delete_user_pref,
         ])
         .setup(move |app| {
             // Spawn the reminder scheduler on the Tauri/tokio runtime

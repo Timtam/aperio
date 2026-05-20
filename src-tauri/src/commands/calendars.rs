@@ -3,7 +3,7 @@
 use cal_adapter_local::LocalAdapter;
 use cal_core::{Calendar, CalendarFeature, ContainerColor, DateRange, Event, NewEvent};
 use chrono::{DateTime, Utc};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use super::{CommandError, CommandResult};
@@ -11,6 +11,20 @@ use crate::db::DbHandle;
 use crate::overrides::{apply_to_calendars, OverridesRepo};
 use crate::registry::{AdapterRegistry, LOCAL_ID};
 use crate::reminders::SchedulerHandle;
+
+/// Wire-format Calendar enriched with the owning account id. Lets
+/// the frontend group containers by source without a second
+/// round-trip to fetch the registry's route map.
+///
+/// `serde(flatten)` writes every Calendar field at the top level so
+/// the existing TypeScript Calendar type only needs one new field
+/// (`account_id`) to consume this shape.
+#[derive(Debug, Serialize)]
+pub struct CalendarRow {
+    #[serde(flatten)]
+    pub inner: Calendar,
+    pub account_id: String,
+}
 
 /// Frontend-supplied payload for creating a local calendar.
 #[derive(Debug, Deserialize)]
@@ -24,7 +38,7 @@ pub async fn list_calendars(
     adapter: State<'_, LocalAdapter>,
     registry: State<'_, AdapterRegistry>,
     db: State<'_, DbHandle>,
-) -> CommandResult<Vec<Calendar>> {
+) -> CommandResult<Vec<CalendarRow>> {
     // Local first so the implicit "local" account stays at the top
     // of the user's calendar list. Each local calendar id is
     // pre-registered in the route map so the write-path commands
@@ -45,18 +59,39 @@ pub async fn list_calendars(
     let shared = db.shared();
     let repo = OverridesRepo::new(&shared);
     apply_to_calendars(&repo, &mut out);
-    Ok(out)
+    // Decorate each row with its owning account id (from the
+    // registry's route map). Local rows fall back to LOCAL_ID;
+    // external rows look themselves up in the routes. The frontend
+    // uses this for the account-grouped sidebar — without it,
+    // grouping would need a second round-trip.
+    Ok(out
+        .into_iter()
+        .map(|cal| {
+            let account_id = registry
+                .account_for_calendar(&cal.id)
+                .unwrap_or_else(|| LOCAL_ID.to_string());
+            CalendarRow {
+                inner: cal,
+                account_id,
+            }
+        })
+        .collect())
 }
 
 #[tauri::command]
 pub async fn create_calendar(
     adapter: State<'_, LocalAdapter>,
     request: CreateCalendarRequest,
-) -> CommandResult<Calendar> {
+) -> CommandResult<CalendarRow> {
     let color = request
         .color_hex
         .map(|hex| ContainerColor::custom(hex.trim().to_string()));
-    Ok(adapter.create_calendar(&request.name, color, None)?)
+    let cal = adapter.create_calendar(&request.name, color, None)?;
+    // Local creates always belong to the implicit local account.
+    Ok(CalendarRow {
+        inner: cal,
+        account_id: LOCAL_ID.to_string(),
+    })
 }
 
 #[tauri::command]

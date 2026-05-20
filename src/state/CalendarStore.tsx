@@ -9,11 +9,12 @@ import {
 } from 'react';
 
 import {
+  listAccounts,
   listCalendars,
   listColorLabels,
   listTaskLists,
 } from '../api/client';
-import type { Calendar, ColorLabel, TaskList } from '../api/types';
+import type { Account, Calendar, ColorLabel, TaskList } from '../api/types';
 
 /**
  * Calendar and task-list store.
@@ -49,6 +50,12 @@ interface CalendarStoreState {
   colorLabels: ColorLabel[];
   refreshColorLabels: () => Promise<void>;
 
+  /** Accounts, used by the sidebar's tree view to group containers
+   *  by their owning source. Refreshed alongside containers; the
+   *  AccountsDialog also calls `refreshAccounts` after add/delete. */
+  accounts: Account[];
+  refreshAccounts: () => Promise<void>;
+
   loading: boolean;
 }
 
@@ -76,6 +83,7 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
   const [calendars, setCalendars] = useState<Calendar[]>([]);
   const [taskLists, setTaskLists] = useState<TaskList[]>([]);
   const [colorLabels, setColorLabels] = useState<ColorLabel[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
   const [selectedCalendarIds, setSelectedCalendarIds] = useState<Set<string>>(
     () => new Set(readPersisted().calendars ?? []),
   );
@@ -101,6 +109,11 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
     setColorLabels(labels);
   }, []);
 
+  const refreshAccounts = useCallback(async () => {
+    const list = await listAccounts();
+    setAccounts(list);
+  }, []);
+
   // Initial load: pull both lists in parallel, then drop the loading
   // flag. The store doesn't auto-refresh on dialog close (we don't yet
   // have one of our own — and creating containers happens through the
@@ -112,13 +125,14 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
       refreshCalendars(),
       refreshTaskLists(),
       refreshColorLabels(),
+      refreshAccounts(),
     ]).then(() => {
       if (!cancelled) setLoading(false);
     });
     return () => {
       cancelled = true;
     };
-  }, [refreshCalendars, refreshTaskLists, refreshColorLabels]);
+  }, [refreshCalendars, refreshTaskLists, refreshColorLabels, refreshAccounts]);
 
   // Persist any selection change.
   useEffect(() => {
@@ -148,6 +162,8 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
       refreshTaskLists,
       colorLabels,
       refreshColorLabels,
+      accounts,
+      refreshAccounts,
       loading,
     }),
     [
@@ -161,6 +177,8 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
       refreshTaskLists,
       colorLabels,
       refreshColorLabels,
+      accounts,
+      refreshAccounts,
       loading,
     ],
   );

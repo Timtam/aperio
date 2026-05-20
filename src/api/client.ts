@@ -372,3 +372,19 @@ export const renameContainer = (
     kind,
     name,
   });
+
+// ── User preferences (key/value) ─────────────────────────────────────────
+
+/** Read a stored user-pref value. Returns `null` when the key has
+ *  never been set — the caller picks a default. Values are opaque
+ *  strings; serialise JSON when you need structure. */
+export const getUserPref = (key: string) =>
+  invoke<string | null>('get_user_pref', { key });
+
+/** Upsert a user-pref value. */
+export const setUserPref = (key: string, value: string) =>
+  invoke<void>('set_user_pref', { key, value });
+
+/** Drop the stored value (no-op when nothing was set). */
+export const deleteUserPref = (key: string) =>
+  invoke<void>('delete_user_pref', { key });

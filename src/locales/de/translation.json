@@ -424,7 +424,14 @@
     "renamedLocalOnly": "Umbenannt zu „{{name}}\" — nur in Aperio (Quelle ist schreibgeschützt).",
     "renameCleared": "Standardname wiederhergestellt.",
     "manageColorLabels": "Farb-Labels verwalten",
-    "manageAccounts": "Konten verwalten"
+    "manageAccounts": "Konten verwalten",
+    "containersHeading": "Kalender & Aufgabenlisten",
+    "treeLabel": "Konten, Kalender und Aufgabenlisten",
+    "tree": {
+      "accountLabel": "{{name}} ({{kind}})",
+      "sectionLabel": "{{name}}",
+      "empty": "Noch keine Kalender oder Aufgabenlisten — über „Konten verwalten\" die Verbindung prüfen."
+    }
   },
   "views": {
     "loading": "Lädt …",
