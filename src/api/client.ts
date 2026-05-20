@@ -388,3 +388,29 @@ export const setUserPref = (key: string, value: string) =>
 /** Drop the stored value (no-op when nothing was set). */
 export const deleteUserPref = (key: string) =>
   invoke<void>('delete_user_pref', { key });
+
+// ── Native context menu ──────────────────────────────────────────────────
+
+/** One entry in the native context menu. `id` round-trips through
+ *  the OS menu API and identifies which item the user picked. */
+export interface ContextMenuItemRequest {
+  id: string;
+  label: string;
+}
+
+/** Show a native OS context menu (Win32 / NSMenu / GTK) anchored
+ *  either at the cursor (omit `position`) or at the given
+ *  window-logical coordinates. Returns the chosen item's id, or
+ *  `null` when the user dismissed without selecting.
+ *
+ *  Frontend keyboard triggers should pass a position so the menu
+ *  appears near the focused row rather than at a stale cursor
+ *  location; right-click triggers should omit it and let the OS
+ *  pick the cursor. */
+export const showSidebarContextMenu = (
+  items: ContextMenuItemRequest[],
+  position?: { x: number; y: number },
+) =>
+  invoke<string | null>('show_sidebar_context_menu', {
+    request: { items, position: position ?? null },
+  });

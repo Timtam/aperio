@@ -105,6 +105,7 @@ pub fn run() {
             commands::get_user_pref,
             commands::set_user_pref,
             commands::delete_user_pref,
+            commands::show_sidebar_context_menu,
         ])
         .setup(move |app| {
             // Spawn the reminder scheduler on the Tauri/tokio runtime
@@ -113,6 +114,20 @@ pub fn run() {
             let scheduler =
                 ReminderScheduler::spawn(db_for_scheduler.clone(), app.handle().clone());
             app.manage(scheduler);
+
+            // Shared state for the native context-menu popups. The
+            // global `on_menu_event` handler below routes selections
+            // from any popup back to the awaiting command via a
+            // oneshot channel held in this state.
+            app.manage(commands::ContextMenuState::new());
+            let handle = app.handle().clone();
+            app.on_menu_event(move |_app, event| {
+                let state = handle.state::<commands::ContextMenuState>();
+                let mut guard = state.pending.lock().expect("ctx menu poisoned");
+                if let Some(tx) = guard.take() {
+                    let _ = tx.send(event.id().as_ref().to_string());
+                }
+            });
             Ok(())
         })
         .run(tauri::generate_context!())

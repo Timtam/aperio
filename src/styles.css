@@ -999,39 +999,10 @@ button[aria-disabled='true'] {
 }
 
 /*
- * Context menu — opened on right-click or Shift+F10 over a leaf row.
- * The menu lives outside the tree's DOM hierarchy via fixed
- * positioning so it can extend past the sidebar's right edge without
- * being clipped. Higher z-index than the rest of the app so a stray
- * Modal can't bury it.
+ * Context menus are now drawn by the OS (Tauri's `tauri::menu`
+ * popup), so the previous `.sidebar__context-menu*` rules went
+ * away — the native menus inherit the platform style automatically.
  */
-.sidebar__context-menu {
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
-  padding: var(--space-1) 0;
-  min-width: 12rem;
-  z-index: 1000;
-}
-
-.sidebar__context-menu-item {
-  display: block;
-  width: 100%;
-  text-align: left;
-  background: transparent;
-  border: 0;
-  padding: var(--space-2) var(--space-3);
-  color: var(--color-fg);
-  cursor: pointer;
-  font: inherit;
-}
-
-.sidebar__context-menu-item:hover,
-.sidebar__context-menu-item:focus {
-  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
-  outline: none;
-}
 
 /*
  * Subtle row-hover affordance — gives pointer users a "this is the
