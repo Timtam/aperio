@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use cal_core::{Calendar, Event, NewEvent};
+use cal_core::{Calendar, Event, NewEvent, NewTask, Task, TaskList};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use tokio::sync::Mutex;
@@ -16,8 +16,9 @@ use url::Url;
 use crate::auth::{self, TokenSet};
 use crate::error::{GraphError, GraphResult};
 use crate::mapping::{
-    event_to_body, map_calendar, map_event, new_event_to_body,
-    CalendarListResponse, EventEntry, EventListResponse,
+    event_to_body, map_calendar, map_event, map_task, map_task_list, new_event_to_body,
+    new_task_to_body, split_task_id, task_to_body, CalendarListResponse, EventEntry,
+    EventListResponse, TodoListResponse, TodoTaskEntry, TodoTaskResponse,
 };
 
 pub const API_BASE: &str = "https://graph.microsoft.com/v1.0";
@@ -280,6 +281,93 @@ pub async fn rename_calendar(
     Ok(())
 }
 
+// ── Microsoft To Do ─────────────────────────────────────────────────────
+
+/// Enumerate every Microsoft To Do task list reachable from the
+/// signed-in user. Pagination same as `list_calendars`.
+pub async fn list_task_lists(state: &ApiState) -> GraphResult<Vec<TaskList>> {
+    let mut out = Vec::new();
+    let mut next: Option<String> = Some("/me/todo/lists".into());
+    while let Some(path) = next {
+        let resp: TodoListResponse = state.get_json(&path).await?;
+        for entry in resp.value {
+            out.push(map_task_list(entry));
+        }
+        next = resp.next_link;
+    }
+    Ok(out)
+}
+
+/// Pull every task from a To Do list. Tasks come back paginated; we
+/// follow `@odata.nextLink` to gather the whole set.
+pub async fn get_tasks(state: &ApiState, list_id: &str) -> GraphResult<Vec<Task>> {
+    let list_enc = urlencoding(list_id);
+    let path = format!("/me/todo/lists/{list_enc}/tasks?$top=200");
+    let mut out = Vec::new();
+    let mut next: Option<String> = Some(path);
+    while let Some(p) = next {
+        let resp: TodoTaskResponse = state.get_json(&p).await?;
+        for entry in resp.value {
+            out.push(map_task(entry, list_id)?);
+        }
+        next = resp.next_link;
+    }
+    Ok(out)
+}
+
+pub async fn create_task(
+    state: &ApiState,
+    list_id: &str,
+    new: NewTask,
+) -> GraphResult<Task> {
+    let list_enc = urlencoding(list_id);
+    let path = format!("/me/todo/lists/{list_enc}/tasks");
+    let body = new_task_to_body(&new)?;
+    let entry: TodoTaskEntry = state.post_json(&path, &body).await?;
+    map_task(entry, list_id)
+}
+
+pub async fn update_task(state: &ApiState, task: &Task) -> GraphResult<Task> {
+    let (list_id, raw_task_id) = split_task_id(&task.id);
+    if list_id.is_empty() {
+        return Err(GraphError::Protocol(format!(
+            "task id '{}' is missing the list-id prefix; can't route update",
+            task.id
+        )));
+    }
+    let list_enc = urlencoding(&list_id);
+    let task_enc = urlencoding(&raw_task_id);
+    let path = format!("/me/todo/lists/{list_enc}/tasks/{task_enc}");
+    let body = task_to_body(task)?;
+    let entry: TodoTaskEntry = state.patch_json(&path, &body).await?;
+    map_task(entry, &list_id)
+}
+
+pub async fn delete_task(state: &ApiState, task_id: &str) -> GraphResult<()> {
+    let (list_id, raw_task_id) = split_task_id(task_id);
+    if list_id.is_empty() {
+        return Err(GraphError::Protocol(format!(
+            "task id '{task_id}' is missing the list-id prefix; can't route delete"
+        )));
+    }
+    let list_enc = urlencoding(&list_id);
+    let task_enc = urlencoding(&raw_task_id);
+    let path = format!("/me/todo/lists/{list_enc}/tasks/{task_enc}");
+    state.delete_request(&path).await
+}
+
+pub async fn rename_task_list(
+    state: &ApiState,
+    list_id: &str,
+    new_name: &str,
+) -> GraphResult<()> {
+    let list_enc = urlencoding(list_id);
+    let path = format!("/me/todo/lists/{list_enc}");
+    let body = serde_json::json!({ "displayName": new_name });
+    let _: serde_json::Value = state.patch_json(&path, &body).await?;
+    Ok(())
+}
+
 fn urlencoding(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
@@ -457,5 +545,104 @@ mod tests {
         let state = fixture_state(&server.url());
         let cals = list_calendars(&state).await.unwrap();
         assert!(cals.is_empty());
+    }
+
+    #[tokio::test]
+    async fn list_task_lists_paginates_via_next_link() {
+        let mut server = mockito::Server::new_async().await;
+        let next_link = format!("{}/me/todo/lists?$skiptoken=abc", server.url());
+        server
+            .mock("GET", "/me/todo/lists")
+            .with_status(200)
+            .with_body(format!(
+                r#"{{
+                    "value": [
+                        {{"id":"L1","displayName":"Tasks","isOwner":true}}
+                    ],
+                    "@odata.nextLink": "{next_link}"
+                }}"#,
+            ))
+            .create_async()
+            .await;
+        server
+            .mock("GET", "/me/todo/lists?$skiptoken=abc")
+            .with_status(200)
+            .with_body(
+                r#"{"value": [{"id":"L2","displayName":"Groceries","isOwner":true}]}"#,
+            )
+            .create_async()
+            .await;
+        let state = fixture_state(&server.url());
+        let lists = list_task_lists(&state).await.unwrap();
+        assert_eq!(lists.len(), 2);
+        assert_eq!(lists[0].name, "Tasks");
+        assert_eq!(lists[1].name, "Groceries");
+    }
+
+    #[tokio::test]
+    async fn get_tasks_round_trips_and_packs_list_id() {
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock("GET", mockito::Matcher::Regex("/me/todo/lists/.+/tasks".into()))
+            .with_status(200)
+            .with_body(
+                r#"{"value":[
+                    {"id":"T1","title":"Call mom","importance":"normal","status":"notStarted"},
+                    {"id":"T2","title":"Read book","importance":"low","status":"completed"}
+                ]}"#,
+            )
+            .create_async()
+            .await;
+        let state = fixture_state(&server.url());
+        let tasks = get_tasks(&state, "LIST-X").await.unwrap();
+        assert_eq!(tasks.len(), 2);
+        // Composite ids carry the list prefix so update/delete can
+        // route without a separate list-id parameter.
+        assert_eq!(tasks[0].id, "LIST-X|T1");
+        assert_eq!(tasks[1].id, "LIST-X|T2");
+        assert_eq!(tasks[1].status, cal_core::TaskStatus::Completed);
+    }
+
+    #[tokio::test]
+    async fn delete_task_errors_when_composite_id_is_legacy() {
+        // A bare task id (no list prefix) can't be routed — we
+        // surface a clear Protocol error rather than hitting Graph
+        // with a malformed URL.
+        let server = mockito::Server::new_async().await;
+        let state = fixture_state(&server.url());
+        let err = delete_task(&state, "NO-PREFIX").await.unwrap_err();
+        match err {
+            GraphError::Protocol(m) => assert!(m.contains("list-id prefix")),
+            other => panic!("expected Protocol, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn delete_task_round_trips_against_composite_id() {
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock("DELETE", "/me/todo/lists/LIST-A/tasks/T1")
+            .with_status(204)
+            .expect(1)
+            .create_async()
+            .await;
+        let state = fixture_state(&server.url());
+        delete_task(&state, "LIST-A|T1").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn rename_task_list_patches_display_name() {
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock("PATCH", "/me/todo/lists/LIST-A")
+            .match_body(mockito::Matcher::PartialJson(serde_json::json!({
+                "displayName": "Renamed"
+            })))
+            .with_status(200)
+            .with_body(r#"{"id":"LIST-A","displayName":"Renamed"}"#)
+            .create_async()
+            .await;
+        let state = fixture_state(&server.url());
+        rename_task_list(&state, "LIST-A", "Renamed").await.unwrap();
     }
 }

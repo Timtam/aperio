@@ -334,7 +334,7 @@
       "ewsEndpointHint": "Die SOAP-URL der Exchange Web Services, die dein Admin dir genannt hat. Endet immer auf „/EWS/Exchange.asmx\". Wenn du die URL nicht kennst: trage E-Mail und Passwort unten ein und drücke „URL automatisch suchen\" — Aperio fragt für dich bei Microsoft Autodiscover nach.",
       "ewsEndpointRequired": "Bitte gib die EWS-Endpunkt-URL ein.",
       "ewsUsernameHint": "Meist deine vollständige E-Mail-Adresse, manche Server wollen aber DOMAIN\\\\Benutzername. Bei Unsicherheit den Admin fragen.",
-      "ewsReadOnlyHint": "Voller Lese-/Schreibzugriff — Kalender und Termine werden in beide Richtungen synchronisiert, inkl. Erstellen, Bearbeiten, Löschen und Umbenennen. Wer eine Terminserie bearbeitet oder löscht, ändert die ganze Serie; „Nur dieses Vorkommen löschen" überspringt nur dieses eine Datum.",
+      "ewsReadOnlyHint": "Voller Lese-/Schreibzugriff — Kalender und Termine werden in beide Richtungen synchronisiert, inkl. Erstellen, Bearbeiten, Löschen und Umbenennen. Wer eine Terminserie bearbeitet oder löscht, ändert die ganze Serie; \"Nur dieses Vorkommen löschen\" überspringt nur dieses eine Datum.",
       "ewsDiscover": "URL automatisch suchen",
       "ewsDiscovering": "Suche …",
       "ewsDiscoverNeedsEmail": "Bitte zuerst die E-Mail-Adresse eintragen — Autodiscover braucht sie, um den richtigen Server zu finden.",

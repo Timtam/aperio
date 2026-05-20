@@ -607,6 +607,572 @@ fn first_reminder_minutes(reminders: &[Reminder]) -> Option<i64> {
     })
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// Microsoft To Do — Phase 6e.2
+// ────────────────────────────────────────────────────────────────────────────
+//
+// Microsoft consolidated all task scenarios under To Do; the legacy
+// Outlook-tasks endpoint was deprecated in 2020. We hit
+// `/me/todo/lists` (list listing) and `/me/todo/lists/{id}/tasks`
+// (task CRUD).
+//
+// Two model mismatches worth flagging:
+//
+//   - `delete_task(task_id)` in cal-core takes only the task id, but
+//     Graph's DELETE URL needs both list id and task id. We encode
+//     the list id into the task id with a `|` separator
+//     (`{listId}|{taskId}`). Graph ids are URL-safe base64-ish and
+//     never contain `|`, so the split is unambiguous.
+//
+//   - Aperio's `DeadlineType` (On / By) doesn't map to anything in
+//     Graph — the "By" semantics live entirely on the Aperio side
+//     (it controls whether the task shows up in every view from
+//     today through the deadline). On the wire we just persist the
+//     date; reading back, we always assume `On` because that's the
+//     closest match to a single-day Microsoft due-date.
+
+use cal_core::{DeadlineType, NewTask, Task, TaskList, TaskPriority, TaskStatus};
+
+// ── Task list listing ──────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct TodoListResponse {
+    #[serde(default)]
+    pub value: Vec<TodoListEntry>,
+    #[serde(default, rename = "@odata.nextLink")]
+    pub next_link: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TodoListEntry {
+    pub id: String,
+    #[serde(rename = "displayName")]
+    pub display_name: String,
+    /// `true` when the signed-in user owns this list (i.e. it lives
+    /// in their mailbox). `false` for shared lists where the user
+    /// is just a guest — we surface those as `read_only` so the UI
+    /// doesn't expose write affordances we can't fulfil.
+    #[serde(default, rename = "isOwner")]
+    pub is_owner: Option<bool>,
+}
+
+pub fn map_task_list(entry: TodoListEntry) -> TaskList {
+    TaskList {
+        id: entry.id,
+        name: entry.display_name,
+        color: None,
+        default_sound: None,
+        // To Do task lists are independent — no embedded-in-calendar
+        // semantics like CalDAV's VTODO-in-VCALENDAR pattern.
+        embedded_in_calendar: None,
+        read_only: !entry.is_owner.unwrap_or(true),
+    }
+}
+
+// ── Task reads ─────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct TodoTaskResponse {
+    #[serde(default)]
+    pub value: Vec<TodoTaskEntry>,
+    #[serde(default, rename = "@odata.nextLink")]
+    pub next_link: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TodoTaskEntry {
+    pub id: String,
+    pub title: String,
+    #[serde(default)]
+    pub body: Option<TodoTaskBody>,
+    /// `low` / `normal` / `high` — Aperio's `Low` / `Medium` / `High`.
+    #[serde(default)]
+    pub importance: Option<String>,
+    /// `notStarted` / `inProgress` / `completed` / `waitingOnOthers`
+    /// / `deferred`. Mapped onto Aperio's narrower set; rare values
+    /// fall through to Open.
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default, rename = "dueDateTime")]
+    pub due_date_time: Option<GraphDateTime>,
+    #[serde(default, rename = "startDateTime")]
+    pub start_date_time: Option<GraphDateTime>,
+    #[serde(default, rename = "completedDateTime")]
+    pub completed_date_time: Option<GraphDateTime>,
+    #[serde(default, rename = "reminderDateTime")]
+    pub reminder_date_time: Option<GraphDateTime>,
+    #[serde(default, rename = "isReminderOn")]
+    pub is_reminder_on: bool,
+    #[serde(default)]
+    pub recurrence: Option<RecurrenceObject>,
+    #[serde(default, rename = "createdDateTime")]
+    pub created_date_time: Option<DateTime<Utc>>,
+    #[serde(default, rename = "lastModifiedDateTime")]
+    pub last_modified_date_time: Option<DateTime<Utc>>,
+    #[serde(default, rename = "@odata.etag")]
+    pub etag: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TodoTaskBody {
+    #[serde(default)]
+    pub content: Option<String>,
+    #[serde(default, rename = "contentType")]
+    pub content_type: Option<String>,
+}
+
+pub fn map_task(entry: TodoTaskEntry, list_id: &str) -> GraphResult<Task> {
+    let priority = match entry.importance.as_deref() {
+        Some("low") => TaskPriority::Low,
+        Some("high") => TaskPriority::High,
+        _ => TaskPriority::Medium,
+    };
+    let status = match entry.status.as_deref() {
+        Some("completed") => TaskStatus::Completed,
+        Some("inProgress") => TaskStatus::InProgress,
+        Some("deferred") => TaskStatus::Cancelled,
+        // `waitingOnOthers` and `notStarted` (and missing) → Open.
+        // `waitingOnOthers` doesn't have a clean Aperio counterpart
+        // and conflating it with Open at least keeps the task on
+        // the user's radar; promoting it to Cancelled would have
+        // been wrong.
+        _ => TaskStatus::Open,
+    };
+    let description = entry.body.and_then(|b| {
+        let raw = b.content?;
+        if raw.is_empty() {
+            return None;
+        }
+        // `contentType: html` is the Graph default. The UI side
+        // treats description as plain text — stripping HTML tags
+        // server-side keeps the round-trip lossy but readable.
+        // Aperio's TaskDialog doesn't render HTML, so a `<p>x</p>`
+        // showing up verbatim would be worse than a plain "x".
+        if matches!(
+            b.content_type.as_deref(),
+            Some("html") | Some("HTML")
+        ) {
+            Some(strip_html_tags(&raw))
+        } else {
+            Some(raw)
+        }
+    });
+
+    let (deadline_date, deadline_time) = entry
+        .due_date_time
+        .as_ref()
+        .map(|d| d.to_utc())
+        .transpose()?
+        .map(|dt| (Some(dt.date_naive()), Some(dt.time())))
+        .unwrap_or((None, None));
+    let deadline_type = if deadline_date.is_some() {
+        // Aperio's `By` semantics live frontend-only — the wire
+        // shape is a flat date+time. We default to `On` (specific
+        // day) and let the user flip to `By` in the task editor if
+        // they want the rolling-deadline behaviour.
+        Some(DeadlineType::On)
+    } else {
+        None
+    };
+    let scheduled_date = entry
+        .start_date_time
+        .as_ref()
+        .map(|d| d.to_utc())
+        .transpose()?
+        .map(|dt| dt.date_naive());
+
+    let reminders = if entry.is_reminder_on {
+        match &entry.reminder_date_time {
+            Some(rd) => vec![Reminder {
+                kind: ReminderKind::Absolute { at: rd.to_utc()? },
+                sound: None,
+            }],
+            None => Vec::new(),
+        }
+    } else {
+        Vec::new()
+    };
+
+    let recurrence = entry
+        .recurrence
+        .as_ref()
+        .and_then(graph_recurrence_to_task_recurrence);
+
+    let completed_at = entry
+        .completed_date_time
+        .as_ref()
+        .map(|d| d.to_utc())
+        .transpose()?;
+    let created = entry.created_date_time.unwrap_or_else(Utc::now);
+    let updated = entry.last_modified_date_time.unwrap_or(created);
+
+    // Pack the list id into the task id so `delete_task(task_id)`
+    // — which doesn't carry the list id in its signature — can find
+    // its way back to the right DELETE URL.
+    let composite_id = format!("{}|{}", list_id, entry.id);
+
+    Ok(Task {
+        id: composite_id,
+        list_id: list_id.to_string(),
+        title: entry.title,
+        description,
+        status,
+        priority,
+        scheduled_date,
+        deadline_type,
+        deadline_date,
+        deadline_time,
+        recurrence,
+        parent_id: None,
+        color_label: None,
+        reminders,
+        sound: None,
+        created_at: created,
+        updated_at: updated,
+        completed_at,
+        etag: entry.etag,
+    })
+}
+
+/// Split the composite `{list_id}|{task_id}` back into its parts.
+/// Used by `update_task` / `delete_task` in the api layer.
+pub fn split_task_id(composite: &str) -> (String, String) {
+    match composite.split_once('|') {
+        Some((list, task)) => (list.to_string(), task.to_string()),
+        None => {
+            // Compat: legacy task id without a packed list id. We
+            // can't route without it; the api layer surfaces this
+            // as Protocol.
+            (String::new(), composite.to_string())
+        }
+    }
+}
+
+/// Very small HTML tag stripper for description bodies. Replaces
+/// `<br>` and `</p>` with newlines, strips everything else between
+/// `<` and `>`. Not a full HTML parser — but Graph emits tame
+/// markup for tasks (mostly `<p>` and `<br>`), and the alternative
+/// of pulling in an html-parser dependency for one field is overkill.
+fn strip_html_tags(s: &str) -> String {
+    let normalized = s
+        .replace("<br>", "\n")
+        .replace("<br/>", "\n")
+        .replace("<br />", "\n")
+        .replace("</p>", "\n");
+    let mut out = String::with_capacity(normalized.len());
+    let mut in_tag = false;
+    for c in normalized.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => out.push(c),
+            _ => {}
+        }
+    }
+    out.trim().to_string()
+}
+
+// ── Task writes ────────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize)]
+pub struct TodoTaskWriteBody {
+    pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body: Option<TodoTaskBodyWrite>,
+    pub importance: &'static str,
+    pub status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "dueDateTime")]
+    pub due_date_time: Option<GraphDateTimeWrite>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "startDateTime")]
+    pub start_date_time: Option<GraphDateTimeWrite>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "reminderDateTime")]
+    pub reminder_date_time: Option<GraphDateTimeWrite>,
+    #[serde(rename = "isReminderOn")]
+    pub is_reminder_on: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recurrence: Option<RecurrenceObject>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TodoTaskBodyWrite {
+    pub content: String,
+    #[serde(rename = "contentType")]
+    pub content_type: &'static str,
+}
+
+pub fn new_task_to_body(new: &NewTask) -> GraphResult<TodoTaskWriteBody> {
+    Ok(TodoTaskWriteBody {
+        title: new.title.clone(),
+        body: new.description.as_deref().filter(|s| !s.is_empty()).map(|s| {
+            TodoTaskBodyWrite {
+                content: s.to_string(),
+                content_type: "text",
+            }
+        }),
+        importance: priority_to_importance(new.priority),
+        status: task_status_to_graph(new.status),
+        due_date_time: build_due_datetime(new.deadline_date, new.deadline_time),
+        start_date_time: build_start_datetime(new.scheduled_date),
+        reminder_date_time: first_absolute_reminder_at(&new.reminders)
+            .map(|at| GraphDateTimeWrite {
+                date_time: at.format("%Y-%m-%dT%H:%M:%S").to_string(),
+                time_zone: "UTC".into(),
+            }),
+        is_reminder_on: first_absolute_reminder_at(&new.reminders).is_some(),
+        recurrence: new
+            .recurrence
+            .as_ref()
+            .map(task_recurrence_to_graph)
+            .transpose()?,
+    })
+}
+
+pub fn task_to_body(task: &Task) -> GraphResult<TodoTaskWriteBody> {
+    Ok(TodoTaskWriteBody {
+        title: task.title.clone(),
+        body: task.description.as_deref().filter(|s| !s.is_empty()).map(|s| {
+            TodoTaskBodyWrite {
+                content: s.to_string(),
+                content_type: "text",
+            }
+        }),
+        importance: priority_to_importance(task.priority),
+        status: task_status_to_graph(task.status),
+        due_date_time: build_due_datetime(task.deadline_date, task.deadline_time),
+        start_date_time: build_start_datetime(task.scheduled_date),
+        reminder_date_time: first_absolute_reminder_at(&task.reminders)
+            .map(|at| GraphDateTimeWrite {
+                date_time: at.format("%Y-%m-%dT%H:%M:%S").to_string(),
+                time_zone: "UTC".into(),
+            }),
+        is_reminder_on: first_absolute_reminder_at(&task.reminders).is_some(),
+        recurrence: task
+            .recurrence
+            .as_ref()
+            .map(task_recurrence_to_graph)
+            .transpose()?,
+    })
+}
+
+fn priority_to_importance(p: TaskPriority) -> &'static str {
+    match p {
+        TaskPriority::Low => "low",
+        TaskPriority::Medium => "normal",
+        TaskPriority::High => "high",
+    }
+}
+
+fn task_status_to_graph(s: TaskStatus) -> &'static str {
+    match s {
+        TaskStatus::Open => "notStarted",
+        TaskStatus::InProgress => "inProgress",
+        TaskStatus::Completed => "completed",
+        TaskStatus::Cancelled => "deferred",
+    }
+}
+
+fn build_due_datetime(
+    date: Option<NaiveDate>,
+    time: Option<chrono::NaiveTime>,
+) -> Option<GraphDateTimeWrite> {
+    let date = date?;
+    let t = time.unwrap_or_else(|| chrono::NaiveTime::from_hms_opt(0, 0, 0).unwrap());
+    let naive = date.and_time(t);
+    Some(GraphDateTimeWrite {
+        date_time: naive.format("%Y-%m-%dT%H:%M:%S").to_string(),
+        time_zone: "UTC".into(),
+    })
+}
+
+fn build_start_datetime(date: Option<NaiveDate>) -> Option<GraphDateTimeWrite> {
+    let date = date?;
+    let naive = date.and_hms_opt(0, 0, 0)?;
+    Some(GraphDateTimeWrite {
+        date_time: naive.format("%Y-%m-%dT%H:%M:%S").to_string(),
+        time_zone: "UTC".into(),
+    })
+}
+
+fn first_absolute_reminder_at(reminders: &[Reminder]) -> Option<DateTime<Utc>> {
+    // Graph models a single absolute reminder per todoTask
+    // (`reminderDateTime` + `isReminderOn`). We pull the first
+    // Absolute entry. Relative reminders don't map — To Do's UI
+    // doesn't expose "remind X minutes before" for tasks.
+    reminders.iter().find_map(|r| match &r.kind {
+        ReminderKind::Absolute { at } => Some(*at),
+        _ => None,
+    })
+}
+
+// ── Task recurrence ⇄ Graph ─────────────────────────────────────────────
+//
+// To Do uses the same PatternedRecurrence shape as events — pattern
+// + range. We map cal-core's `TaskRecurrence` (a simple frequency +
+// interval + optional BYDAY / BYMONTHDAY + end) to that.
+
+pub fn task_recurrence_to_graph(
+    rec: &cal_core::TaskRecurrence,
+) -> GraphResult<RecurrenceObject> {
+    use cal_core::{RecurrenceEnd, RecurrenceFrequency};
+    let interval = rec.interval.max(1);
+    let pattern = match rec.frequency {
+        RecurrenceFrequency::Daily => RecurrencePattern {
+            kind: "daily".into(),
+            interval,
+            days_of_week: Vec::new(),
+            day_of_month: None,
+            month: None,
+            index: None,
+            first_day_of_week: None,
+        },
+        RecurrenceFrequency::Weekly => RecurrencePattern {
+            kind: "weekly".into(),
+            interval,
+            days_of_week: rec
+                .day_of_week
+                .as_ref()
+                .map(|days| {
+                    days.iter()
+                        .map(|d| weekday_full_name(*d).to_string())
+                        .collect()
+                })
+                .unwrap_or_default(),
+            day_of_month: None,
+            month: None,
+            index: None,
+            first_day_of_week: None,
+        },
+        RecurrenceFrequency::Monthly => RecurrencePattern {
+            kind: "absoluteMonthly".into(),
+            interval,
+            days_of_week: Vec::new(),
+            day_of_month: rec.day_of_month.map(|d| d as u32),
+            month: None,
+            index: None,
+            first_day_of_week: None,
+        },
+        RecurrenceFrequency::Yearly => {
+            // To Do's absoluteYearly pattern needs both month and
+            // dayOfMonth. Aperio's TaskRecurrence model doesn't
+            // carry a month for yearly — we lean on `day_of_month`
+            // alone, which surfaces as "12 of January" by default.
+            // A future Aperio TaskRecurrence v2 should add month.
+            RecurrencePattern {
+                kind: "absoluteYearly".into(),
+                interval,
+                days_of_week: Vec::new(),
+                day_of_month: rec.day_of_month.map(|d| d as u32),
+                month: Some(1),
+                index: None,
+                first_day_of_week: None,
+            }
+        }
+    };
+    let range = match &rec.end {
+        Some(RecurrenceEnd::OnDate { date }) => RecurrenceRange {
+            kind: "endDate".into(),
+            start_date: Some(Utc::now().date_naive().format("%Y-%m-%d").to_string()),
+            end_date: Some(date.format("%Y-%m-%d").to_string()),
+            number_of_occurrences: None,
+        },
+        Some(RecurrenceEnd::After { occurrences }) => RecurrenceRange {
+            kind: "numbered".into(),
+            start_date: Some(Utc::now().date_naive().format("%Y-%m-%d").to_string()),
+            end_date: None,
+            number_of_occurrences: Some(*occurrences),
+        },
+        Some(RecurrenceEnd::Never) | None => RecurrenceRange {
+            kind: "noEnd".into(),
+            start_date: Some(Utc::now().date_naive().format("%Y-%m-%d").to_string()),
+            end_date: None,
+            number_of_occurrences: None,
+        },
+    };
+    Ok(RecurrenceObject { pattern, range })
+}
+
+pub fn graph_recurrence_to_task_recurrence(
+    rec: &RecurrenceObject,
+) -> Option<cal_core::TaskRecurrence> {
+    use cal_core::{RecurrenceEnd, RecurrenceFrequency, TaskRecurrence};
+    let frequency = match rec.pattern.kind.as_str() {
+        "daily" => RecurrenceFrequency::Daily,
+        "weekly" => RecurrenceFrequency::Weekly,
+        "absoluteMonthly" => RecurrenceFrequency::Monthly,
+        "absoluteYearly" => RecurrenceFrequency::Yearly,
+        // Relative monthly/yearly aren't in cal-core's TaskRecurrence
+        // model — same caveat as for events. Read-as-no-recurrence.
+        _ => return None,
+    };
+    let day_of_week = if matches!(frequency, RecurrenceFrequency::Weekly)
+        && !rec.pattern.days_of_week.is_empty()
+    {
+        Some(
+            rec.pattern
+                .days_of_week
+                .iter()
+                .filter_map(|s| day_name_to_weekday(s))
+                .collect::<Vec<_>>(),
+        )
+        .filter(|v: &Vec<_>| !v.is_empty())
+    } else {
+        None
+    };
+    let day_of_month = if matches!(
+        frequency,
+        RecurrenceFrequency::Monthly | RecurrenceFrequency::Yearly
+    ) {
+        rec.pattern.day_of_month.and_then(|d| u8::try_from(d).ok())
+    } else {
+        None
+    };
+    let end = match rec.range.kind.as_str() {
+        "numbered" => rec
+            .range
+            .number_of_occurrences
+            .map(|n| RecurrenceEnd::After { occurrences: n }),
+        "endDate" => rec
+            .range
+            .end_date
+            .as_ref()
+            .and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
+            .map(|date| RecurrenceEnd::OnDate { date }),
+        _ => Some(RecurrenceEnd::Never),
+    };
+    Some(TaskRecurrence {
+        frequency,
+        interval: rec.pattern.interval.max(1),
+        day_of_week,
+        day_of_month,
+        end,
+    })
+}
+
+fn weekday_full_name(w: cal_core::Weekday) -> &'static str {
+    match w {
+        cal_core::Weekday::Monday => "monday",
+        cal_core::Weekday::Tuesday => "tuesday",
+        cal_core::Weekday::Wednesday => "wednesday",
+        cal_core::Weekday::Thursday => "thursday",
+        cal_core::Weekday::Friday => "friday",
+        cal_core::Weekday::Saturday => "saturday",
+        cal_core::Weekday::Sunday => "sunday",
+    }
+}
+
+fn day_name_to_weekday(s: &str) -> Option<cal_core::Weekday> {
+    Some(match s.to_ascii_lowercase().as_str() {
+        "monday" => cal_core::Weekday::Monday,
+        "tuesday" => cal_core::Weekday::Tuesday,
+        "wednesday" => cal_core::Weekday::Wednesday,
+        "thursday" => cal_core::Weekday::Thursday,
+        "friday" => cal_core::Weekday::Friday,
+        "saturday" => cal_core::Weekday::Saturday,
+        "sunday" => cal_core::Weekday::Sunday,
+        _ => return None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -827,5 +1393,204 @@ mod tests {
             "monday"
         );
         assert_eq!(json["location"]["displayName"], "Studio");
+    }
+
+    // ── Microsoft To Do tests ─────────────────────────────────────────
+
+    #[test]
+    fn task_list_is_owner_false_maps_to_read_only() {
+        let entry: TodoListEntry = serde_json::from_str(
+            r##"{"id":"L1","displayName":"Shared list","isOwner":false}"##,
+        )
+        .unwrap();
+        let list = map_task_list(entry);
+        assert!(list.read_only);
+        assert_eq!(list.name, "Shared list");
+        assert!(list.embedded_in_calendar.is_none());
+    }
+
+    #[test]
+    fn task_list_missing_is_owner_defaults_to_writable() {
+        let entry: TodoListEntry =
+            serde_json::from_str(r##"{"id":"L1","displayName":"My"}"##).unwrap();
+        let list = map_task_list(entry);
+        assert!(!list.read_only);
+    }
+
+    #[test]
+    fn map_task_packs_list_id_into_task_id() {
+        let entry: TodoTaskEntry = serde_json::from_str(
+            r##"{
+                "id": "T1",
+                "title": "Buy milk",
+                "importance": "high",
+                "status": "notStarted"
+            }"##,
+        )
+        .unwrap();
+        let task = map_task(entry, "LIST-A").unwrap();
+        assert_eq!(task.id, "LIST-A|T1");
+        assert_eq!(task.list_id, "LIST-A");
+        assert_eq!(task.title, "Buy milk");
+        assert_eq!(task.priority, TaskPriority::High);
+        assert_eq!(task.status, TaskStatus::Open);
+    }
+
+    #[test]
+    fn map_task_translates_due_date_and_html_body() {
+        let entry: TodoTaskEntry = serde_json::from_str(
+            r##"{
+                "id": "T2",
+                "title": "Write report",
+                "body": { "content": "<p>line 1</p><p>line 2</p>", "contentType": "html" },
+                "importance": "normal",
+                "status": "inProgress",
+                "dueDateTime": { "dateTime": "2026-06-15T17:00:00", "timeZone": "UTC" }
+            }"##,
+        )
+        .unwrap();
+        let task = map_task(entry, "L").unwrap();
+        assert_eq!(task.status, TaskStatus::InProgress);
+        let body = task.description.unwrap();
+        assert!(body.contains("line 1"));
+        assert!(body.contains("line 2"));
+        assert_eq!(task.deadline_date.unwrap().to_string(), "2026-06-15");
+        assert_eq!(task.deadline_type, Some(DeadlineType::On));
+    }
+
+    #[test]
+    fn map_task_absolute_reminder_becomes_reminder_at() {
+        let entry: TodoTaskEntry = serde_json::from_str(
+            r##"{
+                "id": "T3",
+                "title": "Call back",
+                "isReminderOn": true,
+                "reminderDateTime": { "dateTime": "2026-05-21T09:30:00", "timeZone": "UTC" }
+            }"##,
+        )
+        .unwrap();
+        let task = map_task(entry, "L").unwrap();
+        assert_eq!(task.reminders.len(), 1);
+        match &task.reminders[0].kind {
+            ReminderKind::Absolute { at } => {
+                assert_eq!(at.to_rfc3339(), "2026-05-21T09:30:00+00:00");
+            }
+            other => panic!("expected Absolute reminder, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn split_task_id_separates_list_and_task() {
+        let (list, task) = split_task_id("LIST-A|TASK-1");
+        assert_eq!(list, "LIST-A");
+        assert_eq!(task, "TASK-1");
+    }
+
+    #[test]
+    fn split_task_id_legacy_unprefixed_returns_empty_list() {
+        // Defensive path — an id that lost its list prefix bubbles
+        // out as an empty list id so the api layer can surface a
+        // clear Protocol error instead of generating a 404 URL.
+        let (list, task) = split_task_id("BARE-TASK");
+        assert!(list.is_empty());
+        assert_eq!(task, "BARE-TASK");
+    }
+
+    #[test]
+    fn new_task_to_body_serialises_required_fields() {
+        let new = NewTask {
+            title: "Inbox zero".into(),
+            description: Some("clear out".into()),
+            status: TaskStatus::Open,
+            priority: TaskPriority::Low,
+            scheduled_date: None,
+            deadline_type: None,
+            deadline_date: None,
+            deadline_time: None,
+            recurrence: None,
+            parent_id: None,
+            color_label: None,
+            reminders: Vec::new(),
+            sound: None,
+        };
+        let body = new_task_to_body(&new).unwrap();
+        let json = serde_json::to_value(&body).unwrap();
+        assert_eq!(json["title"], "Inbox zero");
+        assert_eq!(json["importance"], "low");
+        assert_eq!(json["status"], "notStarted");
+        assert_eq!(json["body"]["content"], "clear out");
+        assert_eq!(json["isReminderOn"], false);
+        // Missing optional fields must not be serialised — Graph
+        // accepts a PATCH that only changes a subset and treats
+        // `null` and "missing" differently for some fields.
+        assert!(json.get("dueDateTime").is_none());
+        assert!(json.get("startDateTime").is_none());
+    }
+
+    #[test]
+    fn task_to_body_emits_due_date_and_recurrence() {
+        use cal_core::{RecurrenceEnd, RecurrenceFrequency, TaskRecurrence, Weekday};
+        let task = Task {
+            id: "L|T".into(),
+            list_id: "L".into(),
+            title: "Standup".into(),
+            description: None,
+            status: TaskStatus::Open,
+            priority: TaskPriority::Medium,
+            scheduled_date: None,
+            deadline_type: Some(DeadlineType::On),
+            deadline_date: Some(NaiveDate::from_ymd_opt(2026, 7, 1).unwrap()),
+            deadline_time: Some(chrono::NaiveTime::from_hms_opt(10, 0, 0).unwrap()),
+            recurrence: Some(TaskRecurrence {
+                frequency: RecurrenceFrequency::Weekly,
+                interval: 1,
+                day_of_week: Some(vec![Weekday::Monday, Weekday::Wednesday]),
+                day_of_month: None,
+                end: Some(RecurrenceEnd::After { occurrences: 6 }),
+            }),
+            parent_id: None,
+            color_label: None,
+            reminders: Vec::new(),
+            sound: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            completed_at: None,
+            etag: None,
+        };
+        let body = task_to_body(&task).unwrap();
+        let json = serde_json::to_value(&body).unwrap();
+        assert_eq!(json["dueDateTime"]["dateTime"], "2026-07-01T10:00:00");
+        assert_eq!(json["recurrence"]["pattern"]["type"], "weekly");
+        assert_eq!(json["recurrence"]["pattern"]["daysOfWeek"][0], "monday");
+        assert_eq!(json["recurrence"]["range"]["type"], "numbered");
+        assert_eq!(json["recurrence"]["range"]["numberOfOccurrences"], 6);
+    }
+
+    #[test]
+    fn task_status_round_trips() {
+        // Round-trip every status pair we own. `Cancelled` <→
+        // `deferred` is the lossy edge — Aperio doesn't have
+        // "deferred" as a concept but the round-trip restores the
+        // original value, which is what matters for sync.
+        let cases = [
+            (TaskStatus::Open, "notStarted"),
+            (TaskStatus::InProgress, "inProgress"),
+            (TaskStatus::Completed, "completed"),
+            (TaskStatus::Cancelled, "deferred"),
+        ];
+        for (status, graph) in cases {
+            assert_eq!(task_status_to_graph(status), graph);
+        }
+    }
+
+    #[test]
+    fn html_strip_keeps_text_and_normalises_newlines() {
+        let stripped = strip_html_tags("<p>hello</p><p>world</p>");
+        assert!(stripped.contains("hello"));
+        assert!(stripped.contains("world"));
+        let with_br = strip_html_tags("line a<br/>line b<br>line c");
+        assert!(with_br.contains("line a"));
+        assert!(with_br.contains("line b"));
+        assert!(with_br.contains("line c"));
     }
 }

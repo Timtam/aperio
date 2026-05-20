@@ -358,10 +358,22 @@ impl AdapterRegistry {
             tokens,
         );
         let arc = Arc::new(adapter);
+        // The Graph adapter declares both Calendar and Tasks
+        // capabilities (Phase 6e.1 + 6e.2), so register it under
+        // both surfaces. Same `Arc<MicrosoftGraphAdapter>` instance
+        // is reused — shared listing caches stay coherent across
+        // calendar / task list reads from the same account.
         self.external_cal
             .write()
             .expect("registry cal poison")
-            .insert(account.id.clone(), arc as Arc<dyn CalendarFeature>);
+            .insert(
+                account.id.clone(),
+                arc.clone() as Arc<dyn CalendarFeature>,
+            );
+        self.external_tasks
+            .write()
+            .expect("registry tasks poison")
+            .insert(account.id.clone(), arc as Arc<dyn TasksFeature>);
         Ok(())
     }
 

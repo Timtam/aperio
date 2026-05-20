@@ -39,6 +39,11 @@ pub const DEFAULT_AUTHORITY: &str = "common";
 ///
 ///   - `Calendars.ReadWrite` — full read/write on the user's
 ///     calendars + events
+///   - `Tasks.ReadWrite` — full read/write on the user's Microsoft
+///     To Do task lists + tasks (Phase 6e.2). Surfaces the
+///     `/me/todo/lists` endpoint family. Microsoft consolidated all
+///     task scenarios under To Do; the legacy Outlook-tasks endpoint
+///     was deprecated in 2020.
 ///   - `offline_access` — required so Microsoft hands out a refresh
 ///     token; without it, the access token dies after an hour and
 ///     the user has to re-consent every time
@@ -46,7 +51,7 @@ pub const DEFAULT_AUTHORITY: &str = "common";
 ///     OpenID Connect scope to issue an id_token; without it
 ///     consent works but some user-info endpoints return 403
 pub const SCOPES: &str =
-    "Calendars.ReadWrite offline_access openid profile email";
+    "Calendars.ReadWrite Tasks.ReadWrite offline_access openid profile email";
 
 const AUTH_TIMEOUT: Duration = Duration::from_secs(300);
 
