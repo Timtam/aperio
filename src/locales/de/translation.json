@@ -390,7 +390,8 @@
     "renameButtonShort": "Umbenennen",
     "renameInputLabel": "Neuer Name für „{{name}}\". Enter zum Speichern, Escape verwirft, leer macht das Umbenennen rückgängig.",
     "renameHint": "Enter speichert · Esc verwirft · leer = Standardname",
-    "renamed": "Umbenannt zu „{{name}}\".",
+    "renamedSynced": "Umbenannt zu „{{name}}\" — auch beim Anbieter.",
+    "renamedLocalOnly": "Umbenannt zu „{{name}}\" — nur in Aperio (Quelle ist schreibgeschützt).",
     "renameCleared": "Standardname wiederhergestellt.",
     "manageColorLabels": "Farb-Labels verwalten",
     "manageAccounts": "Konten verwalten"

@@ -97,6 +97,22 @@ pub trait CalendarFeature: Adapter {
             "add_event_exdate is not supported on this adapter".into(),
         ))
     }
+
+    /// Rename a calendar at the source. Local adapter does an SQL
+    /// UPDATE on its `calendars.name`; CalDAV adapters issue
+    /// PROPPATCH with `DAV:displayname` (RFC 4918 §15.2). iCal feed
+    /// adapters and any other read-only source leave the default in
+    /// place, which the command layer translates into "write a local
+    /// override only".
+    async fn rename_calendar(
+        &self,
+        _calendar_id: &str,
+        _new_name: &str,
+    ) -> Result<()> {
+        Err(Error::Unsupported(
+            "rename_calendar is not supported on this adapter".into(),
+        ))
+    }
 }
 
 /// Implemented by adapters that declare `Capability::Tasks`.
@@ -107,6 +123,21 @@ pub trait TasksFeature: Adapter {
     async fn create_task(&self, list_id: &str, task: NewTask) -> Result<Task>;
     async fn update_task(&self, task: Task) -> Result<Task>;
     async fn delete_task(&self, task_id: &str) -> Result<()>;
+
+    /// Rename a task list at the source — same semantics as
+    /// `CalendarFeature::rename_calendar`: writable adapters override
+    /// to push to the source, read-only adapters leave the default
+    /// `Unsupported` and the command layer falls back to a local
+    /// override.
+    async fn rename_task_list(
+        &self,
+        _list_id: &str,
+        _new_name: &str,
+    ) -> Result<()> {
+        Err(Error::Unsupported(
+            "rename_task_list is not supported on this adapter".into(),
+        ))
+    }
 }
 
 /// Implemented by adapters that declare `Capability::Contacts`.

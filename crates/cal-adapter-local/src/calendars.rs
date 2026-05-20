@@ -357,6 +357,34 @@ impl CalendarFeature for LocalAdapter {
         .and_then(|res| res.ok())
         .flatten()
     }
+
+    async fn rename_calendar(
+        &self,
+        calendar_id: &str,
+        new_name: &str,
+    ) -> cal_core::Result<()> {
+        let trimmed = new_name.trim();
+        if trimmed.is_empty() {
+            return Err(cal_core::Error::InvalidInput(
+                "calendar name must not be empty".into(),
+            ));
+        }
+        let changed = self
+            .db
+            .lock()
+            .expect("db mutex poisoned")
+            .execute(
+                "UPDATE calendars SET name = ? WHERE id = ?",
+                params![trimmed, calendar_id],
+            )
+            .map_err(map_sql_err)?;
+        if changed == 0 {
+            return Err(cal_core::Error::NotFound(format!(
+                "calendar '{calendar_id}' not found"
+            )));
+        }
+        Ok(())
+    }
 }
 
 const EVENT_SELECT_PREFIX: &str =
@@ -583,6 +611,36 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM events", [], |r| r.get(0))
             .unwrap();
         assert_eq!(n, 0);
+    }
+
+    #[tokio::test]
+    async fn rename_calendar_updates_the_row() {
+        let a = make_adapter();
+        let cal = a.create_calendar("Old", None, None).unwrap();
+        a.rename_calendar(&cal.id, "New").await.unwrap();
+        let cals = a.list_calendars().await.unwrap();
+        assert_eq!(cals.len(), 1);
+        assert_eq!(cals[0].name, "New");
+    }
+
+    #[tokio::test]
+    async fn rename_calendar_rejects_empty_name() {
+        let a = make_adapter();
+        let cal = a.create_calendar("Old", None, None).unwrap();
+        let err = a.rename_calendar(&cal.id, "   ").await.unwrap_err();
+        assert!(matches!(err, cal_core::Error::InvalidInput(_)));
+        // Original name unchanged.
+        assert_eq!(a.list_calendars().await.unwrap()[0].name, "Old");
+    }
+
+    #[tokio::test]
+    async fn rename_calendar_returns_not_found_for_unknown_id() {
+        let a = make_adapter();
+        let err = a
+            .rename_calendar("does-not-exist", "Whatever")
+            .await
+            .unwrap_err();
+        assert!(matches!(err, cal_core::Error::NotFound(_)));
     }
 
     #[tokio::test]

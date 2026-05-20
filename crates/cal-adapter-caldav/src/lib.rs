@@ -324,6 +324,20 @@ impl CalendarFeature for CaldavAdapter {
         // off the Calendar they got from `list_calendars`.
         None
     }
+
+    async fn rename_calendar(
+        &self,
+        calendar_id: &str,
+        new_name: &str,
+    ) -> CoreResult<()> {
+        // Calendar id == collection URL in CalDAV (see `to_calendar`).
+        let url = Url::parse(calendar_id).map_err(|e| {
+            CoreError::InvalidInput(format!("calendar id is not a URL: {e}"))
+        })?;
+        calendars::proppatch_displayname(&self.http, &url, new_name, &self.credentials)
+            .await
+            .map_err(to_core_error)
+    }
 }
 
 #[async_trait]
@@ -398,6 +412,21 @@ impl TasksFeature for CaldavAdapter {
         Err(CoreError::NotFound(format!(
             "task '{task_id}' not found in any list"
         )))
+    }
+
+    async fn rename_task_list(
+        &self,
+        list_id: &str,
+        new_name: &str,
+    ) -> CoreResult<()> {
+        // Same as calendars — VTODO collections are renamed via the
+        // same PROPPATCH on the collection URL.
+        let url = Url::parse(list_id).map_err(|e| {
+            CoreError::InvalidInput(format!("task list id is not a URL: {e}"))
+        })?;
+        calendars::proppatch_displayname(&self.http, &url, new_name, &self.credentials)
+            .await
+            .map_err(to_core_error)
     }
 }
 

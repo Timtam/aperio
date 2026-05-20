@@ -96,6 +96,7 @@ pub fn run() {
             commands::test_ical_feed,
             commands::set_container_name_override,
             commands::clear_container_name_override,
+            commands::rename_container,
         ])
         .setup(move |app| {
             // Spawn the reminder scheduler on the Tauri/tokio runtime

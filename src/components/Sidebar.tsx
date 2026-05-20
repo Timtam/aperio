@@ -8,7 +8,7 @@ import {
   createTaskList,
   deleteCalendar,
   isCommandError,
-  setContainerNameOverride,
+  renameContainer,
   type ContainerKind,
 } from '../api/client';
 import { useCalendarStore } from '../state/CalendarStore';
@@ -78,11 +78,26 @@ export function Sidebar() {
     const trimmed = draft.trim();
     try {
       if (trimmed === '') {
+        // Empty input ⇒ revert: drop the local override. We don't
+        // attempt to rename at the source here because "revert" is a
+        // local-only concept — the source already has its source
+        // name, which is what we're going back to.
         await clearContainerNameOverride(id, kind);
         announce(t('sidebar.renameCleared'));
       } else {
-        await setContainerNameOverride(id, kind, trimmed);
-        announce(t('sidebar.renamed', { name: trimmed }));
+        // Non-empty input ⇒ canonical rename. Backend orchestrates
+        // adapter push vs. local override based on capability and
+        // returns which path it took, so the SR announcement can say
+        // whether the rename reached the server.
+        const outcome = await renameContainer(id, kind, trimmed);
+        announce(
+          t(
+            outcome.synced_to_source
+              ? 'sidebar.renamedSynced'
+              : 'sidebar.renamedLocalOnly',
+            { name: trimmed },
+          ),
+        );
       }
       // Pull fresh container lists so the new name surfaces in the
       // sidebar (and in every downstream consumer of the store).

@@ -250,8 +250,9 @@ export const testIcalFeed = (
 export type ContainerKind = 'calendar' | 'task_list';
 
 /** Persist a local rename override for a calendar / task list. The
- *  rename never reaches the source server in this iteration —
- *  read-time projection only. */
+ *  rename never reaches the source server — read-time projection
+ *  only. Power-user escape hatch; the canonical entry point for
+ *  rename is `renameContainer` below. */
 export const setContainerNameOverride = (
   container_id: string,
   kind: ContainerKind,
@@ -271,4 +272,27 @@ export const clearContainerNameOverride = (
   invoke<void>('clear_container_name_override', {
     containerId: container_id,
     kind,
+  });
+
+/** Outcome of [`renameContainer`]. `synced_to_source = false` means
+ *  the adapter declared the operation unsupported (read-only source
+ *  like an iCal feed) and the rename was saved as a local override
+ *  instead. The frontend can use this to nudge the user. */
+export interface RenameOutcome {
+  synced_to_source: boolean;
+}
+
+/** Canonical rename entry point. The backend tries to push the new
+ *  name to the source server (CalDAV PROPPATCH, local SQLite UPDATE,
+ *  future Google PATCH) and falls back to a local override only when
+ *  the adapter doesn't support remote rename. */
+export const renameContainer = (
+  container_id: string,
+  kind: ContainerKind,
+  name: string,
+) =>
+  invoke<RenameOutcome>('rename_container', {
+    containerId: container_id,
+    kind,
+    name,
   });

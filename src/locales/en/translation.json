@@ -390,7 +390,8 @@
     "renameButtonShort": "Rename",
     "renameInputLabel": "New name for \"{{name}}\". Enter to save, Escape to cancel, empty value reverts to the source name.",
     "renameHint": "Enter to save · Esc to cancel · empty = source name",
-    "renamed": "Renamed to \"{{name}}\".",
+    "renamedSynced": "Renamed to \"{{name}}\" — also at the source.",
+    "renamedLocalOnly": "Renamed to \"{{name}}\" — locally only (source is read-only).",
     "renameCleared": "Reverted to source name.",
     "manageColorLabels": "Manage color labels",
     "manageAccounts": "Manage accounts"

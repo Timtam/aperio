@@ -498,6 +498,34 @@ impl TasksFeature for LocalAdapter {
         }
         Ok(())
     }
+
+    async fn rename_task_list(
+        &self,
+        list_id: &str,
+        new_name: &str,
+    ) -> cal_core::Result<()> {
+        let trimmed = new_name.trim();
+        if trimmed.is_empty() {
+            return Err(cal_core::Error::InvalidInput(
+                "task list name must not be empty".into(),
+            ));
+        }
+        let changed = self
+            .db()
+            .lock()
+            .expect("db mutex poisoned")
+            .execute(
+                "UPDATE task_lists SET name = ? WHERE id = ?",
+                params![trimmed, list_id],
+            )
+            .map_err(map_sql_err)?;
+        if changed == 0 {
+            return Err(cal_core::Error::NotFound(format!(
+                "task list '{list_id}' not found"
+            )));
+        }
+        Ok(())
+    }
 }
 
 const TASK_SELECT: &str = "SELECT id, list_id, parent_id, title, description, status,
@@ -911,5 +939,32 @@ mod tests {
         let tasks = a.get_tasks(&list.id).await.unwrap();
         let sub = tasks.iter().find(|t| t.title == "Sub").unwrap();
         assert_eq!(sub.parent_id.as_deref(), Some(parent.id.as_str()));
+    }
+
+    #[tokio::test]
+    async fn rename_task_list_updates_the_row() {
+        let (a, list) = adapter_with_list();
+        a.rename_task_list(&list.id, "Renamed").await.unwrap();
+        let lists = a.list_task_lists().await.unwrap();
+        assert_eq!(lists.len(), 1);
+        assert_eq!(lists[0].name, "Renamed");
+    }
+
+    #[tokio::test]
+    async fn rename_task_list_rejects_empty_name() {
+        let (a, list) = adapter_with_list();
+        let err = a.rename_task_list(&list.id, "  ").await.unwrap_err();
+        assert!(matches!(err, cal_core::Error::InvalidInput(_)));
+        assert_eq!(a.list_task_lists().await.unwrap()[0].name, "Inbox");
+    }
+
+    #[tokio::test]
+    async fn rename_task_list_returns_not_found_for_unknown_id() {
+        let (a, _list) = adapter_with_list();
+        let err = a
+            .rename_task_list("does-not-exist", "X")
+            .await
+            .unwrap_err();
+        assert!(matches!(err, cal_core::Error::NotFound(_)));
     }
 }
