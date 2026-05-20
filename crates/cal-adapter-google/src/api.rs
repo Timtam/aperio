@@ -11,8 +11,9 @@
 
 use std::sync::Arc;
 
-use cal_core::{Calendar, Event};
+use cal_core::{Calendar, Event, NewEvent};
 use serde::de::DeserializeOwned;
+use serde::Serialize;
 use tokio::sync::Mutex;
 use tracing::warn;
 use url::Url;
@@ -20,7 +21,8 @@ use url::Url;
 use crate::auth::{self, TokenSet, GOOGLE_TOKEN_URL};
 use crate::error::{GoogleError, GoogleResult};
 use crate::mapping::{
-    map_calendar, map_event, CalendarListResponse, EventListResponse,
+    event_to_body, map_calendar, map_event, new_event_to_body,
+    CalendarListResponse, EventEntry, EventListResponse,
 };
 
 const API_BASE: &str = "https://www.googleapis.com/calendar/v3";
@@ -71,31 +73,99 @@ impl ApiState {
         &self,
         path_and_query: &str,
     ) -> GoogleResult<T> {
-        // First try with whatever access token we currently have.
-        let url = Url::parse(&format!("{}{}", self.api_base, path_and_query))
-            .map_err(|e| GoogleError::Config(format!("bad url: {e}")))?;
-        let access = self.tokens.lock().await.access_token.clone();
+        let url = self.build_url(path_and_query)?;
         let response = self
-            .http
-            .get(url.clone())
-            .bearer_auth(&access)
-            .send()
+            .send_with_refresh(|access| {
+                self.http.get(url.clone()).bearer_auth(access)
+            })
             .await?;
+        decode_json(response).await
+    }
+
+    /// POST a JSON body to `path`, return the decoded response.
+    /// Same 401-refresh-and-retry-once semantics as `get_json`.
+    pub async fn post_json<B: Serialize, T: DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &B,
+    ) -> GoogleResult<T> {
+        let url = self.build_url(path)?;
+        let json = serde_json::to_string(body)?;
+        let response = self
+            .send_with_refresh(|access| {
+                self.http
+                    .post(url.clone())
+                    .bearer_auth(access)
+                    .header("content-type", "application/json")
+                    .body(json.clone())
+            })
+            .await?;
+        decode_json(response).await
+    }
+
+    /// PATCH a JSON body. Same model as POST.
+    pub async fn patch_json<B: Serialize, T: DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &B,
+    ) -> GoogleResult<T> {
+        let url = self.build_url(path)?;
+        let json = serde_json::to_string(body)?;
+        let response = self
+            .send_with_refresh(|access| {
+                self.http
+                    .patch(url.clone())
+                    .bearer_auth(access)
+                    .header("content-type", "application/json")
+                    .body(json.clone())
+            })
+            .await?;
+        decode_json(response).await
+    }
+
+    /// DELETE with no body, no response payload. Returns Ok(()) on
+    /// any 2xx (including the typical 204 No Content).
+    pub async fn delete_request(&self, path: &str) -> GoogleResult<()> {
+        let url = self.build_url(path)?;
+        let response = self
+            .send_with_refresh(|access| {
+                self.http.delete(url.clone()).bearer_auth(access)
+            })
+            .await?;
+        let status = response.status();
+        if status.is_success() {
+            return Ok(());
+        }
+        let text = response.text().await.unwrap_or_default();
+        Err(GoogleError::Http {
+            status: status.as_u16(),
+            message: text.chars().take(300).collect(),
+        })
+    }
+
+    fn build_url(&self, path_and_query: &str) -> GoogleResult<Url> {
+        Url::parse(&format!("{}{}", self.api_base, path_and_query))
+            .map_err(|e| GoogleError::Config(format!("bad url: {e}")))
+    }
+
+    /// Common send-then-refresh-on-401 wrapper. Builds the request
+    /// twice (once with current access token, once with a refreshed
+    /// one) using a caller-provided closure. The closure receives
+    /// the bearer token to attach and returns a `RequestBuilder` —
+    /// keeping body construction in the caller so we don't have to
+    /// genericise over body types here.
+    async fn send_with_refresh<F>(&self, build: F) -> GoogleResult<reqwest::Response>
+    where
+        F: Fn(&str) -> reqwest::RequestBuilder,
+    {
+        let access = self.tokens.lock().await.access_token.clone();
+        let response = build(&access).send().await?;
         if response.status() == reqwest::StatusCode::UNAUTHORIZED {
-            // Refresh and retry exactly once. If the second attempt
-            // also bounces with 401 we propagate the error so the
-            // user sees an honest "reconnect required" prompt.
             self.refresh_access_token().await?;
             let new_access = self.tokens.lock().await.access_token.clone();
-            let retry = self
-                .http
-                .get(url)
-                .bearer_auth(&new_access)
-                .send()
-                .await?;
-            return decode_json(retry).await;
+            return Ok(build(&new_access).send().await?);
         }
-        decode_json(response).await
+        Ok(response)
     }
 
     /// Run the refresh-token grant and replace the in-memory token
@@ -212,6 +282,96 @@ pub async fn get_events(
         }
     }
     Ok(out)
+}
+
+/// `POST /calendars/{id}/events` — create a new event.
+pub async fn create_event(
+    state: &ApiState,
+    calendar_id: &str,
+    new: NewEvent,
+) -> GoogleResult<Event> {
+    let cal_enc = urlencoding(calendar_id);
+    let path = format!("/calendars/{cal_enc}/events");
+    let body = new_event_to_body(&new);
+    let entry: EventEntry = state.post_json(&path, &body).await?;
+    map_event(entry, calendar_id)?
+        .ok_or_else(|| GoogleError::Protocol("create returned cancelled event".into()))
+}
+
+/// `PATCH /calendars/{id}/events/{eventId}` — update an existing
+/// event. Google accepts a partial body, but we send the full
+/// user-visible state so the local copy and the server stay in
+/// step without diffing.
+pub async fn update_event(state: &ApiState, ev: &Event) -> GoogleResult<Event> {
+    let cal_enc = urlencoding(&ev.calendar_id);
+    let ev_enc = urlencoding(&ev.id);
+    let path = format!("/calendars/{cal_enc}/events/{ev_enc}");
+    let body = event_to_body(ev);
+    let entry: EventEntry = state.patch_json(&path, &body).await?;
+    map_event(entry, &ev.calendar_id)?.ok_or_else(|| {
+        GoogleError::Protocol("update returned cancelled event".into())
+    })
+}
+
+/// `DELETE /calendars/{id}/events/{eventId}` — delete an entire
+/// event row (or a single non-recurring instance).
+pub async fn delete_event(
+    state: &ApiState,
+    calendar_id: &str,
+    event_id: &str,
+) -> GoogleResult<()> {
+    let cal_enc = urlencoding(calendar_id);
+    let ev_enc = urlencoding(event_id);
+    let path = format!("/calendars/{cal_enc}/events/{ev_enc}");
+    state.delete_request(&path).await
+}
+
+/// Fetch the recurring master, append `occurrence` to its EXDATE
+/// list, PATCH back. Used for Aperio's "delete only this
+/// occurrence" flow on a recurring series.
+pub async fn add_event_exdate(
+    state: &ApiState,
+    calendar_id: &str,
+    event_id: &str,
+    occurrence: chrono::DateTime<chrono::Utc>,
+) -> GoogleResult<()> {
+    let cal_enc = urlencoding(calendar_id);
+    let ev_enc = urlencoding(event_id);
+    let path = format!("/calendars/{cal_enc}/events/{ev_enc}");
+    let entry: EventEntry = state.get_json(&path).await?;
+    let mut master = map_event(entry, calendar_id)?.ok_or_else(|| {
+        GoogleError::Protocol(
+            "cannot add EXDATE to a cancelled / missing master".into(),
+        )
+    })?;
+    // Append the new exception, keeping any existing ones. The
+    // RRULE itself is unchanged.
+    let mut rec = master.recurrence.unwrap_or_else(|| cal_core::EventRecurrence {
+        rrule: String::new(),
+        exceptions: Vec::new(),
+    });
+    rec.exceptions.push(occurrence);
+    master.recurrence = Some(rec);
+    let body = event_to_body(&master);
+    let _: EventEntry = state.patch_json(&path, &body).await?;
+    Ok(())
+}
+
+/// `PATCH /calendars/{id}` with `{ "summary": "..." }`. Google's
+/// calendar-rename endpoint; counterpart to CalDAV's PROPPATCH
+/// `displayname`.
+pub async fn rename_calendar(
+    state: &ApiState,
+    calendar_id: &str,
+    new_name: &str,
+) -> GoogleResult<()> {
+    let cal_enc = urlencoding(calendar_id);
+    let path = format!("/calendars/{cal_enc}");
+    let body = serde_json::json!({ "summary": new_name });
+    // We don't care about the response body; serde_json::Value is
+    // a fine generic catch-all for "decode whatever Google sent".
+    let _: serde_json::Value = state.patch_json(&path, &body).await?;
+    Ok(())
 }
 
 /// Percent-encode for URL query / path segment use. We do this
@@ -351,6 +511,116 @@ mod tests {
         // Refresh token wasn't returned by the refresh response — old
         // value must be retained.
         assert_eq!(current.refresh_token.as_deref(), Some("refresh-token"));
+    }
+
+    #[tokio::test]
+    async fn create_event_posts_json_and_maps_response() {
+        let mut server = mockito::Server::new_async().await;
+        let m = server
+            .mock("POST", "/calendars/primary/events")
+            .match_header("authorization", "Bearer initial-token")
+            .match_header("content-type", "application/json")
+            .match_body(mockito::Matcher::Regex("\"summary\":\"Standup\"".into()))
+            .with_status(200)
+            .with_body(
+                r##"{
+                  "id": "abc123",
+                  "summary": "Standup",
+                  "start": { "dateTime": "2026-05-25T10:00:00Z" },
+                  "end":   { "dateTime": "2026-05-25T10:30:00Z" }
+                }"##,
+            )
+            .create_async()
+            .await;
+
+        let state = fixture_state(&server.url());
+        let new = NewEvent {
+            title: "Standup".into(),
+            description: None,
+            location: None,
+            start: chrono::Utc.with_ymd_and_hms(2026, 5, 25, 10, 0, 0).unwrap(),
+            end: chrono::Utc.with_ymd_and_hms(2026, 5, 25, 10, 30, 0).unwrap(),
+            all_day: false,
+            recurrence: None,
+            color_label: None,
+            reminders: vec![],
+            sound: None,
+            attendees: vec![],
+        };
+        let ev = create_event(&state, "primary", new).await.unwrap();
+        assert_eq!(ev.id, "abc123");
+        assert_eq!(ev.title, "Standup");
+        m.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn delete_event_204_is_ok() {
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock("DELETE", "/calendars/primary/events/abc123")
+            .with_status(204)
+            .create_async()
+            .await;
+        let state = fixture_state(&server.url());
+        delete_event(&state, "primary", "abc123").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn rename_calendar_patches_summary() {
+        let mut server = mockito::Server::new_async().await;
+        let m = server
+            .mock("PATCH", "/calendars/primary")
+            .match_body(mockito::Matcher::Regex(
+                "\"summary\":\"Arbeit\"".into(),
+            ))
+            .with_status(200)
+            .with_body(r##"{"id":"primary","summary":"Arbeit"}"##)
+            .create_async()
+            .await;
+        let state = fixture_state(&server.url());
+        rename_calendar(&state, "primary", "Arbeit").await.unwrap();
+        m.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn add_event_exdate_fetches_patches_with_new_exception() {
+        let mut server = mockito::Server::new_async().await;
+        // GET the master.
+        let get_mock = server
+            .mock("GET", "/calendars/primary/events/master-1")
+            .with_status(200)
+            .with_body(
+                r##"{
+                  "id": "master-1",
+                  "summary": "Weekly",
+                  "start": { "dateTime": "2026-05-25T18:00:00Z" },
+                  "end":   { "dateTime": "2026-05-25T19:00:00Z" },
+                  "recurrence": ["RRULE:FREQ=WEEKLY"]
+                }"##,
+            )
+            .create_async()
+            .await;
+        // PATCH with the new EXDATE in the recurrence body.
+        let patch_mock = server
+            .mock("PATCH", "/calendars/primary/events/master-1")
+            .match_body(mockito::Matcher::Regex(
+                "EXDATE;VALUE=DATE-TIME:20260601T180000Z".into(),
+            ))
+            .with_status(200)
+            .with_body(r##"{
+                "id": "master-1",
+                "summary": "Weekly",
+                "start": { "dateTime": "2026-05-25T18:00:00Z" },
+                "end":   { "dateTime": "2026-05-25T19:00:00Z" }
+            }"##)
+            .create_async()
+            .await;
+
+        let state = fixture_state(&server.url());
+        let occ = chrono::Utc.with_ymd_and_hms(2026, 6, 1, 18, 0, 0).unwrap();
+        add_event_exdate(&state, "primary", "master-1", occ).await.unwrap();
+        get_mock.assert_async().await;
+        patch_mock.assert_async().await;
     }
 
     #[tokio::test]

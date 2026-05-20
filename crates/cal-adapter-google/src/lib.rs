@@ -178,24 +178,37 @@ impl CalendarFeature for GoogleAdapter {
 
     async fn create_event(
         &self,
-        _calendar_id: &str,
-        _event: NewEvent,
+        calendar_id: &str,
+        event: NewEvent,
     ) -> CoreResult<Event> {
-        Err(CoreError::Unsupported(
-            "Google create_event lands in Phase 6d.2".into(),
-        ))
+        api::create_event(&self.state, calendar_id, event)
+            .await
+            .map_err(to_core_error)
     }
 
-    async fn update_event(&self, _event: Event) -> CoreResult<Event> {
-        Err(CoreError::Unsupported(
-            "Google update_event lands in Phase 6d.2".into(),
-        ))
+    async fn update_event(&self, event: Event) -> CoreResult<Event> {
+        api::update_event(&self.state, &event)
+            .await
+            .map_err(to_core_error)
     }
 
-    async fn delete_event(&self, _event_id: &str) -> CoreResult<()> {
-        Err(CoreError::Unsupported(
-            "Google delete_event lands in Phase 6d.2".into(),
-        ))
+    async fn delete_event(&self, event_id: &str) -> CoreResult<()> {
+        // Aperio's command layer hands us the calendar_id alongside
+        // the event_id when it can, but the legacy
+        // `delete_event(event_id)` trait method doesn't carry it.
+        // We walk every calendar in the listing cache and try the
+        // delete against each — the first 2xx wins, the rest get
+        // their 404s swallowed. Mirrors how the CalDAV adapter
+        // copes with the same signature gap.
+        let cals = self.list_calendars().await?;
+        for cal in cals {
+            if api::delete_event(&self.state, &cal.id, event_id).await.is_ok() {
+                return Ok(());
+            }
+        }
+        Err(CoreError::NotFound(format!(
+            "event '{event_id}' not found in any calendar"
+        )))
     }
 
     async fn get_free_busy(
@@ -215,12 +228,38 @@ impl CalendarFeature for GoogleAdapter {
 
     async fn rename_calendar(
         &self,
-        _calendar_id: &str,
-        _new_name: &str,
+        calendar_id: &str,
+        new_name: &str,
     ) -> CoreResult<()> {
-        Err(CoreError::Unsupported(
-            "Google rename_calendar lands in Phase 6d.2".into(),
-        ))
+        api::rename_calendar(&self.state, calendar_id, new_name)
+            .await
+            .map_err(to_core_error)?;
+        // The cached listing still has the old summary — drop it so
+        // the next list_calendars walks Google again and surfaces
+        // the new name.
+        *self.calendars_cache.lock().await = None;
+        Ok(())
+    }
+
+    async fn add_event_exdate(
+        &self,
+        event_id: &str,
+        occurrence: chrono::DateTime<chrono::Utc>,
+    ) -> CoreResult<()> {
+        // Same calendar-id-walking pattern as delete_event — the
+        // trait method doesn't carry the calendar id.
+        let cals = self.list_calendars().await?;
+        for cal in cals {
+            if api::add_event_exdate(&self.state, &cal.id, event_id, occurrence)
+                .await
+                .is_ok()
+            {
+                return Ok(());
+            }
+        }
+        Err(CoreError::NotFound(format!(
+            "event '{event_id}' not found in any calendar"
+        )))
     }
 }
 
