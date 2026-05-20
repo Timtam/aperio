@@ -1138,8 +1138,9 @@ button[aria-disabled='true'] {
 /*
  * Multi-day all-day events repeat in every cell they cover. A subtle
  * inset border on the leading edge hints that the chip is part of a
- * span — a more elaborate continuous bar (B) can replace this later
- * without changing the markup.
+ * span — visible only on the per-day chips outside the all-day lane,
+ * which happens when the lane is empty for a given event (single-day
+ * timed across midnight, hypothetical future cases).
  */
 .week-event--multiday {
   border-left: 3px solid var(--color-accent-fg);
@@ -1153,6 +1154,132 @@ button[aria-disabled='true'] {
   opacity: 0.7;
   font-variant-numeric: tabular-nums;
   font-size: 0.9em;
+}
+
+/*
+ * `--in-lane` chips: the visible representation lives in the all-day
+ * lane above, but the per-day option stays in the listbox so screen
+ * readers can navigate to the event on every day it covers and the
+ * `aria-activedescendant` target resolves. Standard "visually hidden,
+ * still focusable" pattern.
+ */
+.week-event--in-lane,
+.month-event--in-lane,
+.month-event--in-lane.month-event--overflow {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+/*
+ * In WeekView the chip lives inside an <li> in a flex-column <ul>.
+ * Even with the chip absolutely positioned, the empty <li> would
+ * still claim a flex slot and pull in the parent's `gap: 2px`,
+ * leaving dead vertical space in each affected cell. `display:
+ * contents` removes the wrapper's box without removing it from the
+ * accessibility tree, so screen-reader navigation still finds the
+ * chip and sighted users see no holes.
+ */
+.week-grid__events > li:has(.week-event--in-lane) {
+  display: contents;
+}
+
+/* ── All-day lane (variant B) ───────────────────────────────────────────── */
+
+/*
+ * Week view all-day lane. Sits between the column headers and the day
+ * cells, mirrors the body's 7-column layout, and stacks overlapping
+ * events into discrete lane rows (computed in `buildAllDayBars`).
+ *
+ * The whole strip is decorative (`aria-hidden`) — semantic
+ * representation of the events lives in the listbox cells below as
+ * clipped `.week-event--in-lane` options, so screen reader users
+ * navigate the event per-day just like before.
+ */
+.week-grid__lane {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  grid-template-rows: repeat(var(--lane-rows, 1), minmax(20px, auto));
+  gap: 2px;
+  padding: 2px;
+  background: var(--color-bg-elevated);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.week-allday-bar,
+.month-allday-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--event-color, var(--color-accent));
+  color: var(--color-accent-fg);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  padding: 2px var(--space-1);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.week-allday-bar__title,
+.month-allday-bar__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.week-allday-bar__chevron,
+.month-allday-bar__chevron {
+  flex: 0 0 auto;
+  opacity: 0.7;
+  font-weight: 700;
+}
+
+.week-allday-bar--focused,
+.month-allday-bar--focused {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: 1px;
+}
+
+/*
+ * Continues-before/after: flatten the leading/trailing edge so the
+ * bar reads as "this continues" rather than "this is bounded by the
+ * visible week".
+ */
+.week-allday-bar--continues-before,
+.month-allday-bar--continues-before {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  margin-left: -2px;
+}
+
+.week-allday-bar--continues-after,
+.month-allday-bar--continues-after {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  margin-right: -2px;
+}
+
+/*
+ * Month view per-row lane: same grid layout as the row it precedes
+ * (40 px KW column + 7 day columns), only fills the day columns.
+ */
+.month-grid__lane {
+  display: grid;
+  grid-template-columns: 40px repeat(7, 1fr);
+  grid-template-rows: repeat(var(--lane-rows, 1), minmax(16px, auto));
+  gap: 2px;
+  padding: 2px 0;
+  background: color-mix(in srgb, var(--color-bg-elevated) 70%, transparent);
+  flex: 0 0 auto;
 }
 
 /* ── Month view ─────────────────────────────────────────────────────────── */

@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useId, useMemo, useState } from 'react';
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useState,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   addDays,
@@ -16,7 +23,11 @@ import { useEventTabNavigation } from '../../hooks/useEventTabNavigation';
 import { localDateKey } from '../../intl/dateKey';
 import { useDateFormat } from '../../intl/dateFormat';
 import { labelsLookup, resolveEventColor } from '../../intl/eventColor';
-import { daysCoveredKeys, multiDayInfo } from '../../intl/multiDay';
+import {
+  buildAllDayBars,
+  daysCoveredKeys,
+  multiDayInfo,
+} from '../../intl/multiDay';
 import { useCalendarStore } from '../../state/CalendarStore';
 import { useDialogState } from '../../state/DialogState';
 import { useEvents } from '../../state/useEvents';
@@ -100,6 +111,15 @@ export function MonthView() {
     setDayIndex: (next) => setAnchor(cells[next]),
     onDayChange: dayChangeAnnouncer,
   });
+
+  // Same lane model as WeekView, but applied per week-row of the
+  // month — the bar can't run across a Sunday/Monday break, so we
+  // call buildAllDayBars once per 7-day slice. See WeekView for the
+  // SR/visual split.
+  const focusedEvId =
+    eventIndex !== null
+      ? (buckets[focusIndex]?.events[eventIndex]?.id ?? null)
+      : null;
 
   const [confirmTarget, setConfirmTarget] = useState<CalendarEvent | null>(
     null,
@@ -294,8 +314,84 @@ export function MonthView() {
 
         {Array.from({ length: rowCount }, (_, row) => {
           const rowStart = cells[row * 7];
+          const rowCells = cells.slice(row * 7, row * 7 + 7);
+          const rowBars = buildAllDayBars(events, rowCells);
+          const laneRows = rowBars.reduce(
+            (m, b) => Math.max(m, b.lane + 1),
+            0,
+          );
           return (
-            <div role="row" key={rowStart.toISOString()} className="month-grid__row">
+            <Fragment key={rowStart.toISOString()}>
+              {rowBars.length > 0 && (
+                <div
+                  className="month-grid__lane"
+                  aria-hidden="true"
+                  style={
+                    { '--lane-rows': laneRows } as React.CSSProperties
+                  }
+                >
+                  {rowBars.map((bar) => {
+                    const color = resolveEventColor(
+                      bar.event,
+                      calendarById,
+                      labelById,
+                    );
+                    const isBarFocused =
+                      focusedEvId === bar.event.id;
+                    // The lane shares the row's 8-column layout
+                    // (40 px KW + 7 day columns), so day columns
+                    // start at grid index 2.
+                    const style: React.CSSProperties &
+                      Record<string, string> = {
+                      gridColumn: `${bar.startCol + 1} / ${bar.endCol + 2}`,
+                      gridRow: String(bar.lane + 1),
+                    };
+                    if (color.hex)
+                      style['--event-color'] = color.hex;
+                    return (
+                      <div
+                        key={bar.event.id}
+                        className={
+                          'month-allday-bar' +
+                          (isBarFocused
+                            ? ' month-allday-bar--focused'
+                            : '') +
+                          (bar.continuesBefore
+                            ? ' month-allday-bar--continues-before'
+                            : '') +
+                          (bar.continuesAfter
+                            ? ' month-allday-bar--continues-after'
+                            : '')
+                        }
+                        style={style}
+                        onClick={() => openEventDialog(bar.event)}
+                        title={bar.event.title}
+                      >
+                        {bar.continuesBefore && (
+                          <span
+                            className="month-allday-bar__chevron"
+                            aria-hidden="true"
+                          >
+                            ‹
+                          </span>
+                        )}
+                        <span className="month-allday-bar__title">
+                          {bar.event.title}
+                        </span>
+                        {bar.continuesAfter && (
+                          <span
+                            className="month-allday-bar__chevron"
+                            aria-hidden="true"
+                          >
+                            ›
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              <div role="row" className="month-grid__row">
               <div role="rowheader" className="month-grid__kw">
                 {fmt.isoWeek(rowStart)}
               </div>
@@ -381,7 +477,8 @@ export function MonthView() {
                               ? ' month-event--focused'
                               : '') +
                             (hidden ? ' month-event--overflow' : '') +
-                            (span ? ' month-event--multiday' : '')
+                            (span ? ' month-event--multiday' : '') +
+                            (ev.all_day ? ' month-event--in-lane' : '')
                           }
                           aria-label={aria}
                           aria-selected={isFocusedEvent}
@@ -417,7 +514,8 @@ export function MonthView() {
                   </div>
                 );
               })}
-            </div>
+              </div>
+            </Fragment>
           );
         })}
       </div>

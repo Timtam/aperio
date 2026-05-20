@@ -2,10 +2,19 @@ import { describe, expect, it } from 'vitest';
 
 import type { CalendarEvent } from '../api/types';
 import {
+  buildAllDayBars,
   daysCoveredKeys,
   eventCoversDay,
   multiDayInfo,
 } from './multiDay';
+
+function weekStartingMonday(year: number, month: number, day: number): Date[] {
+  const out: Date[] = [];
+  for (let i = 0; i < 7; i++) {
+    out.push(new Date(year, month, day + i));
+  }
+  return out;
+}
 
 function mkEvent(over: Partial<CalendarEvent>): CalendarEvent {
   return {
@@ -115,5 +124,91 @@ describe('eventCoversDay', () => {
     expect(eventCoversDay(ev, new Date(2026, 4, 25))).toBe(true);
     expect(eventCoversDay(ev, new Date(2026, 5, 2))).toBe(true);
     expect(eventCoversDay(ev, new Date(2026, 5, 3))).toBe(false);
+  });
+});
+
+describe('buildAllDayBars', () => {
+  // Mon 2026-05-18 .. Sun 2026-05-24.
+  const week = weekStartingMonday(2026, 4, 18);
+
+  it('returns no bars when no all-day events overlap the window', () => {
+    const timed = mkEvent({
+      all_day: false,
+      start: '2026-05-20T10:00:00Z',
+      end: '2026-05-20T11:00:00Z',
+    });
+    expect(buildAllDayBars([timed], week)).toEqual([]);
+  });
+
+  it('spans a single-day all-day event over one column', () => {
+    const ev = mkEvent({
+      start: '2026-05-20T00:00:00Z',
+      end: '2026-05-21T00:00:00Z',
+    });
+    const bars = buildAllDayBars([ev], week);
+    expect(bars).toHaveLength(1);
+    expect(bars[0].startCol).toBe(3); // Wed
+    expect(bars[0].endCol).toBe(3);
+    expect(bars[0].lane).toBe(0);
+    expect(bars[0].continuesBefore).toBe(false);
+    expect(bars[0].continuesAfter).toBe(false);
+  });
+
+  it('clips a vacation that runs past both window edges', () => {
+    // 2026-05-18 sits in column 1 (Mon); the vacation began before the
+    // visible week and runs into the next one.
+    const ev = mkEvent({
+      start: '2026-05-15T00:00:00Z',
+      end: '2026-05-30T00:00:00Z',
+    });
+    const bars = buildAllDayBars([ev], week);
+    expect(bars).toHaveLength(1);
+    expect(bars[0].startCol).toBe(1);
+    expect(bars[0].endCol).toBe(7);
+    expect(bars[0].continuesBefore).toBe(true);
+    expect(bars[0].continuesAfter).toBe(true);
+  });
+
+  it('packs three overlapping all-day events into three lanes', () => {
+    const a = mkEvent({
+      id: 'a',
+      start: '2026-05-18T00:00:00Z',
+      end: '2026-05-21T00:00:00Z', // Mon–Wed
+    });
+    const b = mkEvent({
+      id: 'b',
+      start: '2026-05-19T00:00:00Z',
+      end: '2026-05-22T00:00:00Z', // Tue–Thu
+    });
+    const c = mkEvent({
+      id: 'c',
+      start: '2026-05-20T00:00:00Z',
+      end: '2026-05-23T00:00:00Z', // Wed–Fri
+    });
+    const bars = buildAllDayBars([a, b, c], week);
+    expect(bars.map((x) => x.lane).sort()).toEqual([0, 1, 2]);
+    // Leftmost (a) gets the bottom lane after the sort.
+    const aBar = bars.find((x) => x.event.id === 'a')!;
+    expect(aBar.lane).toBe(0);
+  });
+
+  it('reuses a lane when the next bar starts after the previous ends', () => {
+    const earlyWeek = mkEvent({
+      id: 'early',
+      start: '2026-05-18T00:00:00Z',
+      end: '2026-05-20T00:00:00Z', // Mon–Tue
+    });
+    const lateWeek = mkEvent({
+      id: 'late',
+      start: '2026-05-21T00:00:00Z',
+      end: '2026-05-23T00:00:00Z', // Thu–Fri
+    });
+    const bars = buildAllDayBars([earlyWeek, lateWeek], week);
+    // Both can share lane 0 — they don't overlap.
+    expect(bars.every((b) => b.lane === 0)).toBe(true);
+  });
+
+  it('returns an empty array for an empty days window', () => {
+    expect(buildAllDayBars([mkEvent({})], [])).toEqual([]);
   });
 });

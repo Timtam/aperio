@@ -8,7 +8,11 @@ import { useEventTabNavigation } from '../../hooks/useEventTabNavigation';
 import { localDateKey } from '../../intl/dateKey';
 import { useDateFormat } from '../../intl/dateFormat';
 import { labelsLookup, resolveEventColor } from '../../intl/eventColor';
-import { daysCoveredKeys, multiDayInfo } from '../../intl/multiDay';
+import {
+  buildAllDayBars,
+  daysCoveredKeys,
+  multiDayInfo,
+} from '../../intl/multiDay';
 import { useCalendarStore } from '../../state/CalendarStore';
 import { useDialogState } from '../../state/DialogState';
 import { useEvents } from '../../state/useEvents';
@@ -79,6 +83,18 @@ export function WeekView() {
     [events, days],
   );
 
+  // Build the all-day lane bars over the week. The lane is the
+  // visual half of variant B: a contiguous strip above the day cells
+  // where each multi-day all-day event spans the columns it covers.
+  // SR users still find the underlying event via the per-day chips
+  // inside the cells (those carry the listbox options) — the lane
+  // here is `aria-hidden` and exists only for sighted users.
+  const allDayBars = useMemo(
+    () => buildAllDayBars(events, days),
+    [events, days],
+  );
+  const laneRows = allDayBars.reduce((m, b) => Math.max(m, b.lane + 1), 0);
+
   const focusIndex = useMemo(() => {
     const i = days.findIndex((d) => isSameDay(d, anchor));
     return i >= 0 ? i : 0;
@@ -127,6 +143,15 @@ export function WeekView() {
     setDayIndex: (next) => setAnchor(days[next]),
     onDayChange: dayChangeAnnouncer,
   });
+
+  // The currently focused event (if any) drives the lane bar's
+  // focused-state styling: when a per-day chip of a multi-day event
+  // is the active descendant, the bar above lights up — keeps visual
+  // focus on the thing the user actually sees.
+  const focusedEvId =
+    eventIndex !== null
+      ? (buckets[focusIndex]?.events[eventIndex]?.id ?? null)
+      : null;
 
   // Delete confirmation. Non-recurring events go through the
   // straight Confirm dialog; recurring occurrences need a scope
@@ -339,6 +364,70 @@ export function WeekView() {
           ))}
         </div>
 
+        {allDayBars.length > 0 && (
+          <div
+            className="week-grid__lane"
+            aria-hidden="true"
+            style={
+              { '--lane-rows': laneRows } as React.CSSProperties
+            }
+          >
+            {allDayBars.map((bar) => {
+              const color = resolveEventColor(
+                bar.event,
+                calendarById,
+                labelById,
+              );
+              const isBarFocused = focusedEvId === bar.event.id;
+              const span = multiDayInfo(bar.event, new Date(bar.event.start));
+              const style: React.CSSProperties & Record<string, string> = {
+                gridColumn: `${bar.startCol} / ${bar.endCol + 1}`,
+                gridRow: String(bar.lane + 1),
+              };
+              if (color.hex) style['--event-color'] = color.hex;
+              return (
+                <div
+                  key={bar.event.id}
+                  className={
+                    'week-allday-bar' +
+                    (isBarFocused ? ' week-allday-bar--focused' : '') +
+                    (bar.continuesBefore
+                      ? ' week-allday-bar--continues-before'
+                      : '') +
+                    (bar.continuesAfter
+                      ? ' week-allday-bar--continues-after'
+                      : '')
+                  }
+                  style={style}
+                  // Sighted-only affordance: clicking the bar opens
+                  // the event editor. SR users reach the same editor
+                  // via Enter on the per-day chip below.
+                  onClick={() => openEventDialog(bar.event)}
+                  title={
+                    span
+                      ? `${bar.event.title} (${span.dayIndex}/${span.totalDays})`
+                      : bar.event.title
+                  }
+                >
+                  {bar.continuesBefore && (
+                    <span className="week-allday-bar__chevron" aria-hidden="true">
+                      ‹
+                    </span>
+                  )}
+                  <span className="week-allday-bar__title">
+                    {bar.event.title}
+                  </span>
+                  {bar.continuesAfter && (
+                    <span className="week-allday-bar__chevron" aria-hidden="true">
+                      ›
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         <div role="row" className="week-grid__body">
           {days.map((day, i) => {
             const dayEvents = eventsByDay.get(keyOf(day)) ?? [];
@@ -390,6 +479,12 @@ export function WeekView() {
                       : ariaBase;
                     const isFocusedEvent =
                       focused && eventIndex === evIdx;
+                    // All-day events are visualised by the lane above;
+                    // their per-day chip stays in the listbox as the
+                    // aria-activedescendant target but is clipped out
+                    // of the visual flow so the cell only shows timed
+                    // events. The bar's focused state is driven from
+                    // here via `focusedEvId`.
                     return (
                       <li key={ev.id} role="listitem">
                         <span
@@ -397,7 +492,8 @@ export function WeekView() {
                           className={
                             'week-event' +
                             (isFocusedEvent ? ' week-event--focused' : '') +
-                            (span ? ' week-event--multiday' : '')
+                            (span ? ' week-event--multiday' : '') +
+                            (ev.all_day ? ' week-event--in-lane' : '')
                           }
                           aria-label={aria}
                           aria-selected={isFocusedEvent}
