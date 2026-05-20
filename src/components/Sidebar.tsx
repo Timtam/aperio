@@ -1,4 +1,9 @@
-import { useCallback, useState, type KeyboardEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useState,
+  type KeyboardEvent,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useAnnouncer } from '../a11y/Announcer';
@@ -59,6 +64,32 @@ export function Sidebar() {
   } | null>(null);
   const [draft, setDraft] = useState('');
 
+  // After commit/cancel via keyboard (Enter / Esc) or via the
+  // explicit ✓ / ✕ buttons, focus should land back on the row's
+  // edit button — otherwise React unmounts the input and focus
+  // snaps to <body>, forcing the user to Tab all the way back into
+  // the sidebar. For exits via blur (user clicked somewhere else),
+  // we leave focus alone since the click already chose the
+  // destination.
+  const [restoreTarget, setRestoreTarget] = useState<{
+    kind: ContainerKind;
+    id: string;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!restoreTarget) return;
+    // CSS.escape protects against ids that contain special chars
+    // (CalDAV calendar URLs end with `/`, iCal ids contain `:`).
+    const sel =
+      `[data-rename-target-id="${CSS.escape(restoreTarget.id)}"]` +
+      `[data-rename-target-kind="${restoreTarget.kind}"]`;
+    const btn = document.querySelector(sel);
+    if (btn instanceof HTMLElement) {
+      btn.focus({ preventScroll: true });
+    }
+    setRestoreTarget(null);
+  }, [restoreTarget]);
+
   const startEdit = useCallback(
     (kind: ContainerKind, id: string, currentName: string) => {
       setEditing({ kind, id });
@@ -67,74 +98,78 @@ export function Sidebar() {
     [],
   );
 
-  const cancelEdit = useCallback(() => {
-    setEditing(null);
-    setDraft('');
-  }, []);
-
-  const commitEdit = useCallback(async () => {
-    if (!editing) return;
-    const { kind, id } = editing;
-    const trimmed = draft.trim();
-    try {
-      if (trimmed === '') {
-        // Empty input ⇒ revert: drop the local override. We don't
-        // attempt to rename at the source here because "revert" is a
-        // local-only concept — the source already has its source
-        // name, which is what we're going back to.
-        await clearContainerNameOverride(id, kind);
-        announce(t('sidebar.renameCleared'));
-      } else {
-        // Non-empty input ⇒ canonical rename. Backend orchestrates
-        // adapter push vs. local override based on capability and
-        // returns which path it took, so the SR announcement can say
-        // whether the rename reached the server.
-        const outcome = await renameContainer(id, kind, trimmed);
-        announce(
-          t(
-            outcome.synced_to_source
-              ? 'sidebar.renamedSynced'
-              : 'sidebar.renamedLocalOnly',
-            { name: trimmed },
-          ),
-        );
-      }
-      // Pull fresh container lists so the new name surfaces in the
-      // sidebar (and in every downstream consumer of the store).
-      if (kind === 'calendar') {
-        await refreshCalendars();
-      } else {
-        await refreshTaskLists();
-      }
-    } catch (err) {
-      if (isCommandError(err)) {
-        announce(`${err.code}: ${err.message}`);
-      } else {
-        announce(String(err));
-      }
-    } finally {
+  const cancelEdit = useCallback(
+    (restoreFocus: boolean) => {
+      if (!editing) return;
+      const target = restoreFocus ? { ...editing } : null;
       setEditing(null);
       setDraft('');
-    }
-  }, [
-    editing,
-    draft,
-    refreshCalendars,
-    refreshTaskLists,
-    announce,
-    t,
-  ]);
+      if (target) setRestoreTarget(target);
+    },
+    [editing],
+  );
+
+  const commitEdit = useCallback(
+    async (restoreFocus: boolean) => {
+      if (!editing) return;
+      const { kind, id } = editing;
+      const trimmed = draft.trim();
+      const target = restoreFocus ? { kind, id } : null;
+      try {
+        if (trimmed === '') {
+          // Empty input ⇒ revert: drop the local override. We don't
+          // attempt to rename at the source here because "revert" is a
+          // local-only concept — the source already has its source
+          // name, which is what we're going back to.
+          await clearContainerNameOverride(id, kind);
+          announce(t('sidebar.renameCleared'));
+        } else {
+          // Non-empty input ⇒ canonical rename. Backend orchestrates
+          // adapter push vs. local override based on capability and
+          // returns which path it took, so the SR announcement can say
+          // whether the rename reached the server.
+          const outcome = await renameContainer(id, kind, trimmed);
+          announce(
+            t(
+              outcome.synced_to_source
+                ? 'sidebar.renamedSynced'
+                : 'sidebar.renamedLocalOnly',
+              { name: trimmed },
+            ),
+          );
+        }
+        // Pull fresh container lists so the new name surfaces in the
+        // sidebar (and in every downstream consumer of the store).
+        if (kind === 'calendar') {
+          await refreshCalendars();
+        } else {
+          await refreshTaskLists();
+        }
+      } catch (err) {
+        if (isCommandError(err)) {
+          announce(`${err.code}: ${err.message}`);
+        } else {
+          announce(String(err));
+        }
+      } finally {
+        setEditing(null);
+        setDraft('');
+        if (target) setRestoreTarget(target);
+      }
+    },
+    [editing, draft, refreshCalendars, refreshTaskLists, announce, t],
+  );
 
   const onEditKey = useCallback(
     (e: KeyboardEvent<HTMLInputElement>) => {
       if (e.key === 'Enter') {
         e.preventDefault();
-        void commitEdit();
+        void commitEdit(true);
         return;
       }
       if (e.key === 'Escape') {
         e.preventDefault();
-        cancelEdit();
+        cancelEdit(true);
         return;
       }
     },
@@ -233,6 +268,8 @@ export function Sidebar() {
                     <button
                       type="button"
                       className="sidebar__edit"
+                      data-rename-target-id={cal.id}
+                      data-rename-target-kind="calendar"
                       onClick={() => startEdit('calendar', cal.id, cal.name)}
                       aria-label={t('sidebar.renameButton', {
                         name: cal.name,
@@ -303,6 +340,8 @@ export function Sidebar() {
                     <button
                       type="button"
                       className="sidebar__edit"
+                      data-rename-target-id={list.id}
+                      data-rename-target-kind="task_list"
                       onClick={() =>
                         startEdit('task_list', list.id, list.name)
                       }
@@ -353,6 +392,11 @@ export function Sidebar() {
  * typing immediately; Enter / Escape are handled by the caller. The
  * accompanying hint text explains the empty-value-clears-override
  * semantics inline rather than burying it in a tooltip.
+ *
+ * The `restoreFocus` argument that `onCommit` / `onCancel` receive
+ * lets the caller distinguish keyboard / button exits (focus should
+ * jump back to the row's edit button) from blur exits (a click
+ * already chose where focus lands; don't fight it).
  */
 function RenameField({
   name: _name,
@@ -367,8 +411,8 @@ function RenameField({
   name: string;
   value: string;
   onChange: (v: string) => void;
-  onCommit: () => void;
-  onCancel: () => void;
+  onCommit: (restoreFocus: boolean) => void;
+  onCancel: (restoreFocus: boolean) => void;
   onKeyDown: (e: KeyboardEvent<HTMLInputElement>) => void;
   ariaLabel: string;
   hint: string;
@@ -380,7 +424,8 @@ function RenameField({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={onKeyDown}
-        onBlur={onCommit}
+        // Blur exits: don't override the focus the user just chose.
+        onBlur={() => onCommit(false)}
         aria-label={ariaLabel}
         autoFocus
         className="sidebar__rename-input"
@@ -390,12 +435,15 @@ function RenameField({
       </span>
       {/* Both buttons are also reachable via Enter / Escape; they
           exist here for pointer users and as a visible cue that the
-          row is in a special mode. */}
+          row is in a special mode. onMouseDown.preventDefault() stops
+          the input from blurring first — otherwise the blur handler
+          would commit before the button's onClick fires, and our
+          restoreFocus flag wouldn't take effect. */}
       <button
         type="button"
         className="sidebar__rename-action"
         onMouseDown={(e) => e.preventDefault()}
-        onClick={onCommit}
+        onClick={() => onCommit(true)}
         aria-label={ariaLabel}
       >
         ✓
@@ -404,7 +452,7 @@ function RenameField({
         type="button"
         className="sidebar__rename-action"
         onMouseDown={(e) => e.preventDefault()}
-        onClick={onCancel}
+        onClick={() => onCancel(true)}
         aria-label={ariaLabel}
       >
         ✕
