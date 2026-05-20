@@ -6,7 +6,8 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use tauri::State;
 
-use super::CommandResult;
+use super::{CommandError, CommandResult};
+use crate::registry::{AdapterRegistry, LOCAL_ID};
 use crate::reminders::SchedulerHandle;
 
 /// Frontend-supplied payload for creating a local calendar.
@@ -17,8 +18,23 @@ pub struct CreateCalendarRequest {
 }
 
 #[tauri::command]
-pub async fn list_calendars(adapter: State<'_, LocalAdapter>) -> CommandResult<Vec<Calendar>> {
-    Ok(adapter.list_calendars().await?)
+pub async fn list_calendars(
+    adapter: State<'_, LocalAdapter>,
+    registry: State<'_, AdapterRegistry>,
+) -> CommandResult<Vec<Calendar>> {
+    // Local first so the implicit "local" account stays at the top
+    // of the user's calendar list. Each local calendar id is
+    // pre-registered in the route map so the write-path commands
+    // can recognise it without falling back to the legacy "assume
+    // local" branch.
+    let local = adapter.list_calendars().await?;
+    for c in &local {
+        registry.note_calendar_route(&c.id, LOCAL_ID);
+    }
+    let mut external = registry.list_external_calendars().await;
+    let mut out = local;
+    out.append(&mut external);
+    Ok(out)
 }
 
 #[tauri::command]
@@ -47,10 +63,22 @@ pub struct EventRangeRequest {
 #[tauri::command]
 pub async fn get_events(
     adapter: State<'_, LocalAdapter>,
+    registry: State<'_, AdapterRegistry>,
     request: EventRangeRequest,
 ) -> CommandResult<Vec<Event>> {
     let range = DateRange::new(request.start, request.end);
-    Ok(adapter.get_events(&request.calendar_id, range).await?)
+    let account =
+        registry.account_for_calendar(&request.calendar_id).unwrap_or_else(|| LOCAL_ID.to_string());
+    if account == LOCAL_ID {
+        return Ok(adapter.get_events(&request.calendar_id, range).await?);
+    }
+    let Some(ext) = registry.calendar_adapter(&account) else {
+        return Err(CommandError {
+            code: "not_found",
+            message: format!("calendar '{}' is not routable", request.calendar_id),
+        });
+    };
+    Ok(ext.get_events(&request.calendar_id, range).await?)
 }
 
 #[derive(Debug, Deserialize)]
@@ -63,12 +91,25 @@ pub struct CreateEventRequest {
 #[tauri::command]
 pub async fn create_event(
     adapter: State<'_, LocalAdapter>,
+    registry: State<'_, AdapterRegistry>,
     scheduler: State<'_, SchedulerHandle>,
     request: CreateEventRequest,
 ) -> CommandResult<Event> {
-    let event = adapter
-        .create_event(&request.calendar_id, request.event)
-        .await?;
+    let account =
+        registry.account_for_calendar(&request.calendar_id).unwrap_or_else(|| LOCAL_ID.to_string());
+    let event = if account == LOCAL_ID {
+        adapter
+            .create_event(&request.calendar_id, request.event)
+            .await?
+    } else {
+        let Some(ext) = registry.calendar_adapter(&account) else {
+            return Err(CommandError {
+                code: "not_found",
+                message: format!("calendar '{}' is not routable", request.calendar_id),
+            });
+        };
+        ext.create_event(&request.calendar_id, request.event).await?
+    };
     scheduler.invalidate();
     Ok(event)
 }
@@ -76,21 +117,54 @@ pub async fn create_event(
 #[tauri::command]
 pub async fn update_event(
     adapter: State<'_, LocalAdapter>,
+    registry: State<'_, AdapterRegistry>,
     scheduler: State<'_, SchedulerHandle>,
     event: Event,
 ) -> CommandResult<Event> {
-    let event = adapter.update_event(event).await?;
+    let account =
+        registry.account_for_calendar(&event.calendar_id).unwrap_or_else(|| LOCAL_ID.to_string());
+    let updated = if account == LOCAL_ID {
+        adapter.update_event(event).await?
+    } else {
+        let Some(ext) = registry.calendar_adapter(&account) else {
+            return Err(CommandError {
+                code: "not_found",
+                message: format!("calendar '{}' is not routable", event.calendar_id),
+            });
+        };
+        ext.update_event(event).await?
+    };
     scheduler.invalidate();
-    Ok(event)
+    Ok(updated)
 }
 
 #[tauri::command]
 pub async fn delete_event(
     adapter: State<'_, LocalAdapter>,
+    registry: State<'_, AdapterRegistry>,
     scheduler: State<'_, SchedulerHandle>,
     id: String,
+    calendar_id: Option<String>,
 ) -> CommandResult<()> {
-    adapter.delete_event(&id).await?;
+    // The frontend now passes the parent calendar_id so the registry
+    // can route the delete to the right adapter. Older callers
+    // (pre-6b.4) that only sent `id` are still served by the local
+    // adapter — its own data model can locate the row by uid alone.
+    let account = calendar_id
+        .as_deref()
+        .and_then(|cid| registry.account_for_calendar(cid))
+        .unwrap_or_else(|| LOCAL_ID.to_string());
+    if account == LOCAL_ID {
+        adapter.delete_event(&id).await?;
+    } else {
+        let Some(ext) = registry.calendar_adapter(&account) else {
+            return Err(CommandError {
+                code: "not_found",
+                message: format!("account '{account}' is not routable"),
+            });
+        };
+        ext.delete_event(&id).await?;
+    }
     scheduler.invalidate();
     Ok(())
 }

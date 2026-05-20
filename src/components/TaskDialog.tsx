@@ -180,7 +180,10 @@ export function TaskDialog({
     setError(null);
     setSubmitting(true);
     try {
-      await invoke<void>('delete_task', { id: task.id });
+      await invoke<void>('delete_task', {
+        id: task.id,
+        listId: task.list_id,
+      });
       announce(t('dialogs.task.deleted', { title: task.title }));
       onClose();
     } catch (err) {

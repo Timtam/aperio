@@ -259,7 +259,7 @@ export function EventDialog({
           return;
         }
       }
-      await deleteEventById(seriesId);
+      await deleteEventById(seriesId, event.calendar_id);
       announce(t('dialogs.event.deleted', { title: event.title }));
       onClose();
     } catch (err) {

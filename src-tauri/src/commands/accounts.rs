@@ -5,6 +5,7 @@ use tauri::State;
 use super::{CommandError, CommandResult};
 use crate::accounts::{Account, AccountsError, AccountsRepo, AdapterKind};
 use crate::db::DbHandle;
+use crate::registry::AdapterRegistry;
 use crate::secrets;
 
 #[tauri::command]
@@ -34,13 +35,19 @@ fn default_config_json() -> String {
 #[tauri::command]
 pub async fn create_account(
     db: State<'_, DbHandle>,
+    registry: State<'_, AdapterRegistry>,
     request: CreateAccountRequest,
 ) -> CommandResult<Account> {
-    // Phase 6a only allows new local accounts; the other adapter kinds
-    // exist in the type but their construction lives behind feature
-    // work that hasn't landed yet. We reject them here so the frontend
-    // can't open a half-broken account that survives a restart.
-    if request.adapter_kind != AdapterKind::Local {
+    // Local accounts work end-to-end through the existing
+    // LocalAdapter. External kinds need:
+    //   1. The keychain to already hold their secret (the UI in
+    //      6b.5 stores it before calling this command).
+    //   2. The registry to accept the freshly persisted account
+    //      so reads/writes are routable without an app restart.
+    // We persist the row first, then register; failed registration
+    // is downgraded to a warning so the user can fix the
+    // credentials later without losing the row.
+    if !matches!(request.adapter_kind, AdapterKind::Local | AdapterKind::Caldav) {
         return Err(CommandError {
             code: "unsupported",
             message: format!(
@@ -51,21 +58,33 @@ pub async fn create_account(
     }
     let shared = db.shared();
     let repo = AccountsRepo::new(&shared);
-    Ok(repo.create(
+    let created = repo.create(
         request.adapter_kind,
         request.display_name.trim(),
         &request.config_json,
-    )?)
+    )?;
+    if request.adapter_kind != AdapterKind::Local {
+        if let Err(err) = registry.register(&created) {
+            tracing::warn!(
+                account_id = %created.id,
+                ?err,
+                "account persisted but adapter registration failed",
+            );
+        }
+    }
+    Ok(created)
 }
 
 #[tauri::command]
 pub async fn delete_account(
     db: State<'_, DbHandle>,
+    registry: State<'_, AdapterRegistry>,
     id: String,
 ) -> CommandResult<()> {
     let shared = db.shared();
     let repo = AccountsRepo::new(&shared);
     repo.delete(&id)?;
+    registry.unregister(&id);
     // Best-effort credential cleanup — leaves no Aperio entry behind in
     // the keychain for that account id.
     if let Err(err) = secrets::delete_all(&id) {

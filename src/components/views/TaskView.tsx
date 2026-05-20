@@ -72,7 +72,10 @@ export function TaskView() {
   const performDelete = useCallback(
     async (task: Task) => {
       try {
-        await invoke<void>('delete_task', { id: task.id });
+        await invoke<void>('delete_task', {
+          id: task.id,
+          listId: task.list_id,
+        });
         announce(t('dialogs.task.deleted', { title: task.title }));
       } catch (err) {
         if (isCommandError(err)) {

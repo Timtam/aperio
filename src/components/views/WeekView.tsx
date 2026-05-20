@@ -135,7 +135,7 @@ export function WeekView() {
         // the master row. Single-occurrence delete lives in EventDialog
         // where the user can pick scope explicitly.
         const id = ev.id.includes('@') ? ev.id.split('@')[0] : ev.id;
-        await deleteEventById(id);
+        await deleteEventById(id, ev.calendar_id);
         announce(t('dialogs.event.deleted', { title: ev.title }));
       } catch (err) {
         if (isCommandError(err)) {

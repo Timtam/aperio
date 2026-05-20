@@ -64,8 +64,16 @@ export const createEvent = (request: CreateEventRequest) =>
 export const updateEvent = (event: CalendarEvent) =>
   invoke<CalendarEvent>('update_event', { event });
 
-export const deleteEventById = (id: string) =>
-  invoke<void>('delete_event', { id });
+/** Delete an event. `calendarId` is optional but recommended — the
+ *  backend uses it to route the delete to the right adapter when the
+ *  event lives on an external account. Omitting it falls back to
+ *  "assume local", which is only correct for events the user just
+ *  created locally. */
+export const deleteEventById = (id: string, calendarId?: string) =>
+  invoke<void>('delete_event', {
+    id,
+    calendarId: calendarId ?? null,
+  });
 
 export const getEventById = (id: string) =>
   invoke<CalendarEvent | null>('get_event_by_id', { id });

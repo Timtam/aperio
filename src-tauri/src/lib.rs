@@ -9,6 +9,7 @@ pub mod commands;
 pub mod db;
 mod paths;
 mod platform;
+pub mod registry;
 pub mod reminders;
 pub mod secrets;
 
@@ -16,6 +17,7 @@ pub use db::{DbError, DbHandle, DbResult, SharedConn};
 pub use paths::{resolve_data_dir, DataDirKind, DataDirResolution};
 
 use cal_adapter_local::LocalAdapter;
+use registry::AdapterRegistry;
 use reminders::ReminderScheduler;
 use tauri::Manager;
 use tracing::info;
@@ -45,9 +47,21 @@ pub fn run() {
     let local_adapter = LocalAdapter::new(db.shared());
     let db_for_scheduler = db.shared();
 
+    // Build the adapter registry up-front and let it walk the
+    // persisted accounts to materialise external adapters. Failures
+    // per account are logged inside `bootstrap` — a single broken
+    // credential mustn't keep the app from coming up.
+    let registry = AdapterRegistry::new();
+    {
+        let shared = db.shared();
+        let repo = accounts::AccountsRepo::new(&shared);
+        registry.bootstrap(&repo);
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .manage(local_adapter)
+        .manage(registry)
         .manage(db)
         .invoke_handler(tauri::generate_handler![
             app_info,
