@@ -75,7 +75,15 @@ pub struct ReminderScheduler {
 }
 
 impl ReminderScheduler {
-    /// Start the worker loop on the current tokio runtime.
+    /// Start the worker loop on Tauri's async runtime.
+    ///
+    /// We can't use `tokio::spawn` here because `tauri::Builder::setup`
+    /// fires on the main thread without an active tokio runtime
+    /// context. `tauri::async_runtime::spawn` resolves against the
+    /// runtime Tauri installs itself (tokio by default), which is the
+    /// same runtime that powers `#[tauri::command]` async handlers —
+    /// so the `tokio::select!` and `tokio::time::sleep` calls inside
+    /// the worker still work as expected.
     pub fn spawn<R: Runtime>(db: SharedConn, app: AppHandle<R>) -> Arc<Self> {
         let scheduler = Arc::new(Self {
             db,
@@ -83,7 +91,7 @@ impl ReminderScheduler {
             fired: Arc::new(Mutex::new(HashSet::new())),
         });
         let worker = scheduler.clone();
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             // First sweep covers the "fired while we were offline"
             // case for app_start reminders.
             worker.fire_app_start_reminders(&app);
