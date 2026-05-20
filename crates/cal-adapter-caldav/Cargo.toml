@@ -6,6 +6,20 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Aperio — stub for cal-adapter-caldav (Phase 0; full implementation lands in a later phase)."
+description = "Aperio CalDAV adapter — RFC 4791 calendar + RFC 6352 contacts client."
 
 [dependencies]
+async-trait.workspace = true
+cal-core.workspace = true
+chrono.workspace = true
+quick-xml.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+url = "2"
+base64 = "0.22"
+
+[dev-dependencies]
+tokio = { workspace = true }
+mockito = "1"
