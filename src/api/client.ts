@@ -243,3 +243,32 @@ export const testIcalFeed = (
   invoke<void>('test_ical_feed', {
     request: { feed_url, username, password },
   });
+
+/** Which container namespace an override applies to. Calendars and
+ *  task lists have disjoint ids today but the backend keeps them
+ *  separately namespaced so a future code-path can enforce kind. */
+export type ContainerKind = 'calendar' | 'task_list';
+
+/** Persist a local rename override for a calendar / task list. The
+ *  rename never reaches the source server in this iteration —
+ *  read-time projection only. */
+export const setContainerNameOverride = (
+  container_id: string,
+  kind: ContainerKind,
+  name: string,
+) =>
+  invoke<void>('set_container_name_override', {
+    containerId: container_id,
+    kind,
+    name,
+  });
+
+/** Drop the override and revert to the source name on the next read. */
+export const clearContainerNameOverride = (
+  container_id: string,
+  kind: ContainerKind,
+) =>
+  invoke<void>('clear_container_name_override', {
+    containerId: container_id,
+    kind,
+  });

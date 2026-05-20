@@ -386,6 +386,12 @@
     "calendarDeleted": "Kalender „{{name}}\" wurde gelöscht.",
     "taskListCreated": "Aufgabenliste „{{name}}\" wurde angelegt.",
     "deleteCalendar": "Kalender „{{name}}\" löschen",
+    "renameButton": "„{{name}}\" umbenennen",
+    "renameButtonShort": "Umbenennen",
+    "renameInputLabel": "Neuer Name für „{{name}}\". Enter zum Speichern, Escape verwirft, leer macht das Umbenennen rückgängig.",
+    "renameHint": "Enter speichert · Esc verwirft · leer = Standardname",
+    "renamed": "Umbenannt zu „{{name}}\".",
+    "renameCleared": "Standardname wiederhergestellt.",
     "manageColorLabels": "Farb-Labels verwalten",
     "manageAccounts": "Konten verwalten"
   },

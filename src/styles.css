@@ -937,11 +937,60 @@ button[aria-disabled='true'] {
   flex-shrink: 0;
 }
 
-.sidebar__delete {
+.sidebar__delete,
+.sidebar__edit {
   background: transparent;
   border: 0;
   padding: var(--space-1) var(--space-2);
   color: var(--color-fg-muted);
+}
+
+.sidebar__edit:hover,
+.sidebar__delete:hover {
+  color: var(--color-fg);
+}
+
+/*
+ * Inline rename: replaces the toggle + edit + delete cluster with
+ * a text field and tiny Save / Cancel actions. The field auto-focuses
+ * on mount so the user can type immediately; Enter / Esc are wired
+ * at the parent component.
+ */
+.sidebar__rename {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: 1;
+  min-width: 0;
+}
+
+.sidebar__rename-input {
+  flex: 1;
+  min-width: 0;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elevated);
+  color: var(--color-fg);
+  font-size: var(--font-size-sm);
+}
+
+.sidebar__rename-hint {
+  flex: 0 0 auto;
+  font-size: var(--font-size-xs);
+  color: var(--color-fg-muted);
+  white-space: nowrap;
+}
+
+.sidebar__rename-action {
+  background: transparent;
+  border: 0;
+  padding: var(--space-1);
+  color: var(--color-fg-muted);
+}
+
+.sidebar__rename-action:hover {
+  color: var(--color-fg);
 }
 
 .sidebar__add {

@@ -7,6 +7,8 @@ use serde::Deserialize;
 use tauri::State;
 
 use super::{CommandError, CommandResult};
+use crate::db::DbHandle;
+use crate::overrides::{apply_to_calendars, OverridesRepo};
 use crate::registry::{AdapterRegistry, LOCAL_ID};
 use crate::reminders::SchedulerHandle;
 
@@ -21,6 +23,7 @@ pub struct CreateCalendarRequest {
 pub async fn list_calendars(
     adapter: State<'_, LocalAdapter>,
     registry: State<'_, AdapterRegistry>,
+    db: State<'_, DbHandle>,
 ) -> CommandResult<Vec<Calendar>> {
     // Local first so the implicit "local" account stays at the top
     // of the user's calendar list. Each local calendar id is
@@ -34,6 +37,14 @@ pub async fn list_calendars(
     let mut external = registry.list_external_calendars().await;
     let mut out = local;
     out.append(&mut external);
+    // Stamp local rename overrides on top of whatever each adapter
+    // returned. The adapter never sees the override so its
+    // edit-path (where it exists) keeps writing into the source
+    // server with the source name — the override is purely a
+    // frontend-facing read-time projection.
+    let shared = db.shared();
+    let repo = OverridesRepo::new(&shared);
+    apply_to_calendars(&repo, &mut out);
     Ok(out)
 }
 

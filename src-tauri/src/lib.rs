@@ -7,6 +7,7 @@
 pub mod accounts;
 pub mod commands;
 pub mod db;
+pub mod overrides;
 mod paths;
 mod platform;
 pub mod registry;
@@ -93,6 +94,8 @@ pub fn run() {
             commands::delete_account,
             commands::test_caldav_connection,
             commands::test_ical_feed,
+            commands::set_container_name_override,
+            commands::clear_container_name_override,
         ])
         .setup(move |app| {
             // Spawn the reminder scheduler on the Tauri/tokio runtime

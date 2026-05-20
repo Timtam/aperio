@@ -6,6 +6,8 @@ use serde::Deserialize;
 use tauri::State;
 
 use super::{CommandError, CommandResult};
+use crate::db::DbHandle;
+use crate::overrides::{apply_to_task_lists, OverridesRepo};
 use crate::registry::{AdapterRegistry, LOCAL_ID};
 use crate::reminders::SchedulerHandle;
 
@@ -19,6 +21,7 @@ pub struct CreateTaskListRequest {
 pub async fn list_task_lists(
     adapter: State<'_, LocalAdapter>,
     registry: State<'_, AdapterRegistry>,
+    db: State<'_, DbHandle>,
 ) -> CommandResult<Vec<TaskList>> {
     let local = adapter.list_task_lists().await?;
     for l in &local {
@@ -27,6 +30,9 @@ pub async fn list_task_lists(
     let mut external = registry.list_external_task_lists().await;
     let mut out = local;
     out.append(&mut external);
+    let shared = db.shared();
+    let repo = OverridesRepo::new(&shared);
+    apply_to_task_lists(&repo, &mut out);
     Ok(out)
 }
 

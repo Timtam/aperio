@@ -386,6 +386,12 @@
     "calendarDeleted": "Calendar \"{{name}}\" deleted.",
     "taskListCreated": "Task list \"{{name}}\" created.",
     "deleteCalendar": "Delete calendar \"{{name}}\"",
+    "renameButton": "Rename \"{{name}}\"",
+    "renameButtonShort": "Rename",
+    "renameInputLabel": "New name for \"{{name}}\". Enter to save, Escape to cancel, empty value reverts to the source name.",
+    "renameHint": "Enter to save · Esc to cancel · empty = source name",
+    "renamed": "Renamed to \"{{name}}\".",
+    "renameCleared": "Reverted to source name.",
     "manageColorLabels": "Manage color labels",
     "manageAccounts": "Manage accounts"
   },
