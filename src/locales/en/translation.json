@@ -260,6 +260,40 @@
       "moved": "\"{{title}}\" moved.",
       "copied": "\"{{title}}\" copied."
     },
+    "accounts": {
+      "title": "Manage accounts",
+      "loading": "Loading accounts …",
+      "count_zero": "No accounts.",
+      "count_one": "1 account.",
+      "count_other": "{{count}} accounts.",
+      "existingHeading": "Connected accounts",
+      "empty": "No accounts yet. Add one below.",
+      "addHeading": "Add an account",
+      "kindLabel": "Kind",
+      "nameLabel": "Display name",
+      "namePlaceholder": "e.g. Work, Personal",
+      "nameRequired": "Please enter a display name.",
+      "add": "Add account",
+      "delete": "Delete",
+      "localCannotDelete": "The local account cannot be removed.",
+      "deleteTitle": "Delete account",
+      "deleteMessage": "Remove account \"{{name}}\"? Local calendars, task lists, events and tasks that belong to it will be deleted too.",
+      "created": "Account \"{{name}}\" created.",
+      "deleted": "Account \"{{name}}\" removed.",
+      "rowLabel": "{{name}} ({{kind}})",
+      "kindUnavailable": "This adapter type is not available yet.",
+      "comingSoon": "coming soon",
+      "kindName": {
+        "local": "Local",
+        "caldav": "CalDAV (iCloud, Nextcloud, …)",
+        "ical": "iCal (URL / file)",
+        "google": "Google",
+        "microsoft_graph": "Microsoft (Outlook / To Do)",
+        "ews": "Exchange on-premise (EWS)",
+        "vikunja": "Vikunja",
+        "todoist": "Todoist"
+      }
+    },
     "reminders": {
       "title": "Reminders overview",
       "listLabel": "Upcoming reminders",
@@ -324,7 +358,8 @@
     "calendarDeleted": "Calendar \"{{name}}\" deleted.",
     "taskListCreated": "Task list \"{{name}}\" created.",
     "deleteCalendar": "Delete calendar \"{{name}}\"",
-    "manageColorLabels": "Manage color labels"
+    "manageColorLabels": "Manage color labels",
+    "manageAccounts": "Manage accounts"
   },
   "views": {
     "loading": "Loading …",

@@ -260,6 +260,40 @@
       "moved": "„{{title}}\" wurde verschoben.",
       "copied": "„{{title}}\" wurde kopiert."
     },
+    "accounts": {
+      "title": "Konten verwalten",
+      "loading": "Konten werden geladen …",
+      "count_zero": "Keine Konten.",
+      "count_one": "1 Konto.",
+      "count_other": "{{count}} Konten.",
+      "existingHeading": "Verbundene Konten",
+      "empty": "Noch keine Konten. Unten kannst du eines hinzufügen.",
+      "addHeading": "Konto hinzufügen",
+      "kindLabel": "Typ",
+      "nameLabel": "Anzeigename",
+      "namePlaceholder": "z. B. Arbeit, Privat",
+      "nameRequired": "Bitte gib einen Anzeigenamen ein.",
+      "add": "Konto hinzufügen",
+      "delete": "Entfernen",
+      "localCannotDelete": "Das lokale Konto kann nicht entfernt werden.",
+      "deleteTitle": "Konto entfernen",
+      "deleteMessage": "Konto „{{name}}\" wirklich entfernen? Zugehörige lokale Kalender, Aufgabenlisten, Termine und Aufgaben werden mitgelöscht.",
+      "created": "Konto „{{name}}\" wurde angelegt.",
+      "deleted": "Konto „{{name}}\" wurde entfernt.",
+      "rowLabel": "{{name}} ({{kind}})",
+      "kindUnavailable": "Dieser Adapter-Typ ist noch nicht verfügbar.",
+      "comingSoon": "demnächst verfügbar",
+      "kindName": {
+        "local": "Lokal",
+        "caldav": "CalDAV (iCloud, Nextcloud, …)",
+        "ical": "iCal (URL / Datei)",
+        "google": "Google",
+        "microsoft_graph": "Microsoft (Outlook / To Do)",
+        "ews": "Exchange On-Premise (EWS)",
+        "vikunja": "Vikunja",
+        "todoist": "Todoist"
+      }
+    },
     "reminders": {
       "title": "Erinnerungs-Übersicht",
       "listLabel": "Anstehende Erinnerungen",
@@ -324,7 +358,8 @@
     "calendarDeleted": "Kalender „{{name}}\" wurde gelöscht.",
     "taskListCreated": "Aufgabenliste „{{name}}\" wurde angelegt.",
     "deleteCalendar": "Kalender „{{name}}\" löschen",
-    "manageColorLabels": "Farb-Labels verwalten"
+    "manageColorLabels": "Farb-Labels verwalten",
+    "manageAccounts": "Konten verwalten"
   },
   "views": {
     "loading": "Lädt …",

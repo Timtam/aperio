@@ -1,4 +1,5 @@
 import { useDialogState } from '../state/DialogState';
+import { AccountsDialog } from './AccountsDialog';
 import { ColorLabelDialog } from './ColorLabelDialog';
 import { EventDialog } from './EventDialog';
 import { MoveCopyDialog } from './MoveCopyDialog';
@@ -44,6 +45,8 @@ export function DialogHost() {
       return <SearchDialog isOpen onClose={close} />;
     case 'reminders':
       return <RemindersDialog isOpen onClose={close} />;
+    case 'accounts':
+      return <AccountsDialog isOpen onClose={close} />;
     case 'moveCopy':
       return (
         <MoveCopyDialog isOpen onClose={close} target={mode.target} />

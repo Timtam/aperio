@@ -41,6 +41,7 @@ export type DialogMode =
   | { kind: 'colorLabels' }
   | { kind: 'search' }
   | { kind: 'reminders' }
+  | { kind: 'accounts' }
   | { kind: 'moveCopy'; target: MoveCopyTarget };
 
 /**
@@ -70,6 +71,7 @@ interface DialogStateValue {
   openColorLabels: () => void;
   openSearch: () => void;
   openReminders: () => void;
+  openAccounts: () => void;
   openMoveCopy: (target: MoveCopyTarget) => void;
   close: () => void;
 }
@@ -155,6 +157,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     () => push({ kind: 'reminders' }),
     [push],
   );
+  const openAccounts = useCallback(() => push({ kind: 'accounts' }), [push]);
   const openMoveCopy = useCallback(
     (target: MoveCopyTarget) => push({ kind: 'moveCopy', target }),
     [push],
@@ -199,6 +202,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openColorLabels,
       openSearch,
       openReminders,
+      openAccounts,
       openMoveCopy,
       close,
     }),
@@ -210,6 +214,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openColorLabels,
       openSearch,
       openReminders,
+      openAccounts,
       openMoveCopy,
       close,
     ],

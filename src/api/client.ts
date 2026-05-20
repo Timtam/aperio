@@ -6,6 +6,8 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import type {
+  Account,
+  AdapterKind,
   Calendar,
   CalendarEvent,
   ColorLabel,
@@ -169,3 +171,20 @@ export interface UpcomingReminder {
 
 export const listUpcomingReminders = () =>
   invoke<UpcomingReminder[]>('list_upcoming_reminders');
+
+// ── Accounts ───────────────────────────────────────────────────────────────
+
+export const listAccounts = () => invoke<Account[]>('list_accounts');
+
+export interface CreateAccountRequest {
+  adapter_kind: AdapterKind;
+  display_name: string;
+  /** Optional adapter-specific config; defaults to "{}" backend-side. */
+  config_json?: string;
+}
+
+export const createAccount = (request: CreateAccountRequest) =>
+  invoke<Account>('create_account', { request });
+
+export const deleteAccount = (id: string) =>
+  invoke<void>('delete_account', { id });

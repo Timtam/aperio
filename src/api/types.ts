@@ -119,6 +119,29 @@ export interface SearchResults {
   tasks: Task[];
 }
 
+/** Adapter kinds known to the backend. Phase 6a only allows `local`
+ *  to be created; the others appear in the UI as "coming soon" until
+ *  their respective adapter lands. */
+export type AdapterKind =
+  | 'local'
+  | 'caldav'
+  | 'ical'
+  | 'google'
+  | 'microsoft_graph'
+  | 'ews'
+  | 'vikunja'
+  | 'todoist';
+
+export interface Account {
+  id: string;
+  adapter_kind: AdapterKind;
+  display_name: string;
+  /** Adapter-specific non-secret config as a JSON string. */
+  config_json: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface CommandError {
   code:
     | 'auth'

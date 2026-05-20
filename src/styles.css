@@ -477,6 +477,43 @@ button:disabled {
   color: var(--color-fg-muted);
 }
 
+/* ── Accounts dialog ────────────────────────────────────────────────────── */
+
+.accounts-list {
+  list-style: none;
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.accounts-list__item {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: var(--space-2);
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.accounts-list__item:last-child {
+  border-bottom: 0;
+}
+
+.accounts-list__name {
+  font-weight: 500;
+}
+
+.accounts-list__kind {
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  color: var(--color-fg-muted);
+}
+
+.accounts-add-section {
+  margin-top: var(--space-3);
+}
+
 .modal__header {
   display: flex;
   align-items: center;

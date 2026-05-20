@@ -35,7 +35,7 @@ export function Sidebar() {
     toggleTaskList,
     refreshTaskLists,
   } = useCalendarStore();
-  const { openColorLabels } = useDialogState();
+  const { openColorLabels, openAccounts } = useDialogState();
 
   const onCreateCalendar = useCallback(async () => {
     try {
@@ -165,6 +165,13 @@ export function Sidebar() {
           onClick={() => openColorLabels()}
         >
           {t('sidebar.manageColorLabels')}
+        </button>
+        <button
+          type="button"
+          className="sidebar__add"
+          onClick={() => openAccounts()}
+        >
+          {t('sidebar.manageAccounts')}
         </button>
       </section>
     </aside>
