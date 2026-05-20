@@ -909,6 +909,23 @@ button[aria-disabled='true'] {
   display: flex;
   align-items: center;
   gap: var(--space-1);
+  /* `border-radius` matches the toggle button so the hover wash
+     lines up at the rounded corners. */
+  border-radius: var(--radius-sm);
+  transition: background 80ms ease;
+}
+
+/*
+ * Subtle row-hover affordance — gives pointer users a "this is the
+ * row I'm aiming at" cue, and indirectly makes the small ✎ / ✕
+ * action buttons easier to find (you find the row first, then the
+ * actions are right there). Hidden behind `@media (hover: hover)`
+ * so touch devices don't get a stuck-after-tap highlight.
+ */
+@media (hover: hover) {
+  .sidebar__row:hover {
+    background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+  }
 }
 
 .sidebar__toggle {
