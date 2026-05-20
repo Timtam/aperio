@@ -102,8 +102,16 @@ pub struct IcalAdapter {
     http: Client,
     /// Last successful fetch with its caching headers. Used to send
     /// conditional GETs on subsequent reads so unchanged feeds don't
-    /// re-download the body.
+    /// re-download the body — and, inside the `cache_ttl` window, to
+    /// skip the network entirely.
     cache: Mutex<Option<CachedFeed>>,
+    /// In-memory freshness window. Within this duration after the
+    /// last successful fetch, `fetch_body` returns the cached body
+    /// directly without even a conditional GET. Past the window we
+    /// still re-validate with `If-None-Match`. Default 30 s — long
+    /// enough to absorb a typical view-switch storm, short enough
+    /// that a feed update is picked up within a coffee sip.
+    cache_ttl: chrono::Duration,
     capabilities: Vec<Capability>,
 }
 
@@ -112,7 +120,6 @@ struct CachedFeed {
     etag: Option<String>,
     last_modified: Option<String>,
     body: String,
-    #[allow(dead_code)] // exposed via tests / future TTL logic
     fetched_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -139,6 +146,7 @@ impl IcalAdapter {
             credentials,
             http,
             cache: Mutex::new(None),
+            cache_ttl: chrono::Duration::seconds(30),
             capabilities: vec![Capability::Calendar],
         })
     }
@@ -157,6 +165,18 @@ impl IcalAdapter {
         format!("ical:{}", hex::encode(&digest[..8]))
     }
 
+    /// Override the in-memory freshness window. The default 30 s is
+    /// the right knob for production use; tests that need to
+    /// exercise the network-revalidation path inject a zero TTL so
+    /// every `fetch_body` call still hits the wire (with
+    /// `If-None-Match`).
+    #[doc(hidden)]
+    pub fn with_cache_ttl(mut self, ttl: std::time::Duration) -> Self {
+        self.cache_ttl = chrono::Duration::from_std(ttl)
+            .unwrap_or_else(|_| chrono::Duration::zero());
+        self
+    }
+
     /// Smoke test the feed: fetches once, returns Ok with the
     /// derived calendar name on success. Used by the account-creation
     /// flow so the user knows before persisting whether the URL is
@@ -173,6 +193,20 @@ impl IcalAdapter {
     async fn fetch_body(&self) -> IcalResult<String> {
         let url = Url::parse(&self.credentials.config.feed_url)
             .map_err(|e| IcalError::Url(e.to_string()))?;
+
+        // Short-circuit when the cached body is still fresh. We
+        // copy the body out of the mutex first (the borrow checker
+        // would otherwise force us to hold the guard across the
+        // `await`) and return without touching the network.
+        {
+            let guard = self.cache.lock().expect("cache poison");
+            if let Some(c) = guard.as_ref() {
+                let age = chrono::Utc::now().signed_duration_since(c.fetched_at);
+                if age >= chrono::Duration::zero() && age < self.cache_ttl {
+                    return Ok(c.body.clone());
+                }
+            }
+        }
 
         let (cached_etag, cached_lastmod, cached_body) = {
             let guard = self.cache.lock().expect("cache poison");
@@ -534,7 +568,12 @@ mod tests {
             .create_async()
             .await;
 
-        let adapter = IcalAdapter::new(cfg(&format!("{}/cal.ics", server.url()))).unwrap();
+        // TTL=0 forces every fetch_body to hit the wire — otherwise
+        // the second call would short-circuit on the in-memory body
+        // and the 304 path under test would never run.
+        let adapter = IcalAdapter::new(cfg(&format!("{}/cal.ics", server.url())))
+            .unwrap()
+            .with_cache_ttl(std::time::Duration::ZERO);
 
         // First call: 200 with body.
         let first = adapter.fetch_body().await.unwrap();
@@ -629,5 +668,30 @@ mod tests {
         let adapter = IcalAdapter::new(cfg(&format!("{}/cal.ics", server.url()))).unwrap();
         let err = adapter.list_calendars().await.unwrap_err();
         assert!(matches!(err, Error::Authentication(_)));
+    }
+
+    #[tokio::test]
+    async fn cache_ttl_skips_the_network_within_the_window() {
+        let mut server = mockito::Server::new_async().await;
+        let body = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nEND:VCALENDAR\r\n";
+
+        // Mockito expectation: exactly ONE request reaches the
+        // server. A second `fetch_body` inside the TTL window should
+        // serve directly from the in-memory cache.
+        let m = server
+            .mock("GET", "/cal.ics")
+            .with_status(200)
+            .with_body(body)
+            .expect(1)
+            .create_async()
+            .await;
+
+        // Default TTL (30 s) is well past any test runtime; the
+        // second call must hit the cache regardless.
+        let adapter = IcalAdapter::new(cfg(&format!("{}/cal.ics", server.url()))).unwrap();
+        let first = adapter.fetch_body().await.unwrap();
+        let second = adapter.fetch_body().await.unwrap();
+        assert_eq!(first, second);
+        m.assert_async().await;
     }
 }
