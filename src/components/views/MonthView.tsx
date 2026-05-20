@@ -110,7 +110,7 @@ export function MonthView() {
       try {
         if (scope === 'occurrence' && ev.id.includes('@')) {
           const [seriesId, occIso] = ev.id.split('@');
-          await addEventExdate(seriesId, occIso);
+          await addEventExdate(seriesId, occIso, ev.calendar_id);
           announce(
             t('dialogs.event.occurrenceDeleted', { title: ev.title }),
           );

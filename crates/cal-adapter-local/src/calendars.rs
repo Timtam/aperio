@@ -334,6 +334,16 @@ impl CalendarFeature for LocalAdapter {
         Ok(Vec::new())
     }
 
+    async fn add_event_exdate(
+        &self,
+        event_id: &str,
+        occurrence: DateTime<Utc>,
+    ) -> cal_core::Result<()> {
+        // Re-use the inherent method that already implements the
+        // read-modify-write for the JSON-stored exception list.
+        LocalAdapter::add_event_exdate(self, event_id, occurrence)
+    }
+
     fn calendar_color(&self, calendar_id: &str) -> Option<ContainerColor> {
         let conn = self.db().lock().expect("db mutex poisoned");
         conn.query_row(

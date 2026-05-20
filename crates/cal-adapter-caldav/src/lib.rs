@@ -203,6 +203,61 @@ impl CalendarFeature for CaldavAdapter {
             .map_err(to_core_error)
     }
 
+    async fn add_event_exdate(
+        &self,
+        event_id: &str,
+        occurrence: chrono::DateTime<chrono::Utc>,
+    ) -> CoreResult<()> {
+        // Same walk-the-home-set workaround as delete_event below —
+        // the trait signature loses the parent calendar id, so we
+        // try every calendar in the home set until one accepts the
+        // EXDATE update. The aperio command layer routes via the
+        // registry's calendar→account map, so production hits this
+        // path with the right adapter already; the walk is the
+        // fallback if a caller forgot to thread the calendar_id
+        // through.
+        let discovery = self.discover().await.map_err(to_core_error)?;
+        let cals = calendars::list_calendars(
+            &self.http,
+            &discovery.calendar_home_url,
+            &self.credentials,
+        )
+        .await
+        .map_err(to_core_error)?;
+        let mut last_err: Option<CoreError> = None;
+        for cal in cals {
+            let cal_url = match Url::parse(&cal.id) {
+                Ok(u) => u,
+                Err(_) => continue,
+            };
+            match events::add_event_exdate(
+                &self.http,
+                &cal_url,
+                event_id,
+                occurrence,
+                &self.credentials,
+            )
+            .await
+            {
+                Ok(()) => return Ok(()),
+                Err(err) => {
+                    // 404 just means "this event lives in a different
+                    // calendar" — keep walking. Anything else we
+                    // remember in case nothing else works.
+                    if matches!(err, CaldavError::Http { status: 404, .. }) {
+                        continue;
+                    }
+                    last_err = Some(to_core_error(err));
+                }
+            }
+        }
+        Err(last_err.unwrap_or_else(|| {
+            CoreError::NotFound(format!(
+                "event '{event_id}' not found in any calendar"
+            ))
+        }))
+    }
+
     async fn delete_event(&self, event_id: &str) -> CoreResult<()> {
         // The trait signature only gives us the event id. CalDAV
         // needs the calendar collection URL too — we recover it

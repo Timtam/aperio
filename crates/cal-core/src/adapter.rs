@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use crate::color::ContainerColor;
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::reminder::SoundConfig;
 use crate::types::{
     Calendar, Contact, DateRange, Event, FreeBusy, NewEvent, NewTask, Task, TaskList,
@@ -80,6 +80,23 @@ pub trait CalendarFeature: Adapter {
     async fn delete_event(&self, event_id: &str) -> Result<()>;
     async fn get_free_busy(&self, emails: &[&str], range: DateRange) -> Result<Vec<FreeBusy>>;
     fn calendar_color(&self, calendar_id: &str) -> Option<ContainerColor>;
+
+    /// Append `occurrence` to the recurring event's EXDATE list so
+    /// the expansion engine (and the source server) skips just that
+    /// one date. The master row stays alive and every other
+    /// occurrence keeps appearing — used by Aperio's "delete only
+    /// this occurrence" flow on a series. Default implementation
+    /// returns `Unsupported`; adapters that own the event data
+    /// (local SQLite, CalDAV, …) override it.
+    async fn add_event_exdate(
+        &self,
+        _event_id: &str,
+        _occurrence: chrono::DateTime<chrono::Utc>,
+    ) -> Result<()> {
+        Err(Error::Unsupported(
+            "add_event_exdate is not supported on this adapter".into(),
+        ))
+    }
 }
 
 /// Implemented by adapters that declare `Capability::Tasks`.

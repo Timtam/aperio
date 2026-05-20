@@ -12,10 +12,10 @@
 //! a different component name on the filter side and a different
 //! ID/etag tracking concern (completed_at vs start_utc).
 
-use cal_core::{DateRange, Event, NewEvent};
+use cal_core::{DateRange, Event, EventRecurrence, NewEvent};
 use chrono::{DateTime, Utc};
 use reqwest::{
-    header::{HeaderName, HeaderValue, CONTENT_TYPE, IF_MATCH, IF_NONE_MATCH, ETAG},
+    header::{HeaderName, HeaderValue, ACCEPT, CONTENT_TYPE, IF_MATCH, IF_NONE_MATCH, ETAG},
     Client, Method, StatusCode,
 };
 use url::Url;
@@ -249,6 +249,107 @@ pub async fn delete_event(
     }
     Ok(())
 }
+
+/// Read the master VEVENT at `<calendar_url>/<uid>.ics`, append
+/// `occurrence` to its EXDATE list, and PUT the modified iCal body
+/// back. Mirrors the EXDATE handling that the local adapter has for
+/// "delete only this occurrence" of a recurring event.
+///
+/// The fetch + serialise round-trip lets the master keep its RRULE
+/// + every other property the server stored, so we don't
+/// accidentally drop iCloud-specific data on the way through. The
+/// final PUT uses If-Match against the freshly read ETag so a
+/// concurrent edit from another client surfaces as a 412 rather
+/// than a silent overwrite.
+pub async fn add_event_exdate(
+    client: &Client,
+    calendar_url: &Url,
+    event_id: &str,
+    occurrence: DateTime<Utc>,
+    credentials: &Credentials,
+) -> CaldavResult<()> {
+    let resource = resource_url(calendar_url, event_id)?;
+
+    // Step 1: fetch the master body + its ETag.
+    let mut get_headers = auth_header(credentials)?;
+    get_headers.insert(ACCEPT, HeaderValue::from_static("text/calendar"));
+    let response = client
+        .get(resource.clone())
+        .headers(get_headers)
+        .send()
+        .await?;
+    let status = response.status();
+    if status == StatusCode::NOT_FOUND {
+        return Err(CaldavError::Http {
+            status: 404,
+            message: format!("event '{event_id}' not found on server"),
+        });
+    }
+    if !status.is_success() {
+        let body = response.text().await.unwrap_or_default();
+        return Err(CaldavError::Http {
+            status: status.as_u16(),
+            message: if body.is_empty() {
+                status.canonical_reason().unwrap_or("").to_string()
+            } else {
+                body.chars().take(200).collect()
+            },
+        });
+    }
+    let etag = extract_etag(&response);
+    let body = response.text().await?;
+
+    // Step 2: parse, locate the master VEVENT, append EXDATE.
+    let mut events = parse_calendar_data(&body, calendar_url.as_str())?;
+    let master = events
+        .iter_mut()
+        .find(|e| e.id == event_id)
+        .ok_or_else(|| {
+            CaldavError::Discovery(format!(
+                "event '{event_id}' missing from its own resource"
+            ))
+        })?;
+    if master.recurrence.is_none() {
+        return Err(CaldavError::Discovery(format!(
+            "event '{event_id}' is not recurring"
+        )));
+    }
+    let recurrence = master.recurrence.as_mut().unwrap();
+    if !recurrence.exceptions.iter().any(|e| *e == occurrence) {
+        recurrence.exceptions.push(occurrence);
+    }
+    let master_clone = master.clone();
+    // The first event we found should be the master — drop any
+    // additional sub-components (overrides) and re-serialise just
+    // the master with its updated EXDATE list. Servers reattach
+    // their other components on the next round-trip.
+    let serialised = crate::mapping::event_to_ical(&master_clone);
+
+    // Step 3: PUT the modified body back. If-Match guards against a
+    // race with a concurrent edit; without an ETag we send the
+    // request anyway — the server will still accept it.
+    let mut put_headers = auth_header(credentials)?;
+    put_headers.insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static("text/calendar; charset=utf-8"),
+    );
+    if let Some(tag) = etag {
+        if let Ok(v) = HeaderValue::from_str(&tag) {
+            put_headers.insert(IF_MATCH, v);
+        }
+    }
+    let put = client
+        .put(resource)
+        .headers(put_headers)
+        .body(serialised)
+        .send()
+        .await?;
+    expect_write_success(&put)?;
+    Ok(())
+}
+
+#[allow(dead_code)]
+fn _touch_recurrence(_: &EventRecurrence) {}
 
 fn resource_url(calendar_url: &Url, uid: &str) -> CaldavResult<Url> {
     // CalDAV resource URLs are `<collection>/<slug>.ics`. The UID

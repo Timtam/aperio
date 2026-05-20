@@ -83,9 +83,20 @@ export const getTaskById = (id: string) =>
 
 /** Append `occurrence` to a recurring event's EXDATE list. Used when
  *  the user deletes or overrides a single occurrence — the master row
- *  stays intact and the expansion engine simply skips that date. */
-export const addEventExdate = (id: string, occurrence: string) =>
-  invoke<void>('add_event_exdate', { id, occurrence });
+ *  stays intact and the expansion engine simply skips that date.
+ *  `calendarId` lets the backend route the update to the right
+ *  adapter (CalDAV / iCloud / local). It's optional only for
+ *  backwards compatibility; new callers should always pass it. */
+export const addEventExdate = (
+  id: string,
+  occurrence: string,
+  calendarId?: string,
+) =>
+  invoke<void>('add_event_exdate', {
+    id,
+    occurrence,
+    calendarId: calendarId ?? null,
+  });
 
 // ── Task lists & tasks ─────────────────────────────────────────────────────
 

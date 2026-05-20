@@ -173,7 +173,7 @@ export function EventDialog({
             // the user's modified fields.
             const occIso = occurrenceIsoFromId(event.id);
             if (occIso) {
-              await addEventExdate(seriesId, occIso);
+              await addEventExdate(seriesId, occIso, event.calendar_id);
               await apiCreateEvent({
                 calendar_id: form.calendarId,
                 title: trimmedTitle,
@@ -255,7 +255,7 @@ export function EventDialog({
       if (isOccurrence && editScope === 'occurrence' && event.recurrence) {
         const occIso = occurrenceIsoFromId(event.id);
         if (occIso) {
-          await addEventExdate(seriesId, occIso);
+          await addEventExdate(seriesId, occIso, event.calendar_id);
           announce(t('dialogs.event.occurrenceDeleted', { title: event.title }));
           onClose();
           return;

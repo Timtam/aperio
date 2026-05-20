@@ -144,7 +144,7 @@ export function WeekView() {
           // expansion engine skips it. The master row stays alive
           // and every other occurrence keeps appearing.
           const [seriesId, occIso] = ev.id.split('@');
-          await addEventExdate(seriesId, occIso);
+          await addEventExdate(seriesId, occIso, ev.calendar_id);
           announce(
             t('dialogs.event.occurrenceDeleted', { title: ev.title }),
           );

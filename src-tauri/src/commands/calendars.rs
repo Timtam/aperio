@@ -180,11 +180,31 @@ pub async fn get_event_by_id(
 #[tauri::command]
 pub async fn add_event_exdate(
     adapter: State<'_, LocalAdapter>,
+    registry: State<'_, AdapterRegistry>,
     scheduler: State<'_, SchedulerHandle>,
     id: String,
     occurrence: DateTime<Utc>,
+    calendar_id: Option<String>,
 ) -> CommandResult<()> {
-    adapter.add_event_exdate(&id, occurrence)?;
+    // `calendar_id` was added in Phase 6b.7 — older callers that
+    // only pass `id` fall back to "assume local", which is still
+    // right for local-only events but would have wrongly hit the
+    // local adapter when the event lived on iCloud / Nextcloud.
+    let account = calendar_id
+        .as_deref()
+        .and_then(|cid| registry.account_for_calendar(cid))
+        .unwrap_or_else(|| LOCAL_ID.to_string());
+    if account == LOCAL_ID {
+        adapter.add_event_exdate(&id, occurrence)?;
+    } else {
+        let Some(ext) = registry.calendar_adapter(&account) else {
+            return Err(CommandError {
+                code: "not_found",
+                message: format!("account '{account}' is not routable"),
+            });
+        };
+        ext.add_event_exdate(&id, occurrence).await?;
+    }
     scheduler.invalidate();
     Ok(())
 }
