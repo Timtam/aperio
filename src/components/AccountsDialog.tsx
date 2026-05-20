@@ -18,6 +18,7 @@ import {
   testIcalFeed,
 } from '../api/client';
 import type { Account, AdapterKind } from '../api/types';
+import { useCalendarStore } from '../state/CalendarStore';
 import { ConfirmDialog } from './ConfirmDialog';
 import { Modal } from './Modal';
 
@@ -84,6 +85,11 @@ const EMPTY_ICAL: IcalFields = {
 export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
   const { t } = useTranslation();
   const announce = useAnnouncer();
+  // The store owns the calendar / task-list catalog the sidebar
+  // renders from. We have to nudge it manually after creating or
+  // deleting an account — otherwise the new account's calendars
+  // wouldn't show up until something else triggers a store refresh.
+  const { refreshCalendars, refreshTaskLists } = useCalendarStore();
 
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
@@ -189,6 +195,13 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
         setCaldav(EMPTY_CALDAV);
         setIcal(EMPTY_ICAL);
         refresh();
+        // Re-fetch the calendar / task-list catalog so the sidebar
+        // picks up the new account's containers without the user
+        // having to open another dialog (or restart the app). Errors
+        // here are non-fatal — the account row was already
+        // persisted; a stale sidebar fixes itself on the next normal
+        // store refresh.
+        void Promise.allSettled([refreshCalendars(), refreshTaskLists()]);
       } catch (err) {
         if (isCommandError(err)) setError(`${err.code}: ${err.message}`);
         else setError(String(err));
@@ -205,6 +218,8 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
       validateIcal,
       announce,
       refresh,
+      refreshCalendars,
+      refreshTaskLists,
       t,
     ],
   );
@@ -256,12 +271,15 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
         await deleteAccount(acc.id);
         announce(t('dialogs.accounts.deleted', { name: acc.display_name }));
         refresh();
+        // Same as on create: nudge the store so the just-removed
+        // account's calendars disappear from the sidebar.
+        void Promise.allSettled([refreshCalendars(), refreshTaskLists()]);
       } catch (err) {
         if (isCommandError(err)) setError(`${err.code}: ${err.message}`);
         else setError(String(err));
       }
     },
-    [announce, refresh, t],
+    [announce, refresh, refreshCalendars, refreshTaskLists, t],
   );
 
   const headingId = useId();
