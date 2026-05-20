@@ -12,34 +12,78 @@ import { useDialogState } from './DialogState';
  * "partial result on per-list failure" policy. Sorting key: tasks with a
  * concrete scheduled date come first (ordered by date), tasks with only
  * a deadline next, undated tasks last.
+ *
+ * Stale-while-revalidate cache: see `useEvents` for the full rationale.
+ * The model is identical — the only difference is that tasks aren't
+ * range-scoped, so the cache key is just the sorted task-list ids.
  */
+
+type CacheKey = string;
+
+const tasksCache = new Map<CacheKey, Task[]>();
+let cachedDataVersion = -1;
+
+function ensureCacheVersion(version: number): void {
+  if (version !== cachedDataVersion) {
+    tasksCache.clear();
+    cachedDataVersion = version;
+  }
+}
+
+function cacheGet(key: CacheKey, version: number): Task[] | undefined {
+  ensureCacheVersion(version);
+  return tasksCache.get(key);
+}
+
+function cacheSet(key: CacheKey, version: number, tasks: Task[]): void {
+  ensureCacheVersion(version);
+  tasksCache.set(key, tasks);
+}
+
+/** Test-only escape hatch — wipes the cache so each test starts clean. */
+export function __resetTasksCacheForTests(): void {
+  tasksCache.clear();
+  cachedDataVersion = -1;
+}
+
 export function useTasks() {
   const { selectedTaskListIds, taskLists, loading: storeLoading } =
     useCalendarStore();
   const { dataVersion } = useDialogState();
-  const [tasks, setTasks] = useState<Task[]>([]);
-  // True until the first fetch settles, then stays false. Subsequent
-  // refetches keep the previously loaded tasks on screen — see
-  // useEvents for the full reasoning.
-  const [loading, setLoading] = useState(true);
-
-  // Re-fetch when any mutation hint fires — see useEvents for the rationale.
 
   const idsKey = useMemo(
     () => [...selectedTaskListIds].sort().join(' '),
     [selectedTaskListIds],
   );
 
+  // Lazy init: read cache before the first paint so a remount with
+  // a previously seen list selection comes back with data already.
+  const [tasks, setTasks] = useState<Task[]>(
+    () => cacheGet(idsKey, dataVersion) ?? [],
+  );
+  const [loading, setLoading] = useState<boolean>(
+    () => cacheGet(idsKey, dataVersion) === undefined,
+  );
+
   useEffect(() => {
     let cancelled = false;
 
-    // Mirror useEvents: hold off until the task-list catalog has loaded.
+    const cached = cacheGet(idsKey, dataVersion);
+    if (cached) {
+      setTasks(cached);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
+
+    // Wait for the task-list catalog before deciding anything else.
     if (storeLoading) return;
 
     const ids = [...selectedTaskListIds];
     if (ids.length === 0) {
       setTasks([]);
       setLoading(false);
+      cacheSet(idsKey, dataVersion, []);
       return;
     }
 
@@ -55,6 +99,7 @@ export function useTasks() {
       if (cancelled) return;
       const flat = batches.flat();
       flat.sort(taskOrder);
+      cacheSet(idsKey, dataVersion, flat);
       setTasks(flat);
       setLoading(false);
     });
@@ -62,7 +107,10 @@ export function useTasks() {
     return () => {
       cancelled = true;
     };
-  }, [storeLoading, idsKey, selectedTaskListIds, dataVersion]);
+    // selectedTaskListIds intentionally omitted — `idsKey` is the
+    // stable projection.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storeLoading, idsKey, dataVersion]);
 
   const taskListById = useMemo(() => {
     const map = new Map<string, (typeof taskLists)[number]>();
