@@ -321,18 +321,26 @@ export function Sidebar() {
         console.warn('show_sidebar_context_menu failed', err);
       }
 
-      // Regardless of outcome, hand the tree container back its
-      // focus so arrow-key navigation keeps working.
-      setRestoreFocusToTree(true);
-
       if (selected === 'rename') {
+        // Don't steer focus back to the tree here — startEdit() swaps
+        // the leaf row's body into an <input autoFocus />, which grabs
+        // focus during its mount. If we also ran the tree-restore
+        // effect, it would race the autoFocus and silently win, leaving
+        // the user staring at a rename input they can't type into.
         startEdit(containerKind, leaf.containerId, leaf.name);
       } else if (selected === 'delete') {
+        // After delete the row vanishes; tree-focus is the right place
+        // for keyboard navigation to land.
+        setRestoreFocusToTree(true);
         if (leaf.kind === 'calendars') {
           void onDeleteCalendar(leaf.containerId, leaf.name);
         } else {
           void onDeleteTaskListAction(leaf.containerId, leaf.name);
         }
+      } else {
+        // Menu dismissed (Escape, click-away) — no action; just hand
+        // keyboard control back to the tree.
+        setRestoreFocusToTree(true);
       }
     },
     [startEdit, onDeleteCalendar, onDeleteTaskListAction, t],
