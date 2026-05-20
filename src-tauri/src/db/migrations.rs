@@ -11,7 +11,7 @@
 
 use super::{DbError, DbHandle, DbResult};
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 2;
+pub const CURRENT_SCHEMA_VERSION: u32 = 3;
 
 struct Migration {
     target: u32,
@@ -26,6 +26,10 @@ const MIGRATIONS: &[Migration] = &[
     Migration {
         target: 2,
         sql: include_str!("sql/0002_search.sql"),
+    },
+    Migration {
+        target: 3,
+        sql: include_str!("sql/0003_accounts.sql"),
     },
 ];
 
