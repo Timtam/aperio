@@ -23,7 +23,7 @@
 //! feature lands first so the listing/range read can be wired into
 //! the UI; richer mapping is additive on top of this.
 
-use cal_core::{Event, EventRecurrence};
+use cal_core::{Event, EventRecurrence, NewEvent};
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use icalendar::{Calendar as ICalendar, Component, DatePerhapsTime, EventLike};
 
@@ -219,6 +219,77 @@ fn collect_exdates(ev: &icalendar::Event) -> Vec<DateTime<Utc>> {
     out
 }
 
+/// Render an event into a single VCALENDAR/VEVENT body suitable for
+/// PUT to a CalDAV resource URL. The UID is supplied separately so
+/// the caller can pick it from either an existing event (update) or
+/// a fresh UUID (create).
+///
+/// Only the same fields the *reader* understands are emitted —
+/// emitting more would round-trip data the rest of Aperio can't see
+/// anyway and the next read would silently drop them.
+pub fn new_event_to_ical(uid: &str, event: &NewEvent) -> String {
+    let mut ical_ev = icalendar::Event::new();
+    apply_common(&mut ical_ev, uid, event);
+    let mut cal = ICalendar::new();
+    cal.push(ical_ev.done());
+    cal.to_string()
+}
+
+/// Render an existing event back to iCal for the update PUT.
+pub fn event_to_ical(event: &Event) -> String {
+    let new = NewEvent {
+        title: event.title.clone(),
+        description: event.description.clone(),
+        location: event.location.clone(),
+        start: event.start,
+        end: event.end,
+        all_day: event.all_day,
+        recurrence: event.recurrence.clone(),
+        color_label: event.color_label.clone(),
+        reminders: event.reminders.clone(),
+        sound: event.sound.clone(),
+        attendees: event.attendees.clone(),
+    };
+    new_event_to_ical(&event.id, &new)
+}
+
+fn apply_common(ical_ev: &mut icalendar::Event, uid: &str, event: &NewEvent) {
+    ical_ev.uid(uid);
+    ical_ev.summary(&event.title);
+    if let Some(desc) = &event.description {
+        ical_ev.description(desc);
+    }
+    if let Some(loc) = &event.location {
+        ical_ev.location(loc);
+    }
+    if event.all_day {
+        ical_ev.starts(event.start.date_naive());
+        // For all-day events DTEND is exclusive — RFC 5545 §3.6.1.
+        // Aperio stores end as the start-of-next-day already, so
+        // emitting `event.end.date_naive()` is exactly the right
+        // exclusive boundary.
+        ical_ev.ends(event.end.date_naive());
+    } else {
+        ical_ev.starts(event.start);
+        ical_ev.ends(event.end);
+    }
+    if let Some(rec) = &event.recurrence {
+        ical_ev.add_property("RRULE", &rec.rrule);
+        for exdate in &rec.exceptions {
+            ical_ev.add_multi_property(
+                "EXDATE",
+                &format_utc_compact(*exdate),
+            );
+        }
+    }
+    // DTSTAMP is mandatory per RFC 5545 — icalendar adds it
+    // automatically on serialise.
+}
+
+fn format_utc_compact(dt: DateTime<Utc>) -> String {
+    dt.format("%Y%m%dT%H%M%SZ").to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -302,6 +373,65 @@ END:VCALENDAR\r
         assert_eq!(
             rec.exceptions[0],
             Utc.with_ymd_and_hms(2026, 6, 3, 8, 0, 0).unwrap()
+        );
+    }
+
+    #[test]
+    fn write_then_read_roundtrips_an_event() {
+        let event = NewEvent {
+            title: "Sprint planning".into(),
+            description: Some("agenda in the doc".into()),
+            location: Some("room 3.12".into()),
+            start: Utc.with_ymd_and_hms(2026, 5, 20, 8, 0, 0).unwrap(),
+            end: Utc.with_ymd_and_hms(2026, 5, 20, 9, 0, 0).unwrap(),
+            all_day: false,
+            recurrence: Some(EventRecurrence {
+                rrule: "FREQ=WEEKLY;BYDAY=WE".into(),
+                exceptions: vec![Utc
+                    .with_ymd_and_hms(2026, 6, 3, 8, 0, 0)
+                    .unwrap()],
+            }),
+            color_label: None,
+            reminders: Vec::new(),
+            sound: None,
+            attendees: Vec::new(),
+        };
+        let uid = "abcdef-12345@aperio";
+        let body = new_event_to_ical(uid, &event);
+        // The reader must see exactly the fields we wrote.
+        let parsed = parse_calendar_data(&body, "cal-1").unwrap();
+        assert_eq!(parsed.len(), 1);
+        let read = &parsed[0];
+        assert_eq!(read.id, uid);
+        assert_eq!(read.title, "Sprint planning");
+        assert_eq!(read.description.as_deref(), Some("agenda in the doc"));
+        assert_eq!(read.location.as_deref(), Some("room 3.12"));
+        assert_eq!(read.start, event.start);
+        assert_eq!(read.end, event.end);
+        let rec = read.recurrence.as_ref().unwrap();
+        assert!(rec.rrule.contains("WEEKLY"));
+        assert_eq!(rec.exceptions.len(), 1);
+    }
+
+    #[test]
+    fn write_all_day_uses_value_date() {
+        let event = NewEvent {
+            title: "Birthday".into(),
+            description: None,
+            location: None,
+            start: Utc.with_ymd_and_hms(2026, 5, 20, 0, 0, 0).unwrap(),
+            end: Utc.with_ymd_and_hms(2026, 5, 21, 0, 0, 0).unwrap(),
+            all_day: true,
+            recurrence: None,
+            color_label: None,
+            reminders: Vec::new(),
+            sound: None,
+            attendees: Vec::new(),
+        };
+        let body = new_event_to_ical("bday-uid", &event);
+        assert!(
+            body.contains("DTSTART;VALUE=DATE:20260520"),
+            "expected VALUE=DATE DTSTART, got: {body}",
         );
     }
 

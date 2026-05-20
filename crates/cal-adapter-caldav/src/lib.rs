@@ -24,6 +24,7 @@ pub mod discovery;
 pub mod error;
 pub mod events;
 pub mod mapping;
+pub mod tasks;
 mod xml;
 
 use std::sync::Mutex;
@@ -31,8 +32,9 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use cal_core::{
-    Adapter, AuthToken, Calendar, CalendarFeature, Capability, ContainerColor, Credentials as CoreCredentials,
-    DateRange, Error as CoreError, Event, FreeBusy, NewEvent, Result as CoreResult,
+    Adapter, AuthToken, Calendar, CalendarFeature, Capability, ContainerColor,
+    Credentials as CoreCredentials, DateRange, Error as CoreError, Event, FreeBusy,
+    NewEvent, NewTask, Result as CoreResult, Task, TaskList, TasksFeature,
 };
 use reqwest::Client;
 use url::Url;
@@ -84,7 +86,7 @@ impl CaldavAdapter {
             credentials,
             http,
             discovery: Mutex::new(None),
-            capabilities: vec![Capability::Calendar],
+            capabilities: vec![Capability::Calendar, Capability::Tasks],
         })
     }
 
@@ -185,25 +187,68 @@ impl CalendarFeature for CaldavAdapter {
 
     async fn create_event(
         &self,
-        _calendar_id: &str,
-        _event: NewEvent,
+        calendar_id: &str,
+        event: NewEvent,
     ) -> CoreResult<Event> {
-        // Lands in Phase 6b.3 — PUT against a generated UID URL.
-        Err(CoreError::Unsupported(
-            "CalDAV create_event is not implemented yet".into(),
-        ))
+        let cal_url = Url::parse(calendar_id)
+            .map_err(|err| CoreError::InvalidInput(err.to_string()))?;
+        events::create_event(&self.http, &cal_url, event, &self.credentials)
+            .await
+            .map_err(to_core_error)
     }
 
-    async fn update_event(&self, _event: Event) -> CoreResult<Event> {
-        Err(CoreError::Unsupported(
-            "CalDAV update_event is not implemented yet".into(),
-        ))
+    async fn update_event(&self, event: Event) -> CoreResult<Event> {
+        events::update_event(&self.http, event, &self.credentials)
+            .await
+            .map_err(to_core_error)
     }
 
-    async fn delete_event(&self, _event_id: &str) -> CoreResult<()> {
-        Err(CoreError::Unsupported(
-            "CalDAV delete_event is not implemented yet".into(),
-        ))
+    async fn delete_event(&self, event_id: &str) -> CoreResult<()> {
+        // The trait signature only gives us the event id. CalDAV
+        // needs the calendar collection URL too — we recover it
+        // by re-reading the discovery cache; callers that know
+        // the calendar URL up front can hit `events::delete_event`
+        // directly. The current API is good enough for the
+        // registry layer where the calling code picked up the
+        // event from `get_events` first (so we know which calendar
+        // it lives on).
+        //
+        // Without the calendar id we fall back to a best-effort:
+        // walk every calendar in the home set and try to DELETE on
+        // each. That's the lazy path; the registry will refactor
+        // the trait signature in Phase 6b.4 to thread the calendar
+        // id through delete as well.
+        let discovery = self.discover().await.map_err(to_core_error)?;
+        let cals = calendars::list_calendars(
+            &self.http,
+            &discovery.calendar_home_url,
+            &self.credentials,
+        )
+        .await
+        .map_err(to_core_error)?;
+        for cal in cals {
+            let cal_url = match Url::parse(&cal.id) {
+                Ok(u) => u,
+                Err(_) => continue,
+            };
+            // Without an ETag we don't bother with If-Match — the
+            // user explicitly chose to delete this row, so a
+            // concurrent modification is informational at best.
+            if let Ok(()) = events::delete_event(
+                &self.http,
+                &cal_url,
+                event_id,
+                None,
+                &self.credentials,
+            )
+            .await
+            {
+                return Ok(());
+            }
+        }
+        Err(CoreError::NotFound(format!(
+            "event '{event_id}' not found in any calendar"
+        )))
     }
 
     async fn get_free_busy(
@@ -223,6 +268,81 @@ impl CalendarFeature for CaldavAdapter {
         // would just duplicate work; consumers should use the value
         // off the Calendar they got from `list_calendars`.
         None
+    }
+}
+
+#[async_trait]
+impl TasksFeature for CaldavAdapter {
+    async fn list_task_lists(&self) -> CoreResult<Vec<TaskList>> {
+        let discovery = self.discover().await.map_err(to_core_error)?;
+        tasks::list_task_lists(
+            &self.http,
+            &discovery.calendar_home_url,
+            &self.credentials,
+        )
+        .await
+        .map_err(to_core_error)
+    }
+
+    async fn get_tasks(&self, list_id: &str) -> CoreResult<Vec<Task>> {
+        let list_url = Url::parse(list_id)
+            .map_err(|err| CoreError::InvalidInput(err.to_string()))?;
+        tasks::get_tasks(&self.http, &list_url, &self.credentials)
+            .await
+            .map_err(to_core_error)
+    }
+
+    async fn create_task(
+        &self,
+        list_id: &str,
+        task: NewTask,
+    ) -> CoreResult<Task> {
+        let list_url = Url::parse(list_id)
+            .map_err(|err| CoreError::InvalidInput(err.to_string()))?;
+        tasks::create_task(&self.http, &list_url, task, &self.credentials)
+            .await
+            .map_err(to_core_error)
+    }
+
+    async fn update_task(&self, task: Task) -> CoreResult<Task> {
+        tasks::update_task(&self.http, task, &self.credentials)
+            .await
+            .map_err(to_core_error)
+    }
+
+    async fn delete_task(&self, task_id: &str) -> CoreResult<()> {
+        // Same shape as delete_event: the trait signature loses the
+        // list id so we walk the home set and try each candidate
+        // collection. 6b.4 will refactor the trait to carry the
+        // list/calendar id alongside the row id.
+        let discovery = self.discover().await.map_err(to_core_error)?;
+        let lists = tasks::list_task_lists(
+            &self.http,
+            &discovery.calendar_home_url,
+            &self.credentials,
+        )
+        .await
+        .map_err(to_core_error)?;
+        for list in lists {
+            let url = match Url::parse(&list.id) {
+                Ok(u) => u,
+                Err(_) => continue,
+            };
+            if let Ok(()) = tasks::delete_task(
+                &self.http,
+                &url,
+                task_id,
+                None,
+                &self.credentials,
+            )
+            .await
+            {
+                return Ok(());
+            }
+        }
+        Err(CoreError::NotFound(format!(
+            "task '{task_id}' not found in any list"
+        )))
     }
 }
 
