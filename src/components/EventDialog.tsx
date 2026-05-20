@@ -227,6 +227,11 @@ export function EventDialog({
             sound: null,
             attendees: [],
           });
+          // Remember the calendar for the next new-event open. Only
+          // for *creates*: edits shouldn't bias future picks, since
+          // the user might have only changed a recurring event in
+          // a calendar they don't usually write to.
+          writeLastUsedCalendar(form.calendarId);
           announce(t('dialogs.event.created', { title: trimmedTitle }));
         }
         onClose();
@@ -512,11 +517,36 @@ export function EventDialog({
   );
 }
 
+/** localStorage key for the calendar id the user most recently created
+ *  an event on. Read at form-open time so the dropdown defaults to it
+ *  instead of `calendars[0]`, which is a usability win for anyone who
+ *  has more than two calendars wired up. Scope is per-app-install;
+ *  multi-profile / multi-device sync is out of scope here. */
+const LAST_USED_CALENDAR_KEY = 'aperio.lastUsedCalendar.v1';
+
+export function readLastUsedCalendar(): string | null {
+  try {
+    return localStorage.getItem(LAST_USED_CALENDAR_KEY);
+  } catch {
+    // localStorage can throw in private-browsing or quota-exceeded
+    // states. The user just gets the regular `calendars[0]` fallback.
+    return null;
+  }
+}
+
+export function writeLastUsedCalendar(id: string): void {
+  try {
+    localStorage.setItem(LAST_USED_CALENDAR_KEY, id);
+  } catch {
+    // Best effort — no recovery needed.
+  }
+}
+
 function buildInitialState(
   event: CalendarEvent | null,
   defaultCalendarId: string | undefined,
   defaultDate: string | undefined,
-  calendars: { id: string }[],
+  calendars: { id: string; read_only: boolean }[],
 ): FormState {
   if (event) {
     const start = new Date(event.start);
@@ -556,7 +586,28 @@ function buildInitialState(
   const end = new Date(start);
   end.setHours(end.getHours() + 1);
 
-  const fallbackCalendar = defaultCalendarId ?? calendars[0]?.id ?? '';
+  // Fallback chain for the calendar dropdown on a *new* event:
+  //   1. explicit `defaultCalendarId` from the caller (e.g. when the
+  //      user pressed Enter on a specific calendar's row)
+  //   2. last-used calendar (persisted in localStorage on every
+  //      successful create) — provided it still exists and isn't
+  //      read-only
+  //   3. first writable calendar
+  //   4. first calendar regardless of read-only-ness (degenerate case
+  //      where the only available calendar is a subscription feed; the
+  //      dropdown filter will still hide it and the submit blocks)
+  const writableCalendars = calendars.filter((c) => !c.read_only);
+  const lastUsed = readLastUsedCalendar();
+  const lastUsedIfValid =
+    lastUsed && writableCalendars.some((c) => c.id === lastUsed)
+      ? lastUsed
+      : null;
+  const fallbackCalendar =
+    defaultCalendarId ??
+    lastUsedIfValid ??
+    writableCalendars[0]?.id ??
+    calendars[0]?.id ??
+    '';
 
   return {
     title: '',

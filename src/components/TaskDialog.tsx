@@ -160,6 +160,8 @@ export function TaskDialog({
             reminders: form.reminders,
             sound: null,
           });
+          // Remember for next time — only on create, not edit.
+          writeLastUsedTaskList(form.listId);
           announce(t('dialogs.task.created', { title: trimmedTitle }));
         }
         onClose();
@@ -410,11 +412,32 @@ export function TaskDialog({
   );
 }
 
+/** Mirrors EventDialog's last-used-calendar memo. The task-list
+ *  picker on a new task remembers the user's previous pick so a
+ *  multi-list setup doesn't reset to `taskLists[0]` on every open. */
+const LAST_USED_TASK_LIST_KEY = 'aperio.lastUsedTaskList.v1';
+
+export function readLastUsedTaskList(): string | null {
+  try {
+    return localStorage.getItem(LAST_USED_TASK_LIST_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function writeLastUsedTaskList(id: string): void {
+  try {
+    localStorage.setItem(LAST_USED_TASK_LIST_KEY, id);
+  } catch {
+    // Best effort.
+  }
+}
+
 function buildInitialState(
   task: Task | null,
   defaultListId: string | undefined,
   defaultDate: string | undefined,
-  taskLists: { id: string }[],
+  taskLists: { id: string; read_only: boolean }[],
 ): FormState {
   if (task) {
     const mode: DeadlineMode = task.scheduled_date
@@ -444,9 +467,24 @@ function buildInitialState(
   // When the caller anchored us on a day, default to a "scheduled
   // task on that day". When unset, the task starts dateless (backlog).
   const anchored = defaultDate ? defaultDate.slice(0, 10) : null;
+  // Same fallback chain as the event picker: explicit default →
+  // last-used (if still present and writable) → first writable →
+  // first list at all.
+  const writableLists = taskLists.filter((l) => !l.read_only);
+  const lastUsed = readLastUsedTaskList();
+  const lastUsedIfValid =
+    lastUsed && writableLists.some((l) => l.id === lastUsed)
+      ? lastUsed
+      : null;
+  const fallbackList =
+    defaultListId ??
+    lastUsedIfValid ??
+    writableLists[0]?.id ??
+    taskLists[0]?.id ??
+    '';
   return {
     title: '',
-    listId: defaultListId ?? taskLists[0]?.id ?? '',
+    listId: fallbackList,
     status: 'open',
     priority: 'medium',
     deadlineMode: anchored ? 'scheduled' : 'none',
