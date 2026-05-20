@@ -187,7 +187,9 @@ export function MonthView() {
           if (evs.length > 0) {
             openEventDialog(evs[0]);
           } else {
-            openEventDialog(null);
+            openEventDialog(null, {
+              defaultDate: keyOf(focusedDay),
+            });
           }
           return;
         }

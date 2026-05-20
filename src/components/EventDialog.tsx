@@ -37,6 +37,12 @@ export interface EventDialogProps {
   event: CalendarEvent | null;
   /** Pre-selected calendar when creating a new event. */
   defaultCalendarId?: string;
+  /**
+   * ISO date (YYYY-MM-DD or full ISO) used to pre-fill start/end when
+   * creating a new event. The dialog drops the time component so the
+   * defaults are "next full hour on that day". Ignored when editing.
+   */
+  defaultDate?: string;
 }
 
 interface FormState {
@@ -80,6 +86,7 @@ export function EventDialog({
   onClose,
   event,
   defaultCalendarId,
+  defaultDate,
 }: EventDialogProps) {
   const { t } = useTranslation();
   const announce = useAnnouncer();
@@ -87,8 +94,8 @@ export function EventDialog({
 
   const isEdit = event !== null;
   const initialState = useMemo<FormState>(
-    () => buildInitialState(event, defaultCalendarId, calendars),
-    [event, defaultCalendarId, calendars],
+    () => buildInitialState(event, defaultCalendarId, defaultDate, calendars),
+    [event, defaultCalendarId, defaultDate, calendars],
   );
 
   const [form, setForm] = useState<FormState>(initialState);
@@ -487,6 +494,7 @@ export function EventDialog({
 function buildInitialState(
   event: CalendarEvent | null,
   defaultCalendarId: string | undefined,
+  defaultDate: string | undefined,
   calendars: { id: string }[],
 ): FormState {
   if (event) {
@@ -507,11 +515,22 @@ function buildInitialState(
     };
   }
 
-  // New event: default to a 1-hour slot starting at the next full hour.
-  const now = new Date();
-  const start = new Date(now);
-  start.setMinutes(0, 0, 0);
-  start.setHours(start.getHours() + 1);
+  // New event: 1-hour slot.
+  //  - When the caller anchored us on a specific day (Enter on a week
+  //    cell), we use 09:00–10:00 on that day so the form reflects the
+  //    day the user is looking at rather than "today" o'clock.
+  //  - Otherwise (toolbar / Ctrl+N) we default to the next full hour
+  //    from now, which lines up with the user's day-of-work rhythm.
+  const anchoredDay = parseDefaultDate(defaultDate);
+  let start: Date;
+  if (anchoredDay) {
+    start = new Date(anchoredDay);
+    start.setHours(9, 0, 0, 0);
+  } else {
+    start = new Date();
+    start.setMinutes(0, 0, 0);
+    start.setHours(start.getHours() + 1);
+  }
   const end = new Date(start);
   end.setHours(end.getHours() + 1);
 
@@ -530,6 +549,21 @@ function buildInitialState(
     rrule: null,
     colorLabel: null,
   };
+}
+
+/** Parse a YYYY-MM-DD or full ISO string into a Date at the start of
+ *  the local day. Returns null when the input is undefined / invalid. */
+function parseDefaultDate(input: string | undefined): Date | null {
+  if (!input) return null;
+  // Accept both "YYYY-MM-DD" and full ISO. We strip the time so the
+  // base sits at midnight local time; the caller's "next full hour"
+  // logic then lands on 01:00 of that day, which is reasonable for a
+  // form the user will customise anyway.
+  const isoDay = input.length >= 10 ? input.slice(0, 10) : input;
+  const [y, m, d] = isoDay.split('-').map(Number);
+  if (!y || !m || !d) return null;
+  const date = new Date(y, m - 1, d, 0, 0, 0);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function dateInput(d: Date): string {

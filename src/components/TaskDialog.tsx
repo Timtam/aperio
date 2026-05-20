@@ -38,6 +38,8 @@ export interface TaskDialogProps {
   task: Task | null;
   /** Pre-selected list when creating a new task. */
   defaultListId?: string;
+  /** ISO date used to pre-fill scheduled_date when creating. */
+  defaultDate?: string;
 }
 
 type DeadlineMode = 'none' | 'scheduled' | 'on' | 'by';
@@ -60,6 +62,7 @@ export function TaskDialog({
   onClose,
   task,
   defaultListId,
+  defaultDate,
 }: TaskDialogProps) {
   const { t } = useTranslation();
   const announce = useAnnouncer();
@@ -67,8 +70,8 @@ export function TaskDialog({
 
   const isEdit = task !== null;
   const initialState = useMemo<FormState>(
-    () => buildInitialState(task, defaultListId, taskLists),
-    [task, defaultListId, taskLists],
+    () => buildInitialState(task, defaultListId, defaultDate, taskLists),
+    [task, defaultListId, defaultDate, taskLists],
   );
 
   const [form, setForm] = useState<FormState>(initialState);
@@ -390,6 +393,7 @@ export function TaskDialog({
 function buildInitialState(
   task: Task | null,
   defaultListId: string | undefined,
+  defaultDate: string | undefined,
   taskLists: { id: string }[],
 ): FormState {
   if (task) {
@@ -416,13 +420,16 @@ function buildInitialState(
       recurrence: recurrenceFromBackend(task.recurrence),
     };
   }
+  // When the caller anchored us on a day, default to a "scheduled
+  // task on that day". When unset, the task starts dateless (backlog).
+  const anchored = defaultDate ? defaultDate.slice(0, 10) : null;
   return {
     title: '',
     listId: defaultListId ?? taskLists[0]?.id ?? '',
     status: 'open',
     priority: 'medium',
-    deadlineMode: 'none',
-    date: todayInput(),
+    deadlineMode: anchored ? 'scheduled' : 'none',
+    date: anchored ?? todayInput(),
     time: '09:00',
     description: '',
     colorLabel: null,

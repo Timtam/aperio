@@ -215,15 +215,18 @@ export function WeekView() {
         case ' ':
         case 'Spacebar': {
           // Enter on a focused cell with events: open the first one.
-          // Pressing Enter on an empty cell opens the quick-create
-          // event dialog pre-seeded with that day.
+          // Pressing Enter on an empty cell opens the create-event
+          // dialog pre-seeded with that day so the form reflects what
+          // the user is looking at.
           e.preventDefault();
           const focusedDay = days[focusIndex];
           const evs = eventsByDay.get(keyOf(focusedDay)) ?? [];
           if (evs.length > 0) {
             openEventDialog(evs[0]);
           } else {
-            openEventDialog(null);
+            openEventDialog(null, {
+              defaultDate: keyOf(focusedDay),
+            });
           }
           return;
         }

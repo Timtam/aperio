@@ -109,8 +109,11 @@ export function QuickAddDialog({
 
   const openFullDialog = useCallback(() => {
     onClose();
-    openEventDialog(null, calendarId || undefined);
-  }, [onClose, openEventDialog, calendarId]);
+    openEventDialog(null, {
+      calendarId: calendarId || undefined,
+      defaultDate: date || undefined,
+    });
+  }, [onClose, openEventDialog, calendarId, date]);
 
   return (
     <Modal

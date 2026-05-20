@@ -22,6 +22,7 @@ export function DialogHost() {
           onClose={close}
           event={mode.event}
           defaultCalendarId={mode.calendarId}
+          defaultDate={mode.defaultDate}
         />
       );
     case 'task':
@@ -31,6 +32,7 @@ export function DialogHost() {
           onClose={close}
           task={mode.task}
           defaultListId={mode.listId}
+          defaultDate={mode.defaultDate}
         />
       );
     case 'quickAdd':

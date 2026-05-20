@@ -24,20 +24,47 @@ export type MoveCopyTarget =
 
 export type DialogMode =
   | { kind: 'none' }
-  | { kind: 'event'; event: CalendarEvent | null; calendarId?: string }
-  | { kind: 'task'; task: Task | null; listId?: string }
+  | {
+      kind: 'event';
+      event: CalendarEvent | null;
+      calendarId?: string;
+      /** Pre-fill start/end around this date when creating a new event. */
+      defaultDate?: string;
+    }
+  | {
+      kind: 'task';
+      task: Task | null;
+      listId?: string;
+      defaultDate?: string;
+    }
   | { kind: 'quickAdd' }
   | { kind: 'colorLabels' }
   | { kind: 'search' }
   | { kind: 'moveCopy'; target: MoveCopyTarget };
 
+/**
+ * Optional context the caller can pass when opening a *create* dialog
+ * (i.e. when `event` / `task` is null). Editing an existing row never
+ * needs these — its fields come from the row itself.
+ */
+export interface OpenEventOptions {
+  calendarId?: string;
+  /** Pre-fill start/end around this date (ISO string). */
+  defaultDate?: string;
+}
+
+export interface OpenTaskOptions {
+  listId?: string;
+  defaultDate?: string;
+}
+
 interface DialogStateValue {
   mode: DialogMode;
   openEventDialog: (
     event?: CalendarEvent | null,
-    calendarId?: string,
+    options?: OpenEventOptions,
   ) => void;
-  openTaskDialog: (task?: Task | null, listId?: string) => void;
+  openTaskDialog: (task?: Task | null, options?: OpenTaskOptions) => void;
   openQuickAdd: () => void;
   openColorLabels: () => void;
   openSearch: () => void;
@@ -65,16 +92,26 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
   };
 
   const openEventDialog = useCallback(
-    (event: CalendarEvent | null = null, calendarId?: string) => {
+    (event: CalendarEvent | null = null, options?: OpenEventOptions) => {
       captureTrigger();
-      setMode({ kind: 'event', event, calendarId });
+      setMode({
+        kind: 'event',
+        event,
+        calendarId: options?.calendarId,
+        defaultDate: options?.defaultDate,
+      });
     },
     [],
   );
   const openTaskDialog = useCallback(
-    (task: Task | null = null, listId?: string) => {
+    (task: Task | null = null, options?: OpenTaskOptions) => {
       captureTrigger();
-      setMode({ kind: 'task', task, listId });
+      setMode({
+        kind: 'task',
+        task,
+        listId: options?.listId,
+        defaultDate: options?.defaultDate,
+      });
     },
     [],
   );
@@ -103,12 +140,23 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     triggerRef.current = null;
     setMode({ kind: 'none' });
     if (!target) return;
-    // Restore focus after the current React commit so the shell has had
-    // a chance to drop `inert`. Without the microtask the browser would
-    // refuse the focus call while the target's ancestor still claims
-    // to be inert.
-    queueMicrotask(() => {
+    // Restore focus on the next animation frame. queueMicrotask was too
+    // eager on Chromium — it ran before the React commit that drops
+    // `inert` from the shell, so the focus() call hit an inert
+    // ancestor and silently landed on <body>. RAF guarantees the DOM
+    // has been mutated; we additionally double-check on the *next*
+    // frame and re-focus if the element is no longer the active one,
+    // because re-fetches triggered by the dialog close (useEvents,
+    // useTasks) can re-render between the two frames.
+    const restore = () => {
+      if (!document.body.contains(target)) return;
       target.focus({ preventScroll: true });
+    };
+    requestAnimationFrame(() => {
+      restore();
+      requestAnimationFrame(() => {
+        if (document.activeElement !== target) restore();
+      });
     });
   }, []);
 
