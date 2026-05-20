@@ -7,7 +7,7 @@ use cal_core::{
     Weekday,
 };
 use chrono::{Datelike, Days, Months, NaiveDate, Utc};
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use uuid::Uuid;
 
 use crate::mapping::{
@@ -263,6 +263,29 @@ impl LocalAdapter {
             )));
         }
         Ok(())
+    }
+
+    /// Fetch a single task by id. Returns `Ok(None)` when missing.
+    /// Counterpart to `get_event_by_id` for the reminders overview.
+    pub fn get_task_by_id(&self, id: &str) -> cal_core::Result<Option<Task>> {
+        let conn = self.db().lock().expect("db mutex poisoned");
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, list_id, parent_id, title, description, status,
+                        priority, scheduled_date, deadline_type, deadline_date,
+                        deadline_time, recurrence, color_label_id, reminders, sound,
+                        created_at, updated_at, completed_at, etag
+                   FROM tasks WHERE id = ?",
+            )
+            .map_err(map_sql_err)?;
+        let row = stmt
+            .query_row(params![id], |r| Ok(row_to_task(r)))
+            .optional()
+            .map_err(map_sql_err)?;
+        match row {
+            None => Ok(None),
+            Some(res) => res.map(Some),
+        }
     }
 }
 

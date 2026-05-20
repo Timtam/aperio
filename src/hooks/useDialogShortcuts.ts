@@ -20,6 +20,7 @@ export function useDialogShortcuts(): void {
     openTaskDialog,
     openQuickAdd,
     openSearch,
+    openReminders,
     mode,
   } = useDialogState();
 
@@ -34,6 +35,11 @@ export function useDialogShortcuts(): void {
       if (cmd && !e.shiftKey && e.key.toLowerCase() === 'f') {
         e.preventDefault();
         openSearch();
+        return;
+      }
+      if (cmd && e.shiftKey && e.key.toLowerCase() === 'r') {
+        e.preventDefault();
+        openReminders();
         return;
       }
       if (cmd && e.shiftKey && e.key.toLowerCase() === 'n') {
@@ -55,7 +61,14 @@ export function useDialogShortcuts(): void {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [mode.kind, openEventDialog, openTaskDialog, openQuickAdd, openSearch]);
+  }, [
+    mode.kind,
+    openEventDialog,
+    openTaskDialog,
+    openQuickAdd,
+    openSearch,
+    openReminders,
+  ]);
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {

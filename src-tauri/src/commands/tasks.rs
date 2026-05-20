@@ -48,6 +48,14 @@ pub struct CreateTaskRequest {
 }
 
 #[tauri::command]
+pub async fn get_task_by_id(
+    adapter: State<'_, LocalAdapter>,
+    id: String,
+) -> CommandResult<Option<Task>> {
+    Ok(adapter.get_task_by_id(&id)?)
+}
+
+#[tauri::command]
 pub async fn create_task(
     adapter: State<'_, LocalAdapter>,
     scheduler: State<'_, SchedulerHandle>,

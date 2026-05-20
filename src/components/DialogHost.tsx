@@ -3,6 +3,7 @@ import { ColorLabelDialog } from './ColorLabelDialog';
 import { EventDialog } from './EventDialog';
 import { MoveCopyDialog } from './MoveCopyDialog';
 import { QuickAddDialog } from './QuickAddDialog';
+import { RemindersDialog } from './RemindersDialog';
 import { SearchDialog } from './SearchDialog';
 import { TaskDialog } from './TaskDialog';
 
@@ -41,6 +42,8 @@ export function DialogHost() {
       return <ColorLabelDialog isOpen onClose={close} />;
     case 'search':
       return <SearchDialog isOpen onClose={close} />;
+    case 'reminders':
+      return <RemindersDialog isOpen onClose={close} />;
     case 'moveCopy':
       return (
         <MoveCopyDialog isOpen onClose={close} target={mode.target} />

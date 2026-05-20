@@ -50,6 +50,8 @@ pub fn run() {
             commands::update_event,
             commands::delete_event,
             commands::add_event_exdate,
+            commands::get_event_by_id,
+            commands::get_task_by_id,
             commands::list_task_lists,
             commands::create_task_list,
             commands::delete_task_list,
@@ -62,6 +64,7 @@ pub fn run() {
             commands::update_color_label,
             commands::delete_color_label,
             commands::search,
+            commands::list_upcoming_reminders,
         ])
         .setup(move |app| {
             // Spawn the reminder scheduler on the Tauri/tokio runtime

@@ -8,6 +8,7 @@
 
 mod calendars;
 mod color_labels;
+mod reminders;
 mod search;
 mod tasks;
 
@@ -15,6 +16,7 @@ use serde::Serialize;
 
 pub use calendars::*;
 pub use color_labels::*;
+pub use reminders::*;
 pub use search::*;
 pub use tasks::*;
 

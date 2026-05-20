@@ -96,6 +96,14 @@ pub async fn delete_event(
 }
 
 #[tauri::command]
+pub async fn get_event_by_id(
+    adapter: State<'_, LocalAdapter>,
+    id: String,
+) -> CommandResult<Option<Event>> {
+    Ok(adapter.get_event_by_id(&id)?)
+}
+
+#[tauri::command]
 pub async fn add_event_exdate(
     adapter: State<'_, LocalAdapter>,
     scheduler: State<'_, SchedulerHandle>,

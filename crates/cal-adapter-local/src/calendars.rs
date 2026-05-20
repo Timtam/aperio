@@ -116,6 +116,31 @@ impl LocalAdapter {
         Ok(())
     }
 
+    /// Fetch a single event by id. Returns `Ok(None)` when the row
+    /// does not exist. Used by the reminders overview to open an
+    /// item the user picks from the list — the overview only stores
+    /// item ids, not full payloads.
+    pub fn get_event_by_id(&self, id: &str) -> cal_core::Result<Option<Event>> {
+        let conn = self.db().lock().expect("db mutex poisoned");
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, calendar_id, title, description, location,
+                        start_utc, end_utc, all_day, rrule, rrule_exceptions,
+                        color_label_id, reminders, sound, attendees,
+                        created_at, updated_at, etag
+                   FROM events WHERE id = ?",
+            )
+            .map_err(map_sql_err)?;
+        let row = stmt
+            .query_row(params![id], |r| Ok(row_to_event(r)))
+            .optional()
+            .map_err(map_sql_err)?;
+        match row {
+            None => Ok(None),
+            Some(res) => res.map(Some),
+        }
+    }
+
     /// Append a single date to a recurring event's EXDATE list so the
     /// expansion engine skips that occurrence. Used by the UI's
     /// "edit / delete this occurrence only" flow — the master row's

@@ -65,6 +65,12 @@ export const updateEvent = (event: CalendarEvent) =>
 export const deleteEventById = (id: string) =>
   invoke<void>('delete_event', { id });
 
+export const getEventById = (id: string) =>
+  invoke<CalendarEvent | null>('get_event_by_id', { id });
+
+export const getTaskById = (id: string) =>
+  invoke<Task | null>('get_task_by_id', { id });
+
 /** Append `occurrence` to a recurring event's EXDATE list. Used when
  *  the user deletes or overrides a single occurrence — the master row
  *  stays intact and the expansion engine simply skips that date. */
@@ -150,3 +156,16 @@ export interface SearchFilters {
 
 export const search = (query: string, filters?: SearchFilters) =>
   invoke<SearchResults>('search', { query, filters: filters ?? null });
+
+// ── Reminders ──────────────────────────────────────────────────────────────
+
+export interface UpcomingReminder {
+  item_id: string;
+  item_kind: 'event' | 'task';
+  title: string;
+  /** ISO 8601 UTC. */
+  trigger_at: string;
+}
+
+export const listUpcomingReminders = () =>
+  invoke<UpcomingReminder[]>('list_upcoming_reminders');

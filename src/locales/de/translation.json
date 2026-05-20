@@ -260,6 +260,19 @@
       "moved": "„{{title}}\" wurde verschoben.",
       "copied": "„{{title}}\" wurde kopiert."
     },
+    "reminders": {
+      "title": "Erinnerungs-Übersicht",
+      "listLabel": "Anstehende Erinnerungen",
+      "loading": "Erinnerungen werden geladen …",
+      "empty": "Keine anstehenden Erinnerungen.",
+      "count_zero": "Keine Erinnerungen.",
+      "count_one": "1 Erinnerung.",
+      "count_other": "{{count}} Erinnerungen.",
+      "kindEvent": "Termin",
+      "kindTask": "Aufgabe",
+      "eventRow": "{{when}}: Termin „{{title}}\"",
+      "taskRow": "{{when}}: Aufgabe „{{title}}\""
+    },
     "search": {
       "title": "Suche",
       "field": "Termine und Aufgaben durchsuchen",

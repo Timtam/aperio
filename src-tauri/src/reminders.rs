@@ -26,6 +26,7 @@ use cal_adapter_local::SharedConn;
 use cal_core::{Reminder, ReminderKind};
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use rusqlite::params;
+use serde::Serialize;
 use tauri::{AppHandle, Runtime};
 use tauri_plugin_notification::NotificationExt;
 use tokio::sync::Notify;
@@ -50,10 +51,21 @@ struct Trigger {
     trigger_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ItemKind {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ItemKind {
     Event,
     Task,
+}
+
+/// Public DTO for the reminders overview dialog (Ctrl+Shift+R).
+#[derive(Debug, Clone, Serialize)]
+pub struct UpcomingReminder {
+    pub item_id: String,
+    pub item_kind: ItemKind,
+    pub title: String,
+    /// Trigger timestamp in RFC 3339 / ISO 8601 UTC.
+    pub trigger_at: String,
 }
 
 pub struct ReminderScheduler {
@@ -84,6 +96,25 @@ impl ReminderScheduler {
     /// thread; multiple back-to-back calls are coalesced by `Notify`.
     pub fn invalidate(&self) {
         self.invalidate.notify_one();
+    }
+
+    /// Snapshot the upcoming reminder triggers for the Ctrl+Shift+R
+    /// overview dialog. Filters out triggers that already fired in
+    /// this process; sorted ascending by trigger time. Results are
+    /// capped at `limit` to keep the dialog snappy.
+    pub fn upcoming(&self, limit: usize) -> Vec<UpcomingReminder> {
+        let mut triggers = self.collect_pending_triggers();
+        triggers.sort_by_key(|t| t.trigger_at);
+        triggers
+            .into_iter()
+            .take(limit)
+            .map(|t| UpcomingReminder {
+                item_id: t.item_id,
+                item_kind: t.item_kind,
+                title: t.title,
+                trigger_at: t.trigger_at.to_rfc3339(),
+            })
+            .collect()
     }
 
     async fn worker_loop<R: Runtime>(self: Arc<Self>, app: AppHandle<R>) {

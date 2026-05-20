@@ -260,6 +260,19 @@
       "moved": "\"{{title}}\" moved.",
       "copied": "\"{{title}}\" copied."
     },
+    "reminders": {
+      "title": "Reminders overview",
+      "listLabel": "Upcoming reminders",
+      "loading": "Loading reminders …",
+      "empty": "No upcoming reminders.",
+      "count_zero": "No reminders.",
+      "count_one": "1 reminder.",
+      "count_other": "{{count}} reminders.",
+      "kindEvent": "Event",
+      "kindTask": "Task",
+      "eventRow": "{{when}}: event \"{{title}}\"",
+      "taskRow": "{{when}}: task \"{{title}}\""
+    },
     "search": {
       "title": "Search",
       "field": "Search events and tasks",

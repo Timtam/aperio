@@ -40,6 +40,7 @@ export type DialogMode =
   | { kind: 'quickAdd' }
   | { kind: 'colorLabels' }
   | { kind: 'search' }
+  | { kind: 'reminders' }
   | { kind: 'moveCopy'; target: MoveCopyTarget };
 
 /**
@@ -68,6 +69,7 @@ interface DialogStateValue {
   openQuickAdd: () => void;
   openColorLabels: () => void;
   openSearch: () => void;
+  openReminders: () => void;
   openMoveCopy: (target: MoveCopyTarget) => void;
   close: () => void;
 }
@@ -130,6 +132,11 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     setMode({ kind: 'search' });
   }, []);
 
+  const openReminders = useCallback(() => {
+    captureTrigger();
+    setMode({ kind: 'reminders' });
+  }, []);
+
   const openMoveCopy = useCallback((target: MoveCopyTarget) => {
     captureTrigger();
     setMode({ kind: 'moveCopy', target });
@@ -168,6 +175,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openQuickAdd,
       openColorLabels,
       openSearch,
+      openReminders,
       openMoveCopy,
       close,
     }),
@@ -178,6 +186,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openQuickAdd,
       openColorLabels,
       openSearch,
+      openReminders,
       openMoveCopy,
       close,
     ],
