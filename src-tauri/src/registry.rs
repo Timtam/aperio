@@ -318,7 +318,7 @@ impl AdapterRegistry {
                 .unwrap_or_else(chrono::Utc::now),
             scope: None,
         };
-        let adapter = GoogleAdapter::new(config.client_id, tokens);
+        let adapter = GoogleAdapter::new(config.client_id, config.client_secret, tokens);
         let arc = Arc::new(adapter);
         self.external_cal
             .write()

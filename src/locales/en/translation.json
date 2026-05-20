@@ -314,8 +314,12 @@
       "googleClientIdLabel": "Google OAuth client ID",
       "googleClientIdPlaceholder": "e.g. 123456789012-abc…apps.googleusercontent.com",
       "googleClientIdHint": "From your Google Cloud Console (APIs & Services → Credentials → OAuth 2.0 Client ID, type \"Desktop App\"). Aperio needs your own client ID until it ships its own verified Google app registration.",
+      "googleClientSecretLabel": "Google OAuth client secret",
+      "googleClientSecretPlaceholder": "e.g. GOCSPX-…",
+      "googleClientSecretHint": "Sits right under the client ID in the same Cloud Console entry. Despite the name, Google's own docs concede the secret isn't actually secret for Desktop apps — Aperio stores it next to the client ID in the local DB.",
       "googleFlowHint": "Pressing \"Add\" opens your browser to Google's consent screen. After you grant access the tab closes itself and the calendar appears in the sidebar.",
       "clientIdRequired": "Please enter the client ID.",
+      "clientSecretRequired": "Please enter the client secret.",
       "kindName": {
         "local": "Local",
         "caldav": "CalDAV (iCloud, Nextcloud, …)",

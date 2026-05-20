@@ -340,6 +340,13 @@ pub async fn connect_google_account(
             message: "client_id must not be empty".into(),
         });
     }
+    let client_secret = request.client_secret.trim();
+    if client_secret.is_empty() {
+        return Err(CommandError {
+            code: "invalid_input",
+            message: "client_secret must not be empty".into(),
+        });
+    }
 
     // 1) Run the OAuth dance. This opens the system browser and
     //    blocks the command until the user completes consent (or
@@ -347,14 +354,17 @@ pub async fn connect_google_account(
     //    surfaced verbatim — we haven't touched anything persistent
     //    yet.
     let tokens =
-        GoogleAdapter::authenticate_interactive(client_id)
+        GoogleAdapter::authenticate_interactive(client_id, client_secret)
             .await
             .map_err(google_error_to_command)?;
 
-    // 2) Create the account row. Config holds only the non-secret
-    //    client_id; everything else lives in the keychain.
+    // 2) Create the account row. Config carries client_id +
+    //    client_secret (the latter is what Google's docs themselves
+    //    say "is not treated as a secret" for installed apps — see
+    //    the GoogleAccountConfig type docs).
     let config = GoogleAccountConfig {
         client_id: client_id.to_string(),
+        client_secret: client_secret.to_string(),
         account_label: None,
     };
     let config_json = serde_json::to_string(&config).map_err(|e| CommandError {
@@ -407,6 +417,7 @@ pub async fn connect_google_account(
 #[derive(Debug, serde::Deserialize)]
 pub struct ConnectGoogleRequest {
     pub client_id: String,
+    pub client_secret: String,
     pub display_name: String,
 }
 

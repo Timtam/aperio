@@ -33,6 +33,10 @@ const API_BASE: &str = "https://www.googleapis.com/calendar/v3";
 pub struct ApiState {
     pub tokens: Arc<Mutex<TokenSet>>,
     pub client_id: String,
+    /// Google's token endpoint demands the OAuth client secret on
+    /// every grant (auth-code exchange + refresh), even with PKCE
+    /// in the mix — see `auth::run` for the chapter and verse.
+    pub client_secret: String,
     pub http: reqwest::Client,
     /// Token endpoint. Production code passes the Google URL; tests
     /// inject mockito.
@@ -45,11 +49,13 @@ impl ApiState {
     pub fn new(
         tokens: TokenSet,
         client_id: String,
+        client_secret: String,
         http: reqwest::Client,
     ) -> Self {
         Self {
             tokens: Arc::new(Mutex::new(tokens)),
             client_id,
+            client_secret,
             http,
             token_url: GOOGLE_TOKEN_URL.to_string(),
             api_base: API_BASE.to_string(),
@@ -107,12 +113,18 @@ impl ApiState {
                 status: 401,
                 message: "no refresh token; reconnect required".into(),
             })?;
-        let fresh = auth::refresh(&self.client_id, &self.token_url, &refresh, &self.http)
-            .await
-            .map_err(|err| {
-                warn!(?err, "refresh-token grant failed");
-                err
-            })?;
+        let fresh = auth::refresh(
+            &self.client_id,
+            &self.client_secret,
+            &self.token_url,
+            &refresh,
+            &self.http,
+        )
+        .await
+        .map_err(|err| {
+            warn!(?err, "refresh-token grant failed");
+            err
+        })?;
         let mut guard = self.tokens.lock().await;
         guard.access_token = fresh.access_token;
         // Google sometimes omits the refresh token in the response —
@@ -231,6 +243,7 @@ mod tests {
                 scope: None,
             })),
             client_id: "test-client".into(),
+            client_secret: "test-secret".into(),
             http: reqwest::Client::new(),
             token_url: format!("{server_url}/token"),
             api_base: server_url.to_string(),

@@ -76,18 +76,31 @@ pub struct TokenSet {
 /// for redirect, exchange code for tokens. Returns the resulting
 /// [`TokenSet`] on success.
 ///
-/// `client_id` is the Google Cloud Console OAuth client id (Desktop
-/// app type). `token_url` and `auth_url` are exposed as parameters
-/// for tests; production callers pass the constants above via
-/// [`run_default`].
+/// `client_id` and `client_secret` are both issued together when
+/// the user creates a Desktop-app OAuth client in their Google
+/// Cloud Console. PKCE on its own (RFC 7636) would obviate the
+/// secret; Google's implementation still requires it on the token
+/// endpoint regardless. Their own docs concede the point —
+/// "Desktop apps store the client secret in the source code. In
+/// this context, the client secret is not treated as a secret."
+///
+/// `token_url` and `auth_url` are exposed as parameters for tests;
+/// production callers pass the constants above via [`run_default`].
 pub async fn run(
     client_id: &str,
+    client_secret: &str,
     auth_url: &str,
     token_url: &str,
     http: &reqwest::Client,
 ) -> GoogleResult<TokenSet> {
     if client_id.trim().is_empty() {
         return Err(GoogleError::Config("client_id must not be empty".into()));
+    }
+    if client_secret.trim().is_empty() {
+        return Err(GoogleError::Config(
+            "client_secret must not be empty — Google's token endpoint rejects requests without it"
+                .into(),
+        ));
     }
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let port = listener.local_addr()?.port();
@@ -110,15 +123,32 @@ pub async fn run(
         return Err(GoogleError::Csrf);
     }
 
-    exchange_code(http, token_url, client_id, &code, &verifier, &redirect_uri).await
+    exchange_code(
+        http,
+        token_url,
+        client_id,
+        client_secret,
+        &code,
+        &verifier,
+        &redirect_uri,
+    )
+    .await
 }
 
 /// Convenience wrapper that hits the Google production endpoints.
 pub async fn run_default(
     client_id: &str,
+    client_secret: &str,
     http: &reqwest::Client,
 ) -> GoogleResult<TokenSet> {
-    run(client_id, GOOGLE_AUTH_URL, GOOGLE_TOKEN_URL, http).await
+    run(
+        client_id,
+        client_secret,
+        GOOGLE_AUTH_URL,
+        GOOGLE_TOKEN_URL,
+        http,
+    )
+    .await
 }
 
 /// Use a refresh token to mint a new access token. Called by the API
@@ -128,6 +158,7 @@ pub async fn run_default(
 /// preserve the previously stored refresh token.
 pub async fn refresh(
     client_id: &str,
+    client_secret: &str,
     token_url: &str,
     refresh_token: &str,
     http: &reqwest::Client,
@@ -137,6 +168,7 @@ pub async fn refresh(
         ("grant_type", "refresh_token"),
         ("refresh_token", refresh_token),
         ("client_id", client_id),
+        ("client_secret", client_secret),
     ])
     .map_err(|e| GoogleError::Protocol(format!("encode refresh body: {e}")))?;
 
@@ -286,6 +318,7 @@ async fn exchange_code(
     http: &reqwest::Client,
     token_url: &str,
     client_id: &str,
+    client_secret: &str,
     code: &str,
     verifier: &str,
     redirect_uri: &str,
@@ -295,6 +328,7 @@ async fn exchange_code(
         ("grant_type", "authorization_code"),
         ("code", code),
         ("client_id", client_id),
+        ("client_secret", client_secret),
         ("code_verifier", verifier),
         ("redirect_uri", redirect_uri),
     ])
@@ -449,6 +483,7 @@ mod tests {
             &http,
             &format!("{}/token", server.url()),
             "my-client",
+            "shh-secret",
             "auth-code",
             "verifier",
             "http://127.0.0.1:12345",
@@ -482,6 +517,7 @@ mod tests {
         let http = reqwest::Client::new();
         let tokens = refresh(
             "my-client",
+            "shh-secret",
             &format!("{}/token", server.url()),
             "old-refresh",
             &http,
@@ -490,6 +526,72 @@ mod tests {
         .unwrap();
         assert_eq!(tokens.access_token, "ya29.refreshed");
         assert!(tokens.refresh_token.is_none());
+    }
+
+    #[tokio::test]
+    async fn exchange_code_sends_client_secret_in_form_body() {
+        // Regression: Google's token endpoint rejects PKCE Desktop-
+        // app exchanges that omit client_secret with
+        // `invalid_request: client_secret is missing`, even though
+        // RFC 7636 says PKCE alone should be enough. We have to
+        // send the secret regardless.
+        let mut server = mockito::Server::new_async().await;
+        let m = server
+            .mock("POST", "/token")
+            .match_body(mockito::Matcher::Regex(
+                "client_secret=shh-secret".to_string(),
+            ))
+            .with_status(200)
+            .with_body(
+                r#"{"access_token":"ya29.fake","expires_in":3600,"token_type":"Bearer"}"#,
+            )
+            .expect(1)
+            .create_async()
+            .await;
+
+        let http = reqwest::Client::new();
+        exchange_code(
+            &http,
+            &format!("{}/token", server.url()),
+            "my-client",
+            "shh-secret",
+            "code",
+            "verifier",
+            "http://127.0.0.1:12345",
+        )
+        .await
+        .unwrap();
+        m.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn refresh_also_sends_client_secret() {
+        let mut server = mockito::Server::new_async().await;
+        let m = server
+            .mock("POST", "/token")
+            .match_body(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::Regex("grant_type=refresh_token".into()),
+                mockito::Matcher::Regex("client_secret=shh-secret".into()),
+            ]))
+            .with_status(200)
+            .with_body(
+                r#"{"access_token":"ya29.refreshed","expires_in":3600,"token_type":"Bearer"}"#,
+            )
+            .expect(1)
+            .create_async()
+            .await;
+
+        let http = reqwest::Client::new();
+        refresh(
+            "my-client",
+            "shh-secret",
+            &format!("{}/token", server.url()),
+            "old-refresh",
+            &http,
+        )
+        .await
+        .unwrap();
+        m.assert_async().await;
     }
 
     #[tokio::test]
@@ -508,6 +610,7 @@ mod tests {
             &http,
             &format!("{}/token", server.url()),
             "c",
+            "s",
             "code",
             "v",
             "r",

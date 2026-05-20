@@ -251,15 +251,19 @@ export const testIcalFeed = (
  *  is registered with the adapter registry — the resolved
  *  `Account` row is returned just like a `createAccount` call.
  *
- *  `client_id` is the user's own Google Cloud Console OAuth client
- *  id (Desktop app type). See AccountsDialog help text for the
+ *  `client_id` and `client_secret` are the matching pair from the
+ *  user's Desktop-app OAuth client in their Google Cloud Console.
+ *  Google requires both on the token endpoint even though PKCE is
+ *  in use — their own docs concede the "secret" isn't actually a
+ *  secret for installed apps. See AccountsDialog help text for the
  *  setup walkthrough. */
 export const connectGoogleAccount = (
   client_id: string,
+  client_secret: string,
   display_name: string,
 ) =>
   invoke<Account>('connect_google_account', {
-    request: { client_id, display_name },
+    request: { client_id, client_secret, display_name },
   });
 
 /** Which container namespace an override applies to. Calendars and

@@ -34,13 +34,25 @@ use crate::api::ApiState;
 
 /// Persisted-in-the-DB part of a Google account's configuration. The
 /// access + refresh tokens live in the keychain via the `secrets`
-/// module — only the non-secret client_id and the user-visible email
-/// live here.
+/// module — `client_id` and `client_secret` sit here in the DB.
+///
+/// "Why is the client_secret in the DB and not the keychain?"
+/// Google's own Desktop-app OAuth documentation concedes that the
+/// client secret in this flow "is not treated as a secret" —
+/// installed apps are expected to embed it in the source code. We
+/// adopt the same view: it's an identifier of the user's own
+/// Google Cloud project, not a credential that would let an
+/// attacker who reads it impersonate the user. Putting it next to
+/// the client_id keeps the data layout coherent.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GoogleAccountConfig {
     /// OAuth 2.0 client id from the user's Google Cloud Console
     /// (Desktop app type). Treated as public information.
     pub client_id: String,
+    /// The matching client_secret from the same Cloud Console
+    /// entry. See the type-level doc for the "not really a secret"
+    /// discussion.
+    pub client_secret: String,
     /// User-visible email / display name the consent screen showed.
     /// Optional — populated after the first authentication and
     /// helpful when the user has multiple Google accounts.
@@ -63,14 +75,14 @@ impl GoogleAdapter {
     /// Construct an adapter from a previously-obtained [`TokenSet`].
     /// Use [`Self::authenticate_interactive`] to run the OAuth dance
     /// first when creating a fresh account.
-    pub fn new(client_id: String, tokens: TokenSet) -> Self {
+    pub fn new(client_id: String, client_secret: String, tokens: TokenSet) -> Self {
         let http = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(30))
             .build()
             .expect("reqwest client");
         Self {
-            state: ApiState::new(tokens, client_id, http),
+            state: ApiState::new(tokens, client_id, client_secret, http),
             capabilities: vec![Capability::Calendar],
             calendars_cache: Mutex::new(None),
             listing_ttl: chrono::Duration::minutes(5),
@@ -92,13 +104,14 @@ impl GoogleAdapter {
     /// the caller can persist `refresh_token` to keychain.
     pub async fn authenticate_interactive(
         client_id: &str,
+        client_secret: &str,
     ) -> GoogleResult<TokenSet> {
         let http = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(30))
             .build()
             .map_err(|e| GoogleError::Io(e.to_string()))?;
-        auth::run_default(client_id, &http).await
+        auth::run_default(client_id, client_secret, &http).await
     }
 
     /// Expose the current in-memory tokens. Used after a refresh so

@@ -86,10 +86,12 @@ const EMPTY_ICAL: IcalFields = {
 
 interface GoogleFields {
   clientId: string;
+  clientSecret: string;
 }
 
 const EMPTY_GOOGLE: GoogleFields = {
   clientId: '',
+  clientSecret: '',
 };
 
 export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
@@ -147,6 +149,8 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
 
   const validateGoogle = useCallback((): string | null => {
     if (!google.clientId.trim()) return t('dialogs.accounts.clientIdRequired');
+    if (!google.clientSecret.trim())
+      return t('dialogs.accounts.clientSecretRequired');
     return null;
   }, [google, t]);
 
@@ -196,6 +200,7 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
           // as createAccount so the rest of the flow is identical.
           created = await connectGoogleAccount(
             google.clientId.trim(),
+            google.clientSecret.trim(),
             name,
           );
         } else {
@@ -333,6 +338,15 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
   //    empty-state hint instead of skipping straight to the form.
   const sectionRef = useRef<HTMLElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
+  // Surface form-validation / backend errors to keyboard + SR users
+  // by moving focus onto the alert region the moment it appears.
+  // `role="alert"` already triggers an aria-live announcement on
+  // its own, but NVDA's focus mode (which is what the rest of the
+  // app uses) doesn't let the user navigate to prose without
+  // dropping into browse mode. Focusing the region directly lets
+  // them re-read it via Shift+arrow keys without a mode switch,
+  // and gives sighted keyboard users a clear visual landing point.
+  const errorRef = useRef<HTMLParagraphElement>(null);
   const [focusIndex, setFocusIndex] = useState(0);
 
   useEffect(() => {
@@ -348,6 +362,16 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
     if (!isOpen || loading) return;
     (listRef.current ?? sectionRef.current)?.focus({ preventScroll: true });
   }, [isOpen, loading, accounts.length]);
+
+  // Pull focus to the error region whenever it transitions from
+  // empty → set. See the `errorRef` comment for the rationale.
+  // `preventScroll: true` keeps the dialog viewport stable when the
+  // alert is already on screen.
+  useEffect(() => {
+    if (error && errorRef.current) {
+      errorRef.current.focus({ preventScroll: true });
+    }
+  }, [error]);
 
   const isLocalAt = (i: number): boolean => {
     const acc = accounts[i];
@@ -421,7 +445,12 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
         </p>
 
         {error && (
-          <p role="alert" className="form__error">
+          <p
+            ref={errorRef}
+            role="alert"
+            tabIndex={-1}
+            className="form__error"
+          >
             {error}
           </p>
         )}
@@ -692,7 +721,10 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
                     type="text"
                     value={google.clientId}
                     onChange={(e) =>
-                      setGoogle({ clientId: e.target.value })
+                      setGoogle((prev) => ({
+                        ...prev,
+                        clientId: e.target.value,
+                      }))
                     }
                     placeholder={t(
                       'dialogs.accounts.googleClientIdPlaceholder',
@@ -703,6 +735,30 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
                   />
                   <span className="form__hint">
                     {t('dialogs.accounts.googleClientIdHint')}
+                  </span>
+                </label>
+                <label className="form__field">
+                  <span className="form__label">
+                    {t('dialogs.accounts.googleClientSecretLabel')}
+                  </span>
+                  <input
+                    type="text"
+                    value={google.clientSecret}
+                    onChange={(e) =>
+                      setGoogle((prev) => ({
+                        ...prev,
+                        clientSecret: e.target.value,
+                      }))
+                    }
+                    placeholder={t(
+                      'dialogs.accounts.googleClientSecretPlaceholder',
+                    )}
+                    autoComplete="off"
+                    spellCheck={false}
+                    required
+                  />
+                  <span className="form__hint">
+                    {t('dialogs.accounts.googleClientSecretHint')}
                   </span>
                 </label>
                 <p className="form__hint accounts-google-flow-hint">
