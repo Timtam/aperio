@@ -1,4 +1,4 @@
-import { useCallback, useId, useMemo, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { addDays, isSameDay, startOfWeek } from 'date-fns';
 
@@ -177,6 +177,15 @@ export function WeekView() {
     }
   }, []);
 
+  // Announce "Loading …" once on mount if the first fetch is still in
+  // flight (typical with CalDAV calendars). Refetches after the initial
+  // load happen silently — see useEvents for why `loading` stays false
+  // after the first settle.
+  useEffect(() => {
+    if (loading) announce(t('views.loading'));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       // Tab / Shift+Tab walk through *all* events of the visible week
@@ -295,6 +304,12 @@ export function WeekView() {
           {fmt.format(weekStart, 'PP')} – {fmt.format(days[6], 'PP')}
         </h2>
       </header>
+
+      {loading && (
+        <p className="view__loading" aria-hidden="true">
+          {t('views.loading')}
+        </p>
+      )}
 
       <div
         ref={gridRef}

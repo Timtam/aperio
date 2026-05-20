@@ -1,4 +1,4 @@
-import { useCallback, useId, useMemo, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   addDays,
@@ -141,6 +141,13 @@ export function MonthView() {
     }
   }, []);
 
+  // Announce "Loading …" once on mount if we're still fetching. See
+  // DayView for the rationale (mount-only, never on refetches).
+  useEffect(() => {
+    if (loading) announce(t('views.loading'));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey) {
@@ -249,6 +256,12 @@ export function MonthView() {
       <header className="view__header">
         <h2>{fmt.format(anchor, 'MMMM yyyy')}</h2>
       </header>
+
+      {loading && (
+        <p className="view__loading" aria-hidden="true">
+          {t('views.loading')}
+        </p>
+      )}
 
       <div
         ref={gridRef}

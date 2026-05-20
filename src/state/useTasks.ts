@@ -14,11 +14,13 @@ import { useDialogState } from './DialogState';
  * a deadline next, undated tasks last.
  */
 export function useTasks() {
-  const { selectedTaskListIds, taskLists } = useCalendarStore();
+  const { selectedTaskListIds, taskLists, loading: storeLoading } =
+    useCalendarStore();
   const { dataVersion } = useDialogState();
   const [tasks, setTasks] = useState<Task[]>([]);
-  // Initial loading=true so views can hold off the auto-focus until
-  // the first fetch resolves — same reasoning as useEvents.
+  // True until the first fetch settles, then stays false. Subsequent
+  // refetches keep the previously loaded tasks on screen — see
+  // useEvents for the full reasoning.
   const [loading, setLoading] = useState(true);
 
   // Re-fetch when any mutation hint fires — see useEvents for the rationale.
@@ -30,7 +32,9 @@ export function useTasks() {
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
+
+    // Mirror useEvents: hold off until the task-list catalog has loaded.
+    if (storeLoading) return;
 
     const ids = [...selectedTaskListIds];
     if (ids.length === 0) {
@@ -58,7 +62,7 @@ export function useTasks() {
     return () => {
       cancelled = true;
     };
-  }, [idsKey, selectedTaskListIds, dataVersion]);
+  }, [storeLoading, idsKey, selectedTaskListIds, dataVersion]);
 
   const taskListById = useMemo(() => {
     const map = new Map<string, (typeof taskLists)[number]>();

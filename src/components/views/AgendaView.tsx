@@ -57,6 +57,13 @@ export function AgendaView() {
     }
   }, [events.length, focusIndex]);
 
+  // Announce "Loading …" once on mount if we're still fetching. See
+  // DayView for the rationale (mount-only, never on refetches).
+  useEffect(() => {
+    if (loading) announce(t('views.loading'));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const idPrefix = useId();
   const itemId = (i: number) => `${idPrefix}-item-${i}`;
   const listRef = useAutoFocus<HTMLUListElement>(!loading);
@@ -174,6 +181,12 @@ export function AgendaView() {
           {fmt.format(range.start, 'PP')} – {fmt.format(range.end, 'PP')}
         </span>
       </header>
+
+      {loading && (
+        <p className="view__loading" aria-hidden="true">
+          {t('views.loading')}
+        </p>
+      )}
 
       <ul
         ref={listRef}

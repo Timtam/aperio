@@ -1012,6 +1012,19 @@ button[aria-disabled='true'] {
   font-size: var(--font-size-sm);
 }
 
+/*
+ * Initial-load placeholder. Shown inline below the view header while
+ * the first event/task fetch is in flight (CalDAV calendars can take
+ * a second or two). Marked aria-hidden because the global Announcer
+ * reads the same text from the live region — no double announcement.
+ */
+.view__loading {
+  margin: var(--space-3) 0 0;
+  color: var(--color-fg-muted);
+  font-size: var(--font-size-sm);
+  font-style: italic;
+}
+
 /* ── Week view ──────────────────────────────────────────────────────────── */
 
 .week-grid {

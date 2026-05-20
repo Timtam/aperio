@@ -63,6 +63,17 @@ export function DayView() {
     }
   }, [dayEvents.length, focusIndex]);
 
+  // Announce "Loading …" once on mount if we're still fetching the
+  // very first batch. Subsequent refetches keep `loading` false and
+  // happen silently behind the already-rendered events — we never
+  // want to nag the user with "Loading…" after a CRUD operation.
+  useEffect(() => {
+    if (loading) announce(t('views.loading'));
+    // Mount-only — see the comment above. ESLint can't see that
+    // `loading` only ever flips from true → false.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const idPrefix = useId();
   const itemId = (i: number) => `${idPrefix}-item-${i}`;
   const listRef = useAutoFocus<HTMLUListElement>(!loading);
@@ -194,6 +205,12 @@ export function DayView() {
           {fmt.format(anchor, 'PPPP')}
         </h2>
       </header>
+
+      {loading && (
+        <p className="view__loading" aria-hidden="true">
+          {t('views.loading')}
+        </p>
+      )}
 
       <ul
         ref={listRef}

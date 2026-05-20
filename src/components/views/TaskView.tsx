@@ -64,6 +64,13 @@ export function TaskView() {
     }
   }, [flatTasks.length, focusIndex]);
 
+  // Announce "Loading …" once on mount if we're still fetching. See
+  // DayView for the rationale (mount-only, never on refetches).
+  useEffect(() => {
+    if (loading) announce(t('views.loading'));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const idPrefix = useId();
   const itemId = (i: number) => `${idPrefix}-item-${i}`;
   const listRef = useAutoFocus<HTMLUListElement>(!loading);
@@ -200,6 +207,12 @@ export function TaskView() {
       <header className="view__header">
         <h2>{t('views.tasks.title')}</h2>
       </header>
+
+      {loading && (
+        <p className="view__loading" aria-hidden="true">
+          {t('views.loading')}
+        </p>
+      )}
 
       <ul
         ref={listRef}
