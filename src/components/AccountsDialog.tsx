@@ -491,7 +491,7 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
                   type="button"
                   className="form__action"
                   onClick={onTestConnection}
-                  disabled={testing || submitting}
+                  aria-disabled={testing || submitting || undefined}
                 >
                   {testing
                     ? t('dialogs.accounts.testing')
@@ -501,7 +501,9 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
               <button
                 type="submit"
                 className="form__action form__action--primary"
-                disabled={submitting || testing || !ENABLED_KINDS.has(kind)}
+                aria-disabled={
+                  submitting || testing || !ENABLED_KINDS.has(kind) || undefined
+                }
               >
                 {t('dialogs.accounts.add')}
               </button>

@@ -178,7 +178,7 @@ export function ColorLabelDialog({ isOpen, onClose }: ColorLabelDialogProps) {
             </div>
             <button
               type="submit"
-              disabled={submitting}
+              aria-disabled={submitting || undefined}
               className="form__action form__action--primary"
             >
               {t('dialogs.colorLabels.create')}

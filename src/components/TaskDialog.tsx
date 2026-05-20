@@ -103,6 +103,7 @@ export function TaskDialog({
   const onSubmit = useCallback(
     async (e: FormEvent) => {
       e.preventDefault();
+      if (submitting) return;
       setError(null);
 
       const trimmedTitle = form.title.trim();
@@ -172,11 +173,12 @@ export function TaskDialog({
         setSubmitting(false);
       }
     },
-    [form, isEdit, task, announce, onClose, t],
+    [form, submitting, isEdit, task, announce, onClose, t],
   );
 
   const onDelete = useCallback(async () => {
     if (!task) return;
+    if (submitting) return;
     setError(null);
     setSubmitting(true);
     try {
@@ -195,7 +197,7 @@ export function TaskDialog({
     } finally {
       setSubmitting(false);
     }
-  }, [task, announce, onClose, t]);
+  }, [task, submitting, announce, onClose, t]);
 
   const title = isEdit
     ? t('dialogs.task.editTitle')
@@ -381,7 +383,7 @@ export function TaskDialog({
             <button
               type="button"
               onClick={onDelete}
-              disabled={submitting}
+              aria-disabled={submitting || undefined}
               className="form__action form__action--danger"
             >
               {t('dialogs.task.delete')}

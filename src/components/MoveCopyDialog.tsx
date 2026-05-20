@@ -203,14 +203,14 @@ export function MoveCopyDialog({
           <button
             type="button"
             onClick={onClose}
-            disabled={submitting}
+            aria-disabled={submitting || undefined}
             className="form__action"
           >
             {t('dialogs.cancel')}
           </button>
           <button
             type="submit"
-            disabled={submitting}
+            aria-disabled={submitting || undefined}
             className="form__action form__action--primary"
           >
             {mode === 'move'

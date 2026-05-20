@@ -132,6 +132,7 @@ export function EventDialog({
   const onSubmit = useCallback(
     async (e: FormEvent) => {
       e.preventDefault();
+      if (submitting) return; // re-entry guard while a slow PUT is in flight
       setError(null);
 
       const trimmedTitle = form.title.trim();
@@ -239,11 +240,12 @@ export function EventDialog({
         setSubmitting(false);
       }
     },
-    [form, isEdit, event, isOccurrence, editScope, announce, onClose, t],
+    [form, submitting, isEdit, event, isOccurrence, editScope, announce, onClose, t],
   );
 
   const onDelete = useCallback(async () => {
     if (!event) return;
+    if (submitting) return;
     setError(null);
     setSubmitting(true);
     try {
@@ -271,7 +273,7 @@ export function EventDialog({
     } finally {
       setSubmitting(false);
     }
-  }, [event, isOccurrence, editScope, announce, onClose, t]);
+  }, [event, submitting, isOccurrence, editScope, announce, onClose, t]);
 
   const title = isEdit ? t('dialogs.event.editTitle') : t('dialogs.event.newTitle');
 
@@ -474,7 +476,7 @@ export function EventDialog({
             <button
               type="button"
               onClick={onDelete}
-              disabled={submitting}
+              aria-disabled={submitting || undefined}
               className="form__action form__action--danger"
             >
               {t('dialogs.event.delete')}

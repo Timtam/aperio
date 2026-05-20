@@ -346,9 +346,21 @@ button[aria-pressed='true'] {
   border-color: var(--color-accent);
 }
 
-button:disabled {
+button:disabled,
+button[aria-disabled='true'] {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* aria-disabled keeps the element in the tab order so the screen
+   reader's focus stays put while a slow form submit is in flight
+   (a real `disabled` attribute pulls the focus to <body> the
+   moment we set it, which makes NVDA announce the app-root
+   "Aperio" label for the full duration of the network round-trip).
+   We block the click ourselves by intercepting it; pointer events
+   here would still let a determined user double-submit. */
+button[aria-disabled='true'] {
+  pointer-events: none;
 }
 
 .error {
