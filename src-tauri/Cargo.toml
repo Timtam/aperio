@@ -36,6 +36,17 @@ async-trait.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+# Setting the process AppUserModelID at startup + writing the AUMID
+# entry to HKCU is what lets Windows show "Aperio" instead of
+# "Windows PowerShell" as the toast source. Both are needed because
+# portable apps don't go through an installer.
+windows = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_UI_Shell",
+] }
+winreg = "0.55"
+
 [dev-dependencies]
 tempfile = "3"
 tokio = { workspace = true }

@@ -7,6 +7,7 @@
 pub mod commands;
 pub mod db;
 mod paths;
+mod platform;
 pub mod reminders;
 
 pub use db::{DbError, DbHandle, DbResult, SharedConn};
@@ -20,6 +21,11 @@ use tracing::info;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     init_tracing();
+
+    // Register the AUMID and pin it to this process before tauri starts
+    // — toast notifications inherit it at process scope. On non-Windows
+    // platforms this is a no-op.
+    platform::setup();
 
     let data_dir = resolve_data_dir();
     info!(

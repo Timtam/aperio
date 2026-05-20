@@ -81,6 +81,8 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "windows",
+ "winreg",
 ]
 
 [[package]]
