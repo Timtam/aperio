@@ -41,7 +41,7 @@ export function DayView() {
   const fmt = useDateFormat();
   const announce = useAnnouncer();
   const { anchor } = useViewState();
-  const { openEventDialog, openMoveCopy } = useDialogState();
+  const { openEventDialog, openMoveCopy, invalidateData } = useDialogState();
 
   const range = useMemo(() => visibleRange('day', anchor), [anchor]);
   const { events, calendarById, loading } = useEvents(range);
@@ -86,6 +86,11 @@ export function DayView() {
           await deleteEventById(id, ev.calendar_id);
           announce(t('dialogs.event.deleted', { title: ev.title }));
         }
+        // The DeleteEventScope / Confirm dialogs are local view state,
+        // not part of DialogState, so closing them won't trigger a
+        // refetch automatically. Bump the data version ourselves so
+        // useEvents re-reads after the mutation lands on the server.
+        invalidateData();
       } catch (err) {
         if (isCommandError(err)) {
           announce(`${err.code}: ${err.message}`);
@@ -94,7 +99,7 @@ export function DayView() {
         }
       }
     },
-    [announce, t],
+    [announce, t, invalidateData],
   );
 
   const requestDelete = useCallback((ev: CalendarEvent) => {

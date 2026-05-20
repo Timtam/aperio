@@ -74,6 +74,22 @@ interface DialogStateValue {
   openAccounts: () => void;
   openMoveCopy: (target: MoveCopyTarget) => void;
   close: () => void;
+  /**
+   * Counter that bumps whenever data on the wire might have changed.
+   * Consumers like `useEvents` / `useTasks` watch it as a dependency
+   * so they refetch after any mutation — including ones that happen
+   * outside a globally-tracked dialog (e.g. the DeleteEventScope or
+   * Confirm dialogs that live inside a view's local state).
+   *
+   * `close()` automatically bumps this so the common case (mutate
+   * inside a dialog, close the dialog) is covered without every
+   * call site remembering. View-level mutation handlers that
+   * never open a global dialog (per-row Delete shortcut, in-place
+   * status toggle) need to call `invalidateData()` themselves
+   * after the await resolves.
+   */
+  dataVersion: number;
+  invalidateData: () => void;
 }
 
 const DialogStateContext = createContext<DialogStateValue | null>(null);
@@ -104,6 +120,11 @@ const DialogStateContext = createContext<DialogStateValue | null>(null);
  */
 export function DialogStateProvider({ children }: { children: ReactNode }) {
   const [stack, setStack] = useState<DialogMode[]>([]);
+  const [dataVersion, setDataVersion] = useState(0);
+  const invalidateData = useCallback(
+    () => setDataVersion((v) => v + 1),
+    [],
+  );
 
   // One entry per stack frame: the element that was focused
   // immediately before the push. Lives in a ref so the captures stay
@@ -166,6 +187,12 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
   const close = useCallback(() => {
     const target = triggerStackRef.current.pop() ?? null;
     setStack((s) => s.slice(0, -1));
+    // Closing a dialog is the canonical "data may have changed" hint
+    // — the user just confirmed an edit / create / delete. Bump
+    // unconditionally so useEvents / useTasks refetch on the next
+    // tick. Doing it here keeps every existing call site working
+    // without remembering to call invalidateData() itself.
+    setDataVersion((v) => v + 1);
     if (!target) return;
     // Restore focus on the next animation frame. queueMicrotask was
     // too eager on Chromium — it ran before the React commit that
@@ -205,6 +232,8 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openAccounts,
       openMoveCopy,
       close,
+      dataVersion,
+      invalidateData,
     }),
     [
       mode,
@@ -217,6 +246,8 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openAccounts,
       openMoveCopy,
       close,
+      dataVersion,
+      invalidateData,
     ],
   );
 

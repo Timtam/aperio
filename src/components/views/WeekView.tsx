@@ -57,7 +57,7 @@ export function WeekView() {
   const fmt = useDateFormat();
   const announce = useAnnouncer();
   const { anchor, setAnchor, goPrev, goNext } = useViewState();
-  const { openEventDialog } = useDialogState();
+  const { openEventDialog, invalidateData } = useDialogState();
 
   const range = useMemo(() => visibleRange('week', anchor), [anchor]);
   const { events, calendarById, loading } = useEvents(range);
@@ -155,6 +155,9 @@ export function WeekView() {
           await deleteEventById(id, ev.calendar_id);
           announce(t('dialogs.event.deleted', { title: ev.title }));
         }
+        // Local view-state dialogs don't go through DialogState.close(),
+        // so the dataVersion bump has to be explicit here.
+        invalidateData();
       } catch (err) {
         if (isCommandError(err)) {
           announce(`${err.code}: ${err.message}`);
@@ -163,7 +166,7 @@ export function WeekView() {
         }
       }
     },
-    [announce, t],
+    [announce, t, invalidateData],
   );
 
   const requestDelete = useCallback((ev: CalendarEvent) => {

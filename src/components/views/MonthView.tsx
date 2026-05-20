@@ -49,7 +49,7 @@ export function MonthView() {
   const fmt = useDateFormat();
   const announce = useAnnouncer();
   const { anchor, setAnchor, goPrev, goNext } = useViewState();
-  const { openEventDialog } = useDialogState();
+  const { openEventDialog, invalidateData } = useDialogState();
 
   const cells = useMemo(() => buildMonthGrid(anchor), [anchor]);
   const range = useMemo(() => visibleRange('month', anchor), [anchor]);
@@ -119,6 +119,9 @@ export function MonthView() {
           await deleteEventById(id, ev.calendar_id);
           announce(t('dialogs.event.deleted', { title: ev.title }));
         }
+        // Local view-state dialogs don't go through DialogState.close(),
+        // so the dataVersion bump has to be explicit here.
+        invalidateData();
       } catch (err) {
         if (isCommandError(err)) {
           announce(`${err.code}: ${err.message}`);
@@ -127,7 +130,7 @@ export function MonthView() {
         }
       }
     },
-    [announce, t],
+    [announce, t, invalidateData],
   );
 
   const requestDelete = useCallback((ev: CalendarEvent) => {

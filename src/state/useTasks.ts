@@ -15,14 +15,13 @@ import { useDialogState } from './DialogState';
  */
 export function useTasks() {
   const { selectedTaskListIds, taskLists } = useCalendarStore();
-  const { mode } = useDialogState();
+  const { dataVersion } = useDialogState();
   const [tasks, setTasks] = useState<Task[]>([]);
   // Initial loading=true so views can hold off the auto-focus until
   // the first fetch resolves — same reasoning as useEvents.
   const [loading, setLoading] = useState(true);
 
-  // Re-fetch when a dialog closes — see useEvents for the rationale.
-  const dialogClosed = mode.kind === 'none';
+  // Re-fetch when any mutation hint fires — see useEvents for the rationale.
 
   const idsKey = useMemo(
     () => [...selectedTaskListIds].sort().join(' '),
@@ -59,7 +58,7 @@ export function useTasks() {
     return () => {
       cancelled = true;
     };
-  }, [idsKey, selectedTaskListIds, dialogClosed]);
+  }, [idsKey, selectedTaskListIds, dataVersion]);
 
   const taskListById = useMemo(() => {
     const map = new Map<string, (typeof taskLists)[number]>();

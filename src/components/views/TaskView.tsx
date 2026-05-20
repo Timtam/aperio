@@ -46,7 +46,7 @@ export function TaskView() {
   const { tasks, taskListById, loading } = useTasks();
   const { colorLabels } = useCalendarStore();
   const labelById = useMemo(() => labelsLookup(colorLabels), [colorLabels]);
-  const { openTaskDialog, openMoveCopy } = useDialogState();
+  const { openTaskDialog, openMoveCopy, invalidateData } = useDialogState();
 
   // Flatten the task buckets into a single options array, interleaved
   // with separator entries. focusIndex points at the *task* index in
@@ -77,6 +77,9 @@ export function TaskView() {
           listId: task.list_id,
         });
         announce(t('dialogs.task.deleted', { title: task.title }));
+        // ConfirmDialog is local view-state, so the close here doesn't
+        // run through DialogState — bump explicitly.
+        invalidateData();
       } catch (err) {
         if (isCommandError(err)) {
           announce(`${err.code}: ${err.message}`);
@@ -85,7 +88,7 @@ export function TaskView() {
         }
       }
     },
-    [announce, t],
+    [announce, t, invalidateData],
   );
 
   const toggleStatus = useCallback(
@@ -100,6 +103,11 @@ export function TaskView() {
       };
       try {
         await invoke<Task>('update_task', { task: updated });
+        // The toggle never opens a global dialog (it's an in-place
+        // status change), so useTasks would otherwise never see the
+        // mutation. Bump explicitly to refetch and reflect the new
+        // sort bucket.
+        invalidateData();
         announce(
           nextStatus === 'completed'
             ? t('views.tasks.completedAnnounce', { title: task.title })
@@ -110,7 +118,7 @@ export function TaskView() {
         console.warn('update_task failed', err);
       }
     },
-    [announce, t],
+    [announce, t, invalidateData],
   );
 
   const handleKeyDown = useCallback(
