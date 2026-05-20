@@ -11,6 +11,7 @@ import { useTranslation } from 'react-i18next';
 import { useAnnouncer } from '../a11y/Announcer';
 import {
   connectGoogleAccount,
+  connectMicrosoftAccount,
   createAccount,
   deleteAccount,
   isCommandError,
@@ -58,6 +59,7 @@ const ENABLED_KINDS: ReadonlySet<AdapterKind> = new Set([
   'caldav',
   'ical',
   'google',
+  'microsoft_graph',
 ]);
 
 interface CaldavFields {
@@ -94,6 +96,16 @@ const EMPTY_GOOGLE: GoogleFields = {
   clientSecret: '',
 };
 
+interface MicrosoftFields {
+  clientId: string;
+  authority: string;
+}
+
+const EMPTY_MICROSOFT: MicrosoftFields = {
+  clientId: '',
+  authority: 'common',
+};
+
 export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
   const { t } = useTranslation();
   const announce = useAnnouncer();
@@ -116,6 +128,7 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
   const [caldav, setCaldav] = useState<CaldavFields>(EMPTY_CALDAV);
   const [ical, setIcal] = useState<IcalFields>(EMPTY_ICAL);
   const [google, setGoogle] = useState<GoogleFields>(EMPTY_GOOGLE);
+  const [microsoft, setMicrosoft] = useState<MicrosoftFields>(EMPTY_MICROSOFT);
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -154,6 +167,12 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
     return null;
   }, [google, t]);
 
+  const validateMicrosoft = useCallback((): string | null => {
+    if (!microsoft.clientId.trim())
+      return t('dialogs.accounts.clientIdRequired');
+    return null;
+  }, [microsoft, t]);
+
   const onSubmit = useCallback(
     async (e: FormEvent) => {
       e.preventDefault();
@@ -189,6 +208,13 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
           return;
         }
       }
+      if (kind === 'microsoft_graph') {
+        const v = validateMicrosoft();
+        if (v) {
+          setError(v);
+          return;
+        }
+      }
       setSubmitting(true);
       setError(null);
       try {
@@ -202,6 +228,14 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
             google.clientId.trim(),
             google.clientSecret.trim(),
             name,
+          );
+        } else if (kind === 'microsoft_graph') {
+          // Same OAuth-then-persist flow as Google, minus the
+          // client_secret (Microsoft honours PKCE for public clients).
+          created = await connectMicrosoftAccount(
+            microsoft.clientId.trim(),
+            name,
+            microsoft.authority.trim() || undefined,
           );
         } else {
           const configJson =
@@ -235,6 +269,7 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
         setCaldav(EMPTY_CALDAV);
         setIcal(EMPTY_ICAL);
         setGoogle(EMPTY_GOOGLE);
+        setMicrosoft(EMPTY_MICROSOFT);
         refresh();
         // Re-fetch the calendar / task-list catalog so the sidebar
         // picks up the new account's containers without the user
@@ -256,9 +291,11 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
       caldav,
       ical,
       google,
+      microsoft,
       validateCaldav,
       validateIcal,
       validateGoogle,
+      validateMicrosoft,
       announce,
       refresh,
       refreshCalendars,
@@ -763,6 +800,65 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
                 </label>
                 <p className="form__hint accounts-google-flow-hint">
                   {t('dialogs.accounts.googleFlowHint')}
+                </p>
+              </>
+            )}
+
+            {kind === 'microsoft_graph' && (
+              <>
+                <label className="form__field">
+                  <span className="form__label">
+                    {t('dialogs.accounts.microsoftClientIdLabel')}
+                  </span>
+                  <input
+                    type="text"
+                    value={microsoft.clientId}
+                    onChange={(e) =>
+                      setMicrosoft((prev) => ({
+                        ...prev,
+                        clientId: e.target.value,
+                      }))
+                    }
+                    placeholder={t(
+                      'dialogs.accounts.microsoftClientIdPlaceholder',
+                    )}
+                    autoComplete="off"
+                    spellCheck={false}
+                    required
+                  />
+                  <span className="form__hint">
+                    {t('dialogs.accounts.microsoftClientIdHint')}
+                  </span>
+                </label>
+                <label className="form__field">
+                  <span className="form__label">
+                    {t('dialogs.accounts.microsoftAuthorityLabel')}
+                  </span>
+                  <select
+                    value={microsoft.authority}
+                    onChange={(e) =>
+                      setMicrosoft((prev) => ({
+                        ...prev,
+                        authority: e.target.value,
+                      }))
+                    }
+                  >
+                    <option value="common">
+                      {t('dialogs.accounts.microsoftAuthorityCommon')}
+                    </option>
+                    <option value="consumers">
+                      {t('dialogs.accounts.microsoftAuthorityConsumers')}
+                    </option>
+                    <option value="organizations">
+                      {t('dialogs.accounts.microsoftAuthorityOrganizations')}
+                    </option>
+                  </select>
+                  <span className="form__hint">
+                    {t('dialogs.accounts.microsoftAuthorityHint')}
+                  </span>
+                </label>
+                <p className="form__hint accounts-google-flow-hint">
+                  {t('dialogs.accounts.microsoftFlowHint')}
                 </p>
               </>
             )}

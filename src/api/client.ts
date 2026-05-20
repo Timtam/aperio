@@ -266,6 +266,23 @@ export const connectGoogleAccount = (
     request: { client_id, client_secret, display_name },
   });
 
+/** Kick off the Microsoft OAuth dance. Same shape as Google, but:
+ *  - No client_secret (Microsoft honours PKCE-public-client semantics).
+ *  - `authority` selects which Microsoft accounts may sign in:
+ *    `common` (any), `consumers` (personal MS accounts only),
+ *    `organizations` (work/school only), or a specific tenant
+ *    GUID. Defaults to `common` when omitted.
+ *  - The Azure portal app registration must have the same
+ *    "supported account types" setting as the authority you pass. */
+export const connectMicrosoftAccount = (
+  client_id: string,
+  display_name: string,
+  authority?: string,
+) =>
+  invoke<Account>('connect_microsoft_account', {
+    request: { client_id, display_name, authority: authority ?? null },
+  });
+
 /** Which container namespace an override applies to. Calendars and
  *  task lists have disjoint ids today but the backend keeps them
  *  separately namespaced so a future code-path can enforce kind. */

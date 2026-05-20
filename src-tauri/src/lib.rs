@@ -95,6 +95,7 @@ pub fn run() {
             commands::test_caldav_connection,
             commands::test_ical_feed,
             commands::connect_google_account,
+            commands::connect_microsoft_account,
             commands::set_container_name_override,
             commands::clear_container_name_override,
             commands::rename_container,

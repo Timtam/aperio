@@ -34,6 +34,9 @@ use cal_adapter_google::{GoogleAccountConfig, GoogleAdapter, TokenSet as GoogleT
 use cal_adapter_ical::{
     Credentials as IcalCredentials, IcalAccountConfig, IcalAdapter,
 };
+use cal_adapter_microsoft_graph::{
+    GraphAccountConfig, MicrosoftGraphAdapter, TokenSet as GraphTokenSet,
+};
 use cal_core::{CalendarFeature, TasksFeature};
 use tracing::warn;
 
@@ -270,6 +273,7 @@ impl AdapterRegistry {
             AdapterKind::Caldav => self.register_caldav(account),
             AdapterKind::Ical => self.register_ical(account),
             AdapterKind::Google => self.register_google(account),
+            AdapterKind::MicrosoftGraph => self.register_microsoft_graph(account),
             other => Err(RegistryError::Unsupported(format!(
                 "adapter kind '{}' is not wired up yet",
                 other.as_str()
@@ -319,6 +323,38 @@ impl AdapterRegistry {
             scope: None,
         };
         let adapter = GoogleAdapter::new(config.client_id, config.client_secret, tokens);
+        let arc = Arc::new(adapter);
+        self.external_cal
+            .write()
+            .expect("registry cal poison")
+            .insert(account.id.clone(), arc as Arc<dyn CalendarFeature>);
+        Ok(())
+    }
+
+    /// Wire up a Microsoft Graph (Outlook) account. Mirrors the
+    /// Google flow: tokens come out of the keychain, the API
+    /// layer's lazy 401-refresh restores a fresh access token if
+    /// the stored one expired between sessions.
+    fn register_microsoft_graph(&self, account: &Account) -> Result<(), RegistryError> {
+        let config: GraphAccountConfig = serde_json::from_str(&account.config_json)
+            .map_err(|e| RegistryError::Config(e.to_string()))?;
+        let access = secrets::retrieve(&account.id, SecretSlot::AccessToken)
+            .map_err(|e| RegistryError::Secret(format!("missing access token: {e}")))?;
+        let refresh = secrets::retrieve(&account.id, SecretSlot::RefreshToken)
+            .ok()
+            .filter(|s| !s.is_empty());
+        let tokens = GraphTokenSet {
+            access_token: access,
+            refresh_token: refresh,
+            expires_at: chrono::DateTime::<chrono::Utc>::from_timestamp(0, 0)
+                .unwrap_or_else(chrono::Utc::now),
+            scope: None,
+        };
+        let adapter = MicrosoftGraphAdapter::new(
+            config.client_id,
+            config.authority,
+            tokens,
+        );
         let arc = Arc::new(adapter);
         self.external_cal
             .write()

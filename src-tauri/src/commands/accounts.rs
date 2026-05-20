@@ -8,6 +8,7 @@ use cal_adapter_google::{GoogleAccountConfig, GoogleAdapter};
 use cal_adapter_ical::{
     Credentials as IcalCredentials, IcalAccountConfig, IcalAdapter,
 };
+use cal_adapter_microsoft_graph::{GraphAccountConfig, MicrosoftGraphAdapter};
 use cal_core::CalendarFeature;
 use tauri::State;
 
@@ -419,6 +420,119 @@ pub struct ConnectGoogleRequest {
     pub client_id: String,
     pub client_secret: String,
     pub display_name: String,
+}
+
+/// Interactive Microsoft sign-in. Same shape as the Google
+/// equivalent: opens the system browser, runs the OAuth dance,
+/// persists tokens, registers the adapter. PKCE-only — no
+/// `client_secret` for Microsoft public clients.
+#[tauri::command]
+pub async fn connect_microsoft_account(
+    db: State<'_, DbHandle>,
+    registry: State<'_, AdapterRegistry>,
+    request: ConnectMicrosoftRequest,
+) -> CommandResult<Account> {
+    let name = request.display_name.trim();
+    if name.is_empty() {
+        return Err(CommandError {
+            code: "invalid_input",
+            message: "display_name must not be empty".into(),
+        });
+    }
+    let client_id = request.client_id.trim();
+    if client_id.is_empty() {
+        return Err(CommandError {
+            code: "invalid_input",
+            message: "client_id must not be empty".into(),
+        });
+    }
+    let authority = request
+        .authority
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("common");
+
+    let tokens =
+        MicrosoftGraphAdapter::authenticate_interactive(client_id, authority)
+            .await
+            .map_err(graph_error_to_command)?;
+
+    let config = GraphAccountConfig {
+        client_id: client_id.to_string(),
+        authority: authority.to_string(),
+        account_label: None,
+    };
+    let config_json = serde_json::to_string(&config).map_err(|e| CommandError {
+        code: "internal",
+        message: format!("serialise config: {e}"),
+    })?;
+    let shared = db.shared();
+    let repo = AccountsRepo::new(&shared);
+    let created = repo.create(AdapterKind::MicrosoftGraph, name, &config_json)?;
+
+    if let Err(err) =
+        secrets::store(&created.id, SecretSlot::AccessToken, &tokens.access_token)
+    {
+        let _ = repo.delete(&created.id);
+        return Err(CommandError {
+            code: "internal",
+            message: format!("failed to store access token: {err}"),
+        });
+    }
+    if let Some(refresh) = tokens.refresh_token.as_deref() {
+        if let Err(err) = secrets::store(&created.id, SecretSlot::RefreshToken, refresh)
+        {
+            let _ = secrets::delete_all(&created.id);
+            let _ = repo.delete(&created.id);
+            return Err(CommandError {
+                code: "internal",
+                message: format!("failed to store refresh token: {err}"),
+            });
+        }
+    }
+
+    if let Err(err) = registry.register(&created) {
+        let _ = secrets::delete_all(&created.id);
+        let _ = repo.delete(&created.id);
+        return Err(CommandError {
+            code: "internal",
+            message: format!("adapter registration failed: {err}"),
+        });
+    }
+    Ok(created)
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct ConnectMicrosoftRequest {
+    pub client_id: String,
+    #[serde(default)]
+    pub authority: Option<String>,
+    pub display_name: String,
+}
+
+fn graph_error_to_command(err: cal_adapter_microsoft_graph::GraphError) -> CommandError {
+    use cal_adapter_microsoft_graph::GraphError::*;
+    let (code, message) = match err {
+        AuthDenied(m) => ("auth", format!("Verbindung abgelehnt: {m}")),
+        AuthTimeout => (
+            "auth",
+            "Anmeldung hat zu lange gedauert (5 min). Bitte erneut versuchen.".into(),
+        ),
+        Http { status: 401, message } | Http { status: 403, message } => {
+            ("auth", message)
+        }
+        Http { status, message } => (
+            "protocol",
+            format!("Microsoft HTTP {status}: {message}"),
+        ),
+        Network(m) => ("network", m),
+        Protocol(m) => ("protocol", m),
+        Csrf => ("protocol", "CSRF-Mismatch bei OAuth-Redirect".into()),
+        Io(m) => ("internal", m),
+        Config(m) => ("invalid_input", m),
+    };
+    CommandError { code, message }
 }
 
 fn google_error_to_command(err: cal_adapter_google::GoogleError) -> CommandError {
