@@ -285,7 +285,19 @@ export function MonthView() {
                     <span className="month-grid__date">
                       {fmt.format(day, 'd')}
                     </span>
-                    {dayEvents.slice(0, 3).map((ev, evIdx) => {
+                    {/*
+                       Render *every* event, not just the first three.
+                       The visible cell shows the first three plus a
+                       "+N more" hint; events past that are still in
+                       the DOM but visually clipped via the .sr-only
+                       pattern, so the tab navigation hook's
+                       aria-activedescendant lookup always finds a
+                       real element to point at. Without this an
+                       overflow event would have no DOM target and
+                       NVDA would fall back to reading "section"
+                       instead of the event title.
+                     */}
+                    {dayEvents.map((ev, evIdx) => {
                       const color = resolveEventColor(
                         ev,
                         calendarById,
@@ -293,6 +305,23 @@ export function MonthView() {
                       );
                       const isFocusedEvent =
                         focused && eventIndex === evIdx;
+                      const cal = calendarById.get(ev.calendar_id);
+                      const time = ev.all_day
+                        ? t('views.allDay')
+                        : fmt.format(new Date(ev.start), 'p');
+                      const aria = color.labelName
+                        ? t('views.week.eventLabelWithLabel', {
+                            title: ev.title,
+                            time,
+                            calendar: cal?.name ?? '—',
+                            label: color.labelName,
+                          })
+                        : t('views.week.eventLabel', {
+                            title: ev.title,
+                            time,
+                            calendar: cal?.name ?? '—',
+                          });
+                      const hidden = evIdx >= 3;
                       return (
                         <span
                           key={ev.id}
@@ -301,8 +330,10 @@ export function MonthView() {
                             'month-event' +
                             (isFocusedEvent
                               ? ' month-event--focused'
-                              : '')
+                              : '') +
+                            (hidden ? ' month-event--overflow' : '')
                           }
+                          aria-label={aria}
                           aria-selected={isFocusedEvent}
                           style={
                             color.hex
@@ -315,7 +346,10 @@ export function MonthView() {
                       );
                     })}
                     {dayEvents.length > 3 && (
-                      <span className="month-event month-event--more">
+                      <span
+                        className="month-event month-event--more"
+                        aria-hidden="true"
+                      >
                         {t('views.month.moreEvents', {
                           count: dayEvents.length - 3,
                         })}

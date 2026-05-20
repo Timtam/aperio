@@ -1194,6 +1194,38 @@ button:disabled {
   outline-offset: 1px;
 }
 
+/* Events past the visible-first-three of a day cell stay in the DOM
+   so the tab navigation can reach them, but they take no visual
+   space — they sit absolutely positioned and clipped out of view.
+   When such an event becomes the active descendant, the focus ring
+   below overrides the clip so the screen-reader user sees the
+   highlight too (Outlook does the same — the missing rows scroll
+   into view as the user tabs past the visible ones; for now we
+   just rely on NVDA's announcement). */
+.month-event--overflow {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  padding: 0;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.month-event--overflow.month-event--focused {
+  /* When the user has actually tabbed onto an overflow event we
+     pop it back into view, fixed at the bottom of the cell, so
+     the visual + screen-reader experience match. */
+  position: relative;
+  width: auto;
+  height: auto;
+  clip-path: none;
+  white-space: normal;
+  pointer-events: auto;
+}
+
 /* ── Day view (flat listbox) ────────────────────────────────────────────── */
 
 .day-list {
