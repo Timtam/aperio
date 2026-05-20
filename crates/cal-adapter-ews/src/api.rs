@@ -23,13 +23,14 @@ use reqwest::header::{HeaderValue, CONTENT_TYPE};
 use crate::auth::{basic_auth_header, BasicCredentials};
 use crate::error::{EwsError, EwsResult};
 use crate::mapping::{
-    event_to_update_field_xml, new_event_to_calendar_item_xml,
+    decode_event_id, encode_event_id, event_to_update_field_xml, new_event_to_calendar_item_xml,
     parse_find_folder_response, parse_find_item_response, parse_first_item_id,
-    split_calendar_id, to_calendar, to_event,
+    split_calendar_id, to_calendar, to_event, DecodedEventId, EventIdKind,
 };
 use crate::soap::{
     check_for_fault, create_calendar_item, delete_calendar_item, find_calendar_folders,
-    find_items_in_range, update_calendar_item, update_folder_displayname,
+    find_items_in_range, get_recurring_master, update_calendar_item,
+    update_folder_displayname,
 };
 
 /// State carried by the adapter — endpoint + credentials + reqwest
@@ -124,8 +125,8 @@ pub async fn get_events(
 
 /// Create a new calendar item in `calendar_id`. Returns the
 /// freshly-saved event with the server-assigned ItemId in
-/// `Event.id` (in the same `{item_id}|{change_key}` format the rest
-/// of the adapter uses).
+/// `Event.id`, prefixed with the CalendarItemType so the next
+/// edit/delete cycle routes correctly.
 ///
 /// Implementation note: we don't issue a follow-up `GetItem` to
 /// reconstruct the full event from the server. The fields we have on
@@ -147,30 +148,54 @@ pub async fn create_event(
     );
     let response = client.post_soap(envelope).await?;
     let item_ref = parse_first_item_id(&response)?;
-    Ok(build_event_from_new(&event, calendar_id, &item_ref.id, item_ref.change_key))
+    // A freshly created item is a RecurringMaster when it has a
+    // recurrence rule (CreateItem on a recurring CalendarItem produces
+    // the series template), otherwise a Single.
+    let kind = if event.recurrence.is_some() {
+        EventIdKind::RecurringMaster
+    } else {
+        EventIdKind::Single
+    };
+    Ok(build_event_from_new(
+        &event,
+        calendar_id,
+        kind,
+        &item_ref.id,
+        item_ref.change_key,
+    ))
 }
 
 /// Update an existing calendar item with the supplied event payload.
 /// All fields are set; absent fields become DeleteItemField blocks
 /// so EWS clears them server-side.
+///
+/// For occurrences of a recurring series, we resolve the master id
+/// first (via `GetItem` with `RecurringMasterItemId`) and run the
+/// UpdateItem against that — matching Aperio's "edit recurring event
+/// = edit the whole series" semantics. Per-occurrence overrides go
+/// through a separate flow (`add_event_exdate` for skips, or a
+/// future exception-override-create API).
 pub async fn update_event(client: &EwsClient, event: &Event) -> EwsResult<Event> {
-    let (item_id, change_key) = split_calendar_id(&event.id);
+    let decoded = decode_event_id(&event.id);
+    let target = resolve_write_target(client, &decoded).await?;
     let (set_xml, delete_xml) = event_to_update_field_xml(event)?;
     let envelope = update_calendar_item(
-        &item_id,
-        change_key.as_deref(),
+        &target.item_id,
+        target.change_key.as_deref(),
         &set_xml,
         &delete_xml,
     );
     let response = client.post_soap(envelope).await?;
     let item_ref = parse_first_item_id(&response)?;
-    // EWS hands us a *new* ChangeKey after every successful update —
-    // the old one is no longer valid for further writes. We splice it
-    // back into the Aperio-facing id so subsequent edits won't 412.
-    let new_id = match &item_ref.change_key {
-        Some(ck) => format!("{}|{}", item_ref.id, ck),
-        None => item_ref.id.clone(),
+    // The kind we wrote against was `Single` (no recurrence) or
+    // `RecurringMaster` (resolved from an occurrence). On a series-
+    // wide update the row we ended up with is the master; otherwise
+    // it's the single event itself.
+    let returned_kind = match target.kind {
+        EventIdKind::Single => EventIdKind::Single,
+        _ => EventIdKind::RecurringMaster,
     };
+    let new_id = encode_event_id(returned_kind, &item_ref.id, item_ref.change_key.as_deref());
     Ok(Event {
         id: new_id,
         etag: item_ref.change_key,
@@ -179,14 +204,77 @@ pub async fn update_event(client: &EwsClient, event: &Event) -> EwsResult<Event>
     })
 }
 
-/// Delete a calendar item by its Aperio-encoded `{id}|{change_key}`
-/// string. Routes through `DeleteItem MoveToDeletedItems` so the
-/// user can restore from the server's bin.
+/// Delete a calendar item. For non-recurring events this drops the
+/// single row. For occurrences / exceptions of a recurring series,
+/// resolves the master and deletes the whole series — matching the
+/// "delete recurring event = delete series" UX.
+///
+/// Per-occurrence skip (the EXDATE-equivalent) goes through
+/// `add_event_exdate` instead, which always targets the raw
+/// occurrence id.
 pub async fn delete_event(client: &EwsClient, event_id: &str) -> EwsResult<()> {
-    let (item_id, change_key) = split_calendar_id(event_id);
-    let envelope = delete_calendar_item(&item_id, change_key.as_deref());
+    let decoded = decode_event_id(event_id);
+    let target = resolve_write_target(client, &decoded).await?;
+    let envelope =
+        delete_calendar_item(&target.item_id, target.change_key.as_deref());
     client.post_soap(envelope).await?;
     Ok(())
+}
+
+/// Skip a single occurrence of a recurring series. EWS doesn't model
+/// EXDATE as an editable property on the master — the equivalent is
+/// to `DeleteItem` the specific occurrence id, which removes that
+/// date from future expansions without touching the rest of the
+/// series. We deliberately *do not* resolve to the master here.
+///
+/// Single (non-recurring) events shouldn't normally hit this path —
+/// the frontend only offers "delete only this occurrence" on series
+/// events — but if they do, we delete the row regardless, which is
+/// the same result the user would get by clicking the regular
+/// delete button.
+pub async fn add_event_exdate(client: &EwsClient, event_id: &str) -> EwsResult<()> {
+    let decoded = decode_event_id(event_id);
+    let envelope =
+        delete_calendar_item(&decoded.item_id, decoded.change_key.as_deref());
+    client.post_soap(envelope).await?;
+    Ok(())
+}
+
+/// Resolve the (id, change_key) pair to use when writing against a
+/// decoded Aperio event id. For Single / RecurringMaster the decoded
+/// id is the target directly; for Occurrence / Exception we ask the
+/// server "what's the master of this occurrence?" via a `GetItem`
+/// with the special `RecurringMasterItemId` form, then return the
+/// master's id pair.
+async fn resolve_write_target(
+    client: &EwsClient,
+    decoded: &DecodedEventId,
+) -> EwsResult<WriteTarget> {
+    if !decoded.kind.is_occurrence_like() {
+        return Ok(WriteTarget {
+            kind: decoded.kind,
+            item_id: decoded.item_id.clone(),
+            change_key: decoded.change_key.clone(),
+        });
+    }
+    let envelope =
+        get_recurring_master(&decoded.item_id, decoded.change_key.as_deref());
+    let response = client.post_soap(envelope).await?;
+    let master = parse_first_item_id(&response)?;
+    Ok(WriteTarget {
+        kind: EventIdKind::RecurringMaster,
+        item_id: master.id,
+        change_key: master.change_key,
+    })
+}
+
+/// Helper: the resolved (id, change_key) pair plus the kind we
+/// believe we're writing against.
+#[derive(Debug, Clone)]
+struct WriteTarget {
+    kind: EventIdKind,
+    item_id: String,
+    change_key: Option<String>,
 }
 
 /// Rename a calendar folder via `UpdateFolder` + `folder:DisplayName`.
@@ -212,14 +300,12 @@ pub async fn rename_calendar(
 fn build_event_from_new(
     new: &NewEvent,
     calendar_id: &str,
+    kind: EventIdKind,
     item_id: &str,
     change_key: Option<String>,
 ) -> Event {
     let now = Utc::now();
-    let aperio_id = match &change_key {
-        Some(ck) => format!("{item_id}|{ck}"),
-        None => item_id.to_string(),
-    };
+    let aperio_id = encode_event_id(kind, item_id, change_key.as_deref());
     Event {
         id: aperio_id,
         calendar_id: calendar_id.to_string(),
@@ -490,7 +576,9 @@ mod tests {
         let event = create_event(&client, "FOLDER-ID|FCK", new_event("Lunch"))
             .await
             .unwrap();
-        assert_eq!(event.id, "NEW-ITEM-ID|NEW-CK");
+        // Non-recurring create → Single, so the id carries the
+        // `S:` prefix.
+        assert_eq!(event.id, "S:NEW-ITEM-ID|NEW-CK");
         assert_eq!(event.title, "Lunch");
         assert_eq!(event.calendar_id, "FOLDER-ID|FCK");
         assert_eq!(event.etag.as_deref(), Some("NEW-CK"));
@@ -558,7 +646,7 @@ mod tests {
             .create_async()
             .await;
         let starting = Event {
-            id: "ITEM-ID|CK-V1".into(),
+            id: "S:ITEM-ID|CK-V1".into(),
             calendar_id: "FOLDER-ID|FCK".into(),
             title: "Updated".into(),
             description: None,
@@ -576,8 +664,9 @@ mod tests {
             etag: Some("CK-V1".into()),
         };
         let updated = update_event(&client_for(&server), &starting).await.unwrap();
-        // ChangeKey advances on every successful UpdateItem.
-        assert_eq!(updated.id, "ITEM-ID|CK-V2");
+        // ChangeKey advances on every successful UpdateItem; the
+        // kind stays Single (no master-lookup happens for `S:` ids).
+        assert_eq!(updated.id, "S:ITEM-ID|CK-V2");
         assert_eq!(updated.etag.as_deref(), Some("CK-V2"));
     }
 
@@ -607,6 +696,192 @@ mod tests {
             .create_async()
             .await;
         delete_event(&client_for(&server), "ITEM-ID|CK")
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn update_event_on_occurrence_resolves_master_first() {
+        // Two POSTs in sequence to the same endpoint:
+        //   1. GetItem with RecurringMasterItemId → returns the
+        //      master's ItemId (MASTER-ID / MCK-V1).
+        //   2. UpdateItem against MASTER-ID → returns the new
+        //      ChangeKey (MCK-V2).
+        // We use mockito's body-regex matching to bind each mock to
+        // the right SOAP body shape, so the order doesn't depend on
+        // when the framework happens to evaluate them.
+        let mut server = Server::new_async().await;
+        let master_lookup_body = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body>
+    <m:GetItemResponse>
+      <m:ResponseMessages>
+        <m:GetItemResponseMessage ResponseClass="Success">
+          <m:ResponseCode>NoError</m:ResponseCode>
+          <m:Items>
+            <t:CalendarItem>
+              <t:ItemId Id="MASTER-ID" ChangeKey="MCK-V1"/>
+            </t:CalendarItem>
+          </m:Items>
+        </m:GetItemResponseMessage>
+      </m:ResponseMessages>
+    </m:GetItemResponse>
+  </s:Body>
+</s:Envelope>"#;
+        let update_body = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body>
+    <m:UpdateItemResponse>
+      <m:ResponseMessages>
+        <m:UpdateItemResponseMessage ResponseClass="Success">
+          <m:ResponseCode>NoError</m:ResponseCode>
+          <m:Items>
+            <t:CalendarItem>
+              <t:ItemId Id="MASTER-ID" ChangeKey="MCK-V2"/>
+            </t:CalendarItem>
+          </m:Items>
+        </m:UpdateItemResponseMessage>
+      </m:ResponseMessages>
+    </m:UpdateItemResponse>
+  </s:Body>
+</s:Envelope>"#;
+        let _m1 = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::Regex("RecurringMasterItemId".into()))
+            .with_status(200)
+            .with_body(master_lookup_body)
+            .create_async()
+            .await;
+        let _m2 = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::Regex("UpdateItem".into()))
+            .with_status(200)
+            .with_body(update_body)
+            .create_async()
+            .await;
+
+        let starting = Event {
+            // Occurrence-prefixed id — update_event should resolve
+            // master via GetItem before issuing the UpdateItem.
+            id: "O:OCC-ID|OCK".into(),
+            calendar_id: "FOLDER-ID|FCK".into(),
+            title: "Renamed series".into(),
+            description: None,
+            location: None,
+            start: "2026-05-20T08:00:00Z".parse().unwrap(),
+            end: "2026-05-20T09:00:00Z".parse().unwrap(),
+            all_day: false,
+            recurrence: None,
+            color_label: None,
+            reminders: Vec::new(),
+            sound: None,
+            attendees: Vec::new(),
+            created_at: "2026-05-19T00:00:00Z".parse().unwrap(),
+            updated_at: "2026-05-19T00:00:00Z".parse().unwrap(),
+            etag: Some("OCK".into()),
+        };
+        let updated = update_event(&client_for(&server), &starting).await.unwrap();
+        // After series-wide write the kind flips to RecurringMaster
+        // (`M:`), and the id holds the freshly rotated ChangeKey.
+        assert_eq!(updated.id, "M:MASTER-ID|MCK-V2");
+        assert_eq!(updated.etag.as_deref(), Some("MCK-V2"));
+    }
+
+    #[tokio::test]
+    async fn add_event_exdate_targets_occurrence_directly_no_master_lookup() {
+        // A single mock matching the delete envelope is enough — if
+        // add_event_exdate accidentally resolved master, mockito would
+        // raise "no matching mock for the GetItem POST" and fail the
+        // test.
+        let mut server = Server::new_async().await;
+        let body = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages">
+  <s:Body>
+    <m:DeleteItemResponse>
+      <m:ResponseMessages>
+        <m:DeleteItemResponseMessage ResponseClass="Success">
+          <m:ResponseCode>NoError</m:ResponseCode>
+        </m:DeleteItemResponseMessage>
+      </m:ResponseMessages>
+    </m:DeleteItemResponse>
+  </s:Body>
+</s:Envelope>"#;
+        let _m = server
+            .mock("POST", "/")
+            // `DeleteType` only appears in DeleteItem envelopes —
+            // if add_event_exdate accidentally resolved master and
+            // sent a GetItem first, the mock wouldn't match and
+            // mockito would return the default 501.
+            .match_body(mockito::Matcher::Regex("DeleteType".into()))
+            .with_status(200)
+            .with_body(body)
+            .create_async()
+            .await;
+        add_event_exdate(&client_for(&server), "O:OCC-ID|OCK")
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn delete_event_on_occurrence_resolves_master_then_deletes_series() {
+        let mut server = Server::new_async().await;
+        let master_lookup_body = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body>
+    <m:GetItemResponse>
+      <m:ResponseMessages>
+        <m:GetItemResponseMessage ResponseClass="Success">
+          <m:ResponseCode>NoError</m:ResponseCode>
+          <m:Items>
+            <t:CalendarItem>
+              <t:ItemId Id="MASTER-ID" ChangeKey="MCK"/>
+            </t:CalendarItem>
+          </m:Items>
+        </m:GetItemResponseMessage>
+      </m:ResponseMessages>
+    </m:GetItemResponse>
+  </s:Body>
+</s:Envelope>"#;
+        let delete_body = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages">
+  <s:Body>
+    <m:DeleteItemResponse>
+      <m:ResponseMessages>
+        <m:DeleteItemResponseMessage ResponseClass="Success">
+          <m:ResponseCode>NoError</m:ResponseCode>
+        </m:DeleteItemResponseMessage>
+      </m:ResponseMessages>
+    </m:DeleteItemResponse>
+  </s:Body>
+</s:Envelope>"#;
+        let _m1 = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::Regex("RecurringMasterItemId".into()))
+            .with_status(200)
+            .with_body(master_lookup_body)
+            .create_async()
+            .await;
+        let _m2 = server
+            .mock("POST", "/")
+            // Body must mention MASTER-ID — proves we routed to the
+            // master id returned by m1, not back to the occurrence.
+            // MASTER-ID never appears in the GetItem request itself
+            // (only the occurrence id does), so the discriminator is
+            // unambiguous.
+            .match_body(mockito::Matcher::Regex("MASTER-ID".into()))
+            .with_status(200)
+            .with_body(delete_body)
+            .create_async()
+            .await;
+        delete_event(&client_for(&server), "O:OCC-ID|OCK")
             .await
             .unwrap();
     }

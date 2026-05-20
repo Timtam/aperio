@@ -103,6 +103,7 @@ pub fn find_items_in_range(
           <t:FieldURI FieldURI="calendar:End"/>
           <t:FieldURI FieldURI="calendar:IsAllDayEvent"/>
           <t:FieldURI FieldURI="calendar:IsRecurring"/>
+          <t:FieldURI FieldURI="calendar:CalendarItemType"/>
         </t:AdditionalProperties>
       </m:ItemShape>
       <m:CalendarView StartDate="{start_iso}" EndDate="{end_iso}"/>
@@ -238,6 +239,39 @@ pub fn check_for_fault(body: &str) -> EwsResult<()> {
         });
     }
     Ok(())
+}
+
+/// SOAP body for `GetItem` against `<t:RecurringMasterItemId>` — the
+/// special id form that says "give me the master CalendarItem of
+/// this occurrence". Used by the API layer's lazy master-resolution
+/// step before series-wide updates / deletes.
+///
+/// We ask for `IdOnly` since the master's ItemId is all we need;
+/// the body, recurrence and the other properties don't matter for
+/// the immediate write that follows.
+pub fn get_recurring_master(occurrence_id: &str, change_key: Option<&str>) -> String {
+    let id_attr = match change_key {
+        Some(ck) => format!(
+            r#"<t:RecurringMasterItemId OccurrenceId="{}" ChangeKey="{}"/>"#,
+            escape_xml(occurrence_id),
+            escape_xml(ck),
+        ),
+        None => format!(
+            r#"<t:RecurringMasterItemId OccurrenceId="{}"/>"#,
+            escape_xml(occurrence_id),
+        ),
+    };
+    let body = format!(
+        r#"    <m:GetItem>
+      <m:ItemShape>
+        <t:BaseShape>IdOnly</t:BaseShape>
+      </m:ItemShape>
+      <m:ItemIds>
+        {id_attr}
+      </m:ItemIds>
+    </m:GetItem>"#,
+    );
+    wrap(&body)
 }
 
 /// SOAP body for `CreateItem` into a calendar folder. The
@@ -486,6 +520,18 @@ mod tests {
             }
             other => panic!("expected Soap error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn get_recurring_master_uses_recurring_master_item_id_form() {
+        let body = get_recurring_master("OCCURRENCE-ID", Some("OCK"));
+        assert!(body.contains("GetItem"));
+        assert!(body.contains("<t:BaseShape>IdOnly</t:BaseShape>"));
+        assert!(body.contains(r#"OccurrenceId="OCCURRENCE-ID""#));
+        assert!(body.contains(r#"ChangeKey="OCK""#));
+        // Should NOT use a plain ItemId — the special form is what
+        // tells EWS "give me the master, not this occurrence".
+        assert!(!body.contains("<t:ItemId"));
     }
 
     #[test]

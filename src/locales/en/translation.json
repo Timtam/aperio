@@ -334,7 +334,7 @@
       "ewsEndpointHint": "The Exchange Web Services SOAP endpoint your server admin gave you. Always ends in \"/EWS/Exchange.asmx\". If you don't know the URL, fill in the e-mail + password fields below and press \"Discover URL\" — Aperio will ask Microsoft Autodiscover for you.",
       "ewsEndpointRequired": "Please enter the EWS endpoint URL.",
       "ewsUsernameHint": "Usually your full email address, but some servers want DOMAIN\\\\username. Ask your admin if unsure.",
-      "ewsReadOnlyHint": "Full read/write — calendars and events sync both ways, including create, edit, delete and rename. Recurring-series edits work on a per-occurrence basis (each row in the view is its own occurrence on the server).",
+      "ewsReadOnlyHint": "Full read/write — calendars and events sync both ways, including create, edit, delete and rename. Editing or deleting a recurring event affects the whole series; \"delete only this occurrence\" skips just that date.",
       "ewsDiscover": "Discover URL",
       "ewsDiscovering": "Discovering …",
       "ewsDiscoverNeedsEmail": "Please enter your e-mail address before running Discover — autodiscover uses it to figure out which server to ask.",

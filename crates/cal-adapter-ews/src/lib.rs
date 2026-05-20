@@ -207,20 +207,17 @@ impl CalendarFeature for EwsAdapter {
     /// EWS doesn't model EXDATE as an editable property on the master
     /// — instead, the server-side equivalent is `DeleteItem` against
     /// the specific occurrence id, which removes that one date from
-    /// future expansions. Since we read events via `CalendarView`,
-    /// every event id Aperio holds for an EWS series IS an occurrence
-    /// id, so we delegate to `delete_event` and ignore the supplied
-    /// `occurrence` datetime (the ItemId already identifies the right
-    /// row uniquely). Master-series semantics — i.e. routing edits
-    /// against the whole series — arrives in Phase 6f.1c when the
-    /// master id starts riding alongside the occurrence id in the
-    /// Aperio event id string.
+    /// future expansions. The dedicated `api::add_event_exdate` takes
+    /// the raw decoded id (without master-resolution) so this stays
+    /// per-occurrence; the supplied `occurrence` datetime is
+    /// redundant because the ItemId already uniquely identifies the
+    /// row.
     async fn add_event_exdate(
         &self,
         event_id: &str,
         _occurrence: chrono::DateTime<chrono::Utc>,
     ) -> CoreResult<()> {
-        api::delete_event(&self.client, event_id)
+        api::add_event_exdate(&self.client, event_id)
             .await
             .map_err(to_core_error)
     }

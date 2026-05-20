@@ -163,6 +163,136 @@ pub fn split_calendar_id(id: &str) -> (String, Option<String>) {
     }
 }
 
+// ── Event id encoding ───────────────────────────────────────────────────
+//
+// EWS surfaces four flavours of CalendarItem and Aperio's write side
+// needs to tell them apart:
+//
+//   - **Single**: a standalone non-recurring event.
+//   - **RecurringMaster**: the series template that owns the
+//     recurrence rule.
+//   - **Occurrence**: one expanded instance of a series, returned by
+//     `CalendarView`. Has its own ItemId distinct from the master's.
+//   - **Exception**: an occurrence that already carries an override
+//     (someone moved its time, changed its subject, etc.). Also
+//     distinct from the master.
+//
+// Aperio's event ids carry the type as a one-character prefix so the
+// adapter knows where to route writes:
+//
+//   `S:id|ck` → Single (delete / update target the row directly)
+//   `O:id|ck` → Occurrence (target the master for series-wide writes;
+//                target the row for per-occurrence EXDATE)
+//   `E:id|ck` → Exception (same routing as Occurrence)
+//   `M:id|ck` → RecurringMaster (target the row directly; affects
+//                the whole series by definition)
+//
+// Decoder is backwards-compatible: an unprefixed `id|ck` reads as
+// Single. That keeps any persisted ids minted before this change
+// (e.g. in the local override store) working without a migration.
+
+/// Kind of EWS CalendarItem behind an Aperio event id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EventIdKind {
+    Single,
+    Occurrence,
+    Exception,
+    RecurringMaster,
+}
+
+impl EventIdKind {
+    fn prefix(self) -> char {
+        match self {
+            EventIdKind::Single => 'S',
+            EventIdKind::Occurrence => 'O',
+            EventIdKind::Exception => 'E',
+            EventIdKind::RecurringMaster => 'M',
+        }
+    }
+
+    fn from_prefix(c: char) -> Option<Self> {
+        Some(match c {
+            'S' => EventIdKind::Single,
+            'O' => EventIdKind::Occurrence,
+            'E' => EventIdKind::Exception,
+            'M' => EventIdKind::RecurringMaster,
+            _ => return None,
+        })
+    }
+
+    /// Parse from the EWS `<t:CalendarItemType>` element value.
+    pub fn from_calendar_item_type(s: &str) -> Self {
+        match s {
+            "Single" => EventIdKind::Single,
+            "Occurrence" => EventIdKind::Occurrence,
+            "Exception" => EventIdKind::Exception,
+            "RecurringMaster" => EventIdKind::RecurringMaster,
+            // EWS occasionally returns blank values for items the
+            // server didn't fully expand. Fall through to Single as
+            // the least-surprising default; non-recurring is the
+            // common case.
+            _ => EventIdKind::Single,
+        }
+    }
+
+    pub fn is_occurrence_like(self) -> bool {
+        matches!(self, EventIdKind::Occurrence | EventIdKind::Exception)
+    }
+}
+
+/// Pack an EWS ItemId + ChangeKey + type into the Aperio-facing
+/// event id string. Matches the decoder in [`decode_event_id`].
+pub fn encode_event_id(kind: EventIdKind, id: &str, change_key: Option<&str>) -> String {
+    let prefix = kind.prefix();
+    match change_key {
+        Some(ck) => format!("{prefix}:{id}|{ck}"),
+        None => format!("{prefix}:{id}"),
+    }
+}
+
+/// Decoded Aperio event id: split apart into a CalendarItem kind,
+/// the raw ItemId, and the optional ChangeKey.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DecodedEventId {
+    pub kind: EventIdKind,
+    pub item_id: String,
+    pub change_key: Option<String>,
+}
+
+/// Decode an Aperio event id. Falls back to `Single` if the string
+/// has no prefix (compat path for ids minted before 6f.1c).
+pub fn decode_event_id(s: &str) -> DecodedEventId {
+    // The prefix is one character followed by `:`. Anything else is
+    // treated as an un-prefixed legacy id.
+    let mut chars = s.chars();
+    let first = chars.next();
+    let second = chars.next();
+    if let (Some(p), Some(':')) = (first, second) {
+        if let Some(kind) = EventIdKind::from_prefix(p) {
+            let rest = &s[2..];
+            let (item_id, change_key) = match rest.split_once('|') {
+                Some((id, ck)) => (id.to_string(), Some(ck.to_string())),
+                None => (rest.to_string(), None),
+            };
+            return DecodedEventId {
+                kind,
+                item_id,
+                change_key,
+            };
+        }
+    }
+    // Legacy / unprefixed path.
+    let (item_id, change_key) = match s.split_once('|') {
+        Some((id, ck)) => (id.to_string(), Some(ck.to_string())),
+        None => (s.to_string(), None),
+    };
+    DecodedEventId {
+        kind: EventIdKind::Single,
+        item_id,
+        change_key,
+    }
+}
+
 /// One calendar item pulled from a `FindItem` response.
 #[derive(Debug, Clone, Default)]
 pub struct ParsedItem {
@@ -179,6 +309,10 @@ pub struct ParsedItem {
     pub reminder_minutes_before_start: Option<i64>,
     pub created: Option<DateTime<Utc>>,
     pub last_modified: Option<DateTime<Utc>>,
+    /// `<t:CalendarItemType>` element value, normalised. Defaults to
+    /// `Single` when EWS omits it (e.g. older servers that don't
+    /// honour the property request).
+    pub item_type: Option<String>,
 }
 
 /// Walk a `FindItemResponse` body and yield one `ParsedItem` per
@@ -233,6 +367,7 @@ pub fn parse_find_item_response(xml: &str) -> EwsResult<Vec<ParsedItem>> {
                     b"reminderminutesbeforestart" => text_target = Some("reminder_mins"),
                     b"datetimecreated" => text_target = Some("created"),
                     b"lastmodifiedtime" => text_target = Some("modified"),
+                    b"calendaritemtype" => text_target = Some("item_type"),
                     _ => {}
                 }
             }
@@ -282,6 +417,10 @@ pub fn parse_find_item_response(xml: &str) -> EwsResult<Vec<ParsedItem>> {
                     }
                     Some("created") => current.created = parse_ews_datetime(s),
                     Some("modified") => current.last_modified = parse_ews_datetime(s),
+                    Some("item_type") => {
+                        let acc = current.item_type.get_or_insert_with(String::new);
+                        acc.push_str(s);
+                    }
                     _ => {}
                 }
             }
@@ -319,10 +458,15 @@ pub fn to_event(item: ParsedItem, calendar_id: &str) -> EwsResult<Event> {
         EwsError::Protocol("CalendarItem missing End".into())
     })?;
 
-    let id = match &item.change_key {
-        Some(ck) => format!("{}|{}", item.item_id, ck),
-        None => item.item_id.clone(),
-    };
+    // Prefix the id with the CalendarItemType so writes know how to
+    // route — series-wide ops resolve the master from an Occurrence
+    // id via a lazy GetItem; the EXDATE path stays on the raw row.
+    let kind = item
+        .item_type
+        .as_deref()
+        .map(EventIdKind::from_calendar_item_type)
+        .unwrap_or(EventIdKind::Single);
+    let id = encode_event_id(kind, &item.item_id, item.change_key.as_deref());
 
     let reminders = if item.reminder_is_set {
         let minutes = item.reminder_minutes_before_start.unwrap_or(15);
@@ -1013,9 +1157,12 @@ mod tests {
             reminder_minutes_before_start: Some(15),
             created: Some("2026-05-19T08:00:00Z".parse().unwrap()),
             last_modified: Some("2026-05-19T09:00:00Z".parse().unwrap()),
+            item_type: None,
         };
         let ev = to_event(item, "FID|CK").unwrap();
-        assert_eq!(ev.id, "IID|ICK");
+        // No `<t:CalendarItemType>` element → defaults to Single,
+        // which encodes with the `S:` prefix in the Aperio id.
+        assert_eq!(ev.id, "S:IID|ICK");
         assert_eq!(ev.calendar_id, "FID|CK");
         assert_eq!(ev.title, "Lunch");
         assert_eq!(ev.reminders.len(), 1);
@@ -1217,6 +1364,71 @@ mod tests {
         assert!(del.contains("FieldURI=\"calendar:Location\""));
         assert!(del.contains("FieldURI=\"calendar:Recurrence\""));
         assert!(del.contains("FieldURI=\"item:ReminderMinutesBeforeStart\""));
+    }
+
+    #[test]
+    fn encode_then_decode_event_id_roundtrips() {
+        let cases = [
+            (EventIdKind::Single, "I1", Some("C1")),
+            (EventIdKind::Occurrence, "I2", Some("C2")),
+            (EventIdKind::Exception, "I3", Some("C3")),
+            (EventIdKind::RecurringMaster, "I4", None),
+        ];
+        for (kind, id, ck) in cases {
+            let encoded = encode_event_id(kind, id, ck);
+            let decoded = decode_event_id(&encoded);
+            assert_eq!(decoded.kind, kind);
+            assert_eq!(decoded.item_id, id);
+            assert_eq!(decoded.change_key.as_deref(), ck);
+        }
+    }
+
+    #[test]
+    fn decode_event_id_falls_back_to_single_for_unprefixed_legacy_ids() {
+        // ids minted before 6f.1c land as "id|ck" without a prefix —
+        // decoder should treat them as Single so persisted local-only
+        // EXDATE rows etc keep resolving.
+        let decoded = decode_event_id("RAW-ID|RAW-CK");
+        assert_eq!(decoded.kind, EventIdKind::Single);
+        assert_eq!(decoded.item_id, "RAW-ID");
+        assert_eq!(decoded.change_key.as_deref(), Some("RAW-CK"));
+    }
+
+    #[test]
+    fn decode_event_id_handles_id_without_change_key() {
+        let decoded = decode_event_id("O:JUST-ID");
+        assert_eq!(decoded.kind, EventIdKind::Occurrence);
+        assert_eq!(decoded.item_id, "JUST-ID");
+        assert!(decoded.change_key.is_none());
+    }
+
+    #[test]
+    fn to_event_picks_kind_from_calendar_item_type() {
+        let mk = |item_type: Option<&str>| ParsedItem {
+            item_id: "IID".into(),
+            change_key: Some("ICK".into()),
+            subject: "X".into(),
+            body: None,
+            location: None,
+            start: Some("2026-05-20T08:00:00Z".parse().unwrap()),
+            end: Some("2026-05-20T09:00:00Z".parse().unwrap()),
+            is_all_day: false,
+            is_recurring: false,
+            reminder_is_set: false,
+            reminder_minutes_before_start: None,
+            created: None,
+            last_modified: None,
+            item_type: item_type.map(String::from),
+        };
+        assert_eq!(to_event(mk(Some("Single")), "FID").unwrap().id, "S:IID|ICK");
+        assert_eq!(to_event(mk(Some("Occurrence")), "FID").unwrap().id, "O:IID|ICK");
+        assert_eq!(to_event(mk(Some("Exception")), "FID").unwrap().id, "E:IID|ICK");
+        assert_eq!(
+            to_event(mk(Some("RecurringMaster")), "FID").unwrap().id,
+            "M:IID|ICK",
+        );
+        // Missing element → Single (defensive default).
+        assert_eq!(to_event(mk(None), "FID").unwrap().id, "S:IID|ICK");
     }
 
     #[test]
