@@ -43,9 +43,18 @@ pub use config::{AuthKind, CaldavAccountConfig, Credentials};
 pub use discovery::Discovery;
 pub use error::{CaldavError, CaldavResult};
 
+/// Cached listing result with the timestamp it was fetched at.
+/// Returned to the trait impl in cloned form so the lock can be
+/// released before any await point.
+#[derive(Debug, Clone)]
+struct ListingCache<T> {
+    items: Vec<T>,
+    cached_at: chrono::DateTime<chrono::Utc>,
+}
+
 /// One configured CalDAV account. Cheap to clone — the `Client`
 /// is reference-counted by reqwest and the `Mutex` only protects
-/// the lazily-cached discovery result.
+/// the lazily-cached discovery + listing results.
 pub struct CaldavAdapter {
     credentials: Credentials,
     http: Client,
@@ -53,6 +62,19 @@ pub struct CaldavAdapter {
     /// re-walk the well-known chain. Cleared when the user changes
     /// credentials (currently by constructing a fresh adapter).
     discovery: Mutex<Option<Discovery>>,
+    /// Cached calendar listing. PROPFIND on the calendar-home is the
+    /// expensive part — typically 500 ms–2 s against iCloud — and a
+    /// freshly-mounted sidebar can trigger it three or four times in
+    /// a row through the refresh paths.
+    calendars_cache: Mutex<Option<ListingCache<Calendar>>>,
+    /// Same idea for VTODO collections.
+    task_lists_cache: Mutex<Option<ListingCache<TaskList>>>,
+    /// Freshness window for the two listing caches. Default 5 min —
+    /// calendars are rarely added/removed/renamed, so this trades a
+    /// short staleness window (a calendar created on iCloud's web
+    /// UI shows up within 5 min) for snappy renames and account adds
+    /// here in Aperio. The `rename_*` paths explicitly invalidate.
+    listing_ttl: chrono::Duration,
     /// Capabilities the adapter declares to the registry. Always
     /// `[Calendar]` at this point — `TasksFeature` joins once
     /// VTODO read/write lands in 6b.3.
@@ -86,8 +108,56 @@ impl CaldavAdapter {
             credentials,
             http,
             discovery: Mutex::new(None),
+            calendars_cache: Mutex::new(None),
+            task_lists_cache: Mutex::new(None),
+            listing_ttl: chrono::Duration::minutes(5),
             capabilities: vec![Capability::Calendar, Capability::Tasks],
         })
+    }
+
+    /// Override the listing-cache freshness window. Production
+    /// callers use the 5-min default; tests inject a zero TTL when
+    /// they want to verify the network-fetch path runs every time.
+    #[doc(hidden)]
+    pub fn with_listing_ttl(mut self, ttl: std::time::Duration) -> Self {
+        self.listing_ttl = chrono::Duration::from_std(ttl)
+            .unwrap_or_else(|_| chrono::Duration::zero());
+        self
+    }
+
+    /// Drop both listing caches. Called from `rename_*` after a
+    /// successful PROPPATCH so the next `list_*` call walks the
+    /// network and surfaces the new displayname. Public for the
+    /// unlikely future case of "the user knows the server changed
+    /// out-of-band" — currently only the rename paths invoke it.
+    pub fn invalidate_listing_caches(&self) {
+        *self.calendars_cache.lock().expect("poison") = None;
+        *self.task_lists_cache.lock().expect("poison") = None;
+    }
+
+    /// Return the cached calendars if any are within the TTL window.
+    /// Pulled out as a helper so the trait impl below stays readable
+    /// and the mutex guard is dropped before the await point.
+    fn cached_calendars(&self) -> Option<Vec<Calendar>> {
+        let guard = self.calendars_cache.lock().expect("poison");
+        let entry = guard.as_ref()?;
+        let age = chrono::Utc::now().signed_duration_since(entry.cached_at);
+        if age >= chrono::Duration::zero() && age < self.listing_ttl {
+            Some(entry.items.clone())
+        } else {
+            None
+        }
+    }
+
+    fn cached_task_lists(&self) -> Option<Vec<TaskList>> {
+        let guard = self.task_lists_cache.lock().expect("poison");
+        let entry = guard.as_ref()?;
+        let age = chrono::Utc::now().signed_duration_since(entry.cached_at);
+        if age >= chrono::Duration::zero() && age < self.listing_ttl {
+            Some(entry.items.clone())
+        } else {
+            None
+        }
     }
 
     /// Returns the discovered calendar-home URL, running the
@@ -159,14 +229,22 @@ impl Adapter for CaldavAdapter {
 #[async_trait]
 impl CalendarFeature for CaldavAdapter {
     async fn list_calendars(&self) -> CoreResult<Vec<Calendar>> {
+        if let Some(cached) = self.cached_calendars() {
+            return Ok(cached);
+        }
         let discovery = self.discover().await.map_err(to_core_error)?;
-        calendars::list_calendars(
+        let fresh = calendars::list_calendars(
             &self.http,
             &discovery.calendar_home_url,
             &self.credentials,
         )
         .await
-        .map_err(to_core_error)
+        .map_err(to_core_error)?;
+        *self.calendars_cache.lock().expect("poison") = Some(ListingCache {
+            items: fresh.clone(),
+            cached_at: chrono::Utc::now(),
+        });
+        Ok(fresh)
     }
 
     async fn get_events(
@@ -336,21 +414,36 @@ impl CalendarFeature for CaldavAdapter {
         })?;
         calendars::proppatch_displayname(&self.http, &url, new_name, &self.credentials)
             .await
-            .map_err(to_core_error)
+            .map_err(to_core_error)?;
+        // The cached listing still has the old displayname. Drop
+        // both calendar + task-list caches conservatively — some
+        // servers expose VEVENT + VTODO collections at the same
+        // URL, and a rename there would shift the name in both
+        // listings.
+        self.invalidate_listing_caches();
+        Ok(())
     }
 }
 
 #[async_trait]
 impl TasksFeature for CaldavAdapter {
     async fn list_task_lists(&self) -> CoreResult<Vec<TaskList>> {
+        if let Some(cached) = self.cached_task_lists() {
+            return Ok(cached);
+        }
         let discovery = self.discover().await.map_err(to_core_error)?;
-        tasks::list_task_lists(
+        let fresh = tasks::list_task_lists(
             &self.http,
             &discovery.calendar_home_url,
             &self.credentials,
         )
         .await
-        .map_err(to_core_error)
+        .map_err(to_core_error)?;
+        *self.task_lists_cache.lock().expect("poison") = Some(ListingCache {
+            items: fresh.clone(),
+            cached_at: chrono::Utc::now(),
+        });
+        Ok(fresh)
     }
 
     async fn get_tasks(&self, list_id: &str) -> CoreResult<Vec<Task>> {
@@ -426,7 +519,9 @@ impl TasksFeature for CaldavAdapter {
         })?;
         calendars::proppatch_displayname(&self.http, &url, new_name, &self.credentials)
             .await
-            .map_err(to_core_error)
+            .map_err(to_core_error)?;
+        self.invalidate_listing_caches();
+        Ok(())
     }
 }
 
@@ -508,5 +603,119 @@ mod tests {
         let second = adapter.discover().await.unwrap();
         assert_eq!(first.calendar_home_url, second.calendar_home_url);
         assert!(adapter.cached_calendar_home().is_some());
+    }
+
+    /// Minimal PROPFIND-on-home-set response: one VEVENT-capable
+    /// calendar at `/calendars/alice/work/`. Enough for the cache /
+    /// invalidation tests below.
+    const HOME_LISTING_RESPONSE: &str = r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+  <d:response>
+    <d:href>/calendars/alice/work/</d:href>
+    <d:propstat><d:prop>
+      <d:displayname>Work</d:displayname>
+      <d:resourcetype><d:collection/><c:calendar/></d:resourcetype>
+      <c:supported-calendar-component-set>
+        <c:comp name="VEVENT"/>
+      </c:supported-calendar-component-set>
+    </d:prop></d:propstat>
+  </d:response>
+</d:multistatus>"#;
+
+    fn build_adapter(server: &Server) -> CaldavAdapter {
+        CaldavAdapter::new(
+            Credentials::new(
+                CaldavAccountConfig {
+                    server_url: server.url(),
+                    username: "alice".into(),
+                    auth_kind: AuthKind::Basic,
+                },
+                "hunter2".into(),
+            ),
+            Some(Duration::from_secs(3)),
+        )
+        .unwrap()
+    }
+
+    async fn mock_discovery_chain(server: &mut Server) {
+        server
+            .mock("GET", "/.well-known/caldav")
+            .with_status(404)
+            .create_async()
+            .await;
+        server
+            .mock("PROPFIND", "/")
+            .with_status(207)
+            .with_body(PRINCIPAL_RESPONSE)
+            .create_async()
+            .await;
+        server
+            .mock("PROPFIND", "/principals/users/alice/")
+            .with_status(207)
+            .with_body(HOME_SET_RESPONSE)
+            .create_async()
+            .await;
+    }
+
+    #[tokio::test]
+    async fn list_calendars_uses_the_listing_cache() {
+        let mut server = Server::new_async().await;
+        mock_discovery_chain(&mut server).await;
+        // Only ONE PROPFIND on the calendar-home is expected — the
+        // second `list_calendars` must serve from the cache.
+        let m = server
+            .mock("PROPFIND", "/calendars/alice/")
+            .with_status(207)
+            .with_body(HOME_LISTING_RESPONSE)
+            .expect(1)
+            .create_async()
+            .await;
+
+        let adapter = build_adapter(&server);
+        let first = adapter.list_calendars().await.unwrap();
+        let second = adapter.list_calendars().await.unwrap();
+        assert_eq!(first.len(), 1);
+        assert_eq!(first.len(), second.len());
+        assert_eq!(first[0].name, "Work");
+        m.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn invalidate_listing_caches_forces_a_fresh_propfind() {
+        let mut server = Server::new_async().await;
+        mock_discovery_chain(&mut server).await;
+        // Two PROPFINDs expected: one before invalidate, one after.
+        let m = server
+            .mock("PROPFIND", "/calendars/alice/")
+            .with_status(207)
+            .with_body(HOME_LISTING_RESPONSE)
+            .expect(2)
+            .create_async()
+            .await;
+
+        let adapter = build_adapter(&server);
+        adapter.list_calendars().await.unwrap();
+        adapter.invalidate_listing_caches();
+        adapter.list_calendars().await.unwrap();
+        m.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn zero_ttl_bypasses_the_cache_on_every_call() {
+        let mut server = Server::new_async().await;
+        mock_discovery_chain(&mut server).await;
+        // TTL=0 ⇒ every call walks the network.
+        let m = server
+            .mock("PROPFIND", "/calendars/alice/")
+            .with_status(207)
+            .with_body(HOME_LISTING_RESPONSE)
+            .expect(2)
+            .create_async()
+            .await;
+
+        let adapter = build_adapter(&server).with_listing_ttl(Duration::ZERO);
+        adapter.list_calendars().await.unwrap();
+        adapter.list_calendars().await.unwrap();
+        m.assert_async().await;
     }
 }
