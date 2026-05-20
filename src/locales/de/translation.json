@@ -311,6 +311,11 @@
       "icalUsernameLabel": "Benutzername (optional)",
       "icalPasswordLabel": "Passwort (optional)",
       "icalAuthHint": "Nur ausfüllen, wenn der Feed Basic-Auth verlangt. Öffentliche Feeds bleiben anonym.",
+      "googleClientIdLabel": "Google OAuth Client-ID",
+      "googleClientIdPlaceholder": "z. B. 123456789012-abc…apps.googleusercontent.com",
+      "googleClientIdHint": "Aus deiner Google Cloud Console (APIs & Services → Credentials → OAuth 2.0 Client ID, Typ „Desktop App\"). Eine eigene Client-ID ist notwendig, weil Aperio noch keine verifizierte Google-App-Registrierung hat.",
+      "googleFlowHint": "Auf „Hinzufügen\" öffnet Aperio deinen Browser zur Google-Anmeldung. Nach der Zustimmung schließt sich der Tab automatisch und der Kalender erscheint in der Seitenleiste.",
+      "clientIdRequired": "Bitte gib die Client-ID ein.",
       "kindName": {
         "local": "Lokal",
         "caldav": "CalDAV (iCloud, Nextcloud, …)",

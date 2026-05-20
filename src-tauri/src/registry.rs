@@ -30,6 +30,7 @@ use cal_adapter_caldav::{
     config::{CaldavAccountConfig, Credentials as CaldavCredentials},
     CaldavAdapter,
 };
+use cal_adapter_google::{GoogleAccountConfig, GoogleAdapter, TokenSet as GoogleTokenSet};
 use cal_adapter_ical::{
     Credentials as IcalCredentials, IcalAccountConfig, IcalAdapter,
 };
@@ -268,6 +269,7 @@ impl AdapterRegistry {
             AdapterKind::Local => Ok(()),
             AdapterKind::Caldav => self.register_caldav(account),
             AdapterKind::Ical => self.register_ical(account),
+            AdapterKind::Google => self.register_google(account),
             other => Err(RegistryError::Unsupported(format!(
                 "adapter kind '{}' is not wired up yet",
                 other.as_str()
@@ -292,6 +294,36 @@ impl AdapterRegistry {
             .write()
             .expect("registry tasks poison")
             .insert(account.id.clone(), arc as Arc<dyn TasksFeature>);
+        Ok(())
+    }
+
+    /// Wire up a Google Calendar account. Tokens come out of the
+    /// platform keychain (stored after the OAuth dance by the
+    /// `connect_google_account` command). `expires_at` is left at
+    /// epoch — the adapter's API layer refreshes lazily on the
+    /// first 401, so the persisted access token doesn't need to be
+    /// fresh across app restarts.
+    fn register_google(&self, account: &Account) -> Result<(), RegistryError> {
+        let config: GoogleAccountConfig = serde_json::from_str(&account.config_json)
+            .map_err(|e| RegistryError::Config(e.to_string()))?;
+        let access = secrets::retrieve(&account.id, SecretSlot::AccessToken)
+            .map_err(|e| RegistryError::Secret(format!("missing access token: {e}")))?;
+        let refresh = secrets::retrieve(&account.id, SecretSlot::RefreshToken)
+            .ok()
+            .filter(|s| !s.is_empty());
+        let tokens = GoogleTokenSet {
+            access_token: access,
+            refresh_token: refresh,
+            expires_at: chrono::DateTime::<chrono::Utc>::from_timestamp(0, 0)
+                .unwrap_or_else(chrono::Utc::now),
+            scope: None,
+        };
+        let adapter = GoogleAdapter::new(config.client_id, tokens);
+        let arc = Arc::new(adapter);
+        self.external_cal
+            .write()
+            .expect("registry cal poison")
+            .insert(account.id.clone(), arc as Arc<dyn CalendarFeature>);
         Ok(())
     }
 

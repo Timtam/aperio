@@ -311,6 +311,11 @@
       "icalUsernameLabel": "Username (optional)",
       "icalPasswordLabel": "Password (optional)",
       "icalAuthHint": "Only fill in if the feed requires HTTP Basic auth. Public feeds stay anonymous.",
+      "googleClientIdLabel": "Google OAuth client ID",
+      "googleClientIdPlaceholder": "e.g. 123456789012-abc…apps.googleusercontent.com",
+      "googleClientIdHint": "From your Google Cloud Console (APIs & Services → Credentials → OAuth 2.0 Client ID, type \"Desktop App\"). Aperio needs your own client ID until it ships its own verified Google app registration.",
+      "googleFlowHint": "Pressing \"Add\" opens your browser to Google's consent screen. After you grant access the tab closes itself and the calendar appears in the sidebar.",
+      "clientIdRequired": "Please enter the client ID.",
       "kindName": {
         "local": "Local",
         "caldav": "CalDAV (iCloud, Nextcloud, …)",

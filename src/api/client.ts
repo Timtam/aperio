@@ -244,6 +244,24 @@ export const testIcalFeed = (
     request: { feed_url, username, password },
   });
 
+/** Kick off the Google OAuth dance. The backend opens the system
+ *  browser to Google's consent screen and blocks until the user
+ *  completes the flow (or hits the 5-min timeout). On success the
+ *  refresh + access tokens land in the keychain and the new account
+ *  is registered with the adapter registry — the resolved
+ *  `Account` row is returned just like a `createAccount` call.
+ *
+ *  `client_id` is the user's own Google Cloud Console OAuth client
+ *  id (Desktop app type). See AccountsDialog help text for the
+ *  setup walkthrough. */
+export const connectGoogleAccount = (
+  client_id: string,
+  display_name: string,
+) =>
+  invoke<Account>('connect_google_account', {
+    request: { client_id, display_name },
+  });
+
 /** Which container namespace an override applies to. Calendars and
  *  task lists have disjoint ids today but the backend keeps them
  *  separately namespaced so a future code-path can enforce kind. */

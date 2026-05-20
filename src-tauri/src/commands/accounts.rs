@@ -4,6 +4,7 @@ use cal_adapter_caldav::{
     config::{AuthKind, CaldavAccountConfig, Credentials as CaldavCredentials},
     CaldavAdapter,
 };
+use cal_adapter_google::{GoogleAccountConfig, GoogleAdapter};
 use cal_adapter_ical::{
     Credentials as IcalCredentials, IcalAccountConfig, IcalAdapter,
 };
@@ -307,4 +308,128 @@ impl From<AccountsError> for CommandError {
             },
         }
     }
+}
+
+/// Interactive Google sign-in. Runs the OAuth 2.0 PKCE dance via
+/// the system browser, persists access + refresh tokens to the
+/// platform keychain, creates the account row and registers the
+/// adapter. The frontend's "Connect Google" button awaits this
+/// command; the user sees a "Connecting…" state while the consent
+/// screen is open.
+///
+/// The command is best-effort transactional: if any post-OAuth step
+/// fails (DB insert, keychain write, registry registration) we tear
+/// down everything we touched so the next attempt starts clean.
+#[tauri::command]
+pub async fn connect_google_account(
+    db: State<'_, DbHandle>,
+    registry: State<'_, AdapterRegistry>,
+    request: ConnectGoogleRequest,
+) -> CommandResult<Account> {
+    let name = request.display_name.trim();
+    if name.is_empty() {
+        return Err(CommandError {
+            code: "invalid_input",
+            message: "display_name must not be empty".into(),
+        });
+    }
+    let client_id = request.client_id.trim();
+    if client_id.is_empty() {
+        return Err(CommandError {
+            code: "invalid_input",
+            message: "client_id must not be empty".into(),
+        });
+    }
+
+    // 1) Run the OAuth dance. This opens the system browser and
+    //    blocks the command until the user completes consent (or
+    //    times out at 5 min, or the user denies). Errors here are
+    //    surfaced verbatim — we haven't touched anything persistent
+    //    yet.
+    let tokens =
+        GoogleAdapter::authenticate_interactive(client_id)
+            .await
+            .map_err(google_error_to_command)?;
+
+    // 2) Create the account row. Config holds only the non-secret
+    //    client_id; everything else lives in the keychain.
+    let config = GoogleAccountConfig {
+        client_id: client_id.to_string(),
+        account_label: None,
+    };
+    let config_json = serde_json::to_string(&config).map_err(|e| CommandError {
+        code: "internal",
+        message: format!("serialise config: {e}"),
+    })?;
+    let shared = db.shared();
+    let repo = AccountsRepo::new(&shared);
+    let created = repo.create(AdapterKind::Google, name, &config_json)?;
+
+    // 3) Persist tokens to the keychain. If either write fails we
+    //    delete the row and surface an error so the user can retry
+    //    with a clean slate.
+    if let Err(err) =
+        secrets::store(&created.id, SecretSlot::AccessToken, &tokens.access_token)
+    {
+        let _ = repo.delete(&created.id);
+        return Err(CommandError {
+            code: "internal",
+            message: format!("failed to store access token: {err}"),
+        });
+    }
+    if let Some(refresh) = tokens.refresh_token.as_deref() {
+        if let Err(err) = secrets::store(&created.id, SecretSlot::RefreshToken, refresh)
+        {
+            let _ = secrets::delete_all(&created.id);
+            let _ = repo.delete(&created.id);
+            return Err(CommandError {
+                code: "internal",
+                message: format!("failed to store refresh token: {err}"),
+            });
+        }
+    }
+
+    // 4) Register the adapter so subsequent reads/writes route
+    //    through it. The registry reads tokens from keychain again
+    //    — round-trip is intentional so the read-path stays
+    //    identical to what happens at app boot.
+    if let Err(err) = registry.register(&created) {
+        let _ = secrets::delete_all(&created.id);
+        let _ = repo.delete(&created.id);
+        return Err(CommandError {
+            code: "internal",
+            message: format!("adapter registration failed: {err}"),
+        });
+    }
+    Ok(created)
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct ConnectGoogleRequest {
+    pub client_id: String,
+    pub display_name: String,
+}
+
+fn google_error_to_command(err: cal_adapter_google::GoogleError) -> CommandError {
+    use cal_adapter_google::GoogleError::*;
+    let (code, message) = match err {
+        AuthDenied(m) => ("auth", format!("Verbindung abgelehnt: {m}")),
+        AuthTimeout => (
+            "auth",
+            "Anmeldung hat zu lange gedauert (5 min). Bitte erneut versuchen.".into(),
+        ),
+        Http { status: 401, message } | Http { status: 403, message } => {
+            ("auth", message)
+        }
+        Http { status, message } => (
+            "protocol",
+            format!("Google HTTP {status}: {message}"),
+        ),
+        Network(m) => ("network", m),
+        Protocol(m) => ("protocol", m),
+        Csrf => ("protocol", "CSRF-Mismatch bei OAuth-Redirect".into()),
+        Io(m) => ("internal", m),
+        Config(m) => ("invalid_input", m),
+    };
+    CommandError { code, message }
 }

@@ -10,6 +10,7 @@ import { useTranslation } from 'react-i18next';
 
 import { useAnnouncer } from '../a11y/Announcer';
 import {
+  connectGoogleAccount,
   createAccount,
   deleteAccount,
   isCommandError,
@@ -56,6 +57,7 @@ const ENABLED_KINDS: ReadonlySet<AdapterKind> = new Set([
   'local',
   'caldav',
   'ical',
+  'google',
 ]);
 
 interface CaldavFields {
@@ -82,6 +84,14 @@ const EMPTY_ICAL: IcalFields = {
   password: '',
 };
 
+interface GoogleFields {
+  clientId: string;
+}
+
+const EMPTY_GOOGLE: GoogleFields = {
+  clientId: '',
+};
+
 export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
   const { t } = useTranslation();
   const announce = useAnnouncer();
@@ -103,6 +113,7 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
   const [testMessage, setTestMessage] = useState<string | null>(null);
   const [caldav, setCaldav] = useState<CaldavFields>(EMPTY_CALDAV);
   const [ical, setIcal] = useState<IcalFields>(EMPTY_ICAL);
+  const [google, setGoogle] = useState<GoogleFields>(EMPTY_GOOGLE);
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -134,6 +145,11 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
     return null;
   }, [ical, t]);
 
+  const validateGoogle = useCallback((): string | null => {
+    if (!google.clientId.trim()) return t('dialogs.accounts.clientIdRequired');
+    return null;
+  }, [google, t]);
+
   const onSubmit = useCallback(
     async (e: FormEvent) => {
       e.preventDefault();
@@ -162,38 +178,58 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
           return;
         }
       }
+      if (kind === 'google') {
+        const v = validateGoogle();
+        if (v) {
+          setError(v);
+          return;
+        }
+      }
       setSubmitting(true);
       setError(null);
       try {
-        const configJson =
-          kind === 'caldav'
-            ? JSON.stringify({
-                server_url: caldav.serverUrl.trim(),
-                username: caldav.username.trim(),
-                auth_kind: 'basic',
-              })
-            : kind === 'ical'
+        let created;
+        if (kind === 'google') {
+          // Google takes its own path: the backend opens the system
+          // browser, runs the PKCE dance and only then writes the
+          // account row + secrets. Returns the same Account shape
+          // as createAccount so the rest of the flow is identical.
+          created = await connectGoogleAccount(
+            google.clientId.trim(),
+            name,
+          );
+        } else {
+          const configJson =
+            kind === 'caldav'
               ? JSON.stringify({
-                  feed_url: ical.feedUrl.trim(),
-                  username: ical.username.trim() || null,
+                  server_url: caldav.serverUrl.trim(),
+                  username: caldav.username.trim(),
+                  auth_kind: 'basic',
                 })
-              : '{}';
-        const secret =
-          kind === 'caldav'
-            ? caldav.password
-            : kind === 'ical' && ical.password
-              ? ical.password
-              : undefined;
-        const created = await createAccount({
-          adapter_kind: kind,
-          display_name: name,
-          config_json: configJson,
-          secret,
-        });
+              : kind === 'ical'
+                ? JSON.stringify({
+                    feed_url: ical.feedUrl.trim(),
+                    username: ical.username.trim() || null,
+                  })
+                : '{}';
+          const secret =
+            kind === 'caldav'
+              ? caldav.password
+              : kind === 'ical' && ical.password
+                ? ical.password
+                : undefined;
+          created = await createAccount({
+            adapter_kind: kind,
+            display_name: name,
+            config_json: configJson,
+            secret,
+          });
+        }
         announce(t('dialogs.accounts.created', { name: created.display_name }));
         setDisplayName('');
         setCaldav(EMPTY_CALDAV);
         setIcal(EMPTY_ICAL);
+        setGoogle(EMPTY_GOOGLE);
         refresh();
         // Re-fetch the calendar / task-list catalog so the sidebar
         // picks up the new account's containers without the user
@@ -214,8 +250,10 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
       kind,
       caldav,
       ical,
+      google,
       validateCaldav,
       validateIcal,
+      validateGoogle,
       announce,
       refresh,
       refreshCalendars,
@@ -641,6 +679,35 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
                     {testMessage}
                   </p>
                 )}
+              </>
+            )}
+
+            {kind === 'google' && (
+              <>
+                <label className="form__field">
+                  <span className="form__label">
+                    {t('dialogs.accounts.googleClientIdLabel')}
+                  </span>
+                  <input
+                    type="text"
+                    value={google.clientId}
+                    onChange={(e) =>
+                      setGoogle({ clientId: e.target.value })
+                    }
+                    placeholder={t(
+                      'dialogs.accounts.googleClientIdPlaceholder',
+                    )}
+                    autoComplete="off"
+                    spellCheck={false}
+                    required
+                  />
+                  <span className="form__hint">
+                    {t('dialogs.accounts.googleClientIdHint')}
+                  </span>
+                </label>
+                <p className="form__hint accounts-google-flow-hint">
+                  {t('dialogs.accounts.googleFlowHint')}
+                </p>
               </>
             )}
 
