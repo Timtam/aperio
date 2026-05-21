@@ -81,6 +81,14 @@
     "save": "Save",
     "create": "Create",
     "close": "Close",
+    "settings": {
+      "title": "Settings",
+      "tablistAria": "Settings categories",
+      "tabs": {
+        "accounts": "Accounts",
+        "colorLabels": "Color labels"
+      }
+    },
     "confirm": {
       "cancel": "Cancel",
       "confirm": "Delete",
@@ -478,8 +486,7 @@
     "renamedSynced": "Renamed to \"{{name}}\" — also at the source.",
     "renamedLocalOnly": "Renamed to \"{{name}}\" — locally only (source is read-only).",
     "renameCleared": "Reverted to source name.",
-    "manageColorLabels": "Manage color labels",
-    "manageAccounts": "Manage accounts",
+    "openSettings": "Settings",
     "containersHeading": "Containers",
     "treeLabel": "Accounts, calendars and task lists",
     "tree": {

@@ -81,7 +81,7 @@ export function Sidebar() {
     toggleTaskList,
     refreshTaskLists,
   } = useCalendarStore();
-  const { openColorLabels, openAccounts } = useDialogState();
+  const { openSettings } = useDialogState();
   const expansion = useSidebarExpansion();
   const showCompleted = useTaskListShowCompleted();
   const { focusedCalendarId, enterFocus, exitFocus } = useViewState();
@@ -778,16 +778,9 @@ export function Sidebar() {
         <button
           type="button"
           className="sidebar__add"
-          onClick={() => openColorLabels()}
+          onClick={() => openSettings()}
         >
-          {t('sidebar.manageColorLabels')}
-        </button>
-        <button
-          type="button"
-          className="sidebar__add"
-          onClick={() => openAccounts()}
-        >
-          {t('sidebar.manageAccounts')}
+          {t('sidebar.openSettings')}
         </button>
       </section>
     </aside>

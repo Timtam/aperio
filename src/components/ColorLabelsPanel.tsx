@@ -19,31 +19,26 @@ import type { ColorLabel } from '../api/types';
 import { useAutoFocus } from '../hooks/useAutoFocus';
 import { useCalendarStore } from '../state/CalendarStore';
 import { ColorComposer } from './ColorComposer';
-import { Modal } from './Modal';
 
 /**
- * Color-label management dialog (DESIGN.md section 8.1).
+ * Color-label management panel (DESIGN.md §8.1). Rendered inside the
+ * Settings dialog's `role="tabpanel"`. The modal wrapper used to live
+ * here directly; it moved to SettingsDialog so all global config
+ * lives behind one entry point and shares the same Escape / focus
+ * trap / backdrop semantics.
  *
- * Two-mode layout:
- *  - *List mode* (default). The existing labels live in a `role="listbox"`
- *    — one tab stop for the whole list. Arrow Up/Down move between
- *    options via `aria-activedescendant`, Enter opens the focused
- *    label in edit mode. This keeps the tab count low even with a
- *    dozen labels (the previous layout had ~5 tab stops *per row*).
- *  - *Edit mode*. The listbox is replaced by a form for the chosen
- *    label with Name + ColorComposer + Save / Cancel / Delete.
+ * Two-mode layout (unchanged):
+ *  - *List mode* (default). Listbox of existing labels — one tab stop,
+ *    Arrow keys + aria-activedescendant. Enter opens edit mode.
+ *  - *Edit mode*. Form for the focused label: Name + ColorComposer +
+ *    Save / Cancel / Delete.
  *
- * Underneath either mode, the "Add a new label" section stays mounted
- * so the user can always create one.
+ * Underneath either mode, "Add a new label" stays mounted.
  */
-export interface ColorLabelDialogProps {
-  isOpen: boolean;
-  onClose: () => void;
-}
 
 const DEFAULT_NEW_HEX = '#e53935';
 
-export function ColorLabelDialog({ isOpen, onClose }: ColorLabelDialogProps) {
+export function ColorLabelsPanel() {
   const { t } = useTranslation();
   const announce = useAnnouncer();
   const { colorLabels, refreshColorLabels } = useCalendarStore();
@@ -123,82 +118,69 @@ export function ColorLabelDialog({ isOpen, onClose }: ColorLabelDialogProps) {
       : null;
 
   return (
-    <Modal
-      isOpen={isOpen}
-      onClose={onClose}
-      title={t('dialogs.colorLabels.title')}
-      className="modal--form"
-    >
-      <div className="form">
-        {editingLabel ? (
-          <EditLabelSection
-            label={editingLabel}
-            onSave={onUpdate}
-            onCancel={() => setEditingId(null)}
-            onDelete={onDelete}
-          />
-        ) : (
-          <ExistingSection
-            colorLabels={colorLabels}
-            onEdit={setEditingId}
-          />
-        )}
+    <div className="form">
+      {editingLabel ? (
+        <EditLabelSection
+          label={editingLabel}
+          onSave={onUpdate}
+          onCancel={() => setEditingId(null)}
+          onDelete={onDelete}
+        />
+      ) : (
+        <ExistingSection
+          colorLabels={colorLabels}
+          onEdit={setEditingId}
+        />
+      )}
 
-        <section
-          role="region"
-          tabIndex={0}
-          aria-labelledby="color-labels-new"
-          className="color-labels__section"
-        >
-          <h3 id="color-labels-new" className="color-labels__heading">
-            {t('dialogs.colorLabels.newHeading')}
-          </h3>
-          <form onSubmit={onCreate} className="color-labels__create">
-            <label className="form__field">
-              <span className="form__label">
-                {t('dialogs.colorLabels.fields.name')}
-              </span>
-              <input
-                type="text"
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                autoComplete="off"
-                required
-              />
-            </label>
-            <div className="form__field">
-              <span className="form__label">
-                {t('dialogs.colorLabels.fields.color')}
-              </span>
-              <ColorComposer
-                value={newHex}
-                onChange={setNewHex}
-                label={t('dialogs.colorLabels.fields.color')}
-              />
-            </div>
-            <button
-              type="submit"
-              aria-disabled={submitting || undefined}
-              className="form__action form__action--primary"
-            >
-              {t('dialogs.colorLabels.create')}
-            </button>
-          </form>
-        </section>
-
-        {error && (
-          <p role="alert" className="form__error">
-            {error}
-          </p>
-        )}
-
-        <div className="form__actions">
-          <button type="button" onClick={onClose} className="form__action">
-            {t('dialogs.close')}
+      <section
+        role="region"
+        tabIndex={0}
+        aria-labelledby="color-labels-new"
+        className="color-labels__section"
+      >
+        <h3 id="color-labels-new" className="color-labels__heading">
+          {t('dialogs.colorLabels.newHeading')}
+        </h3>
+        <form onSubmit={onCreate} className="color-labels__create">
+          <label className="form__field">
+            <span className="form__label">
+              {t('dialogs.colorLabels.fields.name')}
+            </span>
+            <input
+              type="text"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              autoComplete="off"
+              required
+            />
+          </label>
+          <div className="form__field">
+            <span className="form__label">
+              {t('dialogs.colorLabels.fields.color')}
+            </span>
+            <ColorComposer
+              value={newHex}
+              onChange={setNewHex}
+              label={t('dialogs.colorLabels.fields.color')}
+            />
+          </div>
+          <button
+            type="submit"
+            aria-disabled={submitting || undefined}
+            className="form__action form__action--primary"
+          >
+            {t('dialogs.colorLabels.create')}
           </button>
-        </div>
-      </div>
-    </Modal>
+        </form>
+      </section>
+
+      {error && (
+        <p role="alert" className="form__error">
+          {error}
+        </p>
+      )}
+    </div>
   );
 }
 

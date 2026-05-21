@@ -1,6 +1,4 @@
 import { useDialogState } from '../state/DialogState';
-import { AccountsDialog } from './AccountsDialog';
-import { ColorLabelDialog } from './ColorLabelDialog';
 import { EventDialog } from './EventDialog';
 import { MissedTasksDialog } from './MissedTasksDialog';
 import { MoveCopyDialog } from './MoveCopyDialog';
@@ -8,6 +6,7 @@ import { PlanTaskDialog } from './PlanTaskDialog';
 import { QuickAddDialog } from './QuickAddDialog';
 import { RemindersDialog } from './RemindersDialog';
 import { SearchDialog } from './SearchDialog';
+import { SettingsDialog } from './SettingsDialog';
 import { TaskDialog } from './TaskDialog';
 
 /**
@@ -41,14 +40,18 @@ export function DialogHost() {
       );
     case 'quickAdd':
       return <QuickAddDialog isOpen onClose={close} />;
-    case 'colorLabels':
-      return <ColorLabelDialog isOpen onClose={close} />;
+    case 'settings':
+      return (
+        <SettingsDialog
+          isOpen
+          onClose={close}
+          initialTab={mode.initialTab}
+        />
+      );
     case 'search':
       return <SearchDialog isOpen onClose={close} />;
     case 'reminders':
       return <RemindersDialog isOpen onClose={close} />;
-    case 'accounts':
-      return <AccountsDialog isOpen onClose={close} />;
     case 'moveCopy':
       return (
         <MoveCopyDialog isOpen onClose={close} target={mode.target} />

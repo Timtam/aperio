@@ -78,6 +78,14 @@
   },
   "dialogs": {
     "cancel": "Abbrechen",
+    "settings": {
+      "title": "Einstellungen",
+      "tablistAria": "Einstellungs-Kategorien",
+      "tabs": {
+        "accounts": "Konten",
+        "colorLabels": "Farb-Labels"
+      }
+    },
     "confirm": {
       "cancel": "Abbrechen",
       "confirm": "Löschen",
@@ -478,8 +486,7 @@
     "renamedSynced": "Umbenannt zu „{{name}}\" — auch beim Anbieter.",
     "renamedLocalOnly": "Umbenannt zu „{{name}}\" — nur in Aperio (Quelle ist schreibgeschützt).",
     "renameCleared": "Standardname wiederhergestellt.",
-    "manageColorLabels": "Farb-Labels verwalten",
-    "manageAccounts": "Konten verwalten",
+    "openSettings": "Einstellungen",
     "containersHeading": "Kalender & Aufgabenlisten",
     "treeLabel": "Konten, Kalender und Aufgabenlisten",
     "tree": {

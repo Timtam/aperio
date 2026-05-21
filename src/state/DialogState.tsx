@@ -9,6 +9,7 @@ import {
 } from 'react';
 
 import type { CalendarEvent, Task } from '../api/types';
+import type { SettingsTabId } from '../components/SettingsDialog';
 
 /**
  * Which dialog (if any) is currently open.
@@ -45,10 +46,9 @@ export type DialogMode =
       defaultDate?: string;
     }
   | { kind: 'quickAdd' }
-  | { kind: 'colorLabels' }
+  | { kind: 'settings'; initialTab?: SettingsTabId }
   | { kind: 'search' }
   | { kind: 'reminders' }
-  | { kind: 'accounts' }
   | { kind: 'moveCopy'; target: MoveCopyTarget }
   | { kind: 'planTask'; task: Task }
   | { kind: 'missedTasks' };
@@ -77,10 +77,19 @@ interface DialogStateValue {
   ) => void;
   openTaskDialog: (task?: Task | null, options?: OpenTaskOptions) => void;
   openQuickAdd: () => void;
+  /**
+   * Open the unified Settings dialog. Pass an `initialTab` to land on a
+   * specific category — used by the legacy entry points that used to
+   * open `AccountsDialog` / `ColorLabelDialog` directly so they keep
+   * working without rewriting every call site.
+   */
+  openSettings: (initialTab?: SettingsTabId) => void;
+  /** Convenience: open Settings on the Color-labels tab. */
   openColorLabels: () => void;
+  /** Convenience: open Settings on the Accounts tab. */
+  openAccounts: () => void;
   openSearch: () => void;
   openReminders: () => void;
-  openAccounts: () => void;
   openMoveCopy: (target: MoveCopyTarget) => void;
   openPlanTask: (task: Task) => void;
   openMissedTasks: () => void;
@@ -180,16 +189,23 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     [push],
   );
   const openQuickAdd = useCallback(() => push({ kind: 'quickAdd' }), [push]);
-  const openColorLabels = useCallback(
-    () => push({ kind: 'colorLabels' }),
+  const openSettings = useCallback(
+    (initialTab?: SettingsTabId) => push({ kind: 'settings', initialTab }),
     [push],
+  );
+  const openColorLabels = useCallback(
+    () => openSettings('colorLabels'),
+    [openSettings],
+  );
+  const openAccounts = useCallback(
+    () => openSettings('accounts'),
+    [openSettings],
   );
   const openSearch = useCallback(() => push({ kind: 'search' }), [push]);
   const openReminders = useCallback(
     () => push({ kind: 'reminders' }),
     [push],
   );
-  const openAccounts = useCallback(() => push({ kind: 'accounts' }), [push]);
   const openMoveCopy = useCallback(
     (target: MoveCopyTarget) => push({ kind: 'moveCopy', target }),
     [push],
@@ -245,10 +261,11 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openEventDialog,
       openTaskDialog,
       openQuickAdd,
+      openSettings,
       openColorLabels,
+      openAccounts,
       openSearch,
       openReminders,
-      openAccounts,
       openMoveCopy,
       openPlanTask,
       openMissedTasks,
@@ -261,10 +278,11 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openEventDialog,
       openTaskDialog,
       openQuickAdd,
+      openSettings,
       openColorLabels,
+      openAccounts,
       openSearch,
       openReminders,
-      openAccounts,
       openMoveCopy,
       openPlanTask,
       openMissedTasks,

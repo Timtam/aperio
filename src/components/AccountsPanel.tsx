@@ -24,23 +24,20 @@ import {
 import type { Account, AdapterKind } from '../api/types';
 import { useCalendarStore } from '../state/CalendarStore';
 import { ConfirmDialog } from './ConfirmDialog';
-import { Modal } from './Modal';
 
 /**
- * Account management dialog (DESIGN.md §6.2 / §6.4).
+ * Account management panel (DESIGN.md §6.2 / §6.4). Rendered inside
+ * the Settings dialog's `role="tabpanel"`. The standalone Modal
+ * wrapper moved up to SettingsDialog — global configuration lives
+ * behind one entry point now.
  *
  * Two halves stacked vertically:
  *   - top: existing accounts with a Delete button each
  *   - bottom: "add account" form
  *
- * Phase 6a only ships the local adapter. The kind picker shows every
- * adapter the spec lists, but the non-local entries are disabled with
- * a "coming soon" label so users see the roadmap directly in the UI.
+ * The kind picker shows every adapter the spec lists, with the
+ * not-yet-implemented entries disabled and labelled "coming soon".
  */
-export interface AccountsDialogProps {
-  isOpen: boolean;
-  onClose: () => void;
-}
 
 /** Order of the kind picker. Local first because it's the only
  *  enabled choice in Phase 6a; the others follow the rough release
@@ -121,7 +118,7 @@ const EMPTY_EWS: EwsFields = {
   password: '',
 };
 
-export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
+export function AccountsPanel() {
   const { t } = useTranslation();
   const announce = useAnnouncer();
   // The store owns the calendar / task-list catalog the sidebar
@@ -160,9 +157,12 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
       .finally(() => setLoading(false));
   }, []);
 
+  // The panel mounts when the user lands on its tab, so "on mount" is
+  // the right moment to fetch — no need to gate on an `isOpen` flag any
+  // more (the host SettingsDialog handles open/close).
   useEffect(() => {
-    if (isOpen) refresh();
-  }, [isOpen, refresh]);
+    refresh();
+  }, [refresh]);
 
   const validateCaldav = useCallback((): string | null => {
     if (!caldav.serverUrl.trim()) return t('dialogs.accounts.serverUrlRequired');
@@ -517,9 +517,9 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
   // accounts have loaded, so the user can start arrow-navigating
   // immediately without first chasing a tab stop.
   useEffect(() => {
-    if (!isOpen || loading) return;
+    if (loading) return;
     (listRef.current ?? sectionRef.current)?.focus({ preventScroll: true });
-  }, [isOpen, loading, accounts.length]);
+  }, [loading, accounts.length]);
 
   // Pull focus to the error region whenever it transitions from
   // empty → set. See the `errorRef` comment for the rationale.
@@ -585,12 +585,7 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
   const sectionTabIndex = accounts.length === 0 && !loading ? 0 : -1;
 
   return (
-    <Modal
-      isOpen={isOpen}
-      onClose={onClose}
-      title={t('dialogs.accounts.title')}
-      className="modal--form"
-    >
+    <>
       <div className="form">
         <p
           className="sr-only"
@@ -1119,11 +1114,6 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
           </form>
         </section>
 
-        <div className="form__actions">
-          <button type="button" onClick={onClose} className="form__action">
-            {t('dialogs.close')}
-          </button>
-        </div>
       </div>
 
       <ConfirmDialog
@@ -1137,6 +1127,6 @@ export function AccountsDialog({ isOpen, onClose }: AccountsDialogProps) {
           name: confirmTarget?.display_name ?? '',
         })}
       />
-    </Modal>
+    </>
   );
 }

@@ -413,6 +413,73 @@ button[aria-disabled='true'] {
   max-width: 540px;
 }
 
+/* The Settings dialog hosts a vertical tablist + panel side by side,
+   so it needs more horizontal room than a single-column form. */
+.modal--settings {
+  max-width: 820px;
+}
+
+/* Settings layout — vertical tablist on the left, panel on the right.
+   The tablist is its own scroll region only if it ever outgrows the
+   viewport; the panel scrolls independently so a long form (e.g. the
+   accounts list) doesn't push the tabs out of reach. */
+.settings {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: var(--space-4);
+  min-height: 360px;
+  padding: var(--space-4);
+}
+
+.settings__tablist {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  border-right: 1px solid var(--color-border);
+  padding-right: var(--space-3);
+}
+
+.settings__tab {
+  appearance: none;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--color-fg);
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  cursor: pointer;
+}
+
+.settings__tab:hover {
+  background: var(--color-bg-subtle);
+}
+
+.settings__tab--active {
+  background: var(--color-bg-subtle);
+  border-color: var(--color-border);
+  font-weight: 600;
+}
+
+.settings__panel {
+  /* The panel is the inner scroll container; the outer Modal stays
+     pinned to its max height. */
+  min-width: 0;
+  overflow: auto;
+}
+
+.settings__panel:focus {
+  /* The focus ring on the panel itself is noisy — tab order goes
+     tablist → panel content. Suppress only the default outline; the
+     global :focus-visible rule still applies to descendants. */
+  outline: none;
+}
+
+.settings__footer {
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--color-border);
+}
+
 .form__message {
   margin: 0;
   padding: var(--space-3) var(--space-4) 0;

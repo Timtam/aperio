@@ -8,6 +8,8 @@ import { useDialogState } from '../state/DialogState';
  *  - `N` → quick-add event
  *  - `Ctrl/Cmd+N` → full new-event dialog
  *  - `Ctrl/Cmd+Shift+N` → new-task dialog
+ *  - `Ctrl/Cmd+,` → Settings dialog (matches the platform convention
+ *    used by Visual Studio Code, macOS apps and most modern desktops)
  *
  * All ignore keystrokes inside form controls so a stray `N` while
  * typing in a description field doesn't pop another dialog. The
@@ -21,6 +23,7 @@ export function useDialogShortcuts(): void {
     openQuickAdd,
     openSearch,
     openReminders,
+    openSettings,
     mode,
   } = useDialogState();
 
@@ -52,6 +55,15 @@ export function useDialogShortcuts(): void {
         openEventDialog(null);
         return;
       }
+      // `,` is a stable e.key across layouts; we don't compare e.code
+      // because that varies (KeyComma vs Comma vs others) and not all
+      // keyboards have a dedicated comma key on the same physical
+      // position.
+      if (cmd && !e.shiftKey && e.key === ',') {
+        e.preventDefault();
+        openSettings();
+        return;
+      }
       if (!cmd && !e.shiftKey && !e.altKey && e.key === 'n') {
         e.preventDefault();
         openQuickAdd();
@@ -68,6 +80,7 @@ export function useDialogShortcuts(): void {
     openQuickAdd,
     openSearch,
     openReminders,
+    openSettings,
   ]);
 }
 
