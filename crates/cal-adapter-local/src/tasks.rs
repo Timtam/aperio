@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 use cal_core::{
-    ColorLabelId, ContainerColor, DeadlineType, NewTask, RecurrenceEnd, RecurrenceFrequency,
+    ColorLabelId, ContainerColor, NewTask, RecurrenceEnd, RecurrenceFrequency,
     Reminder, SoundConfig, Task, TaskList, TaskPriority, TaskRecurrence, TaskStatus, TasksFeature,
     Weekday,
 };
@@ -166,7 +166,7 @@ impl LocalAdapter {
             status: TaskStatus::Open,
             priority: template.priority,
             scheduled_date: template.scheduled_date.map(|_| next_date),
-            deadline_type: template.deadline_type,
+            scheduled_time: template.scheduled_time,
             deadline_date: template.deadline_date.map(|_| next_date),
             deadline_time: template.deadline_time,
             recurrence: Some(recurrence.clone()),
@@ -193,7 +193,6 @@ impl LocalAdapter {
         let sound_json = write_sound(&task.sound)?;
         let status = task_status_str(task.status);
         let priority = task_priority_str(task.priority);
-        let deadline_type = task.deadline_type.map(deadline_type_str);
 
         self.db()
             .lock()
@@ -201,7 +200,7 @@ impl LocalAdapter {
             .execute(
                 "INSERT INTO tasks (
                     id, list_id, parent_id, title, description, status, priority,
-                    scheduled_date, deadline_type, deadline_date, deadline_time,
+                    scheduled_date, scheduled_time, deadline_date, deadline_time,
                     recurrence, color_label_id, reminders, sound,
                     created_at, updated_at, completed_at, etag
                  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)",
@@ -214,7 +213,7 @@ impl LocalAdapter {
                     status,
                     priority,
                     task.scheduled_date.as_ref().map(fmt_date),
-                    deadline_type,
+                    task.scheduled_time.as_ref().map(fmt_time),
                     task.deadline_date.as_ref().map(fmt_date),
                     task.deadline_time.as_ref().map(fmt_time),
                     recurrence_json,
@@ -235,7 +234,7 @@ impl LocalAdapter {
             status: task.status,
             priority: task.priority,
             scheduled_date: task.scheduled_date,
-            deadline_type: task.deadline_type,
+            scheduled_time: task.scheduled_time,
             deadline_date: task.deadline_date,
             deadline_time: task.deadline_time,
             recurrence: task.recurrence,
@@ -272,7 +271,7 @@ impl LocalAdapter {
         let mut stmt = conn
             .prepare(
                 "SELECT id, list_id, parent_id, title, description, status,
-                        priority, scheduled_date, deadline_type, deadline_date,
+                        priority, scheduled_date, scheduled_time, deadline_date,
                         deadline_time, recurrence, color_label_id, reminders, sound,
                         created_at, updated_at, completed_at, etag
                    FROM tasks WHERE id = ?",
@@ -351,7 +350,6 @@ impl TasksFeature for LocalAdapter {
         let sound_json = write_sound(&task.sound)?;
         let status = task_status_str(task.status);
         let priority = task_priority_str(task.priority);
-        let deadline_type = task.deadline_type.map(deadline_type_str);
 
         self.db()
             .lock()
@@ -359,7 +357,7 @@ impl TasksFeature for LocalAdapter {
             .execute(
                 "INSERT INTO tasks (
                     id, list_id, parent_id, title, description, status, priority,
-                    scheduled_date, deadline_type, deadline_date, deadline_time,
+                    scheduled_date, scheduled_time, deadline_date, deadline_time,
                     recurrence, color_label_id, reminders, sound,
                     created_at, updated_at, completed_at, etag
                  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)",
@@ -372,7 +370,7 @@ impl TasksFeature for LocalAdapter {
                     status,
                     priority,
                     task.scheduled_date.as_ref().map(fmt_date),
-                    deadline_type,
+                    task.scheduled_time.as_ref().map(fmt_time),
                     task.deadline_date.as_ref().map(fmt_date),
                     task.deadline_time.as_ref().map(fmt_time),
                     recurrence_json,
@@ -393,7 +391,7 @@ impl TasksFeature for LocalAdapter {
             status: task.status,
             priority: task.priority,
             scheduled_date: task.scheduled_date,
-            deadline_type: task.deadline_type,
+            scheduled_time: task.scheduled_time,
             deadline_date: task.deadline_date,
             deadline_time: task.deadline_time,
             recurrence: task.recurrence,
@@ -422,7 +420,6 @@ impl TasksFeature for LocalAdapter {
         let sound_json = write_sound(&task.sound)?;
         let status = task_status_str(task.status);
         let priority = task_priority_str(task.priority);
-        let deadline_type = task.deadline_type.map(deadline_type_str);
 
         let changed = self
             .db()
@@ -431,8 +428,8 @@ impl TasksFeature for LocalAdapter {
             .execute(
                 "UPDATE tasks
                     SET list_id = ?, parent_id = ?, title = ?, description = ?,
-                        status = ?, priority = ?, scheduled_date = ?,
-                        deadline_type = ?, deadline_date = ?, deadline_time = ?,
+                        status = ?, priority = ?, scheduled_date = ?, scheduled_time = ?,
+                        deadline_date = ?, deadline_time = ?,
                         recurrence = ?, color_label_id = ?, reminders = ?, sound = ?,
                         updated_at = ?, completed_at = ?, etag = ?
                   WHERE id = ?",
@@ -444,7 +441,7 @@ impl TasksFeature for LocalAdapter {
                     status,
                     priority,
                     task.scheduled_date.as_ref().map(fmt_date),
-                    deadline_type,
+                    task.scheduled_time.as_ref().map(fmt_time),
                     task.deadline_date.as_ref().map(fmt_date),
                     task.deadline_time.as_ref().map(fmt_time),
                     recurrence_json,
@@ -529,7 +526,7 @@ impl TasksFeature for LocalAdapter {
 }
 
 const TASK_SELECT: &str = "SELECT id, list_id, parent_id, title, description, status,
-            priority, scheduled_date, deadline_type, deadline_date,
+            priority, scheduled_date, scheduled_time, deadline_date,
             deadline_time, recurrence, color_label_id, reminders, sound,
             created_at, updated_at, completed_at, etag
        FROM tasks
@@ -654,21 +651,6 @@ fn parse_task_priority(s: &str) -> cal_core::Result<TaskPriority> {
     })
 }
 
-fn deadline_type_str(t: DeadlineType) -> &'static str {
-    match t {
-        DeadlineType::On => "on",
-        DeadlineType::By => "by",
-    }
-}
-
-fn parse_deadline_type(s: &str) -> cal_core::Result<DeadlineType> {
-    Ok(match s {
-        "on" => DeadlineType::On,
-        "by" => DeadlineType::By,
-        other => return Err(unknown_enum("deadline type", other)),
-    })
-}
-
 pub(crate) fn row_to_task(row: &rusqlite::Row<'_>) -> cal_core::Result<Task> {
     let id = req_text(row, 0)?;
     let list_id = req_text(row, 1)?;
@@ -681,8 +663,8 @@ pub(crate) fn row_to_task(row: &rusqlite::Row<'_>) -> cal_core::Result<Task> {
         Some(s) => Some(parse_date(&s)?),
         None => None,
     };
-    let deadline_type = match opt_text(row, 8)? {
-        Some(s) => Some(parse_deadline_type(&s)?),
+    let scheduled_time = match opt_text(row, 8)? {
+        Some(s) => Some(parse_time(&s)?),
         None => None,
     };
     let deadline_date = match opt_text(row, 9)? {
@@ -716,7 +698,7 @@ pub(crate) fn row_to_task(row: &rusqlite::Row<'_>) -> cal_core::Result<Task> {
         status,
         priority,
         scheduled_date,
-        deadline_type,
+        scheduled_time,
         deadline_date,
         deadline_time,
         recurrence,
@@ -751,7 +733,7 @@ mod tests {
             status: TaskStatus::Open,
             priority: TaskPriority::Medium,
             scheduled_date: None,
-            deadline_type: None,
+            scheduled_time: None,
             deadline_date: None,
             deadline_time: None,
             recurrence: None,
@@ -787,16 +769,37 @@ mod tests {
     async fn deadline_fields_roundtrip() {
         let (a, list) = adapter_with_list();
         let mut nt = mk_task("File taxes");
-        nt.deadline_type = Some(DeadlineType::By);
         nt.deadline_date = Some(NaiveDate::from_ymd_opt(2026, 7, 31).unwrap());
         a.create_task(&list.id, nt).await.unwrap();
 
         let tasks = a.get_tasks(&list.id).await.unwrap();
         assert_eq!(tasks.len(), 1);
-        assert_eq!(tasks[0].deadline_type, Some(DeadlineType::By));
         assert_eq!(
             tasks[0].deadline_date,
             Some(NaiveDate::from_ymd_opt(2026, 7, 31).unwrap())
+        );
+    }
+
+    #[tokio::test]
+    async fn scheduled_time_roundtrips() {
+        // Times pair with their date; the DB CHECK constraint blocks
+        // a time without a date, and round-tripping both ways is the
+        // happy path. New field in migration 0006.
+        let (a, list) = adapter_with_list();
+        let mut nt = mk_task("Standup");
+        nt.scheduled_date = Some(NaiveDate::from_ymd_opt(2026, 5, 21).unwrap());
+        nt.scheduled_time = Some(chrono::NaiveTime::from_hms_opt(9, 30, 0).unwrap());
+        a.create_task(&list.id, nt).await.unwrap();
+
+        let tasks = a.get_tasks(&list.id).await.unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(
+            tasks[0].scheduled_date,
+            Some(NaiveDate::from_ymd_opt(2026, 5, 21).unwrap())
+        );
+        assert_eq!(
+            tasks[0].scheduled_time,
+            Some(chrono::NaiveTime::from_hms_opt(9, 30, 0).unwrap())
         );
     }
 

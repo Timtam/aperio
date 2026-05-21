@@ -624,14 +624,14 @@ fn first_reminder_minutes(reminders: &[Reminder]) -> Option<i64> {
 //     (`{listId}|{taskId}`). Graph ids are URL-safe base64-ish and
 //     never contain `|`, so the split is unambiguous.
 //
-//   - Aperio's `DeadlineType` (On / By) doesn't map to anything in
-//     Graph — the "By" semantics live entirely on the Aperio side
-//     (it controls whether the task shows up in every view from
-//     today through the deadline). On the wire we just persist the
-//     date; reading back, we always assume `On` because that's the
-//     closest match to a single-day Microsoft due-date.
+//   - Graph carries `startDateTime` and `dueDateTime` separately,
+//     which map cleanly onto Aperio's `scheduled_date` /
+//     `scheduled_time` and `deadline_date` / `deadline_time` after
+//     the migration 0006 task-time refactor. The old on/by enum is
+//     gone — every deadline is "by" semantics — so no wire changes
+//     are needed on top of the column rename in this file.
 
-use cal_core::{DeadlineType, NewTask, Task, TaskList, TaskPriority, TaskStatus};
+use cal_core::{NewTask, Task, TaskList, TaskPriority, TaskStatus};
 
 // ── Task list listing ──────────────────────────────────────────────────
 
@@ -765,21 +765,13 @@ pub fn map_task(entry: TodoTaskEntry, list_id: &str) -> GraphResult<Task> {
         .transpose()?
         .map(|dt| (Some(dt.date_naive()), Some(dt.time())))
         .unwrap_or((None, None));
-    let deadline_type = if deadline_date.is_some() {
-        // Aperio's `By` semantics live frontend-only — the wire
-        // shape is a flat date+time. We default to `On` (specific
-        // day) and let the user flip to `By` in the task editor if
-        // they want the rolling-deadline behaviour.
-        Some(DeadlineType::On)
-    } else {
-        None
-    };
-    let scheduled_date = entry
+    let (scheduled_date, scheduled_time) = entry
         .start_date_time
         .as_ref()
         .map(|d| d.to_utc())
         .transpose()?
-        .map(|dt| dt.date_naive());
+        .map(|dt| (Some(dt.date_naive()), Some(dt.time())))
+        .unwrap_or((None, None));
 
     let reminders = if entry.is_reminder_on {
         match &entry.reminder_date_time {
@@ -819,7 +811,7 @@ pub fn map_task(entry: TodoTaskEntry, list_id: &str) -> GraphResult<Task> {
         status,
         priority,
         scheduled_date,
-        deadline_type,
+        scheduled_time,
         deadline_date,
         deadline_time,
         recurrence,
@@ -912,7 +904,7 @@ pub fn new_task_to_body(new: &NewTask) -> GraphResult<TodoTaskWriteBody> {
         importance: priority_to_importance(new.priority),
         status: task_status_to_graph(new.status),
         due_date_time: build_due_datetime(new.deadline_date, new.deadline_time),
-        start_date_time: build_start_datetime(new.scheduled_date),
+        start_date_time: build_start_datetime(new.scheduled_date, new.scheduled_time),
         reminder_date_time: first_absolute_reminder_at(&new.reminders)
             .map(|at| GraphDateTimeWrite {
                 date_time: at.format("%Y-%m-%dT%H:%M:%S").to_string(),
@@ -939,7 +931,7 @@ pub fn task_to_body(task: &Task) -> GraphResult<TodoTaskWriteBody> {
         importance: priority_to_importance(task.priority),
         status: task_status_to_graph(task.status),
         due_date_time: build_due_datetime(task.deadline_date, task.deadline_time),
-        start_date_time: build_start_datetime(task.scheduled_date),
+        start_date_time: build_start_datetime(task.scheduled_date, task.scheduled_time),
         reminder_date_time: first_absolute_reminder_at(&task.reminders)
             .map(|at| GraphDateTimeWrite {
                 date_time: at.format("%Y-%m-%dT%H:%M:%S").to_string(),
@@ -984,9 +976,13 @@ fn build_due_datetime(
     })
 }
 
-fn build_start_datetime(date: Option<NaiveDate>) -> Option<GraphDateTimeWrite> {
+fn build_start_datetime(
+    date: Option<NaiveDate>,
+    time: Option<chrono::NaiveTime>,
+) -> Option<GraphDateTimeWrite> {
     let date = date?;
-    let naive = date.and_hms_opt(0, 0, 0)?;
+    let t = time.unwrap_or_else(|| chrono::NaiveTime::from_hms_opt(0, 0, 0).unwrap());
+    let naive = date.and_time(t);
     Some(GraphDateTimeWrite {
         date_time: naive.format("%Y-%m-%dT%H:%M:%S").to_string(),
         time_zone: "UTC".into(),
@@ -1455,7 +1451,7 @@ mod tests {
         assert!(body.contains("line 1"));
         assert!(body.contains("line 2"));
         assert_eq!(task.deadline_date.unwrap().to_string(), "2026-06-15");
-        assert_eq!(task.deadline_type, Some(DeadlineType::On));
+        assert_eq!(task.scheduled_date, None);
     }
 
     #[test]
@@ -1504,7 +1500,7 @@ mod tests {
             status: TaskStatus::Open,
             priority: TaskPriority::Low,
             scheduled_date: None,
-            deadline_type: None,
+            scheduled_time: None,
             deadline_date: None,
             deadline_time: None,
             recurrence: None,
@@ -1538,7 +1534,7 @@ mod tests {
             status: TaskStatus::Open,
             priority: TaskPriority::Medium,
             scheduled_date: None,
-            deadline_type: Some(DeadlineType::On),
+            scheduled_time: None,
             deadline_date: Some(NaiveDate::from_ymd_opt(2026, 7, 1).unwrap()),
             deadline_time: Some(chrono::NaiveTime::from_hms_opt(10, 0, 0).unwrap()),
             recurrence: Some(TaskRecurrence {

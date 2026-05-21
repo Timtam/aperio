@@ -122,8 +122,22 @@ pub struct Task {
     pub priority: TaskPriority,
 
     // Scheduling
+    //
+    // The previous `deadline_type` enum is gone — what used to be
+    // `type='on'` is now expressed by setting `scheduled_date` (and
+    // optionally `scheduled_time`); what used to be `type='by'` is
+    // the only deadline semantic left, expressed via `deadline_date`
+    // (+ optional `deadline_time`).
+    //
+    // A task may have either, both, or neither set. Both means
+    // "I plan to do it on `scheduled_date`, and it must be done by
+    // `deadline_date`" — the deadline is the backstop, the schedule
+    // is the working day.
+    //
+    // `*_time` fields require their matching `*_date` to be set;
+    // the DB enforces this via CHECK constraints (migration 0006).
     pub scheduled_date: Option<NaiveDate>,
-    pub deadline_type: Option<DeadlineType>,
+    pub scheduled_time: Option<NaiveTime>,
     pub deadline_date: Option<NaiveDate>,
     pub deadline_time: Option<NaiveTime>,
 
@@ -146,7 +160,7 @@ pub struct NewTask {
     pub status: TaskStatus,
     pub priority: TaskPriority,
     pub scheduled_date: Option<NaiveDate>,
-    pub deadline_type: Option<DeadlineType>,
+    pub scheduled_time: Option<NaiveTime>,
     pub deadline_date: Option<NaiveDate>,
     pub deadline_time: Option<NaiveTime>,
     pub recurrence: Option<TaskRecurrence>,
@@ -171,16 +185,6 @@ pub enum TaskPriority {
     Low,
     Medium,
     High,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum DeadlineType {
-    /// Specific day + optional time; appears only on the deadline day.
-    On,
-    /// "Due by"; appears in every configured view from today through the
-    /// deadline (section 9.2).
-    By,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

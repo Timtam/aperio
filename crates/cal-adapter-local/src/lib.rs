@@ -108,13 +108,26 @@ pub(crate) mod test_support {
         let conn = Connection::open_in_memory().expect("open in-memory");
         conn.execute_batch("PRAGMA foreign_keys = ON;")
             .expect("enable fk");
+        // Replay every migration so the in-memory schema matches what
+        // a real Tauri-launched DB sees after the migration runner has
+        // caught up. Add new SCHEMA_V<N> consts alongside the SQL files
+        // — keeping the lists in sync is checked indirectly by the
+        // tests that hit the columns the latest migration introduces.
         conn.execute_batch(SCHEMA_V1).expect("apply v1 schema");
         conn.execute_batch(SCHEMA_V2).expect("apply v2 schema");
         conn.execute_batch(SCHEMA_V3).expect("apply v3 schema");
+        conn.execute_batch(SCHEMA_V4).expect("apply v4 schema");
+        conn.execute_batch(SCHEMA_V5).expect("apply v5 schema");
+        conn.execute_batch(SCHEMA_V6).expect("apply v6 schema");
         Arc::new(Mutex::new(conn))
     }
 
     const SCHEMA_V1: &str = include_str!("../../../src-tauri/src/db/sql/0001_init.sql");
     const SCHEMA_V2: &str = include_str!("../../../src-tauri/src/db/sql/0002_search.sql");
     const SCHEMA_V3: &str = include_str!("../../../src-tauri/src/db/sql/0003_accounts.sql");
+    const SCHEMA_V4: &str =
+        include_str!("../../../src-tauri/src/db/sql/0004_container_overrides.sql");
+    const SCHEMA_V5: &str = include_str!("../../../src-tauri/src/db/sql/0005_user_prefs.sql");
+    const SCHEMA_V6: &str =
+        include_str!("../../../src-tauri/src/db/sql/0006_task_time_fields.sql");
 }

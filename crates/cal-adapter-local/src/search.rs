@@ -191,7 +191,7 @@ impl LocalAdapter {
             let where_extra = clauses.concat();
             let sql = format!(
                 "SELECT t.id, t.list_id, t.parent_id, t.title, t.description,
-                        t.status, t.priority, t.scheduled_date, t.deadline_type,
+                        t.status, t.priority, t.scheduled_date, t.scheduled_time,
                         t.deadline_date, t.deadline_time, t.recurrence, t.color_label_id,
                         t.reminders, t.sound, t.created_at, t.updated_at, t.completed_at,
                         t.etag
@@ -305,7 +305,7 @@ mod tests {
             status: TaskStatus::Open,
             priority: TaskPriority::Medium,
             scheduled_date: None,
-            deadline_type: None,
+            scheduled_time: None,
             deadline_date: None,
             deadline_time: None,
             recurrence: None,

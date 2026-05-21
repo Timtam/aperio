@@ -22,7 +22,7 @@
 //! the later wave that addresses VALARM mapping in general.
 
 use cal_core::{
-    AdapterSource, Calendar, DeadlineType, NewTask, Task, TaskList, TaskPriority,
+    AdapterSource, Calendar, NewTask, Task, TaskList, TaskPriority,
     TaskStatus,
 };
 use chrono::{DateTime, NaiveDate, NaiveTime, TimeZone, Utc};
@@ -219,7 +219,7 @@ pub async fn create_task(
         status: new.status,
         priority: new.priority,
         scheduled_date: new.scheduled_date,
-        deadline_type: new.deadline_type,
+        scheduled_time: new.scheduled_time,
         deadline_date: new.deadline_date,
         deadline_time: new.deadline_time,
         recurrence: new.recurrence,
@@ -338,9 +338,9 @@ fn build_vtodo_from_task(task: &Task) -> String {
         status: task.status,
         priority: task.priority,
         scheduled_date: task.scheduled_date,
-        deadline_type: task.deadline_type,
+        scheduled_time: task.scheduled_time,
         deadline_date: task.deadline_date,
-        deadline_time: task.deadline_time.clone(),
+        deadline_time: task.deadline_time,
         recurrence: task.recurrence.clone(),
         parent_id: task.parent_id.clone(),
         color_label: task.color_label.clone(),
@@ -391,10 +391,21 @@ fn apply_common(
     // says is a malformed DATE-TIME — iCloud's CalDAV server reacted
     // by silently dropping the property, leaving every stored task
     // "dateless" no matter how many times the user set the date.
+    //
+    // Mapping: DTSTART carries Aperio's `scheduled_date` (+ optional
+    // `scheduled_time` as a UTC DATE-TIME), DUE carries `deadline_date`
+    // (+ optional `deadline_time`). The previous "on" vs "by" enum
+    // we used to stash in `X-APERIO-DEADLINE-TYPE` is gone — every
+    // deadline is now "by" semantics — and the X- property is no
+    // longer written. Older VTODOs with that property are read by
+    // ignoring it; DTSTART and DUE flow into their natural slots.
     if let Some(date) = task.scheduled_date {
-        todo.append_property(
-            DatePerhapsTime::Date(date).to_property("DTSTART"),
-        );
+        let value: DatePerhapsTime = if let Some(time) = task.scheduled_time {
+            CalendarDateTime::Utc(Utc.from_utc_datetime(&date.and_time(time))).into()
+        } else {
+            DatePerhapsTime::Date(date)
+        };
+        todo.append_property(value.to_property("DTSTART"));
     }
     if let Some(date) = task.deadline_date {
         let due: DatePerhapsTime = if let Some(time) = task.deadline_time {
@@ -411,16 +422,6 @@ fn apply_common(
             "COMPLETED",
             &completed.format("%Y%m%dT%H%M%SZ").to_string(),
         );
-    }
-    if let Some(deadline_type) = task.deadline_type {
-        // Aperio's deadline_type isn't part of RFC 5545; we stash it
-        // in an X- property so a future read can recover the
-        // distinction between "due on" vs "due by" the user picked.
-        let v = match deadline_type {
-            DeadlineType::On => "ON",
-            DeadlineType::By => "BY",
-        };
-        todo.add_property("X-APERIO-DEADLINE-TYPE", v);
     }
 }
 
@@ -461,17 +462,8 @@ fn map_todo(todo: &Todo, list_id: &str, href: Option<&str>) -> Option<Task> {
         _ => TaskPriority::Medium,
     };
 
-    let scheduled_date = todo
-        .property_value("DTSTART")
-        .and_then(parse_compact_date);
-    let (deadline_date, deadline_time) = parse_due(todo);
-    let deadline_type = todo
-        .property_value("X-APERIO-DEADLINE-TYPE")
-        .and_then(|v| match v.to_ascii_uppercase().as_str() {
-            "ON" => Some(DeadlineType::On),
-            "BY" => Some(DeadlineType::By),
-            _ => None,
-        });
+    let (scheduled_date, scheduled_time) = parse_dt(todo, "DTSTART");
+    let (deadline_date, deadline_time) = parse_dt(todo, "DUE");
     let completed_at = todo
         .property_value("COMPLETED")
         .and_then(parse_compact_utc);
@@ -494,7 +486,7 @@ fn map_todo(todo: &Todo, list_id: &str, href: Option<&str>) -> Option<Task> {
         status,
         priority,
         scheduled_date,
-        deadline_type,
+        scheduled_time,
         deadline_date,
         deadline_time,
         recurrence: None,
@@ -509,8 +501,15 @@ fn map_todo(todo: &Todo, list_id: &str, href: Option<&str>) -> Option<Task> {
     })
 }
 
-fn parse_due(todo: &Todo) -> (Option<NaiveDate>, Option<NaiveTime>) {
-    let Some(raw) = todo.property_value("DUE") else {
+/// Parse an iCalendar date/date-time property by name.
+///
+/// Used for both DTSTART (the "Geplant für" tag, optionally with a
+/// time-of-day) and DUE (the "Spätestens bis" deadline, same shape).
+/// Returns the date component plus an optional time when the value
+/// was emitted as a UTC DATE-TIME. Date-only values yield a `None`
+/// time. Unrecognised formats fall through to `(None, None)`.
+fn parse_dt(todo: &Todo, prop: &str) -> (Option<NaiveDate>, Option<NaiveTime>) {
+    let Some(raw) = todo.property_value(prop) else {
         return (None, None);
     };
     if let Some(date) = parse_compact_date(raw) {
@@ -670,7 +669,7 @@ mod tests {
             status: TaskStatus::Open,
             priority: TaskPriority::Medium,
             scheduled_date: Some(NaiveDate::from_ymd_opt(2026, 5, 20).unwrap()),
-            deadline_type: None,
+            scheduled_time: None,
             deadline_date: None,
             deadline_time: None,
             recurrence: None,
@@ -778,7 +777,7 @@ END:VCALENDAR</c:calendar-data>
             status: TaskStatus::Open,
             priority: TaskPriority::Medium,
             scheduled_date: Some(NaiveDate::from_ymd_opt(2026, 5, 21).unwrap()),
-            deadline_type: Some(DeadlineType::On),
+            scheduled_time: None,
             deadline_date: Some(NaiveDate::from_ymd_opt(2026, 5, 22).unwrap()),
             deadline_time: None,
             recurrence: None,
@@ -809,7 +808,7 @@ END:VCALENDAR</c:calendar-data>
             status: TaskStatus::Open,
             priority: TaskPriority::Medium,
             scheduled_date: None,
-            deadline_type: Some(DeadlineType::On),
+            scheduled_time: None,
             deadline_date: Some(NaiveDate::from_ymd_opt(2026, 5, 22).unwrap()),
             deadline_time: Some(NaiveTime::from_hms_opt(14, 30, 0).unwrap()),
             recurrence: None,
