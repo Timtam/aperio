@@ -672,7 +672,15 @@ export function AccountsPanel() {
                     key={acc.id}
                     id={optionId(i)}
                     role="option"
-                    aria-selected={focused}
+                    // Only expose the selection state while the listbox
+                    // is focused. With `aria-selected="true"` set on the
+                    // first row from the moment the listbox enters the
+                    // a11y tree, NVDA reads that row aloud on every tab
+                    // switch — even though keyboard focus is still on
+                    // the Settings tab. When the user actually tabs
+                    // into the list, listHasFocus flips and the right
+                    // row gets aria-selected back.
+                    aria-selected={listHasFocus ? focused : undefined}
                     aria-label={t(
                       isLocal
                         ? 'dialogs.accounts.rowLabelLocal'

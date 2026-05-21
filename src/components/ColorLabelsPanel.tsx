@@ -330,7 +330,14 @@ function ExistingSection({
                 key={label.id}
                 id={optionId(i)}
                 role="option"
-                aria-selected={focused}
+                // Only expose the selection state while the listbox is
+                // focused. With `aria-selected="true"` set on the first
+                // row from the moment the listbox enters the a11y tree,
+                // NVDA reads that row aloud on every tab switch — even
+                // though keyboard focus is still on the Settings tab.
+                // When the user actually tabs into the list, hasFocus
+                // flips and aria-selected reappears on the right row.
+                aria-selected={hasFocus ? focused : undefined}
                 aria-label={t('dialogs.colorLabels.optionLabel', {
                   name: label.name,
                   hex: label.hex,
