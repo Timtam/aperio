@@ -51,8 +51,7 @@ export type DialogMode =
   | { kind: 'reminders' }
   | { kind: 'moveCopy'; target: MoveCopyTarget }
   | { kind: 'planTask'; task: Task }
-  | { kind: 'missedTasks' }
-  | { kind: 'carryOver' };
+  | { kind: 'dayStartReview' };
 
 /**
  * Optional context the caller can pass when opening a *create* dialog
@@ -93,8 +92,12 @@ interface DialogStateValue {
   openReminders: () => void;
   openMoveCopy: (target: MoveCopyTarget) => void;
   openPlanTask: (task: Task) => void;
-  openMissedTasks: () => void;
-  openCarryOver: () => void;
+  /**
+   * Open the unified day-start review (DESIGN.md § 9.5). One dialog
+   * with two sections — deadline overruns + schedule slips — replaces
+   * the old MissedTasksDialog + CarryOverDialog pair.
+   */
+  openDayStartReview: () => void;
   close: () => void;
   /**
    * Counter that bumps whenever data on the wire might have changed.
@@ -216,12 +219,8 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     (task: Task) => push({ kind: 'planTask', task }),
     [push],
   );
-  const openMissedTasks = useCallback(
-    () => push({ kind: 'missedTasks' }),
-    [push],
-  );
-  const openCarryOver = useCallback(
-    () => push({ kind: 'carryOver' }),
+  const openDayStartReview = useCallback(
+    () => push({ kind: 'dayStartReview' }),
     [push],
   );
 
@@ -274,8 +273,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openReminders,
       openMoveCopy,
       openPlanTask,
-      openMissedTasks,
-      openCarryOver,
+      openDayStartReview,
       close,
       dataVersion,
       invalidateData,
@@ -292,8 +290,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openReminders,
       openMoveCopy,
       openPlanTask,
-      openMissedTasks,
-      openCarryOver,
+      openDayStartReview,
       close,
       dataVersion,
       invalidateData,

@@ -1,11 +1,10 @@
 import { useTranslation } from 'react-i18next';
 
 import { AnnouncerProvider } from './a11y/Announcer';
-import { CarryOverChecker } from './components/CarryOverChecker';
+import { DayStartReviewChecker } from './components/DayStartReviewChecker';
 import { DeadlinePinChecker } from './components/DeadlinePinChecker';
 import { DialogHost } from './components/DialogHost';
 import { FocusBar } from './components/FocusBar';
-import { MissedTasksChecker } from './components/MissedTasksChecker';
 import { Sidebar } from './components/Sidebar';
 import { TitleBar } from './components/TitleBar';
 import { Toolbar } from './components/Toolbar';
@@ -58,24 +57,21 @@ export function App() {
                 <Shell />
                 <DialogHost />
                 {/* Mount-once gates that run the day-start review
-                    flows. All three render nothing themselves.
+                    flows. Both render nothing themselves.
 
                     Order matters:
-                      - CarryOverChecker mounts first and pushes the
-                        carry-over dialog onto the dialog stack (or
-                        runs its silent batch when configured for
-                        auto-today / auto-backlog).
-                      - MissedTasksChecker mounts second and pushes
-                        the (more urgent) deadline-overrun dialog on
-                        top of carry-over. The user dismisses
-                        deadlines first, then sees carry-over.
+                      - DayStartReviewChecker mounts first. It runs
+                        the silent carry-over batch (if the user
+                        opted into auto-today / auto-backlog) and/or
+                        opens the unified review dialog when there
+                        are overdue deadlines or slipped schedules
+                        left to discuss.
                       - DeadlinePinChecker mounts LAST so it has the
                         final write. It silently pins every task with
                         `deadline_date == today` to today, taking
                         precedence over whatever carry-over wrote a
                         moment earlier. */}
-                <CarryOverChecker />
-                <MissedTasksChecker />
+                <DayStartReviewChecker />
                 <DeadlinePinChecker />
               </TaskCascadeProvider>
             </DialogStateProvider>

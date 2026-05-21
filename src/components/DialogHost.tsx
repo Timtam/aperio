@@ -1,7 +1,6 @@
 import { useDialogState } from '../state/DialogState';
-import { CarryOverDialog } from './CarryOverDialog';
+import { DayStartReviewDialog } from './DayStartReviewDialog';
 import { EventDialog } from './EventDialog';
-import { MissedTasksDialog } from './MissedTasksDialog';
 import { MoveCopyDialog } from './MoveCopyDialog';
 import { PlanTaskDialog } from './PlanTaskDialog';
 import { QuickAddDialog } from './QuickAddDialog';
@@ -66,10 +65,8 @@ export function DialogHost() {
           onPlanned={invalidateData}
         />
       );
-    case 'missedTasks':
-      return <MissedTasksDialog isOpen onClose={close} />;
-    case 'carryOver':
-      return <CarryOverDialog isOpen onClose={close} />;
+    case 'dayStartReview':
+      return <DayStartReviewDialog isOpen onClose={close} />;
     case 'none':
     default:
       return null;

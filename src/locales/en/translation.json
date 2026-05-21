@@ -146,50 +146,55 @@
       "plannedAnnouncement": "Scheduled \"{{title}}\" for {{date}}.",
       "backloggedAnnouncement": "Moved \"{{title}}\" back to the backlog."
     },
-    "missedTasks": {
-      "title": "Tasks past deadline",
-      "hint": "These tasks had a deadline before today and are still open. Decide per task or use the actions below.",
-      "listLabel": "Overdue tasks",
-      "deadlineLabel": "Deadline was {{date}}",
-      "completed": "Mark done",
-      "backToBacklog": "Back to backlog",
-      "completeAll": "Mark all done",
-      "snooze": "Remind me later",
-      "allHandled": "All overdue tasks handled.",
-      "snoozed": "Reminder snoozed for 4 hours.",
-      "allCompleted_one": "Marked 1 task as done.",
-      "allCompleted_other": "Marked {{count}} tasks as done."
-    },
-    "carryOver": {
-      "title": "Tasks from earlier",
-      "hint": "These tasks were scheduled for an earlier day and are still open. Decide per task or use the actions below.",
-      "listLabel": "Carry-over tasks",
-      "scheduledLabel": "Was scheduled for {{date}}",
-      "actions": {
-        "today": "Today",
-        "tomorrow": "Tomorrow",
-        "backlog": "Backlog",
-        "done": "Done"
-      },
-      "bulk": {
-        "allToday": "All to today",
-        "allBacklog": "All to backlog"
-      },
+    "dayStartReview": {
+      "title": "Day-start review",
+      "hint": "Tasks that need a decision now that yesterday is over. Resolve them one by one or use the bulk actions per section.",
       "snooze": "Remind me later",
       "snoozed": "Reminder snoozed for 4 hours.",
-      "allHandled": "All carry-over tasks handled.",
-      "carriedToday": "\"{{title}}\" moved to today.",
-      "carriedTomorrow": "\"{{title}}\" moved to tomorrow.",
-      "sentToBacklog": "\"{{title}}\" sent to backlog.",
-      "completed": "\"{{title}}\" marked as done.",
-      "allCarriedToday_one": "Moved 1 task to today.",
-      "allCarriedToday_other": "Moved {{count}} tasks to today.",
-      "allSentToBacklog_one": "Sent 1 task to backlog.",
-      "allSentToBacklog_other": "Sent {{count}} tasks to backlog.",
-      "autoCarriedToday_one": "1 task automatically moved to today.",
-      "autoCarriedToday_other": "{{count}} tasks automatically moved to today.",
-      "autoSentToBacklog_one": "1 task automatically sent to backlog.",
-      "autoSentToBacklog_other": "{{count}} tasks automatically sent to backlog."
+      "allHandled": "All review items handled.",
+      "deadlines": {
+        "heading_one": "Past deadline (1)",
+        "heading_other": "Past deadline ({{count}})",
+        "listLabel": "Overdue tasks",
+        "dateLabel": "Deadline was {{date}}",
+        "actions": {
+          "done": "Mark done",
+          "backlog": "Back to backlog"
+        },
+        "bulk": {
+          "allDone": "Mark all done"
+        },
+        "announceBackToBacklog": "\"{{title}}\" sent back to backlog.",
+        "announceAllCompleted_one": "Marked 1 task as done.",
+        "announceAllCompleted_other": "Marked {{count}} tasks as done."
+      },
+      "carryOver": {
+        "heading_one": "Carry over from earlier (1)",
+        "heading_other": "Carry over from earlier ({{count}})",
+        "listLabel": "Carry-over tasks",
+        "dateLabel": "Was scheduled for {{date}}",
+        "actions": {
+          "today": "Today",
+          "tomorrow": "Tomorrow",
+          "backlog": "Backlog",
+          "done": "Done"
+        },
+        "bulk": {
+          "allToday": "All to today",
+          "allBacklog": "All to backlog"
+        },
+        "announceToday": "\"{{title}}\" moved to today.",
+        "announceTomorrow": "\"{{title}}\" moved to tomorrow.",
+        "announceBacklog": "\"{{title}}\" sent to backlog.",
+        "announceAllToday_one": "Moved 1 task to today.",
+        "announceAllToday_other": "Moved {{count}} tasks to today.",
+        "announceAllBacklog_one": "Sent 1 task to backlog.",
+        "announceAllBacklog_other": "Sent {{count}} tasks to backlog.",
+        "autoToday_one": "1 task automatically moved to today.",
+        "autoToday_other": "{{count}} tasks automatically moved to today.",
+        "autoBacklog_one": "1 task automatically sent to backlog.",
+        "autoBacklog_other": "{{count}} tasks automatically sent to backlog."
+      }
     },
     "deadlinePin": {
       "announce_one": "1 task reached its deadline today and was pinned to today.",

@@ -27,7 +27,8 @@ import { useTasks } from '../state/useTasks';
  *   - `scheduled_date != today` (already there → no-op)
  *
  * Other deadline configurations are handled elsewhere:
- *   - `deadline_date < today` (missed) → MissedTasksDialog asks per row
+ *   - `deadline_date < today` (missed) → DayStartReviewDialog asks per
+ *     row (in the deadlines section)
  *   - `deadline_date > today` (future) → nothing yet; the task lives in
  *     backlog or its scheduled day until it slips into one of the
  *     other branches

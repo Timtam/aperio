@@ -143,50 +143,55 @@
       "plannedAnnouncement": "„{{title}}\" auf {{date}} gelegt.",
       "backloggedAnnouncement": "„{{title}}\" zurück in den Backlog verschoben."
     },
-    "missedTasks": {
-      "title": "Nicht erledigte Aufgaben",
-      "hint": "Diese Aufgaben hatten eine Deadline vor heute und sind noch offen. Entscheide pro Aufgabe oder nutze die Aktionen unten.",
-      "listLabel": "Überfällige Aufgaben",
-      "deadlineLabel": "Deadline war am {{date}}",
-      "completed": "Erledigt",
-      "backToBacklog": "Zurück in Backlog",
-      "completeAll": "Alle erledigt",
-      "snooze": "Später erinnern",
-      "allHandled": "Alle überfälligen Aufgaben bearbeitet.",
-      "snoozed": "Erinnerung für 4 Stunden verschoben.",
-      "allCompleted_one": "1 Aufgabe als erledigt markiert.",
-      "allCompleted_other": "{{count}} Aufgaben als erledigt markiert."
-    },
-    "carryOver": {
-      "title": "Aufgaben vom Vortag",
-      "hint": "Diese Aufgaben waren für einen früheren Tag eingeplant und sind noch offen. Entscheide pro Aufgabe oder nutze die Aktionen unten.",
-      "listLabel": "Mitzunehmende Aufgaben",
-      "scheduledLabel": "Eingeplant für {{date}}",
-      "actions": {
-        "today": "Heute",
-        "tomorrow": "Morgen",
-        "backlog": "Backlog",
-        "done": "Erledigt"
-      },
-      "bulk": {
-        "allToday": "Alle auf heute",
-        "allBacklog": "Alle in Backlog"
-      },
+    "dayStartReview": {
+      "title": "Tageswechsel-Übersicht",
+      "hint": "Aufgaben, die nach gestern noch eine Entscheidung brauchen. Pro Eintrag entscheiden oder die Sammelaktionen je Abschnitt nutzen.",
       "snooze": "Später erinnern",
       "snoozed": "Erinnerung für 4 Stunden verschoben.",
-      "allHandled": "Alle Aufgaben bearbeitet.",
-      "carriedToday": "„{{title}}\" auf heute übernommen.",
-      "carriedTomorrow": "„{{title}}\" auf morgen übernommen.",
-      "sentToBacklog": "„{{title}}\" zurück ins Backlog.",
-      "completed": "„{{title}}\" als erledigt markiert.",
-      "allCarriedToday_one": "1 Aufgabe auf heute übernommen.",
-      "allCarriedToday_other": "{{count}} Aufgaben auf heute übernommen.",
-      "allSentToBacklog_one": "1 Aufgabe zurück ins Backlog.",
-      "allSentToBacklog_other": "{{count}} Aufgaben zurück ins Backlog.",
-      "autoCarriedToday_one": "1 Aufgabe automatisch auf heute übernommen.",
-      "autoCarriedToday_other": "{{count}} Aufgaben automatisch auf heute übernommen.",
-      "autoSentToBacklog_one": "1 Aufgabe automatisch ins Backlog verschoben.",
-      "autoSentToBacklog_other": "{{count}} Aufgaben automatisch ins Backlog verschoben."
+      "allHandled": "Alle Einträge bearbeitet.",
+      "deadlines": {
+        "heading_one": "Verpasste Deadline (1)",
+        "heading_other": "Verpasste Deadlines ({{count}})",
+        "listLabel": "Überfällige Aufgaben",
+        "dateLabel": "Deadline war am {{date}}",
+        "actions": {
+          "done": "Erledigt",
+          "backlog": "Zurück in Backlog"
+        },
+        "bulk": {
+          "allDone": "Alle erledigt"
+        },
+        "announceBackToBacklog": "„{{title}}\" zurück in Backlog.",
+        "announceAllCompleted_one": "1 Aufgabe als erledigt markiert.",
+        "announceAllCompleted_other": "{{count}} Aufgaben als erledigt markiert."
+      },
+      "carryOver": {
+        "heading_one": "Liegengebliebene Aufgabe (1)",
+        "heading_other": "Liegengebliebene Aufgaben ({{count}})",
+        "listLabel": "Mitzunehmende Aufgaben",
+        "dateLabel": "Eingeplant für {{date}}",
+        "actions": {
+          "today": "Heute",
+          "tomorrow": "Morgen",
+          "backlog": "Backlog",
+          "done": "Erledigt"
+        },
+        "bulk": {
+          "allToday": "Alle auf heute",
+          "allBacklog": "Alle in Backlog"
+        },
+        "announceToday": "„{{title}}\" auf heute übernommen.",
+        "announceTomorrow": "„{{title}}\" auf morgen übernommen.",
+        "announceBacklog": "„{{title}}\" zurück ins Backlog.",
+        "announceAllToday_one": "1 Aufgabe auf heute übernommen.",
+        "announceAllToday_other": "{{count}} Aufgaben auf heute übernommen.",
+        "announceAllBacklog_one": "1 Aufgabe zurück ins Backlog.",
+        "announceAllBacklog_other": "{{count}} Aufgaben zurück ins Backlog.",
+        "autoToday_one": "1 Aufgabe automatisch auf heute übernommen.",
+        "autoToday_other": "{{count}} Aufgaben automatisch auf heute übernommen.",
+        "autoBacklog_one": "1 Aufgabe automatisch ins Backlog verschoben.",
+        "autoBacklog_other": "{{count}} Aufgaben automatisch ins Backlog verschoben."
+      }
     },
     "deadlinePin": {
       "announce_one": "1 Aufgabe hat heute ihre Deadline und wurde auf heute eingeplant.",

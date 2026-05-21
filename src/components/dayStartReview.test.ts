@@ -1,7 +1,13 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 
 import type { Task } from '../api/types';
-import { actionableDescendants, filterCarriedOver } from './CarryOverDialog';
+import {
+  actionableDescendants,
+  filterCarriedOver,
+  filterOverdue,
+  isDayStartReviewSnoozed,
+  snoozeDayStartReview,
+} from './dayStartReview';
 
 const baseTask: Task = {
   id: 't1',
@@ -24,6 +30,63 @@ const baseTask: Task = {
   completed_at: null,
   etag: null,
 };
+
+describe('filterOverdue', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 4, 20, 12, 0, 0));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('picks tasks with a deadline strictly before today', () => {
+    const tasks: Task[] = [
+      { ...baseTask, id: 'past', deadline_date: '2026-05-19' },
+      { ...baseTask, id: 'today', deadline_date: '2026-05-20' },
+      { ...baseTask, id: 'future', deadline_date: '2026-05-25' },
+    ];
+    const overdue = filterOverdue(tasks);
+    expect(overdue.map((t) => t.id)).toEqual(['past']);
+  });
+
+  it('ignores tasks without a deadline (scheduled_date alone is not a missed commitment)', () => {
+    const tasks: Task[] = [
+      {
+        ...baseTask,
+        id: 'scheduled-only',
+        deadline_date: null,
+        scheduled_date: '2026-04-01',
+      },
+    ];
+    expect(filterOverdue(tasks)).toHaveLength(0);
+  });
+
+  it('ignores completed and cancelled tasks regardless of deadline', () => {
+    const tasks: Task[] = [
+      {
+        ...baseTask,
+        id: 'done',
+        deadline_date: '2026-05-19',
+        status: 'completed',
+      },
+      {
+        ...baseTask,
+        id: 'cancelled',
+        deadline_date: '2026-05-19',
+        status: 'cancelled',
+      },
+      {
+        ...baseTask,
+        id: 'inprogress',
+        deadline_date: '2026-05-19',
+        status: 'in_progress',
+      },
+    ];
+    // in_progress is NOT terminal — still a missed commitment.
+    expect(filterOverdue(tasks).map((t) => t.id)).toEqual(['inprogress']);
+  });
+});
 
 describe('filterCarriedOver', () => {
   beforeEach(() => {
@@ -114,6 +177,28 @@ describe('filterCarriedOver', () => {
       },
     ];
     expect(filterCarriedOver(tasks).map((t) => t.id)).toEqual(['child']);
+  });
+
+  it('drops rows that are also overdue (deadline takes priority)', () => {
+    // The dialog renders both sections from the same task list; if a
+    // task satisfies both filters the deadline half wins and the
+    // carry-over half skips it, so the user only handles the row
+    // once.
+    const tasks: Task[] = [
+      {
+        ...baseTask,
+        id: 'both',
+        scheduled_date: '2026-05-18',
+        deadline_date: '2026-05-19',
+      },
+      {
+        ...baseTask,
+        id: 'sched-only',
+        scheduled_date: '2026-05-18',
+      },
+    ];
+    expect(filterOverdue(tasks).map((t) => t.id)).toEqual(['both']);
+    expect(filterCarriedOver(tasks).map((t) => t.id)).toEqual(['sched-only']);
   });
 });
 
@@ -226,5 +311,55 @@ describe('actionableDescendants', () => {
       { ...baseTask, id: 'leaf', parent_id: 'm', status: 'open' },
     ];
     expect(actionableDescendants('p', tasks).map((t) => t.id)).toEqual(['leaf']);
+  });
+});
+
+describe('snoozeDayStartReview / isDayStartReviewSnoozed', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 4, 20, 12, 0, 0));
+    localStorage.clear();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    localStorage.clear();
+  });
+
+  it('is not snoozed by default', () => {
+    expect(isDayStartReviewSnoozed()).toBe(false);
+  });
+
+  it('snooze for 4 hours blocks for 4 hours, releases on hour 5', () => {
+    snoozeDayStartReview(4);
+    expect(isDayStartReviewSnoozed()).toBe(true);
+
+    // Three hours later — still snoozed.
+    vi.setSystemTime(new Date(2026, 4, 20, 15, 0, 0));
+    expect(isDayStartReviewSnoozed()).toBe(true);
+
+    // Five hours later — released.
+    vi.setSystemTime(new Date(2026, 4, 20, 17, 0, 1));
+    expect(isDayStartReviewSnoozed()).toBe(false);
+  });
+
+  it('treats a corrupted snooze value as not snoozed', () => {
+    localStorage.setItem('aperio.dayStartReview.snoozeUntil', 'not-a-number');
+    expect(isDayStartReviewSnoozed()).toBe(false);
+  });
+
+  it('honours a still-live legacy missed-tasks snooze key', () => {
+    // Upgrade case: a user on the old build set a 4-hour snooze on
+    // the missed-tasks dialog and then updates. Their snooze should
+    // still hold rather than the unified gate firing immediately on
+    // app start.
+    const until = Date.now() + 60 * 60 * 1000;
+    localStorage.setItem('aperio.missedTasks.snoozeUntil', String(until));
+    expect(isDayStartReviewSnoozed()).toBe(true);
+  });
+
+  it('honours a still-live legacy carry-over snooze key', () => {
+    const until = Date.now() + 60 * 60 * 1000;
+    localStorage.setItem('aperio.carryOver.snoozeUntil', String(until));
+    expect(isDayStartReviewSnoozed()).toBe(true);
   });
 });

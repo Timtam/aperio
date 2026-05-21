@@ -78,7 +78,7 @@ describe('filterDeadlinePinTargets', () => {
     expect(filterDeadlinePinTargets(tasks).map((t) => t.id)).toEqual(['a']);
   });
 
-  it('skips past deadlines (MissedTasksDialog territory)', () => {
+  it('skips past deadlines (DayStartReviewDialog territory)', () => {
     const tasks: Task[] = [
       { ...baseTask, id: 'a', deadline_date: '2026-05-19' },
     ];
