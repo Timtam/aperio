@@ -27,12 +27,19 @@ export function TasksPanel() {
     <div className="form">
       <section
         aria-labelledby={headingId}
-        aria-describedby={hintId}
         className="tasks-settings__section"
       >
         <h3 id={headingId} className="color-labels__heading">
           {t('dialogs.tasks.statusCoupling.heading')}
         </h3>
+        {/* `aria-describedby` sits on the checkbox itself, not on the
+            section. With it on the section, NVDA reads the long hint
+            the moment focus enters the region — *before* the checkbox
+            label gets its turn. Attaching the hint to the input makes
+            it the input's description, so the read order becomes
+            name → role → state → description (the natural one).
+            The visual order keeps the hint above the checkbox so
+            sighted users see the explanation in context. */}
         <p id={hintId} className="tasks-settings__hint">
           {t('dialogs.tasks.statusCoupling.hint')}
         </p>
@@ -40,6 +47,7 @@ export function TasksPanel() {
           <input
             type="checkbox"
             checked={enabled}
+            aria-describedby={hintId}
             onChange={(e) => setEnabled(e.target.checked)}
           />
           <span>{t('dialogs.tasks.statusCoupling.label')}</span>
