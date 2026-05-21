@@ -8,7 +8,11 @@ import { useDeferredLoading } from '../../hooks/useDeferredLoading';
 import { useEventTabNavigation } from '../../hooks/useEventTabNavigation';
 import { localDateKey } from '../../intl/dateKey';
 import { useDateFormat } from '../../intl/dateFormat';
-import { labelsLookup, resolveEventColor } from '../../intl/eventColor';
+import {
+  labelsLookup,
+  resolveEventColor,
+  resolveTaskColor,
+} from '../../intl/eventColor';
 import {
   buildAllDayBars,
   daysCoveredKeys,
@@ -20,7 +24,11 @@ import { useEvents } from '../../state/useEvents';
 import { useTasks } from '../../state/useTasks';
 import { useViewState } from '../../state/ViewState';
 import { visibleRange } from '../../state/viewMath';
-import { groupTasksByDay, todayIsoKey } from '../../intl/taskDay';
+import {
+  groupTasksByDay,
+  mergeDayItems,
+  todayIsoKey,
+} from '../../intl/taskDay';
 import type { CalendarEvent, Task } from '../../api/types';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { DeleteEventScopeDialog } from '../DeleteEventScopeDialog';
@@ -70,7 +78,7 @@ export function WeekView() {
 
   const range = useMemo(() => visibleRange('week', anchor), [anchor]);
   const { events, calendarById, loading } = useEvents(range);
-  const { tasks } = useTasks();
+  const { tasks, taskListById } = useTasks();
   const { colorLabels } = useCalendarStore();
   const labelById = useMemo(() => labelsLookup(colorLabels), [colorLabels]);
 
@@ -98,6 +106,33 @@ export function WeekView() {
     return groupTasksByDay(tasks, dayKeys, today);
   }, [tasks, days]);
 
+  // Pre-merge each day's events + timed tasks into a single time-sorted
+  // list, then split that list back into timed and untimed buckets.
+  // The exact same `timed` array drives:
+  //   - the Tab-navigation buckets (so Tab walks events *and* timed
+  //     tasks chronologically across the visible week);
+  //   - the cell rendering (so the visual order, the focus index, and
+  //     `aria-activedescendant` all agree on which chip is which).
+  const dayItemsByDay = useMemo(() => {
+    const map = new Map<
+      string,
+      ReturnType<typeof mergeDayItems<CalendarEvent, Task>>
+    >();
+    for (const day of days) {
+      const dayKey = keyOf(day);
+      map.set(
+        dayKey,
+        mergeDayItems(
+          eventsByDay.get(dayKey) ?? [],
+          tasksByDay.get(dayKey) ?? [],
+          dayKey,
+          (ev) => new Date(ev.start).getTime(),
+        ),
+      );
+    }
+    return map;
+  }, [days, eventsByDay, tasksByDay]);
+
   // Build the all-day lane bars over the week. The lane is the
   // visual half of variant B: a contiguous strip above the day cells
   // where each multi-day all-day event spans the columns it covers.
@@ -124,24 +159,47 @@ export function WeekView() {
 
   // Two-level focus: `null` means the day cell itself is focused (arrow
   // keys move the day). A number means the user has tabbed into the
-  // day and is focused on the n-th event of that day — Enter opens it,
-  // Delete removes it, Escape returns to the day cell.
+  // day and is focused on the n-th item of that day — Enter opens it,
+  // Delete removes events, Escape returns to the day cell.
   //
   // Tab is handled by the shared hook below: it crosses day boundaries
   // and moves the anchor for us, so the visual day selection follows
-  // the focused event the way it does in Outlook.
-  const buckets = useMemo(
-    () => days.map((d) => ({ events: eventsByDay.get(keyOf(d)) ?? [] })),
-    [days, eventsByDay],
+  // the focused item the way it does in Outlook. Tasks with a concrete
+  // deadline_time live in the same focus order as events — that's the
+  // a11y half of the §9.4 interleave fix.
+  type DayItem =
+    | { kind: 'event'; event: CalendarEvent; title: string }
+    | { kind: 'task'; task: Task; title: string };
+  const buckets = useMemo<{ items: DayItem[] }[]>(
+    () =>
+      days.map((d) => {
+        const merged = dayItemsByDay.get(keyOf(d));
+        const items: DayItem[] =
+          merged?.timed.map((m) =>
+            m.kind === 'event'
+              ? {
+                  kind: 'event' as const,
+                  event: m.event,
+                  title: m.event.title,
+                }
+              : {
+                  kind: 'task' as const,
+                  task: m.task,
+                  title: m.task.title,
+                },
+          ) ?? [];
+        return { items };
+      }),
+    [days, dayItemsByDay],
   );
-  const focusedDayEvents = buckets[focusIndex]?.events ?? [];
+  const focusedDayItems = buckets[focusIndex]?.items ?? [];
 
   const dayChangeAnnouncer = useCallback(
-    (newDayIdx: number, ev: CalendarEvent) => {
+    (newDayIdx: number, item: DayItem) => {
       announce(
         t('views.week.tabAnnounce', {
           day: fmt.format(days[newDayIdx], 'PPPP'),
-          title: ev.title,
+          title: item.title,
         }),
       );
     },
@@ -152,7 +210,7 @@ export function WeekView() {
     eventIndex,
     clear: clearEventIndex,
     handleTab,
-  } = useEventTabNavigation({
+  } = useEventTabNavigation<DayItem>({
     buckets,
     dayIndex: focusIndex,
     setDayIndex: (next) => setAnchor(days[next]),
@@ -162,11 +220,15 @@ export function WeekView() {
   // The currently focused event (if any) drives the lane bar's
   // focused-state styling: when a per-day chip of a multi-day event
   // is the active descendant, the bar above lights up — keeps visual
-  // focus on the thing the user actually sees.
-  const focusedEvId =
+  // focus on the thing the user actually sees. Tasks have no
+  // companion lane bar, so the lookup deliberately returns `null` on
+  // task items.
+  const focusedItem =
     eventIndex !== null
-      ? (buckets[focusIndex]?.events[eventIndex]?.id ?? null)
+      ? (buckets[focusIndex]?.items[eventIndex] ?? null)
       : null;
+  const focusedEvId =
+    focusedItem?.kind === 'event' ? focusedItem.event.id : null;
 
   // Delete confirmation. Non-recurring events go through the
   // straight Confirm dialog; recurring occurrences need a scope
@@ -238,9 +300,12 @@ export function WeekView() {
         return;
       }
 
-      // Event-level shortcuts when an event inside the cell is focused.
+      // Item-level shortcuts when a chip inside the cell is focused.
+      // Enter/Space opens the right editor for either kind; Delete is
+      // event-only — task deletion stays in TaskDialog so the user
+      // confirms it in the same surface they edit from.
       if (eventIndex !== null) {
-        const ev = focusedDayEvents[eventIndex];
+        const item = focusedDayItems[eventIndex];
         if (e.key === 'Escape') {
           e.preventDefault();
           clearEventIndex();
@@ -248,12 +313,13 @@ export function WeekView() {
         }
         if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
           e.preventDefault();
-          if (ev) openEventDialog(ev);
+          if (item?.kind === 'event') openEventDialog(item.event);
+          else if (item?.kind === 'task') openTaskDialog(item.task);
           return;
         }
         if (e.key === 'Delete' || e.key === 'Backspace') {
           e.preventDefault();
-          if (ev) requestDelete(ev);
+          if (item?.kind === 'event') requestDelete(item.event);
           return;
         }
         // Arrow keys fall through to day navigation below, which will
@@ -320,8 +386,9 @@ export function WeekView() {
       focusIndex,
       eventIndex,
       eventsByDay,
-      focusedDayEvents,
+      focusedDayItems,
       openEventDialog,
+      openTaskDialog,
       handleTab,
       clearEventIndex,
       requestDelete,
@@ -442,7 +509,16 @@ export function WeekView() {
 
         <div role="row" className="week-grid__body">
           {days.map((day, i) => {
-            const dayEvents = eventsByDay.get(keyOf(day)) ?? [];
+            const dayKey = keyOf(day);
+            const dayEvents = eventsByDay.get(dayKey) ?? [];
+            const merged = dayItemsByDay.get(dayKey);
+            const timedItems = merged?.timed ?? [];
+            const untimedTasks = merged?.untimed ?? [];
+            // The timedItems array is the same one the Tab-navigation
+            // buckets see, so `itemIdx` below matches the hook's
+            // `eventIndex`. That keeps `aria-activedescendant`,
+            // visual focus, and Enter dispatch in sync for both
+            // events and timed tasks.
             const focused = i === focusIndex;
             return (
               <div
@@ -463,7 +539,76 @@ export function WeekView() {
                 onClick={() => setAnchor(day)}
               >
                 <ul role="list" className="week-grid__events">
-                  {dayEvents.map((ev, evIdx) => {
+                  {timedItems.map((item, itemIdx) => {
+                    const isFocusedItem =
+                      focused && eventIndex === itemIdx;
+                    if (item.kind === 'task') {
+                      const task = item.task;
+                      const time = task.deadline_time
+                        ? fmt.format(
+                            new Date(`${dayKey}T${task.deadline_time}`),
+                            'p',
+                          )
+                        : '';
+                      const color = resolveTaskColor(
+                        task,
+                        taskListById,
+                        labelById,
+                      );
+                      return (
+                        <li
+                          key={`task-${task.id}`}
+                          role="listitem"
+                          className="week-grid__task-item"
+                        >
+                          <span
+                            id={eventOptionId(i, itemIdx)}
+                            className={
+                              'week-task week-task--timed' +
+                              (isFocusedItem ? ' week-task--focused' : '') +
+                              (task.status === 'completed'
+                                ? ' week-task--completed'
+                                : '')
+                            }
+                            aria-label={
+                              color.labelName
+                                ? t('views.week.taskChipTimedWithLabel', {
+                                    title: task.title,
+                                    time,
+                                    label: color.labelName,
+                                  })
+                                : t('views.week.taskChipTimed', {
+                                    title: task.title,
+                                    time,
+                                  })
+                            }
+                            aria-selected={isFocusedItem}
+                            style={
+                              color.hex
+                                ? ({
+                                    '--event-color': color.hex,
+                                  } as React.CSSProperties)
+                                : undefined
+                            }
+                            onClick={() => openTaskDialog(task)}
+                          >
+                            <span className="week-task__time">{time}</span>
+                            <span className="week-task__body">
+                              <span
+                                className="week-task__marker"
+                                aria-hidden="true"
+                              >
+                                {task.status === 'completed' ? '☑' : '☐'}
+                              </span>
+                              <span className="week-task__title">
+                                {task.title}
+                              </span>
+                            </span>
+                          </span>
+                        </li>
+                      );
+                    }
+                    const ev = item.event;
                     const cal = calendarById.get(ev.calendar_id);
                     const color = resolveEventColor(ev, calendarById, labelById);
                     const time = ev.all_day
@@ -489,8 +634,6 @@ export function WeekView() {
                           total: span.totalDays,
                         })
                       : ariaBase;
-                    const isFocusedEvent =
-                      focused && eventIndex === evIdx;
                     // All-day events are visualised by the lane above;
                     // their per-day chip stays in the listbox as the
                     // aria-activedescendant target but is clipped out
@@ -500,15 +643,15 @@ export function WeekView() {
                     return (
                       <li key={ev.id} role="listitem">
                         <span
-                          id={eventOptionId(i, evIdx)}
+                          id={eventOptionId(i, itemIdx)}
                           className={
                             'week-event' +
-                            (isFocusedEvent ? ' week-event--focused' : '') +
+                            (isFocusedItem ? ' week-event--focused' : '') +
                             (span ? ' week-event--multiday' : '') +
                             (ev.all_day ? ' week-event--in-lane' : '')
                           }
                           aria-label={aria}
-                          aria-selected={isFocusedEvent}
+                          aria-selected={isFocusedItem}
                           style={
                             color.hex
                               ? ({ '--event-color': color.hex } as React.CSSProperties)
@@ -530,16 +673,20 @@ export function WeekView() {
                     );
                   })}
                 </ul>
-                {/* §9.4: tasks on this day. Rendered as a small list
-                    of buttons below the events. Each button is a
-                    natural Tab stop (tabIndex=0 default) so SR users
-                    can reach them via Tab and activate with
-                    Space/Enter — separate from the events' custom
-                    aria-activedescendant nav so the two systems
-                    don't fight. */}
+                {/* §9.4: untimed tasks on this day. Tasks that carry
+                    a real deadline_time are hoisted into the timed
+                    lane above (sorted between events by time); only
+                    scheduled-only tasks and By-window intermediate
+                    days end up here. Untimed tasks aren't part of
+                    the grid's aria-activedescendant nav — there is
+                    no minute to slot them at — so they remain plain
+                    buttons reached by the SR's natural Tab order
+                    after the grid is left. */}
                 <WeekDayTasks
-                  tasks={tasksByDay.get(keyOf(day)) ?? []}
+                  tasks={untimedTasks}
                   onOpen={(task) => openTaskDialog(task)}
+                  taskListById={taskListById}
+                  labelById={labelById}
                 />
               </div>
             );
@@ -620,9 +767,13 @@ function groupEventsByDay(
 function WeekDayTasks({
   tasks,
   onOpen,
+  taskListById,
+  labelById,
 }: {
   tasks: Task[];
   onOpen: (task: Task) => void;
+  taskListById: Map<string, import('../../api/types').TaskList>;
+  labelById: Map<string, import('../../api/types').ColorLabel>;
 }) {
   const { t } = useTranslation();
   if (tasks.length === 0) return null;
@@ -636,6 +787,7 @@ function WeekDayTasks({
           task.deadline_type === 'by' && task.deadline_date
             ? 'views.week.taskChipBy'
             : 'views.week.taskChip';
+        const color = resolveTaskColor(task, taskListById, labelById);
         return (
           <li key={task.id} className="week-grid__task-item">
             <button
@@ -650,15 +802,30 @@ function WeekDayTasks({
                   : '')
               }
               onClick={() => onOpen(task)}
-              aria-label={t(labelKey, {
-                title: task.title,
-                deadline: task.deadline_date ?? '',
-              })}
+              style={
+                color.hex
+                  ? ({ '--event-color': color.hex } as React.CSSProperties)
+                  : undefined
+              }
+              aria-label={
+                color.labelName
+                  ? t(`${labelKey}WithLabel`, {
+                      title: task.title,
+                      deadline: task.deadline_date ?? '',
+                      label: color.labelName,
+                    })
+                  : t(labelKey, {
+                      title: task.title,
+                      deadline: task.deadline_date ?? '',
+                    })
+              }
             >
-              <span className="week-task__marker" aria-hidden="true">
-                {task.status === 'completed' ? '☑' : '☐'}
+              <span className="week-task__body">
+                <span className="week-task__marker" aria-hidden="true">
+                  {task.status === 'completed' ? '☑' : '☐'}
+                </span>
+                <span className="week-task__title">{task.title}</span>
               </span>
-              <span className="week-task__title">{task.title}</span>
             </button>
           </li>
         );

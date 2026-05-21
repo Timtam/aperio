@@ -28,13 +28,13 @@ function ev(id: string): CalendarEvent {
 
 interface HostState {
   dayIndex: number;
-  buckets: { events: CalendarEvent[] }[];
+  buckets: { items: CalendarEvent[] }[];
 }
 
 function setup(buckets: CalendarEvent[][], startDay = 0) {
   const state: HostState = {
     dayIndex: startDay,
-    buckets: buckets.map((events) => ({ events })),
+    buckets: buckets.map((items) => ({ items })),
   };
   const onDayChange = vi.fn();
 
@@ -130,5 +130,54 @@ describe('useEventTabNavigation', () => {
     expect(consumed).toBe(false);
     expect(result.result.current.eventIndex).toBeNull();
     expect(state.dayIndex).toBe(0);
+  });
+
+  it('is generic enough to walk a mixed event + task list', () => {
+    // The bucket is whatever the caller wants — WeekView passes a
+    // tagged union of events and tasks so SR Tab walks both kinds.
+    // This test pins the contract: the hook indexes items by
+    // position, the union is opaque to the navigation logic.
+    type Item =
+      | { kind: 'event'; title: string }
+      | { kind: 'task'; title: string };
+    const buckets: { items: Item[] }[] = [
+      {
+        items: [
+          { kind: 'event', title: 'Standup' },
+          { kind: 'task', title: 'Send report' },
+        ],
+      },
+      { items: [{ kind: 'event', title: 'Lunch' }] },
+    ];
+    const onDayChange = vi.fn();
+    let dayIndex = 0;
+    const view = renderHook(
+      () =>
+        useEventTabNavigation<Item>({
+          buckets,
+          dayIndex,
+          setDayIndex: (next) => {
+            dayIndex = next;
+            view.rerender();
+          },
+          onDayChange,
+        }),
+      {},
+    );
+    // First Tab → day 0, item 0 (event Standup).
+    act(() => view.result.current.handleTab(false));
+    expect(view.result.current.eventIndex).toBe(0);
+    // Second Tab → day 0, item 1 (task Send report).
+    act(() => view.result.current.handleTab(false));
+    expect(view.result.current.eventIndex).toBe(1);
+    // Third Tab → day 1, item 0 (event Lunch) — day change fires
+    // with the task-flavoured item that just got skipped past.
+    act(() => view.result.current.handleTab(false));
+    expect(dayIndex).toBe(1);
+    expect(view.result.current.eventIndex).toBe(0);
+    expect(onDayChange).toHaveBeenLastCalledWith(
+      1,
+      expect.objectContaining({ kind: 'event', title: 'Lunch' }),
+    );
   });
 });

@@ -496,7 +496,11 @@
       "tasksOnDay_one": "1 task",
       "tasksOnDay_other": "{{count}} tasks",
       "taskChip": "Task: {{title}}",
-      "taskChipBy": "Task: {{title}}, due by {{deadline}}"
+      "taskChipWithLabel": "Task: {{title}}, label: {{label}}",
+      "taskChipBy": "Task: {{title}}, due by {{deadline}}",
+      "taskChipByWithLabel": "Task: {{title}}, due by {{deadline}}, label: {{label}}",
+      "taskChipTimed": "Task: {{title}}, {{time}}",
+      "taskChipTimedWithLabel": "Task: {{title}}, {{time}}, label: {{label}}"
     },
     "day": {
       "timeGrid": "Time grid",
@@ -504,6 +508,8 @@
       "empty": "No events on this day.",
       "eventLabel": "Event: {{title}}, {{start}} to {{end}}, calendar: {{calendar}}",
       "eventLabelWithLabel": "Event: {{title}}, {{start}} to {{end}}, calendar: {{calendar}}, label: {{label}}",
+      "taskLabel": "Task: {{title}}, {{time}}",
+      "taskLabelWithLabel": "Task: {{title}}, {{time}}, label: {{label}}",
       "tasksHeading": "Tasks"
     },
     "month": {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Task } from '../api/types';
-import { filterTasksOnDay } from './taskDay';
+import { filterTasksOnDay, mergeDayItems, taskTimeOnDay } from './taskDay';
 
 const baseTask: Task = {
   id: 't1',
@@ -111,5 +111,96 @@ describe('filterTasksOnDay', () => {
     expect(
       filterTasksOnDay([baseTask], '2026-05-20', today),
     ).toEqual([]);
+  });
+});
+
+describe('taskTimeOnDay', () => {
+  it('returns the deadline_time on the deadline day', () => {
+    const task: Task = {
+      ...baseTask,
+      deadline_type: 'on',
+      deadline_date: '2026-05-22',
+      deadline_time: '14:30:00',
+    };
+    expect(taskTimeOnDay(task, '2026-05-22')).toBe('14:30:00');
+  });
+
+  it('returns null on intermediate days of a By-window', () => {
+    // Even when the task does carry a deadline_time, on an
+    // intermediate day there is no time we can honestly point at —
+    // the user only committed to that minute on the deadline date.
+    const task: Task = {
+      ...baseTask,
+      deadline_type: 'by',
+      deadline_date: '2026-05-22',
+      deadline_time: '14:30:00',
+    };
+    expect(taskTimeOnDay(task, '2026-05-21')).toBeNull();
+  });
+
+  it('returns null when the user did not pick a time', () => {
+    const task: Task = {
+      ...baseTask,
+      deadline_type: 'on',
+      deadline_date: '2026-05-22',
+      deadline_time: null,
+    };
+    expect(taskTimeOnDay(task, '2026-05-22')).toBeNull();
+  });
+});
+
+describe('mergeDayItems', () => {
+  const eventTime = (e: { start: string }) => new Date(e.start).getTime();
+
+  it('interleaves timed tasks with events sorted by time', () => {
+    // The exact bug the user reported: a 14:00 task lands above a
+    // 15:00 event, not at the bottom of the day cell.
+    const events = [
+      { id: 'morning', start: '2026-05-22T09:00:00' },
+      { id: 'afternoon', start: '2026-05-22T15:00:00' },
+    ];
+    const tasks: Task[] = [
+      {
+        ...baseTask,
+        id: 'task-noon',
+        deadline_type: 'on',
+        deadline_date: '2026-05-22',
+        deadline_time: '14:00:00',
+      },
+    ];
+    const { timed, untimed } = mergeDayItems(
+      events,
+      tasks,
+      '2026-05-22',
+      eventTime,
+    );
+    expect(timed.map((i) => (i.kind === 'event' ? i.event.id : i.task.id)))
+      .toEqual(['morning', 'task-noon', 'afternoon']);
+    expect(untimed).toEqual([]);
+  });
+
+  it('untimed tasks go into the second bucket, not into the timed lane', () => {
+    const events = [{ id: 'meeting', start: '2026-05-22T09:00:00' }];
+    const tasks: Task[] = [
+      // Pure scheduled — no time of day.
+      { ...baseTask, id: 'sched', scheduled_date: '2026-05-22' },
+      // By-task intermediate day, even with deadline_time set.
+      {
+        ...baseTask,
+        id: 'by-window',
+        deadline_type: 'by',
+        deadline_date: '2026-05-22',
+        deadline_time: '14:00:00',
+      },
+    ];
+    const { timed, untimed } = mergeDayItems(
+      events,
+      tasks,
+      '2026-05-21',
+      eventTime,
+    );
+    expect(timed.map((i) => (i.kind === 'event' ? i.event.id : i.task.id)))
+      .toEqual(['meeting']);
+    expect(untimed.map((t) => t.id)).toEqual(['sched', 'by-window']);
   });
 });

@@ -25,24 +25,30 @@ import type { CalendarEvent } from '../api/types';
  * inside the period keeps the cycle finite and predictable for
  * keyboard-only users.
  */
-export interface DayEventsBucket {
-  /** ISO key (or whatever the view uses to bucket events by day). */
-  events: CalendarEvent[];
+export interface DayEventsBucket<T = CalendarEvent> {
+  /**
+   * Focusable items for one day, in the order Tab should walk them.
+   * The hook is agnostic about whether these are pure events or a
+   * merged list — WeekView, for example, puts events *and* timed
+   * tasks here so Shift+Tab walks both kinds. MonthView keeps the
+   * default CalendarEvent shape.
+   */
+  items: T[];
 }
 
-export interface UseEventTabNavigationOptions {
+export interface UseEventTabNavigationOptions<T = CalendarEvent> {
   /** Ordered list of days currently visible. */
-  buckets: DayEventsBucket[];
+  buckets: DayEventsBucket<T>[];
   /** Index into `buckets` of the day cell currently selected by the user. */
   dayIndex: number;
   /** Setter for the host's day index — called when Tab crosses days. */
   setDayIndex: (next: number) => void;
   /**
    * Called after a Tab moves to a different day. Receives the bucket
-   * index *and* the event the user just stepped onto, so the host can
+   * index *and* the item the user just stepped onto, so the host can
    * read out something like "Wednesday, Aug 21: Team meeting".
    */
-  onDayChange?: (newDayIndex: number, event: CalendarEvent) => void;
+  onDayChange?: (newDayIndex: number, item: T) => void;
 }
 
 export interface UseEventTabNavigationResult {
@@ -64,14 +70,14 @@ export interface UseEventTabNavigationResult {
 
 import { useState } from 'react';
 
-export function useEventTabNavigation(
-  opts: UseEventTabNavigationOptions,
+export function useEventTabNavigation<T = CalendarEvent>(
+  opts: UseEventTabNavigationOptions<T>,
 ): UseEventTabNavigationResult {
   const { buckets, dayIndex, setDayIndex, onDayChange } = opts;
 
-  // Total event count across the visible period — drives wrap-around.
+  // Total item count across the visible period — drives wrap-around.
   const total = useMemo(
-    () => buckets.reduce((acc, b) => acc + b.events.length, 0),
+    () => buckets.reduce((acc, b) => acc + b.items.length, 0),
     [buckets],
   );
 
@@ -91,7 +97,7 @@ export function useEventTabNavigation(
   }, [dayIndex]);
 
   // Clamp when the focused day's event list shrinks (e.g. delete).
-  const dayEventCount = buckets[dayIndex]?.events.length ?? 0;
+  const dayEventCount = buckets[dayIndex]?.items.length ?? 0;
   useEffect(() => {
     if (eventIndex !== null && eventIndex >= dayEventCount) {
       setEventIndex(dayEventCount > 0 ? dayEventCount - 1 : null);
@@ -105,7 +111,7 @@ export function useEventTabNavigation(
   const toFlat = useCallback(
     (dIdx: number, eIdx: number): number => {
       let acc = 0;
-      for (let i = 0; i < dIdx; i++) acc += buckets[i]?.events.length ?? 0;
+      for (let i = 0; i < dIdx; i++) acc += buckets[i]?.items.length ?? 0;
       return acc + eIdx;
     },
     [buckets],
@@ -115,7 +121,7 @@ export function useEventTabNavigation(
     (flat: number): { dayIdx: number; evIdx: number } => {
       let acc = 0;
       for (let i = 0; i < buckets.length; i++) {
-        const len = buckets[i]?.events.length ?? 0;
+        const len = buckets[i]?.items.length ?? 0;
         if (flat < acc + len) return { dayIdx: i, evIdx: flat - acc };
         acc += len;
       }
@@ -141,7 +147,7 @@ export function useEventTabNavigation(
       const offset = includeStart ? 0 : 1;
       for (let i = offset; i < buckets.length; i++) {
         const idx = (startDay + i) % buckets.length;
-        if ((buckets[idx]?.events.length ?? 0) > 0) {
+        if ((buckets[idx]?.items.length ?? 0) > 0) {
           return { dayIdx: idx, evIdx: 0 };
         }
       }
@@ -158,7 +164,7 @@ export function useEventTabNavigation(
       const offset = includeStart ? 0 : 1;
       for (let i = offset; i < buckets.length; i++) {
         const idx = (startDay - i + buckets.length) % buckets.length;
-        const len = buckets[idx]?.events.length ?? 0;
+        const len = buckets[idx]?.items.length ?? 0;
         if (len > 0) return { dayIdx: idx, evIdx: len - 1 };
       }
       return null;
@@ -172,8 +178,8 @@ export function useEventTabNavigation(
       if (dayChanged) {
         keepEventRef.current = true;
         setDayIndex(next.dayIdx);
-        const ev = buckets[next.dayIdx]?.events[next.evIdx];
-        if (ev && onDayChange) onDayChange(next.dayIdx, ev);
+        const item = buckets[next.dayIdx]?.items[next.evIdx];
+        if (item && onDayChange) onDayChange(next.dayIdx, item);
       }
       setEventIndex(next.evIdx);
     },

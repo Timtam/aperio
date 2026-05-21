@@ -496,7 +496,11 @@
       "tasksOnDay_one": "1 Aufgabe",
       "tasksOnDay_other": "{{count}} Aufgaben",
       "taskChip": "Aufgabe: {{title}}",
-      "taskChipBy": "Aufgabe: {{title}}, fällig bis {{deadline}}"
+      "taskChipWithLabel": "Aufgabe: {{title}}, Label: {{label}}",
+      "taskChipBy": "Aufgabe: {{title}}, fällig bis {{deadline}}",
+      "taskChipByWithLabel": "Aufgabe: {{title}}, fällig bis {{deadline}}, Label: {{label}}",
+      "taskChipTimed": "Aufgabe: {{title}}, {{time}}",
+      "taskChipTimedWithLabel": "Aufgabe: {{title}}, {{time}}, Label: {{label}}"
     },
     "day": {
       "timeGrid": "Zeitraster",
@@ -504,7 +508,9 @@
       "tasksHeading": "Aufgaben",
       "empty": "Keine Termine an diesem Tag.",
       "eventLabel": "Termin: {{title}}, {{start}} bis {{end}}, Kalender: {{calendar}}",
-      "eventLabelWithLabel": "Termin: {{title}}, {{start}} bis {{end}}, Kalender: {{calendar}}, Label: {{label}}"
+      "eventLabelWithLabel": "Termin: {{title}}, {{start}} bis {{end}}, Kalender: {{calendar}}, Label: {{label}}",
+      "taskLabel": "Aufgabe: {{title}}, {{time}}",
+      "taskLabelWithLabel": "Aufgabe: {{title}}, {{time}}, Label: {{label}}"
     },
     "month": {
       "title": "Monatsansicht",

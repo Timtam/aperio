@@ -78,3 +78,84 @@ export function todayIsoKey(): string {
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
 }
+
+/**
+ * Effective time-of-day at which a task should slot into the timed
+ * lane of `dayIsoKey`, or `null` when the task has no specific time
+ * on that day.
+ *
+ * A task only carries a meaningful time on its *own* deadline day
+ * (`deadline_date === dayIsoKey`) and only when the user actually
+ * picked a time (`deadline_time != null`). Tasks scheduled to a day
+ * without a time, By-tasks spanning a window, and the bare "today"
+ * slot of a long-running By-task all return `null` — there's no
+ * minute we can honestly point at, so they keep their place in the
+ * untimed lane below the day's grid items.
+ *
+ * Returned shape is the raw `HH:MM[:SS]` string from `deadline_time`,
+ * which sorts lexicographically the same way it sorts numerically —
+ * cheap and matches how event start times are compared elsewhere.
+ */
+export function taskTimeOnDay(
+  task: Task,
+  dayIsoKey: string,
+): string | null {
+  if (
+    task.deadline_time &&
+    task.deadline_date === dayIsoKey
+  ) {
+    return task.deadline_time;
+  }
+  return null;
+}
+
+/**
+ * Item types that can appear in a day's time-sorted grid lane. The
+ * views render an event chip for `kind: 'event'` and a task chip for
+ * `kind: 'task'`, sharing the per-day time column so 09:30 events and
+ * 09:45 task deadlines line up the way the user expects.
+ */
+export type DayGridItem<TEvent, TTask> =
+  | { kind: 'event'; event: TEvent; sortKey: number }
+  | { kind: 'task'; task: TTask; sortKey: number };
+
+/**
+ * Merge events and timed tasks into a single chronologically sorted
+ * list for one day. Untimed tasks (those for which `taskTimeOnDay`
+ * returned `null`) are returned in a second array so the caller can
+ * render them in the existing untimed lane below the grid.
+ *
+ * `eventTime(event)` returns the event's start as epoch-ms — keeping
+ * the helper generic over the project's event type means we can unit-
+ * test it without importing the full CalendarEvent shape.
+ */
+export function mergeDayItems<TEvent, TTask extends Task>(
+  events: TEvent[],
+  tasks: TTask[],
+  dayIsoKey: string,
+  eventTime: (e: TEvent) => number,
+): { timed: DayGridItem<TEvent, TTask>[]; untimed: TTask[] } {
+  const timed: DayGridItem<TEvent, TTask>[] = events.map((event) => ({
+    kind: 'event' as const,
+    event,
+    sortKey: eventTime(event),
+  }));
+  const untimed: TTask[] = [];
+  for (const task of tasks) {
+    const time = taskTimeOnDay(task, dayIsoKey);
+    if (time === null) {
+      untimed.push(task);
+      continue;
+    }
+    // Compose an epoch-ms sort key from the day key + the
+    // `HH:MM[:SS]` time string so the comparison is uniform with the
+    // event start times. We parse via `Date` so a daylight-saving
+    // jump still lands at the user's perceived local time.
+    const [hh, mm, ss] = time.split(':').map((n) => Number(n));
+    const [y, mo, d] = dayIsoKey.split('-').map((n) => Number(n));
+    const ms = new Date(y, mo - 1, d, hh ?? 0, mm ?? 0, ss ?? 0).getTime();
+    timed.push({ kind: 'task', task, sortKey: ms });
+  }
+  timed.sort((a, b) => a.sortKey - b.sortKey);
+  return { timed, untimed };
+}

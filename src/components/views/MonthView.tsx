@@ -85,10 +85,10 @@ export function MonthView() {
   // Two-level focus mirrors WeekView; the tab hook below handles
   // chronological cycling across cells.
   const buckets = useMemo(
-    () => cells.map((d) => ({ events: eventsByDay.get(keyOf(d)) ?? [] })),
+    () => cells.map((d) => ({ items: eventsByDay.get(keyOf(d)) ?? [] })),
     [cells, eventsByDay],
   );
-  const focusedDayEvents = buckets[focusIndex]?.events ?? [];
+  const focusedDayEvents = buckets[focusIndex]?.items ?? [];
 
   const dayChangeAnnouncer = useCallback(
     (newDayIdx: number, ev: CalendarEvent) => {
@@ -119,7 +119,7 @@ export function MonthView() {
   // SR/visual split.
   const focusedEvId =
     eventIndex !== null
-      ? (buckets[focusIndex]?.events[eventIndex]?.id ?? null)
+      ? (buckets[focusIndex]?.items[eventIndex]?.id ?? null)
       : null;
 
   const [confirmTarget, setConfirmTarget] = useState<CalendarEvent | null>(

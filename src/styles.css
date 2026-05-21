@@ -1038,41 +1038,80 @@ button[aria-disabled='true'] {
 
 .week-task,
 .day-task {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
+  /* Shared frame: dashed border that picks up the colour label when
+   * one is set (--event-color), so tasks visibly inherit the same
+   * colour signal events do — without filling the chip (events do
+   * the fill; tasks frame). */
   width: 100%;
   background: transparent;
-  border: 1px dashed color-mix(in srgb, var(--color-fg-muted) 40%, transparent);
+  border: 1px dashed var(--event-color, color-mix(in srgb, var(--color-fg-muted) 40%, transparent));
   border-radius: var(--radius-sm);
-  padding: 2px var(--space-2);
+  padding: 2px var(--space-1);
   font: inherit;
   color: var(--color-fg);
   text-align: left;
   cursor: pointer;
+  font-size: var(--font-size-xs);
+}
+
+/* Week task chip: column layout matching event chips (time on top,
+ * marker + title underneath). Untimed chips simply skip the time
+ * line and render only the body — same column model, no special
+ * handling needed. */
+.week-task {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Day untimed task chip stays a one-line row — there's no time slot
+ * on the day surface for these (they live in the dedicated untimed
+ * section below the listbox), so the marker + title sit side by
+ * side without a leading time column. */
+.day-task {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
 }
 
 .week-task:hover,
 .day-task:hover,
 .week-task:focus,
 .day-task:focus {
-  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
-  border-color: var(--color-accent);
+  background: color-mix(
+    in srgb,
+    var(--event-color, var(--color-accent)) 12%,
+    transparent
+  );
+  border-color: var(--event-color, var(--color-accent));
   outline: none;
 }
 
 .week-task--by,
 .day-task--by {
   /* By-tasks (deadline window): solid border to differentiate from
-   * scheduled tasks (dashed), signalling "this has a hard cutoff". */
+   * scheduled tasks (dashed), signalling "this has a hard cutoff".
+   * The label colour (when present) still drives the border colour. */
   border-style: solid;
-  border-color: color-mix(in srgb, var(--color-warning, #d97706) 60%, transparent);
 }
 
 .week-task--completed .week-task__title,
 .day-task--completed .day-task__title {
   color: var(--color-fg-muted);
   text-decoration: line-through;
+}
+
+.week-task--focused {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: 2px;
+}
+
+.week-task__body {
+  /* Inline row holding the [marker] + [title] pair, sits on the
+   * second line of the chip below the time. */
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
 }
 
 .week-task__marker,
@@ -1089,6 +1128,39 @@ button[aria-disabled='true'] {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: var(--font-size-sm);
+}
+
+/* Timed task chip: lives inside the same `<ul>` as event chips. Time
+ * sits on the first line of the chip, matching `.week-event__time`
+ * so the two columns line up across alternating chip types. */
+.week-task__time {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-fg-muted);
+  font-size: var(--font-size-xs);
+  opacity: 0.85;
+}
+
+/* DayView listbox: a task option carries the same option semantics
+ * as an event row, just rendered with the task marker and a single
+ * time stamp instead of start/end. Completed tasks dim the title to
+ * match how completed tasks render elsewhere. */
+.day-list__item--task {
+  /* Visually distinct from events: dashed left border (signals "task,
+   * not appointment") that still picks up the colour label, plus a
+   * subtle accent tint when no label is set so the eye doesn't lose
+   * the row in a list of events. */
+  border-left-style: dashed;
+  border-left-color: var(--event-color, var(--color-accent));
+}
+
+.day-list__item--task .day-task__marker {
+  margin-right: var(--space-2);
+}
+
+.day-list__item--completed .day-list__title {
+  color: var(--color-fg-muted);
+  text-decoration: line-through;
 }
 
 /* ────────────────────────────────────────────────────────────────────

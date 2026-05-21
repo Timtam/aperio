@@ -6,7 +6,11 @@ import { useAnnouncer } from '../../a11y/Announcer';
 import { useAutoFocus } from '../../hooks/useAutoFocus';
 import { useDeferredLoading } from '../../hooks/useDeferredLoading';
 import { useDateFormat } from '../../intl/dateFormat';
-import { labelsLookup, resolveEventColor } from '../../intl/eventColor';
+import {
+  labelsLookup,
+  resolveEventColor,
+  resolveTaskColor,
+} from '../../intl/eventColor';
 import { eventCoversDay, multiDayInfo } from '../../intl/multiDay';
 import { useCalendarStore } from '../../state/CalendarStore';
 import { useDialogState } from '../../state/DialogState';
@@ -15,7 +19,11 @@ import { useTasks } from '../../state/useTasks';
 import { useViewState } from '../../state/ViewState';
 import { visibleRange } from '../../state/viewMath';
 import { localDateKey } from '../../intl/dateKey';
-import { filterTasksOnDay, todayIsoKey } from '../../intl/taskDay';
+import {
+  filterTasksOnDay,
+  mergeDayItems,
+  todayIsoKey,
+} from '../../intl/taskDay';
 import { duplicateEvent } from '../MoveCopyDialog';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { DeleteEventScopeDialog } from '../DeleteEventScopeDialog';
@@ -51,7 +59,7 @@ export function DayView() {
 
   const range = useMemo(() => visibleRange('day', anchor), [anchor]);
   const { events, calendarById, loading } = useEvents(range);
-  const { tasks } = useTasks();
+  const { tasks, taskListById } = useTasks();
   const { colorLabels } = useCalendarStore();
   const labelById = useMemo(() => labelsLookup(colorLabels), [colorLabels]);
 
@@ -70,15 +78,32 @@ export function DayView() {
     [tasks, anchor],
   );
 
+  // Split tasks into "timed" (carry a deadline_time on this specific
+  // day) and "untimed" (everything else). Timed tasks slot into the
+  // events listbox sorted by time so a 14:00 task deadline appears
+  // between a 13:00 meeting and a 15:00 standup — the bug fix the
+  // user asked for. Untimed tasks still render in the dedicated
+  // section below the listbox.
+  const dayKey = useMemo(() => localDateKey(anchor), [anchor]);
+  const { timedItems, untimedTasks } = useMemo(() => {
+    const { timed, untimed } = mergeDayItems(
+      dayEvents,
+      dayTasks,
+      dayKey,
+      (ev) => new Date(ev.start).getTime(),
+    );
+    return { timedItems: timed, untimedTasks: untimed };
+  }, [dayEvents, dayTasks, dayKey]);
+
   const [focusIndex, setFocusIndex] = useState(0);
 
   // If the day changes (or events arrive) and the previous focus index
   // is past the end of the new list, snap back to the last valid item.
   useEffect(() => {
-    if (focusIndex >= dayEvents.length) {
-      setFocusIndex(Math.max(0, dayEvents.length - 1));
+    if (focusIndex >= timedItems.length) {
+      setFocusIndex(Math.max(0, timedItems.length - 1));
     }
-  }, [dayEvents.length, focusIndex]);
+  }, [timedItems.length, focusIndex]);
 
   // Loading indicator is gated on `showLoading` (the deferred
   // variant), not the raw `loading` flag. That way a sub-200ms
@@ -140,14 +165,17 @@ export function DayView() {
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      const focusedItem = timedItems[focusIndex];
       // Ctrl+D duplicates the focused event in place; Shift+M opens
       // the move/copy dialog. Bare keys cover the rest of the listbox
-      // navigation.
+      // navigation. Both shortcuts are event-only — duplicating a
+      // task deadline doesn't have a clear meaning, and Move/Copy of
+      // tasks lives in TaskView.
       if (e.ctrlKey || e.metaKey) {
         if (e.key.toLowerCase() === 'd' && !e.shiftKey && !e.altKey) {
           e.preventDefault();
-          const ev = dayEvents[focusIndex];
-          if (ev) {
+          if (focusedItem?.kind === 'event') {
+            const ev = focusedItem.event;
             void duplicateEvent(ev).then(() =>
               announce(
                 t('actions.duplicated', { title: ev.title }),
@@ -160,15 +188,16 @@ export function DayView() {
       if (e.altKey) return;
       if (e.shiftKey && e.key.toLowerCase() === 'm') {
         e.preventDefault();
-        const ev = dayEvents[focusIndex];
-        if (ev) openMoveCopy({ kind: 'event', event: ev });
+        if (focusedItem?.kind === 'event') {
+          openMoveCopy({ kind: 'event', event: focusedItem.event });
+        }
         return;
       }
-      if (dayEvents.length === 0) return;
+      if (timedItems.length === 0) return;
       switch (e.key) {
         case 'ArrowDown':
           e.preventDefault();
-          setFocusIndex((i) => Math.min(i + 1, dayEvents.length - 1));
+          setFocusIndex((i) => Math.min(i + 1, timedItems.length - 1));
           return;
         case 'ArrowUp':
           e.preventDefault();
@@ -180,21 +209,28 @@ export function DayView() {
           return;
         case 'End':
           e.preventDefault();
-          setFocusIndex(dayEvents.length - 1);
+          setFocusIndex(timedItems.length - 1);
           return;
         case 'Enter':
         case ' ':
         case 'Spacebar': {
           e.preventDefault();
-          const ev = dayEvents[focusIndex];
-          if (ev) openEventDialog(ev);
+          if (focusedItem?.kind === 'event') {
+            openEventDialog(focusedItem.event);
+          } else if (focusedItem?.kind === 'task') {
+            openTaskDialog(focusedItem.task);
+          }
           return;
         }
         case 'Delete':
         case 'Backspace': {
           e.preventDefault();
-          const ev = dayEvents[focusIndex];
-          if (ev) requestDelete(ev);
+          // Tasks go through their own delete flow via TaskDialog;
+          // the listbox Delete shortcut only nukes events, matching
+          // WeekView semantics.
+          if (focusedItem?.kind === 'event') {
+            requestDelete(focusedItem.event);
+          }
           return;
         }
         default:
@@ -202,9 +238,10 @@ export function DayView() {
       }
     },
     [
-      dayEvents,
+      timedItems,
       focusIndex,
       openEventDialog,
+      openTaskDialog,
       openMoveCopy,
       announce,
       t,
@@ -235,17 +272,72 @@ export function DayView() {
         tabIndex={0}
         aria-label={t('views.day.eventList')}
         aria-activedescendant={
-          dayEvents.length > 0 ? itemId(focusIndex) : undefined
+          timedItems.length > 0 ? itemId(focusIndex) : undefined
         }
         onKeyDown={handleKeyDown}
         className="day-list"
       >
-        {dayEvents.length === 0 ? (
+        {timedItems.length === 0 ? (
           <li role="presentation" className="day-list__empty">
             {t('views.day.empty')}
           </li>
         ) : (
-          dayEvents.map((ev, i) => {
+          timedItems.map((item, i) => {
+            const focused = i === focusIndex;
+            if (item.kind === 'task') {
+              const task = item.task;
+              const timeStr = task.deadline_time
+                ? fmt.format(
+                    new Date(`${dayKey}T${task.deadline_time}`),
+                    'p',
+                  )
+                : '';
+              const color = resolveTaskColor(task, taskListById, labelById);
+              return (
+                <li
+                  key={`task-${task.id}`}
+                  id={itemId(i)}
+                  role="option"
+                  aria-selected={focused}
+                  aria-label={
+                    color.labelName
+                      ? t('views.day.taskLabelWithLabel', {
+                          title: task.title,
+                          time: timeStr,
+                          label: color.labelName,
+                        })
+                      : t('views.day.taskLabel', {
+                          title: task.title,
+                          time: timeStr,
+                        })
+                  }
+                  className={
+                    'day-list__item day-list__item--task' +
+                    (focused ? ' day-list__item--focused' : '') +
+                    (task.status === 'completed'
+                      ? ' day-list__item--completed'
+                      : '')
+                  }
+                  style={
+                    color.hex
+                      ? ({
+                          '--event-color': color.hex,
+                        } as React.CSSProperties)
+                      : undefined
+                  }
+                  onClick={() => setFocusIndex(i)}
+                >
+                  <span className="day-list__time">{timeStr}</span>
+                  <span className="day-list__title">
+                    <span className="day-task__marker" aria-hidden="true">
+                      {task.status === 'completed' ? '☑ ' : '☐ '}
+                    </span>
+                    {task.title}
+                  </span>
+                </li>
+              );
+            }
+            const ev = item.event;
             const cal = calendarById.get(ev.calendar_id);
             const color = resolveEventColor(ev, calendarById, labelById);
             const startStr = fmt.format(new Date(ev.start), 'p');
@@ -272,7 +364,6 @@ export function DayView() {
                   total: span.totalDays,
                 })
               : ariaBase;
-            const focused = i === focusIndex;
             return (
               <li
                 key={ev.id}
@@ -313,11 +404,14 @@ export function DayView() {
         )}
       </ul>
 
-      {/* §9.4: tasks on this day, rendered as natural-Tab-order
-          buttons below the events. Click / Enter / Space opens the
-          TaskDialog; status toggles live in TaskView (the dedicated
-          keyboard surface). */}
-      {dayTasks.length > 0 && (
+      {/* §9.4: untimed tasks on this day, rendered as natural-Tab-
+          order buttons below the listbox. Tasks with a concrete
+          deadline_time were already interleaved with events in the
+          listbox above (sorted by time), so only scheduled-only
+          tasks and By-window intermediate days surface here. Click
+          / Enter / Space opens the TaskDialog; status toggles live
+          in TaskView (the dedicated keyboard surface). */}
+      {untimedTasks.length > 0 && (
         <section
           className="day-tasks"
           aria-label={t('views.day.tasksHeading')}
@@ -326,11 +420,12 @@ export function DayView() {
             {t('views.day.tasksHeading')}
           </h3>
           <ul className="day-tasks__list">
-            {dayTasks.map((task) => {
+            {untimedTasks.map((task) => {
               const labelKey =
                 task.deadline_type === 'by' && task.deadline_date
                   ? 'views.week.taskChipBy'
                   : 'views.week.taskChip';
+              const color = resolveTaskColor(task, taskListById, labelById);
               return (
                 <li key={task.id} className="day-tasks__item">
                   <button
@@ -345,10 +440,25 @@ export function DayView() {
                         : '')
                     }
                     onClick={() => openTaskDialog(task)}
-                    aria-label={t(labelKey, {
-                      title: task.title,
-                      deadline: task.deadline_date ?? '',
-                    })}
+                    style={
+                      color.hex
+                        ? ({
+                            '--event-color': color.hex,
+                          } as React.CSSProperties)
+                        : undefined
+                    }
+                    aria-label={
+                      color.labelName
+                        ? t(`${labelKey}WithLabel`, {
+                            title: task.title,
+                            deadline: task.deadline_date ?? '',
+                            label: color.labelName,
+                          })
+                        : t(labelKey, {
+                            title: task.title,
+                            deadline: task.deadline_date ?? '',
+                          })
+                    }
                   >
                     <span className="day-task__marker" aria-hidden="true">
                       {task.status === 'completed' ? '☑' : '☐'}
