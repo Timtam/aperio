@@ -66,16 +66,18 @@ export function MoveCopyDialog({
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // Subtasks: when the task being moved/copied has children, DESIGN.md
-  // §9.10 says we ask whether to bring them along. The checkbox below
-  // surfaces only in that case; events don't have a parent_id concept
-  // so they bypass this entirely.
+  // Subtasks travel with their parent — no opt-out. A parent in
+  // list A with a subtask left behind in list B would split a
+  // logical unit across two containers, which the rest of the app
+  // (TaskDialog, TaskView, calendar filter) treats as impossible.
+  // The dialog still surfaces a one-line info when children exist
+  // so the user knows the move/copy is going to touch more rows
+  // than just the focused one.
   const { tasks } = useTasks();
   const children = useMemo(() => {
     if (target.kind !== 'task') return [];
     return tasks.filter((row) => row.parent_id === target.task.id);
   }, [tasks, target]);
-  const [includeSubtasks, setIncludeSubtasks] = useState(true);
 
   const containers = useMemo(() => {
     // Move / copy targets must accept writes — drop read-only
@@ -121,7 +123,7 @@ export function MoveCopyDialog({
             target.task,
             targetContainerId,
             mode,
-            includeSubtasks ? children : [],
+            children,
           );
         }
         announce(
@@ -152,7 +154,6 @@ export function MoveCopyDialog({
       onClose,
       itemTitle,
       t,
-      includeSubtasks,
       children,
     ],
   );
@@ -224,21 +225,16 @@ export function MoveCopyDialog({
         </label>
 
         {target.kind === 'task' && children.length > 0 && (
-          <label className="form__field form__field--inline">
-            {/* §9.10 "Mit Unteraufgaben"-Rückfrage: only surfaces
-                when the focused task actually has children, so the
-                checkbox doesn't add noise to flat-task moves. */}
-            <input
-              type="checkbox"
-              checked={includeSubtasks}
-              onChange={(e) => setIncludeSubtasks(e.target.checked)}
-            />
-            <span>
-              {t('dialogs.moveCopy.includeSubtasks', {
-                count: children.length,
-              })}
-            </span>
-          </label>
+          <p className="form__hint">
+            {/* Subtasks always travel with their parent; the
+                checkbox went away once we settled the invariant
+                that a task and its children must live in the same
+                list. The line still surfaces so the user isn't
+                surprised by an N-row mutation. */}
+            {t('dialogs.moveCopy.subtasksIncluded', {
+              count: children.length,
+            })}
+          </p>
         )}
 
         {error && (

@@ -222,6 +222,7 @@
       "titleRequired": "Please enter a title.",
       "listRequired": "Please pick a list.",
       "pickList": "Pick a list …",
+      "subtaskListLocked": "Subtasks live in the same list as their parent. Move the parent task to relocate the whole family.",
       "delete": "Delete",
       "created": "Task \"{{title}}\" created.",
       "updated": "Task \"{{title}}\" updated.",
@@ -318,8 +319,8 @@
       "submitCopy": "Copy",
       "moved": "\"{{title}}\" moved.",
       "copied": "\"{{title}}\" copied.",
-      "includeSubtasks_one": "Include the subtask",
-      "includeSubtasks_other": "Include the {{count}} subtasks"
+      "subtasksIncluded_one": "The subtask will be moved or copied along with the parent.",
+      "subtasksIncluded_other": "The {{count}} subtasks will be moved or copied along with the parent."
     },
     "accounts": {
       "title": "Manage accounts",

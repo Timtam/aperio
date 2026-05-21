@@ -155,11 +155,21 @@ export function useChipContextMenu(): ChipContextMenuActions {
           checked: task.status === s,
         })),
       };
+      // Subtasks can't be moved or copied independently — they're
+      // glued to their parent. Hide the Move/Copy entries entirely
+      // so the user doesn't see a path that leads nowhere; the
+      // parent's row carries the moveable handle for the whole
+      // family.
+      const isSubtask = task.parent_id !== null;
       const items: ContextMenuItemRequest[] = [
         { id: 'edit', label: t('chipMenu.edit') },
         statusSubmenu,
-        { id: 'move', label: t('chipMenu.moveTo') },
-        { id: 'copy', label: t('chipMenu.copyTo') },
+        ...(isSubtask
+          ? []
+          : ([
+              { id: 'move', label: t('chipMenu.moveTo') },
+              { id: 'copy', label: t('chipMenu.copyTo') },
+            ] as ContextMenuItemRequest[])),
         { kind: 'separator' },
         { id: 'delete', label: t('chipMenu.delete') },
       ];

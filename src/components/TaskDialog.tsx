@@ -86,6 +86,11 @@ export function TaskDialog({
   const { invalidateData } = useDialogState();
 
   const isEdit = task !== null;
+  // Subtask = a task that has a parent. The list dropdown locks
+  // for these; their list always tracks their parent's. The flag
+  // also drives the cascade decision on save below.
+  const isSubtask = task !== null && task.parent_id !== null;
+  const subtaskHintId = useId();
 
   // Subtasks: children of the task currently being edited. Only
   // meaningful in edit mode — a brand-new task has no id yet, so
@@ -390,6 +395,22 @@ export function TaskDialog({
                 : null,
           };
           await invoke<Task>('update_task', { task: updated });
+          // List-cohabitation: if a parent's list changed, every
+          // descendant follows along so the family stays together.
+          // Otherwise a subsequent reload would surface a parent in
+          // list B with children stranded in list A — exactly the
+          // split-state the move/copy invariant prevents elsewhere.
+          if (
+            !isSubtask &&
+            form.listId !== task.list_id
+          ) {
+            const descendants = collectDescendants(task.id, tasks);
+            for (const child of descendants) {
+              await invoke<Task>('update_task', {
+                task: { ...child, list_id: form.listId },
+              });
+            }
+          }
           announce(t('dialogs.task.updated', { title: trimmedTitle }));
         } else {
           await apiCreateTask({
@@ -423,7 +444,7 @@ export function TaskDialog({
         setSubmitting(false);
       }
     },
-    [form, submitting, isEdit, task, announce, onClose, t],
+    [form, submitting, isEdit, task, announce, onClose, t, isSubtask, tasks],
   );
 
   const onDelete = useCallback(async () => {
@@ -479,6 +500,13 @@ export function TaskDialog({
             value={form.listId}
             onChange={(e) => update('listId', e.target.value)}
             required
+            // Subtasks must live in the same list as their parent
+            // — moving a subtask alone would split a logical
+            // unit. The "move/copy with parent" path is the only
+            // way to relocate a subtask; the disabled dropdown is
+            // accompanied by a hint below so the rule is visible.
+            disabled={isSubtask}
+            aria-describedby={isSubtask ? subtaskHintId : undefined}
           >
             <option value="" disabled>
               {t('dialogs.task.pickList')}
@@ -489,6 +517,11 @@ export function TaskDialog({
               </option>
             ))}
           </select>
+          {isSubtask && (
+            <p id={subtaskHintId} className="form__hint">
+              {t('dialogs.task.subtaskListLocked')}
+            </p>
+          )}
         </label>
 
         <div className="form__row">
@@ -863,6 +896,31 @@ interface DeadlineFields {
   deadline_type: DeadlineType | null;
   deadline_date: string | null;
   deadline_time: string | null;
+}
+
+/**
+ * Walk the whole subtree rooted at `parentId` and return every
+ * descendant — direct children plus grand-children, recursively.
+ * Used by the list-change cascade so a parent moving to a new
+ * task list takes its entire family along.
+ *
+ * Iterative to avoid stack issues on adversarial deep nesting,
+ * even though the UI doesn't currently encourage trees beyond two
+ * levels.
+ */
+function collectDescendants(parentId: string, all: Task[]): Task[] {
+  const out: Task[] = [];
+  const stack: string[] = [parentId];
+  while (stack.length > 0) {
+    const id = stack.pop()!;
+    for (const t of all) {
+      if (t.parent_id === id) {
+        out.push(t);
+        stack.push(t.id);
+      }
+    }
+  }
+  return out;
 }
 
 function splitDeadline(form: FormState): DeadlineFields {

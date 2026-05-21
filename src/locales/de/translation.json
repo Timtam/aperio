@@ -222,6 +222,7 @@
       "titleRequired": "Bitte gib einen Titel ein.",
       "listRequired": "Bitte wähle eine Liste.",
       "pickList": "Liste wählen …",
+      "subtaskListLocked": "Unteraufgaben leben in derselben Liste wie ihre Elternaufgabe. Verschiebe die Elternaufgabe, um die ganze Familie umzuziehen.",
       "delete": "Löschen",
       "created": "Aufgabe „{{title}}\" wurde angelegt.",
       "updated": "Aufgabe „{{title}}\" wurde aktualisiert.",
@@ -318,8 +319,8 @@
       "submitCopy": "Kopieren",
       "moved": "„{{title}}\" wurde verschoben.",
       "copied": "„{{title}}\" wurde kopiert.",
-      "includeSubtasks_one": "Unteraufgabe mit übernehmen",
-      "includeSubtasks_other": "{{count}} Unteraufgaben mit übernehmen"
+      "subtasksIncluded_one": "Die Unteraufgabe wird mit übernommen.",
+      "subtasksIncluded_other": "Die {{count}} Unteraufgaben werden mit übernommen."
     },
     "accounts": {
       "title": "Konten verwalten",
