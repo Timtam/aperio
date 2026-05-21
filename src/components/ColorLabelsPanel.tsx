@@ -49,6 +49,18 @@ export function ColorLabelsPanel() {
   const [submitting, setSubmitting] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
+  // When the user leaves edit mode (Cancel / Save / Delete), we want
+  // focus to land back on the listbox. On *initial* panel mount —
+  // including the SettingsDialog tab-switch case — we explicitly do
+  // NOT want to grab focus: the active tab should keep it, otherwise
+  // NVDA announces the listbox's first option as soon as the user
+  // arrows onto the tab.
+  const focusListOnNextMountRef = useRef(false);
+  const exitEditMode = useCallback(() => {
+    focusListOnNextMountRef.current = true;
+    setEditingId(null);
+  }, []);
+
   const reportError = useCallback((err: unknown) => {
     if (isCommandError(err)) {
       setError(`${err.code}: ${err.message}`);
@@ -89,12 +101,12 @@ export function ColorLabelsPanel() {
         await updateColorLabel(label);
         await refreshColorLabels();
         announce(t('dialogs.colorLabels.updated', { name: label.name }));
-        setEditingId(null);
+        exitEditMode();
       } catch (err) {
         reportError(err);
       }
     },
-    [refreshColorLabels, announce, reportError, t],
+    [refreshColorLabels, announce, reportError, t, exitEditMode],
   );
 
   const onDelete = useCallback(
@@ -104,12 +116,12 @@ export function ColorLabelsPanel() {
         await deleteColorLabel(label.id);
         await refreshColorLabels();
         announce(t('dialogs.colorLabels.deleted', { name: label.name }));
-        setEditingId(null);
+        exitEditMode();
       } catch (err) {
         reportError(err);
       }
     },
-    [refreshColorLabels, announce, reportError, t],
+    [refreshColorLabels, announce, reportError, t, exitEditMode],
   );
 
   const editingLabel =
@@ -123,13 +135,14 @@ export function ColorLabelsPanel() {
         <EditLabelSection
           label={editingLabel}
           onSave={onUpdate}
-          onCancel={() => setEditingId(null)}
+          onCancel={exitEditMode}
           onDelete={onDelete}
         />
       ) : (
         <ExistingSection
           colorLabels={colorLabels}
           onEdit={setEditingId}
+          focusOnMountRef={focusListOnNextMountRef}
         />
       )}
 
@@ -187,13 +200,29 @@ export function ColorLabelsPanel() {
 interface ExistingSectionProps {
   colorLabels: ColorLabel[];
   onEdit: (id: string) => void;
+  /**
+   * Opt-in focus restoration. The parent arms `.current = true` when
+   * the user leaves edit mode (Cancel / Save / Delete); we consume
+   * the flag on mount and move focus onto the listbox so the user
+   * can keep arrow-navigating.
+   *
+   * The flag is intentionally NOT set on the first mount that happens
+   * because the user switched to this Settings tab — there, the tab
+   * itself should keep keyboard focus, otherwise NVDA reads out the
+   * first option as soon as the arrow key passes the tab.
+   */
+  focusOnMountRef: React.MutableRefObject<boolean>;
 }
 
 /**
  * Listbox of existing labels. One tab stop for the whole list; arrow
  * keys move between items, Enter opens the focused label for editing.
  */
-function ExistingSection({ colorLabels, onEdit }: ExistingSectionProps) {
+function ExistingSection({
+  colorLabels,
+  onEdit,
+  focusOnMountRef,
+}: ExistingSectionProps) {
   const { t } = useTranslation();
   const [focusIndex, setFocusIndex] = useState(0);
   const idPrefix = useId();
@@ -206,18 +235,13 @@ function ExistingSection({ colorLabels, onEdit }: ExistingSectionProps) {
     }
   }, [colorLabels.length, focusIndex]);
 
-  // Focus the listbox (or its section as fallback for an empty list)
-  // on mount. This fires both on initial open and on every return from
-  // edit mode. At initial open Modal's own focus effect runs after this
-  // one and overrides it — the section ends up focused so NVDA hears
-  // the heading + description. On subsequent mounts (edit → list)
-  // Modal does not re-fire, so the listbox keeps the focus and the
-  // user can immediately resume navigating with arrows.
   const sectionRef = useRef<HTMLElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
   useEffect(() => {
+    if (!focusOnMountRef.current) return;
+    focusOnMountRef.current = false;
     (listRef.current ?? sectionRef.current)?.focus({ preventScroll: true });
-  }, []);
+  }, [focusOnMountRef]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;

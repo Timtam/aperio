@@ -461,12 +461,21 @@ export function AccountsPanel() {
     }
   }, [ews, announce, t]);
 
+  // Armed when the user triggers a delete from the listbox. The
+  // post-refresh effect below sees the flag, moves focus back onto
+  // the listbox so the user can keep arrow-navigating, then clears
+  // it. Crucially the flag stays false on initial mount and on
+  // create — those must not steal focus from whatever the caller
+  // had focused (the Settings tab, the new-account form, …).
+  const refocusListAfterReloadRef = useRef(false);
+
   const performDelete = useCallback(
     async (acc: Account) => {
       setError(null);
       try {
         await deleteAccount(acc.id);
         announce(t('dialogs.accounts.deleted', { name: acc.display_name }));
+        refocusListAfterReloadRef.current = true;
         refresh();
         // Same as on create: nudge the store so the just-removed
         // account's calendars disappear from the sidebar.
@@ -513,11 +522,17 @@ export function AccountsPanel() {
     }
   }, [accounts.length, focusIndex]);
 
-  // Land focus on the listbox (or the section fallback) once the
-  // accounts have loaded, so the user can start arrow-navigating
-  // immediately without first chasing a tab stop.
+  // After a delete completes (refresh has finished, `loading` flipped
+  // back to false) the row that was focused no longer exists — its
+  // delete button got unmounted along with it, so the Modal's focus
+  // restoration ends up at <body>. Pull focus back onto the listbox
+  // so the user can keep arrow-navigating. On initial load and on
+  // create we leave focus alone: the SettingsDialog tab keeps it on
+  // entry, the form keeps it after add.
   useEffect(() => {
     if (loading) return;
+    if (!refocusListAfterReloadRef.current) return;
+    refocusListAfterReloadRef.current = false;
     (listRef.current ?? sectionRef.current)?.focus({ preventScroll: true });
   }, [loading, accounts.length]);
 

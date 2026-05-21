@@ -172,11 +172,15 @@ export function SettingsDialog({
           })}
         </div>
 
+        {/* No `tabIndex` on the tabpanel: both panels host plenty of
+            focusable controls (the W3C APG carve-out), and adding the
+            panel itself as a tab stop made NVDA pause on it as an
+            "Eigenschaftsfeld" with no interaction — a confusing extra
+            beat between the active tab and the first real control. */}
         <div
           role="tabpanel"
           id={panelId(activeTab)}
           aria-labelledby={tabId(activeTab)}
-          tabIndex={0}
           className="settings__panel"
         >
           {activeTab === 'accounts' && <AccountsPanel />}
