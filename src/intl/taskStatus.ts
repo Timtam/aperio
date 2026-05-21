@@ -4,16 +4,17 @@ import type { Task, TaskStatus } from '../api/types';
  * Per-status glyph for the on-chip / on-row marker.
  *
  * One character wide on every platform — no SVG, no font dependency,
- * no row-shift surprises across locales. The glyphs are chosen so
- * that the "still has work" states use boxes (✅ familiar checkbox
- * convention) and the "done with" states use box-with-content. The
- * in-progress glyph is a circle on purpose: visually distinct from
- * the boxes so a sighted scan can spot in-flight rows immediately.
+ * no row-shift surprises across locales. All four glyphs sit on a
+ * common visual spine (the circle) so the user reads them as a
+ * progression rather than four unrelated symbols. The previous mix
+ * of boxes (☐/☑/☒) and a stray circle (◐) for in_progress was
+ * confusing — a half-filled circle next to an empty box doesn't tell
+ * the eye "these are positions on the same scale".
  *
- *   open        ☐  empty box
+ *   open        ○  empty circle
  *   in_progress ◐  half-filled circle — "started, not finished"
- *   completed   ☑  checked box
- *   cancelled   ☒  X-marked box — "done with, but not successfully"
+ *   completed   ●  filled circle
+ *   cancelled   ⊘  slashed circle — "abandoned / no longer pursued"
  *
  * Shared across TaskView and the calendar-chip surfaces so the
  * symbols mean the same thing wherever the user sees them.
@@ -21,13 +22,13 @@ import type { Task, TaskStatus } from '../api/types';
 export function statusMarker(status: TaskStatus): string {
   switch (status) {
     case 'completed':
-      return '☑';
+      return '●';
     case 'cancelled':
-      return '☒';
+      return '⊘';
     case 'in_progress':
       return '◐';
     case 'open':
-      return '☐';
+      return '○';
   }
 }
 
