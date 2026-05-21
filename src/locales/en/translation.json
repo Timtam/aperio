@@ -570,7 +570,7 @@
       "stateCancelled": "cancelled",
       "expand": "Expand subtasks of \"{{title}}\"",
       "collapse": "Collapse subtasks of \"{{title}}\"",
-      "optionLabel": "{{title}}, list {{list}}, {{state}}{{progress}}, {{due}}",
+      "optionLabel": "{{title}}, {{state}}{{progress}}, {{due}}, list {{list}}",
       "subtaskProgress": ", {{done}} of {{total}} subtasks done",
       "subtaskProgressBadge": "{{done}}/{{total}}",
       "subtaskProgressBadgeAria": "{{done}} of {{total}} subtasks done",

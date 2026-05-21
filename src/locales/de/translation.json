@@ -570,7 +570,7 @@
       "stateCancelled": "abgebrochen",
       "expand": "Unteraufgaben von „{{title}}\" ausklappen",
       "collapse": "Unteraufgaben von „{{title}}\" einklappen",
-      "optionLabel": "{{title}}, Liste {{list}}, {{state}}{{progress}}, {{due}}",
+      "optionLabel": "{{title}}, {{state}}{{progress}}, {{due}}, Liste {{list}}",
       "subtaskProgress": ", {{done}} von {{total}} Unteraufgaben erledigt",
       "subtaskProgressBadge": "{{done}}/{{total}}",
       "subtaskProgressBadgeAria": "{{done}} von {{total}} Unteraufgaben erledigt",
