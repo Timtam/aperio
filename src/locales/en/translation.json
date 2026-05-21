@@ -95,6 +95,20 @@
         "heading": "Status coupling",
         "label": "Couple parent and subtask status",
         "hint": "When enabled, completing a parent task marks its open subtasks complete, and finishing every subtask marks the parent complete. Disable to treat each task independently — status changes never propagate up or down the tree."
+      },
+      "autoDate": {
+        "heading": "Auto-date on start",
+        "label": "Pin a backlog task to today when work begins",
+        "hint": "When enabled, a task without a scheduled day gets today's date the moment its status flips to in progress — directly or via the cascade from a child. Disable to leave the scheduled day alone."
+      },
+      "carryOverDefault": {
+        "heading": "Carry-over default",
+        "hint": "On startup, decide what happens to tasks whose scheduled day has passed and that are still open. \"Ask\" opens the carry-over dialog; the other options run silently and announce the result.",
+        "options": {
+          "ask": "Ask each time",
+          "today": "Automatically move to today",
+          "backlog": "Automatically send to backlog"
+        }
       }
     },
     "confirm": {
@@ -159,7 +173,11 @@
       "allCarriedToday_one": "Moved 1 task to today.",
       "allCarriedToday_other": "Moved {{count}} tasks to today.",
       "allSentToBacklog_one": "Sent 1 task to backlog.",
-      "allSentToBacklog_other": "Sent {{count}} tasks to backlog."
+      "allSentToBacklog_other": "Sent {{count}} tasks to backlog.",
+      "autoCarriedToday_one": "1 task automatically moved to today.",
+      "autoCarriedToday_other": "{{count}} tasks automatically moved to today.",
+      "autoSentToBacklog_one": "1 task automatically sent to backlog.",
+      "autoSentToBacklog_other": "{{count}} tasks automatically sent to backlog."
     },
     "deleteScope": {
       "title": "Delete recurring event",

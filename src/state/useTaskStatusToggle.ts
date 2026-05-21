@@ -46,11 +46,13 @@ export function useTaskStatusActions(): TaskStatusActions {
   // it can walk parents and siblings. `useTasks` returns the global
   // store, refreshed whenever `dataVersion` bumps.
   const { tasks } = useTasks();
-  // Honour the Settings → Tasks "couple parent and subtask status"
-  // checkbox. When the user has turned it off, the planner degrades
-  // to a single-row write and the SR announcement drops its
-  // "X weitere Aufgaben mit aktualisiert" suffix.
-  const { enabled: cascadeEnabled } = useTaskCascadeEnabled();
+  // Honour two Settings → Tasks knobs:
+  //   - `enabled` (cascade-status-coupling): when off the planner
+  //     degrades to a single-row write.
+  //   - `autoDate`: when off the planner does NOT pin a started
+  //     backlog task to today; we simply omit `todayKey` from the
+  //     options. The cascade itself still runs normally.
+  const { enabled: cascadeEnabled, autoDate } = useTaskCascadeEnabled();
 
   const set = useCallback(
     async (task: Task, nextStatus: TaskStatus): Promise<void> => {
@@ -60,8 +62,11 @@ export function useTaskStatusActions(): TaskStatusActions {
         // Auto-date: a dateless task transitioning into in_progress
         // (either directly or because the up-cascade derived it from
         // a child) gets pinned to today, so the carry-over /
-        // missed-tasks flow can locate it later.
-        todayKey: todayIsoKey(),
+        // missed-tasks flow can locate it later. Opt-out via the
+        // Settings → Tasks autoDate toggle — when off we omit
+        // `todayKey` and the planner stops emitting the companion
+        // scheduledDate field.
+        ...(autoDate ? { todayKey: todayIsoKey() } : {}),
       });
       if (writes.length === 0) return;
       try {
@@ -84,7 +89,7 @@ export function useTaskStatusActions(): TaskStatusActions {
         console.warn('update_task failed', err);
       }
     },
-    [announce, t, invalidateData, tasks, cascadeEnabled],
+    [announce, t, invalidateData, tasks, cascadeEnabled, autoDate],
   );
 
   const toggle = useCallback(

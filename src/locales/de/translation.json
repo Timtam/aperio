@@ -92,6 +92,20 @@
         "heading": "Status-Verknüpfung",
         "label": "Status von Eltern- und Unteraufgaben koppeln",
         "hint": "Wenn aktiviert, markiert das Erledigen einer Eltern-Aufgabe deren offene Unteraufgaben mit als erledigt; sind alle Unteraufgaben abgehakt, gilt auch die Eltern-Aufgabe als erledigt. Deaktiviert: jede Aufgabe wird unabhängig behandelt — Status-Änderungen werden nicht mehr im Baum weitergegeben."
+      },
+      "autoDate": {
+        "heading": "Automatisches Datum",
+        "label": "Backlog-Aufgaben beim Starten auf heute setzen",
+        "hint": "Wenn aktiviert, bekommt eine datumlose Aufgabe automatisch das heutige Datum, sobald ihr Status auf in Bearbeitung wechselt — direkt oder über die Statuskopplung eines Kindes. Deaktiviert: das eingeplante Datum bleibt unangetastet."
+      },
+      "carryOverDefault": {
+        "heading": "Übernahme-Standard",
+        "hint": "Beim App-Start entscheiden, was mit Aufgaben passiert, deren geplanter Tag in der Vergangenheit liegt und die noch offen sind. „Jedes Mal fragen\" öffnet den Übernahme-Dialog; die anderen Optionen laufen im Hintergrund und melden das Ergebnis über die Live-Region.",
+        "options": {
+          "ask": "Jedes Mal fragen",
+          "today": "Automatisch auf heute übernehmen",
+          "backlog": "Automatisch ins Backlog verschieben"
+        }
       }
     },
     "confirm": {
@@ -156,7 +170,11 @@
       "allCarriedToday_one": "1 Aufgabe auf heute übernommen.",
       "allCarriedToday_other": "{{count}} Aufgaben auf heute übernommen.",
       "allSentToBacklog_one": "1 Aufgabe zurück ins Backlog.",
-      "allSentToBacklog_other": "{{count}} Aufgaben zurück ins Backlog."
+      "allSentToBacklog_other": "{{count}} Aufgaben zurück ins Backlog.",
+      "autoCarriedToday_one": "1 Aufgabe automatisch auf heute übernommen.",
+      "autoCarriedToday_other": "{{count}} Aufgaben automatisch auf heute übernommen.",
+      "autoSentToBacklog_one": "1 Aufgabe automatisch ins Backlog verschoben.",
+      "autoSentToBacklog_other": "{{count}} Aufgaben automatisch ins Backlog verschoben."
     },
     "deleteScope": {
       "title": "Serientermin löschen",

@@ -97,10 +97,11 @@ export function TaskDialog({
   // Space-toggle and the per-row context menu.
   const { toggle: toggleSubtaskAction, set: setSubtaskAction } =
     useTaskStatusActions();
-  // Settings → Tasks → "couple parent and subtask status". When off,
-  // both planners (subtask add/delete recompute, root-status cascade)
-  // short-circuit and we write only the row the user directly touched.
-  const { enabled: cascadeEnabled } = useTaskCascadeEnabled();
+  // Settings → Tasks → "couple parent and subtask status" + auto-date
+  // toggle. The first short-circuits both planners; the second drops
+  // the `todayKey` companion-write so a started backlog task isn't
+  // auto-pinned to today.
+  const { enabled: cascadeEnabled, autoDate } = useTaskCascadeEnabled();
 
   const isEdit = task !== null;
   // Subtask = a task that has a parent. The list dropdown locks
@@ -194,7 +195,7 @@ export function TaskDialog({
       await applyAncestorWrites(
         planAncestorRecompute(task.id, [...tasks, created], {
           cascadeEnabled,
-          todayKey: todayIsoKey(),
+          ...(autoDate ? { todayKey: todayIsoKey() } : {}),
         }),
         [...tasks, created],
       );
@@ -218,6 +219,7 @@ export function TaskDialog({
     t,
     tasks,
     cascadeEnabled,
+    autoDate,
   ]);
 
   // Subtask status changes go through the shared hook — that gives
@@ -246,7 +248,7 @@ export function TaskDialog({
           await applyAncestorWrites(
             planAncestorRecompute(parentId, snapshot, {
               cascadeEnabled,
-              todayKey: todayIsoKey(),
+              ...(autoDate ? { todayKey: todayIsoKey() } : {}),
             }),
             snapshot,
           );
@@ -259,7 +261,7 @@ export function TaskDialog({
         );
       }
     },
-    [invalidateData, announce, t, tasks, cascadeEnabled],
+    [invalidateData, announce, t, tasks, cascadeEnabled, autoDate],
   );
 
   const setSubtaskStatus = useCallback(
@@ -445,7 +447,10 @@ export function TaskDialog({
               task.id,
               form.status,
               snapshot,
-              { cascadeEnabled, todayKey: todayIsoKey() },
+              {
+                cascadeEnabled,
+                ...(autoDate ? { todayKey: todayIsoKey() } : {}),
+              },
             ).filter((w) => w.taskId !== task.id);
             await applyAncestorWrites(cascadeWrites, snapshot);
           }
@@ -493,6 +498,7 @@ export function TaskDialog({
       isSubtask,
       tasks,
       cascadeEnabled,
+      autoDate,
     ],
   );
 
