@@ -34,6 +34,7 @@ import {
   type TriState,
 } from '../state/sidebarTree';
 import { useSidebarExpansion } from '../state/useSidebarExpansion';
+import { useTaskListShowCompleted } from '../state/useTaskListShowCompleted';
 import { useViewState } from '../state/ViewState';
 
 /**
@@ -82,6 +83,7 @@ export function Sidebar() {
   } = useCalendarStore();
   const { openColorLabels, openAccounts } = useDialogState();
   const expansion = useSidebarExpansion();
+  const showCompleted = useTaskListShowCompleted();
   const { focusedCalendarId, enterFocus, exitFocus } = useViewState();
   const isFocused = focusedCalendarId !== null;
 
@@ -324,6 +326,20 @@ export function Sidebar() {
           });
         }
       }
+      // Task-list-only setting: whether completed tasks stay visible
+      // in the calendar surfaces (WeekView, DayView). The visible
+      // label flips between "show" and "hide" so the action describes
+      // the state the user is about to enter — SR users hear what
+      // they're switching to, not the current state.
+      if (leaf.kind === 'tasks') {
+        const showing = showCompleted.shouldShow(leaf.containerId);
+        items.push({
+          id: 'toggle-show-completed',
+          label: showing
+            ? t('sidebar.menu.hideCompletedInCalendar')
+            : t('sidebar.menu.showCompletedInCalendar'),
+        });
+      }
       // Delete is local-only: external sources have their own
       // life-cycle (CalDAV's MKCOL/DELETE, Graph's PATCH, …) which
       // we haven't wired into a one-click sidebar affordance yet.
@@ -358,6 +374,23 @@ export function Sidebar() {
         setRestoreFocusToTree(true);
         exitFocus();
         announce(t('sidebar.focus.exitedAnnouncement'));
+      } else if (selected === 'toggle-show-completed') {
+        // Per-list preference (Phase 9.4 follow-up). The hook
+        // persists via user_prefs; WeekView and DayView observe the
+        // same store, so the calendar grids refresh on the next
+        // render once the toggle lands.
+        setRestoreFocusToTree(true);
+        const wasShowing = showCompleted.shouldShow(leaf.containerId);
+        showCompleted.toggle(leaf.containerId);
+        announce(
+          wasShowing
+            ? t('sidebar.menu.hideCompletedAnnouncement', {
+                name: leaf.name,
+              })
+            : t('sidebar.menu.showCompletedAnnouncement', {
+                name: leaf.name,
+              }),
+        );
       } else if (selected === 'delete') {
         // After delete the row vanishes; tree-focus is the right place
         // for keyboard navigation to land.
@@ -382,6 +415,7 @@ export function Sidebar() {
       enterFocus,
       exitFocus,
       announce,
+      showCompleted,
     ],
   );
 

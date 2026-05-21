@@ -468,7 +468,11 @@
       "rename": "Rename …",
       "delete": "Delete",
       "focusOpen": "Show only this calendar",
-      "focusExit": "Exit focus mode"
+      "focusExit": "Exit focus mode",
+      "showCompletedInCalendar": "Show completed tasks in calendar view",
+      "hideCompletedInCalendar": "Hide completed tasks in calendar view",
+      "showCompletedAnnouncement": "Completed tasks of \"{{name}}\" are now shown in the calendar.",
+      "hideCompletedAnnouncement": "Completed tasks of \"{{name}}\" are now hidden from the calendar."
     },
     "focus": {
       "banner": "Focused on: {{name}}",
@@ -495,12 +499,14 @@
       "tabAnnounce": "{{day}}: {{title}}",
       "tasksOnDay_one": "1 task",
       "tasksOnDay_other": "{{count}} tasks",
-      "taskChip": "Task: {{title}}",
-      "taskChipWithLabel": "Task: {{title}}, label: {{label}}",
-      "taskChipBy": "Task: {{title}}, due by {{deadline}}",
-      "taskChipByWithLabel": "Task: {{title}}, due by {{deadline}}, label: {{label}}",
-      "taskChipTimed": "Task: {{title}}, {{time}}",
-      "taskChipTimedWithLabel": "Task: {{title}}, {{time}}, label: {{label}}"
+      "taskChip": "Task: {{title}}, {{state}}",
+      "taskChipWithLabel": "Task: {{title}}, label: {{label}}, {{state}}",
+      "taskChipBy": "Task: {{title}}, due by {{deadline}}, {{state}}",
+      "taskChipByWithLabel": "Task: {{title}}, due by {{deadline}}, label: {{label}}, {{state}}",
+      "taskChipTimed": "Task: {{title}}, {{time}}, {{state}}",
+      "taskChipTimedWithLabel": "Task: {{title}}, {{time}}, label: {{label}}, {{state}}",
+      "taskStateDone": "completed",
+      "taskStateOpen": "to do"
     },
     "day": {
       "timeGrid": "Time grid",
@@ -508,8 +514,8 @@
       "empty": "No events on this day.",
       "eventLabel": "Event: {{title}}, {{start}} to {{end}}, calendar: {{calendar}}",
       "eventLabelWithLabel": "Event: {{title}}, {{start}} to {{end}}, calendar: {{calendar}}, label: {{label}}",
-      "taskLabel": "Task: {{title}}, {{time}}",
-      "taskLabelWithLabel": "Task: {{title}}, {{time}}, label: {{label}}",
+      "taskLabel": "Task: {{title}}, {{time}}, {{state}}",
+      "taskLabelWithLabel": "Task: {{title}}, {{time}}, label: {{label}}, {{state}}",
       "tasksHeading": "Tasks"
     },
     "month": {

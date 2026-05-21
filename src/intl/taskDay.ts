@@ -17,9 +17,12 @@ import type { Task } from '../api/types';
  *      task's creation date, so the calendar isn't cluttered with
  *      past stretches of long-running By-tasks.
  *
- * Completed and cancelled tasks are never returned — they belong in
- * the past, not in upcoming calendar slots. (Filtering them here
- * keeps every consumer from having to remember.)
+ * Cancelled tasks are never returned. Completed tasks are hidden by
+ * default — they're done, the user has already moved on — but the
+ * caller can opt back in per task-list via `isCompletedVisible`, the
+ * sidebar context-menu setting "Erledigte Aufgaben in der
+ * Kalenderansicht anzeigen". When the callback is omitted (tests,
+ * one-off callers) the historical "always hide" behaviour applies.
  *
  * The `dayIsoKey` argument is the local `YYYY-MM-DD` key, matching
  * `localDateKey()` in `intl/dateKey.ts` — that way the WeekView /
@@ -30,10 +33,18 @@ export function filterTasksOnDay(
   tasks: Task[],
   dayIsoKey: string,
   todayIsoKey: string,
+  isCompletedVisible?: (listId: string) => boolean,
 ): Task[] {
   return tasks.filter((task) => {
-    if (task.status === 'completed' || task.status === 'cancelled') {
-      return false;
+    if (task.status === 'cancelled') return false;
+    if (task.status === 'completed') {
+      // Completed rows surface only when the user opted-in for this
+      // specific list. Default (no callback / callback returns false)
+      // matches the original behaviour: completed tasks are hidden
+      // from calendar views and live on in TaskView only.
+      if (!isCompletedVisible || !isCompletedVisible(task.list_id)) {
+        return false;
+      }
     }
     if (task.scheduled_date === dayIsoKey) return true;
     if (
@@ -62,10 +73,14 @@ export function groupTasksByDay(
   tasks: Task[],
   dayKeys: string[],
   todayIsoKey: string,
+  isCompletedVisible?: (listId: string) => boolean,
 ): Map<string, Task[]> {
   const out = new Map<string, Task[]>();
   for (const key of dayKeys) {
-    out.set(key, filterTasksOnDay(tasks, key, todayIsoKey));
+    out.set(
+      key,
+      filterTasksOnDay(tasks, key, todayIsoKey, isCompletedVisible),
+    );
   }
   return out;
 }

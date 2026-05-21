@@ -107,6 +107,59 @@ describe('filterTasksOnDay', () => {
     ).toEqual(['live']);
   });
 
+  it('keeps completed tasks when the per-list opt-in is true', () => {
+    // Sidebar context menu: "Erledigte Aufgaben in Kalenderansicht
+    // anzeigen". The pref is per-list, so completed rows on lists
+    // the user opted into stay visible, while completed rows on
+    // other lists still vanish.
+    const tasks: Task[] = [
+      {
+        ...baseTask,
+        id: 'done-shown',
+        list_id: 'list-A',
+        scheduled_date: '2026-05-20',
+        status: 'completed',
+      },
+      {
+        ...baseTask,
+        id: 'done-hidden',
+        list_id: 'list-B',
+        scheduled_date: '2026-05-20',
+        status: 'completed',
+      },
+      {
+        ...baseTask,
+        id: 'live',
+        list_id: 'list-B',
+        scheduled_date: '2026-05-20',
+        status: 'open',
+      },
+    ];
+    const visible = (listId: string) => listId === 'list-A';
+    expect(
+      filterTasksOnDay(tasks, '2026-05-20', today, visible).map((t) => t.id),
+    ).toEqual(['done-shown', 'live']);
+  });
+
+  it('still hides cancelled tasks even when the opt-in is true', () => {
+    // Cancelled is a distinct status — the user explicitly walked
+    // away from the row, so it doesn't belong on the calendar even
+    // when the "show completed" flag is on.
+    const tasks: Task[] = [
+      {
+        ...baseTask,
+        id: 'cancel',
+        list_id: 'list-A',
+        scheduled_date: '2026-05-20',
+        status: 'cancelled',
+      },
+    ];
+    const visible = () => true;
+    expect(
+      filterTasksOnDay(tasks, '2026-05-20', today, visible),
+    ).toEqual([]);
+  });
+
   it('returns empty when nothing matches', () => {
     expect(
       filterTasksOnDay([baseTask], '2026-05-20', today),

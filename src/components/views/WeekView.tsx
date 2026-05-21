@@ -21,6 +21,8 @@ import {
 import { useCalendarStore } from '../../state/CalendarStore';
 import { useDialogState } from '../../state/DialogState';
 import { useEvents } from '../../state/useEvents';
+import { useTaskListShowCompleted } from '../../state/useTaskListShowCompleted';
+import { useTaskStatusToggle } from '../../state/useTaskStatusToggle';
 import { useTasks } from '../../state/useTasks';
 import { useViewState } from '../../state/ViewState';
 import { visibleRange } from '../../state/viewMath';
@@ -79,6 +81,9 @@ export function WeekView() {
   const range = useMemo(() => visibleRange('week', anchor), [anchor]);
   const { events, calendarById, loading } = useEvents(range);
   const { tasks, taskListById } = useTasks();
+  const toggleTaskStatus = useTaskStatusToggle();
+  const { shouldShow: shouldShowCompletedForList } =
+    useTaskListShowCompleted();
   const { colorLabels } = useCalendarStore();
   const labelById = useMemo(() => labelsLookup(colorLabels), [colorLabels]);
 
@@ -103,8 +108,8 @@ export function WeekView() {
   const tasksByDay = useMemo(() => {
     const today = todayIsoKey();
     const dayKeys = days.map((d) => keyOf(d));
-    return groupTasksByDay(tasks, dayKeys, today);
-  }, [tasks, days]);
+    return groupTasksByDay(tasks, dayKeys, today, shouldShowCompletedForList);
+  }, [tasks, days, shouldShowCompletedForList]);
 
   // Pre-merge each day's events + timed tasks into a single time-sorted
   // list, then split that list back into timed and untimed buckets.
@@ -301,9 +306,16 @@ export function WeekView() {
       }
 
       // Item-level shortcuts when a chip inside the cell is focused.
-      // Enter/Space opens the right editor for either kind; Delete is
-      // event-only — task deletion stays in TaskDialog so the user
-      // confirms it in the same surface they edit from.
+      //
+      // Events: Enter / Space → open editor; Delete → confirm delete.
+      // Tasks:  Enter        → open editor;
+      //         Space        → toggle done (matches TaskView's
+      //                        long-standing Space-to-check
+      //                        convention; the chip's ☐/☑ marker is
+      //                        now a real checkbox);
+      //         Delete is intentionally NOT bound — task deletion
+      //         lives in the dialog so the user confirms it in the
+      //         same surface they edit from.
       if (eventIndex !== null) {
         const item = focusedDayItems[eventIndex];
         if (e.key === 'Escape') {
@@ -311,10 +323,16 @@ export function WeekView() {
           clearEventIndex();
           return;
         }
-        if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+        if (e.key === 'Enter') {
           e.preventDefault();
           if (item?.kind === 'event') openEventDialog(item.event);
           else if (item?.kind === 'task') openTaskDialog(item.task);
+          return;
+        }
+        if (e.key === ' ' || e.key === 'Spacebar') {
+          e.preventDefault();
+          if (item?.kind === 'event') openEventDialog(item.event);
+          else if (item?.kind === 'task') void toggleTaskStatus(item.task);
           return;
         }
         if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -392,6 +410,7 @@ export function WeekView() {
       handleTab,
       clearEventIndex,
       requestDelete,
+      toggleTaskStatus,
     ],
   );
 
@@ -555,6 +574,7 @@ export function WeekView() {
                         taskListById,
                         labelById,
                       );
+                      const isCompleted = task.status === 'completed';
                       return (
                         <li
                           key={`task-${task.id}`}
@@ -566,22 +586,22 @@ export function WeekView() {
                             className={
                               'week-task week-task--timed' +
                               (isFocusedItem ? ' week-task--focused' : '') +
-                              (task.status === 'completed'
-                                ? ' week-task--completed'
-                                : '')
+                              (isCompleted ? ' week-task--completed' : '')
                             }
-                            aria-label={
-                              color.labelName
-                                ? t('views.week.taskChipTimedWithLabel', {
-                                    title: task.title,
-                                    time,
-                                    label: color.labelName,
-                                  })
-                                : t('views.week.taskChipTimed', {
-                                    title: task.title,
-                                    time,
-                                  })
-                            }
+                            // The aria-label carries the "done/open"
+                            // state so SR users hear it on focus —
+                            // the visible ☐/☑ marker is only there
+                            // for sighted users. After Space, the
+                            // toggle hook also fires a live-region
+                            // announcement, so the user gets
+                            // confirmation either way.
+                            aria-label={taskChipAriaLabel(
+                              t,
+                              task,
+                              time,
+                              color.labelName,
+                              isCompleted,
+                            )}
                             aria-selected={isFocusedItem}
                             style={
                               color.hex
@@ -590,15 +610,23 @@ export function WeekView() {
                                   } as React.CSSProperties)
                                 : undefined
                             }
+                            // Mouse: clicking outside the checkbox
+                            // opens the editor; the marker's onClick
+                            // below stops the bubble so toggling
+                            // doesn't also open the dialog.
                             onClick={() => openTaskDialog(task)}
                           >
                             <span className="week-task__time">{time}</span>
                             <span className="week-task__body">
                               <span
-                                className="week-task__marker"
+                                className="week-task__check"
                                 aria-hidden="true"
+                                onClick={(ev) => {
+                                  ev.stopPropagation();
+                                  void toggleTaskStatus(task);
+                                }}
                               >
-                                {task.status === 'completed' ? '☑' : '☐'}
+                                {isCompleted ? '☑' : '☐'}
                               </span>
                               <span className="week-task__title">
                                 {task.title}
@@ -685,6 +713,9 @@ export function WeekView() {
                 <WeekDayTasks
                   tasks={untimedTasks}
                   onOpen={(task) => openTaskDialog(task)}
+                  onToggle={(task) => {
+                    void toggleTaskStatus(task);
+                  }}
                   taskListById={taskListById}
                   labelById={labelById}
                 />
@@ -767,11 +798,13 @@ function groupEventsByDay(
 function WeekDayTasks({
   tasks,
   onOpen,
+  onToggle,
   taskListById,
   labelById,
 }: {
   tasks: Task[];
   onOpen: (task: Task) => void;
+  onToggle: (task: Task) => void;
   taskListById: Map<string, import('../../api/types').TaskList>;
   labelById: Map<string, import('../../api/types').ColorLabel>;
 }) {
@@ -788,19 +821,33 @@ function WeekDayTasks({
             ? 'views.week.taskChipBy'
             : 'views.week.taskChip';
         const color = resolveTaskColor(task, taskListById, labelById);
+        const isCompleted = task.status === 'completed';
+        const state = t(
+          isCompleted ? 'views.week.taskStateDone' : 'views.week.taskStateOpen',
+        );
         return (
           <li key={task.id} className="week-grid__task-item">
             <button
               type="button"
               className={
                 'week-task' +
-                (task.status === 'completed'
-                  ? ' week-task--completed'
-                  : '') +
-                (task.deadline_type === 'by'
-                  ? ' week-task--by'
-                  : '')
+                (isCompleted ? ' week-task--completed' : '') +
+                (task.deadline_type === 'by' ? ' week-task--by' : '')
               }
+              // Default <button> behaviour fires onClick on both
+              // Space and Enter — we need Space to toggle and Enter
+              // to open. Intercept in onKeyDown and dispatch by key,
+              // then let onClick still handle the mouse case (which
+              // opens the dialog).
+              onKeyDown={(ev) => {
+                if (ev.key === ' ' || ev.key === 'Spacebar') {
+                  ev.preventDefault();
+                  onToggle(task);
+                } else if (ev.key === 'Enter') {
+                  ev.preventDefault();
+                  onOpen(task);
+                }
+              }}
               onClick={() => onOpen(task)}
               style={
                 color.hex
@@ -813,16 +860,25 @@ function WeekDayTasks({
                       title: task.title,
                       deadline: task.deadline_date ?? '',
                       label: color.labelName,
+                      state,
                     })
                   : t(labelKey, {
                       title: task.title,
                       deadline: task.deadline_date ?? '',
+                      state,
                     })
               }
             >
               <span className="week-task__body">
-                <span className="week-task__marker" aria-hidden="true">
-                  {task.status === 'completed' ? '☑' : '☐'}
+                <span
+                  className="week-task__check"
+                  aria-hidden="true"
+                  onClick={(ev) => {
+                    ev.stopPropagation();
+                    onToggle(task);
+                  }}
+                >
+                  {isCompleted ? '☑' : '☐'}
                 </span>
                 <span className="week-task__title">{task.title}</span>
               </span>
@@ -832,4 +888,32 @@ function WeekDayTasks({
       })}
     </ul>
   );
+}
+
+/**
+ * Build the SR label for a task chip. Centralised here so the timed
+ * variant inside the listbox and the untimed variant in WeekDayTasks
+ * format identically — including the "completed / to do" state
+ * suffix that turns the visible ☐/☑ marker into something AT can
+ * read out.
+ */
+function taskChipAriaLabel(
+  t: (key: string, values?: Record<string, unknown>) => string,
+  task: Task,
+  time: string,
+  labelName: string | null,
+  isCompleted: boolean,
+): string {
+  const state = t(
+    isCompleted ? 'views.week.taskStateDone' : 'views.week.taskStateOpen',
+  );
+  const key = labelName
+    ? 'views.week.taskChipTimedWithLabel'
+    : 'views.week.taskChipTimed';
+  return t(key, {
+    title: task.title,
+    time,
+    label: labelName ?? '',
+    state,
+  });
 }

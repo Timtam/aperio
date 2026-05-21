@@ -1121,6 +1121,39 @@ button[aria-disabled='true'] {
   color: var(--color-fg-muted);
 }
 
+/* The checkbox marker doubles as a click target so mouse users can
+ * tick a task off without opening the dialog. SR users still toggle
+ * via Space on the focused chip — the inner element is aria-hidden
+ * so it doesn't show up as a separate focus stop. */
+.week-task__check,
+.day-task__marker--clickable {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.2em;
+  min-height: 1.2em;
+  font-size: 1em;
+  color: var(--color-fg-muted);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.week-task__check:hover,
+.day-task__marker--clickable:hover {
+  /* The marker is the explicit toggle affordance — a subtle tint
+   * tells the mouse user "this click does something different from
+   * clicking the title". */
+  background: color-mix(
+    in srgb,
+    var(--event-color, var(--color-accent)) 18%,
+    transparent
+  );
+  color: var(--color-fg);
+}
+
 .week-task__title,
 .day-task__title {
   flex: 1;

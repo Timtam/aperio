@@ -15,6 +15,8 @@ import { eventCoversDay, multiDayInfo } from '../../intl/multiDay';
 import { useCalendarStore } from '../../state/CalendarStore';
 import { useDialogState } from '../../state/DialogState';
 import { useEvents } from '../../state/useEvents';
+import { useTaskListShowCompleted } from '../../state/useTaskListShowCompleted';
+import { useTaskStatusToggle } from '../../state/useTaskStatusToggle';
 import { useTasks } from '../../state/useTasks';
 import { useViewState } from '../../state/ViewState';
 import { visibleRange } from '../../state/viewMath';
@@ -60,6 +62,9 @@ export function DayView() {
   const range = useMemo(() => visibleRange('day', anchor), [anchor]);
   const { events, calendarById, loading } = useEvents(range);
   const { tasks, taskListById } = useTasks();
+  const toggleTaskStatus = useTaskStatusToggle();
+  const { shouldShow: shouldShowCompletedForList } =
+    useTaskListShowCompleted();
   const { colorLabels } = useCalendarStore();
   const labelById = useMemo(() => labelsLookup(colorLabels), [colorLabels]);
 
@@ -71,11 +76,17 @@ export function DayView() {
   );
 
   // Tasks visible on this day (§9.4): scheduled, On-deadline, or
-  // By-deadline window. Same filter as WeekView.
+  // By-deadline window. Same filter as WeekView, including the
+  // per-list "show completed" sidebar toggle.
   const dayTasks = useMemo(
     () =>
-      filterTasksOnDay(tasks, localDateKey(anchor), todayIsoKey()),
-    [tasks, anchor],
+      filterTasksOnDay(
+        tasks,
+        localDateKey(anchor),
+        todayIsoKey(),
+        shouldShowCompletedForList,
+      ),
+    [tasks, anchor, shouldShowCompletedForList],
   );
 
   // Split tasks into "timed" (carry a deadline_time on this specific
@@ -211,14 +222,28 @@ export function DayView() {
           e.preventDefault();
           setFocusIndex(timedItems.length - 1);
           return;
-        case 'Enter':
-        case ' ':
-        case 'Spacebar': {
+        case 'Enter': {
+          // Enter always opens the editor — for events the
+          // EventDialog, for tasks the TaskDialog.
           e.preventDefault();
           if (focusedItem?.kind === 'event') {
             openEventDialog(focusedItem.event);
           } else if (focusedItem?.kind === 'task') {
             openTaskDialog(focusedItem.task);
+          }
+          return;
+        }
+        case ' ':
+        case 'Spacebar': {
+          // Space opens events (no other meaningful action) but
+          // toggles done/open on tasks. Matches TaskView's existing
+          // Space-to-check convention and the user-visible
+          // checkbox marker on the chip.
+          e.preventDefault();
+          if (focusedItem?.kind === 'event') {
+            openEventDialog(focusedItem.event);
+          } else if (focusedItem?.kind === 'task') {
+            void toggleTaskStatus(focusedItem.task);
           }
           return;
         }
@@ -246,6 +271,7 @@ export function DayView() {
       announce,
       t,
       requestDelete,
+      toggleTaskStatus,
     ],
   );
 
@@ -293,6 +319,12 @@ export function DayView() {
                   )
                 : '';
               const color = resolveTaskColor(task, taskListById, labelById);
+              const isCompleted = task.status === 'completed';
+              const state = t(
+                isCompleted
+                  ? 'views.week.taskStateDone'
+                  : 'views.week.taskStateOpen',
+              );
               return (
                 <li
                   key={`task-${task.id}`}
@@ -305,18 +337,18 @@ export function DayView() {
                           title: task.title,
                           time: timeStr,
                           label: color.labelName,
+                          state,
                         })
                       : t('views.day.taskLabel', {
                           title: task.title,
                           time: timeStr,
+                          state,
                         })
                   }
                   className={
                     'day-list__item day-list__item--task' +
                     (focused ? ' day-list__item--focused' : '') +
-                    (task.status === 'completed'
-                      ? ' day-list__item--completed'
-                      : '')
+                    (isCompleted ? ' day-list__item--completed' : '')
                   }
                   style={
                     color.hex
@@ -329,8 +361,19 @@ export function DayView() {
                 >
                   <span className="day-list__time">{timeStr}</span>
                   <span className="day-list__title">
-                    <span className="day-task__marker" aria-hidden="true">
-                      {task.status === 'completed' ? '☑ ' : '☐ '}
+                    <span
+                      className="day-task__marker day-task__marker--clickable"
+                      aria-hidden="true"
+                      // Mouse: clicking the marker toggles the task
+                      // without selecting the row, so users don't
+                      // have to round-trip through the dialog just
+                      // to check something off.
+                      onClick={(ev) => {
+                        ev.stopPropagation();
+                        void toggleTaskStatus(task);
+                      }}
+                    >
+                      {isCompleted ? '☑ ' : '☐ '}
                     </span>
                     {task.title}
                   </span>
@@ -426,19 +469,36 @@ export function DayView() {
                   ? 'views.week.taskChipBy'
                   : 'views.week.taskChip';
               const color = resolveTaskColor(task, taskListById, labelById);
+              const isCompleted = task.status === 'completed';
+              const state = t(
+                isCompleted
+                  ? 'views.week.taskStateDone'
+                  : 'views.week.taskStateOpen',
+              );
               return (
                 <li key={task.id} className="day-tasks__item">
                   <button
                     type="button"
                     className={
                       'day-task' +
-                      (task.status === 'completed'
-                        ? ' day-task--completed'
-                        : '') +
+                      (isCompleted ? ' day-task--completed' : '') +
                       (task.deadline_type === 'by'
                         ? ' day-task--by'
                         : '')
                     }
+                    // Default <button> would fire onClick on both
+                    // Space and Enter. We need different actions:
+                    // Space toggles done (matches the visual ☐/☑),
+                    // Enter opens the editor. Intercept here.
+                    onKeyDown={(ev) => {
+                      if (ev.key === ' ' || ev.key === 'Spacebar') {
+                        ev.preventDefault();
+                        void toggleTaskStatus(task);
+                      } else if (ev.key === 'Enter') {
+                        ev.preventDefault();
+                        openTaskDialog(task);
+                      }
+                    }}
                     onClick={() => openTaskDialog(task)}
                     style={
                       color.hex
@@ -453,15 +513,24 @@ export function DayView() {
                             title: task.title,
                             deadline: task.deadline_date ?? '',
                             label: color.labelName,
+                            state,
                           })
                         : t(labelKey, {
                             title: task.title,
                             deadline: task.deadline_date ?? '',
+                            state,
                           })
                     }
                   >
-                    <span className="day-task__marker" aria-hidden="true">
-                      {task.status === 'completed' ? '☑' : '☐'}
+                    <span
+                      className="day-task__marker day-task__marker--clickable"
+                      aria-hidden="true"
+                      onClick={(ev) => {
+                        ev.stopPropagation();
+                        void toggleTaskStatus(task);
+                      }}
+                    >
+                      {isCompleted ? '☑' : '☐'}
                     </span>
                     <span className="day-task__title">{task.title}</span>
                   </button>

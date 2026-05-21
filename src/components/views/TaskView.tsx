@@ -16,8 +16,9 @@ import { useDateFormat } from '../../intl/dateFormat';
 import { labelsLookup, resolveTaskColor } from '../../intl/eventColor';
 import { useCalendarStore } from '../../state/CalendarStore';
 import { useDialogState } from '../../state/DialogState';
+import { useTaskStatusToggle } from '../../state/useTaskStatusToggle';
 import { useTasks } from '../../state/useTasks';
-import type { Task, TaskStatus } from '../../api/types';
+import type { Task } from '../../api/types';
 import { duplicateTask } from '../MoveCopyDialog';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { isCommandError } from '../../api/client';
@@ -99,35 +100,9 @@ export function TaskView() {
     [announce, t, invalidateData],
   );
 
-  const toggleStatus = useCallback(
-    async (task: Task) => {
-      const nextStatus: TaskStatus =
-        task.status === 'completed' ? 'open' : 'completed';
-      const updated: Task = {
-        ...task,
-        status: nextStatus,
-        completed_at:
-          nextStatus === 'completed' ? new Date().toISOString() : null,
-      };
-      try {
-        await invoke<Task>('update_task', { task: updated });
-        // The toggle never opens a global dialog (it's an in-place
-        // status change), so useTasks would otherwise never see the
-        // mutation. Bump explicitly to refetch and reflect the new
-        // sort bucket.
-        invalidateData();
-        announce(
-          nextStatus === 'completed'
-            ? t('views.tasks.completedAnnounce', { title: task.title })
-            : t('views.tasks.reopenedAnnounce', { title: task.title }),
-        );
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn('update_task failed', err);
-      }
-    },
-    [announce, t, invalidateData],
-  );
+  // Shared toggle: WeekView and DayView use the same hook so the
+  // Space-key contract is identical across every task surface.
+  const toggleStatus = useTaskStatusToggle();
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {

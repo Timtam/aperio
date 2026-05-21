@@ -468,7 +468,11 @@
       "rename": "Umbenennen …",
       "delete": "Löschen",
       "focusOpen": "Nur diesen Kalender anzeigen",
-      "focusExit": "Fokus verlassen"
+      "focusExit": "Fokus verlassen",
+      "showCompletedInCalendar": "Erledigte Aufgaben in Kalenderansicht anzeigen",
+      "hideCompletedInCalendar": "Erledigte Aufgaben in Kalenderansicht ausblenden",
+      "showCompletedAnnouncement": "Erledigte Aufgaben von „{{name}}\" werden jetzt im Kalender angezeigt.",
+      "hideCompletedAnnouncement": "Erledigte Aufgaben von „{{name}}\" werden jetzt im Kalender ausgeblendet."
     },
     "focus": {
       "banner": "Fokus: {{name}}",
@@ -495,12 +499,14 @@
       "tabAnnounce": "{{day}}: {{title}}",
       "tasksOnDay_one": "1 Aufgabe",
       "tasksOnDay_other": "{{count}} Aufgaben",
-      "taskChip": "Aufgabe: {{title}}",
-      "taskChipWithLabel": "Aufgabe: {{title}}, Label: {{label}}",
-      "taskChipBy": "Aufgabe: {{title}}, fällig bis {{deadline}}",
-      "taskChipByWithLabel": "Aufgabe: {{title}}, fällig bis {{deadline}}, Label: {{label}}",
-      "taskChipTimed": "Aufgabe: {{title}}, {{time}}",
-      "taskChipTimedWithLabel": "Aufgabe: {{title}}, {{time}}, Label: {{label}}"
+      "taskChip": "Aufgabe: {{title}}, {{state}}",
+      "taskChipWithLabel": "Aufgabe: {{title}}, Label: {{label}}, {{state}}",
+      "taskChipBy": "Aufgabe: {{title}}, fällig bis {{deadline}}, {{state}}",
+      "taskChipByWithLabel": "Aufgabe: {{title}}, fällig bis {{deadline}}, Label: {{label}}, {{state}}",
+      "taskChipTimed": "Aufgabe: {{title}}, {{time}}, {{state}}",
+      "taskChipTimedWithLabel": "Aufgabe: {{title}}, {{time}}, Label: {{label}}, {{state}}",
+      "taskStateDone": "erledigt",
+      "taskStateOpen": "offen"
     },
     "day": {
       "timeGrid": "Zeitraster",
@@ -509,8 +515,8 @@
       "empty": "Keine Termine an diesem Tag.",
       "eventLabel": "Termin: {{title}}, {{start}} bis {{end}}, Kalender: {{calendar}}",
       "eventLabelWithLabel": "Termin: {{title}}, {{start}} bis {{end}}, Kalender: {{calendar}}, Label: {{label}}",
-      "taskLabel": "Aufgabe: {{title}}, {{time}}",
-      "taskLabelWithLabel": "Aufgabe: {{title}}, {{time}}, Label: {{label}}"
+      "taskLabel": "Aufgabe: {{title}}, {{time}}, {{state}}",
+      "taskLabelWithLabel": "Aufgabe: {{title}}, {{time}}, Label: {{label}}, {{state}}"
     },
     "month": {
       "title": "Monatsansicht",
