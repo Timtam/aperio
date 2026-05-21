@@ -11,8 +11,11 @@ import { eventCoversDay, multiDayInfo } from '../../intl/multiDay';
 import { useCalendarStore } from '../../state/CalendarStore';
 import { useDialogState } from '../../state/DialogState';
 import { useEvents } from '../../state/useEvents';
+import { useTasks } from '../../state/useTasks';
 import { useViewState } from '../../state/ViewState';
 import { visibleRange } from '../../state/viewMath';
+import { localDateKey } from '../../intl/dateKey';
+import { filterTasksOnDay, todayIsoKey } from '../../intl/taskDay';
 import { duplicateEvent } from '../MoveCopyDialog';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { DeleteEventScopeDialog } from '../DeleteEventScopeDialog';
@@ -43,10 +46,12 @@ export function DayView() {
   const fmt = useDateFormat();
   const announce = useAnnouncer();
   const { anchor } = useViewState();
-  const { openEventDialog, openMoveCopy, invalidateData } = useDialogState();
+  const { openEventDialog, openTaskDialog, openMoveCopy, invalidateData } =
+    useDialogState();
 
   const range = useMemo(() => visibleRange('day', anchor), [anchor]);
   const { events, calendarById, loading } = useEvents(range);
+  const { tasks } = useTasks();
   const { colorLabels } = useCalendarStore();
   const labelById = useMemo(() => labelsLookup(colorLabels), [colorLabels]);
 
@@ -55,6 +60,14 @@ export function DayView() {
   const dayEvents = useMemo(
     () => events.filter((ev) => eventCoversDay(ev, anchor)),
     [events, anchor],
+  );
+
+  // Tasks visible on this day (§9.4): scheduled, On-deadline, or
+  // By-deadline window. Same filter as WeekView.
+  const dayTasks = useMemo(
+    () =>
+      filterTasksOnDay(tasks, localDateKey(anchor), todayIsoKey()),
+    [tasks, anchor],
   );
 
   const [focusIndex, setFocusIndex] = useState(0);
@@ -299,6 +312,55 @@ export function DayView() {
           })
         )}
       </ul>
+
+      {/* §9.4: tasks on this day, rendered as natural-Tab-order
+          buttons below the events. Click / Enter / Space opens the
+          TaskDialog; status toggles live in TaskView (the dedicated
+          keyboard surface). */}
+      {dayTasks.length > 0 && (
+        <section
+          className="day-tasks"
+          aria-label={t('views.day.tasksHeading')}
+        >
+          <h3 className="day-tasks__heading">
+            {t('views.day.tasksHeading')}
+          </h3>
+          <ul className="day-tasks__list">
+            {dayTasks.map((task) => {
+              const labelKey =
+                task.deadline_type === 'by' && task.deadline_date
+                  ? 'views.week.taskChipBy'
+                  : 'views.week.taskChip';
+              return (
+                <li key={task.id} className="day-tasks__item">
+                  <button
+                    type="button"
+                    className={
+                      'day-task' +
+                      (task.status === 'completed'
+                        ? ' day-task--completed'
+                        : '') +
+                      (task.deadline_type === 'by'
+                        ? ' day-task--by'
+                        : '')
+                    }
+                    onClick={() => openTaskDialog(task)}
+                    aria-label={t(labelKey, {
+                      title: task.title,
+                      deadline: task.deadline_date ?? '',
+                    })}
+                  >
+                    <span className="day-task__marker" aria-hidden="true">
+                      {task.status === 'completed' ? '☑' : '☐'}
+                    </span>
+                    <span className="day-task__title">{task.title}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
 
       <ConfirmDialog
         isOpen={confirmTarget !== null}

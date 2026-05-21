@@ -492,11 +492,16 @@
       "dayAnnounce_other": "{{day}}, {{count}} Termine",
       "eventLabel": "Termin: {{title}}, {{time}}, Kalender: {{calendar}}",
       "eventLabelWithLabel": "Termin: {{title}}, {{time}}, Kalender: {{calendar}}, Label: {{label}}",
-      "tabAnnounce": "{{day}}: {{title}}"
+      "tabAnnounce": "{{day}}: {{title}}",
+      "tasksOnDay_one": "1 Aufgabe",
+      "tasksOnDay_other": "{{count}} Aufgaben",
+      "taskChip": "Aufgabe: {{title}}",
+      "taskChipBy": "Aufgabe: {{title}}, fällig bis {{deadline}}"
     },
     "day": {
       "timeGrid": "Zeitraster",
       "eventList": "Termine des Tages",
+      "tasksHeading": "Aufgaben",
       "empty": "Keine Termine an diesem Tag.",
       "eventLabel": "Termin: {{title}}, {{start}} bis {{end}}, Kalender: {{calendar}}",
       "eventLabelWithLabel": "Termin: {{title}}, {{start}} bis {{end}}, Kalender: {{calendar}}, Label: {{label}}"

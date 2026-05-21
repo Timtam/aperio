@@ -492,14 +492,19 @@
       "dayAnnounce_other": "{{day}}, {{count}} events",
       "eventLabel": "Event: {{title}}, {{time}}, calendar: {{calendar}}",
       "eventLabelWithLabel": "Event: {{title}}, {{time}}, calendar: {{calendar}}, label: {{label}}",
-      "tabAnnounce": "{{day}}: {{title}}"
+      "tabAnnounce": "{{day}}: {{title}}",
+      "tasksOnDay_one": "1 task",
+      "tasksOnDay_other": "{{count}} tasks",
+      "taskChip": "Task: {{title}}",
+      "taskChipBy": "Task: {{title}}, due by {{deadline}}"
     },
     "day": {
       "timeGrid": "Time grid",
       "eventList": "Events on this day",
       "empty": "No events on this day.",
       "eventLabel": "Event: {{title}}, {{start}} to {{end}}, calendar: {{calendar}}",
-      "eventLabelWithLabel": "Event: {{title}}, {{start}} to {{end}}, calendar: {{calendar}}, label: {{label}}"
+      "eventLabelWithLabel": "Event: {{title}}, {{start}} to {{end}}, calendar: {{calendar}}, label: {{label}}",
+      "tasksHeading": "Tasks"
     },
     "month": {
       "title": "Month view",

@@ -17,9 +17,11 @@ import {
 import { useCalendarStore } from '../../state/CalendarStore';
 import { useDialogState } from '../../state/DialogState';
 import { useEvents } from '../../state/useEvents';
+import { useTasks } from '../../state/useTasks';
 import { useViewState } from '../../state/ViewState';
 import { visibleRange } from '../../state/viewMath';
-import type { CalendarEvent } from '../../api/types';
+import { groupTasksByDay, todayIsoKey } from '../../intl/taskDay';
+import type { CalendarEvent, Task } from '../../api/types';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { DeleteEventScopeDialog } from '../DeleteEventScopeDialog';
 import {
@@ -63,10 +65,12 @@ export function WeekView() {
   const fmt = useDateFormat();
   const announce = useAnnouncer();
   const { anchor, setAnchor, goPrev, goNext } = useViewState();
-  const { openEventDialog, invalidateData } = useDialogState();
+  const { openEventDialog, openTaskDialog, invalidateData } =
+    useDialogState();
 
   const range = useMemo(() => visibleRange('week', anchor), [anchor]);
   const { events, calendarById, loading } = useEvents(range);
+  const { tasks } = useTasks();
   const { colorLabels } = useCalendarStore();
   const labelById = useMemo(() => labelsLookup(colorLabels), [colorLabels]);
 
@@ -83,6 +87,16 @@ export function WeekView() {
     () => groupEventsByDay(events, days),
     [events, days],
   );
+
+  // Bucket tasks per visible day (§9.4): scheduled-on-day, On-deadline-
+  // on-day, and By-deadline-spanning-from-today. The today key is
+  // captured fresh on every render — cheap, avoids stale-date bugs
+  // if the app stays open across midnight.
+  const tasksByDay = useMemo(() => {
+    const today = todayIsoKey();
+    const dayKeys = days.map((d) => keyOf(d));
+    return groupTasksByDay(tasks, dayKeys, today);
+  }, [tasks, days]);
 
   // Build the all-day lane bars over the week. The lane is the
   // visual half of variant B: a contiguous strip above the day cells
@@ -516,6 +530,17 @@ export function WeekView() {
                     );
                   })}
                 </ul>
+                {/* §9.4: tasks on this day. Rendered as a small list
+                    of buttons below the events. Each button is a
+                    natural Tab stop (tabIndex=0 default) so SR users
+                    can reach them via Tab and activate with
+                    Space/Enter — separate from the events' custom
+                    aria-activedescendant nav so the two systems
+                    don't fight. */}
+                <WeekDayTasks
+                  tasks={tasksByDay.get(keyOf(day)) ?? []}
+                  onOpen={(task) => openTaskDialog(task)}
+                />
               </div>
             );
           })}
@@ -575,4 +600,69 @@ function groupEventsByDay(
     });
   });
   return map;
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Per-day task chips (§9.4)
+// ────────────────────────────────────────────────────────────────────────
+
+/**
+ * Small list of tasks visible on one day cell. Buttons rather than
+ * spans so they're activatable via Enter/Space and Tab-reachable for
+ * keyboard / SR users without the cell-internal aria-activedescendant
+ * choreography the event chips need.
+ *
+ * Activating a chip opens the TaskDialog (edit mode) — same flow as
+ * Enter on a row in the dedicated Aufgaben view. Status-toggle and
+ * "Im Backlog ablegen" stay in TaskView's keyboard surface; the
+ * calendar chips are display + drill-into-detail only.
+ */
+function WeekDayTasks({
+  tasks,
+  onOpen,
+}: {
+  tasks: Task[];
+  onOpen: (task: Task) => void;
+}) {
+  const { t } = useTranslation();
+  if (tasks.length === 0) return null;
+  return (
+    <ul
+      className="week-grid__tasks"
+      aria-label={t('views.week.tasksOnDay', { count: tasks.length })}
+    >
+      {tasks.map((task) => {
+        const labelKey =
+          task.deadline_type === 'by' && task.deadline_date
+            ? 'views.week.taskChipBy'
+            : 'views.week.taskChip';
+        return (
+          <li key={task.id} className="week-grid__task-item">
+            <button
+              type="button"
+              className={
+                'week-task' +
+                (task.status === 'completed'
+                  ? ' week-task--completed'
+                  : '') +
+                (task.deadline_type === 'by'
+                  ? ' week-task--by'
+                  : '')
+              }
+              onClick={() => onOpen(task)}
+              aria-label={t(labelKey, {
+                title: task.title,
+                deadline: task.deadline_date ?? '',
+              })}
+            >
+              <span className="week-task__marker" aria-hidden="true">
+                {task.status === 'completed' ? '☑' : '☐'}
+              </span>
+              <span className="week-task__title">{task.title}</span>
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
 }
