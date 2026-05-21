@@ -176,11 +176,19 @@ export function SettingsDialog({
             focusable controls (the W3C APG carve-out), and adding the
             panel itself as a tab stop made NVDA pause on it as an
             "Eigenschaftsfeld" with no interaction — a confusing extra
-            beat between the active tab and the first real control. */}
+            beat between the active tab and the first real control.
+            We also intentionally OMIT `aria-labelledby` here. The
+            APG pattern recommends pointing it back at the active tab,
+            but combined with `aria-controls` on the tab that creates
+            a round-trip the screen reader walks on focus: the tab
+            name gets read first as the focused control and then again
+            as the controlled panel's accessible name. Dropping the
+            label-by leaves a nameless tabpanel — NVDA still places it
+            in its landmark list as "tabpanel" — and the focused tab
+            gets announced exactly once, the way the user expects. */}
         <div
           role="tabpanel"
           id={panelId(activeTab)}
-          aria-labelledby={tabId(activeTab)}
           className="settings__panel"
         >
           {activeTab === 'accounts' && <AccountsPanel />}
