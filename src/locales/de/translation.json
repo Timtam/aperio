@@ -581,7 +581,9 @@
       "completedAnnounce": "Aufgabe „{{title}}\" als erledigt markiert.",
       "reopenedAnnounce": "Aufgabe „{{title}}\" wieder geöffnet.",
       "inProgressAnnounce": "Aufgabe „{{title}}\" als in Arbeit markiert.",
-      "cancelledAnnounce": "Aufgabe „{{title}}\" abgebrochen."
+      "cancelledAnnounce": "Aufgabe „{{title}}\" abgebrochen.",
+      "cascadeSuffix_one": "Eine weitere Aufgabe wurde mit aktualisiert.",
+      "cascadeSuffix_other": "{{count}} weitere Aufgaben wurden mit aktualisiert."
     }
   }
 }

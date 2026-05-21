@@ -581,7 +581,9 @@
       "completedAnnounce": "Task \"{{title}}\" marked complete.",
       "reopenedAnnounce": "Task \"{{title}}\" reopened.",
       "inProgressAnnounce": "Task \"{{title}}\" marked in progress.",
-      "cancelledAnnounce": "Task \"{{title}}\" cancelled."
+      "cancelledAnnounce": "Task \"{{title}}\" cancelled.",
+      "cascadeSuffix_one": "1 related task also updated.",
+      "cascadeSuffix_other": "{{count}} related tasks also updated."
     }
   }
 }

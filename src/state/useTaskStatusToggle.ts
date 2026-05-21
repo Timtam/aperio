@@ -4,6 +4,8 @@ import { invoke } from '@tauri-apps/api/core';
 
 import { useAnnouncer } from '../a11y/Announcer';
 import { useDialogState } from './DialogState';
+import { planStatusCascade, type StatusWrite } from './taskCascade';
+import { useTasks } from './useTasks';
 import type { Task, TaskStatus } from '../api/types';
 
 /**
@@ -11,24 +13,22 @@ import type { Task, TaskStatus } from '../api/types';
  * the calendar chips in WeekView and DayView) needs:
  *
  *   - `toggle(task)` — Space-key contract from §9.4: flip between
- *     `open` and `completed`. Mirrors the visible ☐/☑ marker.
+ *     `open` and `completed`. Mirrors the visible ○/● marker.
  *   - `set(task, status)` — explicit assignment, used by the chip
  *     context menu's "Status > {Offen, In Arbeit, Erledigt,
  *     Abgebrochen}" submenu.
  *
- * Both routes share one mutation path: `update_task` with a fresh
- * `completed_at` (set on Completed, cleared on every other status),
- * a `dataVersion` bump so `useTasks` refetches, and an SR live-region
- * announce. Inlining drifted across views before this hook existed
- * — keeping the contract in one place ensures the keyboard, the
- * checkbox marker, and the menu all behave identically.
+ * Both routes go through `planStatusCascade`, so a status change on
+ * a parent or child task ripples through the family per the rules
+ * in `taskCascade.ts`:
  *
- * Returns an object instead of a plain function so the hook can be
- * destructured as `const { toggle, set } = useTaskStatusActions()`.
- * The compatibility default export `useTaskStatusToggle` returns
- * just the toggle callable for older call sites that haven't been
- * updated, and is shadowed by the new hook in the same module so a
- * single import gives the caller whichever shape it wants.
+ *   - parent → completed cascades to non-cancelled descendants
+ *   - parent → cancelled cascades to non-completed descendants
+ *   - any child change recomputes the parent (and so on up the tree)
+ *
+ * SR users hear the cascade scope as a count appended to the focused
+ * task's announce ("X erledigt. 4 weitere Aufgaben mit aktualisiert."),
+ * so it's clear that flipping one row touched several.
  */
 
 export interface TaskStatusActions {
@@ -40,33 +40,37 @@ export function useTaskStatusActions(): TaskStatusActions {
   const announce = useAnnouncer();
   const { t } = useTranslation();
   const { invalidateData } = useDialogState();
+  // The cascade planner needs the latest snapshot of every task so
+  // it can walk parents and siblings. `useTasks` returns the global
+  // store, refreshed whenever `dataVersion` bumps.
+  const { tasks } = useTasks();
 
-  // Shared write path. `set` does the real work; `toggle` is a thin
-  // wrapper that picks the next status. Keeping them on the same
-  // useCallback chain means a single allocation per render.
   const set = useCallback(
     async (task: Task, nextStatus: TaskStatus): Promise<void> => {
       if (task.status === nextStatus) return;
-      const updated: Task = {
-        ...task,
-        status: nextStatus,
-        completed_at:
-          nextStatus === 'completed' ? new Date().toISOString() : null,
-      };
+      const writes = planStatusCascade(task.id, nextStatus, tasks);
+      if (writes.length === 0) return;
       try {
-        await invoke<Task>('update_task', { task: updated });
+        await applyCascade(writes, tasks);
         invalidateData();
-        // Pick the announce flavour from the target state — the same
-        // strings the toggle path used historically. New keys cover
-        // the "in_progress" and "cancelled" cases the toggle path
-        // never produced.
-        announce(announceFor(t, nextStatus, task.title));
+        // Announce: focused task gets the usual status message; if
+        // additional rows were touched, append a count so SR users
+        // know they didn't change just one row.
+        const cascadeCount = writes.length - 1;
+        const base = announceFor(t, nextStatus, task.title);
+        announce(
+          cascadeCount > 0
+            ? `${base} ${t('views.tasks.cascadeSuffix', {
+                count: cascadeCount,
+              })}`
+            : base,
+        );
       } catch (err) {
         // eslint-disable-next-line no-console
         console.warn('update_task failed', err);
       }
     },
-    [announce, t, invalidateData],
+    [announce, t, invalidateData, tasks],
   );
 
   const toggle = useCallback(
@@ -90,6 +94,33 @@ export function useTaskStatusActions(): TaskStatusActions {
 export function useTaskStatusToggle(): (task: Task) => Promise<void> {
   const { toggle } = useTaskStatusActions();
   return toggle;
+}
+
+/**
+ * Apply each StatusWrite by issuing an `update_task` call. The
+ * snapshot is used to look up the unchanged fields of each task;
+ * only `status` and `completed_at` differ. Writes execute serially
+ * — a future Tauri-side batch command could collapse this into one
+ * transaction, but for typical task counts the serial path keeps
+ * the cascade local to one round-trip per row.
+ */
+async function applyCascade(
+  writes: StatusWrite[],
+  snapshot: Task[],
+): Promise<void> {
+  const byId = new Map(snapshot.map((row) => [row.id, row]));
+  for (const w of writes) {
+    const target = byId.get(w.taskId);
+    if (!target) continue;
+    await invoke<Task>('update_task', {
+      task: {
+        ...target,
+        status: w.status,
+        completed_at:
+          w.status === 'completed' ? new Date().toISOString() : null,
+      },
+    });
+  }
 }
 
 function announceFor(

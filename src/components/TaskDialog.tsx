@@ -27,7 +27,12 @@ import type {
 } from '../api/types';
 import { useCalendarStore } from '../state/CalendarStore';
 import { useDialogState } from '../state/DialogState';
+import {
+  planAncestorRecompute,
+  planStatusCascade,
+} from '../state/taskCascade';
 import { useTasks } from '../state/useTasks';
+import { useTaskStatusActions } from '../state/useTaskStatusToggle';
 import { Modal } from './Modal';
 import { RemindersEditor } from './RemindersEditor';
 import {
@@ -84,6 +89,11 @@ export function TaskDialog({
   const { taskLists, colorLabels } = useCalendarStore();
   const { tasks } = useTasks();
   const { invalidateData } = useDialogState();
+  // Shared status actions — they own the parent/subtask cascade
+  // (taskCascade.ts) and the SR announce. Used both for the listbox
+  // Space-toggle and the per-row context menu.
+  const { toggle: toggleSubtaskAction, set: setSubtaskAction } =
+    useTaskStatusActions();
 
   const isEdit = task !== null;
   // Subtask = a task that has a parent. The list dropdown locks
@@ -153,7 +163,7 @@ export function TaskDialog({
     if (!trimmed || subtaskBusy) return;
     setSubtaskBusy(true);
     try {
-      await apiCreateTask({
+      const created = await apiCreateTask({
         list_id: task.list_id,
         title: trimmed,
         description: null,
@@ -169,6 +179,15 @@ export function TaskDialog({
         reminders: [],
         sound: null,
       });
+      // Cascade-up: if the parent was completed before this new
+      // open child appeared, the parent should re-derive to
+      // in_progress (or open if no other progress exists). The
+      // snapshot we hand the planner has to *include* the freshly
+      // created row, since `tasks` is the pre-mutation cache.
+      await applyAncestorWrites(
+        planAncestorRecompute(task.id, [...tasks, created]),
+        [...tasks, created],
+      );
       setNewSubtaskTitle('');
       invalidateData();
       announce(t('dialogs.task.subtasks.added', { title: trimmed }));
@@ -180,34 +199,16 @@ export function TaskDialog({
     } finally {
       setSubtaskBusy(false);
     }
-  }, [task, newSubtaskTitle, subtaskBusy, invalidateData, announce, t]);
+  }, [task, newSubtaskTitle, subtaskBusy, invalidateData, announce, t, tasks]);
 
+  // Subtask status changes go through the shared hook — that gives
+  // us the same cascade (recompute parent, propagate further up) we
+  // get on every other task surface.
   const toggleSubtaskStatus = useCallback(
     async (subtask: Task) => {
-      const next: TaskStatus =
-        subtask.status === 'completed' ? 'open' : 'completed';
-      try {
-        await invoke<Task>('update_task', {
-          task: {
-            ...subtask,
-            status: next,
-            completed_at:
-              next === 'completed' ? new Date().toISOString() : null,
-          },
-        });
-        invalidateData();
-        announce(
-          next === 'completed'
-            ? t('views.tasks.completedAnnounce', { title: subtask.title })
-            : t('views.tasks.reopenedAnnounce', { title: subtask.title }),
-        );
-      } catch (err) {
-        announce(
-          isCommandError(err) ? `${err.code}: ${err.message}` : String(err),
-        );
-      }
+      await toggleSubtaskAction(subtask);
     },
-    [invalidateData, announce, t],
+    [toggleSubtaskAction],
   );
 
   const deleteSubtask = useCallback(
@@ -217,6 +218,17 @@ export function TaskDialog({
           id: subtask.id,
           listId: subtask.list_id,
         });
+        // Recompute ancestors against the post-deletion snapshot:
+        // removing the last open child should mark the parent
+        // completed (or whatever its other children imply).
+        const parentId = subtask.parent_id;
+        if (parentId) {
+          const snapshot = tasks.filter((row) => row.id !== subtask.id);
+          await applyAncestorWrites(
+            planAncestorRecompute(parentId, snapshot),
+            snapshot,
+          );
+        }
         invalidateData();
         announce(t('dialogs.task.deleted', { title: subtask.title }));
       } catch (err) {
@@ -225,29 +237,14 @@ export function TaskDialog({
         );
       }
     },
-    [invalidateData, announce, t],
+    [invalidateData, announce, t, tasks],
   );
 
   const setSubtaskStatus = useCallback(
     async (subtask: Task, next: TaskStatus) => {
-      if (subtask.status === next) return;
-      try {
-        await invoke<Task>('update_task', {
-          task: {
-            ...subtask,
-            status: next,
-            completed_at:
-              next === 'completed' ? new Date().toISOString() : null,
-          },
-        });
-        invalidateData();
-      } catch (err) {
-        announce(
-          isCommandError(err) ? `${err.code}: ${err.message}` : String(err),
-        );
-      }
+      await setSubtaskAction(subtask, next);
     },
-    [invalidateData, announce],
+    [setSubtaskAction],
   );
 
   // Per-subtask context menu (right-click + Shift+F10). Limited to
@@ -410,6 +407,24 @@ export function TaskDialog({
                 task: { ...child, list_id: form.listId },
               });
             }
+          }
+          // Status cascade: if the user changed the Status dropdown
+          // on the form, propagate the change through the family
+          // (cascade-down for completed/cancelled; cascade-up for
+          // every status). Skip the root write — we just did it
+          // above with the full field set. The snapshot we hand the
+          // planner reflects the *new* status so up-cascade reads
+          // a coherent state.
+          if (form.status !== task.status) {
+            const snapshot = tasks.map((row) =>
+              row.id === task.id ? { ...row, status: form.status } : row,
+            );
+            const cascadeWrites = planStatusCascade(
+              task.id,
+              form.status,
+              snapshot,
+            ).filter((w) => w.taskId !== task.id);
+            await applyAncestorWrites(cascadeWrites, snapshot);
           }
           announce(t('dialogs.task.updated', { title: trimmedTitle }));
         } else {
@@ -908,6 +923,32 @@ interface DeadlineFields {
  * even though the UI doesn't currently encourage trees beyond two
  * levels.
  */
+/**
+ * Apply a list of ancestor recompute writes — flips the `status` and
+ * `completed_at` of each affected task. The cascade planner produces
+ * the writes; this helper just executes them. Iterates the snapshot
+ * so each Task object stays canonical (we only change two fields).
+ */
+async function applyAncestorWrites(
+  writes: { taskId: string; status: TaskStatus }[],
+  snapshot: Task[],
+): Promise<void> {
+  if (writes.length === 0) return;
+  const byId = new Map(snapshot.map((row) => [row.id, row]));
+  for (const w of writes) {
+    const target = byId.get(w.taskId);
+    if (!target) continue;
+    await invoke<Task>('update_task', {
+      task: {
+        ...target,
+        status: w.status,
+        completed_at:
+          w.status === 'completed' ? new Date().toISOString() : null,
+      },
+    });
+  }
+}
+
 function collectDescendants(parentId: string, all: Task[]): Task[] {
   const out: Task[] = [];
   const stack: string[] = [parentId];
