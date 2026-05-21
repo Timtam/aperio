@@ -43,7 +43,8 @@ export type DialogMode =
   | { kind: 'reminders' }
   | { kind: 'accounts' }
   | { kind: 'moveCopy'; target: MoveCopyTarget }
-  | { kind: 'planTask'; task: Task };
+  | { kind: 'planTask'; task: Task }
+  | { kind: 'missedTasks' };
 
 /**
  * Optional context the caller can pass when opening a *create* dialog
@@ -75,6 +76,7 @@ interface DialogStateValue {
   openAccounts: () => void;
   openMoveCopy: (target: MoveCopyTarget) => void;
   openPlanTask: (task: Task) => void;
+  openMissedTasks: () => void;
   close: () => void;
   /**
    * Counter that bumps whenever data on the wire might have changed.
@@ -189,6 +191,10 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     (task: Task) => push({ kind: 'planTask', task }),
     [push],
   );
+  const openMissedTasks = useCallback(
+    () => push({ kind: 'missedTasks' }),
+    [push],
+  );
 
   const close = useCallback(() => {
     const target = triggerStackRef.current.pop() ?? null;
@@ -238,6 +244,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openAccounts,
       openMoveCopy,
       openPlanTask,
+      openMissedTasks,
       close,
       dataVersion,
       invalidateData,
@@ -253,6 +260,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openAccounts,
       openMoveCopy,
       openPlanTask,
+      openMissedTasks,
       close,
       dataVersion,
       invalidateData,

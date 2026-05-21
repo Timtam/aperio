@@ -2,6 +2,7 @@ import { useDialogState } from '../state/DialogState';
 import { AccountsDialog } from './AccountsDialog';
 import { ColorLabelDialog } from './ColorLabelDialog';
 import { EventDialog } from './EventDialog';
+import { MissedTasksDialog } from './MissedTasksDialog';
 import { MoveCopyDialog } from './MoveCopyDialog';
 import { PlanTaskDialog } from './PlanTaskDialog';
 import { QuickAddDialog } from './QuickAddDialog';
@@ -61,6 +62,8 @@ export function DialogHost() {
           onPlanned={invalidateData}
         />
       );
+    case 'missedTasks':
+      return <MissedTasksDialog isOpen onClose={close} />;
     case 'none':
     default:
       return null;

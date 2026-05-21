@@ -88,6 +88,20 @@
       "plannedAnnouncement": "„{{title}}\" auf {{date}} gelegt.",
       "backloggedAnnouncement": "„{{title}}\" zurück in den Backlog verschoben."
     },
+    "missedTasks": {
+      "title": "Nicht erledigte Aufgaben",
+      "hint": "Diese Aufgaben hatten eine Deadline vor heute und sind noch offen. Entscheide pro Aufgabe oder nutze die Aktionen unten.",
+      "listLabel": "Überfällige Aufgaben",
+      "deadlineLabel": "Deadline war am {{date}}",
+      "completed": "Erledigt",
+      "backToBacklog": "Zurück in Backlog",
+      "completeAll": "Alle erledigt",
+      "snooze": "Später erinnern",
+      "allHandled": "Alle überfälligen Aufgaben bearbeitet.",
+      "snoozed": "Erinnerung für 4 Stunden verschoben.",
+      "allCompleted_one": "1 Aufgabe als erledigt markiert.",
+      "allCompleted_other": "{{count}} Aufgaben als erledigt markiert."
+    },
     "deleteScope": {
       "title": "Serientermin löschen",
       "message": "„{{title}}\" ist Teil einer Serie. Nur diesen Termin oder die ganze Serie löschen?",

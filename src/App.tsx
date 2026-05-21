@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { AnnouncerProvider } from './a11y/Announcer';
 import { DialogHost } from './components/DialogHost';
 import { FocusBar } from './components/FocusBar';
+import { MissedTasksChecker } from './components/MissedTasksChecker';
 import { Sidebar } from './components/Sidebar';
 import { TitleBar } from './components/TitleBar';
 import { Toolbar } from './components/Toolbar';
@@ -49,6 +50,11 @@ export function App() {
             <DialogStateProvider>
               <Shell />
               <DialogHost />
+              {/* Mount-once gate that pushes the missed-tasks dialog
+                  on startup if anything overdue is sitting unhandled.
+                  Renders nothing itself; the dialog lands via
+                  DialogHost like every other modal. */}
+              <MissedTasksChecker />
             </DialogStateProvider>
           </ViewStateProvider>
         </CalendarStoreProvider>

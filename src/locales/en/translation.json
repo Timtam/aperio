@@ -91,6 +91,20 @@
       "plannedAnnouncement": "Scheduled \"{{title}}\" for {{date}}.",
       "backloggedAnnouncement": "Moved \"{{title}}\" back to the backlog."
     },
+    "missedTasks": {
+      "title": "Tasks past deadline",
+      "hint": "These tasks had a deadline before today and are still open. Decide per task or use the actions below.",
+      "listLabel": "Overdue tasks",
+      "deadlineLabel": "Deadline was {{date}}",
+      "completed": "Mark done",
+      "backToBacklog": "Back to backlog",
+      "completeAll": "Mark all done",
+      "snooze": "Remind me later",
+      "allHandled": "All overdue tasks handled.",
+      "snoozed": "Reminder snoozed for 4 hours.",
+      "allCompleted_one": "Marked 1 task as done.",
+      "allCompleted_other": "Marked {{count}} tasks as done."
+    },
     "deleteScope": {
       "title": "Delete recurring event",
       "message": "\"{{title}}\" is part of a series. Delete just this occurrence, or the whole series?",
