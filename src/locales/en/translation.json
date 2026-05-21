@@ -179,6 +179,10 @@
       "autoSentToBacklog_one": "1 task automatically sent to backlog.",
       "autoSentToBacklog_other": "{{count}} tasks automatically sent to backlog."
     },
+    "deadlinePin": {
+      "announce_one": "1 task reached its deadline today and was pinned to today.",
+      "announce_other": "{{count}} tasks reached their deadline today and were pinned to today."
+    },
     "deleteScope": {
       "title": "Delete recurring event",
       "message": "\"{{title}}\" is part of a series. Delete just this occurrence, or the whole series?",

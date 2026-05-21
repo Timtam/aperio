@@ -176,6 +176,10 @@
       "autoSentToBacklog_one": "1 Aufgabe automatisch ins Backlog verschoben.",
       "autoSentToBacklog_other": "{{count}} Aufgaben automatisch ins Backlog verschoben."
     },
+    "deadlinePin": {
+      "announce_one": "1 Aufgabe hat heute ihre Deadline und wurde auf heute eingeplant.",
+      "announce_other": "{{count}} Aufgaben haben heute ihre Deadline und wurden auf heute eingeplant."
+    },
     "deleteScope": {
       "title": "Serientermin löschen",
       "message": "„{{title}}\" ist Teil einer Serie. Nur diesen Termin oder die ganze Serie löschen?",

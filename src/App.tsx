@@ -2,6 +2,7 @@ import { useTranslation } from 'react-i18next';
 
 import { AnnouncerProvider } from './a11y/Announcer';
 import { CarryOverChecker } from './components/CarryOverChecker';
+import { DeadlinePinChecker } from './components/DeadlinePinChecker';
 import { DialogHost } from './components/DialogHost';
 import { FocusBar } from './components/FocusBar';
 import { MissedTasksChecker } from './components/MissedTasksChecker';
@@ -56,18 +57,26 @@ export function App() {
               <TaskCascadeProvider>
                 <Shell />
                 <DialogHost />
-                {/* Mount-once gates that push the day-start review
-                    dialogs. Both render nothing themselves; the
-                    dialogs live in DialogHost.
+                {/* Mount-once gates that run the day-start review
+                    flows. All three render nothing themselves.
 
-                    Order matters: CarryOverChecker mounts first and
-                    pushes the carry-over dialog onto the dialog
-                    stack. MissedTasksChecker mounts second and
-                    pushes the (more urgent) deadline-overrun dialog
-                    on top. The user dismisses deadlines first, then
-                    sees the carry-over prompt underneath. */}
+                    Order matters:
+                      - CarryOverChecker mounts first and pushes the
+                        carry-over dialog onto the dialog stack (or
+                        runs its silent batch when configured for
+                        auto-today / auto-backlog).
+                      - MissedTasksChecker mounts second and pushes
+                        the (more urgent) deadline-overrun dialog on
+                        top of carry-over. The user dismisses
+                        deadlines first, then sees carry-over.
+                      - DeadlinePinChecker mounts LAST so it has the
+                        final write. It silently pins every task with
+                        `deadline_date == today` to today, taking
+                        precedence over whatever carry-over wrote a
+                        moment earlier. */}
                 <CarryOverChecker />
                 <MissedTasksChecker />
+                <DeadlinePinChecker />
               </TaskCascadeProvider>
             </DialogStateProvider>
           </ViewStateProvider>
