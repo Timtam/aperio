@@ -1,4 +1,5 @@
 import { useDialogState } from '../state/DialogState';
+import { CarryOverDialog } from './CarryOverDialog';
 import { EventDialog } from './EventDialog';
 import { MissedTasksDialog } from './MissedTasksDialog';
 import { MoveCopyDialog } from './MoveCopyDialog';
@@ -67,6 +68,8 @@ export function DialogHost() {
       );
     case 'missedTasks':
       return <MissedTasksDialog isOpen onClose={close} />;
+    case 'carryOver':
+      return <CarryOverDialog isOpen onClose={close} />;
     case 'none':
     default:
       return null;

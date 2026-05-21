@@ -134,6 +134,33 @@
       "allCompleted_one": "Marked 1 task as done.",
       "allCompleted_other": "Marked {{count}} tasks as done."
     },
+    "carryOver": {
+      "title": "Tasks from earlier",
+      "hint": "These tasks were scheduled for an earlier day and are still open. Decide per task or use the actions below.",
+      "listLabel": "Carry-over tasks",
+      "scheduledLabel": "Was scheduled for {{date}}",
+      "actions": {
+        "today": "Today",
+        "tomorrow": "Tomorrow",
+        "backlog": "Backlog",
+        "done": "Done"
+      },
+      "bulk": {
+        "allToday": "All to today",
+        "allBacklog": "All to backlog"
+      },
+      "snooze": "Remind me later",
+      "snoozed": "Reminder snoozed for 4 hours.",
+      "allHandled": "All carry-over tasks handled.",
+      "carriedToday": "\"{{title}}\" moved to today.",
+      "carriedTomorrow": "\"{{title}}\" moved to tomorrow.",
+      "sentToBacklog": "\"{{title}}\" sent to backlog.",
+      "completed": "\"{{title}}\" marked as done.",
+      "allCarriedToday_one": "Moved 1 task to today.",
+      "allCarriedToday_other": "Moved {{count}} tasks to today.",
+      "allSentToBacklog_one": "Sent 1 task to backlog.",
+      "allSentToBacklog_other": "Sent {{count}} tasks to backlog."
+    },
     "deleteScope": {
       "title": "Delete recurring event",
       "message": "\"{{title}}\" is part of a series. Delete just this occurrence, or the whole series?",

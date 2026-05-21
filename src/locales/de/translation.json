@@ -131,6 +131,33 @@
       "allCompleted_one": "1 Aufgabe als erledigt markiert.",
       "allCompleted_other": "{{count}} Aufgaben als erledigt markiert."
     },
+    "carryOver": {
+      "title": "Aufgaben vom Vortag",
+      "hint": "Diese Aufgaben waren für einen früheren Tag eingeplant und sind noch offen. Entscheide pro Aufgabe oder nutze die Aktionen unten.",
+      "listLabel": "Mitzunehmende Aufgaben",
+      "scheduledLabel": "Eingeplant für {{date}}",
+      "actions": {
+        "today": "Heute",
+        "tomorrow": "Morgen",
+        "backlog": "Backlog",
+        "done": "Erledigt"
+      },
+      "bulk": {
+        "allToday": "Alle auf heute",
+        "allBacklog": "Alle in Backlog"
+      },
+      "snooze": "Später erinnern",
+      "snoozed": "Erinnerung für 4 Stunden verschoben.",
+      "allHandled": "Alle Aufgaben bearbeitet.",
+      "carriedToday": "„{{title}}\" auf heute übernommen.",
+      "carriedTomorrow": "„{{title}}\" auf morgen übernommen.",
+      "sentToBacklog": "„{{title}}\" zurück ins Backlog.",
+      "completed": "„{{title}}\" als erledigt markiert.",
+      "allCarriedToday_one": "1 Aufgabe auf heute übernommen.",
+      "allCarriedToday_other": "{{count}} Aufgaben auf heute übernommen.",
+      "allSentToBacklog_one": "1 Aufgabe zurück ins Backlog.",
+      "allSentToBacklog_other": "{{count}} Aufgaben zurück ins Backlog."
+    },
     "deleteScope": {
       "title": "Serientermin löschen",
       "message": "„{{title}}\" ist Teil einer Serie. Nur diesen Termin oder die ganze Serie löschen?",

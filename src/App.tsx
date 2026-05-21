@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next';
 
 import { AnnouncerProvider } from './a11y/Announcer';
+import { CarryOverChecker } from './components/CarryOverChecker';
 import { DialogHost } from './components/DialogHost';
 import { FocusBar } from './components/FocusBar';
 import { MissedTasksChecker } from './components/MissedTasksChecker';
@@ -55,10 +56,17 @@ export function App() {
               <TaskCascadeProvider>
                 <Shell />
                 <DialogHost />
-                {/* Mount-once gate that pushes the missed-tasks dialog
-                    on startup if anything overdue is sitting unhandled.
-                    Renders nothing itself; the dialog lands via
-                    DialogHost like every other modal. */}
+                {/* Mount-once gates that push the day-start review
+                    dialogs. Both render nothing themselves; the
+                    dialogs live in DialogHost.
+
+                    Order matters: CarryOverChecker mounts first and
+                    pushes the carry-over dialog onto the dialog
+                    stack. MissedTasksChecker mounts second and
+                    pushes the (more urgent) deadline-overrun dialog
+                    on top. The user dismisses deadlines first, then
+                    sees the carry-over prompt underneath. */}
+                <CarryOverChecker />
                 <MissedTasksChecker />
               </TaskCascadeProvider>
             </DialogStateProvider>
