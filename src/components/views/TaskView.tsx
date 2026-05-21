@@ -311,7 +311,7 @@ export function TaskView() {
 
       <ul
         ref={listRef}
-        role="listbox"
+        role="tree"
         tabIndex={0}
         aria-label={t('views.tasks.taskList')}
         aria-activedescendant={
@@ -320,6 +320,16 @@ export function TaskView() {
         onKeyDown={handleKeyDown}
         className="task-list"
       >
+        {/* Real W3C tree — role=tree on the container, role=treeitem
+            on each row, and a nested role=group for the children of
+            every expanded parent. The flat `entries` array (DFS-
+            ordered) still drives keyboard nav and focus indexing via
+            `flatTasks`; the recursive render builds the matching DOM
+            hierarchy so AT actually announces "level 2, expanded,
+            3 children" instead of "option 5 of 12" with invisible
+            aria-level attributes. Parent toggle is intentionally
+            isolated — Space on a parent flips its own status only,
+            children keep theirs. */}
         {flatTasks.length === 0 && (
           <li role="presentation" className="task-list__empty">
             {t('views.tasks.empty')}
@@ -338,119 +348,26 @@ export function TaskView() {
               </li>
             );
           }
-          if (entry.hidden) return null;
-          const { task, listName, index, depth, hasChildren } = entry;
-          const focused = index === focusIndex;
-          const isCollapsed = collapsed.has(task.id);
-          // All four TaskStatus values must surface — `cancelled` and
-          // `in_progress` reach the list via the chip context menu's
-          // Status submenu, and before this branch they were both
-          // rendering as ☐ "open" because the only check was
-          // `status === 'completed'`. The marker, the row state
-          // class, and the SR label all key off the same status
-          // value so they can never disagree.
-          const due = describeDue(task, fmt, t);
-          const color = resolveTaskColor(task, taskListById, labelById);
-          const marker = statusMarker(task.status);
-          const stateLabel = t(statusI18nKey(task.status));
-          // Color label is purely visual (it tints the row's accent
-          // strip) — keeping it out of the aria-label spares the SR
-          // user the redundant noise. Subtask progress is the
-          // opposite: it's a real signal that doesn't fit the visible
-          // row at a glance, so SR users get it as a word suffix
-          // and sighted users get a tiny "1/3" badge between title
-          // and due.
-          const progress = subtaskProgress(task.id, tasks);
-          const aria = t('views.tasks.optionLabel', {
-            title: task.title,
-            list: listName,
-            state: stateLabel,
-            progress: subtaskProgressSuffix(t, task.id, tasks),
-            due,
+          // Children are rendered by their parent's recursive call
+          // (the parent emits a <ul role="group"> below). The
+          // top-level iteration only handles depth-0 tasks plus the
+          // separator headings between them.
+          if (entry.depth > 0) return null;
+          return renderTreeItem(entry, {
+            t,
+            fmt,
+            entries,
+            tasks,
+            taskListById,
+            labelById,
+            collapsed,
+            toggleCollapsed,
+            focusIndex,
+            setFocusIndex,
+            toggleStatus,
+            openTaskMenu,
+            itemId,
           });
-          return (
-            <li
-              key={task.id}
-              id={itemId(index)}
-              role="option"
-              aria-selected={focused}
-              aria-label={aria}
-              aria-level={depth + 1}
-              aria-expanded={hasChildren ? !isCollapsed : undefined}
-              className={
-                'task-list__item' +
-                (focused ? ' task-list__item--focused' : '') +
-                ` task-list__item--${task.status.replace('_', '-')}` +
-                (depth > 0 ? ' task-list__item--child' : '')
-              }
-              style={
-                {
-                  ...(color.hex
-                    ? { '--event-color': color.hex }
-                    : {}),
-                  // Indentation per depth — driven by a custom prop so
-                  // the rest of the grid columns (check / title / due)
-                  // keep their alignment. CSS picks `--task-depth`
-                  // up via padding-left on `--child` rows.
-                  '--task-depth': depth,
-                } as React.CSSProperties
-              }
-              onClick={() => {
-                setFocusIndex(index);
-                void toggleStatus(task);
-              }}
-              onContextMenu={(ev) => {
-                ev.preventDefault();
-                ev.stopPropagation();
-                setFocusIndex(index);
-                void openTaskMenu(task);
-              }}
-            >
-              {hasChildren ? (
-                <button
-                  type="button"
-                  className="task-list__twisty"
-                  aria-label={t(
-                    isCollapsed
-                      ? 'views.tasks.expand'
-                      : 'views.tasks.collapse',
-                    { title: task.title },
-                  )}
-                  // Clicking the twisty is its own action — stop
-                  // propagation so the row's onClick (toggle status)
-                  // doesn't also fire.
-                  onClick={(ev) => {
-                    ev.stopPropagation();
-                    toggleCollapsed(task.id);
-                  }}
-                >
-                  <span aria-hidden="true">{isCollapsed ? '▸' : '▾'}</span>
-                </button>
-              ) : (
-                // Empty cell keeps the grid columns aligned across
-                // rows with and without children.
-                <span aria-hidden="true" className="task-list__twisty-spacer" />
-              )}
-              <span className="task-list__check" aria-hidden="true">
-                {marker}
-              </span>
-              <span className="task-list__title">{task.title}</span>
-              {progress && (
-                /* Visible badge for sighted users — "1/3". SR users
-                 * hear the same fact via the optionLabel suffix, so
-                 * the badge itself is aria-hidden to avoid a double
-                 * read. */
-                <span
-                  className="task-list__progress"
-                  aria-hidden="true"
-                  title={t('views.tasks.subtaskProgressBadgeAria', progress)}
-                >
-                  {t('views.tasks.subtaskProgressBadge', progress)}
-                </span>
-              )}
-              <span className="task-list__due">{due}</span>
-            </li>
-          );
         })}
       </ul>
 
@@ -566,6 +483,167 @@ function buildEntries(
   });
 
   return { entries, flatTasks };
+}
+
+/**
+ * Render context for the recursive `renderTreeItem` walker. All
+ * the data + callbacks the tree needs travel as a single object so
+ * we don't thread two dozen positional arguments through the
+ * recursion. The shape stays internal to this module — exporting
+ * it would be a noise tax on the rest of the app.
+ */
+interface RenderTreeCtx {
+  t: (key: string, vars?: Record<string, unknown>) => string;
+  fmt: ReturnType<typeof useDateFormat>;
+  entries: Entry[];
+  tasks: Task[];
+  taskListById: Map<string, import('../../api/types').TaskList>;
+  labelById: Map<string, import('../../api/types').ColorLabel>;
+  collapsed: Set<string>;
+  toggleCollapsed: (id: string) => void;
+  focusIndex: number;
+  setFocusIndex: (i: number) => void;
+  toggleStatus: (task: Task) => Promise<void> | void;
+  openTaskMenu: (task: Task) => Promise<void> | void;
+  itemId: (i: number) => string;
+}
+
+/**
+ * Render one node in the task tree, recursing into a nested
+ * `<ul role="group">` when the node is an expanded parent. The DOM
+ * mirrors the ARIA pattern: each `<li role="treeitem">` owns its
+ * own group, which AT announces as "expanded, N items".
+ */
+function renderTreeItem(
+  entry: Extract<Entry, { kind: 'task' }>,
+  ctx: RenderTreeCtx,
+): JSX.Element {
+  const {
+    t,
+    fmt,
+    entries,
+    tasks,
+    taskListById,
+    labelById,
+    collapsed,
+    toggleCollapsed,
+    focusIndex,
+    setFocusIndex,
+    toggleStatus,
+    openTaskMenu,
+    itemId,
+  } = ctx;
+  const { task, listName, index, depth, hasChildren } = entry;
+  const focused = index === focusIndex;
+  const isCollapsed = collapsed.has(task.id);
+  // Direct children (depth+1, same parent_id) — discovered via the
+  // entries array so we don't have to maintain a separate children
+  // map. `entries` is DFS-ordered, so the immediate children sit
+  // between this entry and the next entry of equal-or-shallower
+  // depth.
+  const children: Extract<Entry, { kind: 'task' }>[] = [];
+  const myIdx = entries.indexOf(entry);
+  for (let i = myIdx + 1; i < entries.length; i++) {
+    const e = entries[i];
+    if (e.kind === 'separator') break;
+    if (e.depth <= depth) break;
+    if (e.depth === depth + 1) children.push(e);
+  }
+
+  const due = describeDue(task, fmt, t);
+  const color = resolveTaskColor(task, taskListById, labelById);
+  const marker = statusMarker(task.status);
+  const stateLabel = t(statusI18nKey(task.status));
+  const progress = subtaskProgress(task.id, tasks);
+  const aria = t('views.tasks.optionLabel', {
+    title: task.title,
+    list: listName,
+    state: stateLabel,
+    progress: subtaskProgressSuffix(t, task.id, tasks),
+    due,
+  });
+  return (
+    <li
+      key={task.id}
+      id={itemId(index)}
+      role="treeitem"
+      aria-selected={focused}
+      aria-label={aria}
+      aria-level={depth + 1}
+      aria-expanded={hasChildren ? !isCollapsed : undefined}
+      className={
+        'task-list__item' +
+        (focused ? ' task-list__item--focused' : '') +
+        ` task-list__item--${task.status.replace('_', '-')}` +
+        (depth > 0 ? ' task-list__item--child' : '')
+      }
+      style={
+        {
+          ...(color.hex ? { '--event-color': color.hex } : {}),
+          // Indentation per depth — driven by a custom prop so the
+          // rest of the grid columns (check / title / progress / due)
+          // keep their alignment.
+          '--task-depth': depth,
+        } as React.CSSProperties
+      }
+      onClick={() => {
+        setFocusIndex(index);
+        void toggleStatus(task);
+      }}
+      onContextMenu={(ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        setFocusIndex(index);
+        void openTaskMenu(task);
+      }}
+    >
+      {hasChildren ? (
+        <button
+          type="button"
+          className="task-list__twisty"
+          aria-label={t(
+            isCollapsed ? 'views.tasks.expand' : 'views.tasks.collapse',
+            { title: task.title },
+          )}
+          // Clicking the twisty is its own action — stop propagation
+          // so the row's onClick (toggle status) doesn't also fire.
+          onClick={(ev) => {
+            ev.stopPropagation();
+            toggleCollapsed(task.id);
+          }}
+        >
+          <span aria-hidden="true">{isCollapsed ? '▸' : '▾'}</span>
+        </button>
+      ) : (
+        <span aria-hidden="true" className="task-list__twisty-spacer" />
+      )}
+      <span className="task-list__check" aria-hidden="true">
+        {marker}
+      </span>
+      <span className="task-list__title">{task.title}</span>
+      {progress && (
+        <span
+          className="task-list__progress"
+          aria-hidden="true"
+          title={t('views.tasks.subtaskProgressBadgeAria', progress)}
+        >
+          {t('views.tasks.subtaskProgressBadge', progress)}
+        </span>
+      )}
+      <span className="task-list__due">{due}</span>
+      {hasChildren && !isCollapsed && (
+        // Nested ARIA group. AT announces this as "group, N items".
+        // Hidden completely (not just CSS-hidden) when collapsed so
+        // the tree doesn't claim items the user can't reach. The
+        // flat focus index still tracks children — clamp effect
+        // pulls focus up if the user collapses while a child is
+        // focused.
+        <ul role="group" className="task-list__group-children">
+          {children.map((child) => renderTreeItem(child, ctx))}
+        </ul>
+      )}
+    </li>
+  );
 }
 
 /** Find the task entry at flat-task position `index`, ignoring

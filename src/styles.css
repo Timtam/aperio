@@ -2171,6 +2171,18 @@ button[aria-disabled='true'] {
   background: color-mix(in srgb, var(--color-fg) 2%, transparent);
 }
 
+/* Nested ARIA group containing a parent treeitem's children. The
+ * tree's outer <ul> already supplies the visible layout (each <li
+ * role="treeitem"> draws its own row chrome); the inner <ul
+ * role="group"> is mostly a structural / semantic wrapper that AT
+ * uses to announce "level 2, group of N items". Strip the default
+ * list margins so children sit flush under the parent row. */
+.task-list__group-children {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
 .task-list__item--focused {
   outline: 2px solid var(--color-accent);
   outline-offset: -1px;
