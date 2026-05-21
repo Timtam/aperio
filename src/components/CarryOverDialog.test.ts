@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 
 import type { Task } from '../api/types';
-import { filterCarriedOver } from './CarryOverDialog';
+import { actionableDescendants, filterCarriedOver } from './CarryOverDialog';
 
 const baseTask: Task = {
   id: 't1',
@@ -96,9 +96,10 @@ describe('filterCarriedOver', () => {
     expect(filterCarriedOver(tasks).map((t) => t.id)).toEqual(['a']);
   });
 
-  it('includes subtasks that have slipped on their own', () => {
+  it('includes subtasks that have slipped on their own (cascade off)', () => {
     // Per-task filter — scheduled_date never cascades, so subtasks
-    // appear in the list independently of their parents.
+    // appear in the list independently of their parents when the
+    // user opted out of status-coupling.
     const tasks: Task[] = [
       {
         ...baseTask,
@@ -113,5 +114,117 @@ describe('filterCarriedOver', () => {
       },
     ];
     expect(filterCarriedOver(tasks).map((t) => t.id)).toEqual(['child']);
+  });
+});
+
+describe('filterCarriedOver — cascade-coupling honoured', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 4, 20, 12, 0, 0));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('hides slipped subtasks whose parent is also slipped', () => {
+    const tasks: Task[] = [
+      { ...baseTask, id: 'parent', scheduled_date: '2026-05-19' },
+      {
+        ...baseTask,
+        id: 'child',
+        parent_id: 'parent',
+        scheduled_date: '2026-05-19',
+      },
+    ];
+    expect(
+      filterCarriedOver(tasks, { cascadeEnabled: true }).map((t) => t.id),
+    ).toEqual(['parent']);
+  });
+
+  it('keeps a slipped subtask whose parent is not slipped', () => {
+    const tasks: Task[] = [
+      { ...baseTask, id: 'parent', scheduled_date: null },
+      {
+        ...baseTask,
+        id: 'child',
+        parent_id: 'parent',
+        scheduled_date: '2026-05-19',
+      },
+    ];
+    expect(
+      filterCarriedOver(tasks, { cascadeEnabled: true }).map((t) => t.id),
+    ).toEqual(['child']);
+  });
+
+  it('hides slipped grandchildren when the grandparent is also slipped', () => {
+    const tasks: Task[] = [
+      { ...baseTask, id: 'g', scheduled_date: '2026-05-19' },
+      {
+        ...baseTask,
+        id: 'p',
+        parent_id: 'g',
+        scheduled_date: '2026-05-19',
+      },
+      {
+        ...baseTask,
+        id: 'c',
+        parent_id: 'p',
+        scheduled_date: '2026-05-19',
+      },
+    ];
+    expect(
+      filterCarriedOver(tasks, { cascadeEnabled: true }).map((t) => t.id),
+    ).toEqual(['g']);
+  });
+
+  it('cascade-off matches the parameterless behaviour', () => {
+    const tasks: Task[] = [
+      { ...baseTask, id: 'parent', scheduled_date: '2026-05-19' },
+      {
+        ...baseTask,
+        id: 'child',
+        parent_id: 'parent',
+        scheduled_date: '2026-05-19',
+      },
+    ];
+    expect(
+      filterCarriedOver(tasks, { cascadeEnabled: false }).map((t) => t.id),
+    ).toEqual(filterCarriedOver(tasks).map((t) => t.id));
+  });
+});
+
+describe('actionableDescendants', () => {
+  it('collects open and in_progress descendants recursively', () => {
+    const tasks: Task[] = [
+      { ...baseTask, id: 'p' },
+      { ...baseTask, id: 'a', parent_id: 'p', status: 'open' },
+      { ...baseTask, id: 'b', parent_id: 'p', status: 'in_progress' },
+      { ...baseTask, id: 'c', parent_id: 'a', status: 'open' },
+    ];
+    expect(actionableDescendants('p', tasks).map((t) => t.id).sort()).toEqual(
+      ['a', 'b', 'c'].sort(),
+    );
+  });
+
+  it('skips completed and cancelled descendants', () => {
+    const tasks: Task[] = [
+      { ...baseTask, id: 'p' },
+      { ...baseTask, id: 'a', parent_id: 'p', status: 'completed' },
+      { ...baseTask, id: 'b', parent_id: 'p', status: 'cancelled' },
+    ];
+    expect(actionableDescendants('p', tasks)).toEqual([]);
+  });
+
+  it('still traverses through a settled middle node to reach open leaves', () => {
+    // A completed middle child shouldn't itself be a cascade target,
+    // but its open grandchildren still should be — we don't want a
+    // stale completion in the middle of the tree to orphan live
+    // descendants.
+    const tasks: Task[] = [
+      { ...baseTask, id: 'p' },
+      { ...baseTask, id: 'm', parent_id: 'p', status: 'completed' },
+      { ...baseTask, id: 'leaf', parent_id: 'm', status: 'open' },
+    ];
+    expect(actionableDescendants('p', tasks).map((t) => t.id)).toEqual(['leaf']);
   });
 });
