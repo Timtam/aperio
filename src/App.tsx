@@ -83,7 +83,18 @@ function Shell() {
         <div className="app-main" data-region="main">
           <Toolbar />
           <FocusBar />
-          <ActiveView />
+          {/* Programmatic focus target for "land here after a
+              transient mode exits" (e.g. closing the focus banner).
+              tabIndex=-1 keeps it out of normal Tab order but lets
+              .focus() succeed; views inside can still own their own
+              tab stops. */}
+          <div
+            className="app-active-view"
+            data-active-view-root
+            tabIndex={-1}
+          >
+            <ActiveView />
+          </div>
         </div>
       </div>
     </div>

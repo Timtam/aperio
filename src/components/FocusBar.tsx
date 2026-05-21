@@ -36,6 +36,33 @@ export function FocusBar() {
     : null;
   const displayName = focusedCalendar?.name ?? '';
 
+  // Single exit handler shared by the click button, Escape, and the
+  // auto-exit when the focused calendar disappears. Beyond clearing
+  // the focused id and announcing, it also moves keyboard / SR focus
+  // onto the active view's wrapper — without this, clicking the
+  // exit button leaves focus on a node that's about to unmount, and
+  // focus falls back to <body>. Screen-reader users would then have
+  // no context for where they are.
+  const exitAndRestoreFocus = useCallback(() => {
+    exitFocus();
+    announce(t('sidebar.focus.exitedAnnouncement'));
+    // Defer past React's commit so we focus *after* the FocusBar has
+    // unmounted; otherwise the focused element is gone before the
+    // browser settles on a default fallback.
+    requestAnimationFrame(() => {
+      const root = document.querySelector(
+        '[data-active-view-root]',
+      ) as HTMLElement | null;
+      if (!root) return;
+      // Prefer the first natively-focusable descendant of the view
+      // (a button, a tabbable grid cell) so the user lands on
+      // something interactive. Fall back to the wrapper itself (it
+      // carries tabIndex=-1 for exactly this case).
+      const target = findFirstFocusable(root) ?? root;
+      target.focus({ preventScroll: true });
+    });
+  }, [exitFocus, announce, t]);
+
   // Global Escape handler. Yields to any open modal (a modal's own
   // close-on-Escape would otherwise be eaten). `useEffect` (not
   // `useLayoutEffect`) is correct: the listener attaches after the
@@ -54,10 +81,9 @@ export function FocusBar() {
         }
       }
       e.preventDefault();
-      exitFocus();
-      announce(t('sidebar.focus.exitedAnnouncement'));
+      exitAndRestoreFocus();
     },
-    [dialogMode, exitFocus, announce, t],
+    [dialogMode, exitAndRestoreFocus],
   );
 
   useEffect(() => {
@@ -75,10 +101,9 @@ export function FocusBar() {
     if (calendars.length === 0) return;
     const stillThere = calendars.some((c) => c.id === focusedCalendarId);
     if (!stillThere) {
-      exitFocus();
-      announce(t('sidebar.focus.exitedAnnouncement'));
+      exitAndRestoreFocus();
     }
-  }, [focusedCalendarId, calendars, exitFocus, announce, t]);
+  }, [focusedCalendarId, calendars, exitAndRestoreFocus]);
 
   if (!focusedCalendarId) return null;
 
@@ -96,13 +121,28 @@ export function FocusBar() {
       <button
         type="button"
         className="focus-bar__exit"
-        onClick={() => {
-          exitFocus();
-          announce(t('sidebar.focus.exitedAnnouncement'));
-        }}
+        onClick={exitAndRestoreFocus}
       >
         {t('sidebar.focus.exit')}
       </button>
     </div>
   );
+}
+
+/**
+ * Find the first natively-focusable descendant of `root`. Matches
+ * the same heuristic `useRegionFocus` uses for F6 navigation —
+ * buttons, links, form controls, and anything with a non-negative
+ * tabindex. Excludes disabled and aria-hidden nodes.
+ */
+function findFirstFocusable(root: HTMLElement): HTMLElement | null {
+  const candidates = root.querySelectorAll<HTMLElement>(
+    'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+  );
+  for (const el of candidates) {
+    if (el.hasAttribute('disabled')) continue;
+    if (el.getAttribute('aria-hidden') === 'true') continue;
+    return el;
+  }
+  return null;
 }
