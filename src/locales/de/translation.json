@@ -516,9 +516,7 @@
       "taskChipBy": "Aufgabe: {{title}}, fällig bis {{deadline}}, {{state}}",
       "taskChipByWithLabel": "Aufgabe: {{title}}, fällig bis {{deadline}}, Label: {{label}}, {{state}}",
       "taskChipTimed": "Aufgabe: {{title}}, {{time}}, {{state}}",
-      "taskChipTimedWithLabel": "Aufgabe: {{title}}, {{time}}, Label: {{label}}, {{state}}",
-      "taskStateDone": "erledigt",
-      "taskStateOpen": "offen"
+      "taskChipTimedWithLabel": "Aufgabe: {{title}}, {{time}}, Label: {{label}}, {{state}}"
     },
     "day": {
       "timeGrid": "Zeitraster",

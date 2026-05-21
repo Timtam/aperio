@@ -14,12 +14,13 @@ import { useAutoFocus } from '../../hooks/useAutoFocus';
 import { useDeferredLoading } from '../../hooks/useDeferredLoading';
 import { useDateFormat } from '../../intl/dateFormat';
 import { labelsLookup, resolveTaskColor } from '../../intl/eventColor';
+import { statusI18nKey, statusMarker } from '../../intl/taskStatus';
 import { useCalendarStore } from '../../state/CalendarStore';
 import { useChipContextMenu } from '../../state/useChipContextMenu';
 import { useDialogState } from '../../state/DialogState';
 import { useTaskStatusToggle } from '../../state/useTaskStatusToggle';
 import { useTasks } from '../../state/useTasks';
-import type { Task, TaskStatus } from '../../api/types';
+import type { Task } from '../../api/types';
 import { duplicateTask } from '../MoveCopyDialog';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { isCommandError } from '../../api/client';
@@ -334,46 +335,6 @@ export function TaskView() {
 type Entry =
   | { kind: 'separator'; label: string }
   | { kind: 'task'; task: Task; listName: string; index: number };
-
-/**
- * Per-status glyph for the listbox marker. Picking from the Unicode
- * ballot-box block keeps the chip a single character wide on every
- * platform — no SVG, no font dependency.
- *
- *   - open        ☐  empty box
- *   - in_progress ◐  half-filled circle — visually distinct from the
- *                    boxes so a sighted user can spot in-flight rows
- *                    at a glance
- *   - completed   ☑  checked box
- *   - cancelled   ☒  X-marked box — the customary "done, but not
- *                    successfully" indicator
- */
-function statusMarker(status: TaskStatus): string {
-  switch (status) {
-    case 'completed':
-      return '☑';
-    case 'cancelled':
-      return '☒';
-    case 'in_progress':
-      return '◐';
-    case 'open':
-      return '☐';
-  }
-}
-
-/** i18n key for the SR-announced state suffix in optionLabel. */
-function statusI18nKey(status: TaskStatus): string {
-  switch (status) {
-    case 'completed':
-      return 'views.tasks.stateDone';
-    case 'cancelled':
-      return 'views.tasks.stateCancelled';
-    case 'in_progress':
-      return 'views.tasks.stateInProgress';
-    case 'open':
-      return 'views.tasks.stateOpen';
-  }
-}
 
 function buildEntries(
   tasks: Task[],

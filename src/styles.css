@@ -1094,8 +1094,13 @@ button[aria-disabled='true'] {
   border-style: solid;
 }
 
+/* "Done with" treatment for completed and cancelled — strike-through
+ * plus muted text. In-progress and open both keep full contrast so
+ * the marker glyph (◐ / ☐) carries the state signal. */
 .week-task--completed .week-task__title,
-.day-task--completed .day-task__title {
+.week-task--cancelled .week-task__title,
+.day-task--completed .day-task__title,
+.day-task--cancelled .day-task__title {
   color: var(--color-fg-muted);
   text-decoration: line-through;
 }
@@ -1191,7 +1196,10 @@ button[aria-disabled='true'] {
   margin-right: var(--space-2);
 }
 
-.day-list__item--completed .day-list__title {
+/* DayView listbox: completed and cancelled task options both get the
+ * strike-through treatment, matching the calendar chips above. */
+.day-list__item--completed .day-list__title,
+.day-list__item--cancelled .day-list__title {
   color: var(--color-fg-muted);
   text-decoration: line-through;
 }

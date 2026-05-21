@@ -32,6 +32,7 @@ import {
   mergeDayItems,
   todayIsoKey,
 } from '../../intl/taskDay';
+import { statusI18nKey, statusMarker } from '../../intl/taskStatus';
 import type { CalendarEvent, Task } from '../../api/types';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { DeleteEventScopeDialog } from '../DeleteEventScopeDialog';
@@ -601,7 +602,13 @@ export function WeekView() {
                         taskListById,
                         labelById,
                       );
-                      const isCompleted = task.status === 'completed';
+                      // All four TaskStatus values need their own
+                      // glyph + class. The legacy `=== 'completed'`
+                      // shortcut would render in_progress and
+                      // cancelled identically to open. Cancelled is
+                      // filtered out of calendar surfaces already,
+                      // but in_progress passes through and would
+                      // otherwise look indistinguishable from open.
                       return (
                         <li
                           key={`task-${task.id}`}
@@ -613,21 +620,20 @@ export function WeekView() {
                             className={
                               'week-task week-task--timed' +
                               (isFocusedItem ? ' week-task--focused' : '') +
-                              (isCompleted ? ' week-task--completed' : '')
+                              ` week-task--${task.status.replace('_', '-')}`
                             }
-                            // The aria-label carries the "done/open"
-                            // state so SR users hear it on focus —
-                            // the visible ☐/☑ marker is only there
-                            // for sighted users. After Space, the
-                            // toggle hook also fires a live-region
-                            // announcement, so the user gets
-                            // confirmation either way.
+                            // The aria-label carries the status as a
+                            // word suffix so SR users hear it on focus
+                            // — the visible marker is only there for
+                            // sighted users. After Space the toggle
+                            // hook also fires a live-region
+                            // announcement, so confirmation lands
+                            // either way.
                             aria-label={taskChipAriaLabel(
                               t,
                               task,
                               time,
                               color.labelName,
-                              isCompleted,
                             )}
                             aria-selected={isFocusedItem}
                             style={
@@ -658,7 +664,7 @@ export function WeekView() {
                                   void toggleTaskStatus(task);
                                 }}
                               >
-                                {isCompleted ? '☑' : '☐'}
+                                {statusMarker(task.status)}
                               </span>
                               <span className="week-task__title">
                                 {task.title}
@@ -863,17 +869,14 @@ function WeekDayTasks({
             ? 'views.week.taskChipBy'
             : 'views.week.taskChip';
         const color = resolveTaskColor(task, taskListById, labelById);
-        const isCompleted = task.status === 'completed';
-        const state = t(
-          isCompleted ? 'views.week.taskStateDone' : 'views.week.taskStateOpen',
-        );
+        const state = t(statusI18nKey(task.status));
         return (
           <li key={task.id} className="week-grid__task-item">
             <button
               type="button"
               className={
                 'week-task' +
-                (isCompleted ? ' week-task--completed' : '') +
+                ` week-task--${task.status.replace('_', '-')}` +
                 (task.deadline_type === 'by' ? ' week-task--by' : '')
               }
               // Default <button> behaviour fires onClick on both
@@ -925,7 +928,7 @@ function WeekDayTasks({
                     onToggle(task);
                   }}
                 >
-                  {isCompleted ? '☑' : '☐'}
+                  {statusMarker(task.status)}
                 </span>
                 <span className="week-task__title">{task.title}</span>
               </span>
@@ -938,22 +941,18 @@ function WeekDayTasks({
 }
 
 /**
- * Build the SR label for a task chip. Centralised here so the timed
- * variant inside the listbox and the untimed variant in WeekDayTasks
- * format identically — including the "completed / to do" state
- * suffix that turns the visible ☐/☑ marker into something AT can
- * read out.
+ * Build the SR label for the timed task chip. Centralised so the chip
+ * inside the listbox and the untimed variant in WeekDayTasks format
+ * identically — including the status word suffix that turns the
+ * visible marker glyph into something AT can read out.
  */
 function taskChipAriaLabel(
   t: (key: string, values?: Record<string, unknown>) => string,
   task: Task,
   time: string,
   labelName: string | null,
-  isCompleted: boolean,
 ): string {
-  const state = t(
-    isCompleted ? 'views.week.taskStateDone' : 'views.week.taskStateOpen',
-  );
+  const state = t(statusI18nKey(task.status));
   const key = labelName
     ? 'views.week.taskChipTimedWithLabel'
     : 'views.week.taskChipTimed';

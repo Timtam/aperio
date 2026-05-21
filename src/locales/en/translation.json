@@ -516,9 +516,7 @@
       "taskChipBy": "Task: {{title}}, due by {{deadline}}, {{state}}",
       "taskChipByWithLabel": "Task: {{title}}, due by {{deadline}}, label: {{label}}, {{state}}",
       "taskChipTimed": "Task: {{title}}, {{time}}, {{state}}",
-      "taskChipTimedWithLabel": "Task: {{title}}, {{time}}, label: {{label}}, {{state}}",
-      "taskStateDone": "completed",
-      "taskStateOpen": "to do"
+      "taskChipTimedWithLabel": "Task: {{title}}, {{time}}, label: {{label}}, {{state}}"
     },
     "day": {
       "timeGrid": "Time grid",

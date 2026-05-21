@@ -27,6 +27,7 @@ import {
   mergeDayItems,
   todayIsoKey,
 } from '../../intl/taskDay';
+import { statusI18nKey, statusMarker } from '../../intl/taskStatus';
 import { duplicateEvent } from '../MoveCopyDialog';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { DeleteEventScopeDialog } from '../DeleteEventScopeDialog';
@@ -347,12 +348,7 @@ export function DayView() {
                   )
                 : '';
               const color = resolveTaskColor(task, taskListById, labelById);
-              const isCompleted = task.status === 'completed';
-              const state = t(
-                isCompleted
-                  ? 'views.week.taskStateDone'
-                  : 'views.week.taskStateOpen',
-              );
+              const state = t(statusI18nKey(task.status));
               return (
                 <li
                   key={`task-${task.id}`}
@@ -376,7 +372,7 @@ export function DayView() {
                   className={
                     'day-list__item day-list__item--task' +
                     (focused ? ' day-list__item--focused' : '') +
-                    (isCompleted ? ' day-list__item--completed' : '')
+                    ` day-list__item--${task.status.replace('_', '-')}`
                   }
                   style={
                     color.hex
@@ -407,7 +403,7 @@ export function DayView() {
                         void toggleTaskStatus(task);
                       }}
                     >
-                      {isCompleted ? '☑ ' : '☐ '}
+                      {statusMarker(task.status)}{' '}
                     </span>
                     {task.title}
                   </span>
@@ -509,19 +505,14 @@ export function DayView() {
                   ? 'views.week.taskChipBy'
                   : 'views.week.taskChip';
               const color = resolveTaskColor(task, taskListById, labelById);
-              const isCompleted = task.status === 'completed';
-              const state = t(
-                isCompleted
-                  ? 'views.week.taskStateDone'
-                  : 'views.week.taskStateOpen',
-              );
+              const state = t(statusI18nKey(task.status));
               return (
                 <li key={task.id} className="day-tasks__item">
                   <button
                     type="button"
                     className={
                       'day-task' +
-                      (isCompleted ? ' day-task--completed' : '') +
+                      ` day-task--${task.status.replace('_', '-')}` +
                       (task.deadline_type === 'by'
                         ? ' day-task--by'
                         : '')
@@ -587,7 +578,7 @@ export function DayView() {
                         void toggleTaskStatus(task);
                       }}
                     >
-                      {isCompleted ? '☑' : '☐'}
+                      {statusMarker(task.status)}
                     </span>
                     <span className="day-task__title">{task.title}</span>
                   </button>
