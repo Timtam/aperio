@@ -79,14 +79,24 @@ export function SettingsDialog({
 
   const focusTab = useCallback(
     (id: SettingsTabId) => {
+      // Move focus to the destination tab BEFORE updating activeTab.
+      //
+      // The previous order was: state update first, then RAF-deferred
+      // focus. That meant the still-focused old tab caught its own
+      // aria-selected flipping from true to false, and NVDA fired a
+      // state-change announcement on it — the user heard the tab name
+      // a second time as a "plain text via aria live" pulse on top of
+      // the normal focus event on the new tab.
+      //
+      // Focusing first peels DOM focus off the old element before its
+      // selection state changes, so the state-change announcement has
+      // no focused element to attach to. The setActiveTab call then
+      // updates aria-selected / tabIndex in the same render; the new
+      // tab is already focused when those land. Calling .focus() on
+      // an element with tabIndex=-1 is fine — tabIndex only gates
+      // Tab-key navigation, not programmatic focus.
+      tabRefs.current[id]?.focus({ preventScroll: true });
       setActiveTab(id);
-      // Defer to the next frame so React commits the new tabIndex=0
-      // before we call focus(). Otherwise the focused element still
-      // has tabIndex=-1 momentarily and screen readers can get
-      // confused about whether the tab is in the tab order.
-      requestAnimationFrame(() => {
-        tabRefs.current[id]?.focus({ preventScroll: true });
-      });
     },
     [],
   );
@@ -155,7 +165,14 @@ export function SettingsDialog({
                 role="tab"
                 type="button"
                 aria-selected={selected}
-                aria-controls={panelId(id)}
+                // `aria-controls` is intentionally only set on the
+                // active tab. With the inactive panel not in the DOM
+                // (we render lazily, one panel at a time), pointing
+                // the inactive tab at a non-existent ID forces some
+                // screen readers to re-resolve the relationship every
+                // time the active panel ID changes, which surfaced as
+                // an extra "tab label" announcement on every switch.
+                aria-controls={selected ? panelId(id) : undefined}
                 tabIndex={selected ? 0 : -1}
                 className={
                   'settings__tab' +
