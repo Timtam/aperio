@@ -3,6 +3,7 @@ import { AccountsDialog } from './AccountsDialog';
 import { ColorLabelDialog } from './ColorLabelDialog';
 import { EventDialog } from './EventDialog';
 import { MoveCopyDialog } from './MoveCopyDialog';
+import { PlanTaskDialog } from './PlanTaskDialog';
 import { QuickAddDialog } from './QuickAddDialog';
 import { RemindersDialog } from './RemindersDialog';
 import { SearchDialog } from './SearchDialog';
@@ -14,7 +15,7 @@ import { TaskDialog } from './TaskDialog';
  * always portal into the same place.
  */
 export function DialogHost() {
-  const { mode, close } = useDialogState();
+  const { mode, close, invalidateData } = useDialogState();
 
   switch (mode.kind) {
     case 'event':
@@ -50,6 +51,15 @@ export function DialogHost() {
     case 'moveCopy':
       return (
         <MoveCopyDialog isOpen onClose={close} target={mode.target} />
+      );
+    case 'planTask':
+      return (
+        <PlanTaskDialog
+          isOpen
+          onClose={close}
+          task={mode.task}
+          onPlanned={invalidateData}
+        />
       );
     case 'none':
     default:

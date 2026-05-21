@@ -76,6 +76,21 @@
       "deleteTaskTitle": "Delete task",
       "deleteTaskMessage": "Delete \"{{title}}\"? This cannot be undone."
     },
+    "plan": {
+      "title": "Schedule \"{{title}}\"",
+      "hint": "Pick a date for this task, or move it back to the backlog.",
+      "quickPresets": "Quick presets",
+      "today": "Today",
+      "tomorrow": "Tomorrow",
+      "nextWeek": "Next Monday",
+      "customDate": "Custom date",
+      "applyCustom": "Apply",
+      "customDateRequired": "Please pick a date first.",
+      "backToBacklog": "Move back to backlog",
+      "cancel": "Cancel",
+      "plannedAnnouncement": "Scheduled \"{{title}}\" for {{date}}.",
+      "backloggedAnnouncement": "Moved \"{{title}}\" back to the backlog."
+    },
     "deleteScope": {
       "title": "Delete recurring event",
       "message": "\"{{title}}\" is part of a series. Delete just this occurrence, or the whole series?",

@@ -73,6 +73,21 @@
       "deleteTaskTitle": "Aufgabe löschen",
       "deleteTaskMessage": "„{{title}}\" wirklich löschen? Das kann nicht rückgängig gemacht werden."
     },
+    "plan": {
+      "title": "„{{title}}\" einplanen",
+      "hint": "Datum auswählen oder Aufgabe zurück in den Backlog verschieben.",
+      "quickPresets": "Schnellauswahl",
+      "today": "Heute",
+      "tomorrow": "Morgen",
+      "nextWeek": "Nächsten Montag",
+      "customDate": "Eigenes Datum",
+      "applyCustom": "Übernehmen",
+      "customDateRequired": "Bitte erst ein Datum auswählen.",
+      "backToBacklog": "Zurück in den Backlog",
+      "cancel": "Abbrechen",
+      "plannedAnnouncement": "„{{title}}\" auf {{date}} gelegt.",
+      "backloggedAnnouncement": "„{{title}}\" zurück in den Backlog verschoben."
+    },
     "deleteScope": {
       "title": "Serientermin löschen",
       "message": "„{{title}}\" ist Teil einer Serie. Nur diesen Termin oder die ganze Serie löschen?",

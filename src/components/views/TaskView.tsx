@@ -47,7 +47,8 @@ export function TaskView() {
   const { tasks, taskListById, loading } = useTasks();
   const { colorLabels } = useCalendarStore();
   const labelById = useMemo(() => labelsLookup(colorLabels), [colorLabels]);
-  const { openTaskDialog, openMoveCopy, invalidateData } = useDialogState();
+  const { openTaskDialog, openMoveCopy, openPlanTask, invalidateData } =
+    useDialogState();
 
   // Flatten the task buckets into a single options array, interleaved
   // with separator entries. focusIndex points at the *task* index in
@@ -149,6 +150,16 @@ export function TaskView() {
         if (task) openMoveCopy({ kind: 'task', task });
         return;
       }
+      if (e.shiftKey && e.key.toLowerCase() === 'd') {
+        // §9.3 — Shift+D opens the plan-task dialog so the user can
+        // assign / change / clear the focused task's scheduled date.
+        // Ctrl+D (above) is "duplicate" — different concern, intentionally
+        // not collapsed.
+        e.preventDefault();
+        const task = flatTasks[focusIndex];
+        if (task) openPlanTask(task);
+        return;
+      }
       if (flatTasks.length === 0) return;
       switch (e.key) {
         case 'ArrowDown':
@@ -197,6 +208,7 @@ export function TaskView() {
       toggleStatus,
       openTaskDialog,
       openMoveCopy,
+      openPlanTask,
       announce,
       t,
     ],
