@@ -46,6 +46,18 @@ export interface StatusWrite {
 }
 
 /**
+ * Behaviour options shared by both planners.
+ *
+ * `cascadeEnabled` defaults to `true` — the historical "couple parent
+ * and subtask status" behaviour. Users can disable it from the Tasks
+ * settings tab; the planners then degrade to a single-row write
+ * (`planStatusCascade`) or a no-op (`planAncestorRecompute`).
+ */
+export interface CascadeOptions {
+  cascadeEnabled?: boolean;
+}
+
+/**
  * Derive a parent's status from the statuses of its children.
  * Returns `null` when the parent has no children (no derivation
  * possible — caller keeps the parent's existing status).
@@ -117,13 +129,26 @@ export function planStatusCascade(
   taskId: string,
   newStatus: TaskStatus,
   allTasks: Task[],
+  options?: CascadeOptions,
 ): StatusWrite[] {
+  const byId = new Map(allTasks.map((t) => [t.id, t]));
+
+  // Decoupled mode: the user opted out of the parent/subtask cascade
+  // in the Tasks settings tab. Return just the single root write (or
+  // nothing, if the status already matches) and skip both halves of
+  // the propagation. Tests cover this branch — the rest of the
+  // function is the historical, coupled path.
+  if (options?.cascadeEnabled === false) {
+    const rootCurrent = byId.get(taskId)?.status;
+    if (rootCurrent === undefined || rootCurrent === newStatus) return [];
+    return [{ taskId, status: newStatus }];
+  }
+
   const writes: StatusWrite[] = [];
   // `overrides` is the running snapshot of statuses as the cascade
   // computes them — used so the up-recompute "sees" the down-cascade
   // changes we've already decided.
   const overrides = new Map<string, TaskStatus>();
-  const byId = new Map(allTasks.map((t) => [t.id, t]));
   const childrenByParent = buildChildrenIndex(allTasks);
 
   const statusOf = (id: string): TaskStatus | undefined =>
@@ -196,7 +221,12 @@ export function planStatusCascade(
 export function planAncestorRecompute(
   parentId: string,
   allTasks: Task[],
+  options?: CascadeOptions,
 ): StatusWrite[] {
+  // Decoupled mode: there is nothing to recompute — parent status
+  // doesn't depend on children. Skip the work entirely.
+  if (options?.cascadeEnabled === false) return [];
+
   const writes: StatusWrite[] = [];
   const overrides = new Map<string, TaskStatus>();
   const byId = new Map(allTasks.map((t) => [t.id, t]));

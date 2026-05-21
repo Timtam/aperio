@@ -83,7 +83,15 @@
       "tablistAria": "Einstellungs-Kategorien",
       "tabs": {
         "accounts": "Konten",
-        "colorLabels": "Farb-Labels"
+        "colorLabels": "Farb-Labels",
+        "tasks": "Aufgaben"
+      }
+    },
+    "tasks": {
+      "statusCoupling": {
+        "heading": "Status-Verknüpfung",
+        "label": "Status von Eltern- und Unteraufgaben koppeln",
+        "hint": "Wenn aktiviert, markiert das Erledigen einer Eltern-Aufgabe deren offene Unteraufgaben mit als erledigt; sind alle Unteraufgaben abgehakt, gilt auch die Eltern-Aufgabe als erledigt. Deaktiviert: jede Aufgabe wird unabhängig behandelt — Status-Änderungen werden nicht mehr im Baum weitergegeben."
       }
     },
     "confirm": {

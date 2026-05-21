@@ -12,6 +12,7 @@ import { useTranslation } from 'react-i18next';
 import { AccountsPanel } from './AccountsPanel';
 import { ColorLabelsPanel } from './ColorLabelsPanel';
 import { Modal } from './Modal';
+import { TasksPanel } from './TasksPanel';
 
 /**
  * Settings dialog — single entry point for global preferences.
@@ -35,9 +36,9 @@ import { Modal } from './Modal';
  * keys change the active tab.
  */
 
-export type SettingsTabId = 'accounts' | 'colorLabels';
+export type SettingsTabId = 'accounts' | 'colorLabels' | 'tasks';
 
-const TAB_ORDER: SettingsTabId[] = ['accounts', 'colorLabels'];
+const TAB_ORDER: SettingsTabId[] = ['accounts', 'colorLabels', 'tasks'];
 
 export interface SettingsDialogProps {
   isOpen: boolean;
@@ -75,6 +76,7 @@ export function SettingsDialog({
   const tabRefs = useRef<Record<SettingsTabId, HTMLButtonElement | null>>({
     accounts: null,
     colorLabels: null,
+    tasks: null,
   });
 
   const focusTab = useCallback(
@@ -134,6 +136,7 @@ export function SettingsDialog({
       ({
         accounts: t('dialogs.settings.tabs.accounts'),
         colorLabels: t('dialogs.settings.tabs.colorLabels'),
+        tasks: t('dialogs.settings.tabs.tasks'),
       }) as Record<SettingsTabId, string>,
     [t],
   );
@@ -217,6 +220,7 @@ export function SettingsDialog({
         >
           {activeTab === 'accounts' && <AccountsPanel />}
           {activeTab === 'colorLabels' && <ColorLabelsPanel />}
+          {activeTab === 'tasks' && <TasksPanel />}
         </div>
       </div>
 

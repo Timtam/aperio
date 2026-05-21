@@ -18,6 +18,7 @@ import { useRegionFocus } from './hooks/useRegionFocus';
 import { useSuppressBrowserDefaults } from './hooks/useSuppressBrowserDefaults';
 import { CalendarStoreProvider } from './state/CalendarStore';
 import { DialogStateProvider, useDialogState } from './state/DialogState';
+import { TaskCascadeProvider } from './state/TaskCascadeProvider';
 import { ViewStateProvider, useViewShortcuts, useViewState } from './state/ViewState';
 
 /**
@@ -28,6 +29,9 @@ import { ViewStateProvider, useViewShortcuts, useViewState } from './state/ViewS
  *  2. CalendarStoreProvider — owns calendars/task-lists + selection.
  *  3. ViewStateProvider — owns active view + anchor date.
  *  4. DialogStateProvider — owns which dialog (if any) is open.
+ *  5. TaskCascadeProvider — owns the parent/subtask status-coupling
+ *     preference. Sits inside the dialog provider so the Settings
+ *     panel can read it via context.
  *
  * `role="application"` stays on the outermost wrapper so portaled
  * dialogs and announcer live regions all sit inside the application
@@ -48,13 +52,15 @@ export function App() {
         <CalendarStoreProvider>
           <ViewStateProvider>
             <DialogStateProvider>
-              <Shell />
-              <DialogHost />
-              {/* Mount-once gate that pushes the missed-tasks dialog
-                  on startup if anything overdue is sitting unhandled.
-                  Renders nothing itself; the dialog lands via
-                  DialogHost like every other modal. */}
-              <MissedTasksChecker />
+              <TaskCascadeProvider>
+                <Shell />
+                <DialogHost />
+                {/* Mount-once gate that pushes the missed-tasks dialog
+                    on startup if anything overdue is sitting unhandled.
+                    Renders nothing itself; the dialog lands via
+                    DialogHost like every other modal. */}
+                <MissedTasksChecker />
+              </TaskCascadeProvider>
             </DialogStateProvider>
           </ViewStateProvider>
         </CalendarStoreProvider>

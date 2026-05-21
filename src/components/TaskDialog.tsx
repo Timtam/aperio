@@ -31,6 +31,7 @@ import {
   planAncestorRecompute,
   planStatusCascade,
 } from '../state/taskCascade';
+import { useTaskCascadeEnabled } from '../state/TaskCascadeProvider';
 import { useTasks } from '../state/useTasks';
 import { useTaskStatusActions } from '../state/useTaskStatusToggle';
 import { Modal } from './Modal';
@@ -94,6 +95,10 @@ export function TaskDialog({
   // Space-toggle and the per-row context menu.
   const { toggle: toggleSubtaskAction, set: setSubtaskAction } =
     useTaskStatusActions();
+  // Settings → Tasks → "couple parent and subtask status". When off,
+  // both planners (subtask add/delete recompute, root-status cascade)
+  // short-circuit and we write only the row the user directly touched.
+  const { enabled: cascadeEnabled } = useTaskCascadeEnabled();
 
   const isEdit = task !== null;
   // Subtask = a task that has a parent. The list dropdown locks
@@ -185,7 +190,9 @@ export function TaskDialog({
       // snapshot we hand the planner has to *include* the freshly
       // created row, since `tasks` is the pre-mutation cache.
       await applyAncestorWrites(
-        planAncestorRecompute(task.id, [...tasks, created]),
+        planAncestorRecompute(task.id, [...tasks, created], {
+          cascadeEnabled,
+        }),
         [...tasks, created],
       );
       setNewSubtaskTitle('');
@@ -199,7 +206,16 @@ export function TaskDialog({
     } finally {
       setSubtaskBusy(false);
     }
-  }, [task, newSubtaskTitle, subtaskBusy, invalidateData, announce, t, tasks]);
+  }, [
+    task,
+    newSubtaskTitle,
+    subtaskBusy,
+    invalidateData,
+    announce,
+    t,
+    tasks,
+    cascadeEnabled,
+  ]);
 
   // Subtask status changes go through the shared hook — that gives
   // us the same cascade (recompute parent, propagate further up) we
@@ -225,7 +241,7 @@ export function TaskDialog({
         if (parentId) {
           const snapshot = tasks.filter((row) => row.id !== subtask.id);
           await applyAncestorWrites(
-            planAncestorRecompute(parentId, snapshot),
+            planAncestorRecompute(parentId, snapshot, { cascadeEnabled }),
             snapshot,
           );
         }
@@ -237,7 +253,7 @@ export function TaskDialog({
         );
       }
     },
-    [invalidateData, announce, t, tasks],
+    [invalidateData, announce, t, tasks, cascadeEnabled],
   );
 
   const setSubtaskStatus = useCallback(
@@ -423,6 +439,7 @@ export function TaskDialog({
               task.id,
               form.status,
               snapshot,
+              { cascadeEnabled },
             ).filter((w) => w.taskId !== task.id);
             await applyAncestorWrites(cascadeWrites, snapshot);
           }
@@ -459,7 +476,18 @@ export function TaskDialog({
         setSubmitting(false);
       }
     },
-    [form, submitting, isEdit, task, announce, onClose, t, isSubtask, tasks],
+    [
+      form,
+      submitting,
+      isEdit,
+      task,
+      announce,
+      onClose,
+      t,
+      isSubtask,
+      tasks,
+      cascadeEnabled,
+    ],
   );
 
   const onDelete = useCallback(async () => {

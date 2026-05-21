@@ -86,7 +86,15 @@
       "tablistAria": "Settings categories",
       "tabs": {
         "accounts": "Accounts",
-        "colorLabels": "Color labels"
+        "colorLabels": "Color labels",
+        "tasks": "Tasks"
+      }
+    },
+    "tasks": {
+      "statusCoupling": {
+        "heading": "Status coupling",
+        "label": "Couple parent and subtask status",
+        "hint": "When enabled, completing a parent task marks its open subtasks complete, and finishing every subtask marks the parent complete. Disable to treat each task independently — status changes never propagate up or down the tree."
       }
     },
     "confirm": {

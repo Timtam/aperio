@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { useAnnouncer } from '../a11y/Announcer';
 import { useDialogState } from './DialogState';
 import { planStatusCascade, type StatusWrite } from './taskCascade';
+import { useTaskCascadeEnabled } from './TaskCascadeProvider';
 import { useTasks } from './useTasks';
 import type { Task, TaskStatus } from '../api/types';
 
@@ -44,11 +45,18 @@ export function useTaskStatusActions(): TaskStatusActions {
   // it can walk parents and siblings. `useTasks` returns the global
   // store, refreshed whenever `dataVersion` bumps.
   const { tasks } = useTasks();
+  // Honour the Settings → Tasks "couple parent and subtask status"
+  // checkbox. When the user has turned it off, the planner degrades
+  // to a single-row write and the SR announcement drops its
+  // "X weitere Aufgaben mit aktualisiert" suffix.
+  const { enabled: cascadeEnabled } = useTaskCascadeEnabled();
 
   const set = useCallback(
     async (task: Task, nextStatus: TaskStatus): Promise<void> => {
       if (task.status === nextStatus) return;
-      const writes = planStatusCascade(task.id, nextStatus, tasks);
+      const writes = planStatusCascade(task.id, nextStatus, tasks, {
+        cascadeEnabled,
+      });
       if (writes.length === 0) return;
       try {
         await applyCascade(writes, tasks);
@@ -70,7 +78,7 @@ export function useTaskStatusActions(): TaskStatusActions {
         console.warn('update_task failed', err);
       }
     },
-    [announce, t, invalidateData, tasks],
+    [announce, t, invalidateData, tasks, cascadeEnabled],
   );
 
   const toggle = useCallback(

@@ -283,3 +283,48 @@ describe('planAncestorRecompute', () => {
     expect(planAncestorRecompute('p', tasks)).toEqual([]);
   });
 });
+
+describe('decoupled mode (cascadeEnabled = false)', () => {
+  it('planStatusCascade returns only the root write — no down-cascade', () => {
+    const tasks = [
+      { ...baseTask, id: 'p', status: 'open' as const },
+      child('a', 'p', 'open'),
+      child('b', 'p', 'open'),
+    ];
+    const writes = planStatusCascade('p', 'completed', tasks, {
+      cascadeEnabled: false,
+    });
+    expect(writes).toEqual([{ taskId: 'p', status: 'completed' }]);
+  });
+
+  it('planStatusCascade returns only the root write — no up-cascade', () => {
+    const tasks = [
+      { ...baseTask, id: 'p', status: 'open' as const },
+      child('a', 'p', 'open'),
+      child('b', 'p', 'completed'),
+    ];
+    const writes = planStatusCascade('a', 'completed', tasks, {
+      cascadeEnabled: false,
+    });
+    expect(writes).toEqual([{ taskId: 'a', status: 'completed' }]);
+  });
+
+  it('planStatusCascade returns [] when the status already matches', () => {
+    const tasks = [{ ...baseTask, id: 'p', status: 'completed' as const }];
+    const writes = planStatusCascade('p', 'completed', tasks, {
+      cascadeEnabled: false,
+    });
+    expect(writes).toEqual([]);
+  });
+
+  it('planAncestorRecompute is a no-op', () => {
+    const tasks = [
+      { ...baseTask, id: 'p', status: 'open' as const },
+      child('a', 'p', 'completed'),
+      child('b', 'p', 'completed'),
+    ];
+    expect(
+      planAncestorRecompute('p', tasks, { cascadeEnabled: false }),
+    ).toEqual([]);
+  });
+});
