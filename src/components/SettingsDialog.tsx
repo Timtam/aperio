@@ -165,14 +165,21 @@ export function SettingsDialog({
                 role="tab"
                 type="button"
                 aria-selected={selected}
-                // `aria-controls` is intentionally only set on the
-                // active tab. With the inactive panel not in the DOM
-                // (we render lazily, one panel at a time), pointing
-                // the inactive tab at a non-existent ID forces some
-                // screen readers to re-resolve the relationship every
-                // time the active panel ID changes, which surfaced as
-                // an extra "tab label" announcement on every switch.
-                aria-controls={selected ? panelId(id) : undefined}
+                // `aria-controls` is intentionally OMITTED on every
+                // tab. The W3C APG recommends it, but it makes NVDA
+                // follow the relationship on focus and read whatever
+                // the first interactive control in the panel sounds
+                // like — for our two panels those happen to be a
+                // listbox labelled "Verbundene Konten" / "Vorhandene
+                // Farb-Labels" and a kind-picker combobox that NVDA
+                // announces as "Lokal, 1 of 8". Both contain the tab
+                // label as a substring, so the user hears the tab
+                // name a second time as plain text via aria-live.
+                // Dropping aria-controls breaks no functionality:
+                // the visual / DOM relationship is obvious, the role
+                // pair (tab + tabpanel) still carries the semantic
+                // meaning, and keyboard navigation lands in the
+                // panel anyway when the user Tabs past the tablist.
                 tabIndex={selected ? 0 : -1}
                 className={
                   'settings__tab' +
