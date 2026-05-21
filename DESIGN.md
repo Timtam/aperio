@@ -21,7 +21,7 @@ Eine barrierefreie, plattformübergreifende Kalender- und Aufgaben-App.
 9. [Aufgaben-Management](#9-aufgaben-management)
 10. [Kontakte & CardDAV-Integration](#10-kontakte--carddav-integration)
 11. [Videokonferenz-Integration](#11-videokonferenz-integration)
-12. [Feiertags-API](#12-feiertags-api)
+12. [Feiertage (per iCal-Abonnement)](#12-feiertage-per-ical-abonnement)
 13. [Suche](#13-suche)
 14. [Erinnerungen & Benachrichtigungen](#14-erinnerungen--benachrichtigungen)
 15. [Native Desktop-Erfahrung & Tastaturkürzel](#15-native-desktop-erfahrung--tastaturkürzel)
@@ -1196,7 +1196,7 @@ Der Plugin-Manager zeigt im Einrichtungsdialog nur die Capabilities an, die der 
 
 ### 10.3 Geburtstags-Kalender
 
-Geburtstage aus verbundenen Kontaktbüchern werden als **eigener, nicht-editierbarer Kalender-Layer** angezeigt – analog zur Feiertags-API (Abschnitt 12).
+Geburtstage aus verbundenen Kontaktbüchern werden als **eigener, nicht-editierbarer Kalender-Layer** angezeigt – analog zu abonnierten Feiertags-iCals (Abschnitt 12).
 
 - Pro verbundenem Kontaktbuch gibt es einen eigenen Geburtstags-Layer (z.B. "Geburtstage – Google", "Geburtstage – iCloud")
 - Layer sind einzeln ein-/ausblendbar
@@ -1293,28 +1293,23 @@ Teams und Meet teilen das OAuth2-Token des jeweiligen Kalender-Adapters – es i
 
 ---
 
-## 12. Feiertags-API
+## 12. Feiertage (per iCal-Abonnement)
 
-### 12.1 Datenquelle
+Eine eigene Feiertags-API ist nicht vorgesehen. Der `cal-adapter-ical` deckt den Use Case vollständig ab: die User abonnieren einen öffentlichen Feiertags-Feed ihrer Wahl als read-only Kalender und sehen Feiertage in allen Ansichten wie jeden anderen Kalender. Beispiele:
 
-Verwendung der öffentlichen API [Nager.Date](https://date.nager.at/api/v3) (kostenlos, keine Registrierung):
+- `https://www.feiertage-deutschland.de/feiertage-de.ics` (alle deutschen Bundesländer)
+- `https://www.officeholidays.com/ics/germany` (offizielle Feiertage Deutschland)
+- Apple/Google bieten regionale Feiertags-iCals für ~100 Länder
 
-```
-GET https://date.nager.at/api/v3/PublicHolidays/{year}/{countryCode}
-```
+Vorteile gegenüber einer eingebauten API:
 
-Unterstützt über 100 Länder mit ISO 3166-1 Alpha-2 Ländercodes.
+- **Keine externe Abhängigkeit** in der Aperio-Binary — der iCal-Adapter ist sowieso vorhanden
+- **Frei wählbare Quelle** — User entscheiden selbst, welchen Feed sie vertrauen
+- **Mehrere Länder gleichzeitig** funktioniert genauso: ein iCal-Abo pro Land
+- **Bundesland-spezifische Feiertage** werden von den meisten Feed-Anbietern bereits getrennt angeboten
+- **Caching** geschieht über den existierenden 30-Sekunden-TTL des iCal-Adapters; lokale SQLite-Persistenz pro Abo
 
-### 12.2 Konfiguration
-
-- Beliebige Länder konfigurierbar (z.B. `DE`, `AT`, `CH`, `US`)
-- **Mehrere Länder gleichzeitig** anzeigbar (z.B. bei internationalen Teams)
-- Feiertage werden als eigener, nicht-editierbarer Kalender-Layer dargestellt
-- Regionale Feiertage (z.B. bundesland-spezifisch in Deutschland) werden unterstützt, sofern die API diese liefert
-
-### 12.3 Caching
-
-Feiertagsdaten werden jährlich gecacht (lokale SQLite-Tabelle), um Offline-Fähigkeit zu gewährleisten. Automatische Aktualisierung bei neuer Netzwerkverbindung und Jahreswechsel.
+Aperio empfiehlt im Account-Dialog optional einen kuratierten Default-Feed pro User-Locale beim ersten Start, der dann nach Wunsch ergänzt oder ersetzt werden kann.
 
 ---
 
@@ -2122,7 +2117,6 @@ Nicht alle Einstellungen sind geräteübergreifend sinnvoll. Sie werden in drei 
 | Wochenanfang (Mo/So) | ✅ Sync | ✅ Ja |
 | KW-Anzeige (Monatsansicht, optional) | ✅ Sync | ✅ Ja |
 | Sprache / Locale | ✅ Sync | ✅ Ja |
-| Feiertags-Konfiguration (Länder) | ✅ Sync | ✅ Ja |
 | Sound-Konfiguration (Container-, Termin- & Aufgaben-Ebene) | ✅ Sync | ✅ Ja |
 | Benutzerdefinierte Sound-Dateien (Audiodaten) | ✅ Sync | ✅ Ja |
 | Standard-Erinnerungszeiten (Termine & Aufgaben getrennt) | ✅ Sync | ✅ Ja |
@@ -3196,7 +3190,6 @@ Aperio/
 │   │   ├── commands/                      # Tauri-Commands (API zu Frontend)
 │   │   ├── db/                            # SQLite-Datenbankschicht
 │   │   ├── sync/                          # Sync Engine, Queue & Event Log
-│   │   ├── holidays/                      # Feiertags-API-Client (Nager.Date)
 │   │   └── updater/                       # Self-Update-Logik
 │   └── Cargo.toml
 ├── src/                                   # React Frontend (TypeScript)
@@ -3601,7 +3594,7 @@ Die folgenden Punkte sind noch nicht vollständig spezifiziert und werden in zuk
 | **Architektur & Tech-Stack** | ✅ Spezifiziert | Siehe Abschnitte 2 & 4 |
 | **Adapter-Architektur** | ✅ Spezifiziert | Siehe Abschnitt 6 – Kalender-, Aufgaben-, Kontakt-Adapter |
 | **Videokonferenz-Integration** | ✅ Spezifiziert | Siehe Abschnitt 11 |
-| **Feiertage** | ✅ Spezifiziert | Siehe Abschnitt 12 |
+| **Feiertage** | ✅ Spezifiziert | Über iCal-Abonnement abgedeckt — siehe Abschnitt 12 |
 | **Self-Update** | ✅ Spezifiziert | Siehe Abschnitt 21 |
 | **Benachrichtigungs-System** | ✅ Spezifiziert | Siehe Abschnitt 14 |
 | **Systemintegration (.ics, webcal://, .aperio)** | ✅ Spezifiziert | Siehe Abschnitt 17 |
