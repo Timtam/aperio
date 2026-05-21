@@ -17,6 +17,10 @@ import type { Task } from '../api/types';
  *      task's creation date, so the calendar isn't cluttered with
  *      past stretches of long-running By-tasks.
  *
+ * Subtasks (tasks with `parent_id` set) are unconditionally hidden
+ * — they're scoped to their parent and managed via TaskDialog /
+ * TaskView, never as standalone chips on the calendar.
+ *
  * Cancelled tasks are never returned. Completed tasks are hidden by
  * default — they're done, the user has already moved on — but the
  * caller can opt back in per task-list via `isCompletedVisible`, the
@@ -36,6 +40,12 @@ export function filterTasksOnDay(
   isCompletedVisible?: (listId: string) => boolean,
 ): Task[] {
   return tasks.filter((task) => {
+    // Subtasks are scoped to their parent: they never surface as
+    // their own chip on a calendar surface, even when they carry
+    // their own scheduled_date or deadline_date. Manage them via
+    // the parent's TaskDialog or under the parent in TaskView. The
+    // calendar is for top-level items only.
+    if (task.parent_id) return false;
     if (task.status === 'cancelled') return false;
     if (task.status === 'completed') {
       // Completed rows surface only when the user opted-in for this

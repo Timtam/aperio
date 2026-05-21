@@ -81,6 +81,29 @@ describe('filterTasksOnDay', () => {
     expect(filterTasksOnDay(tasks, '2026-05-19', today)).toEqual([]);
   });
 
+  it('excludes subtasks (tasks with parent_id set)', () => {
+    // Subtasks are scoped to their parent — calendar surfaces only
+    // render top-level rows, regardless of whether the child carries
+    // its own scheduled_date. The parent is the SoR for "is this on
+    // my plate this day"; the children live inside it.
+    const tasks: Task[] = [
+      {
+        ...baseTask,
+        id: 'parent',
+        scheduled_date: '2026-05-20',
+      },
+      {
+        ...baseTask,
+        id: 'child',
+        parent_id: 'parent',
+        scheduled_date: '2026-05-20',
+      },
+    ];
+    expect(
+      filterTasksOnDay(tasks, '2026-05-20', today).map((t) => t.id),
+    ).toEqual(['parent']);
+  });
+
   it('excludes completed and cancelled tasks', () => {
     const tasks: Task[] = [
       {
