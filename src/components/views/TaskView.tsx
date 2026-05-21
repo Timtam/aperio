@@ -19,7 +19,7 @@ import { useChipContextMenu } from '../../state/useChipContextMenu';
 import { useDialogState } from '../../state/DialogState';
 import { useTaskStatusToggle } from '../../state/useTaskStatusToggle';
 import { useTasks } from '../../state/useTasks';
-import type { Task } from '../../api/types';
+import type { Task, TaskStatus } from '../../api/types';
 import { duplicateTask } from '../MoveCopyDialog';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { isCommandError } from '../../api/client';
@@ -253,25 +253,29 @@ export function TaskView() {
           }
           const { task, listName, index } = entry;
           const focused = index === focusIndex;
-          const checked = task.status === 'completed';
+          // All four TaskStatus values must surface — `cancelled` and
+          // `in_progress` reach the list via the chip context menu's
+          // Status submenu, and before this branch they were both
+          // rendering as ☐ "open" because the only check was
+          // `status === 'completed'`. The marker, the row state
+          // class, and the SR label all key off the same status
+          // value so they can never disagree.
           const due = describeDue(task, fmt, t);
           const color = resolveTaskColor(task, taskListById, labelById);
+          const marker = statusMarker(task.status);
+          const stateLabel = t(statusI18nKey(task.status));
           const aria = color.labelName
             ? t('views.tasks.optionLabelWithLabel', {
                 title: task.title,
                 list: listName,
-                state: checked
-                  ? t('views.tasks.stateDone')
-                  : t('views.tasks.stateOpen'),
+                state: stateLabel,
                 due,
                 label: color.labelName,
               })
             : t('views.tasks.optionLabel', {
                 title: task.title,
                 list: listName,
-                state: checked
-                  ? t('views.tasks.stateDone')
-                  : t('views.tasks.stateOpen'),
+                state: stateLabel,
                 due,
               });
           return (
@@ -284,7 +288,7 @@ export function TaskView() {
               className={
                 'task-list__item' +
                 (focused ? ' task-list__item--focused' : '') +
-                (checked ? ' task-list__item--done' : '')
+                ` task-list__item--${task.status.replace('_', '-')}`
               }
               style={
                 color.hex
@@ -303,7 +307,7 @@ export function TaskView() {
               }}
             >
               <span className="task-list__check" aria-hidden="true">
-                {checked ? '☑' : '☐'}
+                {marker}
               </span>
               <span className="task-list__title">{task.title}</span>
               <span className="task-list__due">{due}</span>
@@ -330,6 +334,46 @@ export function TaskView() {
 type Entry =
   | { kind: 'separator'; label: string }
   | { kind: 'task'; task: Task; listName: string; index: number };
+
+/**
+ * Per-status glyph for the listbox marker. Picking from the Unicode
+ * ballot-box block keeps the chip a single character wide on every
+ * platform — no SVG, no font dependency.
+ *
+ *   - open        ☐  empty box
+ *   - in_progress ◐  half-filled circle — visually distinct from the
+ *                    boxes so a sighted user can spot in-flight rows
+ *                    at a glance
+ *   - completed   ☑  checked box
+ *   - cancelled   ☒  X-marked box — the customary "done, but not
+ *                    successfully" indicator
+ */
+function statusMarker(status: TaskStatus): string {
+  switch (status) {
+    case 'completed':
+      return '☑';
+    case 'cancelled':
+      return '☒';
+    case 'in_progress':
+      return '◐';
+    case 'open':
+      return '☐';
+  }
+}
+
+/** i18n key for the SR-announced state suffix in optionLabel. */
+function statusI18nKey(status: TaskStatus): string {
+  switch (status) {
+    case 'completed':
+      return 'views.tasks.stateDone';
+    case 'cancelled':
+      return 'views.tasks.stateCancelled';
+    case 'in_progress':
+      return 'views.tasks.stateInProgress';
+    case 'open':
+      return 'views.tasks.stateOpen';
+  }
+}
 
 function buildEntries(
   tasks: Task[],

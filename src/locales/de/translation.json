@@ -562,6 +562,8 @@
       "taskList": "Aufgabenliste",
       "stateDone": "erledigt",
       "stateOpen": "offen",
+      "stateInProgress": "in Arbeit",
+      "stateCancelled": "abgebrochen",
       "optionLabel": "{{title}}, Liste {{list}}, {{state}}, {{due}}",
       "optionLabelWithLabel": "{{title}}, Liste {{list}}, {{state}}, {{due}}, Label: {{label}}",
       "dueScheduled": "Geplant: {{date}}",

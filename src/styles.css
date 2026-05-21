@@ -2023,7 +2023,12 @@ button[aria-disabled='true'] {
   background: color-mix(in srgb, var(--color-accent) 8%, transparent);
 }
 
-.task-list__item--done .task-list__title {
+/* Per-status row treatment. Completed and cancelled rows are
+ * "done with" — strike-through plus muted text says the user has
+ * moved past them. In-progress rows lean on the marker glyph alone;
+ * dimming would suggest the task is finished. */
+.task-list__item--completed .task-list__title,
+.task-list__item--cancelled .task-list__title {
   text-decoration: line-through;
   color: var(--color-fg-muted);
 }
