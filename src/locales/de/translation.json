@@ -238,6 +238,16 @@
         "colorLabel": "Farb-Label"
       },
       "noColorLabel": "(Kein Label)",
+      "subtasks": {
+        "heading": "Unteraufgaben",
+        "empty": "Noch keine Unteraufgaben.",
+        "placeholder": "Unteraufgabe hinzufügen …",
+        "newAria": "Titel der neuen Unteraufgabe",
+        "addButton": "Hinzufügen",
+        "added": "Unteraufgabe „{{title}}\" hinzugefügt.",
+        "listAria": "Unteraufgaben. Pfeiltasten zur Navigation, Leertaste zum Umschalten, Umschalt+F10 für Aktionen.",
+        "rowLabel": "{{title}}, {{state}}"
+      },
       "status": {
         "open": "Offen",
         "inProgress": "In Bearbeitung",
@@ -307,7 +317,9 @@
       "submitMove": "Verschieben",
       "submitCopy": "Kopieren",
       "moved": "„{{title}}\" wurde verschoben.",
-      "copied": "„{{title}}\" wurde kopiert."
+      "copied": "„{{title}}\" wurde kopiert.",
+      "includeSubtasks_one": "Unteraufgabe mit übernehmen",
+      "includeSubtasks_other": "{{count}} Unteraufgaben mit übernehmen"
     },
     "accounts": {
       "title": "Konten verwalten",
@@ -562,6 +574,8 @@
       "stateOpen": "offen",
       "stateInProgress": "in Arbeit",
       "stateCancelled": "abgebrochen",
+      "expand": "Unteraufgaben von „{{title}}\" ausklappen",
+      "collapse": "Unteraufgaben von „{{title}}\" einklappen",
       "optionLabel": "{{title}}, Liste {{list}}, {{state}}, {{due}}",
       "optionLabelWithLabel": "{{title}}, Liste {{list}}, {{state}}, {{due}}, Label: {{label}}",
       "dueScheduled": "Geplant: {{date}}",

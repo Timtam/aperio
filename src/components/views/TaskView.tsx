@@ -53,12 +53,30 @@ export function TaskView() {
   const { openTaskDialog, openMoveCopy, openPlanTask, invalidateData } =
     useDialogState();
 
+  // Parent-task collapse state: the set of parent ids whose
+  // children are currently hidden. Lives in component state so a
+  // session-level collapse stays sticky as the user navigates the
+  // list, but doesn't persist across reloads — a future polish
+  // could move this into user_prefs the way the sidebar's
+  // expansion map does.
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const toggleCollapsed = useCallback((id: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
   // Flatten the task buckets into a single options array, interleaved
   // with separator entries. focusIndex points at the *task* index in
-  // `flatTasks` — separators never receive focus.
+  // `flatTasks` — separators never receive focus. Children appear
+  // depth-first under their parent; the `hidden` flag on each entry
+  // tells the renderer when the parent above is collapsed.
   const { entries, flatTasks } = useMemo(
-    () => buildEntries(tasks, taskListById, t),
-    [tasks, taskListById, t],
+    () => buildEntries(tasks, taskListById, t, collapsed),
+    [tasks, taskListById, t, collapsed],
   );
 
   const [focusIndex, setFocusIndex] = useState(0);
@@ -68,6 +86,30 @@ export function TaskView() {
       setFocusIndex(Math.max(0, flatTasks.length - 1));
     }
   }, [flatTasks.length, focusIndex]);
+
+  // Keep focus on a visible row: if the user collapses a parent
+  // and the previously-focused subtask is now hidden, jump focus
+  // back up to the parent so Arrow keys still land on something
+  // useful. The visit walk emits parents before children, so the
+  // closest non-hidden row above the current index is the parent.
+  useEffect(() => {
+    const focused = entries
+      .filter((e): e is Extract<Entry, { kind: 'task' }> => e.kind === 'task')
+      .find((e) => e.index === focusIndex);
+    if (focused?.hidden) {
+      for (let i = focusIndex - 1; i >= 0; i--) {
+        const candidate = entries
+          .filter(
+            (e): e is Extract<Entry, { kind: 'task' }> => e.kind === 'task',
+          )
+          .find((e) => e.index === i);
+        if (candidate && !candidate.hidden) {
+          setFocusIndex(i);
+          return;
+        }
+      }
+    }
+  }, [collapsed, entries, focusIndex]);
 
   // Deferred indicator — see DayView for the rationale.
   const showLoading = useDeferredLoading(loading);
@@ -142,19 +184,55 @@ export function TaskView() {
       switch (e.key) {
         case 'ArrowDown':
           e.preventDefault();
-          setFocusIndex((i) => Math.min(i + 1, flatTasks.length - 1));
+          setFocusIndex((i) => nextVisibleIndex(entries, i, +1));
           return;
         case 'ArrowUp':
           e.preventDefault();
-          setFocusIndex((i) => Math.max(i - 1, 0));
+          setFocusIndex((i) => nextVisibleIndex(entries, i, -1));
           return;
+        case 'ArrowRight': {
+          // Treeview convention: Right on a collapsed parent expands
+          // it; on an expanded parent dives to the first child. We
+          // implement only the expand half — diving is implicit
+          // since the child sits one index below.
+          e.preventDefault();
+          const focused = focusedTaskEntry(entries, focusIndex);
+          if (focused?.hasChildren && collapsed.has(focused.task.id)) {
+            toggleCollapsed(focused.task.id);
+          } else if (focused?.hasChildren) {
+            setFocusIndex((i) => nextVisibleIndex(entries, i, +1));
+          }
+          return;
+        }
+        case 'ArrowLeft': {
+          // Left on an expanded parent collapses it; on a child
+          // jumps to the parent. Lets the user dismiss a noisy
+          // sub-tree with one keystroke.
+          e.preventDefault();
+          const focused = focusedTaskEntry(entries, focusIndex);
+          if (
+            focused?.hasChildren &&
+            !collapsed.has(focused.task.id)
+          ) {
+            toggleCollapsed(focused.task.id);
+          } else if (focused && focused.task.parent_id) {
+            const parentIdx = entries
+              .filter(
+                (e): e is Extract<Entry, { kind: 'task' }> =>
+                  e.kind === 'task',
+              )
+              .find((e) => e.task.id === focused.task.parent_id)?.index;
+            if (parentIdx !== undefined) setFocusIndex(parentIdx);
+          }
+          return;
+        }
         case 'Home':
           e.preventDefault();
-          setFocusIndex(0);
+          setFocusIndex(firstVisibleIndex(entries));
           return;
         case 'End':
           e.preventDefault();
-          setFocusIndex(flatTasks.length - 1);
+          setFocusIndex(lastVisibleIndex(entries));
           return;
         case ' ':
         case 'Spacebar': {
@@ -208,6 +286,9 @@ export function TaskView() {
       t,
       openTaskMenu,
       itemId,
+      entries,
+      collapsed,
+      toggleCollapsed,
     ],
   );
 
@@ -252,8 +333,10 @@ export function TaskView() {
               </li>
             );
           }
-          const { task, listName, index } = entry;
+          if (entry.hidden) return null;
+          const { task, listName, index, depth, hasChildren } = entry;
           const focused = index === focusIndex;
+          const isCollapsed = collapsed.has(task.id);
           // All four TaskStatus values must surface — `cancelled` and
           // `in_progress` reach the list via the chip context menu's
           // Status submenu, and before this branch they were both
@@ -286,15 +369,25 @@ export function TaskView() {
               role="option"
               aria-selected={focused}
               aria-label={aria}
+              aria-level={depth + 1}
+              aria-expanded={hasChildren ? !isCollapsed : undefined}
               className={
                 'task-list__item' +
                 (focused ? ' task-list__item--focused' : '') +
-                ` task-list__item--${task.status.replace('_', '-')}`
+                ` task-list__item--${task.status.replace('_', '-')}` +
+                (depth > 0 ? ' task-list__item--child' : '')
               }
               style={
-                color.hex
-                  ? ({ '--event-color': color.hex } as React.CSSProperties)
-                  : undefined
+                {
+                  ...(color.hex
+                    ? { '--event-color': color.hex }
+                    : {}),
+                  // Indentation per depth — driven by a custom prop so
+                  // the rest of the grid columns (check / title / due)
+                  // keep their alignment. CSS picks `--task-depth`
+                  // up via padding-left on `--child` rows.
+                  '--task-depth': depth,
+                } as React.CSSProperties
               }
               onClick={() => {
                 setFocusIndex(index);
@@ -307,6 +400,31 @@ export function TaskView() {
                 void openTaskMenu(task);
               }}
             >
+              {hasChildren ? (
+                <button
+                  type="button"
+                  className="task-list__twisty"
+                  aria-label={t(
+                    isCollapsed
+                      ? 'views.tasks.expand'
+                      : 'views.tasks.collapse',
+                    { title: task.title },
+                  )}
+                  // Clicking the twisty is its own action — stop
+                  // propagation so the row's onClick (toggle status)
+                  // doesn't also fire.
+                  onClick={(ev) => {
+                    ev.stopPropagation();
+                    toggleCollapsed(task.id);
+                  }}
+                >
+                  <span aria-hidden="true">{isCollapsed ? '▸' : '▾'}</span>
+                </button>
+              ) : (
+                // Empty cell keeps the grid columns aligned across
+                // rows with and without children.
+                <span aria-hidden="true" className="task-list__twisty-spacer" />
+              )}
               <span className="task-list__check" aria-hidden="true">
                 {marker}
               </span>
@@ -334,16 +452,51 @@ export function TaskView() {
 
 type Entry =
   | { kind: 'separator'; label: string }
-  | { kind: 'task'; task: Task; listName: string; index: number };
+  | {
+      kind: 'task';
+      task: Task;
+      listName: string;
+      /** Position in `flatTasks` — what `focusIndex` indexes into. */
+      index: number;
+      /** 0 for top-level, 1+ for nested under a parent. */
+      depth: number;
+      /** Set when this task has at least one child in the list. */
+      hasChildren: boolean;
+      /** True when the parent row above is collapsed (so the
+       *  caller knows to skip this child during rendering). */
+      hidden: boolean;
+    };
 
 function buildEntries(
   tasks: Task[],
   taskListById: Map<string, { name: string }>,
   t: (key: string, vars?: Record<string, unknown>) => string,
+  collapsed: Set<string>,
 ): { entries: Entry[]; flatTasks: Task[] } {
+  // Bucket children under their parent so the depth-first walk
+  // below has O(1) lookup. Tasks whose parent_id points at a
+  // missing row become orphans — surface them at top level rather
+  // than swallowing them silently.
+  const childrenByParent = new Map<string, Task[]>();
+  const allIds = new Set<string>();
+  tasks.forEach((task) => allIds.add(task.id));
+  const topLevel: Task[] = [];
+  tasks.forEach((task) => {
+    if (task.parent_id && allIds.has(task.parent_id)) {
+      const bucket = childrenByParent.get(task.parent_id) ?? [];
+      bucket.push(task);
+      childrenByParent.set(task.parent_id, bucket);
+    } else {
+      topLevel.push(task);
+    }
+  });
+
+  // Two top-level buckets: backlog (no dates at all) and the
+  // per-list groups. Children inherit their parent's bucket so a
+  // subtask of a backlog task lives under it, not somewhere else.
   const backlog: Task[] = [];
   const byList = new Map<string, Task[]>();
-  tasks.forEach((task) => {
+  topLevel.forEach((task) => {
     if (!task.scheduled_date && !task.deadline_date) {
       backlog.push(task);
       return;
@@ -360,25 +513,87 @@ function buildEntries(
   const entries: Entry[] = [];
   const flatTasks: Task[] = [];
 
-  const push = (task: Task, listName: string) => {
-    entries.push({ kind: 'task', task, listName, index: flatTasks.length });
+  // Depth-first emit. Hidden rows still join `flatTasks` so the
+  // index space stays stable across collapse — but the renderer
+  // skips them, and the keyboard nav effect clamps focus on
+  // collapse so the user never lands inside a hidden node.
+  const visit = (task: Task, depth: number, hidden: boolean) => {
+    const children = childrenByParent.get(task.id) ?? [];
+    const listName =
+      taskListById.get(task.list_id)?.name ?? task.list_id;
+    entries.push({
+      kind: 'task',
+      task,
+      listName,
+      index: flatTasks.length,
+      depth,
+      hasChildren: children.length > 0,
+      hidden,
+    });
     flatTasks.push(task);
+    const childHidden = hidden || collapsed.has(task.id);
+    children.forEach((child) => visit(child, depth + 1, childHidden));
   };
 
   if (backlog.length > 0) {
     entries.push({ kind: 'separator', label: t('views.tasks.backlog') });
-    backlog.forEach((task) =>
-      push(task, taskListById.get(task.list_id)?.name ?? task.list_id),
-    );
+    backlog.forEach((task) => visit(task, 0, false));
   }
 
   sortedLists.forEach(([listId, items]) => {
     const name = taskListById.get(listId)?.name ?? listId;
     entries.push({ kind: 'separator', label: name });
-    items.forEach((task) => push(task, name));
+    items.forEach((task) => visit(task, 0, false));
   });
 
   return { entries, flatTasks };
+}
+
+/** Find the task entry at flat-task position `index`, ignoring
+ *  separators and respecting the index/entries decoupling. */
+function focusedTaskEntry(
+  entries: Entry[],
+  index: number,
+): Extract<Entry, { kind: 'task' }> | null {
+  for (const e of entries) {
+    if (e.kind === 'task' && e.index === index) return e;
+  }
+  return null;
+}
+
+/** Next index in the requested direction that points at a visible
+ *  (non-hidden) row. Clamps at the boundary so the user never
+ *  wraps past the end of the list. */
+function nextVisibleIndex(
+  entries: Entry[],
+  current: number,
+  dir: 1 | -1,
+): number {
+  const tasks = entries.filter(
+    (e): e is Extract<Entry, { kind: 'task' }> => e.kind === 'task',
+  );
+  let cursor = current + dir;
+  while (cursor >= 0 && cursor < tasks.length) {
+    const candidate = tasks.find((e) => e.index === cursor);
+    if (candidate && !candidate.hidden) return cursor;
+    cursor += dir;
+  }
+  return current;
+}
+
+function firstVisibleIndex(entries: Entry[]): number {
+  for (const e of entries) {
+    if (e.kind === 'task' && !e.hidden) return e.index;
+  }
+  return 0;
+}
+
+function lastVisibleIndex(entries: Entry[]): number {
+  let found = 0;
+  for (const e of entries) {
+    if (e.kind === 'task' && !e.hidden) found = e.index;
+  }
+  return found;
 }
 
 function describeDue(

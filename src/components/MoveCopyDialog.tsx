@@ -18,6 +18,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type { CalendarEvent, Task } from '../api/types';
 import { useCalendarStore } from '../state/CalendarStore';
 import type { MoveCopyTarget } from '../state/DialogState';
+import { useTasks } from '../state/useTasks';
 import { Modal } from './Modal';
 
 /**
@@ -65,6 +66,17 @@ export function MoveCopyDialog({
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // Subtasks: when the task being moved/copied has children, DESIGN.md
+  // §9.10 says we ask whether to bring them along. The checkbox below
+  // surfaces only in that case; events don't have a parent_id concept
+  // so they bypass this entirely.
+  const { tasks } = useTasks();
+  const children = useMemo(() => {
+    if (target.kind !== 'task') return [];
+    return tasks.filter((row) => row.parent_id === target.task.id);
+  }, [tasks, target]);
+  const [includeSubtasks, setIncludeSubtasks] = useState(true);
+
   const containers = useMemo(() => {
     // Move / copy targets must accept writes — drop read-only
     // containers (iCal feeds, future shared read-only sources) so
@@ -105,7 +117,12 @@ export function MoveCopyDialog({
         if (target.kind === 'event') {
           await moveOrCopyEvent(target.event, targetContainerId, mode);
         } else {
-          await moveOrCopyTask(target.task, targetContainerId, mode);
+          await moveOrCopyTask(
+            target.task,
+            targetContainerId,
+            mode,
+            includeSubtasks ? children : [],
+          );
         }
         announce(
           t(
@@ -135,6 +152,8 @@ export function MoveCopyDialog({
       onClose,
       itemTitle,
       t,
+      includeSubtasks,
+      children,
     ],
   );
 
@@ -203,6 +222,24 @@ export function MoveCopyDialog({
             ))}
           </select>
         </label>
+
+        {target.kind === 'task' && children.length > 0 && (
+          <label className="form__field form__field--inline">
+            {/* §9.10 "Mit Unteraufgaben"-Rückfrage: only surfaces
+                when the focused task actually has children, so the
+                checkbox doesn't add noise to flat-task moves. */}
+            <input
+              type="checkbox"
+              checked={includeSubtasks}
+              onChange={(e) => setIncludeSubtasks(e.target.checked)}
+            />
+            <span>
+              {t('dialogs.moveCopy.includeSubtasks', {
+                count: children.length,
+              })}
+            </span>
+          </label>
+        )}
 
         {error && (
           <p role="alert" className="form__error">
@@ -275,15 +312,26 @@ async function moveOrCopyTask(
   task: Task,
   targetListId: string,
   mode: Mode,
+  children: Task[],
 ): Promise<void> {
   if (mode === 'move') {
+    // Move keeps row identity, so updating list_id on the parent
+    // and each child is enough — parent_id references survive the
+    // list switch.
     await invoke<Task>('update_task', {
       task: { ...task, list_id: targetListId },
     });
+    for (const child of children) {
+      await invoke<Task>('update_task', {
+        task: { ...child, list_id: targetListId },
+      });
+    }
     return;
   }
 
-  await apiCreateTask({
+  // Copy: create a fresh parent row, then re-parent each child copy
+  // onto the new id. The original parent and its children stay put.
+  const newParent = await apiCreateTask({
     list_id: targetListId,
     title: task.title,
     description: task.description,
@@ -294,11 +342,29 @@ async function moveOrCopyTask(
     deadline_date: task.deadline_date,
     deadline_time: task.deadline_time,
     recurrence: task.recurrence,
-    parent_id: null, // top-level on copy; subtask cloning is out of scope
+    parent_id: null,
     color_label: task.color_label,
     reminders: task.reminders,
     sound: task.sound,
   });
+  for (const child of children) {
+    await apiCreateTask({
+      list_id: targetListId,
+      title: child.title,
+      description: child.description,
+      status: child.status,
+      priority: child.priority,
+      scheduled_date: child.scheduled_date,
+      deadline_type: child.deadline_type,
+      deadline_date: child.deadline_date,
+      deadline_time: child.deadline_time,
+      recurrence: child.recurrence,
+      parent_id: newParent.id,
+      color_label: child.color_label,
+      reminders: child.reminders,
+      sound: child.sound,
+    });
+  }
 }
 
 // ────────────────────────────────────────────────────────────────────────────

@@ -594,6 +594,97 @@ button[aria-disabled='true'] {
   align-items: center;
 }
 
+/* Subtasks editor inside TaskDialog (DESIGN.md §9.9). Inline list of
+ * existing children with a marker / title / remove triplet per row,
+ * plus an "add" input below. Mutations apply immediately, the rest
+ * of the dialog stays in staged-save mode — see TaskDialog comment
+ * for the rationale. */
+.form__field--subtasks {
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+
+.subtasks__empty {
+  color: var(--color-fg-muted);
+  font-size: var(--font-size-sm);
+  margin: var(--space-1) 0;
+}
+
+/* Listbox holding the existing subtasks. One tab stop owns the
+ * whole control; arrow keys move the focused option via
+ * aria-activedescendant, Space toggles, Shift+F10 opens the per-row
+ * context menu (Status + Delete). Matches the keyboard model the
+ * dedicated TaskView uses, just narrower. */
+.subtasks__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-panel);
+}
+
+.subtasks__list:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.subtasks__row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  cursor: pointer;
+}
+
+.subtasks__row--focused {
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+
+.subtasks__check {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.4em;
+  color: var(--color-fg-muted);
+  font-size: 1em;
+}
+
+.subtasks__title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subtasks__title--done {
+  color: var(--color-fg-muted);
+  text-decoration: line-through;
+}
+
+.subtasks__add {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.subtasks__add input {
+  flex: 1;
+  min-width: 0;
+}
+
+.subtasks__add-button {
+  /* Inherits the form-button base via no class — small affordance,
+   * sized to match the input height. */
+  white-space: nowrap;
+}
+
 .form__row {
   display: flex;
   gap: var(--space-3);
@@ -2017,12 +2108,52 @@ button[aria-disabled='true'] {
 }
 
 .task-list__item {
+  /* Four columns: twisty (or spacer) / check / title / due. The
+   * twisty column is fixed-width so rows with and without children
+   * keep their check/title/due aligned. */
   display: grid;
-  grid-template-columns: 32px 1fr auto;
+  grid-template-columns: 20px 32px 1fr auto;
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-1) var(--space-2);
+  padding-left: calc(var(--space-2) + var(--task-depth, 0) * 20px);
   border-bottom: 1px solid var(--color-border);
+}
+
+.task-list__twisty {
+  background: transparent;
+  border: 0;
+  color: var(--color-fg-muted);
+  font-size: 0.85em;
+  cursor: pointer;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.4em;
+  min-height: 1.4em;
+  border-radius: var(--radius-sm);
+}
+
+.task-list__twisty:hover,
+.task-list__twisty:focus-visible {
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  color: var(--color-fg);
+  outline: none;
+}
+
+.task-list__twisty-spacer {
+  /* Same width as the twisty button. Reserves the column so
+   * children-less rows don't squeeze the title column to the left. */
+  display: inline-block;
+  width: 1.4em;
+}
+
+.task-list__item--child {
+  /* Subtle visual hint that this row sits under a parent — the
+   * indentation alone is the main cue; the lighter background is a
+   * gentle secondary signal that helps with dense lists. */
+  background: color-mix(in srgb, var(--color-fg) 2%, transparent);
 }
 
 .task-list__item--focused {

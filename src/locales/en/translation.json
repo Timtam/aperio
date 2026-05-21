@@ -238,6 +238,16 @@
         "colorLabel": "Color label"
       },
       "noColorLabel": "(No label)",
+      "subtasks": {
+        "heading": "Subtasks",
+        "empty": "No subtasks yet.",
+        "placeholder": "Add subtask …",
+        "newAria": "New subtask title",
+        "addButton": "Add",
+        "added": "Subtask \"{{title}}\" added.",
+        "listAria": "Subtasks. Arrow keys to navigate, Space to toggle done, Shift+F10 for actions.",
+        "rowLabel": "{{title}}, {{state}}"
+      },
       "status": {
         "open": "Open",
         "inProgress": "In progress",
@@ -307,7 +317,9 @@
       "submitMove": "Move",
       "submitCopy": "Copy",
       "moved": "\"{{title}}\" moved.",
-      "copied": "\"{{title}}\" copied."
+      "copied": "\"{{title}}\" copied.",
+      "includeSubtasks_one": "Include the subtask",
+      "includeSubtasks_other": "Include the {{count}} subtasks"
     },
     "accounts": {
       "title": "Manage accounts",
@@ -562,6 +574,8 @@
       "stateOpen": "open",
       "stateInProgress": "in progress",
       "stateCancelled": "cancelled",
+      "expand": "Expand subtasks of \"{{title}}\"",
+      "collapse": "Collapse subtasks of \"{{title}}\"",
       "optionLabel": "{{title}}, list {{list}}, {{state}}, {{due}}",
       "optionLabelWithLabel": "{{title}}, list {{list}}, {{state}}, {{due}}, label: {{label}}",
       "dueScheduled": "Scheduled: {{date}}",

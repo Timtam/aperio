@@ -1,9 +1,11 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useState,
   type FormEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -11,8 +13,11 @@ import { useAnnouncer } from '../a11y/Announcer';
 import {
   createTask as apiCreateTask,
   isCommandError,
+  showContextMenu,
+  type ContextMenuItemRequest,
 } from '../api/client';
 import { invoke } from '@tauri-apps/api/core';
+import { statusI18nKey, statusMarker } from '../intl/taskStatus';
 import type {
   DeadlineType,
   Reminder,
@@ -21,6 +26,8 @@ import type {
   TaskStatus,
 } from '../api/types';
 import { useCalendarStore } from '../state/CalendarStore';
+import { useDialogState } from '../state/DialogState';
+import { useTasks } from '../state/useTasks';
 import { Modal } from './Modal';
 import { RemindersEditor } from './RemindersEditor';
 import {
@@ -75,8 +82,39 @@ export function TaskDialog({
   const { t } = useTranslation();
   const announce = useAnnouncer();
   const { taskLists, colorLabels } = useCalendarStore();
+  const { tasks } = useTasks();
+  const { invalidateData } = useDialogState();
 
   const isEdit = task !== null;
+
+  // Subtasks: children of the task currently being edited. Only
+  // meaningful in edit mode — a brand-new task has no id yet, so
+  // children can't reference it. Filtering here over the global
+  // task list keeps the dialog in sync with TaskView whenever the
+  // user (or a sync) mutates a child elsewhere.
+  const subtasks = useMemo<Task[]>(() => {
+    if (!task) return [];
+    return tasks.filter((row) => row.parent_id === task.id);
+  }, [tasks, task]);
+
+  const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
+  const [subtaskBusy, setSubtaskBusy] = useState(false);
+  // Listbox focus: aria-activedescendant index into `subtasks`. The
+  // listbox owns the single tab stop; arrow keys move this counter
+  // and the option with the matching id lights up as the focused
+  // descendant — same pattern TaskView uses.
+  const [focusedSubtaskIdx, setFocusedSubtaskIdx] = useState(0);
+  const subtaskListId = useId();
+  const subtaskItemId = useCallback(
+    (i: number) => `${subtaskListId}-item-${i}`,
+    [subtaskListId],
+  );
+
+  useEffect(() => {
+    if (focusedSubtaskIdx >= subtasks.length) {
+      setFocusedSubtaskIdx(Math.max(0, subtasks.length - 1));
+    }
+  }, [subtasks.length, focusedSubtaskIdx]);
   const initialState = useMemo<FormState>(
     () => buildInitialState(task, defaultListId, defaultDate, taskLists),
     [task, defaultListId, defaultDate, taskLists],
@@ -98,6 +136,216 @@ export function TaskDialog({
       setForm((prev) => ({ ...prev, [key]: value }));
     },
     [],
+  );
+
+  // Subtask mutations apply immediately (not staged with the parent
+  // form's Save) so the user can check things off without losing
+  // unsaved parent-field edits. Each path bumps dataVersion so
+  // useTasks refetches and the inline list refreshes.
+  const addSubtask = useCallback(async () => {
+    if (!task) return;
+    const trimmed = newSubtaskTitle.trim();
+    if (!trimmed || subtaskBusy) return;
+    setSubtaskBusy(true);
+    try {
+      await apiCreateTask({
+        list_id: task.list_id,
+        title: trimmed,
+        description: null,
+        status: 'open',
+        priority: 'medium',
+        scheduled_date: null,
+        deadline_type: null,
+        deadline_date: null,
+        deadline_time: null,
+        recurrence: null,
+        parent_id: task.id,
+        color_label: null,
+        reminders: [],
+        sound: null,
+      });
+      setNewSubtaskTitle('');
+      invalidateData();
+      announce(t('dialogs.task.subtasks.added', { title: trimmed }));
+    } catch (err) {
+      // Show inline rather than steal the parent form's error slot.
+      announce(
+        isCommandError(err) ? `${err.code}: ${err.message}` : String(err),
+      );
+    } finally {
+      setSubtaskBusy(false);
+    }
+  }, [task, newSubtaskTitle, subtaskBusy, invalidateData, announce, t]);
+
+  const toggleSubtaskStatus = useCallback(
+    async (subtask: Task) => {
+      const next: TaskStatus =
+        subtask.status === 'completed' ? 'open' : 'completed';
+      try {
+        await invoke<Task>('update_task', {
+          task: {
+            ...subtask,
+            status: next,
+            completed_at:
+              next === 'completed' ? new Date().toISOString() : null,
+          },
+        });
+        invalidateData();
+        announce(
+          next === 'completed'
+            ? t('views.tasks.completedAnnounce', { title: subtask.title })
+            : t('views.tasks.reopenedAnnounce', { title: subtask.title }),
+        );
+      } catch (err) {
+        announce(
+          isCommandError(err) ? `${err.code}: ${err.message}` : String(err),
+        );
+      }
+    },
+    [invalidateData, announce, t],
+  );
+
+  const deleteSubtask = useCallback(
+    async (subtask: Task) => {
+      try {
+        await invoke<void>('delete_task', {
+          id: subtask.id,
+          listId: subtask.list_id,
+        });
+        invalidateData();
+        announce(t('dialogs.task.deleted', { title: subtask.title }));
+      } catch (err) {
+        announce(
+          isCommandError(err) ? `${err.code}: ${err.message}` : String(err),
+        );
+      }
+    },
+    [invalidateData, announce, t],
+  );
+
+  const setSubtaskStatus = useCallback(
+    async (subtask: Task, next: TaskStatus) => {
+      if (subtask.status === next) return;
+      try {
+        await invoke<Task>('update_task', {
+          task: {
+            ...subtask,
+            status: next,
+            completed_at:
+              next === 'completed' ? new Date().toISOString() : null,
+          },
+        });
+        invalidateData();
+      } catch (err) {
+        announce(
+          isCommandError(err) ? `${err.code}: ${err.message}` : String(err),
+        );
+      }
+    },
+    [invalidateData, announce],
+  );
+
+  // Per-subtask context menu (right-click + Shift+F10). Limited to
+  // status + delete — opening a TaskDialog from inside another
+  // TaskDialog would stack modals on the same surface, which is the
+  // reason "edit" lives in TaskView instead. Status changes use
+  // CheckMenuItems so the OS draws its own glyph on the active row.
+  const openSubtaskMenu = useCallback(
+    async (
+      subtask: Task,
+      position?: { x: number; y: number },
+    ) => {
+      const items: ContextMenuItemRequest[] = [
+        {
+          kind: 'submenu',
+          label: t('chipMenu.status'),
+          items: (
+            ['open', 'in_progress', 'completed', 'cancelled'] as TaskStatus[]
+          ).map((s) => ({
+            kind: 'check' as const,
+            id: `status:${s}`,
+            label: t(`chipMenu.statusValue.${s}`),
+            checked: subtask.status === s,
+          })),
+        },
+        { kind: 'separator' },
+        { id: 'delete', label: t('chipMenu.delete') },
+      ];
+      let selected: string | null = null;
+      try {
+        selected = await showContextMenu(items, position);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('show_context_menu failed', err);
+      }
+      if (selected?.startsWith('status:')) {
+        await setSubtaskStatus(subtask, selected.slice('status:'.length) as TaskStatus);
+      } else if (selected === 'delete') {
+        await deleteSubtask(subtask);
+      }
+    },
+    [t, setSubtaskStatus, deleteSubtask],
+  );
+
+  const onSubtaskListKey = useCallback(
+    (e: ReactKeyboardEvent) => {
+      if (subtasks.length === 0) return;
+      switch (e.key) {
+        case 'ArrowDown':
+          e.preventDefault();
+          setFocusedSubtaskIdx((i) =>
+            Math.min(i + 1, subtasks.length - 1),
+          );
+          return;
+        case 'ArrowUp':
+          e.preventDefault();
+          setFocusedSubtaskIdx((i) => Math.max(i - 1, 0));
+          return;
+        case 'Home':
+          e.preventDefault();
+          setFocusedSubtaskIdx(0);
+          return;
+        case 'End':
+          e.preventDefault();
+          setFocusedSubtaskIdx(subtasks.length - 1);
+          return;
+        case ' ':
+        case 'Spacebar': {
+          // Space toggles open/completed — same Space-to-check
+          // contract the rest of the app uses for tasks.
+          e.preventDefault();
+          const sub = subtasks[focusedSubtaskIdx];
+          if (sub) void toggleSubtaskStatus(sub);
+          return;
+        }
+        case 'ContextMenu':
+        case 'F10': {
+          if (e.key === 'F10' && !e.shiftKey) return;
+          e.preventDefault();
+          const sub = subtasks[focusedSubtaskIdx];
+          if (sub) {
+            const target = e.currentTarget as HTMLElement;
+            const id = subtaskItemId(focusedSubtaskIdx);
+            const node = target.ownerDocument?.getElementById(id);
+            const rect = node?.getBoundingClientRect();
+            void openSubtaskMenu(
+              sub,
+              rect ? { x: rect.left, y: rect.bottom } : undefined,
+            );
+          }
+          return;
+        }
+        default:
+          return;
+      }
+    },
+    [
+      subtasks,
+      focusedSubtaskIdx,
+      toggleSubtaskStatus,
+      openSubtaskMenu,
+      subtaskItemId,
+    ],
   );
 
   const onSubmit = useCallback(
@@ -373,6 +621,119 @@ export function TaskDialog({
             ))}
           </select>
         </label>
+
+        {isEdit && task && (
+          <fieldset className="form__field form__field--subtasks">
+            <legend className="form__label">
+              {t('dialogs.task.subtasks.heading')}
+            </legend>
+            {/* Subtasks section. Hidden on create — a brand new
+                parent has no id, so children couldn't reference it.
+                The user finishes the create flow first, then
+                re-opens to add subtasks. Existing tasks see the
+                list immediately and can edit it inline.
+                Mutations here persist immediately (not staged with
+                the parent form). That's a deliberate pick: the most
+                common use is "tick a subtask off mid-edit", which
+                shouldn't be coupled to whether the parent's other
+                changes are saved yet. */}
+            {subtasks.length === 0 ? (
+              <p className="subtasks__empty">
+                {t('dialogs.task.subtasks.empty')}
+              </p>
+            ) : (
+              <ul
+                role="listbox"
+                tabIndex={0}
+                className="subtasks__list"
+                aria-label={t('dialogs.task.subtasks.listAria')}
+                aria-activedescendant={subtaskItemId(focusedSubtaskIdx)}
+                onKeyDown={onSubtaskListKey}
+              >
+                {/* One tab stop owns the whole list — focus moves
+                    between options via aria-activedescendant. Each
+                    row carries aria-checked so AT announces the
+                    Space-to-toggle binding correctly. Delete and
+                    Status changes live in the per-row context menu
+                    (Shift+F10 / right-click). */}
+                {subtasks.map((sub, i) => {
+                  const focused = i === focusedSubtaskIdx;
+                  const isCompleted = sub.status === 'completed';
+                  const stateLabel = t(statusI18nKey(sub.status));
+                  return (
+                    <li
+                      key={sub.id}
+                      id={subtaskItemId(i)}
+                      role="option"
+                      aria-selected={focused}
+                      aria-checked={isCompleted}
+                      aria-label={t('dialogs.task.subtasks.rowLabel', {
+                        title: sub.title,
+                        state: stateLabel,
+                      })}
+                      className={
+                        'subtasks__row' +
+                        (focused ? ' subtasks__row--focused' : '')
+                      }
+                      onClick={() => {
+                        setFocusedSubtaskIdx(i);
+                        void toggleSubtaskStatus(sub);
+                      }}
+                      onContextMenu={(ev) => {
+                        ev.preventDefault();
+                        ev.stopPropagation();
+                        setFocusedSubtaskIdx(i);
+                        void openSubtaskMenu(sub);
+                      }}
+                    >
+                      <span className="subtasks__check" aria-hidden="true">
+                        {statusMarker(sub.status)}
+                      </span>
+                      <span
+                        className={
+                          'subtasks__title' +
+                          (sub.status === 'completed' ||
+                          sub.status === 'cancelled'
+                            ? ' subtasks__title--done'
+                            : '')
+                        }
+                      >
+                        {sub.title}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            <div className="subtasks__add">
+              <input
+                type="text"
+                value={newSubtaskTitle}
+                onChange={(e) => setNewSubtaskTitle(e.target.value)}
+                onKeyDown={(e) => {
+                  // Enter inside this input adds the subtask without
+                  // submitting the parent form — preventDefault
+                  // stops the form-submit fallthrough.
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    void addSubtask();
+                  }
+                }}
+                placeholder={t('dialogs.task.subtasks.placeholder')}
+                aria-label={t('dialogs.task.subtasks.newAria')}
+                disabled={subtaskBusy}
+              />
+              <button
+                type="button"
+                onClick={() => void addSubtask()}
+                disabled={subtaskBusy || !newSubtaskTitle.trim()}
+                className="subtasks__add-button"
+              >
+                {t('dialogs.task.subtasks.addButton')}
+              </button>
+            </div>
+          </fieldset>
+        )}
 
         {error && (
           <p role="alert" className="form__error">
