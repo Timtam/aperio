@@ -106,6 +106,18 @@
           "today": "Automatisch auf heute übernehmen",
           "backlog": "Automatisch ins Backlog verschieben"
         }
+      },
+      "dayStartTrigger": {
+        "heading": "Tageswechsel-Auslöser",
+        "hint": "Wann die Übernahme-, Deadline-Überfällig- und Deadline-Pin-Prüfungen bei dauerlaufender App ausgeführt werden. „Mitternacht\" feuert, sobald das lokale Datum wechselt. Wähle eine Morgenstunde, um den Dialog auf den Schreibtisch-Moment zu verschieben. „Nur App-Start\" deaktiviert die Tageswechsel-Logik komplett (altes Verhalten).",
+        "label": "Auslöser",
+        "options": {
+          "midnight": "Mitternacht (sofort bei Tageswechsel)",
+          "morning0600": "06:00 am neuen Tag",
+          "morning0800": "08:00 am neuen Tag",
+          "morning1200": "12:00 am neuen Tag",
+          "appStart": "Nur beim App-Start"
+        }
       }
     },
     "confirm": {

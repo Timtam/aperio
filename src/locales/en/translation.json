@@ -109,6 +109,18 @@
           "today": "Automatically move to today",
           "backlog": "Automatically send to backlog"
         }
+      },
+      "dayStartTrigger": {
+        "heading": "Day-start trigger",
+        "hint": "When to run the carry-over, missed-deadline, and deadline-pin checks on a long-running app. \"At midnight\" fires as soon as the local date rolls over. Pick a morning hour to defer the dialog until you're at the desk. \"App start only\" disables the day-change re-check entirely (legacy behaviour).",
+        "label": "Trigger",
+        "options": {
+          "midnight": "At midnight (immediately on day change)",
+          "morning0600": "At 06:00 on the new day",
+          "morning0800": "At 08:00 on the new day",
+          "morning1200": "At 12:00 on the new day",
+          "appStart": "App start only"
+        }
       }
     },
     "confirm": {

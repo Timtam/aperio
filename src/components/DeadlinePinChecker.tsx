@@ -4,8 +4,15 @@ import { invoke } from '@tauri-apps/api/core';
 
 import { useAnnouncer } from '../a11y/Announcer';
 import type { Task } from '../api/types';
+import {
+  readFiredDayKey,
+  shouldFireToday,
+  useCurrentDayKey,
+  writeFiredDayKey,
+} from '../hooks/useCurrentDayKey';
 import { todayIsoKey } from '../intl/taskDay';
 import { useDialogState } from '../state/DialogState';
+import { useTaskCascadeEnabled } from '../state/TaskCascadeProvider';
 import { useTasks } from '../state/useTasks';
 
 /**
@@ -42,21 +49,40 @@ import { useTasks } from '../state/useTasks';
  */
 export function DeadlinePinChecker() {
   const { tasks, loading } = useTasks();
-  const { invalidateData } = useDialogState();
+  const { mode: dialogMode, invalidateData } = useDialogState();
   const announce = useAnnouncer();
   const { t } = useTranslation();
-  const firedRef = useRef(false);
+  const { dayStartTrigger, hydrating } = useTaskCascadeEnabled();
+  const todayKey = useCurrentDayKey();
+  const firedRef = useRef<string | null>(readFiredDayKey('deadlinePin'));
 
   useEffect(() => {
-    if (firedRef.current) return;
-    if (loading) return;
-    firedRef.current = true;
+    if (loading || hydrating) return;
+    if (!shouldFireToday(dayStartTrigger, firedRef.current, todayKey)) {
+      return;
+    }
+    // Defer while an editor / dialog is open — silently changing
+    // `scheduled_date` under an open task editor would let the user
+    // save stale data and undo our pin a moment later.
+    if (dialogMode.kind !== 'none') return;
 
     const targets = filterDeadlinePinTargets(tasks);
+    firedRef.current = todayKey;
+    writeFiredDayKey('deadlinePin', todayKey);
     if (targets.length === 0) return;
 
     void pinToToday(targets, announce, t, invalidateData);
-  }, [loading, tasks, announce, t, invalidateData]);
+  }, [
+    loading,
+    hydrating,
+    tasks,
+    dayStartTrigger,
+    todayKey,
+    dialogMode.kind,
+    announce,
+    t,
+    invalidateData,
+  ]);
 
   return null;
 }

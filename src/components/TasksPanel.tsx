@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import {
   useTaskCascadeEnabled,
   type CarryOverDefault,
+  type DayStartTrigger,
 } from '../state/TaskCascadeProvider';
 
 /**
@@ -29,6 +30,21 @@ const CARRY_OVER_OPTIONS: readonly CarryOverDefault[] = [
   'backlog',
 ];
 
+/**
+ * Predefined day-start trigger choices. Exposed as a `<select>` so
+ * the five-element list stays compact in the panel. Custom HH:MM
+ * values that future migrations might introduce still round-trip
+ * through the provider's string storage; only the UI is restricted
+ * to these presets for now.
+ */
+const DAY_START_TRIGGER_OPTIONS: readonly DayStartTrigger[] = [
+  '00:00',
+  '06:00',
+  '08:00',
+  '12:00',
+  'app-start',
+];
+
 export function TasksPanel() {
   const { t } = useTranslation();
   const {
@@ -38,6 +54,8 @@ export function TasksPanel() {
     setAutoDate,
     carryOverDefault,
     setCarryOverDefault,
+    dayStartTrigger,
+    setDayStartTrigger,
   } = useTaskCascadeEnabled();
 
   const couplingHeadingId = useId();
@@ -47,6 +65,9 @@ export function TasksPanel() {
   const carryOverHeadingId = useId();
   const carryOverHintId = useId();
   const carryOverGroupId = useId();
+  const triggerHeadingId = useId();
+  const triggerHintId = useId();
+  const triggerSelectId = useId();
 
   return (
     <div className="form">
@@ -130,6 +151,52 @@ export function TasksPanel() {
             </label>
           ))}
         </div>
+      </section>
+
+      <section
+        aria-labelledby={triggerHeadingId}
+        className="tasks-settings__section"
+      >
+        <h3 id={triggerHeadingId} className="color-labels__heading">
+          {t('dialogs.tasks.dayStartTrigger.heading')}
+        </h3>
+        <p id={triggerHintId} className="tasks-settings__hint">
+          {t('dialogs.tasks.dayStartTrigger.hint')}
+        </p>
+        <label
+          htmlFor={triggerSelectId}
+          className="tasks-settings__select-label"
+        >
+          <span className="form__label">
+            {t('dialogs.tasks.dayStartTrigger.label')}
+          </span>
+          <select
+            id={triggerSelectId}
+            value={dayStartTrigger}
+            aria-describedby={triggerHintId}
+            onChange={(e) =>
+              setDayStartTrigger(e.target.value as DayStartTrigger)
+            }
+          >
+            {DAY_START_TRIGGER_OPTIONS.map((option) => {
+              // The translation keys mirror the option values. The
+              // colon in HH:MM forms is awkward in dot-paths so we
+              // route every preset through an explicit map of named
+              // keys (`midnight`, `morning06`, …).
+              const labelKey =
+                option === 'app-start'
+                  ? 'appStart'
+                  : option === '00:00'
+                  ? 'midnight'
+                  : `morning${option.replace(':', '')}`;
+              return (
+                <option key={option} value={option}>
+                  {t(`dialogs.tasks.dayStartTrigger.options.${labelKey}`)}
+                </option>
+              );
+            })}
+          </select>
+        </label>
       </section>
     </div>
   );

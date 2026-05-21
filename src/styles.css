@@ -529,6 +529,13 @@ button[aria-disabled='true'] {
   height: 1.1em;
 }
 
+.tasks-settings__select-label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-1) 0;
+}
+
 .form__message {
   margin: 0;
   padding: var(--space-3) var(--space-4) 0;

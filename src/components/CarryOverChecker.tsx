@@ -4,6 +4,12 @@ import { invoke } from '@tauri-apps/api/core';
 
 import { useAnnouncer } from '../a11y/Announcer';
 import type { Task } from '../api/types';
+import {
+  readFiredDayKey,
+  shouldFireToday,
+  useCurrentDayKey,
+  writeFiredDayKey,
+} from '../hooks/useCurrentDayKey';
 import { todayIsoKey } from '../intl/taskDay';
 import { useDialogState } from '../state/DialogState';
 import {
@@ -15,13 +21,11 @@ import {
   actionableDescendants,
   filterCarriedOver,
   isCarryOverSnoozed,
-  snoozeCarryOver,
 } from './CarryOverDialog';
 
 /**
- * Mount-once gate that handles the day-start carry-over flow. The
- * Settings → Tasks "Übernahme-Standard" preference decides what
- * happens:
+ * Day-start gate for the carry-over flow. The Settings → Tasks
+ * "Übernahme-Standard" preference decides what happens:
  *
  *   - `ask`  (default) — pushes the carry-over dialog so the user
  *     can decide per row.
@@ -31,42 +35,69 @@ import {
  *     dialog flashes.
  *   - `backlog` — same as above but clears `scheduled_date`.
  *
- * Snooze (the four-hour suppress flag from the dialog's "Später
- * erinnern" button) silences every mode equally: a snoozed user
- * doesn't want either a dialog OR a silent batch action mid-window.
- * After running the silent action we set the snooze ourselves so a
- * re-launch within the window doesn't pick the same task family up
- * a second time.
+ * **Re-trigger semantics.** Used to be mount-once. Now driven by
+ * `useCurrentDayKey()` so an always-on app re-checks when the local
+ * date rolls over. The `firedRef` stores the date key we last fired
+ * on; a different key means a new day and we try again. The Settings
+ * → Tasks `dayStartTrigger` preference further gates *when* on the
+ * new day to fire (immediately at midnight, at a fixed morning hour,
+ * or only on app start — see `shouldFireToday`).
+ *
+ * **Snooze.** The four-hour suppress flag from the dialog's "Später
+ * erinnern" button silences every mode equally. Crucially the snooze
+ * bail does NOT mark `firedRef` — the poller retries on the next
+ * tick, so the moment the snooze expires the gate runs again.
+ *
+ * **Dialog guard.** If any modal is already open (e.g. the user is
+ * editing a task), we skip this tick. The poller will try again. This
+ * avoids silently rewriting fields under an open editor.
  */
 export function CarryOverChecker() {
   const { tasks, loading } = useTasks();
-  const { openCarryOver, invalidateData } = useDialogState();
+  const { mode: dialogMode, openCarryOver, invalidateData } = useDialogState();
   const announce = useAnnouncer();
   const { t } = useTranslation();
   const {
     enabled: cascadeEnabled,
     carryOverDefault,
+    dayStartTrigger,
     hydrating,
   } = useTaskCascadeEnabled();
-  const firedRef = useRef(false);
+  const todayKey = useCurrentDayKey();
+  // Stores the YYYY-MM-DD we last fired on, or null when never fired.
+  // Hydrated from localStorage on mount so a mid-day app restart
+  // doesn't re-run the silent batch (and re-announce) for a day we
+  // already processed. `shouldFireToday` consumes this together with
+  // the trigger preference to decide if a new fire is due.
+  const firedRef = useRef<string | null>(readFiredDayKey('carryOver'));
 
   useEffect(() => {
-    if (firedRef.current) return;
     // Wait for both the task catalog and the preferences round-trip
     // — otherwise a default-`ask` from the pre-hydration state would
     // open the dialog even for users who opted into auto-today /
     // auto-backlog.
     if (loading || hydrating) return;
-    if (isCarryOverSnoozed()) {
-      firedRef.current = true;
+    if (!shouldFireToday(dayStartTrigger, firedRef.current, todayKey)) {
       return;
     }
+    // Don't pile a second carry-over dialog (or silent batch) on top
+    // of whatever the user already has open. Tick again later when
+    // the modal closes.
+    if (dialogMode.kind !== 'none') return;
+    // Snooze respects the user's "Später erinnern" choice. Do NOT
+    // mark fired — when the snooze expires, the next tick should
+    // run the gate properly.
+    if (isCarryOverSnoozed()) return;
+
     const slipped = filterCarriedOver(tasks, { cascadeEnabled });
-    if (slipped.length === 0) {
-      firedRef.current = true;
-      return;
-    }
-    firedRef.current = true;
+    // Even on an empty day we record the fire — the gate's only job
+    // is "review for this day". If new slipped rows appear later
+    // (sync, manual edit), this tick wouldn't have caught them
+    // either; the user explicitly re-running carry-over via the
+    // pending UI later is the answer there.
+    firedRef.current = todayKey;
+    writeFiredDayKey('carryOver', todayKey);
+    if (slipped.length === 0) return;
 
     if (carryOverDefault === 'ask') {
       openCarryOver();
@@ -88,6 +119,9 @@ export function CarryOverChecker() {
     tasks,
     cascadeEnabled,
     carryOverDefault,
+    dayStartTrigger,
+    todayKey,
+    dialogMode.kind,
     openCarryOver,
     invalidateData,
     announce,
@@ -147,9 +181,11 @@ async function runAutoBatch(args: {
         : 'dialogs.carryOver.autoSentToBacklog';
     args.announce(args.t(announceKey, { count: slippedRoots.length }));
     args.invalidateData();
-    // Set the snooze ourselves so a re-launch within the four-hour
-    // window doesn't fire the batch again on the same rows.
-    snoozeCarryOver(4);
+    // The per-day `firedRef` already prevents re-firing within the
+    // same calendar day — no need to set the carry-over snooze on
+    // top. (Re-launching the app mid-day used to require the snooze
+    // to avoid a second batch; the firedRef now lives inside the
+    // checker for the full day instead, which is more accurate.)
   } catch (err) {
     // eslint-disable-next-line no-console
     console.warn('carry-over batch update_task failed', err);
