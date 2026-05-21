@@ -32,7 +32,11 @@ import {
   mergeDayItems,
   todayIsoKey,
 } from '../../intl/taskDay';
-import { statusI18nKey, statusMarker } from '../../intl/taskStatus';
+import {
+  statusI18nKey,
+  statusMarker,
+  subtaskProgressSuffix,
+} from '../../intl/taskStatus';
 import type { CalendarEvent, Task } from '../../api/types';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { DeleteEventScopeDialog } from '../DeleteEventScopeDialog';
@@ -633,7 +637,7 @@ export function WeekView() {
                               t,
                               task,
                               time,
-                              color.labelName,
+                              tasks,
                             )}
                             aria-selected={isFocusedItem}
                             style={
@@ -681,18 +685,15 @@ export function WeekView() {
                       ? t('views.allDay')
                       : `${fmt.format(new Date(ev.start), 'p')}`;
                     const span = multiDayInfo(ev, day);
-                    const ariaBase = color.labelName
-                      ? t('views.week.eventLabelWithLabel', {
-                          title: ev.title,
-                          time,
-                          calendar: cal?.name ?? '—',
-                          label: color.labelName,
-                        })
-                      : t('views.week.eventLabel', {
-                          title: ev.title,
-                          time,
-                          calendar: cal?.name ?? '—',
-                        });
+                    // Color label is purely visual — it's a visible
+                    // accent strip on the chip, not extra information
+                    // an SR user needs spoken. The calendar / list
+                    // affiliation stays in the label.
+                    const ariaBase = t('views.week.eventLabel', {
+                      title: ev.title,
+                      time,
+                      calendar: cal?.name ?? '—',
+                    });
                     const aria = span
                       ? ariaBase +
                         t('views.multiDaySuffix', {
@@ -755,6 +756,7 @@ export function WeekView() {
                     after the grid is left. */}
                 <WeekDayTasks
                   tasks={untimedTasks}
+                  allTasks={tasks}
                   onOpen={(task) => openTaskDialog(task)}
                   onToggle={(task) => {
                     void toggleTaskStatus(task);
@@ -843,6 +845,7 @@ function groupEventsByDay(
  */
 function WeekDayTasks({
   tasks,
+  allTasks,
   onOpen,
   onToggle,
   onContextMenu,
@@ -850,6 +853,9 @@ function WeekDayTasks({
   labelById,
 }: {
   tasks: Task[];
+  /** All tasks in the store — used to resolve subtask progress
+   *  for the parents that show up in this day's chip list. */
+  allTasks: Task[];
   onOpen: (task: Task) => void;
   onToggle: (task: Task) => void;
   onContextMenu: (task: Task) => void;
@@ -904,20 +910,12 @@ function WeekDayTasks({
                   ? ({ '--event-color': color.hex } as React.CSSProperties)
                   : undefined
               }
-              aria-label={
-                color.labelName
-                  ? t(`${labelKey}WithLabel`, {
-                      title: task.title,
-                      deadline: task.deadline_date ?? '',
-                      label: color.labelName,
-                      state,
-                    })
-                  : t(labelKey, {
-                      title: task.title,
-                      deadline: task.deadline_date ?? '',
-                      state,
-                    })
-              }
+              aria-label={t(labelKey, {
+                title: task.title,
+                deadline: task.deadline_date ?? '',
+                state,
+                progress: subtaskProgressSuffix(t, task.id, allTasks),
+              })}
             >
               <span className="week-task__body">
                 <span
@@ -944,22 +942,20 @@ function WeekDayTasks({
  * Build the SR label for the timed task chip. Centralised so the chip
  * inside the listbox and the untimed variant in WeekDayTasks format
  * identically — including the status word suffix that turns the
- * visible marker glyph into something AT can read out.
+ * visible marker glyph into something AT can read out, plus the
+ * "{{done}} of {{total}} subtasks done" segment when relevant.
  */
 function taskChipAriaLabel(
   t: (key: string, values?: Record<string, unknown>) => string,
   task: Task,
   time: string,
-  labelName: string | null,
+  allTasks: Task[],
 ): string {
   const state = t(statusI18nKey(task.status));
-  const key = labelName
-    ? 'views.week.taskChipTimedWithLabel'
-    : 'views.week.taskChipTimed';
-  return t(key, {
+  return t('views.week.taskChipTimed', {
     title: task.title,
     time,
-    label: labelName ?? '',
     state,
+    progress: subtaskProgressSuffix(t, task.id, allTasks),
   });
 }

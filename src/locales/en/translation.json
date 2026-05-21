@@ -519,25 +519,19 @@
       "dayAnnounce_one": "{{day}}, 1 event",
       "dayAnnounce_other": "{{day}}, {{count}} events",
       "eventLabel": "Event: {{title}}, {{time}}, calendar: {{calendar}}",
-      "eventLabelWithLabel": "Event: {{title}}, {{time}}, calendar: {{calendar}}, label: {{label}}",
       "tabAnnounce": "{{day}}: {{title}}",
       "tasksOnDay_one": "1 task",
       "tasksOnDay_other": "{{count}} tasks",
-      "taskChip": "Task: {{title}}, {{state}}",
-      "taskChipWithLabel": "Task: {{title}}, label: {{label}}, {{state}}",
-      "taskChipBy": "Task: {{title}}, due by {{deadline}}, {{state}}",
-      "taskChipByWithLabel": "Task: {{title}}, due by {{deadline}}, label: {{label}}, {{state}}",
-      "taskChipTimed": "Task: {{title}}, {{time}}, {{state}}",
-      "taskChipTimedWithLabel": "Task: {{title}}, {{time}}, label: {{label}}, {{state}}"
+      "taskChip": "Task: {{title}}, {{state}}{{progress}}",
+      "taskChipBy": "Task: {{title}}, due by {{deadline}}, {{state}}{{progress}}",
+      "taskChipTimed": "Task: {{title}}, {{time}}, {{state}}{{progress}}"
     },
     "day": {
       "timeGrid": "Time grid",
       "eventList": "Events on this day",
       "empty": "No events on this day.",
       "eventLabel": "Event: {{title}}, {{start}} to {{end}}, calendar: {{calendar}}",
-      "eventLabelWithLabel": "Event: {{title}}, {{start}} to {{end}}, calendar: {{calendar}}, label: {{label}}",
-      "taskLabel": "Task: {{title}}, {{time}}, {{state}}",
-      "taskLabelWithLabel": "Task: {{title}}, {{time}}, label: {{label}}, {{state}}",
+      "taskLabel": "Task: {{title}}, {{time}}, {{state}}{{progress}}",
       "tasksHeading": "Tasks"
     },
     "month": {
@@ -562,8 +556,7 @@
       "allDay": "All day",
       "dayLabel_one": "{{day}}, 1 event",
       "dayLabel_other": "{{day}}, {{count}} events",
-      "eventLabel": "{{day}}, {{title}}, {{time}}, calendar: {{calendar}}",
-      "eventLabelWithLabel": "{{day}}, {{title}}, {{time}}, calendar: {{calendar}}, label: {{label}}"
+      "eventLabel": "{{day}}, {{title}}, {{time}}, calendar: {{calendar}}"
     },
     "tasks": {
       "title": "Tasks",
@@ -576,8 +569,10 @@
       "stateCancelled": "cancelled",
       "expand": "Expand subtasks of \"{{title}}\"",
       "collapse": "Collapse subtasks of \"{{title}}\"",
-      "optionLabel": "{{title}}, list {{list}}, {{state}}, {{due}}",
-      "optionLabelWithLabel": "{{title}}, list {{list}}, {{state}}, {{due}}, label: {{label}}",
+      "optionLabel": "{{title}}, list {{list}}, {{state}}{{progress}}, {{due}}",
+      "subtaskProgress": ", {{done}} of {{total}} subtasks done",
+      "subtaskProgressBadge": "{{done}}/{{total}}",
+      "subtaskProgressBadgeAria": "{{done}} of {{total}} subtasks done",
       "dueScheduled": "Scheduled: {{date}}",
       "dueDeadline": "Due: {{date}}",
       "dueNone": "No date",

@@ -27,7 +27,11 @@ import {
   mergeDayItems,
   todayIsoKey,
 } from '../../intl/taskDay';
-import { statusI18nKey, statusMarker } from '../../intl/taskStatus';
+import {
+  statusI18nKey,
+  statusMarker,
+  subtaskProgressSuffix,
+} from '../../intl/taskStatus';
 import { duplicateEvent } from '../MoveCopyDialog';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { DeleteEventScopeDialog } from '../DeleteEventScopeDialog';
@@ -355,20 +359,12 @@ export function DayView() {
                   id={itemId(i)}
                   role="option"
                   aria-selected={focused}
-                  aria-label={
-                    color.labelName
-                      ? t('views.day.taskLabelWithLabel', {
-                          title: task.title,
-                          time: timeStr,
-                          label: color.labelName,
-                          state,
-                        })
-                      : t('views.day.taskLabel', {
-                          title: task.title,
-                          time: timeStr,
-                          state,
-                        })
-                  }
+                  aria-label={t('views.day.taskLabel', {
+                    title: task.title,
+                    time: timeStr,
+                    state,
+                    progress: subtaskProgressSuffix(t, task.id, tasks),
+                  })}
                   className={
                     'day-list__item day-list__item--task' +
                     (focused ? ' day-list__item--focused' : '') +
@@ -416,20 +412,12 @@ export function DayView() {
             const startStr = fmt.format(new Date(ev.start), 'p');
             const endStr = fmt.format(new Date(ev.end), 'p');
             const span = multiDayInfo(ev, anchor);
-            const ariaBase = color.labelName
-              ? t('views.day.eventLabelWithLabel', {
-                  title: ev.title,
-                  start: startStr,
-                  end: endStr,
-                  calendar: cal?.name ?? '—',
-                  label: color.labelName,
-                })
-              : t('views.day.eventLabel', {
-                  title: ev.title,
-                  start: startStr,
-                  end: endStr,
-                  calendar: cal?.name ?? '—',
-                });
+            const ariaBase = t('views.day.eventLabel', {
+              title: ev.title,
+              start: startStr,
+              end: endStr,
+              calendar: cal?.name ?? '—',
+            });
             const aria = span
               ? ariaBase +
                 t('views.multiDaySuffix', {
@@ -555,20 +543,12 @@ export function DayView() {
                           } as React.CSSProperties)
                         : undefined
                     }
-                    aria-label={
-                      color.labelName
-                        ? t(`${labelKey}WithLabel`, {
-                            title: task.title,
-                            deadline: task.deadline_date ?? '',
-                            label: color.labelName,
-                            state,
-                          })
-                        : t(labelKey, {
-                            title: task.title,
-                            deadline: task.deadline_date ?? '',
-                            state,
-                          })
-                    }
+                    aria-label={t(labelKey, {
+                      title: task.title,
+                      deadline: task.deadline_date ?? '',
+                      state,
+                      progress: subtaskProgressSuffix(t, task.id, tasks),
+                    })}
                   >
                     <span
                       className="day-task__marker day-task__marker--clickable"

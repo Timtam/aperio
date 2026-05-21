@@ -467,18 +467,11 @@ export function MonthView() {
                         ? t('views.allDay')
                         : fmt.format(new Date(ev.start), 'p');
                       const span = multiDayInfo(ev, day);
-                      const ariaBase = color.labelName
-                        ? t('views.week.eventLabelWithLabel', {
-                            title: ev.title,
-                            time,
-                            calendar: cal?.name ?? '—',
-                            label: color.labelName,
-                          })
-                        : t('views.week.eventLabel', {
-                            title: ev.title,
-                            time,
-                            calendar: cal?.name ?? '—',
-                          });
+                      const ariaBase = t('views.week.eventLabel', {
+                        title: ev.title,
+                        time,
+                        calendar: cal?.name ?? '—',
+                      });
                       const aria = span
                         ? ariaBase +
                           t('views.multiDaySuffix', {

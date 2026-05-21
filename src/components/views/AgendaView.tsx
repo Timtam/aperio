@@ -326,20 +326,12 @@ function renderOccurrences(
     const timeLabel = ev.all_day
       ? ctx.t('views.allDay')
       : `${ctx.fmt.format(new Date(ev.start), 'p')} – ${ctx.fmt.format(new Date(ev.end), 'p')}`;
-    const ariaBase = color.labelName
-      ? ctx.t('views.agenda.eventLabelWithLabel', {
-          day: ctx.fmt.format(day, 'PPPP'),
-          title: ev.title,
-          time: timeLabel,
-          calendar: cal?.name ?? '—',
-          label: color.labelName,
-        })
-      : ctx.t('views.agenda.eventLabel', {
-          day: ctx.fmt.format(day, 'PPPP'),
-          title: ev.title,
-          time: timeLabel,
-          calendar: cal?.name ?? '—',
-        });
+    const ariaBase = ctx.t('views.agenda.eventLabel', {
+      day: ctx.fmt.format(day, 'PPPP'),
+      title: ev.title,
+      time: timeLabel,
+      calendar: cal?.name ?? '—',
+    });
     const aria = span
       ? ariaBase +
         ctx.t('views.multiDaySuffix', {

@@ -14,7 +14,12 @@ import { useAutoFocus } from '../../hooks/useAutoFocus';
 import { useDeferredLoading } from '../../hooks/useDeferredLoading';
 import { useDateFormat } from '../../intl/dateFormat';
 import { labelsLookup, resolveTaskColor } from '../../intl/eventColor';
-import { statusI18nKey, statusMarker } from '../../intl/taskStatus';
+import {
+  statusI18nKey,
+  statusMarker,
+  subtaskProgress,
+  subtaskProgressSuffix,
+} from '../../intl/taskStatus';
 import { useCalendarStore } from '../../state/CalendarStore';
 import { useChipContextMenu } from '../../state/useChipContextMenu';
 import { useDialogState } from '../../state/DialogState';
@@ -348,20 +353,21 @@ export function TaskView() {
           const color = resolveTaskColor(task, taskListById, labelById);
           const marker = statusMarker(task.status);
           const stateLabel = t(statusI18nKey(task.status));
-          const aria = color.labelName
-            ? t('views.tasks.optionLabelWithLabel', {
-                title: task.title,
-                list: listName,
-                state: stateLabel,
-                due,
-                label: color.labelName,
-              })
-            : t('views.tasks.optionLabel', {
-                title: task.title,
-                list: listName,
-                state: stateLabel,
-                due,
-              });
+          // Color label is purely visual (it tints the row's accent
+          // strip) — keeping it out of the aria-label spares the SR
+          // user the redundant noise. Subtask progress is the
+          // opposite: it's a real signal that doesn't fit the visible
+          // row at a glance, so SR users get it as a word suffix
+          // and sighted users get a tiny "1/3" badge between title
+          // and due.
+          const progress = subtaskProgress(task.id, tasks);
+          const aria = t('views.tasks.optionLabel', {
+            title: task.title,
+            list: listName,
+            state: stateLabel,
+            progress: subtaskProgressSuffix(t, task.id, tasks),
+            due,
+          });
           return (
             <li
               key={task.id}
@@ -429,6 +435,19 @@ export function TaskView() {
                 {marker}
               </span>
               <span className="task-list__title">{task.title}</span>
+              {progress && (
+                /* Visible badge for sighted users — "1/3". SR users
+                 * hear the same fact via the optionLabel suffix, so
+                 * the badge itself is aria-hidden to avoid a double
+                 * read. */
+                <span
+                  className="task-list__progress"
+                  aria-hidden="true"
+                  title={t('views.tasks.subtaskProgressBadgeAria', progress)}
+                >
+                  {t('views.tasks.subtaskProgressBadge', progress)}
+                </span>
+              )}
               <span className="task-list__due">{due}</span>
             </li>
           );
