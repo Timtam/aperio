@@ -100,16 +100,20 @@ function Shell() {
       <TitleBar />
       <div className="app-body">
         <Sidebar />
-        <div className="app-main" data-region="main">
+        <div className="app-main">
           <Toolbar />
           <FocusBar />
           {/* Programmatic focus target for "land here after a
-              transient mode exits" (e.g. closing the focus banner).
-              tabIndex=-1 keeps it out of normal Tab order but lets
-              .focus() succeed; views inside can still own their own
-              tab stops. */}
+              transient mode exits" (e.g. closing the focus banner)
+              AND the third stop in the F6 region cycle (sidebar →
+              toolbar → view → sidebar). tabIndex=-1 keeps it out of
+              normal Tab order but lets .focus() succeed; the view
+              inside owns its own tab stops, and useRegionFocus will
+              prefer the first natively-focusable descendant before
+              falling back to this wrapper. */}
           <div
             className="app-active-view"
+            data-region="view"
             data-active-view-root
             tabIndex={-1}
           >

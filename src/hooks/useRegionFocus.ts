@@ -3,13 +3,20 @@ import { useEffect } from 'react';
 /**
  * F6 cycles focus between the major regions of the app shell.
  *
- * DESIGN.md section 3.4 lists `F6` as the way to hop between Sidebar ↔
- * Calendar ↔ Toolbar — the same convention native Windows and macOS
- * apps use. Each major region tags itself with `data-region="<name>"`;
- * pressing F6 moves focus to the first tabbable descendant of the next
- * tagged region in DOM order.
+ * DESIGN.md section 3.4 lists `F6` as the way to hop between Sidebar
+ * ↔ Toolbar ↔ active view — the same convention native Windows and
+ * macOS apps use. Each major region tags itself with
+ * `data-region="<name>"`; pressing F6 moves focus to the first
+ * tabbable descendant of the next tagged region in DOM order, falling
+ * back to the region wrapper itself if it has nothing focusable
+ * inside (the active view wrapper carries `tabIndex=-1` for exactly
+ * this case). Shift+F6 cycles the other way.
  *
- * Shift+F6 cycles the other way.
+ * Current cycle:
+ *   Sidebar → Toolbar → Active view → (wrap)
+ *
+ * Regions are discovered live on every keypress, so a future surface
+ * just needs to mount with `data-region` to join the cycle.
  */
 export function useRegionFocus(): void {
   useEffect(() => {
