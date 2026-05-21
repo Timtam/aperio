@@ -225,6 +225,14 @@ function ExistingSection({
 }: ExistingSectionProps) {
   const { t } = useTranslation();
   const [focusIndex, setFocusIndex] = useState(0);
+  // Track whether the listbox currently owns DOM focus. Used to gate
+  // `aria-activedescendant` so it only points at an option while the
+  // listbox is actually focused. With the attribute set unconditionally
+  // some screen readers (NVDA in particular) treat the listbox as the
+  // current focus target the moment it enters the accessibility tree
+  // and start reading the topmost option, even though keyboard focus
+  // is still on the Settings tab. The gating turns that into a no-op.
+  const [hasFocus, setHasFocus] = useState(false);
   const idPrefix = useId();
   const optionId = (i: number) => `${idPrefix}-option-${i}`;
 
@@ -309,7 +317,9 @@ function ExistingSection({
           role="listbox"
           tabIndex={0}
           aria-label={t('dialogs.colorLabels.listLabel')}
-          aria-activedescendant={optionId(focusIndex)}
+          aria-activedescendant={hasFocus ? optionId(focusIndex) : undefined}
+          onFocus={() => setHasFocus(true)}
+          onBlur={() => setHasFocus(false)}
           onKeyDown={handleKeyDown}
           className="color-labels"
         >

@@ -515,6 +515,14 @@ export function AccountsPanel() {
   // and gives sighted keyboard users a clear visual landing point.
   const errorRef = useRef<HTMLParagraphElement>(null);
   const [focusIndex, setFocusIndex] = useState(0);
+  // Track whether the listbox currently owns DOM focus. Used to gate
+  // `aria-activedescendant` so it only points at an option while the
+  // listbox is actually focused. With the attribute set unconditionally
+  // some screen readers (NVDA in particular) treat the listbox as the
+  // current focus target the moment it enters the accessibility tree
+  // and start reading the topmost option, even though keyboard focus
+  // is still on the Settings tab. The gating turns that into a no-op.
+  const [listHasFocus, setListHasFocus] = useState(false);
 
   useEffect(() => {
     if (focusIndex >= accounts.length) {
@@ -647,8 +655,12 @@ export function AccountsPanel() {
               tabIndex={0}
               aria-label={t('dialogs.accounts.listLabel')}
               aria-activedescendant={
-                accounts.length > 0 ? optionId(focusIndex) : undefined
+                listHasFocus && accounts.length > 0
+                  ? optionId(focusIndex)
+                  : undefined
               }
+              onFocus={() => setListHasFocus(true)}
+              onBlur={() => setListHasFocus(false)}
               onKeyDown={handleListKey}
               className="accounts-list"
             >
