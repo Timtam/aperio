@@ -1021,6 +1021,20 @@ Todoist ist ein kommerzieller, weit verbreiteter Aufgabendienst mit REST-API. Ca
 | **Todoist** | Todoist REST API v2 | ✅ (`parent_id`) | Bidirektional |
 | **Lokal** | Keine externe API | ✅ Via `parent_id` | – (Event Log) |
 
+#### Datums-Felder-Mapping je Adapter
+
+Aperio hält zwei unabhängige Datums-Slots pro Aufgabe: `scheduled_date` (+ optional `scheduled_time`) und `deadline_date` (+ optional `deadline_time`). Beide sind unabhängig (de-)setzbar. Wie die je nach Adapter auf die externe API abgebildet werden, ist nicht einheitlich — einige Dienste haben beide Felder nativ, andere nur eins.
+
+| Adapter | Externe Felder | Mapping |
+|---|---|---|
+| **CalDAV / VTODO** | `DTSTART`, `DUE` | `DTSTART` ↔ `scheduled_*`, `DUE` ↔ `deadline_*`. Beide Richtungen mit optionalem UTC-DATE-TIME. Round-trip ist verlustfrei. |
+| **Microsoft Graph** | `startDateTime`, `dueDateTime` | `startDateTime` ↔ `scheduled_*`, `dueDateTime` ↔ `deadline_*`. Round-trip ist verlustfrei. |
+| **EWS Tasks** | `StartDate`, `DueDate` | Analog Microsoft Graph: `StartDate` ↔ `scheduled_*`, `DueDate` ↔ `deadline_*`. |
+| **Google Tasks** | nur `due` | **One-Way-Drift möglich.** Schreiben: zuerst `scheduled_date` → `due`; ist nur `deadline_date` gesetzt, geht das stattdessen raus. Lesen: Google's `due` landet immer in `scheduled_date`. Folge: eine Aperio-Aufgabe mit `deadline_date` (ohne `scheduled_date`) landet in Google als `due` und kommt beim nächsten Sync als `scheduled_date` zurück — die "by"-Semantik geht beim Round-trip verloren. Akzeptiert als Trade-off, weil Google Tasks keine zwei Slots kennt. |
+| **iCal (.ics)** | `DTSTART`, `DUE` (lesend) | Wie CalDAV, aber read-only. |
+| **Vikunja / Todoist** | jeweiliges Schema | TBD beim Implementierungs-Commit; vermutlich analog Google (ein einziges Datums-Feld → `scheduled_date`). |
+| **Lokal** | direkt aus / in DB | Spalten 1:1; keine Übersetzung nötig. |
+
 ### 9.8 Separate Aufgaben-Ansicht (`Ctrl+6`)
 
 - Gruppierung nach: Fälligkeitsdatum / Priorität / Status / Aufgabenliste
