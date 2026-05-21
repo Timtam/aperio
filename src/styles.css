@@ -1342,6 +1342,16 @@ button[aria-disabled='true'] {
   outline-offset: 2px;
 }
 
+/* Source chip while a drag is in flight. Dims the row a touch and
+ * shifts the cursor to "grabbing" so the user has a visual cue that
+ * the drop step is the next thing. We avoid `opacity: 0` so the
+ * "ghost" the browser auto-renders still has something to copy from
+ * the live DOM. */
+.week-task--dragging {
+  opacity: 0.5;
+  cursor: grabbing;
+}
+
 .week-task__body {
   /* Inline row holding the [marker] + [title] pair, sits on the
    * second line of the chip below the time. */
@@ -1750,6 +1760,17 @@ button[aria-disabled='true'] {
 
 .week-grid__cell--today {
   background: color-mix(in srgb, var(--color-accent) 5%, transparent);
+}
+
+/* Drop-target highlight while a task chip is being dragged over the
+ * cell. Stronger than the focus tint so the user can see which day
+ * will receive the reschedule, even when the cursor still sits on
+ * the source chip momentarily. The inset border keeps the cell's
+ * grid lines intact (an outer outline would jump the column width
+ * by a pixel and ripple the whole row). */
+.week-grid__cell--drag-over {
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  box-shadow: inset 0 0 0 2px var(--color-accent);
 }
 
 .week-grid__events {

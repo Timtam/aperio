@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { addDays, isSameDay, startOfWeek } from 'date-fns';
+import { invoke } from '@tauri-apps/api/core';
 
 import { useAnnouncer } from '../../a11y/Announcer';
 import { useAutoFocus } from '../../hooks/useAutoFocus';
@@ -281,6 +282,61 @@ export function WeekView() {
     null,
   );
   const [scopeTarget, setScopeTarget] = useState<CalendarEvent | null>(null);
+
+  // Drag-and-drop rescheduling (§ 9.4 "Drag & Drop auf Wochentage"):
+  // a task chip can be dragged from its current day onto another day
+  // in the visible week to flip its `scheduled_date`. Mouse-only —
+  // keyboard / SR users have Shift+D (the PlanTaskDialog) for the
+  // same outcome.
+  //
+  //   - `draggingTaskId`: which task is currently being dragged.
+  //     Used by the cell drop-handlers as a "is this an Aperio task
+  //     drag worth reacting to" check, since `dataTransfer.getData`
+  //     during `dragover` is restricted to a few MIME types in
+  //     modern browsers — we keep the id in component state instead.
+  //   - `dragOverDayKey`: which day cell is currently the hovered
+  //     drop target. Drives the highlight class on the cell.
+  const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
+  const [dragOverDayKey, setDragOverDayKey] = useState<string | null>(null);
+
+  const rescheduleTaskByDrop = useCallback(
+    async (taskId: string, newDayKey: string) => {
+      const task = tasks.find((row) => row.id === taskId);
+      if (!task) return;
+      // No-op on same day — avoids a pointless round-trip and
+      // matches the "drag a few pixels onto the source cell" misfire
+      // the browser sometimes triggers.
+      if (task.scheduled_date === newDayKey) return;
+      try {
+        await invoke<Task>('update_task', {
+          task: {
+            ...task,
+            scheduled_date: newDayKey,
+            // Preserve `scheduled_time` — moving the day shouldn't
+            // wipe the user's chosen minute. The carry-over PlanTask
+            // flow clears time because the user is explicitly
+            // re-planning; a DnD reschedule is a smaller adjustment
+            // and the time-of-day usually still makes sense.
+            updated_at: new Date().toISOString(),
+          },
+        });
+        announce(
+          t('views.week.taskRescheduled', {
+            title: task.title,
+            date: fmt.format(
+              new Date(`${newDayKey}T00:00:00`),
+              'PP',
+            ),
+          }),
+        );
+        invalidateData();
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('reschedule update_task failed', err);
+      }
+    },
+    [tasks, announce, t, fmt, invalidateData],
+  );
 
   const performDelete = useCallback(
     async (ev: CalendarEvent, scope: 'occurrence' | 'series') => {
@@ -700,9 +756,48 @@ export function WeekView() {
                 className={
                   'week-grid__cell' +
                   (focused ? ' week-grid__cell--focused' : '') +
-                  (isSameDay(day, today) ? ' week-grid__cell--today' : '')
+                  (isSameDay(day, today) ? ' week-grid__cell--today' : '') +
+                  (dragOverDayKey === dayKey
+                    ? ' week-grid__cell--drag-over'
+                    : '')
                 }
                 onClick={() => setAnchor(day)}
+                onDragOver={(e) => {
+                  // Drop-target gate: only react when an Aperio task
+                  // drag is in flight. We can't read `dataTransfer`
+                  // payload during dragover (browsers expose only
+                  // the type list, not values), so `draggingTaskId`
+                  // in state is the source of truth.
+                  if (!draggingTaskId) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'move';
+                  if (dragOverDayKey !== dayKey) {
+                    setDragOverDayKey(dayKey);
+                  }
+                }}
+                onDragLeave={(e) => {
+                  // Don't flicker the highlight off when the pointer
+                  // moves between the cell's own descendants (chips,
+                  // events). Only clear when the pointer actually
+                  // leaves the cell box.
+                  if (
+                    e.relatedTarget instanceof Node &&
+                    e.currentTarget.contains(e.relatedTarget)
+                  ) {
+                    return;
+                  }
+                  setDragOverDayKey((prev) =>
+                    prev === dayKey ? null : prev,
+                  );
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDragOverDayKey(null);
+                  const taskId =
+                    e.dataTransfer.getData('text/aperio-task') ||
+                    draggingTaskId;
+                  if (taskId) void rescheduleTaskByDrop(taskId, dayKey);
+                }}
               >
                 <ul role="list" className="week-grid__events">
                   {timedItems.map((item, itemIdx) => {
@@ -747,6 +842,9 @@ export function WeekView() {
                             className={
                               'week-task week-task--timed' +
                               (isFocusedItem ? ' week-task--focused' : '') +
+                              (draggingTaskId === task.id
+                                ? ' week-task--dragging'
+                                : '') +
                               ` week-task--${task.status.replace('_', '-')}`
                             }
                             // The aria-label carries the status as a
@@ -770,6 +868,19 @@ export function WeekView() {
                                   } as React.CSSProperties)
                                 : undefined
                             }
+                            draggable
+                            onDragStart={(ev) => {
+                              ev.dataTransfer.setData(
+                                'text/aperio-task',
+                                task.id,
+                              );
+                              ev.dataTransfer.effectAllowed = 'move';
+                              setDraggingTaskId(task.id);
+                            }}
+                            onDragEnd={() => {
+                              setDraggingTaskId(null);
+                              setDragOverDayKey(null);
+                            }}
                             // Mouse: clicking outside the checkbox
                             // opens the editor; the marker's onClick
                             // below stops the bubble so toggling
@@ -889,6 +1000,16 @@ export function WeekView() {
                   }}
                   taskListById={taskListById}
                   labelById={labelById}
+                  draggingTaskId={draggingTaskId}
+                  onDragStart={(task, ev) => {
+                    ev.dataTransfer.setData('text/aperio-task', task.id);
+                    ev.dataTransfer.effectAllowed = 'move';
+                    setDraggingTaskId(task.id);
+                  }}
+                  onDragEnd={() => {
+                    setDraggingTaskId(null);
+                    setDragOverDayKey(null);
+                  }}
                 />
               </div>
             );
@@ -974,6 +1095,9 @@ function WeekDayTasks({
   onContextMenu,
   taskListById,
   labelById,
+  draggingTaskId,
+  onDragStart,
+  onDragEnd,
 }: {
   tasks: Task[];
   /** All tasks in the store — used to resolve subtask progress
@@ -984,6 +1108,18 @@ function WeekDayTasks({
   onContextMenu: (task: Task) => void;
   taskListById: Map<string, import('../../api/types').TaskList>;
   labelById: Map<string, import('../../api/types').ColorLabel>;
+  /** Currently-dragged task id (if any). Drives the dimming class
+   *  on the source chip so the user sees which row is being
+   *  rescheduled. */
+  draggingTaskId: string | null;
+  /** Drag start handler — receives the task plus the native event so
+   *  the parent can set `dataTransfer.setData` and update its
+   *  `draggingTaskId` state. */
+  onDragStart: (task: Task, ev: React.DragEvent<HTMLButtonElement>) => void;
+  /** Drag end handler — fires on both successful drop and cancel
+   *  (Esc / drop outside any target). The parent uses it to clear
+   *  the dragging state. */
+  onDragEnd: () => void;
 }) {
   const { t } = useTranslation();
   if (tasks.length === 0) return null;
@@ -1009,8 +1145,14 @@ function WeekDayTasks({
               className={
                 'week-task' +
                 ` week-task--${task.status.replace('_', '-')}` +
-                (isBy ? ' week-task--by' : '')
+                (isBy ? ' week-task--by' : '') +
+                (draggingTaskId === task.id
+                  ? ' week-task--dragging'
+                  : '')
               }
+              draggable
+              onDragStart={(ev) => onDragStart(task, ev)}
+              onDragEnd={onDragEnd}
               // Default <button> behaviour fires onClick on both
               // Space and Enter — we need Space to toggle and Enter
               // to open. Intercept in onKeyDown and dispatch by key,

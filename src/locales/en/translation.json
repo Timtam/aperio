@@ -605,7 +605,8 @@
       "taskChip": "Task: {{title}}, {{state}}{{progress}}",
       "taskChipBy": "Task: {{title}}, due by {{deadline}}, {{state}}{{progress}}",
       "taskChipTimed": "Task: {{title}}, {{time}}, {{state}}{{progress}}",
-      "deadlineBarTitle": "{{title}} — due by {{date}}"
+      "deadlineBarTitle": "{{title}} — due by {{date}}",
+      "taskRescheduled": "Task \"{{title}}\" moved to {{date}}."
     },
     "day": {
       "timeGrid": "Time grid",

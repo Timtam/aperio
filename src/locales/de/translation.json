@@ -605,7 +605,8 @@
       "taskChip": "Aufgabe: {{title}}, {{state}}{{progress}}",
       "taskChipBy": "Aufgabe: {{title}}, fällig bis {{deadline}}, {{state}}{{progress}}",
       "taskChipTimed": "Aufgabe: {{title}}, {{time}}, {{state}}{{progress}}",
-      "deadlineBarTitle": "{{title}} — bis {{date}}"
+      "deadlineBarTitle": "{{title}} — bis {{date}}",
+      "taskRescheduled": "Aufgabe „{{title}}“ auf {{date}} verschoben."
     },
     "day": {
       "timeGrid": "Zeitraster",
