@@ -1004,6 +1004,71 @@ button[aria-disabled='true'] {
  * away — the native menus inherit the platform style automatically.
  */
 
+/* ────────────────────────────────────────────────────────────────────
+ * Focus mode (drill-in on one calendar)
+ *
+ * The FocusBar is a high-contrast banner just under the toolbar
+ * whenever one calendar takes over the main view. The sidebar gets a
+ * subtle dim so it's clear the multi-select isn't driving things.
+ */
+.focus-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-accent) 35%, transparent);
+  font-size: var(--font-size-sm);
+}
+
+.focus-bar__icon {
+  color: var(--color-accent);
+  font-size: 0.6em;
+}
+
+.focus-bar__label {
+  font-weight: 600;
+}
+
+.focus-bar__hint {
+  color: var(--color-fg-muted);
+  margin-left: auto;
+  font-size: var(--font-size-xs);
+}
+
+.focus-bar__exit {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-3);
+  font: inherit;
+  color: var(--color-fg);
+  cursor: pointer;
+}
+
+.focus-bar__exit:hover {
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+
+/* When the tree is in focus-mode the multi-select is preserved but
+ * inactive: dim the rows to communicate "your checkbox state is
+ * remembered, just not currently driving the view". Pointer events
+ * keep working — the user can still scroll, expand/collapse,
+ * right-click for context menus — only the visual weight drops. */
+.sidebar__tree--in-focus-mode .sidebar__row--leaf,
+.sidebar__tree--in-focus-mode .sidebar__row--section {
+  opacity: 0.5;
+}
+
+/* The focused leaf is the exception — it's the row currently driving
+ * the main view, so we restore its weight and add a thin marker on
+ * its left edge to make it the visual anchor in the otherwise
+ * dimmed tree. */
+.sidebar__tree--in-focus-mode .sidebar__row--focus-target {
+  opacity: 1;
+  box-shadow: inset 3px 0 0 0 var(--color-accent);
+}
+
 /*
  * Subtle row-hover affordance — gives pointer users a "this is the
  * row I'm aiming at" cue, and indirectly makes the small ✎ / ✕

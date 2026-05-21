@@ -2,6 +2,7 @@ import { useTranslation } from 'react-i18next';
 
 import { AnnouncerProvider } from './a11y/Announcer';
 import { DialogHost } from './components/DialogHost';
+import { FocusBar } from './components/FocusBar';
 import { Sidebar } from './components/Sidebar';
 import { TitleBar } from './components/TitleBar';
 import { Toolbar } from './components/Toolbar';
@@ -81,6 +82,7 @@ function Shell() {
         <Sidebar />
         <div className="app-main" data-region="main">
           <Toolbar />
+          <FocusBar />
           <ActiveView />
         </div>
       </div>

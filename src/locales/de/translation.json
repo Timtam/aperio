@@ -437,7 +437,17 @@
     "menu": {
       "label": "Aktionen",
       "rename": "Umbenennen …",
-      "delete": "Löschen"
+      "delete": "Löschen",
+      "focusOpen": "Nur diesen Kalender anzeigen",
+      "focusExit": "Fokus verlassen"
+    },
+    "focus": {
+      "banner": "Fokus: {{name}}",
+      "exit": "Fokus verlassen",
+      "exitHint": "Escape zum Verlassen",
+      "lockedHint": "Fokus zuerst verlassen, um die Auswahl zu ändern.",
+      "enteredAnnouncement": "Fokus auf „{{name}}\". Andere Kalender sind ausgeblendet, bis du den Fokus verlässt.",
+      "exitedAnnouncement": "Fokus-Modus verlassen."
     }
   },
   "views": {

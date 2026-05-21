@@ -34,6 +34,7 @@ import {
   type TriState,
 } from '../state/sidebarTree';
 import { useSidebarExpansion } from '../state/useSidebarExpansion';
+import { useViewState } from '../state/ViewState';
 
 /**
  * Sidebar: tree view of accounts → sections (Calendars / Tasks) →
@@ -81,6 +82,8 @@ export function Sidebar() {
   } = useCalendarStore();
   const { openColorLabels, openAccounts } = useDialogState();
   const expansion = useSidebarExpansion();
+  const { focusedCalendarId, enterFocus, exitFocus } = useViewState();
+  const isFocused = focusedCalendarId !== null;
 
   const tree = useMemo(
     () =>
@@ -304,6 +307,23 @@ export function Sidebar() {
       const items: ContextMenuItemRequest[] = [
         { id: 'rename', label: t('sidebar.menu.rename') },
       ];
+      // Focus-mode toggle: only meaningful on calendar leaves (tasks
+      // don't participate in the focus drill-in today). When we're
+      // already focused on a different calendar, "Show only this
+      // calendar" still works — it just switches the focused id.
+      if (leaf.kind === 'calendars') {
+        if (focusedCalendarId === leaf.containerId) {
+          items.push({
+            id: 'focus-exit',
+            label: t('sidebar.menu.focusExit'),
+          });
+        } else {
+          items.push({
+            id: 'focus-open',
+            label: t('sidebar.menu.focusOpen'),
+          });
+        }
+      }
       // Delete is local-only: external sources have their own
       // life-cycle (CalDAV's MKCOL/DELETE, Graph's PATCH, …) which
       // we haven't wired into a one-click sidebar affordance yet.
@@ -328,6 +348,16 @@ export function Sidebar() {
         // effect, it would race the autoFocus and silently win, leaving
         // the user staring at a rename input they can't type into.
         startEdit(containerKind, leaf.containerId, leaf.name);
+      } else if (selected === 'focus-open') {
+        setRestoreFocusToTree(true);
+        enterFocus(leaf.containerId);
+        announce(
+          t('sidebar.focus.enteredAnnouncement', { name: leaf.name }),
+        );
+      } else if (selected === 'focus-exit') {
+        setRestoreFocusToTree(true);
+        exitFocus();
+        announce(t('sidebar.focus.exitedAnnouncement'));
       } else if (selected === 'delete') {
         // After delete the row vanishes; tree-focus is the right place
         // for keyboard navigation to land.
@@ -343,7 +373,16 @@ export function Sidebar() {
         setRestoreFocusToTree(true);
       }
     },
-    [startEdit, onDeleteCalendar, onDeleteTaskListAction, t],
+    [
+      startEdit,
+      onDeleteCalendar,
+      onDeleteTaskListAction,
+      t,
+      focusedCalendarId,
+      enterFocus,
+      exitFocus,
+      announce,
+    ],
   );
 
   // Helper: find the leaf for a given visible item key. The
@@ -623,7 +662,10 @@ export function Sidebar() {
           // which handles multi-monitor / RTL edge cases for us.
           void openContextMenuForLeaf(ctx.leaf, ctx.accountIsLocal);
         }}
-        className="sidebar__tree"
+        className={
+          'sidebar__tree' +
+          (isFocused ? ' sidebar__tree--in-focus-mode' : '')
+        }
       >
         {tree.map((account) => (
           <AccountSubtree
@@ -670,6 +712,7 @@ export function Sidebar() {
               if (calIds.length) setManyCalendars(calIds, next);
               if (tlIds.length) setManyTaskLists(tlIds, next);
             }}
+            focusedContainerId={focusedCalendarId}
           />
         ))}
       </div>
@@ -814,6 +857,7 @@ interface AccountSubtreeProps {
   onToggleLeaf: (leaf: LeafNode) => void;
   onToggleSection: (section: SectionNode) => void;
   onToggleAccount: (account: AccountNode) => void;
+  focusedContainerId: string | null;
 }
 
 function AccountSubtree({
@@ -831,6 +875,7 @@ function AccountSubtree({
   onToggleLeaf,
   onToggleSection,
   onToggleAccount,
+  focusedContainerId,
 }: AccountSubtreeProps) {
   const { t } = useTranslation();
   const isOpen = expansion.isExpanded(account.key);
@@ -885,6 +930,7 @@ function AccountSubtree({
             onEditKey={onEditKey}
             onToggleLeaf={onToggleLeaf}
             onToggleSection={onToggleSection}
+            focusedContainerId={focusedContainerId}
           />
         ))}
     </div>
@@ -905,6 +951,7 @@ interface SectionSubtreeProps {
   onEditKey: (e: KeyboardEvent<HTMLInputElement>) => void;
   onToggleLeaf: (leaf: LeafNode) => void;
   onToggleSection: (section: SectionNode) => void;
+  focusedContainerId: string | null;
 }
 
 function SectionSubtree({
@@ -921,6 +968,7 @@ function SectionSubtree({
   onEditKey,
   onToggleLeaf,
   onToggleSection,
+  focusedContainerId,
 }: SectionSubtreeProps) {
   const { t } = useTranslation();
   const isOpen = expansion.isExpanded(section.key);
@@ -966,6 +1014,7 @@ function SectionSubtree({
             onCommitEdit={onCommitEdit}
             onEditKey={onEditKey}
             onToggleLeaf={onToggleLeaf}
+            focusedContainerId={focusedContainerId}
           />
         ))}
     </div>
@@ -984,6 +1033,10 @@ interface LeafRowProps {
   onCommitEdit: (restoreFocus: boolean) => Promise<void>;
   onEditKey: (e: KeyboardEvent<HTMLInputElement>) => void;
   onToggleLeaf: (leaf: LeafNode) => void;
+  /** Container id of the calendar currently in focus-mode (null when
+   *  no focus is active). Used to mark the focused leaf visually so
+   *  the user can see at a glance which row drives the main view. */
+  focusedContainerId: string | null;
 }
 
 function LeafRow({
@@ -998,10 +1051,13 @@ function LeafRow({
   onCommitEdit,
   onEditKey,
   onToggleLeaf,
+  focusedContainerId,
 }: LeafRowProps) {
   const { t } = useTranslation();
   const kind: ContainerKind = leaf.kind === 'calendars' ? 'calendar' : 'task_list';
   const isEditing = editing?.kind === kind && editing.id === leaf.containerId;
+  const isFocusTarget =
+    leaf.kind === 'calendars' && leaf.containerId === focusedContainerId;
 
   return (
     <TreeRow
@@ -1011,7 +1067,10 @@ function LeafRow({
       focused={focusedKey === leaf.key}
       onPointerSelect={() => onFocusKey(leaf.key)}
       onToggleSelect={() => onToggleLeaf(leaf)}
-      className="sidebar__row sidebar__row--leaf"
+      className={
+        'sidebar__row sidebar__row--leaf' +
+        (isFocusTarget ? ' sidebar__row--focus-target' : '')
+      }
       style={
         leaf.colorHex
           ? ({ '--container-color': leaf.colorHex } as React.CSSProperties)

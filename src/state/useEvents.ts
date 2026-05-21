@@ -5,6 +5,7 @@ import type { CalendarEvent } from '../api/types';
 import { expandAll } from '../intl/recurrence';
 import { useCalendarStore } from './CalendarStore';
 import { useDialogState } from './DialogState';
+import { useViewState } from './ViewState';
 
 /**
  * Pull events from every selected calendar in a given UTC range and
@@ -81,14 +82,25 @@ export function useEvents(range: { start: Date; end: Date }) {
   const { selectedCalendarIds, calendars, loading: storeLoading } =
     useCalendarStore();
   const { dataVersion } = useDialogState();
+  const { focusedCalendarId } = useViewState();
 
   // Stabilise the range to ISO strings so we only re-fetch when the
   // boundary actually moves, not on every render that re-creates a Date.
   const startIso = useMemo(() => range.start.toISOString(), [range.start]);
   const endIso = useMemo(() => range.end.toISOString(), [range.end]);
+  // Effective calendar set: focus mode collapses the multi-select
+  // sidebar to a single calendar without disturbing the user's
+  // checked-on/off state. When focus exits, this reverts to the
+  // normal selected set and the cache key swaps accordingly — fetches
+  // hit the existing SWR cache because the multi-calendar key still
+  // matches its prior entries.
+  const effectiveIds = useMemo<string[]>(() => {
+    if (focusedCalendarId) return [focusedCalendarId];
+    return [...selectedCalendarIds];
+  }, [focusedCalendarId, selectedCalendarIds]);
   const idsKey = useMemo(
-    () => [...selectedCalendarIds].sort().join(' '),
-    [selectedCalendarIds],
+    () => [...effectiveIds].sort().join(' '),
+    [effectiveIds],
   );
   const key = cacheKey(idsKey, startIso, endIso);
 
@@ -125,7 +137,7 @@ export function useEvents(range: { start: Date; end: Date }) {
     // settles.
     if (storeLoading) return;
 
-    const ids = [...selectedCalendarIds];
+    const ids = effectiveIds;
     if (ids.length === 0) {
       setEvents([]);
       setLoading(false);

@@ -437,7 +437,17 @@
     "menu": {
       "label": "Calendar actions",
       "rename": "Rename …",
-      "delete": "Delete"
+      "delete": "Delete",
+      "focusOpen": "Show only this calendar",
+      "focusExit": "Exit focus mode"
+    },
+    "focus": {
+      "banner": "Focused on: {{name}}",
+      "exit": "Exit focus mode",
+      "exitHint": "Press Escape to exit",
+      "lockedHint": "Exit focus mode to change selection.",
+      "enteredAnnouncement": "Focused on \"{{name}}\". Other calendars are hidden until you exit.",
+      "exitedAnnouncement": "Focus mode exited."
     }
   },
   "views": {

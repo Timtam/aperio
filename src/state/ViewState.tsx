@@ -30,6 +30,7 @@ const STORAGE_KEY = 'aperio.view.v1';
 interface PersistedView {
   view?: ViewId;
   anchor?: string;
+  focusedCalendarId?: string | null;
 }
 
 interface ViewStateValue {
@@ -40,6 +41,15 @@ interface ViewStateValue {
   jumpToToday: () => void;
   goPrev: () => void;
   goNext: () => void;
+  /**
+   * Active "drill-in" calendar. When set, every view reads only this
+   * calendar's events; the sidebar's own checkbox selection is
+   * preserved verbatim and restored when focus exits. `null` is the
+   * default "show all the sidebar's selected calendars" mode.
+   */
+  focusedCalendarId: string | null;
+  enterFocus: (calendarId: string) => void;
+  exitFocus: () => void;
 }
 
 const ViewStateContext = createContext<ViewStateValue | null>(null);
@@ -70,17 +80,27 @@ export function ViewStateProvider({ children }: { children: ReactNode }) {
     }
     return today();
   });
+  const [focusedCalendarId, setFocusedCalendarId] = useState<string | null>(
+    () =>
+      typeof initial.focusedCalendarId === 'string'
+        ? initial.focusedCalendarId
+        : null,
+  );
 
   useEffect(() => {
     try {
       localStorage.setItem(
         STORAGE_KEY,
-        JSON.stringify({ view, anchor: anchor.toISOString() }),
+        JSON.stringify({
+          view,
+          anchor: anchor.toISOString(),
+          focusedCalendarId,
+        }),
       );
     } catch {
       // Quota / private mode — non-fatal.
     }
-  }, [view, anchor]);
+  }, [view, anchor, focusedCalendarId]);
 
   const setView = useCallback((v: ViewId) => setViewState(v), []);
   const setAnchor = useCallback((d: Date) => setAnchorState(d), []);
@@ -93,10 +113,37 @@ export function ViewStateProvider({ children }: { children: ReactNode }) {
     () => setAnchorState((d) => nextPeriod(view, d)),
     [view],
   );
+  const enterFocus = useCallback(
+    (calendarId: string) => setFocusedCalendarId(calendarId),
+    [],
+  );
+  const exitFocus = useCallback(() => setFocusedCalendarId(null), []);
 
   const value = useMemo<ViewStateValue>(
-    () => ({ view, anchor, setView, setAnchor, jumpToToday, goPrev, goNext }),
-    [view, anchor, setView, setAnchor, jumpToToday, goPrev, goNext],
+    () => ({
+      view,
+      anchor,
+      setView,
+      setAnchor,
+      jumpToToday,
+      goPrev,
+      goNext,
+      focusedCalendarId,
+      enterFocus,
+      exitFocus,
+    }),
+    [
+      view,
+      anchor,
+      setView,
+      setAnchor,
+      jumpToToday,
+      goPrev,
+      goNext,
+      focusedCalendarId,
+      enterFocus,
+      exitFocus,
+    ],
   );
 
   return (

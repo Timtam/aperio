@@ -118,4 +118,66 @@ describe('useViewShortcuts', () => {
     expect(screen.getByTestId('view').textContent).toBe('week');
     input.remove();
   });
+
+  it('starts with no calendar focus', () => {
+    render(
+      <ViewStateProvider>
+        <FocusProbe />
+      </ViewStateProvider>,
+    );
+    expect(screen.getByTestId('focused').textContent).toBe('none');
+  });
+
+  it('enterFocus / exitFocus toggle the focused calendar', () => {
+    render(
+      <ViewStateProvider>
+        <FocusProbe />
+      </ViewStateProvider>,
+    );
+    act(() => {
+      screen.getByTestId('enter').click();
+    });
+    expect(screen.getByTestId('focused').textContent).toBe('cal-42');
+    act(() => {
+      screen.getByTestId('exit').click();
+    });
+    expect(screen.getByTestId('focused').textContent).toBe('none');
+  });
+
+  it('persists the focused calendar across remounts', () => {
+    const { unmount } = render(
+      <ViewStateProvider>
+        <FocusProbe />
+      </ViewStateProvider>,
+    );
+    act(() => {
+      screen.getByTestId('enter').click();
+    });
+    unmount();
+    render(
+      <ViewStateProvider>
+        <FocusProbe />
+      </ViewStateProvider>,
+    );
+    expect(screen.getByTestId('focused').textContent).toBe('cal-42');
+  });
 });
+
+function FocusProbe() {
+  const v = useViewState();
+  return (
+    <div>
+      <span data-testid="focused">{v.focusedCalendarId ?? 'none'}</span>
+      <button
+        type="button"
+        data-testid="enter"
+        onClick={() => v.enterFocus('cal-42')}
+      >
+        enter
+      </button>
+      <button type="button" data-testid="exit" onClick={() => v.exitFocus()}>
+        exit
+      </button>
+    </div>
+  );
+}
