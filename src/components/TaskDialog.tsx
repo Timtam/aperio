@@ -19,13 +19,7 @@ import {
 import { invoke } from '@tauri-apps/api/core';
 import { todayIsoKey } from '../intl/taskDay';
 import { statusI18nKey, statusMarker } from '../intl/taskStatus';
-import type {
-  DeadlineType,
-  Reminder,
-  Task,
-  TaskPriority,
-  TaskStatus,
-} from '../api/types';
+import type { Reminder, Task, TaskPriority, TaskStatus } from '../api/types';
 import { useCalendarStore } from '../state/CalendarStore';
 import { useDialogState } from '../state/DialogState';
 import {
@@ -178,7 +172,7 @@ export function TaskDialog({
         status: 'open',
         priority: 'medium',
         scheduled_date: null,
-        deadline_type: null,
+        scheduled_time: null,
         deadline_date: null,
         deadline_time: null,
         recurrence: null,
@@ -390,8 +384,12 @@ export function TaskDialog({
         return;
       }
 
-      const { scheduled_date, deadline_type, deadline_date, deadline_time } =
-        splitDeadline(form);
+      const {
+        scheduled_date,
+        scheduled_time,
+        deadline_date,
+        deadline_time,
+      } = splitDeadline(form);
 
       setSubmitting(true);
       try {
@@ -403,7 +401,7 @@ export function TaskDialog({
             status: form.status,
             priority: form.priority,
             scheduled_date,
-            deadline_type,
+            scheduled_time,
             deadline_date,
             deadline_time,
             recurrence: recurrenceToBackend(form.recurrence),
@@ -463,7 +461,7 @@ export function TaskDialog({
             status: form.status,
             priority: form.priority,
             scheduled_date,
-            deadline_type,
+            scheduled_time,
             deadline_date,
             deadline_time,
             recurrence: recurrenceToBackend(form.recurrence),
@@ -889,24 +887,41 @@ function buildInitialState(
   taskLists: { id: string; read_only: boolean }[],
 ): FormState {
   if (task) {
-    const mode: DeadlineMode = task.scheduled_date
-      ? 'scheduled'
-      : task.deadline_type === 'on'
+    // Post-migration 0006 the wire shape carries two independent slots
+    // (scheduled_date + scheduled_time / deadline_date + deadline_time)
+    // but the dialog's UI is still the legacy four-option dropdown.
+    // Pick the mode that best represents the row:
+    //
+    //   - has scheduled_time → 'on'  (concrete timed slot)
+    //   - has scheduled_date  → 'scheduled'
+    //   - has deadline_date   → 'by'
+    //   - otherwise           → 'none'
+    //
+    // A task with BOTH scheduled and deadline set (the Plan +
+    // Soft-Deadline edge case the migration preserved on legacy
+    // conflicts) renders as 'scheduled' / 'on' here; saving from
+    // this UI drops the deadline. Commit 3's dialog redesign will
+    // expose both slots properly. Until then this is an accepted
+    // lossiness — see the issue tracker for the follow-up.
+    const mode: DeadlineMode = task.scheduled_time
       ? 'on'
-      : task.deadline_type === 'by'
+      : task.scheduled_date
+      ? 'scheduled'
+      : task.deadline_date
       ? 'by'
       : 'none';
+    const dateForMode =
+      mode === 'by' ? task.deadline_date : task.scheduled_date;
+    const timeForMode =
+      mode === 'on' ? task.scheduled_time : task.deadline_time;
     return {
       title: task.title,
       listId: task.list_id,
       status: task.status,
       priority: task.priority,
       deadlineMode: mode,
-      date:
-        task.scheduled_date ??
-        task.deadline_date ??
-        todayInput(),
-      time: task.deadline_time?.slice(0, 5) ?? '09:00',
+      date: dateForMode ?? todayInput(),
+      time: timeForMode?.slice(0, 5) ?? '09:00',
       description: task.description ?? '',
       colorLabel: task.color_label ?? null,
       recurrence: recurrenceFromBackend(task.recurrence),
@@ -948,7 +963,7 @@ function buildInitialState(
 
 interface DeadlineFields {
   scheduled_date: string | null;
-  deadline_type: DeadlineType | null;
+  scheduled_time: string | null;
   deadline_date: string | null;
   deadline_time: string | null;
 }
@@ -1010,33 +1025,48 @@ function collectDescendants(parentId: string, all: Task[]): Task[] {
   return out;
 }
 
+/**
+ * Project the form's four-option DeadlineMode onto the two-slot wire
+ * shape introduced by migration 0006:
+ *
+ *   - 'scheduled' / 'on' both write to `scheduled_*` (the old "Geplanter
+ *      Tag" and "Konkrete Deadline" merged into one slot). 'on' is the
+ *      timed variant; 'scheduled' clears `scheduled_time`.
+ *   - 'by' writes to `deadline_*`. Time stays optional but the legacy
+ *      UI doesn't expose it yet — that's coming with the redesign.
+ *   - 'none' clears everything.
+ *
+ * The redesigned dialog (commit 3) will replace this projection with
+ * two independent date+time blocks; until then the existing dropdown
+ * carries the full save matrix.
+ */
 function splitDeadline(form: FormState): DeadlineFields {
   switch (form.deadlineMode) {
     case 'scheduled':
       return {
         scheduled_date: form.date || null,
-        deadline_type: null,
+        scheduled_time: null,
         deadline_date: null,
         deadline_time: null,
       };
     case 'on':
       return {
-        scheduled_date: null,
-        deadline_type: 'on',
-        deadline_date: form.date || null,
-        deadline_time: form.time ? `${form.time}:00` : null,
+        scheduled_date: form.date || null,
+        scheduled_time: form.time ? `${form.time}:00` : null,
+        deadline_date: null,
+        deadline_time: null,
       };
     case 'by':
       return {
         scheduled_date: null,
-        deadline_type: 'by',
+        scheduled_time: null,
         deadline_date: form.date || null,
         deadline_time: null,
       };
     default:
       return {
         scheduled_date: null,
-        deadline_type: null,
+        scheduled_time: null,
         deadline_date: null,
         deadline_time: null,
       };

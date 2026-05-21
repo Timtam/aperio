@@ -15,7 +15,7 @@ const baseTask: Task = {
   status: 'open',
   priority: 'medium',
   scheduled_date: null,
-  deadline_type: 'on',
+  scheduled_time: null,
   deadline_date: null,
   deadline_time: null,
   recurrence: null,

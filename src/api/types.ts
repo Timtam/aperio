@@ -93,7 +93,6 @@ export interface TaskList {
 
 export type TaskStatus = 'open' | 'in_progress' | 'completed' | 'cancelled';
 export type TaskPriority = 'low' | 'medium' | 'high';
-export type DeadlineType = 'on' | 'by';
 
 export interface Task {
   id: string;
@@ -102,8 +101,27 @@ export interface Task {
   description: string | null;
   status: TaskStatus;
   priority: TaskPriority;
+  /**
+   * The day the task is to be done. Was historically also where the
+   * old `deadline_type='on'` cases lived after migration 0006 — the
+   * "Geplanter Tag" and "Konkrete Deadline" of the old enum are now
+   * one and the same field.
+   */
   scheduled_date: string | null;
-  deadline_type: 'on' | 'by' | null;
+  /**
+   * Optional time-of-day on `scheduled_date`. Renders as a point
+   * marker in the day grid (no block duration). Requires
+   * `scheduled_date`; the DB enforces this via a CHECK constraint.
+   */
+  scheduled_time: string | null;
+  /**
+   * The day BY which the task must be done. The only deadline
+   * semantic that survives migration 0006 — what used to be
+   * `deadline_type='by'`. Until that day the task lives in the
+   * backlog and can be scheduled per-day via `scheduled_date`; on
+   * the deadline day, if still open, an app-start checker pins it
+   * to today.
+   */
   deadline_date: string | null;
   deadline_time: string | null;
   recurrence: unknown;

@@ -488,10 +488,14 @@ export function DayView() {
           </h3>
           <ul className="day-tasks__list">
             {untimedTasks.map((task) => {
-              const labelKey =
-                task.deadline_type === 'by' && task.deadline_date
-                  ? 'views.week.taskChipBy'
-                  : 'views.week.taskChip';
+              // After migration 0006 there is only one deadline
+              // semantic ("by"). A task with a `deadline_date` is a
+              // by-task; the old `deadline_type === 'by'` check
+              // collapses to "is deadline_date set".
+              const isBy = task.deadline_date != null;
+              const labelKey = isBy
+                ? 'views.week.taskChipBy'
+                : 'views.week.taskChip';
               const color = resolveTaskColor(task, taskListById, labelById);
               const state = t(statusI18nKey(task.status));
               return (
@@ -501,9 +505,7 @@ export function DayView() {
                     className={
                       'day-task' +
                       ` day-task--${task.status.replace('_', '-')}` +
-                      (task.deadline_type === 'by'
-                        ? ' day-task--by'
-                        : '')
+                      (isBy ? ' day-task--by' : '')
                     }
                     // Default <button> would fire onClick on both
                     // Space and Enter. We need different actions:

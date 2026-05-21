@@ -94,8 +94,8 @@ export function MissedTasksDialog({
         const updated: Task = {
           ...task,
           scheduled_date: null,
+          scheduled_time: null,
           deadline_date: null,
-          deadline_type: null,
           deadline_time: null,
           status: 'open',
           updated_at: new Date().toISOString(),

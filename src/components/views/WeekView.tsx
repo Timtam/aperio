@@ -870,10 +870,13 @@ function WeekDayTasks({
       aria-label={t('views.week.tasksOnDay', { count: tasks.length })}
     >
       {tasks.map((task) => {
-        const labelKey =
-          task.deadline_type === 'by' && task.deadline_date
-            ? 'views.week.taskChipBy'
-            : 'views.week.taskChip';
+        // Post-migration 0006 there's only one deadline kind ("by")
+        // and the marker is "has a deadline_date" — see DayView for
+        // the matching collapse.
+        const isBy = task.deadline_date != null;
+        const labelKey = isBy
+          ? 'views.week.taskChipBy'
+          : 'views.week.taskChip';
         const color = resolveTaskColor(task, taskListById, labelById);
         const state = t(statusI18nKey(task.status));
         return (
@@ -883,7 +886,7 @@ function WeekDayTasks({
               className={
                 'week-task' +
                 ` week-task--${task.status.replace('_', '-')}` +
-                (task.deadline_type === 'by' ? ' week-task--by' : '')
+                (isBy ? ' week-task--by' : '')
               }
               // Default <button> behaviour fires onClick on both
               // Space and Enter — we need Space to toggle and Enter

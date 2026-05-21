@@ -11,7 +11,7 @@ const baseTask: Task = {
   status: 'open',
   priority: 'medium',
   scheduled_date: null,
-  deadline_type: null,
+  scheduled_time: null,
   deadline_date: null,
   deadline_time: null,
   recurrence: null,
@@ -37,34 +37,24 @@ describe('filterTasksOnDay', () => {
       .toEqual(['sched']);
   });
 
-  it('matches deadline_type=on AND deadline_date == day', () => {
+  it('matches scheduled_date == day for the merged "on" semantic', () => {
+    // Post-migration 0006 the legacy `deadline_type='on'` semantics live
+    // in `scheduled_date` — the day the user committed to. The filter
+    // still picks it up the same way.
     const tasks: Task[] = [
-      {
-        ...baseTask,
-        id: 'on-match',
-        deadline_type: 'on',
-        deadline_date: '2026-05-22',
-      },
-      {
-        ...baseTask,
-        id: 'on-other',
-        deadline_type: 'on',
-        deadline_date: '2026-05-21',
-      },
+      { ...baseTask, id: 'on-match', scheduled_date: '2026-05-22' },
+      { ...baseTask, id: 'on-other', scheduled_date: '2026-05-21' },
     ];
     expect(
       filterTasksOnDay(tasks, '2026-05-22', today).map((t) => t.id),
     ).toEqual(['on-match']);
   });
 
-  it('By-task surfaces on every day from today through deadline', () => {
+  it('deadline-task surfaces on every day from today through deadline', () => {
+    // With the migration `deadline_type` is gone; any task with a
+    // `deadline_date` carries "by"-style window semantics.
     const tasks: Task[] = [
-      {
-        ...baseTask,
-        id: 'by',
-        deadline_type: 'by',
-        deadline_date: '2026-05-22',
-      },
+      { ...baseTask, id: 'by', deadline_date: '2026-05-22' },
     ];
     // today (5/20) — inside window → yes
     expect(filterTasksOnDay(tasks, '2026-05-20', today).map((t) => t.id))
@@ -191,23 +181,46 @@ describe('filterTasksOnDay', () => {
 });
 
 describe('taskTimeOnDay', () => {
-  it('returns the deadline_time on the deadline day', () => {
+  it('returns scheduled_time on the scheduled day (legacy "on" semantic)', () => {
+    // What used to be `deadline_type='on' + deadline_time` is now
+    // `scheduled_date + scheduled_time`.
     const task: Task = {
       ...baseTask,
-      deadline_type: 'on',
-      deadline_date: '2026-05-22',
-      deadline_time: '14:30:00',
+      scheduled_date: '2026-05-22',
+      scheduled_time: '14:30:00',
     };
     expect(taskTimeOnDay(task, '2026-05-22')).toBe('14:30:00');
   });
 
-  it('returns null on intermediate days of a By-window', () => {
-    // Even when the task does carry a deadline_time, on an
-    // intermediate day there is no time we can honestly point at —
-    // the user only committed to that minute on the deadline date.
+  it('returns deadline_time on the deadline day when only a deadline is set', () => {
     const task: Task = {
       ...baseTask,
-      deadline_type: 'by',
+      deadline_date: '2026-05-22',
+      deadline_time: '17:00:00',
+    };
+    expect(taskTimeOnDay(task, '2026-05-22')).toBe('17:00:00');
+  });
+
+  it('prefers scheduled_time when both could apply on the same day', () => {
+    // The Plan + Soft-Deadline edge case the migration preserves: both
+    // slots set, possibly on the same day. The schedule-time wins as
+    // the more action-oriented marker for that day.
+    const task: Task = {
+      ...baseTask,
+      scheduled_date: '2026-05-22',
+      scheduled_time: '09:00:00',
+      deadline_date: '2026-05-22',
+      deadline_time: '17:00:00',
+    };
+    expect(taskTimeOnDay(task, '2026-05-22')).toBe('09:00:00');
+  });
+
+  it('returns null on intermediate days of a deadline window', () => {
+    // Even with a deadline_time, on an intermediate day there is no
+    // time we can honestly point at — the user only committed to that
+    // minute on the deadline date.
+    const task: Task = {
+      ...baseTask,
       deadline_date: '2026-05-22',
       deadline_time: '14:30:00',
     };
@@ -217,9 +230,8 @@ describe('taskTimeOnDay', () => {
   it('returns null when the user did not pick a time', () => {
     const task: Task = {
       ...baseTask,
-      deadline_type: 'on',
-      deadline_date: '2026-05-22',
-      deadline_time: null,
+      scheduled_date: '2026-05-22',
+      scheduled_time: null,
     };
     expect(taskTimeOnDay(task, '2026-05-22')).toBeNull();
   });
@@ -239,9 +251,8 @@ describe('mergeDayItems', () => {
       {
         ...baseTask,
         id: 'task-noon',
-        deadline_type: 'on',
-        deadline_date: '2026-05-22',
-        deadline_time: '14:00:00',
+        scheduled_date: '2026-05-22',
+        scheduled_time: '14:00:00',
       },
     ];
     const { timed, untimed } = mergeDayItems(
@@ -260,11 +271,10 @@ describe('mergeDayItems', () => {
     const tasks: Task[] = [
       // Pure scheduled — no time of day.
       { ...baseTask, id: 'sched', scheduled_date: '2026-05-22' },
-      // By-task intermediate day, even with deadline_time set.
+      // Deadline-task on an intermediate day, even with deadline_time set.
       {
         ...baseTask,
         id: 'by-window',
-        deadline_type: 'by',
         deadline_date: '2026-05-22',
         deadline_time: '14:00:00',
       },

@@ -123,7 +123,7 @@ export interface CreateTaskRequest {
   status: Task['status'];
   priority: Task['priority'];
   scheduled_date: string | null;
-  deadline_type: 'on' | 'by' | null;
+  scheduled_time: string | null;
   deadline_date: string | null;
   deadline_time: string | null;
   recurrence: unknown;

@@ -3,19 +3,27 @@ import type { Task } from '../api/types';
 /**
  * Tasks that should appear on `day` in a calendar view.
  *
- * A task is "on" a day when any of three conditions is true:
+ * After migration 0006 a task carries two independent slots, either
+ * of which can put the row on a given day:
  *
- *   1. `scheduled_date == day`  — the user explicitly planned this
- *      task for that day (Backlog → planned).
- *   2. `deadline_type == 'on'` and `deadline_date == day` — the
- *      user committed to finishing this task on that specific day.
- *   3. `deadline_type == 'by'` and the day falls inside the
- *      `[today, deadline_date]` window — the task is in its "still
- *      possible to finish in time" stretch, so it surfaces on every
- *      day inside that stretch (the spec's "an jedem Tag bis zur
- *      Deadline sichtbar"). The window starts at today, not at the
- *      task's creation date, so the calendar isn't cluttered with
- *      past stretches of long-running By-tasks.
+ *   1. `scheduled_date == day` — the user committed to working on the
+ *      task on that day, either as a planned slot ("Geplant für") or
+ *      as the legacy "concrete deadline" (the old `deadline_type='on'`
+ *      moved into this field by the migration).
+ *   2. `deadline_date != null` and the day falls inside the
+ *      `[today, deadline_date]` window — the task is in its
+ *      "still possible to finish in time" stretch, so it surfaces on
+ *      every day inside that stretch (the spec's "an jedem Tag bis
+ *      zur Deadline sichtbar"). The window starts at today so the
+ *      calendar isn't cluttered with past stretches of long-running
+ *      By-tasks. The deadline-day itself is the last day of the
+ *      window. (The old `deadline_type='by'` flag is gone; every
+ *      `deadline_date` now carries this semantics.)
+ *
+ * A task with both fields set surfaces on its planned day plus every
+ * day in the deadline window — the planned day is typically already
+ * inside that window so the practical effect is "shown on the
+ * intended-work day and as a reminder every day until the deadline".
  *
  * Subtasks (tasks with `parent_id` set) are unconditionally hidden
  * — they're scoped to their parent and managed via TaskDialog /
@@ -58,13 +66,6 @@ export function filterTasksOnDay(
     }
     if (task.scheduled_date === dayIsoKey) return true;
     if (
-      task.deadline_type === 'on' &&
-      task.deadline_date === dayIsoKey
-    ) {
-      return true;
-    }
-    if (
-      task.deadline_type === 'by' &&
       task.deadline_date &&
       dayIsoKey >= todayIsoKey &&
       dayIsoKey <= task.deadline_date
@@ -109,26 +110,38 @@ export function todayIsoKey(): string {
  * lane of `dayIsoKey`, or `null` when the task has no specific time
  * on that day.
  *
- * A task only carries a meaningful time on its *own* deadline day
- * (`deadline_date === dayIsoKey`) and only when the user actually
- * picked a time (`deadline_time != null`). Tasks scheduled to a day
- * without a time, By-tasks spanning a window, and the bare "today"
- * slot of a long-running By-task all return `null` — there's no
- * minute we can honestly point at, so they keep their place in the
- * untimed lane below the day's grid items.
+ * Two distinct slots can contribute a time:
  *
- * Returned shape is the raw `HH:MM[:SS]` string from `deadline_time`,
- * which sorts lexicographically the same way it sorts numerically —
- * cheap and matches how event start times are compared elsewhere.
+ *   - `scheduled_time` when `scheduled_date === dayIsoKey`. The user
+ *     planned to work on the task at that minute on that day.
+ *   - `deadline_time` when `deadline_date === dayIsoKey`. The user
+ *     marked the deadline with a specific time-of-day.
+ *
+ * When both apply on the same day (the rare Plan + Soft-Deadline
+ * configuration that happens to collide on one day) the scheduled
+ * time wins — it's the "I plan to do it then" commitment, while the
+ * deadline_time on the same day is the "must be done by then" cap.
+ * Showing the schedule wins because it's the more action-oriented
+ * marker for that day.
+ *
+ * Tasks scheduled to a day without a time, By-tasks spanning a
+ * window, and the bare "today" slot of a long-running By-task all
+ * return `null` — there's no minute we can honestly point at, so
+ * they keep their place in the untimed lane below the day's grid
+ * items.
+ *
+ * Returned shape is the raw `HH:MM[:SS]` string, which sorts
+ * lexicographically the same way it sorts numerically — cheap and
+ * matches how event start times are compared elsewhere.
  */
 export function taskTimeOnDay(
   task: Task,
   dayIsoKey: string,
 ): string | null {
-  if (
-    task.deadline_time &&
-    task.deadline_date === dayIsoKey
-  ) {
+  if (task.scheduled_time && task.scheduled_date === dayIsoKey) {
+    return task.scheduled_time;
+  }
+  if (task.deadline_time && task.deadline_date === dayIsoKey) {
     return task.deadline_time;
   }
   return null;

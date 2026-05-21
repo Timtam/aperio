@@ -77,13 +77,16 @@ export function PlanTaskDialog({
         const updated: Task = {
           ...task,
           scheduled_date: choice.kind === 'date' ? choice.iso : null,
+          // Picking a specific day drops the per-day time too; the
+          // task is being moved as a whole, so the previously planned
+          // minute (if any) doesn't transfer to the new date.
+          scheduled_time:
+            choice.kind === 'date' ? null : task.scheduled_time,
           // "Back to backlog" also clears the deadline so the task is
-          // truly unscheduled — otherwise a `By` deadline alone would
+          // truly unscheduled — otherwise a "by" deadline alone would
           // keep pulling it into upcoming views.
           deadline_date:
             choice.kind === 'backlog' ? null : task.deadline_date,
-          deadline_type:
-            choice.kind === 'backlog' ? null : task.deadline_type,
           deadline_time:
             choice.kind === 'backlog' ? null : task.deadline_time,
           status:
