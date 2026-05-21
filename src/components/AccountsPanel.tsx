@@ -602,15 +602,16 @@ export function AccountsPanel() {
   return (
     <>
       <div className="form">
-        <p
-          className="sr-only"
-          aria-live="polite"
-          aria-atomic="true"
-        >
-          {loading
-            ? t('dialogs.accounts.loading')
-            : t('dialogs.accounts.count', { count: accounts.length })}
-        </p>
+        {/* The "Loading accounts …" / "5 accounts." live region we used
+            to render here was useful when this panel lived in its own
+            modal — opening the modal explicitly meant the user wanted
+            that summary. Inside the Settings tab it just fires on
+            every tab switch, drowning the user in count chatter they
+            didn't ask for. The information stays reachable via the
+            listbox semantics: NVDA already announces "1 of 5" when
+            focus enters the list. Create / delete confirmations go
+            through the global Announcer, so the events that actually
+            matter still surface. */}
 
         {error && (
           <p
