@@ -284,6 +284,129 @@ describe('planAncestorRecompute', () => {
   });
 });
 
+describe('auto-date (todayKey)', () => {
+  const TODAY = '2026-05-21';
+
+  it('pins a dateless task transitioning to in_progress', () => {
+    const tasks = [
+      { ...baseTask, id: 'a', status: 'open' as const, scheduled_date: null },
+    ];
+    const writes = planStatusCascade('a', 'in_progress', tasks, {
+      todayKey: TODAY,
+    });
+    expect(writes).toEqual([
+      { taskId: 'a', status: 'in_progress', scheduledDate: TODAY },
+    ]);
+  });
+
+  it('leaves an already-dated task alone when it goes in_progress', () => {
+    const tasks = [
+      {
+        ...baseTask,
+        id: 'a',
+        status: 'open' as const,
+        scheduled_date: '2026-05-19',
+      },
+    ];
+    const writes = planStatusCascade('a', 'in_progress', tasks, {
+      todayKey: TODAY,
+    });
+    expect(writes).toEqual([{ taskId: 'a', status: 'in_progress' }]);
+  });
+
+  it('does not fire for transitions to non-in_progress statuses', () => {
+    const tasks = [
+      { ...baseTask, id: 'a', status: 'open' as const, scheduled_date: null },
+    ];
+    expect(
+      planStatusCascade('a', 'completed', tasks, { todayKey: TODAY }),
+    ).toEqual([{ taskId: 'a', status: 'completed' }]);
+    expect(
+      planStatusCascade('a', 'cancelled', tasks, { todayKey: TODAY }),
+    ).toEqual([{ taskId: 'a', status: 'cancelled' }]);
+  });
+
+  it('fires for reactivation (completed → in_progress) on a dateless task', () => {
+    const tasks = [
+      {
+        ...baseTask,
+        id: 'a',
+        status: 'completed' as const,
+        scheduled_date: null,
+      },
+    ];
+    const writes = planStatusCascade('a', 'in_progress', tasks, {
+      todayKey: TODAY,
+    });
+    expect(writes).toEqual([
+      { taskId: 'a', status: 'in_progress', scheduledDate: TODAY },
+    ]);
+  });
+
+  it('also pins a dateless parent that the up-cascade derives to in_progress', () => {
+    const tasks = [
+      {
+        ...baseTask,
+        id: 'p',
+        status: 'open' as const,
+        scheduled_date: null,
+      },
+      child('a', 'p', 'open'),
+      child('b', 'p', 'open'),
+    ];
+    const writes = planStatusCascade('a', 'in_progress', tasks, {
+      todayKey: TODAY,
+    });
+    // a → in_progress (also pinned), and p re-derives to in_progress
+    // (also pinned because it was dateless).
+    expect(writes).toEqual([
+      { taskId: 'a', status: 'in_progress', scheduledDate: TODAY },
+      { taskId: 'p', status: 'in_progress', scheduledDate: TODAY },
+    ]);
+  });
+
+  it('still fires when cascade coupling is off (orthogonal feature)', () => {
+    const tasks = [
+      { ...baseTask, id: 'a', status: 'open' as const, scheduled_date: null },
+    ];
+    const writes = planStatusCascade('a', 'in_progress', tasks, {
+      cascadeEnabled: false,
+      todayKey: TODAY,
+    });
+    expect(writes).toEqual([
+      { taskId: 'a', status: 'in_progress', scheduledDate: TODAY },
+    ]);
+  });
+
+  it('planAncestorRecompute pins a dateless parent it newly derives to in_progress', () => {
+    const tasks = [
+      {
+        ...baseTask,
+        id: 'p',
+        status: 'completed' as const,
+        scheduled_date: null,
+      },
+      // A freshly-added open subtask drags the parent off "completed"
+      // — the rule "completed + open" reads as in_progress.
+      child('a', 'p', 'completed'),
+      child('b', 'p', 'open'),
+    ];
+    const writes = planAncestorRecompute('p', tasks, { todayKey: TODAY });
+    expect(writes).toEqual([
+      { taskId: 'p', status: 'in_progress', scheduledDate: TODAY },
+    ]);
+  });
+
+  it('does nothing when todayKey is omitted', () => {
+    const tasks = [
+      { ...baseTask, id: 'a', status: 'open' as const, scheduled_date: null },
+    ];
+    expect(planStatusCascade('a', 'in_progress', tasks)).toEqual([
+      { taskId: 'a', status: 'in_progress' },
+    ]);
+  });
+});
+
 describe('decoupled mode (cascadeEnabled = false)', () => {
   it('planStatusCascade returns only the root write — no down-cascade', () => {
     const tasks = [

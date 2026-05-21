@@ -43,6 +43,16 @@ import type { Task, TaskStatus } from '../api/types';
 export interface StatusWrite {
   taskId: string;
   status: TaskStatus;
+  /**
+   * Companion write: when set, the task's `scheduled_date` should
+   * also be updated to this ISO date string (`YYYY-MM-DD`). Used by
+   * the "started → pin to today" auto-date feature: a task that
+   * transitions into `in_progress` while it currently has no
+   * scheduled_date gets it pinned so the missed-tasks / carry-over
+   * flow can find it later. Independent of the cascade-coupling
+   * preference — the date logic applies even when coupling is off.
+   */
+  scheduledDate?: string;
 }
 
 /**
@@ -52,9 +62,38 @@ export interface StatusWrite {
  * and subtask status" behaviour. Users can disable it from the Tasks
  * settings tab; the planners then degrade to a single-row write
  * (`planStatusCascade`) or a no-op (`planAncestorRecompute`).
+ *
+ * `todayKey` enables the auto-date feature documented on `StatusWrite`.
+ * When provided, every write the planner emits for a transition into
+ * `in_progress` on a dateless task carries the date as a companion
+ * change. Passed in (rather than read inline) so the planner stays
+ * pure and trivially testable.
  */
 export interface CascadeOptions {
   cascadeEnabled?: boolean;
+  todayKey?: string;
+}
+
+/**
+ * Apply the "started → pin to today" rule to a write the planner is
+ * about to emit. No-op unless every condition is met:
+ *   - the new status is `in_progress`
+ *   - the caller passed a `todayKey`
+ *   - the target task currently has no `scheduled_date`
+ *
+ * The rule fires identically for the root user-driven transition and
+ * for an ancestor that the up-cascade derives to `in_progress`. Both
+ * are "the task is now being worked on" from the user's perspective.
+ */
+function attachAutoDate(
+  write: StatusWrite,
+  target: Task | undefined,
+  options: CascadeOptions | undefined,
+): StatusWrite {
+  if (write.status !== 'in_progress') return write;
+  if (!options?.todayKey) return write;
+  if (!target || target.scheduled_date !== null) return write;
+  return { ...write, scheduledDate: options.todayKey };
 }
 
 /**
@@ -136,12 +175,18 @@ export function planStatusCascade(
   // Decoupled mode: the user opted out of the parent/subtask cascade
   // in the Tasks settings tab. Return just the single root write (or
   // nothing, if the status already matches) and skip both halves of
-  // the propagation. Tests cover this branch — the rest of the
-  // function is the historical, coupled path.
+  // the propagation. The auto-date rule still applies — it's an
+  // orthogonal feature.
   if (options?.cascadeEnabled === false) {
     const rootCurrent = byId.get(taskId)?.status;
     if (rootCurrent === undefined || rootCurrent === newStatus) return [];
-    return [{ taskId, status: newStatus }];
+    return [
+      attachAutoDate(
+        { taskId, status: newStatus },
+        byId.get(taskId),
+        options,
+      ),
+    ];
   }
 
   const writes: StatusWrite[] = [];
@@ -157,7 +202,9 @@ export function planStatusCascade(
   // Root: skip if already that status.
   const rootCurrent = byId.get(taskId)?.status;
   if (rootCurrent !== newStatus) {
-    writes.push({ taskId, status: newStatus });
+    writes.push(
+      attachAutoDate({ taskId, status: newStatus }, byId.get(taskId), options),
+    );
     overrides.set(taskId, newStatus);
   }
 
@@ -204,7 +251,9 @@ export function planStatusCascade(
     if (derived === null) break;
     const parentEffective = statusOf(parentId);
     if (parentEffective === derived) break; // no change → no further propagation
-    writes.push({ taskId: parentId, status: derived });
+    writes.push(
+      attachAutoDate({ taskId: parentId, status: derived }, parent, options),
+    );
     overrides.set(parentId, derived);
     current = parent;
   }
@@ -245,7 +294,9 @@ export function planAncestorRecompute(
     if (derived === null) break;
     const effectiveCurrent = overrides.get(currentId) ?? current.status;
     if (effectiveCurrent !== derived) {
-      writes.push({ taskId: currentId, status: derived });
+      writes.push(
+        attachAutoDate({ taskId: currentId, status: derived }, current, options),
+      );
       overrides.set(currentId, derived);
     }
     currentId = current.parent_id ?? undefined;

@@ -17,6 +17,7 @@ import {
   type ContextMenuItemRequest,
 } from '../api/client';
 import { invoke } from '@tauri-apps/api/core';
+import { todayIsoKey } from '../intl/taskDay';
 import { statusI18nKey, statusMarker } from '../intl/taskStatus';
 import type {
   DeadlineType,
@@ -30,6 +31,7 @@ import { useDialogState } from '../state/DialogState';
 import {
   planAncestorRecompute,
   planStatusCascade,
+  type StatusWrite,
 } from '../state/taskCascade';
 import { useTaskCascadeEnabled } from '../state/TaskCascadeProvider';
 import { useTasks } from '../state/useTasks';
@@ -192,6 +194,7 @@ export function TaskDialog({
       await applyAncestorWrites(
         planAncestorRecompute(task.id, [...tasks, created], {
           cascadeEnabled,
+          todayKey: todayIsoKey(),
         }),
         [...tasks, created],
       );
@@ -241,7 +244,10 @@ export function TaskDialog({
         if (parentId) {
           const snapshot = tasks.filter((row) => row.id !== subtask.id);
           await applyAncestorWrites(
-            planAncestorRecompute(parentId, snapshot, { cascadeEnabled }),
+            planAncestorRecompute(parentId, snapshot, {
+              cascadeEnabled,
+              todayKey: todayIsoKey(),
+            }),
             snapshot,
           );
         }
@@ -439,7 +445,7 @@ export function TaskDialog({
               task.id,
               form.status,
               snapshot,
-              { cascadeEnabled },
+              { cascadeEnabled, todayKey: todayIsoKey() },
             ).filter((w) => w.taskId !== task.id);
             await applyAncestorWrites(cascadeWrites, snapshot);
           }
@@ -958,7 +964,7 @@ interface DeadlineFields {
  * so each Task object stays canonical (we only change two fields).
  */
 async function applyAncestorWrites(
-  writes: { taskId: string; status: TaskStatus }[],
+  writes: StatusWrite[],
   snapshot: Task[],
 ): Promise<void> {
   if (writes.length === 0) return;
@@ -972,6 +978,12 @@ async function applyAncestorWrites(
         status: w.status,
         completed_at:
           w.status === 'completed' ? new Date().toISOString() : null,
+        // Honour the planner's auto-date companion write — see the
+        // matching block in useTaskStatusToggle.applyCascade.
+        scheduled_date:
+          w.scheduledDate !== undefined
+            ? w.scheduledDate
+            : target.scheduled_date,
       },
     });
   }

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 
 import { useAnnouncer } from '../a11y/Announcer';
+import { todayIsoKey } from '../intl/taskDay';
 import { useDialogState } from './DialogState';
 import { planStatusCascade, type StatusWrite } from './taskCascade';
 import { useTaskCascadeEnabled } from './TaskCascadeProvider';
@@ -56,6 +57,11 @@ export function useTaskStatusActions(): TaskStatusActions {
       if (task.status === nextStatus) return;
       const writes = planStatusCascade(task.id, nextStatus, tasks, {
         cascadeEnabled,
+        // Auto-date: a dateless task transitioning into in_progress
+        // (either directly or because the up-cascade derived it from
+        // a child) gets pinned to today, so the carry-over /
+        // missed-tasks flow can locate it later.
+        todayKey: todayIsoKey(),
       });
       if (writes.length === 0) return;
       try {
@@ -126,6 +132,15 @@ async function applyCascade(
         status: w.status,
         completed_at:
           w.status === 'completed' ? new Date().toISOString() : null,
+        // Honour the planner's auto-date companion write: when a task
+        // transitions into in_progress without a scheduled_date, the
+        // planner pins it to today so the carry-over flow can find it
+        // later. `undefined` means "no change", in which case we keep
+        // the existing date.
+        scheduled_date:
+          w.scheduledDate !== undefined
+            ? w.scheduledDate
+            : target.scheduled_date,
       },
     });
   }
