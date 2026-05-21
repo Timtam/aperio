@@ -26,7 +26,9 @@ use cal_core::{
     TaskStatus,
 };
 use chrono::{DateTime, NaiveDate, NaiveTime, TimeZone, Utc};
-use icalendar::{Calendar as ICalendar, Component, Todo};
+use icalendar::{
+    Calendar as ICalendar, CalendarDateTime, Component, DatePerhapsTime, Todo,
+};
 use reqwest::{
     header::{HeaderName, HeaderValue, CONTENT_TYPE, IF_MATCH, IF_NONE_MATCH, ETAG},
     Client, Method, StatusCode,
@@ -363,19 +365,27 @@ fn apply_common(
     };
     todo.add_property("PRIORITY", &prio.to_string());
 
+    // DTSTART / DUE: emit through the typed icalendar helpers so the
+    // `VALUE=DATE` parameter goes on the wire when we hand over a
+    // date-only value. The previous raw `add_property("DTSTART", "20260521")`
+    // path produced a property *without* the parameter, which RFC 5545
+    // says is a malformed DATE-TIME — iCloud's CalDAV server reacted
+    // by silently dropping the property, leaving every stored task
+    // "dateless" no matter how many times the user set the date.
     if let Some(date) = task.scheduled_date {
-        todo.add_property("DTSTART", &format_date_compact(date));
+        todo.append_property(
+            DatePerhapsTime::Date(date).to_property("DTSTART"),
+        );
     }
     if let Some(date) = task.deadline_date {
-        let value = if let Some(time) = task.deadline_time {
-            // DATE+TIME → compact UTC YYYYMMDDTHHMMSSZ.
-            Utc.from_utc_datetime(&date.and_time(time))
-                .format("%Y%m%dT%H%M%SZ")
-                .to_string()
+        let due: DatePerhapsTime = if let Some(time) = task.deadline_time {
+            // DATE+TIME → UTC date-time. The typed conversion emits
+            // `YYYYMMDDTHHMMSSZ` for us; no manual format needed.
+            CalendarDateTime::Utc(Utc.from_utc_datetime(&date.and_time(time))).into()
         } else {
-            format_date_compact(date)
+            DatePerhapsTime::Date(date)
         };
-        todo.add_property("DUE", &value);
+        todo.due(due);
     }
     if let Some(completed) = completed_at {
         todo.add_property(
@@ -395,9 +405,6 @@ fn apply_common(
     }
 }
 
-fn format_date_compact(date: NaiveDate) -> String {
-    date.format("%Y%m%d").to_string()
-}
 
 fn map_todo(todo: &Todo, list_id: &str) -> Option<Task> {
     let uid = todo.get_uid()?.to_string();
@@ -698,6 +705,71 @@ END:VCALENDAR</c:calendar-data>
             Some(NaiveDate::from_ymd_opt(2026, 5, 20).unwrap())
         );
         assert_eq!(tasks[0].etag.as_deref(), Some("\"todo-1\""));
+    }
+
+    #[test]
+    fn build_vtodo_emits_value_date_parameter_for_date_only_fields() {
+        // Regression for the iCloud "task saves but date is gone"
+        // bug: when scheduled_date / deadline_date are pure NaiveDate
+        // (no time), DTSTART and DUE must carry `VALUE=DATE`. Without
+        // it, RFC 5545 interprets a bare `20260520` as a malformed
+        // DATE-TIME and Apple's CalDAV server silently drops the
+        // property when it persists the VTODO.
+        let new = NewTask {
+            title: "Pay bill".into(),
+            description: None,
+            status: TaskStatus::Open,
+            priority: TaskPriority::Medium,
+            scheduled_date: Some(NaiveDate::from_ymd_opt(2026, 5, 21).unwrap()),
+            deadline_type: Some(DeadlineType::On),
+            deadline_date: Some(NaiveDate::from_ymd_opt(2026, 5, 22).unwrap()),
+            deadline_time: None,
+            recurrence: None,
+            parent_id: None,
+            color_label: None,
+            reminders: Vec::new(),
+            sound: None,
+        };
+        let body = build_vtodo_body("uid-1", &new, None);
+        assert!(
+            body.contains("DTSTART;VALUE=DATE:20260521"),
+            "DTSTART must include VALUE=DATE parameter, got:\n{body}",
+        );
+        assert!(
+            body.contains("DUE;VALUE=DATE:20260522"),
+            "DUE must include VALUE=DATE parameter, got:\n{body}",
+        );
+    }
+
+    #[test]
+    fn build_vtodo_with_due_time_emits_utc_datetime() {
+        // The other half of the same property: when the user picked a
+        // specific time of day, DUE is a regular UTC DATE-TIME (no
+        // VALUE parameter, RFC 5545 default).
+        let new = NewTask {
+            title: "Status call".into(),
+            description: None,
+            status: TaskStatus::Open,
+            priority: TaskPriority::Medium,
+            scheduled_date: None,
+            deadline_type: Some(DeadlineType::On),
+            deadline_date: Some(NaiveDate::from_ymd_opt(2026, 5, 22).unwrap()),
+            deadline_time: Some(NaiveTime::from_hms_opt(14, 30, 0).unwrap()),
+            recurrence: None,
+            parent_id: None,
+            color_label: None,
+            reminders: Vec::new(),
+            sound: None,
+        };
+        let body = build_vtodo_body("uid-2", &new, None);
+        assert!(
+            body.contains("DUE:20260522T143000Z"),
+            "DUE must be a UTC DATE-TIME when a time is set, got:\n{body}",
+        );
+        assert!(
+            !body.contains("VALUE=DATE-TIME"),
+            "DUE date-time should not carry VALUE=DATE-TIME (RFC 5545 default), got:\n{body}",
+        );
     }
 
     #[tokio::test]
