@@ -172,7 +172,11 @@ pub async fn get_tasks(
             .map_err(|err: String| CaldavError::Protocol(format!("ical: {err}")))?;
         for comp in parsed.components {
             if let icalendar::CalendarComponent::Todo(todo) = comp {
-                if let Some(mut task) = map_todo(&todo, list_id) {
+                // Pass the server's actual href into the id encoder
+                // — without it, delete/update later would build a
+                // URL from the UID alone, which doesn't match how
+                // iCloud (and others) name their VTODO resources.
+                if let Some(mut task) = map_todo(&todo, list_id, Some(&entry.href)) {
                     if let Some(etag) = &entry.etag {
                         task.etag = Some(etag.clone());
                     }
@@ -238,7 +242,13 @@ pub async fn update_task(
     let list_url = Url::parse(&task.list_id).map_err(|e| {
         CaldavError::Config(format!("task.list_id is not a URL: {e}"))
     })?;
-    let resource = resource_url(&list_url, &task.id)?;
+    // Resolve the actual resource URL the server stored the VTODO at.
+    // `get_tasks` encodes `{href}|{uid}` into task.id so we can recover
+    // the server's filename here — iCloud chooses its own paths for
+    // VTODO resources, and falling back to `{list}/{uid}.ics` reaches
+    // a 404 every time. The legacy uid-only path still applies to
+    // freshly-created tasks that haven't been refetched yet.
+    let resource = resource_url_for_task(&list_url, &task.id)?;
     let body = build_vtodo_from_task(&task);
     let mut headers = auth_header(credentials)?;
     headers.insert(
@@ -271,7 +281,12 @@ pub async fn delete_task(
     etag: Option<&str>,
     credentials: &Credentials,
 ) -> CaldavResult<()> {
-    let resource = resource_url(list_url, task_id)?;
+    // See `update_task` for why the resource URL has to come from the
+    // server-provided href encoded into the id rather than from
+    // `{list}/{uid}.ics`. The 404 path below already swallows missing
+    // resources as success, so a wrong URL here would otherwise look
+    // like a successful delete without ever touching the real row.
+    let resource = resource_url_for_task(list_url, task_id)?;
     let mut headers = auth_header(credentials)?;
     if let Some(etag) = etag {
         let value =
@@ -332,7 +347,11 @@ fn build_vtodo_from_task(task: &Task) -> String {
         reminders: task.reminders.clone(),
         sound: task.sound.clone(),
     };
-    build_vtodo_body(&task.id, &new, task.completed_at)
+    // The id may be the composite `{href}|{uid}` we encode in
+    // `map_todo`; strip the href back off so the iCal UID matches what
+    // the server already stored.
+    let (_, uid) = decode_id(&task.id);
+    build_vtodo_body(uid, &new, task.completed_at)
 }
 
 fn apply_common(
@@ -406,8 +425,20 @@ fn apply_common(
 }
 
 
-fn map_todo(todo: &Todo, list_id: &str) -> Option<Task> {
-    let uid = todo.get_uid()?.to_string();
+fn map_todo(todo: &Todo, list_id: &str, href: Option<&str>) -> Option<Task> {
+    let uid_raw = todo.get_uid()?.to_string();
+    // Encode the server's resource href into the id when we have it
+    // (`{href}|{uid}`). This lets the write paths reach the right URL
+    // even when the server names its VTODO files arbitrarily — iCloud
+    // does this for its Reminders collections. Without the href the
+    // delete path falls through to a 404 (which we treat as success)
+    // and the user sees "deleted" with the task still present on the
+    // server. Tasks read before this fix kept the legacy bare-UID id
+    // and continue to work via the fallback in `resource_url_for_task`.
+    let uid = match href {
+        Some(h) if !h.is_empty() => format!("{h}|{uid_raw}"),
+        _ => uid_raw,
+    };
     let title = todo.get_summary().unwrap_or("").to_string();
     let description = todo.get_description().map(|s| s.to_string());
 
@@ -546,6 +577,32 @@ async fn propfind(
 fn resource_url(list_url: &Url, uid: &str) -> CaldavResult<Url> {
     let slug = format!("{}.ics", urlencoding(uid));
     list_url.join(&slug).map_err(Into::into)
+}
+
+/// Split a task id into `(Some(href), uid)` when it carries the
+/// composite `{href}|{uid}` we mint in `map_todo`, or `(None, id)`
+/// when it's a plain UID (freshly-created tasks before refetch, plus
+/// rows persisted by older Aperio versions).
+fn decode_id(task_id: &str) -> (Option<&str>, &str) {
+    match task_id.split_once('|') {
+        Some((href, uid)) if !href.is_empty() => (Some(href), uid),
+        _ => (None, task_id),
+    }
+}
+
+/// Resolve the absolute URL of the VTODO resource. Prefers the
+/// server-provided href encoded into the id by `map_todo`; falls back
+/// to the legacy `{list}/{uid}.ics` shape for tasks that haven't been
+/// refetched since the bug fix.
+fn resource_url_for_task(list_url: &Url, task_id: &str) -> CaldavResult<Url> {
+    let (href, uid) = decode_id(task_id);
+    if let Some(href) = href {
+        // `Url::join` resolves both absolute-path-only ("/calendars/…")
+        // and absolute-URL hrefs against the list base, so this works
+        // regardless of how the server formatted its href.
+        return list_url.join(href).map_err(Into::into);
+    }
+    resource_url(list_url, uid)
 }
 
 fn urlencoding(s: &str) -> String {
@@ -793,5 +850,109 @@ END:VCALENDAR</c:calendar-data>
         m.assert_async().await;
         assert!(created.id.contains("@aperio"));
         assert_eq!(created.etag.as_deref(), Some("\"new\""));
+    }
+
+    #[test]
+    fn decode_id_splits_composite_form() {
+        // Plain UID stays plain — covers tasks created before this fix
+        // and freshly-created tasks before the next refetch.
+        assert_eq!(decode_id("todo-1@aperio"), (None, "todo-1@aperio"));
+        // Composite `{href}|{uid}` splits at the first pipe; the href
+        // can be any of the URL shapes a server might hand back.
+        assert_eq!(
+            decode_id("/calendars/alice/tasks/EE.ics|todo-1@aperio"),
+            (Some("/calendars/alice/tasks/EE.ics"), "todo-1@aperio"),
+        );
+    }
+
+    #[test]
+    fn resource_url_for_task_prefers_server_href() {
+        let list_url =
+            Url::parse("https://server.example/calendars/alice/tasks/").unwrap();
+        // With href the resolved URL must use the server's filename,
+        // not `{list}/{uid}.ics` — that's the regression that made
+        // every iCloud task delete silently 404.
+        let resolved = resource_url_for_task(
+            &list_url,
+            "/calendars/alice/tasks/8B0F-EE.ics|todo-1@aperio",
+        )
+        .unwrap();
+        assert_eq!(
+            resolved.as_str(),
+            "https://server.example/calendars/alice/tasks/8B0F-EE.ics",
+        );
+        // Without href we fall back to the legacy UID-derived URL so
+        // tasks that haven't been refetched since the fix still work.
+        let legacy = resource_url_for_task(&list_url, "todo-1@aperio").unwrap();
+        assert_eq!(
+            legacy.as_str(),
+            "https://server.example/calendars/alice/tasks/todo-1%40aperio.ics",
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_task_uses_server_provided_href() {
+        // Mirrors how iCloud names VTODO resources: the file lives at
+        // a server-chosen path (`8B0F-EE.ics`), not at `{uid}.ics`.
+        // The test asserts that delete actually hits the server-chosen
+        // path; before the fix this DELETE would go to
+        // `/calendars/alice/tasks/todo-1%40aperio.ics`, 404 silently,
+        // and report success.
+        let mut server = Server::new_async().await;
+        let delete_mock = server
+            .mock("DELETE", "/calendars/alice/tasks/8B0F-EE.ics")
+            .with_status(204)
+            .expect(1)
+            .create_async()
+            .await;
+        let url =
+            Url::parse(&format!("{}/calendars/alice/tasks/", server.url())).unwrap();
+        let composite_id =
+            "/calendars/alice/tasks/8B0F-EE.ics|todo-1@aperio";
+        delete_task(&client(), &url, composite_id, None, &creds(&server.url()))
+            .await
+            .unwrap();
+        delete_mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn get_tasks_encodes_href_into_id() {
+        // Verifies the read path stamps the href onto each task so
+        // later writes can route to the right resource. Without this
+        // round-trip the composite id never appears and the delete
+        // fix above would never trigger.
+        let body = r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+  <d:response>
+    <d:href>/calendars/alice/tasks/8B0F-EE.ics</d:href>
+    <d:propstat><d:prop>
+      <d:getetag>"todo-1"</d:getetag>
+      <c:calendar-data>BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//test//EN
+BEGIN:VTODO
+UID:todo-1@aperio
+SUMMARY:Buy milk
+STATUS:NEEDS-ACTION
+END:VTODO
+END:VCALENDAR</c:calendar-data>
+    </d:prop></d:propstat>
+  </d:response>
+</d:multistatus>"#;
+        let mut server = Server::new_async().await;
+        let _m = server
+            .mock("REPORT", "/calendars/alice/tasks/")
+            .with_status(207)
+            .with_body(body)
+            .create_async()
+            .await;
+        let url =
+            Url::parse(&format!("{}/calendars/alice/tasks/", server.url())).unwrap();
+        let tasks = get_tasks(&client(), &url, &creds(&server.url())).await.unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(
+            tasks[0].id,
+            "/calendars/alice/tasks/8B0F-EE.ics|todo-1@aperio",
+        );
     }
 }
