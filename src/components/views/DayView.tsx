@@ -25,6 +25,7 @@ import { localDateKey } from '../../intl/dateKey';
 import {
   filterTasksOnDay,
   mergeDayItems,
+  taskTimeOnDay,
   todayIsoKey,
 } from '../../intl/taskDay';
 import {
@@ -345,9 +346,14 @@ export function DayView() {
             const focused = i === focusIndex;
             if (item.kind === 'task') {
               const task = item.task;
-              const timeStr = task.deadline_time
+              // Pull the effective time-of-day via the shared helper;
+              // it returns scheduled_time when on the scheduled day,
+              // deadline_time when on the deadline day, with the
+              // schedule winning on a same-day collision.
+              const timeOnDay = taskTimeOnDay(task, dayKey);
+              const timeStr = timeOnDay
                 ? fmt.format(
-                    new Date(`${dayKey}T${task.deadline_time}`),
+                    new Date(`${dayKey}T${timeOnDay}`),
                     'p',
                   )
                 : '';

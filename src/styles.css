@@ -810,6 +810,24 @@ button[aria-disabled='true'] {
   flex: 1;
 }
 
+/* Used by TaskDialog's two date+time blocks (Geplant für / Spätestens
+   bis). Default <fieldset> styling is heavy in most browsers — strip
+   it back to a borderless, padding-less group with just the legend
+   acting as a section header. */
+.form__fieldset {
+  border: none;
+  padding: 0;
+  margin: 0 0 var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.form__fieldset > .form__label {
+  /* The fieldset's <legend> picks up form__label too. */
+  padding: 0;
+}
+
 .form__label {
   font-size: var(--font-size-sm);
   color: var(--color-fg-muted);

@@ -30,6 +30,7 @@ import { visibleRange } from '../../state/viewMath';
 import {
   groupTasksByDay,
   mergeDayItems,
+  taskTimeOnDay,
   todayIsoKey,
 } from '../../intl/taskDay';
 import {
@@ -595,9 +596,17 @@ export function WeekView() {
                       focused && eventIndex === itemIdx;
                     if (item.kind === 'task') {
                       const task = item.task;
-                      const time = task.deadline_time
+                      // Pull the effective time-of-day for this row
+                      // on this specific day — could come from either
+                      // scheduled_time (the planned slot) or
+                      // deadline_time (when this is the deadline day
+                      // and only a deadline is set). The same helper
+                      // backs taskTimeOnDay-based sorting upstream,
+                      // so chips line up consistently.
+                      const timeOnDay = taskTimeOnDay(task, dayKey);
+                      const time = timeOnDay
                         ? fmt.format(
-                            new Date(`${dayKey}T${task.deadline_time}`),
+                            new Date(`${dayKey}T${timeOnDay}`),
                             'p',
                           )
                         : '';

@@ -58,16 +58,22 @@ export interface TaskDialogProps {
   defaultDate?: string;
 }
 
-type DeadlineMode = 'none' | 'scheduled' | 'on' | 'by';
 
 interface FormState {
   title: string;
   listId: string;
   status: TaskStatus;
   priority: TaskPriority;
-  deadlineMode: DeadlineMode;
-  date: string;
-  time: string;
+  // Two independent date+time slots — replacing the old `deadlineMode`
+  // + single date/time fields. Each pair maps directly onto the
+  // matching wire fields (`scheduled_*` / `deadline_*`); an empty
+  // date string means the slot is unset. Time without date is
+  // impossible in the UI (the time input is disabled when the date
+  // is empty) and would also fail the DB CHECK constraint.
+  scheduledDate: string;
+  scheduledTime: string;
+  deadlineDate: string;
+  deadlineTime: string;
   description: string;
   colorLabel: string | null;
   recurrence: TaskRecurrenceValue;
@@ -620,52 +626,79 @@ export function TaskDialog({
           </label>
         </div>
 
-        <label className="form__field">
-          <span className="form__label">
-            {t('dialogs.task.fields.deadlineMode')}
-          </span>
-          <select
-            value={form.deadlineMode}
-            onChange={(e) =>
-              update('deadlineMode', e.target.value as DeadlineMode)
-            }
-          >
-            <option value="none">{t('dialogs.task.deadline.none')}</option>
-            <option value="scheduled">
-              {t('dialogs.task.deadline.scheduled')}
-            </option>
-            <option value="on">{t('dialogs.task.deadline.on')}</option>
-            <option value="by">{t('dialogs.task.deadline.by')}</option>
-          </select>
-        </label>
-
-        {form.deadlineMode !== 'none' && (
+        {/* Two independent date+time blocks. Either or both can be
+            unset (empty date input). The time input next to each
+            date is disabled when the date is empty — a time without
+            a day is meaningless and would fail the DB CHECK
+            constraint anyway. Clearing the date doesn't clear the
+            time field's local string; the save path discards it when
+            the date is empty, and restoring the date brings the
+            previously-typed time back. */}
+        <fieldset className="form__fieldset">
+          <legend className="form__label">
+            {t('dialogs.task.fields.scheduled.legend')}
+          </legend>
+          <p className="form__hint">
+            {t('dialogs.task.fields.scheduled.hint')}
+          </p>
           <div className="form__row">
             <label className="form__field">
               <span className="form__label">
-                {t('dialogs.task.fields.date')}
+                {t('dialogs.task.fields.scheduled.date')}
               </span>
               <input
                 type="date"
-                value={form.date}
-                onChange={(e) => update('date', e.target.value)}
-                required
+                value={form.scheduledDate}
+                onChange={(e) => update('scheduledDate', e.target.value)}
               />
             </label>
-            {form.deadlineMode === 'on' && (
-              <label className="form__field">
-                <span className="form__label">
-                  {t('dialogs.task.fields.time')}
-                </span>
-                <input
-                  type="time"
-                  value={form.time}
-                  onChange={(e) => update('time', e.target.value)}
-                />
-              </label>
-            )}
+            <label className="form__field">
+              <span className="form__label">
+                {t('dialogs.task.fields.scheduled.time')}
+              </span>
+              <input
+                type="time"
+                value={form.scheduledTime}
+                onChange={(e) => update('scheduledTime', e.target.value)}
+                disabled={!form.scheduledDate}
+                aria-disabled={!form.scheduledDate || undefined}
+              />
+            </label>
           </div>
-        )}
+        </fieldset>
+
+        <fieldset className="form__fieldset">
+          <legend className="form__label">
+            {t('dialogs.task.fields.deadline.legend')}
+          </legend>
+          <p className="form__hint">
+            {t('dialogs.task.fields.deadline.hint')}
+          </p>
+          <div className="form__row">
+            <label className="form__field">
+              <span className="form__label">
+                {t('dialogs.task.fields.deadline.date')}
+              </span>
+              <input
+                type="date"
+                value={form.deadlineDate}
+                onChange={(e) => update('deadlineDate', e.target.value)}
+              />
+            </label>
+            <label className="form__field">
+              <span className="form__label">
+                {t('dialogs.task.fields.deadline.time')}
+              </span>
+              <input
+                type="time"
+                value={form.deadlineTime}
+                onChange={(e) => update('deadlineTime', e.target.value)}
+                disabled={!form.deadlineDate}
+                aria-disabled={!form.deadlineDate || undefined}
+              />
+            </label>
+          </div>
+        </fieldset>
 
         <label className="form__field">
           <span className="form__label">
@@ -887,50 +920,27 @@ function buildInitialState(
   taskLists: { id: string; read_only: boolean }[],
 ): FormState {
   if (task) {
-    // Post-migration 0006 the wire shape carries two independent slots
-    // (scheduled_date + scheduled_time / deadline_date + deadline_time)
-    // but the dialog's UI is still the legacy four-option dropdown.
-    // Pick the mode that best represents the row:
-    //
-    //   - has scheduled_time → 'on'  (concrete timed slot)
-    //   - has scheduled_date  → 'scheduled'
-    //   - has deadline_date   → 'by'
-    //   - otherwise           → 'none'
-    //
-    // A task with BOTH scheduled and deadline set (the Plan +
-    // Soft-Deadline edge case the migration preserved on legacy
-    // conflicts) renders as 'scheduled' / 'on' here; saving from
-    // this UI drops the deadline. Commit 3's dialog redesign will
-    // expose both slots properly. Until then this is an accepted
-    // lossiness — see the issue tracker for the follow-up.
-    const mode: DeadlineMode = task.scheduled_time
-      ? 'on'
-      : task.scheduled_date
-      ? 'scheduled'
-      : task.deadline_date
-      ? 'by'
-      : 'none';
-    const dateForMode =
-      mode === 'by' ? task.deadline_date : task.scheduled_date;
-    const timeForMode =
-      mode === 'on' ? task.scheduled_time : task.deadline_time;
+    // Direct field-by-field mapping. Each slot is independently
+    // optional — a task may have schedule only, deadline only, both
+    // (Plan + Soft-Deadline), or neither (backlog).
     return {
       title: task.title,
       listId: task.list_id,
       status: task.status,
       priority: task.priority,
-      deadlineMode: mode,
-      date: dateForMode ?? todayInput(),
-      time: timeForMode?.slice(0, 5) ?? '09:00',
+      scheduledDate: task.scheduled_date ?? '',
+      scheduledTime: task.scheduled_time?.slice(0, 5) ?? '',
+      deadlineDate: task.deadline_date ?? '',
+      deadlineTime: task.deadline_time?.slice(0, 5) ?? '',
       description: task.description ?? '',
       colorLabel: task.color_label ?? null,
       recurrence: recurrenceFromBackend(task.recurrence),
       reminders: task.reminders ?? [],
     };
   }
-  // When the caller anchored us on a day, default to a "scheduled
-  // task on that day". When unset, the task starts dateless (backlog).
-  const anchored = defaultDate ? defaultDate.slice(0, 10) : null;
+  // When the caller anchored us on a day, default to a scheduled
+  // task on that day. When unset, the task starts dateless (backlog).
+  const anchored = defaultDate ? defaultDate.slice(0, 10) : '';
   // Same fallback chain as the event picker: explicit default →
   // last-used (if still present and writable) → first writable →
   // first list at all.
@@ -951,9 +961,10 @@ function buildInitialState(
     listId: fallbackList,
     status: 'open',
     priority: 'medium',
-    deadlineMode: anchored ? 'scheduled' : 'none',
-    date: anchored ?? todayInput(),
-    time: '09:00',
+    scheduledDate: anchored,
+    scheduledTime: '',
+    deadlineDate: '',
+    deadlineTime: '',
     description: '',
     colorLabel: null,
     recurrence: { ...TASK_RECURRENCE_DEFAULT },
@@ -1026,57 +1037,29 @@ function collectDescendants(parentId: string, all: Task[]): Task[] {
 }
 
 /**
- * Project the form's four-option DeadlineMode onto the two-slot wire
- * shape introduced by migration 0006:
+ * Project the form's two date+time pairs onto the wire shape. Both
+ * slots are independent: each is "set" only if the date is non-empty.
+ * Time without a date silently drops — the UI prevents this, but the
+ * helper stays defensive.
  *
- *   - 'scheduled' / 'on' both write to `scheduled_*` (the old "Geplanter
- *      Tag" and "Konkrete Deadline" merged into one slot). 'on' is the
- *      timed variant; 'scheduled' clears `scheduled_time`.
- *   - 'by' writes to `deadline_*`. Time stays optional but the legacy
- *      UI doesn't expose it yet — that's coming with the redesign.
- *   - 'none' clears everything.
- *
- * The redesigned dialog (commit 3) will replace this projection with
- * two independent date+time blocks; until then the existing dropdown
- * carries the full save matrix.
+ * Time values come in as `HH:MM`; the wire uses `HH:MM:SS`.
  */
 function splitDeadline(form: FormState): DeadlineFields {
-  switch (form.deadlineMode) {
-    case 'scheduled':
-      return {
-        scheduled_date: form.date || null,
-        scheduled_time: null,
-        deadline_date: null,
-        deadline_time: null,
-      };
-    case 'on':
-      return {
-        scheduled_date: form.date || null,
-        scheduled_time: form.time ? `${form.time}:00` : null,
-        deadline_date: null,
-        deadline_time: null,
-      };
-    case 'by':
-      return {
-        scheduled_date: null,
-        scheduled_time: null,
-        deadline_date: form.date || null,
-        deadline_time: null,
-      };
-    default:
-      return {
-        scheduled_date: null,
-        scheduled_time: null,
-        deadline_date: null,
-        deadline_time: null,
-      };
-  }
+  const scheduledDate = form.scheduledDate || null;
+  const scheduledTime =
+    scheduledDate && form.scheduledTime
+      ? `${form.scheduledTime}:00`
+      : null;
+  const deadlineDate = form.deadlineDate || null;
+  const deadlineTime =
+    deadlineDate && form.deadlineTime
+      ? `${form.deadlineTime}:00`
+      : null;
+  return {
+    scheduled_date: scheduledDate,
+    scheduled_time: scheduledTime,
+    deadline_date: deadlineDate,
+    deadline_time: deadlineTime,
+  };
 }
 
-function todayInput(): string {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}

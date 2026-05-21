@@ -293,9 +293,18 @@
         "list": "List",
         "status": "Status",
         "priority": "Priority",
-        "deadlineMode": "Deadline",
-        "date": "Date",
-        "time": "Time",
+        "scheduled": {
+          "legend": "Scheduled for",
+          "hint": "The day to work on the task. Add a time to pin it to a specific slot in the day.",
+          "date": "Date",
+          "time": "Time"
+        },
+        "deadline": {
+          "legend": "Due by",
+          "hint": "Must be done by this day. The task stays in the backlog until done; on the deadline day it gets pinned automatically.",
+          "date": "Date",
+          "time": "Time"
+        },
         "description": "Description",
         "colorLabel": "Color label"
       },
@@ -320,12 +329,6 @@
         "low": "Low",
         "medium": "Medium",
         "high": "High"
-      },
-      "deadline": {
-        "none": "No date",
-        "scheduled": "Scheduled day",
-        "on": "Concrete deadline",
-        "by": "Due by"
       },
       "recurrence": {
         "label": "Repeat",
