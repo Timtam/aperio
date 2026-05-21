@@ -22,6 +22,7 @@ import { useCalendarStore } from '../../state/CalendarStore';
 import { useDialogState } from '../../state/DialogState';
 import { useEvents } from '../../state/useEvents';
 import { useTaskListShowCompleted } from '../../state/useTaskListShowCompleted';
+import { useChipContextMenu } from '../../state/useChipContextMenu';
 import { useTaskStatusToggle } from '../../state/useTaskStatusToggle';
 import { useTasks } from '../../state/useTasks';
 import { useViewState } from '../../state/ViewState';
@@ -84,6 +85,8 @@ export function WeekView() {
   const toggleTaskStatus = useTaskStatusToggle();
   const { shouldShow: shouldShowCompletedForList } =
     useTaskListShowCompleted();
+  const { openForEvent: openEventMenu, openForTask: openTaskMenu } =
+    useChipContextMenu();
   const { colorLabels } = useCalendarStore();
   const labelById = useMemo(() => labelsLookup(colorLabels), [colorLabels]);
 
@@ -316,6 +319,9 @@ export function WeekView() {
       //         Delete is intentionally NOT bound — task deletion
       //         lives in the dialog so the user confirms it in the
       //         same surface they edit from.
+      // Shift+F10 / ContextMenu key opens the chip context menu —
+      // matches the platform convention every desktop has used
+      // since the 90s.
       if (eventIndex !== null) {
         const item = focusedDayItems[eventIndex];
         if (e.key === 'Escape') {
@@ -333,6 +339,24 @@ export function WeekView() {
           e.preventDefault();
           if (item?.kind === 'event') openEventDialog(item.event);
           else if (item?.kind === 'task') void toggleTaskStatus(item.task);
+          return;
+        }
+        if (
+          e.key === 'ContextMenu' ||
+          (e.shiftKey && e.key === 'F10')
+        ) {
+          e.preventDefault();
+          if (item) {
+            const target = e.currentTarget as HTMLElement;
+            const id = eventOptionId(focusIndex, eventIndex);
+            const node = target.ownerDocument?.getElementById(id);
+            const rect = node?.getBoundingClientRect();
+            const pos = rect
+              ? { x: rect.left, y: rect.bottom }
+              : undefined;
+            if (item.kind === 'event') void openEventMenu(item.event, pos);
+            else void openTaskMenu(item.task, pos);
+          }
           return;
         }
         if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -411,6 +435,9 @@ export function WeekView() {
       clearEventIndex,
       requestDelete,
       toggleTaskStatus,
+      eventOptionId,
+      openEventMenu,
+      openTaskMenu,
     ],
   );
 
@@ -615,6 +642,11 @@ export function WeekView() {
                             // below stops the bubble so toggling
                             // doesn't also open the dialog.
                             onClick={() => openTaskDialog(task)}
+                            onContextMenu={(ev) => {
+                              ev.preventDefault();
+                              ev.stopPropagation();
+                              void openTaskMenu(task);
+                            }}
                           >
                             <span className="week-task__time">{time}</span>
                             <span className="week-task__body">
@@ -680,6 +712,11 @@ export function WeekView() {
                           }
                           aria-label={aria}
                           aria-selected={isFocusedItem}
+                          onContextMenu={(cmev) => {
+                            cmev.preventDefault();
+                            cmev.stopPropagation();
+                            void openEventMenu(ev);
+                          }}
                           style={
                             color.hex
                               ? ({ '--event-color': color.hex } as React.CSSProperties)
@@ -715,6 +752,9 @@ export function WeekView() {
                   onOpen={(task) => openTaskDialog(task)}
                   onToggle={(task) => {
                     void toggleTaskStatus(task);
+                  }}
+                  onContextMenu={(task) => {
+                    void openTaskMenu(task);
                   }}
                   taskListById={taskListById}
                   labelById={labelById}
@@ -799,12 +839,14 @@ function WeekDayTasks({
   tasks,
   onOpen,
   onToggle,
+  onContextMenu,
   taskListById,
   labelById,
 }: {
   tasks: Task[];
   onOpen: (task: Task) => void;
   onToggle: (task: Task) => void;
+  onContextMenu: (task: Task) => void;
   taskListById: Map<string, import('../../api/types').TaskList>;
   labelById: Map<string, import('../../api/types').ColorLabel>;
 }) {
@@ -849,6 +891,11 @@ function WeekDayTasks({
                 }
               }}
               onClick={() => onOpen(task)}
+              onContextMenu={(ev) => {
+                ev.preventDefault();
+                ev.stopPropagation();
+                onContextMenu(task);
+              }}
               style={
                 color.hex
                   ? ({ '--event-color': color.hex } as React.CSSProperties)

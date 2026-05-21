@@ -13,6 +13,7 @@ import {
   type DayOccurrence,
 } from '../../intl/multiDay';
 import { useCalendarStore } from '../../state/CalendarStore';
+import { useChipContextMenu } from '../../state/useChipContextMenu';
 import { useDialogState } from '../../state/DialogState';
 import { useEvents } from '../../state/useEvents';
 import { useViewState } from '../../state/ViewState';
@@ -51,6 +52,7 @@ export function AgendaView() {
 
   const range = useMemo(() => visibleRange('agenda', anchor), [anchor]);
   const { events, calendarById, loading } = useEvents(range);
+  const { openForEvent: openEventMenu } = useChipContextMenu();
   const { colorLabels } = useCalendarStore();
   const labelById = useMemo(() => labelsLookup(colorLabels), [colorLabels]);
 
@@ -173,6 +175,22 @@ export function AgendaView() {
           if (ev) requestDelete(ev);
           return;
         }
+        case 'ContextMenu':
+        case 'F10': {
+          if (e.key === 'F10' && !e.shiftKey) return;
+          e.preventDefault();
+          if (ev) {
+            const target = e.currentTarget as HTMLElement;
+            const id = itemId(focusIndex);
+            const node = target.ownerDocument?.getElementById(id);
+            const rect = node?.getBoundingClientRect();
+            const pos = rect
+              ? { x: rect.left, y: rect.bottom }
+              : undefined;
+            void openEventMenu(ev, pos);
+          }
+          return;
+        }
         default:
           return;
       }
@@ -185,6 +203,8 @@ export function AgendaView() {
       announce,
       t,
       requestDelete,
+      openEventMenu,
+      itemId,
     ],
   );
 
@@ -229,6 +249,9 @@ export function AgendaView() {
             t,
             itemId,
             onSelect: setFocusIndex,
+            onContextMenu: (event) => {
+              void openEventMenu(event);
+            },
           })
         )}
       </ul>
@@ -267,6 +290,7 @@ interface RenderContext {
   t: (key: string, vars?: Record<string, unknown>) => string;
   itemId: (i: number) => string;
   onSelect: (i: number) => void;
+  onContextMenu: (event: CalendarEvent, index: number) => void;
 }
 
 function renderOccurrences(
@@ -343,6 +367,12 @@ function renderOccurrences(
             : undefined
         }
         onClick={() => ctx.onSelect(i)}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          ctx.onSelect(i);
+          ctx.onContextMenu(ev, i);
+        }}
       >
         <span className="agenda-list__time">{timeLabel}</span>
         <span className="agenda-list__title">

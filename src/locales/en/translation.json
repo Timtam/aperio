@@ -7,6 +7,19 @@
   "actions": {
     "duplicated": "\"{{title}}\" duplicated."
   },
+  "chipMenu": {
+    "edit": "Edit …",
+    "delete": "Delete",
+    "moveTo": "Move to …",
+    "copyTo": "Copy to …",
+    "status": "Status",
+    "statusValue": {
+      "open": "To do",
+      "in_progress": "In progress",
+      "completed": "Completed",
+      "cancelled": "Cancelled"
+    }
+  },
   "reminders": {
     "label": "Reminders",
     "empty": "No reminders set.",
@@ -556,7 +569,9 @@
       "dueNone": "No date",
       "toggleLabel": "Toggle done state for {{title}} (list {{list}})",
       "completedAnnounce": "Task \"{{title}}\" marked complete.",
-      "reopenedAnnounce": "Task \"{{title}}\" reopened."
+      "reopenedAnnounce": "Task \"{{title}}\" reopened.",
+      "inProgressAnnounce": "Task \"{{title}}\" marked in progress.",
+      "cancelledAnnounce": "Task \"{{title}}\" cancelled."
     }
   }
 }

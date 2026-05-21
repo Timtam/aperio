@@ -1,15 +1,15 @@
 //! Native context menu plumbing.
 //!
-//! The sidebar's per-row rename / delete actions are reachable
-//! through the OS-native context menu rather than a custom React
-//! overlay — that gives us real Win32 / NSMenu / GTK menus with
-//! the platform's keyboard model, accessibility wiring, and visual
-//! style for free.
+//! Sidebar rows, event chips, and task rows all reach their
+//! per-item actions through the OS-native context menu rather than a
+//! custom React overlay — Win32 / NSMenu / GTK each give us their
+//! real menus with the platform's keyboard model, accessibility
+//! wiring, and visual style for free.
 //!
 //! The flow is:
 //!
-//!   1. Frontend calls `show_sidebar_context_menu({ items, position })`
-//!      with a list of `{id, label}` entries and (optionally) the
+//!   1. Frontend calls `show_context_menu({ items, position })` with
+//!      a tree of `{kind, id, label, …}` entries and (optionally) the
 //!      logical-pixel position the menu should anchor at.
 //!   2. This command builds a `tauri::menu::Menu`, installs a
 //!      one-shot sender into the shared `ContextMenuState`, calls
@@ -21,11 +21,23 @@
 //!   4. If the user dismisses the menu without selecting (clicks
 //!      outside, presses Escape), no event fires — the timeout
 //!      drops the sender and the command returns `None`.
+//!
+//! The item shape supports four kinds:
+//!
+//!   - `Text` — a plain action row (the default).
+//!   - `Check` — a row whose check-mark state is supplied by the
+//!     caller. The OS draws its own glyph.
+//!   - `Submenu` — a nested menu with its own `items` list. Used by
+//!     task chips for the Status > {open, in_progress, …} cascade.
+//!   - `Separator` — a horizontal divider, no id.
 
 use std::time::Duration;
 
-use tauri::menu::{CheckMenuItemBuilder, ContextMenu, MenuBuilder};
-use tauri::{AppHandle, Manager, State};
+use tauri::menu::{
+    CheckMenuItemBuilder, ContextMenu, MenuBuilder, MenuItemBuilder, MenuItemKind,
+    PredefinedMenuItem, SubmenuBuilder,
+};
+use tauri::{AppHandle, Manager, Runtime, State};
 use tokio::sync::oneshot;
 
 use super::{CommandError, CommandResult};
@@ -56,17 +68,42 @@ impl Default for ContextMenuState {
     }
 }
 
+#[derive(Debug, Default, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum MenuKind {
+    /// Plain action row — the default for backward compat with
+    /// callers that omit `kind`.
+    #[default]
+    Text,
+    /// Check-mark row. The frontend supplies the initial `checked`
+    /// state; the OS handles the visual glyph.
+    Check,
+    /// Nested menu. `items` carries the children, `label` the
+    /// visible parent text.
+    Submenu,
+    /// Horizontal divider. No id, no label, never selected.
+    Separator,
+}
+
 #[derive(Debug, serde::Deserialize)]
 pub struct ContextMenuItemRequest {
-    pub id: String,
-    pub label: String,
-    /// Optional. When present, the entry is built as a native
-    /// `CheckMenuItem` with this initial state — the OS draws its
-    /// own check-mark glyph (Win32 / NSMenu / GTK), which is more
-    /// intuitive than a label that flips between "show" and "hide".
-    /// Omit for ordinary text rows.
+    /// Optional kind discriminator. Defaults to `Text` so existing
+    /// `{id, label}` callers (sidebar) keep working unchanged.
+    #[serde(default)]
+    pub kind: MenuKind,
+    /// Required for text / check / submenu items in spirit, but kept
+    /// optional here so a malformed payload fails with a clear error
+    /// at build time instead of a serde decode rejection.
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub label: Option<String>,
     #[serde(default)]
     pub checked: Option<bool>,
+    /// Children for `Submenu` items. Recursively typed so deeper
+    /// nesting works, though we only use one level today.
+    #[serde(default)]
+    pub items: Vec<ContextMenuItemRequest>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -85,8 +122,107 @@ pub struct ShowContextMenuRequest {
     pub position: Option<ContextMenuPosition>,
 }
 
+/// Build one menu item from its request. Recurses through submenu
+/// children so a `Submenu { items: [...] }` becomes a real native
+/// `Submenu` with its kids attached.
+fn build_item<R: Runtime>(
+    app: &AppHandle<R>,
+    req: &ContextMenuItemRequest,
+) -> CommandResult<MenuItemKind<R>> {
+    // Implicit-check fallback: TypeScript's structural typing happily
+    // accepts a payload like `{id, label, checked}` (without `kind`)
+    // against the `text` branch of the union because `checked` is
+    // valid in *another* branch. Without this guard we'd silently
+    // build a plain row, drop the `checked` field on the floor, and
+    // never render the OS check-mark glyph. Promote to `Check` when
+    // the caller provided a `checked` value alongside no explicit
+    // kind — semantically that's what they meant.
+    if req.kind == MenuKind::Text && req.checked.is_some() {
+        let id = req.id.as_deref().ok_or_else(|| CommandError {
+            code: "internal",
+            message: "check menu item missing id".into(),
+        })?;
+        let label = req.label.as_deref().ok_or_else(|| CommandError {
+            code: "internal",
+            message: "check menu item missing label".into(),
+        })?;
+        let item = CheckMenuItemBuilder::with_id(id, label)
+            .checked(req.checked.unwrap_or(false))
+            .build(app)
+            .map_err(|e| CommandError {
+                code: "internal",
+                message: format!("check item build: {e}"),
+            })?;
+        return Ok(MenuItemKind::Check(item));
+    }
+
+    match req.kind {
+        MenuKind::Text => {
+            let id = req.id.as_deref().ok_or_else(|| CommandError {
+                code: "internal",
+                message: "text menu item missing id".into(),
+            })?;
+            let label = req.label.as_deref().ok_or_else(|| CommandError {
+                code: "internal",
+                message: "text menu item missing label".into(),
+            })?;
+            let item = MenuItemBuilder::with_id(id, label)
+                .build(app)
+                .map_err(|e| CommandError {
+                    code: "internal",
+                    message: format!("text item build: {e}"),
+                })?;
+            Ok(MenuItemKind::MenuItem(item))
+        }
+        MenuKind::Check => {
+            let id = req.id.as_deref().ok_or_else(|| CommandError {
+                code: "internal",
+                message: "check menu item missing id".into(),
+            })?;
+            let label = req.label.as_deref().ok_or_else(|| CommandError {
+                code: "internal",
+                message: "check menu item missing label".into(),
+            })?;
+            let item = CheckMenuItemBuilder::with_id(id, label)
+                .checked(req.checked.unwrap_or(false))
+                .build(app)
+                .map_err(|e| CommandError {
+                    code: "internal",
+                    message: format!("check item build: {e}"),
+                })?;
+            Ok(MenuItemKind::Check(item))
+        }
+        MenuKind::Submenu => {
+            let label = req.label.as_deref().ok_or_else(|| CommandError {
+                code: "internal",
+                message: "submenu missing label".into(),
+            })?;
+            let mut sb = SubmenuBuilder::new(app, label);
+            // Recurse so deeper nesting works without special-casing
+            // it here. The frontend never goes deeper than one level
+            // today; the recursion is a future-proofing freebie.
+            for child in &req.items {
+                let child_kind = build_item(app, child)?;
+                sb = sb.item(&child_kind);
+            }
+            let submenu = sb.build().map_err(|e| CommandError {
+                code: "internal",
+                message: format!("submenu build: {e}"),
+            })?;
+            Ok(MenuItemKind::Submenu(submenu))
+        }
+        MenuKind::Separator => {
+            let sep = PredefinedMenuItem::separator(app).map_err(|e| CommandError {
+                code: "internal",
+                message: format!("separator build: {e}"),
+            })?;
+            Ok(MenuItemKind::Predefined(sep))
+        }
+    }
+}
+
 #[tauri::command]
-pub async fn show_sidebar_context_menu(
+pub async fn show_context_menu(
     app: AppHandle,
     state: State<'_, ContextMenuState>,
     request: ShowContextMenuRequest,
@@ -96,27 +232,13 @@ pub async fn show_sidebar_context_menu(
     }
 
     // Build the menu. Each item gets the caller-supplied id which
-    // travels back unchanged when the user activates it. Items with
-    // `checked = Some(_)` become native check-mark entries (the OS
-    // renders the glyph); plain entries use the lighter `text(...)`
-    // path so menus that don't need state don't pay for it.
+    // travels back unchanged when the user activates it. Submenus
+    // recurse via `build_item`; checkboxes draw their own glyph;
+    // plain text rows are the cheapest path.
     let mut builder = MenuBuilder::new(&app);
     for item in &request.items {
-        match item.checked {
-            Some(initial) => {
-                let check_item = CheckMenuItemBuilder::with_id(&item.id, &item.label)
-                    .checked(initial)
-                    .build(&app)
-                    .map_err(|e| CommandError {
-                        code: "internal",
-                        message: format!("check item build: {e}"),
-                    })?;
-                builder = builder.item(&check_item);
-            }
-            None => {
-                builder = builder.text(item.id.clone(), &item.label);
-            }
-        }
+        let kind = build_item(&app, item)?;
+        builder = builder.item(&kind);
     }
     let menu = builder.build().map_err(|e| CommandError {
         code: "internal",

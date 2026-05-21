@@ -15,6 +15,7 @@ import { useDeferredLoading } from '../../hooks/useDeferredLoading';
 import { useDateFormat } from '../../intl/dateFormat';
 import { labelsLookup, resolveTaskColor } from '../../intl/eventColor';
 import { useCalendarStore } from '../../state/CalendarStore';
+import { useChipContextMenu } from '../../state/useChipContextMenu';
 import { useDialogState } from '../../state/DialogState';
 import { useTaskStatusToggle } from '../../state/useTaskStatusToggle';
 import { useTasks } from '../../state/useTasks';
@@ -103,6 +104,7 @@ export function TaskView() {
   // Shared toggle: WeekView and DayView use the same hook so the
   // Space-key contract is identical across every task surface.
   const toggleStatus = useTaskStatusToggle();
+  const { openForTask: openTaskMenu } = useChipContextMenu();
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -173,6 +175,23 @@ export function TaskView() {
           if (task) setConfirmTarget(task);
           return;
         }
+        case 'ContextMenu':
+        case 'F10': {
+          if (e.key === 'F10' && !e.shiftKey) return;
+          e.preventDefault();
+          const task = flatTasks[focusIndex];
+          if (task) {
+            const target = e.currentTarget as HTMLElement;
+            const id = itemId(focusIndex);
+            const node = target.ownerDocument?.getElementById(id);
+            const rect = node?.getBoundingClientRect();
+            const pos = rect
+              ? { x: rect.left, y: rect.bottom }
+              : undefined;
+            void openTaskMenu(task, pos);
+          }
+          return;
+        }
         default:
           return;
       }
@@ -186,6 +205,8 @@ export function TaskView() {
       openPlanTask,
       announce,
       t,
+      openTaskMenu,
+      itemId,
     ],
   );
 
@@ -273,6 +294,12 @@ export function TaskView() {
               onClick={() => {
                 setFocusIndex(index);
                 void toggleStatus(task);
+              }}
+              onContextMenu={(ev) => {
+                ev.preventDefault();
+                ev.stopPropagation();
+                setFocusIndex(index);
+                void openTaskMenu(task);
               }}
             >
               <span className="task-list__check" aria-hidden="true">

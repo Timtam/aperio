@@ -18,7 +18,7 @@ import {
   deleteTaskList,
   isCommandError,
   renameContainer,
-  showSidebarContextMenu,
+  showContextMenu,
   type ContainerKind,
   type ContextMenuItemRequest,
 } from '../api/client';
@@ -331,8 +331,16 @@ export function Sidebar() {
       // native CheckMenuItem so the OS draws its own check-mark
       // glyph — the user reads the state at a glance instead of
       // parsing "show vs hide" wording.
+      //
+      // `kind: 'check'` is required: when the chip-context-menu
+      // refactor (Phase #92) turned the request shape into a
+      // discriminated union, the default kind became `text`, which
+      // would silently strip the `checked` field and render this
+      // entry as a plain row — the toggle would still fire on click,
+      // but the user would never see whether the option was on.
       if (leaf.kind === 'tasks') {
         items.push({
+          kind: 'check',
           id: 'toggle-show-completed',
           label: t('sidebar.menu.showCompletedInCalendar'),
           checked: showCompleted.shouldShow(leaf.containerId),
@@ -349,10 +357,10 @@ export function Sidebar() {
 
       let selected: string | null = null;
       try {
-        selected = await showSidebarContextMenu(items, position);
+        selected = await showContextMenu(items, position);
       } catch (err) {
         // eslint-disable-next-line no-console
-        console.warn('show_sidebar_context_menu failed', err);
+        console.warn('show_context_menu failed', err);
       }
 
       if (selected === 'rename') {

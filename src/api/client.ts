@@ -391,18 +391,25 @@ export const deleteUserPref = (key: string) =>
 
 // ── Native context menu ──────────────────────────────────────────────────
 
-/** One entry in the native context menu. `id` round-trips through
- *  the OS menu API and identifies which item the user picked.
+/** One entry in the native context menu. The shape supports four
+ *  kinds:
  *
- *  When `checked` is set (true or false), the backend builds a native
- *  CheckMenuItem with that initial state — Win32 / NSMenu / GTK each
- *  render their own check-mark glyph. Omit `checked` for plain text
- *  rows; that path uses the lighter `MenuBuilder::text(...)`. */
-export interface ContextMenuItemRequest {
-  id: string;
-  label: string;
-  checked?: boolean;
-}
+ *    - `text` (default): a plain action row. `id` round-trips through
+ *      the OS menu API and identifies what the user picked.
+ *    - `check`: a row whose check-mark state is driven by `checked`.
+ *      Win32 / NSMenu / GTK draw their own glyph.
+ *    - `submenu`: a nested menu with its own `items` array. `label`
+ *      is the visible parent text; `id` is unused (the submenu
+ *      header itself is never "selected").
+ *    - `separator`: a horizontal divider — no id, no label, never
+ *      selected.
+ *
+ *  Backward compat: omitting `kind` is treated as `text`. */
+export type ContextMenuItemRequest =
+  | { kind?: 'text'; id: string; label: string }
+  | { kind: 'check'; id: string; label: string; checked: boolean }
+  | { kind: 'submenu'; label: string; items: ContextMenuItemRequest[] }
+  | { kind: 'separator' };
 
 /** Show a native OS context menu (Win32 / NSMenu / GTK) anchored
  *  either at the cursor (omit `position`) or at the given
@@ -413,10 +420,10 @@ export interface ContextMenuItemRequest {
  *  appears near the focused row rather than at a stale cursor
  *  location; right-click triggers should omit it and let the OS
  *  pick the cursor. */
-export const showSidebarContextMenu = (
+export const showContextMenu = (
   items: ContextMenuItemRequest[],
   position?: { x: number; y: number },
 ) =>
-  invoke<string | null>('show_sidebar_context_menu', {
+  invoke<string | null>('show_context_menu', {
     request: { items, position: position ?? null },
   });

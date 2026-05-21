@@ -105,7 +105,7 @@ pub fn run() {
             commands::get_user_pref,
             commands::set_user_pref,
             commands::delete_user_pref,
-            commands::show_sidebar_context_menu,
+            commands::show_context_menu,
         ])
         .setup(move |app| {
             // Spawn the reminder scheduler on the Tauri/tokio runtime

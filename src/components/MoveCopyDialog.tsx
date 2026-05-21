@@ -57,7 +57,10 @@ export function MoveCopyDialog({
   const initialContainerId =
     target.kind === 'event' ? target.event.calendar_id : target.task.list_id;
 
-  const [mode, setMode] = useState<Mode>('move');
+  // Callers (esp. the chip context menu's "Kopieren nach …" entry)
+  // can pre-select either mode. Default stays `move` to match the
+  // long-standing Shift+M behaviour.
+  const [mode, setMode] = useState<Mode>(target.defaultMode ?? 'move');
   const [targetContainerId, setTargetContainerId] = useState(initialContainerId);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);

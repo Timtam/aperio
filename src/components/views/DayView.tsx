@@ -16,6 +16,7 @@ import { useCalendarStore } from '../../state/CalendarStore';
 import { useDialogState } from '../../state/DialogState';
 import { useEvents } from '../../state/useEvents';
 import { useTaskListShowCompleted } from '../../state/useTaskListShowCompleted';
+import { useChipContextMenu } from '../../state/useChipContextMenu';
 import { useTaskStatusToggle } from '../../state/useTaskStatusToggle';
 import { useTasks } from '../../state/useTasks';
 import { useViewState } from '../../state/ViewState';
@@ -65,6 +66,8 @@ export function DayView() {
   const toggleTaskStatus = useTaskStatusToggle();
   const { shouldShow: shouldShowCompletedForList } =
     useTaskListShowCompleted();
+  const { openForEvent: openEventMenu, openForTask: openTaskMenu } =
+    useChipContextMenu();
   const { colorLabels } = useCalendarStore();
   const labelById = useMemo(() => labelsLookup(colorLabels), [colorLabels]);
 
@@ -258,6 +261,28 @@ export function DayView() {
           }
           return;
         }
+        case 'ContextMenu':
+        case 'F10': {
+          if (e.key === 'F10' && !e.shiftKey) return;
+          // Shift+F10 / Menu key: open the chip context menu near
+          // the focused row, mirroring the platform convention.
+          e.preventDefault();
+          if (focusedItem) {
+            const target = e.currentTarget as HTMLElement;
+            const id = itemId(focusIndex);
+            const node = target.ownerDocument?.getElementById(id);
+            const rect = node?.getBoundingClientRect();
+            const pos = rect
+              ? { x: rect.left, y: rect.bottom }
+              : undefined;
+            if (focusedItem.kind === 'event') {
+              void openEventMenu(focusedItem.event, pos);
+            } else {
+              void openTaskMenu(focusedItem.task, pos);
+            }
+          }
+          return;
+        }
         default:
           return;
       }
@@ -272,6 +297,9 @@ export function DayView() {
       t,
       requestDelete,
       toggleTaskStatus,
+      openEventMenu,
+      openTaskMenu,
+      itemId,
     ],
   );
 
@@ -358,6 +386,12 @@ export function DayView() {
                       : undefined
                   }
                   onClick={() => setFocusIndex(i)}
+                  onContextMenu={(ev) => {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    setFocusIndex(i);
+                    void openTaskMenu(task);
+                  }}
                 >
                   <span className="day-list__time">{timeStr}</span>
                   <span className="day-list__title">
@@ -425,6 +459,12 @@ export function DayView() {
                     : undefined
                 }
                 onClick={() => setFocusIndex(i)}
+                onContextMenu={(cmev) => {
+                  cmev.preventDefault();
+                  cmev.stopPropagation();
+                  setFocusIndex(i);
+                  void openEventMenu(ev);
+                }}
               >
                 <span className="day-list__time">
                   {ev.all_day ? t('views.allDay') : `${startStr} – ${endStr}`}
@@ -497,9 +537,26 @@ export function DayView() {
                       } else if (ev.key === 'Enter') {
                         ev.preventDefault();
                         openTaskDialog(task);
+                      } else if (
+                        ev.key === 'ContextMenu' ||
+                        (ev.shiftKey && ev.key === 'F10')
+                      ) {
+                        ev.preventDefault();
+                        const rect = (
+                          ev.currentTarget as HTMLElement
+                        ).getBoundingClientRect();
+                        void openTaskMenu(task, {
+                          x: rect.left,
+                          y: rect.bottom,
+                        });
                       }
                     }}
                     onClick={() => openTaskDialog(task)}
+                    onContextMenu={(ev) => {
+                      ev.preventDefault();
+                      ev.stopPropagation();
+                      void openTaskMenu(task);
+                    }}
                     style={
                       color.hex
                         ? ({

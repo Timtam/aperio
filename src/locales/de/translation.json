@@ -7,6 +7,19 @@
   "actions": {
     "duplicated": "„{{title}}\" wurde dupliziert."
   },
+  "chipMenu": {
+    "edit": "Bearbeiten …",
+    "delete": "Löschen",
+    "moveTo": "Verschieben nach …",
+    "copyTo": "Kopieren nach …",
+    "status": "Status",
+    "statusValue": {
+      "open": "Offen",
+      "in_progress": "In Arbeit",
+      "completed": "Erledigt",
+      "cancelled": "Abgebrochen"
+    }
+  },
   "reminders": {
     "label": "Erinnerungen",
     "empty": "Keine Erinnerungen gesetzt.",
@@ -556,7 +569,9 @@
       "dueNone": "Ohne Datum",
       "toggleLabel": "{{title}} (Liste {{list}}) als erledigt umschalten",
       "completedAnnounce": "Aufgabe „{{title}}\" als erledigt markiert.",
-      "reopenedAnnounce": "Aufgabe „{{title}}\" wieder geöffnet."
+      "reopenedAnnounce": "Aufgabe „{{title}}\" wieder geöffnet.",
+      "inProgressAnnounce": "Aufgabe „{{title}}\" als in Arbeit markiert.",
+      "cancelledAnnounce": "Aufgabe „{{title}}\" abgebrochen."
     }
   }
 }

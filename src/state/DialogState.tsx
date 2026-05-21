@@ -19,8 +19,15 @@ import type { CalendarEvent, Task } from '../api/types';
  * component to show.
  */
 export type MoveCopyTarget =
-  | { kind: 'event'; event: CalendarEvent }
-  | { kind: 'task'; task: Task };
+  | {
+      kind: 'event';
+      event: CalendarEvent;
+      /** Optional initial mode for the dialog's Move / Copy radio.
+       *  Defaults to `move` to match the historical Shift+M shortcut.
+       *  Context-menu callers pass `copy` for "Kopieren nach …". */
+      defaultMode?: 'move' | 'copy';
+    }
+  | { kind: 'task'; task: Task; defaultMode?: 'move' | 'copy' };
 
 export type DialogMode =
   | { kind: 'none' }

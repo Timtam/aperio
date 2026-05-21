@@ -30,6 +30,7 @@ import {
   multiDayInfo,
 } from '../../intl/multiDay';
 import { useCalendarStore } from '../../state/CalendarStore';
+import { useChipContextMenu } from '../../state/useChipContextMenu';
 import { useDialogState } from '../../state/DialogState';
 import { useEvents } from '../../state/useEvents';
 import { useViewState } from '../../state/ViewState';
@@ -63,6 +64,7 @@ export function MonthView() {
   const announce = useAnnouncer();
   const { anchor, setAnchor, goPrev, goNext } = useViewState();
   const { openEventDialog, invalidateData } = useDialogState();
+  const { openForEvent: openEventMenu } = useChipContextMenu();
 
   const cells = useMemo(() => buildMonthGrid(anchor), [anchor]);
   const range = useMemo(() => visibleRange('month', anchor), [anchor]);
@@ -196,6 +198,23 @@ export function MonthView() {
           if (ev) requestDelete(ev);
           return;
         }
+        if (
+          e.key === 'ContextMenu' ||
+          (e.shiftKey && e.key === 'F10')
+        ) {
+          e.preventDefault();
+          if (ev) {
+            const target = e.currentTarget as HTMLElement;
+            const id = eventOptionId(focusIndex, eventIndex);
+            const node = target.ownerDocument?.getElementById(id);
+            const rect = node?.getBoundingClientRect();
+            const pos = rect
+              ? { x: rect.left, y: rect.bottom }
+              : undefined;
+            void openEventMenu(ev, pos);
+          }
+          return;
+        }
       }
       switch (e.key) {
         case 'ArrowLeft':
@@ -265,6 +284,7 @@ export function MonthView() {
       handleTab,
       clearEventIndex,
       requestDelete,
+      openEventMenu,
     ],
   );
 
@@ -482,6 +502,11 @@ export function MonthView() {
                           }
                           aria-label={aria}
                           aria-selected={isFocusedEvent}
+                          onContextMenu={(cmev) => {
+                            cmev.preventDefault();
+                            cmev.stopPropagation();
+                            void openEventMenu(ev);
+                          }}
                           style={
                             color.hex
                               ? ({ '--event-color': color.hex } as React.CSSProperties)
