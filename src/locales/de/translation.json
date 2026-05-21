@@ -470,7 +470,6 @@
       "focusOpen": "Nur diesen Kalender anzeigen",
       "focusExit": "Fokus verlassen",
       "showCompletedInCalendar": "Erledigte Aufgaben in Kalenderansicht anzeigen",
-      "hideCompletedInCalendar": "Erledigte Aufgaben in Kalenderansicht ausblenden",
       "showCompletedAnnouncement": "Erledigte Aufgaben von „{{name}}\" werden jetzt im Kalender angezeigt.",
       "hideCompletedAnnouncement": "Erledigte Aufgaben von „{{name}}\" werden jetzt im Kalender ausgeblendet."
     },

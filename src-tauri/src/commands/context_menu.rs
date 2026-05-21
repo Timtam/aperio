@@ -24,7 +24,7 @@
 
 use std::time::Duration;
 
-use tauri::menu::{ContextMenu, MenuBuilder};
+use tauri::menu::{CheckMenuItemBuilder, ContextMenu, MenuBuilder};
 use tauri::{AppHandle, Manager, State};
 use tokio::sync::oneshot;
 
@@ -60,6 +60,13 @@ impl Default for ContextMenuState {
 pub struct ContextMenuItemRequest {
     pub id: String,
     pub label: String,
+    /// Optional. When present, the entry is built as a native
+    /// `CheckMenuItem` with this initial state — the OS draws its
+    /// own check-mark glyph (Win32 / NSMenu / GTK), which is more
+    /// intuitive than a label that flips between "show" and "hide".
+    /// Omit for ordinary text rows.
+    #[serde(default)]
+    pub checked: Option<bool>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -89,10 +96,27 @@ pub async fn show_sidebar_context_menu(
     }
 
     // Build the menu. Each item gets the caller-supplied id which
-    // travels back unchanged when the user activates it.
+    // travels back unchanged when the user activates it. Items with
+    // `checked = Some(_)` become native check-mark entries (the OS
+    // renders the glyph); plain entries use the lighter `text(...)`
+    // path so menus that don't need state don't pay for it.
     let mut builder = MenuBuilder::new(&app);
     for item in &request.items {
-        builder = builder.text(item.id.clone(), &item.label);
+        match item.checked {
+            Some(initial) => {
+                let check_item = CheckMenuItemBuilder::with_id(&item.id, &item.label)
+                    .checked(initial)
+                    .build(&app)
+                    .map_err(|e| CommandError {
+                        code: "internal",
+                        message: format!("check item build: {e}"),
+                    })?;
+                builder = builder.item(&check_item);
+            }
+            None => {
+                builder = builder.text(item.id.clone(), &item.label);
+            }
+        }
     }
     let menu = builder.build().map_err(|e| CommandError {
         code: "internal",

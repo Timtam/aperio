@@ -392,10 +392,16 @@ export const deleteUserPref = (key: string) =>
 // ── Native context menu ──────────────────────────────────────────────────
 
 /** One entry in the native context menu. `id` round-trips through
- *  the OS menu API and identifies which item the user picked. */
+ *  the OS menu API and identifies which item the user picked.
+ *
+ *  When `checked` is set (true or false), the backend builds a native
+ *  CheckMenuItem with that initial state — Win32 / NSMenu / GTK each
+ *  render their own check-mark glyph. Omit `checked` for plain text
+ *  rows; that path uses the lighter `MenuBuilder::text(...)`. */
 export interface ContextMenuItemRequest {
   id: string;
   label: string;
+  checked?: boolean;
 }
 
 /** Show a native OS context menu (Win32 / NSMenu / GTK) anchored

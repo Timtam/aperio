@@ -327,17 +327,15 @@ export function Sidebar() {
         }
       }
       // Task-list-only setting: whether completed tasks stay visible
-      // in the calendar surfaces (WeekView, DayView). The visible
-      // label flips between "show" and "hide" so the action describes
-      // the state the user is about to enter — SR users hear what
-      // they're switching to, not the current state.
+      // in the calendar surfaces (WeekView, DayView). Built as a
+      // native CheckMenuItem so the OS draws its own check-mark
+      // glyph — the user reads the state at a glance instead of
+      // parsing "show vs hide" wording.
       if (leaf.kind === 'tasks') {
-        const showing = showCompleted.shouldShow(leaf.containerId);
         items.push({
           id: 'toggle-show-completed',
-          label: showing
-            ? t('sidebar.menu.hideCompletedInCalendar')
-            : t('sidebar.menu.showCompletedInCalendar'),
+          label: t('sidebar.menu.showCompletedInCalendar'),
+          checked: showCompleted.shouldShow(leaf.containerId),
         });
       }
       // Delete is local-only: external sources have their own

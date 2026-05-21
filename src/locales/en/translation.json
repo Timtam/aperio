@@ -470,7 +470,6 @@
       "focusOpen": "Show only this calendar",
       "focusExit": "Exit focus mode",
       "showCompletedInCalendar": "Show completed tasks in calendar view",
-      "hideCompletedInCalendar": "Hide completed tasks in calendar view",
       "showCompletedAnnouncement": "Completed tasks of \"{{name}}\" are now shown in the calendar.",
       "hideCompletedAnnouncement": "Completed tasks of \"{{name}}\" are now hidden from the calendar."
     },
