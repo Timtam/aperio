@@ -592,7 +592,8 @@
       "tasksOnDay_other": "{{count}} Aufgaben",
       "taskChip": "Aufgabe: {{title}}, {{state}}{{progress}}",
       "taskChipBy": "Aufgabe: {{title}}, fällig bis {{deadline}}, {{state}}{{progress}}",
-      "taskChipTimed": "Aufgabe: {{title}}, {{time}}, {{state}}{{progress}}"
+      "taskChipTimed": "Aufgabe: {{title}}, {{time}}, {{state}}{{progress}}",
+      "deadlineBarTitle": "{{title}} — bis {{date}}"
     },
     "day": {
       "timeGrid": "Zeitraster",

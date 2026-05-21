@@ -592,7 +592,8 @@
       "tasksOnDay_other": "{{count}} tasks",
       "taskChip": "Task: {{title}}, {{state}}{{progress}}",
       "taskChipBy": "Task: {{title}}, due by {{deadline}}, {{state}}{{progress}}",
-      "taskChipTimed": "Task: {{title}}, {{time}}, {{state}}{{progress}}"
+      "taskChipTimed": "Task: {{title}}, {{time}}, {{state}}{{progress}}",
+      "deadlineBarTitle": "{{title}} — due by {{date}}"
     },
     "day": {
       "timeGrid": "Time grid",

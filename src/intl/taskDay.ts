@@ -96,6 +96,177 @@ export function groupTasksByDay(
   return out;
 }
 
+/**
+ * Tasks scheduled FOR `day` — the `scheduled_date == day` branch only,
+ * without the deadline-window contribution that `filterTasksOnDay`
+ * also includes.
+ *
+ * Used by WeekView so the per-day chip column doesn't double up with
+ * the new deadline-bar lane (a task with `deadline_date` overlapping
+ * the visible week appears in the bar, NOT as a chip on every day of
+ * the window). DayView keeps using `filterTasksOnDay` instead — it
+ * has no header lane, so chip-per-day-of-window is still the
+ * documented behaviour there.
+ *
+ * Subtask, status, and completed-opt-in filtering mirrors
+ * `filterTasksOnDay`.
+ */
+export function filterScheduledTasksOnDay(
+  tasks: Task[],
+  dayIsoKey: string,
+  isCompletedVisible?: (listId: string) => boolean,
+): Task[] {
+  return tasks.filter((task) => {
+    if (task.parent_id) return false;
+    if (task.status === 'cancelled') return false;
+    if (task.status === 'completed') {
+      if (!isCompletedVisible || !isCompletedVisible(task.list_id)) {
+        return false;
+      }
+    }
+    return task.scheduled_date === dayIsoKey;
+  });
+}
+
+/** Same shape as `groupTasksByDay` but uses the scheduled-only filter. */
+export function groupScheduledTasksByDay(
+  tasks: Task[],
+  dayKeys: string[],
+  isCompletedVisible?: (listId: string) => boolean,
+): Map<string, Task[]> {
+  const out = new Map<string, Task[]>();
+  for (const key of dayKeys) {
+    out.set(
+      key,
+      filterScheduledTasksOnDay(tasks, key, isCompletedVisible),
+    );
+  }
+  return out;
+}
+
+/**
+ * One row in the deadline-header lane WeekView renders above its day
+ * grid (DESIGN.md § 9.4). Each bar represents a task whose deadline
+ * window — `[max(today, weekStart), deadline_date]` — overlaps the
+ * visible week. The bar spans those day columns, with chevrons when
+ * the window extends past the week on either side.
+ *
+ * Lane-packed greedily: bars sorted by start, longer-first as a
+ * tiebreaker, then placed into the lowest lane that doesn't collide
+ * with anything already there. Matches `buildAllDayBars`' shape so
+ * the CSS treatment can be near-identical.
+ */
+export interface DeadlineBar {
+  task: Task;
+  /** 1-based grid column for `gridColumn: start / end+1`. */
+  startCol: number;
+  endCol: number;
+  /** 0-based lane row inside the lane container. */
+  lane: number;
+  /** Window started before the visible week — render a left chevron. */
+  continuesBefore: boolean;
+  /** Deadline is after the visible week — render a right chevron. */
+  continuesAfter: boolean;
+}
+
+/**
+ * Build the deadline-header bars for one visible week.
+ *
+ * `dayKeys` must be the seven ISO day keys (Mon–Sun, or however the
+ * week is configured) in display order. `todayIsoKey` decides the
+ * window's left edge — past days of the window never render.
+ */
+export function buildDeadlineBars(
+  tasks: Task[],
+  dayKeys: string[],
+  todayIsoKey: string,
+  isCompletedVisible?: (listId: string) => boolean,
+): DeadlineBar[] {
+  if (dayKeys.length === 0) return [];
+  const weekStart = dayKeys[0];
+  const weekEnd = dayKeys[dayKeys.length - 1];
+  // Left boundary of every bar: whichever is later, today or the week
+  // start. When the user navigates to a future week, the bar covers
+  // the whole week (today is before weekStart, so the boundary IS
+  // weekStart). When today is inside the visible week, the bar starts
+  // at today.
+  const startBoundary = todayIsoKey > weekStart ? todayIsoKey : weekStart;
+  // If "today" is past the visible week's end (the user is looking
+  // at a week entirely in the past) — no bars. The deadline-window
+  // logic doesn't backfill historical days.
+  if (startBoundary > weekEnd) return [];
+
+  const candidates: Array<{
+    task: Task;
+    startIdx: number;
+    endIdx: number;
+    continuesBefore: boolean;
+    continuesAfter: boolean;
+  }> = [];
+
+  for (const task of tasks) {
+    if (task.parent_id) continue;
+    if (!task.deadline_date) continue;
+    if (task.status === 'cancelled') continue;
+    if (task.status === 'completed') {
+      if (!isCompletedVisible || !isCompletedVisible(task.list_id)) {
+        continue;
+      }
+    }
+    // The window ends at deadline_date. If the deadline is before
+    // our left boundary (e.g., yesterday), there's no overlap.
+    if (task.deadline_date < startBoundary) continue;
+
+    const visStart = startBoundary;
+    const visEnd =
+      task.deadline_date < weekEnd ? task.deadline_date : weekEnd;
+    const startIdx = dayKeys.indexOf(visStart);
+    const endIdx = dayKeys.indexOf(visEnd);
+    if (startIdx < 0 || endIdx < 0 || startIdx > endIdx) continue;
+
+    candidates.push({
+      task,
+      startIdx,
+      endIdx,
+      // "continuesBefore" applies when the user is viewing a future
+      // week and the task's window started in a previous week —
+      // today is before weekStart. (The other case where the window
+      // started earlier — today inside the week, bar starts at today
+      // — doesn't add a left chevron because the bar lines up with
+      // today's column.)
+      continuesBefore: todayIsoKey < weekStart,
+      continuesAfter: task.deadline_date > weekEnd,
+    });
+  }
+
+  // Greedy lane-packing: sort by start, longer first as a tiebreaker
+  // (longer bars are harder to fit later). Then for each bar pick
+  // the lowest lane whose previous occupant ends before this bar
+  // starts.
+  candidates.sort(
+    (a, b) =>
+      a.startIdx - b.startIdx ||
+      b.endIdx - b.startIdx - (a.endIdx - a.startIdx),
+  );
+  const laneEnds: number[] = [];
+  return candidates.map((c) => {
+    let lane = 0;
+    while (lane < laneEnds.length && laneEnds[lane] >= c.startIdx) {
+      lane += 1;
+    }
+    if (lane === laneEnds.length) laneEnds.push(c.endIdx);
+    else laneEnds[lane] = c.endIdx;
+    return {
+      task: c.task,
+      startCol: c.startIdx + 1,
+      endCol: c.endIdx + 1,
+      lane,
+      continuesBefore: c.continuesBefore,
+      continuesAfter: c.continuesAfter,
+    };
+  });
+}
+
 /** Local `YYYY-MM-DD` for today — convenience for the caller. */
 export function todayIsoKey(): string {
   const d = new Date();

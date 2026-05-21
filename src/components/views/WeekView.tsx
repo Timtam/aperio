@@ -28,7 +28,8 @@ import { useTasks } from '../../state/useTasks';
 import { useViewState } from '../../state/ViewState';
 import { visibleRange } from '../../state/viewMath';
 import {
-  groupTasksByDay,
+  buildDeadlineBars,
+  groupScheduledTasksByDay,
   mergeDayItems,
   taskTimeOnDay,
   todayIsoKey,
@@ -114,11 +115,39 @@ export function WeekView() {
   // on-day, and By-deadline-spanning-from-today. The today key is
   // captured fresh on every render — cheap, avoids stale-date bugs
   // if the app stays open across midnight.
+  // Per-day chip lists carry the scheduled tasks only. Deadline-window
+  // tasks that aren't scheduled for a specific day land in the
+  // deadline-header bars instead (see `deadlineBars` below) — that's
+  // what § 9.4 means by "oberhalb des Tagesrasters – an jedem Tag bis
+  // zur Deadline sichtbar". The bar carries the every-day visibility;
+  // duplicating the row into each day's chip column would be noise.
   const tasksByDay = useMemo(() => {
+    const dayKeys = days.map((d) => keyOf(d));
+    return groupScheduledTasksByDay(
+      tasks,
+      dayKeys,
+      shouldShowCompletedForList,
+    );
+  }, [tasks, days, shouldShowCompletedForList]);
+
+  // Deadline bars — one per task whose deadline window overlaps the
+  // visible week. Lane-packed so bars stack vertically when they
+  // overlap horizontally. Re-renders whenever `tasks`, the visible
+  // week, or the per-list "show completed" preference changes.
+  const deadlineBars = useMemo(() => {
     const today = todayIsoKey();
     const dayKeys = days.map((d) => keyOf(d));
-    return groupTasksByDay(tasks, dayKeys, today, shouldShowCompletedForList);
+    return buildDeadlineBars(
+      tasks,
+      dayKeys,
+      today,
+      shouldShowCompletedForList,
+    );
   }, [tasks, days, shouldShowCompletedForList]);
+  const deadlineLaneRows = deadlineBars.reduce(
+    (m, b) => Math.max(m, b.lane + 1),
+    0,
+  );
 
   // Pre-merge each day's events + timed tasks into a single time-sorted
   // list, then split that list back into timed and untimed buckets.
@@ -494,6 +523,91 @@ export function WeekView() {
             </div>
           ))}
         </div>
+
+        {/* Deadline-header lane — § 9.4. Sits between the dow-header
+            row and the all-day event lane (when both are present),
+            so the deadline reminders read above the timed grid but
+            don't clutter the regular all-day event strip. Visual /
+            mouse only (aria-hidden); deadline-only tasks with no
+            scheduled day for the week are reached via TaskView, the
+            same backlog entry point. Tasks with a scheduled day for
+            the week ALSO appear as a chip in that day's column —
+            the bar is awareness, the chip is the actionable
+            handle. */}
+        {deadlineBars.length > 0 && (
+          <div
+            className="week-grid__deadline-lane"
+            aria-hidden="true"
+            style={
+              {
+                '--lane-rows': deadlineLaneRows,
+              } as React.CSSProperties
+            }
+          >
+            {deadlineBars.map((bar) => {
+              const color = resolveTaskColor(
+                bar.task,
+                taskListById,
+                labelById,
+              );
+              const style: React.CSSProperties & Record<string, string> = {
+                gridColumn: `${bar.startCol} / ${bar.endCol + 1}`,
+                gridRow: String(bar.lane + 1),
+              };
+              if (color.hex) style['--task-color'] = color.hex;
+              return (
+                <div
+                  key={bar.task.id}
+                  className={
+                    'week-deadline-bar' +
+                    ` week-deadline-bar--${bar.task.status.replace(
+                      '_',
+                      '-',
+                    )}` +
+                    (bar.continuesBefore
+                      ? ' week-deadline-bar--continues-before'
+                      : '') +
+                    (bar.continuesAfter
+                      ? ' week-deadline-bar--continues-after'
+                      : '')
+                  }
+                  style={style}
+                  onClick={() => openTaskDialog(bar.task)}
+                  title={t('views.week.deadlineBarTitle', {
+                    title: bar.task.title,
+                    date: fmt.format(
+                      new Date(`${bar.task.deadline_date}T00:00:00`),
+                      'PP',
+                    ),
+                  })}
+                >
+                  {bar.continuesBefore && (
+                    <span
+                      className="week-deadline-bar__chevron"
+                      aria-hidden="true"
+                    >
+                      ‹
+                    </span>
+                  )}
+                  <span className="week-deadline-bar__marker" aria-hidden="true">
+                    {statusMarker(bar.task.status)}
+                  </span>
+                  <span className="week-deadline-bar__title">
+                    {bar.task.title}
+                  </span>
+                  {bar.continuesAfter && (
+                    <span
+                      className="week-deadline-bar__chevron"
+                      aria-hidden="true"
+                    >
+                      ›
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
 
         {allDayBars.length > 0 && (
           <div

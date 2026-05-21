@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Task } from '../api/types';
-import { filterTasksOnDay, mergeDayItems, taskTimeOnDay } from './taskDay';
+import {
+  buildDeadlineBars,
+  filterScheduledTasksOnDay,
+  filterTasksOnDay,
+  mergeDayItems,
+  taskTimeOnDay,
+} from './taskDay';
 
 const baseTask: Task = {
   id: 't1',
@@ -289,4 +295,181 @@ describe('mergeDayItems', () => {
       .toEqual(['meeting']);
     expect(untimed.map((t) => t.id)).toEqual(['sched', 'by-window']);
   });
+});
+
+describe('filterScheduledTasksOnDay', () => {
+  it('matches scheduled_date == day only — no deadline-window fallthrough', () => {
+    // The whole point of this filter (used by WeekView's per-day
+    // chips): a task that's surfaced only by `deadline_date` shouldn't
+    // appear as a chip on every day of the window. That lives in the
+    // separate deadline-header lane.
+    const tasks: Task[] = [
+      { ...baseTask, id: 'sched', scheduled_date: '2026-05-20' },
+      {
+        ...baseTask,
+        id: 'deadline-only',
+        deadline_date: '2026-05-22',
+      },
+    ];
+    expect(
+      filterScheduledTasksOnDay(tasks, '2026-05-20').map((t) => t.id),
+    ).toEqual(['sched']);
+    // No fallback contribution from `deadline-only` on day 22 either —
+    // the task only shows up if its scheduled_date matches.
+    expect(filterScheduledTasksOnDay(tasks, '2026-05-22')).toEqual([]);
+  });
+
+  it('still hides subtasks, cancelled, and (opt-out) completed', () => {
+    const tasks: Task[] = [
+      { ...baseTask, id: 'a', scheduled_date: '2026-05-20' },
+      {
+        ...baseTask,
+        id: 'sub',
+        scheduled_date: '2026-05-20',
+        parent_id: 'a',
+      },
+      {
+        ...baseTask,
+        id: 'cancel',
+        scheduled_date: '2026-05-20',
+        status: 'cancelled',
+      },
+      {
+        ...baseTask,
+        id: 'done',
+        scheduled_date: '2026-05-20',
+        status: 'completed',
+      },
+    ];
+    expect(
+      filterScheduledTasksOnDay(tasks, '2026-05-20').map((t) => t.id),
+    ).toEqual(['a']);
+    expect(
+      filterScheduledTasksOnDay(tasks, '2026-05-20', () => true).map(
+        (t) => t.id,
+      ),
+    ).toEqual(['a', 'done']);
+  });
+});
+
+describe('buildDeadlineBars', () => {
+  // Mon - Sun, ISO week. Use 2026-05-18..24 so today=2026-05-20 lands
+  // mid-week (Wednesday) — gives us "before today", "today", and
+  // "after today" columns to work with.
+  const weekKeys = [
+    '2026-05-18',
+    '2026-05-19',
+    '2026-05-20',
+    '2026-05-21',
+    '2026-05-22',
+    '2026-05-23',
+    '2026-05-24',
+  ];
+  const today = '2026-05-20';
+
+  it('spans from today to deadline when both lie inside the visible week', () => {
+    const tasks: Task[] = [
+      { ...baseTask, id: 'a', deadline_date: '2026-05-22' },
+    ];
+    const bars = buildDeadlineBars(tasks, weekKeys, today);
+    expect(bars).toEqual([
+      {
+        task: tasks[0],
+        startCol: 3, // 2026-05-20 → idx 2 → 1-based col 3
+        endCol: 5, // 2026-05-22 → idx 4 → 1-based col 5
+        lane: 0,
+        continuesBefore: false,
+        continuesAfter: false,
+      },
+    ]);
+  });
+
+  it('ends at the visible-week boundary when the deadline is later', () => {
+    const tasks: Task[] = [
+      { ...baseTask, id: 'a', deadline_date: '2026-05-27' },
+    ];
+    const bars = buildDeadlineBars(tasks, weekKeys, today);
+    expect(bars[0].endCol).toBe(7); // Sun column
+    expect(bars[0].continuesAfter).toBe(true);
+  });
+
+  it('drops bars whose deadline is in the past (handled elsewhere)', () => {
+    const tasks: Task[] = [
+      { ...baseTask, id: 'a', deadline_date: '2026-05-19' },
+    ];
+    expect(buildDeadlineBars(tasks, weekKeys, today)).toEqual([]);
+  });
+
+  it('starts at the week boundary when today is in a previous week (future-week view)', () => {
+    // User navigated to a future week. Today is before this week,
+    // so the bar covers the whole week — and the left edge gets a
+    // chevron because the window started earlier.
+    const tasks: Task[] = [
+      { ...baseTask, id: 'a', deadline_date: '2026-05-22' },
+    ];
+    const futureToday = '2026-05-11';
+    const bars = buildDeadlineBars(tasks, weekKeys, futureToday);
+    expect(bars[0].startCol).toBe(1);
+    expect(bars[0].endCol).toBe(5);
+    expect(bars[0].continuesBefore).toBe(true);
+    expect(bars[0].continuesAfter).toBe(false);
+  });
+
+  it('skips weeks entirely in the past', () => {
+    const tasks: Task[] = [
+      { ...baseTask, id: 'a', deadline_date: '2026-05-22' },
+    ];
+    const tomorrowKeys = ['2026-05-04', '2026-05-05', '2026-05-06'];
+    expect(
+      buildDeadlineBars(tasks, tomorrowKeys, '2026-05-20'),
+    ).toEqual([]);
+  });
+
+  it('skips subtasks, cancelled, and (opt-out) completed tasks', () => {
+    const tasks: Task[] = [
+      { ...baseTask, id: 'a', deadline_date: '2026-05-22' },
+      {
+        ...baseTask,
+        id: 'sub',
+        deadline_date: '2026-05-22',
+        parent_id: 'a',
+      },
+      {
+        ...baseTask,
+        id: 'cancel',
+        deadline_date: '2026-05-22',
+        status: 'cancelled',
+      },
+      {
+        ...baseTask,
+        id: 'done',
+        deadline_date: '2026-05-22',
+        status: 'completed',
+      },
+    ];
+    expect(buildDeadlineBars(tasks, weekKeys, today).map((b) => b.task.id)).toEqual([
+      'a',
+    ]);
+    // With the opt-in callback, completed comes back.
+    expect(
+      buildDeadlineBars(tasks, weekKeys, today, () => true).map(
+        (b) => b.task.id,
+      ),
+    ).toEqual(['a', 'done']);
+  });
+
+  it('lane-packs overlapping bars without colliding', () => {
+    const tasks: Task[] = [
+      { ...baseTask, id: 'mon-wed', deadline_date: '2026-05-20' }, // Wed
+      { ...baseTask, id: 'wed-fri', deadline_date: '2026-05-22' }, // Wed-Fri
+      { ...baseTask, id: 'thu-sat', deadline_date: '2026-05-23' }, // Wed-Sat (because today=Wed)
+    ];
+    const bars = buildDeadlineBars(tasks, weekKeys, today);
+    // All three overlap on Wed (today). They must land on distinct
+    // lanes — 0, 1, 2 — so they stack rather than overwriting each
+    // other.
+    const lanes = bars.map((b) => b.lane).sort();
+    expect(lanes).toEqual([0, 1, 2]);
+  });
+
 });

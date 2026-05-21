@@ -1914,6 +1914,85 @@ button[aria-disabled='true'] {
 }
 
 /*
+ * Deadline-header lane (§ 9.4). Geometry matches the all-day lane —
+ * 7 grid columns mirroring the day grid below — but the visual
+ * treatment is muted: a tinted strip with task-coloured bars,
+ * distinguishable from event bars by the leading status marker and
+ * the dashed background.
+ */
+.week-grid__deadline-lane {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  grid-template-rows: repeat(var(--lane-rows, 1), minmax(20px, auto));
+  gap: 2px;
+  padding: 2px;
+  background: color-mix(in srgb, var(--color-bg-elevated) 60%, transparent);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.week-deadline-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  /* The task-coloured fill but with a lower-key treatment than the
+     event lane — these are awareness markers, not the primary
+     content of the day. */
+  background: color-mix(
+    in srgb,
+    var(--task-color, var(--color-accent)) 25%,
+    transparent
+  );
+  border-left: 3px solid var(--task-color, var(--color-accent));
+  color: var(--color-fg);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  padding: 2px var(--space-1);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.week-deadline-bar__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.week-deadline-bar__chevron {
+  flex: 0 0 auto;
+  opacity: 0.7;
+  font-weight: 700;
+}
+
+.week-deadline-bar__marker {
+  flex: 0 0 auto;
+  opacity: 0.85;
+}
+
+.week-deadline-bar--continues-before {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  margin-left: -2px;
+}
+
+.week-deadline-bar--continues-after {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  margin-right: -2px;
+}
+
+/* Completed and cancelled deadline tasks (only visible when the
+   per-list "show completed" opt-in is on) get a muted treatment so
+   they don't fight for attention with live deadlines. */
+.week-deadline-bar--completed,
+.week-deadline-bar--cancelled {
+  opacity: 0.55;
+  text-decoration: line-through;
+}
+
+/*
  * Month view per-row lane: same grid layout as the row it precedes
  * (40 px KW column + 7 day columns), only fills the day columns.
  */
