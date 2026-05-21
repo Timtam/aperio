@@ -54,8 +54,22 @@ impl EwsClient {
     /// POST a SOAP body to the EWS endpoint and return the response
     /// body as a string. The caller hands the result to
     /// `check_for_fault` first, then to an operation-specific parser.
+    ///
+    /// Debug logging: both request and response bodies go out on
+    /// `tracing::debug!` under the `cal_adapter_ews::soap` target.
+    /// Enable with `RUST_LOG=cal_adapter_ews=debug` to see exactly
+    /// what Exchange is being asked and what it sends back — useful
+    /// when an event shows up in Outlook but not in Aperio.
+    /// Bodies are truncated to 16 KiB per direction to keep the log
+    /// readable; the truncation marker stays in the line.
     async fn post_soap(&self, body: String) -> EwsResult<String> {
         let auth = basic_auth_header(&self.credentials)?;
+        tracing::debug!(
+            target: "cal_adapter_ews::soap",
+            endpoint = %self.endpoint,
+            request = %truncate_for_log(&body),
+            "EWS request",
+        );
         let mut req = self
             .http
             .post(&self.endpoint)
@@ -75,6 +89,12 @@ impl EwsClient {
         let res = req.send().await?;
         let status = res.status();
         let text = res.text().await.unwrap_or_default();
+        tracing::debug!(
+            target: "cal_adapter_ews::soap",
+            status = %status.as_u16(),
+            response = %truncate_for_log(&text),
+            "EWS response",
+        );
         if !status.is_success() {
             return Err(EwsError::Http {
                 status: status.as_u16(),
@@ -297,6 +317,31 @@ pub async fn rename_calendar(
 /// follow-up GetItem; the field set is whatever the user typed,
 /// timestamps default to "now" so the row sorts sensibly in the
 /// frontend cache.
+/// Trim a SOAP body for safe logging. EWS responses for big calendars
+/// can run into the megabytes; dumping all of that would drown
+/// `RUST_LOG=debug` output and slow the app. 16 KiB is plenty to
+/// see the FindItem envelope, the response messages, and the first
+/// ~30 calendar items; anything beyond that is appended with a
+/// truncation marker so the reader knows there's more.
+fn truncate_for_log(body: &str) -> String {
+    const MAX: usize = 16 * 1024;
+    if body.len() <= MAX {
+        return body.to_string();
+    }
+    let mut out = String::with_capacity(MAX + 32);
+    // Slicing on a byte boundary risks splitting a UTF-8 codepoint —
+    // `char_indices` gives us the last valid prefix boundary.
+    let cut = body
+        .char_indices()
+        .take_while(|(i, _)| *i < MAX)
+        .last()
+        .map(|(i, c)| i + c.len_utf8())
+        .unwrap_or(0);
+    out.push_str(&body[..cut]);
+    out.push_str("\n… [truncated]");
+    out
+}
+
 fn build_event_from_new(
     new: &NewEvent,
     calendar_id: &str,
