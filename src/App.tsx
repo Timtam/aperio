@@ -9,6 +9,7 @@ import { Sidebar } from './components/Sidebar';
 import { TitleBar } from './components/TitleBar';
 import { Toolbar } from './components/Toolbar';
 import { AgendaView } from './components/views/AgendaView';
+import { ContactsView } from './components/views/ContactsView';
 import { DayView } from './components/views/DayView';
 import { MonthView } from './components/views/MonthView';
 import { TaskView } from './components/views/TaskView';
@@ -155,6 +156,8 @@ function ActiveView() {
       return <AgendaView />;
     case 'tasks':
       return <TaskView />;
+    case 'contacts':
+      return <ContactsView />;
     default:
       return <p role="alert">{t('app.unknownView', { view })}</p>;
   }

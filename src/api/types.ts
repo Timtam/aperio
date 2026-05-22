@@ -141,6 +141,45 @@ export interface ColorLabel {
   hex: string;
 }
 
+/** Address book — the contacts equivalent of `Calendar`/`TaskList`.
+ *  Same `account_id` enrichment so the sidebar can group by source. */
+export interface ContactList {
+  id: string;
+  name: string;
+  color: ContainerColor | null;
+  read_only: boolean;
+  account_id: string;
+}
+
+export interface Contact {
+  id: string;
+  list_id: string;
+  display_name: string;
+  given_name: string | null;
+  family_name: string | null;
+  organization: string | null;
+  emails: string[];
+  phone_numbers: string[];
+  /** ISO date (YYYY-MM-DD) or null. */
+  birthday: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+  etag: string | null;
+}
+
+/** Payload for `create_contact` — server fills in id + timestamps. */
+export interface NewContact {
+  display_name: string;
+  given_name: string | null;
+  family_name: string | null;
+  organization: string | null;
+  emails: string[];
+  phone_numbers: string[];
+  birthday: string | null;
+  notes: string | null;
+}
+
 export interface SearchResults {
   events: CalendarEvent[];
   tasks: Task[];

@@ -2587,6 +2587,128 @@ button[aria-disabled='true'] {
   font-size: var(--font-size-xs);
 }
 
+/* ── Contacts view (DESIGN.md §10) ──────────────────────────────────────── */
+
+/*
+ * The contacts view shares the visual conventions of TaskView — a
+ * single listbox with group separators, mounted in the active-view
+ * panel. Layout-wise it's denser than the task view (two-line
+ * rows instead of one) to make space for the org / email meta.
+ */
+.contacts-view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  outline: none;
+  min-height: 0;
+}
+
+.contacts-view__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.contacts-view__title {
+  margin: 0;
+  font-size: var(--font-size-xl);
+  font-weight: 600;
+}
+
+.contacts-view__actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.contacts-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-panel);
+  flex: 1;
+  min-height: 0;
+}
+
+.contacts-list:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.contacts-list__separator {
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-elevated);
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--color-fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.contacts-list__separator:first-child {
+  border-top: none;
+}
+
+.contacts-list__item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  cursor: pointer;
+}
+
+.contacts-list__item:last-child {
+  border-bottom: none;
+}
+
+.contacts-list__item--focused {
+  background: var(--color-bg-elevated);
+  /* Match the rest of the app's focus ring on the focused option.
+     Listbox semantics keep keyboard focus on the <ul>, so the
+     visual marker has to live on the active descendant. */
+  box-shadow: inset 0 0 0 2px var(--color-accent);
+}
+
+.contacts-list__name {
+  font-size: var(--font-size-base);
+  font-weight: 500;
+}
+
+.contacts-list__meta {
+  display: flex;
+  gap: var(--space-3);
+  color: var(--color-fg-muted);
+  font-size: var(--font-size-sm);
+}
+
+.contacts-list__org,
+.contacts-list__email {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 18rem;
+}
+
+/* Contact dialog: two-column row for given + family name. Re-uses
+ * the global `form__field` block, just lays two fields side-by-side. */
+.modal--contact .form__row--two {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+
+@media (max-width: 480px) {
+  .modal--contact .form__row--two {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ── Toast stack (Undo-Toast for silent task batches) ───────────────────── */
 
 /*

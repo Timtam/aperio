@@ -87,6 +87,11 @@ export function Sidebar() {
   const { focusedCalendarId, enterFocus, exitFocus } = useViewState();
   const isFocused = focusedCalendarId !== null;
 
+  // Sidebar still groups by accounts → calendars + tasks only in
+  // Phase 10a-3. Contact lists land in the tree under their owning
+  // account in 10a-4 once the leaf-renderer learns the third
+  // kind; the ContactsView (Ctrl+7) already groups by list
+  // header, so reaching every book is a tab away in the meantime.
   const tree = useMemo(
     () =>
       buildSidebarTree({
@@ -837,6 +842,15 @@ function flattenTree(
       });
       if (!isExpanded(section.key)) continue;
       for (const leaf of section.children) {
+        // Sidebar's leaf-renderer only handles calendars / tasks
+        // today. Contacts leaves (Phase 10a-3) flow through the
+        // tree from contactLists but the Sidebar caller in this
+        // phase doesn't pass them — defensive guard so the
+        // `sectionKind` narrowing stays sound when 10a-4 wires
+        // them up. Until then the cast assertion is a static
+        // guarantee: any `contacts` leaf that slipped through is
+        // dropped from the visible list.
+        if (leaf.kind === 'contacts') continue;
         out.push({
           kind: 'leaf',
           key: leaf.key,

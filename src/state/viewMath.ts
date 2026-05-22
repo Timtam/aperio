@@ -24,7 +24,14 @@ import {
  *    for YearView, one month for AgendaView, and one month for TaskView.
  */
 
-export type ViewId = 'day' | 'week' | 'month' | 'year' | 'agenda' | 'tasks';
+export type ViewId =
+  | 'day'
+  | 'week'
+  | 'month'
+  | 'year'
+  | 'agenda'
+  | 'tasks'
+  | 'contacts';
 
 export const VIEWS: ViewId[] = [
   'day',
@@ -33,6 +40,7 @@ export const VIEWS: ViewId[] = [
   'year',
   'agenda',
   'tasks',
+  'contacts',
 ];
 
 /** Range visible in the given view, anchored at `date`. */
@@ -56,6 +64,11 @@ export function visibleRange(view: ViewId, date: Date): { start: Date; end: Date
       // Task view is not date-driven, but other parts of the store still
       // pull events to colour-code "tasks due today". Use a month range.
       return { start: startOfMonth(date), end: endOfMonth(date) };
+    case 'contacts':
+      // Contacts view is date-less. Returning today as both endpoints
+      // means no event range is computed for it, while keeping the
+      // shape callers expect.
+      return { start: startOfDay(date), end: endOfDay(date) };
   }
 }
 
@@ -72,6 +85,9 @@ export function nextPeriod(view: ViewId, date: Date): Date {
       return addMonths(date, 1);
     case 'year':
       return addYears(date, 1);
+    case 'contacts':
+      // Contacts isn't time-anchored — Ctrl+Right is a no-op.
+      return date;
   }
 }
 
@@ -88,6 +104,8 @@ export function prevPeriod(view: ViewId, date: Date): Date {
       return addMonths(date, -1);
     case 'year':
       return addYears(date, -1);
+    case 'contacts':
+      return date;
   }
 }
 

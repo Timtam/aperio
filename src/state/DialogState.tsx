@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 
-import type { CalendarEvent, Task } from '../api/types';
+import type { CalendarEvent, Contact, Task } from '../api/types';
 import type { SettingsTabId } from '../components/SettingsDialog';
 
 /**
@@ -51,7 +51,14 @@ export type DialogMode =
   | { kind: 'reminders' }
   | { kind: 'moveCopy'; target: MoveCopyTarget }
   | { kind: 'planTask'; task: Task }
-  | { kind: 'dayStartReview' };
+  | { kind: 'dayStartReview' }
+  | {
+      kind: 'contact';
+      contact: Contact | null;
+      /** Pre-select this contact list when creating a new contact.
+       *  Ignored when editing (the contact's own `list_id` wins). */
+      listId?: string;
+    };
 
 /**
  * Optional context the caller can pass when opening a *create* dialog
@@ -67,6 +74,11 @@ export interface OpenEventOptions {
 export interface OpenTaskOptions {
   listId?: string;
   defaultDate?: string;
+}
+
+export interface OpenContactOptions {
+  /** Pre-select this contact list when creating a new contact. */
+  listId?: string;
 }
 
 interface DialogStateValue {
@@ -98,6 +110,12 @@ interface DialogStateValue {
    * the old MissedTasksDialog + CarryOverDialog pair.
    */
   openDayStartReview: () => void;
+  /** Open the contact create/edit dialog. Pass `null` (or omit) for
+   *  a fresh contact, an existing `Contact` to edit it. */
+  openContactDialog: (
+    contact?: Contact | null,
+    options?: OpenContactOptions,
+  ) => void;
   close: () => void;
   /**
    * Counter that bumps whenever data on the wire might have changed.
@@ -223,6 +241,16 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     () => push({ kind: 'dayStartReview' }),
     [push],
   );
+  const openContactDialog = useCallback(
+    (contact: Contact | null = null, options?: OpenContactOptions) => {
+      push({
+        kind: 'contact',
+        contact,
+        listId: options?.listId,
+      });
+    },
+    [push],
+  );
 
   const close = useCallback(() => {
     const target = triggerStackRef.current.pop() ?? null;
@@ -274,6 +302,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openMoveCopy,
       openPlanTask,
       openDayStartReview,
+      openContactDialog,
       close,
       dataVersion,
       invalidateData,
@@ -291,6 +320,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openMoveCopy,
       openPlanTask,
       openDayStartReview,
+      openContactDialog,
       close,
       dataVersion,
       invalidateData,

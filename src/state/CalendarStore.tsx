@@ -12,9 +12,16 @@ import {
   listAccounts,
   listCalendars,
   listColorLabels,
+  listContactLists,
   listTaskLists,
 } from '../api/client';
-import type { Account, Calendar, ColorLabel, TaskList } from '../api/types';
+import type {
+  Account,
+  Calendar,
+  ColorLabel,
+  ContactList,
+  TaskList,
+} from '../api/types';
 
 /**
  * Calendar and task-list store.
@@ -46,6 +53,14 @@ interface CalendarStoreState {
   selectedTaskListIds: Set<string>;
   toggleTaskList: (id: string) => void;
   refreshTaskLists: () => Promise<void>;
+
+  /** Address books (DESIGN.md §10). Contacts don't use a sidebar
+   *  selection set yet — `useContacts` always reads every book —
+   *  so there's no `selectedContactListIds` companion. A future
+   *  polish can add one in parallel with the calendar / task one
+   *  if the "show only this book" workflow turns out to matter. */
+  contactLists: ContactList[];
+  refreshContactLists: () => Promise<void>;
 
   colorLabels: ColorLabel[];
   refreshColorLabels: () => Promise<void>;
@@ -82,6 +97,7 @@ function writePersisted(value: PersistedSelection) {
 export function CalendarStoreProvider({ children }: { children: ReactNode }) {
   const [calendars, setCalendars] = useState<Calendar[]>([]);
   const [taskLists, setTaskLists] = useState<TaskList[]>([]);
+  const [contactLists, setContactLists] = useState<ContactList[]>([]);
   const [colorLabels, setColorLabels] = useState<ColorLabel[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [selectedCalendarIds, setSelectedCalendarIds] = useState<Set<string>>(
@@ -104,6 +120,11 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
     setSelectedTaskListIds((prev) => reconcileSelection(prev, list));
   }, []);
 
+  const refreshContactLists = useCallback(async () => {
+    const list = await listContactLists();
+    setContactLists(list);
+  }, []);
+
   const refreshColorLabels = useCallback(async () => {
     const labels = await listColorLabels();
     setColorLabels(labels);
@@ -124,6 +145,7 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
     Promise.allSettled([
       refreshCalendars(),
       refreshTaskLists(),
+      refreshContactLists(),
       refreshColorLabels(),
       refreshAccounts(),
     ]).then(() => {
@@ -132,7 +154,13 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [refreshCalendars, refreshTaskLists, refreshColorLabels, refreshAccounts]);
+  }, [
+    refreshCalendars,
+    refreshTaskLists,
+    refreshContactLists,
+    refreshColorLabels,
+    refreshAccounts,
+  ]);
 
   // Persist any selection change.
   useEffect(() => {
@@ -160,6 +188,8 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
       selectedTaskListIds,
       toggleTaskList,
       refreshTaskLists,
+      contactLists,
+      refreshContactLists,
       colorLabels,
       refreshColorLabels,
       accounts,
@@ -175,6 +205,8 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
       selectedTaskListIds,
       toggleTaskList,
       refreshTaskLists,
+      contactLists,
+      refreshContactLists,
       colorLabels,
       refreshColorLabels,
       accounts,

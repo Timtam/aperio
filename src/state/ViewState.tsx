@@ -179,7 +179,7 @@ export function useViewShortcuts(): void {
       const cmd = e.ctrlKey || e.metaKey;
       if (!cmd) return;
 
-      if (e.key >= '1' && e.key <= '6') {
+      if (e.key >= '1' && e.key <= '9') {
         const index = Number(e.key) - 1;
         const next = VIEWS[index];
         if (next) {

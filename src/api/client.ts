@@ -12,6 +12,9 @@ import type {
   CalendarEvent,
   ColorLabel,
   CommandError,
+  Contact,
+  ContactList,
+  NewContact,
   NewEvent,
   SearchResults,
   Task,
@@ -477,4 +480,53 @@ export const showContextMenu = (
 ) =>
   invoke<string | null>('show_context_menu', {
     request: { items, position: position ?? null },
+  });
+
+// ── Contacts (DESIGN.md §10) ────────────────────────────────────────────
+
+export const listContactLists = () =>
+  invoke<ContactList[]>('list_contact_lists');
+
+export interface CreateContactListRequest {
+  name: string;
+  color_hex: string | null;
+}
+
+export const createContactList = (request: CreateContactListRequest) =>
+  invoke<ContactList>('create_contact_list', { request });
+
+export const deleteContactList = (id: string) =>
+  invoke<void>('delete_contact_list', { id });
+
+export const renameContactList = (id: string, newName: string) =>
+  invoke<void>('rename_contact_list', { id, newName });
+
+export const getContacts = (listId: string) =>
+  invoke<Contact[]>('get_contacts', { listId });
+
+/** Cross-account contacts search. Hits up to 50 rows per source;
+ *  the local adapter caps internally, external adapters do
+ *  whatever they do. Empty / whitespace queries return an empty
+ *  array without a round-trip cost on the local side. */
+export const searchContacts = (query: string) =>
+  invoke<Contact[]>('search_contacts', { query });
+
+export interface CreateContactRequest extends NewContact {
+  list_id: string;
+}
+
+export const createContact = (request: CreateContactRequest) =>
+  invoke<Contact>('create_contact', { request });
+
+export const updateContact = (contact: Contact) =>
+  invoke<Contact>('update_contact', { contact });
+
+/** Delete a contact. `listId` is an optional routing hint — the
+ *  backend uses it to find the owning account without walking
+ *  every contact list. Frontend callers always know the list
+ *  (they just rendered the row), so always pass it. */
+export const deleteContact = (id: string, listId?: string) =>
+  invoke<void>('delete_contact', {
+    id,
+    listId: listId ?? null,
   });

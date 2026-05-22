@@ -79,7 +79,8 @@
       "month": "Monat",
       "year": "Jahr",
       "agenda": "Agenda",
-      "tasks": "Aufgaben"
+      "tasks": "Aufgaben",
+      "contacts": "Kontakte"
     }
   },
   "dialogs": {
@@ -630,6 +631,35 @@
       "lockedHint": "Fokus zuerst verlassen, um die Auswahl zu ändern.",
       "enteredAnnouncement": "Fokus auf „{{name}}\". Andere Kalender sind ausgeblendet, bis du den Fokus verlässt.",
       "exitedAnnouncement": "Fokus-Modus verlassen."
+    },
+    "contact": {
+      "createTitle": "Neuer Kontakt",
+      "editTitle": "Kontakt bearbeiten",
+      "displayNameLabel": "Anzeigename",
+      "displayNameRequired": "Bitte einen Anzeigenamen eingeben.",
+      "givenNameLabel": "Vorname",
+      "familyNameLabel": "Nachname",
+      "organizationLabel": "Organisation",
+      "emailsLabel": "E-Mail-Adressen",
+      "emailsPlaceholder": "z. B. max@example.com, m.muster@example.org",
+      "emailsHint": "Mehrere Adressen durch Komma trennen.",
+      "phoneNumbersLabel": "Telefonnummern",
+      "phoneNumbersPlaceholder": "z. B. +49 30 1234567, +49 170 1234567",
+      "phoneNumbersHint": "Mehrere Nummern durch Komma trennen.",
+      "birthdayLabel": "Geburtstag",
+      "notesLabel": "Notizen",
+      "listLabel": "Kontaktbuch",
+      "listRequired": "Bitte ein Kontaktbuch auswählen.",
+      "readOnly": "schreibgeschützt",
+      "cancel": "Abbrechen",
+      "save": "Speichern",
+      "create": "Hinzufügen",
+      "delete": "Löschen",
+      "deleteTitle": "Kontakt löschen?",
+      "deleteMessage": "„{{name}}\" wird unwiderruflich entfernt.",
+      "created": "Kontakt „{{name}}\" angelegt.",
+      "updated": "Kontakt „{{name}}\" gespeichert.",
+      "deleted": "Kontakt „{{name}}\" gelöscht."
     }
   },
   "views": {
@@ -710,6 +740,19 @@
       "cancelledAnnounce": "Aufgabe „{{title}}\" abgebrochen.",
       "cascadeSuffix_one": "Eine weitere Aufgabe wurde mit aktualisiert.",
       "cascadeSuffix_other": "{{count}} weitere Aufgaben wurden mit aktualisiert."
+    },
+    "contacts": {
+      "heading": "Kontakte",
+      "loading": "Kontakte werden geladen …",
+      "empty": "Noch keine Kontakte. Erstelle den ersten oben rechts mit „Kontakt hinzufügen“.",
+      "add": "Kontakt hinzufügen",
+      "listLabel": "Kontaktliste",
+      "groupLabel_one": "{{name}} (1 Kontakt)",
+      "groupLabel_other": "{{name}} ({{count}} Kontakte)",
+      "groupOrphans_one": "Ohne Kontaktbuch (1 Kontakt)",
+      "groupOrphans_other": "Ohne Kontaktbuch ({{count}} Kontakte)",
+      "fromList": "Liste {{list}}",
+      "focusAnnounce": "{{name}}, {{list}}, Eintrag {{index}} von {{total}}"
     }
   }
 }

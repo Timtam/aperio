@@ -1,4 +1,9 @@
-import type { Account, Calendar, TaskList } from '../api/types';
+import type {
+  Account,
+  Calendar,
+  ContactList,
+  TaskList,
+} from '../api/types';
 
 /**
  * Sidebar tree model.
@@ -33,13 +38,13 @@ import type { Account, Calendar, TaskList } from '../api/types';
 
 export const LOCAL_ACCOUNT_ID = 'local';
 
-export type SectionKind = 'calendars' | 'tasks';
+export type SectionKind = 'calendars' | 'tasks' | 'contacts';
 
 export interface LeafNode {
   key: string;
   kind: SectionKind;
-  /** The original container id (calendar or task-list id). Used by
-   *  rename / toggle / delete actions. */
+  /** The original container id (calendar / task-list / contact-list
+   *  id). Used by rename / toggle / delete actions. */
   containerId: string;
   name: string;
   /** Hex color, when the container declares one. */
@@ -47,16 +52,21 @@ export interface LeafNode {
   /** True for read-only sources (iCal feed etc). The UI hides the
    *  delete affordance and disables rename push. */
   readOnly: boolean;
-  /** True when the container is currently in the visible set. */
+  /** True when the container is currently in the visible set.
+   *  Contacts always render as `selected: true` for now since
+   *  there's no per-list filter yet — DESIGN.md §10 doesn't
+   *  describe one and the autocomplete picker (§10.4) reads
+   *  everywhere anyway. */
   selected: boolean;
 }
 
 export interface SectionNode {
   key: string;
   kind: SectionKind;
-  /** Display label — "Kalender" / "Aufgaben". Resolved by the
-   *  rendering component from i18n keys, not stored here. */
-  labelKey: 'calendars' | 'tasks';
+  /** Display label — "Kalender" / "Aufgaben" / "Kontakte".
+   *  Resolved by the rendering component from i18n keys, not
+   *  stored here. */
+  labelKey: 'calendars' | 'tasks' | 'contacts';
   children: LeafNode[];
 }
 
@@ -83,12 +93,24 @@ export function buildSidebarTree(input: {
   accounts: Account[];
   calendars: Calendar[];
   taskLists: TaskList[];
+  /** Contact lists are optional in the input shape so the
+   *  existing call-sites + tests don't have to change at the
+   *  same time as the contacts adapter lands. Treated as empty
+   *  when absent. */
+  contactLists?: ContactList[];
   selectedCalendarIds: Set<string>;
   selectedTaskListIds: Set<string>;
 }): AccountNode[] {
-  const { accounts, calendars, taskLists, selectedCalendarIds, selectedTaskListIds } = input;
+  const {
+    accounts,
+    calendars,
+    taskLists,
+    contactLists = [],
+    selectedCalendarIds,
+    selectedTaskListIds,
+  } = input;
 
-  // Group calendars / task lists by account id.
+  // Group calendars / task lists / contact lists by account id.
   const calsByAccount = new Map<string, Calendar[]>();
   for (const c of calendars) {
     const arr = calsByAccount.get(c.account_id) ?? [];
@@ -100,6 +122,12 @@ export function buildSidebarTree(input: {
     const arr = tlsByAccount.get(l.account_id) ?? [];
     arr.push(l);
     tlsByAccount.set(l.account_id, arr);
+  }
+  const cbsByAccount = new Map<string, ContactList[]>();
+  for (const cb of contactLists) {
+    const arr = cbsByAccount.get(cb.account_id) ?? [];
+    arr.push(cb);
+    cbsByAccount.set(cb.account_id, arr);
   }
 
   // Synthesise a local account entry if the backend didn't return
@@ -142,6 +170,11 @@ export function buildSidebarTree(input: {
       .sort((a, b) =>
         a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
       );
+    const cbs = (cbsByAccount.get(acc.id) ?? [])
+      .slice()
+      .sort((a, b) =>
+        a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
+      );
 
     const sections: SectionNode[] = [];
     if (cals.length > 0) {
@@ -173,6 +206,25 @@ export function buildSidebarTree(input: {
           colorHex: l.color?.hex ?? null,
           readOnly: l.read_only,
           selected: selectedTaskListIds.has(l.id),
+        })),
+      });
+    }
+    if (cbs.length > 0) {
+      sections.push({
+        key: `${accountKey}#contacts`,
+        kind: 'contacts',
+        labelKey: 'contacts',
+        children: cbs.map((cb) => ({
+          key: `${accountKey}#contacts#${cb.id}`,
+          kind: 'contacts',
+          containerId: cb.id,
+          name: cb.name,
+          colorHex: cb.color?.hex ?? null,
+          readOnly: cb.read_only,
+          // No per-list filter yet — always selected. Once a
+          // selection set lands the same `Set.has` lookup the
+          // other branches use will plug in here.
+          selected: true,
         })),
       });
     }

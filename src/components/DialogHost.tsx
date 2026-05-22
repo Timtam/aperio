@@ -1,4 +1,5 @@
 import { useDialogState } from '../state/DialogState';
+import { ContactDialog } from './ContactDialog';
 import { DayStartReviewDialog } from './DayStartReviewDialog';
 import { EventDialog } from './EventDialog';
 import { MoveCopyDialog } from './MoveCopyDialog';
@@ -67,6 +68,15 @@ export function DialogHost() {
       );
     case 'dayStartReview':
       return <DayStartReviewDialog isOpen onClose={close} />;
+    case 'contact':
+      return (
+        <ContactDialog
+          isOpen
+          onClose={close}
+          contact={mode.contact}
+          defaultListId={mode.listId}
+        />
+      );
     case 'none':
     default:
       return null;

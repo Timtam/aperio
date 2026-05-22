@@ -79,7 +79,8 @@
       "month": "Month",
       "year": "Year",
       "agenda": "Agenda",
-      "tasks": "Tasks"
+      "tasks": "Tasks",
+      "contacts": "Contacts"
     }
   },
   "dialogs": {
@@ -630,6 +631,35 @@
       "lockedHint": "Exit focus mode to change selection.",
       "enteredAnnouncement": "Focused on \"{{name}}\". Other calendars are hidden until you exit.",
       "exitedAnnouncement": "Focus mode exited."
+    },
+    "contact": {
+      "createTitle": "New contact",
+      "editTitle": "Edit contact",
+      "displayNameLabel": "Display name",
+      "displayNameRequired": "Please enter a display name.",
+      "givenNameLabel": "First name",
+      "familyNameLabel": "Last name",
+      "organizationLabel": "Organisation",
+      "emailsLabel": "Email addresses",
+      "emailsPlaceholder": "e.g. max@example.com, m.muster@example.org",
+      "emailsHint": "Separate multiple addresses with commas.",
+      "phoneNumbersLabel": "Phone numbers",
+      "phoneNumbersPlaceholder": "e.g. +49 30 1234567, +49 170 1234567",
+      "phoneNumbersHint": "Separate multiple numbers with commas.",
+      "birthdayLabel": "Birthday",
+      "notesLabel": "Notes",
+      "listLabel": "Address book",
+      "listRequired": "Please pick an address book.",
+      "readOnly": "read-only",
+      "cancel": "Cancel",
+      "save": "Save",
+      "create": "Add",
+      "delete": "Delete",
+      "deleteTitle": "Delete contact?",
+      "deleteMessage": "\"{{name}}\" will be permanently removed.",
+      "created": "Contact \"{{name}}\" added.",
+      "updated": "Contact \"{{name}}\" saved.",
+      "deleted": "Contact \"{{name}}\" deleted."
     }
   },
   "views": {
@@ -710,6 +740,19 @@
       "cancelledAnnounce": "Task \"{{title}}\" cancelled.",
       "cascadeSuffix_one": "1 related task also updated.",
       "cascadeSuffix_other": "{{count}} related tasks also updated."
+    },
+    "contacts": {
+      "heading": "Contacts",
+      "loading": "Loading contacts …",
+      "empty": "No contacts yet. Add the first one with the \"Add contact\" button.",
+      "add": "Add contact",
+      "listLabel": "Contact list",
+      "groupLabel_one": "{{name}} (1 contact)",
+      "groupLabel_other": "{{name}} ({{count}} contacts)",
+      "groupOrphans_one": "Without address book (1 contact)",
+      "groupOrphans_other": "Without address book ({{count}} contacts)",
+      "fromList": "from {{list}}",
+      "focusAnnounce": "{{name}}, {{list}}, item {{index}} of {{total}}"
     }
   }
 }

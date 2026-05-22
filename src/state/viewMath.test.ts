@@ -4,8 +4,19 @@ import { nextPeriod, prevPeriod, visibleRange, today, VIEWS } from './viewMath';
 const REF = new Date('2026-05-19T12:00:00Z');
 
 describe('viewMath', () => {
-  it('exposes the six DESIGN.md views in stable order', () => {
-    expect(VIEWS).toEqual(['day', 'week', 'month', 'year', 'agenda', 'tasks']);
+  it('exposes the DESIGN.md views in stable order', () => {
+    // Order matters: Ctrl+1..7 in `ViewState.tsx` is index-based, so a
+    // shuffle here would silently re-map every shortcut. Contacts
+    // joined the lineup in Phase 10a-3 (§10).
+    expect(VIEWS).toEqual([
+      'day',
+      'week',
+      'month',
+      'year',
+      'agenda',
+      'tasks',
+      'contacts',
+    ]);
   });
 
   it('day view range covers the anchor day', () => {

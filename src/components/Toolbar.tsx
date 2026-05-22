@@ -12,6 +12,7 @@ const VIEW_SHORTCUT: Record<ViewId, string> = {
   year: '4',
   agenda: '5',
   tasks: '6',
+  contacts: '7',
 };
 
 /**
