@@ -62,6 +62,14 @@ struct FiredKey {
 
 /// One concrete reminder occurrence, after expanding recurrence and
 /// resolving relative offsets to absolute UTC times.
+///
+/// `relevant_until` is the wall-clock time after which firing this
+/// reminder no longer makes sense — set to the event's end for
+/// timed events, the all-day window's end for all-day events, or
+/// the task's due time. The scheduler's catch-up logic uses it to
+/// decide whether a past-trigger reminder should still fire when
+/// the app starts after the trigger time but before the event
+/// itself has happened.
 #[derive(Debug, Clone)]
 struct Trigger {
     item_id: String,
@@ -69,6 +77,7 @@ struct Trigger {
     title: String,
     body: String,
     trigger_at: DateTime<Utc>,
+    relevant_until: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -247,16 +256,20 @@ impl ReminderScheduler {
         // Events — RRULE-expanded the same way the external adapter
         // path is, so a recurring local event fires a reminder for
         // each occurrence inside the window instead of only the
-        // series master.
+        // series master. `end_utc` flows into the per-occurrence
+        // `relevant_until` so the catch-up logic in
+        // `collect_pending_triggers` can decide whether a
+        // just-missed reminder is still worth firing.
         if let Ok(mut stmt) = conn.prepare(EVENT_QUERY) {
             if let Ok(mut rows) = stmt.query(params![]) {
                 while let Some(row) = rows.next().unwrap_or(None) {
                     let id: String = row.get(0).unwrap_or_default();
                     let title: String = row.get(1).unwrap_or_default();
                     let start_str: String = row.get(2).unwrap_or_default();
-                    let reminders_json: Option<String> = row.get(3).unwrap_or(None);
-                    let rrule: Option<String> = row.get(4).unwrap_or(None);
-                    let exceptions_json: Option<String> = row.get(5).unwrap_or(None);
+                    let end_str: String = row.get(3).unwrap_or_default();
+                    let reminders_json: Option<String> = row.get(4).unwrap_or(None);
+                    let rrule: Option<String> = row.get(5).unwrap_or(None);
+                    let exceptions_json: Option<String> = row.get(6).unwrap_or(None);
                     let Some(reminders) = parse_reminders(reminders_json.as_deref())
                     else {
                         continue;
@@ -264,6 +277,8 @@ impl ReminderScheduler {
                     let Ok(start) = start_str.parse::<DateTime<Utc>>() else {
                         continue;
                     };
+                    let end = end_str.parse::<DateTime<Utc>>().unwrap_or(start);
+                    let duration = (end - start).max(ChronoDuration::zero());
                     let recurrence = rrule.map(|rule| EventRecurrence {
                         rrule: rule,
                         exceptions: parse_rrule_exceptions(exceptions_json.as_deref()),
@@ -275,6 +290,7 @@ impl ReminderScheduler {
                         start,
                         recurrence.as_ref(),
                         &reminders,
+                        duration,
                         earliest,
                         latest,
                     ));
@@ -340,6 +356,10 @@ impl ReminderScheduler {
                         due,
                         recurrence.as_ref(),
                         &reminders,
+                        // See `task_triggers`: tasks are point-in-
+                        // time, relevant_until == due, catch-up
+                        // fires for not-yet-overdue rows only.
+                        ChronoDuration::zero(),
                         earliest,
                         latest,
                     ));
@@ -470,13 +490,20 @@ impl ReminderScheduler {
     }
 
     /// Build the list of pending (not-yet-fired, in-the-future or
-    /// just-overdue) reminder triggers for the scheduler. Limited to
-    /// `MAX_HORIZON_DAYS` of lookahead so we don't fan out on long
-    /// recurring series, with a small `GRACE_MINUTES` tolerance for
-    /// just-overdue triggers we still want to deliver.
+    /// catch-up-eligible) reminder triggers for the scheduler.
+    /// Lookahead is bounded by `MAX_HORIZON_DAYS` to keep RRULE
+    /// expansion costs sane on long recurring series.
+    ///
+    /// Catch-up window: the past bound reaches `CATCH_UP_HORIZON`
+    /// days back so reminders that lapsed while the app was closed
+    /// (or before an external adapter finished its first fetch)
+    /// still make it into the scan. The relevance filter below
+    /// drops the ones whose event has already happened — a
+    /// reminder for tomorrow's standup that "fired" three hours ago
+    /// is still useful; one for last Friday's lunch isn't.
     async fn collect_pending_triggers(&self) -> Vec<Trigger> {
         let now = Utc::now();
-        let earliest = now - ChronoDuration::minutes(GRACE_MINUTES);
+        let earliest = now - ChronoDuration::days(CATCH_UP_HORIZON);
         let latest = now + ChronoDuration::days(MAX_HORIZON_DAYS);
         let mut out = self.collect_triggers_in_window(earliest, latest).await;
 
@@ -485,6 +512,12 @@ impl ReminderScheduler {
         // but possible — keep the first occurrence).
         let mut seen: HashSet<(String, String)> = HashSet::new();
         out.retain(|t| seen.insert((t.item_id.clone(), t.trigger_at.to_rfc3339())));
+
+        // Catch-up filter. Future triggers always stay (the worker
+        // schedules them via tokio::sleep). Past triggers stay only
+        // when the event itself is still relevant — see
+        // `catchup_eligible` for the rule.
+        out.retain(|t| catchup_eligible(t, now, CATCH_UP_GRACE));
 
         // Filter out anything we already fired in this process.
         let fired = self.fired.lock().expect("fired set poisoned");
@@ -537,14 +570,19 @@ impl ReminderScheduler {
             };
             let mut acc: Vec<Trigger> = Vec::new();
 
-            // Events
+            // Events. The same EVENT_QUERY shape feeds the regular
+            // scan and the AppStart catch-up; column indices are
+            // now id(0), title(1), start_utc(2), end_utc(3),
+            // reminders(4), rrule(5), rrule_exceptions(6). AppStart
+            // doesn't care about recurrence or duration, so we read
+            // only the columns we need.
             if let Ok(mut stmt) = conn.prepare(EVENT_QUERY) {
                 if let Ok(mut rows) = stmt.query(params![]) {
                     while let Some(row) = rows.next().unwrap_or(None) {
                         let id: String = row.get(0).unwrap_or_default();
                         let title: String = row.get(1).unwrap_or_default();
                         let start_str: String = row.get(2).unwrap_or_default();
-                        let reminders_json: Option<String> = row.get(3).unwrap_or(None);
+                        let reminders_json: Option<String> = row.get(4).unwrap_or(None);
                         let Some(reminders) = parse_reminders(reminders_json.as_deref())
                         else {
                             continue;
@@ -560,6 +598,16 @@ impl ReminderScheduler {
                                     title: title.clone(),
                                     body: format_event_body(&start),
                                     trigger_at: now,
+                                    // AppStart fires at app start;
+                                    // the event itself is the
+                                    // reference, so relevant_until
+                                    // matches the (already-passed)
+                                    // start. The dedupe pass
+                                    // ignores this field, and the
+                                    // catch-up filter doesn't run
+                                    // on this code path (we
+                                    // explicitly want to fire here).
+                                    relevant_until: start,
                                 });
                             }
                         }
@@ -611,6 +659,7 @@ impl ReminderScheduler {
                                     title: title.clone(),
                                     body: format_task_body(&due),
                                     trigger_at: now,
+                                    relevant_until: due,
                                 });
                             }
                         }
@@ -631,10 +680,22 @@ impl ReminderScheduler {
 /// pass. A new mutation invalidates the loop, so the horizon only
 /// needs to be long enough to comfortably bridge a quiet stretch.
 const MAX_HORIZON_DAYS: i64 = 30;
-/// Trigger times within this many minutes in the past still fire.
-/// Above that we treat them as "missed" and skip — usually the
-/// app_start logic will pick them up instead.
-const GRACE_MINUTES: i64 = 5;
+/// How far back the scheduler reaches when looking for catch-up
+/// candidates — reminders whose trigger time lapsed while the app
+/// was closed or before an external adapter's first fetch
+/// returned. The relevance filter
+/// (`trigger_at > now || relevant_until > now`) drops anything
+/// where the event itself is already over, so this bound is just a
+/// scan-size guard rather than the policy bound. Seven days keeps
+/// the worst-case "I haven't opened the app in a week" within
+/// reach while still bounded for the cache layer.
+const CATCH_UP_HORIZON: i64 = 7;
+/// A small grace added to `relevant_until` when deciding whether a
+/// past-trigger reminder is still worth firing. Lets a reminder
+/// for an event that started a couple of minutes ago still ring
+/// when the app opens — useful for the "I'm walking into the
+/// meeting" case where the user joined late.
+const CATCH_UP_GRACE: ChronoDuration = ChronoDuration::minutes(5);
 /// How far back the Ctrl+Shift+R overview looks for already-passed
 /// reminders. A week of backlog is enough for "did I miss something
 /// yesterday?" without flooding the list.
@@ -658,15 +719,20 @@ const EXTERNAL_TRIGGERS_TTL: Duration = Duration::from_secs(5 * 60);
 /// the cache TTL so the next loop runs with a fresh external snapshot.
 const EMPTY_HORIZON_RETRY: Duration = EXTERNAL_TRIGGERS_TTL;
 
-/// SELECT id, title, start_utc, reminders, rrule, rrule_exceptions FROM events
+/// SELECT id, title, start_utc, end_utc, reminders, rrule, rrule_exceptions FROM events
 ///
-/// The `rrule` + `rrule_exceptions` columns let the scheduler expand
-/// recurring events into per-occurrence reminders instead of seeing
-/// only the master's start. Non-recurring events still work — both
-/// columns come back NULL and the expansion helper degrades to a
+/// `end_utc` joins the others so the scheduler can compute each
+/// event's duration — used by the catch-up filter so a reminder
+/// whose fire time lapsed still goes out when the app starts
+/// before the event itself has happened (or is still in progress).
+///
+/// `rrule` + `rrule_exceptions` let the scheduler expand recurring
+/// events into per-occurrence reminders instead of seeing only the
+/// master's start. Non-recurring events still work — both columns
+/// come back NULL and the expansion helper degrades to a
 /// single-occurrence vector containing the master start.
-const EVENT_QUERY: &str =
-    "SELECT id, title, start_utc, reminders, rrule, rrule_exceptions FROM events";
+const EVENT_QUERY: &str = "SELECT id, title, start_utc, end_utc, reminders, \
+    rrule, rrule_exceptions FROM events";
 
 /// SELECT id, title, scheduled_date, scheduled_time, deadline_date,
 /// deadline_time, reminders, recurrence FROM tasks
@@ -711,6 +777,12 @@ fn event_triggers(
         if effective.is_empty() {
             continue;
         }
+        // Event-shaped duration: the wall-clock span the event
+        // occupies. Drives the catch-up logic — a reminder whose
+        // trigger lapsed but whose event is still in progress (or
+        // hasn't started yet) is still useful on app start; one for
+        // an event already ended isn't.
+        let duration = (ev.end - ev.start).max(ChronoDuration::zero());
         out.extend(occurrence_triggers(
             &ev.id,
             ItemKind::Event,
@@ -718,6 +790,7 @@ fn event_triggers(
             ev.start,
             ev.recurrence.as_ref(),
             effective,
+            duration,
             window_start,
             window_end,
         ));
@@ -727,14 +800,19 @@ fn event_triggers(
 
 /// The single primitive every event-trigger emission path funnels
 /// through. Given an item's master start + (optional) recurrence
-/// spec + reminders, produce every Trigger whose fire time falls
-/// inside `[window_start, window_end]`.
+/// spec + reminders + occurrence duration, produce every Trigger
+/// whose fire time falls inside `[window_start, window_end]`.
 ///
 /// Recurrence handling: when `recurrence` is `Some`, the master's
 /// `start` becomes the DTSTART for an RRULE expansion bounded by a
 /// padded version of the window (see `event_expansion_window`).
 /// Without recurrence the function emits the single master start.
 /// Either way, each occurrence + each reminder produces one Trigger.
+///
+/// `duration` is the offset added to each occurrence start to
+/// compute its `relevant_until` — events pass `event.end -
+/// event.start`, tasks pass `Duration::zero()` (a task's "relevant
+/// until" is the due time itself).
 fn occurrence_triggers(
     item_id: &str,
     item_kind: ItemKind,
@@ -742,6 +820,7 @@ fn occurrence_triggers(
     master_start: DateTime<Utc>,
     recurrence: Option<&EventRecurrence>,
     reminders: &[Reminder],
+    duration: ChronoDuration,
     window_start: DateTime<Utc>,
     window_end: DateTime<Utc>,
 ) -> Vec<Trigger> {
@@ -758,6 +837,7 @@ fn occurrence_triggers(
 
     let mut out = Vec::with_capacity(starts.len() * reminders.len());
     for occ_start in starts {
+        let relevant_until = occ_start + duration;
         for r in reminders {
             let Some(at) = trigger_time_for(&r.kind, occ_start) else {
                 continue;
@@ -775,6 +855,7 @@ fn occurrence_triggers(
                 title: title.to_string(),
                 body: format_event_body(&occ_start),
                 trigger_at: at,
+                relevant_until,
             });
         }
     }
@@ -926,6 +1007,10 @@ fn task_triggers(
             master_due,
             recurrence.as_ref(),
             &t.reminders,
+            // Tasks have no "duration" — they're a point in time,
+            // not a span. relevant_until == due time, which means
+            // catch-up fires only for not-yet-overdue tasks.
+            ChronoDuration::zero(),
             window_start,
             window_end,
         ));
@@ -1053,6 +1138,19 @@ fn weekday_to_byday(d: &cal_core::Weekday) -> &'static str {
         Saturday => "SA",
         Sunday => "SU",
     }
+}
+
+/// Decide whether a Trigger should fire at `now`. Future triggers
+/// always pass (the worker schedules them via `tokio::sleep`); past
+/// triggers pass only when the underlying event is still relevant
+/// — `relevant_until + grace` lets a reminder for an event that
+/// just barely started still ring, useful for the "I'm walking
+/// into the meeting" case.
+///
+/// Pure helper so the filter is unit-testable without spinning up
+/// a scheduler instance.
+fn catchup_eligible(t: &Trigger, now: DateTime<Utc>, grace: ChronoDuration) -> bool {
+    t.trigger_at > now || t.relevant_until + grace > now
 }
 
 fn trigger_time_for(
@@ -1555,6 +1653,116 @@ mod tests {
             Utc.with_ymd_and_hms(2026, 6, 20, 0, 0, 0).unwrap(),
         );
         assert_eq!(triggers.len(), 2, "COUNT=2 should cap at two triggers");
+    }
+
+    // ── Catch-up filter ─────────────────────────────────────────
+
+    fn future_trigger(at_offset_min: i64, relevant_offset_min: i64) -> Trigger {
+        let now = Utc.with_ymd_and_hms(2026, 5, 20, 12, 0, 0).unwrap();
+        Trigger {
+            item_id: "t".into(),
+            item_kind: ItemKind::Event,
+            title: "T".into(),
+            body: String::new(),
+            trigger_at: now + ChronoDuration::minutes(at_offset_min),
+            relevant_until: now + ChronoDuration::minutes(relevant_offset_min),
+        }
+    }
+
+    #[test]
+    fn catchup_keeps_future_triggers_unconditionally() {
+        // The worker sleeps until future triggers fire; the filter
+        // must not preemptively drop them.
+        let t = future_trigger(30, 60);
+        let now = Utc.with_ymd_and_hms(2026, 5, 20, 12, 0, 0).unwrap();
+        assert!(catchup_eligible(&t, now, CATCH_UP_GRACE));
+    }
+
+    #[test]
+    fn catchup_fires_recently_missed_when_event_not_started() {
+        // The exact scenario the user reported: trigger 22 min ago,
+        // event still 38 min in the future. The reminder must fire
+        // immediately on the next scan.
+        let t = future_trigger(-22, 38);
+        let now = Utc.with_ymd_and_hms(2026, 5, 20, 12, 0, 0).unwrap();
+        assert!(
+            catchup_eligible(&t, now, CATCH_UP_GRACE),
+            "missed reminder for an event 38 min away should still fire",
+        );
+    }
+
+    #[test]
+    fn catchup_drops_reminders_for_events_already_over() {
+        // Trigger 90 min ago, event ended 30 min ago. No useful
+        // notification any more — drop.
+        let t = future_trigger(-90, -30);
+        let now = Utc.with_ymd_and_hms(2026, 5, 20, 12, 0, 0).unwrap();
+        assert!(
+            !catchup_eligible(&t, now, CATCH_UP_GRACE),
+            "reminder for a finished event should NOT fire",
+        );
+    }
+
+    #[test]
+    fn catchup_fires_during_grace_after_event_start() {
+        // Event started 3 min ago (timed events have
+        // relevant_until == start, so this is the
+        // "walked-into-the-meeting" case). With CATCH_UP_GRACE=5
+        // min, the reminder still fires.
+        let t = future_trigger(-15, -3);
+        let now = Utc.with_ymd_and_hms(2026, 5, 20, 12, 0, 0).unwrap();
+        assert!(catchup_eligible(&t, now, CATCH_UP_GRACE));
+    }
+
+    #[test]
+    fn catchup_drops_after_grace_window_passes() {
+        // Same as above but the event started 10 min ago — past
+        // the CATCH_UP_GRACE window. Drop.
+        let t = future_trigger(-25, -10);
+        let now = Utc.with_ymd_and_hms(2026, 5, 20, 12, 0, 0).unwrap();
+        assert!(!catchup_eligible(&t, now, CATCH_UP_GRACE));
+    }
+
+    #[test]
+    fn event_trigger_uses_event_end_as_relevance() {
+        // A 1-hour timed event: master_start=08:00, end=09:00.
+        // The emitted trigger should carry relevant_until=09:00,
+        // not 08:00 — gives the catch-up logic a full hour of
+        // grace during which a missed reminder still rings.
+        let ev = make_event(vec![rel(15)]);
+        let (ws, we) = wide_window();
+        let triggers = event_triggers(&[ev], &[], ws, we);
+        assert_eq!(triggers.len(), 1);
+        assert_eq!(
+            triggers[0].relevant_until,
+            Utc.with_ymd_and_hms(2026, 5, 20, 9, 0, 0).unwrap(),
+        );
+    }
+
+    #[test]
+    fn task_trigger_uses_due_time_as_relevance() {
+        // A task with reminder 15 min before 09:00 (the default-
+        // when-no-time case): triggers at 08:45, relevant_until at
+        // 09:00. After 09:00 the task is overdue and the catch-up
+        // filter drops it.
+        let task = make_task(
+            Some(NaiveDate::from_ymd_opt(2026, 5, 20).unwrap()),
+            None,
+            None,
+            None,
+            vec![rel(15)],
+        );
+        let (ws, we) = task_window();
+        let triggers = task_triggers(&[task], ws, we);
+        assert_eq!(triggers.len(), 1);
+        // relevant_until == due time. Local-time 09:00 round-trips
+        // through chrono::Local to UTC; assert the date-level fact.
+        let due_local =
+            chrono::Local.from_utc_datetime(&triggers[0].relevant_until.naive_utc());
+        assert_eq!(
+            due_local.time(),
+            NaiveTime::from_hms_opt(9, 0, 0).unwrap(),
+        );
     }
 
     #[test]
