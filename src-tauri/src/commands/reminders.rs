@@ -14,5 +14,9 @@ const OVERVIEW_LIMIT: usize = 100;
 pub async fn list_upcoming_reminders(
     scheduler: State<'_, SchedulerHandle>,
 ) -> CommandResult<Vec<UpcomingReminder>> {
-    Ok(scheduler.upcoming(OVERVIEW_LIMIT))
+    // Pull the Arc out of the State guard before awaiting — the State
+    // borrow can't cross the await point. Cloning the Arc is a refcount
+    // bump; the underlying scheduler is the same.
+    let scheduler = SchedulerHandle::clone(&scheduler);
+    Ok(scheduler.upcoming(OVERVIEW_LIMIT).await)
 }

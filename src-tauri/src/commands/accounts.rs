@@ -15,6 +15,7 @@ use cal_adapter_ical::{
 };
 use cal_adapter_microsoft_graph::{GraphAccountConfig, MicrosoftGraphAdapter};
 use cal_core::CalendarFeature;
+use std::sync::Arc;
 use tauri::State;
 
 use super::{CommandError, CommandResult};
@@ -56,7 +57,7 @@ fn default_config_json() -> String {
 #[tauri::command]
 pub async fn create_account(
     db: State<'_, DbHandle>,
-    registry: State<'_, AdapterRegistry>,
+    registry: State<'_, Arc<AdapterRegistry>>,
     request: CreateAccountRequest,
 ) -> CommandResult<Account> {
     // Reject adapter kinds we have no construction path for yet.
@@ -405,7 +406,7 @@ fn ews_discover_error_to_command(err: EwsError) -> CommandError {
 #[tauri::command]
 pub async fn delete_account(
     db: State<'_, DbHandle>,
-    registry: State<'_, AdapterRegistry>,
+    registry: State<'_, Arc<AdapterRegistry>>,
     id: String,
 ) -> CommandResult<()> {
     let shared = db.shared();
@@ -456,7 +457,7 @@ impl From<AccountsError> for CommandError {
 #[tauri::command]
 pub async fn connect_google_account(
     db: State<'_, DbHandle>,
-    registry: State<'_, AdapterRegistry>,
+    registry: State<'_, Arc<AdapterRegistry>>,
     request: ConnectGoogleRequest,
 ) -> CommandResult<Account> {
     let name = request.display_name.trim();
@@ -561,7 +562,7 @@ pub struct ConnectGoogleRequest {
 #[tauri::command]
 pub async fn connect_microsoft_account(
     db: State<'_, DbHandle>,
-    registry: State<'_, AdapterRegistry>,
+    registry: State<'_, Arc<AdapterRegistry>>,
     request: ConnectMicrosoftRequest,
 ) -> CommandResult<Account> {
     let name = request.display_name.trim();

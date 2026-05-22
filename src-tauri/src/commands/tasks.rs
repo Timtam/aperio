@@ -3,6 +3,7 @@
 use cal_adapter_local::LocalAdapter;
 use cal_core::{NewTask, Task, TaskList, TasksFeature};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use tauri::State;
 
 use super::{CommandError, CommandResult};
@@ -30,7 +31,7 @@ pub struct CreateTaskListRequest {
 #[tauri::command]
 pub async fn list_task_lists(
     adapter: State<'_, LocalAdapter>,
-    registry: State<'_, AdapterRegistry>,
+    registry: State<'_, Arc<AdapterRegistry>>,
     db: State<'_, DbHandle>,
 ) -> CommandResult<Vec<TaskListRow>> {
     let local = adapter.list_task_lists().await?;
@@ -78,7 +79,7 @@ pub async fn delete_task_list(adapter: State<'_, LocalAdapter>, id: String) -> C
 #[tauri::command]
 pub async fn get_tasks(
     adapter: State<'_, LocalAdapter>,
-    registry: State<'_, AdapterRegistry>,
+    registry: State<'_, Arc<AdapterRegistry>>,
     list_id: String,
 ) -> CommandResult<Vec<Task>> {
     let account = registry
@@ -114,7 +115,7 @@ pub async fn get_task_by_id(
 #[tauri::command]
 pub async fn create_task(
     adapter: State<'_, LocalAdapter>,
-    registry: State<'_, AdapterRegistry>,
+    registry: State<'_, Arc<AdapterRegistry>>,
     scheduler: State<'_, SchedulerHandle>,
     request: CreateTaskRequest,
 ) -> CommandResult<Task> {
@@ -139,7 +140,7 @@ pub async fn create_task(
 #[tauri::command]
 pub async fn update_task(
     adapter: State<'_, LocalAdapter>,
-    registry: State<'_, AdapterRegistry>,
+    registry: State<'_, Arc<AdapterRegistry>>,
     scheduler: State<'_, SchedulerHandle>,
     task: Task,
 ) -> CommandResult<Task> {
@@ -164,7 +165,7 @@ pub async fn update_task(
 #[tauri::command]
 pub async fn delete_task(
     adapter: State<'_, LocalAdapter>,
-    registry: State<'_, AdapterRegistry>,
+    registry: State<'_, Arc<AdapterRegistry>>,
     scheduler: State<'_, SchedulerHandle>,
     id: String,
     list_id: Option<String>,

@@ -21,6 +21,7 @@ pub use paths::{resolve_data_dir, DataDirKind, DataDirResolution};
 use cal_adapter_local::LocalAdapter;
 use registry::AdapterRegistry;
 use reminders::ReminderScheduler;
+use std::sync::Arc;
 use tauri::Manager;
 use tracing::info;
 
@@ -53,12 +54,24 @@ pub fn run() {
     // persisted accounts to materialise external adapters. Failures
     // per account are logged inside `bootstrap` — a single broken
     // credential mustn't keep the app from coming up.
-    let registry = AdapterRegistry::new();
+    //
+    // The registry is wrapped in `Arc` because two consumers hold it
+    // concurrently: Tauri's command State (via `manage`) and the
+    // reminder scheduler's background task. Both call the same
+    // adapters; sharing the same instance keeps the in-adapter
+    // listing caches coherent across read paths.
+    let registry = Arc::new(AdapterRegistry::new());
     {
         let shared = db.shared();
         let repo = accounts::AccountsRepo::new(&shared);
         registry.bootstrap(&repo);
     }
+
+    // The scheduler holds its own Arc so its background scan can
+    // fan out to external adapters even while a command is awaiting
+    // them via Tauri's State. Both handles point at the same
+    // registry instance.
+    let registry_for_scheduler = Arc::clone(&registry);
 
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
@@ -111,8 +124,11 @@ pub fn run() {
             // Spawn the reminder scheduler on the Tauri/tokio runtime
             // and register its handle so command modules can call
             // `invalidate()` after every mutation.
-            let scheduler =
-                ReminderScheduler::spawn(db_for_scheduler.clone(), app.handle().clone());
+            let scheduler = ReminderScheduler::spawn(
+                db_for_scheduler.clone(),
+                Arc::clone(&registry_for_scheduler),
+                app.handle().clone(),
+            );
             app.manage(scheduler);
 
             // Shared state for the native context-menu popups. The

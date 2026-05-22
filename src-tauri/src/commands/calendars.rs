@@ -4,6 +4,7 @@ use cal_adapter_local::LocalAdapter;
 use cal_core::{Calendar, CalendarFeature, ContainerColor, DateRange, Event, NewEvent};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use tauri::State;
 
 use super::{CommandError, CommandResult};
@@ -36,7 +37,7 @@ pub struct CreateCalendarRequest {
 #[tauri::command]
 pub async fn list_calendars(
     adapter: State<'_, LocalAdapter>,
-    registry: State<'_, AdapterRegistry>,
+    registry: State<'_, Arc<AdapterRegistry>>,
     db: State<'_, DbHandle>,
 ) -> CommandResult<Vec<CalendarRow>> {
     // Local first so the implicit "local" account stays at the top
@@ -109,7 +110,7 @@ pub struct EventRangeRequest {
 #[tauri::command]
 pub async fn get_events(
     adapter: State<'_, LocalAdapter>,
-    registry: State<'_, AdapterRegistry>,
+    registry: State<'_, Arc<AdapterRegistry>>,
     request: EventRangeRequest,
 ) -> CommandResult<Vec<Event>> {
     let range = DateRange::new(request.start, request.end);
@@ -137,7 +138,7 @@ pub struct CreateEventRequest {
 #[tauri::command]
 pub async fn create_event(
     adapter: State<'_, LocalAdapter>,
-    registry: State<'_, AdapterRegistry>,
+    registry: State<'_, Arc<AdapterRegistry>>,
     scheduler: State<'_, SchedulerHandle>,
     request: CreateEventRequest,
 ) -> CommandResult<Event> {
@@ -163,7 +164,7 @@ pub async fn create_event(
 #[tauri::command]
 pub async fn update_event(
     adapter: State<'_, LocalAdapter>,
-    registry: State<'_, AdapterRegistry>,
+    registry: State<'_, Arc<AdapterRegistry>>,
     scheduler: State<'_, SchedulerHandle>,
     event: Event,
 ) -> CommandResult<Event> {
@@ -187,7 +188,7 @@ pub async fn update_event(
 #[tauri::command]
 pub async fn delete_event(
     adapter: State<'_, LocalAdapter>,
-    registry: State<'_, AdapterRegistry>,
+    registry: State<'_, Arc<AdapterRegistry>>,
     scheduler: State<'_, SchedulerHandle>,
     id: String,
     calendar_id: Option<String>,
@@ -226,7 +227,7 @@ pub async fn get_event_by_id(
 #[tauri::command]
 pub async fn add_event_exdate(
     adapter: State<'_, LocalAdapter>,
-    registry: State<'_, AdapterRegistry>,
+    registry: State<'_, Arc<AdapterRegistry>>,
     scheduler: State<'_, SchedulerHandle>,
     id: String,
     occurrence: DateTime<Utc>,

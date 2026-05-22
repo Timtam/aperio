@@ -154,18 +154,40 @@ impl AdapterRegistry {
             .cloned()
     }
 
+    /// Snapshot every registered CalendarFeature adapter together with
+    /// its owning account id. The lock is dropped before the caller
+    /// awaits anything on the adapters, so a slow adapter doesn't
+    /// block concurrent `register` / `unregister` calls from
+    /// `create_account` / `delete_account`.
+    pub fn snapshot_calendar_adapters(
+        &self,
+    ) -> Vec<(String, Arc<dyn CalendarFeature>)> {
+        self.external_cal
+            .read()
+            .expect("registry cal poison")
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
+    }
+
+    /// Counterpart of `snapshot_calendar_adapters` for the tasks side.
+    pub fn snapshot_task_adapters(
+        &self,
+    ) -> Vec<(String, Arc<dyn TasksFeature>)> {
+        self.external_tasks
+            .read()
+            .expect("registry tasks poison")
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
+    }
+
     /// Run `list_calendars` on every external CalendarFeature
     /// adapter and return the flat aggregated list. Errors from
     /// one adapter don't poison the rest; they are logged and the
     /// other accounts still get to show up.
     pub async fn list_external_calendars(&self) -> Vec<cal_core::Calendar> {
-        let snapshot: Vec<(String, Arc<dyn CalendarFeature>)> = self
-            .external_cal
-            .read()
-            .expect("registry cal poison")
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
+        let snapshot = self.snapshot_calendar_adapters();
         let mut out = Vec::new();
         for (account_id, adapter) in snapshot {
             match adapter.list_calendars().await {
@@ -191,13 +213,7 @@ impl AdapterRegistry {
     }
 
     pub async fn list_external_task_lists(&self) -> Vec<cal_core::TaskList> {
-        let snapshot: Vec<(String, Arc<dyn TasksFeature>)> = self
-            .external_tasks
-            .read()
-            .expect("registry tasks poison")
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
+        let snapshot = self.snapshot_task_adapters();
         let mut out = Vec::new();
         for (account_id, adapter) in snapshot {
             match adapter.list_task_lists().await {

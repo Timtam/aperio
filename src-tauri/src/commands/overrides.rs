@@ -20,6 +20,7 @@
 
 use cal_adapter_local::LocalAdapter;
 use cal_core::{CalendarFeature, TasksFeature};
+use std::sync::Arc;
 use tauri::State;
 
 use super::{CommandError, CommandResult};
@@ -66,7 +67,7 @@ pub struct RenameOutcome {
 #[tauri::command]
 pub async fn rename_container(
     db: State<'_, DbHandle>,
-    registry: State<'_, AdapterRegistry>,
+    registry: State<'_, Arc<AdapterRegistry>>,
     local: State<'_, LocalAdapter>,
     container_id: String,
     kind: ContainerKind,
