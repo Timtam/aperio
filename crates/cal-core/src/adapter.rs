@@ -13,7 +13,8 @@ use crate::color::ContainerColor;
 use crate::error::{Error, Result};
 use crate::reminder::SoundConfig;
 use crate::types::{
-    Calendar, Contact, DateRange, Event, FreeBusy, NewEvent, NewTask, Task, TaskList,
+    Calendar, Contact, ContactList, DateRange, Event, FreeBusy, NewContact, NewEvent, NewTask,
+    Task, TaskList,
 };
 
 /// Stable identifier for the adapter source (e.g. "google", "caldav",
@@ -141,10 +142,40 @@ pub trait TasksFeature: Adapter {
 }
 
 /// Implemented by adapters that declare `Capability::Contacts`.
+///
+/// Symmetric with `CalendarFeature` / `TasksFeature`: enumerate the
+/// address books (`list_contact_lists`), read the contacts in one
+/// (`get_contacts`), and full CRUD on individual rows. Cross-list
+/// `search_contacts` lives alongside the listing helpers so the
+/// attendees-picker (§10.4) can hit it without first walking every
+/// list.
+///
+/// `rename_contact_list` follows the same default-`Unsupported`
+/// pattern as `CalendarFeature::rename_calendar` — read-only
+/// providers (e.g. Google's "Other contacts") leave it alone and
+/// the command layer falls back to a local override.
 #[async_trait]
 pub trait ContactsFeature: Adapter {
-    async fn list_contacts(&self) -> Result<Vec<Contact>>;
+    async fn list_contact_lists(&self) -> Result<Vec<ContactList>>;
+    async fn get_contacts(&self, list_id: &str) -> Result<Vec<Contact>>;
+    /// Free-form text search across every list the adapter owns.
+    /// The query is intended for the attendees-picker autocomplete;
+    /// adapters MAY return an empty list if they can't service a
+    /// quick search.
     async fn search_contacts(&self, query: &str) -> Result<Vec<Contact>>;
+    async fn create_contact(&self, list_id: &str, contact: NewContact) -> Result<Contact>;
+    async fn update_contact(&self, contact: Contact) -> Result<Contact>;
+    async fn delete_contact(&self, contact_id: &str) -> Result<()>;
+
+    async fn rename_contact_list(
+        &self,
+        _list_id: &str,
+        _new_name: &str,
+    ) -> Result<()> {
+        Err(Error::Unsupported(
+            "rename_contact_list is not supported on this adapter".into(),
+        ))
+    }
 }
 
 // ────────────────────────────────────────────────────────────────────────────

@@ -226,17 +226,66 @@ pub enum RecurrenceEnd {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Contacts
+// Contacts (DESIGN.md §10)
 // ────────────────────────────────────────────────────────────────────────────
+
+/// An address book — the contacts equivalent of `Calendar` and `TaskList`.
+/// Every `Contact` belongs to exactly one list.
+///
+/// Sticking the contacts under their own container surface (rather than
+/// flattening them under the account) keeps the model coherent with the
+/// rest of the app: the sidebar tree still has one section per provider
+/// → one node per container → leaf items, and per-list overrides work
+/// (e.g. "include in autocomplete" can flip on a list at a time).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContactList {
+    pub id: String,
+    pub name: String,
+    pub color: Option<ContainerColor>,
+    /// Read-only address books (provider-curated lists like "Other
+    /// contacts" on Google) can't be modified. Defaults to `false`
+    /// for user-owned lists.
+    pub read_only: bool,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Contact {
     pub id: String,
+    /// Container reference — the address book this contact lives in.
+    pub list_id: String,
+    /// Display name as the user wants to see it ("Max Mustermann").
+    /// Required: a contact with no display name is a row we wouldn't
+    /// know how to render in the picker.
     pub display_name: String,
     pub given_name: Option<String>,
     pub family_name: Option<String>,
+    /// Organisation / company name. Free-form, multi-valued in
+    /// providers like Google but Aperio keeps it scalar for now —
+    /// the autocomplete picker only needs the primary value.
+    pub organization: Option<String>,
     pub emails: Vec<String>,
     pub phone_numbers: Vec<String>,
     pub birthday: Option<NaiveDate>,
+    /// Free-form notes the user (or the provider's UI) attached to
+    /// the contact. Surfaced verbatim in the contact dialog; not
+    /// indexed for autocomplete.
+    pub notes: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
     pub etag: Option<String>,
+}
+
+/// Payload for creating a new contact. Mirrors `NewTask` / `NewEvent`:
+/// no server-assigned ids, no timestamps — the adapter fills those
+/// in.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NewContact {
+    pub display_name: String,
+    pub given_name: Option<String>,
+    pub family_name: Option<String>,
+    pub organization: Option<String>,
+    pub emails: Vec<String>,
+    pub phone_numbers: Vec<String>,
+    pub birthday: Option<NaiveDate>,
+    pub notes: Option<String>,
 }

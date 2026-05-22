@@ -16,6 +16,7 @@
 
 mod calendars;
 mod color_labels;
+mod contacts;
 mod mapping;
 mod search;
 mod tasks;
@@ -54,7 +55,11 @@ impl LocalAdapter {
         Self {
             db,
             source: AdapterSource::new(SOURCE_ID),
-            capabilities: vec![Capability::Calendar, Capability::Tasks],
+            capabilities: vec![
+                Capability::Calendar,
+                Capability::Tasks,
+                Capability::Contacts,
+            ],
         }
     }
 
@@ -119,6 +124,7 @@ pub(crate) mod test_support {
         conn.execute_batch(SCHEMA_V4).expect("apply v4 schema");
         conn.execute_batch(SCHEMA_V5).expect("apply v5 schema");
         conn.execute_batch(SCHEMA_V6).expect("apply v6 schema");
+        conn.execute_batch(SCHEMA_V7).expect("apply v7 schema");
         Arc::new(Mutex::new(conn))
     }
 
@@ -130,4 +136,5 @@ pub(crate) mod test_support {
     const SCHEMA_V5: &str = include_str!("../../../src-tauri/src/db/sql/0005_user_prefs.sql");
     const SCHEMA_V6: &str =
         include_str!("../../../src-tauri/src/db/sql/0006_task_time_fields.sql");
+    const SCHEMA_V7: &str = include_str!("../../../src-tauri/src/db/sql/0007_contacts.sql");
 }
