@@ -20,6 +20,7 @@ import { useSuppressBrowserDefaults } from './hooks/useSuppressBrowserDefaults';
 import { CalendarStoreProvider } from './state/CalendarStore';
 import { DialogStateProvider, useDialogState } from './state/DialogState';
 import { TaskCascadeProvider } from './state/TaskCascadeProvider';
+import { ToastProvider } from './state/ToastProvider';
 import { ViewStateProvider, useViewShortcuts, useViewState } from './state/ViewState';
 
 /**
@@ -33,6 +34,11 @@ import { ViewStateProvider, useViewShortcuts, useViewState } from './state/ViewS
  *  5. TaskCascadeProvider — owns the parent/subtask status-coupling
  *     preference. Sits inside the dialog provider so the Settings
  *     panel can read it via context.
+ *  6. ToastProvider — owns the bottom-right toast stack (currently
+ *     the Undo handle for silent carry-over batches). Sits inside
+ *     TaskCascadeProvider so the DayStartReviewChecker can pull
+ *     both via context, and renders its toast stack alongside
+ *     DialogHost (outside the inert shell).
  *
  * `role="application"` stays on the outermost wrapper so portaled
  * dialogs and announcer live regions all sit inside the application
@@ -54,25 +60,27 @@ export function App() {
           <ViewStateProvider>
             <DialogStateProvider>
               <TaskCascadeProvider>
-                <Shell />
-                <DialogHost />
-                {/* Mount-once gates that run the day-start review
-                    flows. Both render nothing themselves.
+                <ToastProvider>
+                  <Shell />
+                  <DialogHost />
+                  {/* Mount-once gates that run the day-start review
+                      flows. Both render nothing themselves.
 
-                    Order matters:
-                      - DayStartReviewChecker mounts first. It runs
-                        the silent carry-over batch (if the user
-                        opted into auto-today / auto-backlog) and/or
-                        opens the unified review dialog when there
-                        are overdue deadlines or slipped schedules
-                        left to discuss.
-                      - DeadlinePinChecker mounts LAST so it has the
-                        final write. It silently pins every task with
-                        `deadline_date == today` to today, taking
-                        precedence over whatever carry-over wrote a
-                        moment earlier. */}
-                <DayStartReviewChecker />
-                <DeadlinePinChecker />
+                      Order matters:
+                        - DayStartReviewChecker mounts first. It runs
+                          the silent carry-over batch (if the user
+                          opted into auto-today / auto-backlog) and/or
+                          opens the unified review dialog when there
+                          are overdue deadlines or slipped schedules
+                          left to discuss.
+                        - DeadlinePinChecker mounts LAST so it has the
+                          final write. It silently pins every task with
+                          `deadline_date == today` to today, taking
+                          precedence over whatever carry-over wrote a
+                          moment earlier. */}
+                  <DayStartReviewChecker />
+                  <DeadlinePinChecker />
+                </ToastProvider>
               </TaskCascadeProvider>
             </DialogStateProvider>
           </ViewStateProvider>

@@ -7,6 +7,12 @@
   "actions": {
     "duplicated": "„{{title}}\" wurde dupliziert."
   },
+  "toast": {
+    "regionLabel": "Benachrichtigungen",
+    "undoLabel": "Rückgängig",
+    "undoInFlight": "Wird rückgängig gemacht …",
+    "dismissLabel": "Schließen"
+  },
   "chipMenu": {
     "edit": "Bearbeiten …",
     "delete": "Löschen",
@@ -208,7 +214,13 @@
         "autoToday_one": "1 Aufgabe automatisch auf heute übernommen.",
         "autoToday_other": "{{count}} Aufgaben automatisch auf heute übernommen.",
         "autoBacklog_one": "1 Aufgabe automatisch ins Backlog verschoben.",
-        "autoBacklog_other": "{{count}} Aufgaben automatisch ins Backlog verschoben."
+        "autoBacklog_other": "{{count}} Aufgaben automatisch ins Backlog verschoben.",
+        "autoTodayToast_one": "1 Aufgabe auf heute übernommen.",
+        "autoTodayToast_other": "{{count}} Aufgaben auf heute übernommen.",
+        "autoBacklogToast_one": "1 Aufgabe ins Backlog verschoben.",
+        "autoBacklogToast_other": "{{count}} Aufgaben ins Backlog verschoben.",
+        "undoAnnounce_one": "Übernahme für 1 Aufgabe rückgängig gemacht.",
+        "undoAnnounce_other": "Übernahme für {{count}} Aufgaben rückgängig gemacht."
       }
     },
     "deadlinePin": {

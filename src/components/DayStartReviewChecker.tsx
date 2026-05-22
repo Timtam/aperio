@@ -17,6 +17,7 @@ import {
   type CarryOverDefault,
   type EffectiveListSettings,
 } from '../state/TaskCascadeProvider';
+import { useToast } from '../state/ToastProvider';
 import { useTasks } from '../state/useTasks';
 import {
   actionableDescendants,
@@ -68,6 +69,7 @@ export function DayStartReviewChecker() {
   const { t } = useTranslation();
   const { effectiveForList, dayStartTrigger, hydrating } =
     useTaskCascadeEnabled();
+  const { showToast } = useToast();
   const todayKey = useCurrentDayKey();
   // Persistent fire marker — hydrated from localStorage on mount so a
   // mid-day app restart doesn't re-run the silent batch (and
@@ -136,6 +138,7 @@ export function DayStartReviewChecker() {
             announce,
             t,
             invalidateData,
+            showToast,
           });
         }
         if (backlogRows.length > 0) {
@@ -147,6 +150,7 @@ export function DayStartReviewChecker() {
             announce,
             t,
             invalidateData,
+            showToast,
           });
         }
         // Dialog opens iff there's still something to talk about —
@@ -172,6 +176,7 @@ export function DayStartReviewChecker() {
     openDayStartReview,
     invalidateData,
     announce,
+    showToast,
     t,
   ]);
 
@@ -183,6 +188,14 @@ export function DayStartReviewChecker() {
  * plus, when cascade-coupling is on for THAT row's list, its
  * actionable descendants — the same target set the dialog's bulk
  * buttons would touch, with per-list cascade respected.
+ *
+ * After a successful batch we surface a visible toast with an Undo
+ * button. The Undo handler re-applies each task's original
+ * `scheduled_date` (captured before the batch) so the user can
+ * back out the silent change. We restore only that one field —
+ * not the whole task snapshot — to minimise the blast radius of
+ * a concurrent edit that happens during the 10-second toast
+ * window.
  *
  * Single-action per call — the caller splits rows by action and
  * runs us twice when the user has mixed today/backlog defaults
@@ -196,6 +209,11 @@ async function runAutoCarryOverBatch(args: {
   announce: (message: string) => void;
   t: (key: string, values?: Record<string, unknown>) => string;
   invalidateData: () => void;
+  showToast: (input: {
+    message: string;
+    undo?: { label?: string; action: () => Promise<void> | void };
+    durationMs?: number;
+  }) => string;
 }): Promise<void> {
   const { action, slippedRoots, allTasks, effectiveForList } = args;
   const collected = new Map<string, Task>();
@@ -211,6 +229,18 @@ async function runAutoCarryOverBatch(args: {
 
   const newDate = action === 'today' ? todayIsoKey() : null;
   const now = new Date().toISOString();
+  // Snapshot the prior scheduled_date for every target BEFORE we
+  // mutate. The undo handler replays this map, so the toast keeps a
+  // closure over it for its 10-second lifetime even if `targets`
+  // (the live `tasks` reference) has moved on by the time the user
+  // clicks.
+  const originalSchedules: Array<{
+    task: Task;
+    previousScheduledDate: string | null;
+  }> = targets.map((task) => ({
+    task,
+    previousScheduledDate: task.scheduled_date ?? null,
+  }));
   try {
     await Promise.all(
       targets.map((task) =>
@@ -232,6 +262,45 @@ async function runAutoCarryOverBatch(args: {
         : 'dialogs.dayStartReview.carryOver.autoBacklog';
     args.announce(args.t(announceKey, { count: slippedRoots.length }));
     args.invalidateData();
+
+    // Surface a visible Undo handle. The screen-reader-only announce
+    // call above already told assistive tech what happened; the
+    // toast provides the matching visual channel + an actionable
+    // button. The toast's own `role="status" aria-live="polite"`
+    // means SR users hear the toast text too, but the announcer's
+    // shorter message is what hits first.
+    const toastKey =
+      action === 'today'
+        ? 'dialogs.dayStartReview.carryOver.autoTodayToast'
+        : 'dialogs.dayStartReview.carryOver.autoBacklogToast';
+    args.showToast({
+      message: args.t(toastKey, { count: slippedRoots.length }),
+      undo: {
+        action: async () => {
+          // Replay the snapshot in parallel. We restore only the
+          // single `scheduled_date` field; anything else the user
+          // may have edited in the meantime stays as-is.
+          const undoNow = new Date().toISOString();
+          await Promise.all(
+            originalSchedules.map(({ task, previousScheduledDate }) =>
+              invoke<Task>('update_task', {
+                task: {
+                  ...task,
+                  scheduled_date: previousScheduledDate,
+                  updated_at: undoNow,
+                },
+              }),
+            ),
+          );
+          args.invalidateData();
+          args.announce(
+            args.t('dialogs.dayStartReview.carryOver.undoAnnounce', {
+              count: slippedRoots.length,
+            }),
+          );
+        },
+      },
+    });
   } catch (err) {
     // eslint-disable-next-line no-console
     console.warn('day-start review carry-over batch failed', err);

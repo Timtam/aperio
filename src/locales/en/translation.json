@@ -7,6 +7,12 @@
   "actions": {
     "duplicated": "\"{{title}}\" duplicated."
   },
+  "toast": {
+    "regionLabel": "Notifications",
+    "undoLabel": "Undo",
+    "undoInFlight": "Undoing…",
+    "dismissLabel": "Dismiss"
+  },
   "chipMenu": {
     "edit": "Edit …",
     "delete": "Delete",
@@ -211,7 +217,13 @@
         "autoToday_one": "1 task automatically moved to today.",
         "autoToday_other": "{{count}} tasks automatically moved to today.",
         "autoBacklog_one": "1 task automatically sent to backlog.",
-        "autoBacklog_other": "{{count}} tasks automatically sent to backlog."
+        "autoBacklog_other": "{{count}} tasks automatically sent to backlog.",
+        "autoTodayToast_one": "1 task moved to today.",
+        "autoTodayToast_other": "{{count}} tasks moved to today.",
+        "autoBacklogToast_one": "1 task sent to backlog.",
+        "autoBacklogToast_other": "{{count}} tasks sent to backlog.",
+        "undoAnnounce_one": "Undid carry-over for 1 task.",
+        "undoAnnounce_other": "Undid carry-over for {{count}} tasks."
       }
     },
     "deadlinePin": {

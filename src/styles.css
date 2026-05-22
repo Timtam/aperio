@@ -2586,3 +2586,125 @@ button[aria-disabled='true'] {
   color: var(--color-fg-muted);
   font-size: var(--font-size-xs);
 }
+
+/* ── Toast stack (Undo-Toast for silent task batches) ───────────────────── */
+
+/*
+ * Pinned to the bottom-right corner so it stays out of the way of
+ * the calendar grid (whose primary content sits in the top half of
+ * the viewport once the toolbar is accounted for). The z-index sits
+ * BELOW the dialog overlay (which uses z-index: 100 in DialogHost)
+ * — when a dialog opens the toast stays visible underneath but
+ * doesn't compete with the modal for focus.
+ */
+.toast-stack {
+  position: fixed;
+  bottom: var(--space-4);
+  right: var(--space-4);
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-width: 380px;
+  /* The wrapper itself is click-through — only the toast rows opt
+     in to pointer events. This way an empty stack doesn't catch
+     stray clicks meant for the view underneath. */
+  pointer-events: none;
+}
+
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-panel);
+  color: var(--color-fg);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  /* Soft drop-shadow so the toast lifts off the page; falls back to
+     a heavier border in forced-colors mode (see media query below). */
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  font-size: var(--font-size-sm);
+  /* The slide-in keeps the appearance grounded — reduced-motion
+     users get the same toast without the slide thanks to the global
+     `prefers-reduced-motion` rule near the top of this file. */
+  animation: toast-slide-in var(--motion-base) var(--motion-easing);
+}
+
+@keyframes toast-slide-in {
+  from {
+    transform: translateY(8px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.toast__message {
+  flex: 1;
+  min-width: 0;
+}
+
+.toast__action {
+  flex-shrink: 0;
+  background: transparent;
+  color: var(--color-accent);
+  border: 1px solid transparent;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.toast__action:hover {
+  background: var(--color-bg-elevated);
+}
+
+.toast__action:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.toast__action[aria-disabled='true'] {
+  color: var(--color-fg-muted);
+  cursor: progress;
+}
+
+.toast__dismiss {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  background: transparent;
+  color: var(--color-fg-muted);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+
+.toast__dismiss:hover {
+  background: var(--color-bg-elevated);
+  color: var(--color-fg);
+}
+
+.toast__dismiss:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+@media (forced-colors: active) {
+  /* The drop-shadow disappears in high-contrast mode; lean on the
+     border (already CanvasText) for the lift. */
+  .toast {
+    box-shadow: none;
+  }
+}
