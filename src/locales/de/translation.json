@@ -499,6 +499,13 @@
       "ewsDiscoverNeedsPassword": "Bitte zuerst das Passwort eintragen — der Autodiscover-Endpunkt fordert Basic-Auth.",
       "ewsDiscoverOk": "Autodiscover hat die Endpunkt-URL gefunden: {{url}}",
       "ewsDiscoverSrHint": "Microsoft Autodiscover anhand der E-Mail-Adresse nach der EWS-Endpunkt-URL fragen. Setzt voraus, dass E-Mail und Passwort oben ausgefüllt sind.",
+      "vikunjaServerUrlLabel": "Vikunja-Server-URL",
+      "vikunjaServerUrlPlaceholder": "z.B. https://try.vikunja.io",
+      "vikunjaServerUrlHint": "Die Basis-URL deiner Vikunja-Instanz – nur der Server-Stamm, ohne Pfad. Aperio hängt „/api/v1“ selbst an.",
+      "vikunjaServerUrlRequired": "Bitte gib die Vikunja-Server-URL ein.",
+      "vikunjaApiTokenLabel": "API-Token",
+      "vikunjaApiTokenRequired": "Bitte gib dein Vikunja-API-Token ein.",
+      "vikunjaApiTokenHint": "Erzeuge ein Token in Vikunja unter Einstellungen → API-Tokens. Das Token verlässt nach dem Drücken von „Hinzufügen“ nie den System-Schlüsselbund.",
       "kindName": {
         "local": "Lokal",
         "caldav": "CalDAV (iCloud, Nextcloud, …)",

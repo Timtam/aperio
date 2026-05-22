@@ -14,6 +14,7 @@ use cal_adapter_ical::{
     Credentials as IcalCredentials, IcalAccountConfig, IcalAdapter,
 };
 use cal_adapter_microsoft_graph::{GraphAccountConfig, MicrosoftGraphAdapter};
+use cal_adapter_vikunja::{VikunjaAccountConfig, VikunjaAdapter, VikunjaError};
 use cal_core::CalendarFeature;
 use std::sync::Arc;
 use tauri::State;
@@ -72,6 +73,7 @@ pub async fn create_account(
             | AdapterKind::Caldav
             | AdapterKind::Ical
             | AdapterKind::Ews
+            | AdapterKind::Vikunja
     ) {
         return Err(CommandError {
             code: "unsupported",
@@ -134,6 +136,25 @@ pub async fn create_account(
         smoke_test_ews(&config, secret).await?;
     }
 
+    // Vikunja smoke-test: a single `GET /projects?per_page=1` against
+    // the user-supplied server URL with the Bearer token. Catches
+    // typo'd URLs, dead servers and revoked tokens before we
+    // persist anything.
+    if request.adapter_kind == AdapterKind::Vikunja {
+        let Some(secret) = request.secret.as_deref() else {
+            return Err(CommandError {
+                code: "invalid_input",
+                message: "Vikunja needs an API token to authenticate.".into(),
+            });
+        };
+        let config: VikunjaAccountConfig = serde_json::from_str(&request.config_json)
+            .map_err(|e| CommandError {
+                code: "invalid_input",
+                message: format!("invalid Vikunja config: {e}"),
+            })?;
+        smoke_test_vikunja(&config, secret).await?;
+    }
+
     let shared = db.shared();
     let repo = AccountsRepo::new(&shared);
     let created = repo.create(
@@ -146,9 +167,19 @@ pub async fn create_account(
     // and the DB stay aligned. A keychain write that fails is fatal
     // — we tear the row down again so the user doesn't end up with
     // an external account that can never authenticate.
+    //
+    // The slot depends on the adapter kind: Vikunja (and any future
+    // adapter that authenticates with a long-lived API token) lives
+    // in `SecretSlot::ApiToken`, everyone else's Basic-auth-style
+    // credential lives in `SecretSlot::Password`. The slot name is
+    // what the registry's `register_*` paths look for, so the two
+    // sides have to stay in step.
     if let Some(secret) = request.secret {
-        if let Err(err) = secrets::store(&created.id, SecretSlot::Password, &secret)
-        {
+        let slot = match request.adapter_kind {
+            AdapterKind::Vikunja => SecretSlot::ApiToken,
+            _ => SecretSlot::Password,
+        };
+        if let Err(err) = secrets::store(&created.id, slot, &secret) {
             let _ = repo.delete(&created.id);
             return Err(CommandError {
                 code: "internal",
@@ -250,6 +281,40 @@ async fn smoke_test_ews(
     Ok(())
 }
 
+/// Vikunja round-trip: build an ephemeral adapter from the request
+/// payload and hit `GET /projects?per_page=1` via
+/// `VikunjaAdapter::smoke_test`. Surfaces wrong URL / wrong token /
+/// firewall problems before we persist anything.
+async fn smoke_test_vikunja(
+    config: &VikunjaAccountConfig,
+    secret: &str,
+) -> Result<(), CommandError> {
+    let adapter = VikunjaAdapter::new(&config.server_url, secret.to_string())
+        .map_err(vikunja_error_to_command)?;
+    adapter
+        .smoke_test()
+        .await
+        .map_err(caldav_core_error_to_command)?;
+    Ok(())
+}
+
+fn vikunja_error_to_command(err: VikunjaError) -> CommandError {
+    use VikunjaError::*;
+    let (code, message) = match err {
+        Network(m) => ("network", m),
+        Http { status: 401, message } | Http { status: 403, message } => {
+            ("auth", message)
+        }
+        Http { status, message } => (
+            "protocol",
+            format!("Vikunja HTTP {status}: {message}"),
+        ),
+        Protocol(m) => ("protocol", m),
+        Config(m) => ("invalid_input", m),
+    };
+    CommandError { code, message }
+}
+
 fn ical_error_to_command(err: cal_adapter_ical::IcalError) -> CommandError {
     use cal_adapter_ical::IcalError::*;
     let (code, message) = match err {
@@ -340,6 +405,28 @@ pub struct TestEwsRequest {
     pub endpoint: String,
     pub username: String,
     pub password: String,
+}
+
+/// Round-trip a Vikunja credential check without persisting anything.
+/// Used by AccountsDialog's "Test connection" button on the Vikunja
+/// form. Mirrors the EWS / CalDAV pattern — same `(server URL +
+/// secret) → smoke-test` shape with `secret` being the API token.
+#[tauri::command]
+pub async fn test_vikunja_connection(
+    request: TestVikunjaRequest,
+) -> CommandResult<()> {
+    let config = VikunjaAccountConfig {
+        server_url: request.server_url,
+        account_label: None,
+    };
+    smoke_test_vikunja(&config, &request.api_token).await?;
+    Ok(())
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct TestVikunjaRequest {
+    pub server_url: String,
+    pub api_token: String,
 }
 
 /// Probe the user's domain for an EWS endpoint via POX Autodiscover.

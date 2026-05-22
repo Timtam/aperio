@@ -32,6 +32,7 @@ use cal_adapter_caldav::{
 };
 use cal_adapter_ews::{BasicCredentials as EwsCredentials, EwsAccountConfig, EwsAdapter};
 use cal_adapter_google::{GoogleAccountConfig, GoogleAdapter, TokenSet as GoogleTokenSet};
+use cal_adapter_vikunja::{VikunjaAccountConfig, VikunjaAdapter};
 use cal_adapter_ical::{
     Credentials as IcalCredentials, IcalAccountConfig, IcalAdapter,
 };
@@ -292,6 +293,7 @@ impl AdapterRegistry {
             AdapterKind::Google => self.register_google(account),
             AdapterKind::MicrosoftGraph => self.register_microsoft_graph(account),
             AdapterKind::Ews => self.register_ews(account),
+            AdapterKind::Vikunja => self.register_vikunja(account),
             other => Err(RegistryError::Unsupported(format!(
                 "adapter kind '{}' is not wired up yet",
                 other.as_str()
@@ -430,6 +432,26 @@ impl AdapterRegistry {
                 account.id.clone(),
                 arc.clone() as Arc<dyn CalendarFeature>,
             );
+        self.external_tasks
+            .write()
+            .expect("registry tasks poison")
+            .insert(account.id.clone(), arc as Arc<dyn TasksFeature>);
+        Ok(())
+    }
+
+    /// Wire up a Vikunja account. Vikunja is tasks-only — we register
+    /// the adapter under `external_tasks` and skip `external_cal`.
+    /// The API token comes out of the platform keychain under
+    /// `SecretSlot::ApiToken` (the slot is named for exactly this
+    /// use case — long-lived third-party-client tokens).
+    fn register_vikunja(&self, account: &Account) -> Result<(), RegistryError> {
+        let config: VikunjaAccountConfig = serde_json::from_str(&account.config_json)
+            .map_err(|e| RegistryError::Config(e.to_string()))?;
+        let token = secrets::retrieve(&account.id, SecretSlot::ApiToken)
+            .map_err(|e| RegistryError::Secret(format!("missing API token: {e}")))?;
+        let adapter = VikunjaAdapter::new(&config.server_url, token)
+            .map_err(|e| RegistryError::Construct(e.to_string()))?;
+        let arc = Arc::new(adapter);
         self.external_tasks
             .write()
             .expect("registry tasks poison")

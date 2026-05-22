@@ -499,6 +499,13 @@
       "ewsDiscoverNeedsPassword": "Please enter your password before running Discover — Microsoft's autodiscover endpoint requires Basic auth.",
       "ewsDiscoverOk": "Autodiscover found the endpoint: {{url}}",
       "ewsDiscoverSrHint": "Ask Microsoft Autodiscover for the EWS endpoint based on your e-mail address. Requires the e-mail and password fields above to be filled in.",
+      "vikunjaServerUrlLabel": "Vikunja server URL",
+      "vikunjaServerUrlPlaceholder": "e.g. https://try.vikunja.io",
+      "vikunjaServerUrlHint": "The base URL of your Vikunja instance — just the server root, no path. Aperio appends \"/api/v1\" itself.",
+      "vikunjaServerUrlRequired": "Please enter the Vikunja server URL.",
+      "vikunjaApiTokenLabel": "API token",
+      "vikunjaApiTokenRequired": "Please enter your Vikunja API token.",
+      "vikunjaApiTokenHint": "Create a token in Vikunja under Settings → API Tokens. The token never leaves your system keychain after you press \"Add\".",
       "kindName": {
         "local": "Local",
         "caldav": "CalDAV (iCloud, Nextcloud, …)",

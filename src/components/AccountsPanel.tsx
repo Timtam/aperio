@@ -20,6 +20,7 @@ import {
   testCaldavConnection,
   testEwsConnection,
   testIcalFeed,
+  testVikunjaConnection,
 } from '../api/client';
 import type { Account, AdapterKind } from '../api/types';
 import { useCalendarStore } from '../state/CalendarStore';
@@ -60,6 +61,7 @@ const ENABLED_KINDS: ReadonlySet<AdapterKind> = new Set([
   'google',
   'microsoft_graph',
   'ews',
+  'vikunja',
 ]);
 
 interface CaldavFields {
@@ -118,6 +120,16 @@ const EMPTY_EWS: EwsFields = {
   password: '',
 };
 
+interface VikunjaFields {
+  serverUrl: string;
+  apiToken: string;
+}
+
+const EMPTY_VIKUNJA: VikunjaFields = {
+  serverUrl: '',
+  apiToken: '',
+};
+
 export function AccountsPanel() {
   const { t } = useTranslation();
   const announce = useAnnouncer();
@@ -144,6 +156,7 @@ export function AccountsPanel() {
   const [google, setGoogle] = useState<GoogleFields>(EMPTY_GOOGLE);
   const [microsoft, setMicrosoft] = useState<MicrosoftFields>(EMPTY_MICROSOFT);
   const [ews, setEws] = useState<EwsFields>(EMPTY_EWS);
+  const [vikunja, setVikunja] = useState<VikunjaFields>(EMPTY_VIKUNJA);
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -198,6 +211,14 @@ export function AccountsPanel() {
     return null;
   }, [ews, t]);
 
+  const validateVikunja = useCallback((): string | null => {
+    if (!vikunja.serverUrl.trim())
+      return t('dialogs.accounts.vikunjaServerUrlRequired');
+    if (!vikunja.apiToken.trim())
+      return t('dialogs.accounts.vikunjaApiTokenRequired');
+    return null;
+  }, [vikunja, t]);
+
   const onSubmit = useCallback(
     async (e: FormEvent) => {
       e.preventDefault();
@@ -247,6 +268,13 @@ export function AccountsPanel() {
           return;
         }
       }
+      if (kind === 'vikunja') {
+        const v = validateVikunja();
+        if (v) {
+          setError(v);
+          return;
+        }
+      }
       setSubmitting(true);
       setError(null);
       try {
@@ -287,7 +315,11 @@ export function AccountsPanel() {
                       endpoint: ews.endpoint.trim(),
                       username: ews.username.trim(),
                     })
-                  : '{}';
+                  : kind === 'vikunja'
+                    ? JSON.stringify({
+                        server_url: vikunja.serverUrl.trim(),
+                      })
+                    : '{}';
           const secret =
             kind === 'caldav'
               ? caldav.password
@@ -295,7 +327,9 @@ export function AccountsPanel() {
                 ? ical.password
                 : kind === 'ews'
                   ? ews.password
-                  : undefined;
+                  : kind === 'vikunja'
+                    ? vikunja.apiToken.trim()
+                    : undefined;
           created = await createAccount({
             adapter_kind: kind,
             display_name: name,
@@ -310,6 +344,7 @@ export function AccountsPanel() {
         setGoogle(EMPTY_GOOGLE);
         setMicrosoft(EMPTY_MICROSOFT);
         setEws(EMPTY_EWS);
+        setVikunja(EMPTY_VIKUNJA);
         refresh();
         // Re-fetch the calendar / task-list catalog so the sidebar
         // picks up the new account's containers without the user
@@ -337,13 +372,16 @@ export function AccountsPanel() {
       google,
       microsoft,
       ews,
+      vikunja,
       validateCaldav,
       validateIcal,
       validateGoogle,
       validateMicrosoft,
       validateEws,
+      validateVikunja,
       announce,
       refresh,
+      refreshAccounts,
       refreshCalendars,
       refreshTaskLists,
       t,
@@ -388,6 +426,16 @@ export function AccountsPanel() {
           ews.username.trim(),
           ews.password,
         );
+      } else if (kind === 'vikunja') {
+        const v = validateVikunja();
+        if (v) {
+          setError(v);
+          return;
+        }
+        await testVikunjaConnection(
+          vikunja.serverUrl.trim(),
+          vikunja.apiToken.trim(),
+        );
       } else {
         return;
       }
@@ -404,9 +452,11 @@ export function AccountsPanel() {
     caldav,
     ical,
     ews,
+    vikunja,
     validateCaldav,
     validateIcal,
     validateEws,
+    validateVikunja,
     announce,
     t,
   ]);
@@ -1095,6 +1145,65 @@ export function AccountsPanel() {
               </>
             )}
 
+            {kind === 'vikunja' && (
+              <>
+                <label className="form__field">
+                  <span className="form__label">
+                    {t('dialogs.accounts.vikunjaServerUrlLabel')}
+                  </span>
+                  <input
+                    type="url"
+                    value={vikunja.serverUrl}
+                    onChange={(e) =>
+                      setVikunja((prev) => ({
+                        ...prev,
+                        serverUrl: e.target.value,
+                      }))
+                    }
+                    placeholder={t(
+                      'dialogs.accounts.vikunjaServerUrlPlaceholder',
+                    )}
+                    autoComplete="off"
+                    spellCheck={false}
+                    required
+                  />
+                  <span className="form__hint">
+                    {t('dialogs.accounts.vikunjaServerUrlHint')}
+                  </span>
+                </label>
+                <label className="form__field">
+                  <span className="form__label">
+                    {t('dialogs.accounts.vikunjaApiTokenLabel')}
+                  </span>
+                  <input
+                    type="password"
+                    value={vikunja.apiToken}
+                    onChange={(e) =>
+                      setVikunja((prev) => ({
+                        ...prev,
+                        apiToken: e.target.value,
+                      }))
+                    }
+                    autoComplete="new-password"
+                    spellCheck={false}
+                    required
+                  />
+                  <span className="form__hint">
+                    {t('dialogs.accounts.vikunjaApiTokenHint')}
+                  </span>
+                </label>
+                {testMessage && kind === 'vikunja' && (
+                  <p
+                    role="status"
+                    aria-live="polite"
+                    className="form__hint accounts-test-ok"
+                  >
+                    {testMessage}
+                  </p>
+                )}
+              </>
+            )}
+
             <div className="form__actions">
               {kind === 'ews' && (
                 <button
@@ -1111,7 +1220,10 @@ export function AccountsPanel() {
                     : t('dialogs.accounts.ewsDiscover')}
                 </button>
               )}
-              {(kind === 'caldav' || kind === 'ical' || kind === 'ews') && (
+              {(kind === 'caldav' ||
+                kind === 'ical' ||
+                kind === 'ews' ||
+                kind === 'vikunja') && (
                 <button
                   type="button"
                   className="form__action"

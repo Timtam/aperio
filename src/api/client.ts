@@ -262,6 +262,25 @@ export const testEwsConnection = (
     request: { endpoint, username, password },
   });
 
+/** Vikunja config persisted as JSON in `accounts.config_json`. Mirrors
+ *  the backend `VikunjaAccountConfig`. The server URL points at the
+ *  Vikunja root (e.g. `https://try.vikunja.io`); the API token lives
+ *  only in the keychain.  */
+export interface VikunjaConfig {
+  server_url: string;
+}
+
+/** Round-trip a single `GET /projects` against the Vikunja server
+ *  with the provided API token. Catches typo'd URLs, unreachable
+ *  servers and revoked tokens before persistence. */
+export const testVikunjaConnection = (
+  server_url: string,
+  api_token: string,
+) =>
+  invoke<void>('test_vikunja_connection', {
+    request: { server_url, api_token },
+  });
+
 /** Result of an Autodiscover lookup. `account_email` may differ from
  *  what the user typed if a `<RedirectAddr>` step rewrote the
  *  identity along the way — the dialog can use it to refill the
