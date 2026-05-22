@@ -654,6 +654,9 @@
     "contact": {
       "createTitle": "New contact",
       "editTitle": "Edit contact",
+      "viewTitle": "Contact details",
+      "close": "Close",
+      "readOnlyHint": "This entry comes from a read-only directory (e.g. the Global Address List) and can't be edited here.",
       "displayNameLabel": "Display name",
       "displayNameRequired": "Please enter a display name.",
       "givenNameLabel": "First name",
@@ -794,7 +797,8 @@
       "groupBadge_other": "group · {{count}}",
       "groupBadgeAria_zero": "Distribution list, empty",
       "groupBadgeAria_one": "Distribution list with 1 member",
-      "groupBadgeAria_other": "Distribution list with {{count}} members"
+      "groupBadgeAria_other": "Distribution list with {{count}} members",
+      "galListName": "Global Address List"
     }
   }
 }

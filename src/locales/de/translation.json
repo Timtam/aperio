@@ -654,6 +654,9 @@
     "contact": {
       "createTitle": "Neuer Kontakt",
       "editTitle": "Kontakt bearbeiten",
+      "viewTitle": "Kontakt-Details",
+      "close": "Schließen",
+      "readOnlyHint": "Dieser Eintrag stammt aus einem schreibgeschützten Verzeichnis (z. B. der Globalen Adressliste) und kann hier nicht bearbeitet werden.",
       "displayNameLabel": "Anzeigename",
       "displayNameRequired": "Bitte einen Anzeigenamen eingeben.",
       "givenNameLabel": "Vorname",
@@ -794,7 +797,8 @@
       "groupBadge_other": "Gruppe · {{count}}",
       "groupBadgeAria_zero": "Verteilerliste, leer",
       "groupBadgeAria_one": "Verteilerliste mit 1 Mitglied",
-      "groupBadgeAria_other": "Verteilerliste mit {{count}} Mitgliedern"
+      "groupBadgeAria_other": "Verteilerliste mit {{count}} Mitgliedern",
+      "galListName": "Globale Adressliste"
     }
   }
 }

@@ -21,6 +21,7 @@ import {
   updateContact as apiUpdateContact,
 } from '../api/client';
 import type { Contact, ContactPhoto } from '../api/types';
+import { getContactListDisplayName } from '../intl/contactList';
 import { useCalendarStore } from '../state/CalendarStore';
 import { useDialogState } from '../state/DialogState';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -216,6 +217,17 @@ export function ContactDialog({
     () => contactLists.filter((l) => !l.read_only),
     [contactLists],
   );
+
+  // View-only when the contact lives in a read-only list (e.g. the
+  // EWS Global Address List). The dialog stays open so the user
+  // can read every field, but inputs are disabled and the Save /
+  // Delete buttons go away. The Cancel button morphs into a
+  // Close-only action to match.
+  const viewOnly = useMemo(() => {
+    if (!contact) return false;
+    const list = contactLists.find((l) => l.id === contact.list_id);
+    return list?.read_only ?? false;
+  }, [contact, contactLists]);
 
   // Default list resolution chain:
   //   1. Editing → the contact's own list_id (locked, see below).
@@ -487,7 +499,11 @@ export function ContactDialog({
         isOpen={isOpen}
         onClose={onClose}
         title={t(
-          isEdit ? 'dialogs.contact.editTitle' : 'dialogs.contact.createTitle',
+          viewOnly
+            ? 'dialogs.contact.viewTitle'
+            : isEdit
+              ? 'dialogs.contact.editTitle'
+              : 'dialogs.contact.createTitle',
         )}
         className="modal--form modal--contact"
         dismissOnBackdrop={false}
@@ -525,36 +541,38 @@ export function ContactDialog({
                     : t('dialogs.contact.photoNone')}
                 </div>
               )}
-              <div className="contact-photo__actions">
-                <input
-                  ref={photoInputRef}
-                  id={photoInputId}
-                  type="file"
-                  accept={ALLOWED_PHOTO_TYPES.join(',')}
-                  className="sr-only"
-                  onChange={(e) => void onPickPhoto(e)}
-                />
-                <button
-                  type="button"
-                  className="form__action"
-                  onClick={() => photoInputRef.current?.click()}
-                  aria-disabled={submitting || photoLoading || undefined}
-                >
-                  {photo
-                    ? t('dialogs.contact.photoReplace')
-                    : t('dialogs.contact.photoChoose')}
-                </button>
-                {photo && (
+              {!viewOnly && (
+                <div className="contact-photo__actions">
+                  <input
+                    ref={photoInputRef}
+                    id={photoInputId}
+                    type="file"
+                    accept={ALLOWED_PHOTO_TYPES.join(',')}
+                    className="sr-only"
+                    onChange={(e) => void onPickPhoto(e)}
+                  />
                   <button
                     type="button"
                     className="form__action"
-                    onClick={onRemovePhoto}
-                    aria-disabled={submitting || undefined}
+                    onClick={() => photoInputRef.current?.click()}
+                    aria-disabled={submitting || photoLoading || undefined}
                   >
-                    {t('dialogs.contact.photoRemove')}
+                    {photo
+                      ? t('dialogs.contact.photoReplace')
+                      : t('dialogs.contact.photoChoose')}
                   </button>
-                )}
-              </div>
+                  {photo && (
+                    <button
+                      type="button"
+                      className="form__action"
+                      onClick={onRemovePhoto}
+                      aria-disabled={submitting || undefined}
+                    >
+                      {t('dialogs.contact.photoRemove')}
+                    </button>
+                  )}
+                </div>
+              )}
               {photoError && (
                 <p role="alert" className="form__error">
                   {photoError}
@@ -562,6 +580,12 @@ export function ContactDialog({
               )}
             </div>
           </div>
+
+          {viewOnly && (
+            <p className="form__hint form__hint--note">
+              {t('dialogs.contact.readOnlyHint')}
+            </p>
+          )}
 
           <label className="form__field">
             <span className="form__label">
@@ -577,6 +601,7 @@ export function ContactDialog({
               autoComplete="off"
               spellCheck={false}
               required
+              readOnly={viewOnly}
             />
           </label>
 
@@ -592,6 +617,7 @@ export function ContactDialog({
                   setForm((p) => ({ ...p, givenName: e.target.value }))
                 }
                 autoComplete="given-name"
+                readOnly={viewOnly}
               />
             </label>
             <label className="form__field">
@@ -605,6 +631,7 @@ export function ContactDialog({
                   setForm((p) => ({ ...p, familyName: e.target.value }))
                 }
                 autoComplete="family-name"
+                readOnly={viewOnly}
               />
             </label>
           </div>
@@ -620,6 +647,7 @@ export function ContactDialog({
                 setForm((p) => ({ ...p, organization: e.target.value }))
               }
               autoComplete="organization"
+              readOnly={viewOnly}
             />
           </label>
 
@@ -636,6 +664,7 @@ export function ContactDialog({
               placeholder={t('dialogs.contact.emailsPlaceholder')}
               autoComplete="off"
               spellCheck={false}
+              readOnly={viewOnly}
             />
             <span className="form__hint">
               {t('dialogs.contact.emailsHint')}
@@ -655,6 +684,7 @@ export function ContactDialog({
               placeholder={t('dialogs.contact.phoneNumbersPlaceholder')}
               autoComplete="off"
               spellCheck={false}
+              readOnly={viewOnly}
             />
             <span className="form__hint">
               {t('dialogs.contact.phoneNumbersHint')}
@@ -671,6 +701,7 @@ export function ContactDialog({
               onChange={(e) =>
                 setForm((p) => ({ ...p, birthday: e.target.value }))
               }
+              readOnly={viewOnly}
             />
           </label>
 
@@ -684,6 +715,7 @@ export function ContactDialog({
                 setForm((p) => ({ ...p, notes: e.target.value }))
               }
               rows={3}
+              readOnly={viewOnly}
             />
           </label>
 
@@ -694,6 +726,7 @@ export function ContactDialog({
               onChange={(e) =>
                 setForm((p) => ({ ...p, isGroup: e.target.checked }))
               }
+              disabled={viewOnly}
             />
             <span className="form__label">
               {t('dialogs.contact.isGroupLabel')}
@@ -713,6 +746,7 @@ export function ContactDialog({
                 placeholder={t('dialogs.contact.membersPlaceholder')}
                 rows={5}
                 spellCheck={false}
+                readOnly={viewOnly}
               />
               <span className="form__hint">
                 {t('dialogs.contact.membersHint')}
@@ -730,10 +764,11 @@ export function ContactDialog({
                 setForm((p) => ({ ...p, listId: e.target.value }))
               }
               required
+              disabled={viewOnly}
             >
               {contactLists.map((l) => (
                 <option key={l.id} value={l.id} disabled={l.read_only}>
-                  {l.name}
+                  {getContactListDisplayName(l, t)}
                   {l.read_only ? ` (${t('dialogs.contact.readOnly')})` : ''}
                 </option>
               ))}
@@ -748,9 +783,11 @@ export function ContactDialog({
               onClick={onClose}
               aria-disabled={submitting || undefined}
             >
-              {t('dialogs.contact.cancel')}
+              {viewOnly
+                ? t('dialogs.contact.close')
+                : t('dialogs.contact.cancel')}
             </button>
-            {isEdit && (
+            {isEdit && !viewOnly && (
               <button
                 type="button"
                 className="form__action form__action--danger"
@@ -760,15 +797,17 @@ export function ContactDialog({
                 {t('dialogs.contact.delete')}
               </button>
             )}
-            <button
-              type="submit"
-              className="form__action form__action--primary"
-              aria-disabled={submitting || undefined}
-            >
-              {isEdit
-                ? t('dialogs.contact.save')
-                : t('dialogs.contact.create')}
-            </button>
+            {!viewOnly && (
+              <button
+                type="submit"
+                className="form__action form__action--primary"
+                aria-disabled={submitting || undefined}
+              >
+                {isEdit
+                  ? t('dialogs.contact.save')
+                  : t('dialogs.contact.create')}
+              </button>
+            )}
           </div>
         </form>
       </Modal>

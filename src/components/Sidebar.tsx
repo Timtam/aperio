@@ -25,6 +25,7 @@ import {
   type ContainerKind,
   type ContextMenuItemRequest,
 } from '../api/client';
+import { getContactListDisplayName } from '../intl/contactList';
 import { useCalendarStore } from '../state/CalendarStore';
 import { useDialogState } from '../state/DialogState';
 import {
@@ -1226,6 +1227,17 @@ function LeafRow({
       : leaf.kind === 'tasks'
         ? 'task_list'
         : 'contact_list';
+  // Synthetic system-managed lists (the EWS GAL today) carry an
+  // English label from the backend; the helper swaps it for the
+  // localized string when the sentinel id is recognised, falling
+  // back to leaf.name verbatim otherwise.
+  const displayName =
+    leaf.kind === 'contacts'
+      ? getContactListDisplayName(
+          { id: leaf.containerId, name: leaf.name },
+          t,
+        )
+      : leaf.name;
   const isEditing = editing?.kind === kind && editing.id === leaf.containerId;
   const isFocusTarget =
     leaf.kind === 'calendars' && leaf.containerId === focusedContainerId;
@@ -1255,13 +1267,13 @@ function LeafRow({
           onCommit={onCommitEdit}
           onCancel={onCancelEdit}
           onKeyDown={onEditKey}
-          ariaLabel={t('sidebar.renameInputLabel', { name: leaf.name })}
+          ariaLabel={t('sidebar.renameInputLabel', { name: displayName })}
           hint={t('sidebar.renameHint')}
         />
       ) : (
         <>
           <span className="sidebar__swatch" aria-hidden="true" />
-          <span className="sidebar__name">{leaf.name}</span>
+          <span className="sidebar__name">{displayName}</span>
         </>
       )}
     </TreeRow>

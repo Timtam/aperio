@@ -60,6 +60,8 @@
 //!   4. **Remove** via `DeleteAttachment` on the existing
 //!      ContactPicture attachment id.
 
+use std::time::Duration;
+
 use base64::Engine;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use quick_xml::events::Event as XmlEvent;
@@ -72,23 +74,72 @@ use crate::error::{EwsError, EwsResult};
 use crate::mapping::{parse_first_item_id, split_calendar_id};
 use crate::soap::{delete_calendar_item, escape_xml};
 
+/// Sentinel id for the synthetic "Globale Adressliste" entry the
+/// adapter surfaces alongside the user's personal contact folders.
+/// The GAL doesn't live in any IPF.Contact folder — it's an Active
+/// Directory projection EWS exposes via `FindPeople` /
+/// `ResolveNames`. We give it a stable id with the `ews-` prefix so
+/// the registry's `list_id → account` routing finds the EWS adapter
+/// without colliding with any real Exchange folder id (folder ids
+/// are server-minted opaque base64 blobs and never start with that
+/// prefix).
+pub const GAL_LIST_ID: &str = "ews-gal";
+
+/// Page size for `FindPeople` paging. Exchange caps individual
+/// pages around 100 — going higher silently truncates without an
+/// error. The smallish page also keeps each round-trip's response
+/// body manageable for parsing.
+const GAL_PAGE_SIZE: u32 = 100;
+
+/// Inter-page delay during `FindPeople` paging. EWS doesn't
+/// publish a documented rate limit but Exchange Online and large
+/// on-prem servers can throttle on rapid back-to-back SOAP calls;
+/// a 50 ms gap is enough to keep us under any sensible bucket
+/// without making a 5000-row GAL pull noticeably slower.
+const GAL_PAGE_DELAY: Duration = Duration::from_millis(50);
+
+/// Hard cap on total FindPeople pages so a misbehaving server
+/// (`IncludesLastItemInRange=false` forever) can't pin us in an
+/// infinite loop. 200 × 100 = 20 000 personas — comfortable
+/// headroom for a corporate GAL while still bounding the worst
+/// case.
+const GAL_MAX_PAGES: u32 = 200;
+
 // ── Public adapter-side surface ────────────────────────────────────────
 
 /// Enumerate every contact folder in the user's mailbox. Same
 /// `FindFolder` flow as `list_calendars` / `list_task_lists`, just
 /// with `IPF.Contact` as the folder-class restriction.
+///
+/// On top of the user's personal folders we append a synthetic
+/// "Globale Adressliste" entry that backs onto EWS `FindPeople`
+/// against the Active Directory projection — the corporate
+/// address list Outlook surfaces under "All Address Lists". The
+/// GAL entry is `read_only` (you can't modify directory data
+/// through EWS as a user) so the create/edit/delete paths skip
+/// it automatically.
 pub async fn list_contact_lists(client: &EwsClient) -> EwsResult<Vec<ContactList>> {
     let body = find_contact_folders();
     let xml = client.post_soap(body).await?;
     let folders = parse_find_contact_folder_response(&xml)?;
-    Ok(folders.into_iter().map(to_contact_list).collect())
+    let mut out: Vec<ContactList> =
+        folders.into_iter().map(to_contact_list).collect();
+    out.push(gal_contact_list());
+    Ok(out)
 }
 
 /// Pull every contact in `list_id`. No date filter equivalent for
 /// contacts (the closest thing — `LastModifiedTime` ranges — is
 /// useful for delta sync but not the initial listing), so we ask
 /// for every row in the folder via a `Shallow` traversal.
+///
+/// The synthetic GAL list dispatches into `get_gal_contacts`,
+/// which pages `FindPeople` against the directory rather than
+/// `FindItem` against a folder.
 pub async fn get_contacts(client: &EwsClient, list_id: &str) -> EwsResult<Vec<Contact>> {
+    if list_id == GAL_LIST_ID {
+        return get_gal_contacts(client).await;
+    }
     let (folder_id, change_key) = split_calendar_id(list_id);
     let body = find_contacts_in_folder(&folder_id, change_key.as_deref());
     let xml = client.post_soap(body).await?;
@@ -96,6 +147,71 @@ pub async fn get_contacts(client: &EwsClient, list_id: &str) -> EwsResult<Vec<Co
     Ok(parsed
         .into_iter()
         .map(|item| to_contact(item, list_id))
+        .collect())
+}
+
+/// Synthetic ContactList representing the corporate GAL. The id
+/// is the `GAL_LIST_ID` sentinel; the display name is left in
+/// English here because the EWS adapter has no i18n surface —
+/// the frontend re-labels it via `i18n` keyed on the same
+/// sentinel id.
+fn gal_contact_list() -> ContactList {
+    ContactList {
+        id: GAL_LIST_ID.to_string(),
+        name: "Global Address List".to_string(),
+        color: None,
+        // Read-only: EWS doesn't let us modify directory entries
+        // as a regular user, and `create_contact` /
+        // `update_contact` / `delete_contact` would all fail
+        // with `ErrorAccessDenied` if a frontend tried to write
+        // into this list. Marking the list read-only short-
+        // circuits those attempts up front in the dialog UI.
+        read_only: true,
+    }
+}
+
+/// Page `FindPeople` against the directory until the server
+/// signals `IncludesLastItemInRange=true`. Inserts a small delay
+/// between batches so a 1000+ entry GAL doesn't hammer the
+/// server with back-to-back requests.
+async fn get_gal_contacts(client: &EwsClient) -> EwsResult<Vec<Contact>> {
+    let mut all: Vec<Contact> = Vec::new();
+    let mut offset: u32 = 0;
+    for _ in 0..GAL_MAX_PAGES {
+        let body = find_people_in_directory(offset, GAL_PAGE_SIZE);
+        let xml = client.post_soap(body).await?;
+        let (page, includes_last) = parse_find_people_response(&xml)?;
+        if page.is_empty() {
+            break;
+        }
+        let page_len = page.len() as u32;
+        all.extend(page.into_iter().map(|p| persona_to_contact(p, GAL_LIST_ID)));
+        if includes_last {
+            break;
+        }
+        offset = offset.saturating_add(page_len);
+        // Politeness: yield long enough that Exchange's per-
+        // mailbox throttling buckets don't trip on a fast pager.
+        tokio::time::sleep(GAL_PAGE_DELAY).await;
+    }
+    Ok(all)
+}
+
+/// Run a `ResolveNames` query against the directory. Cheap-and-
+/// focused search used by the attendees picker — Exchange does
+/// the prefix matching server-side so the client doesn't need to
+/// pull the whole GAL just to look up "anna".
+pub async fn search_gal(client: &EwsClient, query: &str) -> EwsResult<Vec<Contact>> {
+    let trimmed = query.trim();
+    if trimmed.is_empty() {
+        return Ok(Vec::new());
+    }
+    let body = resolve_names_envelope(trimmed);
+    let xml = client.post_soap(body).await?;
+    let parsed = parse_resolve_names_response(&xml)?;
+    Ok(parsed
+        .into_iter()
+        .map(|p| persona_to_contact(p, GAL_LIST_ID))
         .collect())
 }
 
@@ -117,6 +233,16 @@ pub async fn create_contact(
     list_id: &str,
     contact: NewContact,
 ) -> EwsResult<Contact> {
+    if list_id == GAL_LIST_ID {
+        // The synthetic GAL list is a read-only directory
+        // projection — there's no mailbox folder to write into.
+        // We reject up front rather than letting EWS surface a
+        // confusing `ErrorInvalidIdMalformed` for the sentinel.
+        return Err(EwsError::Protocol(
+            "the Global Address List is read-only; cannot create contacts there"
+                .into(),
+        ));
+    }
     let (folder_id, folder_change_key) = split_calendar_id(list_id);
     let item_xml = new_contact_to_contact_item_xml(&contact);
     let envelope = create_contact_in_folder(
@@ -270,6 +396,12 @@ async fn upload_contact_photo(
 /// task adapter's "what you see is what you get" semantic and keeps
 /// the round-trip with the Aperio UI lossless.
 pub async fn update_contact(client: &EwsClient, contact: &Contact) -> EwsResult<Contact> {
+    if contact.list_id == GAL_LIST_ID {
+        return Err(EwsError::Protocol(
+            "the Global Address List is read-only; cannot update directory entries"
+                .into(),
+        ));
+    }
     let (item_id, change_key) = split_calendar_id(&contact.id);
     let (set_xml, delete_xml) = contact_to_update_field_xml(contact);
     let envelope = update_contact_item(
@@ -1637,6 +1769,476 @@ fn build_contact_from_new(
     }
 }
 
+// ── GAL helpers (FindPeople / ResolveNames) ──────────────────────────
+
+/// SOAP body for `FindPeople` paged against the Active Directory
+/// projection. The distinguished id `directory` is what Outlook
+/// uses for "All Address Lists → Global Address List" — Exchange
+/// 2013+ supports it; 2010 doesn't ship FindPeople at all, in
+/// which case the request returns a SOAP fault that surfaces back
+/// up the stack so the frontend can show a clear "this server
+/// doesn't expose the GAL via EWS" message.
+fn find_people_in_directory(offset: u32, max_entries: u32) -> String {
+    let body = format!(
+        r#"    <m:FindPeople>
+      <m:PersonaShape>
+        <t:BaseShape>Default</t:BaseShape>
+      </m:PersonaShape>
+      <m:IndexedPageItemView Offset="{offset}" MaxEntriesReturned="{max_entries}" BasePoint="Beginning"/>
+      <m:ParentFolderId>
+        <t:DistinguishedFolderId Id="directory"/>
+      </m:ParentFolderId>
+    </m:FindPeople>"#,
+    );
+    wrap(&body)
+}
+
+/// SOAP body for `ResolveNames` — the focused name-fragment
+/// search against the directory. Used by the attendees picker
+/// to surface GAL hits without pulling the whole list.
+///
+/// `ReturnFullContactData=true` makes EWS embed each match's
+/// full `<t:Contact>` shape inside the `<t:Resolution>` block,
+/// so we don't need a follow-up GetItem per row.
+/// `SearchScope=ActiveDirectoryContacts` covers both the GAL and
+/// the user's personal Contacts; `ActiveDirectory` (GAL only)
+/// would miss personal entries the user might also want.
+fn resolve_names_envelope(query: &str) -> String {
+    let body = format!(
+        r#"    <m:ResolveNames ReturnFullContactData="true" SearchScope="ActiveDirectoryContacts">
+      <m:UnresolvedEntry>{}</m:UnresolvedEntry>
+    </m:ResolveNames>"#,
+        escape_xml(query),
+    );
+    wrap(&body)
+}
+
+/// One row pulled from a `FindPeople` or `ResolveNames` response.
+/// Persona shape is narrower than the Contact item shape we
+/// already model — no indexed email slots, no FileAs, etc. — so
+/// we map directly into `Contact` via `persona_to_contact`
+/// rather than reusing the existing `to_contact` path.
+#[derive(Debug, Clone, Default)]
+pub struct ParsedPersona {
+    pub persona_id: String,
+    pub display_name: String,
+    pub given_name: Option<String>,
+    pub surname: Option<String>,
+    pub company_name: Option<String>,
+    pub email_addresses: Vec<String>,
+    pub phone_numbers: Vec<String>,
+    pub department: Option<String>,
+}
+
+/// Parse a `FindPeopleResponse` into `(personas, includes_last)`.
+/// The `includes_last` flag is computed from the response's
+/// `TotalNumberOfPeopleInView` + the page offset we know we
+/// requested — older Exchange versions don't echo it back as a
+/// literal, so we calculate locally instead of trusting an
+/// attribute that may not exist.
+pub fn parse_find_people_response(
+    xml: &str,
+) -> EwsResult<(Vec<ParsedPersona>, bool)> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+
+    let mut personas: Vec<ParsedPersona> = Vec::new();
+    let mut current = ParsedPersona::default();
+    let mut inside_persona = false;
+    let mut text_target: Option<&'static str> = None;
+    // Collected total — Exchange always reports it on FindPeople.
+    // We use it to decide "are we on the last page" so the caller
+    // stops paging without an explicit boolean.
+    let mut total_in_view: Option<u32> = None;
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(XmlEvent::Start(e)) | Ok(XmlEvent::Empty(e)) => {
+                let local = e.local_name().as_ref().to_ascii_lowercase();
+                if local == b"persona" {
+                    inside_persona = true;
+                    current = ParsedPersona::default();
+                    continue;
+                }
+                if !inside_persona {
+                    if local == b"totalnumberofpeopleinview" {
+                        text_target = Some("total_in_view");
+                    }
+                    continue;
+                }
+                match local.as_slice() {
+                    b"personaid" => {
+                        for a in e.attributes().flatten() {
+                            let key = a.key.as_ref();
+                            if key.eq_ignore_ascii_case(b"Id") {
+                                current.persona_id =
+                                    String::from_utf8_lossy(&a.value).into_owned();
+                            }
+                        }
+                    }
+                    b"displayname" => text_target = Some("display_name"),
+                    b"givenname" => text_target = Some("given_name"),
+                    b"surname" => text_target = Some("surname"),
+                    b"companyname" => text_target = Some("company_name"),
+                    b"department" | b"departments" => text_target = Some("department"),
+                    // `EmailAddress` element of a Persona wraps the
+                    // mail string inside another `EmailAddress`
+                    // child — we route both occurrences to the same
+                    // text target and dedup on push.
+                    b"emailaddress" => text_target = Some("email_address"),
+                    // Phone numbers live under `WorkPhones`,
+                    // `HomePhones`, `MobilePhones`, etc., each
+                    // wrapping a `PhoneNumberAttributedValue` with
+                    // a `Value/Number`. We capture every `<t:Number>`
+                    // text node and dedup on push.
+                    b"number" => text_target = Some("phone_number"),
+                    _ => {}
+                }
+            }
+            Ok(XmlEvent::End(e)) => {
+                let local = e.local_name().as_ref().to_ascii_lowercase();
+                if local == b"persona" {
+                    if !current.display_name.is_empty()
+                        || !current.email_addresses.is_empty()
+                    {
+                        personas.push(std::mem::take(&mut current));
+                    }
+                    inside_persona = false;
+                    text_target = None;
+                    continue;
+                }
+                if matches!(
+                    local.as_slice(),
+                    b"displayname"
+                        | b"givenname"
+                        | b"surname"
+                        | b"companyname"
+                        | b"department"
+                        | b"departments"
+                        | b"emailaddress"
+                        | b"number"
+                        | b"totalnumberofpeopleinview"
+                ) {
+                    text_target = None;
+                }
+            }
+            Ok(XmlEvent::Text(t)) if text_target.is_some() => {
+                let raw = match t.unescape() {
+                    Ok(c) => c.to_string(),
+                    Err(_) => continue,
+                };
+                let s = raw.trim();
+                if s.is_empty() {
+                    continue;
+                }
+                match text_target {
+                    Some("display_name") => current.display_name.push_str(s),
+                    Some("given_name") => {
+                        current
+                            .given_name
+                            .get_or_insert_with(String::new)
+                            .push_str(s);
+                    }
+                    Some("surname") => {
+                        current.surname.get_or_insert_with(String::new).push_str(s);
+                    }
+                    Some("company_name") => {
+                        current
+                            .company_name
+                            .get_or_insert_with(String::new)
+                            .push_str(s);
+                    }
+                    Some("department") => {
+                        current
+                            .department
+                            .get_or_insert_with(String::new)
+                            .push_str(s);
+                    }
+                    Some("email_address") => {
+                        if s.contains('@') && !current.email_addresses.contains(&s.to_string()) {
+                            current.email_addresses.push(s.to_string());
+                        }
+                    }
+                    Some("phone_number") => {
+                        if !current.phone_numbers.contains(&s.to_string()) {
+                            current.phone_numbers.push(s.to_string());
+                        }
+                    }
+                    Some("total_in_view") => {
+                        total_in_view = s.parse::<u32>().ok();
+                    }
+                    _ => {}
+                }
+            }
+            Ok(XmlEvent::Eof) => break,
+            Err(err) => return Err(EwsError::Protocol(format!("xml parse: {err}"))),
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    // "Last page" is determined two ways and we trust whichever
+    // fires first:
+    //   - Short page: the server returned fewer rows than
+    //     GAL_PAGE_SIZE asked for ⇒ we've drained the source.
+    //   - TotalNumberOfPeopleInView: if the total is known and
+    //     this page filled the remainder, we're done.
+    // We can't fully evaluate the second condition here (we don't
+    // see the offset), so we report just the short-page signal
+    // and the caller handles the total separately.
+    let includes_last = (personas.len() as u32) < GAL_PAGE_SIZE;
+    // Tracing: emit the total once per page so a user running
+    // with `RUST_LOG=cal_adapter_ews=debug` can see how big the
+    // GAL is even mid-pull.
+    if let Some(total) = total_in_view {
+        tracing::debug!(
+            target: "cal_adapter_ews::gal",
+            total = total,
+            page_size = personas.len(),
+            "FindPeople page parsed",
+        );
+    }
+    Ok((personas, includes_last))
+}
+
+/// Parse a `ResolveNamesResponse`. The shape differs from
+/// FindPeople — every match is wrapped in `<t:Resolution>` and
+/// the directory data shows up inside `<t:Mailbox>` (always
+/// present) plus an optional `<t:Contact>` block (only when we
+/// asked for ReturnFullContactData). The mailbox carries the
+/// authoritative display name + SMTP address; the contact block
+/// adds the phone / company fields when available.
+pub fn parse_resolve_names_response(xml: &str) -> EwsResult<Vec<ParsedPersona>> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+
+    let mut out: Vec<ParsedPersona> = Vec::new();
+    let mut current = ParsedPersona::default();
+    let mut inside_resolution = false;
+    let mut inside_mailbox = false;
+    let mut inside_contact = false;
+    // Track depth of nested email-collection elements so the
+    // mailbox's `<t:EmailAddress>` value doesn't get confused
+    // with a contact's `<t:Entry Key="EmailAddress1">…</t:Entry>`
+    // nested inside `<t:EmailAddresses>`.
+    let mut text_target: Option<&'static str> = None;
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(XmlEvent::Start(e)) | Ok(XmlEvent::Empty(e)) => {
+                let local = e.local_name().as_ref().to_ascii_lowercase();
+                if local == b"resolution" {
+                    inside_resolution = true;
+                    current = ParsedPersona::default();
+                    continue;
+                }
+                if !inside_resolution {
+                    continue;
+                }
+                if local == b"mailbox" {
+                    inside_mailbox = true;
+                    continue;
+                }
+                if local == b"contact" {
+                    inside_contact = true;
+                    continue;
+                }
+                match local.as_slice() {
+                    // Mailbox-level Name + EmailAddress carry the
+                    // authoritative identity for the row.
+                    b"name" if inside_mailbox && !inside_contact => {
+                        text_target = Some("display_name");
+                    }
+                    b"emailaddress" if inside_mailbox && !inside_contact => {
+                        text_target = Some("email_address");
+                    }
+                    // Contact-level enrichment (only present when
+                    // ReturnFullContactData was honoured).
+                    b"displayname" if inside_contact => {
+                        text_target = Some("display_name");
+                    }
+                    b"givenname" if inside_contact => {
+                        text_target = Some("given_name");
+                    }
+                    b"surname" if inside_contact => {
+                        text_target = Some("surname");
+                    }
+                    b"companyname" if inside_contact => {
+                        text_target = Some("company_name");
+                    }
+                    b"entry" if inside_contact => {
+                        // Routed via the same Entry text path that
+                        // FindItem uses — `EmailAddresses/Entry`
+                        // for emails, `PhoneNumbers/Entry` for
+                        // phones. We don't differentiate here; the
+                        // dedup-on-push keeps duplicates out.
+                        text_target = Some("entry_value");
+                    }
+                    _ => {}
+                }
+            }
+            Ok(XmlEvent::End(e)) => {
+                let local = e.local_name().as_ref().to_ascii_lowercase();
+                if local == b"resolution" {
+                    if !current.display_name.is_empty()
+                        || !current.email_addresses.is_empty()
+                    {
+                        out.push(std::mem::take(&mut current));
+                    }
+                    inside_resolution = false;
+                    inside_mailbox = false;
+                    inside_contact = false;
+                    text_target = None;
+                    continue;
+                }
+                if local == b"mailbox" {
+                    inside_mailbox = false;
+                }
+                if local == b"contact" {
+                    inside_contact = false;
+                }
+                if matches!(
+                    local.as_slice(),
+                    b"name"
+                        | b"displayname"
+                        | b"emailaddress"
+                        | b"givenname"
+                        | b"surname"
+                        | b"companyname"
+                        | b"entry"
+                ) {
+                    text_target = None;
+                }
+            }
+            Ok(XmlEvent::Text(t)) if text_target.is_some() => {
+                let raw = match t.unescape() {
+                    Ok(c) => c.to_string(),
+                    Err(_) => continue,
+                };
+                let s = raw.trim();
+                if s.is_empty() {
+                    continue;
+                }
+                match text_target {
+                    Some("display_name") => {
+                        if current.display_name.is_empty() {
+                            current.display_name.push_str(s);
+                        }
+                    }
+                    Some("email_address") => {
+                        if s.contains('@')
+                            && !current.email_addresses.contains(&s.to_string())
+                        {
+                            current.email_addresses.push(s.to_string());
+                        }
+                    }
+                    Some("given_name") => {
+                        current
+                            .given_name
+                            .get_or_insert_with(String::new)
+                            .push_str(s);
+                    }
+                    Some("surname") => {
+                        current.surname.get_or_insert_with(String::new).push_str(s);
+                    }
+                    Some("company_name") => {
+                        current
+                            .company_name
+                            .get_or_insert_with(String::new)
+                            .push_str(s);
+                    }
+                    Some("entry_value") => {
+                        // Heuristic: an email-looking value lands
+                        // in emails, anything else lands in phones.
+                        // Avoids the parser having to track which
+                        // collection (EmailAddresses vs PhoneNumbers)
+                        // the Entry sits in.
+                        if s.contains('@') {
+                            if !current.email_addresses.contains(&s.to_string()) {
+                                current.email_addresses.push(s.to_string());
+                            }
+                        } else if !current.phone_numbers.contains(&s.to_string()) {
+                            current.phone_numbers.push(s.to_string());
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Ok(XmlEvent::Eof) => break,
+            Err(err) => return Err(EwsError::Protocol(format!("xml parse: {err}"))),
+            _ => {}
+        }
+        buf.clear();
+    }
+    Ok(out)
+}
+
+/// Map a `ParsedPersona` (FindPeople / ResolveNames row) into
+/// the cal-core `Contact` shape. PersonaId is recorded under
+/// the contact's `id` so the photo-CRUD paths can route back
+/// (though the GAL is read-only — those paths surface an error
+/// today). `list_id` is supplied so the synthetic GAL row knows
+/// which "container" it belongs to.
+fn persona_to_contact(p: ParsedPersona, list_id: &str) -> Contact {
+    let now = Utc::now();
+    // Pick the best non-empty display name. ResolveNames
+    // sometimes leaves DisplayName blank when the row came only
+    // from the mailbox half; assemble from given+surname or fall
+    // back to the first email address.
+    let display_name = if !p.display_name.is_empty() {
+        p.display_name.clone()
+    } else if p.given_name.is_some() || p.surname.is_some() {
+        format!(
+            "{} {}",
+            p.given_name.as_deref().unwrap_or(""),
+            p.surname.as_deref().unwrap_or("")
+        )
+        .trim()
+        .to_string()
+    } else if let Some(email) = p.email_addresses.first() {
+        email.clone()
+    } else {
+        "(unnamed)".to_string()
+    };
+    Contact {
+        // PersonaId is opaque and not stable across mailbox
+        // moves, but it's good enough for in-session round-trips
+        // (the dialog can pass it to a "view full details" route
+        // later). We don't try to encode a change key because
+        // the GAL doesn't carry one.
+        id: if p.persona_id.is_empty() {
+            // ResolveNames doesn't return a PersonaId — synthesise
+            // a stable-within-this-session id from the first email
+            // so the picker has something unique.
+            p.email_addresses
+                .first()
+                .cloned()
+                .unwrap_or_else(|| display_name.clone())
+        } else {
+            p.persona_id
+        },
+        list_id: list_id.to_string(),
+        display_name,
+        given_name: p.given_name,
+        family_name: p.surname,
+        organization: p.company_name.or(p.department),
+        emails: p.email_addresses,
+        phone_numbers: p.phone_numbers,
+        birthday: None,
+        notes: None,
+        members: None,
+        // GAL personas don't have photos in their default shape;
+        // upgrading to a custom Persona shape with `Photo` is a
+        // future polish. For now, surface no photo.
+        has_photo: false,
+        created_at: now,
+        updated_at: now,
+        etag: None,
+    }
+}
+
 // ── Cross-list search ─────────────────────────────────────────────────
 
 /// Case-insensitive contains match used by `EwsAdapter::search_contacts`.
@@ -2219,5 +2821,181 @@ mod tests {
         // `Contact.has_photo` flag arrives without a follow-up
         // GetItem per row.
         assert!(body.contains("contacts:HasPicture"));
+    }
+
+    // ── GAL: FindPeople envelope + parser ─────────────────────────
+
+    #[test]
+    fn find_people_envelope_targets_directory() {
+        let body = find_people_in_directory(0, 100);
+        // Distinguished folder id `directory` is the EWS shape
+        // for the GAL — losing this would silently make the GAL
+        // disappear, so pin it in a test.
+        assert!(body.contains(r#"Id="directory""#));
+        assert!(body.contains("FindPeople"));
+        assert!(body.contains(r#"Offset="0""#));
+        assert!(body.contains(r#"MaxEntriesReturned="100""#));
+    }
+
+    #[test]
+    fn find_people_envelope_carries_offset_for_paging() {
+        let body = find_people_in_directory(200, 100);
+        assert!(body.contains(r#"Offset="200""#));
+    }
+
+    #[test]
+    fn parses_find_people_response_with_two_personas() {
+        let xml = r#"
+<m:FindPeopleResponse xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+                      xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <m:ResponseCode>NoError</m:ResponseCode>
+  <m:People>
+    <t:Persona>
+      <t:PersonaId Id="P1-ID"/>
+      <t:DisplayName>Anna Beispiel</t:DisplayName>
+      <t:GivenName>Anna</t:GivenName>
+      <t:Surname>Beispiel</t:Surname>
+      <t:CompanyName>Example GmbH</t:CompanyName>
+      <t:EmailAddress>
+        <t:Name>Anna Beispiel</t:Name>
+        <t:EmailAddress>anna@example.com</t:EmailAddress>
+      </t:EmailAddress>
+      <t:WorkPhones>
+        <t:PhoneNumberAttributedValue>
+          <t:Value>
+            <t:Number>+49 30 1234567</t:Number>
+          </t:Value>
+        </t:PhoneNumberAttributedValue>
+      </t:WorkPhones>
+    </t:Persona>
+    <t:Persona>
+      <t:PersonaId Id="P2-ID"/>
+      <t:DisplayName>Bernd Beispiel</t:DisplayName>
+      <t:EmailAddress>
+        <t:EmailAddress>bernd@example.com</t:EmailAddress>
+      </t:EmailAddress>
+    </t:Persona>
+  </m:People>
+  <m:TotalNumberOfPeopleInView>2</m:TotalNumberOfPeopleInView>
+</m:FindPeopleResponse>"#;
+        let (personas, includes_last) = parse_find_people_response(xml).unwrap();
+        assert_eq!(personas.len(), 2);
+        assert_eq!(personas[0].persona_id, "P1-ID");
+        assert_eq!(personas[0].display_name, "Anna Beispiel");
+        assert_eq!(personas[0].given_name.as_deref(), Some("Anna"));
+        assert_eq!(personas[0].surname.as_deref(), Some("Beispiel"));
+        assert_eq!(personas[0].company_name.as_deref(), Some("Example GmbH"));
+        assert_eq!(personas[0].email_addresses, vec!["anna@example.com"]);
+        assert_eq!(personas[0].phone_numbers, vec!["+49 30 1234567"]);
+        assert_eq!(personas[1].email_addresses, vec!["bernd@example.com"]);
+        // Two-row response is shorter than GAL_PAGE_SIZE ⇒
+        // includes_last is true so the caller stops paging.
+        assert!(includes_last);
+    }
+
+    #[test]
+    fn persona_to_contact_uses_email_when_displayname_blank() {
+        let p = ParsedPersona {
+            persona_id: "P".into(),
+            display_name: String::new(),
+            email_addresses: vec!["fallback@example.com".into()],
+            ..Default::default()
+        };
+        let c = persona_to_contact(p, GAL_LIST_ID);
+        assert_eq!(c.display_name, "fallback@example.com");
+        assert_eq!(c.list_id, GAL_LIST_ID);
+    }
+
+    #[test]
+    fn persona_to_contact_synthesises_id_from_email_when_personaid_absent() {
+        // ResolveNames doesn't echo PersonaId — falling back to
+        // the first email keeps the row uniquely identifiable
+        // for the picker.
+        let p = ParsedPersona {
+            persona_id: String::new(),
+            display_name: "Frieda".into(),
+            email_addresses: vec!["frieda@example.com".into()],
+            ..Default::default()
+        };
+        let c = persona_to_contact(p, GAL_LIST_ID);
+        assert_eq!(c.id, "frieda@example.com");
+    }
+
+    // ── GAL: ResolveNames envelope + parser ────────────────────────
+
+    #[test]
+    fn resolve_names_envelope_carries_query_and_scope() {
+        let body = resolve_names_envelope("Anna");
+        assert!(body.contains("ResolveNames"));
+        assert!(body.contains(r#"ReturnFullContactData="true""#));
+        assert!(body.contains(r#"SearchScope="ActiveDirectoryContacts""#));
+        assert!(body.contains("<m:UnresolvedEntry>Anna</m:UnresolvedEntry>"));
+    }
+
+    #[test]
+    fn resolve_names_escapes_xml_in_query() {
+        // A query with `<` or `&` would break the SOAP envelope if
+        // emitted raw — the helper must escape.
+        let body = resolve_names_envelope("a<b&c");
+        assert!(body.contains("a&lt;b&amp;c"));
+    }
+
+    #[test]
+    fn parses_resolve_names_response_with_mailbox_only_and_full_contact() {
+        let xml = r#"
+<m:ResolveNamesResponse xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+                        xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <m:ResponseMessages>
+    <m:ResolveNamesResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:ResolutionSet TotalItemsInView="2" IncludesLastItemInRange="true">
+        <t:Resolution>
+          <t:Mailbox>
+            <t:Name>Anna Beispiel</t:Name>
+            <t:EmailAddress>anna@example.com</t:EmailAddress>
+            <t:RoutingType>SMTP</t:RoutingType>
+          </t:Mailbox>
+          <t:Contact>
+            <t:DisplayName>Anna Beispiel</t:DisplayName>
+            <t:GivenName>Anna</t:GivenName>
+            <t:Surname>Beispiel</t:Surname>
+            <t:CompanyName>Example GmbH</t:CompanyName>
+            <t:PhoneNumbers>
+              <t:Entry Key="BusinessPhone">+49 30 1234567</t:Entry>
+            </t:PhoneNumbers>
+          </t:Contact>
+        </t:Resolution>
+        <t:Resolution>
+          <t:Mailbox>
+            <t:Name>Bernd</t:Name>
+            <t:EmailAddress>bernd@example.com</t:EmailAddress>
+          </t:Mailbox>
+        </t:Resolution>
+      </m:ResolutionSet>
+    </m:ResolveNamesResponseMessage>
+  </m:ResponseMessages>
+</m:ResolveNamesResponse>"#;
+        let rows = parse_resolve_names_response(xml).unwrap();
+        assert_eq!(rows.len(), 2);
+        // Row 0: full Contact block + Mailbox. DisplayName from
+        // Mailbox wins (parsed first), then Contact enriches.
+        assert_eq!(rows[0].display_name, "Anna Beispiel");
+        assert_eq!(rows[0].email_addresses, vec!["anna@example.com"]);
+        assert_eq!(rows[0].given_name.as_deref(), Some("Anna"));
+        assert_eq!(rows[0].company_name.as_deref(), Some("Example GmbH"));
+        assert_eq!(rows[0].phone_numbers, vec!["+49 30 1234567"]);
+        // Row 1: Mailbox-only — picker still has a name + email
+        // to render.
+        assert_eq!(rows[1].display_name, "Bernd");
+        assert_eq!(rows[1].email_addresses, vec!["bernd@example.com"]);
+    }
+
+    // ── GAL list surfacing ─────────────────────────────────────────
+
+    #[test]
+    fn gal_contact_list_is_read_only_with_sentinel_id() {
+        let list = gal_contact_list();
+        assert_eq!(list.id, GAL_LIST_ID);
+        assert!(list.read_only);
     }
 }

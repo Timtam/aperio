@@ -12,6 +12,7 @@ import { useTranslation } from 'react-i18next';
 import { useAnnouncer } from '../../a11y/Announcer';
 import { useDeferredLoading } from '../../hooks/useDeferredLoading';
 import type { Contact, ContactList } from '../../api/types';
+import { getContactListDisplayName } from '../../intl/contactList';
 import { useCalendarStore } from '../../state/CalendarStore';
 import { useContacts } from '../../state/useContacts';
 import { useDialogState } from '../../state/DialogState';
@@ -307,7 +308,7 @@ function buildEntries(
       kind: 'separator',
       key: `sep:${list.id}`,
       label: t('views.contacts.groupLabel', {
-        name: list.name,
+        name: getContactListDisplayName(list, t),
         count: bucket.length,
       }),
     });
@@ -363,6 +364,9 @@ function buildAriaLabel(
   const parts: string[] = [c.display_name];
   if (c.organization) parts.push(c.organization);
   if (c.emails[0]) parts.push(c.emails[0]);
-  if (list) parts.push(t('views.contacts.fromList', { list: list.name }));
+  if (list)
+    parts.push(
+      t('views.contacts.fromList', { list: getContactListDisplayName(list, t) }),
+    );
   return parts.join(', ');
 }

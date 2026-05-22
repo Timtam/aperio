@@ -354,6 +354,13 @@ impl ContactsFeature for EwsAdapter {
         let lists = self.list_contact_lists().await?;
         let mut out = Vec::new();
         for list in lists {
+            // Skip the synthetic GAL list here — enumerating it
+            // would pull the whole directory per keystroke. The
+            // `ResolveNames` fan-out below handles GAL hits in
+            // O(1) round-trips with server-side prefix matching.
+            if list.id == contacts::GAL_LIST_ID {
+                continue;
+            }
             // Tolerate per-list failures — a broken book shouldn't
             // mute the whole search.
             let Ok(rows) = self.get_contacts(&list.id).await else {
@@ -363,6 +370,23 @@ impl ContactsFeature for EwsAdapter {
                 if contacts::contact_matches(&c, &needle) {
                     out.push(c);
                 }
+            }
+        }
+        // GAL search runs alongside the personal-folder fan-out.
+        // ResolveNames does the matching server-side and caps the
+        // result set itself, so a typeahead "ma" against a
+        // 5000-entry directory is one round-trip with maybe 100
+        // rows back. Per-query failures (`ErrorNameResolutionNoResults`
+        // is the common one for nonsense queries) are logged and
+        // ignored — the personal-folder hits still surface.
+        match contacts::search_gal(&self.client, query).await {
+            Ok(gal_hits) => out.extend(gal_hits),
+            Err(err) => {
+                tracing::debug!(
+                    target: "cal_adapter_ews::gal",
+                    ?err,
+                    "GAL search returned no usable results",
+                );
             }
         }
         Ok(out)
