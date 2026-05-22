@@ -250,9 +250,12 @@ pub fn parse_multistatus(body: &str) -> CaldavResult<Vec<ResponseEntry>> {
                 }
             }
             Ok(Event::CData(t)) => {
-                // CDATA is rare in CalDAV but Nextcloud emits it for
-                // some XML-unsafe display names. The bytes are
-                // already unescaped.
+                // CDATA shows up in CalDAV occasionally (Nextcloud for
+                // XML-unsafe display names, iCloud for some
+                // `<c:calendar-data>` payloads). The bytes are already
+                // unescaped. `capture_text`'s CalendarData branch
+                // appends, so a body served as
+                // `Text + CData + Text` round-trips intact.
                 if let Ok(text) = std::str::from_utf8(t.as_ref()) {
                     capture_text(&mut current, text_target, text);
                 }
@@ -314,9 +317,27 @@ fn capture_text(current: &mut Option<ResponseEntry>, target: TextTarget, text: &
             // iCal needs CRLF/LF preserved as-is; only collapse the
             // leading/trailing whitespace the XML pretty-printer
             // adds around the element body.
+            //
+            // **Append, never overwrite.** quick_xml can deliver the
+            // body in several pieces — e.g. when the server wraps the
+            // iCal payload in a `<![CDATA[…]]>` block we see
+            // `Text("...whitespace...") + CData(body) +
+            //  Text("...whitespace...")`, and when the body contains
+            // an XML-escaped char like `&amp;` quick_xml emits
+            // `Text(before) + GeneralRef + Text(after)`. iCloud /
+            // Nextcloud are both fond of CDATA; without this every
+            // chunk after the first would wipe the previous one and
+            // we'd end up with a truncated VCALENDAR — typical visible
+            // symptom: events still appear (the SUMMARY survives in
+            // the last chunk) but the VALARM block from the first
+            // chunk is gone, so `parse_valarms` silently returns an
+            // empty list.
             let stripped = text.trim_matches(|c: char| c == ' ' || c == '\t');
             if !stripped.is_empty() {
-                entry.calendar_data = Some(stripped.to_string());
+                match &mut entry.calendar_data {
+                    Some(buf) => buf.push_str(stripped),
+                    None => entry.calendar_data = Some(stripped.to_string()),
+                }
             }
         }
         TextTarget::None => {}
@@ -548,6 +569,103 @@ END:VCALENDAR</c:calendar-data>
         let data = entries[0].calendar_data.as_deref().unwrap();
         assert!(data.contains("UID:event-1@aperio"));
         assert!(data.contains("DTSTART:20260520T080000Z"));
+    }
+
+    #[test]
+    fn calendar_data_survives_cdata_wrapping() {
+        // Regression: iCloud (and Nextcloud, sometimes) wrap the iCal
+        // body inside `<c:calendar-data><![CDATA[…]]></c:calendar-data>`.
+        // quick_xml emits that as a `Text(whitespace) + CData(body) +
+        // Text(whitespace)` triple. The old `capture_text`
+        // implementation **overwrote** `entry.calendar_data` on every
+        // text event, so the CData body got clipped — typically the
+        // last Text chunk (just whitespace) won and the iCal body was
+        // empty, which silently dropped every VALARM along with the
+        // rest of the VEVENT contents. The user-visible symptom: the
+        // calendar still showed events (because the SUMMARY survived
+        // in whatever chunk happened to land last), but every iCloud
+        // event came in with no reminders.
+        //
+        // Append-not-overwrite is the fix; this test pins it.
+        let body = r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+  <d:response>
+    <d:href>/calendars/alice/work/event-1.ics</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:getetag>"abc-123"</d:getetag>
+        <c:calendar-data>
+          <![CDATA[BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Apple Inc.//iCloud Calendar//EN
+BEGIN:VEVENT
+UID:icloud-event@example.com
+SUMMARY:Standup
+DTSTART:20260520T080000Z
+DTEND:20260520T083000Z
+BEGIN:VALARM
+ACTION:DISPLAY
+DESCRIPTION:Event reminder
+TRIGGER:-PT15M
+END:VALARM
+END:VEVENT
+END:VCALENDAR]]>
+        </c:calendar-data>
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+</d:multistatus>"#;
+        let entries = parse_multistatus(body).unwrap();
+        assert_eq!(entries.len(), 1);
+        let data = entries[0].calendar_data.as_deref().unwrap();
+        // Spot-check every section of the body — overwrite-bug would
+        // strip out at least one of these.
+        assert!(data.contains("BEGIN:VCALENDAR"), "missing VCALENDAR open");
+        assert!(data.contains("UID:icloud-event@example.com"), "missing UID");
+        assert!(data.contains("BEGIN:VALARM"), "missing VALARM open");
+        assert!(data.contains("TRIGGER:-PT15M"), "missing TRIGGER");
+        assert!(data.contains("END:VALARM"), "missing VALARM close");
+        assert!(data.contains("END:VCALENDAR"), "missing VCALENDAR close");
+    }
+
+    #[test]
+    fn calendar_data_survives_entity_reference_split() {
+        // Another way quick_xml splits text events: an inline entity
+        // reference (`&amp;` etc.) breaks the surrounding text into
+        // two `Event::Text` calls with a `GeneralRef` in between.
+        // Aperio's `capture_text` re-unescapes the surrounding chunks
+        // via `t.unescape()`, so the `&` is restored, and the append
+        // semantics keep the order intact.
+        let body = r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+  <d:response>
+    <d:href>/calendars/alice/work/event-2.ics</d:href>
+    <d:propstat>
+      <d:prop>
+        <c:calendar-data>BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:amp@example.com
+SUMMARY:Tom &amp; Jerry
+DTSTART:20260520T080000Z
+DTEND:20260520T083000Z
+BEGIN:VALARM
+ACTION:DISPLAY
+TRIGGER:-PT10M
+END:VALARM
+END:VEVENT
+END:VCALENDAR</c:calendar-data>
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+</d:multistatus>"#;
+        let entries = parse_multistatus(body).unwrap();
+        let data = entries[0].calendar_data.as_deref().unwrap();
+        assert!(data.contains("Tom & Jerry"), "entity reference dropped or split: {data}");
+        assert!(data.contains("BEGIN:VALARM"));
+        assert!(data.contains("TRIGGER:-PT10M"));
     }
 
     #[test]

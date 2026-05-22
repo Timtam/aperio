@@ -808,6 +808,55 @@ END:VCALENDAR\r
         assert_eq!(parse_iso_duration_to_minutes_before("-PT5X"), None);
     }
 
+    /// Real iCloud VEVENT bodies — paraphrased from a live capture —
+    /// include several X-WR-* / X-APPLE-* properties on the VEVENT
+    /// itself AND on the VALARM. Some carriers also folded the
+    /// DESCRIPTION line. The parser has to walk past all of that and
+    /// still pick out the relative TRIGGER on the inner VALARM.
+    #[test]
+    fn reads_real_world_icloud_vevent_with_extra_properties() {
+        let body = "BEGIN:VCALENDAR\r
+VERSION:2.0\r
+PRODID:-//Apple Inc.//iCloud Calendar//EN\r
+CALSCALE:GREGORIAN\r
+X-WR-CALNAME:Home\r
+BEGIN:VEVENT\r
+UID:91FA80F1-1234-5678-9ABC-DEF012345678\r
+DTSTAMP:20260520T060000Z\r
+CREATED:20260519T120000Z\r
+LAST-MODIFIED:20260519T120000Z\r
+SUMMARY:Zahnarzt\r
+DTSTART:20260520T080000Z\r
+DTEND:20260520T090000Z\r
+SEQUENCE:0\r
+X-APPLE-DEFAULT-ALARM:TRUE\r
+BEGIN:VALARM\r
+ACTION:DISPLAY\r
+DESCRIPTION:Event reminder\r
+TRIGGER:-PT15M\r
+UID:91FA80F1-AAAA-BBBB-CCCC-DDDDDDDDDDDD\r
+X-WR-ALARMUID:91FA80F1-AAAA-BBBB-CCCC-DDDDDDDDDDDD\r
+X-APPLE-DEFAULT-ALARM:TRUE\r
+END:VALARM\r
+END:VEVENT\r
+END:VCALENDAR\r
+";
+        let events = parse_calendar_data(body, "cal-1").unwrap();
+        assert_eq!(events.len(), 1, "expected one VEVENT");
+        let reminders = &events[0].reminders;
+        assert_eq!(
+            reminders.len(),
+            1,
+            "iCloud VALARM was dropped during parse",
+        );
+        match &reminders[0].kind {
+            ReminderKind::Relative { minutes_before } => {
+                assert_eq!(*minutes_before, 15);
+            }
+            other => panic!("expected Relative reminder, got {other:?}"),
+        }
+    }
+
     #[test]
     fn ignores_non_vevent_components() {
         let body = "BEGIN:VCALENDAR\r
