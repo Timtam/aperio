@@ -540,11 +540,11 @@ impl AdapterRegistry {
 
     /// Wire up an EWS (Exchange Web Services) account. Basic-auth-
     /// only for the first cut — the keychain holds the password,
-    /// the JSON config holds the endpoint URL + username. Both the
-    /// calendar and tasks surfaces are registered: Phase 6f.1 wired
-    /// up calendars; Phase 6f.2 added the tasks side, so the same
-    /// EwsAdapter instance now serves both feature traits (the
-    /// per-account listing caches stay coherent across them).
+    /// the JSON config holds the endpoint URL + username. All three
+    /// feature surfaces are registered against the same EwsAdapter
+    /// instance so the per-account listing caches stay coherent:
+    /// Phase 6f.1 wired up calendars, 6f.2 added tasks, 10e added
+    /// contacts (`IPF.Contact` folders + `<t:Contact>` items).
     fn register_ews(&self, account: &Account) -> Result<(), RegistryError> {
         let config: EwsAccountConfig = serde_json::from_str(&account.config_json)
             .map_err(|e| RegistryError::Config(e.to_string()))?;
@@ -566,7 +566,18 @@ impl AdapterRegistry {
         self.external_tasks
             .write()
             .expect("registry tasks poison")
-            .insert(account.id.clone(), arc as Arc<dyn TasksFeature>);
+            .insert(
+                account.id.clone(),
+                arc.clone() as Arc<dyn TasksFeature>,
+            );
+        // Phase 10e: the same EwsAdapter also serves ContactsFeature
+        // against the user's `IPF.Contact` folders. The per-account
+        // listing caches stay coherent across all three feature
+        // traits because they share the same Arc.
+        self.external_contacts
+            .write()
+            .expect("registry contacts poison")
+            .insert(account.id.clone(), arc as Arc<dyn ContactsFeature>);
         Ok(())
     }
 

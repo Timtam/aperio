@@ -1,4 +1,4 @@
-//! Exchange Web Services (EWS) adapter — Phase 6f.1a (read-only).
+//! Exchange Web Services (EWS) adapter.
 //!
 //! EWS is the SOAP-over-HTTP API Microsoft shipped for on-premise
 //! Exchange servers and a handful of Exchange-alike products
@@ -8,25 +8,30 @@
 //! stopped growing, but on-premise installs still rely on it as
 //! their default external interface.
 //!
-//! Phase 6f.1a scope:
+//! Feature surface (built up incrementally across phases):
 //!
-//!   - manual server URL (no `Autodiscover.svc` resolution yet)
+//!   - **Calendar** (Phase 6f.1a/1b/1c): `IPF.Appointment` folders,
+//!     `CalendarView` for date-windowed events, full CRUD including
+//!     recurring-master series editing.
+//!   - **Tasks** (Phase 6f.2): `IPF.Task` folders, `<t:Task>` items,
+//!     full CRUD without recurrence (recurring tasks are out of
+//!     scope for the first cut).
+//!   - **Contacts** (Phase 10e): `IPF.Contact` folders,
+//!     `<t:Contact>` items, full CRUD with indexed property
+//!     handling for emails / phone numbers and a client-side
+//!     fan-out for cross-list search.
+//!
+//! Auth + transport:
+//!
+//!   - Manual server URL (no `Autodiscover.svc` resolution yet)
 //!   - Basic auth (no NTLM, no OAuth-against-EWS for Online)
-//!   - `FindFolder` over `msgfolderroot` restricted to
-//!     `IPF.Appointment` → calendar list
-//!   - `FindItem` with `CalendarView` → events in a bounded window
-//!   - 5-minute listing-cache TTL, mirroring CalDAV / Google / Graph
-//!   - all write methods are `Unsupported`; Phase 6f.1b adds them
-//!
-//! `cal_core::Calendar.read_only` is `true` for every calendar listed
-//! here so the UI doesn't expose an Edit button on something we can't
-//! yet PUT back. The user-visible name override + rename flow still
-//! works via the local-override fallback that the command layer
-//! provides when `rename_calendar` returns `Unsupported`.
+//!   - 5-minute listing-cache TTL across all three feature surfaces,
+//!     mirroring CalDAV / Google / Graph
 
 pub mod api;
 pub mod auth;
 pub mod autodiscover;
+pub mod contacts;
 pub mod error;
 pub mod mapping;
 pub mod soap;
@@ -36,9 +41,10 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use cal_core::{
-    Adapter, AuthToken, Calendar, CalendarFeature, Capability, ContainerColor,
-    Credentials as CoreCredentials, DateRange, Error as CoreError, Event, FreeBusy,
-    NewEvent, NewTask, Result as CoreResult, Task, TaskList, TasksFeature,
+    Adapter, AuthToken, Calendar, CalendarFeature, Capability, Contact, ContactList,
+    ContactsFeature, ContainerColor, Credentials as CoreCredentials, DateRange,
+    Error as CoreError, Event, FreeBusy, NewContact, NewEvent, NewTask,
+    Result as CoreResult, Task, TaskList, TasksFeature,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -66,6 +72,8 @@ pub struct EwsAdapter {
     capabilities: Vec<Capability>,
     calendars_cache: Mutex<Option<(Vec<Calendar>, chrono::DateTime<chrono::Utc>)>>,
     task_lists_cache: Mutex<Option<(Vec<TaskList>, chrono::DateTime<chrono::Utc>)>>,
+    contact_lists_cache:
+        Mutex<Option<(Vec<ContactList>, chrono::DateTime<chrono::Utc>)>>,
     listing_ttl: chrono::Duration,
 }
 
@@ -82,9 +90,14 @@ impl EwsAdapter {
             .expect("reqwest client");
         Self {
             client: EwsClient::new(endpoint, credentials, http),
-            capabilities: vec![Capability::Calendar, Capability::Tasks],
+            capabilities: vec![
+                Capability::Calendar,
+                Capability::Tasks,
+                Capability::Contacts,
+            ],
             calendars_cache: Mutex::new(None),
             task_lists_cache: Mutex::new(None),
+            contact_lists_cache: Mutex::new(None),
             listing_ttl: chrono::Duration::minutes(5),
         }
     }
@@ -109,6 +122,17 @@ impl EwsAdapter {
 
     async fn cached_task_lists(&self) -> Option<Vec<TaskList>> {
         let guard = self.task_lists_cache.lock().await;
+        let (items, ts) = guard.as_ref()?;
+        let age = chrono::Utc::now().signed_duration_since(*ts);
+        if age >= chrono::Duration::zero() && age < self.listing_ttl {
+            Some(items.clone())
+        } else {
+            None
+        }
+    }
+
+    async fn cached_contact_lists(&self) -> Option<Vec<ContactList>> {
+        let guard = self.contact_lists_cache.lock().await;
         let (items, ts) = guard.as_ref()?;
         let age = chrono::Utc::now().signed_duration_since(*ts);
         if age >= chrono::Duration::zero() && age < self.listing_ttl {
@@ -291,6 +315,92 @@ impl TasksFeature for EwsAdapter {
         // the cached list so the next list_task_lists round-trip
         // picks up the new display name.
         *self.task_lists_cache.lock().await = None;
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl ContactsFeature for EwsAdapter {
+    async fn list_contact_lists(&self) -> CoreResult<Vec<ContactList>> {
+        if let Some(cached) = self.cached_contact_lists().await {
+            return Ok(cached);
+        }
+        let fresh = contacts::list_contact_lists(&self.client)
+            .await
+            .map_err(to_core_error)?;
+        *self.contact_lists_cache.lock().await =
+            Some((fresh.clone(), chrono::Utc::now()));
+        Ok(fresh)
+    }
+
+    async fn get_contacts(&self, list_id: &str) -> CoreResult<Vec<Contact>> {
+        contacts::get_contacts(&self.client, list_id)
+            .await
+            .map_err(to_core_error)
+    }
+
+    async fn search_contacts(&self, query: &str) -> CoreResult<Vec<Contact>> {
+        // EWS supports server-side `Restriction` queries but their
+        // shape varies across Exchange releases (CompanyName matching
+        // doesn't compose with EmailAddresses matching in older
+        // servers). Aperio's caches make the client-side grep cheap:
+        // list books → for each book fetch its contacts → filter.
+        // An empty / whitespace query short-circuits so a stray
+        // keystroke doesn't trigger network traffic.
+        let needle = query.trim().to_lowercase();
+        if needle.is_empty() {
+            return Ok(Vec::new());
+        }
+        let lists = self.list_contact_lists().await?;
+        let mut out = Vec::new();
+        for list in lists {
+            // Tolerate per-list failures — a broken book shouldn't
+            // mute the whole search.
+            let Ok(rows) = self.get_contacts(&list.id).await else {
+                continue;
+            };
+            for c in rows {
+                if contacts::contact_matches(&c, &needle) {
+                    out.push(c);
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    async fn create_contact(
+        &self,
+        list_id: &str,
+        contact: NewContact,
+    ) -> CoreResult<Contact> {
+        contacts::create_contact(&self.client, list_id, contact)
+            .await
+            .map_err(to_core_error)
+    }
+
+    async fn update_contact(&self, contact: Contact) -> CoreResult<Contact> {
+        contacts::update_contact(&self.client, &contact)
+            .await
+            .map_err(to_core_error)
+    }
+
+    async fn delete_contact(&self, contact_id: &str) -> CoreResult<()> {
+        contacts::delete_contact(&self.client, contact_id)
+            .await
+            .map_err(to_core_error)
+    }
+
+    async fn rename_contact_list(
+        &self,
+        list_id: &str,
+        new_name: &str,
+    ) -> CoreResult<()> {
+        contacts::rename_contact_list(&self.client, list_id, new_name)
+            .await
+            .map_err(to_core_error)?;
+        // Mirror the calendar / tasks pattern: drop the cache so the
+        // next list_contact_lists picks up the new display name.
+        *self.contact_lists_cache.lock().await = None;
         Ok(())
     }
 }
