@@ -36,8 +36,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use cal_adapter_local::SharedConn;
-use cal_core::{DateRange, Event, Reminder, ReminderKind, Task};
+use cal_core::{DateRange, Event, EventRecurrence, Reminder, ReminderKind, Task};
 use chrono::{DateTime, Duration as ChronoDuration, NaiveDateTime, NaiveTime, TimeZone, Utc};
+use rrule::{RRule, RRuleSet, Tz as RruleTz};
 use rusqlite::params;
 use serde::Serialize;
 use tauri::{AppHandle, Runtime};
@@ -240,7 +241,10 @@ impl ReminderScheduler {
         };
         let mut acc: Vec<Trigger> = Vec::new();
 
-        // Events
+        // Events — RRULE-expanded the same way the external adapter
+        // path is, so a recurring local event fires a reminder for
+        // each occurrence inside the window instead of only the
+        // series master.
         if let Ok(mut stmt) = conn.prepare(EVENT_QUERY) {
             if let Ok(mut rows) = stmt.query(params![]) {
                 while let Some(row) = rows.next().unwrap_or(None) {
@@ -248,6 +252,8 @@ impl ReminderScheduler {
                     let title: String = row.get(1).unwrap_or_default();
                     let start_str: String = row.get(2).unwrap_or_default();
                     let reminders_json: Option<String> = row.get(3).unwrap_or(None);
+                    let rrule: Option<String> = row.get(4).unwrap_or(None);
+                    let exceptions_json: Option<String> = row.get(5).unwrap_or(None);
                     let Some(reminders) = parse_reminders(reminders_json.as_deref())
                     else {
                         continue;
@@ -255,24 +261,30 @@ impl ReminderScheduler {
                     let Ok(start) = start_str.parse::<DateTime<Utc>>() else {
                         continue;
                     };
-                    for r in &reminders {
-                        if let Some(at) = trigger_time_for(&r.kind, start) {
-                            if at >= earliest && at <= latest {
-                                acc.push(Trigger {
-                                    item_id: id.clone(),
-                                    item_kind: ItemKind::Event,
-                                    title: title.clone(),
-                                    body: format_event_body(&start),
-                                    trigger_at: at,
-                                });
-                            }
-                        }
-                    }
+                    let recurrence = rrule.map(|rule| EventRecurrence {
+                        rrule: rule,
+                        exceptions: parse_rrule_exceptions(exceptions_json.as_deref()),
+                    });
+                    acc.extend(occurrence_triggers(
+                        &id,
+                        ItemKind::Event,
+                        &title,
+                        start,
+                        recurrence.as_ref(),
+                        &reminders,
+                        earliest,
+                        latest,
+                    ));
                 }
             }
         }
 
-        // Tasks
+        // Tasks — no recurrence expansion yet. Task recurrence on
+        // Aperio is a structured `TaskRecurrence` model rather than
+        // an RFC 5545 RRULE string, and expanding it needs its own
+        // helper. Recurring task reminders therefore still fire for
+        // the master row only; the UI's "complete-this-instance"
+        // flow is the workaround in the meantime.
         if let Ok(mut stmt) = conn.prepare(TASK_QUERY) {
             if let Ok(mut rows) = stmt.query(params![]) {
                 while let Some(row) = rows.next().unwrap_or(None) {
@@ -343,7 +355,15 @@ impl ReminderScheduler {
         let now = Utc::now();
         let from = now - ChronoDuration::days(EXTERNAL_PAST_DAYS);
         let to = now + ChronoDuration::days(EXTERNAL_FUTURE_DAYS);
-        let range = DateRange::new(from, to);
+        // The CalDAV `get_events` filter takes a DateRange in event-
+        // start coordinates. For recurring events we expand
+        // occurrences within the padded window below, but iCloud only
+        // returns the master if its own DTSTART falls inside this
+        // range — so we widen here too. A two-week pad either side
+        // covers Apple's longest reminder preset and matches
+        // `EVENT_EXPANSION_PAD`.
+        let (occ_from, occ_to) = occurrence_window(from, to);
+        let range = DateRange::new(occ_from, occ_to);
 
         let mut acc: Vec<Trigger> = Vec::new();
 
@@ -374,7 +394,7 @@ impl ReminderScheduler {
                         continue;
                     }
                 };
-                acc.extend(event_triggers(&events, &defaults));
+                acc.extend(event_triggers(&events, &defaults, from, to));
             }
         }
 
@@ -598,8 +618,15 @@ const EXTERNAL_TRIGGERS_TTL: Duration = Duration::from_secs(5 * 60);
 /// the cache TTL so the next loop runs with a fresh external snapshot.
 const EMPTY_HORIZON_RETRY: Duration = EXTERNAL_TRIGGERS_TTL;
 
-/// SELECT id, title, start_utc, reminders FROM events
-const EVENT_QUERY: &str = "SELECT id, title, start_utc, reminders FROM events";
+/// SELECT id, title, start_utc, reminders, rrule, rrule_exceptions FROM events
+///
+/// The `rrule` + `rrule_exceptions` columns let the scheduler expand
+/// recurring events into per-occurrence reminders instead of seeing
+/// only the master's start. Non-recurring events still work — both
+/// columns come back NULL and the expansion helper degrades to a
+/// single-occurrence vector containing the master start.
+const EVENT_QUERY: &str =
+    "SELECT id, title, start_utc, reminders, rrule, rrule_exceptions FROM events";
 
 /// SELECT id, title, scheduled_date, deadline_date, deadline_time, reminders FROM tasks
 const TASK_QUERY: &str =
@@ -609,7 +636,20 @@ const TASK_QUERY: &str =
 /// `reminders` on an event falls back to the calendar's stored default
 /// reminder list (mirrors iOS's "Default Alert Times" behaviour — the
 /// VALARM isn't on the wire, the user wants it applied locally).
-fn event_triggers(events: &[Event], calendar_defaults: &[Reminder]) -> Vec<Trigger> {
+///
+/// Recurring events (`event.recurrence: Some(...)`) get expanded
+/// inside `[window_start, window_end]` so every occurrence whose
+/// reminder fires in the scheduler horizon emits its own trigger,
+/// not just the series master. EXDATE exceptions from
+/// `EventRecurrence.exceptions` are honoured; the rest of the
+/// occurrence list flows back through the same trigger emission
+/// loop a non-recurring event would.
+fn event_triggers(
+    events: &[Event],
+    calendar_defaults: &[Reminder],
+    window_start: DateTime<Utc>,
+    window_end: DateTime<Utc>,
+) -> Vec<Trigger> {
     let mut out = Vec::new();
     for ev in events {
         let effective: &[Reminder] = if ev.reminders.is_empty() {
@@ -620,20 +660,177 @@ fn event_triggers(events: &[Event], calendar_defaults: &[Reminder]) -> Vec<Trigg
         if effective.is_empty() {
             continue;
         }
-        for r in effective {
-            let Some(at) = trigger_time_for(&r.kind, ev.start) else {
+        out.extend(occurrence_triggers(
+            &ev.id,
+            ItemKind::Event,
+            &ev.title,
+            ev.start,
+            ev.recurrence.as_ref(),
+            effective,
+            window_start,
+            window_end,
+        ));
+    }
+    out
+}
+
+/// The single primitive every event-trigger emission path funnels
+/// through. Given an item's master start + (optional) recurrence
+/// spec + reminders, produce every Trigger whose fire time falls
+/// inside `[window_start, window_end]`.
+///
+/// Recurrence handling: when `recurrence` is `Some`, the master's
+/// `start` becomes the DTSTART for an RRULE expansion bounded by a
+/// padded version of the window (see `event_expansion_window`).
+/// Without recurrence the function emits the single master start.
+/// Either way, each occurrence + each reminder produces one Trigger.
+fn occurrence_triggers(
+    item_id: &str,
+    item_kind: ItemKind,
+    title: &str,
+    master_start: DateTime<Utc>,
+    recurrence: Option<&EventRecurrence>,
+    reminders: &[Reminder],
+    window_start: DateTime<Utc>,
+    window_end: DateTime<Utc>,
+) -> Vec<Trigger> {
+    let starts: Vec<DateTime<Utc>> = match recurrence {
+        Some(rec) => expand_occurrences(
+            master_start,
+            &rec.rrule,
+            &rec.exceptions,
+            window_start,
+            window_end,
+        ),
+        None => vec![master_start],
+    };
+
+    let mut out = Vec::with_capacity(starts.len() * reminders.len());
+    for occ_start in starts {
+        for r in reminders {
+            let Some(at) = trigger_time_for(&r.kind, occ_start) else {
                 continue;
             };
+            if at < window_start || at > window_end {
+                // Bound the emission to the requested window so a
+                // weekly series doesn't fill `out` with months of
+                // out-of-range triggers — the caller filters again,
+                // but doing it here keeps the cache + sort small.
+                continue;
+            }
             out.push(Trigger {
-                item_id: ev.id.clone(),
-                item_kind: ItemKind::Event,
-                title: ev.title.clone(),
-                body: format_event_body(&ev.start),
+                item_id: item_id.to_string(),
+                item_kind,
+                title: title.to_string(),
+                body: format_event_body(&occ_start),
                 trigger_at: at,
             });
         }
     }
     out
+}
+
+/// Expand an RRULE into the occurrence list within `[start_bound,
+/// end_bound]`. EXDATEs from the master are honoured. Robustness
+/// notes:
+///
+///   - `start_bound`/`end_bound` here are the OCCURRENCE-start
+///     bounds, not the reminder-fire bounds. Callers pad the
+///     reminder window outward by `EVENT_EXPANSION_PAD` to cover
+///     the maximum sensible reminder lead time (one week).
+///   - A bad / unparseable RRULE degrades to the single master
+///     start so the user still gets a reminder for the first
+///     occurrence — same fall-through the JS expansion uses.
+///   - `RRULESET_LIMIT` caps unbounded series (e.g. "weekly
+///     forever") so a runaway rule can't allocate gigabytes.
+fn expand_occurrences(
+    dt_start_utc: DateTime<Utc>,
+    rrule_body: &str,
+    exceptions: &[DateTime<Utc>],
+    start_bound: DateTime<Utc>,
+    end_bound: DateTime<Utc>,
+) -> Vec<DateTime<Utc>> {
+    let trimmed = rrule_body.trim();
+    let body = trimmed.strip_prefix("RRULE:").unwrap_or(trimmed);
+
+    let unvalidated: RRule<rrule::Unvalidated> = match body.parse() {
+        Ok(r) => r,
+        Err(err) => {
+            warn!(
+                rrule = %body,
+                ?err,
+                "failed to parse RRULE during reminder expansion; falling back to master start",
+            );
+            return vec![dt_start_utc];
+        }
+    };
+
+    let dt_start = dt_start_utc.with_timezone(&RruleTz::UTC);
+    let validated = match unvalidated.validate(dt_start) {
+        Ok(v) => v,
+        Err(err) => {
+            warn!(
+                rrule = %body,
+                ?err,
+                "RRULE failed validation; falling back to master start",
+            );
+            return vec![dt_start_utc];
+        }
+    };
+
+    let mut set = RRuleSet::new(dt_start).rrule(validated);
+    for ex in exceptions {
+        set = set.exdate(ex.with_timezone(&RruleTz::UTC));
+    }
+    set = set
+        .after(start_bound.with_timezone(&RruleTz::UTC))
+        .before(end_bound.with_timezone(&RruleTz::UTC));
+
+    let result = set.all(RRULESET_LIMIT);
+    if result.limited {
+        warn!(
+            rrule = %body,
+            limit = RRULESET_LIMIT,
+            "RRULE expansion hit the scheduler safety limit",
+        );
+    }
+    result
+        .dates
+        .into_iter()
+        .map(|dt| dt.with_timezone(&Utc))
+        .collect()
+}
+
+/// Hard cap on the number of occurrences we'll materialise from a
+/// single RRULE — protects against unbounded rules like "every
+/// minute forever" pinned to a stale start date. 500 covers a
+/// 10-year weekly series, well above anything a calendar UI emits
+/// in practice.
+const RRULESET_LIMIT: u16 = 500;
+
+/// Buffer added around the reminder window when expanding RRULE
+/// occurrences. A reminder fires `δ` BEFORE its event; an event
+/// starting at `window_end + δ` still has its reminder firing
+/// inside the window. The buffer needs to cover the largest
+/// reasonable `δ`. One week is generous — Apple's longest preset
+/// is two weeks, but most relative reminders sit in the
+/// minutes-to-hours range. A tighter bound would silently miss
+/// long-lead reminders; a wider one just costs a few extra
+/// occurrences to iterate.
+const EVENT_EXPANSION_PAD: ChronoDuration = ChronoDuration::days(14);
+
+/// Convenience: derive the occurrence-expansion bounds from the
+/// reminder-fire window. Same value used by every collect path so
+/// recurring events stay in sync between local SQL and external
+/// adapter scans.
+fn occurrence_window(
+    window_start: DateTime<Utc>,
+    window_end: DateTime<Utc>,
+) -> (DateTime<Utc>, DateTime<Utc>) {
+    (
+        window_start - EVENT_EXPANSION_PAD,
+        window_end + EVENT_EXPANSION_PAD,
+    )
 }
 
 /// Translate a batch of external tasks into Trigger entries. Same
@@ -707,6 +904,21 @@ fn parse_reminders(json: Option<&str>) -> Option<Vec<Reminder>> {
         Ok(list) if !list.is_empty() => Some(list),
         _ => None,
     }
+}
+
+/// Parse the `events.rrule_exceptions` JSON column into a list of
+/// UTC EXDATE timestamps. Empty / NULL / unparseable falls through
+/// to an empty Vec — the caller still expands the rest of the rule
+/// normally, so a malformed exceptions field never blocks all
+/// reminders on the row.
+fn parse_rrule_exceptions(json: Option<&str>) -> Vec<DateTime<Utc>> {
+    let Some(raw) = json else {
+        return Vec::new();
+    };
+    if raw.is_empty() {
+        return Vec::new();
+    }
+    serde_json::from_str::<Vec<DateTime<Utc>>>(raw).unwrap_or_default()
 }
 
 fn task_due_time(
@@ -811,13 +1023,25 @@ mod tests {
         }
     }
 
+    /// Generous test window that comfortably contains every
+    /// fixture's start date — `event_triggers` filters to it, so
+    /// tests that don't care about windowing use this as a no-op
+    /// pair.
+    fn wide_window() -> (DateTime<Utc>, DateTime<Utc>) {
+        (
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            Utc.with_ymd_and_hms(2027, 1, 1, 0, 0, 0).unwrap(),
+        )
+    }
+
     #[test]
     fn event_with_explicit_reminder_uses_it_and_ignores_calendar_default() {
         // The event carries its own VALARM-equivalent. Calendar
         // defaults stay defaults — they only matter when the event's
         // reminder list is empty.
         let ev = make_event(vec![rel(15)]);
-        let triggers = event_triggers(&[ev], &[rel(60)]);
+        let (ws, we) = wide_window();
+        let triggers = event_triggers(&[ev], &[rel(60)], ws, we);
         assert_eq!(triggers.len(), 1);
         // 8:00 start − 15 min = 7:45.
         assert_eq!(
@@ -833,7 +1057,8 @@ mod tests {
         // in Settings → Kalender, the trigger fires from the
         // default.
         let ev = make_event(Vec::new());
-        let triggers = event_triggers(&[ev], &[rel(15)]);
+        let (ws, we) = wide_window();
+        let triggers = event_triggers(&[ev], &[rel(15)], ws, we);
         assert_eq!(triggers.len(), 1);
         assert_eq!(
             triggers[0].trigger_at,
@@ -844,15 +1069,113 @@ mod tests {
     #[test]
     fn event_with_no_reminders_and_no_default_emits_nothing() {
         let ev = make_event(Vec::new());
-        let triggers = event_triggers(&[ev], &[]);
+        let (ws, we) = wide_window();
+        let triggers = event_triggers(&[ev], &[], ws, we);
         assert!(triggers.is_empty());
     }
 
     #[test]
     fn event_with_multiple_defaults_emits_one_trigger_each() {
         let ev = make_event(Vec::new());
-        let triggers = event_triggers(&[ev], &[rel(60), rel(10)]);
+        let (ws, we) = wide_window();
+        let triggers = event_triggers(&[ev], &[rel(60), rel(10)], ws, we);
         assert_eq!(triggers.len(), 2);
+    }
+
+    fn make_recurring_event(rrule: &str, exceptions: Vec<DateTime<Utc>>) -> Event {
+        let mut ev = make_event(vec![rel(15)]);
+        ev.recurrence = Some(EventRecurrence {
+            rrule: rrule.to_string(),
+            exceptions,
+        });
+        ev
+    }
+
+    #[test]
+    fn recurring_event_emits_a_trigger_per_occurrence_in_window() {
+        // Weekly Wednesday meeting (DTSTART 2026-05-20 is also a
+        // Wednesday). Within a four-week window we expect four
+        // occurrences and therefore four triggers — one per week,
+        // each firing 15 minutes before the 08:00 start.
+        let ev = make_recurring_event("FREQ=WEEKLY;BYDAY=WE", Vec::new());
+        let triggers = event_triggers(
+            &[ev],
+            &[],
+            Utc.with_ymd_and_hms(2026, 5, 19, 0, 0, 0).unwrap(),
+            Utc.with_ymd_and_hms(2026, 6, 17, 0, 0, 0).unwrap(),
+        );
+        assert_eq!(triggers.len(), 4, "expected 4 weekly occurrences");
+        // First occurrence's reminder: 2026-05-20 07:45.
+        assert_eq!(
+            triggers[0].trigger_at,
+            Utc.with_ymd_and_hms(2026, 5, 20, 7, 45, 0).unwrap(),
+        );
+        // Last occurrence's reminder: 2026-06-10 07:45.
+        assert_eq!(
+            triggers[3].trigger_at,
+            Utc.with_ymd_and_hms(2026, 6, 10, 7, 45, 0).unwrap(),
+        );
+    }
+
+    #[test]
+    fn recurring_event_honours_exdate_exceptions() {
+        // Same weekly series, but the user excluded the 2026-05-27
+        // occurrence (e.g. via the "delete only this occurrence"
+        // flow). Triggers for that date must NOT appear.
+        let ev = make_recurring_event(
+            "FREQ=WEEKLY;BYDAY=WE",
+            vec![Utc.with_ymd_and_hms(2026, 5, 27, 8, 0, 0).unwrap()],
+        );
+        let triggers = event_triggers(
+            &[ev],
+            &[],
+            Utc.with_ymd_and_hms(2026, 5, 19, 0, 0, 0).unwrap(),
+            Utc.with_ymd_and_hms(2026, 6, 4, 0, 0, 0).unwrap(),
+        );
+        // Master + week 3 expected (week 2 skipped).
+        let dates: Vec<_> = triggers
+            .iter()
+            .map(|t| t.trigger_at.date_naive())
+            .collect();
+        assert!(dates.contains(&chrono::NaiveDate::from_ymd_opt(2026, 5, 20).unwrap()));
+        assert!(!dates.contains(&chrono::NaiveDate::from_ymd_opt(2026, 5, 27).unwrap()));
+        assert!(dates.contains(&chrono::NaiveDate::from_ymd_opt(2026, 6, 3).unwrap()));
+    }
+
+    #[test]
+    fn recurring_event_falls_back_to_master_on_bad_rrule() {
+        // Garbage RRULE — the expansion helper warn-logs and
+        // degrades to the master start. The first occurrence's
+        // reminder still fires; subsequent ones simply don't. Better
+        // than dropping the row entirely.
+        let ev = make_recurring_event("BOGUS=NOPE", Vec::new());
+        let triggers = event_triggers(
+            &[ev],
+            &[],
+            Utc.with_ymd_and_hms(2026, 5, 19, 0, 0, 0).unwrap(),
+            Utc.with_ymd_and_hms(2026, 6, 4, 0, 0, 0).unwrap(),
+        );
+        assert_eq!(triggers.len(), 1);
+        assert_eq!(
+            triggers[0].trigger_at,
+            Utc.with_ymd_and_hms(2026, 5, 20, 7, 45, 0).unwrap(),
+        );
+    }
+
+    #[test]
+    fn recurring_event_window_filter_excludes_out_of_range_occurrences() {
+        // Weekly series, but the window is "next two weeks only".
+        // Occurrences outside that window must NOT emit triggers
+        // even if the RRULE rolls them out — keeps cache sizes
+        // bounded for daily or hourly rules.
+        let ev = make_recurring_event("FREQ=WEEKLY;BYDAY=WE", Vec::new());
+        let triggers = event_triggers(
+            &[ev],
+            &[],
+            Utc.with_ymd_and_hms(2026, 5, 19, 0, 0, 0).unwrap(),
+            Utc.with_ymd_and_hms(2026, 6, 3, 0, 0, 0).unwrap(),
+        );
+        assert_eq!(triggers.len(), 2, "only the first two weekly occurrences");
     }
 
     #[test]

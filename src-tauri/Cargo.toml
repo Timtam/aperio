@@ -37,10 +37,12 @@ cal-adapter-ews = { path = "../crates/cal-adapter-ews" }
 
 rusqlite.workspace = true
 chrono.workspace = true
+chrono-tz.workspace = true
 async-trait.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
 keyring.workspace = true
+rrule.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 # Setting the process AppUserModelID at startup + writing the AUMID

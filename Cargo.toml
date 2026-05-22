@@ -68,6 +68,11 @@ chrono-tz = "0.9"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 quick-xml = { version = "0.36", features = ["serialize"] }
 icalendar = "0.16"
+# RRULE expansion (RFC 5545) for the backend reminder scheduler so
+# recurring events fire reminders for every occurrence, not just the
+# series master. Frontend uses rrule.js in the renderer; the Rust
+# side stays self-contained.
+rrule = "0.14"
 
 # Auth
 oauth2 = "4"
