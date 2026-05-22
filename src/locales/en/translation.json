@@ -798,7 +798,14 @@
       "groupBadgeAria_zero": "Distribution list, empty",
       "groupBadgeAria_one": "Distribution list with 1 member",
       "groupBadgeAria_other": "Distribution list with {{count}} members",
-      "galListName": "Global Address List"
+      "galListName": "Global Address List",
+      "searchLabel": "Search contacts",
+      "searchPlaceholder": "Type a name or email …",
+      "searchHint": "Searches your address books plus connected directories like the Global Address List.",
+      "searching": "Searching directory …",
+      "searchEmpty": "No contacts found for \"{{query}}\".",
+      "searchResults_one": "1 result",
+      "searchResults_other": "{{count}} results"
     }
   }
 }

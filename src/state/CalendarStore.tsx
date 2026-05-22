@@ -41,6 +41,7 @@ const STORAGE_KEY = 'aperio.selection.v1';
 interface PersistedSelection {
   calendars?: string[];
   taskLists?: string[];
+  contactLists?: string[];
 }
 
 interface CalendarStoreState {
@@ -54,12 +55,13 @@ interface CalendarStoreState {
   toggleTaskList: (id: string) => void;
   refreshTaskLists: () => Promise<void>;
 
-  /** Address books (DESIGN.md §10). Contacts don't use a sidebar
-   *  selection set yet — `useContacts` always reads every book —
-   *  so there's no `selectedContactListIds` companion. A future
-   *  polish can add one in parallel with the calendar / task one
-   *  if the "show only this book" workflow turns out to matter. */
+  /** Address books (DESIGN.md §10). Each list has its own
+   *  selection toggle so users can exclude e.g. the big read-only
+   *  Global Address List from the contacts panel listing without
+   *  hiding their personal books. */
   contactLists: ContactList[];
+  selectedContactListIds: Set<string>;
+  toggleContactList: (id: string) => void;
   refreshContactLists: () => Promise<void>;
 
   colorLabels: ColorLabel[];
@@ -106,6 +108,9 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
   const [selectedTaskListIds, setSelectedTaskListIds] = useState<Set<string>>(
     () => new Set(readPersisted().taskLists ?? []),
   );
+  const [selectedContactListIds, setSelectedContactListIds] = useState<
+    Set<string>
+  >(() => new Set(readPersisted().contactLists ?? []));
   const [loading, setLoading] = useState(true);
 
   const refreshCalendars = useCallback(async () => {
@@ -123,6 +128,17 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
   const refreshContactLists = useCallback(async () => {
     const list = await listContactLists();
     setContactLists(list);
+    // Contact lists have a `read_only` flag; on first run the
+    // reconciler defaults to "every writable list selected" so
+    // a fresh user sees their personal address books without
+    // having to tick anything. Read-only lists (the EWS Global
+    // Address List is the big one — 1000+ entries via a slow
+    // ResolveNames walk) are opt-in: the user enables them
+    // explicitly via the sidebar checkbox once, and the
+    // selection persists from then on.
+    setSelectedContactListIds((prev) =>
+      reconcileContactSelection(prev, list),
+    );
   }, []);
 
   const refreshColorLabels = useCallback(async () => {
@@ -167,8 +183,9 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
     writePersisted({
       calendars: [...selectedCalendarIds],
       taskLists: [...selectedTaskListIds],
+      contactLists: [...selectedContactListIds],
     });
-  }, [selectedCalendarIds, selectedTaskListIds]);
+  }, [selectedCalendarIds, selectedTaskListIds, selectedContactListIds]);
 
   const toggleCalendar = useCallback((id: string) => {
     setSelectedCalendarIds((prev) => toggleSet(prev, id));
@@ -176,6 +193,10 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
 
   const toggleTaskList = useCallback((id: string) => {
     setSelectedTaskListIds((prev) => toggleSet(prev, id));
+  }, []);
+
+  const toggleContactList = useCallback((id: string) => {
+    setSelectedContactListIds((prev) => toggleSet(prev, id));
   }, []);
 
   const value = useMemo<CalendarStoreState>(
@@ -189,6 +210,8 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
       toggleTaskList,
       refreshTaskLists,
       contactLists,
+      selectedContactListIds,
+      toggleContactList,
       refreshContactLists,
       colorLabels,
       refreshColorLabels,
@@ -206,6 +229,8 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
       toggleTaskList,
       refreshTaskLists,
       contactLists,
+      selectedContactListIds,
+      toggleContactList,
       refreshContactLists,
       colorLabels,
       refreshColorLabels,
@@ -245,6 +270,29 @@ function reconcileSelection<T extends { id: string }>(
   if (prev.size === 0) {
     return valid;
   }
+  const next = new Set<string>();
+  prev.forEach((id) => {
+    if (valid.has(id)) next.add(id);
+  });
+  return next;
+}
+
+/**
+ * Variant of `reconcileSelection` that respects the `read_only`
+ * flag when defaulting first-run selection. Read-only lists
+ * (the EWS GAL) are heavy to enumerate, so they're opt-in
+ * rather than auto-selected. After the user has manually
+ * enabled one, it's persisted like any other and the regular
+ * "remove ids that no longer exist" pass takes over.
+ */
+function reconcileContactSelection(
+  prev: Set<string>,
+  list: ContactList[],
+): Set<string> {
+  if (prev.size === 0) {
+    return new Set(list.filter((l) => !l.read_only).map((l) => l.id));
+  }
+  const valid = new Set(list.map((l) => l.id));
   const next = new Set<string>();
   prev.forEach((id) => {
     if (valid.has(id)) next.add(id);

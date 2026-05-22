@@ -12,6 +12,7 @@ description = "Aperio Exchange Web Services (EWS) adapter — SOAP-over-HTTP cli
 async-trait.workspace = true
 cal-core.workspace = true
 chrono.workspace = true
+futures.workspace = true
 quick-xml.workspace = true
 reqwest.workspace = true
 serde.workspace = true

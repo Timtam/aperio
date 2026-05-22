@@ -798,7 +798,14 @@
       "groupBadgeAria_zero": "Verteilerliste, leer",
       "groupBadgeAria_one": "Verteilerliste mit 1 Mitglied",
       "groupBadgeAria_other": "Verteilerliste mit {{count}} Mitgliedern",
-      "galListName": "Globale Adressliste"
+      "galListName": "Globale Adressliste",
+      "searchLabel": "Kontakte durchsuchen",
+      "searchPlaceholder": "Name oder E-Mail eingeben …",
+      "searchHint": "Durchsucht deine Adressbücher plus verbundene Verzeichnisse wie die Globale Adressliste.",
+      "searching": "Verzeichnis wird durchsucht …",
+      "searchEmpty": "Keine Kontakte für „{{query}}\" gefunden.",
+      "searchResults_one": "1 Treffer",
+      "searchResults_other": "{{count}} Treffer"
     }
   }
 }

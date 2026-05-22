@@ -120,14 +120,24 @@ pub fn find_items_in_range(
 /// the body is a non-fault response — the caller continues parsing
 /// the operation-specific payload.
 pub fn check_for_fault(body: &str) -> EwsResult<()> {
-    // EWS faults come in two flavours:
+    // EWS faults come in three flavours:
     //   - `<soap:Fault>` for transport-level problems (auth failed,
-    //     server error)
+    //     server error).
     //   - `<m:*Response>` with `<m:ResponseMessages>` containing one
     //     or more `<m:*ResponseMessage ResponseClass="Error">` for
-    //     per-operation failures
+    //     per-operation failures (the dominant shape: FindFolder,
+    //     FindItem, GetItem, …).
+    //   - `<m:*Response ResponseClass="Error">` *itself* — FindPeople
+    //     is the outlier here, its response body has neither a
+    //     `<m:ResponseMessages>` wrapper nor a `*ResponseMessage`
+    //     element. The ResponseClass attribute lives directly on the
+    //     `<FindPeopleResponse>` tag. Without catching this case the
+    //     caller would see `Ok([])` for an ErrorInvalidOperation
+    //     (e.g. `directory` distinguished folder is rejected on
+    //     on-prem Exchange) and silently render an empty list.
     //
-    // Both should bubble out as `EwsError::Soap`. We check for both.
+    // All three bubble out as `EwsError::Soap`. We check for all of
+    // them.
     let mut reader = Reader::from_str(body);
     reader.config_mut().trim_text(true);
     let mut buf = Vec::new();
@@ -139,6 +149,13 @@ pub fn check_for_fault(body: &str) -> EwsResult<()> {
     let mut error_code = String::new();
     let mut error_text = String::new();
     let mut inside_response_message = false;
+    // Top-level `<*Response ResponseClass="Error">` mode — used by
+    // FindPeople and a handful of other singletons that don't wrap
+    // their per-call result in `<m:ResponseMessages>`. We track the
+    // depth so a child element (e.g. `<ResponseCode>` inside the
+    // outer Response tag) routes its text into the right buffer
+    // without colliding with the per-ResponseMessage path above.
+    let mut inside_response_wrapper_error = false;
 
     loop {
         match reader.read_event_into(&mut buf) {
@@ -168,7 +185,25 @@ pub fn check_for_fault(body: &str) -> EwsResult<()> {
                         }
                     }
                 }
-                if inside_response_message && error_class_seen {
+                // Top-level `<*Response ResponseClass="Error">` —
+                // the FindPeople shape. Match any element ending
+                // in `response` (so it covers FindPeopleResponse,
+                // GetAttachmentResponse, etc.) but NOT the inner
+                // ResponseMessage (those are handled above and end
+                // in `responsemessage`).
+                if local.ends_with(b"response") && !local.ends_with(b"responsemessage") {
+                    for a in e.attributes().flatten() {
+                        if a.key.as_ref().eq_ignore_ascii_case(b"ResponseClass")
+                            && a.value.as_ref().eq_ignore_ascii_case(b"Error")
+                        {
+                            inside_response_wrapper_error = true;
+                            error_class_seen = true;
+                        }
+                    }
+                }
+                if (inside_response_message || inside_response_wrapper_error)
+                    && error_class_seen
+                {
                     if local == b"messagetext" {
                         current_text_target = Some("et");
                     } else if local == b"responsecode" {
@@ -185,7 +220,7 @@ pub fn check_for_fault(body: &str) -> EwsResult<()> {
                     // Bail out the moment we see the first error
                     // ResponseMessage; subsequent ones would just
                     // shadow this one with the same condition.
-                    if error_class_seen {
+                    if error_class_seen && inside_response_message {
                         return Err(EwsError::Soap {
                             code: if error_code.is_empty() {
                                 "Unknown".into()
@@ -200,6 +235,26 @@ pub fn check_for_fault(body: &str) -> EwsResult<()> {
                         });
                     }
                     inside_response_message = false;
+                }
+                if local.ends_with(b"response") && !local.ends_with(b"responsemessage") {
+                    // Top-level wrapper closes: if it was tagged
+                    // Error, bail out the same way the per-message
+                    // branch does.
+                    if inside_response_wrapper_error {
+                        return Err(EwsError::Soap {
+                            code: if error_code.is_empty() {
+                                "Unknown".into()
+                            } else {
+                                error_code.clone()
+                            },
+                            message: if error_text.is_empty() {
+                                "EWS returned an Error response".into()
+                            } else {
+                                error_text.clone()
+                            },
+                        });
+                    }
+                    inside_response_wrapper_error = false;
                 }
                 current_text_target = None;
             }
@@ -517,6 +572,37 @@ mod tests {
             EwsError::Soap { code, message } => {
                 assert_eq!(code, "ErrorAccessDenied");
                 assert_eq!(message, "Access is denied.");
+            }
+            other => panic!("expected Soap error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn detects_top_level_response_error_class_findpeople_style() {
+        // FindPeople doesn't wrap its response in ResponseMessages —
+        // the ResponseClass attribute lives on the outer
+        // `<FindPeopleResponse>` tag. Without this branch the
+        // caller saw `Ok([])` for an ErrorInvalidOperation against
+        // an on-prem Exchange that didn't recognise the
+        // `directory` distinguished folder. Real wire body from
+        // mail.hs-anhalt.de (Exchange 2019 CU14), reduced.
+        let body = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
+  <s:Body>
+    <FindPeopleResponse ResponseClass="Error"
+                        xmlns="http://schemas.microsoft.com/exchange/services/2006/messages">
+      <MessageText>Der Distinguished Name des Ordners wurde nicht erkannt.</MessageText>
+      <ResponseCode>ErrorInvalidOperation</ResponseCode>
+      <DescriptiveLinkKey>0</DescriptiveLinkKey>
+      <TotalNumberOfPeopleInView>0</TotalNumberOfPeopleInView>
+    </FindPeopleResponse>
+  </s:Body>
+</s:Envelope>"#;
+        let err = check_for_fault(body).unwrap_err();
+        match err {
+            EwsError::Soap { code, message } => {
+                assert_eq!(code, "ErrorInvalidOperation");
+                assert!(message.contains("Distinguished Name"));
             }
             other => panic!("expected Soap error, got {other:?}"),
         }

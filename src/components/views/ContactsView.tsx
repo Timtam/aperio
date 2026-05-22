@@ -3,13 +3,13 @@ import {
   useEffect,
   useId,
   useMemo,
-  useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { useAnnouncer } from '../../a11y/Announcer';
+import { searchContacts as apiSearchContacts } from '../../api/client';
+import { useAutoFocus } from '../../hooks/useAutoFocus';
 import { useDeferredLoading } from '../../hooks/useDeferredLoading';
 import type { Contact, ContactList } from '../../api/types';
 import { getContactListDisplayName } from '../../intl/contactList';
@@ -29,32 +29,105 @@ import { useDialogState } from '../../state/DialogState';
  *   - Enter opens the dialog in edit mode
  *   - Insert / Ctrl+N opens the dialog in create mode
  *
- * Search and the attendees autocomplete (§10.4) come in later
- * phases; this view is the catalog screen that lets the user pile
- * contacts in / out manually first.
+ * The earlier hard-freeze on big directory listings (~2000 GAL
+ * entries) was driven by `aria-setsize` + `content-visibility:
+ * auto` on the rendered options — Chromium's accessibility tree
+ * and NVDA's virtual cursor combined poorly with those hooks.
+ * With both removed, a plain "render every entry" listbox holds
+ * up; this file used to ship a sliding window + IntersectionObserver
+ * sentinel + progressive reveal hook to limit DOM size, but they
+ * each introduced their own re-render storms (reveal-restart
+ * loops, observer churn on every reveal tick) and the resulting
+ * post-load flicker was worse than the original load cost.
+ * The search input above the list is the practical fast path when
+ * the user is hunting for a specific person.
  */
+
 export function ContactsView() {
   const { t } = useTranslation();
-  const announce = useAnnouncer();
-  const { contactLists } = useCalendarStore();
+  const { contactLists, selectedContactListIds } = useCalendarStore();
   const { contacts, loading, contactListById } = useContacts();
   const { openContactDialog } = useDialogState();
 
   const headingId = useId();
-  const sectionRef = useRef<HTMLElement>(null);
-  const listRef = useRef<HTMLUListElement>(null);
+  const searchId = useId();
+  // Auto-focus the listbox once contacts are loaded so the user
+  // lands somewhere actionable on mount + on every view-switch
+  // (Ctrl+8). Same pattern TaskView uses for its task list.
+  // Empty / search-empty states are rendered as a presentation
+  // `<li>` *inside* the listbox so the listbox is always the
+  // focus target, even before the first contact arrives.
+  const listRef = useAutoFocus<HTMLUListElement>(true);
   const [focusIndex, setFocusIndex] = useState(0);
   const [listHasFocus, setListHasFocus] = useState(false);
 
+  // Search input + debounced query the server-side fan-out
+  // listens to. We keep two values: `searchInput` is the raw
+  // box content (updates on every keystroke for instant UI
+  // feedback) and `searchQuery` is the debounced version that
+  // actually fires the `search_contacts` Tauri command. 250 ms
+  // is the conventional debounce window for typeahead — slow
+  // enough to skip the burst of intermediate strings, fast
+  // enough to feel responsive.
+  const [searchInput, setSearchInput] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<Contact[]>([]);
+  const [searching, setSearching] = useState(false);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setSearchQuery(searchInput.trim());
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [searchInput]);
+
+  useEffect(() => {
+    if (!searchQuery) {
+      setSearchResults([]);
+      setSearching(false);
+      return;
+    }
+    let cancelled = false;
+    setSearching(true);
+    apiSearchContacts(searchQuery)
+      .then((rows) => {
+        if (cancelled) return;
+        setSearchResults(rows);
+        setSearching(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        // Per-fetch errors (server hiccup, network) collapse to
+        // an empty result rather than bubbling up — the search
+        // box stays usable, the next keystroke retries.
+        setSearchResults([]);
+        setSearching(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [searchQuery]);
+
+  // While searching: display the server fan-out results,
+  // filtered by which lists the user has selected (so the GAL
+  // toggle still controls whether directory hits show up).
+  // Otherwise: display the auto-fetched writable lists.
+  const isSearching = searchQuery.length > 0;
+  const displayedContacts: Contact[] = useMemo(() => {
+    if (!isSearching) return contacts;
+    return searchResults.filter((c) => selectedContactListIds.has(c.list_id));
+  }, [isSearching, contacts, searchResults, selectedContactListIds]);
+
   const showLoading = useDeferredLoading(loading);
+  const showSearchSpinner = useDeferredLoading(searching);
 
   // Flat list of {separator | contact} entries — separators carry
   // a contact-list header, contacts hold the row data. focusIndex
   // points at the *contact* index in `flatContacts`; separators
   // never receive focus.
   const { entries, flatContacts } = useMemo(() => {
-    return buildEntries(contacts, contactListById, contactLists, t);
-  }, [contacts, contactListById, contactLists, t]);
+    return buildEntries(displayedContacts, contactListById, contactLists, t);
+  }, [displayedContacts, contactListById, contactLists, t]);
 
   useEffect(() => {
     if (focusIndex >= flatContacts.length) {
@@ -111,38 +184,33 @@ export function ContactsView() {
     }
   };
 
-  // SR live-region updates when the focused row changes — same
-  // pattern TaskView uses to surface "Max Mustermann, Inbox,
-  // Eintrag 3 von 14".
-  useEffect(() => {
-    if (!listHasFocus) return;
-    if (!focusedContact) return;
-    const list = contactListById.get(focusedContact.list_id);
-    announce(
-      t('views.contacts.focusAnnounce', {
-        name: focusedContact.display_name,
-        list: list?.name ?? '',
-        index: focusIndex + 1,
-        total: flatContacts.length,
-      }),
-    );
-    // Only the focused row's identity matters — re-announce on
-    // every focus move, but not on every render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusIndex, listHasFocus]);
+  // We deliberately do NOT push a focus-row announcement through
+  // the live region. Each row's `aria-label` already carries
+  // name + organisation + email + list, and the screen reader
+  // announces that natively when `aria-activedescendant` moves.
+  // A parallel `announce()` was duplicating that announcement
+  // (native read followed by a polite-live-region read of the
+  // exact same string a moment later) — the user heard every
+  // navigation twice. Position info ("Eintrag 3 von 1967") used
+  // to live in this announce, but with a 2000-entry GAL the
+  // index is more noise than signal; users who care can read it
+  // off the visual position. The TaskView keeps its own
+  // analogous announce because its lists stay short and the
+  // duplicate isn't perceptible at that scale.
 
   const optionId = (i: number) => `${headingId}-row-${i}`;
 
-  const sectionTabIndex = flatContacts.length === 0 ? 0 : -1;
-
+  // The listbox is always rendered (with a presentation `<li>`
+  // placeholder when no rows exist) so the auto-focus ref
+  // always resolves to a real element and screen-reader users
+  // tabbing into the view immediately land on something they
+  // can navigate. `aria-busy` toggles while the fetch is in
+  // flight; combined with `aria-live` on the loading text the
+  // user hears both signals.
   return (
     <section
-      ref={sectionRef}
-      tabIndex={sectionTabIndex}
       aria-labelledby={`${headingId}-heading`}
-      aria-describedby={
-        flatContacts.length === 0 ? `${headingId}-empty` : undefined
-      }
+      aria-busy={showLoading || undefined}
       className="contacts-view"
     >
       <header className="contacts-view__header">
@@ -160,33 +228,71 @@ export function ContactsView() {
         </div>
       </header>
 
-      {showLoading && (
-        <p role="status" className="form__hint">
-          {t('views.contacts.loading')}
+      <div className="contacts-view__search">
+        <label htmlFor={searchId} className="sr-only">
+          {t('views.contacts.searchLabel')}
+        </label>
+        <input
+          id={searchId}
+          type="search"
+          role="searchbox"
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          placeholder={t('views.contacts.searchPlaceholder')}
+          aria-describedby={`${searchId}-hint`}
+          autoComplete="off"
+          spellCheck={false}
+        />
+        <span id={`${searchId}-hint`} className="form__hint">
+          {t('views.contacts.searchHint')}
+        </span>
+      </div>
+
+      {showSearchSpinner && (
+        <p role="status" aria-live="polite" className="form__hint">
+          {t('views.contacts.searching')}
         </p>
       )}
 
-      {!showLoading && flatContacts.length === 0 && (
-        <p id={`${headingId}-empty`} className="form__hint">
-          {t('views.contacts.empty')}
+      {!showLoading && isSearching && flatContacts.length > 0 && (
+        <p role="status" aria-live="polite" className="form__hint sr-only">
+          {t('views.contacts.searchResults', { count: flatContacts.length })}
         </p>
       )}
 
-      {flatContacts.length > 0 && (
-        <ul
-          ref={listRef}
-          role="listbox"
-          tabIndex={0}
-          aria-label={t('views.contacts.listLabel')}
-          aria-activedescendant={
-            listHasFocus ? optionId(focusIndex) : undefined
-          }
-          onFocus={() => setListHasFocus(true)}
-          onBlur={() => setListHasFocus(false)}
-          onKeyDown={handleListKey}
-          className="contacts-list"
-        >
-          {entries.map((entry) => {
+      <ul
+        ref={listRef}
+        role="listbox"
+        tabIndex={0}
+        aria-label={t('views.contacts.listLabel')}
+        aria-activedescendant={
+          listHasFocus && flatContacts.length > 0
+            ? optionId(focusIndex)
+            : undefined
+        }
+        onFocus={() => setListHasFocus(true)}
+        onBlur={() => setListHasFocus(false)}
+        onKeyDown={handleListKey}
+        className="contacts-list"
+      >
+        {/* Empty / placeholder states live INSIDE the listbox
+            so the `<ul>` is always the tab stop, even before
+            the first contact arrives. Screen readers announce
+            the listbox label, then the placeholder text. */}
+        {showLoading && (
+          <li role="presentation" className="contacts-list__placeholder">
+            {t('views.contacts.loading')}
+          </li>
+        )}
+        {!showLoading && flatContacts.length === 0 && (
+          <li role="presentation" className="contacts-list__placeholder">
+            {isSearching
+              ? t('views.contacts.searchEmpty', { query: searchQuery })
+              : t('views.contacts.empty')}
+          </li>
+        )}
+        {!showLoading &&
+          entries.map((entry) => {
             if (entry.kind === 'separator') {
               return (
                 <li
@@ -266,8 +372,7 @@ export function ContactsView() {
               </li>
             );
           })}
-        </ul>
-      )}
+      </ul>
     </section>
   );
 }

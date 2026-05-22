@@ -97,12 +97,14 @@ export function Sidebar() {
     toggleTaskList,
     refreshTaskLists,
     contactLists,
+    selectedContactListIds,
+    toggleContactList,
     refreshContactLists,
   } = useCalendarStore();
   const { openSettings } = useDialogState();
   const expansion = useSidebarExpansion();
   const showCompleted = useTaskListShowCompleted();
-  const { focusedCalendarId, enterFocus, exitFocus, setView } = useViewState();
+  const { focusedCalendarId, enterFocus, exitFocus } = useViewState();
   const isFocused = focusedCalendarId !== null;
 
   const tree = useMemo(
@@ -114,6 +116,7 @@ export function Sidebar() {
         contactLists,
         selectedCalendarIds,
         selectedTaskListIds,
+        selectedContactListIds,
       }),
     [
       accounts,
@@ -122,6 +125,7 @@ export function Sidebar() {
       contactLists,
       selectedCalendarIds,
       selectedTaskListIds,
+      selectedContactListIds,
     ],
   );
 
@@ -563,6 +567,15 @@ export function Sidebar() {
     },
     [selectedTaskListIds, toggleTaskList],
   );
+  const setManyContactLists = useCallback(
+    (ids: string[], next: boolean) => {
+      for (const id of ids) {
+        const isOn = selectedContactListIds.has(id);
+        if (isOn !== next) toggleContactList(id);
+      }
+    },
+    [selectedContactListIds, toggleContactList],
+  );
 
   // ── Keyboard handler on the tree container ───────────────────────
   // Type-ahead buffer: collected single-character keypresses within
@@ -725,8 +738,10 @@ export function Sidebar() {
       if (item.kind === 'leaf') {
         if (item.sectionKind === 'calendars') {
           toggleCalendar(item.containerId);
-        } else {
+        } else if (item.sectionKind === 'tasks') {
           toggleTaskList(item.containerId);
+        } else {
+          toggleContactList(item.containerId);
         }
         return;
       }
@@ -745,10 +760,22 @@ export function Sidebar() {
       const tlIds = leaves
         .filter((l) => l.kind === 'tasks')
         .map((l) => l.containerId);
+      const clIds = leaves
+        .filter((l) => l.kind === 'contacts')
+        .map((l) => l.containerId);
       if (calIds.length) setManyCalendars(calIds, next);
       if (tlIds.length) setManyTaskLists(tlIds, next);
+      if (clIds.length) setManyContactLists(clIds, next);
     },
-    [tree, toggleCalendar, toggleTaskList, setManyCalendars, setManyTaskLists],
+    [
+      tree,
+      toggleCalendar,
+      toggleTaskList,
+      toggleContactList,
+      setManyCalendars,
+      setManyTaskLists,
+      setManyContactLists,
+    ],
   );
 
   // ── Render ───────────────────────────────────────────────────────
@@ -826,32 +853,20 @@ export function Sidebar() {
               } else if (leaf.kind === 'tasks') {
                 toggleTaskList(leaf.containerId);
               } else {
-                // Contacts don't have a per-list selection set yet
-                // (DESIGN.md §10 doesn't describe one, ContactsView
-                // always reads everything). Space / Enter on a
-                // contact-list leaf jumps to ContactsView instead —
-                // a discoverable affordance until the per-list
-                // filter lands.
-                setView('contacts');
+                toggleContactList(leaf.containerId);
               }
             }}
             onToggleSection={(section) => {
-              if (section.kind === 'contacts') {
-                // No checkbox semantics for the contacts section
-                // either — Space toggles the calendars / tasks
-                // sections' filters; the contacts section just
-                // jumps the active view.
-                setView('contacts');
-                return;
-              }
               const leaves = section.children;
               const state = parentTriState(leaves);
               const next = state === 'unchecked';
               const ids = leaves.map((l) => l.containerId);
               if (section.kind === 'calendars') {
                 setManyCalendars(ids, next);
-              } else {
+              } else if (section.kind === 'tasks') {
                 setManyTaskLists(ids, next);
+              } else {
+                setManyContactLists(ids, next);
               }
             }}
             onToggleAccount={(node) => {
@@ -864,14 +879,12 @@ export function Sidebar() {
               const tlIds = leaves
                 .filter((l) => l.kind === 'tasks')
                 .map((l) => l.containerId);
-              // Contact leaves intentionally don't participate in
-              // the account-level toggle: there's no selection set
-              // to flip. They'll always render as "checked" via the
-              // sidebarTree's `selected: true` for contacts, so the
-              // account tri-state still reads correctly across the
-              // mixed sections.
+              const clIds = leaves
+                .filter((l) => l.kind === 'contacts')
+                .map((l) => l.containerId);
               if (calIds.length) setManyCalendars(calIds, next);
               if (tlIds.length) setManyTaskLists(tlIds, next);
+              if (clIds.length) setManyContactLists(clIds, next);
             }}
             focusedContainerId={focusedCalendarId}
           />

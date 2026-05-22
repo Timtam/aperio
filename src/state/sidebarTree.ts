@@ -100,6 +100,11 @@ export function buildSidebarTree(input: {
   contactLists?: ContactList[];
   selectedCalendarIds: Set<string>;
   selectedTaskListIds: Set<string>;
+  /** Same per-list selection set as calendars / tasks. Optional
+   *  so older tests don't have to wire it; missing ⇒ treated as
+   *  "no list selected" which mirrors the empty-set defaults the
+   *  other branches use. */
+  selectedContactListIds?: Set<string>;
 }): AccountNode[] {
   const {
     accounts,
@@ -108,6 +113,7 @@ export function buildSidebarTree(input: {
     contactLists = [],
     selectedCalendarIds,
     selectedTaskListIds,
+    selectedContactListIds,
   } = input;
 
   // Group calendars / task lists / contact lists by account id.
@@ -221,10 +227,7 @@ export function buildSidebarTree(input: {
           name: cb.name,
           colorHex: cb.color?.hex ?? null,
           readOnly: cb.read_only,
-          // No per-list filter yet — always selected. Once a
-          // selection set lands the same `Set.has` lookup the
-          // other branches use will plug in here.
-          selected: true,
+          selected: selectedContactListIds?.has(cb.id) ?? false,
         })),
       });
     }

@@ -74,7 +74,18 @@ pub struct EwsAdapter {
     task_lists_cache: Mutex<Option<(Vec<TaskList>, chrono::DateTime<chrono::Utc>)>>,
     contact_lists_cache:
         Mutex<Option<(Vec<ContactList>, chrono::DateTime<chrono::Utc>)>>,
+    /// GAL enumeration is a 39-prefix ResolveNames walk that
+    /// burns ~3-5 seconds plus full server round-trips. Cache
+    /// the result for half an hour so a second panel open
+    /// inside the same session is instant, and a `gal_fetch_lock`
+    /// dedupes concurrent first-call attempts (e.g. React
+    /// StrictMode's double-invocation in dev) so the server
+    /// never sees the parallel double-walk.
+    gal_cache:
+        Mutex<Option<(Vec<Contact>, chrono::DateTime<chrono::Utc>)>>,
+    gal_fetch_lock: Mutex<()>,
     listing_ttl: chrono::Duration,
+    gal_ttl: chrono::Duration,
 }
 
 impl EwsAdapter {
@@ -98,7 +109,10 @@ impl EwsAdapter {
             calendars_cache: Mutex::new(None),
             task_lists_cache: Mutex::new(None),
             contact_lists_cache: Mutex::new(None),
+            gal_cache: Mutex::new(None),
+            gal_fetch_lock: Mutex::new(()),
             listing_ttl: chrono::Duration::minutes(5),
+            gal_ttl: chrono::Duration::minutes(30),
         }
     }
 
@@ -136,6 +150,62 @@ impl EwsAdapter {
         let (items, ts) = guard.as_ref()?;
         let age = chrono::Utc::now().signed_duration_since(*ts);
         if age >= chrono::Duration::zero() && age < self.listing_ttl {
+            Some(items.clone())
+        } else {
+            None
+        }
+    }
+
+    /// Cached read of the GAL contact set. The actual fetch is
+    /// expensive (39 ResolveNames round-trips) so we cache the
+    /// whole result for `gal_ttl` (30 min) and dedupe concurrent
+    /// callers via `gal_fetch_lock` — without that, React
+    /// StrictMode's double-effect-invocation in dev fires two
+    /// parallel walks, doubling the load on Exchange (which
+    /// then throttles, compounding the wait).
+    async fn get_gal_contacts_cached(&self) -> CoreResult<Vec<Contact>> {
+        // Fast path: cache hit without ever touching the
+        // dedupe lock. Concurrent fast-path readers all walk
+        // straight through.
+        if let Some(cached) = self.cached_gal().await {
+            tracing::debug!(
+                target: "cal_adapter_ews::gal",
+                cached = cached.len(),
+                "GAL cache hit",
+            );
+            return Ok(cached);
+        }
+        // Slow path: take the dedupe lock and re-check the cache
+        // inside the critical section. The first arrival does
+        // the actual fetch and populates the cache; every other
+        // caller blocks on `_lock`, then sees the cache hit on
+        // re-check and exits.
+        let _lock = self.gal_fetch_lock.lock().await;
+        if let Some(cached) = self.cached_gal().await {
+            return Ok(cached);
+        }
+        let started = chrono::Utc::now();
+        let fresh = contacts::get_contacts(&self.client, contacts::GAL_LIST_ID)
+            .await
+            .map_err(to_core_error)?;
+        *self.gal_cache.lock().await =
+            Some((fresh.clone(), chrono::Utc::now()));
+        tracing::debug!(
+            target: "cal_adapter_ews::gal",
+            count = fresh.len(),
+            elapsed_ms = chrono::Utc::now()
+                .signed_duration_since(started)
+                .num_milliseconds(),
+            "GAL fetched and cached",
+        );
+        Ok(fresh)
+    }
+
+    async fn cached_gal(&self) -> Option<Vec<Contact>> {
+        let guard = self.gal_cache.lock().await;
+        let (items, ts) = guard.as_ref()?;
+        let age = chrono::Utc::now().signed_duration_since(*ts);
+        if age >= chrono::Duration::zero() && age < self.gal_ttl {
             Some(items.clone())
         } else {
             None
@@ -334,6 +404,9 @@ impl ContactsFeature for EwsAdapter {
     }
 
     async fn get_contacts(&self, list_id: &str) -> CoreResult<Vec<Contact>> {
+        if list_id == contacts::GAL_LIST_ID {
+            return self.get_gal_contacts_cached().await;
+        }
         contacts::get_contacts(&self.client, list_id)
             .await
             .map_err(to_core_error)

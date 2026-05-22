@@ -42,6 +42,19 @@
 //!     `PhysicalAddresses` (`Home`, `Work`, `Other`) but cal-core's
 //!     `Contact` has no address slot yet, so we drop them.
 //!
+//! Phase 10g.x adds **GAL access**. The Global Address List
+//! lives in Active Directory, not in the user's mailbox, so the
+//! standard `FindItem` against an `IPF.Contact` folder doesn't
+//! see it. Exchange Online exposes the GAL via `FindPeople`
+//! against the `directory` distinguished folder, but on-prem
+//! Exchange (2013 / 2016 / 2019) rejects that with
+//! `ErrorInvalidOperation`. The portable workaround used here:
+//! walk the alphabet via `ResolveNames`, dedup by email, sort
+//! alphabetically. The synthetic `GAL_LIST_ID` list represents
+//! the directory in `list_contact_lists`; `get_contacts`
+//! dispatches on the sentinel so the regular folder-based path
+//! stays untouched.
+//!
 //! Phase 10g adds **photos**. EWS files the avatar as a hidden
 //! `FileAttachment` on the contact item — `IsContactPhoto="true"`,
 //! `Name="ContactPicture.jpg"` — so the CRUD path is:
@@ -60,10 +73,9 @@
 //!   4. **Remove** via `DeleteAttachment` on the existing
 //!      ContactPicture attachment id.
 
-use std::time::Duration;
-
 use base64::Engine;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
+use futures::stream::{self, StreamExt};
 use quick_xml::events::Event as XmlEvent;
 use quick_xml::reader::Reader;
 
@@ -85,25 +97,44 @@ use crate::soap::{delete_calendar_item, escape_xml};
 /// prefix).
 pub const GAL_LIST_ID: &str = "ews-gal";
 
-/// Page size for `FindPeople` paging. Exchange caps individual
-/// pages around 100 — going higher silently truncates without an
-/// error. The smallish page also keeps each round-trip's response
-/// body manageable for parsing.
-const GAL_PAGE_SIZE: u32 = 100;
+/// Concurrent ResolveNames probes while walking the GAL. 3 was
+/// landed after a Hochschule-Anhalt user reported a freeze with
+/// 5 in flight — the on-prem Exchange there throttled the burst
+/// and inflated individual response times into the seconds.
+/// Three keeps us under the per-mailbox EWS bucket while still
+/// cutting wall-clock to ~5–8 s for a few-hundred-entry GAL
+/// (down from the 20–40 s sequential baseline). Going higher
+/// risks ErrorServerBusy waits that erase the speedup.
+const GAL_CONCURRENCY: usize = 3;
 
-/// Inter-page delay during `FindPeople` paging. EWS doesn't
-/// publish a documented rate limit but Exchange Online and large
-/// on-prem servers can throttle on rapid back-to-back SOAP calls;
-/// a 50 ms gap is enough to keep us under any sensible bucket
-/// without making a 5000-row GAL pull noticeably slower.
-const GAL_PAGE_DELAY: Duration = Duration::from_millis(50);
-
-/// Hard cap on total FindPeople pages so a misbehaving server
-/// (`IncludesLastItemInRange=false` forever) can't pin us in an
-/// infinite loop. 200 × 100 = 20 000 personas — comfortable
-/// headroom for a corporate GAL while still bounding the worst
-/// case.
-const GAL_MAX_PAGES: u32 = 200;
+/// Prefixes walked via `ResolveNames` to enumerate the GAL.
+///
+/// **Why ResolveNames and not FindPeople?** FindPeople against
+/// the `directory` distinguished folder only works on Exchange
+/// Online — on-prem Exchange (2013 / 2016 / 2019) rejects it
+/// with `ErrorInvalidOperation` ("Der Distinguished Name des
+/// Ordners wurde nicht erkannt." was the literal response from a
+/// Hochschule Anhalt server during diagnosis). ResolveNames is
+/// the only enumeration path that works across every Exchange
+/// version.
+///
+/// **Why a fixed prefix list?** ResolveNames is fundamentally a
+/// search operation — it wants a name fragment. Walking the
+/// Latin / German alphabet + digits picks up almost every GAL
+/// entry: display names and aliases start with one of these
+/// characters in practice. Server-side throttling typically caps
+/// ResolveNames at ~100 results per query; for a few-hundred-
+/// entry GAL this is enough headroom that no single letter
+/// exceeds the limit. Larger directories may miss the tail of
+/// over-represented letters (e.g. an "M"-heavy org); that's a
+/// known limitation we'd fix by recursing into two-letter
+/// prefixes when a result set looks suspiciously full.
+const GAL_ENUM_PREFIXES: &[&str] = &[
+    "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m",
+    "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z",
+    "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
+    "ä", "ö", "ü",
+];
 
 // ── Public adapter-side surface ────────────────────────────────────────
 
@@ -155,6 +186,7 @@ pub async fn get_contacts(client: &EwsClient, list_id: &str) -> EwsResult<Vec<Co
 /// English here because the EWS adapter has no i18n surface —
 /// the frontend re-labels it via `i18n` keyed on the same
 /// sentinel id.
+#[allow(clippy::missing_const_for_fn)]
 fn gal_contact_list() -> ContactList {
     ContactList {
         id: GAL_LIST_ID.to_string(),
@@ -170,31 +202,121 @@ fn gal_contact_list() -> ContactList {
     }
 }
 
-/// Page `FindPeople` against the directory until the server
-/// signals `IncludesLastItemInRange=true`. Inserts a small delay
-/// between batches so a 1000+ entry GAL doesn't hammer the
-/// server with back-to-back requests.
+/// Walk the GAL via `ResolveNames` with each prefix in
+/// `GAL_ENUM_PREFIXES`. Dedup by lower-cased primary email
+/// (people match multiple prefix queries — by display name AND
+/// by alias — so without dedup the panel shows everyone twice).
+///
+/// Bounded concurrency: up to `GAL_CONCURRENCY` (5) requests
+/// in-flight at once. Going sequential takes 20-40 s on a slow
+/// on-prem Exchange (one round-trip per prefix), which makes
+/// the panel feel frozen. Five in parallel brings it under 3 s
+/// while staying below the per-mailbox EWS throttling bucket.
+///
+/// Per-prefix failures (an `ErrorNameResolutionNoResults` for a
+/// prefix that matches nothing) are tolerated: the prefix yields
+/// an empty list and the walk continues. A blanket
+/// authentication / server-down failure produces empty lists
+/// for every prefix; the GAL surface ends up empty rather than
+/// bubbling a single error, since the caller's
+/// `useContacts` `.catch` would otherwise eat just one prefix's
+/// failure and confusingly succeed with the others.
 async fn get_gal_contacts(client: &EwsClient) -> EwsResult<Vec<Contact>> {
-    let mut all: Vec<Contact> = Vec::new();
-    let mut offset: u32 = 0;
-    for _ in 0..GAL_MAX_PAGES {
-        let body = find_people_in_directory(offset, GAL_PAGE_SIZE);
-        let xml = client.post_soap(body).await?;
-        let (page, includes_last) = parse_find_people_response(&xml)?;
-        if page.is_empty() {
-            break;
+    use std::collections::HashMap;
+
+    // Clone the client once up front so each in-flight future
+    // can carry its own owned handle — reqwest::Client is cheap
+    // to clone (Arc-wrapped state) and this dodges the
+    // higher-ranked lifetime tangle that comes from capturing
+    // `&EwsClient` across `buffer_unordered`'s future boundary.
+    let owned_client = client.clone();
+    // Pre-allocate owned `String` prefixes too. `stream::iter`'s
+    // higher-ranked lifetime inference doesn't like a future
+    // borrowing a `&str` from the closure argument; owned
+    // strings sidestep the issue entirely without the cost (39
+    // single-character allocations is nothing).
+    let prefixes: Vec<String> =
+        GAL_ENUM_PREFIXES.iter().map(|s| (*s).to_string()).collect();
+
+    // Run all prefix queries with bounded concurrency. Each
+    // future swallows its own per-prefix errors so the stream
+    // can collect into a flat `Vec<ParsedPersona>` without
+    // having to short-circuit on the first miss. We capture the
+    // prefix in the log line so a user enabling debug tracing
+    // can tell which letter dropped if results look short.
+    let personas: Vec<ParsedPersona> = stream::iter(prefixes.into_iter())
+        .map(move |prefix: String| {
+            let client = owned_client.clone();
+            async move {
+                let body = resolve_names_envelope(&prefix);
+                let xml = match client.post_soap(body).await {
+                    Ok(x) => x,
+                    Err(err) => {
+                        // `ErrorNameResolutionNoResults` is normal
+                        // for prefixes the directory has no entries
+                        // for. Log at debug and move on.
+                        tracing::debug!(
+                            target: "cal_adapter_ews::gal",
+                            %prefix,
+                            ?err,
+                            "ResolveNames prefix yielded no usable results",
+                        );
+                        return Vec::new();
+                    }
+                };
+                let parsed = parse_resolve_names_response(&xml).unwrap_or_default();
+                tracing::debug!(
+                    target: "cal_adapter_ews::gal",
+                    %prefix,
+                    returned = parsed.len(),
+                    "ResolveNames prefix walked",
+                );
+                parsed
+            }
+        })
+        .buffer_unordered(GAL_CONCURRENCY)
+        .flat_map(stream::iter)
+        .collect()
+        .await;
+
+    // Dedup by lower-cased primary email — same person can match
+    // multiple prefix queries (display name AND alias). For
+    // entries that came back without an email we fall back to
+    // their synthesised contact id (display name or whatever
+    // `persona_to_contact` minted).
+    let mut by_email: HashMap<String, Contact> = HashMap::new();
+    let mut no_email: HashMap<String, Contact> = HashMap::new();
+    for p in personas {
+        let contact = persona_to_contact(p, GAL_LIST_ID);
+        match contact.emails.first().map(|e| e.to_lowercase()) {
+            Some(email) => {
+                by_email.entry(email).or_insert(contact);
+            }
+            None => {
+                no_email.entry(contact.id.clone()).or_insert(contact);
+            }
         }
-        let page_len = page.len() as u32;
-        all.extend(page.into_iter().map(|p| persona_to_contact(p, GAL_LIST_ID)));
-        if includes_last {
-            break;
-        }
-        offset = offset.saturating_add(page_len);
-        // Politeness: yield long enough that Exchange's per-
-        // mailbox throttling buckets don't trip on a fast pager.
-        tokio::time::sleep(GAL_PAGE_DELAY).await;
     }
-    Ok(all)
+
+    let mut out: Vec<Contact> = by_email
+        .into_values()
+        .chain(no_email.into_values())
+        .collect();
+    // Sort by display name so the panel order matches what the
+    // user expects (alphabetical, like Outlook's GAL view).
+    // Case-insensitive — the GAL mixes uppercase abbreviations
+    // ("IT-Service") with regular names.
+    out.sort_by(|a, b| {
+        a.display_name
+            .to_lowercase()
+            .cmp(&b.display_name.to_lowercase())
+    });
+    tracing::debug!(
+        target: "cal_adapter_ews::gal",
+        total = out.len(),
+        "GAL enumeration complete",
+    );
+    Ok(out)
 }
 
 /// Run a `ResolveNames` query against the directory. Cheap-and-
@@ -1771,28 +1893,6 @@ fn build_contact_from_new(
 
 // ── GAL helpers (FindPeople / ResolveNames) ──────────────────────────
 
-/// SOAP body for `FindPeople` paged against the Active Directory
-/// projection. The distinguished id `directory` is what Outlook
-/// uses for "All Address Lists → Global Address List" — Exchange
-/// 2013+ supports it; 2010 doesn't ship FindPeople at all, in
-/// which case the request returns a SOAP fault that surfaces back
-/// up the stack so the frontend can show a clear "this server
-/// doesn't expose the GAL via EWS" message.
-fn find_people_in_directory(offset: u32, max_entries: u32) -> String {
-    let body = format!(
-        r#"    <m:FindPeople>
-      <m:PersonaShape>
-        <t:BaseShape>Default</t:BaseShape>
-      </m:PersonaShape>
-      <m:IndexedPageItemView Offset="{offset}" MaxEntriesReturned="{max_entries}" BasePoint="Beginning"/>
-      <m:ParentFolderId>
-        <t:DistinguishedFolderId Id="directory"/>
-      </m:ParentFolderId>
-    </m:FindPeople>"#,
-    );
-    wrap(&body)
-}
-
 /// SOAP body for `ResolveNames` — the focused name-fragment
 /// search against the directory. Used by the attendees picker
 /// to surface GAL hits without pulling the whole list.
@@ -1813,7 +1913,8 @@ fn resolve_names_envelope(query: &str) -> String {
     wrap(&body)
 }
 
-/// One row pulled from a `FindPeople` or `ResolveNames` response.
+/// One row pulled from a `ResolveNames` response (and historic
+/// `FindPeople` callers from when that path was still alive).
 /// Persona shape is narrower than the Contact item shape we
 /// already model — no indexed email slots, no FileAs, etc. — so
 /// we map directly into `Contact` via `persona_to_contact`
@@ -1830,185 +1931,13 @@ pub struct ParsedPersona {
     pub department: Option<String>,
 }
 
-/// Parse a `FindPeopleResponse` into `(personas, includes_last)`.
-/// The `includes_last` flag is computed from the response's
-/// `TotalNumberOfPeopleInView` + the page offset we know we
-/// requested — older Exchange versions don't echo it back as a
-/// literal, so we calculate locally instead of trusting an
-/// attribute that may not exist.
-pub fn parse_find_people_response(
-    xml: &str,
-) -> EwsResult<(Vec<ParsedPersona>, bool)> {
-    let mut reader = Reader::from_str(xml);
-    reader.config_mut().trim_text(true);
-    let mut buf = Vec::new();
-
-    let mut personas: Vec<ParsedPersona> = Vec::new();
-    let mut current = ParsedPersona::default();
-    let mut inside_persona = false;
-    let mut text_target: Option<&'static str> = None;
-    // Collected total — Exchange always reports it on FindPeople.
-    // We use it to decide "are we on the last page" so the caller
-    // stops paging without an explicit boolean.
-    let mut total_in_view: Option<u32> = None;
-
-    loop {
-        match reader.read_event_into(&mut buf) {
-            Ok(XmlEvent::Start(e)) | Ok(XmlEvent::Empty(e)) => {
-                let local = e.local_name().as_ref().to_ascii_lowercase();
-                if local == b"persona" {
-                    inside_persona = true;
-                    current = ParsedPersona::default();
-                    continue;
-                }
-                if !inside_persona {
-                    if local == b"totalnumberofpeopleinview" {
-                        text_target = Some("total_in_view");
-                    }
-                    continue;
-                }
-                match local.as_slice() {
-                    b"personaid" => {
-                        for a in e.attributes().flatten() {
-                            let key = a.key.as_ref();
-                            if key.eq_ignore_ascii_case(b"Id") {
-                                current.persona_id =
-                                    String::from_utf8_lossy(&a.value).into_owned();
-                            }
-                        }
-                    }
-                    b"displayname" => text_target = Some("display_name"),
-                    b"givenname" => text_target = Some("given_name"),
-                    b"surname" => text_target = Some("surname"),
-                    b"companyname" => text_target = Some("company_name"),
-                    b"department" | b"departments" => text_target = Some("department"),
-                    // `EmailAddress` element of a Persona wraps the
-                    // mail string inside another `EmailAddress`
-                    // child — we route both occurrences to the same
-                    // text target and dedup on push.
-                    b"emailaddress" => text_target = Some("email_address"),
-                    // Phone numbers live under `WorkPhones`,
-                    // `HomePhones`, `MobilePhones`, etc., each
-                    // wrapping a `PhoneNumberAttributedValue` with
-                    // a `Value/Number`. We capture every `<t:Number>`
-                    // text node and dedup on push.
-                    b"number" => text_target = Some("phone_number"),
-                    _ => {}
-                }
-            }
-            Ok(XmlEvent::End(e)) => {
-                let local = e.local_name().as_ref().to_ascii_lowercase();
-                if local == b"persona" {
-                    if !current.display_name.is_empty()
-                        || !current.email_addresses.is_empty()
-                    {
-                        personas.push(std::mem::take(&mut current));
-                    }
-                    inside_persona = false;
-                    text_target = None;
-                    continue;
-                }
-                if matches!(
-                    local.as_slice(),
-                    b"displayname"
-                        | b"givenname"
-                        | b"surname"
-                        | b"companyname"
-                        | b"department"
-                        | b"departments"
-                        | b"emailaddress"
-                        | b"number"
-                        | b"totalnumberofpeopleinview"
-                ) {
-                    text_target = None;
-                }
-            }
-            Ok(XmlEvent::Text(t)) if text_target.is_some() => {
-                let raw = match t.unescape() {
-                    Ok(c) => c.to_string(),
-                    Err(_) => continue,
-                };
-                let s = raw.trim();
-                if s.is_empty() {
-                    continue;
-                }
-                match text_target {
-                    Some("display_name") => current.display_name.push_str(s),
-                    Some("given_name") => {
-                        current
-                            .given_name
-                            .get_or_insert_with(String::new)
-                            .push_str(s);
-                    }
-                    Some("surname") => {
-                        current.surname.get_or_insert_with(String::new).push_str(s);
-                    }
-                    Some("company_name") => {
-                        current
-                            .company_name
-                            .get_or_insert_with(String::new)
-                            .push_str(s);
-                    }
-                    Some("department") => {
-                        current
-                            .department
-                            .get_or_insert_with(String::new)
-                            .push_str(s);
-                    }
-                    Some("email_address") => {
-                        if s.contains('@') && !current.email_addresses.contains(&s.to_string()) {
-                            current.email_addresses.push(s.to_string());
-                        }
-                    }
-                    Some("phone_number") => {
-                        if !current.phone_numbers.contains(&s.to_string()) {
-                            current.phone_numbers.push(s.to_string());
-                        }
-                    }
-                    Some("total_in_view") => {
-                        total_in_view = s.parse::<u32>().ok();
-                    }
-                    _ => {}
-                }
-            }
-            Ok(XmlEvent::Eof) => break,
-            Err(err) => return Err(EwsError::Protocol(format!("xml parse: {err}"))),
-            _ => {}
-        }
-        buf.clear();
-    }
-
-    // "Last page" is determined two ways and we trust whichever
-    // fires first:
-    //   - Short page: the server returned fewer rows than
-    //     GAL_PAGE_SIZE asked for ⇒ we've drained the source.
-    //   - TotalNumberOfPeopleInView: if the total is known and
-    //     this page filled the remainder, we're done.
-    // We can't fully evaluate the second condition here (we don't
-    // see the offset), so we report just the short-page signal
-    // and the caller handles the total separately.
-    let includes_last = (personas.len() as u32) < GAL_PAGE_SIZE;
-    // Tracing: emit the total once per page so a user running
-    // with `RUST_LOG=cal_adapter_ews=debug` can see how big the
-    // GAL is even mid-pull.
-    if let Some(total) = total_in_view {
-        tracing::debug!(
-            target: "cal_adapter_ews::gal",
-            total = total,
-            page_size = personas.len(),
-            "FindPeople page parsed",
-        );
-    }
-    Ok((personas, includes_last))
-}
-
-/// Parse a `ResolveNamesResponse`. The shape differs from
-/// FindPeople — every match is wrapped in `<t:Resolution>` and
-/// the directory data shows up inside `<t:Mailbox>` (always
-/// present) plus an optional `<t:Contact>` block (only when we
-/// asked for ReturnFullContactData). The mailbox carries the
-/// authoritative display name + SMTP address; the contact block
-/// adds the phone / company fields when available.
+/// Parse a `ResolveNamesResponse`. Each match is wrapped in
+/// `<t:Resolution>` and the directory data shows up inside
+/// `<t:Mailbox>` (always present) plus an optional `<t:Contact>`
+/// block (only when we asked for ReturnFullContactData). The
+/// mailbox carries the authoritative display name + SMTP
+/// address; the contact block adds the phone / company fields
+/// when available.
 pub fn parse_resolve_names_response(xml: &str) -> EwsResult<Vec<ParsedPersona>> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
@@ -2175,7 +2104,7 @@ pub fn parse_resolve_names_response(xml: &str) -> EwsResult<Vec<ParsedPersona>> 
     Ok(out)
 }
 
-/// Map a `ParsedPersona` (FindPeople / ResolveNames row) into
+/// Map a `ParsedPersona` (ResolveNames row) into
 /// the cal-core `Contact` shape. PersonaId is recorded under
 /// the contact's `id` so the photo-CRUD paths can route back
 /// (though the GAL is read-only — those paths surface an error
@@ -2823,74 +2752,23 @@ mod tests {
         assert!(body.contains("contacts:HasPicture"));
     }
 
-    // ── GAL: FindPeople envelope + parser ─────────────────────────
+    // ── GAL enumeration via ResolveNames ─────────────────────────
 
     #[test]
-    fn find_people_envelope_targets_directory() {
-        let body = find_people_in_directory(0, 100);
-        // Distinguished folder id `directory` is the EWS shape
-        // for the GAL — losing this would silently make the GAL
-        // disappear, so pin it in a test.
-        assert!(body.contains(r#"Id="directory""#));
-        assert!(body.contains("FindPeople"));
-        assert!(body.contains(r#"Offset="0""#));
-        assert!(body.contains(r#"MaxEntriesReturned="100""#));
-    }
-
-    #[test]
-    fn find_people_envelope_carries_offset_for_paging() {
-        let body = find_people_in_directory(200, 100);
-        assert!(body.contains(r#"Offset="200""#));
-    }
-
-    #[test]
-    fn parses_find_people_response_with_two_personas() {
-        let xml = r#"
-<m:FindPeopleResponse xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
-                      xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
-  <m:ResponseCode>NoError</m:ResponseCode>
-  <m:People>
-    <t:Persona>
-      <t:PersonaId Id="P1-ID"/>
-      <t:DisplayName>Anna Beispiel</t:DisplayName>
-      <t:GivenName>Anna</t:GivenName>
-      <t:Surname>Beispiel</t:Surname>
-      <t:CompanyName>Example GmbH</t:CompanyName>
-      <t:EmailAddress>
-        <t:Name>Anna Beispiel</t:Name>
-        <t:EmailAddress>anna@example.com</t:EmailAddress>
-      </t:EmailAddress>
-      <t:WorkPhones>
-        <t:PhoneNumberAttributedValue>
-          <t:Value>
-            <t:Number>+49 30 1234567</t:Number>
-          </t:Value>
-        </t:PhoneNumberAttributedValue>
-      </t:WorkPhones>
-    </t:Persona>
-    <t:Persona>
-      <t:PersonaId Id="P2-ID"/>
-      <t:DisplayName>Bernd Beispiel</t:DisplayName>
-      <t:EmailAddress>
-        <t:EmailAddress>bernd@example.com</t:EmailAddress>
-      </t:EmailAddress>
-    </t:Persona>
-  </m:People>
-  <m:TotalNumberOfPeopleInView>2</m:TotalNumberOfPeopleInView>
-</m:FindPeopleResponse>"#;
-        let (personas, includes_last) = parse_find_people_response(xml).unwrap();
-        assert_eq!(personas.len(), 2);
-        assert_eq!(personas[0].persona_id, "P1-ID");
-        assert_eq!(personas[0].display_name, "Anna Beispiel");
-        assert_eq!(personas[0].given_name.as_deref(), Some("Anna"));
-        assert_eq!(personas[0].surname.as_deref(), Some("Beispiel"));
-        assert_eq!(personas[0].company_name.as_deref(), Some("Example GmbH"));
-        assert_eq!(personas[0].email_addresses, vec!["anna@example.com"]);
-        assert_eq!(personas[0].phone_numbers, vec!["+49 30 1234567"]);
-        assert_eq!(personas[1].email_addresses, vec!["bernd@example.com"]);
-        // Two-row response is shorter than GAL_PAGE_SIZE ⇒
-        // includes_last is true so the caller stops paging.
-        assert!(includes_last);
+    fn gal_prefix_list_covers_alphabet_digits_and_umlauts() {
+        // The walker can only see entries whose name or alias
+        // starts with one of these. Drift in this constant would
+        // silently shrink the GAL we surface, so a paranoid pin
+        // is appropriate.
+        assert!(GAL_ENUM_PREFIXES.contains(&"a"));
+        assert!(GAL_ENUM_PREFIXES.contains(&"z"));
+        assert!(GAL_ENUM_PREFIXES.contains(&"0"));
+        assert!(GAL_ENUM_PREFIXES.contains(&"9"));
+        assert!(GAL_ENUM_PREFIXES.contains(&"ä"));
+        assert!(GAL_ENUM_PREFIXES.contains(&"ö"));
+        assert!(GAL_ENUM_PREFIXES.contains(&"ü"));
+        // 26 letters + 10 digits + 3 umlauts = 39.
+        assert_eq!(GAL_ENUM_PREFIXES.len(), 39);
     }
 
     #[test]

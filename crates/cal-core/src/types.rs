@@ -287,7 +287,14 @@ pub struct Contact {
     ///     `X-ADDRESSBOOKSERVER-MEMBER`
     /// — all funnel into this one field so the rest of the stack
     /// stays group-agnostic.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ///
+    /// **Serialization note:** we deliberately keep this field on
+    /// the wire even when `None` (no `skip_serializing_if`). The
+    /// frontend's group / person discriminator is a `!== null`
+    /// check; if serde omitted the field instead, the value
+    /// would arrive as `undefined`, satisfy `!== null`, and then
+    /// crash on `.members.length`. Keep it explicit.
+    #[serde(default)]
     pub members: Option<Vec<GroupMember>>,
     /// Photo presence flag. `true` ⇒ the contact has an avatar
     /// stored on the source (CardDAV PHOTO body, EWS
