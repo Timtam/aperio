@@ -667,6 +667,10 @@
       "phoneNumbersHint": "Separate multiple numbers with commas.",
       "birthdayLabel": "Birthday",
       "notesLabel": "Notes",
+      "isGroupLabel": "This is a distribution list (group)",
+      "membersLabel": "Members",
+      "membersPlaceholder": "Alice Doe <alice@example.com>\nbob@example.com",
+      "membersHint": "One member per line. Use \"Name <email>\" to keep a display name, or paste a bare email address.",
       "listLabel": "Address book",
       "listRequired": "Please pick an address book.",
       "readOnly": "read-only",
@@ -771,7 +775,13 @@
       "groupOrphans_one": "Without address book (1 contact)",
       "groupOrphans_other": "Without address book ({{count}} contacts)",
       "fromList": "from {{list}}",
-      "focusAnnounce": "{{name}}, {{list}}, item {{index}} of {{total}}"
+      "focusAnnounce": "{{name}}, {{list}}, item {{index}} of {{total}}",
+      "groupBadge_zero": "group",
+      "groupBadge_one": "group · 1",
+      "groupBadge_other": "group · {{count}}",
+      "groupBadgeAria_zero": "Distribution list, empty",
+      "groupBadgeAria_one": "Distribution list with 1 member",
+      "groupBadgeAria_other": "Distribution list with {{count}} members"
     }
   }
 }

@@ -218,20 +218,48 @@ export function ContactsView() {
               >
                 <span className="contacts-list__name">
                   {entry.contact.display_name}
+                  {entry.contact.members !== null && (
+                    // Distribution-list marker. We render a small
+                    // pill next to the name rather than a separate
+                    // row so the grouping stays inline with the
+                    // alphabetised flow — same visual weight as
+                    // the metadata line below.
+                    <span
+                      className="contacts-list__group-badge"
+                      aria-label={t('views.contacts.groupBadgeAria', {
+                        count: entry.contact.members.length,
+                      })}
+                    >
+                      {t('views.contacts.groupBadge', {
+                        count: entry.contact.members.length,
+                      })}
+                    </span>
+                  )}
                 </span>
                 {(entry.contact.organization ||
-                  entry.contact.emails.length > 0) && (
+                  entry.contact.emails.length > 0 ||
+                  (entry.contact.members !== null &&
+                    entry.contact.members.length > 0)) && (
                   <span className="contacts-list__meta">
                     {entry.contact.organization && (
                       <span className="contacts-list__org">
                         {entry.contact.organization}
                       </span>
                     )}
-                    {entry.contact.emails[0] && (
-                      <span className="contacts-list__email">
-                        {entry.contact.emails[0]}
-                      </span>
-                    )}
+                    {entry.contact.members !== null
+                      ? entry.contact.members[0] && (
+                          <span className="contacts-list__email">
+                            {entry.contact.members[0].name ??
+                              entry.contact.members[0].email}
+                            {entry.contact.members.length > 1 &&
+                              ` +${entry.contact.members.length - 1}`}
+                          </span>
+                        )
+                      : entry.contact.emails[0] && (
+                          <span className="contacts-list__email">
+                            {entry.contact.emails[0]}
+                          </span>
+                        )}
                   </span>
                 )}
               </li>

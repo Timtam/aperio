@@ -126,6 +126,7 @@ pub(crate) mod test_support {
         conn.execute_batch(SCHEMA_V6).expect("apply v6 schema");
         conn.execute_batch(SCHEMA_V7).expect("apply v7 schema");
         conn.execute_batch(SCHEMA_V8).expect("apply v8 schema");
+        conn.execute_batch(SCHEMA_V9).expect("apply v9 schema");
         Arc::new(Mutex::new(conn))
     }
 
@@ -140,4 +141,6 @@ pub(crate) mod test_support {
     const SCHEMA_V7: &str = include_str!("../../../src-tauri/src/db/sql/0007_contacts.sql");
     const SCHEMA_V8: &str =
         include_str!("../../../src-tauri/src/db/sql/0008_contacts_fts.sql");
+    const SCHEMA_V9: &str =
+        include_str!("../../../src-tauri/src/db/sql/0009_contact_members.sql");
 }

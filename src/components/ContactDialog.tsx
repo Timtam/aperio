@@ -54,6 +54,17 @@ interface FormState {
   phoneNumbers: string;
   birthday: string;
   notes: string;
+  /** Toggles distribution-list mode. When true, the dialog hides
+   *  person-only fields (given/family/birthday/phone) and surfaces
+   *  the member textarea instead. Stored separately from
+   *  `membersText` so toggling off and on doesn't wipe whatever
+   *  the user already typed. */
+  isGroup: boolean;
+  /** One member per line, `Name <email@example.com>` style — same
+   *  RFC 2822 shape mail clients have trained users on. Bare
+   *  email addresses are also accepted; the name defaults to null
+   *  on parse. */
+  membersText: string;
 }
 
 function emptyForm(): FormState {
@@ -67,6 +78,8 @@ function emptyForm(): FormState {
     phoneNumbers: '',
     birthday: '',
     notes: '',
+    isGroup: false,
+    membersText: '',
   };
 }
 
@@ -81,7 +94,41 @@ function fromContact(c: Contact): FormState {
     phoneNumbers: c.phone_numbers.join(', '),
     birthday: c.birthday ?? '',
     notes: c.notes ?? '',
+    isGroup: c.members !== null,
+    membersText: (c.members ?? [])
+      .map((m) =>
+        m.name && m.name.trim()
+          ? `${m.name.trim()} <${m.email}>`
+          : m.email,
+      )
+      .join('\n'),
   };
+}
+
+/** Parse the multi-line members textarea into structured
+ *  GroupMember records. Each non-empty line is either
+ *  `Name <email>` (CN preserved) or a bare `email` (name = null).
+ *  Lines without an `@` are skipped — the picker needs an email
+ *  to be useful. */
+function parseMembers(raw: string): { name: string | null; email: string }[] {
+  const out: { name: string | null; email: string }[] = [];
+  for (const line of raw.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const angle = trimmed.match(/^(.*?)\s*<\s*([^>]+?)\s*>\s*$/);
+    if (angle) {
+      const name = angle[1].trim();
+      const email = angle[2].trim();
+      if (email.includes('@')) {
+        out.push({ name: name || null, email });
+      }
+      continue;
+    }
+    if (trimmed.includes('@')) {
+      out.push({ name: null, email: trimmed });
+    }
+  }
+  return out;
 }
 
 /** Split a comma-separated string into trimmed non-empty entries.
@@ -174,16 +221,36 @@ export function ContactDialog({
       setSubmitting(true);
       setError(null);
 
-      const payload = {
-        display_name: name,
-        given_name: form.givenName.trim() || null,
-        family_name: form.familyName.trim() || null,
-        organization: form.organization.trim() || null,
-        emails: splitCsv(form.emails),
-        phone_numbers: splitCsv(form.phoneNumbers),
-        birthday: form.birthday || null,
-        notes: form.notes.trim() || null,
-      };
+      // Group payload differs from a person payload: when the user
+      // marked this contact as a distribution list, we wipe the
+      // person-only fields (given/family/birthday/phone) and emit
+      // the parsed members array. The backend uses the non-null
+      // `members` marker to route the row into the right wire
+      // shape (`<t:DistributionList>` on EWS, `KIND:group` on
+      // CardDAV, the `members` JSON column on local SQLite).
+      const payload = form.isGroup
+        ? {
+            display_name: name,
+            given_name: null,
+            family_name: null,
+            organization: form.organization.trim() || null,
+            emails: [],
+            phone_numbers: [],
+            birthday: null,
+            notes: form.notes.trim() || null,
+            members: parseMembers(form.membersText),
+          }
+        : {
+            display_name: name,
+            given_name: form.givenName.trim() || null,
+            family_name: form.familyName.trim() || null,
+            organization: form.organization.trim() || null,
+            emails: splitCsv(form.emails),
+            phone_numbers: splitCsv(form.phoneNumbers),
+            birthday: form.birthday || null,
+            notes: form.notes.trim() || null,
+            members: null,
+          };
 
       try {
         if (contact) {
@@ -387,6 +454,39 @@ export function ContactDialog({
               rows={3}
             />
           </label>
+
+          <label className="form__field form__field--check">
+            <input
+              type="checkbox"
+              checked={form.isGroup}
+              onChange={(e) =>
+                setForm((p) => ({ ...p, isGroup: e.target.checked }))
+              }
+            />
+            <span className="form__label">
+              {t('dialogs.contact.isGroupLabel')}
+            </span>
+          </label>
+
+          {form.isGroup && (
+            <label className="form__field">
+              <span className="form__label">
+                {t('dialogs.contact.membersLabel')}
+              </span>
+              <textarea
+                value={form.membersText}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, membersText: e.target.value }))
+                }
+                placeholder={t('dialogs.contact.membersPlaceholder')}
+                rows={5}
+                spellCheck={false}
+              />
+              <span className="form__hint">
+                {t('dialogs.contact.membersHint')}
+              </span>
+            </label>
+          )}
 
           <label className="form__field">
             <span className="form__label">

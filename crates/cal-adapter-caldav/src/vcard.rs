@@ -23,20 +23,24 @@
 //!  - `UID` → reused as the resource UID on write; parsed but the
 //!    caller does its own id juggling.
 //!  - `REV` → reused as `updated_at` when present.
+//!  - `KIND` / `X-ADDRESSBOOKSERVER-KIND` (Phase 10f) → group flag.
+//!  - `MEMBER` / `X-ADDRESSBOOKSERVER-MEMBER` (Phase 10f) → the
+//!    distribution-list member list, both vCard 4.0 spec form and
+//!    Apple CardDAV variant.
 //!
 //! Not covered (intentionally; can grow when a real use-case shows up):
 //!
-//!  - Photo / logo / sound binary blobs.
-//!  - Categories, group memberships, X-* extensions.
-//!  - Addresses (`ADR`). The model has no address field today.
-//!  - Property parameters beyond `TYPE` — we round-trip the value
-//!    without trying to preserve `LANGUAGE`, `LABEL`, etc.
+//!  - Photo / logo / sound binary blobs (planned for Phase 10g).
+//!  - Categories, other X-* extensions.
+//!  - Addresses (`ADR`) — planned for Phase 10h.
+//!  - Property parameters beyond `TYPE` and `CN` — we round-trip
+//!    the value without trying to preserve `LANGUAGE`, `LABEL`, etc.
 //!
 //! Tolerance: line folding (continuation lines starting with space
 //! / tab) and the three vCard escape sequences (`\\`, `\,`, `\;`,
 //! `\n`) are honoured both directions.
 
-use cal_core::{Contact, NewContact};
+use cal_core::{Contact, GroupMember, NewContact};
 use chrono::{DateTime, NaiveDate, Utc};
 
 use crate::error::{CaldavError, CaldavResult};
@@ -67,6 +71,14 @@ pub fn parse_vcard(
     let mut notes: Option<String> = None;
     let mut updated_at: Option<DateTime<Utc>> = None;
     let mut saw_vcard = false;
+    // Group / distribution-list state. vCard 4.0 signals a group via
+    // `KIND:group` + `MEMBER:mailto:foo@example.com`. Apple's
+    // CardDAV servers (and older clients still on 3.0) ship the
+    // same data under `X-ADDRESSBOOKSERVER-KIND` /
+    // `X-ADDRESSBOOKSERVER-MEMBER` — we accept either and emit
+    // both on write so round-trips survive between server kinds.
+    let mut is_group = false;
+    let mut members: Vec<GroupMember> = Vec::new();
 
     for raw_line in unfolded.lines() {
         let line = raw_line.trim_end_matches('\r');
@@ -147,7 +159,40 @@ pub fn parse_vcard(
                         .map(|n| Utc.from_utc_datetime(&n))
                     });
             }
-            "UID" | "PRODID" | "KIND" => { /* discard — adapter owns the id mapping */ }
+            "UID" | "PRODID" => { /* discard — adapter owns the id mapping */ }
+            "KIND" | "X-ADDRESSBOOKSERVER-KIND" => {
+                // The only `KIND` value Aperio acts on is `group`.
+                // vCard 4.0 also defines `individual`, `org`,
+                // `location`, `application` — none of which change
+                // our wire mapping today, so we treat anything
+                // non-group as a regular contact.
+                if value.trim().eq_ignore_ascii_case("group") {
+                    is_group = true;
+                }
+            }
+            "MEMBER" | "X-ADDRESSBOOKSERVER-MEMBER" => {
+                // Spec form: `MEMBER;CN=Alice:mailto:alice@example.com`.
+                // We extract the email (after `mailto:`) and the
+                // optional CN parameter from the head. urn:uuid:
+                // references — used when a server links groups by
+                // their underlying contact UID — are accepted and
+                // surfaced as members with no resolvable email; we
+                // skip those because the picker needs an email.
+                let trimmed = unescape(value);
+                let email = trimmed
+                    .strip_prefix("mailto:")
+                    .or_else(|| trimmed.strip_prefix("MAILTO:"))
+                    .map(|s| s.to_string());
+                if let Some(email) = email.filter(|s| !s.is_empty()) {
+                    // CN parameter lives on the head as
+                    // `MEMBER;CN=Alice` (case-insensitive). Other
+                    // parameters (e.g. `MEMBER;TYPE=…`) are not
+                    // semantically used by groups, so we just look
+                    // for CN.
+                    let name = extract_cn_param(head);
+                    members.push(GroupMember { name, email });
+                }
+            }
             _ => { /* unknown / unsupported property; skip silently */ }
         }
     }
@@ -179,10 +224,28 @@ pub fn parse_vcard(
         phone_numbers,
         birthday,
         notes,
+        members: if is_group { Some(members) } else { None },
         created_at: now,
         updated_at: updated_at.unwrap_or(now),
         etag,
     })
+}
+
+/// Extract the `CN=…` parameter from a vCard property head like
+/// `MEMBER;CN=Alice` or `MEMBER;TYPE=work;CN="Alice Doe"`. Returns
+/// `None` if no CN parameter is present. Quoted values get their
+/// surrounding double quotes stripped — vCard params may quote
+/// values that contain commas or semicolons.
+fn extract_cn_param(head: &str) -> Option<String> {
+    for part in head.split(';').skip(1) {
+        let (key, val) = part.split_once('=')?;
+        if key.trim().eq_ignore_ascii_case("CN") {
+            let v = val.trim();
+            let stripped = v.strip_prefix('"').and_then(|s| s.strip_suffix('"'));
+            return Some(stripped.unwrap_or(v).to_string()).filter(|s| !s.is_empty());
+        }
+    }
+    None
 }
 
 /// Build a vCard 3.0 body for a new contact. The UID is supplied so
@@ -196,6 +259,16 @@ pub fn build_vcard(uid: &str, contact: &NewContact) -> String {
     out.push_str("VERSION:3.0\r\n");
     out.push_str("PRODID:-//Aperio//Contacts//EN\r\n");
     out.push_str(&format!("UID:{uid}\r\n"));
+    // KIND signals "this row is a distribution list" — emit both
+    // the vCard 4.0 form (`KIND:group`) and the Apple
+    // CardDAV / vCard 3.0 form (`X-ADDRESSBOOKSERVER-KIND:group`)
+    // so a server reading either dialect picks up the group flag.
+    // Apple Contacts and Nextcloud both honour the X- variant on
+    // 3.0; vCard 4.0 clients honour `KIND`.
+    if contact.members.is_some() {
+        out.push_str("KIND:group\r\n");
+        out.push_str("X-ADDRESSBOOKSERVER-KIND:group\r\n");
+    }
     out.push_str(&format!("FN:{}\r\n", escape(&contact.display_name)));
     // N is always present, even when one half is blank — clients
     // (Apple Contacts, Nextcloud's UI) sort by N if FN is missing.
@@ -228,12 +301,56 @@ pub fn build_vcard(uid: &str, contact: &NewContact) -> String {
     if let Some(note) = contact.notes.as_deref().filter(|s| !s.is_empty()) {
         out.push_str(&format!("NOTE:{}\r\n", escape(note)));
     }
+    // Group members: vCard 4.0 uses MEMBER (URI value), Apple
+    // CardDAV uses X-ADDRESSBOOKSERVER-MEMBER. Emit both so each
+    // server kind can read its native form. CN holds the optional
+    // display name so the picker round-trips human-readable
+    // labels rather than collapsing groups to bare email lists.
+    if let Some(members) = contact.members.as_ref() {
+        for m in members {
+            if m.email.is_empty() {
+                continue;
+            }
+            let cn = m
+                .name
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .map(|s| format!(";CN={}", escape_param(s)))
+                .unwrap_or_default();
+            out.push_str(&format!(
+                "MEMBER{cn}:mailto:{}\r\n",
+                escape(&m.email),
+            ));
+            out.push_str(&format!(
+                "X-ADDRESSBOOKSERVER-MEMBER{cn}:mailto:{}\r\n",
+                escape(&m.email),
+            ));
+        }
+    }
     out.push_str(&format!(
         "REV:{}\r\n",
         Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
     ));
     out.push_str("END:VCARD\r\n");
     out
+}
+
+/// Escape a vCard parameter value for use inside a property head
+/// (e.g. `MEMBER;CN=…:value`). Parameters tolerate fewer escapes
+/// than property values — semicolons, commas, and colons break the
+/// parser, double quotes wrap a value to preserve the unsafe chars.
+fn escape_param(s: &str) -> String {
+    if s.chars()
+        .any(|c| c == ';' || c == ',' || c == ':' || c == '"')
+    {
+        // Surround in double quotes and replace any inner quotes
+        // with a single quote (vCard params don't define a quote
+        // escape, so the cleanest fallback is substitution).
+        let cleaned = s.replace('"', "'");
+        format!("\"{cleaned}\"")
+    } else {
+        s.to_string()
+    }
 }
 
 /// Variant of `build_vcard` for an existing `Contact`. Used by the
@@ -253,6 +370,7 @@ pub fn rebuild_vcard(uid: &str, contact: &Contact) -> String {
         phone_numbers: contact.phone_numbers.clone(),
         birthday: contact.birthday,
         notes: contact.notes.clone(),
+        members: contact.members.clone(),
     };
     build_vcard(uid, &payload)
 }
@@ -417,6 +535,7 @@ mod tests {
             phone_numbers: vec!["+49 30 1234567".into()],
             birthday: Some(NaiveDate::from_ymd_opt(1985, 4, 17).unwrap()),
             notes: Some("Met at conf 2024".into()),
+            members: None,
         };
         let body = build_vcard("uid-1", &nc);
         let parsed = parse(&body);
@@ -560,6 +679,7 @@ mod tests {
             phone_numbers: Vec::new(),
             birthday: None,
             notes: None,
+            members: None,
         };
         let body = build_vcard("uid", &nc);
         assert!(body.contains("FN:Smith\\, Inc.\\; LTD"));
@@ -579,6 +699,7 @@ mod tests {
             phone_numbers: Vec::new(),
             birthday: None,
             notes: Some("Line one\nLine two".into()),
+            members: None,
         };
         let body = build_vcard("uid", &nc);
         assert!(body.contains("NOTE:Line one\\nLine two"));
@@ -599,6 +720,7 @@ mod tests {
             phone_numbers: vec!["+49 170 1234567".into()],
             birthday: Some(NaiveDate::from_ymd_opt(1990, 3, 15).unwrap()),
             notes: None,
+            members: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
             etag: Some("etag-1".into()),

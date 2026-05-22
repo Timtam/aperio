@@ -667,6 +667,10 @@
       "phoneNumbersHint": "Mehrere Nummern durch Komma trennen.",
       "birthdayLabel": "Geburtstag",
       "notesLabel": "Notizen",
+      "isGroupLabel": "Verteilerliste (Gruppe)",
+      "membersLabel": "Mitglieder",
+      "membersPlaceholder": "Alice Doe <alice@example.com>\nbob@example.com",
+      "membersHint": "Ein Mitglied pro Zeile. „Name <email>\" behält den Anzeigenamen, eine bloße E-Mail-Adresse ist auch zulässig.",
       "listLabel": "Kontaktbuch",
       "listRequired": "Bitte ein Kontaktbuch auswählen.",
       "readOnly": "schreibgeschützt",
@@ -771,7 +775,13 @@
       "groupOrphans_one": "Ohne Kontaktbuch (1 Kontakt)",
       "groupOrphans_other": "Ohne Kontaktbuch ({{count}} Kontakte)",
       "fromList": "Liste {{list}}",
-      "focusAnnounce": "{{name}}, {{list}}, Eintrag {{index}} von {{total}}"
+      "focusAnnounce": "{{name}}, {{list}}, Eintrag {{index}} von {{total}}",
+      "groupBadge_zero": "Gruppe",
+      "groupBadge_one": "Gruppe · 1",
+      "groupBadge_other": "Gruppe · {{count}}",
+      "groupBadgeAria_zero": "Verteilerliste, leer",
+      "groupBadgeAria_one": "Verteilerliste mit 1 Mitglied",
+      "groupBadgeAria_other": "Verteilerliste mit {{count}} Mitgliedern"
     }
   }
 }

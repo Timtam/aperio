@@ -151,6 +151,15 @@ export interface ContactList {
   account_id: string;
 }
 
+/** One row inside a distribution list. Matches the cal-core
+ *  `GroupMember` type. The picker needs an email to be useful;
+ *  the name is optional and survives round-trips through
+ *  EWS (`<t:Mailbox>`) and vCard (`MEMBER;CN=…`). */
+export interface GroupMember {
+  name: string | null;
+  email: string;
+}
+
 export interface Contact {
   id: string;
   list_id: string;
@@ -163,6 +172,12 @@ export interface Contact {
   /** ISO date (YYYY-MM-DD) or null. */
   birthday: string | null;
   notes: string | null;
+  /** Distribution-list membership marker. `null` ⇒ regular
+   *  person-contact (the default). A non-null array (possibly
+   *  empty) ⇒ this row is a group / distribution list.
+   *  Aperio surfaces the distinction in the dialog (member
+   *  editor) and in the list view (group badge). */
+  members: GroupMember[] | null;
   created_at: string;
   updated_at: string;
   etag: string | null;
@@ -178,6 +193,9 @@ export interface NewContact {
   phone_numbers: string[];
   birthday: string | null;
   notes: string | null;
+  /** See `Contact.members`. `null` ⇒ create a person; a non-null
+   *  array (possibly empty) ⇒ create a distribution list. */
+  members: GroupMember[] | null;
 }
 
 export interface SearchResults {

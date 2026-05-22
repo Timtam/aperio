@@ -131,7 +131,7 @@ impl ContactsFeature for LocalAdapter {
             .prepare(
                 "SELECT id, list_id, display_name, given_name, family_name,
                         organization, emails, phone_numbers, birthday, notes,
-                        etag, created_at, updated_at
+                        etag, created_at, updated_at, members
                  FROM contacts
                  WHERE list_id = ?
                  ORDER BY display_name COLLATE NOCASE",
@@ -168,7 +168,7 @@ impl ContactsFeature for LocalAdapter {
             .prepare(
                 "SELECT c.id, c.list_id, c.display_name, c.given_name, c.family_name,
                         c.organization, c.emails, c.phone_numbers, c.birthday, c.notes,
-                        c.etag, c.created_at, c.updated_at
+                        c.etag, c.created_at, c.updated_at, c.members
                  FROM contacts_fts f
                  JOIN contacts c ON c.id = f.id
                  WHERE contacts_fts MATCH ?
@@ -202,6 +202,13 @@ impl ContactsFeature for LocalAdapter {
         let emails_json = encode_json(&contact.emails)?;
         let phones_json = encode_json(&contact.phone_numbers)?;
         let birthday_s = contact.birthday.as_ref().map(fmt_date);
+        // Members column is NULL for regular contacts and a JSON
+        // array (possibly empty) for distribution lists. Migration
+        // 0009 added the column; old rows stay NULL on upgrade.
+        let members_json = match contact.members.as_ref() {
+            Some(m) => Some(encode_json(m)?),
+            None => None,
+        };
 
         self.db()
             .lock()
@@ -210,8 +217,8 @@ impl ContactsFeature for LocalAdapter {
                 "INSERT INTO contacts (
                     id, list_id, display_name, given_name, family_name,
                     organization, emails, phone_numbers, birthday, notes,
-                    etag, created_at, updated_at
-                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)",
+                    etag, created_at, updated_at, members
+                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)",
                 params![
                     id,
                     list_id,
@@ -225,6 +232,7 @@ impl ContactsFeature for LocalAdapter {
                     contact.notes.as_deref(),
                     now_s,
                     now_s,
+                    members_json,
                 ],
             )
             .map_err(map_sql_err)?;
@@ -240,6 +248,7 @@ impl ContactsFeature for LocalAdapter {
             phone_numbers: contact.phone_numbers,
             birthday: contact.birthday,
             notes: contact.notes,
+            members: contact.members,
             created_at: now,
             updated_at: now,
             etag: None,
@@ -257,6 +266,10 @@ impl ContactsFeature for LocalAdapter {
         let emails_json = encode_json(&contact.emails)?;
         let phones_json = encode_json(&contact.phone_numbers)?;
         let birthday_s = contact.birthday.as_ref().map(fmt_date);
+        let members_json = match contact.members.as_ref() {
+            Some(m) => Some(encode_json(m)?),
+            None => None,
+        };
 
         let changed = self
             .db()
@@ -267,7 +280,7 @@ impl ContactsFeature for LocalAdapter {
                     SET list_id = ?, display_name = ?, given_name = ?,
                         family_name = ?, organization = ?, emails = ?,
                         phone_numbers = ?, birthday = ?, notes = ?,
-                        updated_at = ?
+                        members = ?, updated_at = ?
                   WHERE id = ?",
                 params![
                     contact.list_id,
@@ -279,6 +292,7 @@ impl ContactsFeature for LocalAdapter {
                     phones_json,
                     birthday_s,
                     contact.notes.as_deref(),
+                    members_json,
                     now_s,
                     contact.id,
                 ],
@@ -429,6 +443,14 @@ fn row_to_contact(row: &Row<'_>) -> rusqlite::Result<CoreResult<Contact>> {
         let updated_at = parse_utc(&req_text(row, 12)?)?;
         let emails: Vec<String> = decode_json(&emails_json)?;
         let phone_numbers: Vec<String> = decode_json(&phones_json)?;
+        // Members column (added in migration 0009) carries the
+        // distribution-list payload. NULL ⇒ regular contact;
+        // JSON array (possibly empty) ⇒ this is a group.
+        let members_json: Option<String> = opt_text(row, 13)?;
+        let members = match members_json {
+            Some(s) => Some(decode_json::<Vec<cal_core::GroupMember>>(&s)?),
+            None => None,
+        };
         Ok(Contact {
             id,
             list_id,
@@ -440,6 +462,7 @@ fn row_to_contact(row: &Row<'_>) -> rusqlite::Result<CoreResult<Contact>> {
             phone_numbers,
             birthday,
             notes,
+            members,
             created_at,
             updated_at,
             etag,
@@ -468,6 +491,7 @@ mod tests {
             phone_numbers: vec!["+49 30 1234567".into()],
             birthday: Some(NaiveDate::from_ymd_opt(1985, 4, 17).unwrap()),
             notes: Some("Met at conf 2024".into()),
+            members: None,
         }
     }
 
@@ -551,6 +575,7 @@ mod tests {
             phone_numbers: Vec::new(),
             birthday: None,
             notes: None,
+            members: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
             etag: None,
@@ -606,6 +631,7 @@ mod tests {
             phone_numbers: Vec::new(),
             birthday: None,
             notes: None,
+            members: None,
         };
         let _ = adapter
             .create_contact(LOCAL_DEFAULT_CONTACT_LIST_ID, second)

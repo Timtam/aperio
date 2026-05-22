@@ -206,6 +206,7 @@ pub async fn create_contact(
         phone_numbers: new.phone_numbers,
         birthday: new.birthday,
         notes: new.notes,
+        members: new.members,
         created_at: now,
         updated_at: now,
         etag,

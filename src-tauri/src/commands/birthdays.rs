@@ -344,6 +344,7 @@ mod tests {
             phone_numbers: Vec::new(),
             birthday: bday,
             notes: None,
+            members: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
             etag: None,

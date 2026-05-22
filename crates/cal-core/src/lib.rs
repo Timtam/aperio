@@ -18,6 +18,6 @@ pub use error::{Error, Result};
 pub use reminder::{Reminder, ReminderKind, SoundConfig, SoundSource};
 pub use types::{
     Calendar, Contact, ContactList, DateRange, Event, EventRecurrence, FreeBusy, FreeBusySlot,
-    NewContact, NewEvent, NewTask, RecurrenceEnd, RecurrenceFrequency, Task, TaskList,
-    TaskPriority, TaskRecurrence, TaskStatus, Weekday,
+    GroupMember, NewContact, NewEvent, NewTask, RecurrenceEnd, RecurrenceFrequency, Task,
+    TaskList, TaskPriority, TaskRecurrence, TaskStatus, Weekday,
 };

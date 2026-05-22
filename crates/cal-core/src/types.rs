@@ -270,9 +270,47 @@ pub struct Contact {
     /// the contact. Surfaced verbatim in the contact dialog; not
     /// indexed for autocomplete.
     pub notes: Option<String>,
+    /// Group membership marker (DESIGN.md §10 distribution lists).
+    /// `None` ⇒ this is a regular person-contact.
+    /// `Some(members)` ⇒ this is a distribution list / address-book
+    /// group, with the listed members in declared order. An empty
+    /// `Vec` is still a group (a freshly created empty group),
+    /// distinguishable from a person via the `Some` wrapper.
+    ///
+    /// On the wire each provider has its own group convention:
+    ///   - EWS uses a separate `<t:DistributionList>` item type
+    ///     alongside `<t:Contact>` in the same folder
+    ///   - vCard 4.0 uses `KIND:group` + `MEMBER:mailto:…`
+    ///   - vCard 3.0 (Apple / older servers) uses
+    ///     `X-ADDRESSBOOKSERVER-KIND:group` +
+    ///     `X-ADDRESSBOOKSERVER-MEMBER`
+    /// — all funnel into this one field so the rest of the stack
+    /// stays group-agnostic.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub members: Option<Vec<GroupMember>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub etag: Option<String>,
+}
+
+/// One member of a distribution list. Mirrors the
+/// `<t:Mailbox>` shape EWS uses and the `MEMBER` shape vCard 4.0
+/// uses — both encode "(optional display name, email address)" as
+/// the canonical identity. We do not link to a concrete `Contact.id`
+/// here because the underlying contact can live on a different
+/// server, in a different book, or not yet exist as a row at all
+/// (typing an email into the picker should still produce a valid
+/// member).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GroupMember {
+    /// Display name as the user / provider typed it. Optional —
+    /// raw email addresses without a name are common in dumb
+    /// CSV imports.
+    pub name: Option<String>,
+    /// Required: the picker needs an addressable identifier and
+    /// vCard's `MEMBER:mailto:` only accepts a URI scheme that
+    /// resolves to something. We pin email here.
+    pub email: String,
 }
 
 /// Payload for creating a new contact. Mirrors `NewTask` / `NewEvent`:
@@ -288,4 +326,9 @@ pub struct NewContact {
     pub phone_numbers: Vec<String>,
     pub birthday: Option<NaiveDate>,
     pub notes: Option<String>,
+    /// See `Contact::members`. `Some(empty vec)` creates a new
+    /// distribution list with no initial members; `None` creates a
+    /// person-contact (the common case).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub members: Option<Vec<GroupMember>>,
 }

@@ -51,7 +51,7 @@ use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use quick_xml::events::Event as XmlEvent;
 use quick_xml::reader::Reader;
 
-use cal_core::{Contact, ContactList, NewContact};
+use cal_core::{Contact, ContactList, GroupMember, NewContact};
 
 use crate::api::EwsClient;
 use crate::error::{EwsError, EwsResult};
@@ -230,6 +230,7 @@ pub fn find_contacts_in_folder(folder_id: &str, change_key: Option<&str>) -> Str
           <t:FieldURI FieldURI="contacts:EmailAddresses"/>
           <t:FieldURI FieldURI="contacts:PhoneNumbers"/>
           <t:FieldURI FieldURI="contacts:Birthday"/>
+          <t:FieldURI FieldURI="distributionlist:Members"/>
         </t:AdditionalProperties>
       </m:ItemShape>
       <m:ParentFolderIds>
@@ -446,6 +447,11 @@ pub struct ParsedContact {
     /// Phone numbers, deduplicated (same number may appear under
     /// multiple keys) and in EWS's natural iteration order.
     pub phone_numbers: Vec<String>,
+    /// Distribution-list members. `None` ⇒ this row is a person
+    /// (`<t:Contact>`); `Some` ⇒ this row is a group
+    /// (`<t:DistributionList>`), where the empty vec is the
+    /// "freshly created empty group" case.
+    pub members: Option<Vec<GroupMember>>,
     pub created: Option<DateTime<Utc>>,
     pub last_modified: Option<DateTime<Utc>>,
 }
@@ -465,13 +471,22 @@ pub fn parse_find_contact_item_response(xml: &str) -> EwsResult<Vec<ParsedContac
     let mut current = ParsedContact::default();
     let mut text_target: Option<&'static str> = None;
     // Tracks which indexed collection we're inside: `Some("email")`,
-    // `Some("phone")`, or `None`. We route entries by collection
-    // rather than by Key attribute — Aperio's flat phone / email
-    // vecs don't distinguish HomePhone from MobilePhone, so the
-    // key only matters when we write back (at which point
+    // `Some("phone")`, `Some("members")`, or `None`. We route entries
+    // by collection rather than by Key attribute — Aperio's flat
+    // phone / email vecs don't distinguish HomePhone from MobilePhone,
+    // so the key only matters when we write back (at which point
     // `phone_key_for_slot` picks a sensible default).
     let mut in_collection: Option<&'static str> = None;
     let mut current_entry_value = String::new();
+    // Distribution-list parsing state. EWS emits `<t:DistributionList>`
+    // rows in the same `<m:Items>` collection as `<t:Contact>` rows;
+    // we flag the in-flight ParsedContact as a group when we open one,
+    // and accumulate `<t:Mailbox>` blocks inside `<t:Members>` into
+    // GroupMember entries. The Mailbox shape is
+    // `<t:Mailbox><t:Name>…</t:Name><t:EmailAddress>…</t:EmailAddress></t:Mailbox>`
+    // — we keep the in-flight name + email and finalise on Mailbox-End.
+    let mut current_member_name: Option<String> = None;
+    let mut current_member_email: Option<String> = None;
 
     loop {
         match reader.read_event_into(&mut buf) {
@@ -480,6 +495,16 @@ pub fn parse_find_contact_item_response(xml: &str) -> EwsResult<Vec<ParsedContac
                 if local == b"contact" {
                     inside_item = true;
                     current = ParsedContact::default();
+                    continue;
+                }
+                if local == b"distributionlist" {
+                    // Same in-flight slot as Contact but flagged as
+                    // a group up front; the rest of the parser
+                    // populates display_name + Members + timestamps
+                    // identically.
+                    inside_item = true;
+                    current = ParsedContact::default();
+                    current.members = Some(Vec::new());
                     continue;
                 }
                 if !inside_item {
@@ -513,6 +538,22 @@ pub fn parse_find_contact_item_response(xml: &str) -> EwsResult<Vec<ParsedContac
                     b"phonenumbers" => {
                         in_collection = Some("phone");
                     }
+                    b"members" => {
+                        // Switch the collection target so nested
+                        // `<t:Mailbox>` blocks are routed to
+                        // GroupMember instead of EmailAddresses.
+                        in_collection = Some("members");
+                    }
+                    b"mailbox" if in_collection == Some("members") => {
+                        current_member_name = None;
+                        current_member_email = None;
+                    }
+                    b"name" if in_collection == Some("members") => {
+                        text_target = Some("member_name");
+                    }
+                    b"emailaddress" if in_collection == Some("members") => {
+                        text_target = Some("member_email");
+                    }
                     b"entry" if in_collection.is_some() => {
                         current_entry_value.clear();
                         text_target = Some("entry");
@@ -522,7 +563,7 @@ pub fn parse_find_contact_item_response(xml: &str) -> EwsResult<Vec<ParsedContac
             }
             Ok(XmlEvent::End(e)) => {
                 let local = e.local_name().as_ref().to_ascii_lowercase();
-                if local == b"contact" {
+                if local == b"contact" || local == b"distributionlist" {
                     if !current.item_id.is_empty() {
                         items.push(std::mem::take(&mut current));
                     }
@@ -556,7 +597,28 @@ pub fn parse_find_contact_item_response(xml: &str) -> EwsResult<Vec<ParsedContac
                     text_target = None;
                     continue;
                 }
-                if local == b"emailaddresses" || local == b"phonenumbers" {
+                if local == b"mailbox" && in_collection == Some("members") {
+                    // Finalise the in-flight member if it has an
+                    // email. Members without an email (e.g. a
+                    // <t:Mailbox> with only a routing type) are
+                    // dropped since the picker can't act on them.
+                    if let Some(email) = current_member_email.take().filter(|s| !s.is_empty())
+                    {
+                        let name = current_member_name.take().filter(|s| !s.is_empty());
+                        if let Some(members) = current.members.as_mut() {
+                            members.push(GroupMember { name, email });
+                        }
+                    } else {
+                        current_member_name = None;
+                        current_member_email = None;
+                    }
+                    text_target = None;
+                    continue;
+                }
+                if local == b"emailaddresses"
+                    || local == b"phonenumbers"
+                    || local == b"members"
+                {
                     in_collection = None;
                     continue;
                 }
@@ -595,6 +657,16 @@ pub fn parse_find_contact_item_response(xml: &str) -> EwsResult<Vec<ParsedContac
                     Some("created") => current.created = parse_ews_datetime(s),
                     Some("modified") => current.last_modified = parse_ews_datetime(s),
                     Some("entry") => current_entry_value.push_str(s),
+                    Some("member_name") => {
+                        current_member_name
+                            .get_or_insert_with(String::new)
+                            .push_str(s);
+                    }
+                    Some("member_email") => {
+                        current_member_email
+                            .get_or_insert_with(String::new)
+                            .push_str(s);
+                    }
                     _ => {}
                 }
             }
@@ -685,6 +757,7 @@ pub fn to_contact(item: ParsedContact, list_id: &str) -> Contact {
         phone_numbers: item.phone_numbers,
         birthday,
         notes: item.body,
+        members: item.members,
         created_at: item.created.unwrap_or_else(Utc::now),
         updated_at: item.last_modified.unwrap_or_else(Utc::now),
         etag: item.change_key,
@@ -702,6 +775,13 @@ pub fn to_contact(item: ParsedContact, list_id: &str) -> Contact {
 /// GivenName → CompanyName → Body → EmailAddresses →
 /// PhoneNumbers → … → Surname → … → Birthday.
 pub fn new_contact_to_contact_item_xml(contact: &NewContact) -> String {
+    // Distribution lists ride a different item element: EWS rejects
+    // a `<t:Contact>` payload that carries `<t:Members>` with
+    // ErrorSchemaValidation. We branch on the `members` discriminator
+    // — `Some` ⇒ DistributionList shape, `None` ⇒ Contact shape.
+    if let Some(members) = contact.members.as_ref() {
+        return new_distribution_list_to_item_xml(&contact.display_name, members);
+    }
     let mut out = String::new();
     out.push_str("        <t:Contact>\n");
 
@@ -792,11 +872,102 @@ pub fn new_contact_to_contact_item_xml(contact: &NewContact) -> String {
     out
 }
 
+/// Build the `<t:DistributionList>` body for a CreateItem against a
+/// contact folder. The wire shape is small — DisplayName + a
+/// `<t:Members>` collection of `<t:Member><t:Mailbox>…</t:Mailbox></t:Member>`
+/// — but the element wrapper is what tells EWS to treat the row
+/// as a group rather than a person.
+fn new_distribution_list_to_item_xml(display_name: &str, members: &[GroupMember]) -> String {
+    let mut out = String::new();
+    out.push_str("        <t:DistributionList>\n");
+    if !display_name.is_empty() {
+        out.push_str(&format!(
+            "          <t:DisplayName>{}</t:DisplayName>\n",
+            escape_xml(display_name),
+        ));
+    }
+    out.push_str("          <t:Members>\n");
+    for m in members {
+        if m.email.is_empty() {
+            continue;
+        }
+        out.push_str("            <t:Member>\n");
+        out.push_str("              <t:Mailbox>\n");
+        if let Some(name) = m.name.as_deref().filter(|s| !s.is_empty()) {
+            out.push_str(&format!(
+                "                <t:Name>{}</t:Name>\n",
+                escape_xml(name),
+            ));
+        }
+        out.push_str(&format!(
+            "                <t:EmailAddress>{}</t:EmailAddress>\n",
+            escape_xml(&m.email),
+        ));
+        // RoutingType is technically optional but Outlook fills it
+        // with SMTP. Some older Exchange servers reject the Member
+        // without it; pinning the value avoids the variance.
+        out.push_str("                <t:RoutingType>SMTP</t:RoutingType>\n");
+        out.push_str("              </t:Mailbox>\n");
+        out.push_str("            </t:Member>\n");
+    }
+    out.push_str("          </t:Members>\n");
+    out.push_str("        </t:DistributionList>");
+    out
+}
+
 /// Build the `<t:Updates>` body for an `UpdateItem` envelope —
 /// returns `(set_fields_xml, delete_fields_xml)`. Mirrors the task
 /// adapter pattern: present fields get `SetItemField`, cleared
 /// fields get `DeleteItemField` so EWS clears the server value.
+///
+/// Distribution lists take a different path — see the early-return
+/// branch — because the Updates shape wants a `<t:DistributionList>`
+/// wrapper instead of a `<t:Contact>` wrapper inside SetItemField.
 pub fn contact_to_update_field_xml(contact: &Contact) -> (String, String) {
+    if let Some(members) = contact.members.as_ref() {
+        // Group updates target two fields: DisplayName and the full
+        // Members collection. We rewrite Members in toto rather than
+        // diffing — EWS does support per-member SetItemField, but
+        // the diff logic on the client side is more code than it
+        // saves on the wire for the membership sizes Aperio sees.
+        let mut set = String::new();
+        set.push_str(
+            "            <t:SetItemField>\n              <t:FieldURI FieldURI=\"contacts:DisplayName\"/>\n              <t:DistributionList>\n",
+        );
+        set.push_str(&format!(
+            "                <t:DisplayName>{}</t:DisplayName>\n",
+            escape_xml(&contact.display_name),
+        ));
+        set.push_str("              </t:DistributionList>\n            </t:SetItemField>\n");
+
+        set.push_str(
+            "            <t:SetItemField>\n              <t:FieldURI FieldURI=\"distributionlist:Members\"/>\n              <t:DistributionList>\n                <t:Members>\n",
+        );
+        for m in members {
+            if m.email.is_empty() {
+                continue;
+            }
+            set.push_str("                  <t:Member>\n");
+            set.push_str("                    <t:Mailbox>\n");
+            if let Some(name) = m.name.as_deref().filter(|s| !s.is_empty()) {
+                set.push_str(&format!(
+                    "                      <t:Name>{}</t:Name>\n",
+                    escape_xml(name),
+                ));
+            }
+            set.push_str(&format!(
+                "                      <t:EmailAddress>{}</t:EmailAddress>\n",
+                escape_xml(&m.email),
+            ));
+            set.push_str("                      <t:RoutingType>SMTP</t:RoutingType>\n");
+            set.push_str("                    </t:Mailbox>\n");
+            set.push_str("                  </t:Member>\n");
+        }
+        set.push_str(
+            "                </t:Members>\n              </t:DistributionList>\n            </t:SetItemField>\n",
+        );
+        return (set, String::new());
+    }
     let mut set = String::new();
     let mut del = String::new();
 
@@ -1003,6 +1174,7 @@ fn build_contact_from_new(
         phone_numbers: new.phone_numbers.clone(),
         birthday: new.birthday,
         notes: new.notes.clone(),
+        members: new.members.clone(),
         created_at: now,
         updated_at: now,
         etag: change_key,
@@ -1305,6 +1477,7 @@ mod tests {
             phone_numbers: vec![],
             birthday: Some(NaiveDate::from_ymd_opt(1990, 6, 15).unwrap()),
             notes: None,
+            members: None,
         };
         let xml = new_contact_to_contact_item_xml(&nc);
         assert!(xml.contains("<t:FileAs>Anna Beispiel</t:FileAs>"));
@@ -1334,6 +1507,7 @@ mod tests {
             phone_numbers: vec!["+1".into()],
             birthday: Some(NaiveDate::from_ymd_opt(2000, 1, 1).unwrap()),
             notes: Some("Note".into()),
+            members: None,
         };
         let xml = new_contact_to_contact_item_xml(&nc);
         let order_check = |earlier: &str, later: &str| {
@@ -1376,6 +1550,7 @@ mod tests {
             phone_numbers: vec![],
             birthday: None,
             notes: None,
+            members: None,
         };
         let xml = new_contact_to_contact_item_xml(&nc);
         assert!(xml.contains("EmailAddress1"));
@@ -1401,6 +1576,7 @@ mod tests {
             phone_numbers: vec![],
             birthday: None,
             notes: None,
+            members: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
             etag: Some("CK".into()),
@@ -1426,6 +1602,7 @@ mod tests {
             phone_numbers: vec![],
             birthday: None,
             notes: None,
+            members: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
             etag: Some("CK".into()),
@@ -1448,6 +1625,7 @@ mod tests {
             phone_numbers: vec![],
             birthday: None,
             notes: None,
+            members: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
             etag: None,

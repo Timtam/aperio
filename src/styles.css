@@ -2695,6 +2695,22 @@ button[aria-disabled='true'] {
   max-width: 18rem;
 }
 
+/* Distribution-list marker: a small pill next to the display name
+ * carrying "group · N" / "Gruppe · N". Visual weight stays low so
+ * it doesn't compete with the name — same hierarchy as the
+ * metadata line. */
+.contacts-list__group-badge {
+  display: inline-block;
+  margin-left: var(--space-2);
+  padding: 0 var(--space-2);
+  background: var(--color-bg-subtle);
+  color: var(--color-fg-muted);
+  font-size: var(--font-size-xs);
+  border-radius: var(--radius-pill);
+  font-weight: normal;
+  white-space: nowrap;
+}
+
 /* Contact dialog: two-column row for given + family name. Re-uses
  * the global `form__field` block, just lays two fields side-by-side. */
 .modal--contact .form__row--two {

@@ -1,0 +1,28 @@
+-- Migration 0009: distribution-list support on contacts (DESIGN.md §10
+-- groups, Phase 10f).
+--
+-- Adds a single `members` column to the `contacts` table. The
+-- semantics:
+--
+--   * NULL                    ⇒ regular person-contact (the common
+--                                case; matches every pre-0009 row
+--                                on upgrade without a backfill).
+--   * '[]' (empty JSON array) ⇒ this is a distribution list with
+--                                no members yet (freshly created).
+--   * '[{name, email}, …]'    ⇒ distribution list with the listed
+--                                members in declared order.
+--
+-- We use a JSON column for the same reason `emails` and
+-- `phone_numbers` use one: the membership list is multi-valued and
+-- only ever queried as a unit (the picker reads members for a single
+-- group at a time; cross-group "who is in any group I own?" queries
+-- aren't on the design roadmap). FTS5 indexes group names via the
+-- `display_name` column the existing trigger already covers — no
+-- changes needed in the `contacts_fts` mirror.
+--
+-- The column is nullable rather than DEFAULT '[]' on purpose: the
+-- NULL/non-NULL distinction is what tells the frontend "this is a
+-- person, hide the member editor" vs "this is a group, show it".
+-- Defaulting to '[]' would erase that signal.
+
+ALTER TABLE contacts ADD COLUMN members TEXT;
