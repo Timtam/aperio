@@ -15,6 +15,7 @@ pub mod api;
 pub mod auth;
 pub mod error;
 pub mod mapping;
+pub mod tasks;
 
 use std::time::Duration;
 
@@ -22,7 +23,7 @@ use async_trait::async_trait;
 use cal_core::{
     Adapter, AuthToken, Calendar, CalendarFeature, Capability, ContainerColor,
     Credentials as CoreCredentials, DateRange, Error as CoreError, Event, FreeBusy,
-    NewEvent, Result as CoreResult,
+    NewEvent, NewTask, Result as CoreResult, Task, TaskList, TasksFeature,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -68,6 +69,11 @@ pub struct GoogleAdapter {
     /// expensive (~300 ms over HTTPS to Google) and the sidebar
     /// calls it from several refresh paths.
     calendars_cache: Mutex<Option<(Vec<Calendar>, chrono::DateTime<chrono::Utc>)>>,
+    /// Same shape as `calendars_cache` but for Google Tasks lists.
+    /// The tasks API lives on a separate host — caching the listing
+    /// keeps the sidebar snappy and avoids re-hitting Google on every
+    /// `list_task_lists` call.
+    task_lists_cache: Mutex<Option<(Vec<TaskList>, chrono::DateTime<chrono::Utc>)>>,
     listing_ttl: chrono::Duration,
 }
 
@@ -83,8 +89,13 @@ impl GoogleAdapter {
             .expect("reqwest client");
         Self {
             state: ApiState::new(tokens, client_id, client_secret, http),
-            capabilities: vec![Capability::Calendar],
+            // Phase 6d.3 broadens the OAuth consent (see auth::SCOPES)
+            // to cover Google Tasks as well; declare the matching
+            // capability so the registry routes both feature surfaces
+            // to this adapter.
+            capabilities: vec![Capability::Calendar, Capability::Tasks],
             calendars_cache: Mutex::new(None),
+            task_lists_cache: Mutex::new(None),
             listing_ttl: chrono::Duration::minutes(5),
         }
     }
@@ -123,6 +134,17 @@ impl GoogleAdapter {
 
     async fn cached_calendars(&self) -> Option<Vec<Calendar>> {
         let guard = self.calendars_cache.lock().await;
+        let (items, ts) = guard.as_ref()?;
+        let age = chrono::Utc::now().signed_duration_since(*ts);
+        if age >= chrono::Duration::zero() && age < self.listing_ttl {
+            Some(items.clone())
+        } else {
+            None
+        }
+    }
+
+    async fn cached_task_lists(&self) -> Option<Vec<TaskList>> {
+        let guard = self.task_lists_cache.lock().await;
         let (items, ts) = guard.as_ref()?;
         let age = chrono::Utc::now().signed_duration_since(*ts);
         if age >= chrono::Duration::zero() && age < self.listing_ttl {
@@ -260,6 +282,77 @@ impl CalendarFeature for GoogleAdapter {
         Err(CoreError::NotFound(format!(
             "event '{event_id}' not found in any calendar"
         )))
+    }
+}
+
+#[async_trait]
+impl TasksFeature for GoogleAdapter {
+    async fn list_task_lists(&self) -> CoreResult<Vec<TaskList>> {
+        if let Some(cached) = self.cached_task_lists().await {
+            return Ok(cached);
+        }
+        let fresh = tasks::list_task_lists(&self.state)
+            .await
+            .map_err(to_core_error)?;
+        *self.task_lists_cache.lock().await =
+            Some((fresh.clone(), chrono::Utc::now()));
+        Ok(fresh)
+    }
+
+    async fn get_tasks(&self, list_id: &str) -> CoreResult<Vec<Task>> {
+        tasks::get_tasks(&self.state, list_id)
+            .await
+            .map_err(to_core_error)
+    }
+
+    async fn create_task(
+        &self,
+        list_id: &str,
+        task: NewTask,
+    ) -> CoreResult<Task> {
+        tasks::create_task(&self.state, list_id, task)
+            .await
+            .map_err(to_core_error)
+    }
+
+    async fn update_task(&self, task: Task) -> CoreResult<Task> {
+        tasks::update_task(&self.state, &task)
+            .await
+            .map_err(to_core_error)
+    }
+
+    async fn delete_task(&self, task_id: &str) -> CoreResult<()> {
+        // The trait signature drops the list_id, so we walk every
+        // known list and let the first 2xx win. Mirrors the
+        // `delete_event` fallback above — same trade-off (one extra
+        // round-trip per non-matching list) and same justification:
+        // the Aperio command layer already knows the list, but the
+        // trait surface does not carry it.
+        let lists = self.list_task_lists().await?;
+        for list in lists {
+            if tasks::delete_task(&self.state, &list.id, task_id)
+                .await
+                .is_ok()
+            {
+                return Ok(());
+            }
+        }
+        Err(CoreError::NotFound(format!(
+            "task '{task_id}' not found in any task list"
+        )))
+    }
+
+    async fn rename_task_list(
+        &self,
+        list_id: &str,
+        new_name: &str,
+    ) -> CoreResult<()> {
+        tasks::rename_task_list(&self.state, list_id, new_name)
+            .await
+            .map_err(to_core_error)?;
+        // Drop the cached listing — the cached title is stale.
+        *self.task_lists_cache.lock().await = None;
+        Ok(())
     }
 }
 

@@ -154,7 +154,14 @@ impl ApiState {
     /// the bearer token to attach and returns a `RequestBuilder` —
     /// keeping body construction in the caller so we don't have to
     /// genericise over body types here.
-    async fn send_with_refresh<F>(&self, build: F) -> GoogleResult<reqwest::Response>
+    ///
+    /// `pub(crate)` so the tasks module can drive its own
+    /// absolute-URL flow without duplicating the refresh logic. The
+    /// public Calendar surface still uses the convenience wrappers
+    /// above (`get_json`, `post_json`, …) — this lower-level entry
+    /// stays internal because it requires the caller to build the
+    /// full RequestBuilder themselves.
+    pub(crate) async fn send_with_refresh<F>(&self, build: F) -> GoogleResult<reqwest::Response>
     where
         F: Fn(&str) -> reqwest::RequestBuilder,
     {
@@ -207,7 +214,10 @@ impl ApiState {
     }
 }
 
-async fn decode_json<T: DeserializeOwned>(
+/// Decode the response body as JSON, surfacing HTTP errors as
+/// `GoogleError::Http`. `pub(crate)` for the tasks module — same
+/// rationale as `send_with_refresh` above.
+pub(crate) async fn decode_json<T: DeserializeOwned>(
     response: reqwest::Response,
 ) -> GoogleResult<T> {
     let status = response.status();

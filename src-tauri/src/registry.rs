@@ -342,10 +342,22 @@ impl AdapterRegistry {
         };
         let adapter = GoogleAdapter::new(config.client_id, config.client_secret, tokens);
         let arc = Arc::new(adapter);
+        // Phase 6d.3: the same adapter instance serves both Calendar
+        // and Tasks. The combined OAuth scope (see auth::SCOPES) gives
+        // a single access token rights over both surfaces, so the
+        // shared `Arc<GoogleAdapter>` keeps the in-memory token cache
+        // and refresh state coherent across calendar and task reads.
         self.external_cal
             .write()
             .expect("registry cal poison")
-            .insert(account.id.clone(), arc as Arc<dyn CalendarFeature>);
+            .insert(
+                account.id.clone(),
+                arc.clone() as Arc<dyn CalendarFeature>,
+            );
+        self.external_tasks
+            .write()
+            .expect("registry tasks poison")
+            .insert(account.id.clone(), arc as Arc<dyn TasksFeature>);
         Ok(())
     }
 

@@ -50,9 +50,19 @@ pub const GOOGLE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth"
 pub const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 /// Read + write calendar access. Read-only would be
 /// `https://www.googleapis.com/auth/calendar.readonly`; we ask for
-/// full access up front so Phase 6d.2's write paths don't trigger a
-/// second consent screen.
+/// full access up front so the write paths don't trigger a second
+/// consent screen.
 pub const SCOPE_CALENDAR: &str = "https://www.googleapis.com/auth/calendar";
+/// Read + write Tasks access. Same rationale as the calendar scope
+/// — the listing/CRUD flows both need write so we may as well ask
+/// up front.
+pub const SCOPE_TASKS: &str = "https://www.googleapis.com/auth/tasks";
+/// The combined scope string we request on the consent screen.
+/// Google's OAuth dialog renders one entry per space-separated
+/// scope; granting once covers every feature this adapter exposes
+/// (Calendar + Tasks, Phase 6d.3) so users don't see a separate
+/// dialog when they later open the tasks side of the app.
+pub const SCOPES: &str = "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/tasks";
 /// 5 minute ceiling on the consent dance. Google rejects unused
 /// codes after a similar window anyway and waiting longer means
 /// Aperio is hung holding a TCP port.
@@ -215,7 +225,7 @@ fn build_auth_url(
         .append_pair("client_id", client_id)
         .append_pair("redirect_uri", redirect_uri)
         .append_pair("response_type", "code")
-        .append_pair("scope", SCOPE_CALENDAR)
+        .append_pair("scope", SCOPES)
         .append_pair("code_challenge", challenge)
         .append_pair("code_challenge_method", "S256")
         .append_pair("state", state)
@@ -451,7 +461,7 @@ mod tests {
         assert_eq!(pairs.get("client_id").map(String::as_str), Some("my-client-id.apps.googleusercontent.com"));
         assert_eq!(pairs.get("redirect_uri").map(String::as_str), Some("http://127.0.0.1:12345"));
         assert_eq!(pairs.get("response_type").map(String::as_str), Some("code"));
-        assert_eq!(pairs.get("scope").map(String::as_str), Some(SCOPE_CALENDAR));
+        assert_eq!(pairs.get("scope").map(String::as_str), Some(SCOPES));
         assert_eq!(pairs.get("code_challenge_method").map(String::as_str), Some("S256"));
         assert_eq!(pairs.get("code_challenge").map(String::as_str), Some("challenge"));
         assert_eq!(pairs.get("state").map(String::as_str), Some("state"));
