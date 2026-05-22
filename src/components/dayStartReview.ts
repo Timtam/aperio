@@ -48,18 +48,23 @@ export function filterOverdue(tasks: Task[]): Task[] {
  * Picks tasks with a `scheduled_date` strictly before today, still in
  * an actionable status (`open` or `in_progress`).
  *
- * When `cascadeEnabled` is true (the carry-over honours the Settings →
- * Tasks status-coupling preference) a slipped task is hidden if any
- * ancestor is also slipped — the user only decides at the root of
- * each slipped subtree, and the dialog's action handlers propagate
- * the chosen verdict (Heute / Morgen / Backlog / Erledigt) to the
- * actionable descendants. An "orphaned" slipped subtask whose parent
- * itself isn't slipped still surfaces as its own row, because there
- * is no slipped ancestor to attach it to.
+ * Cascade-coupling is resolved per task list via the optional
+ * `cascadeEnabledFor` callback — so a user who set "cascade on" for
+ * the work list and "cascade off" for the hobby list gets both
+ * behaviours in the same run. When the callback is omitted, cascade
+ * is treated as off for every list (the historical "no cascade"
+ * default that simpler callers and the unit tests use).
  *
- * When `cascadeEnabled` is false (or omitted, for backward
- * compatibility with the checker / tests) every slipped task appears
- * as its own row regardless of hierarchy.
+ * For a list with cascade on: a slipped task is hidden if any
+ * ancestor in the same list is also slipped — the user only decides
+ * at the root of each slipped subtree, and the dialog's action
+ * handlers propagate the chosen verdict (Heute / Morgen / Backlog /
+ * Erledigt) to the actionable descendants. An "orphaned" slipped
+ * subtask whose parent itself isn't slipped still surfaces as its
+ * own row.
+ *
+ * For a list with cascade off: every slipped task appears as its own
+ * row regardless of hierarchy.
  *
  * Cross-section dedup: tasks that ALSO appear in the overdue list
  * (deadline strictly before today AND scheduled_date strictly before
@@ -71,7 +76,13 @@ export function filterOverdue(tasks: Task[]): Task[] {
  */
 export function filterCarriedOver(
   tasks: Task[],
-  options?: { cascadeEnabled?: boolean },
+  options?: {
+    /** Resolve per-list cascade preference. Parent and child tasks
+     *  live in the same list (invariant from #98), so walking the
+     *  ancestor chain calls this with one list id per hop and
+     *  short-circuits the moment a non-cascading list is hit. */
+    cascadeEnabledFor?: (listId: string) => boolean;
+  },
 ): Task[] {
   const today = todayIsoKey();
   const overdueIds = new Set(filterOverdue(tasks).map((t) => t.id));
@@ -84,11 +95,17 @@ export function filterCarriedOver(
     return task.scheduled_date < today;
   });
 
-  if (!options?.cascadeEnabled) return slipped;
+  const cascadeFor = options?.cascadeEnabledFor;
+  if (!cascadeFor) return slipped;
 
   const slippedIds = new Set(slipped.map((t) => t.id));
   const byId = new Map(tasks.map((t) => [t.id, t]));
   const hasSlippedAncestor = (task: Task): boolean => {
+    // Cascade-coupling for THIS task's list decides whether to
+    // suppress it when an ancestor is slipped. If the task's own
+    // list has cascade off, the row appears even when the parent is
+    // slipped — same as the historical "cascade off" behaviour.
+    if (!cascadeFor(task.list_id)) return false;
     let parentId: string | null = task.parent_id;
     while (parentId) {
       if (slippedIds.has(parentId)) return true;

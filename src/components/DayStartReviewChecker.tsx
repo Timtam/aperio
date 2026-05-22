@@ -15,6 +15,7 @@ import { useDialogState } from '../state/DialogState';
 import {
   useTaskCascadeEnabled,
   type CarryOverDefault,
+  type EffectiveListSettings,
 } from '../state/TaskCascadeProvider';
 import { useTasks } from '../state/useTasks';
 import {
@@ -34,15 +35,13 @@ import {
  * and only later realised there was also a carry-over list. One
  * gate, one dialog, both sections.
  *
- * Behaviour:
- *
- *  - When `carryOverDefault === 'today' | 'backlog'` the carry-over
- *    half is applied silently in a batch BEFORE we consider opening
- *    a dialog. The Settings → Tasks "Übernahme-Standard" preference
- *    is honoured exactly as the old CarryOverChecker did.
- *  - The dialog opens iff there is at least one row left to show
- *    after the silent batch — either overdue rows or, in `ask` mode,
- *    the carry-over rows themselves.
+ * Per-list overrides: the cascade-coupling and carry-over-default
+ * preferences resolve per task list via
+ * `useTaskCascadeEnabled().effectiveForList(listId)`. The silent
+ * auto-batch path groups slipped tasks by their list and applies
+ * each list's chosen action — Work might "ask", Hobby might
+ * "auto-today", and the user gets a dialog for the Work rows while
+ * the Hobby rows quietly shift without prompting.
  *
  * Re-trigger semantics: a persistent `firedDayKey` in localStorage
  * (slot `dayStartReview`) prevents re-firing for a day the user
@@ -67,12 +66,8 @@ export function DayStartReviewChecker() {
   } = useDialogState();
   const announce = useAnnouncer();
   const { t } = useTranslation();
-  const {
-    enabled: cascadeEnabled,
-    carryOverDefault,
-    dayStartTrigger,
-    hydrating,
-  } = useTaskCascadeEnabled();
+  const { effectiveForList, dayStartTrigger, hydrating } =
+    useTaskCascadeEnabled();
   const todayKey = useCurrentDayKey();
   // Persistent fire marker — hydrated from localStorage on mount so a
   // mid-day app restart doesn't re-run the silent batch (and
@@ -98,7 +93,9 @@ export function DayStartReviewChecker() {
     if (isDayStartReviewSnoozed()) return;
 
     const overdue = filterOverdue(tasks);
-    const slipped = filterCarriedOver(tasks, { cascadeEnabled });
+    const slipped = filterCarriedOver(tasks, {
+      cascadeEnabledFor: (listId) => effectiveForList(listId).cascade,
+    });
     // Even on an empty day we record the fire — the gate's only job
     // is "review for this day". If new slipped / overdue rows appear
     // later (sync, manual edit), this tick wouldn't have caught
@@ -107,36 +104,68 @@ export function DayStartReviewChecker() {
     firedRef.current = todayKey;
     writeFiredDayKey('dayStartReview', todayKey);
 
-    const wantsAuto =
-      carryOverDefault !== 'ask' && slipped.length > 0;
-    if (wantsAuto) {
-      // Apply the carry-over batch silently, then re-decide whether
-      // the dialog still needs to open (only when there are overdue
-      // rows left to address — the carry-over half just got
-      // handled).
+    // Group slipped tasks by list and split by each list's carry-over
+    // default. Tasks in lists set to 'ask' end up in the dialog; tasks
+    // in 'today' / 'backlog' lists run through the silent batch with
+    // the appropriate action. A mix of lists with different defaults
+    // produces a hybrid — some rows handled silently, others surfaced
+    // for explicit review.
+    const askRows: Task[] = [];
+    const todayRows: Task[] = [];
+    const backlogRows: Task[] = [];
+    for (const row of slipped) {
+      const eff = effectiveForList(row.list_id);
+      if (eff.carryOverDefault === 'today') todayRows.push(row);
+      else if (eff.carryOverDefault === 'backlog') backlogRows.push(row);
+      else askRows.push(row);
+    }
+
+    const hasSilentWork = todayRows.length > 0 || backlogRows.length > 0;
+    if (hasSilentWork) {
       void (async () => {
-        await runAutoCarryOverBatch({
-          action: carryOverDefault,
-          slippedRoots: slipped,
-          allTasks: tasks,
-          cascadeEnabled,
-          announce,
-          t,
-          invalidateData,
-        });
-        if (overdue.length > 0) openDayStartReview();
+        // Run each batch in its own pass so a failure on one half
+        // (e.g. an offline iCloud account) doesn't block the other.
+        // Both share the same `effectiveForList` so each batch's
+        // cascade decision honours the originating row's list.
+        if (todayRows.length > 0) {
+          await runAutoCarryOverBatch({
+            action: 'today',
+            slippedRoots: todayRows,
+            allTasks: tasks,
+            effectiveForList,
+            announce,
+            t,
+            invalidateData,
+          });
+        }
+        if (backlogRows.length > 0) {
+          await runAutoCarryOverBatch({
+            action: 'backlog',
+            slippedRoots: backlogRows,
+            allTasks: tasks,
+            effectiveForList,
+            announce,
+            t,
+            invalidateData,
+          });
+        }
+        // Dialog opens iff there's still something to talk about —
+        // either an overdue row or a slipped row whose list voted
+        // 'ask'.
+        if (overdue.length + askRows.length > 0) openDayStartReview();
       })();
       return;
     }
 
-    if (overdue.length + slipped.length === 0) return;
+    // No silent work: pure ask-mode. Open the dialog if there's
+    // anything in either section, otherwise stay quiet.
+    if (overdue.length + askRows.length === 0) return;
     openDayStartReview();
   }, [
     loading,
     hydrating,
     tasks,
-    cascadeEnabled,
-    carryOverDefault,
+    effectiveForList,
     dayStartTrigger,
     todayKey,
     dialogMode.kind,
@@ -151,28 +180,28 @@ export function DayStartReviewChecker() {
 
 /**
  * Apply a silent carry-over batch action. Collects every slipped row
- * plus, when cascade-coupling is on, its actionable descendants — the
- * same target set the dialog's bulk buttons would touch.
+ * plus, when cascade-coupling is on for THAT row's list, its
+ * actionable descendants — the same target set the dialog's bulk
+ * buttons would touch, with per-list cascade respected.
  *
- * Unchanged from the standalone CarryOverChecker version other than
- * the relocation. The announce key still lives under
- * `dialogs.dayStartReview.carryOver.auto*` so the message text is
- * specific ("automatisch auf heute übernommen") rather than generic.
+ * Single-action per call — the caller splits rows by action and
+ * runs us twice when the user has mixed today/backlog defaults
+ * across lists.
  */
 async function runAutoCarryOverBatch(args: {
   action: Exclude<CarryOverDefault, 'ask'>;
   slippedRoots: Task[];
   allTasks: Task[];
-  cascadeEnabled: boolean;
+  effectiveForList: (listId: string) => EffectiveListSettings;
   announce: (message: string) => void;
   t: (key: string, values?: Record<string, unknown>) => string;
   invalidateData: () => void;
 }): Promise<void> {
-  const { action, slippedRoots, allTasks, cascadeEnabled } = args;
+  const { action, slippedRoots, allTasks, effectiveForList } = args;
   const collected = new Map<string, Task>();
   for (const root of slippedRoots) {
     collected.set(root.id, root);
-    if (!cascadeEnabled) continue;
+    if (!effectiveForList(root.list_id).cascade) continue;
     for (const desc of actionableDescendants(root.id, allTasks)) {
       collected.set(desc.id, desc);
     }

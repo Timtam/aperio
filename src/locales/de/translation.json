@@ -125,6 +125,17 @@
           "morning1200": "12:00 am neuen Tag",
           "appStart": "Nur beim App-Start"
         }
+      },
+      "perList": {
+        "heading": "Pro Aufgabenliste",
+        "hint": "Überschreibe die drei globalen Standards oben für einzelne Aufgabenlisten. Felder auf „Globaler Standard\" erben den Wert; eine konkrete Auswahl lässt diese Liste anders reagieren als die übrigen.",
+        "empty": "Noch keine Aufgabenlisten — füge zuerst ein Konto hinzu oder lege eine lokale Liste an.",
+        "cascade": "Status-Kopplung",
+        "autoDate": "Auto-Datum beim Start",
+        "carryOver": "Übernahme",
+        "inherit": "Globaler Standard",
+        "on": "An",
+        "off": "Aus"
       }
     },
     "confirm": {

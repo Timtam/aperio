@@ -1,10 +1,12 @@
-import { useId } from 'react';
+import { useId, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { useCalendarStore } from '../state/CalendarStore';
 import {
   useTaskCascadeEnabled,
   type CarryOverDefault,
   type DayStartTrigger,
+  type ListOverrides,
 } from '../state/TaskCascadeProvider';
 
 /**
@@ -56,7 +58,36 @@ export function TasksPanel() {
     setCarryOverDefault,
     dayStartTrigger,
     setDayStartTrigger,
+    listOverrides,
+    setListOverride,
   } = useTaskCascadeEnabled();
+  const { taskLists, accounts } = useCalendarStore();
+
+  // Group lists by their owning account so the per-list editor reads
+  // as "iCloud > Privat | Arbeit" rather than a flat alphabetical
+  // list — mirrors the Calendars-panel layout.
+  const accountNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    accounts.forEach((a) => map.set(a.id, a.display_name));
+    return map;
+  }, [accounts]);
+  const listGroups = useMemo(() => {
+    const byAccount = new Map<string, typeof taskLists>();
+    taskLists.forEach((l) => {
+      const bucket = byAccount.get(l.account_id) ?? [];
+      bucket.push(l);
+      byAccount.set(l.account_id, bucket);
+    });
+    return [...byAccount.entries()].map(([accountId, lists]) => ({
+      accountId,
+      accountName:
+        accountNameById.get(accountId) ??
+        (accountId === 'local'
+          ? t('dialogs.settings.calendars.localAccount')
+          : accountId),
+      lists,
+    }));
+  }, [taskLists, accountNameById, t]);
 
   const couplingHeadingId = useId();
   const couplingHintId = useId();
@@ -68,6 +99,27 @@ export function TasksPanel() {
   const triggerHeadingId = useId();
   const triggerHintId = useId();
   const triggerSelectId = useId();
+  const perListHeadingId = useId();
+  const perListHintId = useId();
+
+  // Build the override-update payload for one knob on one list. The
+  // tri-state "inherit | true | false" select serialises through:
+  //   "" → field absent (inherit global)
+  //   non-empty → field present with that value
+  function updateListOverride<K extends keyof ListOverrides>(
+    listId: string,
+    key: K,
+    value: ListOverrides[K] | undefined,
+  ) {
+    const existing = listOverrides[listId] ?? {};
+    const next: ListOverrides = { ...existing };
+    if (value === undefined) {
+      delete next[key];
+    } else {
+      next[key] = value;
+    }
+    setListOverride(listId, next);
+  }
 
   return (
     <div className="form">
@@ -197,6 +249,152 @@ export function TasksPanel() {
             })}
           </select>
         </label>
+      </section>
+
+      {/* Per-list overrides (#124). The three knobs above are the
+          global defaults; this section lets the user override any
+          subset of them for a specific task list. Most users won't
+          touch it — the "Globaler Standard" option is the default
+          per field, identical to the historical behaviour. */}
+      <section
+        aria-labelledby={perListHeadingId}
+        className="tasks-settings__section"
+      >
+        <h3 id={perListHeadingId} className="color-labels__heading">
+          {t('dialogs.tasks.perList.heading')}
+        </h3>
+        <p id={perListHintId} className="tasks-settings__hint">
+          {t('dialogs.tasks.perList.hint')}
+        </p>
+        {taskLists.length === 0 && (
+          <p className="form__hint">{t('dialogs.tasks.perList.empty')}</p>
+        )}
+        {listGroups.map((group) => (
+          <section
+            key={group.accountId}
+            className="tasks-settings__list-group"
+            aria-label={t('dialogs.settings.calendars.accountHeading', {
+              account: group.accountName,
+            })}
+          >
+            <h4 className="calendars-panel__account">{group.accountName}</h4>
+            <ul className="tasks-settings__list">
+              {group.lists.map((list) => {
+                const override = listOverrides[list.id] ?? {};
+                // Tri-state selects: empty value = "inherit global".
+                // Wrapping each select with `aria-describedby` would
+                // re-announce the section hint on every focus, which
+                // got noisy in #102 testing — the per-list section
+                // header carries enough context.
+                return (
+                  <li
+                    key={list.id}
+                    className="tasks-settings__list-row"
+                  >
+                    <header className="tasks-settings__list-name">
+                      {list.name}
+                    </header>
+                    <div className="tasks-settings__list-controls">
+                      <label className="tasks-settings__select-label">
+                        <span className="form__label">
+                          {t('dialogs.tasks.perList.cascade')}
+                        </span>
+                        <select
+                          value={
+                            override.cascade === undefined
+                              ? ''
+                              : override.cascade
+                              ? 'true'
+                              : 'false'
+                          }
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            updateListOverride(
+                              list.id,
+                              'cascade',
+                              v === '' ? undefined : v === 'true',
+                            );
+                          }}
+                        >
+                          <option value="">
+                            {t('dialogs.tasks.perList.inherit')}
+                          </option>
+                          <option value="true">
+                            {t('dialogs.tasks.perList.on')}
+                          </option>
+                          <option value="false">
+                            {t('dialogs.tasks.perList.off')}
+                          </option>
+                        </select>
+                      </label>
+                      <label className="tasks-settings__select-label">
+                        <span className="form__label">
+                          {t('dialogs.tasks.perList.autoDate')}
+                        </span>
+                        <select
+                          value={
+                            override.autoDate === undefined
+                              ? ''
+                              : override.autoDate
+                              ? 'true'
+                              : 'false'
+                          }
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            updateListOverride(
+                              list.id,
+                              'autoDate',
+                              v === '' ? undefined : v === 'true',
+                            );
+                          }}
+                        >
+                          <option value="">
+                            {t('dialogs.tasks.perList.inherit')}
+                          </option>
+                          <option value="true">
+                            {t('dialogs.tasks.perList.on')}
+                          </option>
+                          <option value="false">
+                            {t('dialogs.tasks.perList.off')}
+                          </option>
+                        </select>
+                      </label>
+                      <label className="tasks-settings__select-label">
+                        <span className="form__label">
+                          {t('dialogs.tasks.perList.carryOver')}
+                        </span>
+                        <select
+                          value={override.carryOverDefault ?? ''}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            updateListOverride(
+                              list.id,
+                              'carryOverDefault',
+                              v === ''
+                                ? undefined
+                                : (v as CarryOverDefault),
+                            );
+                          }}
+                        >
+                          <option value="">
+                            {t('dialogs.tasks.perList.inherit')}
+                          </option>
+                          {CARRY_OVER_OPTIONS.map((option) => (
+                            <option key={option} value={option}>
+                              {t(
+                                `dialogs.tasks.carryOverDefault.options.${option}`,
+                              )}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        ))}
       </section>
     </div>
   );

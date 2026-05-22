@@ -46,19 +46,26 @@ export function useTaskStatusActions(): TaskStatusActions {
   // it can walk parents and siblings. `useTasks` returns the global
   // store, refreshed whenever `dataVersion` bumps.
   const { tasks } = useTasks();
-  // Honour two Settings → Tasks knobs:
-  //   - `enabled` (cascade-status-coupling): when off the planner
+  // Honour two Settings → Tasks knobs PER LIST:
+  //   - `cascade` (cascade-status-coupling): when off the planner
   //     degrades to a single-row write.
   //   - `autoDate`: when off the planner does NOT pin a started
   //     backlog task to today; we simply omit `todayKey` from the
   //     options. The cascade itself still runs normally.
-  const { enabled: cascadeEnabled, autoDate } = useTaskCascadeEnabled();
+  //
+  // Per-task lookup via `effectiveForList(task.list_id)` so a user
+  // who set "cascade off" for one specific list gets that respected
+  // here without affecting the rest of the app. Parent and child
+  // tasks live in the same list (invariant from #98), so the cascade
+  // planner walking the tree all reads the same per-list setting.
+  const { effectiveForList } = useTaskCascadeEnabled();
 
   const set = useCallback(
     async (task: Task, nextStatus: TaskStatus): Promise<void> => {
       if (task.status === nextStatus) return;
+      const { cascade, autoDate } = effectiveForList(task.list_id);
       const writes = planStatusCascade(task.id, nextStatus, tasks, {
-        cascadeEnabled,
+        cascadeEnabled: cascade,
         // Auto-date: a dateless task transitioning into in_progress
         // (either directly or because the up-cascade derived it from
         // a child) gets pinned to today, so the carry-over /
@@ -89,7 +96,7 @@ export function useTaskStatusActions(): TaskStatusActions {
         console.warn('update_task failed', err);
       }
     },
-    [announce, t, invalidateData, tasks, cascadeEnabled, autoDate],
+    [announce, t, invalidateData, tasks, effectiveForList],
   );
 
   const toggle = useCallback(

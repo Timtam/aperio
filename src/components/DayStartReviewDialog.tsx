@@ -68,13 +68,22 @@ export function DayStartReviewDialog({
   const announce = useAnnouncer();
   const { tasks } = useTasks();
   const { invalidateData } = useDialogState();
-  const { enabled: cascadeEnabled } = useTaskCascadeEnabled();
+  // Per-list cascade resolution: each row obeys its OWN list's
+  // status-coupling preference. The filter below treats a slipped
+  // subtask as hidden iff its own list has cascade on AND it has a
+  // slipped ancestor in that same list; the per-row action
+  // handlers walk descendants the same way.
+  const { effectiveForList } = useTaskCascadeEnabled();
+  const cascadeEnabledFor = useCallback(
+    (listId: string) => effectiveForList(listId).cascade,
+    [effectiveForList],
+  );
   const { set: setTaskStatus } = useTaskStatusActions();
 
   const overdue = useMemo(() => filterOverdue(tasks), [tasks]);
   const slipped = useMemo(
-    () => filterCarriedOver(tasks, { cascadeEnabled }),
-    [tasks, cascadeEnabled],
+    () => filterCarriedOver(tasks, { cascadeEnabledFor }),
+    [tasks, cascadeEnabledFor],
   );
 
   const [busy, setBusy] = useState(false);
@@ -207,7 +216,12 @@ export function DayStartReviewDialog({
     ): Promise<void> => {
       setBusy(true);
       try {
-        const followers = cascadeEnabled
+        // Per-list cascade: descendants follow the action iff THIS
+        // row's list has cascade on. A user with cascade off for
+        // "Hobby" can move the parent without dragging the kids
+        // along, even if "Work" cascades.
+        const cascade = effectiveForList(root.list_id).cascade;
+        const followers = cascade
           ? actionableDescendants(root.id, tasks)
           : [];
         const targets: Task[] = [root, ...followers];
@@ -250,7 +264,7 @@ export function DayStartReviewDialog({
         setBusy(false);
       }
     },
-    [tasks, cascadeEnabled, t, announce, invalidateData],
+    [tasks, effectiveForList, t, announce, invalidateData],
   );
 
   const carryToToday = useCallback(
@@ -293,13 +307,15 @@ export function DayStartReviewDialog({
     const collected = new Map<string, Task>();
     for (const row of remainingSlipped) {
       collected.set(row.id, row);
-      if (!cascadeEnabled) continue;
+      // Per-list cascade — same logic as the per-row action
+      // above, just applied to every visible carry-over row.
+      if (!effectiveForList(row.list_id).cascade) continue;
       for (const desc of actionableDescendants(row.id, tasks)) {
         collected.set(desc.id, desc);
       }
     }
     return [...collected.values()];
-  }, [remainingSlipped, cascadeEnabled, tasks]);
+  }, [remainingSlipped, effectiveForList, tasks]);
 
   const allCarryToToday = useCallback(async () => {
     setBusy(true);

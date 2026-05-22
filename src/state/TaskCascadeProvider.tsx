@@ -47,6 +47,19 @@ const CASCADE_KEY = 'tasks.cascadeStatusCoupling';
 const AUTO_DATE_KEY = 'tasks.autoDateOnStart';
 const CARRY_OVER_KEY = 'tasks.carryOverDefault';
 const DAY_START_TRIGGER_KEY = 'tasks.dayStartTrigger';
+/**
+ * Single JSON pref holding the per-list override map. Keyed by
+ * task-list id, value is a `ListOverrides` record carrying any
+ * subset of the three knobs the user wants to override for that
+ * list. Missing keys / absent fields fall back to the global
+ * default.
+ *
+ * Storing as one blob (rather than `tasks.list.{id}.*` keys per
+ * field) keeps the hydration round-trip a single fetch and means
+ * we don't have to enumerate all known lists to discover overrides
+ * — the JSON blob is self-describing.
+ */
+const LIST_OVERRIDES_KEY = 'tasks.listOverrides';
 const WRITE_DEBOUNCE_MS = 150;
 
 export type CarryOverDefault = 'ask' | 'today' | 'backlog';
@@ -95,6 +108,33 @@ function isCarryOverDefault(value: unknown): value is CarryOverDefault {
   );
 }
 
+/**
+ * Per-list override of any subset of the three task-behaviour
+ * knobs. Absent fields inherit the corresponding global default —
+ * a list with `{ carryOverDefault: 'today' }` keeps the global
+ * cascade and auto-date and just changes the carry-over policy.
+ *
+ * Empty `{}` is semantically identical to "no override" but we
+ * still drop the list key when all fields clear so the persisted
+ * JSON stays minimal.
+ */
+export interface ListOverrides {
+  cascade?: boolean;
+  autoDate?: boolean;
+  carryOverDefault?: CarryOverDefault;
+}
+
+/**
+ * The merged values for a specific task list. `cascade`, `autoDate`,
+ * `carryOverDefault` are guaranteed non-null — either inherited from
+ * the global default or overridden by the per-list entry.
+ */
+export interface EffectiveListSettings {
+  cascade: boolean;
+  autoDate: boolean;
+  carryOverDefault: CarryOverDefault;
+}
+
 interface TaskCascadeContextValue {
   /** True when parent/subtask status coupling is active. */
   enabled: boolean;
@@ -112,6 +152,20 @@ interface TaskCascadeContextValue {
   dayStartTrigger: DayStartTrigger;
   /** Set the day-start-trigger preference. Debounced-persisted. */
   setDayStartTrigger: (value: DayStartTrigger) => void;
+  /** Per-list overrides for the cascade / auto-date / carry-over
+   *  knobs. Keyed by task-list id. Absent keys mean "inherit". */
+  listOverrides: Record<string, ListOverrides>;
+  /** Replace the override entry for one list. Pass an empty object
+   *  (or all-absent fields) to clear the override for that list —
+   *  the entry is dropped from the persisted JSON and consumers
+   *  fall back to the globals. */
+  setListOverride: (listId: string, override: ListOverrides) => void;
+  /** Resolve the effective {cascade, autoDate, carryOverDefault}
+   *  values for a single list — per-list override wins per field,
+   *  otherwise the global default applies. The dayStartTrigger is
+   *  intentionally NOT per-list (it's a clock-time pref about WHEN
+   *  the day-start checkers fire, not per-list behaviour). */
+  effectiveForList: (listId: string) => EffectiveListSettings;
   /** True until the initial hydration round-trip returns. */
   hydrating: boolean;
 }
@@ -129,6 +183,9 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
   // which is what users of always-on PCs expect.
   const [dayStartTrigger, setDayStartTriggerState] =
     useState<DayStartTrigger>('00:00');
+  const [listOverrides, setListOverridesState] = useState<
+    Record<string, ListOverrides>
+  >({});
   const [hydrating, setHydrating] = useState(true);
 
   useEffect(() => {
@@ -138,24 +195,62 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
       getUserPref(AUTO_DATE_KEY).catch(() => null),
       getUserPref(CARRY_OVER_KEY).catch(() => null),
       getUserPref(DAY_START_TRIGGER_KEY).catch(() => null),
+      getUserPref(LIST_OVERRIDES_KEY).catch(() => null),
     ])
-      .then(([cascadeRaw, autoDateRaw, carryOverRaw, triggerRaw]) => {
-        if (cancelled) return;
-        // Cascade + auto-date follow the same on/off convention as
-        // before — only literal "false" toggles the default off.
-        if (cascadeRaw === 'false') setEnabledState(false);
-        if (autoDateRaw === 'false') setAutoDateState(false);
-        // Carry-over default is a tri-state enum; reject anything
-        // that doesn't match the allowed values and keep the default.
-        if (isCarryOverDefault(carryOverRaw)) {
-          setCarryOverDefaultState(carryOverRaw);
-        }
-        // Day-start trigger: same approach — accept only the known
-        // enum members. Garbage falls back to the default '00:00'.
-        if (isDayStartTrigger(triggerRaw)) {
-          setDayStartTriggerState(triggerRaw);
-        }
-      })
+      .then(
+        ([cascadeRaw, autoDateRaw, carryOverRaw, triggerRaw, listOverridesRaw]) => {
+          if (cancelled) return;
+          // Cascade + auto-date follow the same on/off convention as
+          // before — only literal "false" toggles the default off.
+          if (cascadeRaw === 'false') setEnabledState(false);
+          if (autoDateRaw === 'false') setAutoDateState(false);
+          // Carry-over default is a tri-state enum; reject anything
+          // that doesn't match the allowed values and keep the default.
+          if (isCarryOverDefault(carryOverRaw)) {
+            setCarryOverDefaultState(carryOverRaw);
+          }
+          // Day-start trigger: same approach — accept only the known
+          // enum members. Garbage falls back to the default '00:00'.
+          if (isDayStartTrigger(triggerRaw)) {
+            setDayStartTriggerState(triggerRaw);
+          }
+          // Per-list overrides: a JSON blob of `Record<listId,
+          // ListOverrides>`. Validate per-list-per-field so a corrupt
+          // entry for one list doesn't poison the others.
+          if (listOverridesRaw) {
+            try {
+              const parsed = JSON.parse(listOverridesRaw) as unknown;
+              if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                const sanitised: Record<string, ListOverrides> = {};
+                for (const [listId, raw] of Object.entries(parsed)) {
+                  if (!raw || typeof raw !== 'object') continue;
+                  const entry: ListOverrides = {};
+                  const r = raw as Record<string, unknown>;
+                  if (typeof r.cascade === 'boolean') entry.cascade = r.cascade;
+                  if (typeof r.autoDate === 'boolean') entry.autoDate = r.autoDate;
+                  if (isCarryOverDefault(r.carryOverDefault)) {
+                    entry.carryOverDefault = r.carryOverDefault;
+                  }
+                  // Drop entries with no surviving fields so the
+                  // in-memory map matches what we'd persist.
+                  if (
+                    entry.cascade !== undefined ||
+                    entry.autoDate !== undefined ||
+                    entry.carryOverDefault !== undefined
+                  ) {
+                    sanitised[listId] = entry;
+                  }
+                }
+                setListOverridesState(sanitised);
+              }
+            } catch {
+              // Bad JSON; leave the map empty so consumers fall back
+              // to globals. The next write will overwrite the
+              // corrupt value.
+            }
+          }
+        },
+      )
       .finally(() => {
         if (!cancelled) setHydrating(false);
       });
@@ -238,6 +333,26 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
     };
   }, [dayStartTrigger, hydrating]);
 
+  const listOverridesTimer = useRef<number | null>(null);
+  useEffect(() => {
+    if (hydrating) return;
+    if (listOverridesTimer.current !== null) {
+      window.clearTimeout(listOverridesTimer.current);
+    }
+    listOverridesTimer.current = window.setTimeout(() => {
+      // Empty map serialises to "{}" — still a valid value, but we
+      // don't need to keep an empty pref hanging around. Storing
+      // the empty object is harmless either way; keep it simple.
+      void setUserPref(LIST_OVERRIDES_KEY, JSON.stringify(listOverrides));
+    }, WRITE_DEBOUNCE_MS);
+    return () => {
+      if (listOverridesTimer.current !== null) {
+        window.clearTimeout(listOverridesTimer.current);
+        listOverridesTimer.current = null;
+      }
+    };
+  }, [listOverrides, hydrating]);
+
   const setEnabled = useCallback((value: boolean) => {
     setEnabledState(value);
   }, []);
@@ -251,6 +366,47 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
     setDayStartTriggerState(value);
   }, []);
 
+  const setListOverride = useCallback(
+    (listId: string, override: ListOverrides) => {
+      setListOverridesState((prev) => {
+        // Strip undefined fields so the persisted map matches the
+        // in-memory shape.
+        const trimmed: ListOverrides = {};
+        if (override.cascade !== undefined) trimmed.cascade = override.cascade;
+        if (override.autoDate !== undefined) trimmed.autoDate = override.autoDate;
+        if (override.carryOverDefault !== undefined) {
+          trimmed.carryOverDefault = override.carryOverDefault;
+        }
+        const isEmpty =
+          trimmed.cascade === undefined &&
+          trimmed.autoDate === undefined &&
+          trimmed.carryOverDefault === undefined;
+        if (isEmpty) {
+          // Drop the list entry entirely — falls back to globals
+          // for every field, identical to "no override".
+          if (prev[listId] === undefined) return prev;
+          const next = { ...prev };
+          delete next[listId];
+          return next;
+        }
+        return { ...prev, [listId]: trimmed };
+      });
+    },
+    [],
+  );
+
+  const effectiveForList = useCallback(
+    (listId: string): EffectiveListSettings => {
+      const override = listOverrides[listId];
+      return {
+        cascade: override?.cascade ?? enabled,
+        autoDate: override?.autoDate ?? autoDate,
+        carryOverDefault: override?.carryOverDefault ?? carryOverDefault,
+      };
+    },
+    [listOverrides, enabled, autoDate, carryOverDefault],
+  );
+
   const value = useMemo<TaskCascadeContextValue>(
     () => ({
       enabled,
@@ -261,6 +417,9 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
       setCarryOverDefault,
       dayStartTrigger,
       setDayStartTrigger,
+      listOverrides,
+      setListOverride,
+      effectiveForList,
       hydrating,
     }),
     [
@@ -272,6 +431,9 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
       setCarryOverDefault,
       dayStartTrigger,
       setDayStartTrigger,
+      listOverrides,
+      setListOverride,
+      effectiveForList,
       hydrating,
     ],
   );

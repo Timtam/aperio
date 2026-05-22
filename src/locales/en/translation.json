@@ -128,6 +128,17 @@
           "morning1200": "At 12:00 on the new day",
           "appStart": "App start only"
         }
+      },
+      "perList": {
+        "heading": "Per task list",
+        "hint": "Override the three defaults above for individual task lists. Leave a field on \"Global default\" to inherit; pick a specific value to make this list behave differently from the rest.",
+        "empty": "No task lists yet — add an account or create a local list first.",
+        "cascade": "Status coupling",
+        "autoDate": "Auto-date on start",
+        "carryOver": "Carry-over",
+        "inherit": "Global default",
+        "on": "On",
+        "off": "Off"
       }
     },
     "confirm": {

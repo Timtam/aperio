@@ -222,7 +222,7 @@ describe('filterCarriedOver — cascade-coupling honoured', () => {
       },
     ];
     expect(
-      filterCarriedOver(tasks, { cascadeEnabled: true }).map((t) => t.id),
+      filterCarriedOver(tasks, { cascadeEnabledFor: () => true }).map((t) => t.id),
     ).toEqual(['parent']);
   });
 
@@ -237,7 +237,7 @@ describe('filterCarriedOver — cascade-coupling honoured', () => {
       },
     ];
     expect(
-      filterCarriedOver(tasks, { cascadeEnabled: true }).map((t) => t.id),
+      filterCarriedOver(tasks, { cascadeEnabledFor: () => true }).map((t) => t.id),
     ).toEqual(['child']);
   });
 
@@ -258,7 +258,7 @@ describe('filterCarriedOver — cascade-coupling honoured', () => {
       },
     ];
     expect(
-      filterCarriedOver(tasks, { cascadeEnabled: true }).map((t) => t.id),
+      filterCarriedOver(tasks, { cascadeEnabledFor: () => true }).map((t) => t.id),
     ).toEqual(['g']);
   });
 
@@ -272,9 +272,51 @@ describe('filterCarriedOver — cascade-coupling honoured', () => {
         scheduled_date: '2026-05-19',
       },
     ];
+    // `cascadeEnabledFor: () => false` and "no callback at all" must
+    // yield identical results — both mean "no cascade".
     expect(
-      filterCarriedOver(tasks, { cascadeEnabled: false }).map((t) => t.id),
+      filterCarriedOver(tasks, { cascadeEnabledFor: () => false }).map((t) => t.id),
     ).toEqual(filterCarriedOver(tasks).map((t) => t.id));
+  });
+
+  it('honours per-list cascade callback for mixed lists', () => {
+    // Two parent/child pairs in different lists. The first list has
+    // cascade on (subtask should hide); the second has cascade off
+    // (both rows surface independently). Mirrors the user-facing
+    // case of "Work cascades, Hobby doesn't".
+    const tasks: Task[] = [
+      {
+        ...baseTask,
+        id: 'work-parent',
+        list_id: 'work',
+        scheduled_date: '2026-05-19',
+      },
+      {
+        ...baseTask,
+        id: 'work-child',
+        list_id: 'work',
+        parent_id: 'work-parent',
+        scheduled_date: '2026-05-19',
+      },
+      {
+        ...baseTask,
+        id: 'hobby-parent',
+        list_id: 'hobby',
+        scheduled_date: '2026-05-19',
+      },
+      {
+        ...baseTask,
+        id: 'hobby-child',
+        list_id: 'hobby',
+        parent_id: 'hobby-parent',
+        scheduled_date: '2026-05-19',
+      },
+    ];
+    const result = filterCarriedOver(tasks, {
+      cascadeEnabledFor: (listId) => listId === 'work',
+    });
+    const ids = result.map((t) => t.id).sort();
+    expect(ids).toEqual(['hobby-child', 'hobby-parent', 'work-parent']);
   });
 });
 
