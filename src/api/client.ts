@@ -14,6 +14,7 @@ import type {
   CommandError,
   Contact,
   ContactList,
+  ContactPhoto,
   NewContact,
   NewEvent,
   SearchResults,
@@ -527,6 +528,37 @@ export const updateContact = (contact: Contact) =>
  *  (they just rendered the row), so always pass it. */
 export const deleteContact = (id: string, listId?: string) =>
   invoke<void>('delete_contact', {
+    id,
+    listId: listId ?? null,
+  });
+
+/** Pull the avatar bytes for a contact. Returns `null` when the
+ *  contact has no photo — the dialog renders the initials
+ *  placeholder in that case. */
+export const getContactPhoto = (id: string, listId?: string) =>
+  invoke<ContactPhoto | null>('get_contact_photo', {
+    id,
+    listId: listId ?? null,
+  });
+
+/** Upload (or replace) the contact's avatar. The bytes travel
+ *  base64-encoded inside `photo.data`; on the wire the Rust side
+ *  custom-serdes them into `Vec<u8>`. */
+export const setContactPhoto = (
+  id: string,
+  photo: ContactPhoto,
+  listId?: string,
+) =>
+  invoke<void>('set_contact_photo', {
+    id,
+    listId: listId ?? null,
+    photo,
+  });
+
+/** Clear the avatar without touching any other field. Idempotent
+ *  — calling it on a contact without a photo succeeds silently. */
+export const deleteContactPhoto = (id: string, listId?: string) =>
+  invoke<void>('delete_contact_photo', {
     id,
     listId: listId ?? null,
   });

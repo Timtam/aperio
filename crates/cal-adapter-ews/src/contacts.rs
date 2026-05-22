@@ -38,20 +38,34 @@
 //!
 //! Out of scope for the first cut:
 //!
-//!   - **Distribution lists** (`<t:DistributionList>`). Aperio
-//!     doesn't model group contacts yet.
-//!   - **Photos.** EWS exposes contact photos as attachments —
-//!     adding them is a separate `CreateAttachment` round-trip and
-//!     the design document doesn't call for them in §10.
 //!   - **Physical addresses.** EWS supports indexed
 //!     `PhysicalAddresses` (`Home`, `Work`, `Other`) but cal-core's
 //!     `Contact` has no address slot yet, so we drop them.
+//!
+//! Phase 10g adds **photos**. EWS files the avatar as a hidden
+//! `FileAttachment` on the contact item — `IsContactPhoto="true"`,
+//! `Name="ContactPicture.jpg"` — so the CRUD path is:
+//!
+//!   1. **Detect** via `contacts:HasPicture` in the FindItem
+//!      additional-properties — flips `Contact.has_photo` without
+//!      a follow-up round-trip.
+//!   2. **Read** via `GetItem` (item:Attachments to find the
+//!      attachment id) + `GetAttachment` (to pull the base64
+//!      `Content`). Adapters that don't model the inverse don't
+//!      need to know about attachment ids.
+//!   3. **Write** via `CreateAttachment` with the
+//!      `<t:IsContactPhoto>true</t:IsContactPhoto>` flag. Replacing
+//!      an existing photo means a `DeleteAttachment` first, since
+//!      Exchange only ever has one photo per contact.
+//!   4. **Remove** via `DeleteAttachment` on the existing
+//!      ContactPicture attachment id.
 
+use base64::Engine;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use quick_xml::events::Event as XmlEvent;
 use quick_xml::reader::Reader;
 
-use cal_core::{Contact, ContactList, GroupMember, NewContact};
+use cal_core::{Contact, ContactList, ContactPhoto, GroupMember, NewContact};
 
 use crate::api::EwsClient;
 use crate::error::{EwsError, EwsResult};
@@ -90,6 +104,14 @@ pub async fn get_contacts(client: &EwsClient, list_id: &str) -> EwsResult<Vec<Co
 /// envelope, harvest the assigned ItemId, synthesise the returned
 /// `Contact` from the request fields so we don't need a follow-up
 /// GetItem.
+///
+/// When `contact.photo` carries inline avatar bytes, a follow-up
+/// `CreateAttachment` round-trip files them as a ContactPicture
+/// attachment so the created contact already has a photo on the
+/// first reload. A failed photo upload doesn't sink the create —
+/// the contact still exists; we log the error and return the
+/// contact without the photo, which leaves the caller free to
+/// retry via `set_contact_photo`.
 pub async fn create_contact(
     client: &EwsClient,
     list_id: &str,
@@ -104,12 +126,143 @@ pub async fn create_contact(
     );
     let response = client.post_soap(envelope).await?;
     let item_ref = parse_first_item_id(&response)?;
-    Ok(build_contact_from_new(
+    let created = build_contact_from_new(
         &contact,
         list_id,
         &item_ref.id,
-        item_ref.change_key,
-    ))
+        item_ref.change_key.clone(),
+    );
+
+    // Inline photo upload: the contact item now exists, so we
+    // CreateAttachment with IsContactPhoto=true. The follow-up
+    // round-trip is unavoidable — `<t:Contact>` payloads don't
+    // accept attachments inside CreateItem, EWS rejects them with
+    // ErrorAttachmentNestLevelExceeded.
+    if let Some(photo) = contact.photo.as_ref() {
+        if !photo.data.is_empty() {
+            if let Err(err) = upload_contact_photo(
+                client,
+                &item_ref.id,
+                item_ref.change_key.as_deref(),
+                photo,
+            )
+            .await
+            {
+                tracing::warn!(
+                    item_id = %item_ref.id,
+                    ?err,
+                    "contact created but photo upload failed; caller may retry via set_contact_photo",
+                );
+                // Reflect what's actually on the server: the photo
+                // didn't make it, so don't claim it did.
+                return Ok(Contact {
+                    has_photo: false,
+                    ..created
+                });
+            }
+        }
+    }
+
+    Ok(created)
+}
+
+/// Fetch the contact's avatar via the EWS attachment surface.
+///
+/// 1. `GetItem` with `item:Attachments` to enumerate the
+///    attachments on this contact.
+/// 2. Filter for the `ContactPicture` (`IsContactPhoto=true` or
+///    `Name="ContactPicture.jpg"`).
+/// 3. `GetAttachment` on its id to pull the base64 `Content`.
+///
+/// Returns `None` when the contact has no photo. The `<t:HasPicture>`
+/// flag in listings is the canonical signal — this helper exists
+/// so the frontend can actually display the bytes once the user
+/// opens the contact.
+pub async fn get_contact_photo(
+    client: &EwsClient,
+    contact_id: &str,
+) -> EwsResult<Option<ContactPhoto>> {
+    let (item_id, change_key) = split_calendar_id(contact_id);
+    let envelope = get_item_attachments_envelope(&item_id, change_key.as_deref());
+    let response = client.post_soap(envelope).await?;
+    let attachments = parse_attachment_index(&response)?;
+    let Some(photo_attachment_id) = attachments
+        .into_iter()
+        .find(|a| a.is_contact_photo)
+        .map(|a| a.attachment_id)
+    else {
+        return Ok(None);
+    };
+    let envelope = get_attachment_envelope(&photo_attachment_id);
+    let response = client.post_soap(envelope).await?;
+    let parsed = parse_get_attachment_response(&response)?;
+    Ok(parsed)
+}
+
+/// Replace (or upload) the contact's photo. Existing photo
+/// attachments are deleted first — Exchange only ever keeps one
+/// ContactPicture per item, but stale attachments would surface
+/// as duplicates in Outlook until the next server-side cleanup.
+pub async fn set_contact_photo(
+    client: &EwsClient,
+    contact_id: &str,
+    photo: ContactPhoto,
+) -> EwsResult<()> {
+    if photo.data.is_empty() {
+        return Err(EwsError::Protocol(
+            "contact photo payload must not be empty".into(),
+        ));
+    }
+    let (item_id, change_key) = split_calendar_id(contact_id);
+
+    // 1. Drop any existing ContactPicture attachments so the
+    //    upload doesn't pile a second one on top.
+    let envelope = get_item_attachments_envelope(&item_id, change_key.as_deref());
+    let response = client.post_soap(envelope).await?;
+    let attachments = parse_attachment_index(&response)?;
+    for attachment in attachments {
+        if attachment.is_contact_photo {
+            let envelope = delete_attachment_envelope(&attachment.attachment_id);
+            client.post_soap(envelope).await?;
+        }
+    }
+
+    // 2. Upload the new bytes.
+    upload_contact_photo(client, &item_id, change_key.as_deref(), &photo).await
+}
+
+/// Strip the avatar by deleting every ContactPicture attachment
+/// on the contact. Errors per attachment surface to the caller;
+/// the no-photo case (no matching attachments) yields `Ok(())`.
+pub async fn delete_contact_photo(
+    client: &EwsClient,
+    contact_id: &str,
+) -> EwsResult<()> {
+    let (item_id, change_key) = split_calendar_id(contact_id);
+    let envelope = get_item_attachments_envelope(&item_id, change_key.as_deref());
+    let response = client.post_soap(envelope).await?;
+    let attachments = parse_attachment_index(&response)?;
+    for attachment in attachments {
+        if attachment.is_contact_photo {
+            let envelope = delete_attachment_envelope(&attachment.attachment_id);
+            client.post_soap(envelope).await?;
+        }
+    }
+    Ok(())
+}
+
+/// Internal helper that CreateAttachments a ContactPicture onto
+/// an existing contact item. Shared by `create_contact` (the
+/// inline-photo follow-up) and `set_contact_photo`.
+async fn upload_contact_photo(
+    client: &EwsClient,
+    item_id: &str,
+    change_key: Option<&str>,
+    photo: &ContactPhoto,
+) -> EwsResult<()> {
+    let envelope = create_contact_photo_envelope(item_id, change_key, photo);
+    client.post_soap(envelope).await?;
+    Ok(())
 }
 
 /// Update an existing contact. Every field is set or deleted
@@ -230,6 +383,7 @@ pub fn find_contacts_in_folder(folder_id: &str, change_key: Option<&str>) -> Str
           <t:FieldURI FieldURI="contacts:EmailAddresses"/>
           <t:FieldURI FieldURI="contacts:PhoneNumbers"/>
           <t:FieldURI FieldURI="contacts:Birthday"/>
+          <t:FieldURI FieldURI="contacts:HasPicture"/>
           <t:FieldURI FieldURI="distributionlist:Members"/>
         </t:AdditionalProperties>
       </m:ItemShape>
@@ -452,6 +606,11 @@ pub struct ParsedContact {
     /// (`<t:DistributionList>`), where the empty vec is the
     /// "freshly created empty group" case.
     pub members: Option<Vec<GroupMember>>,
+    /// EWS `contacts:HasPicture` — `true` ⇒ the contact has a
+    /// ContactPicture attachment we can fetch via
+    /// `get_contact_photo`. Mirrors the `has_photo` flag the
+    /// frontend listings consume.
+    pub has_picture: bool,
     pub created: Option<DateTime<Utc>>,
     pub last_modified: Option<DateTime<Utc>>,
 }
@@ -530,6 +689,7 @@ pub fn parse_find_contact_item_response(xml: &str) -> EwsResult<Vec<ParsedContac
                     b"companyname" => text_target = Some("company_name"),
                     b"body" => text_target = Some("body"),
                     b"birthday" => text_target = Some("birthday"),
+                    b"haspicture" => text_target = Some("has_picture"),
                     b"datetimecreated" => text_target = Some("created"),
                     b"lastmodifiedtime" => text_target = Some("modified"),
                     b"emailaddresses" => {
@@ -654,6 +814,11 @@ pub fn parse_find_contact_item_response(xml: &str) -> EwsResult<Vec<ParsedContac
                         current.body.get_or_insert_with(String::new).push_str(s);
                     }
                     Some("birthday") => current.birthday = parse_ews_datetime(s),
+                    Some("has_picture") => {
+                        // EWS emits `true` / `false`; tolerate
+                        // `True` / case mismatches just in case.
+                        current.has_picture = s.eq_ignore_ascii_case("true");
+                    }
                     Some("created") => current.created = parse_ews_datetime(s),
                     Some("modified") => current.last_modified = parse_ews_datetime(s),
                     Some("entry") => current_entry_value.push_str(s),
@@ -758,6 +923,7 @@ pub fn to_contact(item: ParsedContact, list_id: &str) -> Contact {
         birthday,
         notes: item.body,
         members: item.members,
+        has_photo: item.has_picture,
         created_at: item.created.unwrap_or_else(Utc::now),
         updated_at: item.last_modified.unwrap_or_else(Utc::now),
         etag: item.change_key,
@@ -1156,6 +1322,285 @@ fn delete_indexed_xml(field_uri: &str, key: &str) -> String {
     )
 }
 
+// ── Photo attachment helpers ──────────────────────────────────────────
+
+/// A single attachment summary we care about — only Id + the
+/// ContactPicture flag. We pull these via `GetItem` /
+/// `item:Attachments` to find the photo before downloading it.
+#[derive(Debug, Clone, Default)]
+struct AttachmentIndexEntry {
+    attachment_id: String,
+    is_contact_photo: bool,
+}
+
+/// SOAP body for `GetItem` requesting the item's attachment
+/// collection. We ask for `Default` shape plus `item:Attachments`
+/// so the response carries the attachment ids without bloating
+/// the round-trip with body / contact fields we don't need here.
+fn get_item_attachments_envelope(item_id: &str, change_key: Option<&str>) -> String {
+    let id_attr = match change_key {
+        Some(ck) => format!(
+            r#"<t:ItemId Id="{}" ChangeKey="{}"/>"#,
+            escape_xml(item_id),
+            escape_xml(ck),
+        ),
+        None => format!(r#"<t:ItemId Id="{}"/>"#, escape_xml(item_id)),
+    };
+    let body = format!(
+        r#"    <m:GetItem>
+      <m:ItemShape>
+        <t:BaseShape>IdOnly</t:BaseShape>
+        <t:AdditionalProperties>
+          <t:FieldURI FieldURI="item:Attachments"/>
+        </t:AdditionalProperties>
+      </m:ItemShape>
+      <m:ItemIds>
+        {id_attr}
+      </m:ItemIds>
+    </m:GetItem>"#,
+    );
+    wrap(&body)
+}
+
+/// SOAP body for `GetAttachment` against a single attachment id.
+/// Default shape carries `<t:Content>` (base64), `<t:Name>`, and
+/// `<t:ContentType>` — exactly what we need to materialise a
+/// `ContactPhoto`.
+fn get_attachment_envelope(attachment_id: &str) -> String {
+    let body = format!(
+        r#"    <m:GetAttachment>
+      <m:AttachmentShape>
+        <t:IncludeMimeContent>false</t:IncludeMimeContent>
+      </m:AttachmentShape>
+      <m:AttachmentIds>
+        <t:AttachmentId Id="{}"/>
+      </m:AttachmentIds>
+    </m:GetAttachment>"#,
+        escape_xml(attachment_id),
+    );
+    wrap(&body)
+}
+
+/// SOAP body for `CreateAttachment` uploading a ContactPicture.
+/// `IsContactPhoto=true` is what tells Exchange to treat the
+/// FileAttachment as the contact's avatar — without it Outlook
+/// shows the attachment as a regular file on the contact rather
+/// than the photo thumbnail.
+fn create_contact_photo_envelope(
+    item_id: &str,
+    change_key: Option<&str>,
+    photo: &ContactPhoto,
+) -> String {
+    let id_attr = match change_key {
+        Some(ck) => format!(
+            r#"<t:ItemId Id="{}" ChangeKey="{}"/>"#,
+            escape_xml(item_id),
+            escape_xml(ck),
+        ),
+        None => format!(r#"<t:ItemId Id="{}"/>"#, escape_xml(item_id)),
+    };
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&photo.data);
+    // Exchange identifies the photo by Name="ContactPicture.jpg"
+    // by convention; the actual extension can be png / gif but
+    // the literal "ContactPicture.jpg" is what Outlook scans for.
+    let content_type = escape_xml(&photo.content_type);
+    let body = format!(
+        r#"    <m:CreateAttachment>
+      <m:ParentItemId {id_attr_no_brackets}/>
+      <m:Attachments>
+        <t:FileAttachment>
+          <t:Name>ContactPicture.jpg</t:Name>
+          <t:ContentType>{content_type}</t:ContentType>
+          <t:IsInline>false</t:IsInline>
+          <t:IsContactPhoto>true</t:IsContactPhoto>
+          <t:Content>{b64}</t:Content>
+        </t:FileAttachment>
+      </m:Attachments>
+    </m:CreateAttachment>"#,
+        // The ParentItemId carries the same attributes as ItemId
+        // but the wrapper expects them inline; reuse the rendered
+        // attribute body without the surrounding <t:ItemId>.
+        id_attr_no_brackets = id_attr
+            .trim_start_matches("<t:ItemId ")
+            .trim_end_matches("/>"),
+    );
+    wrap(&body)
+}
+
+/// SOAP body for `DeleteAttachment` by id.
+fn delete_attachment_envelope(attachment_id: &str) -> String {
+    let body = format!(
+        r#"    <m:DeleteAttachment>
+      <m:AttachmentIds>
+        <t:AttachmentId Id="{}"/>
+      </m:AttachmentIds>
+    </m:DeleteAttachment>"#,
+        escape_xml(attachment_id),
+    );
+    wrap(&body)
+}
+
+/// Walk a `GetItemResponse` payload and yield one entry per
+/// FileAttachment on the contact. We grab the AttachmentId plus
+/// the `IsContactPhoto` flag — the only two pieces the photo
+/// CRUD paths use. Non-photo attachments are reported alongside
+/// so the caller can filter; we don't drop them here in case a
+/// future hook wants to enumerate them.
+fn parse_attachment_index(xml: &str) -> EwsResult<Vec<AttachmentIndexEntry>> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    let mut out: Vec<AttachmentIndexEntry> = Vec::new();
+    let mut inside_attachment = false;
+    let mut current = AttachmentIndexEntry::default();
+    let mut text_target: Option<&'static str> = None;
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(XmlEvent::Start(e)) | Ok(XmlEvent::Empty(e)) => {
+                let local = e.local_name().as_ref().to_ascii_lowercase();
+                if local == b"fileattachment" || local == b"itemattachment" {
+                    inside_attachment = true;
+                    current = AttachmentIndexEntry::default();
+                    continue;
+                }
+                if inside_attachment && local == b"attachmentid" {
+                    for a in e.attributes().flatten() {
+                        let key = a.key.as_ref();
+                        if key.eq_ignore_ascii_case(b"Id") {
+                            current.attachment_id =
+                                String::from_utf8_lossy(&a.value).into_owned();
+                        }
+                    }
+                }
+                if inside_attachment && local == b"iscontactphoto" {
+                    text_target = Some("is_contact_photo");
+                }
+            }
+            Ok(XmlEvent::End(e)) => {
+                let local = e.local_name().as_ref().to_ascii_lowercase();
+                if local == b"fileattachment" || local == b"itemattachment" {
+                    if !current.attachment_id.is_empty() {
+                        out.push(std::mem::take(&mut current));
+                    }
+                    inside_attachment = false;
+                    text_target = None;
+                    continue;
+                }
+                if local == b"iscontactphoto" {
+                    text_target = None;
+                }
+            }
+            Ok(XmlEvent::Text(t)) if text_target == Some("is_contact_photo") => {
+                let raw = match t.unescape() {
+                    Ok(c) => c.to_string(),
+                    Err(_) => continue,
+                };
+                if raw.trim().eq_ignore_ascii_case("true") {
+                    current.is_contact_photo = true;
+                }
+            }
+            Ok(XmlEvent::Eof) => break,
+            Err(err) => return Err(EwsError::Protocol(format!("xml parse: {err}"))),
+            _ => {}
+        }
+        buf.clear();
+    }
+    Ok(out)
+}
+
+/// Parse a `GetAttachmentResponse` into a `ContactPhoto`. The
+/// shape EWS emits:
+///
+/// ```xml
+/// <m:GetAttachmentResponseMessage ResponseClass="Success">
+///   <m:Attachments>
+///     <t:FileAttachment>
+///       <t:AttachmentId Id="…"/>
+///       <t:Name>ContactPicture.jpg</t:Name>
+///       <t:ContentType>image/jpeg</t:ContentType>
+///       <t:Content>BASE64BYTES</t:Content>
+///     </t:FileAttachment>
+///   </m:Attachments>
+/// </m:GetAttachmentResponseMessage>
+/// ```
+fn parse_get_attachment_response(xml: &str) -> EwsResult<Option<ContactPhoto>> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    let mut content_type: Option<String> = None;
+    let mut content_b64: Option<String> = None;
+    let mut text_target: Option<&'static str> = None;
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(XmlEvent::Start(e)) | Ok(XmlEvent::Empty(e)) => {
+                let local = e.local_name().as_ref().to_ascii_lowercase();
+                match local.as_slice() {
+                    b"contenttype" => text_target = Some("content_type"),
+                    b"content" => text_target = Some("content"),
+                    _ => {}
+                }
+            }
+            Ok(XmlEvent::End(e)) => {
+                let local = e.local_name().as_ref().to_ascii_lowercase();
+                if matches!(local.as_slice(), b"contenttype" | b"content") {
+                    text_target = None;
+                }
+            }
+            Ok(XmlEvent::Text(t)) => {
+                if text_target.is_none() {
+                    continue;
+                }
+                let raw = match t.unescape() {
+                    Ok(c) => c.to_string(),
+                    Err(_) => continue,
+                };
+                let s = raw.trim();
+                if s.is_empty() {
+                    continue;
+                }
+                match text_target {
+                    Some("content_type") => {
+                        content_type.get_or_insert_with(String::new).push_str(s);
+                    }
+                    Some("content") => {
+                        // EWS may chunk the base64 across multiple
+                        // Text events; append rather than replace.
+                        content_b64.get_or_insert_with(String::new).push_str(s);
+                    }
+                    _ => {}
+                }
+            }
+            Ok(XmlEvent::Eof) => break,
+            Err(err) => return Err(EwsError::Protocol(format!("xml parse: {err}"))),
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    let Some(b64) = content_b64 else {
+        return Ok(None);
+    };
+    let cleaned: String = b64.chars().filter(|c| !c.is_whitespace()).collect();
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(cleaned.as_bytes())
+        .map_err(|e| EwsError::Protocol(format!("attachment base64: {e}")))?;
+    if bytes.is_empty() {
+        return Ok(None);
+    }
+    // Default to image/jpeg if Exchange somehow stripped the
+    // ContentType — Outlook treats ContactPicture as JPEG by
+    // convention.
+    let content_type = content_type
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "image/jpeg".to_string());
+    Ok(Some(ContactPhoto {
+        content_type,
+        data: bytes,
+    }))
+}
+
 fn build_contact_from_new(
     new: &NewContact,
     list_id: &str,
@@ -1175,6 +1620,17 @@ fn build_contact_from_new(
         birthday: new.birthday,
         notes: new.notes.clone(),
         members: new.members.clone(),
+        // Photo follows the same flag-on-create semantic as the
+        // CardDAV path: if the caller supplied bytes, the
+        // create_contact flow uploaded them via CreateAttachment
+        // and a subsequent listing would flip the flag anyway —
+        // compute it here so the create response is already
+        // honest.
+        has_photo: new
+            .photo
+            .as_ref()
+            .map(|p| !p.data.is_empty())
+            .unwrap_or(false),
         created_at: now,
         updated_at: now,
         etag: change_key,
@@ -1478,6 +1934,7 @@ mod tests {
             birthday: Some(NaiveDate::from_ymd_opt(1990, 6, 15).unwrap()),
             notes: None,
             members: None,
+            photo: None,
         };
         let xml = new_contact_to_contact_item_xml(&nc);
         assert!(xml.contains("<t:FileAs>Anna Beispiel</t:FileAs>"));
@@ -1508,6 +1965,7 @@ mod tests {
             birthday: Some(NaiveDate::from_ymd_opt(2000, 1, 1).unwrap()),
             notes: Some("Note".into()),
             members: None,
+            photo: None,
         };
         let xml = new_contact_to_contact_item_xml(&nc);
         let order_check = |earlier: &str, later: &str| {
@@ -1551,6 +2009,7 @@ mod tests {
             birthday: None,
             notes: None,
             members: None,
+            photo: None,
         };
         let xml = new_contact_to_contact_item_xml(&nc);
         assert!(xml.contains("EmailAddress1"));
@@ -1577,6 +2036,7 @@ mod tests {
             birthday: None,
             notes: None,
             members: None,
+            has_photo: false,
             created_at: Utc::now(),
             updated_at: Utc::now(),
             etag: Some("CK".into()),
@@ -1603,6 +2063,7 @@ mod tests {
             birthday: None,
             notes: None,
             members: None,
+            has_photo: false,
             created_at: Utc::now(),
             updated_at: Utc::now(),
             etag: Some("CK".into()),
@@ -1626,6 +2087,7 @@ mod tests {
             birthday: None,
             notes: None,
             members: None,
+            has_photo: false,
             created_at: Utc::now(),
             updated_at: Utc::now(),
             etag: None,
@@ -1650,5 +2112,112 @@ mod tests {
     #[test]
     fn search_returns_false_on_no_match() {
         assert!(!contact_matches(&sample_contact(), "schmidt"));
+    }
+
+    // ── Photo attachment helpers ──────────────────────────────────
+
+    #[test]
+    fn attachment_index_isolates_contact_photo_id() {
+        // GetItemResponse with two attachments: one ordinary file
+        // and one ContactPicture. The parser must report both
+        // but only the ContactPicture should carry the flag.
+        let xml = r#"
+<m:GetItemResponse xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+                   xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <m:Items>
+    <t:Contact>
+      <t:Attachments>
+        <t:FileAttachment>
+          <t:AttachmentId Id="ATT-FILE"/>
+          <t:Name>readme.txt</t:Name>
+          <t:IsContactPhoto>false</t:IsContactPhoto>
+        </t:FileAttachment>
+        <t:FileAttachment>
+          <t:AttachmentId Id="ATT-PHOTO"/>
+          <t:Name>ContactPicture.jpg</t:Name>
+          <t:IsContactPhoto>true</t:IsContactPhoto>
+        </t:FileAttachment>
+      </t:Attachments>
+    </t:Contact>
+  </m:Items>
+</m:GetItemResponse>"#;
+        let attachments = parse_attachment_index(xml).unwrap();
+        assert_eq!(attachments.len(), 2);
+        let photo = attachments
+            .iter()
+            .find(|a| a.is_contact_photo)
+            .expect("contact photo present");
+        assert_eq!(photo.attachment_id, "ATT-PHOTO");
+        let other = attachments
+            .iter()
+            .find(|a| !a.is_contact_photo)
+            .expect("non-photo attachment present");
+        assert_eq!(other.attachment_id, "ATT-FILE");
+    }
+
+    #[test]
+    fn parse_get_attachment_response_decodes_base64() {
+        // Real PNG bytes — same as the cal-adapter-local fixture
+        // — round-tripped through base64 inside a minimal EWS
+        // GetAttachmentResponse envelope.
+        const PNG_1X1: &[u8] = &[
+            0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49,
+            0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06,
+            0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44,
+            0x41, 0x54, 0x78, 0x9c, 0x63, 0xfa, 0xcf, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01,
+            0xe5, 0x27, 0xde, 0xfc, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
+            0x42, 0x60, 0x82,
+        ];
+        let b64 = base64::engine::general_purpose::STANDARD.encode(PNG_1X1);
+        let xml = format!(
+            r#"
+<m:GetAttachmentResponse xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+                         xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <m:ResponseMessages>
+    <m:GetAttachmentResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Attachments>
+        <t:FileAttachment>
+          <t:AttachmentId Id="ATT-PHOTO"/>
+          <t:Name>ContactPicture.jpg</t:Name>
+          <t:ContentType>image/png</t:ContentType>
+          <t:IsContactPhoto>true</t:IsContactPhoto>
+          <t:Content>{b64}</t:Content>
+        </t:FileAttachment>
+      </m:Attachments>
+    </m:GetAttachmentResponseMessage>
+  </m:ResponseMessages>
+</m:GetAttachmentResponse>"#,
+        );
+        let photo = parse_get_attachment_response(&xml).unwrap().unwrap();
+        assert_eq!(photo.content_type, "image/png");
+        assert_eq!(photo.data, PNG_1X1.to_vec());
+    }
+
+    #[test]
+    fn create_contact_photo_envelope_marks_iscontactphoto() {
+        let photo = ContactPhoto {
+            content_type: "image/jpeg".into(),
+            data: vec![0xff, 0xd8, 0xff],
+        };
+        let envelope = create_contact_photo_envelope("ITEM-1", Some("CK-1"), &photo);
+        // The IsContactPhoto flag is what makes Exchange treat the
+        // upload as the contact's avatar — without it Outlook
+        // shows it as a regular attachment instead. Make sure we
+        // never accidentally drop the flag.
+        assert!(envelope.contains("<t:IsContactPhoto>true</t:IsContactPhoto>"));
+        assert!(envelope.contains("<t:Name>ContactPicture.jpg</t:Name>"));
+        assert!(envelope.contains("<t:ContentType>image/jpeg</t:ContentType>"));
+        assert!(envelope.contains(r#"Id="ITEM-1""#));
+        assert!(envelope.contains(r#"ChangeKey="CK-1""#));
+    }
+
+    #[test]
+    fn haspicture_field_is_requested_on_findcontacts() {
+        let body = find_contacts_in_folder("FID", None);
+        // Listing FindItem must pull `contacts:HasPicture` so the
+        // `Contact.has_photo` flag arrives without a follow-up
+        // GetItem per row.
+        assert!(body.contains("contacts:HasPicture"));
     }
 }

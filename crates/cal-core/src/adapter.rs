@@ -13,8 +13,8 @@ use crate::color::ContainerColor;
 use crate::error::{Error, Result};
 use crate::reminder::SoundConfig;
 use crate::types::{
-    Calendar, Contact, ContactList, DateRange, Event, FreeBusy, NewContact, NewEvent, NewTask,
-    Task, TaskList,
+    Calendar, Contact, ContactList, ContactPhoto, DateRange, Event, FreeBusy, NewContact,
+    NewEvent, NewTask, Task, TaskList,
 };
 
 /// Stable identifier for the adapter source (e.g. "google", "caldav",
@@ -174,6 +174,55 @@ pub trait ContactsFeature: Adapter {
     ) -> Result<()> {
         Err(Error::Unsupported(
             "rename_contact_list is not supported on this adapter".into(),
+        ))
+    }
+
+    /// Fetch the photo bytes for a contact. Pulled lazily because
+    /// listings carry only the `has_photo` flag — a 1000-contact
+    /// `get_contacts` shouldn't haul a megabyte of JPEGs across
+    /// the IPC.
+    ///
+    /// `Ok(None)` ⇒ the contact exists but has no photo (the
+    /// listing's `has_photo` would have been `false` anyway, but
+    /// returning `None` rather than a `NotFound` keeps the caller
+    /// from having to special-case the "stale flag" race).
+    ///
+    /// `Ok(Some(_))` ⇒ photo bytes plus their MIME content type.
+    ///
+    /// `Err(NotFound)` ⇒ the contact id itself doesn't exist.
+    ///
+    /// Adapters that don't model photos at all default to `Ok(None)`
+    /// — the frontend renders the no-photo placeholder and the user
+    /// sees no error.
+    async fn get_contact_photo(
+        &self,
+        _contact_id: &str,
+    ) -> Result<Option<ContactPhoto>> {
+        Ok(None)
+    }
+
+    /// Replace the photo for an existing contact. Adapters that
+    /// store photos inline (CardDAV vCard PHOTO) re-PUT the
+    /// resource; adapters that store them as side-data (EWS
+    /// ContactPicture attachment) issue the provider-specific
+    /// attachment write. Default `Unsupported` so adapters that
+    /// haven't grown the feature surface a clear error rather
+    /// than silently swallowing the write.
+    async fn set_contact_photo(
+        &self,
+        _contact_id: &str,
+        _photo: ContactPhoto,
+    ) -> Result<()> {
+        Err(Error::Unsupported(
+            "set_contact_photo is not supported on this adapter".into(),
+        ))
+    }
+
+    /// Remove the photo without touching any other field. Same
+    /// default-`Unsupported` shape as `set_contact_photo`.
+    async fn delete_contact_photo(&self, _contact_id: &str) -> Result<()> {
+        Err(Error::Unsupported(
+            "delete_contact_photo is not supported on this adapter".into(),
         ))
     }
 }

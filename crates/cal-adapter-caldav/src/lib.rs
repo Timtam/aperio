@@ -212,6 +212,23 @@ impl CaldavAdapter {
         }
     }
 
+    /// Pick a URL on the contact server that the photo-CRUD
+    /// helpers can join contact resource paths against. The
+    /// `ContactsFeature` photo methods take only `contact_id`
+    /// (which encodes the resource href), so we need a base URL
+    /// from the same host for `Url::join` to resolve absolute
+    /// paths against. Any address-book URL works; the home URL
+    /// is preferred because discovery already cached it.
+    async fn contact_resource_base(&self) -> CoreResult<Url> {
+        let discovery = self.discover().await.map_err(to_core_error)?;
+        discovery.addressbook_home_url.clone().ok_or_else(|| {
+            CoreError::NotFound(
+                "no addressbook-home-set; this server does not advertise CardDAV"
+                    .into(),
+            )
+        })
+    }
+
     /// Returns the discovered calendar-home URL, running the
     /// discovery chain once and caching the result. Subsequent calls
     /// return the cached value without any HTTP traffic.
@@ -734,6 +751,40 @@ impl ContactsFeature for CaldavAdapter {
         // new name. Calendars and tasks aren't affected.
         *self.contact_lists_cache.lock().expect("poison") = None;
         Ok(())
+    }
+
+    async fn get_contact_photo(
+        &self,
+        contact_id: &str,
+    ) -> CoreResult<Option<cal_core::ContactPhoto>> {
+        let base = self.contact_resource_base().await?;
+        contacts::get_contact_photo(&self.http, &base, contact_id, &self.credentials)
+            .await
+            .map_err(to_core_error)
+    }
+
+    async fn set_contact_photo(
+        &self,
+        contact_id: &str,
+        photo: cal_core::ContactPhoto,
+    ) -> CoreResult<()> {
+        let base = self.contact_resource_base().await?;
+        contacts::set_contact_photo(
+            &self.http,
+            &base,
+            contact_id,
+            photo,
+            &self.credentials,
+        )
+        .await
+        .map_err(to_core_error)
+    }
+
+    async fn delete_contact_photo(&self, contact_id: &str) -> CoreResult<()> {
+        let base = self.contact_resource_base().await?;
+        contacts::delete_contact_photo(&self.http, &base, contact_id, &self.credentials)
+            .await
+            .map_err(to_core_error)
     }
 }
 

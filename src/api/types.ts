@@ -178,9 +178,26 @@ export interface Contact {
    *  Aperio surfaces the distinction in the dialog (member
    *  editor) and in the list view (group badge). */
   members: GroupMember[] | null;
+  /** Avatar presence flag (Phase 10g). `true` ⇒ the contact has
+   *  a photo we can fetch via `get_contact_photo`; the listing
+   *  doesn't carry the bytes themselves so a thousand-row pull
+   *  stays cheap. The dialog and the attendees picker probe
+   *  `has_photo` to decide whether to issue a follow-up fetch
+   *  or render the initials placeholder. */
+  has_photo: boolean;
   created_at: string;
   updated_at: string;
   etag: string | null;
+}
+
+/** Avatar bytes attached to a contact. Round-tripped on
+ *  `get_contact_photo` / `set_contact_photo`, with `data` carried
+ *  as a base64-encoded string (the Rust side custom-serdes the
+ *  `Vec<u8>` so the JSON shape stays small). */
+export interface ContactPhoto {
+  content_type: string;
+  /** Base64-encoded image bytes. */
+  data: string;
 }
 
 /** Payload for `create_contact` — server fills in id + timestamps. */
@@ -196,6 +213,10 @@ export interface NewContact {
   /** See `Contact.members`. `null` ⇒ create a person; a non-null
    *  array (possibly empty) ⇒ create a distribution list. */
   members: GroupMember[] | null;
+  /** Optional inline avatar — backend writes it as part of the
+   *  create round-trip so a "new contact with photo" gesture
+   *  lands as one command. `null` for the common case. */
+  photo: ContactPhoto | null;
 }
 
 export interface SearchResults {

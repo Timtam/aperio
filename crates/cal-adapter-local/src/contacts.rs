@@ -18,8 +18,8 @@
 
 use async_trait::async_trait;
 use cal_core::{
-    Contact, ContactList, ContactsFeature, ContainerColor, Error as CoreError, NewContact,
-    Result as CoreResult,
+    Contact, ContactList, ContactPhoto, ContactsFeature, ContainerColor, Error as CoreError,
+    NewContact, Result as CoreResult,
 };
 use chrono::Utc;
 use rusqlite::{params, Row};
@@ -127,11 +127,17 @@ impl ContactsFeature for LocalAdapter {
 
     async fn get_contacts(&self, list_id: &str) -> CoreResult<Vec<Contact>> {
         let conn = self.db().lock().expect("db mutex poisoned");
+        // `photo_data IS NOT NULL` projects the has_photo flag
+        // without materialising the BLOB — SQLite skips reading
+        // the bytes off disk when we don't reference the column
+        // directly, so the listing query stays cheap even for
+        // contacts with megabyte-sized avatars.
         let mut stmt = conn
             .prepare(
                 "SELECT id, list_id, display_name, given_name, family_name,
                         organization, emails, phone_numbers, birthday, notes,
-                        etag, created_at, updated_at, members
+                        etag, created_at, updated_at, members,
+                        (photo_data IS NOT NULL) AS has_photo
                  FROM contacts
                  WHERE list_id = ?
                  ORDER BY display_name COLLATE NOCASE",
@@ -168,7 +174,8 @@ impl ContactsFeature for LocalAdapter {
             .prepare(
                 "SELECT c.id, c.list_id, c.display_name, c.given_name, c.family_name,
                         c.organization, c.emails, c.phone_numbers, c.birthday, c.notes,
-                        c.etag, c.created_at, c.updated_at, c.members
+                        c.etag, c.created_at, c.updated_at, c.members,
+                        (c.photo_data IS NOT NULL) AS has_photo
                  FROM contacts_fts f
                  JOIN contacts c ON c.id = f.id
                  WHERE contacts_fts MATCH ?
@@ -209,6 +216,16 @@ impl ContactsFeature for LocalAdapter {
             Some(m) => Some(encode_json(m)?),
             None => None,
         };
+        // Photo travels inline on create — Some ⇒ both columns
+        // get populated, None ⇒ both stay NULL. Splitting it into
+        // a follow-up `set_contact_photo` after a create would
+        // double the round-trip count and require the caller to
+        // worry about the in-between state.
+        let (photo_data, photo_content_type) = match contact.photo.as_ref() {
+            Some(p) => (Some(p.data.clone()), Some(p.content_type.clone())),
+            None => (None, None),
+        };
+        let has_photo = photo_data.is_some();
 
         self.db()
             .lock()
@@ -217,8 +234,9 @@ impl ContactsFeature for LocalAdapter {
                 "INSERT INTO contacts (
                     id, list_id, display_name, given_name, family_name,
                     organization, emails, phone_numbers, birthday, notes,
-                    etag, created_at, updated_at, members
-                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)",
+                    etag, created_at, updated_at, members,
+                    photo_data, photo_content_type
+                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)",
                 params![
                     id,
                     list_id,
@@ -233,6 +251,8 @@ impl ContactsFeature for LocalAdapter {
                     now_s,
                     now_s,
                     members_json,
+                    photo_data,
+                    photo_content_type,
                 ],
             )
             .map_err(map_sql_err)?;
@@ -249,6 +269,7 @@ impl ContactsFeature for LocalAdapter {
             birthday: contact.birthday,
             notes: contact.notes,
             members: contact.members,
+            has_photo,
             created_at: now,
             updated_at: now,
             etag: None,
@@ -317,6 +338,114 @@ impl ContactsFeature for LocalAdapter {
             .lock()
             .expect("db mutex poisoned")
             .execute("DELETE FROM contacts WHERE id = ?", params![contact_id])
+            .map_err(map_sql_err)?;
+        if changed == 0 {
+            return Err(CoreError::NotFound(format!(
+                "contact '{contact_id}' not found"
+            )));
+        }
+        Ok(())
+    }
+
+    async fn get_contact_photo(
+        &self,
+        contact_id: &str,
+    ) -> CoreResult<Option<ContactPhoto>> {
+        let conn = self.db().lock().expect("db mutex poisoned");
+        // First pass: confirm the contact row exists at all so we
+        // can distinguish "no photo on a real contact" from "id
+        // typo / stale frontend reference". Cheap — primary-key
+        // lookup, no BLOB I/O.
+        let exists: i64 = conn
+            .query_row(
+                "SELECT 1 FROM contacts WHERE id = ?",
+                params![contact_id],
+                |row| row.get(0),
+            )
+            .or_else(|err| match err {
+                rusqlite::Error::QueryReturnedNoRows => Ok(0),
+                other => Err(other),
+            })
+            .map_err(map_sql_err)?;
+        if exists == 0 {
+            return Err(CoreError::NotFound(format!(
+                "contact '{contact_id}' not found"
+            )));
+        }
+        // Second pass: pull the BLOB and the content type. We do
+        // them in two statements so the existence check can stay
+        // cheap — selecting the BLOB up front would force SQLite
+        // to materialise the bytes on every "is there a photo?"
+        // probe.
+        let row: (Option<Vec<u8>>, Option<String>) = conn
+            .query_row(
+                "SELECT photo_data, photo_content_type
+                 FROM contacts WHERE id = ?",
+                params![contact_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(map_sql_err)?;
+        match row {
+            (Some(data), Some(content_type)) => Ok(Some(ContactPhoto {
+                content_type,
+                data,
+            })),
+            // No photo set, or content type missing (shouldn't
+            // happen — the columns are written as a pair — but
+            // we tolerate it). Treat as "no photo".
+            _ => Ok(None),
+        }
+    }
+
+    async fn set_contact_photo(
+        &self,
+        contact_id: &str,
+        photo: ContactPhoto,
+    ) -> CoreResult<()> {
+        if photo.content_type.trim().is_empty() {
+            return Err(CoreError::InvalidInput(
+                "photo content_type must not be empty".into(),
+            ));
+        }
+        if photo.data.is_empty() {
+            return Err(CoreError::InvalidInput(
+                "photo data must not be empty".into(),
+            ));
+        }
+        let now_s = fmt_utc(&Utc::now());
+        let changed = self
+            .db()
+            .lock()
+            .expect("db mutex poisoned")
+            .execute(
+                "UPDATE contacts
+                    SET photo_data = ?, photo_content_type = ?,
+                        updated_at = ?
+                  WHERE id = ?",
+                params![photo.data, photo.content_type, now_s, contact_id],
+            )
+            .map_err(map_sql_err)?;
+        if changed == 0 {
+            return Err(CoreError::NotFound(format!(
+                "contact '{contact_id}' not found"
+            )));
+        }
+        Ok(())
+    }
+
+    async fn delete_contact_photo(&self, contact_id: &str) -> CoreResult<()> {
+        let now_s = fmt_utc(&Utc::now());
+        let changed = self
+            .db()
+            .lock()
+            .expect("db mutex poisoned")
+            .execute(
+                "UPDATE contacts
+                    SET photo_data = NULL, photo_content_type = NULL,
+                        updated_at = ?
+                  WHERE id = ?",
+                params![now_s, contact_id],
+            )
             .map_err(map_sql_err)?;
         if changed == 0 {
             return Err(CoreError::NotFound(format!(
@@ -451,6 +580,11 @@ fn row_to_contact(row: &Row<'_>) -> rusqlite::Result<CoreResult<Contact>> {
             Some(s) => Some(decode_json::<Vec<cal_core::GroupMember>>(&s)?),
             None => None,
         };
+        // `has_photo` is the projected `photo_data IS NOT NULL`
+        // boolean column (added in migration 0010). SQLite emits
+        // it as an integer 0 / 1; `read_bool` lets us decode it
+        // the same way `read_only` is decoded on contact lists.
+        let has_photo = read_bool(row, 14)?;
         Ok(Contact {
             id,
             list_id,
@@ -463,6 +597,7 @@ fn row_to_contact(row: &Row<'_>) -> rusqlite::Result<CoreResult<Contact>> {
             birthday,
             notes,
             members,
+            has_photo,
             created_at,
             updated_at,
             etag,
@@ -492,6 +627,26 @@ mod tests {
             birthday: Some(NaiveDate::from_ymd_opt(1985, 4, 17).unwrap()),
             notes: Some("Met at conf 2024".into()),
             members: None,
+            photo: None,
+        }
+    }
+
+    /// 1x1 PNG, baked here so the photo round-trip tests don't
+    /// need any external fixtures. The bytes are a real PNG
+    /// (signature + IHDR + IDAT + IEND) — small enough to embed
+    /// inline, large enough to verify BLOB storage actually keeps
+    /// the original bits.
+    fn sample_photo() -> ContactPhoto {
+        const PNG_1X1: &[u8] = &[
+            0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48,
+            0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00,
+            0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78,
+            0x9c, 0x63, 0xfa, 0xcf, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01, 0xe5, 0x27, 0xde, 0xfc,
+            0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+        ];
+        ContactPhoto {
+            content_type: "image/png".into(),
+            data: PNG_1X1.to_vec(),
         }
     }
 
@@ -576,6 +731,7 @@ mod tests {
             birthday: None,
             notes: None,
             members: None,
+            has_photo: false,
             created_at: Utc::now(),
             updated_at: Utc::now(),
             etag: None,
@@ -632,6 +788,7 @@ mod tests {
             birthday: None,
             notes: None,
             members: None,
+            photo: None,
         };
         let _ = adapter
             .create_contact(LOCAL_DEFAULT_CONTACT_LIST_ID, second)
@@ -811,5 +968,154 @@ mod tests {
         // The deleted list is gone.
         let lists = adapter.list_contact_lists().await.unwrap();
         assert_eq!(lists.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn create_carries_inline_photo_through_to_listing() {
+        let adapter = fixture_adapter();
+        let mut payload = sample_new_contact();
+        payload.photo = Some(sample_photo());
+        let created = adapter
+            .create_contact(LOCAL_DEFAULT_CONTACT_LIST_ID, payload)
+            .await
+            .unwrap();
+        // Returned struct reflects the photo presence immediately.
+        assert!(created.has_photo);
+
+        // And the listing path projects the same flag without
+        // having to hit the BLOB column.
+        let listed = adapter
+            .get_contacts(LOCAL_DEFAULT_CONTACT_LIST_ID)
+            .await
+            .unwrap();
+        assert_eq!(listed.len(), 1);
+        assert!(listed[0].has_photo);
+    }
+
+    #[tokio::test]
+    async fn get_contact_photo_round_trips() {
+        let adapter = fixture_adapter();
+        let mut payload = sample_new_contact();
+        payload.photo = Some(sample_photo());
+        let created = adapter
+            .create_contact(LOCAL_DEFAULT_CONTACT_LIST_ID, payload)
+            .await
+            .unwrap();
+        let fetched = adapter
+            .get_contact_photo(&created.id)
+            .await
+            .unwrap()
+            .expect("photo present");
+        assert_eq!(fetched.content_type, "image/png");
+        assert_eq!(fetched.data, sample_photo().data);
+    }
+
+    #[tokio::test]
+    async fn get_photo_returns_none_when_no_photo_set() {
+        let adapter = fixture_adapter();
+        let created = adapter
+            .create_contact(LOCAL_DEFAULT_CONTACT_LIST_ID, sample_new_contact())
+            .await
+            .unwrap();
+        // Contact exists, but the column pair is NULL ⇒ Ok(None).
+        let result = adapter.get_contact_photo(&created.id).await.unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn get_photo_returns_not_found_for_unknown_id() {
+        let adapter = fixture_adapter();
+        let err = adapter
+            .get_contact_photo("does-not-exist")
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CoreError::NotFound(_)));
+    }
+
+    #[tokio::test]
+    async fn set_photo_replaces_existing_bytes() {
+        let adapter = fixture_adapter();
+        let created = adapter
+            .create_contact(LOCAL_DEFAULT_CONTACT_LIST_ID, sample_new_contact())
+            .await
+            .unwrap();
+        // Set #1.
+        adapter
+            .set_contact_photo(&created.id, sample_photo())
+            .await
+            .unwrap();
+        // Set #2 — different content type + bytes — must overwrite.
+        let other = ContactPhoto {
+            content_type: "image/jpeg".into(),
+            // Two-byte stub stands in for a different image; the
+            // assertion below confirms the new bytes won.
+            data: vec![0xff, 0xd8],
+        };
+        adapter
+            .set_contact_photo(&created.id, other.clone())
+            .await
+            .unwrap();
+        let fetched = adapter
+            .get_contact_photo(&created.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(fetched.content_type, other.content_type);
+        assert_eq!(fetched.data, other.data);
+    }
+
+    #[tokio::test]
+    async fn set_photo_rejects_empty_payload() {
+        let adapter = fixture_adapter();
+        let created = adapter
+            .create_contact(LOCAL_DEFAULT_CONTACT_LIST_ID, sample_new_contact())
+            .await
+            .unwrap();
+        let empty = ContactPhoto {
+            content_type: "image/png".into(),
+            data: Vec::new(),
+        };
+        let err = adapter
+            .set_contact_photo(&created.id, empty)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CoreError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn delete_photo_clears_the_flag() {
+        let adapter = fixture_adapter();
+        let mut payload = sample_new_contact();
+        payload.photo = Some(sample_photo());
+        let created = adapter
+            .create_contact(LOCAL_DEFAULT_CONTACT_LIST_ID, payload)
+            .await
+            .unwrap();
+        adapter
+            .delete_contact_photo(&created.id)
+            .await
+            .unwrap();
+        // get_contact_photo returns None and the listing's flag
+        // flips back to false.
+        assert!(adapter
+            .get_contact_photo(&created.id)
+            .await
+            .unwrap()
+            .is_none());
+        let listed = adapter
+            .get_contacts(LOCAL_DEFAULT_CONTACT_LIST_ID)
+            .await
+            .unwrap();
+        assert!(!listed[0].has_photo);
+    }
+
+    #[tokio::test]
+    async fn delete_photo_on_unknown_id_yields_not_found() {
+        let adapter = fixture_adapter();
+        let err = adapter
+            .delete_contact_photo("nope")
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CoreError::NotFound(_)));
     }
 }

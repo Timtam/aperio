@@ -1,7 +1,8 @@
 //! Data types for calendars, events, tasks, task lists, and contacts.
 
+use base64::Engine;
 use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::color::{ColorLabelId, ContainerColor};
 use crate::reminder::{Reminder, SoundConfig};
@@ -288,6 +289,15 @@ pub struct Contact {
     /// stays group-agnostic.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub members: Option<Vec<GroupMember>>,
+    /// Photo presence flag. `true` ⇒ the contact has an avatar
+    /// stored on the source (CardDAV PHOTO body, EWS
+    /// ContactPicture attachment, local SQLite BLOB). The bytes
+    /// themselves are pulled lazily via
+    /// `ContactsFeature::get_contact_photo` so listings and the
+    /// attendees picker stay cheap — a 1000-contact pull doesn't
+    /// haul a megabyte of JPEGs across the wire.
+    #[serde(default)]
+    pub has_photo: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub etag: Option<String>,
@@ -331,4 +341,48 @@ pub struct NewContact {
     /// person-contact (the common case).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub members: Option<Vec<GroupMember>>,
+    /// Optional avatar to attach on create. `None` ⇒ no photo;
+    /// `Some` ⇒ the adapter writes the bytes through the same
+    /// path `set_contact_photo` would. Carrying the photo on
+    /// create lets a "new contact with photo" gesture land as a
+    /// single command rather than a create-then-upload pair the
+    /// caller has to keep transactionally consistent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub photo: Option<ContactPhoto>,
+}
+
+/// Binary avatar attached to a contact. Carried inline in
+/// `NewContact` on create and shuttled across
+/// `ContactsFeature::get_contact_photo` / `set_contact_photo` on
+/// read / update; pulled lazily so it doesn't bloat listings.
+///
+/// `content_type` is a MIME type — we expect `image/jpeg`,
+/// `image/png`, or `image/gif` in practice (the three EWS's
+/// `ContactPicture.jpg` attachment slot and vCard `PHOTO`
+/// property formally permit, and the three the frontend's file
+/// picker filters down to).
+///
+/// `data` is the raw bytes. JSON serialisation uses base64 so the
+/// payload travels through the Tauri IPC without ballooning into
+/// the giant integer-array shape `Vec<u8>` produces by default —
+/// every adapter and the command layer agree on this single
+/// encoding via the `serialize_with` / `deserialize_with`
+/// helpers below.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContactPhoto {
+    pub content_type: String,
+    #[serde(serialize_with = "serialize_b64", deserialize_with = "deserialize_b64")]
+    pub data: Vec<u8>,
+}
+
+fn serialize_b64<S: Serializer>(bytes: &[u8], s: S) -> Result<S::Ok, S::Error> {
+    let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+    s.serialize_str(&encoded)
+}
+
+fn deserialize_b64<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
+    let s = String::deserialize(d)?;
+    base64::engine::general_purpose::STANDARD
+        .decode(s.as_bytes())
+        .map_err(serde::de::Error::custom)
 }

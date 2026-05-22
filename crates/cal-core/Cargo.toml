@@ -15,3 +15,9 @@ chrono.workspace = true
 chrono-tz.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
+# Photo bytes round-trip across the Tauri IPC and adapter wire
+# formats (vCard PHOTO body, EWS contact-picture attachment) as
+# base64. Defining the encoding once at the cal-core layer means
+# every adapter and the command-layer serialize / deserialize the
+# same way — no per-adapter base64 quirks.
+base64 = "0.22"

@@ -1,0 +1,32 @@
+-- Migration 0010: contact photo storage (Phase 10g).
+--
+-- Adds two columns to `contacts` for the avatar feature:
+--
+--   * `photo_data`         — raw image bytes. NULL ⇒ no photo.
+--   * `photo_content_type` — MIME type ("image/jpeg",
+--                            "image/png", "image/gif"). NULL when
+--                            `photo_data` is NULL.
+--
+-- We store the bytes inline rather than splitting them into a
+-- side table because:
+--
+--   * The two queries we run against photos are "is there one?"
+--     (covered by `photo_data IS NOT NULL` without a join) and
+--     "give me the bytes for this contact" (a single-row SELECT).
+--     A side table would buy nothing on either path.
+--   * Cascade-delete already lines up: dropping a contact row
+--     drops its photo. A side table would need its own ON DELETE
+--     CASCADE plumbing.
+--   * The `has_photo` flag the API exposes is just a non-null
+--     check on `photo_data`, so the listing query stays cheap
+--     (`SELECT photo_data IS NOT NULL ...`) — SQLite doesn't
+--     materialise the BLOB unless we ask for the column itself.
+--
+-- Old rows stay valid: both columns are nullable and default to
+-- NULL, so the upgrade is a pure ALTER without a backfill.
+--
+-- The FTS5 mirror (0008) doesn't index photos and doesn't need
+-- updating — `contacts_fts` only carries text columns.
+
+ALTER TABLE contacts ADD COLUMN photo_data BLOB;
+ALTER TABLE contacts ADD COLUMN photo_content_type TEXT;

@@ -682,7 +682,20 @@
       "deleteMessage": "„{{name}}\" wird unwiderruflich entfernt.",
       "created": "Kontakt „{{name}}\" angelegt.",
       "updated": "Kontakt „{{name}}\" gespeichert.",
-      "deleted": "Kontakt „{{name}}\" gelöscht."
+      "deleted": "Kontakt „{{name}}\" gelöscht.",
+      "photoSectionLabel": "Foto",
+      "photoChoose": "Foto auswählen",
+      "photoReplace": "Foto ersetzen",
+      "photoRemove": "Foto entfernen",
+      "photoNone": "Kein Foto",
+      "photoLoading": "Foto wird geladen …",
+      "photoLoadFailed": "Foto konnte nicht geladen werden.",
+      "photoUnsupportedType": "Bitte ein JPEG-, PNG- oder GIF-Bild wählen.",
+      "photoTooLarge": "Bild ist größer als {{limit}}.",
+      "photoAltSet": "Foto von {{name}}",
+      "photoAltNone": "Kein Foto für {{name}}",
+      "photoUpdated": "Foto für „{{name}}\" gespeichert.",
+      "photoRemoved": "Foto für „{{name}}\" entfernt."
     }
   },
   "views": {

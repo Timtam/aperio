@@ -682,7 +682,20 @@
       "deleteMessage": "\"{{name}}\" will be permanently removed.",
       "created": "Contact \"{{name}}\" added.",
       "updated": "Contact \"{{name}}\" saved.",
-      "deleted": "Contact \"{{name}}\" deleted."
+      "deleted": "Contact \"{{name}}\" deleted.",
+      "photoSectionLabel": "Photo",
+      "photoChoose": "Choose photo",
+      "photoReplace": "Replace photo",
+      "photoRemove": "Remove photo",
+      "photoNone": "No photo",
+      "photoLoading": "Loading photo …",
+      "photoLoadFailed": "Could not load photo.",
+      "photoUnsupportedType": "Please pick a JPEG, PNG, or GIF image.",
+      "photoTooLarge": "Image is larger than {{limit}}.",
+      "photoAltSet": "Photo of {{name}}",
+      "photoAltNone": "No photo for {{name}}",
+      "photoUpdated": "Photo for \"{{name}}\" saved.",
+      "photoRemoved": "Photo for \"{{name}}\" removed."
     }
   },
   "views": {

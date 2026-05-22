@@ -18,7 +18,7 @@
 //!     10a-3.
 
 use cal_adapter_local::LocalAdapter;
-use cal_core::{Contact, ContactList, ContactsFeature, NewContact};
+use cal_core::{Contact, ContactList, ContactPhoto, ContactsFeature, NewContact};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tauri::State;
@@ -246,5 +246,96 @@ pub async fn rename_contact_list(
         };
         ext.rename_contact_list(&id, &new_name).await?;
     }
+    Ok(())
+}
+
+/// Resolve the adapter that owns this contact's list (or the
+/// local adapter when `list_id` is missing or doesn't match a
+/// known external book). Returns the account id alongside so the
+/// caller can decide whether to invoke the local or external
+/// path. Mirrors the lookup pattern `delete_contact` uses.
+fn resolve_contact_account(
+    registry: &AdapterRegistry,
+    list_id: Option<&str>,
+) -> String {
+    list_id
+        .and_then(|lid| registry.account_for_contact_list(lid))
+        .unwrap_or_else(|| LOCAL_ID.to_string())
+}
+
+/// Pull the avatar bytes for a contact. Returns `None` when the
+/// contact has no photo (a frontend that calls this opportunistically
+/// because `has_photo` was true would have surfaced the no-photo
+/// placeholder; getting `Ok(None)` keeps it from showing a broken
+/// image instead).
+#[tauri::command]
+pub async fn get_contact_photo(
+    adapter: State<'_, LocalAdapter>,
+    registry: State<'_, Arc<AdapterRegistry>>,
+    id: String,
+    list_id: Option<String>,
+) -> CommandResult<Option<ContactPhoto>> {
+    let account = resolve_contact_account(&registry, list_id.as_deref());
+    if account == LOCAL_ID {
+        return Ok(adapter.get_contact_photo(&id).await?);
+    }
+    let Some(ext) = registry.contact_adapter(&account) else {
+        return Err(CommandError {
+            code: "not_found",
+            message: format!("account '{account}' is not routable"),
+        });
+    };
+    Ok(ext.get_contact_photo(&id).await?)
+}
+
+/// Replace (or set) the contact's avatar. `photo.data` arrives
+/// from the frontend already base64-decoded via the serde shape
+/// on `ContactPhoto`.
+#[tauri::command]
+pub async fn set_contact_photo(
+    adapter: State<'_, LocalAdapter>,
+    registry: State<'_, Arc<AdapterRegistry>>,
+    id: String,
+    list_id: Option<String>,
+    photo: ContactPhoto,
+) -> CommandResult<()> {
+    let account = resolve_contact_account(&registry, list_id.as_deref());
+    if account == LOCAL_ID {
+        adapter.set_contact_photo(&id, photo).await?;
+        return Ok(());
+    }
+    let Some(ext) = registry.contact_adapter(&account) else {
+        return Err(CommandError {
+            code: "not_found",
+            message: format!("account '{account}' is not routable"),
+        });
+    };
+    ext.set_contact_photo(&id, photo).await?;
+    Ok(())
+}
+
+/// Clear the avatar without touching any other field. Idempotent
+/// — calling this on a contact that already has no photo
+/// succeeds silently on the local adapter and (for external
+/// adapters) just finds no matching attachments to delete.
+#[tauri::command]
+pub async fn delete_contact_photo(
+    adapter: State<'_, LocalAdapter>,
+    registry: State<'_, Arc<AdapterRegistry>>,
+    id: String,
+    list_id: Option<String>,
+) -> CommandResult<()> {
+    let account = resolve_contact_account(&registry, list_id.as_deref());
+    if account == LOCAL_ID {
+        adapter.delete_contact_photo(&id).await?;
+        return Ok(());
+    }
+    let Some(ext) = registry.contact_adapter(&account) else {
+        return Err(CommandError {
+            code: "not_found",
+            message: format!("account '{account}' is not routable"),
+        });
+    };
+    ext.delete_contact_photo(&id).await?;
     Ok(())
 }

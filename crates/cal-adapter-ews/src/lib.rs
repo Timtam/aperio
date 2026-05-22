@@ -403,6 +403,31 @@ impl ContactsFeature for EwsAdapter {
         *self.contact_lists_cache.lock().await = None;
         Ok(())
     }
+
+    async fn get_contact_photo(
+        &self,
+        contact_id: &str,
+    ) -> CoreResult<Option<cal_core::ContactPhoto>> {
+        contacts::get_contact_photo(&self.client, contact_id)
+            .await
+            .map_err(to_core_error)
+    }
+
+    async fn set_contact_photo(
+        &self,
+        contact_id: &str,
+        photo: cal_core::ContactPhoto,
+    ) -> CoreResult<()> {
+        contacts::set_contact_photo(&self.client, contact_id, photo)
+            .await
+            .map_err(to_core_error)
+    }
+
+    async fn delete_contact_photo(&self, contact_id: &str) -> CoreResult<()> {
+        contacts::delete_contact_photo(&self.client, contact_id)
+            .await
+            .map_err(to_core_error)
+    }
 }
 
 fn to_core_error(err: EwsError) -> CoreError {

@@ -135,6 +135,14 @@ pub fn run() {
             commands::create_contact,
             commands::update_contact,
             commands::delete_contact,
+            // Phase 10g: contact photo CRUD. Each command takes
+            // an optional `list_id` routing hint that the
+            // frontend supplies from the rendered contact row;
+            // missing hints fall back to the local adapter the
+            // same way `delete_contact` does.
+            commands::get_contact_photo,
+            commands::set_contact_photo,
+            commands::delete_contact_photo,
         ])
         .setup(move |app| {
             // Spawn the reminder scheduler on the Tauri/tokio runtime

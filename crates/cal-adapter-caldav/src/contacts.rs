@@ -19,9 +19,9 @@
 //!     (DAV:displayname is namespace-agnostic and the existing
 //!     helper handles the 207-inside-failed-propstat case).
 
-use cal_core::{Contact, ContactList, ContainerColor, NewContact};
+use cal_core::{Contact, ContactList, ContactPhoto, ContainerColor, NewContact};
 use reqwest::{
-    header::{HeaderName, HeaderValue, CONTENT_TYPE, ETAG, IF_MATCH, IF_NONE_MATCH},
+    header::{HeaderName, HeaderValue, ACCEPT, CONTENT_TYPE, ETAG, IF_MATCH, IF_NONE_MATCH},
     Client, Method, StatusCode,
 };
 use url::Url;
@@ -30,7 +30,7 @@ use uuid::Uuid;
 use crate::auth::auth_header;
 use crate::config::Credentials;
 use crate::error::{CaldavError, CaldavResult};
-use crate::vcard::{build_vcard, parse_vcard, rebuild_vcard};
+use crate::vcard::{build_vcard, parse_vcard, parse_vcard_photo, rebuild_vcard};
 use crate::xml::{parse_multistatus, ResponseEntry};
 
 const PROPFIND: &str = "PROPFIND";
@@ -195,6 +195,16 @@ pub async fn create_contact(
     // book URL.
     let href = resource.path().to_string();
     let id = format!("{href}|{uid}");
+    // `has_photo` mirrors what the build emitter actually wrote:
+    // if NewContact carried a non-empty photo, the vCard has a
+    // PHOTO line and a subsequent listing pass would flip the
+    // flag. Computing it here saves the caller a round-trip just
+    // to re-read the new resource.
+    let has_photo = new
+        .photo
+        .as_ref()
+        .map(|p| !p.data.is_empty())
+        .unwrap_or(false);
     Ok(Contact {
         id,
         list_id: addressbook_url.to_string(),
@@ -207,6 +217,7 @@ pub async fn create_contact(
         birthday: new.birthday,
         notes: new.notes,
         members: new.members,
+        has_photo,
         created_at: now,
         updated_at: now,
         etag,
@@ -223,7 +234,33 @@ pub async fn update_contact(
     })?;
     let resource = resource_url_for_contact(&list_url, &contact.id)?;
     let (_, uid) = decode_id(&contact.id);
-    let body = rebuild_vcard(uid, &contact);
+    // Photo preservation: vCard PUTs are full-resource replacements
+    // — leaving PHOTO out of the rebuilt body would wipe the
+    // server-side avatar even when the user only touched a phone
+    // number. Pull the current resource first, lift its inline
+    // PHOTO (if any), and pass it through the rebuilder. The GET
+    // costs us a round-trip but only for contacts whose listing
+    // flag claims an avatar; photo-less contacts skip it.
+    let preserved_photo = if contact.has_photo {
+        match fetch_vcard_body(client, &resource, credentials).await {
+            Ok(body) => parse_vcard_photo(&body),
+            Err(err) => {
+                // Don't fail the whole update on a transient
+                // photo-fetch hiccup; log and proceed without
+                // preservation. A frontend that wanted the photo
+                // back can call set_contact_photo explicitly.
+                tracing::warn!(
+                    contact_id = %contact.id,
+                    ?err,
+                    "could not preserve PHOTO on update; proceeding without",
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let body = rebuild_vcard(uid, &contact, preserved_photo);
     let mut headers = auth_header(credentials)?;
     headers.insert(
         CONTENT_TYPE,
@@ -246,6 +283,155 @@ pub async fn update_contact(
         updated_at: chrono::Utc::now(),
         ..contact
     })
+}
+
+/// GET a vCard resource and return its body as text. Shared by
+/// the photo-CRUD helpers, which all need the current vCard
+/// state (current PHOTO bytes, current etag) before re-PUTting
+/// a mutated version.
+async fn fetch_vcard_body(
+    client: &Client,
+    resource: &Url,
+    credentials: &Credentials,
+) -> CaldavResult<String> {
+    let mut headers = auth_header(credentials)?;
+    headers.insert(
+        ACCEPT,
+        HeaderValue::from_static("text/vcard, text/x-vcard, */*"),
+    );
+    let response = client.get(resource.clone()).headers(headers).send().await?;
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().await.unwrap_or_default();
+        return Err(CaldavError::Http {
+            status: status.as_u16(),
+            message: if body.is_empty() {
+                status.canonical_reason().unwrap_or("").to_string()
+            } else {
+                body.chars().take(200).collect()
+            },
+        });
+    }
+    Ok(response.text().await?)
+}
+
+/// Fetch a contact's avatar by re-reading the vCard and pulling
+/// out the inline PHOTO body. The byte path costs one GET; an
+/// absent or URL-only PHOTO yields `Ok(None)`.
+pub async fn get_contact_photo(
+    client: &Client,
+    list_url: &Url,
+    contact_id: &str,
+    credentials: &Credentials,
+) -> CaldavResult<Option<ContactPhoto>> {
+    let resource = resource_url_for_contact(list_url, contact_id)?;
+    let body = fetch_vcard_body(client, &resource, credentials).await?;
+    Ok(parse_vcard_photo(&body))
+}
+
+/// Write or replace a contact's avatar. CardDAV doesn't have a
+/// dedicated photo endpoint — the PHOTO property lives inside
+/// the vCard — so we round-trip the entire resource: GET to
+/// pick up the current state (etag + every property we'd
+/// otherwise drop), re-emit with the new PHOTO embedded, and
+/// PUT back with `If-Match` so a concurrent edit doesn't get
+/// silently clobbered.
+pub async fn set_contact_photo(
+    client: &Client,
+    list_url: &Url,
+    contact_id: &str,
+    photo: ContactPhoto,
+    credentials: &Credentials,
+) -> CaldavResult<()> {
+    let resource = resource_url_for_contact(list_url, contact_id)?;
+    let body = fetch_vcard_body(client, &resource, credentials).await?;
+    let etag_header_value = read_etag_from_get(client, &resource, credentials).await;
+    let (_, uid) = decode_id(contact_id);
+    // Re-parse the body so we can rebuild a faithful representation
+    // of the existing contact (every property we model survives)
+    // with just the PHOTO replaced.
+    let mut existing = parse_vcard(&body, list_url.as_str(), contact_id.into(), None)?;
+    existing.has_photo = true;
+    let new_body = rebuild_vcard(uid, &existing, Some(photo));
+    put_vcard(client, &resource, &new_body, etag_header_value, credentials).await
+}
+
+/// Strip the avatar without touching any other field. Same
+/// GET → rebuild → PUT shape as `set_contact_photo`, just
+/// passing `None` as the photo on the rebuild side.
+pub async fn delete_contact_photo(
+    client: &Client,
+    list_url: &Url,
+    contact_id: &str,
+    credentials: &Credentials,
+) -> CaldavResult<()> {
+    let resource = resource_url_for_contact(list_url, contact_id)?;
+    let body = fetch_vcard_body(client, &resource, credentials).await?;
+    let etag_header_value = read_etag_from_get(client, &resource, credentials).await;
+    let (_, uid) = decode_id(contact_id);
+    let mut existing = parse_vcard(&body, list_url.as_str(), contact_id.into(), None)?;
+    existing.has_photo = false;
+    let new_body = rebuild_vcard(uid, &existing, None);
+    put_vcard(client, &resource, &new_body, etag_header_value, credentials).await
+}
+
+/// Read the ETag header that the most recent GET response would
+/// have carried. We can't peek at the GET we already did from
+/// inside `fetch_vcard_body` (it owns the response), so we issue
+/// a HEAD-shaped GET here just for the header. Failures collapse
+/// to `None` — without an etag the PUT skips `If-Match`, which
+/// trades safety against concurrent edits for the ability to
+/// still complete the write.
+async fn read_etag_from_get(
+    client: &Client,
+    resource: &Url,
+    credentials: &Credentials,
+) -> Option<String> {
+    let headers = match auth_header(credentials) {
+        Ok(h) => h,
+        Err(_) => return None,
+    };
+    let response = client
+        .request(Method::HEAD, resource.clone())
+        .headers(headers)
+        .send()
+        .await
+        .ok()?;
+    response
+        .headers()
+        .get(ETAG)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string())
+}
+
+/// Shared PUT helper for the photo-mutation paths. Adds
+/// `If-Match` when we managed to recover an etag, fails if the
+/// server rejects the write.
+async fn put_vcard(
+    client: &Client,
+    resource: &Url,
+    body: &str,
+    if_match: Option<String>,
+    credentials: &Credentials,
+) -> CaldavResult<()> {
+    let mut headers = auth_header(credentials)?;
+    headers.insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static("text/vcard; charset=utf-8"),
+    );
+    if let Some(etag) = if_match {
+        if let Ok(value) = HeaderValue::from_str(&etag) {
+            headers.insert(IF_MATCH, value);
+        }
+    }
+    let response = client
+        .put(resource.clone())
+        .headers(headers)
+        .body(body.to_string())
+        .send()
+        .await?;
+    expect_write(&response)?;
+    Ok(())
 }
 
 pub async fn delete_contact(

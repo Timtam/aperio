@@ -5,6 +5,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ChangeEvent,
   type FormEvent,
 } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -13,14 +14,32 @@ import { useAnnouncer } from '../a11y/Announcer';
 import {
   createContact as apiCreateContact,
   deleteContact as apiDeleteContact,
+  deleteContactPhoto as apiDeleteContactPhoto,
+  getContactPhoto as apiGetContactPhoto,
   isCommandError,
+  setContactPhoto as apiSetContactPhoto,
   updateContact as apiUpdateContact,
 } from '../api/client';
-import type { Contact } from '../api/types';
+import type { Contact, ContactPhoto } from '../api/types';
 import { useCalendarStore } from '../state/CalendarStore';
 import { useDialogState } from '../state/DialogState';
 import { ConfirmDialog } from './ConfirmDialog';
 import { Modal } from './Modal';
+
+/** File-size cap for an uploaded avatar. Five megabytes is what
+ *  every CardDAV / Exchange server we target accepts comfortably
+ *  — pushing past it tends to surface as `ErrorRequestStreamTooLarge`
+ *  on EWS or a 413 from Nextcloud. We enforce in the dialog so the
+ *  failure mode is a clear inline error rather than a backend
+ *  round-trip that comes back red. */
+const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
+
+/** MIME types the upload widget accepts. Matches what every
+ *  CardDAV and EWS implementation reliably round-trips; HEIC/HEIF
+ *  (Apple's default) we deliberately exclude — Outlook can't
+ *  render it, and re-encoding browser-side would mean shipping a
+ *  decoder. */
+const ALLOWED_PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/gif'];
 
 /**
  * Contact create / edit dialog (DESIGN.md §10).
@@ -143,6 +162,36 @@ function splitCsv(raw: string): string[] {
     .filter((s) => s.length > 0);
 }
 
+/** Read a `File` into the base64 `ContactPhoto` shape the
+ *  backend expects. We strip the data URI prefix so what travels
+ *  is just the base64 body — the Rust side's custom serde
+ *  deserialises that into `Vec<u8>`. */
+function fileToContactPhoto(file: File): Promise<ContactPhoto> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error ?? new Error('read failed'));
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result !== 'string') {
+        reject(new Error('FileReader returned non-string result'));
+        return;
+      }
+      const comma = result.indexOf(',');
+      const b64 = comma >= 0 ? result.slice(comma + 1) : result;
+      resolve({ content_type: file.type, data: b64 });
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+/** Render a `ContactPhoto` as a `data:` URL the browser can paint
+ *  into an `<img>`. Falls back to an empty string for nullish
+ *  inputs so callers can pass it through unconditionally. */
+function photoToDataUrl(photo: ContactPhoto | null): string {
+  if (!photo) return '';
+  return `data:${photo.content_type};base64,${photo.data}`;
+}
+
 export function ContactDialog({
   isOpen,
   onClose,
@@ -186,6 +235,19 @@ export function ContactDialog({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // Photo state. `photo` is the bytes currently held in the
+  // dialog (either freshly chosen by the user or fetched from
+  // the server on open); `photoLoading` is the in-flight fetch
+  // indicator. `photoDirty` flips when the user picks a new
+  // photo OR removes the existing one, telling the save handler
+  // to issue the set / delete round-trip in addition to the
+  // contact update.
+  const [photo, setPhoto] = useState<ContactPhoto | null>(null);
+  const [photoLoading, setPhotoLoading] = useState(false);
+  const [photoDirty, setPhotoDirty] = useState(false);
+  const [photoError, setPhotoError] = useState<string | null>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const photoInputId = useId();
 
   // Reset / hydrate the form whenever the dialog opens or the
   // editing target swaps. Putting focus on the display-name field
@@ -203,8 +265,79 @@ export function ContactDialog({
     }
     setError(null);
     setConfirmDelete(false);
+    // Reset photo state on every open. We re-fetch below when
+    // editing a contact that claims to have one.
+    setPhoto(null);
+    setPhotoDirty(false);
+    setPhotoError(null);
+    setPhotoLoading(false);
     queueMicrotask(() => firstFieldRef.current?.focus());
   }, [isOpen, contact, resolveDefaultListId]);
+
+  // Lazy photo fetch: only when editing a contact whose listing
+  // flag claims it has one. Cancellable so a fast close-then-open
+  // doesn't race a stale fetch onto the new dialog.
+  useEffect(() => {
+    if (!isOpen || !contact || !contact.has_photo) {
+      return;
+    }
+    let cancelled = false;
+    setPhotoLoading(true);
+    setPhotoError(null);
+    apiGetContactPhoto(contact.id, contact.list_id)
+      .then((p) => {
+        if (cancelled) return;
+        setPhoto(p);
+        setPhotoLoading(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setPhotoError(t('dialogs.contact.photoLoadFailed'));
+        setPhotoLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, contact, t]);
+
+  const onPickPhoto = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      // Reset the input value so picking the same file twice in a
+      // row still fires onChange (a no-op pick wouldn't otherwise
+      // surface, leaving the user wondering why the preview
+      // didn't update).
+      event.target.value = '';
+      if (!file) return;
+      if (!ALLOWED_PHOTO_TYPES.includes(file.type)) {
+        setPhotoError(t('dialogs.contact.photoUnsupportedType'));
+        return;
+      }
+      if (file.size > MAX_PHOTO_BYTES) {
+        setPhotoError(
+          t('dialogs.contact.photoTooLarge', {
+            limit: `${MAX_PHOTO_BYTES / (1024 * 1024)} MB`,
+          }),
+        );
+        return;
+      }
+      try {
+        const next = await fileToContactPhoto(file);
+        setPhoto(next);
+        setPhotoDirty(true);
+        setPhotoError(null);
+      } catch (err) {
+        setPhotoError(String(err));
+      }
+    },
+    [t],
+  );
+
+  const onRemovePhoto = useCallback(() => {
+    setPhoto(null);
+    setPhotoDirty(true);
+    setPhotoError(null);
+  }, []);
 
   const onSubmit = useCallback(
     async (e: FormEvent) => {
@@ -264,13 +397,39 @@ export function ContactDialog({
             // with its own clock anyway.
             updated_at: new Date().toISOString(),
           });
+          // Photo: only round-trip the change when it actually
+          // moved. The non-photo `update_contact` path explicitly
+          // does NOT touch photo storage, so untouched photos
+          // survive the field update without us doing anything.
+          if (photoDirty) {
+            if (photo) {
+              await apiSetContactPhoto(contact.id, photo, form.listId);
+              announce(
+                t('dialogs.contact.photoUpdated', {
+                  name: payload.display_name,
+                }),
+              );
+            } else {
+              await apiDeleteContactPhoto(contact.id, form.listId);
+              announce(
+                t('dialogs.contact.photoRemoved', {
+                  name: payload.display_name,
+                }),
+              );
+            }
+          }
           announce(
             t('dialogs.contact.updated', { name: payload.display_name }),
           );
         } else {
+          // Create path: the inline `photo` field on NewContact
+          // lets the adapter write the avatar in the same logical
+          // operation (one local INSERT, one EWS CreateItem +
+          // CreateAttachment, one CardDAV PUT with PHOTO embedded).
           await apiCreateContact({
             list_id: form.listId,
             ...payload,
+            photo: photo,
           });
           announce(
             t('dialogs.contact.created', { name: payload.display_name }),
@@ -288,7 +447,16 @@ export function ContactDialog({
         setSubmitting(false);
       }
     },
-    [form, contact, t, announce, invalidateData, onClose],
+    [
+      form,
+      contact,
+      photo,
+      photoDirty,
+      t,
+      announce,
+      invalidateData,
+      onClose,
+    ],
   );
 
   const performDelete = useCallback(async () => {
@@ -330,6 +498,70 @@ export function ContactDialog({
               {error}
             </p>
           )}
+
+          <div className="form__field form__field--photo">
+            <span className="form__label">
+              {t('dialogs.contact.photoSectionLabel')}
+            </span>
+            <div className="contact-photo">
+              {photo ? (
+                <img
+                  className="contact-photo__preview"
+                  src={photoToDataUrl(photo)}
+                  alt={t('dialogs.contact.photoAltSet', {
+                    name: form.displayName || t('dialogs.contact.photoNone'),
+                  })}
+                />
+              ) : (
+                <div
+                  className="contact-photo__placeholder"
+                  role="img"
+                  aria-label={t('dialogs.contact.photoAltNone', {
+                    name: form.displayName || '',
+                  })}
+                >
+                  {photoLoading
+                    ? t('dialogs.contact.photoLoading')
+                    : t('dialogs.contact.photoNone')}
+                </div>
+              )}
+              <div className="contact-photo__actions">
+                <input
+                  ref={photoInputRef}
+                  id={photoInputId}
+                  type="file"
+                  accept={ALLOWED_PHOTO_TYPES.join(',')}
+                  className="sr-only"
+                  onChange={(e) => void onPickPhoto(e)}
+                />
+                <button
+                  type="button"
+                  className="form__action"
+                  onClick={() => photoInputRef.current?.click()}
+                  aria-disabled={submitting || photoLoading || undefined}
+                >
+                  {photo
+                    ? t('dialogs.contact.photoReplace')
+                    : t('dialogs.contact.photoChoose')}
+                </button>
+                {photo && (
+                  <button
+                    type="button"
+                    className="form__action"
+                    onClick={onRemovePhoto}
+                    aria-disabled={submitting || undefined}
+                  >
+                    {t('dialogs.contact.photoRemove')}
+                  </button>
+                )}
+              </div>
+              {photoError && (
+                <p role="alert" className="form__error">
+                  {photoError}
+                </p>
+              )}
+            </div>
+          </div>
 
           <label className="form__field">
             <span className="form__label">

@@ -345,6 +345,7 @@ mod tests {
             birthday: bday,
             notes: None,
             members: None,
+            has_photo: false,
             created_at: Utc::now(),
             updated_at: Utc::now(),
             etag: None,

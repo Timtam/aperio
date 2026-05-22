@@ -27,20 +27,29 @@
 //!  - `MEMBER` / `X-ADDRESSBOOKSERVER-MEMBER` (Phase 10f) → the
 //!    distribution-list member list, both vCard 4.0 spec form and
 //!    Apple CardDAV variant.
+//!  - `PHOTO` (Phase 10g): inline base64 bodies in both the vCard
+//!    3.0 (`PHOTO;ENCODING=b;TYPE=JPEG:<b64>`) and vCard 4.0
+//!    (`PHOTO:data:image/jpeg;base64,<b64>`) shapes. URI-only
+//!    PHOTOs (`PHOTO:http://…`) flip `has_photo` to `true` so the
+//!    flag stays honest, but `parse_vcard_photo` returns `None`
+//!    for them — Aperio doesn't fetch remote-URL avatars on the
+//!    user's behalf.
 //!
 //! Not covered (intentionally; can grow when a real use-case shows up):
 //!
-//!  - Photo / logo / sound binary blobs (planned for Phase 10g).
+//!  - Logo / sound binary blobs.
 //!  - Categories, other X-* extensions.
 //!  - Addresses (`ADR`) — planned for Phase 10h.
-//!  - Property parameters beyond `TYPE` and `CN` — we round-trip
-//!    the value without trying to preserve `LANGUAGE`, `LABEL`, etc.
+//!  - Property parameters beyond `TYPE`, `CN`, `ENCODING`, `VALUE`
+//!    — we round-trip the value without trying to preserve
+//!    `LANGUAGE`, `LABEL`, etc.
 //!
 //! Tolerance: line folding (continuation lines starting with space
 //! / tab) and the three vCard escape sequences (`\\`, `\,`, `\;`,
 //! `\n`) are honoured both directions.
 
-use cal_core::{Contact, GroupMember, NewContact};
+use base64::Engine;
+use cal_core::{Contact, ContactPhoto, GroupMember, NewContact};
 use chrono::{DateTime, NaiveDate, Utc};
 
 use crate::error::{CaldavError, CaldavResult};
@@ -71,6 +80,14 @@ pub fn parse_vcard(
     let mut notes: Option<String> = None;
     let mut updated_at: Option<DateTime<Utc>> = None;
     let mut saw_vcard = false;
+    // PHOTO presence flag. We don't carry the bytes through the
+    // `Contact` shape (avatars travel via `get_contact_photo`
+    // instead), but we do need to remember whether the vCard had
+    // one so the listing exposes the right `has_photo` value. Any
+    // non-empty PHOTO property — inline base64 or URI — sets this
+    // to true; the byte-extraction path (`parse_vcard_photo`)
+    // applies stricter rules.
+    let mut has_photo = false;
     // Group / distribution-list state. vCard 4.0 signals a group via
     // `KIND:group` + `MEMBER:mailto:foo@example.com`. Apple's
     // CardDAV servers (and older clients still on 3.0) ship the
@@ -170,6 +187,16 @@ pub fn parse_vcard(
                     is_group = true;
                 }
             }
+            "PHOTO" => {
+                // Any non-empty PHOTO body flips the listing flag.
+                // We don't decode here; the actual bytes are
+                // extracted on-demand by `parse_vcard_photo` so a
+                // 1000-contact PROPFIND doesn't decode a megabyte
+                // of base64 the user might never look at.
+                if !value.trim().is_empty() {
+                    has_photo = true;
+                }
+            }
             "MEMBER" | "X-ADDRESSBOOKSERVER-MEMBER" => {
                 // Spec form: `MEMBER;CN=Alice:mailto:alice@example.com`.
                 // We extract the email (after `mailto:`) and the
@@ -225,10 +252,157 @@ pub fn parse_vcard(
         birthday,
         notes,
         members: if is_group { Some(members) } else { None },
+        has_photo,
         created_at: now,
         updated_at: updated_at.unwrap_or(now),
         etag,
     })
+}
+
+/// Extract the inline photo from a vCard body.
+///
+/// Returns `Some(ContactPhoto)` if the body carries a base64-encoded
+/// PHOTO property in either of the two shapes Aperio handles:
+///
+///   - vCard 3.0: `PHOTO;ENCODING=b;TYPE=JPEG:<base64>` (TYPE may
+///     be JPEG / PNG / GIF; the MIME type is inferred from it).
+///   - vCard 4.0: `PHOTO:data:image/jpeg;base64,<base64>` (the
+///     URI's media-type prefix gives us the MIME directly).
+///
+/// Returns `None` when the vCard has no PHOTO, when the PHOTO is a
+/// remote URL (we don't fetch URL avatars on the user's behalf),
+/// or when the base64 doesn't decode. The CardDAV `get_contact_photo`
+/// path treats `None` as "no avatar" — the frontend renders the
+/// initials placeholder.
+pub fn parse_vcard_photo(raw: &str) -> Option<ContactPhoto> {
+    let unfolded = unfold(raw);
+    for line in unfolded.lines() {
+        let line = line.trim_end_matches('\r');
+        if line.is_empty() {
+            continue;
+        }
+        let Some((head, value)) = split_property(line) else {
+            continue;
+        };
+        let name = head.split(';').next().unwrap_or("").to_ascii_uppercase();
+        if name != "PHOTO" {
+            continue;
+        }
+        if let Some(photo) = decode_inline_photo(head, value) {
+            return Some(photo);
+        }
+    }
+    None
+}
+
+/// Decode a single PHOTO property line into a `ContactPhoto`,
+/// rejecting URI-only photos and unrecognised encodings. Shared
+/// by `parse_vcard_photo`.
+fn decode_inline_photo(head: &str, value: &str) -> Option<ContactPhoto> {
+    let value = value.trim();
+    if value.is_empty() {
+        return None;
+    }
+
+    // vCard 4.0 data URI: `PHOTO:data:image/jpeg;base64,<b64>` —
+    // no parameters on the head, the encoding hint lives inside
+    // the value itself.
+    if let Some(rest) = value.strip_prefix("data:").or_else(|| value.strip_prefix("DATA:")) {
+        let mut split = rest.splitn(2, ',');
+        let header = split.next()?;
+        let body = split.next()?;
+        // header looks like `image/jpeg;base64`. Pull out the mime
+        // up to the first `;` and verify the encoding is base64.
+        let (mime, params) = header.split_once(';').unwrap_or((header, ""));
+        if !params
+            .split(';')
+            .any(|p| p.trim().eq_ignore_ascii_case("base64"))
+        {
+            return None;
+        }
+        let cleaned: String = body.chars().filter(|c| !c.is_whitespace()).collect();
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(cleaned.as_bytes())
+            .ok()?;
+        if bytes.is_empty() {
+            return None;
+        }
+        return Some(ContactPhoto {
+            content_type: mime.trim().to_string(),
+            data: bytes,
+        });
+    }
+
+    // vCard 3.0 base64 form: `PHOTO;ENCODING=b;TYPE=JPEG:<b64>`.
+    // The encoding parameter is mandatory in this branch — without
+    // it we can't tell base64 bytes apart from a URI, so we abstain.
+    let params: Vec<(&str, &str)> = head
+        .split(';')
+        .skip(1)
+        .filter_map(|p| p.split_once('='))
+        .map(|(k, v)| (k.trim(), v.trim()))
+        .collect();
+    let encoded = params
+        .iter()
+        .any(|(k, v)| k.eq_ignore_ascii_case("ENCODING") && (*v == "b" || v.eq_ignore_ascii_case("BASE64")));
+    if !encoded {
+        // PHOTO without ENCODING and not a data: URI ⇒ this is a
+        // bare URL like `PHOTO:http://example.org/photo.jpg`. We
+        // don't fetch external avatars, so treat it as "no photo
+        // we can return".
+        return None;
+    }
+    let type_param = params
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("TYPE"))
+        .map(|(_, v)| {
+            // Strip surrounding quotes vCard params allow on
+            // multi-valued TYPE entries (`TYPE="JPEG,PHOTO"` shows
+            // up in some Apple exports).
+            let trimmed = v.trim_matches('"');
+            trimmed
+                .split(',')
+                .next()
+                .unwrap_or(trimmed)
+                .to_ascii_uppercase()
+        });
+    let content_type = match type_param.as_deref() {
+        Some("JPEG") | Some("JPG") | None => "image/jpeg",
+        Some("PNG") => "image/png",
+        Some("GIF") => "image/gif",
+        Some("BMP") => "image/bmp",
+        Some("WEBP") => "image/webp",
+        Some(other) => {
+            // Pass an already-shaped MIME (`image/jpeg`) through
+            // unchanged; otherwise default to JPEG so the frontend
+            // can still render the bytes.
+            if other.starts_with("IMAGE/") {
+                return Some(ContactPhoto {
+                    content_type: other.to_ascii_lowercase(),
+                    data: decode_b64_stripped(value)?,
+                });
+            }
+            "image/jpeg"
+        }
+    };
+    let bytes = decode_b64_stripped(value)?;
+    if bytes.is_empty() {
+        return None;
+    }
+    Some(ContactPhoto {
+        content_type: content_type.to_string(),
+        data: bytes,
+    })
+}
+
+/// Strip whitespace (line-folding leftovers, indentation) before
+/// base64-decoding. The `unfold` pass joins continuation lines
+/// without trimming embedded whitespace, so we have to do it here.
+fn decode_b64_stripped(value: &str) -> Option<Vec<u8>> {
+    let cleaned: String = value.chars().filter(|c| !c.is_whitespace()).collect();
+    base64::engine::general_purpose::STANDARD
+        .decode(cleaned.as_bytes())
+        .ok()
 }
 
 /// Extract the `CN=…` parameter from a vCard property head like
@@ -301,6 +475,20 @@ pub fn build_vcard(uid: &str, contact: &NewContact) -> String {
     if let Some(note) = contact.notes.as_deref().filter(|s| !s.is_empty()) {
         out.push_str(&format!("NOTE:{}\r\n", escape(note)));
     }
+    // PHOTO (Phase 10g): emit the vCard 3.0 base64 form because
+    // every CardDAV server in the wild — iCloud, Nextcloud,
+    // Radicale, Baikal, Fastmail — round-trips it cleanly. The
+    // data: URI variant requires the server to be on vCard 4.0,
+    // which isn't a safe assumption. TYPE is derived from the
+    // MIME so Apple Contacts' UI picks the right thumbnail
+    // shape; long base64 lines are folded at 75 chars to stay
+    // inside RFC 6350 §3.2 even though most servers tolerate
+    // longer lines.
+    if let Some(photo) = contact.photo.as_ref() {
+        if !photo.data.is_empty() {
+            push_vcard_photo(&mut out, photo);
+        }
+    }
     // Group members: vCard 4.0 uses MEMBER (URI value), Apple
     // CardDAV uses X-ADDRESSBOOKSERVER-MEMBER. Emit both so each
     // server kind can read its native form. CN holds the optional
@@ -357,10 +545,24 @@ fn escape_param(s: &str) -> String {
 /// PUT-update path — keeps the contact's UID stable so the
 /// resource URL doesn't shift, and emits the same property set as
 /// the create version.
-pub fn rebuild_vcard(uid: &str, contact: &Contact) -> String {
+///
+/// `preserved_photo` is the photo body we want to re-emit on the
+/// updated resource. The Contact struct doesn't carry the bytes
+/// (the listing flag is enough for every other code path), so
+/// the CardDAV `update_contact` does a quick GET + parse to
+/// recover them when `contact.has_photo` is true — passing
+/// `None` here on an update of a contact that has a photo would
+/// silently wipe the avatar on the next PUT.
+pub fn rebuild_vcard(
+    uid: &str,
+    contact: &Contact,
+    preserved_photo: Option<ContactPhoto>,
+) -> String {
     // Reuse the create builder; the only delta would be REV
     // (rebuilt unconditionally above) and we don't try to preserve
-    // properties we don't model (categories, X-*, etc.).
+    // properties we don't model (categories, X-*, etc.). The photo
+    // travels through `NewContact.photo` so the existing emitter
+    // path handles it without a second branch.
     let payload = NewContact {
         display_name: contact.display_name.clone(),
         given_name: contact.given_name.clone(),
@@ -371,8 +573,45 @@ pub fn rebuild_vcard(uid: &str, contact: &Contact) -> String {
         birthday: contact.birthday,
         notes: contact.notes.clone(),
         members: contact.members.clone(),
+        photo: preserved_photo,
     };
     build_vcard(uid, &payload)
+}
+
+/// Emit a `PHOTO` line in the vCard 3.0 base64 form, line-folded
+/// per RFC 6350 §3.2 so older parsers don't reject the entry as
+/// too-long. The MIME type is mapped onto the `TYPE=` parameter
+/// using the inverse of the lookup `decode_inline_photo` uses;
+/// unknown MIMEs fall back to `JPEG` because that's what every
+/// CardDAV reference impl treats as the safe default.
+fn push_vcard_photo(out: &mut String, photo: &ContactPhoto) {
+    let mime_lower = photo.content_type.to_ascii_lowercase();
+    let type_param = match mime_lower.as_str() {
+        "image/jpeg" | "image/jpg" => "JPEG",
+        "image/png" => "PNG",
+        "image/gif" => "GIF",
+        "image/bmp" => "BMP",
+        "image/webp" => "WEBP",
+        _ => "JPEG",
+    };
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&photo.data);
+    // RFC 6350 §3.2: lines longer than 75 octets SHOULD be folded.
+    // We fold by writing the prefix, then a CRLF + single space
+    // (the continuation marker) every 72 chars of base64 so the
+    // total line length stays well under the limit.
+    let header = format!("PHOTO;ENCODING=b;TYPE={type_param}:");
+    out.push_str(&header);
+    let mut written = header.len();
+    for chunk in b64.as_bytes().chunks(72) {
+        let s = std::str::from_utf8(chunk).expect("base64 is ASCII");
+        if written + s.len() > 75 {
+            out.push_str("\r\n ");
+            written = 1;
+        }
+        out.push_str(s);
+        written += s.len();
+    }
+    out.push_str("\r\n");
 }
 
 use chrono::TimeZone;
@@ -536,6 +775,7 @@ mod tests {
             birthday: Some(NaiveDate::from_ymd_opt(1985, 4, 17).unwrap()),
             notes: Some("Met at conf 2024".into()),
             members: None,
+            photo: None,
         };
         let body = build_vcard("uid-1", &nc);
         let parsed = parse(&body);
@@ -642,6 +882,13 @@ mod tests {
         );
         let parsed = parse(body);
         assert_eq!(parsed.display_name, "Test");
+        // A URI-shaped PHOTO still flips the listing flag — the
+        // server claims this row has an avatar — even though
+        // `parse_vcard_photo` won't fetch the remote URL on the
+        // user's behalf. The frontend collapses to the initials
+        // placeholder when the photo fetch returns None.
+        assert!(parsed.has_photo);
+        assert!(parse_vcard_photo(body).is_none());
     }
 
     #[test]
@@ -680,6 +927,7 @@ mod tests {
             birthday: None,
             notes: None,
             members: None,
+            photo: None,
         };
         let body = build_vcard("uid", &nc);
         assert!(body.contains("FN:Smith\\, Inc.\\; LTD"));
@@ -700,6 +948,7 @@ mod tests {
             birthday: None,
             notes: Some("Line one\nLine two".into()),
             members: None,
+            photo: None,
         };
         let body = build_vcard("uid", &nc);
         assert!(body.contains("NOTE:Line one\\nLine two"));
@@ -721,11 +970,12 @@ mod tests {
             birthday: Some(NaiveDate::from_ymd_opt(1990, 3, 15).unwrap()),
             notes: None,
             members: None,
+            has_photo: false,
             created_at: Utc::now(),
             updated_at: Utc::now(),
             etag: Some("etag-1".into()),
         };
-        let body = rebuild_vcard("uid-2", &original);
+        let body = rebuild_vcard("uid-2", &original, None);
         let reparsed = parse(&body);
         assert_eq!(reparsed.display_name, "Jane Doe");
         assert_eq!(reparsed.given_name.as_deref(), Some("Jane"));
@@ -737,5 +987,119 @@ mod tests {
             vec!["+49 170 1234567".to_string()],
         );
         assert_eq!(reparsed.birthday, original.birthday);
+    }
+
+    /// Sample PNG bytes shared across the PHOTO tests. Real PNG
+    /// (signature + IHDR + IDAT + IEND) so the round-trip exercises
+    /// the same decoder path a server would feed us.
+    const PNG_1X1: &[u8] = &[
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48,
+        0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00,
+        0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78,
+        0x9c, 0x63, 0xfa, 0xcf, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01, 0xe5, 0x27, 0xde, 0xfc,
+        0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+    ];
+
+    #[test]
+    fn build_and_parse_inline_photo_round_trip() {
+        let photo = ContactPhoto {
+            content_type: "image/png".into(),
+            data: PNG_1X1.to_vec(),
+        };
+        let nc = NewContact {
+            display_name: "Pic Person".into(),
+            given_name: None,
+            family_name: None,
+            organization: None,
+            emails: Vec::new(),
+            phone_numbers: Vec::new(),
+            birthday: None,
+            notes: None,
+            members: None,
+            photo: Some(photo.clone()),
+        };
+        let body = build_vcard("uid-photo", &nc);
+        // PHOTO header is present in the vCard 3.0 base64 form.
+        assert!(body.contains("PHOTO;ENCODING=b;TYPE=PNG:"));
+        // Listing flag flips on, bytes round-trip.
+        let parsed = parse(&body);
+        assert!(parsed.has_photo);
+        let extracted = parse_vcard_photo(&body).expect("inline photo decodes");
+        assert_eq!(extracted.content_type, photo.content_type);
+        assert_eq!(extracted.data, photo.data);
+    }
+
+    #[test]
+    fn parses_vcard_4_data_uri_photo() {
+        let b64 = base64::engine::general_purpose::STANDARD.encode(PNG_1X1);
+        let body = format!(
+            "BEGIN:VCARD\r\nVERSION:4.0\r\nFN:Test\r\nPHOTO:data:image/png;base64,{b64}\r\nEND:VCARD\r\n",
+        );
+        let parsed = parse(&body);
+        assert!(parsed.has_photo);
+        let extracted = parse_vcard_photo(&body).expect("data URI decodes");
+        assert_eq!(extracted.content_type, "image/png");
+        assert_eq!(extracted.data, PNG_1X1.to_vec());
+    }
+
+    #[test]
+    fn folded_photo_lines_reassemble_before_decode() {
+        // Force the builder to fold (PNG_1X1 is ~75 bytes base64).
+        let photo = ContactPhoto {
+            content_type: "image/png".into(),
+            data: PNG_1X1.to_vec(),
+        };
+        let mut s = String::new();
+        push_vcard_photo(&mut s, &photo);
+        // The emitter MUST fold long base64 onto continuation
+        // lines — confirm we actually produced one so this test
+        // covers the fold-handling path through `unfold`.
+        assert!(s.contains("\r\n "));
+        let body =
+            format!("BEGIN:VCARD\r\nVERSION:3.0\r\nFN:T\r\n{s}END:VCARD\r\n");
+        let extracted = parse_vcard_photo(&body).expect("folded photo decodes");
+        assert_eq!(extracted.data, PNG_1X1.to_vec());
+    }
+
+    #[test]
+    fn rebuild_carries_preserved_photo_back_into_vcard() {
+        let contact = Contact {
+            id: "id".into(),
+            list_id: "list".into(),
+            display_name: "Has Photo".into(),
+            given_name: None,
+            family_name: None,
+            organization: None,
+            emails: Vec::new(),
+            phone_numbers: Vec::new(),
+            birthday: None,
+            notes: None,
+            members: None,
+            has_photo: true,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            etag: None,
+        };
+        let photo = ContactPhoto {
+            content_type: "image/png".into(),
+            data: PNG_1X1.to_vec(),
+        };
+        let body = rebuild_vcard("uid", &contact, Some(photo.clone()));
+        let reparsed = parse(&body);
+        assert!(reparsed.has_photo);
+        let extracted = parse_vcard_photo(&body).expect("photo present");
+        assert_eq!(extracted.data, photo.data);
+    }
+
+    #[test]
+    fn parse_vcard_photo_rejects_bare_url() {
+        let body =
+            "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:T\r\nPHOTO:http://example.org/p.jpg\r\nEND:VCARD\r\n";
+        // has_photo flips on (it's a real PHOTO line) but we
+        // refuse to chase the URL — `parse_vcard_photo` returns
+        // None so the caller knows there's no avatar to display.
+        let parsed = parse(body);
+        assert!(parsed.has_photo);
+        assert!(parse_vcard_photo(body).is_none());
     }
 }
