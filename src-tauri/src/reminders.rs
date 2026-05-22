@@ -151,10 +151,27 @@ impl ReminderScheduler {
 
     /// Wake the worker so it re-scans. Safe to call from any thread;
     /// multiple back-to-back calls are coalesced by `Notify`. Local
-    /// triggers re-scan on every wake; external triggers respect the
-    /// TTL cache unless `invalidate_external` is true.
+    /// triggers re-scan on every wake; external triggers come from
+    /// the TTL cache unless the caller also calls
+    /// `invalidate_external_cache`.
     pub fn invalidate(&self) {
         self.invalidate.notify_one();
+    }
+
+    /// Drop the external-trigger snapshot so the next scan re-fans
+    /// out to every adapter. Used by settings flows whose change
+    /// affects how external events resolve to Triggers — most
+    /// notably "Standard-Hinweise" for a calendar (per-calendar
+    /// default reminders), where the cached Triggers were materialised
+    /// against the OLD defaults and won't reflect the new ones until
+    /// the cache expires.
+    ///
+    /// Pairs with `invalidate()`: caller usually wants both — clear
+    /// the cache, then wake the worker so it picks up the change
+    /// without waiting for the next polling tick.
+    pub fn invalidate_external_cache(&self) {
+        let mut guard = self.external_cache.lock().expect("external cache poison");
+        *guard = None;
     }
 
     /// Snapshot reminder triggers for the Ctrl+Shift+R overview

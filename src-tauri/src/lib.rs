@@ -103,6 +103,7 @@ pub fn run() {
             commands::delete_color_label,
             commands::search,
             commands::list_upcoming_reminders,
+            commands::invalidate_reminders,
             commands::list_accounts,
             commands::create_account,
             commands::delete_account,

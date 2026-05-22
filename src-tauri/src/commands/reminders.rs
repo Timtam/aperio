@@ -20,3 +20,23 @@ pub async fn list_upcoming_reminders(
     let scheduler = SchedulerHandle::clone(&scheduler);
     Ok(scheduler.upcoming(OVERVIEW_LIMIT).await)
 }
+
+/// Invalidate the reminder scheduler so it re-scans on the next
+/// tick. Clears the external-trigger cache too, since the change
+/// that triggered the invalidation (most commonly a per-calendar
+/// "Standard-Hinweis" edit in Settings → Kalender) affects how
+/// external events resolve to Triggers — without the cache flush
+/// the new default wouldn't reach the firing loop until the TTL
+/// expires (~5 min).
+///
+/// Cheap on the wire (no payload, no async work besides the
+/// fire-and-forget notify) so callers can lean on it whenever
+/// they've touched something the scheduler reads.
+#[tauri::command]
+pub async fn invalidate_reminders(
+    scheduler: State<'_, SchedulerHandle>,
+) -> CommandResult<()> {
+    scheduler.invalidate_external_cache();
+    scheduler.invalidate();
+    Ok(())
+}

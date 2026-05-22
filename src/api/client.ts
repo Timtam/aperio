@@ -389,6 +389,22 @@ export const setUserPref = (key: string, value: string) =>
 export const deleteUserPref = (key: string) =>
   invoke<void>('delete_user_pref', { key });
 
+/**
+ * Wake the reminder scheduler so it re-scans on the next tick AND
+ * drop its external-trigger cache so the next scan re-fans out to
+ * every adapter. The frontend calls this after editing things the
+ * scheduler reads but doesn't watch directly — most notably the
+ * per-calendar "Standard-Hinweise" in Settings → Kalender. Without
+ * it, a freshly added default reminder doesn't reach the firing
+ * loop until the cache TTL (~5 min) expires.
+ *
+ * Cheap on the wire: no payload, the scheduler's `Notify` coalesces
+ * repeat calls, so it's safe to invoke per-change rather than
+ * trying to batch.
+ */
+export const invalidateReminders = () =>
+  invoke<void>('invalidate_reminders');
+
 // ── Native context menu ──────────────────────────────────────────────────
 
 /** One entry in the native context menu. The shape supports four

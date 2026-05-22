@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 
-import { getUserPref, setUserPref } from '../api/client';
+import {
+  getUserPref,
+  invalidateReminders,
+  setUserPref,
+} from '../api/client';
 import type { Reminder } from '../api/types';
 
 /**
@@ -139,11 +143,28 @@ export function useCalendarDefaultReminders(
       }
       const timer = window.setTimeout(() => {
         pendingWrites.delete(calendarId);
-        if (reminders.length === 0) {
-          void setUserPref(prefKey(calendarId), '');
-        } else {
-          void setUserPref(prefKey(calendarId), JSON.stringify(reminders));
-        }
+        const writePromise =
+          reminders.length === 0
+            ? setUserPref(prefKey(calendarId), '')
+            : setUserPref(prefKey(calendarId), JSON.stringify(reminders));
+        // Once the pref lands in SQLite, nudge the reminder scheduler
+        // so it drops its external-trigger cache and re-scans on the
+        // next tick. Without this nudge, a default reminder added
+        // while Aperio is running wouldn't reach the firing loop
+        // until the scheduler's TTL cache expires (~5 min) — meaning
+        // "a meeting in 30 min with a freshly-set 15 min default"
+        // would silently not fire even though the catch-up logic
+        // would have caught it.
+        void writePromise
+          .then(() => invalidateReminders())
+          .catch((err) => {
+            // Pref write itself failed; nothing to invalidate. The
+            // in-memory map already reflects the user's intent, the
+            // next mount will overwrite from disk anyway. Log so a
+            // pattern of failures surfaces in dev.
+            // eslint-disable-next-line no-console
+            console.warn('default-reminder pref write failed', err);
+          });
       }, WRITE_DEBOUNCE_MS);
       pendingWrites.set(calendarId, timer);
     },
