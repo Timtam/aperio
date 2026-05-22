@@ -30,6 +30,7 @@ pub mod autodiscover;
 pub mod error;
 pub mod mapping;
 pub mod soap;
+pub mod tasks;
 
 use std::time::Duration;
 
@@ -37,7 +38,7 @@ use async_trait::async_trait;
 use cal_core::{
     Adapter, AuthToken, Calendar, CalendarFeature, Capability, ContainerColor,
     Credentials as CoreCredentials, DateRange, Error as CoreError, Event, FreeBusy,
-    NewEvent, Result as CoreResult,
+    NewEvent, NewTask, Result as CoreResult, Task, TaskList, TasksFeature,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -64,6 +65,7 @@ pub struct EwsAdapter {
     client: EwsClient,
     capabilities: Vec<Capability>,
     calendars_cache: Mutex<Option<(Vec<Calendar>, chrono::DateTime<chrono::Utc>)>>,
+    task_lists_cache: Mutex<Option<(Vec<TaskList>, chrono::DateTime<chrono::Utc>)>>,
     listing_ttl: chrono::Duration,
 }
 
@@ -80,8 +82,9 @@ impl EwsAdapter {
             .expect("reqwest client");
         Self {
             client: EwsClient::new(endpoint, credentials, http),
-            capabilities: vec![Capability::Calendar],
+            capabilities: vec![Capability::Calendar, Capability::Tasks],
             calendars_cache: Mutex::new(None),
+            task_lists_cache: Mutex::new(None),
             listing_ttl: chrono::Duration::minutes(5),
         }
     }
@@ -95,6 +98,17 @@ impl EwsAdapter {
 
     async fn cached_calendars(&self) -> Option<Vec<Calendar>> {
         let guard = self.calendars_cache.lock().await;
+        let (items, ts) = guard.as_ref()?;
+        let age = chrono::Utc::now().signed_duration_since(*ts);
+        if age >= chrono::Duration::zero() && age < self.listing_ttl {
+            Some(items.clone())
+        } else {
+            None
+        }
+    }
+
+    async fn cached_task_lists(&self) -> Option<Vec<TaskList>> {
+        let guard = self.task_lists_cache.lock().await;
         let (items, ts) = guard.as_ref()?;
         let age = chrono::Utc::now().signed_duration_since(*ts);
         if age >= chrono::Duration::zero() && age < self.listing_ttl {
@@ -220,6 +234,64 @@ impl CalendarFeature for EwsAdapter {
         api::add_event_exdate(&self.client, event_id)
             .await
             .map_err(to_core_error)
+    }
+}
+
+#[async_trait]
+impl TasksFeature for EwsAdapter {
+    async fn list_task_lists(&self) -> CoreResult<Vec<TaskList>> {
+        if let Some(cached) = self.cached_task_lists().await {
+            return Ok(cached);
+        }
+        let fresh = tasks::list_task_lists(&self.client)
+            .await
+            .map_err(to_core_error)?;
+        *self.task_lists_cache.lock().await =
+            Some((fresh.clone(), chrono::Utc::now()));
+        Ok(fresh)
+    }
+
+    async fn get_tasks(&self, list_id: &str) -> CoreResult<Vec<Task>> {
+        tasks::get_tasks(&self.client, list_id)
+            .await
+            .map_err(to_core_error)
+    }
+
+    async fn create_task(
+        &self,
+        list_id: &str,
+        task: NewTask,
+    ) -> CoreResult<Task> {
+        tasks::create_task(&self.client, list_id, task)
+            .await
+            .map_err(to_core_error)
+    }
+
+    async fn update_task(&self, task: Task) -> CoreResult<Task> {
+        tasks::update_task(&self.client, &task)
+            .await
+            .map_err(to_core_error)
+    }
+
+    async fn delete_task(&self, task_id: &str) -> CoreResult<()> {
+        tasks::delete_task(&self.client, task_id)
+            .await
+            .map_err(to_core_error)
+    }
+
+    async fn rename_task_list(
+        &self,
+        list_id: &str,
+        new_name: &str,
+    ) -> CoreResult<()> {
+        tasks::rename_task_list(&self.client, list_id, new_name)
+            .await
+            .map_err(to_core_error)?;
+        // Same cache invalidation pattern as `rename_calendar`: drop
+        // the cached list so the next list_task_lists round-trip
+        // picks up the new display name.
+        *self.task_lists_cache.lock().await = None;
+        Ok(())
     }
 }
 

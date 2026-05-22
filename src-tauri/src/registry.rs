@@ -395,11 +395,11 @@ impl AdapterRegistry {
 
     /// Wire up an EWS (Exchange Web Services) account. Basic-auth-
     /// only for the first cut — the keychain holds the password,
-    /// the JSON config holds the endpoint URL + username. EWS doesn't
-    /// expose tasks through the same calendar endpoint we wire up
-    /// here (they live behind a separate `IPF.Task` folder restriction
-    /// + `tasks:` field URIs), so only the calendar feature is
-    /// registered. Phase 6f.2 adds the task side.
+    /// the JSON config holds the endpoint URL + username. Both the
+    /// calendar and tasks surfaces are registered: Phase 6f.1 wired
+    /// up calendars; Phase 6f.2 added the tasks side, so the same
+    /// EwsAdapter instance now serves both feature traits (the
+    /// per-account listing caches stay coherent across them).
     fn register_ews(&self, account: &Account) -> Result<(), RegistryError> {
         let config: EwsAccountConfig = serde_json::from_str(&account.config_json)
             .map_err(|e| RegistryError::Config(e.to_string()))?;
@@ -414,7 +414,14 @@ impl AdapterRegistry {
         self.external_cal
             .write()
             .expect("registry cal poison")
-            .insert(account.id.clone(), arc as Arc<dyn CalendarFeature>);
+            .insert(
+                account.id.clone(),
+                arc.clone() as Arc<dyn CalendarFeature>,
+            );
+        self.external_tasks
+            .write()
+            .expect("registry tasks poison")
+            .insert(account.id.clone(), arc as Arc<dyn TasksFeature>);
         Ok(())
     }
 

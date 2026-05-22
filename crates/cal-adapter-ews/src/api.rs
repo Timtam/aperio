@@ -62,7 +62,11 @@ impl EwsClient {
     /// when an event shows up in Outlook but not in Aperio.
     /// Bodies are truncated to 16 KiB per direction to keep the log
     /// readable; the truncation marker stays in the line.
-    async fn post_soap(&self, body: String) -> EwsResult<String> {
+    ///
+    /// Crate-visible so `tasks.rs` can route its own SOAP envelopes
+    /// through the same client without duplicating the HTTP +
+    /// fault-check plumbing.
+    pub(crate) async fn post_soap(&self, body: String) -> EwsResult<String> {
         let auth = basic_auth_header(&self.credentials)?;
         tracing::debug!(
             target: "cal_adapter_ews::soap",
