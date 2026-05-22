@@ -36,7 +36,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use cal_adapter_local::SharedConn;
-use cal_core::{DateRange, Event, EventRecurrence, Reminder, ReminderKind, Task};
+use cal_core::{
+    DateRange, Event, EventRecurrence, RecurrenceEnd, RecurrenceFrequency, Reminder,
+    ReminderKind, Task, TaskRecurrence,
+};
 use chrono::{DateTime, Duration as ChronoDuration, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use rrule::{RRule, RRuleSet, Tz as RruleTz};
 use rusqlite::params;
@@ -279,45 +282,67 @@ impl ReminderScheduler {
             }
         }
 
-        // Tasks — no recurrence expansion yet. Task recurrence on
-        // Aperio is a structured `TaskRecurrence` model rather than
-        // an RFC 5545 RRULE string, and expanding it needs its own
-        // helper. Recurring task reminders therefore still fire for
-        // the master row only; the UI's "complete-this-instance"
-        // flow is the workaround in the meantime.
+        // Tasks — recurrence-aware via the same `occurrence_triggers`
+        // primitive the events path uses. `task_recurrence_to_rrule_body`
+        // turns the structured `TaskRecurrence` into an RFC 5545
+        // RRULE body the expansion helper understands, so a weekly
+        // chore fires reminders for every week within the horizon.
         if let Ok(mut stmt) = conn.prepare(TASK_QUERY) {
             if let Ok(mut rows) = stmt.query(params![]) {
                 while let Some(row) = rows.next().unwrap_or(None) {
                     let id: String = row.get(0).unwrap_or_default();
                     let title: String = row.get(1).unwrap_or_default();
                     let scheduled_date: Option<String> = row.get(2).unwrap_or(None);
-                    let deadline_date: Option<String> = row.get(3).unwrap_or(None);
-                    let deadline_time: Option<String> = row.get(4).unwrap_or(None);
-                    let reminders_json: Option<String> = row.get(5).unwrap_or(None);
+                    let scheduled_time: Option<String> = row.get(3).unwrap_or(None);
+                    let deadline_date: Option<String> = row.get(4).unwrap_or(None);
+                    let deadline_time: Option<String> = row.get(5).unwrap_or(None);
+                    let reminders_json: Option<String> = row.get(6).unwrap_or(None);
+                    let recurrence_json: Option<String> = row.get(7).unwrap_or(None);
+
                     let Some(reminders) = parse_reminders(reminders_json.as_deref())
                     else {
                         continue;
                     };
-                    let Some(due) = task_due_time(
-                        scheduled_date.as_deref(),
-                        deadline_date.as_deref(),
-                        deadline_time.as_deref(),
-                    ) else {
+
+                    // Parse the date/time pair into the structured
+                    // types `master_due` understands so the local
+                    // and external paths agree on the master due
+                    // (scheduled-time wins over deadline-time when
+                    // scheduled-date won the date arbitration).
+                    let sd = scheduled_date
+                        .as_deref()
+                        .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
+                    let st = scheduled_time.as_deref().and_then(parse_local_time);
+                    let dd = deadline_date
+                        .as_deref()
+                        .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
+                    let dt = deadline_time.as_deref().and_then(parse_local_time);
+                    let Some(due) = master_due(sd, st, dd, dt) else {
                         continue;
                     };
-                    for r in &reminders {
-                        if let Some(at) = trigger_time_for(&r.kind, due) {
-                            if at >= earliest && at <= latest {
-                                acc.push(Trigger {
-                                    item_id: id.clone(),
-                                    item_kind: ItemKind::Task,
-                                    title: title.clone(),
-                                    body: format_task_body(&due),
-                                    trigger_at: at,
-                                });
-                            }
-                        }
-                    }
+
+                    let recurrence = recurrence_json
+                        .as_deref()
+                        .and_then(|s| serde_json::from_str::<TaskRecurrence>(s).ok())
+                        .and_then(|rec| {
+                            task_recurrence_to_rrule_body(&rec).map(|rrule| {
+                                EventRecurrence {
+                                    rrule,
+                                    exceptions: Vec::new(),
+                                }
+                            })
+                        });
+
+                    acc.extend(occurrence_triggers(
+                        &id,
+                        ItemKind::Task,
+                        &title,
+                        due,
+                        recurrence.as_ref(),
+                        &reminders,
+                        earliest,
+                        latest,
+                    ));
                 }
             }
         }
@@ -424,7 +449,7 @@ impl ReminderScheduler {
                         continue;
                     }
                 };
-                acc.extend(task_triggers(&tasks));
+                acc.extend(task_triggers(&tasks, from, to));
             }
         }
 
@@ -542,25 +567,40 @@ impl ReminderScheduler {
                 }
             }
 
-            // Tasks
+            // Tasks. AppStart fires once per process for the master
+            // due time — recurrence is irrelevant here (the kind
+            // means "as soon as the user opens the app after the
+            // reference time"), so we keep the master-only behaviour
+            // even though the surrounding scanner is now
+            // recurrence-aware. Column indices follow the new
+            // TASK_QUERY shape (scheduled_time added at index 3,
+            // recurrence at index 7).
             if let Ok(mut stmt) = conn.prepare(TASK_QUERY) {
                 if let Ok(mut rows) = stmt.query(params![]) {
                     while let Some(row) = rows.next().unwrap_or(None) {
                         let id: String = row.get(0).unwrap_or_default();
                         let title: String = row.get(1).unwrap_or_default();
                         let scheduled_date: Option<String> = row.get(2).unwrap_or(None);
-                        let deadline_date: Option<String> = row.get(3).unwrap_or(None);
-                        let deadline_time: Option<String> = row.get(4).unwrap_or(None);
-                        let reminders_json: Option<String> = row.get(5).unwrap_or(None);
+                        let scheduled_time: Option<String> = row.get(3).unwrap_or(None);
+                        let deadline_date: Option<String> = row.get(4).unwrap_or(None);
+                        let deadline_time: Option<String> = row.get(5).unwrap_or(None);
+                        let reminders_json: Option<String> = row.get(6).unwrap_or(None);
                         let Some(reminders) = parse_reminders(reminders_json.as_deref())
                         else {
                             continue;
                         };
-                        let Some(due) = task_due_time(
-                            scheduled_date.as_deref(),
-                            deadline_date.as_deref(),
-                            deadline_time.as_deref(),
-                        ) else {
+                        // Mirror the new scanner: pair each date
+                        // with its own time-of-day rather than
+                        // collapsing both into deadline_time.
+                        let date = scheduled_date
+                            .as_deref()
+                            .or(deadline_date.as_deref());
+                        let time = if scheduled_date.is_some() {
+                            scheduled_time.as_deref()
+                        } else {
+                            deadline_time.as_deref()
+                        };
+                        let Some(due) = task_due_time(date, None, time) else {
                             continue;
                         };
                         for r in &reminders {
@@ -628,9 +668,20 @@ const EMPTY_HORIZON_RETRY: Duration = EXTERNAL_TRIGGERS_TTL;
 const EVENT_QUERY: &str =
     "SELECT id, title, start_utc, reminders, rrule, rrule_exceptions FROM events";
 
-/// SELECT id, title, scheduled_date, deadline_date, deadline_time, reminders FROM tasks
-const TASK_QUERY: &str =
-    "SELECT id, title, scheduled_date, deadline_date, deadline_time, reminders FROM tasks";
+/// SELECT id, title, scheduled_date, scheduled_time, deadline_date,
+/// deadline_time, reminders, recurrence FROM tasks
+///
+/// The extra columns make recurring tasks reach the scheduler the
+/// same way recurring events do — `recurrence` is the JSON-serialised
+/// `TaskRecurrence` (or NULL for non-recurring rows), and
+/// `scheduled_time` lets us pair the date with its own time-of-day
+/// (the original query collapsed scheduled and deadline times into
+/// the deadline_time column, which lost precision when both were
+/// set).
+const TASK_QUERY: &str = "SELECT id, title, \
+    scheduled_date, scheduled_time, \
+    deadline_date, deadline_time, \
+    reminders, recurrence FROM tasks";
 
 /// Translate a batch of external events into Trigger entries. Empty
 /// `reminders` on an event falls back to the calendar's stored default
@@ -838,47 +889,170 @@ fn occurrence_window(
 /// `task_due_time`, but operating on the structured `NaiveDate` /
 /// `NaiveTime` fields directly so we don't round-trip through the
 /// stringified columns the local SQLite path uses.
-fn task_triggers(tasks: &[Task]) -> Vec<Trigger> {
+///
+/// Recurring tasks (`task.recurrence: Some(...)`) get expanded the
+/// same way recurring events do: the master's due time is the
+/// DTSTART, the structured TaskRecurrence is translated to an RFC
+/// 5545 RRULE body, `expand_occurrences` produces every due time
+/// inside the reminder window. A task without recurrence still
+/// emits exactly one set of triggers off its master due time.
+fn task_triggers(
+    tasks: &[Task],
+    window_start: DateTime<Utc>,
+    window_end: DateTime<Utc>,
+) -> Vec<Trigger> {
     let mut out = Vec::new();
     for t in tasks {
         if t.reminders.is_empty() {
             continue;
         }
-        // Scheduled wins over deadline as the reference time, same as
-        // `task_due_time` upstream. Pair the date with its OWN
-        // time-of-day (so `scheduled_date` uses `scheduled_time`,
-        // `deadline_date` uses `deadline_time`); default to 09:00
-        // local when no time is set.
-        let (date, time) = if let Some(d) = t.scheduled_date {
-            (d, t.scheduled_time)
-        } else if let Some(d) = t.deadline_date {
-            (d, t.deadline_time)
-        } else {
+        let Some(master_due) = task_master_due(t) else {
             continue;
         };
-        let nt = time.unwrap_or_else(|| {
-            NaiveTime::from_hms_opt(9, 0, 0).expect("9:00 is valid")
+        // Tasks use the same `EventRecurrence` shape as the
+        // expansion helper expects — wrap the structured
+        // TaskRecurrence into an RRULE body so a single set of
+        // primitives serves both kinds of recurring rows.
+        let recurrence = t.recurrence.as_ref().and_then(|rec| {
+            task_recurrence_to_rrule_body(rec).map(|rrule| EventRecurrence {
+                rrule,
+                exceptions: Vec::new(),
+            })
         });
-        let Some(local) =
-            chrono::Local.from_local_datetime(&NaiveDateTime::new(date, nt)).single()
-        else {
-            continue;
-        };
-        let due = local.with_timezone(&Utc);
-        for r in &t.reminders {
-            let Some(at) = trigger_time_for(&r.kind, due) else {
-                continue;
-            };
-            out.push(Trigger {
-                item_id: t.id.clone(),
-                item_kind: ItemKind::Task,
-                title: t.title.clone(),
-                body: format_task_body(&due),
-                trigger_at: at,
-            });
-        }
+        out.extend(occurrence_triggers(
+            &t.id,
+            ItemKind::Task,
+            &t.title,
+            master_due,
+            recurrence.as_ref(),
+            &t.reminders,
+            window_start,
+            window_end,
+        ));
     }
     out
+}
+
+/// Master "due time" for a task — first occurrence's reference for
+/// reminder triggers. Scheduled wins over deadline, mirroring the
+/// `task_due_time` convention used everywhere else. Returns `None`
+/// when neither date is set (purely backlogged tasks).
+fn task_master_due(t: &Task) -> Option<DateTime<Utc>> {
+    master_due(
+        t.scheduled_date,
+        t.scheduled_time,
+        t.deadline_date,
+        t.deadline_time,
+    )
+}
+
+/// Resolution helper shared between the external `Task` path and the
+/// local SQL scanner. Pairs each date with its OWN time-of-day —
+/// `scheduled_date` uses `scheduled_time`, `deadline_date` uses
+/// `deadline_time` — and falls back to 09:00 local when no time is
+/// set, matching the convention `task_due_time` uses for the
+/// stringified version.
+fn master_due(
+    scheduled_date: Option<chrono::NaiveDate>,
+    scheduled_time: Option<NaiveTime>,
+    deadline_date: Option<chrono::NaiveDate>,
+    deadline_time: Option<NaiveTime>,
+) -> Option<DateTime<Utc>> {
+    let (date, time) = if let Some(d) = scheduled_date {
+        (d, scheduled_time)
+    } else if let Some(d) = deadline_date {
+        (d, deadline_time)
+    } else {
+        return None;
+    };
+    let nt = time.unwrap_or_else(|| {
+        NaiveTime::from_hms_opt(9, 0, 0).expect("9:00 is valid")
+    });
+    let local = chrono::Local
+        .from_local_datetime(&NaiveDateTime::new(date, nt))
+        .single()?;
+    Some(local.with_timezone(&Utc))
+}
+
+/// Translate Aperio's structured `TaskRecurrence` into an RFC 5545
+/// RRULE body that `expand_occurrences` can drive through the same
+/// rrule crate the event path uses.
+///
+/// `None` when the recurrence is incomplete enough that no
+/// occurrences would expand — e.g. a `RecurrenceEnd::After { 0 }`
+/// or interval 0. Same defensive bailing the JS-side
+/// TaskRecurrenceSelector applies before showing the rule.
+///
+/// Frequency / interval map 1:1. `day_of_week` becomes BYDAY,
+/// `day_of_month` becomes BYMONTHDAY. `end`:
+///
+///   - `Never`           → no UNTIL/COUNT (rrule defaults to
+///                         RRULESET_LIMIT-bounded "infinite")
+///   - `After { n }`     → `COUNT=n`
+///   - `OnDate { date }` → `UNTIL=YYYYMMDDT235959Z`. The end-of-day
+///                         UTC bound matches how the JS selector
+///                         interprets the picker — the user picks a
+///                         date, and the rule is inclusive of that
+///                         day's occurrences.
+fn task_recurrence_to_rrule_body(rec: &TaskRecurrence) -> Option<String> {
+    if rec.interval == 0 {
+        return None;
+    }
+    let freq = match rec.frequency {
+        RecurrenceFrequency::Daily => "DAILY",
+        RecurrenceFrequency::Weekly => "WEEKLY",
+        RecurrenceFrequency::Monthly => "MONTHLY",
+        RecurrenceFrequency::Yearly => "YEARLY",
+    };
+    let mut parts: Vec<String> = vec![format!("FREQ={freq}")];
+    if rec.interval > 1 {
+        parts.push(format!("INTERVAL={}", rec.interval));
+    }
+    if let Some(days) = &rec.day_of_week {
+        if !days.is_empty() {
+            let by_day: Vec<&'static str> = days.iter().map(weekday_to_byday).collect();
+            parts.push(format!("BYDAY={}", by_day.join(",")));
+        }
+    }
+    if let Some(dom) = rec.day_of_month {
+        if (1..=31).contains(&dom) {
+            parts.push(format!("BYMONTHDAY={}", dom));
+        }
+    }
+    match &rec.end {
+        Some(RecurrenceEnd::After { occurrences }) => {
+            if *occurrences == 0 {
+                return None;
+            }
+            parts.push(format!("COUNT={}", occurrences));
+        }
+        Some(RecurrenceEnd::OnDate { date }) => {
+            // RFC 5545 UNTIL must carry a UTC indicator for
+            // DTSTART-with-time series. We use the same trick the
+            // CalDAV adapter uses elsewhere — anchor at end-of-day
+            // UTC so the picked date is inclusive.
+            parts.push(format!(
+                "UNTIL={}T235959Z",
+                date.format("%Y%m%d"),
+            ));
+        }
+        Some(RecurrenceEnd::Never) | None => {}
+    }
+    Some(parts.join(";"))
+}
+
+/// Map Aperio's weekday enum into RFC 5545 BYDAY two-letter codes.
+fn weekday_to_byday(d: &cal_core::Weekday) -> &'static str {
+    use cal_core::Weekday::*;
+    match d {
+        Monday => "MO",
+        Tuesday => "TU",
+        Wednesday => "WE",
+        Thursday => "TH",
+        Friday => "FR",
+        Saturday => "SA",
+        Sunday => "SU",
+    }
 }
 
 fn trigger_time_for(
@@ -932,17 +1106,27 @@ fn task_due_time(
     // chrono::Local and then convert to UTC.
     use chrono::NaiveDate;
     let nd = NaiveDate::parse_from_str(date, "%Y-%m-%d").ok()?;
-    let nt = if let Some(t) = time {
-        NaiveTime::parse_from_str(t, "%H:%M:%S")
-            .or_else(|_| NaiveTime::parse_from_str(t, "%H:%M"))
-            .ok()?
-    } else {
-        NaiveTime::from_hms_opt(9, 0, 0)?
-    };
+    let nt = time
+        .and_then(parse_local_time)
+        .unwrap_or_else(|| {
+            NaiveTime::from_hms_opt(9, 0, 0).expect("9:00 is valid")
+        });
     let local = chrono::Local
         .from_local_datetime(&NaiveDateTime::new(nd, nt))
         .single()?;
     Some(local.with_timezone(&Utc))
+}
+
+/// Parse the `HH:MM[:SS]` strings the local SQLite stores into a
+/// `NaiveTime`. Returns `None` for empty / unparseable values so the
+/// caller can fall back to the 09:00-local default.
+fn parse_local_time(raw: &str) -> Option<NaiveTime> {
+    if raw.is_empty() {
+        return None;
+    }
+    NaiveTime::parse_from_str(raw, "%H:%M:%S")
+        .or_else(|_| NaiveTime::parse_from_str(raw, "%H:%M"))
+        .ok()
 }
 
 fn format_event_body(start: &DateTime<Utc>) -> String {
@@ -1178,6 +1362,13 @@ mod tests {
         assert_eq!(triggers.len(), 2, "only the first two weekly occurrences");
     }
 
+    fn task_window() -> (DateTime<Utc>, DateTime<Utc>) {
+        (
+            Utc.with_ymd_and_hms(2026, 5, 19, 0, 0, 0).unwrap(),
+            Utc.with_ymd_and_hms(2026, 7, 1, 0, 0, 0).unwrap(),
+        )
+    }
+
     #[test]
     fn task_triggers_prefer_scheduled_over_deadline_date() {
         // Both scheduled and deadline are set; the reference time
@@ -1191,7 +1382,8 @@ mod tests {
             Some(NaiveTime::from_hms_opt(18, 0, 0).unwrap()),
             vec![rel(0)], // fire at the reference time itself
         );
-        let triggers = task_triggers(&[task]);
+        let (ws, we) = task_window();
+        let triggers = task_triggers(&[task], ws, we);
         assert_eq!(triggers.len(), 1);
         // 10:00 local = depends on zone; assert just the date so the
         // test is portable. The original date wins (scheduled), not
@@ -1211,7 +1403,8 @@ mod tests {
             None,
             vec![rel(0)],
         );
-        let triggers = task_triggers(&[task]);
+        let (ws, we) = task_window();
+        let triggers = task_triggers(&[task], ws, we);
         assert_eq!(triggers.len(), 1);
         let dt_local = chrono::Local.from_utc_datetime(&triggers[0].trigger_at.naive_utc());
         assert_eq!(dt_local.time(), NaiveTime::from_hms_opt(9, 0, 0).unwrap());
@@ -1220,7 +1413,8 @@ mod tests {
     #[test]
     fn task_without_any_date_emits_nothing() {
         let task = make_task(None, None, None, None, vec![rel(15)]);
-        assert!(task_triggers(&[task]).is_empty());
+        let (ws, we) = task_window();
+        assert!(task_triggers(&[task], ws, we).is_empty());
     }
 
     #[test]
@@ -1232,6 +1426,157 @@ mod tests {
             None,
             Vec::new(),
         );
-        assert!(task_triggers(&[task]).is_empty());
+        let (ws, we) = task_window();
+        assert!(task_triggers(&[task], ws, we).is_empty());
+    }
+
+    // ── TaskRecurrence → RRULE conversion ────────────────────────
+
+    fn weekday(d: cal_core::Weekday) -> Vec<cal_core::Weekday> {
+        vec![d]
+    }
+
+    #[test]
+    fn task_recurrence_weekly_with_interval_and_byday_serialises() {
+        // Every two weeks on Wed & Fri, ends after 4 occurrences.
+        let rec = TaskRecurrence {
+            frequency: RecurrenceFrequency::Weekly,
+            interval: 2,
+            day_of_week: Some(vec![cal_core::Weekday::Wednesday, cal_core::Weekday::Friday]),
+            day_of_month: None,
+            end: Some(RecurrenceEnd::After { occurrences: 4 }),
+        };
+        let body = task_recurrence_to_rrule_body(&rec).expect("valid rrule");
+        // The exact ordering of parts is deterministic in the
+        // helper; assert each fragment is present to keep the test
+        // tolerant if we later reorder for readability.
+        assert!(body.contains("FREQ=WEEKLY"), "got: {body}");
+        assert!(body.contains("INTERVAL=2"), "got: {body}");
+        assert!(body.contains("BYDAY=WE,FR"), "got: {body}");
+        assert!(body.contains("COUNT=4"), "got: {body}");
+    }
+
+    #[test]
+    fn task_recurrence_monthly_on_day_of_month_until_date() {
+        let rec = TaskRecurrence {
+            frequency: RecurrenceFrequency::Monthly,
+            interval: 1,
+            day_of_week: None,
+            day_of_month: Some(15),
+            end: Some(RecurrenceEnd::OnDate {
+                date: NaiveDate::from_ymd_opt(2026, 12, 31).unwrap(),
+            }),
+        };
+        let body = task_recurrence_to_rrule_body(&rec).expect("valid rrule");
+        assert!(body.contains("FREQ=MONTHLY"), "got: {body}");
+        // Interval omitted when 1 — keeps the rule compact.
+        assert!(!body.contains("INTERVAL"), "got: {body}");
+        assert!(body.contains("BYMONTHDAY=15"), "got: {body}");
+        assert!(body.contains("UNTIL=20261231T235959Z"), "got: {body}");
+    }
+
+    #[test]
+    fn task_recurrence_with_zero_interval_rejects() {
+        // Defensive: a corrupt persisted value with interval=0 would
+        // produce an infinite loop in some RRULE implementations.
+        // We reject it before handing to the expansion helper.
+        let rec = TaskRecurrence {
+            frequency: RecurrenceFrequency::Daily,
+            interval: 0,
+            day_of_week: None,
+            day_of_month: None,
+            end: None,
+        };
+        assert!(task_recurrence_to_rrule_body(&rec).is_none());
+    }
+
+    #[test]
+    fn task_recurrence_count_zero_rejects() {
+        // After-zero-occurrences is a degenerate rule (no triggers
+        // would ever fire). Bail rather than emit `COUNT=0` which
+        // the rrule crate would reject in validation anyway.
+        let rec = TaskRecurrence {
+            frequency: RecurrenceFrequency::Daily,
+            interval: 1,
+            day_of_week: None,
+            day_of_month: None,
+            end: Some(RecurrenceEnd::After { occurrences: 0 }),
+        };
+        assert!(task_recurrence_to_rrule_body(&rec).is_none());
+    }
+
+    // ── End-to-end recurring task triggers ──────────────────────
+
+    fn make_recurring_task(rec: TaskRecurrence) -> Task {
+        let mut t = make_task(
+            Some(NaiveDate::from_ymd_opt(2026, 5, 20).unwrap()),
+            Some(NaiveTime::from_hms_opt(9, 0, 0).unwrap()),
+            None,
+            None,
+            vec![rel(0)],
+        );
+        t.recurrence = Some(rec);
+        t
+    }
+
+    #[test]
+    fn recurring_task_emits_a_trigger_per_occurrence_in_window() {
+        // Weekly on Wednesdays (2026-05-20 IS a Wednesday).
+        // 4-week window → 4 triggers.
+        let task = make_recurring_task(TaskRecurrence {
+            frequency: RecurrenceFrequency::Weekly,
+            interval: 1,
+            day_of_week: Some(weekday(cal_core::Weekday::Wednesday)),
+            day_of_month: None,
+            end: None,
+        });
+        let triggers = task_triggers(
+            &[task],
+            Utc.with_ymd_and_hms(2026, 5, 19, 0, 0, 0).unwrap(),
+            Utc.with_ymd_and_hms(2026, 6, 17, 0, 0, 0).unwrap(),
+        );
+        assert_eq!(triggers.len(), 4, "expected four weekly Wednesday occurrences");
+    }
+
+    #[test]
+    fn recurring_task_after_n_occurrences_stops_at_n() {
+        // After 2 occurrences: master + 1 more.
+        let task = make_recurring_task(TaskRecurrence {
+            frequency: RecurrenceFrequency::Weekly,
+            interval: 1,
+            day_of_week: Some(weekday(cal_core::Weekday::Wednesday)),
+            day_of_month: None,
+            end: Some(RecurrenceEnd::After { occurrences: 2 }),
+        });
+        let triggers = task_triggers(
+            &[task],
+            Utc.with_ymd_and_hms(2026, 5, 19, 0, 0, 0).unwrap(),
+            // Window wide enough to see four if the rule allowed.
+            Utc.with_ymd_and_hms(2026, 6, 20, 0, 0, 0).unwrap(),
+        );
+        assert_eq!(triggers.len(), 2, "COUNT=2 should cap at two triggers");
+    }
+
+    #[test]
+    fn recurring_task_until_date_excludes_later_occurrences() {
+        // UNTIL bounds the rule — occurrences strictly after the
+        // until date must not appear, even if the window extends
+        // beyond it.
+        let task = make_recurring_task(TaskRecurrence {
+            frequency: RecurrenceFrequency::Weekly,
+            interval: 1,
+            day_of_week: Some(weekday(cal_core::Weekday::Wednesday)),
+            day_of_month: None,
+            end: Some(RecurrenceEnd::OnDate {
+                date: NaiveDate::from_ymd_opt(2026, 6, 3).unwrap(),
+            }),
+        });
+        let triggers = task_triggers(
+            &[task],
+            Utc.with_ymd_and_hms(2026, 5, 19, 0, 0, 0).unwrap(),
+            Utc.with_ymd_and_hms(2026, 7, 1, 0, 0, 0).unwrap(),
+        );
+        // 2026-05-20, 05-27, 06-03 — 3 occurrences, 06-10 excluded.
+        assert_eq!(triggers.len(), 3, "UNTIL=06-03 should leave three triggers");
     }
 }
