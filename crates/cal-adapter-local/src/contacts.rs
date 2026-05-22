@@ -152,33 +152,32 @@ impl ContactsFeature for LocalAdapter {
         if trimmed.is_empty() {
             return Ok(Vec::new());
         }
-        // Lowercase the needle ONCE in Rust; the column-side
-        // `LOWER(...)` handles each row at query time. Using
-        // `INSTR` instead of `LIKE '%...%' COLLATE NOCASE` avoids
-        // SQLite's surprising LIKE-with-COLLATE interactions
-        // (LIKE has its own case-insensitivity rules that can
-        // overlap unhappily with an explicit COLLATE clause) and
-        // strips any chance that a stray `%` or `_` in the query
-        // becomes a wildcard.
-        let needle = trimmed.to_lowercase();
+        // Migration 0008 fills the `contacts_fts` mirror; the
+        // tokeniser is `unicode61 remove_diacritics 2` (same as
+        // events_fts / tasks_fts) so "Müller" matches "muller"
+        // without the picker UI having to think about it. The
+        // prepared query is a space-separated list of
+        // `prefix*`-style tokens — short typeahead strings ("ma"
+        // → "ma*") match "Max" before the user finishes typing.
+        let prepared = prepare_fts_query(trimmed);
+        if prepared.is_empty() {
+            return Ok(Vec::new());
+        }
         let conn = self.db().lock().expect("db mutex poisoned");
         let mut stmt = conn
             .prepare(
-                "SELECT id, list_id, display_name, given_name, family_name,
-                        organization, emails, phone_numbers, birthday, notes,
-                        etag, created_at, updated_at
-                 FROM contacts
-                 WHERE INSTR(LOWER(display_name),                ?1) > 0
-                    OR INSTR(LOWER(COALESCE(given_name,    '')), ?1) > 0
-                    OR INSTR(LOWER(COALESCE(family_name,   '')), ?1) > 0
-                    OR INSTR(LOWER(COALESCE(organization,  '')), ?1) > 0
-                    OR INSTR(LOWER(emails),                      ?1) > 0
-                 ORDER BY display_name COLLATE NOCASE
+                "SELECT c.id, c.list_id, c.display_name, c.given_name, c.family_name,
+                        c.organization, c.emails, c.phone_numbers, c.birthday, c.notes,
+                        c.etag, c.created_at, c.updated_at
+                 FROM contacts_fts f
+                 JOIN contacts c ON c.id = f.id
+                 WHERE contacts_fts MATCH ?
+                 ORDER BY rank
                  LIMIT 50",
             )
             .map_err(map_sql_err)?;
         let rows = stmt
-            .query_map(params![needle], row_to_contact)
+            .query_map(params![prepared], row_to_contact)
             .map_err(map_sql_err)?;
         let mut out = Vec::new();
         for r in rows {
@@ -342,6 +341,55 @@ impl ContactsFeature for LocalAdapter {
         }
         Ok(())
     }
+}
+
+// ── FTS5 query sanitiser ───────────────────────────────────────────────
+
+/// Turn a free-form picker input into an FTS5 MATCH expression.
+///
+/// More aggressive sanitiser than `search.rs::prepare_query`
+/// because the attendees picker is a real-world email-paste
+/// surface — strings like `"max@example.com"` are typed
+/// regularly, and FTS5 treats `@` / `.` as syntax markers
+/// (`column@row`, …) that produce a "syntax error" on MATCH and
+/// kill the typeahead. To dodge that:
+///
+///   - Walk every character. Letters, digits, dash and underscore
+///     pass through; everything else (incl. `@`, `.`, `,`, `:`,
+///     `*`, `"`, `(`, `)`, `^`, etc.) becomes whitespace. That
+///     mirrors how FTS5's `unicode61` tokeniser splits on the
+///     index side — querying for the same atoms it indexed.
+///   - Re-split on whitespace and lowercase each token. FTS5's
+///     query parser still treats uppercase AND / OR / NOT / NEAR
+///     as operators with a `*` suffix; lowercasing dodges that.
+///   - Append `*` to every token so a half-typed prefix lands
+///     hits as soon as a useful prefix is in.
+///   - Drop empty tokens so trailing punctuation doesn't fall
+///     through.
+///
+/// Result example: `"jane@example, dr."` →
+/// `jane* example* dr*`.
+///
+/// Returns the empty string when every token was filtered out —
+/// the caller treats that as "no query, no results".
+fn prepare_fts_query(input: &str) -> String {
+    let scrubbed: String = input
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                ' '
+            }
+        })
+        .collect();
+    scrubbed
+        .split_whitespace()
+        .map(|tok| tok.to_lowercase())
+        .filter(|tok| !tok.is_empty())
+        .map(|tok| format!("{tok}*"))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 // ── Row decoders ───────────────────────────────────────────────────────
@@ -623,6 +671,98 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, CoreError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn search_folds_diacritics() {
+        let adapter = fixture_adapter();
+        let mut müller = sample_new_contact();
+        müller.display_name = "Müller".into();
+        müller.family_name = Some("Müller".into());
+        müller.given_name = Some("Anna".into());
+        müller.emails = vec!["anna@example.com".into()];
+        adapter
+            .create_contact(LOCAL_DEFAULT_CONTACT_LIST_ID, müller)
+            .await
+            .unwrap();
+        // `unicode61 remove_diacritics 2` folds umlauts, so the
+        // ASCII spelling lands on the umlaut row.
+        let hits = adapter.search_contacts("mull").await.unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].display_name, "Müller");
+    }
+
+    #[tokio::test]
+    async fn search_prefix_matches_short_typeahead() {
+        let adapter = fixture_adapter();
+        adapter
+            .create_contact(LOCAL_DEFAULT_CONTACT_LIST_ID, sample_new_contact())
+            .await
+            .unwrap();
+        // "ma" → "ma*" matches "Max Mustermann" through the
+        // prepare_fts_query suffix.
+        let hits = adapter.search_contacts("ma").await.unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].display_name, "Max Mustermann");
+    }
+
+    #[tokio::test]
+    async fn search_handles_fts_special_chars() {
+        let adapter = fixture_adapter();
+        adapter
+            .create_contact(LOCAL_DEFAULT_CONTACT_LIST_ID, sample_new_contact())
+            .await
+            .unwrap();
+        // A query containing FTS5 syntax (`:`, `(`, `*`) used to
+        // either crash or match nothing — the sanitiser strips
+        // those so the underlying token still hits.
+        let hits = adapter.search_contacts("max:").await.unwrap();
+        assert_eq!(hits.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn search_picks_up_email_substring() {
+        let adapter = fixture_adapter();
+        adapter
+            .create_contact(LOCAL_DEFAULT_CONTACT_LIST_ID, sample_new_contact())
+            .await
+            .unwrap();
+        // The emails column is indexed via the FTS mirror, so a
+        // domain-shaped query lands on the row even though no
+        // name fragment matches. Picker UX: typing "@example"
+        // (after stripping the special chars to "example") should
+        // surface every contact at that domain.
+        let hits = adapter.search_contacts("example").await.unwrap();
+        assert_eq!(hits.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn search_reflects_list_rename() {
+        let adapter = fixture_adapter();
+        adapter
+            .create_contact(LOCAL_DEFAULT_CONTACT_LIST_ID, sample_new_contact())
+            .await
+            .unwrap();
+        // Hit before rename via the list_name column.
+        assert_eq!(
+            adapter.search_contacts("Contacts").await.unwrap().len(),
+            1,
+        );
+        adapter
+            .rename_contact_list(LOCAL_DEFAULT_CONTACT_LIST_ID, "Friends")
+            .await
+            .unwrap();
+        // Old name no longer matches; new name now does. Proves
+        // the `contact_lists_fts_rename` trigger rewrites the
+        // denormalised column.
+        assert_eq!(
+            adapter.search_contacts("Contacts").await.unwrap().len(),
+            0,
+        );
+        assert_eq!(
+            adapter.search_contacts("Friends").await.unwrap().len(),
+            1,
+        );
     }
 
     #[tokio::test]

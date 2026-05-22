@@ -2709,6 +2709,135 @@ button[aria-disabled='true'] {
   }
 }
 
+/* ── Attendee picker (DESIGN.md §10.4) ──────────────────────────────────── */
+
+/*
+ * Three layers stacked in the EventDialog field:
+ *   1. Chip list of the currently-attached attendees (above the
+ *      input — they "filled" the field).
+ *   2. The combobox input itself.
+ *   3. An absolutely-positioned popup listbox of suggestions
+ *      anchored to the input.
+ *
+ * The popup uses `position: absolute` against
+ * `.attendee-picker__combo`, so the parent dialog's overflow doesn't
+ * crop it — the dialog's body uses `overflow-y: auto` for long
+ * forms, but the popup deliberately escapes via stacking context.
+ */
+.attendee-picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.attendee-picker__chips {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.attendee-picker__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  max-width: 100%;
+}
+
+.attendee-picker__chip-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 22rem;
+}
+
+.attendee-picker__chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  background: transparent;
+  color: var(--color-fg-muted);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+
+.attendee-picker__chip-remove:hover {
+  background: var(--color-bg-panel);
+  color: var(--color-fg);
+}
+
+.attendee-picker__chip-remove:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.attendee-picker__combo {
+  position: relative;
+}
+
+.attendee-picker__input {
+  width: 100%;
+}
+
+.attendee-picker__popup {
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  left: 0;
+  right: 0;
+  list-style: none;
+  margin: 0;
+  padding: var(--space-1);
+  background: var(--color-bg-panel);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  z-index: 50;
+  max-height: 14rem;
+  overflow-y: auto;
+}
+
+.attendee-picker__option {
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.attendee-picker__option--focused {
+  background: var(--color-bg-elevated);
+  box-shadow: inset 0 0 0 2px var(--color-accent);
+}
+
+.attendee-picker__option-name {
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+}
+
+.attendee-picker__option-email {
+  font-size: var(--font-size-xs);
+  color: var(--color-fg-muted);
+}
+
+@media (forced-colors: active) {
+  .attendee-picker__popup {
+    box-shadow: none;
+  }
+}
+
 /* ── Toast stack (Undo-Toast for silent task batches) ───────────────────── */
 
 /*

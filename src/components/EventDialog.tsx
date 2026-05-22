@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useState,
   type FormEvent,
@@ -18,6 +19,7 @@ import {
 import type { CalendarEvent } from '../api/types';
 import { useCalendarStore } from '../state/CalendarStore';
 import { useCalendarDefaultReminders } from '../state/useCalendarDefaultReminders';
+import { AttendeePicker } from './AttendeePicker';
 import { Modal } from './Modal';
 import { RecurrenceSelector } from './RecurrenceSelector';
 import { RemindersEditor } from './RemindersEditor';
@@ -63,6 +65,14 @@ interface FormState {
   /** Color-label id, or null. */
   colorLabel: string | null;
   reminders: Reminder[];
+  /** Free-form attendee strings (DESIGN.md §10.4). The
+   *  AttendeePicker stores each pick from the contacts catalog
+   *  as `"Name <email>"`; raw free-form entries (typed-in
+   *  email addresses without a matching contact) round-trip
+   *  verbatim. The adapter layer doesn't care about the format
+   *  — it ships the array through to the source (CalDAV
+   *  ATTENDEE, Graph attendees array, ...) as-is. */
+  attendees: string[];
 }
 
 /**
@@ -97,6 +107,10 @@ export function EventDialog({
   const { calendars, colorLabels } = useCalendarStore();
 
   const isEdit = event !== null;
+  // Stable id for the attendees-picker label — used as the
+  // combobox's `aria-labelledby` so the input announces "Teilnehmer,
+  // Combobox" with the right name on every screen reader.
+  const attendeesLabelId = useId();
 
   // Per-calendar default reminders (Settings → Kalender). The point of
   // these is to mirror iOS's "Standard-Hinweise", which iOS applies
@@ -254,7 +268,7 @@ export function EventDialog({
                 color_label: form.colorLabel,
                 reminders: remindersForWire,
                 sound: null,
-                attendees: [],
+                attendees: form.attendees,
               });
               announce(
                 t('dialogs.event.occurrenceUpdated', { title: trimmedTitle }),
@@ -277,6 +291,7 @@ export function EventDialog({
             recurrence,
             color_label: form.colorLabel,
             reminders: remindersForWire,
+            attendees: form.attendees,
           };
           await apiUpdateEvent(updated);
           announce(t('dialogs.event.updated', { title: trimmedTitle }));
@@ -293,7 +308,7 @@ export function EventDialog({
             color_label: form.colorLabel,
             reminders: remindersForWire,
             sound: null,
-            attendees: [],
+            attendees: form.attendees,
           });
           // Remember the calendar for the next new-event open. Only
           // for *creates*: edits shouldn't bias future picks, since
@@ -496,6 +511,17 @@ export function EventDialog({
           />
         </label>
 
+        <div className="form__field">
+          <span className="form__label" id={attendeesLabelId}>
+            {t('dialogs.event.fields.attendees')}
+          </span>
+          <AttendeePicker
+            value={form.attendees}
+            onChange={(next) => update('attendees', next)}
+            labelledBy={attendeesLabelId}
+          />
+        </div>
+
         <label className="form__field">
           <span className="form__label">
             {t('dialogs.event.fields.colorLabel')}
@@ -649,6 +675,7 @@ function buildInitialState(
       rrule: event.recurrence?.rrule ?? null,
       colorLabel: event.color_label ?? null,
       reminders: event.reminders ?? [],
+      attendees: event.attendees ?? [],
     };
   }
 
@@ -707,6 +734,7 @@ function buildInitialState(
     rrule: null,
     colorLabel: null,
     reminders: [],
+    attendees: [],
   };
 }
 

@@ -291,7 +291,17 @@
         "endTime": "End time",
         "location": "Location",
         "description": "Description",
+        "attendees": "Attendees",
         "colorLabel": "Color label"
+      },
+      "attendees": {
+        "placeholder": "Type a name or email …",
+        "popupLabel": "Contact suggestions",
+        "chipsLabel": "Current attendees",
+        "removeLabel": "Remove {{name}}",
+        "added": "{{name}} added.",
+        "removed": "{{name}} removed.",
+        "alreadyOnList": "Already on the attendee list."
       },
       "noColorLabel": "(No label)",
       "recurrence": {

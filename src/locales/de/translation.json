@@ -291,7 +291,17 @@
         "endTime": "Endzeit",
         "location": "Ort",
         "description": "Beschreibung",
+        "attendees": "Teilnehmer",
         "colorLabel": "Farb-Label"
+      },
+      "attendees": {
+        "placeholder": "Name oder E-Mail eingeben …",
+        "popupLabel": "Kontaktvorschläge",
+        "chipsLabel": "Aktuelle Teilnehmer",
+        "removeLabel": "{{name}} entfernen",
+        "added": "{{name}} hinzugefügt.",
+        "removed": "{{name}} entfernt.",
+        "alreadyOnList": "Steht bereits auf der Teilnehmerliste."
       },
       "noColorLabel": "(Kein Label)",
       "recurrence": {
