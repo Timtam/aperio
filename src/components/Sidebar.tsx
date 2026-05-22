@@ -13,10 +13,13 @@ import { useAnnouncer } from '../a11y/Announcer';
 import {
   clearContainerNameOverride,
   createCalendar,
+  createContactList,
   createTaskList,
   deleteCalendar,
+  deleteContactList,
   deleteTaskList,
   isCommandError,
+  renameContactList,
   renameContainer,
   showContextMenu,
   type ContainerKind,
@@ -36,6 +39,18 @@ import {
 import { useSidebarExpansion } from '../state/useSidebarExpansion';
 import { useTaskListShowCompleted } from '../state/useTaskListShowCompleted';
 import { useViewState } from '../state/ViewState';
+
+/**
+ * Sidebar-local extension of `ContainerKind` to include contact
+ * lists. The backend rename/override surface still only knows
+ * `calendar` / `task_list`; contacts have their own dedicated
+ * commands (`rename_contact_list`, `delete_contact_list`) and
+ * bypass the override path entirely. Threading a distinct
+ * `'contact_list'` discriminator through the editing state lets
+ * `commitEdit` branch cleanly without smuggling a contacts code
+ * path through the override-aware `renameContainer`.
+ */
+type LeafEditKind = ContainerKind | 'contact_list';
 
 /**
  * Sidebar: tree view of accounts → sections (Calendars / Tasks) →
@@ -80,28 +95,33 @@ export function Sidebar() {
     selectedTaskListIds,
     toggleTaskList,
     refreshTaskLists,
+    contactLists,
+    refreshContactLists,
   } = useCalendarStore();
   const { openSettings } = useDialogState();
   const expansion = useSidebarExpansion();
   const showCompleted = useTaskListShowCompleted();
-  const { focusedCalendarId, enterFocus, exitFocus } = useViewState();
+  const { focusedCalendarId, enterFocus, exitFocus, setView } = useViewState();
   const isFocused = focusedCalendarId !== null;
 
-  // Sidebar still groups by accounts → calendars + tasks only in
-  // Phase 10a-3. Contact lists land in the tree under their owning
-  // account in 10a-4 once the leaf-renderer learns the third
-  // kind; the ContactsView (Ctrl+7) already groups by list
-  // header, so reaching every book is a tab away in the meantime.
   const tree = useMemo(
     () =>
       buildSidebarTree({
         accounts,
         calendars,
         taskLists,
+        contactLists,
         selectedCalendarIds,
         selectedTaskListIds,
       }),
-    [accounts, calendars, taskLists, selectedCalendarIds, selectedTaskListIds],
+    [
+      accounts,
+      calendars,
+      taskLists,
+      contactLists,
+      selectedCalendarIds,
+      selectedTaskListIds,
+    ],
   );
 
   // Flatten the tree to the list the user can navigate through. Each
@@ -139,7 +159,7 @@ export function Sidebar() {
   // ── Inline rename plumbing ────────────────────────────────────────
   // Identifies the leaf currently in edit mode (`null` = no edit).
   const [editing, setEditing] = useState<{
-    kind: ContainerKind;
+    kind: LeafEditKind;
     id: string;
   } | null>(null);
   const [draft, setDraft] = useState('');
@@ -163,7 +183,7 @@ export function Sidebar() {
   }, [restoreFocusToTree]);
 
   const startEdit = useCallback(
-    (kind: ContainerKind, id: string, currentName: string) => {
+    (kind: LeafEditKind, id: string, currentName: string) => {
       setEditing({ kind, id });
       setDraft(currentName);
     },
@@ -186,9 +206,27 @@ export function Sidebar() {
       const { kind, id } = editing;
       const trimmed = draft.trim();
       try {
-        if (trimmed === '') {
+        // Contact lists don't participate in the override system —
+        // there's only `rename_contact_list`, which routes through
+        // the registry the same way `renameContainer` does for
+        // calendars / tasks. An empty draft is rejected: clearing
+        // a name has no local-override fallback to land in.
+        if (kind === 'contact_list') {
+          if (trimmed === '') {
+            announce(t('sidebar.contactListNameRequired'));
+            return;
+          }
+          await renameContactList(id, trimmed);
+          announce(t('sidebar.renamedSynced', { name: trimmed }));
+          await refreshContactLists();
+        } else if (trimmed === '') {
           await clearContainerNameOverride(id, kind);
           announce(t('sidebar.renameCleared'));
+          if (kind === 'calendar') {
+            await refreshCalendars();
+          } else {
+            await refreshTaskLists();
+          }
         } else {
           const outcome = await renameContainer(id, kind, trimmed);
           announce(
@@ -199,11 +237,11 @@ export function Sidebar() {
               { name: trimmed },
             ),
           );
-        }
-        if (kind === 'calendar') {
-          await refreshCalendars();
-        } else {
-          await refreshTaskLists();
+          if (kind === 'calendar') {
+            await refreshCalendars();
+          } else {
+            await refreshTaskLists();
+          }
         }
       } catch (err) {
         if (isCommandError(err)) {
@@ -217,7 +255,15 @@ export function Sidebar() {
         if (restoreFocus) setRestoreFocusToTree(true);
       }
     },
-    [editing, draft, refreshCalendars, refreshTaskLists, announce, t],
+    [
+      editing,
+      draft,
+      refreshCalendars,
+      refreshTaskLists,
+      refreshContactLists,
+      announce,
+      t,
+    ],
   );
 
   const onEditKey = useCallback(
@@ -292,6 +338,40 @@ export function Sidebar() {
     }
   }, [taskLists.length, refreshTaskLists, announce, t]);
 
+  const onCreateContactList = useCallback(async () => {
+    try {
+      const list = await createContactList({
+        name: t('sidebar.newContactListName', {
+          n: contactLists.length + 1,
+        }),
+        color_hex: null,
+      });
+      await refreshContactLists();
+      announce(t('sidebar.contactListCreated', { name: list.name }));
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('create_contact_list failed', err);
+    }
+  }, [contactLists.length, refreshContactLists, announce, t]);
+
+  const onDeleteContactListAction = useCallback(
+    async (id: string, name: string) => {
+      try {
+        await deleteContactList(id);
+        await refreshContactLists();
+        announce(t('sidebar.contactListDeleted', { name }));
+      } catch (err) {
+        if (isCommandError(err)) {
+          announce(`${err.code}: ${err.message}`);
+        } else {
+          // eslint-disable-next-line no-console
+          console.warn('delete_contact_list failed', err);
+        }
+      }
+    },
+    [refreshContactLists, announce, t],
+  );
+
   // ── Context menu plumbing ────────────────────────────────────────
   //
   // Pops the OS-native context menu via Tauri's `tauri::menu::Menu`
@@ -309,8 +389,18 @@ export function Sidebar() {
       accountIsLocal: boolean,
       position?: { x: number; y: number },
     ) => {
-      const containerKind: ContainerKind =
-        leaf.kind === 'calendars' ? 'calendar' : 'task_list';
+      // Two kinds end up writing back through the override system
+      // (`calendar` / `task_list`); contacts have their own
+      // `rename_contact_list` write path. The `editKind` value the
+      // rest of this function passes around is the
+      // sidebar-local `LeafEditKind` so the editing-state
+      // discriminator and the rename router agree.
+      const editKind: LeafEditKind =
+        leaf.kind === 'calendars'
+          ? 'calendar'
+          : leaf.kind === 'tasks'
+            ? 'task_list'
+            : 'contact_list';
       const items: ContextMenuItemRequest[] = [
         { id: 'rename', label: t('sidebar.menu.rename') },
       ];
@@ -374,7 +464,7 @@ export function Sidebar() {
         // focus during its mount. If we also ran the tree-restore
         // effect, it would race the autoFocus and silently win, leaving
         // the user staring at a rename input they can't type into.
-        startEdit(containerKind, leaf.containerId, leaf.name);
+        startEdit(editKind, leaf.containerId, leaf.name);
       } else if (selected === 'focus-open') {
         setRestoreFocusToTree(true);
         enterFocus(leaf.containerId);
@@ -408,8 +498,10 @@ export function Sidebar() {
         setRestoreFocusToTree(true);
         if (leaf.kind === 'calendars') {
           void onDeleteCalendar(leaf.containerId, leaf.name);
-        } else {
+        } else if (leaf.kind === 'tasks') {
           void onDeleteTaskListAction(leaf.containerId, leaf.name);
+        } else {
+          void onDeleteContactListAction(leaf.containerId, leaf.name);
         }
       } else {
         // Menu dismissed (Escape, click-away) — no action; just hand
@@ -421,6 +513,7 @@ export function Sidebar() {
       startEdit,
       onDeleteCalendar,
       onDeleteTaskListAction,
+      onDeleteContactListAction,
       t,
       focusedCalendarId,
       enterFocus,
@@ -729,11 +822,27 @@ export function Sidebar() {
             onToggleLeaf={(leaf) => {
               if (leaf.kind === 'calendars') {
                 toggleCalendar(leaf.containerId);
-              } else {
+              } else if (leaf.kind === 'tasks') {
                 toggleTaskList(leaf.containerId);
+              } else {
+                // Contacts don't have a per-list selection set yet
+                // (DESIGN.md §10 doesn't describe one, ContactsView
+                // always reads everything). Space / Enter on a
+                // contact-list leaf jumps to ContactsView instead —
+                // a discoverable affordance until the per-list
+                // filter lands.
+                setView('contacts');
               }
             }}
             onToggleSection={(section) => {
+              if (section.kind === 'contacts') {
+                // No checkbox semantics for the contacts section
+                // either — Space toggles the calendars / tasks
+                // sections' filters; the contacts section just
+                // jumps the active view.
+                setView('contacts');
+                return;
+              }
               const leaves = section.children;
               const state = parentTriState(leaves);
               const next = state === 'unchecked';
@@ -754,6 +863,12 @@ export function Sidebar() {
               const tlIds = leaves
                 .filter((l) => l.kind === 'tasks')
                 .map((l) => l.containerId);
+              // Contact leaves intentionally don't participate in
+              // the account-level toggle: there's no selection set
+              // to flip. They'll always render as "checked" via the
+              // sidebarTree's `selected: true` for contacts, so the
+              // account tri-state still reads correctly across the
+              // mixed sections.
               if (calIds.length) setManyCalendars(calIds, next);
               if (tlIds.length) setManyTaskLists(tlIds, next);
             }}
@@ -776,6 +891,13 @@ export function Sidebar() {
           onClick={onCreateTaskList}
         >
           + {t('sidebar.newTaskList')}
+        </button>
+        <button
+          type="button"
+          className="sidebar__add"
+          onClick={onCreateContactList}
+        >
+          + {t('sidebar.newContactList')}
         </button>
       </div>
 
@@ -812,7 +934,7 @@ type VisibleItem =
       label: string;
       parentKey: string;
       level: 3;
-      sectionKind: 'calendars' | 'tasks';
+      sectionKind: 'calendars' | 'tasks' | 'contacts';
       containerId: string;
     };
 
@@ -842,15 +964,6 @@ function flattenTree(
       });
       if (!isExpanded(section.key)) continue;
       for (const leaf of section.children) {
-        // Sidebar's leaf-renderer only handles calendars / tasks
-        // today. Contacts leaves (Phase 10a-3) flow through the
-        // tree from contactLists but the Sidebar caller in this
-        // phase doesn't pass them — defensive guard so the
-        // `sectionKind` narrowing stays sound when 10a-4 wires
-        // them up. Until then the cast assertion is a static
-        // guarantee: any `contacts` leaf that slipped through is
-        // dropped from the visible list.
-        if (leaf.kind === 'contacts') continue;
         out.push({
           kind: 'leaf',
           key: leaf.key,
@@ -895,7 +1008,7 @@ interface AccountSubtreeProps {
   focusedKey: string | null;
   onFocusKey: (key: string) => void;
   itemId: (key: string) => string;
-  editing: { kind: ContainerKind; id: string } | null;
+  editing: { kind: LeafEditKind; id: string } | null;
   draft: string;
   onDraftChange: (v: string) => void;
   onCancelEdit: (restoreFocus: boolean) => void;
@@ -990,7 +1103,7 @@ interface SectionSubtreeProps {
   focusedKey: string | null;
   onFocusKey: (key: string) => void;
   itemId: (key: string) => string;
-  editing: { kind: ContainerKind; id: string } | null;
+  editing: { kind: LeafEditKind; id: string } | null;
   draft: string;
   onDraftChange: (v: string) => void;
   onCancelEdit: (restoreFocus: boolean) => void;
@@ -1023,7 +1136,9 @@ function SectionSubtree({
   const sectionLabel =
     section.labelKey === 'calendars'
       ? t('sidebar.calendars')
-      : t('sidebar.taskLists');
+      : section.labelKey === 'tasks'
+        ? t('sidebar.taskLists')
+        : t('sidebar.contactLists');
 
   return (
     <div role="group" className="sidebar__section-group">
@@ -1073,7 +1188,7 @@ interface LeafRowProps {
   focusedKey: string | null;
   onFocusKey: (key: string) => void;
   itemId: (key: string) => string;
-  editing: { kind: ContainerKind; id: string } | null;
+  editing: { kind: LeafEditKind; id: string } | null;
   draft: string;
   onDraftChange: (v: string) => void;
   onCancelEdit: (restoreFocus: boolean) => void;
@@ -1101,7 +1216,16 @@ function LeafRow({
   focusedContainerId,
 }: LeafRowProps) {
   const { t } = useTranslation();
-  const kind: ContainerKind = leaf.kind === 'calendars' ? 'calendar' : 'task_list';
+  // LeafEditKind discriminates the three leaf types so the rename
+  // commit path can branch on the appropriate write API. Contact
+  // leaves don't participate in the override system; the
+  // `commitEdit` callback in Sidebar handles them separately.
+  const kind: LeafEditKind =
+    leaf.kind === 'calendars'
+      ? 'calendar'
+      : leaf.kind === 'tasks'
+        ? 'task_list'
+        : 'contact_list';
   const isEditing = editing?.kind === kind && editing.id === leaf.containerId;
   const isFocusTarget =
     leaf.kind === 'calendars' && leaf.containerId === focusedContainerId;
