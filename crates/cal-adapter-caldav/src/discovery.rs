@@ -46,6 +46,21 @@ const HOME_SET_BODY: &str = r#"<?xml version="1.0" encoding="utf-8"?>
   </d:prop>
 </d:propfind>"#;
 
+/// Same PROPFIND shape as above, but for CardDAV's
+/// `addressbook-home-set`. Asked separately rather than packed into
+/// the single PROPFIND so servers without CardDAV support (a
+/// plain calendar host) don't reject the whole request — most
+/// servers respond with a 404 for unknown properties on the same
+/// principal, but a separate request lets us read the addressbook
+/// status independently and treat it as "no addressbooks
+/// available" rather than "discovery failed".
+const ADDRESSBOOK_HOME_SET_BODY: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<d:propfind xmlns:d="DAV:" xmlns:cr="urn:ietf:params:xml:ns:carddav">
+  <d:prop>
+    <cr:addressbook-home-set/>
+  </d:prop>
+</d:propfind>"#;
+
 /// Result of a full discovery pass.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Discovery {
@@ -58,6 +73,12 @@ pub struct Discovery {
     /// calendars — the PROPFIND target for the next layer (calendar
     /// listing in 6b.2).
     pub calendar_home_url: Url,
+    /// CardDAV `addressbook-home-set`. Optional: a server may
+    /// advertise CalDAV only (Apple Calendar server in
+    /// calendar-only mode, some Radicale set-ups). Absent ⇒ the
+    /// adapter declines the `Contacts` capability at the trait
+    /// boundary.
+    pub addressbook_home_url: Option<Url>,
 }
 
 pub async fn run(client: &Client, credentials: &Credentials) -> CaldavResult<Discovery> {
@@ -66,10 +87,26 @@ pub async fn run(client: &Client, credentials: &Credentials) -> CaldavResult<Dis
     let principal_url = find_principal(client, &dav_root, credentials).await?;
     let calendar_home_url =
         find_calendar_home(client, &principal_url, credentials).await?;
+    // Addressbook home is best-effort: a missing or 404 response
+    // means "this server doesn't surface CardDAV", which is fine —
+    // we just don't expose the Contacts capability. Anything else
+    // (auth failure, 5xx) we swallow and log; the calendar side is
+    // already authenticated by the time we get here, so a single
+    // odd response on this probe shouldn't tear down the whole
+    // discovery result.
+    let addressbook_home_url =
+        match find_addressbook_home(client, &principal_url, credentials).await {
+            Ok(url) => Some(url),
+            Err(err) => {
+                debug!(?err, "addressbook-home-set discovery skipped");
+                None
+            }
+        };
     Ok(Discovery {
         dav_root,
         principal_url,
         calendar_home_url,
+        addressbook_home_url,
     })
 }
 
@@ -176,6 +213,24 @@ async fn find_calendar_home(
         .ok_or_else(|| {
             CaldavError::Discovery(
                 "server did not return a calendar-home-set".into(),
+            )
+        })?;
+    principal_url.join(&href).map_err(Into::into)
+}
+
+async fn find_addressbook_home(
+    client: &Client,
+    principal_url: &Url,
+    credentials: &Credentials,
+) -> CaldavResult<Url> {
+    let response =
+        propfind(client, principal_url, ADDRESSBOOK_HOME_SET_BODY, credentials, 0)
+            .await?;
+    let body = expect_207(response).await?;
+    let href = extract_first_nested_href(&body, b"addressbook-home-set")?
+        .ok_or_else(|| {
+            CaldavError::Discovery(
+                "server did not return an addressbook-home-set".into(),
             )
         })?;
     principal_url.join(&href).map_err(Into::into)

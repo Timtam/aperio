@@ -428,14 +428,27 @@ impl AdapterRegistry {
         let adapter = CaldavAdapter::new(credentials, None)
             .map_err(|e| RegistryError::Construct(e.to_string()))?;
         let arc = Arc::new(adapter);
+        // CalDAV adapters speak three feature traits now (Phase 10b
+        // light up the contacts side). All three slots route to the
+        // same `Arc<CaldavAdapter>` — discovery, listing caches and
+        // the HTTP client are shared. Servers without CardDAV
+        // surface a no-op `list_contact_lists` and the registry's
+        // aggregation skips them.
         self.external_cal
             .write()
             .expect("registry cal poison")
-            .insert(account.id.clone(), arc.clone() as Arc<dyn CalendarFeature>);
+            .insert(
+                account.id.clone(),
+                arc.clone() as Arc<dyn CalendarFeature>,
+            );
         self.external_tasks
             .write()
             .expect("registry tasks poison")
-            .insert(account.id.clone(), arc as Arc<dyn TasksFeature>);
+            .insert(account.id.clone(), arc.clone() as Arc<dyn TasksFeature>);
+        self.external_contacts
+            .write()
+            .expect("registry contacts poison")
+            .insert(account.id.clone(), arc as Arc<dyn ContactsFeature>);
         Ok(())
     }
 

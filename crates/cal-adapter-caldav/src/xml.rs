@@ -140,6 +140,11 @@ pub struct ResponseEntry {
     /// `true` when the `<resourcetype>` block contains a
     /// `<C:calendar/>` element from the CalDAV namespace.
     pub is_calendar: bool,
+    /// `true` when the `<resourcetype>` block contains a
+    /// `<CR:addressbook/>` element from the CardDAV namespace.
+    /// Used by the contacts listing path to filter the
+    /// addressbook-home-set's children.
+    pub is_addressbook: bool,
     /// `<ical:calendar-color>` or `<C:calendar-color>` value when
     /// present (servers vary on the namespace).
     pub calendar_color: Option<String>,
@@ -151,6 +156,12 @@ pub struct ResponseEntry {
     /// `addressbook-query` / `calendar-query` REPORT. Empty in plain
     /// PROPFIND responses.
     pub calendar_data: Option<String>,
+    /// Inline vCard body returned by `<address-data>` on an
+    /// `addressbook-query` / `addressbook-multiget` REPORT, or by a
+    /// PROPFIND that asks for it directly. Same CDATA / multi-chunk
+    /// caveats as `calendar_data` — `capture_text` appends rather
+    /// than overwrites.
+    pub address_data: Option<String>,
 }
 
 /// Walk a multistatus document and emit one [`ResponseEntry`] per
@@ -195,6 +206,8 @@ pub fn parse_multistatus(body: &str) -> CaldavResult<Vec<ResponseEntry>> {
                     in_supported_set = true;
                 } else if in_resourcetype && local_name_eq(name, b"calendar") {
                     entry.is_calendar = true;
+                } else if in_resourcetype && local_name_eq(name, b"addressbook") {
+                    entry.is_addressbook = true;
                 } else if in_supported_set && local_name_eq(name, b"comp") {
                     // `<comp name="VEVENT"/>` — the value lives in the
                     // `name` attribute, not in the element text.
@@ -220,6 +233,8 @@ pub fn parse_multistatus(body: &str) -> CaldavResult<Vec<ResponseEntry>> {
                     text_target = TextTarget::Color;
                 } else if local_name_eq(name, b"calendar-data") {
                     text_target = TextTarget::CalendarData;
+                } else if local_name_eq(name, b"address-data") {
+                    text_target = TextTarget::AddressData;
                 }
             }
             Ok(Event::End(e)) => {
@@ -279,6 +294,7 @@ enum TextTarget {
     Etag,
     Color,
     CalendarData,
+    AddressData,
 }
 
 fn capture_text(current: &mut Option<ResponseEntry>, target: TextTarget, text: &str) {
@@ -337,6 +353,20 @@ fn capture_text(current: &mut Option<ResponseEntry>, target: TextTarget, text: &
                 match &mut entry.calendar_data {
                     Some(buf) => buf.push_str(stripped),
                     None => entry.calendar_data = Some(stripped.to_string()),
+                }
+            }
+        }
+        TextTarget::AddressData => {
+            // Same shape as CalendarData: vCard bodies have CRLF /
+            // LF semantics, can ship CDATA-wrapped from iCloud,
+            // can split across chunks when the XML escaping kicks
+            // in. Append-not-overwrite or we truncate the vCard
+            // on first sub-chunk.
+            let stripped = text.trim_matches(|c: char| c == ' ' || c == '\t');
+            if !stripped.is_empty() {
+                match &mut entry.address_data {
+                    Some(buf) => buf.push_str(stripped),
+                    None => entry.address_data = Some(stripped.to_string()),
                 }
             }
         }

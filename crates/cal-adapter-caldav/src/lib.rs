@@ -20,6 +20,7 @@
 mod auth;
 pub mod calendars;
 pub mod config;
+pub mod contacts;
 pub mod discovery;
 pub mod error;
 pub mod events;
@@ -33,9 +34,10 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use cal_core::{
-    Adapter, AuthToken, Calendar, CalendarFeature, Capability, ContainerColor,
-    Credentials as CoreCredentials, DateRange, Error as CoreError, Event, FreeBusy,
-    NewEvent, NewTask, Result as CoreResult, Task, TaskList, TasksFeature,
+    Adapter, AuthToken, Calendar, CalendarFeature, Capability, Contact, ContactList,
+    ContactsFeature, ContainerColor, Credentials as CoreCredentials, DateRange,
+    Error as CoreError, Event, FreeBusy, NewContact, NewEvent, NewTask,
+    Result as CoreResult, Task, TaskList, TasksFeature,
 };
 use reqwest::Client;
 use url::Url;
@@ -84,6 +86,11 @@ pub struct CaldavAdapter {
     calendars_cache: Mutex<Option<ListingCache<Calendar>>>,
     /// Same idea for VTODO collections.
     task_lists_cache: Mutex<Option<ListingCache<TaskList>>>,
+    /// And for CardDAV address books. The trait impl bails with an
+    /// empty Vec when discovery didn't surface an
+    /// `addressbook-home-set` — see `addressbook_home_url`
+    /// handling below.
+    contact_lists_cache: Mutex<Option<ListingCache<ContactList>>>,
     /// Freshness window for the two listing caches. Default 5 min —
     /// calendars are rarely added/removed/renamed, so this trades a
     /// short staleness window (a calendar created on iCloud's web
@@ -91,8 +98,13 @@ pub struct CaldavAdapter {
     /// here in Aperio. The `rename_*` paths explicitly invalidate.
     listing_ttl: chrono::Duration,
     /// Capabilities the adapter declares to the registry. Always
-    /// `[Calendar]` at this point — `TasksFeature` joins once
-    /// VTODO read/write lands in 6b.3.
+    /// includes Calendar + Tasks (every CalDAV collection is a
+    /// candidate for VEVENT or VTODO and the trait-level methods
+    /// degrade gracefully when a server offers neither). Contacts
+    /// is always advertised too — the trait's `list_contact_lists`
+    /// returns an empty Vec when discovery didn't find an
+    /// addressbook-home-set, so a calendar-only server still shows
+    /// up correctly with zero contact books.
     capabilities: Vec<Capability>,
 }
 
@@ -133,8 +145,13 @@ impl CaldavAdapter {
             discovery: Mutex::new(None),
             calendars_cache: Mutex::new(None),
             task_lists_cache: Mutex::new(None),
+            contact_lists_cache: Mutex::new(None),
             listing_ttl: chrono::Duration::minutes(5),
-            capabilities: vec![Capability::Calendar, Capability::Tasks],
+            capabilities: vec![
+                Capability::Calendar,
+                Capability::Tasks,
+                Capability::Contacts,
+            ],
         })
     }
 
@@ -156,6 +173,7 @@ impl CaldavAdapter {
     pub fn invalidate_listing_caches(&self) {
         *self.calendars_cache.lock().expect("poison") = None;
         *self.task_lists_cache.lock().expect("poison") = None;
+        *self.contact_lists_cache.lock().expect("poison") = None;
     }
 
     /// Return the cached calendars if any are within the TTL window.
@@ -174,6 +192,17 @@ impl CaldavAdapter {
 
     fn cached_task_lists(&self) -> Option<Vec<TaskList>> {
         let guard = self.task_lists_cache.lock().expect("poison");
+        let entry = guard.as_ref()?;
+        let age = chrono::Utc::now().signed_duration_since(entry.cached_at);
+        if age >= chrono::Duration::zero() && age < self.listing_ttl {
+            Some(entry.items.clone())
+        } else {
+            None
+        }
+    }
+
+    fn cached_contact_lists(&self) -> Option<Vec<ContactList>> {
+        let guard = self.contact_lists_cache.lock().expect("poison");
         let entry = guard.as_ref()?;
         let age = chrono::Utc::now().signed_duration_since(entry.cached_at);
         if age >= chrono::Duration::zero() && age < self.listing_ttl {
@@ -548,6 +577,184 @@ impl TasksFeature for CaldavAdapter {
         self.invalidate_listing_caches();
         Ok(())
     }
+}
+
+#[async_trait]
+impl ContactsFeature for CaldavAdapter {
+    async fn list_contact_lists(&self) -> CoreResult<Vec<ContactList>> {
+        if let Some(cached) = self.cached_contact_lists() {
+            return Ok(cached);
+        }
+        let discovery = self.discover().await.map_err(to_core_error)?;
+        let Some(home) = discovery.addressbook_home_url.as_ref() else {
+            // No CardDAV on this server (or the addressbook-home
+            // probe failed silently during discovery). Cache an
+            // empty Vec so we don't re-walk discovery every time
+            // the sidebar refreshes — the registry still routes a
+            // future contact through whichever adapter is around.
+            *self.contact_lists_cache.lock().expect("poison") = Some(ListingCache {
+                items: Vec::new(),
+                cached_at: chrono::Utc::now(),
+            });
+            return Ok(Vec::new());
+        };
+        let fresh =
+            contacts::list_contact_lists(&self.http, home, &self.credentials)
+                .await
+                .map_err(to_core_error)?;
+        *self.contact_lists_cache.lock().expect("poison") = Some(ListingCache {
+            items: fresh.clone(),
+            cached_at: chrono::Utc::now(),
+        });
+        Ok(fresh)
+    }
+
+    async fn get_contacts(&self, list_id: &str) -> CoreResult<Vec<Contact>> {
+        let list_url = Url::parse(list_id)
+            .map_err(|err| CoreError::InvalidInput(err.to_string()))?;
+        contacts::get_contacts(&self.http, &list_url, &self.credentials)
+            .await
+            .map_err(to_core_error)
+    }
+
+    async fn search_contacts(&self, query: &str) -> CoreResult<Vec<Contact>> {
+        // CardDAV defines `addressbook-query` REPORT with `prop-filter`
+        // that the server can execute, but implementations are
+        // wildly inconsistent (iCloud rejects most non-trivial
+        // queries with 403; Nextcloud handles them, Radicale
+        // partially). The cheap, universally-correct alternative
+        // is to read every book and filter client-side — the
+        // listings are cached anyway, and a few hundred vCards is
+        // a comfortable in-memory grep. Empty / whitespace queries
+        // short-circuit so a stray keystroke doesn't trigger a
+        // sync.
+        let needle = query.trim().to_lowercase();
+        if needle.is_empty() {
+            return Ok(Vec::new());
+        }
+        let lists = self.list_contact_lists().await?;
+        let mut out = Vec::new();
+        for list in lists {
+            // Per-list errors don't fail the whole search — same
+            // tolerance pattern the calendar fan-out uses.
+            let Ok(contacts) = self.get_contacts(&list.id).await else {
+                continue;
+            };
+            for c in contacts {
+                if contact_matches(&c, &needle) {
+                    out.push(c);
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    async fn create_contact(
+        &self,
+        list_id: &str,
+        contact: NewContact,
+    ) -> CoreResult<Contact> {
+        let list_url = Url::parse(list_id)
+            .map_err(|err| CoreError::InvalidInput(err.to_string()))?;
+        contacts::create_contact(&self.http, &list_url, contact, &self.credentials)
+            .await
+            .map_err(to_core_error)
+    }
+
+    async fn update_contact(&self, contact: Contact) -> CoreResult<Contact> {
+        contacts::update_contact(&self.http, contact, &self.credentials)
+            .await
+            .map_err(to_core_error)
+    }
+
+    async fn delete_contact(&self, contact_id: &str) -> CoreResult<()> {
+        // Same trait-signature limitation as delete_event /
+        // delete_task: only the id, not the parent collection.
+        // Walk every known book and try each — the first 2xx wins,
+        // 404s keep us moving.
+        let discovery = self.discover().await.map_err(to_core_error)?;
+        let Some(home) = discovery.addressbook_home_url.as_ref() else {
+            return Err(CoreError::NotFound(format!(
+                "no addressbook-home-set; contact '{contact_id}' is not routable",
+            )));
+        };
+        let lists =
+            contacts::list_contact_lists(&self.http, home, &self.credentials)
+                .await
+                .map_err(to_core_error)?;
+        let mut last_err: Option<CaldavError> = None;
+        for list in lists {
+            let Ok(url) = Url::parse(&list.id) else {
+                continue;
+            };
+            match contacts::delete_contact(
+                &self.http,
+                &url,
+                contact_id,
+                None,
+                &self.credentials,
+            )
+            .await
+            {
+                Ok(()) => return Ok(()),
+                Err(err) => {
+                    if matches!(err, CaldavError::Http { status: 404, .. }) {
+                        continue;
+                    }
+                    last_err = Some(err);
+                }
+            }
+        }
+        Err(last_err.map(to_core_error).unwrap_or_else(|| {
+            CoreError::NotFound(format!(
+                "contact '{contact_id}' not found in any address book"
+            ))
+        }))
+    }
+
+    async fn rename_contact_list(
+        &self,
+        list_id: &str,
+        new_name: &str,
+    ) -> CoreResult<()> {
+        // Address book displayname rename is the same PROPPATCH
+        // shape as calendars / task lists. iCloud rejects this
+        // (read-only address books); other servers (Nextcloud,
+        // Radicale) accept it. The override-aware command layer
+        // falls back to a local rename on Unsupported, but we
+        // surface server-side errors verbatim here so the user
+        // sees the real reason.
+        let url = Url::parse(list_id).map_err(|e| {
+            CoreError::InvalidInput(format!("contact list id is not a URL: {e}"))
+        })?;
+        calendars::proppatch_displayname(&self.http, &url, new_name, &self.credentials)
+            .await
+            .map_err(to_core_error)?;
+        // Drop the contacts cache so the next listing sees the
+        // new name. Calendars and tasks aren't affected.
+        *self.contact_lists_cache.lock().expect("poison") = None;
+        Ok(())
+    }
+}
+
+/// Case-insensitive substring match across the same fields the
+/// local adapter's `search_contacts` looks at. Kept inline since
+/// the predicate is small and self-contained.
+fn contact_matches(c: &Contact, needle_lower: &str) -> bool {
+    let probes = [
+        Some(c.display_name.as_str()),
+        c.given_name.as_deref(),
+        c.family_name.as_deref(),
+        c.organization.as_deref(),
+    ];
+    if probes
+        .iter()
+        .flatten()
+        .any(|s| s.to_lowercase().contains(needle_lower))
+    {
+        return true;
+    }
+    c.emails.iter().any(|e| e.to_lowercase().contains(needle_lower))
 }
 
 #[cfg(test)]
