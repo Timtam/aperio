@@ -276,6 +276,9 @@
       "deleted": "Event \"{{title}}\" deleted.",
       "occurrenceUpdated": "This occurrence of \"{{title}}\" was changed.",
       "occurrenceDeleted": "This occurrence of \"{{title}}\" was deleted.",
+      "birthdayTitle": "Birthday",
+      "birthdayHint": "Birthdays come from your contacts. Edit the contact in your address book to change the date.",
+      "birthdayClose": "Close",
       "scope": {
         "label": "Apply to",
         "occurrence": "This occurrence only",

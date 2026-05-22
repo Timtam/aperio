@@ -376,6 +376,41 @@ export function EventDialog({
 
   const title = isEdit ? t('dialogs.event.editTitle') : t('dialogs.event.newTitle');
 
+  // Birthday events (DESIGN.md §10.3) are synthesised from
+  // contacts. The full edit form would let the user type into
+  // fields whose save would fail at the backend — better to
+  // short-circuit to a read-only summary the user can dismiss.
+  // The contact source is what they edit instead.
+  if (event && event.id.startsWith('aperio-birthday:')) {
+    return (
+      <Modal
+        isOpen={isOpen}
+        onClose={onClose}
+        title={t('dialogs.event.birthdayTitle')}
+        className="modal--form modal--birthday"
+      >
+        <div className="form" role="document">
+          <p>
+            <strong>{event.title}</strong>
+          </p>
+          {event.description && (
+            <p className="form__hint">{event.description}</p>
+          )}
+          <p className="form__hint">{t('dialogs.event.birthdayHint')}</p>
+          <div className="form__actions">
+            <button
+              type="button"
+              className="form__action form__action--primary"
+              onClick={onClose}
+            >
+              {t('dialogs.event.birthdayClose')}
+            </button>
+          </div>
+        </div>
+      </Modal>
+    );
+  }
+
   return (
     <Modal
       isOpen={isOpen}

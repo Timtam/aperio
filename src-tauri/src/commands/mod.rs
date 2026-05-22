@@ -7,6 +7,7 @@
 //! "conflict" from "auth failure" to render appropriate UI.
 
 mod accounts;
+mod birthdays;
 mod calendars;
 mod color_labels;
 mod contacts;

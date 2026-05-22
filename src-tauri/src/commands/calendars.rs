@@ -7,6 +7,9 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tauri::State;
 
+use super::birthdays::{
+    is_birthday_calendar_id, list_birthday_calendars, synthesise_birthday_events,
+};
 use super::{CommandError, CommandResult};
 use crate::db::DbHandle;
 use crate::overrides::{apply_to_calendars, OverridesRepo};
@@ -60,12 +63,25 @@ pub async fn list_calendars(
     let shared = db.shared();
     let repo = OverridesRepo::new(&shared);
     apply_to_calendars(&repo, &mut out);
+    // Synthesised birthday calendars (DESIGN.md §10.3) — one per
+    // contact list that has at least one contact with a `birthday`
+    // set. Each carries `read_only = true` so the UI hides edit /
+    // delete affordances; rendered events flow through `get_events`
+    // with the prefix-routed shim below. We stamp the route map
+    // here too so subsequent `get_events` calls reach the right
+    // contacts adapter via the same registry mechanism real
+    // calendars use.
+    let birthday_rows = list_birthday_calendars(&adapter, &registry).await;
+    for (cal, account_id) in &birthday_rows {
+        registry.note_calendar_route(&cal.id, account_id);
+    }
+
     // Decorate each row with its owning account id (from the
     // registry's route map). Local rows fall back to LOCAL_ID;
     // external rows look themselves up in the routes. The frontend
     // uses this for the account-grouped sidebar — without it,
     // grouping would need a second round-trip.
-    Ok(out
+    let mut decorated: Vec<CalendarRow> = out
         .into_iter()
         .map(|cal| {
             let account_id = registry
@@ -76,7 +92,14 @@ pub async fn list_calendars(
                 account_id,
             }
         })
-        .collect())
+        .collect();
+    for (cal, account_id) in birthday_rows {
+        decorated.push(CalendarRow {
+            inner: cal,
+            account_id,
+        });
+    }
+    Ok(decorated)
 }
 
 #[tauri::command]
@@ -114,6 +137,25 @@ pub async fn get_events(
     request: EventRangeRequest,
 ) -> CommandResult<Vec<Event>> {
     let range = DateRange::new(request.start, request.end);
+    // Synthesised birthday calendars short-circuit the adapter
+    // routing — they aren't backed by any provider and have no
+    // events of their own. The `synthesise_birthday_events`
+    // helper computes them on the fly from the underlying
+    // contact list. Returns `None` when the id doesn't carry the
+    // birthday prefix; in that case we fall through to the
+    // regular adapter path.
+    if is_birthday_calendar_id(&request.calendar_id) {
+        if let Some(events) =
+            synthesise_birthday_events(&adapter, &registry, &request.calendar_id, range).await
+        {
+            return Ok(events);
+        }
+        // Unknown synthesised id (e.g. the underlying contact
+        // list has been removed since the listing). Surface an
+        // empty list rather than 404 — the sidebar still has
+        // the layer ticked, the next refresh will drop it.
+        return Ok(Vec::new());
+    }
     let account =
         registry.account_for_calendar(&request.calendar_id).unwrap_or_else(|| LOCAL_ID.to_string());
     if account == LOCAL_ID {
