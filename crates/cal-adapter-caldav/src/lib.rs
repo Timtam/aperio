@@ -25,6 +25,7 @@ pub mod error;
 pub mod events;
 pub mod mapping;
 pub mod tasks;
+pub mod vcard;
 mod xml;
 
 use std::sync::Mutex;
