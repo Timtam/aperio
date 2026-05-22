@@ -86,8 +86,15 @@
       "tablistAria": "Settings categories",
       "tabs": {
         "accounts": "Accounts",
+        "calendars": "Calendars",
         "colorLabels": "Color labels",
         "tasks": "Tasks"
+      },
+      "calendars": {
+        "hint": "Default reminders that apply to events without their own reminder. Useful for iCloud calendars: iOS “Default Alert Times” aren't written into the event itself, so without a default here the alarm doesn't show in Aperio.",
+        "empty": "No calendars yet — add an account first.",
+        "accountHeading": "{{account}}",
+        "localAccount": "Local"
       }
     },
     "tasks": {

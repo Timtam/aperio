@@ -480,6 +480,67 @@ button[aria-disabled='true'] {
   border-top: 1px solid var(--color-border);
 }
 
+/* Calendars settings panel — per-calendar default-reminder editors,
+ * grouped by account so iCloud / local / Nextcloud rows don't blur
+ * together. */
+.calendars-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-1);
+}
+
+.calendars-panel__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.calendars-panel__account {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.calendars-panel__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.calendars-panel__row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.calendars-panel__row-header {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.calendars-panel__swatch {
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 999px;
+  background: var(--color-fg-muted);
+  flex-shrink: 0;
+}
+
+.calendars-panel__name {
+  font-weight: 500;
+}
+
 /* Tasks settings panel — currently just one section / one toggle. */
 .tasks-settings__section {
   display: flex;

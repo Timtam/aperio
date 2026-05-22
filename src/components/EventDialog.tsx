@@ -17,6 +17,7 @@ import {
 } from '../api/client';
 import type { CalendarEvent } from '../api/types';
 import { useCalendarStore } from '../state/CalendarStore';
+import { useCalendarDefaultReminders } from '../state/useCalendarDefaultReminders';
 import { Modal } from './Modal';
 import { RecurrenceSelector } from './RecurrenceSelector';
 import { RemindersEditor } from './RemindersEditor';
@@ -96,14 +97,67 @@ export function EventDialog({
   const { calendars, colorLabels } = useCalendarStore();
 
   const isEdit = event !== null;
-  const initialState = useMemo<FormState>(
-    () => buildInitialState(event, defaultCalendarId, defaultDate, calendars),
-    [event, defaultCalendarId, defaultDate, calendars],
+
+  // Per-calendar default reminders (Settings → Kalender). The point of
+  // these is to mirror iOS's "Standard-Hinweise", which iOS applies
+  // locally instead of writing into the VEVENT body — so iCloud sends
+  // us events with `reminders: []` and we re-overlay the user's chosen
+  // calendar default at form-init time. The overlay is intentionally
+  // confined to this dialog (not the wire layer) so opening + saving
+  // an iCloud event without touching anything doesn't silently promote
+  // the calendar default into a per-event VALARM on the server.
+  const dialogCalendarId = event?.calendar_id;
+  const calendarIdsForDefaults = useMemo(
+    () => (dialogCalendarId ? [dialogCalendarId] : []),
+    [dialogCalendarId],
   );
+  const { getDefaultsFor } = useCalendarDefaultReminders(
+    calendarIdsForDefaults,
+  );
+
+  // True when the form's `reminders` slot was filled from the
+  // calendar's default rather than from the event itself. Used by the
+  // submit path to send `[]` instead of the defaults — keeps the wire
+  // pure unless the user explicitly touches the reminders editor.
+  const remindersWereFromDefault =
+    isEdit &&
+    event !== null &&
+    (event.reminders ?? []).length === 0 &&
+    getDefaultsFor(event.calendar_id).length > 0;
+
+  const initialState = useMemo<FormState>(() => {
+    const base = buildInitialState(
+      event,
+      defaultCalendarId,
+      defaultDate,
+      calendars,
+    );
+    if (remindersWereFromDefault && event) {
+      return {
+        ...base,
+        reminders: getDefaultsFor(event.calendar_id),
+      };
+    }
+    return base;
+  }, [
+    event,
+    defaultCalendarId,
+    defaultDate,
+    calendars,
+    remindersWereFromDefault,
+    getDefaultsFor,
+  ]);
 
   const [form, setForm] = useState<FormState>(initialState);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // Flips to `false` the moment the user touches the reminders editor.
+  // While still `true` on submit, the dialog sends an empty reminders
+  // list — the calendar default stays a default and isn't silently
+  // promoted to a per-event VALARM the user never asked for.
+  const [keepRemindersAsDefault, setKeepRemindersAsDefault] = useState(
+    remindersWereFromDefault,
+  );
 
   // When editing a single occurrence of a recurring series the user
   // can apply changes to just this occurrence (creates an EXDATE +
@@ -119,8 +173,11 @@ export function EventDialog({
       setForm(initialState);
       setError(null);
       setEditScope('occurrence');
+      // Re-arm the "keep defaults out of the wire" flag every time
+      // the dialog (re-)opens with a fresh event.
+      setKeepRemindersAsDefault(remindersWereFromDefault);
     }
-  }, [isOpen, initialState]);
+  }, [isOpen, initialState, remindersWereFromDefault]);
 
   const update = useCallback(
     <K extends keyof FormState>(key: K, value: FormState[K]) => {
@@ -162,6 +219,17 @@ export function EventDialog({
 
       setSubmitting(true);
       try {
+        // The reminders list to send to the server. When
+        // `keepRemindersAsDefault` is still true, the editor was never
+        // touched and the rows the user is looking at came from the
+        // calendar's default — sending them would silently promote
+        // the default to a per-event VALARM that lives on the wire
+        // independently of the default. Sending `[]` instead keeps
+        // the calendar default a default.
+        const remindersForWire = keepRemindersAsDefault
+          ? []
+          : form.reminders;
+
         if (isEdit && event) {
           const seriesId = event.id.includes('@')
             ? event.id.split('@')[0]
@@ -184,7 +252,7 @@ export function EventDialog({
                 all_day: form.allDay,
                 recurrence: null,
                 color_label: form.colorLabel,
-                reminders: form.reminders,
+                reminders: remindersForWire,
                 sound: null,
                 attendees: [],
               });
@@ -208,7 +276,7 @@ export function EventDialog({
             description: form.description.trim() || null,
             recurrence,
             color_label: form.colorLabel,
-            reminders: form.reminders,
+            reminders: remindersForWire,
           };
           await apiUpdateEvent(updated);
           announce(t('dialogs.event.updated', { title: trimmedTitle }));
@@ -223,7 +291,7 @@ export function EventDialog({
             all_day: form.allDay,
             recurrence,
             color_label: form.colorLabel,
-            reminders: form.reminders,
+            reminders: remindersForWire,
             sound: null,
             attendees: [],
           });
@@ -245,7 +313,18 @@ export function EventDialog({
         setSubmitting(false);
       }
     },
-    [form, submitting, isEdit, event, isOccurrence, editScope, announce, onClose, t],
+    [
+      form,
+      submitting,
+      isEdit,
+      event,
+      isOccurrence,
+      editScope,
+      keepRemindersAsDefault,
+      announce,
+      onClose,
+      t,
+    ],
   );
 
   const onDelete = useCallback(async () => {
@@ -443,7 +522,13 @@ export function EventDialog({
 
         <RemindersEditor
           value={form.reminders}
-          onChange={(next) => update('reminders', next)}
+          onChange={(next) => {
+            update('reminders', next);
+            // The moment the user touches the editor, the entries
+            // become real per-event reminders — clear the
+            // "keep as default" gate so submit actually sends them.
+            setKeepRemindersAsDefault(false);
+          }}
           mode="event"
         />
 

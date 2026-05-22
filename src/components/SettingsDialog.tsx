@@ -10,6 +10,7 @@ import {
 import { useTranslation } from 'react-i18next';
 
 import { AccountsPanel } from './AccountsPanel';
+import { CalendarsPanel } from './CalendarsPanel';
 import { ColorLabelsPanel } from './ColorLabelsPanel';
 import { Modal } from './Modal';
 import { TasksPanel } from './TasksPanel';
@@ -36,9 +37,18 @@ import { TasksPanel } from './TasksPanel';
  * keys change the active tab.
  */
 
-export type SettingsTabId = 'accounts' | 'colorLabels' | 'tasks';
+export type SettingsTabId =
+  | 'accounts'
+  | 'calendars'
+  | 'colorLabels'
+  | 'tasks';
 
-const TAB_ORDER: SettingsTabId[] = ['accounts', 'colorLabels', 'tasks'];
+const TAB_ORDER: SettingsTabId[] = [
+  'accounts',
+  'calendars',
+  'colorLabels',
+  'tasks',
+];
 
 export interface SettingsDialogProps {
   isOpen: boolean;
@@ -75,6 +85,7 @@ export function SettingsDialog({
   // the newly-active tab (the roving-tabindex contract requires it).
   const tabRefs = useRef<Record<SettingsTabId, HTMLButtonElement | null>>({
     accounts: null,
+    calendars: null,
     colorLabels: null,
     tasks: null,
   });
@@ -135,6 +146,7 @@ export function SettingsDialog({
     () =>
       ({
         accounts: t('dialogs.settings.tabs.accounts'),
+        calendars: t('dialogs.settings.tabs.calendars'),
         colorLabels: t('dialogs.settings.tabs.colorLabels'),
         tasks: t('dialogs.settings.tabs.tasks'),
       }) as Record<SettingsTabId, string>,
@@ -219,6 +231,7 @@ export function SettingsDialog({
           className="settings__panel"
         >
           {activeTab === 'accounts' && <AccountsPanel />}
+          {activeTab === 'calendars' && <CalendarsPanel />}
           {activeTab === 'colorLabels' && <ColorLabelsPanel />}
           {activeTab === 'tasks' && <TasksPanel />}
         </div>
