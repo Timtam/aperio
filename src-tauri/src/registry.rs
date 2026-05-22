@@ -40,7 +40,7 @@ use cal_adapter_ical::{
 use cal_adapter_microsoft_graph::{
     GraphAccountConfig, MicrosoftGraphAdapter, TokenSet as GraphTokenSet,
 };
-use cal_core::{CalendarFeature, TasksFeature};
+use cal_core::{CalendarFeature, ContactsFeature, TasksFeature};
 use tracing::warn;
 
 use crate::accounts::{Account, AccountsRepo, AdapterKind, LOCAL_ACCOUNT_ID};
@@ -58,6 +58,10 @@ pub const LOCAL_ID: &str = LOCAL_ACCOUNT_ID;
 struct Routes {
     calendar_to_account: HashMap<String, String>,
     list_to_account: HashMap<String, String>,
+    /// Contact-list id → account id. Same shape as the others;
+    /// filled lazily during the first `list_contact_lists` call
+    /// and refreshed on every subsequent one.
+    contact_list_to_account: HashMap<String, String>,
 }
 
 /// Process-wide registry of all non-local adapter instances.
@@ -66,6 +70,13 @@ pub struct AdapterRegistry {
     external_cal: RwLock<HashMap<String, Arc<dyn CalendarFeature>>>,
     /// External adapters with TasksFeature, keyed by account_id.
     external_tasks: RwLock<HashMap<String, Arc<dyn TasksFeature>>>,
+    /// External adapters with ContactsFeature, keyed by account_id.
+    /// Empty in Phase 10a — Aperio's three CardDAV-capable adapters
+    /// (CalDAV/CardDAV, Google People, MS Graph Contacts) grow the
+    /// feature in 10b. The slot exists now so the registry surface
+    /// and the routing helpers don't have to be redesigned when
+    /// they land.
+    external_contacts: RwLock<HashMap<String, Arc<dyn ContactsFeature>>>,
     /// Reverse lookup for routing writes back to the right adapter.
     routes: Mutex<Routes>,
 }
@@ -75,6 +86,7 @@ impl AdapterRegistry {
         Self {
             external_cal: RwLock::new(HashMap::new()),
             external_tasks: RwLock::new(HashMap::new()),
+            external_contacts: RwLock::new(HashMap::new()),
             routes: Mutex::new(Routes::default()),
         }
     }
@@ -125,12 +137,19 @@ impl AdapterRegistry {
             .write()
             .expect("registry tasks poison")
             .remove(account_id);
+        self.external_contacts
+            .write()
+            .expect("registry contacts poison")
+            .remove(account_id);
         let mut routes = self.routes.lock().expect("registry routes poison");
         routes
             .calendar_to_account
             .retain(|_, owner| owner != account_id);
         routes
             .list_to_account
+            .retain(|_, owner| owner != account_id);
+        routes
+            .contact_list_to_account
             .retain(|_, owner| owner != account_id);
     }
 
@@ -152,6 +171,15 @@ impl AdapterRegistry {
             .lock()
             .expect("registry routes poison")
             .list_to_account
+            .get(list_id)
+            .cloned()
+    }
+
+    pub fn account_for_contact_list(&self, list_id: &str) -> Option<String> {
+        self.routes
+            .lock()
+            .expect("registry routes poison")
+            .contact_list_to_account
             .get(list_id)
             .cloned()
     }
@@ -179,6 +207,23 @@ impl AdapterRegistry {
         self.external_tasks
             .read()
             .expect("registry tasks poison")
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
+    }
+
+    /// Counterpart of `snapshot_calendar_adapters` for the contacts
+    /// side. Currently always empty until Phase 10b lights up the
+    /// CardDAV adapter; the method exists so the aggregation
+    /// helpers (`list_external_contact_lists`,
+    /// `search_external_contacts`) compile without conditional
+    /// guards.
+    pub fn snapshot_contact_adapters(
+        &self,
+    ) -> Vec<(String, Arc<dyn ContactsFeature>)> {
+        self.external_contacts
+            .read()
+            .expect("registry contacts poison")
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect()
@@ -240,6 +285,62 @@ impl AdapterRegistry {
         out
     }
 
+    /// Aggregate `list_contact_lists` across every external
+    /// adapter that declares `ContactsFeature`. Errors per account
+    /// are logged and skipped — same shape as the calendar / tasks
+    /// equivalents.
+    pub async fn list_external_contact_lists(&self) -> Vec<cal_core::ContactList> {
+        let snapshot = self.snapshot_contact_adapters();
+        let mut out = Vec::new();
+        for (account_id, adapter) in snapshot {
+            match adapter.list_contact_lists().await {
+                Ok(lists) => {
+                    let mut routes = self.routes.lock().expect("registry routes poison");
+                    for l in &lists {
+                        routes
+                            .contact_list_to_account
+                            .insert(l.id.clone(), account_id.clone());
+                    }
+                    out.extend(lists);
+                }
+                Err(err) => {
+                    warn!(
+                        account_id = %account_id,
+                        ?err,
+                        "list_contact_lists failed for external adapter"
+                    );
+                }
+            }
+        }
+        out
+    }
+
+    /// Fan `search_contacts` out across every external adapter and
+    /// concatenate the hits. The local adapter is searched
+    /// separately by the command layer because it isn't part of
+    /// this registry. Adapters that fail are logged; their
+    /// absence shouldn't block hits from the rest.
+    pub async fn search_external_contacts(
+        &self,
+        query: &str,
+    ) -> Vec<cal_core::Contact> {
+        let snapshot = self.snapshot_contact_adapters();
+        let mut out = Vec::new();
+        for (account_id, adapter) in snapshot {
+            match adapter.search_contacts(query).await {
+                Ok(hits) => out.extend(hits),
+                Err(err) => {
+                    warn!(
+                        account_id = %account_id,
+                        ?err,
+                        "search_contacts failed for external adapter"
+                    );
+                }
+            }
+        }
+        out
+    }
+
     /// After the registry routes a write back to a specific
     /// account, this returns the adapter handle. Returns `None`
     /// when the account is unknown — the caller maps that to a
@@ -266,6 +367,17 @@ impl AdapterRegistry {
             .cloned()
     }
 
+    pub fn contact_adapter(
+        &self,
+        account_id: &str,
+    ) -> Option<Arc<dyn ContactsFeature>> {
+        self.external_contacts
+            .read()
+            .expect("registry contacts poison")
+            .get(account_id)
+            .cloned()
+    }
+
     /// Record that a calendar id has been observed against
     /// `account_id`. Used by `list_calendars` to register the
     /// local adapter's rows so subsequent get_events calls can
@@ -283,6 +395,14 @@ impl AdapterRegistry {
             .lock()
             .expect("registry routes poison")
             .list_to_account
+            .insert(list_id.to_string(), account_id.to_string());
+    }
+
+    pub fn note_contact_list_route(&self, list_id: &str, account_id: &str) {
+        self.routes
+            .lock()
+            .expect("registry routes poison")
+            .contact_list_to_account
             .insert(list_id.to_string(), account_id.to_string());
     }
 

@@ -122,6 +122,19 @@ pub fn run() {
             commands::set_user_pref,
             commands::delete_user_pref,
             commands::show_context_menu,
+            // Phase 10a-2: contacts. The local adapter is always
+            // present; external CardDAV-class adapters wire
+            // themselves in via the registry's `external_contacts`
+            // slot once they land (Phase 10b onward).
+            commands::list_contact_lists,
+            commands::create_contact_list,
+            commands::delete_contact_list,
+            commands::rename_contact_list,
+            commands::get_contacts,
+            commands::search_contacts,
+            commands::create_contact,
+            commands::update_contact,
+            commands::delete_contact,
         ])
         .setup(move |app| {
             // Spawn the reminder scheduler on the Tauri/tokio runtime

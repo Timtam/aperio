@@ -9,6 +9,7 @@
 mod accounts;
 mod calendars;
 mod color_labels;
+mod contacts;
 mod context_menu;
 mod overrides;
 mod reminders;
@@ -21,6 +22,7 @@ use serde::Serialize;
 pub use accounts::*;
 pub use calendars::*;
 pub use color_labels::*;
+pub use contacts::*;
 pub use context_menu::*;
 pub use overrides::*;
 pub use reminders::*;
