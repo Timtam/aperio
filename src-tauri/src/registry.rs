@@ -32,6 +32,7 @@ use cal_adapter_caldav::{
 };
 use cal_adapter_ews::{BasicCredentials as EwsCredentials, EwsAccountConfig, EwsAdapter};
 use cal_adapter_google::{GoogleAccountConfig, GoogleAdapter, TokenSet as GoogleTokenSet};
+use cal_adapter_todoist::{TodoistAccountConfig, TodoistAdapter};
 use cal_adapter_vikunja::{VikunjaAccountConfig, VikunjaAdapter};
 use cal_adapter_ical::{
     Credentials as IcalCredentials, IcalAccountConfig, IcalAdapter,
@@ -294,10 +295,7 @@ impl AdapterRegistry {
             AdapterKind::MicrosoftGraph => self.register_microsoft_graph(account),
             AdapterKind::Ews => self.register_ews(account),
             AdapterKind::Vikunja => self.register_vikunja(account),
-            other => Err(RegistryError::Unsupported(format!(
-                "adapter kind '{}' is not wired up yet",
-                other.as_str()
-            ))),
+            AdapterKind::Todoist => self.register_todoist(account),
         }
     }
 
@@ -451,6 +449,29 @@ impl AdapterRegistry {
             .map_err(|e| RegistryError::Secret(format!("missing API token: {e}")))?;
         let adapter = VikunjaAdapter::new(&config.server_url, token)
             .map_err(|e| RegistryError::Construct(e.to_string()))?;
+        let arc = Arc::new(adapter);
+        self.external_tasks
+            .write()
+            .expect("registry tasks poison")
+            .insert(account.id.clone(), arc as Arc<dyn TasksFeature>);
+        Ok(())
+    }
+
+    /// Wire up a Todoist account. Same shape as Vikunja: tasks-only,
+    /// API token in the keychain under `SecretSlot::ApiToken`. The
+    /// config carries no server URL — Todoist is hosted and the
+    /// base URL is hard-coded in the adapter.
+    fn register_todoist(&self, account: &Account) -> Result<(), RegistryError> {
+        // Empty `config_json` is allowed — the `TodoistAccountConfig`
+        // only holds an optional account label and Todoist itself
+        // doesn't need anything but the token. Parse with defaults so
+        // older accounts written as `{}` still work.
+        let _config: TodoistAccountConfig =
+            serde_json::from_str(&account.config_json)
+                .unwrap_or_default();
+        let token = secrets::retrieve(&account.id, SecretSlot::ApiToken)
+            .map_err(|e| RegistryError::Secret(format!("missing API token: {e}")))?;
+        let adapter = TodoistAdapter::new(token);
         let arc = Arc::new(adapter);
         self.external_tasks
             .write()

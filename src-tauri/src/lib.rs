@@ -111,6 +111,7 @@ pub fn run() {
             commands::test_ical_feed,
             commands::test_ews_connection,
             commands::test_vikunja_connection,
+            commands::test_todoist_connection,
             commands::discover_ews_endpoint,
             commands::connect_google_account,
             commands::connect_microsoft_account,

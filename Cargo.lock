@@ -82,6 +82,7 @@ dependencies = [
  "cal-adapter-ical",
  "cal-adapter-local",
  "cal-adapter-microsoft-graph",
+ "cal-adapter-todoist",
  "cal-adapter-vikunja",
  "cal-core",
  "chrono",
@@ -635,6 +636,19 @@ dependencies = [
 [[package]]
 name = "cal-adapter-todoist"
 version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "cal-core",
+ "chrono",
+ "mockito",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "url",
+]
 
 [[package]]
 name = "cal-adapter-vikunja"

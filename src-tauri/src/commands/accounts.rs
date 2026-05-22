@@ -14,6 +14,7 @@ use cal_adapter_ical::{
     Credentials as IcalCredentials, IcalAccountConfig, IcalAdapter,
 };
 use cal_adapter_microsoft_graph::{GraphAccountConfig, MicrosoftGraphAdapter};
+use cal_adapter_todoist::{TodoistAdapter, TodoistError};
 use cal_adapter_vikunja::{VikunjaAccountConfig, VikunjaAdapter, VikunjaError};
 use cal_core::CalendarFeature;
 use std::sync::Arc;
@@ -74,6 +75,7 @@ pub async fn create_account(
             | AdapterKind::Ical
             | AdapterKind::Ews
             | AdapterKind::Vikunja
+            | AdapterKind::Todoist
     ) {
         return Err(CommandError {
             code: "unsupported",
@@ -155,6 +157,18 @@ pub async fn create_account(
         smoke_test_vikunja(&config, secret).await?;
     }
 
+    // Todoist smoke-test: hit `GET /projects` with the supplied
+    // Bearer token. Catches revoked tokens before persistence.
+    if request.adapter_kind == AdapterKind::Todoist {
+        let Some(secret) = request.secret.as_deref() else {
+            return Err(CommandError {
+                code: "invalid_input",
+                message: "Todoist needs an API token to authenticate.".into(),
+            });
+        };
+        smoke_test_todoist(secret).await?;
+    }
+
     let shared = db.shared();
     let repo = AccountsRepo::new(&shared);
     let created = repo.create(
@@ -176,7 +190,7 @@ pub async fn create_account(
     // sides have to stay in step.
     if let Some(secret) = request.secret {
         let slot = match request.adapter_kind {
-            AdapterKind::Vikunja => SecretSlot::ApiToken,
+            AdapterKind::Vikunja | AdapterKind::Todoist => SecretSlot::ApiToken,
             _ => SecretSlot::Password,
         };
         if let Err(err) = secrets::store(&created.id, slot, &secret) {
@@ -315,6 +329,36 @@ fn vikunja_error_to_command(err: VikunjaError) -> CommandError {
     CommandError { code, message }
 }
 
+/// Todoist round-trip: build an ephemeral adapter from the supplied
+/// token and hit `GET /projects` via `TodoistAdapter::smoke_test`.
+/// Surfaces revoked tokens / network problems before persistence.
+async fn smoke_test_todoist(secret: &str) -> Result<(), CommandError> {
+    let adapter = TodoistAdapter::new(secret.to_string());
+    adapter
+        .smoke_test()
+        .await
+        .map_err(caldav_core_error_to_command)?;
+    Ok(())
+}
+
+#[allow(dead_code)]
+fn todoist_error_to_command(err: TodoistError) -> CommandError {
+    use TodoistError::*;
+    let (code, message) = match err {
+        Network(m) => ("network", m),
+        Http { status: 401, message } | Http { status: 403, message } => {
+            ("auth", message)
+        }
+        Http { status, message } => (
+            "protocol",
+            format!("Todoist HTTP {status}: {message}"),
+        ),
+        Protocol(m) => ("protocol", m),
+        Config(m) => ("invalid_input", m),
+    };
+    CommandError { code, message }
+}
+
 fn ical_error_to_command(err: cal_adapter_ical::IcalError) -> CommandError {
     use cal_adapter_ical::IcalError::*;
     let (code, message) = match err {
@@ -426,6 +470,23 @@ pub async fn test_vikunja_connection(
 #[derive(Debug, serde::Deserialize)]
 pub struct TestVikunjaRequest {
     pub server_url: String,
+    pub api_token: String,
+}
+
+/// Round-trip a Todoist API-token check without persisting anything.
+/// Used by AccountsDialog's "Test connection" button on the Todoist
+/// form. Same shape as Vikunja minus the server URL — Todoist is
+/// hosted, the base URL is hard-coded in the adapter.
+#[tauri::command]
+pub async fn test_todoist_connection(
+    request: TestTodoistRequest,
+) -> CommandResult<()> {
+    smoke_test_todoist(&request.api_token).await?;
+    Ok(())
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct TestTodoistRequest {
     pub api_token: String,
 }
 

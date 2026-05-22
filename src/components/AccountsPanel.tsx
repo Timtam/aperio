@@ -20,6 +20,7 @@ import {
   testCaldavConnection,
   testEwsConnection,
   testIcalFeed,
+  testTodoistConnection,
   testVikunjaConnection,
 } from '../api/client';
 import type { Account, AdapterKind } from '../api/types';
@@ -62,6 +63,7 @@ const ENABLED_KINDS: ReadonlySet<AdapterKind> = new Set([
   'microsoft_graph',
   'ews',
   'vikunja',
+  'todoist',
 ]);
 
 interface CaldavFields {
@@ -130,6 +132,14 @@ const EMPTY_VIKUNJA: VikunjaFields = {
   apiToken: '',
 };
 
+interface TodoistFields {
+  apiToken: string;
+}
+
+const EMPTY_TODOIST: TodoistFields = {
+  apiToken: '',
+};
+
 export function AccountsPanel() {
   const { t } = useTranslation();
   const announce = useAnnouncer();
@@ -157,6 +167,7 @@ export function AccountsPanel() {
   const [microsoft, setMicrosoft] = useState<MicrosoftFields>(EMPTY_MICROSOFT);
   const [ews, setEws] = useState<EwsFields>(EMPTY_EWS);
   const [vikunja, setVikunja] = useState<VikunjaFields>(EMPTY_VIKUNJA);
+  const [todoist, setTodoist] = useState<TodoistFields>(EMPTY_TODOIST);
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -219,6 +230,12 @@ export function AccountsPanel() {
     return null;
   }, [vikunja, t]);
 
+  const validateTodoist = useCallback((): string | null => {
+    if (!todoist.apiToken.trim())
+      return t('dialogs.accounts.todoistApiTokenRequired');
+    return null;
+  }, [todoist, t]);
+
   const onSubmit = useCallback(
     async (e: FormEvent) => {
       e.preventDefault();
@@ -275,6 +292,13 @@ export function AccountsPanel() {
           return;
         }
       }
+      if (kind === 'todoist') {
+        const v = validateTodoist();
+        if (v) {
+          setError(v);
+          return;
+        }
+      }
       setSubmitting(true);
       setError(null);
       try {
@@ -319,7 +343,9 @@ export function AccountsPanel() {
                     ? JSON.stringify({
                         server_url: vikunja.serverUrl.trim(),
                       })
-                    : '{}';
+                    : kind === 'todoist'
+                      ? '{}'
+                      : '{}';
           const secret =
             kind === 'caldav'
               ? caldav.password
@@ -329,7 +355,9 @@ export function AccountsPanel() {
                   ? ews.password
                   : kind === 'vikunja'
                     ? vikunja.apiToken.trim()
-                    : undefined;
+                    : kind === 'todoist'
+                      ? todoist.apiToken.trim()
+                      : undefined;
           created = await createAccount({
             adapter_kind: kind,
             display_name: name,
@@ -345,6 +373,7 @@ export function AccountsPanel() {
         setMicrosoft(EMPTY_MICROSOFT);
         setEws(EMPTY_EWS);
         setVikunja(EMPTY_VIKUNJA);
+        setTodoist(EMPTY_TODOIST);
         refresh();
         // Re-fetch the calendar / task-list catalog so the sidebar
         // picks up the new account's containers without the user
@@ -373,12 +402,14 @@ export function AccountsPanel() {
       microsoft,
       ews,
       vikunja,
+      todoist,
       validateCaldav,
       validateIcal,
       validateGoogle,
       validateMicrosoft,
       validateEws,
       validateVikunja,
+      validateTodoist,
       announce,
       refresh,
       refreshAccounts,
@@ -436,6 +467,13 @@ export function AccountsPanel() {
           vikunja.serverUrl.trim(),
           vikunja.apiToken.trim(),
         );
+      } else if (kind === 'todoist') {
+        const v = validateTodoist();
+        if (v) {
+          setError(v);
+          return;
+        }
+        await testTodoistConnection(todoist.apiToken.trim());
       } else {
         return;
       }
@@ -453,10 +491,12 @@ export function AccountsPanel() {
     ical,
     ews,
     vikunja,
+    todoist,
     validateCaldav,
     validateIcal,
     validateEws,
     validateVikunja,
+    validateTodoist,
     announce,
     t,
   ]);
@@ -1204,6 +1244,41 @@ export function AccountsPanel() {
               </>
             )}
 
+            {kind === 'todoist' && (
+              <>
+                <label className="form__field">
+                  <span className="form__label">
+                    {t('dialogs.accounts.todoistApiTokenLabel')}
+                  </span>
+                  <input
+                    type="password"
+                    value={todoist.apiToken}
+                    onChange={(e) =>
+                      setTodoist((prev) => ({
+                        ...prev,
+                        apiToken: e.target.value,
+                      }))
+                    }
+                    autoComplete="new-password"
+                    spellCheck={false}
+                    required
+                  />
+                  <span className="form__hint">
+                    {t('dialogs.accounts.todoistApiTokenHint')}
+                  </span>
+                </label>
+                {testMessage && kind === 'todoist' && (
+                  <p
+                    role="status"
+                    aria-live="polite"
+                    className="form__hint accounts-test-ok"
+                  >
+                    {testMessage}
+                  </p>
+                )}
+              </>
+            )}
+
             <div className="form__actions">
               {kind === 'ews' && (
                 <button
@@ -1223,7 +1298,8 @@ export function AccountsPanel() {
               {(kind === 'caldav' ||
                 kind === 'ical' ||
                 kind === 'ews' ||
-                kind === 'vikunja') && (
+                kind === 'vikunja' ||
+                kind === 'todoist') && (
                 <button
                   type="button"
                   className="form__action"

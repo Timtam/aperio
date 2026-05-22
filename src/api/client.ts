@@ -281,6 +281,22 @@ export const testVikunjaConnection = (
     request: { server_url, api_token },
   });
 
+/** Todoist is hosted — there's no server URL to configure. The
+ *  account config is an empty JSON object (`{}`) by default; only
+ *  the optional `account_label` shows up here if the dialog
+ *  captured one. */
+export interface TodoistConfig {
+  account_label?: string | null;
+}
+
+/** Round-trip a `GET /projects` against api.todoist.com with the
+ *  supplied Bearer token. Catches revoked tokens / unreachable API
+ *  before persisting the account row. */
+export const testTodoistConnection = (api_token: string) =>
+  invoke<void>('test_todoist_connection', {
+    request: { api_token },
+  });
+
 /** Result of an Autodiscover lookup. `account_email` may differ from
  *  what the user typed if a `<RedirectAddr>` step rewrote the
  *  identity along the way — the dialog can use it to refill the

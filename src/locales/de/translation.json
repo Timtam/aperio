@@ -506,6 +506,9 @@
       "vikunjaApiTokenLabel": "API-Token",
       "vikunjaApiTokenRequired": "Bitte gib dein Vikunja-API-Token ein.",
       "vikunjaApiTokenHint": "Erzeuge ein Token in Vikunja unter Einstellungen → API-Tokens. Das Token verlässt nach dem Drücken von „Hinzufügen“ nie den System-Schlüsselbund.",
+      "todoistApiTokenLabel": "API-Token",
+      "todoistApiTokenRequired": "Bitte gib dein Todoist-API-Token ein.",
+      "todoistApiTokenHint": "Du findest dein Token in Todoist unter Einstellungen → Integrationen → Entwickler → API-Token. Das Token verlässt nach dem Drücken von „Hinzufügen“ nie den System-Schlüsselbund.",
       "kindName": {
         "local": "Lokal",
         "caldav": "CalDAV (iCloud, Nextcloud, …)",

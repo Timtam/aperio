@@ -35,6 +35,7 @@ cal-adapter-google = { path = "../crates/cal-adapter-google" }
 cal-adapter-microsoft-graph = { path = "../crates/cal-adapter-microsoft-graph" }
 cal-adapter-ews = { path = "../crates/cal-adapter-ews" }
 cal-adapter-vikunja = { path = "../crates/cal-adapter-vikunja" }
+cal-adapter-todoist = { path = "../crates/cal-adapter-todoist" }
 
 rusqlite.workspace = true
 chrono.workspace = true
