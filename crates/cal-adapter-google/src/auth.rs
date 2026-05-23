@@ -57,12 +57,26 @@ pub const SCOPE_CALENDAR: &str = "https://www.googleapis.com/auth/calendar";
 /// — the listing/CRUD flows both need write so we may as well ask
 /// up front.
 pub const SCOPE_TASKS: &str = "https://www.googleapis.com/auth/tasks";
+/// Read + write People API access (Phase 10h). Covers `people` +
+/// `contactGroups` + `otherContacts.readonly` derivations — the
+/// single `contacts` scope is enough for everything Aperio surfaces:
+/// listing, CRUD, photos, groups. `contacts.other.readonly` would
+/// be needed on top to access the auto-collected "Other contacts"
+/// folder; we leave that for a follow-up phase so the consent
+/// screen stays compact for now.
+pub const SCOPE_CONTACTS: &str = "https://www.googleapis.com/auth/contacts";
 /// The combined scope string we request on the consent screen.
 /// Google's OAuth dialog renders one entry per space-separated
 /// scope; granting once covers every feature this adapter exposes
-/// (Calendar + Tasks, Phase 6d.3) so users don't see a separate
-/// dialog when they later open the tasks side of the app.
-pub const SCOPES: &str = "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/tasks";
+/// (Calendar + Tasks + Contacts, Phase 10h) so users don't see a
+/// separate dialog when they later open another surface of the app.
+///
+/// **Re-consent note:** users with tokens minted before Phase 10h
+/// have `calendar tasks` but not `contacts`. Their next People API
+/// call will fail with 403; the wrapping command should surface
+/// the standard "reconnect this account" affordance rather than
+/// silently degrading.
+pub const SCOPES: &str = "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/tasks https://www.googleapis.com/auth/contacts";
 /// 5 minute ceiling on the consent dance. Google rejects unused
 /// codes after a similar window anyway and waiting longer means
 /// Aperio is hung holding a TCP port.

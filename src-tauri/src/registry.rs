@@ -475,11 +475,12 @@ impl AdapterRegistry {
         };
         let adapter = GoogleAdapter::new(config.client_id, config.client_secret, tokens);
         let arc = Arc::new(adapter);
-        // Phase 6d.3: the same adapter instance serves both Calendar
-        // and Tasks. The combined OAuth scope (see auth::SCOPES) gives
-        // a single access token rights over both surfaces, so the
-        // shared `Arc<GoogleAdapter>` keeps the in-memory token cache
-        // and refresh state coherent across calendar and task reads.
+        // Phase 6d.3 + 10h: the same adapter instance serves all
+        // three feature traits. The combined OAuth scope (see
+        // auth::SCOPES) gives a single access token rights over
+        // Calendar + Tasks + Contacts, so the shared
+        // `Arc<GoogleAdapter>` keeps the in-memory token + listing
+        // caches coherent across every read path.
         self.external_cal
             .write()
             .expect("registry cal poison")
@@ -490,7 +491,11 @@ impl AdapterRegistry {
         self.external_tasks
             .write()
             .expect("registry tasks poison")
-            .insert(account.id.clone(), arc as Arc<dyn TasksFeature>);
+            .insert(account.id.clone(), arc.clone() as Arc<dyn TasksFeature>);
+        self.external_contacts
+            .write()
+            .expect("registry contacts poison")
+            .insert(account.id.clone(), arc as Arc<dyn ContactsFeature>);
         Ok(())
     }
 

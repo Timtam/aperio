@@ -13,6 +13,7 @@
 
 pub mod api;
 pub mod auth;
+pub mod contacts;
 pub mod error;
 pub mod mapping;
 pub mod tasks;
@@ -21,9 +22,10 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use cal_core::{
-    Adapter, AuthToken, Calendar, CalendarFeature, Capability, ContainerColor,
-    Credentials as CoreCredentials, DateRange, Error as CoreError, Event, FreeBusy,
-    NewEvent, NewTask, Result as CoreResult, Task, TaskList, TasksFeature,
+    Adapter, AuthToken, Calendar, CalendarFeature, Capability, Contact, ContactList,
+    ContactPhoto, ContactsFeature, ContainerColor, Credentials as CoreCredentials,
+    DateRange, Error as CoreError, Event, FreeBusy, NewContact, NewEvent, NewTask,
+    Result as CoreResult, Task, TaskList, TasksFeature,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -74,6 +76,12 @@ pub struct GoogleAdapter {
     /// keeps the sidebar snappy and avoids re-hitting Google on every
     /// `list_task_lists` call.
     task_lists_cache: Mutex<Option<(Vec<TaskList>, chrono::DateTime<chrono::Utc>)>>,
+    /// Cache for the full contact + group fan-out. People-API
+    /// listing for a 1000-contact account is several pages of
+    /// HTTPS; ContactsView calls it on every panel mount, so a
+    /// 5-minute TTL keeps the re-open instant. Cleared on any
+    /// mutation (create / update / delete / photo write).
+    contacts_cache: Mutex<Option<(Vec<Contact>, chrono::DateTime<chrono::Utc>)>>,
     listing_ttl: chrono::Duration,
 }
 
@@ -89,13 +97,19 @@ impl GoogleAdapter {
             .expect("reqwest client");
         Self {
             state: ApiState::new(tokens, client_id, client_secret, http),
-            // Phase 6d.3 broadens the OAuth consent (see auth::SCOPES)
-            // to cover Google Tasks as well; declare the matching
-            // capability so the registry routes both feature surfaces
-            // to this adapter.
-            capabilities: vec![Capability::Calendar, Capability::Tasks],
+            // Phase 6d.3 added Tasks; Phase 10h adds Contacts.
+            // Declaring all three capabilities lets the registry
+            // route every feature surface through this one
+            // adapter instance so the shared OAuth token state +
+            // listing caches stay coherent.
+            capabilities: vec![
+                Capability::Calendar,
+                Capability::Tasks,
+                Capability::Contacts,
+            ],
             calendars_cache: Mutex::new(None),
             task_lists_cache: Mutex::new(None),
+            contacts_cache: Mutex::new(None),
             listing_ttl: chrono::Duration::minutes(5),
         }
     }
@@ -145,6 +159,17 @@ impl GoogleAdapter {
 
     async fn cached_task_lists(&self) -> Option<Vec<TaskList>> {
         let guard = self.task_lists_cache.lock().await;
+        let (items, ts) = guard.as_ref()?;
+        let age = chrono::Utc::now().signed_duration_since(*ts);
+        if age >= chrono::Duration::zero() && age < self.listing_ttl {
+            Some(items.clone())
+        } else {
+            None
+        }
+    }
+
+    async fn cached_contacts(&self) -> Option<Vec<Contact>> {
+        let guard = self.contacts_cache.lock().await;
         let (items, ts) = guard.as_ref()?;
         let age = chrono::Utc::now().signed_duration_since(*ts);
         if age >= chrono::Duration::zero() && age < self.listing_ttl {
@@ -352,6 +377,114 @@ impl TasksFeature for GoogleAdapter {
             .map_err(to_core_error)?;
         // Drop the cached listing — the cached title is stale.
         *self.task_lists_cache.lock().await = None;
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl ContactsFeature for GoogleAdapter {
+    async fn list_contact_lists(&self) -> CoreResult<Vec<ContactList>> {
+        // Google exposes exactly one synthetic ContactList per
+        // account — the user's address book. Static, doesn't
+        // need a fetch; the registry will still call this on
+        // every sidebar refresh and we want it to be cheap.
+        Ok(contacts::list_contact_lists())
+    }
+
+    async fn get_contacts(&self, list_id: &str) -> CoreResult<Vec<Contact>> {
+        if list_id != contacts::GOOGLE_CONTACT_LIST_ID {
+            // Unknown list id — the registry should never route a
+            // foreign list id to this adapter, but defending here
+            // keeps the failure mode informative.
+            return Ok(Vec::new());
+        }
+        if let Some(cached) = self.cached_contacts().await {
+            return Ok(cached);
+        }
+        let fresh = contacts::get_contacts(&self.state)
+            .await
+            .map_err(to_core_error)?;
+        *self.contacts_cache.lock().await =
+            Some((fresh.clone(), chrono::Utc::now()));
+        Ok(fresh)
+    }
+
+    async fn search_contacts(&self, query: &str) -> CoreResult<Vec<Contact>> {
+        contacts::search_contacts(&self.state, query)
+            .await
+            .map_err(to_core_error)
+    }
+
+    async fn create_contact(
+        &self,
+        _list_id: &str,
+        contact: NewContact,
+    ) -> CoreResult<Contact> {
+        let result = contacts::create_contact(&self.state, contact)
+            .await
+            .map_err(to_core_error)?;
+        // Invalidate the listing cache so the next `get_contacts`
+        // shows the newly created row.
+        *self.contacts_cache.lock().await = None;
+        Ok(result)
+    }
+
+    async fn update_contact(&self, contact: Contact) -> CoreResult<Contact> {
+        let result = contacts::update_contact(&self.state, contact)
+            .await
+            .map_err(to_core_error)?;
+        *self.contacts_cache.lock().await = None;
+        Ok(result)
+    }
+
+    async fn delete_contact(&self, contact_id: &str) -> CoreResult<()> {
+        contacts::delete_contact(&self.state, contact_id)
+            .await
+            .map_err(to_core_error)?;
+        *self.contacts_cache.lock().await = None;
+        Ok(())
+    }
+
+    async fn rename_contact_list(
+        &self,
+        _list_id: &str,
+        _new_name: &str,
+    ) -> CoreResult<()> {
+        // The synthetic "Google Contacts" list isn't a real
+        // server-side container — there's nothing to PATCH. The
+        // command layer falls back to a local override on
+        // Unsupported.
+        Err(CoreError::Unsupported(
+            "the Google Contacts list cannot be renamed at the source".into(),
+        ))
+    }
+
+    async fn get_contact_photo(
+        &self,
+        contact_id: &str,
+    ) -> CoreResult<Option<ContactPhoto>> {
+        contacts::get_contact_photo(&self.state, contact_id)
+            .await
+            .map_err(to_core_error)
+    }
+
+    async fn set_contact_photo(
+        &self,
+        contact_id: &str,
+        photo: ContactPhoto,
+    ) -> CoreResult<()> {
+        contacts::set_contact_photo(&self.state, contact_id, photo)
+            .await
+            .map_err(to_core_error)?;
+        *self.contacts_cache.lock().await = None;
+        Ok(())
+    }
+
+    async fn delete_contact_photo(&self, contact_id: &str) -> CoreResult<()> {
+        contacts::delete_contact_photo(&self.state, contact_id)
+            .await
+            .map_err(to_core_error)?;
+        *self.contacts_cache.lock().await = None;
         Ok(())
     }
 }

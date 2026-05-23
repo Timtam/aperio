@@ -232,6 +232,142 @@ pub(crate) async fn decode_json<T: DeserializeOwned>(
         .map_err(|e| GoogleError::Protocol(format!("json: {e}: {text}")))
 }
 
+// ── Absolute-URL helpers shared across modules ─────────────────────────
+//
+// Calendar's REST surface is under `googleapis.com/calendar/v3`,
+// Tasks under `tasks.googleapis.com/tasks/v1`, People under
+// `people.googleapis.com/v1`. The `ApiState::get_json` etc.
+// shortcuts assume the Calendar base URL; modules targeting the
+// other hosts build absolute URLs and route through these.
+
+/// GET an absolute URL, decode the JSON body, transparent refresh
+/// on 401.
+pub(crate) async fn get_absolute<T: DeserializeOwned>(
+    state: &ApiState,
+    url: &str,
+) -> GoogleResult<T> {
+    let url_owned = url.to_string();
+    let response = state
+        .send_with_refresh(|access| state.http.get(&url_owned).bearer_auth(access))
+        .await?;
+    decode_json(response).await
+}
+
+/// POST a JSON body to an absolute URL, decode the JSON response.
+pub(crate) async fn post_absolute<B: Serialize, T: DeserializeOwned>(
+    state: &ApiState,
+    url: &str,
+    body: &B,
+) -> GoogleResult<T> {
+    let url_owned = url.to_string();
+    let json = serde_json::to_string(body)?;
+    let response = state
+        .send_with_refresh(|access| {
+            state
+                .http
+                .post(&url_owned)
+                .bearer_auth(access)
+                .header("content-type", "application/json")
+                .body(json.clone())
+        })
+        .await?;
+    decode_json(response).await
+}
+
+/// PATCH a JSON body to an absolute URL, decode the JSON response.
+pub(crate) async fn patch_absolute<B: Serialize, T: DeserializeOwned>(
+    state: &ApiState,
+    url: &str,
+    body: &B,
+) -> GoogleResult<T> {
+    let url_owned = url.to_string();
+    let json = serde_json::to_string(body)?;
+    let response = state
+        .send_with_refresh(|access| {
+            state
+                .http
+                .patch(&url_owned)
+                .bearer_auth(access)
+                .header("content-type", "application/json")
+                .body(json.clone())
+        })
+        .await?;
+    decode_json(response).await
+}
+
+/// PUT a JSON body to an absolute URL, decode the JSON response.
+/// ContactGroup updates use PUT (not PATCH) per the People API
+/// reference.
+pub(crate) async fn put_absolute<B: Serialize, T: DeserializeOwned>(
+    state: &ApiState,
+    url: &str,
+    body: &B,
+) -> GoogleResult<T> {
+    let url_owned = url.to_string();
+    let json = serde_json::to_string(body)?;
+    let response = state
+        .send_with_refresh(|access| {
+            state
+                .http
+                .put(&url_owned)
+                .bearer_auth(access)
+                .header("content-type", "application/json")
+                .body(json.clone())
+        })
+        .await?;
+    decode_json(response).await
+}
+
+/// DELETE an absolute URL. Returns Ok(()) on any 2xx (typically 200
+/// for People-API contact deletes, 204 for the rest).
+pub(crate) async fn delete_absolute(state: &ApiState, url: &str) -> GoogleResult<()> {
+    let url_owned = url.to_string();
+    let response = state
+        .send_with_refresh(|access| state.http.delete(&url_owned).bearer_auth(access))
+        .await?;
+    let status = response.status();
+    if status.is_success() {
+        return Ok(());
+    }
+    let text = response.text().await.unwrap_or_default();
+    Err(GoogleError::Http {
+        status: status.as_u16(),
+        message: text.chars().take(300).collect(),
+    })
+}
+
+/// GET an absolute URL with the OAuth bearer attached and return
+/// the raw response bytes. Used by the photo-fetch path — Google
+/// returns photo URLs (CDN endpoints) rather than inline bytes,
+/// and we need to download the binary on the user's behalf.
+pub(crate) async fn get_absolute_bytes(
+    state: &ApiState,
+    url: &str,
+) -> GoogleResult<(Vec<u8>, Option<String>)> {
+    let url_owned = url.to_string();
+    let response = state
+        .send_with_refresh(|access| state.http.get(&url_owned).bearer_auth(access))
+        .await?;
+    let status = response.status();
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+    if !status.is_success() {
+        return Err(GoogleError::Http {
+            status: status.as_u16(),
+            message: format!("photo fetch returned status {status}"),
+        });
+    }
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|e| GoogleError::Network(e.to_string()))?
+        .to_vec();
+    Ok((bytes, content_type))
+}
+
 /// `GET /users/me/calendarList`. Pages through `nextPageToken` until
 /// Google stops returning one — for typical users this is one call.
 pub async fn list_calendars(state: &ApiState) -> GoogleResult<Vec<Calendar>> {

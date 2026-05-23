@@ -47,8 +47,10 @@ use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex as _Mutex;
 
-use crate::api::{decode_json, ApiState};
-use crate::error::{GoogleError, GoogleResult};
+use crate::api::{
+    delete_absolute, get_absolute, patch_absolute, post_absolute, ApiState,
+};
+use crate::error::GoogleResult;
 
 const TASKS_API_BASE: &str = "https://tasks.googleapis.com/tasks/v1";
 
@@ -185,78 +187,9 @@ pub async fn rename_task_list(
     Ok(())
 }
 
-// ── HTTP helpers that route through ApiState's token-refresh flow ──────
-
-async fn get_absolute<T: serde::de::DeserializeOwned>(
-    state: &ApiState,
-    url: &str,
-) -> GoogleResult<T> {
-    let url_owned = url.to_string();
-    let response = state
-        .send_with_refresh(|access| {
-            state.http.get(&url_owned).bearer_auth(access)
-        })
-        .await?;
-    decode_json(response).await
-}
-
-async fn post_absolute<B: Serialize, T: serde::de::DeserializeOwned>(
-    state: &ApiState,
-    url: &str,
-    body: &B,
-) -> GoogleResult<T> {
-    let url_owned = url.to_string();
-    let json = serde_json::to_string(body)?;
-    let response = state
-        .send_with_refresh(|access| {
-            state
-                .http
-                .post(&url_owned)
-                .bearer_auth(access)
-                .header("content-type", "application/json")
-                .body(json.clone())
-        })
-        .await?;
-    decode_json(response).await
-}
-
-async fn patch_absolute<B: Serialize, T: serde::de::DeserializeOwned>(
-    state: &ApiState,
-    url: &str,
-    body: &B,
-) -> GoogleResult<T> {
-    let url_owned = url.to_string();
-    let json = serde_json::to_string(body)?;
-    let response = state
-        .send_with_refresh(|access| {
-            state
-                .http
-                .patch(&url_owned)
-                .bearer_auth(access)
-                .header("content-type", "application/json")
-                .body(json.clone())
-        })
-        .await?;
-    decode_json(response).await
-}
-
-async fn delete_absolute(state: &ApiState, url: &str) -> GoogleResult<()> {
-    let url_owned = url.to_string();
-    let response = state
-        .send_with_refresh(|access| {
-            state.http.delete(&url_owned).bearer_auth(access)
-        })
-        .await?;
-    let status = response.status();
-    if status.is_success() {
-        return Ok(());
-    }
-    let text = response.text().await.unwrap_or_default();
-    Err(GoogleError::Http {
-        status: status.as_u16(),
-        message: text.chars().take(300).collect(),
-    })
-}
+// (HTTP helpers moved to api.rs — `get_absolute` / `post_absolute`
+// / `patch_absolute` / `delete_absolute` are shared with the
+// People API client in `contacts.rs`.)
 
 // ── JSON wire shapes ───────────────────────────────────────────────────
 
@@ -518,6 +451,7 @@ type _ArcMarker = Arc<_Mutex<()>>;
 mod tests {
     use super::*;
     use crate::auth::TokenSet;
+    use crate::error::GoogleError;
     use mockito::Server;
     use std::sync::Arc;
     use tokio::sync::Mutex;
