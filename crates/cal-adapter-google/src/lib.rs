@@ -18,6 +18,7 @@ pub mod error;
 pub mod mapping;
 pub mod tasks;
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -76,12 +77,17 @@ pub struct GoogleAdapter {
     /// keeps the sidebar snappy and avoids re-hitting Google on every
     /// `list_task_lists` call.
     task_lists_cache: Mutex<Option<(Vec<TaskList>, chrono::DateTime<chrono::Utc>)>>,
-    /// Cache for the full contact + group fan-out. People-API
-    /// listing for a 1000-contact account is several pages of
-    /// HTTPS; ContactsView calls it on every panel mount, so a
-    /// 5-minute TTL keeps the re-open instant. Cleared on any
-    /// mutation (create / update / delete / photo write).
-    contacts_cache: Mutex<Option<(Vec<Contact>, chrono::DateTime<chrono::Utc>)>>,
+    /// Cache for the People API listing per list_id. Keyed by
+    /// list_id so the three synthetic lists (personal + Other
+    /// Contacts + Directory) each cache independently and a
+    /// mutation against one doesn't invalidate the others'
+    /// timing-out work. 5-minute TTL keeps a panel re-open
+    /// instant; full clear on any mutation in case the mutation
+    /// touches relationships across lists (rare but possible
+    /// via group membership changes that affect personal +
+    /// directory views).
+    contacts_cache:
+        Mutex<HashMap<String, (Vec<Contact>, chrono::DateTime<chrono::Utc>)>>,
     listing_ttl: chrono::Duration,
 }
 
@@ -109,7 +115,7 @@ impl GoogleAdapter {
             ],
             calendars_cache: Mutex::new(None),
             task_lists_cache: Mutex::new(None),
-            contacts_cache: Mutex::new(None),
+            contacts_cache: Mutex::new(HashMap::new()),
             listing_ttl: chrono::Duration::minutes(5),
         }
     }
@@ -168,9 +174,9 @@ impl GoogleAdapter {
         }
     }
 
-    async fn cached_contacts(&self) -> Option<Vec<Contact>> {
+    async fn cached_contacts(&self, list_id: &str) -> Option<Vec<Contact>> {
         let guard = self.contacts_cache.lock().await;
-        let (items, ts) = guard.as_ref()?;
+        let (items, ts) = guard.get(list_id)?;
         let age = chrono::Utc::now().signed_duration_since(*ts);
         if age >= chrono::Duration::zero() && age < self.listing_ttl {
             Some(items.clone())
@@ -392,20 +398,25 @@ impl ContactsFeature for GoogleAdapter {
     }
 
     async fn get_contacts(&self, list_id: &str) -> CoreResult<Vec<Contact>> {
-        if list_id != contacts::GOOGLE_CONTACT_LIST_ID {
-            // Unknown list id — the registry should never route a
-            // foreign list id to this adapter, but defending here
-            // keeps the failure mode informative.
+        // Unknown ids yield an empty Vec — the registry shouldn't
+        // route foreign list ids here, but defending makes the
+        // failure mode boring.
+        if list_id != contacts::GOOGLE_CONTACT_LIST_ID
+            && list_id != contacts::GOOGLE_OTHER_CONTACTS_LIST_ID
+            && list_id != contacts::GOOGLE_DIRECTORY_LIST_ID
+        {
             return Ok(Vec::new());
         }
-        if let Some(cached) = self.cached_contacts().await {
+        if let Some(cached) = self.cached_contacts(list_id).await {
             return Ok(cached);
         }
-        let fresh = contacts::get_contacts(&self.state)
+        let fresh = contacts::get_contacts(&self.state, list_id)
             .await
             .map_err(to_core_error)?;
-        *self.contacts_cache.lock().await =
-            Some((fresh.clone(), chrono::Utc::now()));
+        self.contacts_cache
+            .lock()
+            .await
+            .insert(list_id.to_string(), (fresh.clone(), chrono::Utc::now()));
         Ok(fresh)
     }
 
@@ -417,23 +428,34 @@ impl ContactsFeature for GoogleAdapter {
 
     async fn create_contact(
         &self,
-        _list_id: &str,
+        list_id: &str,
         contact: NewContact,
     ) -> CoreResult<Contact> {
+        if is_read_only_google_list(list_id) {
+            return Err(CoreError::Unsupported(format!(
+                "the Google list '{list_id}' is read-only and does not accept new contacts"
+            )));
+        }
         let result = contacts::create_contact(&self.state, contact)
             .await
             .map_err(to_core_error)?;
         // Invalidate the listing cache so the next `get_contacts`
         // shows the newly created row.
-        *self.contacts_cache.lock().await = None;
+        self.contacts_cache.lock().await.clear();
         Ok(result)
     }
 
     async fn update_contact(&self, contact: Contact) -> CoreResult<Contact> {
+        if is_read_only_google_list(&contact.list_id) {
+            return Err(CoreError::Unsupported(format!(
+                "contacts in '{}' cannot be edited from Aperio",
+                contact.list_id,
+            )));
+        }
         let result = contacts::update_contact(&self.state, contact)
             .await
             .map_err(to_core_error)?;
-        *self.contacts_cache.lock().await = None;
+        self.contacts_cache.lock().await.clear();
         Ok(result)
     }
 
@@ -441,7 +463,7 @@ impl ContactsFeature for GoogleAdapter {
         contacts::delete_contact(&self.state, contact_id)
             .await
             .map_err(to_core_error)?;
-        *self.contacts_cache.lock().await = None;
+        self.contacts_cache.lock().await.clear();
         Ok(())
     }
 
@@ -476,7 +498,7 @@ impl ContactsFeature for GoogleAdapter {
         contacts::set_contact_photo(&self.state, contact_id, photo)
             .await
             .map_err(to_core_error)?;
-        *self.contacts_cache.lock().await = None;
+        self.contacts_cache.lock().await.clear();
         Ok(())
     }
 
@@ -484,9 +506,19 @@ impl ContactsFeature for GoogleAdapter {
         contacts::delete_contact_photo(&self.state, contact_id)
             .await
             .map_err(to_core_error)?;
-        *self.contacts_cache.lock().await = None;
+        self.contacts_cache.lock().await.clear();
         Ok(())
     }
+}
+
+/// True for the two synthetic Google ContactLists that don't
+/// accept writes: Other Contacts (auto-collected by Gmail) and
+/// the Workspace Directory. The frontend's read-only-aware
+/// dialog short-circuits these too, but the backend guard is the
+/// authoritative gate.
+fn is_read_only_google_list(list_id: &str) -> bool {
+    list_id == contacts::GOOGLE_OTHER_CONTACTS_LIST_ID
+        || list_id == contacts::GOOGLE_DIRECTORY_LIST_ID
 }
 
 fn to_core_error(err: GoogleError) -> CoreError {

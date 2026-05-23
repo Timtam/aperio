@@ -58,25 +58,38 @@ pub const SCOPE_CALENDAR: &str = "https://www.googleapis.com/auth/calendar";
 /// up front.
 pub const SCOPE_TASKS: &str = "https://www.googleapis.com/auth/tasks";
 /// Read + write People API access (Phase 10h). Covers `people` +
-/// `contactGroups` + `otherContacts.readonly` derivations — the
-/// single `contacts` scope is enough for everything Aperio surfaces:
-/// listing, CRUD, photos, groups. `contacts.other.readonly` would
-/// be needed on top to access the auto-collected "Other contacts"
-/// folder; we leave that for a follow-up phase so the consent
-/// screen stays compact for now.
+/// `contactGroups` — full CRUD on the user's own address book.
 pub const SCOPE_CONTACTS: &str = "https://www.googleapis.com/auth/contacts";
+/// Read-only access to "Other contacts" — the auto-collected
+/// addresses Gmail builds from people the user emails but never
+/// explicitly adds to their book. Read-only by spec (Google
+/// owns the curation), and Aperio surfaces it as a read-only
+/// ContactList that the user can opt into via the sidebar.
+pub const SCOPE_CONTACTS_OTHER_READONLY: &str =
+    "https://www.googleapis.com/auth/contacts.other.readonly";
+/// Read-only access to the Workspace / G Suite directory — the
+/// organisation-wide address book analogous to the EWS GAL. Only
+/// returns useful results for Workspace accounts; personal
+/// `@gmail.com` accounts respond with 403 / empty, so the list
+/// renders as empty there and that's the documented behaviour.
+pub const SCOPE_DIRECTORY_READONLY: &str =
+    "https://www.googleapis.com/auth/directory.readonly";
 /// The combined scope string we request on the consent screen.
 /// Google's OAuth dialog renders one entry per space-separated
 /// scope; granting once covers every feature this adapter exposes
-/// (Calendar + Tasks + Contacts, Phase 10h) so users don't see a
-/// separate dialog when they later open another surface of the app.
+/// (Calendar + Tasks + Contacts incl. the auto-collected Other
+/// list and the Workspace Directory) so users don't see a
+/// separate dialog when they later open another surface of the
+/// app.
 ///
 /// **Re-consent note:** users with tokens minted before Phase 10h
-/// have `calendar tasks` but not `contacts`. Their next People API
-/// call will fail with 403; the wrapping command should surface
-/// the standard "reconnect this account" affordance rather than
+/// have `calendar tasks`. Tokens minted between 10h-1 and 10h-2
+/// have `calendar tasks contacts` but not the two read-only
+/// additions. Either way, the next call against a missing scope
+/// fails with 403; the wrapping command should surface the
+/// standard "reconnect this account" affordance rather than
 /// silently degrading.
-pub const SCOPES: &str = "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/tasks https://www.googleapis.com/auth/contacts";
+pub const SCOPES: &str = "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/tasks https://www.googleapis.com/auth/contacts https://www.googleapis.com/auth/contacts.other.readonly https://www.googleapis.com/auth/directory.readonly";
 /// 5 minute ceiling on the consent dance. Google rejects unused
 /// codes after a similar window anyway and waiting longer means
 /// Aperio is hung holding a TCP port.

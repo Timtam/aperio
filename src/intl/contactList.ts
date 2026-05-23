@@ -7,11 +7,27 @@ import type { ContactList } from '../api/types';
  *  label for a localized one without changing the wire shape. */
 export const EWS_GAL_LIST_ID = 'ews-gal';
 
+/** Sentinel for the writable Google personal address book
+ *  (`GOOGLE_CONTACT_LIST_ID` in the Rust adapter). */
+export const GOOGLE_CONTACTS_LIST_ID = 'google-contacts';
+
+/** Sentinel for the read-only auto-collected "Other contacts"
+ *  list backed by Gmail's history of sent addresses. */
+export const GOOGLE_OTHER_CONTACTS_LIST_ID = 'google-other-contacts';
+
+/** Sentinel for the read-only Workspace / G Suite directory —
+ *  Google's equivalent of the EWS GAL. Empty for personal
+ *  `@gmail.com` accounts. */
+export const GOOGLE_DIRECTORY_LIST_ID = 'google-directory';
+
 /** Translation-table for system-managed list ids whose names the
  *  backend hardcodes in English. Add new entries here when more
  *  adapters surface synthetic read-only lists. */
 const SYSTEM_LIST_I18N_KEY: Record<string, string> = {
   [EWS_GAL_LIST_ID]: 'views.contacts.galListName',
+  [GOOGLE_CONTACTS_LIST_ID]: 'views.contacts.googleListName',
+  [GOOGLE_OTHER_CONTACTS_LIST_ID]: 'views.contacts.googleOtherListName',
+  [GOOGLE_DIRECTORY_LIST_ID]: 'views.contacts.googleDirectoryListName',
 };
 
 /** Resolve the display name for a `ContactList`. Synthetic
