@@ -91,6 +91,12 @@ pub struct SyncRoundReport {
     /// philosophy as the applier: one bad file shouldn't sink
     /// the entire sync round.
     pub push_failures: usize,
+    /// Field-level conflicts the applier recorded during this
+    /// round (DESIGN.md §19.3). The scheduler reads this to
+    /// decide whether to fire a §19.9 system notification +
+    /// emit `sync-conflicts-changed` so the status bar refreshes
+    /// its badge count.
+    pub conflicts: usize,
 }
 
 impl SyncRoundReport {
@@ -100,6 +106,7 @@ impl SyncRoundReport {
         self.skipped_already_applied += report.skipped_already_applied;
         self.skipped_unsupported += report.skipped_unsupported;
         self.apply_failures += report.failed;
+        self.conflicts += report.conflicts;
     }
 }
 

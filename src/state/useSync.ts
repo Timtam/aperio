@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { listen } from '@tauri-apps/api/event';
+import {
+  isPermissionGranted,
+  requestPermission,
+  sendNotification,
+} from '@tauri-apps/plugin-notification';
 
 import {
   getSyncConflictsCount,
@@ -11,6 +17,34 @@ import {
   type SyncRoundReport,
 } from '../api/client';
 import { useDialogState } from './DialogState';
+
+/**
+ * Fire an OS-level notification announcing new sync conflicts
+ * (DESIGN.md §19.9). Requests notification permission lazily on
+ * the first call — the user sees the OS prompt at most once per
+ * install; subsequent calls short-circuit via the already-granted
+ * check. Failures are best-effort: we still emit the in-app
+ * `aria-live` + status-bar tone via the existing paths, so a
+ * suppressed notification doesn't hide the conflict.
+ */
+async function notifyConflicts(
+  count: number,
+  title: string,
+  body: string,
+): Promise<void> {
+  try {
+    let granted = await isPermissionGranted();
+    if (!granted) {
+      const result = await requestPermission();
+      granted = result === 'granted';
+    }
+    if (!granted) return;
+    sendNotification({ title, body });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn(`notify ${count} sync conflicts failed`, err);
+  }
+}
 
 /**
  * Frontend bridge to the cross-device sync backend (DESIGN.md §19,
@@ -45,6 +79,7 @@ import { useDialogState } from './DialogState';
  * consumer surface.
  */
 export function useSync() {
+  const { t } = useTranslation();
   const { invalidateData, openSyncSchemaTooOld } = useDialogState();
   const [status, setStatus] = useState<SyncStatus | null>(null);
   const [lastReport, setLastReport] = useState<SyncRoundReport | null>(null);
@@ -102,6 +137,23 @@ export function useSync() {
         if (report.applied > 0) {
           invalidateData();
         }
+        // §19.9: fire an OS-level notification when the round
+        // produced field-level conflicts. The status badge
+        // already shifts tone via the `sync-conflicts-changed`
+        // event the scheduler emits in parallel; the
+        // notification adds the "you're not currently looking
+        // at Aperio" reach. Suppressed silently when the user
+        // hasn't granted notification permission.
+        if (report.conflicts > 0) {
+          const title = t('syncStatus.notifyConflictTitle');
+          const body =
+            report.conflicts === 1
+              ? t('syncStatus.notifyConflictBody_one')
+              : t('syncStatus.notifyConflictBody_other', {
+                  count: report.conflicts,
+                });
+          void notifyConflicts(report.conflicts, title, body);
+        }
       }
       if (error) {
         setLastError(error);
@@ -125,7 +177,10 @@ export function useSync() {
       cancelled = true;
       unlisten?.();
     };
-  }, [invalidateData]);
+    // `t` is part of the closure for the notification message;
+    // include it so a locale switch re-attaches with the new
+    // translator.
+  }, [invalidateData, t]);
 
   // Phase Sl: when the backend latches `schema_too_old`, pop the
   // §19.13 update modal exactly once per session. The user can

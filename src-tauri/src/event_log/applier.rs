@@ -95,6 +95,14 @@ pub struct ApplyReport {
     /// signals whether we should warn the user that some data
     /// didn't make it.
     pub failed: usize,
+    /// Field-level conflicts the applier wrote into
+    /// `sync_conflicts` during this pass (DESIGN.md §19.3).
+    /// Surfaced through `SyncRoundReport` so the scheduler can
+    /// fire a §19.9 system notification when the count goes up
+    /// in a single round — the user shouldn't have to
+    /// rediscover unresolved conflicts by checking the status
+    /// indicator after a quiet sync.
+    pub conflicts: usize,
 }
 
 /// The applier itself.
@@ -109,6 +117,19 @@ pub struct EventLogApplier {
     /// emit — skipping them in the applier prevents re-running
     /// the same insert.
     local_device_id: DeviceId,
+    /// Per-`apply_log_file` conflict counter. Reset to 0 on
+    /// entry to `apply_envelopes`; bumped by `merge_fields` on
+    /// every successful `repo.record(...)`. Read into the
+    /// `ApplyReport` before returning.
+    ///
+    /// Interior mutability via `AtomicUsize` lets `merge_fields`
+    /// stay `&self`, avoiding a refactor of the whole apply
+    /// dispatch to thread mutable counters through. The
+    /// `InFlightGuard` on the orchestrator guarantees only one
+    /// `apply_envelopes` runs at a time, so the relaxed
+    /// ordering is sufficient — we don't actually rely on
+    /// cross-thread synchronisation.
+    pending_conflicts: std::sync::atomic::AtomicUsize,
 }
 
 impl EventLogApplier {
@@ -121,6 +142,7 @@ impl EventLogApplier {
             db,
             adapter,
             local_device_id,
+            pending_conflicts: std::sync::atomic::AtomicUsize::new(0),
         }
     }
 
@@ -141,6 +163,11 @@ impl EventLogApplier {
         &self,
         mut envelopes: Vec<EventEnvelope>,
     ) -> SyncResult<ApplyReport> {
+        // Reset the per-pass conflict counter. `merge_fields`
+        // bumps it on every recorded conflict; we fold the final
+        // value into the report below.
+        self.pending_conflicts
+            .store(0, std::sync::atomic::Ordering::Relaxed);
         // Chronological order. ULID-prefixed ids sort
         // lexicographically by timestamp too — so the secondary
         // key is just for ties at the same wall-clock moment.
@@ -206,6 +233,12 @@ impl EventLogApplier {
                 }
             }
         }
+        // Fold the per-pass conflict counter into the report so
+        // the orchestrator can decide whether to fire a §19.9
+        // system notification after the round.
+        report.conflicts = self
+            .pending_conflicts
+            .load(std::sync::atomic::Ordering::Relaxed);
         Ok(report)
     }
 
@@ -669,16 +702,27 @@ impl EventLogApplier {
                     remote_device_id: env.device_id.as_str().to_string(),
                     remote_timestamp: env.timestamp,
                 };
-                if let Err(err) = repo.record(new_conflict) {
-                    warn!(
-                        field = %field,
-                        ?err,
-                        "couldn't persist sync conflict; falling back to last-write-wins for this field",
-                    );
-                    // Don't let a conflict-table write failure
-                    // block the merge — better to apply silently
-                    // than to stall the sync. The local row stays
-                    // as it was.
+                match repo.record(new_conflict) {
+                    Ok(_) => {
+                        // Bump the per-pass counter; the
+                        // outer `apply_envelopes` folds the
+                        // total into the ApplyReport.
+                        self.pending_conflicts.fetch_add(
+                            1,
+                            std::sync::atomic::Ordering::Relaxed,
+                        );
+                    }
+                    Err(err) => {
+                        warn!(
+                            field = %field,
+                            ?err,
+                            "couldn't persist sync conflict; falling back to last-write-wins for this field",
+                        );
+                        // Don't let a conflict-table write failure
+                        // block the merge — better to apply silently
+                        // than to stall the sync. The local row stays
+                        // as it was.
+                    }
                 }
                 // Keep local value (merged already holds it).
             } else {

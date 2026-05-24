@@ -101,7 +101,10 @@
     "announceConflict_one": "A new sync conflict needs your decision.",
     "announceConflict_other": "{{count}} sync conflicts need your decision.",
     "announceFailure": "Sync failed: {{message}}",
-    "announceSchemaTooOld": "The sync dataset was created by a newer Aperio version. Please update the app."
+    "announceSchemaTooOld": "The sync dataset was created by a newer Aperio version. Please update the app.",
+    "notifyConflictTitle": "Sync conflict",
+    "notifyConflictBody_one": "A sync conflict needs your decision. Open Aperio to resolve it.",
+    "notifyConflictBody_other": "{{count}} sync conflicts need your decision. Open Aperio to resolve them."
   },
   "syncSchemaTooOld": {
     "title": "Update required",

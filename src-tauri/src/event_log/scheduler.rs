@@ -252,10 +252,22 @@ impl SyncScheduler {
                     pushed = report.pushed_logs,
                     fetched = report.fetched_logs,
                     applied = report.applied,
+                    conflicts = report.conflicts,
                     "scheduled sync round completed",
                 );
                 self.reset_failures();
                 self.emit_status(app, Some(report.clone()), None);
+                // New conflicts landed during this round — kick
+                // the frontend's conflict-count fetch so the
+                // status badge updates without polling. (The
+                // applier writes to `sync_conflicts` but doesn't
+                // emit the event itself; doing it here keeps the
+                // applier handle-free.)
+                if report.conflicts > 0 {
+                    if let Err(err) = app.emit("sync-conflicts-changed", ()) {
+                        warn!(?err, "failed to emit sync-conflicts-changed");
+                    }
+                }
             }
             Err(err) => {
                 warn!(?err, "scheduled sync round failed");
@@ -293,7 +305,9 @@ impl SyncScheduler {
                     pushed_logs: Some(u32::try_from(report.pushed_logs).unwrap_or(u32::MAX)),
                     fetched_logs: Some(u32::try_from(report.fetched_logs).unwrap_or(u32::MAX)),
                     applied: Some(u32::try_from(report.applied).unwrap_or(u32::MAX)),
-                    conflicts: None,
+                    conflicts: Some(
+                        u32::try_from(report.conflicts).unwrap_or(u32::MAX),
+                    ),
                 },
                 None,
             ),

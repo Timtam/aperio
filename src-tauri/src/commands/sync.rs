@@ -667,6 +667,19 @@ pub async fn sync_now(
     );
     let report = result.map_err(sync_err)?;
     scheduler.note_success();
+    // If new conflicts landed during this manual round, kick
+    // the frontend's conflict-count refetch + notification
+    // path. Same logic as the periodic scheduler's `run_round`.
+    if report.conflicts > 0 {
+        if let Err(err) =
+            tauri::Emitter::emit(&app, "sync-conflicts-changed", ())
+        {
+            tracing::warn!(
+                ?err,
+                "failed to emit sync-conflicts-changed after manual sync",
+            );
+        }
+    }
     Ok(report)
 }
 
