@@ -551,14 +551,26 @@ impl SyncOrchestrator {
         // doesn't break correctness, but firing inside the same
         // round lets the user see "compacted" status promptly.
         // Failures are non-fatal — the next round retries.
+        //
+        // §19.10 — record the outcome in the Protokoll so the user
+        // can see when log files were GCed. Manual `compact_now`
+        // logs via the scheduler; the auto path here writes
+        // directly via `SyncLogRepo` since the orchestrator
+        // doesn't hold a scheduler reference (the relationship
+        // goes the other way).
         match self.compactor.should_compact(adapter.as_ref()).await {
             Ok(true) => {
                 info!("compaction thresholds breached; running inline");
-                if let Err(err) =
-                    self.compactor.compact_now(adapter.as_ref()).await
-                {
+                let started = std::time::Instant::now();
+                let outcome =
+                    self.compactor.compact_now(adapter.as_ref()).await;
+                let duration_ms =
+                    u64::try_from(started.elapsed().as_millis())
+                        .unwrap_or(u64::MAX);
+                if let Err(err) = &outcome {
                     warn!(?err, "auto-compaction failed");
                 }
+                self.record_compaction_row(&outcome, duration_ms);
             }
             Ok(false) => {}
             Err(err) => warn!(?err, "couldn't evaluate compaction thresholds"),
@@ -694,6 +706,73 @@ impl SyncOrchestrator {
                 ))
             })?;
         Ok(())
+    }
+
+    /// Write a `Compaction`-trigger row into the sync_log. Used
+    /// by the auto-compaction hook in `sync_now` to surface
+    /// compaction outcomes in the Settings Protokoll viewer
+    /// without going through the scheduler (which doesn't own
+    /// the orchestrator — the relationship goes the other way).
+    /// Mirrors the layout `SyncScheduler::record_compaction_outcome`
+    /// produces for the manual path so both rows render
+    /// identically in the UI.
+    ///
+    /// Best-effort: persistence failures are logged but don't
+    /// surface upstream. We don't emit `sync-log-changed` from
+    /// here because the orchestrator has no `AppHandle`; the
+    /// next sync round's emit (which always fires after
+    /// `run_round`) will trigger a frontend refresh.
+    fn record_compaction_row(
+        &self,
+        result: &Result<
+            crate::event_log::compactor::CompactionReport,
+            sync_core::SyncError,
+        >,
+        duration_ms: u64,
+    ) {
+        use crate::sync_log::{SyncLogCounters, SyncLogRepo, SyncTrigger};
+        let (success, counters, error) = match result {
+            Ok(report) => {
+                let success = report.failed_deletes == 0;
+                let error = if success {
+                    None
+                } else {
+                    Some(format!(
+                        "{} of {} log deletions failed",
+                        report.failed_deletes,
+                        report.deleted_logs + report.failed_deletes,
+                    ))
+                };
+                (
+                    success,
+                    SyncLogCounters {
+                        pushed_logs: None,
+                        fetched_logs: None,
+                        applied: Some(
+                            u32::try_from(report.deleted_logs)
+                                .unwrap_or(u32::MAX),
+                        ),
+                        conflicts: None,
+                    },
+                    error,
+                )
+            }
+            Err(err) => (
+                false,
+                SyncLogCounters::default(),
+                Some(err.to_string()),
+            ),
+        };
+        let repo = SyncLogRepo::new(&self.db);
+        if let Err(err) = repo.record(
+            SyncTrigger::Compaction,
+            success,
+            &counters,
+            Some(duration_ms),
+            error.as_deref(),
+        ) {
+            warn!(?err, "couldn't persist compaction sync_log entry");
+        }
     }
 }
 

@@ -716,7 +716,9 @@ pub async fn get_sync_status(
 /// impatient" override.
 #[tauri::command]
 pub async fn compact_now(
+    app: tauri::AppHandle,
     orchestrator: State<'_, Arc<SyncOrchestrator>>,
+    scheduler: State<'_, Arc<SyncScheduler>>,
 ) -> CommandResult<CompactionReport> {
     // Borrow the adapter handle for the duration of the compaction.
     // If none is configured, fail fast with a clear code rather than
@@ -733,11 +735,18 @@ pub async fn compact_now(
             }
         }
     };
-    orchestrator
+    let started = std::time::Instant::now();
+    let result = orchestrator
         .compactor()
         .compact_now(adapter.as_ref())
-        .await
-        .map_err(sync_err)
+        .await;
+    let duration_ms =
+        u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+    // §19.10 — surface the outcome in the Protokoll regardless of
+    // success/failure so the user has an audit trail of every
+    // compaction run. Mirrors the manual-sync_now bookkeeping.
+    scheduler.record_compaction_outcome(&app, &result, duration_ms);
+    result.map_err(sync_err)
 }
 
 /// Test the supplied adapter config end-to-end without committing

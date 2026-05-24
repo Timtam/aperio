@@ -160,12 +160,15 @@ function ProtocolRow({
         return t('dialogs.settings.sync.protocolTriggerAppStart');
       case 'app_exit':
         return t('dialogs.settings.sync.protocolTriggerAppExit');
+      case 'compaction':
+        return t('dialogs.settings.sync.protocolTriggerCompaction');
       default:
         // Forward-compat: an unknown trigger from a newer
         // backend renders verbatim so we don't hide info.
         return entry.trigger;
     }
   })();
+  const isCompaction = entry.trigger === 'compaction';
   const timestamp = (() => {
     try {
       return fmt.format(new Date(entry.recorded_at), 'PPpp');
@@ -173,21 +176,37 @@ function ProtocolRow({
       return entry.recorded_at;
     }
   })();
-  const summary = entry.success
-    ? t('dialogs.settings.sync.protocolSummarySuccess', {
-        pushed: entry.pushed_logs ?? 0,
-        fetched: entry.fetched_logs ?? 0,
-        applied: entry.applied ?? 0,
-      })
-    : t('dialogs.settings.sync.protocolSummaryFailure', {
+  // Compaction rows surface a different summary — there are no
+  // pushed/fetched counters for them, and `applied` carries the
+  // "deleted logs" count instead of "events applied". The
+  // backend writes both shapes via the same sync_log table so
+  // we branch here on `trigger` to render an honest label.
+  const summary = (() => {
+    if (!entry.success) {
+      return t('dialogs.settings.sync.protocolSummaryFailure', {
         error: entry.error ?? '?',
       });
+    }
+    if (isCompaction) {
+      return t('dialogs.settings.sync.protocolSummaryCompaction', {
+        deleted: entry.applied ?? 0,
+      });
+    }
+    return t('dialogs.settings.sync.protocolSummarySuccess', {
+      pushed: entry.pushed_logs ?? 0,
+      fetched: entry.fetched_logs ?? 0,
+      applied: entry.applied ?? 0,
+    });
+  })();
 
   return (
     <li
-      className={`sync-panel__protocol-row sync-panel__protocol-row--${
-        entry.success ? 'ok' : 'fail'
-      }`}
+      className={
+        `sync-panel__protocol-row sync-panel__protocol-row--${
+          entry.success ? 'ok' : 'fail'
+        }` +
+        (isCompaction ? ' sync-panel__protocol-row--compaction' : '')
+      }
     >
       <span aria-hidden="true" className="sync-panel__protocol-glyph">
         {entry.success ? '✓' : '✗'}

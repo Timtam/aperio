@@ -369,6 +369,78 @@ impl SyncScheduler {
         self.write_sync_log(app, trigger, result, duration_ms);
     }
 
+    /// §19.10 — record a compaction outcome in the Protokoll so
+    /// the user can see when log files were GCed (and how many).
+    /// The `applied` column carries the deleted-log count for the
+    /// Protokoll viewer to surface as "N old logs removed";
+    /// `failed_deletes > 0` flags the row as partially-failed so
+    /// the user notices something didn't tear down.
+    ///
+    /// Called from both the manual `compact_now` Tauri command
+    /// path and the auto-compaction hook inside a sync round —
+    /// both produce a single row in the protocol so the user has
+    /// the same audit trail regardless of how compaction was
+    /// triggered.
+    pub fn record_compaction_outcome<R: Runtime>(
+        &self,
+        app: &AppHandle<R>,
+        result: &Result<crate::event_log::CompactionReport, sync_core::SyncError>,
+        duration_ms: u64,
+    ) {
+        let (success, counters, error) = match result {
+            Ok(report) => {
+                let success = report.failed_deletes == 0;
+                let error = if success {
+                    None
+                } else {
+                    Some(format!(
+                        "{} of {} log deletions failed",
+                        report.failed_deletes,
+                        report.deleted_logs + report.failed_deletes,
+                    ))
+                };
+                (
+                    success,
+                    SyncLogCounters {
+                        // No push / fetch on compaction — the
+                        // operation works against the existing
+                        // remote files. Keep these `None` so the
+                        // Protokoll view can render "N old logs
+                        // removed" without confusing the user
+                        // with bogus push/fetch counts.
+                        pushed_logs: None,
+                        fetched_logs: None,
+                        applied: Some(
+                            u32::try_from(report.deleted_logs)
+                                .unwrap_or(u32::MAX),
+                        ),
+                        conflicts: None,
+                    },
+                    error,
+                )
+            }
+            Err(err) => (
+                false,
+                SyncLogCounters::default(),
+                Some(err.to_string()),
+            ),
+        };
+        let repo = SyncLogRepo::new(&self.db);
+        if let Err(err) = repo.record(
+            SyncTrigger::Compaction,
+            success,
+            &counters,
+            Some(duration_ms),
+            error.as_deref(),
+        ) {
+            warn!(?err, "couldn't persist compaction sync_log entry");
+            return;
+        }
+        if let Err(err) = app.emit("sync-log-changed", ()) {
+            warn!(?err, "failed to emit sync-log-changed after compaction");
+        }
+    }
+
     /// Bump the consecutive-failures counter; caps at u32::MAX (we
     /// only ever use the value to compute `1 << min(n, cap)` so the
     /// raw size doesn't matter beyond the backoff cap).

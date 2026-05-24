@@ -53,6 +53,14 @@ pub enum SyncTrigger {
     Manual,
     /// Final push on `RunEvent::ExitRequested`.
     AppExit,
+    /// Snapshot + log compaction ran (DESIGN.md §19.10). The
+    /// resulting row's `applied` column carries the deleted-log
+    /// count so the Protokoll viewer can render "N old logs
+    /// removed" alongside the regular sync rounds. Compaction
+    /// runs from two places — the manual `compact_now` command
+    /// and the auto-trigger inside a sync round — and both
+    /// land here.
+    Compaction,
 }
 
 impl SyncTrigger {
@@ -63,6 +71,7 @@ impl SyncTrigger {
             SyncTrigger::Kick => "kick",
             SyncTrigger::Manual => "manual",
             SyncTrigger::AppExit => "app_exit",
+            SyncTrigger::Compaction => "compaction",
         }
     }
 }
