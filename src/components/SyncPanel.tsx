@@ -24,6 +24,7 @@ import {
 import { useDateFormat } from '../intl/dateFormat';
 import { useDialogState } from '../state/DialogState';
 import { useSync } from '../state/useSync';
+import { SyncProtocolSection } from './SyncProtocolSection';
 import { SyncSftpTrustDialog } from './SyncSftpTrustDialog';
 
 /**
@@ -64,6 +65,7 @@ export function SyncPanel() {
   const adapterHeadingId = useId();
   const intervalHeadingId = useId();
   const previewHeadingId = useId();
+  const protocolHeadingId = useId();
 
   // Adapter draft state. Seeded from current backend state on mount
   // so the inputs reflect the persisted choice.
@@ -1149,6 +1151,10 @@ export function SyncPanel() {
           )}
         </section>
       )}
+      {/* §19.9 detailed Sync-Protokoll. Always rendered (no
+          gating on `configured`) so users can still see the
+          history of past attempts after a disconnect. */}
+      <SyncProtocolSection headingId={protocolHeadingId} />
       <SyncSftpTrustDialog
         isOpen={trustPreview !== null}
         preview={trustPreview}

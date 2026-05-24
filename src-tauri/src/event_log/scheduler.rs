@@ -48,15 +48,17 @@
 //! - **Snapshot generation.** Phase Sg.
 
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
+use sync_core::SyncResult;
 use tauri::{AppHandle, Emitter, Runtime};
 use tokio::sync::Notify;
 use tracing::{debug, info, warn};
 
 use crate::db::SharedConn;
 use crate::event_log::{SyncOrchestrator, SyncRoundReport, SyncStatus};
+use crate::sync_log::{SyncLogCounters, SyncLogRepo, SyncTrigger};
 use crate::user_prefs::UserPrefsRepo;
 
 /// `user_prefs` key for the configurable polling interval, in minutes.
@@ -175,7 +177,7 @@ impl SyncScheduler {
             }
             if worker.orchestrator.status().configured {
                 info!("running app-start sync round");
-                worker.run_round(&app).await;
+                worker.run_round(&app, SyncTrigger::AppStart).await;
             } else {
                 debug!("app-start sync skipped — no adapter configured");
             }
@@ -196,7 +198,7 @@ impl SyncScheduler {
                             continue;
                         }
                         debug!(?interval, "periodic sync tick");
-                        worker.run_round(&app).await;
+                        worker.run_round(&app, SyncTrigger::Periodic).await;
                     }
                     _ = worker.kick.notified() => {
                         // Debounce. Sleep a short window, draining
@@ -210,7 +212,7 @@ impl SyncScheduler {
                             continue;
                         }
                         debug!("mutation-triggered sync round");
-                        worker.run_round(&app).await;
+                        worker.run_round(&app, SyncTrigger::Kick).await;
                     }
                 }
             }
@@ -228,9 +230,23 @@ impl SyncScheduler {
     /// orchestrator's "AlreadyRunning" rejection (returned when the
     /// in-flight guard is held) is NOT counted as a failure — it
     /// just means another round is already covering us.
-    async fn run_round<R: Runtime>(&self, app: &AppHandle<R>) {
+    ///
+    /// Also appends one row to the §19.9 Sync-Protokoll table —
+    /// the Settings → Synchronisation → Protokoll list reads from
+    /// there. `trigger` tags WHY this round ran so the user can
+    /// filter manual / periodic / startup attempts apart in the
+    /// rare bug-report scenario where it matters.
+    async fn run_round<R: Runtime>(
+        &self,
+        app: &AppHandle<R>,
+        trigger: SyncTrigger,
+    ) {
         self.emit_status(app, None, None);
-        match self.orchestrator.sync_now().await {
+        let started = Instant::now();
+        let result = self.orchestrator.sync_now().await;
+        let duration_ms = u64::try_from(started.elapsed().as_millis())
+            .unwrap_or(u64::MAX);
+        match &result {
             Ok(report) => {
                 info!(
                     pushed = report.pushed_logs,
@@ -239,7 +255,7 @@ impl SyncScheduler {
                     "scheduled sync round completed",
                 );
                 self.reset_failures();
-                self.emit_status(app, Some(report), None);
+                self.emit_status(app, Some(report.clone()), None);
             }
             Err(err) => {
                 warn!(?err, "scheduled sync round failed");
@@ -252,6 +268,73 @@ impl SyncScheduler {
                 self.emit_status(app, None, Some(err.to_string()));
             }
         }
+        self.write_sync_log(app, trigger, &result, duration_ms);
+    }
+
+    /// Append one row to the §19.9 sync_log table + emit a
+    /// `sync-log-changed` event so the Protokoll component in
+    /// Settings refreshes without polling.
+    ///
+    /// Exposed via [`Self::record_manual_outcome`] so the manual
+    /// `sync_now` Tauri command + the app-exit `push_now` path
+    /// (which run through the orchestrator directly, not via the
+    /// scheduler loop) can also contribute to the protocol.
+    fn write_sync_log<R: Runtime>(
+        &self,
+        app: &AppHandle<R>,
+        trigger: SyncTrigger,
+        result: &SyncResult<SyncRoundReport>,
+        duration_ms: u64,
+    ) {
+        let (success, counters, error) = match result {
+            Ok(report) => (
+                true,
+                SyncLogCounters {
+                    pushed_logs: Some(u32::try_from(report.pushed_logs).unwrap_or(u32::MAX)),
+                    fetched_logs: Some(u32::try_from(report.fetched_logs).unwrap_or(u32::MAX)),
+                    applied: Some(u32::try_from(report.applied).unwrap_or(u32::MAX)),
+                    conflicts: None,
+                },
+                None,
+            ),
+            Err(err) => (false, SyncLogCounters::default(), Some(err.to_string())),
+        };
+        let repo = SyncLogRepo::new(&self.db);
+        if let Err(err) = repo.record(
+            trigger,
+            success,
+            &counters,
+            Some(duration_ms),
+            error.as_deref(),
+        ) {
+            // Persisting the protocol entry is best-effort; we
+            // already emitted `sync-status` so the user sees the
+            // outcome. Silently swallowing a sqlite hiccup beats
+            // crashing the scheduler loop.
+            warn!(?err, "couldn't persist sync_log entry");
+            return;
+        }
+        // Frontend listens for `sync-log-changed` to refresh the
+        // Protokoll list. No payload needed — the listener
+        // re-fetches via `list_sync_log_entries`.
+        if let Err(err) = app.emit("sync-log-changed", ()) {
+            warn!(?err, "failed to emit sync-log-changed event");
+        }
+    }
+
+    /// Public counterpart of [`Self::write_sync_log`] for the
+    /// manual `sync_now` Tauri command + the app-exit push path.
+    /// The scheduler loop uses `write_sync_log` directly; callers
+    /// that don't go through the loop call this so their outcome
+    /// still shows up in the Settings Protokoll.
+    pub fn record_manual_outcome<R: Runtime>(
+        &self,
+        app: &AppHandle<R>,
+        trigger: SyncTrigger,
+        result: &SyncResult<SyncRoundReport>,
+        duration_ms: u64,
+    ) {
+        self.write_sync_log(app, trigger, result, duration_ms);
     }
 
     /// Bump the consecutive-failures counter; caps at u32::MAX (we

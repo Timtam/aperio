@@ -903,6 +903,40 @@ export const resolveSyncConflict = (
   choice: SyncResolutionChoice,
 ) => invoke<void>('resolve_sync_conflict', { id, choice });
 
+// ── Sync protocol (§19.9 detailed history) ──
+
+/** One row of the §19.9 Sync-Protokoll. Successful rounds
+ *  carry the counter fields populated; failures carry
+ *  `error` instead. */
+export interface SyncLogEntry {
+  id: number;
+  /** RFC 3339 timestamp the scheduler recorded. */
+  recorded_at: string;
+  /** Why this round ran. One of:
+   *  `app_start` | `periodic` | `kick` | `manual` | `app_exit`. */
+  trigger: string;
+  success: boolean;
+  pushed_logs: number | null;
+  fetched_logs: number | null;
+  applied: number | null;
+  conflicts: number | null;
+  /** Wall-clock duration in milliseconds. */
+  duration_ms: number | null;
+  /** Set on `success = false`. Free-form error string. */
+  error: string | null;
+}
+
+/** Read recent sync rounds from the protocol table, newest first.
+ *  `limit` caps the returned set; values above the backend's
+ *  retention ceiling (200 rows) are silently clamped. */
+export const listSyncLogEntries = (limit?: number) =>
+  invoke<SyncLogEntry[]>('list_sync_log_entries', {
+    limit: limit ?? null,
+  });
+
+/** Drop every row from the protocol table. */
+export const clearSyncLog = () => invoke<void>('clear_sync_log');
+
 // ── SFTP host-key trust dialog (§19.5) ──
 
 /** Snapshot returned by `previewSftpHostKey`. The frontend uses

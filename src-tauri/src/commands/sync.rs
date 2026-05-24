@@ -52,6 +52,7 @@ use crate::event_log::{
 };
 use crate::secrets::{self, SecretSlot};
 use crate::sftp_host_keys::UserPrefsHostKeyVerifier;
+use crate::sync_log::{SyncLogEntry, SyncLogRepo, MAX_LOG_ROWS};
 use crate::user_prefs::UserPrefsRepo;
 
 /// `user_prefs` key naming the currently-configured adapter
@@ -645,12 +646,26 @@ pub async fn set_sync_interval(
 /// so a user who clicks "Sync now" after a transient hiccup is
 /// out of the warning state immediately, not on the next
 /// periodic tick.
+///
+/// Records the outcome in the §19.9 Sync-Protokoll so manual
+/// triggers show up alongside periodic ones in the Settings
+/// history list.
 #[tauri::command]
 pub async fn sync_now(
+    app: tauri::AppHandle,
     orchestrator: State<'_, Arc<SyncOrchestrator>>,
     scheduler: State<'_, Arc<SyncScheduler>>,
 ) -> CommandResult<SyncRoundReport> {
-    let report = orchestrator.sync_now().await.map_err(sync_err)?;
+    let started = std::time::Instant::now();
+    let result = orchestrator.sync_now().await;
+    let duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+    scheduler.record_manual_outcome(
+        &app,
+        crate::sync_log::SyncTrigger::Manual,
+        &result,
+        duration_ms,
+    );
+    let report = result.map_err(sync_err)?;
     scheduler.note_success();
     Ok(report)
 }
@@ -1107,6 +1122,41 @@ pub async fn trust_sftp_host_key(
     let verifier = UserPrefsHostKeyVerifier::new(shared);
     verifier.record(trimmed_host_port, trimmed_fp);
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Phase Sm follow-up — §19.9 "Detailliertes Sync-Protokoll".
+// ---------------------------------------------------------------------------
+
+/// Read recent sync rounds from the `sync_log` table, newest
+/// first. `limit` caps the returned set; values above the
+/// retention ceiling are silently clamped (no error — the user
+/// just gets whatever's in the table).
+///
+/// The Settings → Synchronisation → Protokoll list calls this
+/// on mount and on every `sync-log-changed` event the scheduler
+/// emits after a round.
+#[tauri::command]
+pub async fn list_sync_log_entries(
+    db: State<'_, DbHandle>,
+    limit: Option<u32>,
+) -> CommandResult<Vec<SyncLogEntry>> {
+    let shared = db.shared();
+    let repo = SyncLogRepo::new(&shared);
+    // Default to the full retention cap; the table prunes itself
+    // so this is the natural upper bound.
+    let n = limit.unwrap_or(MAX_LOG_ROWS).min(MAX_LOG_ROWS);
+    repo.list(n).map_err(internal)
+}
+
+/// Drop every row from `sync_log`. The Protokoll component's
+/// "Verlauf leeren" button calls this when the user wants to
+/// scrub history before sharing a screen recording / bug report.
+#[tauri::command]
+pub async fn clear_sync_log(db: State<'_, DbHandle>) -> CommandResult<()> {
+    let shared = db.shared();
+    let repo = SyncLogRepo::new(&shared);
+    repo.clear().map_err(internal)
 }
 
 /// Drop the pinned fingerprint for a host_port. Used by the

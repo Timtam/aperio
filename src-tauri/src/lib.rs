@@ -17,6 +17,7 @@ pub mod registry;
 pub mod reminders;
 pub mod secrets;
 pub mod sftp_host_keys;
+pub mod sync_log;
 pub mod user_prefs;
 
 pub use db::{DbError, DbHandle, DbResult, SharedConn};
@@ -302,6 +303,11 @@ pub fn run() {
             commands::trust_sftp_host_key,
             commands::forget_sftp_host_key,
             commands::get_pinned_sftp_host_key,
+            // Phase Sm follow-up (DESIGN.md §19.9): the detailed
+            // sync protocol. `list_sync_log_entries` reads the
+            // history, `clear_sync_log` scrubs it.
+            commands::list_sync_log_entries,
+            commands::clear_sync_log,
         ])
         .setup(move |app| {
             // Spawn the reminder scheduler on the Tauri/tokio runtime
