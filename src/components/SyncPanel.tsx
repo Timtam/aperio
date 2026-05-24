@@ -77,6 +77,14 @@ export function SyncPanel() {
   const [sftpUserDraft, setSftpUserDraft] = useState('');
   const [sftpPathDraft, setSftpPathDraft] = useState('');
   const [sftpPasswordDraft, setSftpPasswordDraft] = useState('');
+  // Phase Sm-2: auth method radio + SSH-key fields. Password is
+  // the default. The two key inputs only render when
+  // `sftpAuthDraft === 'key'`.
+  const [sftpAuthDraft, setSftpAuthDraft] = useState<'password' | 'key'>(
+    'password',
+  );
+  const [sftpKeyPathDraft, setSftpKeyPathDraft] = useState('');
+  const [sftpKeyPassphraseDraft, setSftpKeyPassphraseDraft] = useState('');
   // Phase Sk: E2E passphrase. Two roles depending on the
   // onboarding branch:
   //   - `adopt_local` with non-empty value → mints a fresh dataset
@@ -109,6 +117,16 @@ export function SyncPanel() {
       if (isCommandError(err)) {
         switch (err.code) {
           case 'auth':
+            // SFTP host-key mismatch is surfaced as `auth` with a
+            // distinctive message prefix — promote it to a
+            // dedicated warning so the user sees the §19.5
+            // verify-out-of-band guidance instead of a generic
+            // "auth failed" string.
+            if (err.message.includes('host key mismatch')) {
+              return t(
+                'dialogs.settings.sync.adapterSftpHostKeyMismatch',
+              );
+            }
             return t('dialogs.settings.sync.errorAuth');
           case 'io':
             return t('dialogs.settings.sync.errorIo');
@@ -153,7 +171,20 @@ export function SyncPanel() {
         port: Number.isFinite(port) && port > 0 ? port : 22,
         user: sftpUserDraft.trim(),
         path: sftpPathDraft.trim(),
-        password: sftpPasswordDraft.trim() || null,
+        auth_method: sftpAuthDraft,
+        // Only one side of the password vs key fields is
+        // populated per round-trip; the unused fields go as
+        // null. The backend ignores the inactive side.
+        password:
+          sftpAuthDraft === 'password'
+            ? sftpPasswordDraft.trim() || null
+            : null,
+        key_path:
+          sftpAuthDraft === 'key' ? sftpKeyPathDraft.trim() || null : null,
+        key_passphrase:
+          sftpAuthDraft === 'key'
+            ? sftpKeyPassphraseDraft.trim() || null
+            : null,
       };
     }
     return { kind: 'none' };
@@ -168,6 +199,9 @@ export function SyncPanel() {
     sftpUserDraft,
     sftpPathDraft,
     sftpPasswordDraft,
+    sftpAuthDraft,
+    sftpKeyPathDraft,
+    sftpKeyPassphraseDraft,
   ]);
 
   // Validation: the Connect button needs a path for `local`, a URL +
@@ -178,11 +212,20 @@ export function SyncPanel() {
     if (kindDraft === 'local') return !pathDraft.trim();
     if (kindDraft === 'webdav') return !urlDraft.trim() || !userDraft.trim();
     if (kindDraft === 'sftp') {
-      return (
+      if (
         !sftpHostDraft.trim() ||
         !sftpUserDraft.trim() ||
         !sftpPathDraft.trim()
-      );
+      ) {
+        return true;
+      }
+      // Key auth needs a path on first connect; subsequent edits
+      // reuse the previously-saved path so the empty-but-
+      // configured case stays valid.
+      if (sftpAuthDraft === 'key' && !sftpKeyPathDraft.trim() && !status?.configured) {
+        return true;
+      }
+      return false;
     }
     return false;
   })();
@@ -220,7 +263,10 @@ export function SyncPanel() {
       // don't sit in memory longer than necessary. The keychain
       // entry is the canonical store from this point on.
       if (kindDraft === 'webdav') setPasswordDraft('');
-      if (kindDraft === 'sftp') setSftpPasswordDraft('');
+      if (kindDraft === 'sftp') {
+        setSftpPasswordDraft('');
+        setSftpKeyPassphraseDraft('');
+      }
     } catch (err) {
       // eslint-disable-next-line no-console
       console.warn('configure_sync_adapter failed', err);
@@ -626,25 +672,101 @@ export function SyncPanel() {
                 {t('dialogs.settings.sync.adapterSftpPathHint')}
               </p>
             </div>
-            <div className="sync-panel__field">
+            <fieldset className="sync-panel__field sync-panel__authmethod">
+              <legend>
+                {t('dialogs.settings.sync.adapterSftpAuthMethod')}
+              </legend>
               <label>
-                {t('dialogs.settings.sync.adapterSftpPassword')}
                 <input
-                  type="password"
-                  value={sftpPasswordDraft}
-                  onChange={(e) => setSftpPasswordDraft(e.target.value)}
-                  autoComplete="new-password"
-                  placeholder={
-                    status?.configured
-                      ? t('dialogs.settings.sync.adapterWebdavPasswordKept')
-                      : undefined
-                  }
-                />
+                  type="radio"
+                  name="sftp-auth"
+                  value="password"
+                  checked={sftpAuthDraft === 'password'}
+                  onChange={() => setSftpAuthDraft('password')}
+                />{' '}
+                {t('dialogs.settings.sync.adapterSftpAuthPassword')}
               </label>
-              <p className="sync-panel__hint">
-                {t('dialogs.settings.sync.adapterSftpPasswordHint')}
-              </p>
-            </div>
+              <label>
+                <input
+                  type="radio"
+                  name="sftp-auth"
+                  value="key"
+                  checked={sftpAuthDraft === 'key'}
+                  onChange={() => setSftpAuthDraft('key')}
+                />{' '}
+                {t('dialogs.settings.sync.adapterSftpAuthKey')}
+              </label>
+            </fieldset>
+            {sftpAuthDraft === 'password' && (
+              <div className="sync-panel__field">
+                <label>
+                  {t('dialogs.settings.sync.adapterSftpPassword')}
+                  <input
+                    type="password"
+                    value={sftpPasswordDraft}
+                    onChange={(e) =>
+                      setSftpPasswordDraft(e.target.value)
+                    }
+                    autoComplete="new-password"
+                    placeholder={
+                      status?.configured
+                        ? t(
+                            'dialogs.settings.sync.adapterWebdavPasswordKept',
+                          )
+                        : undefined
+                    }
+                  />
+                </label>
+                <p className="sync-panel__hint">
+                  {t('dialogs.settings.sync.adapterSftpPasswordHint')}
+                </p>
+              </div>
+            )}
+            {sftpAuthDraft === 'key' && (
+              <>
+                <div className="sync-panel__field">
+                  <label>
+                    {t('dialogs.settings.sync.adapterSftpKeyPath')}
+                    <input
+                      type="text"
+                      value={sftpKeyPathDraft}
+                      onChange={(e) =>
+                        setSftpKeyPathDraft(e.target.value)
+                      }
+                      placeholder="/home/alice/.ssh/id_ed25519"
+                    />
+                  </label>
+                  <p className="sync-panel__hint">
+                    {t('dialogs.settings.sync.adapterSftpKeyPathHint')}
+                  </p>
+                </div>
+                <div className="sync-panel__field">
+                  <label>
+                    {t('dialogs.settings.sync.adapterSftpKeyPassphrase')}
+                    <input
+                      type="password"
+                      value={sftpKeyPassphraseDraft}
+                      onChange={(e) =>
+                        setSftpKeyPassphraseDraft(e.target.value)
+                      }
+                      autoComplete="new-password"
+                      placeholder={
+                        status?.configured
+                          ? t(
+                              'dialogs.settings.sync.adapterWebdavPasswordKept',
+                            )
+                          : undefined
+                      }
+                    />
+                  </label>
+                  <p className="sync-panel__hint">
+                    {t(
+                      'dialogs.settings.sync.adapterSftpKeyPassphraseHint',
+                    )}
+                  </p>
+                </div>
+              </>
+            )}
           </>
         )}
         <div className="sync-panel__actions">

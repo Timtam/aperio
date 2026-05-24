@@ -25,26 +25,37 @@
 //! actual transfer. We can switch to a long-lived pooled
 //! connection later if profiling shows it matters.
 //!
-//! ## Host-key verification (v1 contract)
+//! ## Host-key verification (TOFU)
 //!
-//! `ClientHandler::check_server_key` accepts **any** host key.
-//! That's the lowest-friction path for v1 and matches how most
-//! WebDAV / FTPS setups work (TLS cert pinning is also opt-in).
-//! A Phase-Sm follow-up wires a TOFU (trust-on-first-use) prompt
-//! that stores the fingerprint in `user_prefs` and rejects
-//! changes.
+//! `ClientHandler::check_server_key` consults a
+//! [`HostKeyVerifier`] supplied by the caller. The convention is
+//! trust-on-first-use:
+//!
+//! - **Unknown host**: first connect ever to this host:port —
+//!   accept + remember the fingerprint.
+//! - **Known and matching**: accept silently.
+//! - **Known and mismatching**: reject the handshake.
+//!   `connect()` translates the russh disconnect into a
+//!   [`SyncError::Auth`] with a "host key changed" message; the
+//!   command layer surfaces it to the user via a distinct error
+//!   code so the Settings panel can render the §19.5 "verify
+//!   the server identity out-of-band" warning instead of a
+//!   generic auth failure.
+//!
+//! The [`InMemoryHostKeyVerifier`] is the test fixture; the
+//! production [`UserPrefsHostKeyVerifier`] lives in `src-tauri`
+//! against the `user_prefs.sync.adapter.sftp.knownHosts.*` keys.
 //!
 //! ## Auth
 //!
-//! v1 supports **password** auth only. SSH key files (PEM or
-//! OpenSSH format, with or without passphrase) land in a follow-
-//! up — the russh API already exposes `authenticate_publickey`,
-//! but the UX of picking + storing a key file is its own scope.
+//! Two methods supported:
+//!
+//! - [`SftpAuth::Password { password }`]
+//! - [`SftpAuth::PrivateKey { path, passphrase }`] — PEM or
+//!   OpenSSH-format private key, with optional passphrase.
 //!
 //! ## What this crate does NOT do
 //!
-//! - **TOFU host-key pinning.** v1 accepts any key.
-//! - **SSH-key authentication.** v1 password-only.
 //! - **Connection pooling.** v1 per-operation connect.
 //! - **Resume / partial uploads.** Each write is one round-trip;
 //!   meta.json + snapshot.json use atomic write-temp + rename so
@@ -53,12 +64,12 @@
 //!   name, so a partial write is retried naturally by the
 //!   scheduler picking up the same pending file.
 
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use russh::client::{self, Handle};
-use russh::keys::ssh_key::PublicKey;
+use russh::keys::ssh_key::{Algorithm, HashAlg, PublicKey};
 use russh_sftp::client::SftpSession;
 use russh_sftp::protocol::OpenFlags;
 use sync_core::{
@@ -67,6 +78,115 @@ use sync_core::{
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tracing::{debug, warn};
+
+// ─────────────────────────────────────────────────────────────────
+// Auth + host-key verifier types
+// ─────────────────────────────────────────────────────────────────
+
+/// Authentication method the adapter uses against the SSH server.
+///
+/// `Password` and `PrivateKey` cover the two cases v1 supports.
+/// Future variants (agent forwarding, hardware key) can extend
+/// this enum without changing the trait surface.
+#[derive(Debug, Clone)]
+pub enum SftpAuth {
+    Password { password: String },
+    PrivateKey {
+        /// Absolute path to a PEM or OpenSSH-format private key
+        /// file. We don't keep the key material itself in memory
+        /// until the connect path actually reads it — protects
+        /// against accidental serialisation.
+        path: PathBuf,
+        /// Optional passphrase for an encrypted key. `None` for
+        /// unencrypted keys; an empty string is treated as `None`.
+        passphrase: Option<String>,
+    },
+}
+
+/// Decision returned by a [`HostKeyVerifier`] for a server-
+/// presented public key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HostKeyDecision {
+    /// First contact with this host — record + accept.
+    AcceptAndRemember,
+    /// Known host with matching fingerprint — accept silently.
+    Accept,
+    /// Known host but the fingerprint changed since last connect.
+    /// Includes both the stored + presented forms so the
+    /// surfaced error can show them to the user.
+    Mismatch {
+        stored: String,
+        presented: String,
+    },
+}
+
+/// Decides whether to accept a server's host key.
+///
+/// Implementors are called from inside the SSH handshake, so
+/// they MUST be cheap + non-blocking. The default
+/// [`InMemoryHostKeyVerifier`] is fine for tests; the production
+/// `UserPrefsHostKeyVerifier` reads + writes `user_prefs` from
+/// `src-tauri`.
+///
+/// `host_port` is the `"host:port"` string used as the lookup
+/// key; the verifier doesn't need to parse it. `fingerprint` is
+/// the standard SHA-256 fingerprint of the server's public key
+/// (`SHA256:<base64>` form per ssh-keygen).
+pub trait HostKeyVerifier: Send + Sync + std::fmt::Debug {
+    /// Look up the stored fingerprint for `host_port`. Returns
+    /// the appropriate [`HostKeyDecision`] but does NOT commit
+    /// the AcceptAndRemember case — that's `record`'s job, so a
+    /// caller that wants to dry-run the verification can do so.
+    fn verify(&self, host_port: &str, fingerprint: &str) -> HostKeyDecision;
+    /// Commit a TOFU acceptance — called after a successful
+    /// handshake for hosts we just learned. Implementations that
+    /// already write through in `verify` can no-op here.
+    fn record(&self, host_port: &str, fingerprint: &str);
+}
+
+/// In-memory implementation for tests. Stores known hosts in a
+/// `Mutex<HashMap>`; not persisted anywhere.
+#[derive(Debug, Default)]
+pub struct InMemoryHostKeyVerifier {
+    known: Mutex<std::collections::HashMap<String, String>>,
+}
+
+impl InMemoryHostKeyVerifier {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Pre-seed a known fingerprint — handy for tests that want
+    /// to assert the mismatch path.
+    pub fn with_known(host_port: &str, fingerprint: &str) -> Self {
+        let mut map = std::collections::HashMap::new();
+        map.insert(host_port.to_string(), fingerprint.to_string());
+        Self {
+            known: Mutex::new(map),
+        }
+    }
+}
+
+impl HostKeyVerifier for InMemoryHostKeyVerifier {
+    fn verify(&self, host_port: &str, fingerprint: &str) -> HostKeyDecision {
+        let known = self.known.lock().expect("known-hosts mutex poison");
+        match known.get(host_port) {
+            None => HostKeyDecision::AcceptAndRemember,
+            Some(stored) if stored == fingerprint => HostKeyDecision::Accept,
+            Some(stored) => HostKeyDecision::Mismatch {
+                stored: stored.clone(),
+                presented: fingerprint.to_string(),
+            },
+        }
+    }
+
+    fn record(&self, host_port: &str, fingerprint: &str) {
+        self.known
+            .lock()
+            .expect("known-hosts mutex poison")
+            .insert(host_port.to_string(), fingerprint.to_string());
+    }
+}
 
 /// SFTP adapter configuration.
 ///
@@ -79,8 +199,12 @@ pub struct SftpSyncAdapter {
     host: String,
     port: u16,
     user: String,
-    password: String,
+    auth: SftpAuth,
     base_path: PathBuf,
+    /// Verifier consulted on every handshake. The default is an
+    /// in-memory store; production wires a `UserPrefsHostKeyVerifier`
+    /// so the TOFU pinning survives restarts.
+    host_key_verifier: Arc<dyn HostKeyVerifier>,
 }
 
 impl SftpSyncAdapter {
@@ -88,16 +212,40 @@ impl SftpSyncAdapter {
         host: impl Into<String>,
         port: u16,
         user: impl Into<String>,
-        password: impl Into<String>,
+        auth: SftpAuth,
         base_path: impl Into<PathBuf>,
+        host_key_verifier: Arc<dyn HostKeyVerifier>,
     ) -> Self {
         Self {
             host: host.into(),
             port,
             user: user.into(),
-            password: password.into(),
+            auth,
             base_path: base_path.into(),
+            host_key_verifier,
         }
+    }
+
+    /// Convenience constructor for password auth with the
+    /// in-memory verifier — used by tests and downstream code
+    /// that doesn't need persistent host-key pinning.
+    pub fn new_password(
+        host: impl Into<String>,
+        port: u16,
+        user: impl Into<String>,
+        password: impl Into<String>,
+        base_path: impl Into<PathBuf>,
+    ) -> Self {
+        Self::new(
+            host,
+            port,
+            user,
+            SftpAuth::Password {
+                password: password.into(),
+            },
+            base_path,
+            Arc::new(InMemoryHostKeyVerifier::new()),
+        )
     }
 
     /// Borrow the configured base path. Used by Settings for the
@@ -130,23 +278,114 @@ impl SftpSyncAdapter {
     /// caller keeps the handle alive — dropping the handle while
     /// using the session aborts mid-operation.
     async fn connect(&self) -> SyncResult<(Handle<ClientHandler>, SftpSession)> {
+        // The handler captures a shared side-channel slot for
+        // verdicts. `check_server_key` writes the verifier's
+        // [`HostKeyDecision`] (plus the observed fingerprint)
+        // into the slot, then returns `false` for `Mismatch` so
+        // russh aborts the handshake cleanly; for the two accept
+        // variants it returns `true`. We read the slot after the
+        // handshake to decide whether to commit a TOFU record.
+        let outcome = Arc::new(Mutex::new(None::<HandshakeOutcome>));
+        let host_port = format!("{}:{}", self.host, self.port);
+        let handler = ClientHandler {
+            verifier: Arc::clone(&self.host_key_verifier),
+            host_port: host_port.clone(),
+            outcome: Arc::clone(&outcome),
+        };
         let config = Arc::new(client::Config::default());
-        let mut handle = client::connect(
+        let connect_result = client::connect(
             config,
             (self.host.as_str(), self.port),
-            ClientHandler,
+            handler,
         )
-        .await
-        .map_err(|err| SyncError::network(format!("ssh connect: {err}")))?;
-        let authed = handle
-            .authenticate_password(self.user.as_str(), self.password.as_str())
-            .await
-            .map_err(|err| SyncError::auth(format!("ssh auth: {err}")))?;
-        if !authed.success() {
-            return Err(SyncError::auth(
-                "SSH password authentication rejected by server",
-            ));
+        .await;
+
+        // Inspect the side channel BEFORE the connect error is
+        // surfaced — a mismatch verdict beats a generic russh
+        // disconnect message.
+        let recorded_outcome =
+            outcome.lock().expect("handshake outcome poison").take();
+        let mut handle = match connect_result {
+            Ok(h) => h,
+            Err(err) => {
+                if let Some(HandshakeOutcome {
+                    decision:
+                        HostKeyDecision::Mismatch { stored, presented },
+                    ..
+                }) = recorded_outcome
+                {
+                    return Err(SyncError::auth(format!(
+                        "host key mismatch — stored {stored}, server \
+                         presented {presented}; verify the server \
+                         out-of-band before re-connecting",
+                    )));
+                }
+                return Err(SyncError::network(format!(
+                    "ssh connect: {err}",
+                )));
+            }
+        };
+
+        // Authenticate. The auth call is allowed to fail with
+        // server-side rejection (wrong password / key not in
+        // authorized_keys); both map to `SyncError::Auth`.
+        match &self.auth {
+            SftpAuth::Password { password } => {
+                let authed = handle
+                    .authenticate_password(self.user.as_str(), password)
+                    .await
+                    .map_err(|err| {
+                        SyncError::auth(format!("ssh auth: {err}"))
+                    })?;
+                if !authed.success() {
+                    return Err(SyncError::auth(
+                        "SSH password authentication rejected by server",
+                    ));
+                }
+            }
+            SftpAuth::PrivateKey { path, passphrase } => {
+                let key = load_private_key(path, passphrase.as_deref())?;
+                // Pick the hash algorithm. RSA needs an explicit
+                // SHA-256/SHA-512 (`Some(...)`); modern Ed25519 /
+                // ECDSA keys return `None` which signals "use
+                // whatever the algorithm naturally hashes with".
+                //
+                // russh exposes this via a private trait
+                // (`helpers::algorithm::AlgorithmExt`); we inline
+                // the four-line match here rather than fight the
+                // visibility.
+                let alg = hash_alg_for(&key.algorithm());
+                let auth_key = russh::keys::PrivateKeyWithHashAlg::new(
+                    Arc::new(key),
+                    alg,
+                );
+                let authed = handle
+                    .authenticate_publickey(self.user.as_str(), auth_key)
+                    .await
+                    .map_err(|err| {
+                        SyncError::auth(format!("ssh key auth: {err}"))
+                    })?;
+                if !authed.success() {
+                    return Err(SyncError::auth(
+                        "SSH key authentication rejected by server",
+                    ));
+                }
+            }
         }
+
+        // Auth succeeded → safe to commit a TOFU record. Doing
+        // this AFTER auth ensures we don't pin a key we never
+        // actually used (e.g. wrong password against a hostile
+        // MitM would still record their key under our hostname
+        // before failing auth).
+        if let Some(HandshakeOutcome {
+            decision: HostKeyDecision::AcceptAndRemember,
+            fingerprint,
+        }) = &recorded_outcome
+        {
+            self.host_key_verifier.record(&host_port, fingerprint);
+        }
+
         let channel = handle
             .channel_open_session()
             .await
@@ -182,27 +421,87 @@ impl SftpSyncAdapter {
     }
 }
 
-/// SSH client handler. v1 accepts every host key — see the
-/// module docs for the trade-off + the follow-up plan.
+/// SSH client handler. Consults the verifier configured on the
+/// `SftpSyncAdapter`; writes its verdict + the observed
+/// fingerprint into the side-channel slot the connect helper
+/// reads after the handshake.
 ///
 /// `russh::client::Handler` uses native `async fn` in trait
 /// (Rust 1.75+), so we do NOT mark the impl with
 /// `#[async_trait]` — the attribute would rewrite the lifetime
 /// annotations away from the trait's signature.
-#[derive(Debug, Clone, Default)]
-struct ClientHandler;
+#[derive(Clone)]
+struct ClientHandler {
+    verifier: Arc<dyn HostKeyVerifier>,
+    /// `"host:port"` lookup key for the verifier.
+    host_port: String,
+    /// Side-channel for the connect helper. Set during
+    /// `check_server_key`; read after the handshake (either to
+    /// surface a mismatch error or to commit a TOFU record).
+    outcome: Arc<Mutex<Option<HandshakeOutcome>>>,
+}
+
+impl std::fmt::Debug for ClientHandler {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ClientHandler")
+            .field("host_port", &self.host_port)
+            .finish()
+    }
+}
+
+/// Carried through the connect side-channel.
+#[derive(Debug, Clone)]
+struct HandshakeOutcome {
+    decision: HostKeyDecision,
+    /// SHA256 fingerprint of the presented key — needed by the
+    /// connect helper to call `record()` on TOFU acceptance.
+    fingerprint: String,
+}
 
 impl client::Handler for ClientHandler {
     type Error = russh::Error;
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &PublicKey,
+        server_public_key: &PublicKey,
     ) -> Result<bool, Self::Error> {
-        // Accept every key. Real production = TOFU + fingerprint
-        // pinning in user_prefs; that lands in a Phase-Sm follow-
-        // up.
-        Ok(true)
+        let fingerprint =
+            server_public_key.fingerprint(HashAlg::Sha256).to_string();
+        let decision = self.verifier.verify(&self.host_port, &fingerprint);
+        let accept = !matches!(decision, HostKeyDecision::Mismatch { .. });
+        *self.outcome.lock().expect("handshake outcome poison") =
+            Some(HandshakeOutcome {
+                decision,
+                fingerprint,
+            });
+        Ok(accept)
+    }
+}
+
+/// Load a private key from disk, optionally decrypting it with
+/// `passphrase`. Handles both PEM and OpenSSH-format keys via
+/// russh's helper. Errors map to `SyncError::Auth` so the UI
+/// can show a "key file unreadable / wrong passphrase" message
+/// instead of a generic IO error.
+fn load_private_key(
+    path: &Path,
+    passphrase: Option<&str>,
+) -> SyncResult<russh::keys::PrivateKey> {
+    russh::keys::load_secret_key(path, passphrase).map_err(|err| {
+        SyncError::auth(format!(
+            "couldn't load SSH key at {}: {err}",
+            path.display(),
+        ))
+    })
+}
+
+/// Inline copy of russh's private `AlgorithmExt::hash_alg`.
+/// Returns `Some(HashAlg)` only for RSA keys; every other
+/// algorithm uses its built-in hash (Ed25519 / ECDSA / etc.).
+fn hash_alg_for(alg: &Algorithm) -> Option<HashAlg> {
+    match alg {
+        Algorithm::Rsa { hash } => *hash,
+        _ => None,
     }
 }
 
@@ -467,7 +766,7 @@ mod tests {
 
     #[test]
     fn remote_path_joins_relative_segments() {
-        let a = SftpSyncAdapter::new(
+        let a = SftpSyncAdapter::new_password(
             "h",
             22,
             "u",
@@ -486,7 +785,7 @@ mod tests {
 
     #[test]
     fn remote_path_trims_redundant_slashes() {
-        let a = SftpSyncAdapter::new(
+        let a = SftpSyncAdapter::new_password(
             "h",
             22,
             "u",
@@ -505,7 +804,7 @@ mod tests {
     fn remote_path_normalises_windows_backslashes_in_base() {
         // On Windows the PathBuf may carry backslashes; SFTP
         // demands forward slashes server-side.
-        let a = SftpSyncAdapter::new(
+        let a = SftpSyncAdapter::new_password(
             "h",
             22,
             "u",
@@ -513,5 +812,67 @@ mod tests {
             PathBuf::from("\\home\\alice\\aperio"),
         );
         assert_eq!(a.remote_path("meta.json"), "/home/alice/aperio/meta.json");
+    }
+
+    // -----------------------------------------------------------------
+    // HostKeyVerifier tests
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn in_memory_verifier_first_use_returns_accept_and_remember() {
+        let v = InMemoryHostKeyVerifier::new();
+        let d = v.verify("nas:22", "SHA256:abc");
+        assert_eq!(d, HostKeyDecision::AcceptAndRemember);
+    }
+
+    #[test]
+    fn in_memory_verifier_known_key_returns_accept() {
+        let v = InMemoryHostKeyVerifier::with_known("nas:22", "SHA256:abc");
+        let d = v.verify("nas:22", "SHA256:abc");
+        assert_eq!(d, HostKeyDecision::Accept);
+    }
+
+    #[test]
+    fn in_memory_verifier_changed_key_returns_mismatch() {
+        let v = InMemoryHostKeyVerifier::with_known("nas:22", "SHA256:abc");
+        let d = v.verify("nas:22", "SHA256:zzz");
+        assert_eq!(
+            d,
+            HostKeyDecision::Mismatch {
+                stored: "SHA256:abc".into(),
+                presented: "SHA256:zzz".into(),
+            },
+        );
+    }
+
+    #[test]
+    fn in_memory_verifier_record_persists_across_verify_calls() {
+        // Implement the TOFU flow manually: verify returns
+        // AcceptAndRemember on first use; we commit via record;
+        // next verify returns Accept.
+        let v = InMemoryHostKeyVerifier::new();
+        assert_eq!(
+            v.verify("nas:22", "SHA256:abc"),
+            HostKeyDecision::AcceptAndRemember,
+        );
+        v.record("nas:22", "SHA256:abc");
+        assert_eq!(
+            v.verify("nas:22", "SHA256:abc"),
+            HostKeyDecision::Accept,
+        );
+    }
+
+    #[test]
+    fn in_memory_verifier_record_overwrites_existing() {
+        // A user that explicitly accepts a changed key (via the
+        // §19.5 "verify out-of-band, then re-pin" flow) calls
+        // record() with the new fingerprint; the next verify
+        // returns Accept.
+        let v = InMemoryHostKeyVerifier::with_known("nas:22", "SHA256:old");
+        v.record("nas:22", "SHA256:new");
+        assert_eq!(
+            v.verify("nas:22", "SHA256:new"),
+            HostKeyDecision::Accept,
+        );
     }
 }

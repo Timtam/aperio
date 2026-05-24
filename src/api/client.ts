@@ -663,7 +663,22 @@ export type SyncAdapterConfig =
       port: number;
       user: string;
       path: string;
+      /** `"password"` or `"key"`. The two halves of the union
+       *  share the host/port/user/path payload, so we model it
+       *  as a single shape with a string discriminator rather
+       *  than two TypeScript variants — matches the Rust enum's
+       *  serialised form. */
+      auth_method: 'password' | 'key';
+      /** Used when `auth_method = "password"`. Empty / null
+       *  reuses the keychain entry. */
       password?: string | null;
+      /** Used when `auth_method = "key"`. Absolute path to the
+       *  PEM / OpenSSH-format private key file. */
+      key_path?: string | null;
+      /** Optional passphrase for an encrypted key. Empty / null
+       *  reuses the keychain entry (or is treated as "no
+       *  passphrase" on first-run). */
+      key_passphrase?: string | null;
     }
   | { kind: 'none' };
 

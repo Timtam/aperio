@@ -35,7 +35,7 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use serde::Deserialize;
 use sync_adapter_local::LocalFsSyncAdapter;
-use sync_adapter_sftp::SftpSyncAdapter;
+use sync_adapter_sftp::{SftpAuth, SftpSyncAdapter};
 use sync_adapter_webdav::{WebDavCredentials, WebDavSyncAdapter};
 use sync_core::{
     derive_key, EncryptingAdapter, EncryptionParams, SyncAdapter, KEY_LEN,
@@ -49,6 +49,7 @@ use crate::event_log::{
     SyncRoundReport, SyncScheduler, SyncStatus,
 };
 use crate::secrets::{self, SecretSlot};
+use crate::sftp_host_keys::UserPrefsHostKeyVerifier;
 use crate::user_prefs::UserPrefsRepo;
 
 /// `user_prefs` key naming the currently-configured adapter
@@ -67,12 +68,19 @@ const PREF_WEBDAV_URL: &str = "sync.adapter.webdav.url";
 const PREF_WEBDAV_USER: &str = "sync.adapter.webdav.user";
 
 /// SFTP adapter config keys. Same device-local / never-synced
-/// guarantee as the WebDAV pair. Password lives in the keychain
-/// under a separate pseudo-account.
+/// guarantee as the WebDAV pair. Password / key passphrase live
+/// in the keychain under a separate pseudo-account.
 const PREF_SFTP_HOST: &str = "sync.adapter.sftp.host";
 const PREF_SFTP_PORT: &str = "sync.adapter.sftp.port";
 const PREF_SFTP_USER: &str = "sync.adapter.sftp.user";
 const PREF_SFTP_PATH: &str = "sync.adapter.sftp.path";
+/// `"password"` or `"key"` — selects which auth variant the
+/// adapter builds. Mirrors the frontend's radio.
+const PREF_SFTP_AUTH_METHOD: &str = "sync.adapter.sftp.authMethod";
+/// Absolute path to the SSH private key file when `authMethod`
+/// is "key". The path is local-only, not a secret — it can live
+/// in user_prefs without going through the keychain.
+const PREF_SFTP_KEY_PATH: &str = "sync.adapter.sftp.keyPath";
 
 /// Pseudo-account id used to store the WebDAV password in the
 /// platform keychain. The `secrets` module is account-scoped; we
@@ -84,6 +92,11 @@ const WEBDAV_SECRET_ACCOUNT: &str = "sync.adapter.webdav";
 /// WebDAV one so switching backends doesn't accidentally invalidate
 /// the other family's stored credential.
 const SFTP_SECRET_ACCOUNT: &str = "sync.adapter.sftp";
+
+/// Pseudo-account id for the SSH-key passphrase. Stored in its
+/// own slot so a user that switches from password to key auth
+/// (or vice versa) doesn't clobber the inactive credential.
+const SFTP_KEY_SECRET_ACCOUNT: &str = "sync.adapter.sftp.key";
 
 /// `user_prefs` key flagging whether the current sync dataset is
 /// E2E-encrypted. Mirrors the boolean in `meta.json`; lets
@@ -133,17 +146,32 @@ pub enum SyncAdapterConfig {
     },
     /// SFTP adapter (DESIGN.md §19.6). `host` is bare; `port`
     /// defaults to 22 on the frontend; `path` is an absolute
-    /// remote path. Same password-Option contract as the WebDAV
-    /// variant: `None` reuses the previously-stored keychain
-    /// secret.
+    /// remote path.
+    ///
+    /// `auth_method` discriminates between password and SSH-key
+    /// auth. Same Option<String> reuse contract for `password`
+    /// and `key_passphrase`: `None` or empty re-fetches the
+    /// stored keychain secret so URL/user edits don't require
+    /// re-typing.
     Sftp {
         host: String,
         #[serde(default = "default_sftp_port")]
         port: u16,
         user: String,
         path: String,
+        #[serde(default = "default_sftp_auth_method")]
+        auth_method: String,
+        /// Password for `auth_method = "password"`.
         #[serde(default)]
         password: Option<String>,
+        /// Filesystem path to a PEM / OpenSSH private key when
+        /// `auth_method = "key"`.
+        #[serde(default)]
+        key_path: Option<String>,
+        /// Optional passphrase for an encrypted key. Empty
+        /// string is treated as "no passphrase".
+        #[serde(default)]
+        key_passphrase: Option<String>,
     },
     /// Explicit disconnect. The orchestrator drops its adapter
     /// handle; subsequent `sync_now` calls return a clear "not
@@ -155,6 +183,10 @@ fn default_sftp_port() -> u16 {
     22
 }
 
+fn default_sftp_auth_method() -> String {
+    "password".to_string()
+}
+
 /// Build a fresh adapter instance from a [`SyncAdapterConfig`] —
 /// validates the inputs, returns an `Arc<dyn SyncAdapter>` ready to
 /// hand to the orchestrator or the onboarding service.
@@ -163,6 +195,7 @@ fn default_sftp_port() -> u16 {
 /// adapter to operate on, and a disconnect has no adapter to make.
 fn build_adapter(
     config: &SyncAdapterConfig,
+    db: &crate::db::SharedConn,
 ) -> CommandResult<Arc<dyn SyncAdapter>> {
     match config {
         SyncAdapterConfig::Local { path } => {
@@ -202,7 +235,16 @@ fn build_adapter(
                 .map_err(sync_err)?;
             Ok(Arc::new(adapter))
         }
-        SyncAdapterConfig::Sftp { host, port, user, path, password } => {
+        SyncAdapterConfig::Sftp {
+            host,
+            port,
+            user,
+            path,
+            auth_method,
+            password,
+            key_path,
+            key_passphrase,
+        } => {
             let trimmed_host = host.trim();
             let trimmed_user = user.trim();
             let trimmed_path = path.trim();
@@ -224,30 +266,80 @@ fn build_adapter(
                     message: "SFTP path must not be empty".into(),
                 });
             }
-            // Same password-reuse contract as the WebDAV branch:
-            // Some + non-empty → use the supplied value; None or
-            // empty → re-fetch the previously-stored keychain
-            // secret so URL/user edits don't require re-typing
-            // the password.
-            let resolved_password = match password.as_deref().map(str::trim) {
-                Some(p) if !p.is_empty() => p.to_string(),
-                _ => secrets::retrieve(
-                    SFTP_SECRET_ACCOUNT,
-                    SecretSlot::Password,
-                )
-                .map_err(|err| CommandError {
-                    code: "auth",
-                    message: format!(
-                        "no SFTP password configured: {err}",
-                    ),
-                })?,
+            // Build the auth method. `password` and `key` are the
+            // two we support; anything else surfaces as
+            // invalid_input rather than silently picking a
+            // default.
+            let auth = match auth_method.as_str() {
+                "password" => {
+                    // Same Option-reuse contract as the WebDAV
+                    // branch: Some + non-empty → use the supplied
+                    // value; None or empty → re-fetch the
+                    // previously-stored keychain secret so
+                    // host/user edits don't require re-typing.
+                    let resolved = match password.as_deref().map(str::trim) {
+                        Some(p) if !p.is_empty() => p.to_string(),
+                        _ => secrets::retrieve(
+                            SFTP_SECRET_ACCOUNT,
+                            SecretSlot::Password,
+                        )
+                        .map_err(|err| CommandError {
+                            code: "auth",
+                            message: format!(
+                                "no SFTP password configured: {err}",
+                            ),
+                        })?,
+                    };
+                    SftpAuth::Password { password: resolved }
+                }
+                "key" => {
+                    let path = key_path
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .ok_or(CommandError {
+                            code: "invalid_input",
+                            message: "SSH key path must not be empty".into(),
+                        })?;
+                    // Passphrase same Option-reuse contract: empty
+                    // / None → re-fetch keychain. An unencrypted
+                    // key with neither side supplying a passphrase
+                    // round-trips as `None`.
+                    let passphrase = match key_passphrase
+                        .as_deref()
+                        .map(str::trim)
+                    {
+                        Some(p) if !p.is_empty() => Some(p.to_string()),
+                        _ => secrets::retrieve(
+                            SFTP_KEY_SECRET_ACCOUNT,
+                            SecretSlot::Password,
+                        )
+                        .ok()
+                        .filter(|s| !s.is_empty()),
+                    };
+                    SftpAuth::PrivateKey {
+                        path: PathBuf::from(path),
+                        passphrase,
+                    }
+                }
+                other => {
+                    return Err(CommandError {
+                        code: "invalid_input",
+                        message: format!(
+                            "unknown SFTP auth method: {other}",
+                        ),
+                    });
+                }
             };
+            let verifier =
+                Arc::new(UserPrefsHostKeyVerifier::new(db.clone()));
             Ok(Arc::new(SftpSyncAdapter::new(
                 trimmed_host,
                 *port,
                 trimmed_user,
-                resolved_password,
+                auth,
                 PathBuf::from(trimmed_path),
+                verifier,
             )))
         }
         SyncAdapterConfig::None => Err(CommandError {
@@ -293,18 +385,51 @@ fn persist_adapter_config(
             }
             Ok(())
         }
-        SyncAdapterConfig::Sftp { host, port, user, path, password } => {
+        SyncAdapterConfig::Sftp {
+            host,
+            port,
+            user,
+            path,
+            auth_method,
+            password,
+            key_path,
+            key_passphrase,
+        } => {
             prefs.set(PREF_ADAPTER_KIND, "sftp").map_err(internal)?;
             prefs.set(PREF_SFTP_HOST, host.trim()).map_err(internal)?;
             prefs.set(PREF_SFTP_PORT, &port.to_string()).map_err(internal)?;
             prefs.set(PREF_SFTP_USER, user.trim()).map_err(internal)?;
             prefs.set(PREF_SFTP_PATH, path.trim()).map_err(internal)?;
+            prefs
+                .set(PREF_SFTP_AUTH_METHOD, auth_method.trim())
+                .map_err(internal)?;
+            if let Some(p) = key_path.as_deref().map(str::trim) {
+                if !p.is_empty() {
+                    prefs.set(PREF_SFTP_KEY_PATH, p).map_err(internal)?;
+                }
+            }
+            // Only overwrite the password keychain when the
+            // request body carries a non-empty value. Same
+            // reasoning as the WebDAV branch.
             if let Some(pw) = password.as_deref().map(str::trim) {
                 if !pw.is_empty() {
                     secrets::store(
                         SFTP_SECRET_ACCOUNT,
                         SecretSlot::Password,
                         pw,
+                    )
+                    .map_err(|err| CommandError {
+                        code: "internal",
+                        message: format!("keychain store: {err}"),
+                    })?;
+                }
+            }
+            if let Some(pp) = key_passphrase.as_deref().map(str::trim) {
+                if !pp.is_empty() {
+                    secrets::store(
+                        SFTP_KEY_SECRET_ACCOUNT,
+                        SecretSlot::Password,
+                        pp,
                     )
                     .map_err(|err| CommandError {
                         code: "internal",
@@ -429,7 +554,7 @@ pub async fn configure_sync_adapter(
             // request body omitted the password (e.g. URL-only
             // edit). Then we probe.
             persist_adapter_config(&prefs, &config)?;
-            let plain = build_adapter(&config)?;
+            let plain = build_adapter(&config, &shared)?;
             // Probe the connection before keeping the adapter
             // active — misconfigurations should surface immediately
             // at the settings dialog, not hours later when the
@@ -579,10 +704,12 @@ pub async fn compact_now(
 /// the orchestrator state.
 #[tauri::command]
 pub async fn preview_sync_target(
+    db: State<'_, DbHandle>,
     onboarding: State<'_, Arc<OnboardingService>>,
     config: SyncAdapterConfig,
 ) -> CommandResult<SyncPreview> {
-    let adapter = build_adapter(&config)?;
+    let shared = db.shared();
+    let adapter = build_adapter(&config, &shared)?;
     onboarding.preview(adapter.as_ref()).await.map_err(sync_err)
 }
 
@@ -605,7 +732,8 @@ pub async fn accept_remote_dataset(
     device_name: Option<String>,
     passphrase: Option<String>,
 ) -> CommandResult<OnboardingReport> {
-    let plain = build_adapter(&config)?;
+    let shared = db.shared();
+    let plain = build_adapter(&config, &shared)?;
     plain.test_connection().await.map_err(sync_err)?;
 
     // Phase Sk: peek at meta.json to see if the dataset is
@@ -651,7 +779,6 @@ pub async fn accept_remote_dataset(
     // Commit the choice into the orchestrator + user_prefs only
     // now that onboarding has succeeded.
     orchestrator.configure(Arc::clone(&adapter));
-    let shared = db.shared();
     let prefs = UserPrefsRepo::new(&shared);
     persist_adapter_config(&prefs, &config)?;
     // Persist E2E state alongside the adapter config — the
@@ -689,7 +816,8 @@ pub async fn adopt_local_dataset(
     device_name: Option<String>,
     passphrase: Option<String>,
 ) -> CommandResult<OnboardingReport> {
-    let plain = build_adapter(&config)?;
+    let shared = db.shared();
+    let plain = build_adapter(&config, &shared)?;
     plain.test_connection().await.map_err(sync_err)?;
 
     // Phase Sk: if the user supplied a passphrase, mint a fresh
@@ -718,7 +846,6 @@ pub async fn adopt_local_dataset(
         .map_err(sync_err)?;
 
     orchestrator.configure(Arc::clone(&adapter));
-    let shared = db.shared();
     let prefs = UserPrefsRepo::new(&shared);
     persist_adapter_config(&prefs, &config)?;
     if let Some(k) = key {
@@ -789,21 +916,50 @@ pub fn build_adapter_from_prefs(
             if path.trim().is_empty() {
                 return None;
             }
-            // Password lives in the keychain only — no fallback.
-            // If it's missing, we can't reconstruct the adapter,
-            // so signal "needs reconfigure" the same way as a
-            // missing URL.
-            let password = secrets::retrieve(
-                SFTP_SECRET_ACCOUNT,
-                SecretSlot::Password,
-            )
-            .ok()?;
+            let auth_method = prefs
+                .get(PREF_SFTP_AUTH_METHOD)
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| "password".to_string());
+            let auth = match auth_method.as_str() {
+                "key" => {
+                    let key_path =
+                        prefs.get(PREF_SFTP_KEY_PATH).ok().flatten()?;
+                    if key_path.trim().is_empty() {
+                        return None;
+                    }
+                    let passphrase = secrets::retrieve(
+                        SFTP_KEY_SECRET_ACCOUNT,
+                        SecretSlot::Password,
+                    )
+                    .ok()
+                    .filter(|s| !s.is_empty());
+                    SftpAuth::PrivateKey {
+                        path: PathBuf::from(key_path.trim()),
+                        passphrase,
+                    }
+                }
+                // "password" + anything unknown both fall to
+                // password auth — forward-compat for a future
+                // auth method that an older Aperio doesn't know.
+                _ => {
+                    let password = secrets::retrieve(
+                        SFTP_SECRET_ACCOUNT,
+                        SecretSlot::Password,
+                    )
+                    .ok()?;
+                    SftpAuth::Password { password }
+                }
+            };
+            let verifier =
+                Arc::new(UserPrefsHostKeyVerifier::new(db.clone()));
             Arc::new(SftpSyncAdapter::new(
                 host.trim(),
                 port,
                 user.trim(),
-                password,
+                auth,
                 PathBuf::from(path.trim()),
+                verifier,
             ))
         }
         // Forward-compat: an unknown kind (left over from a

@@ -16,6 +16,7 @@ mod platform;
 pub mod registry;
 pub mod reminders;
 pub mod secrets;
+pub mod sftp_host_keys;
 pub mod user_prefs;
 
 pub use db::{DbError, DbHandle, DbResult, SharedConn};
