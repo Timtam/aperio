@@ -15,6 +15,7 @@ mod context_menu;
 mod overrides;
 mod reminders;
 mod search;
+mod sync;
 mod tasks;
 mod user_prefs;
 
@@ -28,6 +29,7 @@ pub use context_menu::*;
 pub use overrides::*;
 pub use reminders::*;
 pub use search::*;
+pub use sync::*;
 pub use tasks::*;
 pub use user_prefs::*;
 

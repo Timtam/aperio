@@ -1,0 +1,411 @@
+//! Sync orchestrator — Phase Sd's "one round of sync" coordinator.
+//!
+//! Pulls together the three Sa/Sb/Sc components into a single
+//! `sync_now()` operation:
+//!
+//! ```text
+//!  sync_now()
+//!      │
+//!      ▼  1. Push every file from
+//!      │     <data_dir>/sync/log/pending/ to the remote via
+//!      │     SyncAdapter::push_log.
+//!      │
+//!      ▼  2. Fetch every log from the remote whose timestamp
+//!      │     is newer than our cursor (user_prefs.sync.cursor).
+//!      │     Filter out files our own device originally wrote
+//!      │     (they round-trip the loopback unchanged).
+//!      │
+//!      ▼  3. Hand each fetched LogFile to the EventLogApplier.
+//!      │     Idempotency in `sync_applied_events` covers the
+//!      │     "we already processed this file" case.
+//!      │
+//!      ▼  4. Advance the cursor to the latest log timestamp
+//!      │     just fetched. Persist to user_prefs so the next
+//!      │     round picks up where we left off.
+//!      │
+//!      ▼  5. Return a SyncRoundReport summarising what happened.
+//! ```
+//!
+//! ## What's deliberately NOT in this orchestrator yet
+//!
+//! - **Periodic clock.** Phase Sd is manual-trigger-only. The
+//!   scheduler that fires `sync_now()` every N minutes lives in
+//!   Phase Se alongside app-start + on-mutation auto-push.
+//! - **Snapshot generation + compaction.** Phase Sg. We pass
+//!   `fetch_snapshot` through but never produce one.
+//! - **Conflict resolution UI.** The applier's last-write-wins
+//!   already produces a coherent state; surfacing field-level
+//!   collisions for the user to choose between is Phase Sh.
+//! - **Meta.json device registration.** Phase Sf — the
+//!   onboarding flow does the upsert of our own DeviceRecord.
+//! - **E2E encryption layer.** Phase Sk wraps the adapter calls
+//!   with AES-256-GCM before bytes hit the SyncAdapter trait.
+//! - **Multiple adapter kinds at once.** v1 picks one
+//!   configured adapter; switching adapters requires a manual
+//!   "clear cursor, re-onboard" gesture.
+
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+
+use chrono::{DateTime, Utc};
+use serde::Serialize;
+use sync_core::{DeviceCursor, DeviceId, LogFile, SyncAdapter, SyncResult};
+use tracing::{debug, info, warn};
+
+use crate::db::SharedConn;
+use crate::event_log::{ApplyReport, EventLogApplier};
+use crate::user_prefs::UserPrefsRepo;
+
+/// `user_prefs` key holding the RFC 3339 timestamp of the
+/// newest log file we've already fetched from the remote. The
+/// orchestrator reads this on entry to filter remote logs and
+/// writes it back on success.
+pub const SYNC_CURSOR_PREF_KEY: &str = "sync.cursor.lastSeenLog";
+
+/// Result of one `sync_now()` invocation. Surfaced to the
+/// frontend via the `sync_now` Tauri command so the user
+/// dialogue can show "12 events applied" or "no new changes".
+#[derive(Debug, Default, Clone, Serialize, PartialEq, Eq)]
+pub struct SyncRoundReport {
+    /// Number of pending log files we successfully pushed to the
+    /// remote.
+    pub pushed_logs: usize,
+    /// Number of log files we pulled from the remote (after
+    /// cursor + own-device filtering).
+    pub fetched_logs: usize,
+    /// Aggregate apply counts across every fetched log.
+    pub applied: usize,
+    pub skipped_own: usize,
+    pub skipped_already_applied: usize,
+    pub skipped_unsupported: usize,
+    /// Per-envelope failures inside the applier. Non-fatal —
+    /// the round itself still counts as a success.
+    pub apply_failures: usize,
+    /// Push failures we logged but kept going on. Same
+    /// philosophy as the applier: one bad file shouldn't sink
+    /// the entire sync round.
+    pub push_failures: usize,
+}
+
+impl SyncRoundReport {
+    fn merge_apply(&mut self, report: ApplyReport) {
+        self.applied += report.applied;
+        self.skipped_own += report.skipped_own;
+        self.skipped_already_applied += report.skipped_already_applied;
+        self.skipped_unsupported += report.skipped_unsupported;
+        self.apply_failures += report.failed;
+    }
+}
+
+/// Read-only snapshot of the orchestrator's state, returned by
+/// `get_sync_status`. The scheduler in Phase Se will extend this
+/// with the next scheduled tick + interval; the Sd version
+/// carries just enough for a "last synced at …" indicator.
+#[derive(Debug, Clone, Serialize)]
+pub struct SyncStatus {
+    pub configured: bool,
+    pub in_flight: bool,
+    pub last_synced_at: Option<String>,
+}
+
+/// The orchestrator itself. Holds an `Option<adapter>` so the
+/// app can start without one configured — `sync_now` returns
+/// a sensible "not configured" error in that case rather than
+/// panicking.
+pub struct SyncOrchestrator {
+    db: SharedConn,
+    /// `<data_dir>/sync/log/pending/` — the staging directory
+    /// the writer drops session files into.
+    pending_dir: PathBuf,
+    /// Our device id. Used to filter our own files out of
+    /// `fetch_new_logs` results so we don't re-apply our own
+    /// events.
+    local_device_id: DeviceId,
+    /// The applier reused across rounds.
+    applier: Arc<EventLogApplier>,
+    /// Currently-configured adapter. `None` when the app hasn't
+    /// been set up yet.
+    adapter: Mutex<Option<Arc<dyn SyncAdapter>>>,
+    /// One-at-a-time guard against overlapping sync rounds.
+    /// `try_lock` failure → return early; the user's second
+    /// click while a round is in flight produces an
+    /// "AlreadyRunning" status instead of starting a parallel
+    /// push that would race.
+    in_flight: Mutex<bool>,
+}
+
+impl SyncOrchestrator {
+    pub fn new(
+        db: SharedConn,
+        pending_dir: PathBuf,
+        local_device_id: DeviceId,
+        applier: Arc<EventLogApplier>,
+    ) -> Self {
+        Self {
+            db,
+            pending_dir,
+            local_device_id,
+            applier,
+            adapter: Mutex::new(None),
+            in_flight: Mutex::new(false),
+        }
+    }
+
+    /// Swap in a freshly-built adapter (the user just configured
+    /// or reconfigured the backend). Replacing during a
+    /// `sync_now` is safe — the round holds its own `Arc` clone
+    /// for the duration.
+    pub fn configure(&self, adapter: Arc<dyn SyncAdapter>) {
+        let mut guard = self.adapter.lock().expect("adapter mutex poison");
+        *guard = Some(adapter);
+    }
+
+    /// Tear down the adapter (user picked "Disconnect" in
+    /// settings). Subsequent `sync_now` calls return
+    /// `SyncStatus::configured = false`.
+    pub fn deconfigure(&self) {
+        let mut guard = self.adapter.lock().expect("adapter mutex poison");
+        *guard = None;
+    }
+
+    pub fn status(&self) -> SyncStatus {
+        let configured = self
+            .adapter
+            .lock()
+            .expect("adapter mutex poison")
+            .is_some();
+        let in_flight =
+            *self.in_flight.lock().expect("in-flight mutex poison");
+        let last_synced_at = self.read_cursor();
+        SyncStatus {
+            configured,
+            in_flight,
+            last_synced_at,
+        }
+    }
+
+    /// Run one sync round. See module docs for the four steps.
+    /// Returns Err only on hard failures the user needs to act
+    /// on (no adapter configured, adapter `test_connection`
+    /// returns Err in step zero). Per-file failures inside the
+    /// round downgrade to counters in the report.
+    pub async fn sync_now(&self) -> SyncResult<SyncRoundReport> {
+        // Take the in-flight guard. Releases on drop so an early
+        // `return` past this point still clears it.
+        let _guard = InFlightGuard::acquire(&self.in_flight)?;
+
+        let adapter = match self
+            .adapter
+            .lock()
+            .expect("adapter mutex poison")
+            .clone()
+        {
+            Some(a) => a,
+            None => {
+                return Err(sync_core::SyncError::internal(
+                    "no sync adapter configured",
+                ));
+            }
+        };
+
+        let mut report = SyncRoundReport::default();
+
+        // 1. Push pending logs.
+        match self.push_pending(adapter.as_ref()).await {
+            Ok(count) => report.pushed_logs = count,
+            Err(err) => {
+                warn!(?err, "push phase of sync round failed");
+                report.push_failures += 1;
+            }
+        }
+
+        // 2. Fetch + apply.
+        let cursor = self.cursor_for_fetch();
+        match adapter.fetch_new_logs(&cursor).await {
+            Ok(logs) => {
+                // Filter out our own device's logs. The remote
+                // still has them (the local FS adapter is shared
+                // among devices via the same root path) but
+                // re-applying our own emissions is wasted work
+                // — the applier would just count them as
+                // `skipped_own` anyway.
+                let foreign: Vec<LogFile> = logs
+                    .into_iter()
+                    .filter(|log| log.name.device_id != self.local_device_id)
+                    .collect();
+                report.fetched_logs = foreign.len();
+
+                // Track the newest timestamp we actually saw so
+                // the cursor advances even if the apply step
+                // partially fails.
+                let mut newest = cursor.last_seen_log;
+                for log in &foreign {
+                    if log.name.timestamp > newest {
+                        newest = log.name.timestamp;
+                    }
+                }
+
+                for log in foreign {
+                    match self.applier.apply_log_file(&log) {
+                        Ok(apply_report) => report.merge_apply(apply_report),
+                        Err(err) => {
+                            warn!(
+                                log = %log.name.to_filename(),
+                                ?err,
+                                "apply phase failed for log file",
+                            );
+                            report.apply_failures += 1;
+                        }
+                    }
+                }
+
+                // 3. Advance cursor. Persist as RFC 3339 to keep
+                // the user_prefs value human-readable.
+                if newest > cursor.last_seen_log {
+                    if let Err(err) = self.save_cursor(newest) {
+                        warn!(?err, "couldn't persist sync cursor");
+                    }
+                }
+            }
+            Err(err) => {
+                warn!(?err, "fetch phase of sync round failed");
+                report.push_failures += 1;
+            }
+        }
+
+        info!(
+            pushed = report.pushed_logs,
+            fetched = report.fetched_logs,
+            applied = report.applied,
+            "sync round complete",
+        );
+        Ok(report)
+    }
+
+    /// Walk the pending directory and push every `.jsonl` file
+    /// up to the adapter. Returns the number of successful
+    /// pushes; per-file errors get a warning + skip rather
+    /// than sinking the whole batch.
+    ///
+    /// We do NOT delete the local file after a successful push.
+    /// The writer is still appending to the current-session file
+    /// for the rest of this app run, and we'd lose those
+    /// additions. Older session files are kept around too — Phase
+    /// Sg's compaction handles their eventual GC.
+    async fn push_pending(
+        &self,
+        adapter: &dyn SyncAdapter,
+    ) -> SyncResult<usize> {
+        let mut entries = match tokio::fs::read_dir(&self.pending_dir).await {
+            Ok(rd) => rd,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                // Nothing to push — the writer hasn't run yet
+                // this session.
+                return Ok(0);
+            }
+            Err(err) => return Err(sync_core::SyncError::io(err.to_string())),
+        };
+
+        let mut pushed = 0usize;
+        while let Some(entry) = entries
+            .next_entry()
+            .await
+            .map_err(|err| sync_core::SyncError::io(err.to_string()))?
+        {
+            let path = entry.path();
+            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            let parsed = match sync_core::LogFileName::from_filename(name) {
+                Ok(p) => p,
+                Err(_) => {
+                    debug!(name = name, "skipping pending entry: not a log file");
+                    continue;
+                }
+            };
+            let bytes = match tokio::fs::read(&path).await {
+                Ok(b) => b,
+                Err(err) => {
+                    warn!(name = name, ?err, "couldn't read pending log");
+                    continue;
+                }
+            };
+            let log = LogFile {
+                name: parsed,
+                bytes,
+            };
+            match adapter.push_log(&log).await {
+                Ok(()) => pushed += 1,
+                Err(err) => warn!(name = name, ?err, "push_log failed"),
+            }
+        }
+        Ok(pushed)
+    }
+
+    fn cursor_for_fetch(&self) -> DeviceCursor {
+        let raw = self.read_cursor();
+        match raw.and_then(|s| DateTime::parse_from_rfc3339(&s).ok()) {
+            Some(ts) => DeviceCursor {
+                last_seen_log: ts.with_timezone(&Utc),
+            },
+            None => DeviceCursor::epoch(),
+        }
+    }
+
+    fn read_cursor(&self) -> Option<String> {
+        UserPrefsRepo::new(&self.db)
+            .get(SYNC_CURSOR_PREF_KEY)
+            .ok()
+            .flatten()
+    }
+
+    fn save_cursor(&self, ts: DateTime<Utc>) -> SyncResult<()> {
+        UserPrefsRepo::new(&self.db)
+            .set(SYNC_CURSOR_PREF_KEY, &ts.to_rfc3339())
+            .map_err(|err| {
+                sync_core::SyncError::internal(format!(
+                    "save cursor: {err}"
+                ))
+            })?;
+        Ok(())
+    }
+}
+
+/// RAII guard for the in-flight bool. Sets it to `true` on
+/// `acquire`; clears it on drop. Acquire returns Err when a
+/// round is already in progress — caller surfaces that to the
+/// user.
+///
+/// Uses `std::sync::Mutex<bool>` (not tokio's): the lock is
+/// only held during the read-then-write of a bool, never
+/// across an `.await`, so a sync mutex is correct + means
+/// `Drop` can release without spawning a task.
+struct InFlightGuard<'a> {
+    flag: &'a Mutex<bool>,
+}
+
+impl<'a> InFlightGuard<'a> {
+    fn acquire(flag: &'a Mutex<bool>) -> SyncResult<Self> {
+        let mut guard = flag.lock().expect("in-flight mutex poison");
+        if *guard {
+            return Err(sync_core::SyncError::internal(
+                "sync already in progress",
+            ));
+        }
+        *guard = true;
+        Ok(Self { flag })
+    }
+}
+
+impl Drop for InFlightGuard<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut guard) = self.flag.lock() {
+            *guard = false;
+        }
+        // Poison from a panic mid-round → the bool stays true
+        // and the next sync attempt fails with "already in
+        // progress". That's the right behaviour given we can't
+        // reason about whether the previous round corrupted
+        // anything; the user restarts the app.
+    }
+}

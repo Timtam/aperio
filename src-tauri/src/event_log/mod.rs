@@ -36,8 +36,12 @@
 //! "different device" semantics per §19.
 
 pub mod applier;
+pub mod orchestrator;
 
 pub use applier::{ApplyReport, EventLogApplier};
+pub use orchestrator::{
+    SyncOrchestrator, SyncRoundReport, SyncStatus, SYNC_CURSOR_PREF_KEY,
+};
 
 use std::path::PathBuf;
 use std::sync::Arc;

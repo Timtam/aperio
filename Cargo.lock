@@ -93,6 +93,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "sync-adapter-local",
  "sync-core",
  "tauri",
  "tauri-build",
@@ -4589,6 +4590,17 @@ version = "0.1.0"
 [[package]]
 name = "sync-adapter-local"
 version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "serde",
+ "serde_json",
+ "sync-core",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+]
 
 [[package]]
 name = "sync-adapter-sftp"

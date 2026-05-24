@@ -22,7 +22,7 @@ pub use paths::{resolve_data_dir, DataDirKind, DataDirResolution};
 
 use cal_adapter_local::LocalAdapter;
 use contact_sync::ContactSyncScheduler;
-use event_log::EventLogWriter;
+use event_log::{EventLogApplier, EventLogWriter, SyncOrchestrator};
 use registry::AdapterRegistry;
 use reminders::ReminderScheduler;
 use std::sync::Arc;
@@ -98,7 +98,43 @@ pub fn run() {
         "event-log writer device id",
     );
     let event_log_writer =
-        EventLogWriter::spawn(data_dir.path.clone(), device_id);
+        EventLogWriter::spawn(data_dir.path.clone(), device_id.clone());
+
+    // Phase Sc + Sd: stand up the applier and orchestrator.
+    //
+    // The applier uses its own `LocalAdapter` instance — both
+    // point at the same `SharedConn` so they see the same SQLite
+    // rows, but they don't share any in-memory state beyond
+    // that. A separate adapter handle keeps us from having to
+    // refactor every `State<'_, LocalAdapter>` command signature
+    // into `State<'_, Arc<LocalAdapter>>`.
+    let applier_adapter = Arc::new(LocalAdapter::new(db.shared()));
+    let applier = Arc::new(EventLogApplier::new(
+        db.shared(),
+        applier_adapter,
+        device_id.clone(),
+    ));
+    let sync_orchestrator = Arc::new(SyncOrchestrator::new(
+        db.shared(),
+        data_dir
+            .path
+            .join("sync")
+            .join("log")
+            .join("pending"),
+        device_id,
+        applier,
+    ));
+    // If the user had previously configured a sync adapter,
+    // reconstruct it now so `sync_now` works without a
+    // re-configure step. Adapter credentials are device-local
+    // (per §19.2.1) and never propagate, so the user_prefs
+    // lookup is the single source of truth.
+    if let Some(adapter) =
+        commands::build_adapter_from_prefs(&db.shared())
+    {
+        info!("restoring previously-configured sync adapter");
+        sync_orchestrator.configure(adapter);
+    }
 
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
@@ -106,6 +142,7 @@ pub fn run() {
         .manage(registry)
         .manage(db)
         .manage(event_log_writer)
+        .manage(sync_orchestrator)
         .invoke_handler(tauri::generate_handler![
             app_info,
             commands::list_calendars,
@@ -182,6 +219,12 @@ pub fn run() {
             // a frontend-only concern routed through user_prefs.
             commands::clear_contacts_cache,
             commands::set_contacts_sync_interval,
+            // Phase Sd (DESIGN.md §19): cross-device sync. The
+            // orchestrator is registered in setup; these commands
+            // are the user-facing surface.
+            commands::configure_sync_adapter,
+            commands::sync_now,
+            commands::get_sync_status,
         ])
         .setup(move |app| {
             // Spawn the reminder scheduler on the Tauri/tokio runtime
