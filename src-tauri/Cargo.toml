@@ -31,6 +31,7 @@ cal-core.workspace = true
 cal-adapter-local.workspace = true
 sync-core.workspace = true
 sync-adapter-local = { path = "../crates/sync-adapter-local" }
+sync-adapter-webdav = { path = "../crates/sync-adapter-webdav" }
 cal-adapter-caldav = { path = "../crates/cal-adapter-caldav" }
 cal-adapter-ical = { path = "../crates/cal-adapter-ical" }
 cal-adapter-google = { path = "../crates/cal-adapter-google" }

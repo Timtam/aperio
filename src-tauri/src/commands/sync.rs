@@ -33,6 +33,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 use sync_adapter_local::LocalFsSyncAdapter;
+use sync_adapter_webdav::{WebDavCredentials, WebDavSyncAdapter};
 use sync_core::SyncAdapter;
 use tauri::State;
 
@@ -42,6 +43,7 @@ use crate::event_log::{
     CompactionReport, OnboardingReport, OnboardingService, SyncOrchestrator, SyncPreview,
     SyncRoundReport, SyncScheduler, SyncStatus,
 };
+use crate::secrets::{self, SecretSlot};
 use crate::user_prefs::UserPrefsRepo;
 
 /// `user_prefs` key naming the currently-configured adapter
@@ -52,21 +54,52 @@ const PREF_ADAPTER_KIND: &str = "sync.adapter.kind";
 /// we just need a filesystem path.
 const PREF_LOCAL_PATH: &str = "sync.adapter.local.path";
 
+/// WebDAV adapter config keys. The URL + user live in user_prefs
+/// (device-local; never propagated); the password is stored in the
+/// platform keychain via the `secrets` module against a fixed
+/// pseudo-account id so we get a single managed slot.
+const PREF_WEBDAV_URL: &str = "sync.adapter.webdav.url";
+const PREF_WEBDAV_USER: &str = "sync.adapter.webdav.user";
+
+/// Pseudo-account id used to store the WebDAV password in the
+/// platform keychain. The `secrets` module is account-scoped; we
+/// use this fixed string so the sync adapter has its own managed
+/// keychain entry independent of any user-facing account row.
+const WEBDAV_SECRET_ACCOUNT: &str = "sync.adapter.webdav";
+
 /// Request body for [`configure_sync_adapter`] and the onboarding
-/// commands. The kind is flattened so the frontend can build one of:
+/// commands. The kind is flattened so the frontend can build:
 ///
 /// ```jsonc
 /// { "kind": "local",  "path":   "/mnt/nas/aperio" }
+/// { "kind": "webdav", "url":    "https://cloud.example.com/.../aperio/",
+///                     "user":   "alice",
+///                     "password": "hunter2" }    // optional on re-edit
 /// { "kind": "none" }   // disconnects any configured adapter
 /// ```
 ///
-/// Future adapter kinds (`webdav`, `sftp`, …) will add their own
-/// branches as new struct variants.
+/// Future adapter kinds (`sftp`, `dropbox`, `googledrive`, …) will
+/// add their own branches as new struct variants.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SyncAdapterConfig {
     /// Filesystem path-based adapter — DESIGN.md §19.6 entry.
     Local { path: String },
+    /// WebDAV adapter (DESIGN.md §19.6). The URL must point at the
+    /// collection that holds `log/`, `snapshot.json`, etc. — for
+    /// Nextcloud that's typically
+    /// `https://<host>/remote.php/dav/files/<user>/<folder>/`.
+    ///
+    /// `password` is optional: if `None`, the previously-stored
+    /// keychain password is reused. The Settings UI uses that to
+    /// support "edit URL without re-typing the password". An empty
+    /// string is treated as "no auth", same as omitting the field.
+    Webdav {
+        url: String,
+        user: String,
+        #[serde(default)]
+        password: Option<String>,
+    },
     /// Explicit disconnect. The orchestrator drops its adapter
     /// handle; subsequent `sync_now` calls return a clear "not
     /// configured" error rather than silently no-oping.
@@ -93,6 +126,33 @@ fn build_adapter(
             }
             Ok(Arc::new(LocalFsSyncAdapter::new(PathBuf::from(trimmed))))
         }
+        SyncAdapterConfig::Webdav { url, user, password } => {
+            let trimmed_url = url.trim();
+            if trimmed_url.is_empty() {
+                return Err(CommandError {
+                    code: "invalid_input",
+                    message: "WebDAV URL must not be empty".into(),
+                });
+            }
+            let trimmed_user = user.trim();
+            // Resolve the password from one of two sources:
+            //   - the request body (set on a fresh connect / when
+            //     the user re-types it in Settings)
+            //   - the keychain (set on a URL-only edit, or on app
+            //     start when restoring from prefs)
+            let resolved_password = match password.as_deref().map(str::trim) {
+                Some(p) if !p.is_empty() => Some(p.to_string()),
+                _ => secrets::retrieve(WEBDAV_SECRET_ACCOUNT, SecretSlot::Password)
+                    .ok(),
+            };
+            let credentials = match (trimmed_user.is_empty(), resolved_password) {
+                (false, Some(pw)) => WebDavCredentials::basic(trimmed_user, &pw),
+                _ => WebDavCredentials::None,
+            };
+            let adapter = WebDavSyncAdapter::new(trimmed_url, credentials)
+                .map_err(sync_err)?;
+            Ok(Arc::new(adapter))
+        }
         SyncAdapterConfig::None => Err(CommandError {
             code: "invalid_input",
             message: "cannot build adapter from None kind".into(),
@@ -112,6 +172,28 @@ fn persist_adapter_config(
             let trimmed = path.trim();
             prefs.set(PREF_ADAPTER_KIND, "local").map_err(internal)?;
             prefs.set(PREF_LOCAL_PATH, trimmed).map_err(internal)?;
+            Ok(())
+        }
+        SyncAdapterConfig::Webdav { url, user, password } => {
+            prefs.set(PREF_ADAPTER_KIND, "webdav").map_err(internal)?;
+            prefs.set(PREF_WEBDAV_URL, url.trim()).map_err(internal)?;
+            prefs.set(PREF_WEBDAV_USER, user.trim()).map_err(internal)?;
+            // Only overwrite the keychain when the request body
+            // explicitly carries a non-empty password. URL/user
+            // edits that omit the password keep the prior secret.
+            if let Some(pw) = password.as_deref().map(str::trim) {
+                if !pw.is_empty() {
+                    secrets::store(
+                        WEBDAV_SECRET_ACCOUNT,
+                        SecretSlot::Password,
+                        pw,
+                    )
+                    .map_err(|err| CommandError {
+                        code: "internal",
+                        message: format!("keychain store: {err}"),
+                    })?;
+                }
+            }
             Ok(())
         }
         SyncAdapterConfig::None => {
@@ -170,15 +252,20 @@ pub async fn configure_sync_adapter(
     let shared = db.shared();
     let prefs = UserPrefsRepo::new(&shared);
     match &config {
-        SyncAdapterConfig::Local { .. } => {
+        SyncAdapterConfig::Local { .. } | SyncAdapterConfig::Webdav { .. } => {
+            // Persist BEFORE building the adapter so the keychain
+            // entry for the new WebDAV password is in place; the
+            // adapter constructor then reads it back when the
+            // request body omitted the password (e.g. URL-only
+            // edit). Then we probe.
+            persist_adapter_config(&prefs, &config)?;
             let adapter = build_adapter(&config)?;
-            // Probe the path before persisting — we want
-            // misconfigurations to surface immediately at the
-            // settings dialog, not hours later when the first
-            // sync_now runs.
+            // Probe the connection before keeping the adapter
+            // active — misconfigurations should surface immediately
+            // at the settings dialog, not hours later when the
+            // first sync_now runs.
             adapter.test_connection().await.map_err(sync_err)?;
             orchestrator.configure(adapter);
-            persist_adapter_config(&prefs, &config)?;
             // Kick the scheduler so the user sees data flow
             // immediately instead of waiting up to one interval
             // for the periodic loop. The debounce window swallows
@@ -189,10 +276,11 @@ pub async fn configure_sync_adapter(
         SyncAdapterConfig::None => {
             orchestrator.deconfigure();
             persist_adapter_config(&prefs, &config)?;
-            // Keep PREF_LOCAL_PATH around so re-enabling the
-            // same path is one click away. It's already
-            // per-device + never synced, so leaving it has no
-            // downside.
+            // Keep PREF_LOCAL_PATH / PREF_WEBDAV_* around so re-
+            // enabling the same backend is one click away. The
+            // keychain password also stays — it's never synced and
+            // a user reconnecting to the same dataset wouldn't
+            // want to re-type it.
         }
     }
     Ok(())
@@ -377,6 +465,29 @@ pub fn build_adapter_from_prefs(
                 return None;
             }
             Some(Arc::new(LocalFsSyncAdapter::new(PathBuf::from(path))))
+        }
+        "webdav" => {
+            let url = prefs.get(PREF_WEBDAV_URL).ok().flatten()?;
+            if url.trim().is_empty() {
+                return None;
+            }
+            let user = prefs
+                .get(PREF_WEBDAV_USER)
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            let password = secrets::retrieve(
+                WEBDAV_SECRET_ACCOUNT,
+                SecretSlot::Password,
+            )
+            .ok();
+            let credentials = match (user.trim().is_empty(), password) {
+                (false, Some(pw)) => WebDavCredentials::basic(user.trim(), &pw),
+                _ => WebDavCredentials::None,
+            };
+            WebDavSyncAdapter::new(url.trim(), credentials)
+                .ok()
+                .map(|a| Arc::new(a) as Arc<dyn SyncAdapter>)
         }
         // Forward-compat: an unknown kind (left over from a
         // future Aperio version) is silently treated as "no

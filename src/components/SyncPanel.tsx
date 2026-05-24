@@ -58,8 +58,17 @@ export function SyncPanel() {
 
   // Adapter draft state. Seeded from current backend state on mount
   // so the inputs reflect the persisted choice.
-  const [kindDraft, setKindDraft] = useState<'local' | 'none'>('local');
+  const [kindDraft, setKindDraft] = useState<'local' | 'webdav' | 'none'>(
+    'local',
+  );
   const [pathDraft, setPathDraft] = useState('');
+  // WebDAV-only fields. `passwordDraft` is empty on first render —
+  // the persisted password lives in the OS keychain and we don't
+  // surface it back. Submitting with an empty password reuses the
+  // keychain entry.
+  const [urlDraft, setUrlDraft] = useState('');
+  const [userDraft, setUserDraft] = useState('');
+  const [passwordDraft, setPasswordDraft] = useState('');
   const [deviceNameDraft, setDeviceNameDraft] = useState('');
   const [intervalDraft, setIntervalDraft] = useState<number | null>(null);
   const [busyAdapter, setBusyAdapter] = useState(false);
@@ -102,8 +111,28 @@ export function SyncPanel() {
 
   const buildConfig = useCallback((): SyncAdapterConfig => {
     if (kindDraft === 'local') return { kind: 'local', path: pathDraft.trim() };
+    if (kindDraft === 'webdav') {
+      return {
+        kind: 'webdav',
+        url: urlDraft.trim(),
+        user: userDraft.trim(),
+        // Empty string → backend reuses keychain entry. Sending
+        // `undefined` would serialize to `null` via serde's default;
+        // either form is fine on the wire.
+        password: passwordDraft.trim() || null,
+      };
+    }
     return { kind: 'none' };
-  }, [kindDraft, pathDraft]);
+  }, [kindDraft, pathDraft, urlDraft, userDraft, passwordDraft]);
+
+  // Validation: the Connect button needs a path for `local`, a URL +
+  // user for `webdav`. Per-kind feedback steers the user before they
+  // hit the backend's error code path.
+  const configMissingRequired = (() => {
+    if (kindDraft === 'local') return !pathDraft.trim();
+    if (kindDraft === 'webdav') return !urlDraft.trim() || !userDraft.trim();
+    return false;
+  })();
 
   const onIntervalChange = useCallback(
     async (raw: string) => {
@@ -127,13 +156,17 @@ export function SyncPanel() {
   );
 
   const onConfigure = useCallback(async () => {
-    if (kindDraft === 'local' && !pathDraft.trim()) {
+    if (configMissingRequired) {
       announce(t('dialogs.settings.sync.adapterNeedPath'), 'assertive');
       return;
     }
     setBusyAdapter(true);
     try {
       await configureSyncAdapter(buildConfig());
+      // Clear the password field after a successful connect so it
+      // doesn't sit in memory longer than necessary. The keychain
+      // entry is the canonical store from this point on.
+      if (kindDraft === 'webdav') setPasswordDraft('');
     } catch (err) {
       // eslint-disable-next-line no-console
       console.warn('configure_sync_adapter failed', err);
@@ -144,7 +177,14 @@ export function SyncPanel() {
     } finally {
       setBusyAdapter(false);
     }
-  }, [announce, buildConfig, kindDraft, messageForError, pathDraft, t]);
+  }, [
+    announce,
+    buildConfig,
+    configMissingRequired,
+    kindDraft,
+    messageForError,
+    t,
+  ]);
 
   const onDisconnect = useCallback(async () => {
     setBusyAdapter(true);
@@ -160,7 +200,7 @@ export function SyncPanel() {
   }, []);
 
   const onPreview = useCallback(async () => {
-    if (kindDraft !== 'local' || !pathDraft.trim()) {
+    if (kindDraft === 'none' || configMissingRequired) {
       announce(t('dialogs.settings.sync.adapterNeedPath'), 'assertive');
       return;
     }
@@ -175,7 +215,14 @@ export function SyncPanel() {
     } finally {
       setBusyPreview(false);
     }
-  }, [announce, buildConfig, kindDraft, messageForError, pathDraft, t]);
+  }, [
+    announce,
+    buildConfig,
+    configMissingRequired,
+    kindDraft,
+    messageForError,
+    t,
+  ]);
 
   const onAccept = useCallback(async () => {
     setBusyAccept(true);
@@ -348,11 +395,14 @@ export function SyncPanel() {
             <select
               value={kindDraft}
               onChange={(e) =>
-                setKindDraft(e.target.value as 'local' | 'none')
+                setKindDraft(e.target.value as 'local' | 'webdav' | 'none')
               }
             >
               <option value="local">
                 {t('dialogs.settings.sync.adapterKindLocal')}
+              </option>
+              <option value="webdav">
+                {t('dialogs.settings.sync.adapterKindWebdav')}
               </option>
               <option value="none">
                 {t('dialogs.settings.sync.adapterKindNone')}
@@ -375,6 +425,54 @@ export function SyncPanel() {
               {t('dialogs.settings.sync.adapterPathHint')}
             </p>
           </div>
+        )}
+        {kindDraft === 'webdav' && (
+          <>
+            <div className="sync-panel__field">
+              <label>
+                {t('dialogs.settings.sync.adapterWebdavUrl')}
+                <input
+                  type="url"
+                  value={urlDraft}
+                  onChange={(e) => setUrlDraft(e.target.value)}
+                  placeholder="https://cloud.example.com/remote.php/dav/files/alice/aperio/"
+                />
+              </label>
+              <p className="sync-panel__hint">
+                {t('dialogs.settings.sync.adapterWebdavUrlHint')}
+              </p>
+            </div>
+            <div className="sync-panel__field">
+              <label>
+                {t('dialogs.settings.sync.adapterWebdavUser')}
+                <input
+                  type="text"
+                  value={userDraft}
+                  onChange={(e) => setUserDraft(e.target.value)}
+                  autoComplete="username"
+                />
+              </label>
+            </div>
+            <div className="sync-panel__field">
+              <label>
+                {t('dialogs.settings.sync.adapterWebdavPassword')}
+                <input
+                  type="password"
+                  value={passwordDraft}
+                  onChange={(e) => setPasswordDraft(e.target.value)}
+                  autoComplete="new-password"
+                  placeholder={
+                    status?.configured
+                      ? t('dialogs.settings.sync.adapterWebdavPasswordKept')
+                      : undefined
+                  }
+                />
+              </label>
+              <p className="sync-panel__hint">
+                {t('dialogs.settings.sync.adapterWebdavPasswordHint')}
+              </p>
+            </div>
+          </>
         )}
         <div className="sync-panel__actions">
           <button

@@ -94,6 +94,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sync-adapter-local",
+ "sync-adapter-webdav",
  "sync-core",
  "tauri",
  "tauri-build",
@@ -4609,6 +4610,20 @@ version = "0.1.0"
 [[package]]
 name = "sync-adapter-webdav"
 version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "quick-xml 0.36.2",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sync-core",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "url",
+]
 
 [[package]]
 name = "sync-core"
