@@ -37,10 +37,15 @@
 
 pub mod applier;
 pub mod orchestrator;
+pub mod scheduler;
 
 pub use applier::{ApplyReport, EventLogApplier};
 pub use orchestrator::{
     SyncOrchestrator, SyncRoundReport, SyncStatus, SYNC_CURSOR_PREF_KEY,
+};
+pub use scheduler::{
+    read_interval_minutes, SyncScheduler, SyncStatusPayload,
+    DEFAULT_SYNC_INTERVAL_MINUTES, PREF_SYNC_INTERVAL_MINUTES,
 };
 
 use std::path::PathBuf;
@@ -50,7 +55,7 @@ use chrono::Utc;
 use sync_core::{DeviceId, EventEnvelope, LogFileName, SyncEvent, DEVICE_ID_PREF_KEY};
 use tokio::fs::{File, OpenOptions};
 use tokio::io::AsyncWriteExt;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Notify};
 use tracing::{debug, warn};
 
 use crate::db::SharedConn;
@@ -68,6 +73,16 @@ pub struct EventLogWriter {
     /// effectively allocation-only — appending a mutation event
     /// is constant time and never awaits.
     sender: mpsc::UnboundedSender<EventEnvelope>,
+    /// Optional kick handle the [`SyncScheduler`] hands us so we can
+    /// ping it after every append. `Option<_>` because tests + the
+    /// fallback "no scheduler yet" startup path skip it; in
+    /// production `lib.rs` always wires one through.
+    ///
+    /// `Notify::notify_one()` is fire-and-forget — if the scheduler
+    /// is already inside a debounce window, the second ping is
+    /// absorbed and the same round flushes both edits. That's the
+    /// coalescing behaviour DESIGN.md §19.8 asks for.
+    kick: Option<Arc<Notify>>,
 }
 
 impl EventLogWriter {
@@ -79,10 +94,22 @@ impl EventLogWriter {
     /// the process lifetime; on `drop` of the last `Arc` the
     /// sender side closes and the loop exits cleanly.
     pub fn spawn(data_dir: PathBuf, device_id: DeviceId) -> Arc<Self> {
+        Self::spawn_with_kick(data_dir, device_id, None)
+    }
+
+    /// Variant that wires the writer into a [`SyncScheduler`] kick
+    /// channel. `lib.rs` uses this so every local mutation triggers
+    /// a debounced sync push; tests use [`Self::spawn`] without one.
+    pub fn spawn_with_kick(
+        data_dir: PathBuf,
+        device_id: DeviceId,
+        kick: Option<Arc<Notify>>,
+    ) -> Arc<Self> {
         let (sender, receiver) = mpsc::unbounded_channel();
         let writer = Arc::new(Self {
             device_id: device_id.clone(),
             sender,
+            kick,
         });
         let pending_dir = data_dir.join("sync").join("log").join("pending");
         tauri::async_runtime::spawn(drain_loop(
@@ -142,6 +169,12 @@ impl EventLogWriter {
         let envelope = EventEnvelope::new(self.device_id.clone(), event);
         if let Err(err) = self.sender.send(envelope) {
             warn!(?err, "event-log writer channel closed; event lost");
+        }
+        // Tell the scheduler something happened. Notify is a one-shot
+        // latch — extra `notify_one()` calls during a debounce window
+        // are absorbed, so bulk operations don't fan out to N pushes.
+        if let Some(kick) = &self.kick {
+            kick.notify_one();
         }
     }
 }

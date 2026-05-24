@@ -22,12 +22,13 @@ pub use paths::{resolve_data_dir, DataDirKind, DataDirResolution};
 
 use cal_adapter_local::LocalAdapter;
 use contact_sync::ContactSyncScheduler;
-use event_log::{EventLogApplier, EventLogWriter, SyncOrchestrator};
+use event_log::{EventLogApplier, EventLogWriter, SyncOrchestrator, SyncScheduler};
 use registry::AdapterRegistry;
 use reminders::ReminderScheduler;
 use std::sync::Arc;
 use tauri::Manager;
-use tracing::info;
+use tokio::sync::Notify;
+use tracing::{info, warn};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -97,8 +98,16 @@ pub fn run() {
         device_id = %device_id,
         "event-log writer device id",
     );
-    let event_log_writer =
-        EventLogWriter::spawn(data_dir.path.clone(), device_id.clone());
+    // Phase Se: the writer and the scheduler share a `Notify` so
+    // every local mutation kicks a debounced sync round. Built
+    // here so both halves see the same Arc — the writer pings via
+    // `notify_one`, the scheduler awaits via `notified`.
+    let kick_notify = Arc::new(Notify::new());
+    let event_log_writer = EventLogWriter::spawn_with_kick(
+        data_dir.path.clone(),
+        device_id.clone(),
+        Some(Arc::clone(&kick_notify)),
+    );
 
     // Phase Sc + Sd: stand up the applier and orchestrator.
     //
@@ -135,8 +144,16 @@ pub fn run() {
         info!("restoring previously-configured sync adapter");
         sync_orchestrator.configure(adapter);
     }
+    // Phase Se: hold a separate clone for the app-exit hook below.
+    // The `RunEvent::ExitRequested` callback is `FnMut`, not async,
+    // so it captures this Arc and blocks on a final `push_now()`
+    // before the process dies.
+    let orchestrator_for_exit = Arc::clone(&sync_orchestrator);
+    let scheduler_kick_for_setup = Arc::clone(&kick_notify);
+    let scheduler_orchestrator = Arc::clone(&sync_orchestrator);
+    let scheduler_db = db.shared();
 
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .manage(local_adapter)
         .manage(registry)
@@ -225,6 +242,7 @@ pub fn run() {
             commands::configure_sync_adapter,
             commands::sync_now,
             commands::get_sync_status,
+            commands::set_sync_interval,
         ])
         .setup(move |app| {
             // Spawn the reminder scheduler on the Tauri/tokio runtime
@@ -250,6 +268,21 @@ pub fn run() {
             );
             app.manage(contact_sync);
 
+            // Phase Se: sync scheduler. Spawns the periodic worker
+            // + listens on the kick `Notify` shared with the event-
+            // log writer, so any local mutation triggers a debounced
+            // push round. Registered into State so the
+            // `configure_sync_adapter` / `set_sync_interval` commands
+            // can wake the loop without an indirection through a
+            // global.
+            let sync_scheduler = SyncScheduler::spawn(
+                Arc::clone(&scheduler_orchestrator),
+                scheduler_db.clone(),
+                Arc::clone(&scheduler_kick_for_setup),
+                app.handle().clone(),
+            );
+            app.manage(sync_scheduler);
+
             // Shared state for the native context-menu popups. The
             // global `on_menu_event` handler below routes selections
             // from any popup back to the awaiting command via a
@@ -265,8 +298,54 @@ pub fn run() {
             });
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("failed to start the Tauri app");
+        .build(tauri::generate_context!())
+        .expect("failed to build the Tauri app");
+
+    // Phase Se: app-exit hook. DESIGN.md §19.8 mandates pushing
+    // pending logs before the process terminates so the next device
+    // doesn't see a multi-day-old view of this one. We use the
+    // push-only variant (`push_now`) rather than `sync_now` because
+    // fetching during shutdown is wasted work — the applied events
+    // wouldn't make it into the UI before the window closes.
+    //
+    // `block_on` here is fine: the run callback runs on the main
+    // thread after the event loop has stopped accepting new work.
+    // A bounded timeout via `tokio::time::timeout` keeps a hung
+    // network drive from stalling the close indefinitely.
+    app.run(move |_app, event| {
+        if let tauri::RunEvent::ExitRequested { .. } = event {
+            if !orchestrator_for_exit.status().configured {
+                return;
+            }
+            info!("running app-exit sync push");
+            let orchestrator = Arc::clone(&orchestrator_for_exit);
+            // 10s ceiling matches the user's patience window for
+            // "I just clicked X" — Phase Sj's network adapters
+            // will tune this per-adapter.
+            tauri::async_runtime::block_on(async move {
+                let push = orchestrator.push_now();
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs(10),
+                    push,
+                )
+                .await
+                {
+                    Ok(Ok(count)) => {
+                        info!(
+                            pushed = count,
+                            "app-exit sync push complete",
+                        );
+                    }
+                    Ok(Err(err)) => {
+                        warn!(?err, "app-exit sync push failed");
+                    }
+                    Err(_) => {
+                        warn!("app-exit sync push timed out after 10s");
+                    }
+                }
+            });
+        }
+    });
 }
 
 fn init_tracing() {

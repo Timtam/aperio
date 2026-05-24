@@ -56,6 +56,12 @@ use crate::db::SharedConn;
 use crate::event_log::{ApplyReport, EventLogApplier};
 use crate::user_prefs::UserPrefsRepo;
 
+/// Bring the scheduler's interval pref into status reads. The
+/// orchestrator owns the `SyncStatus` shape; reading the interval
+/// from the same source-of-truth keeps the frontend from having to
+/// query two endpoints.
+use crate::event_log::scheduler::read_interval_minutes;
+
 /// `user_prefs` key holding the RFC 3339 timestamp of the
 /// newest log file we've already fetched from the remote. The
 /// orchestrator reads this on entry to filter remote logs and
@@ -106,6 +112,10 @@ pub struct SyncStatus {
     pub configured: bool,
     pub in_flight: bool,
     pub last_synced_at: Option<String>,
+    /// Currently-configured periodic interval, in minutes. Surfaced
+    /// alongside the other status bits so the Settings → Sync panel
+    /// can render the slider value without a second round-trip.
+    pub interval_minutes: u32,
 }
 
 /// The orchestrator itself. Holds an `Option<adapter>` so the
@@ -177,10 +187,12 @@ impl SyncOrchestrator {
         let in_flight =
             *self.in_flight.lock().expect("in-flight mutex poison");
         let last_synced_at = self.read_cursor();
+        let interval_minutes = read_interval_minutes(&self.db);
         SyncStatus {
             configured,
             in_flight,
             last_synced_at,
+            interval_minutes,
         }
     }
 
@@ -280,6 +292,34 @@ impl SyncOrchestrator {
             "sync round complete",
         );
         Ok(report)
+    }
+
+    /// Push-only variant of [`Self::sync_now`]. Skips the fetch +
+    /// apply phases — used by the app-exit hook in `lib.rs` where we
+    /// want to flush local mutations to the remote before the
+    /// process dies but don't care about pulling new work that
+    /// won't be applied before exit anyway.
+    ///
+    /// Returns the number of files actually pushed. Errors here are
+    /// the same "soft" kind `sync_now` produces: a single bad file
+    /// downgrades to a warning + counter rather than aborting the
+    /// shutdown round.
+    pub async fn push_now(&self) -> SyncResult<usize> {
+        let _guard = InFlightGuard::acquire(&self.in_flight)?;
+        let adapter = match self
+            .adapter
+            .lock()
+            .expect("adapter mutex poison")
+            .clone()
+        {
+            Some(a) => a,
+            None => {
+                return Err(sync_core::SyncError::internal(
+                    "no sync adapter configured",
+                ));
+            }
+        };
+        self.push_pending(adapter.as_ref()).await
     }
 
     /// Walk the pending directory and push every `.jsonl` file

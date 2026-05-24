@@ -27,7 +27,7 @@ use tauri::State;
 
 use super::{CommandError, CommandResult};
 use crate::db::DbHandle;
-use crate::event_log::{SyncOrchestrator, SyncRoundReport, SyncStatus};
+use crate::event_log::{SyncOrchestrator, SyncRoundReport, SyncScheduler, SyncStatus};
 use crate::user_prefs::UserPrefsRepo;
 
 /// `user_prefs` key naming the currently-configured adapter
@@ -66,6 +66,7 @@ pub enum SyncAdapterConfig {
 pub async fn configure_sync_adapter(
     db: State<'_, DbHandle>,
     orchestrator: State<'_, Arc<SyncOrchestrator>>,
+    scheduler: State<'_, Arc<SyncScheduler>>,
     config: SyncAdapterConfig,
 ) -> CommandResult<()> {
     let shared = db.shared();
@@ -101,6 +102,12 @@ pub async fn configure_sync_adapter(
                     message: err.to_string(),
                 }
             })?;
+            // Kick the scheduler so the user sees data flow
+            // immediately instead of waiting up to one interval
+            // for the periodic loop. The debounce window swallows
+            // any pile of mutations the writer queued while the
+            // adapter was unconfigured.
+            scheduler.kick();
         }
         SyncAdapterConfig::None => {
             orchestrator.deconfigure();
@@ -115,6 +122,21 @@ pub async fn configure_sync_adapter(
         }
     }
     Ok(())
+}
+
+/// Set the periodic sync interval (in minutes). Values below 1 are
+/// clamped to 1 so a typo can't pin the scheduler into a hot loop.
+/// Returns the value actually persisted so the Settings UI can echo
+/// it back into its slider.
+#[tauri::command]
+pub async fn set_sync_interval(
+    scheduler: State<'_, Arc<SyncScheduler>>,
+    minutes: u32,
+) -> CommandResult<u32> {
+    scheduler.set_interval_minutes(minutes).map_err(|err| CommandError {
+        code: "internal",
+        message: err,
+    })
 }
 
 /// Trigger one sync round (push pending logs + fetch & apply
