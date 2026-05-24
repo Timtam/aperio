@@ -57,6 +57,33 @@ pub struct AperioSnapshotBody {
     /// same shape the storage layer holds them in.
     #[serde(default)]
     pub settings: BTreeMap<String, String>,
+    /// Account metadata (display_name, kind, non-secret config).
+    /// §19.11.8 wants this in the snapshot so a fresh device can
+    /// surface the "connect each account" wizard after onboarding
+    /// — the user gets to see which providers had been set up on
+    /// the other device(s) and which credentials they still need
+    /// to re-enter on THIS one. Credentials themselves are
+    /// device-local (kept in the OS keychain), so we never sync
+    /// the passwords / OAuth tokens — only the config that
+    /// identifies which keychain entry each account needs.
+    #[serde(default)]
+    pub accounts: Vec<SnapshotAccount>,
+}
+
+/// Non-secret account row carried in [`AperioSnapshotBody.accounts`].
+/// Mirrors the columns of `accounts` we want to round-trip across
+/// devices; deliberately excludes the keychain-backed secret.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SnapshotAccount {
+    pub id: String,
+    pub adapter_kind: String,
+    pub display_name: String,
+    /// JSON string of the adapter's non-secret config (server
+    /// URLs, client_ids, etc.). Stored opaquely; the snapshot
+    /// applier doesn't validate the shape.
+    pub config_json: String,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 /// Result of applying a snapshot body. Merges
@@ -68,6 +95,8 @@ pub struct SnapshotApplyOutcome {
     pub rows_failed: usize,
     pub settings_applied: usize,
     pub settings_failed: usize,
+    pub accounts_applied: usize,
+    pub accounts_failed: usize,
 }
 
 impl SnapshotApplyOutcome {
@@ -115,7 +144,12 @@ impl SnapshotBuilder {
             .dump_for_snapshot()
             .map_err(|err| SyncError::internal(format!("dump rows: {err}")))?;
         let settings = self.dump_settings()?;
-        let body = AperioSnapshotBody { dump, settings };
+        let accounts = self.dump_accounts()?;
+        let body = AperioSnapshotBody {
+            dump,
+            settings,
+            accounts,
+        };
         let body_value = serde_json::to_value(&body)?;
         Ok(Snapshot::new(Utc::now(), self.app_version.clone(), body_value))
     }
@@ -166,7 +200,72 @@ impl SnapshotBuilder {
                 }
             }
         }
+
+        // §19.11.8: restore the non-secret account rows. The
+        // applier does a flat upsert keyed by `id` — the LOCAL
+        // account (id = "local") is always present from the
+        // schema's bootstrap row, so the snapshot's local entry
+        // (if any) just overwrites it harmlessly.
+        for acc in &body.accounts {
+            match upsert_snapshot_account(&self.db, acc) {
+                Ok(()) => outcome.accounts_applied += 1,
+                Err(err) => {
+                    warn!(
+                        account_id = %acc.id,
+                        ?err,
+                        "failed to apply snapshot account",
+                    );
+                    outcome.accounts_failed += 1;
+                }
+            }
+        }
         Ok(outcome)
+    }
+
+    /// Read every account row except the implicit `local` one into
+    /// a `Vec<SnapshotAccount>` for the §19.11.8 wizard. The
+    /// `local` account is skipped because the schema's bootstrap
+    /// row recreates it on every device; including it would just
+    /// bloat the snapshot.
+    ///
+    /// Secrets are NOT touched here — only the non-secret columns
+    /// (`id`, `adapter_kind`, `display_name`, `config_json`,
+    /// timestamps) ride along. Credentials stay device-local in
+    /// the OS keychain.
+    fn dump_accounts(&self) -> SyncResult<Vec<SnapshotAccount>> {
+        let conn = self.db.lock().expect("db mutex poisoned");
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, adapter_kind, display_name, config_json,
+                        created_at, updated_at
+                   FROM accounts
+                  WHERE id != 'local'
+                  ORDER BY display_name COLLATE NOCASE",
+            )
+            .map_err(|err| {
+                SyncError::internal(format!("dump accounts prepare: {err}"))
+            })?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(SnapshotAccount {
+                    id: row.get(0)?,
+                    adapter_kind: row.get(1)?,
+                    display_name: row.get(2)?,
+                    config_json: row.get(3)?,
+                    created_at: row.get(4)?,
+                    updated_at: row.get(5)?,
+                })
+            })
+            .map_err(|err| {
+                SyncError::internal(format!("dump accounts query: {err}"))
+            })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r.map_err(|err| {
+                SyncError::internal(format!("dump accounts row: {err}"))
+            })?);
+        }
+        Ok(out)
     }
 
     /// Read the current values of every whitelisted user_prefs
@@ -218,6 +317,45 @@ impl SnapshotBuilder {
         }
         Ok(out)
     }
+}
+
+/// Insert-or-update the `accounts` table from a snapshot row.
+/// Free function (rather than a method) so the apply loop can
+/// call it under the existing db mutex without restructuring
+/// the SnapshotBuilder borrow flow.
+///
+/// Skips the implicit `local` account — the schema's bootstrap
+/// row already exists, and overwriting it with a snapshot copy
+/// from another device would clobber its (locally-meaningful)
+/// timestamps without any user-visible benefit.
+fn upsert_snapshot_account(
+    db: &SharedConn,
+    acc: &SnapshotAccount,
+) -> rusqlite::Result<()> {
+    if acc.id == "local" {
+        return Ok(());
+    }
+    let conn = db.lock().expect("db mutex poisoned");
+    conn.execute(
+        "INSERT INTO accounts
+            (id, adapter_kind, display_name, config_json,
+             created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+            adapter_kind = excluded.adapter_kind,
+            display_name = excluded.display_name,
+            config_json  = excluded.config_json,
+            updated_at   = excluded.updated_at",
+        params![
+            acc.id,
+            acc.adapter_kind,
+            acc.display_name,
+            acc.config_json,
+            acc.created_at,
+            acc.updated_at,
+        ],
+    )?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -287,6 +425,100 @@ mod tests {
         // The non-whitelisted key was never in the snapshot so
         // it stays absent.
         assert!(prefs2.get("sidebar.expansion").unwrap().is_none());
+    }
+
+    /// §19.11.8 — non-secret account rows round-trip from one
+    /// device's snapshot to another. Verifies the `dump_accounts`
+    /// → snapshot → `apply` chain lands the same row on the other
+    /// side without touching the keychain. The implicit
+    /// `id = "local"` account stays excluded from both sides.
+    #[tokio::test]
+    async fn accounts_round_trip_in_snapshot() {
+        let (_tmp, db, adapter) = fresh();
+        // Seed the source: insert one external account directly
+        // via SQL (the test layer has no need to spin up the
+        // adapter registry just to upsert a row).
+        {
+            let shared = db.shared();
+            let conn = shared.lock().unwrap();
+            conn.execute(
+                "INSERT INTO accounts
+                    (id, adapter_kind, display_name, config_json,
+                     created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?)",
+                params![
+                    "acc-1",
+                    "caldav",
+                    "Fastmail",
+                    r#"{"server_url":"https://caldav.fastmail.com/"}"#,
+                    "2026-05-24T10:00:00Z",
+                    "2026-05-24T10:00:00Z",
+                ],
+            )
+            .unwrap();
+        }
+
+        let builder = SnapshotBuilder::new(db.shared(), adapter, "1.0.0-test");
+        let snap = builder.build().unwrap();
+
+        // The wire body should include exactly the one external
+        // account row — the implicit `local` row is excluded.
+        let body: AperioSnapshotBody =
+            serde_json::from_value(snap.body.clone()).unwrap();
+        assert_eq!(body.accounts.len(), 1);
+        assert_eq!(body.accounts[0].id, "acc-1");
+        assert_eq!(body.accounts[0].adapter_kind, "caldav");
+        assert_eq!(body.accounts[0].display_name, "Fastmail");
+
+        // Apply to a fresh device — should land the same row.
+        let (_tmp2, db2, adapter2) = fresh();
+        let builder2 =
+            SnapshotBuilder::new(db2.shared(), adapter2.clone(), "1.0.0-test");
+        let outcome = builder2.apply(&snap).unwrap();
+        assert_eq!(outcome.accounts_applied, 1);
+        assert_eq!(outcome.accounts_failed, 0);
+
+        // Row landed in the destination.
+        let shared2 = db2.shared();
+        let conn2 = shared2.lock().unwrap();
+        let (kind, name): (String, String) = conn2
+            .query_row(
+                "SELECT adapter_kind, display_name FROM accounts WHERE id = ?",
+                params!["acc-1"],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(kind, "caldav");
+        assert_eq!(name, "Fastmail");
+    }
+
+    /// Local accounts (`id = "local"`) are never written into the
+    /// snapshot — every device already has the bootstrap row, and
+    /// overwriting it with someone else's timestamps would just
+    /// flap the row on every onboarding.
+    #[tokio::test]
+    async fn snapshot_excludes_local_account() {
+        let (_tmp, db, adapter) = fresh();
+        // The bootstrap row for `id = "local"` is created by the
+        // migrations, so we just verify it exists then build.
+        {
+            let shared = db.shared();
+            let conn = shared.lock().unwrap();
+            let present: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM accounts WHERE id = 'local'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(present, 1, "bootstrap local account should exist");
+        }
+        let builder = SnapshotBuilder::new(db.shared(), adapter, "1.0.0-test");
+        let snap = builder.build().unwrap();
+        let body: AperioSnapshotBody =
+            serde_json::from_value(snap.body.clone()).unwrap();
+        // No `local` row in the dumped accounts list.
+        assert!(body.accounts.iter().all(|acc| acc.id != "local"));
     }
 
     #[tokio::test]

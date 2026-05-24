@@ -222,6 +222,34 @@ export const listUpcomingReminders = () =>
 
 export const listAccounts = () => invoke<Account[]>('list_accounts');
 
+/** §19.11 step 8 — accounts whose keychain credentials are
+ *  absent on this device. After `accept_remote_dataset` on a
+ *  fresh device, the snapshot has populated the `accounts`
+ *  table but the OS keychain is empty for every entry (secrets
+ *  are device-local). The wizard reads this to drive the
+ *  "Konten verbinden" prompt. Local account always excluded. */
+export const listAccountsMissingCredentials = () =>
+  invoke<Account[]>('list_accounts_missing_credentials');
+
+/** Attach a password / API token to an existing account row
+ *  pulled in via the snapshot. Used by the onboarding wizard
+ *  for password-based backends (CalDAV, iCal-with-auth, EWS,
+ *  Vikunja, Todoist). OAuth backends use their dedicated
+ *  reconnect command instead. */
+export const setAccountSecret = (accountId: string, secret: string) =>
+  invoke<void>('set_account_secret', { accountId, secret });
+
+/** Re-run the Google OAuth flow against an existing account
+ *  row. Opens the system browser. Tokens land in the keychain
+ *  under the existing account id, preserving downstream
+ *  references. */
+export const reconnectGoogleAccount = (accountId: string) =>
+  invoke<void>('reconnect_google_account', { accountId });
+
+/** Microsoft equivalent of `reconnectGoogleAccount`. */
+export const reconnectMicrosoftAccount = (accountId: string) =>
+  invoke<void>('reconnect_microsoft_account', { accountId });
+
 export interface CreateAccountRequest {
   adapter_kind: AdapterKind;
   display_name: string;

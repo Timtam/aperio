@@ -124,6 +124,36 @@
     "errorPrefix": "Fortsetzung fehlgeschlagen",
     "doneAnnouncement": "Snapshot angewendet: {{applied}} Einträge lokal aktualisiert."
   },
+  "syncAccountsConnect": {
+    "title": "Konten verbinden",
+    "body": "Deine Konten wurden aus dem Sync-Speicher übernommen, aber Passwörter und Tokens werden ausschließlich pro Gerät gespeichert. Bitte hinterlege die Zugangsdaten für die folgenden Konten erneut, damit dieses Gerät sie verwenden kann.",
+    "hint": "Du kannst diesen Dialog auch schließen und die Konten später unter Einstellungen → Konten verbinden. Bis dahin sind Kalender und Aufgaben dieser Konten auf diesem Gerät nicht verfügbar.",
+    "empty": "Alle Konten sind wieder verbunden.",
+    "secretLabelPassword": "Passwort",
+    "secretLabelToken": "API-Token",
+    "oauthHint": "Öffnet die Anmeldeseite im Standardbrowser.",
+    "actionSave": "Speichern",
+    "actionSignIn": "Im Browser anmelden",
+    "actionLater": "Später",
+    "actionDone": "Fertig",
+    "saving": "Wird gespeichert …",
+    "signingIn": "Anmeldung läuft …",
+    "errorAuth": "Die Zugangsdaten wurden abgelehnt. Bitte prüfen und erneut versuchen.",
+    "errorNetwork": "Netzwerkfehler beim Erreichen des Kontos.",
+    "errorInvalidInput": "Die Eingabe ist für diesen Kontotyp nicht gültig.",
+    "errorEmpty": "Bitte einen Wert eingeben, bevor du speicherst.",
+    "connectedAnnouncement": "Konto {{name}} wieder verbunden.",
+    "kind": {
+      "local": "Lokal",
+      "caldav": "CalDAV",
+      "ical": "iCal",
+      "google": "Google",
+      "microsoft_graph": "Microsoft 365",
+      "ews": "Exchange (EWS)",
+      "vikunja": "Vikunja",
+      "todoist": "Todoist"
+    }
+  },
   "dialogs": {
     "cancel": "Abbrechen",
     "settings": {

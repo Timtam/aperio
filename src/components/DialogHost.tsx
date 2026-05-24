@@ -8,6 +8,7 @@ import { QuickAddDialog } from './QuickAddDialog';
 import { RemindersDialog } from './RemindersDialog';
 import { SearchDialog } from './SearchDialog';
 import { SettingsDialog } from './SettingsDialog';
+import { SyncAccountsConnectDialog } from './SyncAccountsConnectDialog';
 import { SyncConflictsDialog } from './SyncConflictsDialog';
 import { SyncSchemaTooOldDialog } from './SyncSchemaTooOldDialog';
 import { SyncStaleResumeDialog } from './SyncStaleResumeDialog';
@@ -97,6 +98,14 @@ export function DialogHost() {
           isOpen
           onClose={close}
           snapshotAt={mode.snapshotAt}
+        />
+      );
+    case 'syncAccountsConnect':
+      return (
+        <SyncAccountsConnectDialog
+          isOpen
+          onClose={close}
+          accounts={mode.accounts}
         />
       );
     case 'none':

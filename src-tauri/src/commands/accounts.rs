@@ -35,6 +35,71 @@ pub async fn list_accounts(
     Ok(repo.list()?)
 }
 
+/// §19.11 step 8 — list accounts whose keychain credentials are
+/// absent on this device. After `accept_remote_dataset` on a
+/// fresh device, the snapshot has populated the `accounts` table
+/// (config + adapter kind) but the OS keychain is empty for
+/// every entry — credentials never travel through the sync
+/// store. The onboarding wizard reads this list to render the
+/// "Konten verbinden" UI.
+///
+/// The `local` account is always skipped: it has no credentials
+/// to begin with.
+///
+/// The credentials check is per-`adapter_kind`:
+///
+/// - `caldav`, `ical`, `ews`: needs a `Password` slot.
+/// - `vikunja`, `todoist`: needs an `ApiToken` slot.
+/// - `google`, `microsoft_graph`: needs a `RefreshToken` slot
+///   (the access token is short-lived and the registry can
+///   re-mint it from the refresh token; an account with only
+///   an access token would shortly need re-auth anyway).
+///
+/// A `NotFound` from the keychain → missing credential; any
+/// other error → log + treat as missing (better to prompt the
+/// user than to silently leave them disconnected).
+#[tauri::command]
+pub async fn list_accounts_missing_credentials(
+    db: State<'_, DbHandle>,
+) -> CommandResult<Vec<Account>> {
+    let shared = db.shared();
+    let repo = AccountsRepo::new(&shared);
+    let all = repo.list()?;
+    let mut out = Vec::new();
+    for acc in all {
+        if acc.id == "local" || acc.adapter_kind == AdapterKind::Local {
+            continue;
+        }
+        let slot = required_secret_slot(acc.adapter_kind);
+        if !secret_present(&acc.id, slot) {
+            out.push(acc);
+        }
+    }
+    Ok(out)
+}
+
+/// Which keychain slot a fully-configured account of this kind
+/// must have populated. Kept separate from the connect-side
+/// logic so the two stay consistent: any future adapter that
+/// needs a different secret shape adds itself here too.
+fn required_secret_slot(kind: AdapterKind) -> SecretSlot {
+    match kind {
+        AdapterKind::Vikunja | AdapterKind::Todoist => SecretSlot::ApiToken,
+        AdapterKind::Google | AdapterKind::MicrosoftGraph => {
+            SecretSlot::RefreshToken
+        }
+        _ => SecretSlot::Password,
+    }
+}
+
+/// Best-effort check for a keychain entry's presence. Treats any
+/// error other than `NotFound` as a soft "missing" so the
+/// wizard always errs on the side of letting the user
+/// re-authenticate.
+fn secret_present(account_id: &str, slot: SecretSlot) -> bool {
+    matches!(secrets::retrieve(account_id, slot), Ok(_))
+}
+
 /// Request payload for creating an account. `config_json` is the
 /// adapter-specific non-secret configuration; the shape is owned by
 /// each adapter and validated at adapter construction time.
@@ -838,4 +903,233 @@ fn google_error_to_command(err: cal_adapter_google::GoogleError) -> CommandError
         Config(m) => ("invalid_input", m),
     };
     CommandError { code, message }
+}
+
+// ---------------------------------------------------------------------------
+// §19.11.8 reconnect commands — re-attach credentials to existing
+// account rows pulled in via the snapshot's `accounts` section. The
+// onboarding wizard ("Konten verbinden") drives these.
+// ---------------------------------------------------------------------------
+
+/// Re-attach a password / API token to an existing account row.
+/// Used by the onboarding wizard for password-based backends
+/// (CalDAV, iCal-with-auth, EWS, Vikunja, Todoist). The
+/// `account_id` MUST already exist in the `accounts` table —
+/// snapshots populate it; this command only fills in the
+/// missing keychain slot.
+///
+/// Slot selection mirrors `create_account` + `required_secret_slot`:
+/// Vikunja / Todoist get `ApiToken`, everyone else `Password`.
+///
+/// After the secret lands we register the adapter so subsequent
+/// reads / writes route through it without an app restart.
+#[tauri::command]
+pub async fn set_account_secret(
+    db: State<'_, DbHandle>,
+    registry: State<'_, Arc<AdapterRegistry>>,
+    account_id: String,
+    secret: String,
+) -> CommandResult<()> {
+    let shared = db.shared();
+    let repo = AccountsRepo::new(&shared);
+    let account = repo.get(&account_id)?.ok_or(CommandError {
+        code: "not_found",
+        message: format!("account {account_id} not found"),
+    })?;
+    if account.adapter_kind == AdapterKind::Local {
+        return Err(CommandError {
+            code: "invalid_input",
+            message: "the local account has no credential slot".into(),
+        });
+    }
+    if matches!(
+        account.adapter_kind,
+        AdapterKind::Google | AdapterKind::MicrosoftGraph,
+    ) {
+        return Err(CommandError {
+            code: "invalid_input",
+            message: format!(
+                "OAuth accounts (kind={}) must use the dedicated reconnect command",
+                account.adapter_kind.as_str(),
+            ),
+        });
+    }
+    let slot = match account.adapter_kind {
+        AdapterKind::Vikunja | AdapterKind::Todoist => SecretSlot::ApiToken,
+        _ => SecretSlot::Password,
+    };
+    secrets::store(&account_id, slot, &secret).map_err(|err| CommandError {
+        code: "internal",
+        message: format!("failed to store credential: {err}"),
+    })?;
+    // Register so the adapter is live for the rest of this
+    // session. A registration failure leaves the secret in place
+    // — the user can retry without re-typing the password.
+    if let Err(err) = registry.register(&account) {
+        return Err(CommandError {
+            code: "internal",
+            message: format!("adapter registration failed: {err}"),
+        });
+    }
+    Ok(())
+}
+
+/// Re-run the Google OAuth flow against an existing account row.
+/// Reads the persisted `client_id` / `client_secret` from
+/// `config_json`, opens the system browser, and writes the fresh
+/// tokens under the EXISTING account id — preserving the
+/// downstream calendar / task list / event rows that reference
+/// it. Subsequent reads / writes route through the
+/// freshly-registered adapter without an app restart.
+#[tauri::command]
+pub async fn reconnect_google_account(
+    db: State<'_, DbHandle>,
+    registry: State<'_, Arc<AdapterRegistry>>,
+    account_id: String,
+) -> CommandResult<()> {
+    let shared = db.shared();
+    let repo = AccountsRepo::new(&shared);
+    let account = repo.get(&account_id)?.ok_or(CommandError {
+        code: "not_found",
+        message: format!("account {account_id} not found"),
+    })?;
+    if account.adapter_kind != AdapterKind::Google {
+        return Err(CommandError {
+            code: "invalid_input",
+            message: "account is not a Google account".into(),
+        });
+    }
+    let config: GoogleAccountConfig = serde_json::from_str(&account.config_json)
+        .map_err(|err| CommandError {
+            code: "internal",
+            message: format!("parse Google config: {err}"),
+        })?;
+    let tokens = GoogleAdapter::authenticate_interactive(
+        &config.client_id,
+        &config.client_secret,
+    )
+    .await
+    .map_err(google_error_to_command)?;
+    secrets::store(&account.id, SecretSlot::AccessToken, &tokens.access_token)
+        .map_err(|err| CommandError {
+            code: "internal",
+            message: format!("failed to store access token: {err}"),
+        })?;
+    if let Some(refresh) = tokens.refresh_token.as_deref() {
+        secrets::store(&account.id, SecretSlot::RefreshToken, refresh)
+            .map_err(|err| CommandError {
+                code: "internal",
+                message: format!("failed to store refresh token: {err}"),
+            })?;
+    }
+    if let Err(err) = registry.register(&account) {
+        return Err(CommandError {
+            code: "internal",
+            message: format!("adapter registration failed: {err}"),
+        });
+    }
+    Ok(())
+}
+
+/// Microsoft equivalent of [`reconnect_google_account`].
+/// Re-runs the PKCE-only public-client OAuth flow with the
+/// persisted `client_id` / `authority` and writes fresh tokens
+/// against the existing account row.
+#[tauri::command]
+pub async fn reconnect_microsoft_account(
+    db: State<'_, DbHandle>,
+    registry: State<'_, Arc<AdapterRegistry>>,
+    account_id: String,
+) -> CommandResult<()> {
+    let shared = db.shared();
+    let repo = AccountsRepo::new(&shared);
+    let account = repo.get(&account_id)?.ok_or(CommandError {
+        code: "not_found",
+        message: format!("account {account_id} not found"),
+    })?;
+    if account.adapter_kind != AdapterKind::MicrosoftGraph {
+        return Err(CommandError {
+            code: "invalid_input",
+            message: "account is not a Microsoft Graph account".into(),
+        });
+    }
+    let config: GraphAccountConfig = serde_json::from_str(&account.config_json)
+        .map_err(|err| CommandError {
+            code: "internal",
+            message: format!("parse Graph config: {err}"),
+        })?;
+    let tokens = MicrosoftGraphAdapter::authenticate_interactive(
+        &config.client_id,
+        &config.authority,
+    )
+    .await
+    .map_err(graph_error_to_command)?;
+    secrets::store(&account.id, SecretSlot::AccessToken, &tokens.access_token)
+        .map_err(|err| CommandError {
+            code: "internal",
+            message: format!("failed to store access token: {err}"),
+        })?;
+    if let Some(refresh) = tokens.refresh_token.as_deref() {
+        secrets::store(&account.id, SecretSlot::RefreshToken, refresh)
+            .map_err(|err| CommandError {
+                code: "internal",
+                message: format!("failed to store refresh token: {err}"),
+            })?;
+    }
+    if let Err(err) = registry.register(&account) {
+        return Err(CommandError {
+            code: "internal",
+            message: format!("adapter registration failed: {err}"),
+        });
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// §19.11.8 — the missing-credentials check picks the right
+    /// keychain slot per `AdapterKind`. Drives the dialog's
+    /// password vs API-token vs OAuth branching.
+    #[test]
+    fn required_secret_slot_maps_each_kind() {
+        // Password-based providers.
+        assert!(matches!(
+            required_secret_slot(AdapterKind::Caldav),
+            SecretSlot::Password
+        ));
+        assert!(matches!(
+            required_secret_slot(AdapterKind::Ical),
+            SecretSlot::Password
+        ));
+        assert!(matches!(
+            required_secret_slot(AdapterKind::Ews),
+            SecretSlot::Password
+        ));
+        assert!(matches!(
+            required_secret_slot(AdapterKind::Local),
+            SecretSlot::Password
+        ));
+        // API-token providers — surfaced as "API token" in the UI.
+        assert!(matches!(
+            required_secret_slot(AdapterKind::Vikunja),
+            SecretSlot::ApiToken
+        ));
+        assert!(matches!(
+            required_secret_slot(AdapterKind::Todoist),
+            SecretSlot::ApiToken
+        ));
+        // OAuth providers — slot we probe for "is the user
+        // signed in" is the refresh token, since the access
+        // token rotates on its own.
+        assert!(matches!(
+            required_secret_slot(AdapterKind::Google),
+            SecretSlot::RefreshToken
+        ));
+        assert!(matches!(
+            required_secret_slot(AdapterKind::MicrosoftGraph),
+            SecretSlot::RefreshToken
+        ));
+    }
 }

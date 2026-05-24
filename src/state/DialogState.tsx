@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 
-import type { CalendarEvent, Contact, Task } from '../api/types';
+import type { Account, CalendarEvent, Contact, Task } from '../api/types';
 import type { SettingsTabId } from '../components/SettingsDialog';
 
 /**
@@ -61,7 +61,8 @@ export type DialogMode =
     }
   | { kind: 'syncConflicts' }
   | { kind: 'syncSchemaTooOld'; required: string; running: string }
-  | { kind: 'syncStaleResume'; snapshotAt: string };
+  | { kind: 'syncStaleResume'; snapshotAt: string }
+  | { kind: 'syncAccountsConnect'; accounts: Account[] };
 
 /**
  * Optional context the caller can pass when opening a *create* dialog
@@ -132,6 +133,12 @@ interface DialogStateValue {
    *  when the backend latches `status.stale_device_since`. The
    *  user clicks Fortfahren → resume command → latch clears. */
   openSyncStaleResume: (snapshotAt: string) => void;
+  /** §19.11 step 8 — "Konten verbinden" wizard. Opened by the
+   *  SyncPanel right after a successful `accept_remote_dataset`
+   *  when the snapshot brought in account rows that don't yet
+   *  have their secrets on this device. The dialog walks the
+   *  user through re-attaching credentials per account. */
+  openSyncAccountsConnect: (accounts: Account[]) => void;
   close: () => void;
   /**
    * Counter that bumps whenever data on the wire might have changed.
@@ -280,6 +287,10 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     (snapshotAt: string) => push({ kind: 'syncStaleResume', snapshotAt }),
     [push],
   );
+  const openSyncAccountsConnect = useCallback(
+    (accounts: Account[]) => push({ kind: 'syncAccountsConnect', accounts }),
+    [push],
+  );
 
   const close = useCallback(() => {
     const target = triggerStackRef.current.pop() ?? null;
@@ -335,6 +346,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openSyncConflicts,
       openSyncSchemaTooOld,
       openSyncStaleResume,
+      openSyncAccountsConnect,
       close,
       dataVersion,
       invalidateData,
@@ -356,6 +368,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openSyncConflicts,
       openSyncSchemaTooOld,
       openSyncStaleResume,
+      openSyncAccountsConnect,
       close,
       dataVersion,
       invalidateData,

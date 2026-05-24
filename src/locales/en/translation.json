@@ -124,6 +124,36 @@
     "errorPrefix": "Resume failed",
     "doneAnnouncement": "Snapshot applied: {{applied}} events updated locally."
   },
+  "syncAccountsConnect": {
+    "title": "Reconnect accounts",
+    "body": "We pulled in your accounts from the sync store, but the passwords and tokens are stored only on each device. Please re-attach the credentials for the following accounts so this device can reach them too.",
+    "hint": "You can also dismiss this dialog and reconnect later from Settings → Accounts. Until then, calendars and tasks from these accounts will be unavailable on this device.",
+    "empty": "All accounts are reconnected.",
+    "secretLabelPassword": "Password",
+    "secretLabelToken": "API token",
+    "oauthHint": "Opens the sign-in page in your default browser.",
+    "actionSave": "Save",
+    "actionSignIn": "Sign in via browser",
+    "actionLater": "Later",
+    "actionDone": "Done",
+    "saving": "Saving …",
+    "signingIn": "Signing in …",
+    "errorAuth": "The credentials were rejected. Please check and try again.",
+    "errorNetwork": "Network error while reaching the account.",
+    "errorInvalidInput": "The input is not valid for this account type.",
+    "errorEmpty": "Please enter a value before saving.",
+    "connectedAnnouncement": "Account {{name}} reconnected.",
+    "kind": {
+      "local": "Local",
+      "caldav": "CalDAV",
+      "ical": "iCal",
+      "google": "Google",
+      "microsoft_graph": "Microsoft 365",
+      "ews": "Exchange (EWS)",
+      "vikunja": "Vikunja",
+      "todoist": "Todoist"
+    }
+  },
   "dialogs": {
     "cancel": "Cancel",
     "save": "Save",

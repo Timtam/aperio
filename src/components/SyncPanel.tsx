@@ -24,6 +24,7 @@ import {
 import { useDateFormat } from '../intl/dateFormat';
 import { useDialogState } from '../state/DialogState';
 import { useSync } from '../state/useSync';
+import { fetchAccountsNeedingConnect } from './SyncAccountsConnectDialog';
 import { SyncProtocolSection } from './SyncProtocolSection';
 import { SyncSftpTrustDialog } from './SyncSftpTrustDialog';
 
@@ -51,7 +52,7 @@ export function SyncPanel() {
   const { t } = useTranslation();
   const announce = useAnnouncer();
   const fmt = useDateFormat();
-  const { openSyncConflicts } = useDialogState();
+  const { openSyncConflicts, openSyncAccountsConnect } = useDialogState();
   const {
     status,
     lastReport,
@@ -496,6 +497,16 @@ export function SyncPanel() {
       // Clear the passphrase after a successful onboarding; the
       // derived key lives in the keychain from this point on.
       setPassphraseDraft('');
+      // §19.11 step 8: the snapshot we just applied may have
+      // brought in external account rows whose secrets are not
+      // on this device yet. Open the reconnect wizard so the
+      // user can re-attach credentials in one go. Skip silently
+      // when there's nothing to do (Local-only datasets, or the
+      // user already has every secret in their keychain).
+      const needConnect = await fetchAccountsNeedingConnect();
+      if (needConnect && needConnect.length > 0) {
+        openSyncAccountsConnect(needConnect);
+      }
     } catch (err) {
       announce(
         `${t('dialogs.settings.sync.errorPrefix')}: ${messageForError(err)}`,
@@ -509,6 +520,7 @@ export function SyncPanel() {
     buildConfig,
     deviceNameDraft,
     messageForError,
+    openSyncAccountsConnect,
     passphraseDraft,
     t,
   ]);

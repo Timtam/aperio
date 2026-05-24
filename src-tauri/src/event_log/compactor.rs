@@ -336,6 +336,8 @@ impl Compactor {
             rows_failed: 0,
             settings_applied: body.settings.len(),
             settings_failed: 0,
+            accounts_applied: body.accounts.len(),
+            accounts_failed: 0,
         }
     }
 }
