@@ -6,6 +6,7 @@
 
 pub mod accounts;
 pub mod commands;
+pub mod conflicts;
 pub mod contact_sync;
 pub mod db;
 pub mod event_log;
@@ -283,6 +284,13 @@ pub fn run() {
             // compaction. The auto-trigger lives inside
             // `sync_now`; this is the manual override.
             commands::compact_now,
+            // Phase Sh (DESIGN.md §19.3): conflict surfacing +
+            // resolution. The merge logic in the applier records
+            // conflicts; these commands let the frontend read and
+            // resolve them.
+            commands::list_sync_conflicts,
+            commands::get_sync_conflicts_count,
+            commands::resolve_sync_conflict,
         ])
         .setup(move |app| {
             // Spawn the reminder scheduler on the Tauri/tokio runtime

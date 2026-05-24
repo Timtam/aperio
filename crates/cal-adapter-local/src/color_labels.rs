@@ -7,7 +7,7 @@
 //! `calendars.rs` and `tasks.rs`).
 
 use cal_core::{ColorLabel, ColorLabelId};
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use uuid::Uuid;
 
 use crate::mapping::req_text;
@@ -35,6 +35,31 @@ impl LocalAdapter {
             });
         }
         Ok(out)
+    }
+
+    /// Fetch one color label by id. Returns `None` when missing.
+    /// Used by the conflict-detection path so it can compare a
+    /// proposed patch against the live row.
+    pub fn get_color_label_by_id(&self, id: &str) -> cal_core::Result<Option<ColorLabel>> {
+        let conn = self.db().lock().expect("db mutex poisoned");
+        let mut stmt = conn
+            .prepare("SELECT id, name, hex FROM color_labels WHERE id = ?")
+            .map_err(map_sql_err)?;
+        let row = stmt
+            .query_row(params![id], |r| {
+                Ok((req_text(r, 0), req_text(r, 1), req_text(r, 2)))
+            })
+            .optional()
+            .map_err(map_sql_err)?;
+        let Some(parts) = row else {
+            return Ok(None);
+        };
+        let (id, name, hex) = parts;
+        Ok(Some(ColorLabel {
+            id: ColorLabelId::new(id?),
+            name: name?,
+            hex: hex?,
+        }))
     }
 
     pub fn create_color_label(&self, name: &str, hex: &str) -> cal_core::Result<ColorLabel> {

@@ -141,6 +141,42 @@ impl LocalAdapter {
         }
     }
 
+    /// Read one calendar row by id, returning `None` if it doesn't
+    /// exist. Used by the conflict-detection path so it can compare
+    /// the proposed patch against the live row.
+    pub fn get_calendar_by_id(&self, id: &str) -> cal_core::Result<Option<Calendar>> {
+        let conn = self.db().lock().expect("db mutex poisoned");
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, name, color_hex, color_source, read_only, default_sound
+                   FROM calendars WHERE id = ?",
+            )
+            .map_err(map_sql_err)?;
+        let row = stmt
+            .query_row(params![id], |r| {
+                Ok((
+                    req_text(r, 0),
+                    req_text(r, 1),
+                    read_container_color(r, 2, 3),
+                    read_bool(r, 4),
+                    read_sound(r, 5),
+                ))
+            })
+            .optional()
+            .map_err(map_sql_err)?;
+        let Some(parts) = row else {
+            return Ok(None);
+        };
+        let (id, name, color, read_only, sound) = parts;
+        Ok(Some(Calendar {
+            id: id?,
+            name: name?,
+            color: color?,
+            read_only: read_only?,
+            default_sound: sound?,
+        }))
+    }
+
     /// Append a single date to a recurring event's EXDATE list so the
     /// expansion engine skips that occurrence. Used by the UI's
     /// "edit / delete this occurrence only" flow — the master row's

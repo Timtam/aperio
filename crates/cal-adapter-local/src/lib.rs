@@ -142,6 +142,7 @@ pub mod test_support {
         conn.execute_batch(SCHEMA_V10).expect("apply v10 schema");
         conn.execute_batch(SCHEMA_V11).expect("apply v11 schema");
         conn.execute_batch(SCHEMA_V12).expect("apply v12 schema");
+        conn.execute_batch(SCHEMA_V13).expect("apply v13 schema");
         Arc::new(Mutex::new(conn))
     }
 
@@ -164,4 +165,6 @@ pub mod test_support {
         include_str!("../../../src-tauri/src/db/sql/0011_contact_addresses.sql");
     const SCHEMA_V12: &str =
         include_str!("../../../src-tauri/src/db/sql/0012_sync_applied_events.sql");
+    const SCHEMA_V13: &str =
+        include_str!("../../../src-tauri/src/db/sql/0013_sync_conflicts.sql");
 }

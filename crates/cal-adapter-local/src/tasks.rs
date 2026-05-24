@@ -264,6 +264,45 @@ impl LocalAdapter {
         Ok(())
     }
 
+    /// Fetch a single task list by id, returning `None` if missing.
+    /// Used by the conflict-detection path to compare the live row
+    /// against an incoming patch.
+    pub fn get_task_list_by_id(&self, id: &str) -> cal_core::Result<Option<TaskList>> {
+        let conn = self.db().lock().expect("db mutex poisoned");
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, name, color_hex, color_source, default_sound,
+                        embedded_in_calendar, read_only
+                   FROM task_lists WHERE id = ?",
+            )
+            .map_err(map_sql_err)?;
+        let row = stmt
+            .query_row(params![id], |r| {
+                Ok((
+                    req_text(r, 0),
+                    req_text(r, 1),
+                    read_container_color(r, 2, 3),
+                    read_sound(r, 4),
+                    opt_text(r, 5),
+                    read_bool(r, 6),
+                ))
+            })
+            .optional()
+            .map_err(map_sql_err)?;
+        let Some(parts) = row else {
+            return Ok(None);
+        };
+        let (id, name, color, sound, embedded, read_only) = parts;
+        Ok(Some(TaskList {
+            id: id?,
+            name: name?,
+            color: color?,
+            default_sound: sound?,
+            embedded_in_calendar: embedded?,
+            read_only: read_only?,
+        }))
+    }
+
     /// Fetch a single task by id. Returns `Ok(None)` when missing.
     /// Counterpart to `get_event_by_id` for the reminders overview.
     pub fn get_task_by_id(&self, id: &str) -> cal_core::Result<Option<Task>> {
