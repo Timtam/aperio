@@ -34,6 +34,9 @@ use std::sync::Arc;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use serde::Deserialize;
+use sync_adapter_dropbox::{
+    oauth as dropbox_oauth, DropboxAccountConfig, DropboxSyncAdapter,
+};
 use sync_adapter_ftp::{FtpsMode, FtpsSyncAdapter};
 use sync_adapter_local::LocalFsSyncAdapter;
 use sync_adapter_sftp::{
@@ -117,6 +120,18 @@ const PREF_FTP_MODE: &str = "sync.adapter.ftp.mode";
 /// Pseudo-account id for the FTPS password.
 const FTP_SECRET_ACCOUNT: &str = "sync.adapter.ftp";
 
+/// Dropbox adapter config keys. The OAuth refresh token lives
+/// in the keychain under DROPBOX_SECRET_ACCOUNT; the
+/// non-secret app-config bits sit here so they survive a
+/// re-launch.
+const PREF_DROPBOX_CLIENT_ID: &str = "sync.adapter.dropbox.clientId";
+const PREF_DROPBOX_CLIENT_SECRET: &str =
+    "sync.adapter.dropbox.clientSecret";
+const PREF_DROPBOX_PATH: &str = "sync.adapter.dropbox.path";
+
+/// Pseudo-account id for the Dropbox refresh token.
+const DROPBOX_SECRET_ACCOUNT: &str = "sync.adapter.dropbox";
+
 /// `user_prefs` key flagging whether the current sync dataset is
 /// E2E-encrypted. Mirrors the boolean in `meta.json`; lets
 /// `build_adapter_from_prefs` decide synchronously whether to wrap
@@ -191,6 +206,25 @@ pub enum SyncAdapterConfig {
         /// string is treated as "no passphrase".
         #[serde(default)]
         key_passphrase: Option<String>,
+    },
+    /// Dropbox adapter (DESIGN.md §19.6 — Dropbox API v2 +
+    /// OAuth 2.0). The user creates their own Dropbox app at
+    /// dropbox.com/developers/apps and supplies the
+    /// `client_id`. `client_secret` is optional — public apps
+    /// use PKCE only. The OAuth dance happens via the dedicated
+    /// `connect_dropbox_oauth` command before `configure_sync_adapter`
+    /// is called with this variant; by the time the adapter
+    /// is built the refresh token already lives in the
+    /// keychain.
+    Dropbox {
+        client_id: String,
+        #[serde(default)]
+        client_secret: String,
+        /// Remote folder, e.g. `/aperio`. Empty string = app
+        /// root (for app-folder-scoped apps) / Dropbox root
+        /// (for full-Dropbox apps).
+        #[serde(default)]
+        path: String,
     },
     /// FTPS adapter (DESIGN.md §19.6 — "FTP über TLS"). Plain
     /// FTP is not supported; the `mode` picks between
@@ -390,6 +424,46 @@ fn build_adapter(
                 verifier,
             )))
         }
+        SyncAdapterConfig::Dropbox {
+            client_id,
+            client_secret,
+            path,
+        } => {
+            let trimmed_client_id = client_id.trim();
+            if trimmed_client_id.is_empty() {
+                return Err(CommandError {
+                    code: "invalid_input",
+                    message: "Dropbox client_id must not be empty".into(),
+                });
+            }
+            // OAuth must have completed before this build path
+            // runs — the refresh token is the entry credential
+            // we need to mint access tokens. Missing keychain
+            // entry → user hasn't signed in yet.
+            let refresh_token = secrets::retrieve(
+                DROPBOX_SECRET_ACCOUNT,
+                SecretSlot::RefreshToken,
+            )
+            .map_err(|err| CommandError {
+                code: "auth",
+                message: format!(
+                    "Dropbox sign-in required — no refresh token: {err}",
+                ),
+            })?;
+            let adapter = DropboxSyncAdapter::new(
+                DropboxAccountConfig {
+                    client_id: trimmed_client_id.to_string(),
+                    client_secret: client_secret.trim().to_string(),
+                    base_path: path.trim().to_string(),
+                },
+                refresh_token,
+            )
+            .map_err(|err| CommandError {
+                code: "invalid_input",
+                message: format!("build Dropbox adapter: {err}"),
+            })?;
+            Ok(Arc::new(adapter))
+        }
         SyncAdapterConfig::Ftp {
             host,
             port,
@@ -554,6 +628,25 @@ fn persist_adapter_config(
             }
             Ok(())
         }
+        SyncAdapterConfig::Dropbox {
+            client_id,
+            client_secret,
+            path,
+        } => {
+            // Refresh token already in the keychain from the
+            // OAuth dance — persist_adapter_config doesn't
+            // touch it; we only mirror the non-secret app
+            // config into user_prefs here.
+            prefs.set(PREF_ADAPTER_KIND, "dropbox").map_err(internal)?;
+            prefs
+                .set(PREF_DROPBOX_CLIENT_ID, client_id.trim())
+                .map_err(internal)?;
+            prefs
+                .set(PREF_DROPBOX_CLIENT_SECRET, client_secret.trim())
+                .map_err(internal)?;
+            prefs.set(PREF_DROPBOX_PATH, path.trim()).map_err(internal)?;
+            Ok(())
+        }
         SyncAdapterConfig::Ftp {
             host,
             port,
@@ -697,7 +790,8 @@ pub async fn configure_sync_adapter(
         SyncAdapterConfig::Local { .. }
         | SyncAdapterConfig::Webdav { .. }
         | SyncAdapterConfig::Sftp { .. }
-        | SyncAdapterConfig::Ftp { .. } => {
+        | SyncAdapterConfig::Ftp { .. }
+        | SyncAdapterConfig::Dropbox { .. } => {
             // Persist BEFORE building the adapter so the keychain
             // entry for the new WebDAV password is in place; the
             // adapter constructor then reads it back when the
@@ -1512,6 +1606,36 @@ pub fn build_adapter_from_prefs(
                 mode,
             ))
         }
+        "dropbox" => {
+            let client_id =
+                prefs.get(PREF_DROPBOX_CLIENT_ID).ok().flatten()?;
+            if client_id.trim().is_empty() {
+                return None;
+            }
+            let client_secret = prefs
+                .get(PREF_DROPBOX_CLIENT_SECRET)
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            let path =
+                prefs.get(PREF_DROPBOX_PATH).ok().flatten().unwrap_or_default();
+            let refresh_token = secrets::retrieve(
+                DROPBOX_SECRET_ACCOUNT,
+                SecretSlot::RefreshToken,
+            )
+            .ok()?;
+            Arc::new(
+                DropboxSyncAdapter::new(
+                    DropboxAccountConfig {
+                        client_id: client_id.trim().to_string(),
+                        client_secret: client_secret.trim().to_string(),
+                        base_path: path.trim().to_string(),
+                    },
+                    refresh_token,
+                )
+                .ok()?,
+            )
+        }
         // Forward-compat: an unknown kind (left over from a
         // future Aperio version) is silently treated as "no
         // adapter configured" rather than a hard error. The
@@ -1541,6 +1665,73 @@ pub fn build_adapter_from_prefs(
 
 // ---------------------------------------------------------------------------
 // Phase Sm — SFTP host-key trust dialog support.
+// ---------------------------------------------------------------------------
+// Dropbox OAuth dance.
+// ---------------------------------------------------------------------------
+
+/// Run the Dropbox OAuth authorisation-code flow against the
+/// user's own Dropbox app (client_id from
+/// dropbox.com/developers/apps). On success, stores the
+/// refresh token in the keychain under
+/// `DROPBOX_SECRET_ACCOUNT::RefreshToken` so subsequent
+/// `configure_sync_adapter` calls can build the adapter without
+/// re-running the dance.
+///
+/// Opens the system browser; blocks on the loopback listener
+/// for up to 5 minutes waiting for the user to complete the
+/// consent screen.
+///
+/// `client_secret` may be empty for public (PKCE-only) Dropbox
+/// apps; confidential apps pass the secret as documented by
+/// the Dropbox developer console.
+#[tauri::command]
+pub async fn connect_dropbox_oauth(
+    client_id: String,
+    client_secret: String,
+) -> CommandResult<()> {
+    let trimmed_id = client_id.trim();
+    if trimmed_id.is_empty() {
+        return Err(CommandError {
+            code: "invalid_input",
+            message: "Dropbox client_id must not be empty".into(),
+        });
+    }
+    let http = reqwest::Client::new();
+    let tokens =
+        dropbox_oauth::run(trimmed_id, client_secret.trim(), &http)
+            .await
+            .map_err(|err| CommandError {
+                code: if err.is_auth() { "auth" } else { "network" },
+                message: format!("Dropbox OAuth: {err}"),
+            })?;
+    let refresh_token =
+        tokens.refresh_token.ok_or(CommandError {
+            code: "protocol",
+            message:
+                "Dropbox returned no refresh token — the app config may \
+                 be missing offline access".into(),
+        })?;
+    secrets::store(
+        DROPBOX_SECRET_ACCOUNT,
+        SecretSlot::RefreshToken,
+        &refresh_token,
+    )
+    .map_err(|err| CommandError {
+        code: "internal",
+        message: format!("keychain store Dropbox refresh: {err}"),
+    })?;
+    Ok(())
+}
+
+/// Returns `true` when a Dropbox refresh token is on file —
+/// drives the "signed in" indicator next to the OAuth button
+/// in the SyncPanel.
+#[tauri::command]
+pub async fn has_dropbox_refresh_token() -> CommandResult<bool> {
+    Ok(secrets::retrieve(DROPBOX_SECRET_ACCOUNT, SecretSlot::RefreshToken)
+        .is_ok())
+}
+
 // ---------------------------------------------------------------------------
 
 /// Probe an SFTP server's SHA256 host-key fingerprint WITHOUT

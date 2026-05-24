@@ -322,6 +322,9 @@ pub fn run() {
             // without authenticating; trust commits a user-
             // confirmed pin.
             commands::preview_sftp_host_key,
+            // §19.6 Dropbox OAuth dance.
+            commands::connect_dropbox_oauth,
+            commands::has_dropbox_refresh_token,
             commands::trust_sftp_host_key,
             commands::forget_sftp_host_key,
             commands::get_pinned_sftp_host_key,
