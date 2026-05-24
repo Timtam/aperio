@@ -77,7 +77,12 @@ export function SyncStatusIndicator() {
       conflictCount === 1
         ? t('syncStatus.conflict_one')
         : t('syncStatus.conflict_other', { count: conflictCount }),
-    error: t('syncStatus.noConnection'),
+    // Sustained-failure overrides the transient label so the badge
+    // reads "dauerhaft fehlgeschlagen" instead of just "Keine
+    // Verbindung" — same tone, stronger wording.
+    error: status?.sustained_failure
+      ? t('syncStatus.sustainedFailure')
+      : t('syncStatus.noConnection'),
     uploading: t('syncStatus.uploading'),
     synced: t('syncStatus.synced'),
     off: t('syncStatus.off'),

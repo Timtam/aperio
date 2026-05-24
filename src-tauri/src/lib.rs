@@ -275,6 +275,7 @@ pub fn run() {
             // orchestrator is registered in setup; these commands
             // are the user-facing surface.
             commands::configure_sync_adapter,
+            commands::test_sync_adapter,
             commands::sync_now,
             commands::get_sync_status,
             commands::set_sync_interval,
@@ -299,6 +300,8 @@ pub fn run() {
             // confirmed pin.
             commands::preview_sftp_host_key,
             commands::trust_sftp_host_key,
+            commands::forget_sftp_host_key,
+            commands::get_pinned_sftp_host_key,
         ])
         .setup(move |app| {
             // Spawn the reminder scheduler on the Tauri/tokio runtime

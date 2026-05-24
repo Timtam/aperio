@@ -101,6 +101,17 @@ impl HostKeyVerifier for UserPrefsHostKeyVerifier {
             );
         }
     }
+
+    fn forget(&self, host_port: &str) {
+        let repo = UserPrefsRepo::new(&self.db);
+        if let Err(err) = repo.delete(&Self::key_for(host_port)) {
+            warn!(
+                ?err,
+                host_port = %host_port,
+                "couldn't drop SFTP host-key fingerprint",
+            );
+        }
+    }
 }
 
 #[cfg(test)]
@@ -163,6 +174,28 @@ mod tests {
         let v = UserPrefsHostKeyVerifier::new(db.shared());
         v.record("nas:22", "SHA256:abc");
         assert_eq!(v.peek("nas:22"), Some("SHA256:abc".into()));
+    }
+
+    #[test]
+    fn forget_drops_persisted_pin() {
+        let (_tmp, db) = fresh_db();
+        let v = UserPrefsHostKeyVerifier::new(db.shared());
+        v.record("nas:22", "SHA256:abc");
+        v.forget("nas:22");
+        assert_eq!(v.peek("nas:22"), None);
+        // The next verify should treat this as first-use.
+        assert_eq!(
+            v.verify("nas:22", "SHA256:xyz"),
+            HostKeyDecision::AcceptAndRemember,
+        );
+    }
+
+    #[test]
+    fn forget_unknown_host_is_noop() {
+        let (_tmp, db) = fresh_db();
+        let v = UserPrefsHostKeyVerifier::new(db.shared());
+        // Doesn't panic when nothing is pinned.
+        v.forget("nas:22");
     }
 
     #[test]

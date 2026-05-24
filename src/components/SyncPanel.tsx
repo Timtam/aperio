@@ -9,10 +9,13 @@ import {
   adoptLocalDataset,
   compactNow,
   configureSyncAdapter,
+  forgetSftpHostKey,
+  getPinnedSftpHostKey,
   isCommandError,
   previewSftpHostKey,
   previewSyncTarget,
   setSyncInterval,
+  testSyncAdapter,
   trustSftpHostKey,
   type HostKeyPreview,
   type SyncAdapterConfig,
@@ -106,6 +109,7 @@ export function SyncPanel() {
   const [deviceNameDraft, setDeviceNameDraft] = useState('');
   const [intervalDraft, setIntervalDraft] = useState<number | null>(null);
   const [busyAdapter, setBusyAdapter] = useState(false);
+  const [busyTest, setBusyTest] = useState(false);
   const [busyPreview, setBusyPreview] = useState(false);
   const [busyAccept, setBusyAccept] = useState(false);
   const [busyAdopt, setBusyAdopt] = useState(false);
@@ -124,6 +128,14 @@ export function SyncPanel() {
   );
   const [pendingSftpConfig, setPendingSftpConfig] =
     useState<SyncAdapterConfig | null>(null);
+  // The fingerprint currently pinned for the host:port the user
+  // has typed into the SFTP fields. Lets the SyncPanel render a
+  // "Pin vergessen" button when one exists, without probing the
+  // server. Refreshed whenever host/port change or after a
+  // trust/forget gesture so the UI doesn't go stale.
+  const [pinnedFingerprint, setPinnedFingerprint] = useState<string | null>(
+    null,
+  );
 
   const interval = intervalDraft ?? status?.interval_minutes ?? 5;
 
@@ -364,6 +376,10 @@ export function SyncPanel() {
       if (!config || !preview) return;
       try {
         await trustSftpHostKey(preview.host_port, fingerprint);
+        // Reflect the new pin in the UI immediately so the
+        // "Vergessen" button shows up without waiting for the
+        // host/port effect to re-fire.
+        setPinnedFingerprint(fingerprint);
       } catch (err) {
         // eslint-disable-next-line no-console
         console.warn('trust_sftp_host_key failed', err);
@@ -389,6 +405,37 @@ export function SyncPanel() {
     setTrustPreview(null);
     setPendingSftpConfig(null);
   }, []);
+
+  // "Verbindung testen" — build the adapter, run `test_connection`,
+  // throw the handle away. Never persists, never mutates the
+  // active orchestrator. Errors are announced verbatim via the
+  // standard error path; success gets a brief "OK" announcement.
+  const onTest = useCallback(async () => {
+    if (configMissingRequired) {
+      announce(t('dialogs.settings.sync.adapterNeedPath'), 'assertive');
+      return;
+    }
+    setBusyTest(true);
+    try {
+      await testSyncAdapter(buildConfig());
+      announce(t('dialogs.settings.sync.adapterTestOk'));
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('test_sync_adapter failed', err);
+      announce(
+        `${t('dialogs.settings.sync.errorPrefix')}: ${messageForError(err)}`,
+        'assertive',
+      );
+    } finally {
+      setBusyTest(false);
+    }
+  }, [
+    announce,
+    buildConfig,
+    configMissingRequired,
+    messageForError,
+    t,
+  ]);
 
   const onDisconnect = useCallback(async () => {
     setBusyAdapter(true);
@@ -577,6 +624,67 @@ export function SyncPanel() {
     }
   }, [status?.configured]);
 
+  // Look up the currently-pinned fingerprint whenever the SFTP
+  // host/port pair changes — so the "Aktueller Pin" line + the
+  // "Vergessen" button update without a manual refresh. Debounced
+  // via the natural typing cadence; an extra short delay isn't
+  // worth the complexity for a fingerprint readout.
+  useEffect(() => {
+    if (kindDraft !== 'sftp') {
+      setPinnedFingerprint(null);
+      return;
+    }
+    const host = sftpHostDraft.trim();
+    if (!host) {
+      setPinnedFingerprint(null);
+      return;
+    }
+    const port = Number.parseInt(sftpPortDraft, 10);
+    const resolvedPort = Number.isFinite(port) && port > 0 ? port : 22;
+    const hostPort = `${host}:${resolvedPort}`;
+    let cancelled = false;
+    getPinnedSftpHostKey(hostPort)
+      .then((fp) => {
+        if (!cancelled) setPinnedFingerprint(fp);
+      })
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.warn('get_pinned_sftp_host_key failed', err);
+        if (!cancelled) setPinnedFingerprint(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [kindDraft, sftpHostDraft, sftpPortDraft]);
+
+  // "Pin vergessen" — drop the stored fingerprint so the next
+  // connect goes through the first-use trust dialog again. Used
+  // when the user knows their server key was rotated and wants
+  // to avoid the mismatch warning on the next round.
+  const onForgetPin = useCallback(async () => {
+    const host = sftpHostDraft.trim();
+    if (!host) return;
+    const port = Number.parseInt(sftpPortDraft, 10);
+    const resolvedPort = Number.isFinite(port) && port > 0 ? port : 22;
+    const hostPort = `${host}:${resolvedPort}`;
+    const confirmed = window.confirm(
+      t('dialogs.settings.sync.sftpForgetPinConfirm', { hostPort }),
+    );
+    if (!confirmed) return;
+    try {
+      await forgetSftpHostKey(hostPort);
+      setPinnedFingerprint(null);
+      announce(t('dialogs.settings.sync.sftpForgetPinDone'));
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('forget_sftp_host_key failed', err);
+      announce(
+        `${t('dialogs.settings.sync.errorPrefix')}: ${messageForError(err)}`,
+        'assertive',
+      );
+    }
+  }, [announce, messageForError, sftpHostDraft, sftpPortDraft, t]);
+
   return (
     <div className="sync-panel">
       <section aria-labelledby={stateHeadingId}>
@@ -606,6 +714,11 @@ export function SyncPanel() {
         {lastError && (
           <p className="sync-panel__error" role="alert">
             {t('dialogs.settings.sync.errorPrefix')}: {lastError}
+          </p>
+        )}
+        {status?.sustained_failure && (
+          <p className="sync-panel__warning" role="status">
+            {t('dialogs.settings.sync.sustainedFailureBanner')}
           </p>
         )}
         <div className="sync-panel__actions">
@@ -852,6 +965,21 @@ export function SyncPanel() {
                 </p>
               </div>
             )}
+            {pinnedFingerprint && (
+              <div className="sync-panel__field sync-panel__pin">
+                <p>
+                  {t('dialogs.settings.sync.sftpPinCurrent')}
+                  {': '}
+                  <code>{pinnedFingerprint}</code>
+                </p>
+                <p className="sync-panel__hint">
+                  {t('dialogs.settings.sync.sftpPinHint')}
+                </p>
+                <button type="button" onClick={() => void onForgetPin()}>
+                  {t('dialogs.settings.sync.sftpForgetPin')}
+                </button>
+              </div>
+            )}
             {sftpAuthDraft === 'key' && (
               <>
                 <div className="sync-panel__field">
@@ -920,6 +1048,21 @@ export function SyncPanel() {
               ? t('dialogs.settings.sync.adapterConnecting')
               : t('dialogs.settings.sync.adapterConfigure')}
           </button>
+          {/* "Verbindung testen" lets the user verify host / URL /
+              credentials without persisting anything. Disabled for
+              the `none` kind (nothing to test) and while a real
+              configure is in flight. */}
+          {kindDraft !== 'none' && (
+            <button
+              type="button"
+              disabled={busyAdapter || busyTest}
+              onClick={() => void onTest()}
+            >
+              {busyTest
+                ? t('dialogs.settings.sync.adapterTesting')
+                : t('dialogs.settings.sync.adapterTest')}
+            </button>
+          )}
           {status?.configured && (
             <button
               type="button"

@@ -80,6 +80,21 @@ const APP_START_DELAY: Duration = Duration::from_secs(5);
 /// shot pile of edits inside a single push instead of N small ones.
 const DEBOUNCE_WINDOW: Duration = Duration::from_secs(2);
 
+/// Upper bound on the exponential backoff between failed rounds.
+/// Failed rounds double the wait (2x, 4x, 8x …) up to this cap so
+/// a remote that's been down for hours doesn't keep slamming the
+/// network every few minutes. We pick 30 minutes as the ceiling —
+/// large enough to noticeably back off, short enough that a
+/// recovered network gets picked up within "one coffee break".
+const MAX_BACKOFF: Duration = Duration::from_secs(30 * 60);
+
+/// Threshold (consecutive failures) before we flip the SyncStatus
+/// `sustained_failure` flag. Two-in-a-row is normal transient
+/// noise; three signals "something's actually wrong" — the status
+/// indicator can shift tone and a Settings reader gets a hint
+/// without the user having to read the log.
+const SUSTAINED_FAILURE_THRESHOLD: u32 = 3;
+
 /// Frontend payload emitted on the `sync-status` channel. Sent
 /// before + after every sync round so the status indicator can flip
 /// between "↑ Wird hochgeladen…" and "✓ Synchronisiert" without
@@ -114,6 +129,13 @@ pub struct SyncScheduler {
     /// app-start kick. Used by tests so they don't have to wait the
     /// `APP_START_DELAY` to assert behaviour.
     started: Arc<Mutex<bool>>,
+    /// Count of consecutive failed rounds (since the last success).
+    /// Drives exponential backoff (`interval << min(n, cap)`) and
+    /// the `sustained_failure` flag on `SyncStatus`. Reset to 0 by
+    /// every successful round — including the manual `sync_now`
+    /// command path so the user clicking "Sync now" after a hiccup
+    /// gets immediate back-to-normal cadence.
+    consecutive_failures: Arc<Mutex<u32>>,
 }
 
 impl SyncScheduler {
@@ -135,6 +157,7 @@ impl SyncScheduler {
             db,
             kick,
             started: Arc::new(Mutex::new(false)),
+            consecutive_failures: Arc::new(Mutex::new(0)),
         });
 
         let worker = scheduler.clone();
@@ -198,6 +221,13 @@ impl SyncScheduler {
     /// Run one sync round through the orchestrator and emit a
     /// `sync-status` event before + after. Errors don't bubble — the
     /// status emit carries the message instead.
+    ///
+    /// Maintains the `consecutive_failures` counter that drives the
+    /// exponential backoff + `sustained_failure` status latch. A
+    /// successful round resets it; a failed one bumps it. The
+    /// orchestrator's "AlreadyRunning" rejection (returned when the
+    /// in-flight guard is held) is NOT counted as a failure — it
+    /// just means another round is already covering us.
     async fn run_round<R: Runtime>(&self, app: &AppHandle<R>) {
         self.emit_status(app, None, None);
         match self.orchestrator.sync_now().await {
@@ -208,13 +238,64 @@ impl SyncScheduler {
                     applied = report.applied,
                     "scheduled sync round completed",
                 );
+                self.reset_failures();
                 self.emit_status(app, Some(report), None);
             }
             Err(err) => {
                 warn!(?err, "scheduled sync round failed");
+                // `AlreadyRunning` is a courteous self-reject, not a
+                // real failure — the round in flight will set the
+                // success / failure tone for us.
+                if !err.to_string().contains("AlreadyRunning") {
+                    self.bump_failure();
+                }
                 self.emit_status(app, None, Some(err.to_string()));
             }
         }
+    }
+
+    /// Bump the consecutive-failures counter; caps at u32::MAX (we
+    /// only ever use the value to compute `1 << min(n, cap)` so the
+    /// raw size doesn't matter beyond the backoff cap).
+    fn bump_failure(&self) {
+        let mut guard = self
+            .consecutive_failures
+            .lock()
+            .expect("consecutive_failures mutex poison");
+        *guard = guard.saturating_add(1);
+    }
+
+    /// Reset the consecutive-failures counter to zero. Called after
+    /// every successful round; also exposed via [`Self::note_success`]
+    /// so the manual `sync_now` Tauri command can clear the latch
+    /// without going through the scheduler loop.
+    fn reset_failures(&self) {
+        let mut guard = self
+            .consecutive_failures
+            .lock()
+            .expect("consecutive_failures mutex poison");
+        *guard = 0;
+    }
+
+    /// Public accessor for the failure counter. Used by
+    /// [`SyncOrchestrator::status`] to surface `sustained_failure`
+    /// in the snapshot without coupling the orchestrator to the
+    /// scheduler's internals.
+    pub fn consecutive_failures(&self) -> u32 {
+        *self
+            .consecutive_failures
+            .lock()
+            .expect("consecutive_failures mutex poison")
+    }
+
+    /// Hook so the manual `sync_now` Tauri command (which runs
+    /// through the orchestrator directly, not via the scheduler
+    /// loop) can clear the latch after a successful round. Failure
+    /// is still tracked only by the scheduler so a user-driven
+    /// retry that fails doesn't keep them stuck in the warning
+    /// state — they get a fresh chance on the next periodic tick.
+    pub fn note_success(&self) {
+        self.reset_failures();
     }
 
     fn emit_status<R: Runtime>(
@@ -224,13 +305,25 @@ impl SyncScheduler {
         error: Option<String>,
     ) {
         let payload = SyncStatusPayload {
-            status: self.orchestrator.status(),
+            status: self.current_status(),
             report,
             error,
         };
         if let Err(err) = app.emit("sync-status", &payload) {
             warn!(?err, "failed to emit sync-status event");
         }
+    }
+
+    /// Augmented [`SyncStatus`] snapshot: orchestrator's view +
+    /// the scheduler's `sustained_failure` decoration. Used by
+    /// both the emit path and the `get_sync_status` Tauri
+    /// command so the frontend gets the same picture whether it
+    /// polls or listens.
+    pub fn current_status(&self) -> SyncStatus {
+        let mut status = self.orchestrator.status();
+        status.sustained_failure =
+            self.consecutive_failures() >= SUSTAINED_FAILURE_THRESHOLD;
+        status
     }
 
     /// Read the configured interval from `user_prefs`. Defaults to
@@ -241,9 +334,22 @@ impl SyncScheduler {
         read_interval_minutes(&self.db)
     }
 
-    /// Convert the configured interval into a `Duration`.
+    /// Convert the configured interval into a `Duration`. When
+    /// consecutive failures are non-zero, the base interval is
+    /// shifted left by `min(failures, 5)` bits — yielding 1x, 2x,
+    /// 4x, 8x, 16x, 32x — then capped at [`MAX_BACKOFF`]. The cap
+    /// matters more than the exponent: it's what stops a remote
+    /// that's been unreachable for a day from sleeping forever.
+    ///
+    /// We compute the multiplier as `1u32.checked_shl(n)`; any `n`
+    /// beyond 31 would otherwise overflow and silently wrap to
+    /// zero. The 5-bit ceiling keeps the math comfortably inside
+    /// safe range AND already saturates at the MAX_BACKOFF cap for
+    /// any base interval we'd realistically configure.
     fn interval_duration(&self) -> Duration {
-        Duration::from_secs(u64::from(self.read_interval_minutes()) * 60)
+        let base =
+            Duration::from_secs(u64::from(self.read_interval_minutes()) * 60);
+        backoff_duration(base, self.consecutive_failures())
     }
 
     /// Wake the background loop. Used by the `configure_sync_adapter`
@@ -272,6 +378,26 @@ impl SyncScheduler {
         self.kick.notify_one();
         Ok(clamped)
     }
+}
+
+/// Pure backoff calculation. Pulled out of
+/// [`SyncScheduler::interval_duration`] so the tests can exercise
+/// the math without spinning up a full scheduler.
+///
+/// `base` is the configured interval; `failures` is the count of
+/// consecutive failed rounds since the last success. The result
+/// is `base << min(failures, 5)`, capped at [`MAX_BACKOFF`]. The
+/// 5-bit shift cap keeps the math inside `u32` range; the
+/// MAX_BACKOFF cap is what actually bounds the sleep duration for
+/// long-running outages.
+fn backoff_duration(base: Duration, failures: u32) -> Duration {
+    if failures == 0 {
+        return base;
+    }
+    let shift = failures.min(5);
+    let multiplier = 1u32 << shift;
+    let scaled = base.saturating_mul(multiplier);
+    scaled.min(MAX_BACKOFF)
 }
 
 /// Free function reading the configured interval. Exposed separately
@@ -346,5 +472,49 @@ mod tests {
             read_interval_minutes(&shared),
             DEFAULT_SYNC_INTERVAL_MINUTES,
         );
+    }
+
+    // -----------------------------------------------------------------
+    // backoff_duration
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn backoff_zero_failures_returns_base_unchanged() {
+        let base = Duration::from_secs(300); // 5 min
+        assert_eq!(backoff_duration(base, 0), base);
+    }
+
+    #[test]
+    fn backoff_doubles_per_failure() {
+        let base = Duration::from_secs(60); // 1 min
+        assert_eq!(backoff_duration(base, 1), Duration::from_secs(120));
+        assert_eq!(backoff_duration(base, 2), Duration::from_secs(240));
+        assert_eq!(backoff_duration(base, 3), Duration::from_secs(480));
+    }
+
+    #[test]
+    fn backoff_caps_at_max_backoff() {
+        // 5-min base, 5 failures → 5 * 32 = 160 min, way above
+        // the 30-min cap.
+        let base = Duration::from_secs(5 * 60);
+        assert_eq!(backoff_duration(base, 5), MAX_BACKOFF);
+        // Big shift cap: 100 failures still respects the cap.
+        assert_eq!(backoff_duration(base, 100), MAX_BACKOFF);
+    }
+
+    #[test]
+    fn backoff_doesnt_undershoot_with_tiny_base() {
+        // 1-min base × 2 failures → 4 min, well below cap.
+        let base = Duration::from_secs(60);
+        assert_eq!(backoff_duration(base, 2), Duration::from_secs(240));
+    }
+
+    #[test]
+    fn backoff_caps_when_shift_overflow_would_lose_precision() {
+        // Guard the saturating_mul + cap interaction: with a base
+        // large enough that even a single doubling exceeds the
+        // cap, we still get the cap back, not zero.
+        let big_base = MAX_BACKOFF; // 30 min
+        assert_eq!(backoff_duration(big_base, 1), MAX_BACKOFF);
     }
 }

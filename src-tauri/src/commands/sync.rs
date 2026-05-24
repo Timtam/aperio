@@ -641,20 +641,28 @@ pub async fn set_sync_interval(
 }
 
 /// Trigger one sync round (push pending logs + fetch & apply
-/// new ones).
+/// new ones). On success, clears the scheduler's failure latch —
+/// so a user who clicks "Sync now" after a transient hiccup is
+/// out of the warning state immediately, not on the next
+/// periodic tick.
 #[tauri::command]
 pub async fn sync_now(
     orchestrator: State<'_, Arc<SyncOrchestrator>>,
+    scheduler: State<'_, Arc<SyncScheduler>>,
 ) -> CommandResult<SyncRoundReport> {
-    orchestrator.sync_now().await.map_err(sync_err)
+    let report = orchestrator.sync_now().await.map_err(sync_err)?;
+    scheduler.note_success();
+    Ok(report)
 }
 
-/// Read-only status snapshot for the status indicator.
+/// Read-only status snapshot for the status indicator. Returns
+/// the scheduler-decorated status so `sustained_failure` and
+/// any future scheduler-level flags are visible to the frontend.
 #[tauri::command]
 pub async fn get_sync_status(
-    orchestrator: State<'_, Arc<SyncOrchestrator>>,
+    scheduler: State<'_, Arc<SyncScheduler>>,
 ) -> CommandResult<SyncStatus> {
-    Ok(orchestrator.status())
+    Ok(scheduler.current_status())
 }
 
 /// Manually trigger a compaction round (Phase Sg, §19.10). Snapshots
@@ -691,6 +699,33 @@ pub async fn compact_now(
         .compact_now(adapter.as_ref())
         .await
         .map_err(sync_err)
+}
+
+/// Test the supplied adapter config end-to-end without committing
+/// anything. Builds the adapter, calls `test_connection`, throws
+/// away the adapter handle. Intended for the SyncPanel's
+/// "Verbindung testen" button so the user can verify URL / host /
+/// credentials in isolation before they hit Connect.
+///
+/// SFTP semantics: the test path uses the same UserPrefs-backed
+/// host-key verifier the real adapter would use. If the user
+/// hasn't pinned yet, the silent-TOFU verifier will accept and
+/// pin on first contact — same behaviour as if they'd clicked
+/// Connect directly. That's fine: the trust-dialog flow is
+/// upstream of this command, and the user wouldn't reach the
+/// test button without having seen it.
+///
+/// Returns no payload on success; failures map to the standard
+/// `sync_err` codes (`network`, `auth`, `not_found`, …) so the
+/// frontend can reuse the same error formatting it already has.
+#[tauri::command]
+pub async fn test_sync_adapter(
+    db: State<'_, DbHandle>,
+    config: SyncAdapterConfig,
+) -> CommandResult<()> {
+    let shared = db.shared();
+    let adapter = build_adapter(&config, &shared)?;
+    adapter.test_connection().await.map_err(sync_err)
 }
 
 // ---------------------------------------------------------------------------
@@ -1072,4 +1107,47 @@ pub async fn trust_sftp_host_key(
     let verifier = UserPrefsHostKeyVerifier::new(shared);
     verifier.record(trimmed_host_port, trimmed_fp);
     Ok(())
+}
+
+/// Drop the pinned fingerprint for a host_port. Used by the
+/// SyncPanel's "Pin vergessen" gesture — when a user knows
+/// their server's key has rotated, they can clear the old pin
+/// proactively rather than waiting for the next connect to fail
+/// with a mismatch dialog. The next connect goes through the
+/// first-use trust dialog again.
+#[tauri::command]
+pub async fn forget_sftp_host_key(
+    db: State<'_, DbHandle>,
+    host_port: String,
+) -> CommandResult<()> {
+    let trimmed = host_port.trim();
+    if trimmed.is_empty() {
+        return Err(CommandError {
+            code: "invalid_input",
+            message: "host_port must not be empty".into(),
+        });
+    }
+    let shared = db.shared();
+    let verifier = UserPrefsHostKeyVerifier::new(shared);
+    verifier.forget(trimmed);
+    Ok(())
+}
+
+/// Read the currently-pinned fingerprint for a host_port, or
+/// `None` if nothing is pinned yet. Lets the SyncPanel render
+/// "Aktueller Pin: SHA256:…" without having to probe the
+/// server, so the "Vergessen" button can stay informative even
+/// when the server is unreachable.
+#[tauri::command]
+pub async fn get_pinned_sftp_host_key(
+    db: State<'_, DbHandle>,
+    host_port: String,
+) -> CommandResult<Option<String>> {
+    let trimmed = host_port.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    let shared = db.shared();
+    let verifier = UserPrefsHostKeyVerifier::new(shared);
+    Ok(verifier.peek(trimmed))
 }

@@ -186,6 +186,14 @@ pub trait HostKeyVerifier: Send + Sync + std::fmt::Debug {
     /// or by the adapter itself after a silent-TOFU connect for
     /// callers that don't need the confirmation step.
     fn record(&self, host_port: &str, fingerprint: &str);
+    /// Drop the stored fingerprint for `host_port`. No-op when
+    /// nothing is pinned. Used by the SyncPanel's "Pin
+    /// vergessen" gesture — a user who knows their server's key
+    /// rotated can clear the old pin proactively instead of
+    /// waiting for the next connect to trip the mismatch
+    /// detector. The next connect to this host_port will go
+    /// through the first-use trust dialog again.
+    fn forget(&self, host_port: &str);
 }
 
 /// In-memory implementation for tests. Stores known hosts in a
@@ -237,6 +245,13 @@ impl HostKeyVerifier for InMemoryHostKeyVerifier {
             .lock()
             .expect("known-hosts mutex poison")
             .insert(host_port.to_string(), fingerprint.to_string());
+    }
+
+    fn forget(&self, host_port: &str) {
+        self.known
+            .lock()
+            .expect("known-hosts mutex poison")
+            .remove(host_port);
     }
 }
 
@@ -1012,6 +1027,26 @@ mod tests {
             v.verify("nas:22", "SHA256:abc"),
             HostKeyDecision::Accept,
         );
+    }
+
+    #[test]
+    fn in_memory_verifier_forget_drops_pin() {
+        let v = InMemoryHostKeyVerifier::with_known("nas:22", "SHA256:abc");
+        v.forget("nas:22");
+        // After forget, verify returns AcceptAndRemember again —
+        // the host is treated as new on next contact.
+        assert_eq!(
+            v.verify("nas:22", "SHA256:zzz"),
+            HostKeyDecision::AcceptAndRemember,
+        );
+    }
+
+    #[test]
+    fn in_memory_verifier_forget_unknown_is_noop() {
+        let v = InMemoryHostKeyVerifier::new();
+        // Doesn't panic when nothing is pinned.
+        v.forget("nas:22");
+        assert_eq!(v.peek("nas:22"), None);
     }
 
     #[test]

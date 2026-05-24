@@ -132,6 +132,17 @@ pub struct SyncStatus {
     /// user knows what version they need. `None` when sync is
     /// fine.
     pub min_app_version_required: Option<String>,
+    /// `true` when the scheduler has seen three or more
+    /// consecutive failed rounds. Drives a warning tone on the
+    /// status indicator + a banner in the Settings panel so the
+    /// user doesn't have to read the log to notice a remote
+    /// that's been unreachable for a while.
+    ///
+    /// The orchestrator itself doesn't track failure history —
+    /// it gets `false` by default. The scheduler decorates the
+    /// status before emitting / serving via `get_sync_status`.
+    #[serde(default)]
+    pub sustained_failure: bool,
 }
 
 /// The orchestrator itself. Holds an `Option<adapter>` so the
@@ -261,6 +272,11 @@ impl SyncOrchestrator {
             e2e_enabled,
             schema_too_old,
             min_app_version_required,
+            // The orchestrator doesn't track failure history.
+            // The scheduler decorates this before emitting and
+            // `get_sync_status` does the same when serving the
+            // snapshot to the frontend.
+            sustained_failure: false,
         }
     }
 

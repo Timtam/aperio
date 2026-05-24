@@ -707,6 +707,13 @@ export interface SyncStatus {
    *  dataset requires. Shown verbatim in the update prompt so
    *  the user knows which version to install. */
   min_app_version_required: string | null;
+  /** `true` when the scheduler has seen three or more
+   *  consecutive failed rounds. Drives a warning tone on the
+   *  status indicator + a banner in the Settings panel so the
+   *  user doesn't have to read the log to notice a remote
+   *  that's been unreachable for a while. Cleared on the next
+   *  successful round. */
+  sustained_failure: boolean;
 }
 
 /** Counters from one `syncNow` invocation. Surfaced so the
@@ -825,6 +832,14 @@ export const syncNow = () =>
 export const configureSyncAdapter = (config: SyncAdapterConfig) =>
   invoke<void>('configure_sync_adapter', { config });
 
+/** Test the supplied adapter config without committing it. Builds
+ *  the adapter, runs `test_connection`, throws away the handle.
+ *  Used by SyncPanel's "Verbindung testen" button so the user
+ *  can verify host/credentials/path without modifying the
+ *  configured adapter or persisting anything. */
+export const testSyncAdapter = (config: SyncAdapterConfig) =>
+  invoke<void>('test_sync_adapter', { config });
+
 /** Update the periodic interval (in minutes). Clamps to ≥1 on the
  *  backend; returns the value actually persisted. */
 export const setSyncInterval = (minutes: number) =>
@@ -918,3 +933,18 @@ export const previewSftpHostKey = (host: string, port: number) =>
  *  flow commits its decision. */
 export const trustSftpHostKey = (hostPort: string, fingerprint: string) =>
   invoke<void>('trust_sftp_host_key', { hostPort, fingerprint });
+
+/** Drop the pinned fingerprint for a host_port. Used by the
+ *  SyncPanel's "Pin vergessen" button — when the user knows the
+ *  server's key was rotated, they clear the old pin so the next
+ *  connect goes through the first-use trust dialog instead of
+ *  firing the mismatch warning. */
+export const forgetSftpHostKey = (hostPort: string) =>
+  invoke<void>('forget_sftp_host_key', { hostPort });
+
+/** Read the currently-pinned fingerprint for a host_port, or
+ *  null if nothing is pinned. The SyncPanel uses this to render
+ *  "Aktueller Pin: …" without probing the live server, so the
+ *  pin-management UI works even when the server is unreachable. */
+export const getPinnedSftpHostKey = (hostPort: string) =>
+  invoke<string | null>('get_pinned_sftp_host_key', { hostPort });
