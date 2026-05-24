@@ -71,18 +71,31 @@ export function SyncStatusIndicator() {
     off: '◌',
   };
 
+  // Tease the auth-failure case apart from generic
+  // connectivity errors. The status badge stays in the `error`
+  // tone (same glyph + same routing target — Settings → Sync —
+  // since that's where the user fixes both), but the label
+  // changes from "Keine Verbindung" to a more actionable
+  // "Anmeldung fehlgeschlagen" so the user knows to check
+  // credentials rather than the network.
+  const isAuthError =
+    tone === 'error' && status?.last_error_code === 'auth';
   const label: Record<typeof tone, string> = {
     schema_too_old: t('syncStatus.schemaTooOld'),
     conflict:
       conflictCount === 1
         ? t('syncStatus.conflict_one')
         : t('syncStatus.conflict_other', { count: conflictCount }),
-    // Sustained-failure overrides the transient label so the badge
-    // reads "dauerhaft fehlgeschlagen" instead of just "Keine
-    // Verbindung" — same tone, stronger wording.
-    error: status?.sustained_failure
-      ? t('syncStatus.sustainedFailure')
-      : t('syncStatus.noConnection'),
+    // Priority order for the error label:
+    //   auth → "Anmeldung fehlgeschlagen" (most actionable)
+    //   sustained → "dauerhaft fehlgeschlagen" (stronger
+    //               wording after three failed rounds)
+    //   default → "Keine Verbindung" (transient)
+    error: isAuthError
+      ? t('syncStatus.authFailed')
+      : status?.sustained_failure
+        ? t('syncStatus.sustainedFailure')
+        : t('syncStatus.noConnection'),
     uploading: t('syncStatus.uploading'),
     synced: t('syncStatus.synced'),
     off: t('syncStatus.off'),
@@ -106,8 +119,14 @@ export function SyncStatusIndicator() {
           : t('syncStatus.announceConflict_other', { count: conflictCount });
       announce(message, 'assertive');
     } else if (tone === 'error') {
+      // Auth failures get a dedicated announcement that names
+      // the fix path ("Sync-Einstellungen prüfen") rather than
+      // echoing the raw error string — which the user can't
+      // act on anyway.
       announce(
-        t('syncStatus.announceFailure', { message: lastError ?? '' }),
+        isAuthError
+          ? t('syncStatus.announceAuthFailed')
+          : t('syncStatus.announceFailure', { message: lastError ?? '' }),
         'assertive',
       );
     } else if (tone === 'uploading') {

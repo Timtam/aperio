@@ -667,7 +667,16 @@ pub async fn sync_now(
         &result,
         duration_ms,
     );
-    let report = result.map_err(sync_err)?;
+    // Mirror the scheduler-loop bookkeeping: on a manual-sync
+    // failure we latch the error code so the StatusBar's auth
+    // banner picks up; on success we clear both counters.
+    let report = match result {
+        Ok(r) => r,
+        Err(err) => {
+            scheduler.note_failure(&err);
+            return Err(sync_err(err));
+        }
+    };
     scheduler.note_success();
     // If new conflicts landed during this manual round, kick
     // the frontend's conflict-count refetch + notification

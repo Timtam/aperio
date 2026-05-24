@@ -821,6 +821,11 @@ export function SyncPanel() {
             {t('dialogs.settings.sync.errorPrefix')}: {lastError}
           </p>
         )}
+        {status?.last_error_code === 'auth' && (
+          <p className="sync-panel__warning" role="status">
+            {t('dialogs.settings.sync.authFailureBanner')}
+          </p>
+        )}
         {status?.sustained_failure && (
           <p className="sync-panel__warning" role="status">
             {t('dialogs.settings.sync.sustainedFailureBanner')}

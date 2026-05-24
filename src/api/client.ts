@@ -767,6 +767,15 @@ export interface SyncStatus {
    *  the local data will jump to). Cleared after a successful
    *  `resumeStaleDevice` call. */
   stale_device_since: string | null;
+  /** Stable identifier of the most recent sync-round failure
+   *  ([`SyncError::code`] strings: "auth", "network", "io",
+   *  "protocol", "not_found", "encryption_required",
+   *  "schema_too_old", "stale_device", "internal"). Latched on
+   *  failure, cleared on the next success. Lets the SyncStatusBar
+   *  branch on the error kind — most notably to render an
+   *  "auth failed, reconnect here" banner specifically for
+   *  `"auth"` rather than the generic "Verbindungsfehler". */
+  last_error_code: string | null;
 }
 
 /** Counters from one `syncNow` invocation. Surfaced so the

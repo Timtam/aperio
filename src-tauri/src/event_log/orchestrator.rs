@@ -159,6 +159,20 @@ pub struct SyncStatus {
     /// rounds can run again. RFC3339 timestamp of the snapshot
     /// the dialog should reference.
     pub stale_device_since: Option<String>,
+    /// Stable identifier of the most recent sync-round failure
+    /// (matches [`sync_core::SyncError::code`]). Latched by the
+    /// scheduler when a round errors out; cleared on the next
+    /// success. Lets the status indicator branch on the failure
+    /// kind without having to parse the human-readable message
+    /// — most notably to surface an "auth failed, reconnect
+    /// here" banner specifically for `"auth"`.
+    ///
+    /// `None` when no failure is outstanding. The orchestrator
+    /// itself never sets this; the scheduler decorates the
+    /// status before emitting / serving via `get_sync_status`
+    /// (same pattern as `sustained_failure`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_error_code: Option<String>,
 }
 
 /// The orchestrator itself. Holds an `Option<adapter>` so the
@@ -314,6 +328,11 @@ impl SyncOrchestrator {
             // snapshot to the frontend.
             sustained_failure: false,
             stale_device_since,
+            // Same pattern as `sustained_failure`: the
+            // orchestrator returns `None`; the scheduler
+            // decorates this with whatever it last latched
+            // from a failed round.
+            last_error_code: None,
         }
     }
 

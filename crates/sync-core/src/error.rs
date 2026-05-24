@@ -105,6 +105,30 @@ impl SyncError {
     pub fn not_found(msg: impl Into<String>) -> Self {
         Self::NotFound(msg.into())
     }
+
+    /// Stable identifier for the variant, matching the strings the
+    /// frontend's `CommandError.code` discriminator uses. Lets
+    /// non-command paths (scheduler emits, status surfaces) carry
+    /// the same machine-readable kind alongside the human message
+    /// without each caller re-deriving the mapping.
+    ///
+    /// The strings here MUST stay in lockstep with
+    /// `src-tauri/src/commands/sync.rs::sync_err` and the
+    /// `CommandError.code` union in `src/api/types.ts`. Adding a
+    /// new variant means touching all three.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Io(_) => "io",
+            Self::Network(_) => "network",
+            Self::Auth(_) => "auth",
+            Self::Protocol(_) => "protocol",
+            Self::EncryptionRequired => "encryption_required",
+            Self::NotFound(_) => "not_found",
+            Self::SchemaTooOld { .. } => "schema_too_old",
+            Self::StaleDevice { .. } => "stale_device",
+            Self::Internal(_) => "internal",
+        }
+    }
 }
 
 impl From<std::io::Error> for SyncError {

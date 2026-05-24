@@ -138,6 +138,16 @@ pub struct SyncScheduler {
     /// command path so the user clicking "Sync now" after a hiccup
     /// gets immediate back-to-normal cadence.
     consecutive_failures: Arc<Mutex<u32>>,
+    /// Stable identifier of the most recent failure ([`SyncError::code`]
+    /// strings: `"auth"`, `"network"`, `"io"`, …). Latched on every
+    /// failed round; cleared on the next success. Surfaced on
+    /// `SyncStatus.last_error_code` so the frontend can branch on
+    /// the failure kind — most notably an auth failure that points
+    /// the user straight at the sync settings panel.
+    ///
+    /// Same lifecycle as `consecutive_failures` — the manual
+    /// `sync_now` path clears it via `reset_failures` on success.
+    last_error_code: Arc<Mutex<Option<String>>>,
 }
 
 impl SyncScheduler {
@@ -160,6 +170,7 @@ impl SyncScheduler {
             kick,
             started: Arc::new(Mutex::new(false)),
             consecutive_failures: Arc::new(Mutex::new(0)),
+            last_error_code: Arc::new(Mutex::new(None)),
         });
 
         let worker = scheduler.clone();
@@ -256,6 +267,7 @@ impl SyncScheduler {
                     "scheduled sync round completed",
                 );
                 self.reset_failures();
+                self.clear_last_error_code();
                 self.emit_status(app, Some(report.clone()), None);
                 // New conflicts landed during this round — kick
                 // the frontend's conflict-count fetch so the
@@ -276,6 +288,12 @@ impl SyncScheduler {
                 // success / failure tone for us.
                 if !err.to_string().contains("AlreadyRunning") {
                     self.bump_failure();
+                    // Latch the error code so the next status
+                    // emit (and `get_sync_status`) carries the
+                    // kind alongside the human message. The
+                    // self-reject branch above intentionally
+                    // skips this — it's not a real failure.
+                    self.set_last_error_code(err.code());
                 }
                 self.emit_status(app, None, Some(err.to_string()));
             }
@@ -385,6 +403,36 @@ impl SyncScheduler {
             .expect("consecutive_failures mutex poison")
     }
 
+    /// Set the latched error code (the `SyncError::code` discriminator
+    /// — `"auth"`, `"network"`, `"io"`, …). Called on every failed
+    /// round so the status surface knows what kind of failure to
+    /// branch on; cleared by [`Self::clear_last_error_code`] on the
+    /// next success.
+    fn set_last_error_code(&self, code: &'static str) {
+        let mut guard = self
+            .last_error_code
+            .lock()
+            .expect("last_error_code mutex poison");
+        *guard = Some(code.to_string());
+    }
+
+    fn clear_last_error_code(&self) {
+        let mut guard = self
+            .last_error_code
+            .lock()
+            .expect("last_error_code mutex poison");
+        *guard = None;
+    }
+
+    /// Snapshot the latched error code. `None` once the next
+    /// successful round clears it.
+    pub fn last_error_code(&self) -> Option<String> {
+        self.last_error_code
+            .lock()
+            .expect("last_error_code mutex poison")
+            .clone()
+    }
+
     /// Hook so the manual `sync_now` Tauri command (which runs
     /// through the orchestrator directly, not via the scheduler
     /// loop) can clear the latch after a successful round. Failure
@@ -393,6 +441,18 @@ impl SyncScheduler {
     /// state — they get a fresh chance on the next periodic tick.
     pub fn note_success(&self) {
         self.reset_failures();
+        self.clear_last_error_code();
+    }
+
+    /// Hook for the manual-sync path to surface a failure into
+    /// the latched error code so the status banner picks up the
+    /// kind. The scheduler loop calls this internally via
+    /// `set_last_error_code` + `bump_failure`; the manual path
+    /// (which doesn't go through the loop) needs an explicit
+    /// entry point. Mirrors `note_success`.
+    pub fn note_failure(&self, err: &sync_core::SyncError) {
+        self.bump_failure();
+        self.set_last_error_code(err.code());
     }
 
     fn emit_status<R: Runtime>(
@@ -420,6 +480,7 @@ impl SyncScheduler {
         let mut status = self.orchestrator.status();
         status.sustained_failure =
             self.consecutive_failures() >= SUSTAINED_FAILURE_THRESHOLD;
+        status.last_error_code = self.last_error_code();
         status
     }
 
