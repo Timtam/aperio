@@ -373,6 +373,8 @@
       "actionTakeRemote": "Take the other version",
       "actionSaveBoth": "Save both",
       "actionSaveBothUnsupported": "\"Save both\" isn't available yet in this version.",
+      "actionAriaContext": "{{kind}}, field {{field}}",
+      "listLabel": "Open sync conflicts",
       "resolved": "Conflict resolved."
     },
     "tasks": {

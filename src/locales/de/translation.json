@@ -370,6 +370,8 @@
       "actionTakeRemote": "Andere Version nehmen",
       "actionSaveBoth": "Beide speichern",
       "actionSaveBothUnsupported": "„Beide speichern\" steht in dieser Version noch nicht zur Verfügung.",
+      "actionAriaContext": "{{kind}}, Feld {{field}}",
+      "listLabel": "Offene Sync-Konflikte",
       "resolved": "Konflikt gelöst."
     },
     "tasks": {

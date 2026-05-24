@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { listen } from '@tauri-apps/api/event';
 
 import { useAnnouncer } from '../a11y/Announcer';
+import { FocusableNote } from '../a11y/FocusableNote';
 import {
   listSyncConflicts,
   resolveSyncConflict,
@@ -54,6 +55,7 @@ export function SyncConflictsDialog({
   const fmt = useDateFormat();
   const [conflicts, setConflicts] = useState<SyncConflict[]>([]);
   const [busy, setBusy] = useState<number | null>(null);
+  const listRef = useRef<HTMLUListElement>(null);
 
   const refresh = useCallback(() => {
     listSyncConflicts()
@@ -96,6 +98,14 @@ export function SyncConflictsDialog({
       // sees their click land. The `sync-conflicts-changed` event
       // re-syncs the truth in case of an error.
       setConflicts((prev) => prev.filter((c) => c.id !== conflict.id));
+      // Re-park focus on the listbox so the next row (or empty
+      // state) is reachable without the user having to hunt for
+      // focus. The button that was just clicked is unmounting
+      // along with its row, so without an explicit move the
+      // browser drops focus to <body> and NVDA loses context.
+      requestAnimationFrame(() => {
+        listRef.current?.focus({ preventScroll: true });
+      });
       try {
         await resolveSyncConflict(conflict.id, choice);
         announce(t('syncConflicts.resolved'));
@@ -134,11 +144,26 @@ export function SyncConflictsDialog({
       title={t('syncConflicts.title')}
       className="sync-conflicts-dialog"
     >
-      <p className="sync-conflicts__intro">
+      {/* Modal's body lives in `role="application"` for the
+          dialog focus-mode trick (see Modal.tsx), so prose
+          paragraphs need to be focusable for NVDA's
+          arrow-navigation. FocusableNote wires the text as the
+          element's accessible name so the screen reader reads
+          the actual content instead of "Anmerkung". */}
+      <FocusableNote className="sync-conflicts__intro">
         {conflicts.length === 0 ? t('syncConflicts.empty') : intro}
-      </p>
+      </FocusableNote>
       {conflicts.length > 0 && (
-        <ul className="sync-conflicts__list">
+        // The list itself is a tab-stop landing target — after
+        // the user resolves a row, we re-park focus on the
+        // <ul> so they can keep walking the remaining rows
+        // without the browser dropping focus to <body>.
+        <ul
+          ref={listRef}
+          tabIndex={-1}
+          className="sync-conflicts__list"
+          aria-label={t('syncConflicts.listLabel')}
+        >
           {conflicts.map((c) => (
             <ConflictRow
               key={c.id}
@@ -178,9 +203,34 @@ function ConflictRow({
       return conflict.remote_timestamp;
     }
   })();
+  const headingId = useId();
+  const saveBothHintId = useId();
+  // Per-row context for the three resolution buttons. Without
+  // this every row's "Keep my version" button reads identically
+  // — three rows × three buttons = nine generic labels. Threading
+  // the field + kind into each button's accessible name lets SR
+  // users know which conflict they're acting on without
+  // back-arrowing to the row heading.
+  const ariaContext = t('syncConflicts.actionAriaContext', {
+    kind: kindLabel,
+    field: conflict.field,
+  });
   return (
-    <li className="sync-conflict-row">
-      <div className="sync-conflict-row__heading">
+    <li
+      className="sync-conflict-row"
+      // Group semantics: the buttons inside read as part of a
+      // discrete conflict group whose accessible name is the
+      // heading. NVDA announces "Konflikt-Gruppe: Termin, Feld
+      // title" once on entry rather than re-reading the
+      // heading for each button.
+      role="group"
+      aria-labelledby={headingId}
+      aria-busy={busy || undefined}
+    >
+      <div
+        id={headingId}
+        className="sync-conflict-row__heading"
+      >
         <strong>{kindLabel}</strong>
         <span className="sync-conflict-row__field">
           {t('syncConflicts.fieldLabel')}: {conflict.field}
@@ -210,6 +260,7 @@ function ConflictRow({
         <button
           type="button"
           disabled={busy}
+          aria-label={`${t('syncConflicts.actionKeepLocal')} — ${ariaContext}`}
           onClick={() => onResolve(conflict, 'keep_local')}
         >
           {t('syncConflicts.actionKeepLocal')}
@@ -217,6 +268,7 @@ function ConflictRow({
         <button
           type="button"
           disabled={busy}
+          aria-label={`${t('syncConflicts.actionTakeRemote')} — ${ariaContext}`}
           onClick={() => onResolve(conflict, 'take_remote')}
         >
           {t('syncConflicts.actionTakeRemote')}
@@ -224,11 +276,18 @@ function ConflictRow({
         <button
           type="button"
           disabled={busy}
+          aria-label={`${t('syncConflicts.actionSaveBoth')} — ${ariaContext}`}
+          // Use aria-describedby (not title) for the "not yet
+          // implemented" hint so SR users on platforms that
+          // ignore title still get the message.
+          aria-describedby={saveBothHintId}
           onClick={() => onResolve(conflict, 'save_both')}
-          title={t('syncConflicts.actionSaveBothUnsupported')}
         >
           {t('syncConflicts.actionSaveBoth')}
         </button>
+        <span id={saveBothHintId} className="sr-only">
+          {t('syncConflicts.actionSaveBothUnsupported')}
+        </span>
       </div>
     </li>
   );
