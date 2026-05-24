@@ -8,6 +8,7 @@ pub mod accounts;
 pub mod commands;
 pub mod contact_sync;
 pub mod db;
+pub mod event_log;
 pub mod overrides;
 mod paths;
 mod platform;
@@ -21,6 +22,7 @@ pub use paths::{resolve_data_dir, DataDirKind, DataDirResolution};
 
 use cal_adapter_local::LocalAdapter;
 use contact_sync::ContactSyncScheduler;
+use event_log::EventLogWriter;
 use registry::AdapterRegistry;
 use reminders::ReminderScheduler;
 use std::sync::Arc;
@@ -82,11 +84,28 @@ pub fn run() {
     let registry_for_contact_sync = Arc::clone(&registry);
     let db_for_contact_sync = db.shared();
 
+    // Phase Sb (DESIGN.md §19): mint or load this install's
+    // DeviceId from user_prefs and spawn the event-log writer.
+    // The writer's background drain task lives in `event_log::
+    // mod::drain_loop` — keeps one JSONL session file open under
+    // `<data_dir>/sync/log/pending/` and appends every local
+    // mutation that flows through the command layer's writer
+    // hooks. Wrapped in Arc so cloning into Tauri State is free.
+    let device_id =
+        EventLogWriter::load_or_mint_device_id(&db.shared());
+    info!(
+        device_id = %device_id,
+        "event-log writer device id",
+    );
+    let event_log_writer =
+        EventLogWriter::spawn(data_dir.path.clone(), device_id);
+
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .manage(local_adapter)
         .manage(registry)
         .manage(db)
+        .manage(event_log_writer)
         .invoke_handler(tauri::generate_handler![
             app_info,
             commands::list_calendars,

@@ -5,6 +5,7 @@ use cal_core::{Calendar, CalendarFeature, ContainerColor, DateRange, Event, NewE
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use sync_core::{EventPayload, IdPayload, SyncEvent};
 use tauri::State;
 
 use super::birthdays::{
@@ -12,6 +13,7 @@ use super::birthdays::{
 };
 use super::{CommandError, CommandResult};
 use crate::db::DbHandle;
+use crate::event_log::EventLogWriter;
 use crate::overrides::{apply_to_calendars, OverridesRepo};
 use crate::registry::{AdapterRegistry, LOCAL_ID};
 use crate::reminders::SchedulerHandle;
@@ -105,6 +107,7 @@ pub async fn list_calendars(
 #[tauri::command]
 pub async fn create_calendar(
     adapter: State<'_, LocalAdapter>,
+    event_log: State<'_, Arc<EventLogWriter>>,
     request: CreateCalendarRequest,
 ) -> CommandResult<CalendarRow> {
     let color = request
@@ -112,6 +115,14 @@ pub async fn create_calendar(
         .map(|hex| ContainerColor::custom(hex.trim().to_string()));
     let cal = adapter.create_calendar(&request.name, color, None)?;
     // Local creates always belong to the implicit local account.
+    // Mint a CalendarCreated event so other devices in the sync
+    // mesh learn about the new container.
+    if let Ok(fields) = serde_json::to_value(&cal) {
+        event_log.append(SyncEvent::CalendarCreated(EventPayload {
+            id: cal.id.clone(),
+            fields,
+        }));
+    }
     Ok(CalendarRow {
         inner: cal,
         account_id: LOCAL_ID.to_string(),
@@ -119,8 +130,14 @@ pub async fn create_calendar(
 }
 
 #[tauri::command]
-pub async fn delete_calendar(adapter: State<'_, LocalAdapter>, id: String) -> CommandResult<()> {
-    Ok(adapter.delete_calendar(&id)?)
+pub async fn delete_calendar(
+    adapter: State<'_, LocalAdapter>,
+    event_log: State<'_, Arc<EventLogWriter>>,
+    id: String,
+) -> CommandResult<()> {
+    adapter.delete_calendar(&id)?;
+    event_log.append(SyncEvent::CalendarDeleted(IdPayload { id: id.clone() }));
+    Ok(())
 }
 
 #[derive(Debug, Deserialize)]
@@ -182,11 +199,13 @@ pub async fn create_event(
     adapter: State<'_, LocalAdapter>,
     registry: State<'_, Arc<AdapterRegistry>>,
     scheduler: State<'_, SchedulerHandle>,
+    event_log: State<'_, Arc<EventLogWriter>>,
     request: CreateEventRequest,
 ) -> CommandResult<Event> {
     let account =
         registry.account_for_calendar(&request.calendar_id).unwrap_or_else(|| LOCAL_ID.to_string());
-    let event = if account == LOCAL_ID {
+    let is_local = account == LOCAL_ID;
+    let event = if is_local {
         adapter
             .create_event(&request.calendar_id, request.event)
             .await?
@@ -199,6 +218,19 @@ pub async fn create_event(
         };
         ext.create_event(&request.calendar_id, request.event).await?
     };
+    // Only LOCAL events flow through the event log — external
+    // adapters (Google, iCloud, EWS, Graph) handle their own
+    // multi-device sync via the respective provider APIs, see
+    // DESIGN.md §19.12. Pushing those through the event log too
+    // would race against the provider's authoritative source.
+    if is_local {
+        if let Ok(fields) = serde_json::to_value(&event) {
+            event_log.append(SyncEvent::EventCreated(EventPayload {
+                id: event.id.clone(),
+                fields,
+            }));
+        }
+    }
     scheduler.invalidate();
     Ok(event)
 }
@@ -208,6 +240,7 @@ pub async fn update_event(
     adapter: State<'_, LocalAdapter>,
     registry: State<'_, Arc<AdapterRegistry>>,
     scheduler: State<'_, SchedulerHandle>,
+    event_log: State<'_, Arc<EventLogWriter>>,
     event: Event,
     previous_calendar_id: Option<String>,
 ) -> CommandResult<Event> {
@@ -244,6 +277,15 @@ pub async fn update_event(
         // there's nothing to gain from a two-call dance here.
         if source_account == LOCAL_ID && target_account == LOCAL_ID {
             let updated = adapter.update_event(event).await?;
+            // Local↔Local move surfaces as a single UPDATE on the
+            // calendar_id column — emit one EventUpdated event
+            // carrying the full row.
+            if let Ok(fields) = serde_json::to_value(&updated) {
+                event_log.append(SyncEvent::EventUpdated(EventPayload {
+                    id: updated.id.clone(),
+                    fields,
+                }));
+            }
             scheduler.invalidate();
             return Ok(updated);
         }
@@ -315,13 +357,34 @@ pub async fn update_event(
             );
         }
 
+        // Sync-event emission for cross-adapter moves. A move is
+        // create-on-target + delete-from-source under the hood,
+        // and the event log records the same shape: each side
+        // emits its own event IF the side is local. External-
+        // adapter sides stay silent (the provider's own sync
+        // mesh propagates the change).
+        if target_account == LOCAL_ID {
+            if let Ok(fields) = serde_json::to_value(&created) {
+                event_log.append(SyncEvent::EventCreated(EventPayload {
+                    id: created.id.clone(),
+                    fields,
+                }));
+            }
+        }
+        if source_account == LOCAL_ID {
+            event_log.append(SyncEvent::EventDeleted(IdPayload {
+                id: event.id.clone(),
+            }));
+        }
+
         scheduler.invalidate();
         return Ok(created);
     }
 
     // Plain in-place update — no calendar change, the existing
     // single-PUT/SQL-UPDATE path handles it.
-    let updated = if target_account == LOCAL_ID {
+    let is_local = target_account == LOCAL_ID;
+    let updated = if is_local {
         adapter.update_event(event).await?
     } else {
         let Some(ext) = registry.calendar_adapter(&target_account) else {
@@ -332,6 +395,14 @@ pub async fn update_event(
         };
         ext.update_event(event).await?
     };
+    if is_local {
+        if let Ok(fields) = serde_json::to_value(&updated) {
+            event_log.append(SyncEvent::EventUpdated(EventPayload {
+                id: updated.id.clone(),
+                fields,
+            }));
+        }
+    }
     scheduler.invalidate();
     Ok(updated)
 }
@@ -341,6 +412,7 @@ pub async fn delete_event(
     adapter: State<'_, LocalAdapter>,
     registry: State<'_, Arc<AdapterRegistry>>,
     scheduler: State<'_, SchedulerHandle>,
+    event_log: State<'_, Arc<EventLogWriter>>,
     id: String,
     calendar_id: Option<String>,
 ) -> CommandResult<()> {
@@ -352,7 +424,8 @@ pub async fn delete_event(
         .as_deref()
         .and_then(|cid| registry.account_for_calendar(cid))
         .unwrap_or_else(|| LOCAL_ID.to_string());
-    if account == LOCAL_ID {
+    let is_local = account == LOCAL_ID;
+    if is_local {
         adapter.delete_event(&id).await?;
     } else {
         let Some(ext) = registry.calendar_adapter(&account) else {
@@ -362,6 +435,9 @@ pub async fn delete_event(
             });
         };
         ext.delete_event(&id).await?;
+    }
+    if is_local {
+        event_log.append(SyncEvent::EventDeleted(IdPayload { id: id.clone() }));
     }
     scheduler.invalidate();
     Ok(())
@@ -380,6 +456,7 @@ pub async fn add_event_exdate(
     adapter: State<'_, LocalAdapter>,
     registry: State<'_, Arc<AdapterRegistry>>,
     scheduler: State<'_, SchedulerHandle>,
+    event_log: State<'_, Arc<EventLogWriter>>,
     id: String,
     occurrence: DateTime<Utc>,
     calendar_id: Option<String>,
@@ -392,7 +469,8 @@ pub async fn add_event_exdate(
         .as_deref()
         .and_then(|cid| registry.account_for_calendar(cid))
         .unwrap_or_else(|| LOCAL_ID.to_string());
-    if account == LOCAL_ID {
+    let is_local = account == LOCAL_ID;
+    if is_local {
         adapter.add_event_exdate(&id, occurrence)?;
     } else {
         let Some(ext) = registry.calendar_adapter(&account) else {
@@ -402,6 +480,21 @@ pub async fn add_event_exdate(
             });
         };
         ext.add_event_exdate(&id, occurrence).await?;
+    }
+    // For local events the exdate mutation rewrote the master
+    // event's recurrence.exceptions list. Re-read the row so the
+    // event log carries the new state. Cheap — single SQL row
+    // fetch — and the alternative (id-only payload) would force
+    // the applier to do the same read against its local DB.
+    if is_local {
+        if let Ok(Some(refreshed)) = adapter.get_event_by_id(&id) {
+            if let Ok(fields) = serde_json::to_value(&refreshed) {
+                event_log.append(SyncEvent::EventUpdated(EventPayload {
+                    id: id.clone(),
+                    fields,
+                }));
+            }
+        }
     }
     scheduler.invalidate();
     Ok(())

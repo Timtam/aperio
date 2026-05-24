@@ -4,10 +4,12 @@ use cal_adapter_local::LocalAdapter;
 use cal_core::{NewTask, Task, TaskList, TasksFeature};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use sync_core::{EventPayload, IdPayload, SyncEvent};
 use tauri::State;
 
 use super::{CommandError, CommandResult};
 use crate::db::DbHandle;
+use crate::event_log::EventLogWriter;
 use crate::overrides::{apply_to_task_lists, OverridesRepo};
 use crate::registry::{AdapterRegistry, LOCAL_ID};
 use crate::reminders::SchedulerHandle;
@@ -61,10 +63,17 @@ pub async fn list_task_lists(
 #[tauri::command]
 pub async fn create_task_list(
     adapter: State<'_, LocalAdapter>,
+    event_log: State<'_, Arc<EventLogWriter>>,
     request: CreateTaskListRequest,
 ) -> CommandResult<TaskListRow> {
     let list =
         adapter.create_task_list(&request.name, None, None, request.embedded_in_calendar)?;
+    if let Ok(fields) = serde_json::to_value(&list) {
+        event_log.append(SyncEvent::TaskListCreated(EventPayload {
+            id: list.id.clone(),
+            fields,
+        }));
+    }
     Ok(TaskListRow {
         inner: list,
         account_id: LOCAL_ID.to_string(),
@@ -72,8 +81,14 @@ pub async fn create_task_list(
 }
 
 #[tauri::command]
-pub async fn delete_task_list(adapter: State<'_, LocalAdapter>, id: String) -> CommandResult<()> {
-    Ok(adapter.delete_task_list(&id)?)
+pub async fn delete_task_list(
+    adapter: State<'_, LocalAdapter>,
+    event_log: State<'_, Arc<EventLogWriter>>,
+    id: String,
+) -> CommandResult<()> {
+    adapter.delete_task_list(&id)?;
+    event_log.append(SyncEvent::TaskListDeleted(IdPayload { id: id.clone() }));
+    Ok(())
 }
 
 #[tauri::command]
@@ -117,12 +132,14 @@ pub async fn create_task(
     adapter: State<'_, LocalAdapter>,
     registry: State<'_, Arc<AdapterRegistry>>,
     scheduler: State<'_, SchedulerHandle>,
+    event_log: State<'_, Arc<EventLogWriter>>,
     request: CreateTaskRequest,
 ) -> CommandResult<Task> {
     let account = registry
         .account_for_task_list(&request.list_id)
         .unwrap_or_else(|| LOCAL_ID.to_string());
-    let task = if account == LOCAL_ID {
+    let is_local = account == LOCAL_ID;
+    let task = if is_local {
         adapter.create_task(&request.list_id, request.task).await?
     } else {
         let Some(ext) = registry.task_adapter(&account) else {
@@ -133,6 +150,14 @@ pub async fn create_task(
         };
         ext.create_task(&request.list_id, request.task).await?
     };
+    if is_local {
+        if let Ok(fields) = serde_json::to_value(&task) {
+            event_log.append(SyncEvent::TaskCreated(EventPayload {
+                id: task.id.clone(),
+                fields,
+            }));
+        }
+    }
     scheduler.invalidate();
     Ok(task)
 }
@@ -142,6 +167,7 @@ pub async fn update_task(
     adapter: State<'_, LocalAdapter>,
     registry: State<'_, Arc<AdapterRegistry>>,
     scheduler: State<'_, SchedulerHandle>,
+    event_log: State<'_, Arc<EventLogWriter>>,
     task: Task,
     previous_list_id: Option<String>,
 ) -> CommandResult<Task> {
@@ -172,6 +198,14 @@ pub async fn update_task(
         // create+delete dance needed.
         if source_account == LOCAL_ID && target_account == LOCAL_ID {
             let updated = adapter.update_task(task).await?;
+            // Local↔Local task move = single SQL UPDATE on list_id.
+            // Emit one TaskUpdated with the full row.
+            if let Ok(fields) = serde_json::to_value(&updated) {
+                event_log.append(SyncEvent::TaskUpdated(EventPayload {
+                    id: updated.id.clone(),
+                    fields,
+                }));
+            }
             scheduler.invalidate();
             return Ok(updated);
         }
@@ -244,12 +278,30 @@ pub async fn update_task(
             );
         }
 
+        // Sync-event emission: same shape as the event move —
+        // each LOCAL side emits its own event, external sides
+        // stay silent and rely on the provider's sync mesh.
+        if target_account == LOCAL_ID {
+            if let Ok(fields) = serde_json::to_value(&created) {
+                event_log.append(SyncEvent::TaskCreated(EventPayload {
+                    id: created.id.clone(),
+                    fields,
+                }));
+            }
+        }
+        if source_account == LOCAL_ID {
+            event_log.append(SyncEvent::TaskDeleted(IdPayload {
+                id: task.id.clone(),
+            }));
+        }
+
         scheduler.invalidate();
         return Ok(created);
     }
 
     // Plain in-place update.
-    let updated = if target_account == LOCAL_ID {
+    let is_local = target_account == LOCAL_ID;
+    let updated = if is_local {
         adapter.update_task(task).await?
     } else {
         let Some(ext) = registry.task_adapter(&target_account) else {
@@ -260,6 +312,14 @@ pub async fn update_task(
         };
         ext.update_task(task).await?
     };
+    if is_local {
+        if let Ok(fields) = serde_json::to_value(&updated) {
+            event_log.append(SyncEvent::TaskUpdated(EventPayload {
+                id: updated.id.clone(),
+                fields,
+            }));
+        }
+    }
     scheduler.invalidate();
     Ok(updated)
 }
@@ -269,6 +329,7 @@ pub async fn delete_task(
     adapter: State<'_, LocalAdapter>,
     registry: State<'_, Arc<AdapterRegistry>>,
     scheduler: State<'_, SchedulerHandle>,
+    event_log: State<'_, Arc<EventLogWriter>>,
     id: String,
     list_id: Option<String>,
 ) -> CommandResult<()> {
@@ -276,7 +337,8 @@ pub async fn delete_task(
         .as_deref()
         .and_then(|lid| registry.account_for_task_list(lid))
         .unwrap_or_else(|| LOCAL_ID.to_string());
-    if account == LOCAL_ID {
+    let is_local = account == LOCAL_ID;
+    if is_local {
         adapter.delete_task(&id).await?;
     } else {
         let Some(ext) = registry.task_adapter(&account) else {
@@ -286,6 +348,9 @@ pub async fn delete_task(
             });
         };
         ext.delete_task(&id).await?;
+    }
+    if is_local {
+        event_log.append(SyncEvent::TaskDeleted(IdPayload { id: id.clone() }));
     }
     scheduler.invalidate();
     Ok(())

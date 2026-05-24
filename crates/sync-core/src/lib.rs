@@ -48,7 +48,11 @@ pub mod snapshot;
 pub use adapter::{DeviceCursor, SyncAdapter};
 pub use device::{DeviceId, DEVICE_ID_PREF_KEY};
 pub use error::{SyncError, SyncResult};
-pub use event::{EventEnvelope, EventId, SyncEvent};
+pub use event::{
+    EventEnvelope, EventId, EventPayload, IdPayload, PartialPayload,
+    PluginPayload, SettingsPayload, ShortcutKeyPayload, ShortcutPayload,
+    SyncEvent,
+};
 pub use log::{LogFile, LogFileName};
 pub use meta::{DeviceRecord, MetaJson, SCHEMA_VERSION};
 pub use snapshot::{Snapshot, SnapshotMetadata};
