@@ -172,6 +172,12 @@ pub struct OnboardingService {
     /// single-threaded inside the orchestrator's in-flight
     /// guard.
     pending_dir: PathBuf,
+    /// §19.11.7: where custom notification sound files live
+    /// locally. `accept_remote` and `resume_from_stale` invoke
+    /// `sound_assets::sync_assets` after applying the snapshot
+    /// so any newly-referenced hashes are downloaded before
+    /// the user sees the dataset.
+    sounds_dir: PathBuf,
     app_version: String,
 }
 
@@ -182,6 +188,7 @@ impl OnboardingService {
         applier: Arc<EventLogApplier>,
         snapshot_builder: Arc<SnapshotBuilder>,
         pending_dir: PathBuf,
+        sounds_dir: PathBuf,
         app_version: impl Into<String>,
     ) -> Self {
         Self {
@@ -190,6 +197,7 @@ impl OnboardingService {
             applier,
             snapshot_builder,
             pending_dir,
+            sounds_dir,
             app_version: app_version.into(),
         }
     }
@@ -395,6 +403,26 @@ impl OnboardingService {
         }
         self.mark_onboarded()?;
 
+        // §19.11.7: pull every custom sound the freshly-applied
+        // snapshot + logs reference. Best-effort: a failure here
+        // means some reminders will be silent until the next
+        // periodic sound-asset sync round; the rest of the
+        // dataset has already converged.
+        match crate::sound_assets::sync_assets(
+            &self.db,
+            &self.sounds_dir,
+            adapter,
+        )
+        .await
+        {
+            Ok(asset_report) => info!(
+                pushed = asset_report.pushed,
+                fetched = asset_report.fetched,
+                "accept_remote sound asset sync",
+            ),
+            Err(err) => warn!(?err, "accept_remote sound asset sync failed"),
+        }
+
         info!(
             applied = report.applied,
             devices = report.device_count,
@@ -533,6 +561,25 @@ impl OnboardingService {
         }
         adapter.push_meta(&meta).await?;
         report.device_count = meta.devices.len();
+
+        // §19.11.7: same sound-asset sync as `accept_remote`.
+        // The snapshot pull above may have referenced new sound
+        // hashes; pull them now so the user hears reminders
+        // correctly after the resume.
+        match crate::sound_assets::sync_assets(
+            &self.db,
+            &self.sounds_dir,
+            adapter,
+        )
+        .await
+        {
+            Ok(asset_report) => info!(
+                pushed = asset_report.pushed,
+                fetched = asset_report.fetched,
+                "stale resume sound asset sync",
+            ),
+            Err(err) => warn!(?err, "stale resume sound asset sync failed"),
+        }
 
         info!(
             applied = report.applied,
@@ -916,11 +963,10 @@ mod tests {
     }
 
     fn build_service(db: SharedConn) -> OnboardingService {
-        // Tests that don't exercise stale-resume use a stub
-        // pending dir that doesn't exist — `read_dir` returns
-        // NotFound and `replay_pending_logs` quietly no-ops. The
-        // resume-with-pending test that DOES need a real dir
-        // uses `build_service_with_pending` below.
+        // Tests that don't exercise stale-resume use stub
+        // pending + sounds dirs that don't exist — the read /
+        // walk paths return NotFound and quietly no-op. Tests
+        // that DO need real dirs use `build_service_with_pending`.
         build_service_with_pending(db, PathBuf::from("/non/existent/pending"))
     }
 
@@ -946,6 +992,10 @@ mod tests {
             applier,
             snapshot_builder,
             pending_dir,
+            // Same stub-path treatment for the sounds dir — the
+            // sound-asset sync's `read_dir` returns NotFound on
+            // a missing dir and quietly returns empty.
+            PathBuf::from("/non/existent/sounds"),
             "1.0.0-test",
         )
     }

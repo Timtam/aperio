@@ -17,6 +17,7 @@ pub mod registry;
 pub mod reminders;
 pub mod secrets;
 pub mod sftp_host_keys;
+pub mod sound_assets;
 pub mod sync_log;
 pub mod user_prefs;
 
@@ -154,17 +155,24 @@ pub fn run() {
     // once and hand both consumers a clone.
     let pending_dir =
         data_dir.path.join("sync").join("log").join("pending");
+    // Local custom-sound store. Same convention used by the
+    // §19.10 / §19.11.7 sound-asset sync. Lives outside the
+    // sync/ subtree because the audio files are user content,
+    // not sync-engine plumbing.
+    let sounds_dir = crate::sound_assets::sounds_dir_under(&data_dir.path);
     let onboarding = Arc::new(OnboardingService::new(
         db.shared(),
         device_id.clone(),
         Arc::clone(&applier),
         Arc::clone(&snapshot_builder),
         pending_dir.clone(),
+        sounds_dir.clone(),
         env!("CARGO_PKG_VERSION"),
     ));
     let sync_orchestrator = Arc::new(SyncOrchestrator::new(
         db.shared(),
         pending_dir,
+        sounds_dir,
         device_id,
         applier,
         Arc::clone(&onboarding),

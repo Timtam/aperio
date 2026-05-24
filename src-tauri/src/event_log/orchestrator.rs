@@ -170,6 +170,12 @@ pub struct SyncOrchestrator {
     /// `<data_dir>/sync/log/pending/` — the staging directory
     /// the writer drops session files into.
     pending_dir: PathBuf,
+    /// `<data_dir>/assets/sounds/` — local store for custom
+    /// notification sounds. The §19.10 / §19.11.7 sound-asset
+    /// sync hook walks this dir after every successful round to
+    /// push local-only files + fetch referenced-but-missing
+    /// ones. See `crate::sound_assets`.
+    sounds_dir: PathBuf,
     /// Our device id. Used to filter our own files out of
     /// `fetch_new_logs` results so we don't re-apply our own
     /// events.
@@ -214,6 +220,7 @@ impl SyncOrchestrator {
     pub fn new(
         db: SharedConn,
         pending_dir: PathBuf,
+        sounds_dir: PathBuf,
         local_device_id: DeviceId,
         applier: Arc<EventLogApplier>,
         onboarding: Arc<OnboardingService>,
@@ -222,6 +229,7 @@ impl SyncOrchestrator {
         Self {
             db,
             pending_dir,
+            sounds_dir,
             local_device_id,
             applier,
             onboarding,
@@ -489,7 +497,36 @@ impl SyncOrchestrator {
             warn!(?err, "meta.json heartbeat failed");
         }
 
-        // 5. (Phase Sg) Evaluate compaction thresholds. We run
+        // 5. (DESIGN.md §19.10 / §19.11.7) Sound-asset sync.
+        // Pushes local-only sound files + fetches referenced
+        // hashes that aren't present locally. Best-effort: a
+        // failure here doesn't sink the round, the next pass
+        // retries. The asset bytes flow OUT-OF-BAND from the
+        // event log — see `sound_assets` for the algorithm.
+        match crate::sound_assets::sync_assets(
+            &self.db,
+            &self.sounds_dir,
+            adapter.as_ref(),
+        )
+        .await
+        {
+            Ok(asset_report) => {
+                if asset_report.pushed > 0
+                    || asset_report.fetched > 0
+                    || asset_report.missing_on_remote > 0
+                {
+                    info!(
+                        pushed = asset_report.pushed,
+                        fetched = asset_report.fetched,
+                        missing = asset_report.missing_on_remote,
+                        "sound asset sync",
+                    );
+                }
+            }
+            Err(err) => warn!(?err, "sound asset sync failed"),
+        }
+
+        // 6. (Phase Sg) Evaluate compaction thresholds. We run
         // inline so the snapshot + log GC happens before the next
         // scheduler tick re-pushes; missing this window once
         // doesn't break correctness, but firing inside the same
