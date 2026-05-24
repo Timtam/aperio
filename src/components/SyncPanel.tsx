@@ -10,9 +10,11 @@ import {
   changeSyncPassphrase,
   compactNow,
   configureSyncAdapter,
+  connectDropboxOauth,
   disableSyncEncryption,
   forgetSftpHostKey,
   getPinnedSftpHostKey,
+  hasDropboxRefreshToken,
   isCommandError,
   previewSftpHostKey,
   previewSyncTarget,
@@ -74,7 +76,7 @@ export function SyncPanel() {
   // Adapter draft state. Seeded from current backend state on mount
   // so the inputs reflect the persisted choice.
   const [kindDraft, setKindDraft] = useState<
-    'local' | 'webdav' | 'sftp' | 'ftp' | 'none'
+    'local' | 'webdav' | 'sftp' | 'ftp' | 'dropbox' | 'none'
   >('local');
   const [pathDraft, setPathDraft] = useState('');
   // WebDAV-only fields. `passwordDraft` is empty on first render —
@@ -111,6 +113,21 @@ export function SyncPanel() {
   const [ftpModeDraft, setFtpModeDraft] = useState<
     'explicit' | 'implicit' | 'plain'
   >('explicit');
+  // Dropbox-only fields. `clientId` / `clientSecret` are from
+  // the user's own app at dropbox.com/developers/apps;
+  // `client_secret` stays empty for public PKCE-only apps. The
+  // refresh token doesn't surface here — it lives in the OS
+  // keychain after the OAuth dance completes.
+  const [dropboxClientIdDraft, setDropboxClientIdDraft] = useState('');
+  const [dropboxClientSecretDraft, setDropboxClientSecretDraft] =
+    useState('');
+  const [dropboxPathDraft, setDropboxPathDraft] = useState('');
+  const [busyDropboxOauth, setBusyDropboxOauth] = useState(false);
+  /** Whether a refresh token is already in the keychain.
+   *  Refreshed on mount + after the OAuth round-trip finishes
+   *  so the "Sign in" button flips to "Re-sign in" once auth
+   *  has happened. */
+  const [dropboxSignedIn, setDropboxSignedIn] = useState(false);
   // Phase Sk: E2E passphrase. Two roles depending on the
   // onboarding branch:
   //   - `adopt_local` with non-empty value → mints a fresh dataset
@@ -255,6 +272,16 @@ export function SyncPanel() {
             : null,
       };
     }
+    if (kindDraft === 'dropbox') {
+      return {
+        kind: 'dropbox',
+        client_id: dropboxClientIdDraft.trim(),
+        // Empty string for PKCE-only public apps; the backend
+        // honours both shapes.
+        client_secret: dropboxClientSecretDraft.trim(),
+        path: dropboxPathDraft.trim(),
+      };
+    }
     if (kindDraft === 'ftp') {
       // Same parse-or-default port pattern as SFTP. The
       // backend's `default_ftp_port` is 21 (explicit FTPS); we
@@ -297,6 +324,9 @@ export function SyncPanel() {
     ftpPathDraft,
     ftpPasswordDraft,
     ftpModeDraft,
+    dropboxClientIdDraft,
+    dropboxClientSecretDraft,
+    dropboxPathDraft,
   ]);
 
   // Validation: the Connect button needs a path for `local`, a URL +
@@ -327,6 +357,13 @@ export function SyncPanel() {
       // to the server's home directory when blank). Password
       // can be reused from the keychain on subsequent edits.
       return !ftpHostDraft.trim() || !ftpUserDraft.trim();
+    }
+    if (kindDraft === 'dropbox') {
+      // Dropbox requires the client_id and a completed OAuth
+      // sign-in. client_secret + path are optional. Without a
+      // refresh token the Connect step would build an adapter
+      // that can't mint access tokens, so we gate on it here.
+      return !dropboxClientIdDraft.trim() || !dropboxSignedIn;
     }
     return false;
   })();
@@ -803,6 +840,57 @@ export function SyncPanel() {
     }
   }, [announce, messageForError, oldPassphraseDraft, t]);
 
+  // §19.6 — Dropbox OAuth handlers.
+  const refreshDropboxSignedIn = useCallback(() => {
+    hasDropboxRefreshToken()
+      .then(setDropboxSignedIn)
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.warn('has_dropbox_refresh_token failed', err);
+        setDropboxSignedIn(false);
+      });
+  }, []);
+
+  useEffect(() => {
+    refreshDropboxSignedIn();
+  }, [refreshDropboxSignedIn]);
+
+  const onConnectDropbox = useCallback(async () => {
+    const clientId = dropboxClientIdDraft.trim();
+    if (!clientId) {
+      announce(
+        t('dialogs.settings.sync.adapterDropboxNeedsClientId'),
+        'assertive',
+      );
+      return;
+    }
+    setBusyDropboxOauth(true);
+    try {
+      await connectDropboxOauth(
+        clientId,
+        dropboxClientSecretDraft.trim(),
+      );
+      announce(t('dialogs.settings.sync.adapterDropboxSignedInAnnouncement'));
+      refreshDropboxSignedIn();
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('connect_dropbox_oauth failed', err);
+      announce(
+        `${t('dialogs.settings.sync.errorPrefix')}: ${messageForError(err)}`,
+        'assertive',
+      );
+    } finally {
+      setBusyDropboxOauth(false);
+    }
+  }, [
+    announce,
+    dropboxClientIdDraft,
+    dropboxClientSecretDraft,
+    messageForError,
+    refreshDropboxSignedIn,
+    t,
+  ]);
+
   const lastSyncedLabel = (() => {
     if (!status?.last_synced_at) return t('dialogs.settings.sync.stateNeverSynced');
     try {
@@ -995,6 +1083,7 @@ export function SyncPanel() {
                     | 'webdav'
                     | 'sftp'
                     | 'ftp'
+                    | 'dropbox'
                     | 'none',
                 )
               }
@@ -1010,6 +1099,9 @@ export function SyncPanel() {
               </option>
               <option value="ftp">
                 {t('dialogs.settings.sync.adapterKindFtp')}
+              </option>
+              <option value="dropbox">
+                {t('dialogs.settings.sync.adapterKindDropbox')}
               </option>
               <option value="none">
                 {t('dialogs.settings.sync.adapterKindNone')}
@@ -1413,6 +1505,83 @@ export function SyncPanel() {
                     )
                   : t('dialogs.settings.sync.adapterFtpTlsRequiredHint')}
               </p>
+            </div>
+          </>
+        )}
+        {kindDraft === 'dropbox' && (
+          <>
+            <p className="sync-panel__hint">
+              {t('dialogs.settings.sync.adapterDropboxIntro')}
+            </p>
+            <div className="sync-panel__field">
+              <label>
+                {t('dialogs.settings.sync.adapterDropboxClientId')}
+                <input
+                  type="text"
+                  value={dropboxClientIdDraft}
+                  onChange={(e) =>
+                    setDropboxClientIdDraft(e.target.value)
+                  }
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </label>
+              <p className="sync-panel__hint">
+                {t('dialogs.settings.sync.adapterDropboxClientIdHint')}
+              </p>
+            </div>
+            <div className="sync-panel__field">
+              <label>
+                {t('dialogs.settings.sync.adapterDropboxClientSecret')}
+                <input
+                  type="password"
+                  value={dropboxClientSecretDraft}
+                  onChange={(e) =>
+                    setDropboxClientSecretDraft(e.target.value)
+                  }
+                  autoComplete="off"
+                />
+              </label>
+              <p className="sync-panel__hint">
+                {t('dialogs.settings.sync.adapterDropboxClientSecretHint')}
+              </p>
+            </div>
+            <div className="sync-panel__field">
+              <label>
+                {t('dialogs.settings.sync.adapterDropboxPath')}
+                <input
+                  type="text"
+                  value={dropboxPathDraft}
+                  onChange={(e) => setDropboxPathDraft(e.target.value)}
+                  placeholder="/aperio"
+                  spellCheck={false}
+                />
+              </label>
+              <p className="sync-panel__hint">
+                {t('dialogs.settings.sync.adapterDropboxPathHint')}
+              </p>
+            </div>
+            <div className="sync-panel__actions">
+              <button
+                type="button"
+                disabled={busyDropboxOauth}
+                onClick={() => void onConnectDropbox()}
+              >
+                {busyDropboxOauth
+                  ? t('dialogs.settings.sync.adapterDropboxSigningIn')
+                  : dropboxSignedIn
+                    ? t('dialogs.settings.sync.adapterDropboxResignIn')
+                    : t('dialogs.settings.sync.adapterDropboxSignIn')}
+              </button>
+              {dropboxSignedIn && (
+                <span
+                  className="sync-panel__hint"
+                  role="status"
+                  aria-live="polite"
+                >
+                  {t('dialogs.settings.sync.adapterDropboxSignedIn')}
+                </span>
+              )}
             </div>
           </>
         )}

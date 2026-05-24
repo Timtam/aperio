@@ -726,6 +726,20 @@ export type SyncAdapterConfig =
       key_passphrase?: string | null;
     }
   | {
+      kind: 'dropbox';
+      /** Dropbox app's OAuth client_id from
+       *  dropbox.com/developers/apps. Not a secret per the
+       *  Dropbox docs — it identifies the app, not the user. */
+      client_id: string;
+      /** Optional. Public (PKCE-only) Dropbox apps leave this
+       *  empty; confidential apps pass the secret as
+       *  documented by the developer console. */
+      client_secret?: string;
+      /** Remote folder under the user's Dropbox, e.g.
+       *  `/aperio`. Empty string addresses the app's root. */
+      path?: string;
+    }
+  | {
       kind: 'ftp';
       host: string;
       port: number;
@@ -1103,6 +1117,25 @@ export const trustSftpHostKey = (hostPort: string, fingerprint: string) =>
  *  firing the mismatch warning. */
 export const forgetSftpHostKey = (hostPort: string) =>
   invoke<void>('forget_sftp_host_key', { hostPort });
+
+/** §19.6 Dropbox OAuth dance. Opens the system browser at the
+ *  Dropbox consent screen, blocks until the user completes (or
+ *  the 5-minute timeout fires), stores the resulting refresh
+ *  token in the keychain. Subsequent `configureSyncAdapter`
+ *  calls with a Dropbox config can then build the adapter
+ *  without prompting again. `clientSecret` is optional for
+ *  public PKCE-only apps. */
+export const connectDropboxOauth = (
+  clientId: string,
+  clientSecret: string,
+) =>
+  invoke<void>('connect_dropbox_oauth', { clientId, clientSecret });
+
+/** Probe for whether the keychain already holds a Dropbox
+ *  refresh token. Drives the "signed in" / "sign in" toggle on
+ *  the Dropbox button in the SyncPanel. */
+export const hasDropboxRefreshToken = () =>
+  invoke<boolean>('has_dropbox_refresh_token');
 
 /** Read the currently-pinned fingerprint for a host_port, or
  *  null if nothing is pinned. The SyncPanel uses this to render
