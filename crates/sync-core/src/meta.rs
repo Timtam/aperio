@@ -23,6 +23,7 @@ use std::collections::BTreeMap;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::crypto::EncryptionParams;
 use crate::device::DeviceId;
 
 /// Current schema version Aperio writes.
@@ -89,6 +90,13 @@ pub struct MetaJson {
     /// prompting for the key.
     #[serde(default)]
     pub e2e_enabled: bool,
+    /// KDF parameters (salt + Argon2 cost) needed by any device
+    /// joining this dataset. Set in lockstep with `e2e_enabled`:
+    /// the pair (`true`, `Some(_)`) marks an encrypted dataset;
+    /// (`false`, `None`) is plaintext. The mixed states are
+    /// invalid and rejected by the adapter wrapper.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub e2e_params: Option<EncryptionParams>,
     /// Timestamp of the current snapshot. Logs older than this are
     /// already folded into the snapshot and can be GC'd once every
     /// device has caught up.
@@ -109,6 +117,7 @@ impl MetaJson {
             schema_version: SCHEMA_VERSION,
             min_app_version: app_version.into(),
             e2e_enabled: false,
+            e2e_params: None,
             snapshot_timestamp: Utc::now(),
             devices: BTreeMap::new(),
         }
@@ -168,6 +177,7 @@ mod tests {
             schema_version: SCHEMA_VERSION,
             min_app_version: "1.0.0".into(),
             e2e_enabled: false,
+            e2e_params: None,
             snapshot_timestamp: Utc::now(),
             devices: BTreeMap::from([(
                 "dev-a".into(),

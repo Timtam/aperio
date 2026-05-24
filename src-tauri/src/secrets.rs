@@ -43,6 +43,11 @@ pub enum SecretSlot {
     Password,
     /// API token (Vikunja, Todoist, …).
     ApiToken,
+    /// 32-byte AES-256 key for cross-device sync E2E encryption
+    /// (Phase Sk). Stored as base64 so the keychain backend
+    /// doesn't choke on null bytes; the value is `KEY_LEN`
+    /// bytes after decode.
+    SyncEncryptionKey,
 }
 
 impl SecretSlot {
@@ -52,6 +57,7 @@ impl SecretSlot {
             SecretSlot::RefreshToken => "refresh_token",
             SecretSlot::Password => "password",
             SecretSlot::ApiToken => "api_token",
+            SecretSlot::SyncEncryptionKey => "sync_encryption_key",
         }
     }
 }

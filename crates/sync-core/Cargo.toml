@@ -32,3 +32,15 @@ thiserror.workspace = true
 # with the rest of the workspace.
 tokio = { workspace = true, features = ["fs", "io-util", "rt", "sync"] }
 tracing.workspace = true
+
+# E2E encryption (Phase Sk, DESIGN.md §19.7). AES-256-GCM gives
+# authenticated encryption; argon2 derives the key from the user's
+# passphrase with strong KDF parameters. base64 is the wire
+# encoding for ciphertext blobs embedded in JSON snapshots.
+aes-gcm.workspace = true
+argon2.workspace = true
+base64 = "0.22"
+# rand only needed at runtime for fresh nonces + salts; the
+# aes-gcm crate's `OsRng` re-export pulls this in but we depend
+# explicitly for clarity.
+rand = "0.8"

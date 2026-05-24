@@ -40,6 +40,8 @@ cal-adapter-ews = { path = "../crates/cal-adapter-ews" }
 cal-adapter-vikunja = { path = "../crates/cal-adapter-vikunja" }
 cal-adapter-todoist = { path = "../crates/cal-adapter-todoist" }
 
+base64 = "0.22"
+
 rusqlite.workspace = true
 chrono.workspace = true
 chrono-tz.workspace = true

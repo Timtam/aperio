@@ -213,7 +213,15 @@
         "errorNetwork": "Network error.",
         "errorNotFound": "No dataset found at the path.",
         "errorSchemaTooOld": "Sync dataset needs a newer Aperio version.",
-        "errorEncryption": "Encrypted dataset, but no password configured."
+        "errorEncryption": "Encrypted dataset, but no password configured.",
+        "e2eActive": "🔒 End-to-end encryption active",
+        "e2eInactive": "End-to-end encryption disabled",
+        "e2eEnableLabel": "Enable end-to-end encryption",
+        "e2eEnableHint": "All log files and snapshots are encrypted with AES-256-GCM before they leave this device. The storage only sees encrypted blobs.",
+        "e2ePassphrase": "Passphrase",
+        "e2eIrreversibleWarning": "Warning: without this passphrase the data cannot be recovered. Store it somewhere safe.",
+        "e2ePassphraseRequired": "Please enter a passphrase first.",
+        "e2eRemoteRequiresPassphrase": "This dataset is encrypted. Enter the passphrase to unlock this device's view of the data."
       }
     },
     "syncConflicts": {

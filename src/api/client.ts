@@ -671,6 +671,10 @@ export interface SyncStatus {
    *  (per §19.8); the Settings → Synchronisation slider edits it
    *  via `setSyncInterval`. */
   interval_minutes: number;
+  /** Phase Sk — whether the current dataset is end-to-end
+   *  encrypted. Surfaced so the Settings panel can render a
+   *  "🔒 verschlüsselt" badge without a separate fetch. */
+  e2e_enabled: boolean;
 }
 
 /** Counters from one `syncNow` invocation. Surfaced so the
@@ -798,26 +802,34 @@ export const previewSyncTarget = (config: SyncAdapterConfig) =>
 
 /** "Datensatz übernehmen" — pull every remote log (and snapshot if
  *  present), apply locally, register this device in meta.json,
- *  configure the orchestrator. */
+ *  configure the orchestrator. Pass `passphrase` when the preview
+ *  shows `e2e_enabled = true`; the backend derives the AES key
+ *  via Argon2id and stores it in the OS keychain. */
 export const acceptRemoteDataset = (
   config: SyncAdapterConfig,
   deviceName: string | null,
+  passphrase: string | null = null,
 ) =>
   invoke<OnboardingReport>('accept_remote_dataset', {
     config,
     deviceName,
+    passphrase,
   });
 
 /** "Neu beginnen" — overwrite the remote `meta.json` with one
  *  naming only this device. Caller is responsible for confirming
- *  the destructive action. */
+ *  the destructive action. Pass `passphrase` to enable E2E
+ *  encryption on the fresh dataset; the backend mints fresh KDF
+ *  params + stores the derived key in the OS keychain. */
 export const adoptLocalDataset = (
   config: SyncAdapterConfig,
   deviceName: string | null,
+  passphrase: string | null = null,
 ) =>
   invoke<OnboardingReport>('adopt_local_dataset', {
     config,
     deviceName,
+    passphrase,
   });
 
 // ── Conflict resolution (§19.3) ──

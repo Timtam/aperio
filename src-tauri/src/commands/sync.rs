@@ -31,10 +31,14 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
 use serde::Deserialize;
 use sync_adapter_local::LocalFsSyncAdapter;
 use sync_adapter_webdav::{WebDavCredentials, WebDavSyncAdapter};
-use sync_core::SyncAdapter;
+use sync_core::{
+    derive_key, EncryptingAdapter, EncryptionParams, SyncAdapter, KEY_LEN,
+};
 use tauri::State;
 
 use super::{CommandError, CommandResult};
@@ -66,6 +70,19 @@ const PREF_WEBDAV_USER: &str = "sync.adapter.webdav.user";
 /// use this fixed string so the sync adapter has its own managed
 /// keychain entry independent of any user-facing account row.
 const WEBDAV_SECRET_ACCOUNT: &str = "sync.adapter.webdav";
+
+/// `user_prefs` key flagging whether the current sync dataset is
+/// E2E-encrypted. Mirrors the boolean in `meta.json`; lets
+/// `build_adapter_from_prefs` decide synchronously whether to wrap
+/// the adapter in `EncryptingAdapter` without needing an async
+/// `fetch_meta` round-trip.
+const PREF_E2E_ENABLED: &str = "sync.adapter.e2eEnabled";
+
+/// Pseudo-account id for the cross-device sync encryption key.
+/// Different from the WebDAV password slot so disabling sync
+/// encryption doesn't accidentally invalidate the WebDAV
+/// credentials (or vice versa).
+const E2E_SECRET_ACCOUNT: &str = "sync.adapter.e2e";
 
 /// Request body for [`configure_sync_adapter`] and the onboarding
 /// commands. The kind is flattened so the frontend can build:
@@ -234,6 +251,55 @@ fn internal(err: impl std::fmt::Display) -> CommandError {
     }
 }
 
+/// Read the persisted 32-byte AES key from the keychain. Base64
+/// is the on-disk encoding because the keyring crate's backend
+/// rejects null bytes on some platforms.
+fn load_e2e_key() -> Option<[u8; KEY_LEN]> {
+    let raw = secrets::retrieve(E2E_SECRET_ACCOUNT, SecretSlot::SyncEncryptionKey).ok()?;
+    let bytes = BASE64.decode(raw).ok()?;
+    if bytes.len() != KEY_LEN {
+        return None;
+    }
+    let mut out = [0u8; KEY_LEN];
+    out.copy_from_slice(&bytes);
+    Some(out)
+}
+
+/// Persist the 32-byte AES key in the keychain.
+fn store_e2e_key(key: &[u8; KEY_LEN]) -> CommandResult<()> {
+    let encoded = BASE64.encode(key);
+    secrets::store(
+        E2E_SECRET_ACCOUNT,
+        SecretSlot::SyncEncryptionKey,
+        &encoded,
+    )
+    .map_err(|err| CommandError {
+        code: "internal",
+        message: format!("keychain store sync key: {err}"),
+    })
+}
+
+/// Drop the keychain entry for the sync key. Used when the user
+/// explicitly disconnects from an E2E dataset.
+#[allow(dead_code)]
+fn delete_e2e_key() {
+    let _ = secrets::delete(E2E_SECRET_ACCOUNT, SecretSlot::SyncEncryptionKey);
+}
+
+/// If `key` is present, wrap the plain adapter in
+/// `EncryptingAdapter`. Otherwise return the plain adapter
+/// unchanged. Consolidates the "did we just configure E2E" check
+/// at every call site (configure, onboard, restore-from-prefs).
+fn wrap_if_encrypted(
+    plain: Arc<dyn SyncAdapter>,
+    key: Option<[u8; KEY_LEN]>,
+) -> Arc<dyn SyncAdapter> {
+    match key {
+        Some(k) => Arc::new(EncryptingAdapter::new(plain, k)),
+        None => plain,
+    }
+}
+
 /// Install / swap the active sync adapter. Persists the user's
 /// choice so the next app start reconstructs the same adapter
 /// in `lib.rs`'s setup phase.
@@ -259,13 +325,46 @@ pub async fn configure_sync_adapter(
             // request body omitted the password (e.g. URL-only
             // edit). Then we probe.
             persist_adapter_config(&prefs, &config)?;
-            let adapter = build_adapter(&config)?;
+            let plain = build_adapter(&config)?;
             // Probe the connection before keeping the adapter
             // active — misconfigurations should surface immediately
             // at the settings dialog, not hours later when the
             // first sync_now runs.
-            adapter.test_connection().await.map_err(sync_err)?;
+            plain.test_connection().await.map_err(sync_err)?;
+            // Phase Sk: inspect the target's `meta.json` to decide
+            // whether to wrap with `EncryptingAdapter`. We don't
+            // re-derive the key here — that requires the
+            // passphrase. If the target is E2E and we already have
+            // the key in our keychain (same logical dataset across
+            // adapter swap), reuse it. Otherwise refuse — the
+            // onboarding flow is the right path for "I'm joining a
+            // new encrypted dataset".
+            let target_meta = plain.fetch_meta().await.map_err(sync_err)?;
+            let e2e_target = target_meta
+                .as_ref()
+                .map(|m| m.e2e_enabled)
+                .unwrap_or(false);
+            let key = if e2e_target {
+                let k = load_e2e_key().ok_or(CommandError {
+                    code: "encryption_required",
+                    message: "target dataset is encrypted; onboard via accept_remote_dataset first"
+                        .into(),
+                })?;
+                Some(k)
+            } else {
+                None
+            };
+            let adapter = wrap_if_encrypted(plain, key);
             orchestrator.configure(adapter);
+            // Keep PREF_E2E_ENABLED in sync with what we just
+            // discovered on the target meta. The keychain key
+            // stays either way; the flag is the source of truth
+            // for "should we wrap on next boot".
+            if e2e_target {
+                prefs.set(PREF_E2E_ENABLED, "true").map_err(internal)?;
+            } else {
+                let _ = prefs.delete(PREF_E2E_ENABLED);
+            }
             // Kick the scheduler so the user sees data flow
             // immediately instead of waiting up to one interval
             // for the periodic loop. The debounce window swallows
@@ -391,12 +490,44 @@ pub async fn accept_remote_dataset(
     onboarding: State<'_, Arc<OnboardingService>>,
     config: SyncAdapterConfig,
     device_name: Option<String>,
+    passphrase: Option<String>,
 ) -> CommandResult<OnboardingReport> {
-    let adapter = build_adapter(&config)?;
-    adapter.test_connection().await.map_err(sync_err)?;
+    let plain = build_adapter(&config)?;
+    plain.test_connection().await.map_err(sync_err)?;
+
+    // Phase Sk: peek at meta.json to see if the dataset is
+    // encrypted. If it is, we must derive the key BEFORE the
+    // accept_remote flow tries to read snapshots or logs — the
+    // applier needs decrypted bytes.
+    let meta = plain.fetch_meta().await.map_err(sync_err)?;
+    let e2e_active = meta
+        .as_ref()
+        .map(|m| m.e2e_enabled)
+        .unwrap_or(false);
+    let key: Option<[u8; KEY_LEN]> = if e2e_active {
+        let pp = passphrase.as_deref().map(str::trim).filter(|s| !s.is_empty());
+        let pp = pp.ok_or(CommandError {
+            code: "encryption_required",
+            message: "this dataset is encrypted; a passphrase is required"
+                .into(),
+        })?;
+        let params = meta
+            .as_ref()
+            .and_then(|m| m.e2e_params.clone())
+            .ok_or(CommandError {
+                code: "protocol",
+                message: "meta.json says e2e but carries no params".into(),
+            })?;
+        let derived = derive_key(pp, &params).map_err(sync_err)?;
+        Some(derived)
+    } else {
+        None
+    };
+    let adapter = wrap_if_encrypted(Arc::clone(&plain), key);
 
     // Run the onboarding side first. If it fails (e.g. remote has
-    // no meta.json), we haven't yet altered the orchestrator's
+    // no meta.json or the passphrase is wrong → applier fails to
+    // parse JSON), we haven't yet altered the orchestrator's
     // state — the next attempt can pick a different path.
     let trimmed = device_name.as_deref().map(str::trim).filter(|s| !s.is_empty());
     let report = onboarding
@@ -408,7 +539,18 @@ pub async fn accept_remote_dataset(
     // now that onboarding has succeeded.
     orchestrator.configure(Arc::clone(&adapter));
     let shared = db.shared();
-    persist_adapter_config(&UserPrefsRepo::new(&shared), &config)?;
+    let prefs = UserPrefsRepo::new(&shared);
+    persist_adapter_config(&prefs, &config)?;
+    // Persist E2E state alongside the adapter config — the
+    // restore-on-boot path reads both.
+    if let Some(k) = key {
+        store_e2e_key(&k)?;
+        prefs.set(PREF_E2E_ENABLED, "true").map_err(internal)?;
+    } else {
+        // Joining a non-E2E dataset wipes any stale flag from a
+        // previous session.
+        let _ = prefs.delete(PREF_E2E_ENABLED);
+    }
     scheduler.kick();
     Ok(report)
 }
@@ -432,19 +574,46 @@ pub async fn adopt_local_dataset(
     onboarding: State<'_, Arc<OnboardingService>>,
     config: SyncAdapterConfig,
     device_name: Option<String>,
+    passphrase: Option<String>,
 ) -> CommandResult<OnboardingReport> {
-    let adapter = build_adapter(&config)?;
-    adapter.test_connection().await.map_err(sync_err)?;
+    let plain = build_adapter(&config)?;
+    plain.test_connection().await.map_err(sync_err)?;
+
+    // Phase Sk: if the user supplied a passphrase, mint a fresh
+    // EncryptionParams + derive the key. The wrapped adapter
+    // encrypts everything we push from here on; the meta.json
+    // we write carries `e2e_enabled = true` so other devices
+    // know to prompt for the passphrase when they onboard.
+    let trimmed_pp = passphrase
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let (key, e2e_params) = match trimmed_pp {
+        Some(pp) => {
+            let params = EncryptionParams::fresh();
+            let derived = derive_key(pp, &params).map_err(sync_err)?;
+            (Some(derived), Some(params))
+        }
+        None => (None, None),
+    };
+    let adapter = wrap_if_encrypted(Arc::clone(&plain), key);
 
     let trimmed = device_name.as_deref().map(str::trim).filter(|s| !s.is_empty());
     let report = onboarding
-        .adopt_local(adapter.as_ref(), trimmed)
+        .adopt_local(adapter.as_ref(), trimmed, e2e_params)
         .await
         .map_err(sync_err)?;
 
     orchestrator.configure(Arc::clone(&adapter));
     let shared = db.shared();
-    persist_adapter_config(&UserPrefsRepo::new(&shared), &config)?;
+    let prefs = UserPrefsRepo::new(&shared);
+    persist_adapter_config(&prefs, &config)?;
+    if let Some(k) = key {
+        store_e2e_key(&k)?;
+        prefs.set(PREF_E2E_ENABLED, "true").map_err(internal)?;
+    } else {
+        let _ = prefs.delete(PREF_E2E_ENABLED);
+    }
     scheduler.kick();
     Ok(report)
 }
@@ -458,13 +627,13 @@ pub fn build_adapter_from_prefs(
 ) -> Option<Arc<dyn SyncAdapter>> {
     let prefs = UserPrefsRepo::new(db);
     let kind = prefs.get(PREF_ADAPTER_KIND).ok().flatten()?;
-    match kind.as_str() {
+    let plain: Arc<dyn SyncAdapter> = match kind.as_str() {
         "local" => {
             let path = prefs.get(PREF_LOCAL_PATH).ok().flatten()?;
             if path.trim().is_empty() {
                 return None;
             }
-            Some(Arc::new(LocalFsSyncAdapter::new(PathBuf::from(path))))
+            Arc::new(LocalFsSyncAdapter::new(PathBuf::from(path)))
         }
         "webdav" => {
             let url = prefs.get(PREF_WEBDAV_URL).ok().flatten()?;
@@ -485,15 +654,32 @@ pub fn build_adapter_from_prefs(
                 (false, Some(pw)) => WebDavCredentials::basic(user.trim(), &pw),
                 _ => WebDavCredentials::None,
             };
-            WebDavSyncAdapter::new(url.trim(), credentials)
-                .ok()
-                .map(|a| Arc::new(a) as Arc<dyn SyncAdapter>)
+            let adapter = WebDavSyncAdapter::new(url.trim(), credentials).ok()?;
+            Arc::new(adapter)
         }
         // Forward-compat: an unknown kind (left over from a
         // future Aperio version) is silently treated as "no
         // adapter configured" rather than a hard error. The
         // user reconfigures in Settings; we don't crash the
         // app over it.
-        _ => None,
+        _ => return None,
+    };
+
+    // Phase Sk: if the dataset is flagged E2E in user_prefs,
+    // wrap with `EncryptingAdapter` using the keychain-stored
+    // key. If the key is missing (keychain wiped, fresh OS
+    // install with the same data dir), bail out so the user
+    // re-runs onboarding rather than syncing garbage.
+    let e2e_on = prefs
+        .get(PREF_E2E_ENABLED)
+        .ok()
+        .flatten()
+        .as_deref()
+        == Some("true");
+    if e2e_on {
+        let key = load_e2e_key()?;
+        Some(wrap_if_encrypted(plain, Some(key)))
+    } else {
+        Some(plain)
     }
 }

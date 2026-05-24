@@ -116,6 +116,12 @@ pub struct SyncStatus {
     /// alongside the other status bits so the Settings → Sync panel
     /// can render the slider value without a second round-trip.
     pub interval_minutes: u32,
+    /// Whether the current dataset is end-to-end encrypted (Phase
+    /// Sk). Read straight from `user_prefs.sync.adapter.e2eEnabled`
+    /// — kept in sync by the onboarding + configure paths so the
+    /// status indicator can flip a "🔒 verschlüsselt" badge on
+    /// without a network call.
+    pub e2e_enabled: bool,
 }
 
 /// The orchestrator itself. Holds an `Option<adapter>` so the
@@ -217,11 +223,18 @@ impl SyncOrchestrator {
             *self.in_flight.lock().expect("in-flight mutex poison");
         let last_synced_at = self.read_cursor();
         let interval_minutes = read_interval_minutes(&self.db);
+        let e2e_enabled = UserPrefsRepo::new(&self.db)
+            .get("sync.adapter.e2eEnabled")
+            .ok()
+            .flatten()
+            .as_deref()
+            == Some("true");
         SyncStatus {
             configured,
             in_flight,
             last_synced_at,
             interval_minutes,
+            e2e_enabled,
         }
     }
 

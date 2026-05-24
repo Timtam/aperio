@@ -69,6 +69,18 @@ export function SyncPanel() {
   const [urlDraft, setUrlDraft] = useState('');
   const [userDraft, setUserDraft] = useState('');
   const [passwordDraft, setPasswordDraft] = useState('');
+  // Phase Sk: E2E passphrase. Two roles depending on the
+  // onboarding branch:
+  //   - `adopt_local` with non-empty value → mints a fresh dataset
+  //     with E2E enabled.
+  //   - `accept_remote` against a preview that says `e2e_enabled`
+  //     → the passphrase the user types to unlock the existing
+  //     dataset's key.
+  // `enableE2eDraft` is the explicit "I want to turn on
+  // encryption for the new dataset" checkbox, used only on
+  // adopt_local.
+  const [passphraseDraft, setPassphraseDraft] = useState('');
+  const [enableE2eDraft, setEnableE2eDraft] = useState(false);
   const [deviceNameDraft, setDeviceNameDraft] = useState('');
   const [intervalDraft, setIntervalDraft] = useState<number | null>(null);
   const [busyAdapter, setBusyAdapter] = useState(false);
@@ -230,6 +242,7 @@ export function SyncPanel() {
       const report = await acceptRemoteDataset(
         buildConfig(),
         deviceNameDraft.trim() || null,
+        passphraseDraft.trim() || null,
       );
       const message =
         report.device_count === 1
@@ -239,6 +252,9 @@ export function SyncPanel() {
             });
       announce(message);
       setPreview(null);
+      // Clear the passphrase after a successful onboarding; the
+      // derived key lives in the keychain from this point on.
+      setPassphraseDraft('');
     } catch (err) {
       announce(
         `${t('dialogs.settings.sync.errorPrefix')}: ${messageForError(err)}`,
@@ -247,22 +263,43 @@ export function SyncPanel() {
     } finally {
       setBusyAccept(false);
     }
-  }, [announce, buildConfig, deviceNameDraft, messageForError, t]);
+  }, [
+    announce,
+    buildConfig,
+    deviceNameDraft,
+    messageForError,
+    passphraseDraft,
+    t,
+  ]);
 
   const onAdopt = useCallback(async () => {
     const confirmed = window.confirm(t('dialogs.settings.sync.previewAdoptConfirm'));
     if (!confirmed) return;
+    // Phase Sk: if the user ticked "Enable encryption", a
+    // passphrase is required. Empty + ticked is a dead-end
+    // configuration; gate before hitting the backend.
+    if (enableE2eDraft && !passphraseDraft.trim()) {
+      announce(
+        t('dialogs.settings.sync.e2ePassphraseRequired'),
+        'assertive',
+      );
+      return;
+    }
     setBusyAdopt(true);
     try {
       const report = await adoptLocalDataset(
         buildConfig(),
         deviceNameDraft.trim() || null,
+        enableE2eDraft ? passphraseDraft.trim() : null,
       );
       const message = report.remote_was_empty
         ? t('dialogs.settings.sync.onboardingFresh')
         : t('dialogs.settings.sync.onboardingDone_one');
       announce(message);
       setPreview(null);
+      // Clear the passphrase after a successful onboarding.
+      setPassphraseDraft('');
+      setEnableE2eDraft(false);
     } catch (err) {
       announce(
         `${t('dialogs.settings.sync.errorPrefix')}: ${messageForError(err)}`,
@@ -271,7 +308,15 @@ export function SyncPanel() {
     } finally {
       setBusyAdopt(false);
     }
-  }, [announce, buildConfig, deviceNameDraft, messageForError, t]);
+  }, [
+    announce,
+    buildConfig,
+    deviceNameDraft,
+    enableE2eDraft,
+    messageForError,
+    passphraseDraft,
+    t,
+  ]);
 
   const onCompact = useCallback(async () => {
     setBusyCompact(true);
@@ -323,6 +368,13 @@ export function SyncPanel() {
             ? t('dialogs.settings.sync.stateConfigured', { path: pathDraft || '–' })
             : t('dialogs.settings.sync.stateUnconfigured')}
         </p>
+        {status?.configured && (
+          <p>
+            {status.e2e_enabled
+              ? t('dialogs.settings.sync.e2eActive')
+              : t('dialogs.settings.sync.e2eInactive')}
+          </p>
+        )}
         <p>{lastSyncedLabel}</p>
         {lastReport && (
           <p>
@@ -529,22 +581,40 @@ export function SyncPanel() {
             </p>
           )}
           {preview?.kind === 'empty' && (
-            <PreviewEmpty
-              t={t}
-              busyAdopt={busyAdopt}
-              onAdopt={onAdopt}
-            />
+            <>
+              <E2eEnableInput
+                enabled={enableE2eDraft}
+                onToggle={setEnableE2eDraft}
+                passphrase={passphraseDraft}
+                onPassphraseChange={setPassphraseDraft}
+                t={t}
+              />
+              <PreviewEmpty
+                t={t}
+                busyAdopt={busyAdopt}
+                onAdopt={onAdopt}
+              />
+            </>
           )}
           {preview?.kind === 'existing' && (
-            <PreviewExisting
-              preview={preview}
-              t={t}
-              fmt={fmt}
-              busyAccept={busyAccept}
-              busyAdopt={busyAdopt}
-              onAccept={onAccept}
-              onAdopt={onAdopt}
-            />
+            <>
+              {preview.e2e_enabled && (
+                <E2ePassphrasePrompt
+                  passphrase={passphraseDraft}
+                  onPassphraseChange={setPassphraseDraft}
+                  t={t}
+                />
+              )}
+              <PreviewExisting
+                preview={preview}
+                t={t}
+                fmt={fmt}
+                busyAccept={busyAccept}
+                busyAdopt={busyAdopt}
+                onAccept={onAccept}
+                onAdopt={onAdopt}
+              />
+            </>
           )}
         </section>
       )}
@@ -646,6 +716,89 @@ function PreviewExisting({
             {t('dialogs.settings.sync.previewAdoptButton')}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/** Sub-form rendered above the "Start fresh" button when the
+ *  remote is empty. Checkbox + passphrase input that wire to the
+ *  adopt_local flow's optional `passphrase` argument. The
+ *  passphrase is intentionally NOT confirmed twice — §19.7 makes
+ *  the irreversibility clear in the surrounding copy and the user
+ *  is the only person who can ever recover the dataset anyway. */
+function E2eEnableInput({
+  enabled,
+  onToggle,
+  passphrase,
+  onPassphraseChange,
+  t,
+}: {
+  enabled: boolean;
+  onToggle: (next: boolean) => void;
+  passphrase: string;
+  onPassphraseChange: (next: string) => void;
+  t: ReturnType<typeof useTranslation>['t'];
+}) {
+  return (
+    <div className="sync-panel__e2e">
+      <label className="sync-panel__field">
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => onToggle(e.target.checked)}
+        />{' '}
+        {t('dialogs.settings.sync.e2eEnableLabel')}
+      </label>
+      <p className="sync-panel__hint">
+        {t('dialogs.settings.sync.e2eEnableHint')}
+      </p>
+      {enabled && (
+        <div className="sync-panel__field">
+          <label>
+            {t('dialogs.settings.sync.e2ePassphrase')}
+            <input
+              type="password"
+              value={passphrase}
+              onChange={(e) => onPassphraseChange(e.target.value)}
+              autoComplete="new-password"
+            />
+          </label>
+          <p className="sync-panel__hint sync-panel__hint--warning">
+            {t('dialogs.settings.sync.e2eIrreversibleWarning')}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Sub-form rendered above the accept/adopt cards when the
+ *  preview reports `e2e_enabled = true`. The user MUST type the
+ *  dataset's passphrase to derive the key and decrypt anything
+ *  during onboarding. */
+function E2ePassphrasePrompt({
+  passphrase,
+  onPassphraseChange,
+  t,
+}: {
+  passphrase: string;
+  onPassphraseChange: (next: string) => void;
+  t: ReturnType<typeof useTranslation>['t'];
+}) {
+  return (
+    <div className="sync-panel__e2e">
+      <p>{t('dialogs.settings.sync.e2eRemoteRequiresPassphrase')}</p>
+      <div className="sync-panel__field">
+        <label>
+          {t('dialogs.settings.sync.e2ePassphrase')}
+          <input
+            type="password"
+            value={passphrase}
+            onChange={(e) => onPassphraseChange(e.target.value)}
+            autoComplete="current-password"
+          />
+        </label>
       </div>
     </div>
   );

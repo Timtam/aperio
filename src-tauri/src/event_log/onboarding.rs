@@ -383,6 +383,7 @@ impl OnboardingService {
         &self,
         adapter: &dyn SyncAdapter,
         device_name: Option<&str>,
+        e2e_params: Option<sync_core::EncryptionParams>,
     ) -> SyncResult<OnboardingReport> {
         adapter.test_connection().await?;
 
@@ -399,6 +400,14 @@ impl OnboardingService {
         }
 
         let mut meta = MetaJson::fresh(&self.app_version);
+        // Phase Sk: bake the E2E flag + params into the fresh
+        // meta so devices joining later can derive the same key
+        // from the user's passphrase. The key itself is NEVER
+        // written here — it lives only in each device's keychain.
+        if let Some(params) = e2e_params {
+            meta.e2e_enabled = true;
+            meta.e2e_params = Some(params);
+        }
         self.register_self_in_meta(&mut meta, device_name);
         adapter.push_meta(&meta).await?;
 
@@ -772,7 +781,7 @@ mod tests {
         );
         adapter.install_meta(meta);
 
-        let report = svc.adopt_local(&adapter, Some("This")).await.unwrap();
+        let report = svc.adopt_local(&adapter, Some("This"), None).await.unwrap();
         // adopt_local overwrites, so the device count drops to just us.
         assert_eq!(report.device_count, 1);
         assert!(!report.remote_was_empty);

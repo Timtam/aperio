@@ -38,7 +38,9 @@
 //!   command layer where it has cross-table read access.
 
 pub mod adapter;
+pub mod crypto;
 pub mod device;
+pub mod encrypting_adapter;
 pub mod error;
 pub mod event;
 pub mod log;
@@ -46,7 +48,11 @@ pub mod meta;
 pub mod snapshot;
 
 pub use adapter::{DeviceCursor, SyncAdapter};
+pub use crypto::{
+    decrypt, derive_key, encrypt, EncryptionParams, KEY_LEN, NONCE_LEN, SALT_LEN,
+};
 pub use device::{DeviceId, DEVICE_ID_PREF_KEY};
+pub use encrypting_adapter::EncryptingAdapter;
 pub use error::{SyncError, SyncResult};
 pub use event::{
     EventEnvelope, EventId, EventPayload, IdPayload, PartialPayload,

@@ -210,7 +210,15 @@
         "errorNetwork": "Netzwerkfehler.",
         "errorNotFound": "Kein Datensatz am Pfad gefunden.",
         "errorSchemaTooOld": "Sync-Datensatz benötigt eine neuere Aperio-Version.",
-        "errorEncryption": "Verschlüsselter Datensatz, aber kein Passwort konfiguriert."
+        "errorEncryption": "Verschlüsselter Datensatz, aber kein Passwort konfiguriert.",
+        "e2eActive": "🔒 Ende-zu-Ende-Verschlüsselung aktiv",
+        "e2eInactive": "Ende-zu-Ende-Verschlüsselung deaktiviert",
+        "e2eEnableLabel": "Ende-zu-Ende-Verschlüsselung aktivieren",
+        "e2eEnableHint": "Alle Log-Dateien und Snapshots werden mit AES-256-GCM verschlüsselt, bevor sie das Gerät verlassen. Der Speicher sieht nur verschlüsselte Blobs.",
+        "e2ePassphrase": "Passwort",
+        "e2eIrreversibleWarning": "Achtung: Ohne dieses Passwort sind die Daten nicht wiederherstellbar. Notiere es an einem sicheren Ort.",
+        "e2ePassphraseRequired": "Bitte zuerst ein Passwort eingeben.",
+        "e2eRemoteRequiresPassphrase": "Dieser Datensatz ist verschlüsselt. Gib das Passwort ein, um die Daten dieses Geräts freizuschalten."
       }
     },
     "syncConflicts": {
