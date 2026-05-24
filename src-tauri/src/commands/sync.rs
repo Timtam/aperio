@@ -38,6 +38,9 @@ use sync_adapter_dropbox::{
     oauth as dropbox_oauth, DropboxAccountConfig, DropboxSyncAdapter,
 };
 use sync_adapter_ftp::{FtpsMode, FtpsSyncAdapter};
+use sync_adapter_googledrive::{
+    oauth as gdrive_oauth, DriveSyncAdapter, GoogleDriveAccountConfig,
+};
 use sync_adapter_local::LocalFsSyncAdapter;
 use sync_adapter_sftp::{
     HostKeyPreview, HostKeyVerifier, SftpAuth, SftpSyncAdapter,
@@ -132,6 +135,18 @@ const PREF_DROPBOX_PATH: &str = "sync.adapter.dropbox.path";
 /// Pseudo-account id for the Dropbox refresh token.
 const DROPBOX_SECRET_ACCOUNT: &str = "sync.adapter.dropbox";
 
+/// Google Drive adapter config keys. Same shape as the
+/// Dropbox set; the refresh token lives in the keychain
+/// under GOOGLEDRIVE_SECRET_ACCOUNT.
+const PREF_GOOGLEDRIVE_CLIENT_ID: &str = "sync.adapter.googledrive.clientId";
+const PREF_GOOGLEDRIVE_CLIENT_SECRET: &str =
+    "sync.adapter.googledrive.clientSecret";
+const PREF_GOOGLEDRIVE_FOLDER_NAME: &str =
+    "sync.adapter.googledrive.folderName";
+
+/// Pseudo-account id for the Google Drive refresh token.
+const GOOGLEDRIVE_SECRET_ACCOUNT: &str = "sync.adapter.googledrive";
+
 /// `user_prefs` key flagging whether the current sync dataset is
 /// E2E-encrypted. Mirrors the boolean in `meta.json`; lets
 /// `build_adapter_from_prefs` decide synchronously whether to wrap
@@ -225,6 +240,23 @@ pub enum SyncAdapterConfig {
         /// (for full-Dropbox apps).
         #[serde(default)]
         path: String,
+    },
+    /// Google Drive adapter (DESIGN.md §19.6 — Drive API v3 +
+    /// OAuth 2.0). The user creates a Drive app at
+    /// console.cloud.google.com and supplies both
+    /// `client_id` and `client_secret` (Google requires the
+    /// secret for installed apps; their docs say "in this
+    /// context the secret is not treated as a secret").
+    /// `folder_name` is the human-readable folder under My
+    /// Drive that holds the dataset; the adapter creates it
+    /// if missing. The OAuth dance runs through
+    /// `connect_googledrive_oauth` before the regular
+    /// `configure_sync_adapter` call.
+    GoogleDrive {
+        client_id: String,
+        client_secret: String,
+        #[serde(default)]
+        folder_name: String,
     },
     /// FTPS adapter (DESIGN.md §19.6 — "FTP über TLS"). Plain
     /// FTP is not supported; the `mode` picks between
@@ -464,6 +496,49 @@ fn build_adapter(
             })?;
             Ok(Arc::new(adapter))
         }
+        SyncAdapterConfig::GoogleDrive {
+            client_id,
+            client_secret,
+            folder_name,
+        } => {
+            let trimmed_id = client_id.trim();
+            let trimmed_secret = client_secret.trim();
+            if trimmed_id.is_empty() {
+                return Err(CommandError {
+                    code: "invalid_input",
+                    message: "Google Drive client_id must not be empty".into(),
+                });
+            }
+            if trimmed_secret.is_empty() {
+                return Err(CommandError {
+                    code: "invalid_input",
+                    message: "Google Drive client_secret must not be empty".into(),
+                });
+            }
+            let refresh_token = secrets::retrieve(
+                GOOGLEDRIVE_SECRET_ACCOUNT,
+                SecretSlot::RefreshToken,
+            )
+            .map_err(|err| CommandError {
+                code: "auth",
+                message: format!(
+                    "Google Drive sign-in required — no refresh token: {err}",
+                ),
+            })?;
+            let adapter = DriveSyncAdapter::new(
+                GoogleDriveAccountConfig {
+                    client_id: trimmed_id.to_string(),
+                    client_secret: trimmed_secret.to_string(),
+                    folder_name: folder_name.trim().to_string(),
+                },
+                refresh_token,
+            )
+            .map_err(|err| CommandError {
+                code: "invalid_input",
+                message: format!("build Google Drive adapter: {err}"),
+            })?;
+            Ok(Arc::new(adapter))
+        }
         SyncAdapterConfig::Ftp {
             host,
             port,
@@ -647,6 +722,27 @@ fn persist_adapter_config(
             prefs.set(PREF_DROPBOX_PATH, path.trim()).map_err(internal)?;
             Ok(())
         }
+        SyncAdapterConfig::GoogleDrive {
+            client_id,
+            client_secret,
+            folder_name,
+        } => {
+            // Same shape as the Dropbox branch — refresh token
+            // already lives in the keychain from
+            // `connect_googledrive_oauth`; we only persist the
+            // non-secret app-config bits.
+            prefs.set(PREF_ADAPTER_KIND, "googledrive").map_err(internal)?;
+            prefs
+                .set(PREF_GOOGLEDRIVE_CLIENT_ID, client_id.trim())
+                .map_err(internal)?;
+            prefs
+                .set(PREF_GOOGLEDRIVE_CLIENT_SECRET, client_secret.trim())
+                .map_err(internal)?;
+            prefs
+                .set(PREF_GOOGLEDRIVE_FOLDER_NAME, folder_name.trim())
+                .map_err(internal)?;
+            Ok(())
+        }
         SyncAdapterConfig::Ftp {
             host,
             port,
@@ -791,7 +887,8 @@ pub async fn configure_sync_adapter(
         | SyncAdapterConfig::Webdav { .. }
         | SyncAdapterConfig::Sftp { .. }
         | SyncAdapterConfig::Ftp { .. }
-        | SyncAdapterConfig::Dropbox { .. } => {
+        | SyncAdapterConfig::Dropbox { .. }
+        | SyncAdapterConfig::GoogleDrive { .. } => {
             // Persist BEFORE building the adapter so the keychain
             // entry for the new WebDAV password is in place; the
             // adapter constructor then reads it back when the
@@ -1636,6 +1733,44 @@ pub fn build_adapter_from_prefs(
                 .ok()?,
             )
         }
+        "googledrive" => {
+            let client_id =
+                prefs.get(PREF_GOOGLEDRIVE_CLIENT_ID).ok().flatten()?;
+            if client_id.trim().is_empty() {
+                return None;
+            }
+            // Google requires both id + secret for installed apps,
+            // so a missing secret here means the user never
+            // finished the Settings form. Treat that as
+            // "not configured" rather than booting a half-built
+            // adapter.
+            let client_secret =
+                prefs.get(PREF_GOOGLEDRIVE_CLIENT_SECRET).ok().flatten()?;
+            if client_secret.trim().is_empty() {
+                return None;
+            }
+            let folder_name = prefs
+                .get(PREF_GOOGLEDRIVE_FOLDER_NAME)
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            let refresh_token = secrets::retrieve(
+                GOOGLEDRIVE_SECRET_ACCOUNT,
+                SecretSlot::RefreshToken,
+            )
+            .ok()?;
+            Arc::new(
+                DriveSyncAdapter::new(
+                    GoogleDriveAccountConfig {
+                        client_id: client_id.trim().to_string(),
+                        client_secret: client_secret.trim().to_string(),
+                        folder_name: folder_name.trim().to_string(),
+                    },
+                    refresh_token,
+                )
+                .ok()?,
+            )
+        }
         // Forward-compat: an unknown kind (left over from a
         // future Aperio version) is silently treated as "no
         // adapter configured" rather than a hard error. The
@@ -1730,6 +1865,85 @@ pub async fn connect_dropbox_oauth(
 pub async fn has_dropbox_refresh_token() -> CommandResult<bool> {
     Ok(secrets::retrieve(DROPBOX_SECRET_ACCOUNT, SecretSlot::RefreshToken)
         .is_ok())
+}
+
+// ---------------------------------------------------------------------------
+// Google Drive OAuth dance.
+// ---------------------------------------------------------------------------
+
+/// Run the Google Drive OAuth authorisation-code flow against
+/// the user's own Drive app (client_id + client_secret from
+/// console.cloud.google.com). On success, stores the refresh
+/// token in the keychain under
+/// `GOOGLEDRIVE_SECRET_ACCOUNT::RefreshToken` so subsequent
+/// `configure_sync_adapter` calls can build the adapter without
+/// re-running the dance.
+///
+/// Opens the system browser; blocks on the loopback listener
+/// for up to 5 minutes waiting for the user to complete the
+/// consent screen.
+///
+/// Unlike Dropbox, Google's installed-app flow requires
+/// `client_secret` to be supplied (their docs explicitly note
+/// that the secret isn't treated as a secret in this context
+/// — it's still part of the token exchange).
+#[tauri::command]
+pub async fn connect_googledrive_oauth(
+    client_id: String,
+    client_secret: String,
+) -> CommandResult<()> {
+    let trimmed_id = client_id.trim();
+    let trimmed_secret = client_secret.trim();
+    if trimmed_id.is_empty() {
+        return Err(CommandError {
+            code: "invalid_input",
+            message: "Google Drive client_id must not be empty".into(),
+        });
+    }
+    if trimmed_secret.is_empty() {
+        return Err(CommandError {
+            code: "invalid_input",
+            message: "Google Drive client_secret must not be empty".into(),
+        });
+    }
+    let http = reqwest::Client::new();
+    let tokens =
+        gdrive_oauth::run(trimmed_id, trimmed_secret, &http)
+            .await
+            .map_err(|err| CommandError {
+                code: if err.is_auth() { "auth" } else { "network" },
+                message: format!("Google Drive OAuth: {err}"),
+            })?;
+    let refresh_token =
+        tokens.refresh_token.ok_or(CommandError {
+            code: "protocol",
+            message:
+                "Google returned no refresh token — make sure the \
+                 consent screen is configured for offline access"
+                    .into(),
+        })?;
+    secrets::store(
+        GOOGLEDRIVE_SECRET_ACCOUNT,
+        SecretSlot::RefreshToken,
+        &refresh_token,
+    )
+    .map_err(|err| CommandError {
+        code: "internal",
+        message: format!("keychain store Google Drive refresh: {err}"),
+    })?;
+    Ok(())
+}
+
+/// Returns `true` when a Google Drive refresh token is on
+/// file — drives the "signed in" indicator next to the OAuth
+/// button in the SyncPanel.
+#[tauri::command]
+pub async fn has_googledrive_refresh_token() -> CommandResult<bool> {
+    Ok(secrets::retrieve(
+        GOOGLEDRIVE_SECRET_ACCOUNT,
+        SecretSlot::RefreshToken,
+    )
+    .is_ok())
 }
 
 // ---------------------------------------------------------------------------

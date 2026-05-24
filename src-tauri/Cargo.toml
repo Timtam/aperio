@@ -46,6 +46,7 @@ sync-adapter-webdav = { path = "../crates/sync-adapter-webdav" }
 sync-adapter-sftp = { path = "../crates/sync-adapter-sftp" }
 sync-adapter-ftp = { path = "../crates/sync-adapter-ftp" }
 sync-adapter-dropbox = { path = "../crates/sync-adapter-dropbox" }
+sync-adapter-googledrive = { path = "../crates/sync-adapter-googledrive" }
 cal-adapter-caldav = { path = "../crates/cal-adapter-caldav" }
 cal-adapter-ical = { path = "../crates/cal-adapter-ical" }
 cal-adapter-google = { path = "../crates/cal-adapter-google" }

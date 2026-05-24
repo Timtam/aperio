@@ -121,6 +121,7 @@ dependencies = [
  "serde_json",
  "sync-adapter-dropbox",
  "sync-adapter-ftp",
+ "sync-adapter-googledrive",
  "sync-adapter-local",
  "sync-adapter-sftp",
  "sync-adapter-webdav",
