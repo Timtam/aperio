@@ -6,6 +6,29 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Aperio — stub for sync-core (Phase 0; full implementation lands in a later phase)."
+description = "Aperio — shared types and traits for cross-device sync (DESIGN.md §19)."
 
 [dependencies]
+# Adapters return async results across the network — every sync trait
+# method is `async`, so we need the same dyn-async story the cal-core
+# adapter traits use.
+async-trait.workspace = true
+# SyncEvent payloads round-trip as JSON Lines. Every adapter sees the
+# same wire format; serde is the canonical encoder for both the log
+# entries themselves and the meta.json / snapshot envelopes.
+serde.workspace = true
+serde_json = "1"
+# Log entries carry RFC 3339 timestamps; chrono is the workspace's
+# date-time library and already understood by every adapter.
+chrono.workspace = true
+# device_id is a UUID v4 generated on first run and persisted in
+# user_prefs. Same uuid crate the local adapter uses for event UIDs.
+uuid.workspace = true
+# All error variants implement std::error::Error via thiserror — the
+# crate boundary speaks `Result<T, SyncError>` so consumers (the
+# command layer, individual sync adapters) get one place to map errors.
+thiserror.workspace = true
+# tokio for the async runtime + tracing for diagnostics; both align
+# with the rest of the workspace.
+tokio = { workspace = true, features = ["fs", "io-util", "rt", "sync"] }
+tracing.workspace = true
