@@ -180,15 +180,29 @@ export function ContactsPanel() {
         <h3 id={privacyHeadingId} className="color-labels__heading">
           {t('dialogs.settings.contacts.privacyTitle')}
         </h3>
-        {/* The body is split across two paragraphs so the section
-            reads like prose rather than a wall of text. Both get
-            referenced via `aria-describedby` on the cache button
-            below — the user hears the privacy implications before
-            committing to the destructive action. */}
-        <p id={privacyHintId} className="tasks-settings__hint">
+        {/* Informational prose. The Modal wraps the dialog body
+            in `role="application"` to keep NVDA in focus mode
+            (so form fields behave like form fields — see
+            Modal.tsx for the reasoning). Side effect: static
+            `<p>` paragraphs are invisible to focus-mode tab
+            navigation. We work around that by making the prose
+            blocks tab stops in their own right via
+            `tabIndex={0}` + `role="note"`, so the user lands on
+            each paragraph as they tab through and the screen
+            reader reads the text. */}
+        <p
+          id={privacyHintId}
+          className="tasks-settings__hint"
+          role="note"
+          tabIndex={0}
+        >
           {t('dialogs.settings.contacts.privacyBody')}
         </p>
-        <p className="tasks-settings__hint">
+        <p
+          className="tasks-settings__hint"
+          role="note"
+          tabIndex={0}
+        >
           {t('dialogs.settings.contacts.privacyProvidersIntro')}
         </p>
         {/* Provider privacy-policy links. Open in the system
@@ -224,7 +238,14 @@ export function ContactsPanel() {
             </a>
           </li>
           <li>
-            <span className="tasks-settings__hint">
+            {/* Same tabIndex / role treatment as the prose
+                paragraphs above — without it, NVDA in focus
+                mode tabs past this final note silently. */}
+            <span
+              className="tasks-settings__hint"
+              role="note"
+              tabIndex={0}
+            >
               {t('dialogs.settings.contacts.providerPolicyOthers')}
             </span>
           </li>
@@ -332,12 +353,18 @@ export function ContactsPanel() {
         {/* No `aria-live` on this paragraph — opening the tab
             (or tabbing into the panel) made screen readers
             announce "Last synced at …" out of nowhere, which
-            users reported as disorienting. The timestamp is
-            already part of the static document the user can
-            navigate to; explicit announcements for the actual
-            sync events go through `announce()` in the click
-            handlers instead. */}
-        <p className="tasks-settings__hint">
+            users reported as disorienting. Explicit
+            announcements for the actual sync events go through
+            `announce()` in the click handlers instead.
+            `tabIndex={0}` + `role="note"` makes the paragraph
+            a focus stop so NVDA in focus mode (the Modal wraps
+            the body in `role="application"`) can actually
+            reach + read it. */}
+        <p
+          className="tasks-settings__hint"
+          role="note"
+          tabIndex={0}
+        >
           {status?.last_synced_at
             ? t('dialogs.settings.contacts.lastSynced', {
                 time: new Date(status.last_synced_at).toLocaleString(),
