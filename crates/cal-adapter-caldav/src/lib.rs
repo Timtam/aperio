@@ -786,6 +786,14 @@ impl ContactsFeature for CaldavAdapter {
             .await
             .map_err(to_core_error)
     }
+
+    async fn invalidate_contacts_cache(&self) -> CoreResult<()> {
+        // CardDAV's listing cache is the only stateful contact
+        // cache the adapter holds — individual contact rows are
+        // fetched per-request without an intermediate cache.
+        *self.contact_lists_cache.lock().expect("poison") = None;
+        Ok(())
+    }
 }
 
 /// Case-insensitive substring match across the same fields the

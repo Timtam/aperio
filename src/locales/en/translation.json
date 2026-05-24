@@ -95,13 +95,45 @@
         "accounts": "Accounts",
         "calendars": "Calendars",
         "colorLabels": "Color labels",
-        "tasks": "Tasks"
+        "tasks": "Tasks",
+        "contacts": "Contacts"
       },
       "calendars": {
         "hint": "Default reminders that apply to events without their own reminder. Useful for iCloud calendars: iOS “Default Alert Times” aren't written into the event itself, so without a default here the alarm doesn't show in Aperio.",
         "empty": "No calendars yet — add an account first.",
         "accountHeading": "{{account}}",
         "localAccount": "Local"
+      },
+      "contacts": {
+        "privacyTitle": "Privacy",
+        "privacyBody": "Aperio syncs your contacts directly with the connected providers and keeps names, email addresses, phone numbers, birthdays, and organisation fields in memory so search and the attendees picker stay responsive.",
+        "privacyProvidersIntro": "What each provider collects and how long they retain it is governed by their own privacy policies:",
+        "providerPolicyGoogle": "Google privacy policy",
+        "providerPolicyMicrosoft": "Microsoft privacy policy",
+        "providerPolicyOthers": "For CardDAV, iCloud, and Exchange accounts the privacy policy of your server applies.",
+        "providerPolicyAria": "Open {{provider}} privacy policy",
+        "syncTitle": "Sync",
+        "syncBody": "All writable address books sync at app start and at the configured interval. Heavy read-only directories (GAL / Suggested People / Other Contacts / Workspace Directory) only pull on demand.",
+        "intervalLabel": "Sync interval",
+        "intervalOption_one": "{{minutes}} minute",
+        "intervalOption_other": "{{minutes}} minutes",
+        "syncNow": "Sync now",
+        "syncing": "Syncing …",
+        "syncFull": "Include directories",
+        "syncFullHint": "Also pulls the read-only directories (GAL / Suggested People / Other Contacts / Workspace Directory). May take several minutes depending on account size.",
+        "lastSynced": "Last successful sync: {{time}}",
+        "neverSynced": "No sync run yet.",
+        "intervalChanged": "Sync interval set to {{minutes}} minutes.",
+        "syncStarted": "Sync started.",
+        "syncStartedFull": "Full sync (including directories) started.",
+        "cacheTitle": "Clear cache",
+        "cacheBody": "Drops the in-memory snapshots of every external address book. Your own local contacts and the local “Contacts” folder are not affected — the next sync re-pulls provider data.",
+        "clearCache": "Clear cache",
+        "clearing": "Clearing …",
+        "cacheCleared_zero": "Cache cleared — no connected accounts to notify.",
+        "cacheCleared_one": "Cleared cache for 1 account.",
+        "cacheCleared_other": "Cleared cache for {{count}} accounts.",
+        "cacheClearFailed": "Couldn't fully clear the cache. See log for details."
       }
     },
     "tasks": {
@@ -471,6 +503,15 @@
       "deleteMessage": "Remove account \"{{name}}\"? Local calendars, task lists, events and tasks that belong to it will be deleted too.",
       "created": "Account \"{{name}}\" created.",
       "deleted": "Account \"{{name}}\" removed.",
+      "privacyNotice": {
+        "title": "Privacy notice",
+        "body": "Aperio syncs your contacts directly with the connected provider and keeps the data in memory so the attendees picker and search stay responsive. Names, email addresses, phone numbers, birthdays, and organisation fields are kept; photos are loaded lazily on demand.",
+        "providerLine": "What {{provider}} collects and how long it's retained is governed by their privacy policy:",
+        "providerLink": "Open {{provider}} privacy policy",
+        "providerGeneric": "For CalDAV / CardDAV / iCloud / Exchange servers your provider's privacy policy applies — your administrator can point you at it if you need the exact link.",
+        "cacheHint": "You can clear the local cache at any time under Settings → Contacts → \"Clear cache\".",
+        "acknowledge": "Got it"
+      },
       "listLabel": "Connected accounts",
       "rowLabel": "{{name}} ({{kind}}). Press Enter or Delete to remove.",
       "rowLabelLocal": "{{name}} ({{kind}}). Cannot be removed.",

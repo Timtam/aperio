@@ -12,6 +12,7 @@ import { useTranslation } from 'react-i18next';
 import { AccountsPanel } from './AccountsPanel';
 import { CalendarsPanel } from './CalendarsPanel';
 import { ColorLabelsPanel } from './ColorLabelsPanel';
+import { ContactsPanel } from './ContactsPanel';
 import { Modal } from './Modal';
 import { TasksPanel } from './TasksPanel';
 
@@ -41,13 +42,15 @@ export type SettingsTabId =
   | 'accounts'
   | 'calendars'
   | 'colorLabels'
-  | 'tasks';
+  | 'tasks'
+  | 'contacts';
 
 const TAB_ORDER: SettingsTabId[] = [
   'accounts',
   'calendars',
   'colorLabels',
   'tasks',
+  'contacts',
 ];
 
 export interface SettingsDialogProps {
@@ -88,6 +91,7 @@ export function SettingsDialog({
     calendars: null,
     colorLabels: null,
     tasks: null,
+    contacts: null,
   });
 
   const focusTab = useCallback(
@@ -149,6 +153,7 @@ export function SettingsDialog({
         calendars: t('dialogs.settings.tabs.calendars'),
         colorLabels: t('dialogs.settings.tabs.colorLabels'),
         tasks: t('dialogs.settings.tabs.tasks'),
+        contacts: t('dialogs.settings.tabs.contacts'),
       }) as Record<SettingsTabId, string>,
     [t],
   );
@@ -234,6 +239,7 @@ export function SettingsDialog({
           {activeTab === 'calendars' && <CalendarsPanel />}
           {activeTab === 'colorLabels' && <ColorLabelsPanel />}
           {activeTab === 'tasks' && <TasksPanel />}
+          {activeTab === 'contacts' && <ContactsPanel />}
         </div>
       </div>
 

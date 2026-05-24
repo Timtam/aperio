@@ -595,3 +595,19 @@ export const syncContactsNow = (includeReadOnly = false) =>
 
 export const getContactsSyncStatus = () =>
   invoke<ContactsSyncStatus>('get_contacts_sync_status');
+
+/** Wipe every external adapter's in-memory contact cache and reset
+ *  the persisted "last synced" timestamp to never. Backs the
+ *  "Cache leeren" button in Settings → Kontakte (DESIGN.md §10.6).
+ *  Returns the number of adapters whose invalidate succeeded;
+ *  failed ones log on the backend but don't sink the call. Local
+ *  contact rows are user data, not a cache — this never touches
+ *  the SQLite `contacts` table. */
+export const clearContactsCache = () =>
+  invoke<number>('clear_contacts_cache');
+
+/** Update the periodic-sync interval (in minutes). The backend
+ *  clamps to [1, 1440] and returns the value actually persisted,
+ *  so a typo gets corrected rather than crashing the scheduler. */
+export const setContactsSyncInterval = (minutes: number) =>
+  invoke<number>('set_contacts_sync_interval', { minutes });

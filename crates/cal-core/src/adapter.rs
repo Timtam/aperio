@@ -225,6 +225,28 @@ pub trait ContactsFeature: Adapter {
             "delete_contact_photo is not supported on this adapter".into(),
         ))
     }
+
+    /// Drop every in-memory cache the adapter holds for contact
+    /// data — list-of-lists, per-list contact arrays, GAL pull
+    /// snapshots. Surfaced as the back end of the
+    /// "Einstellungen → Kontakte → Cache leeren" gesture in §10.6.
+    ///
+    /// Default no-op: the local adapter doesn't carry an in-memory
+    /// cache (its data lives in SQLite, which is the source of
+    /// truth — not a cache), so it inherits the no-op default
+    /// without needing a bespoke impl. External adapters that
+    /// hold listing / contact / photo caches override this to
+    /// reset those structures; the next `get_contacts` then hits
+    /// the wire and re-warms.
+    ///
+    /// Returning `Result` (rather than `()`) leaves room for an
+    /// adapter that needs to flush an on-disk cache and could
+    /// genuinely fail — say, an SQLite-backed CardDAV mirror that
+    /// hits an IO error on truncate. The current external
+    /// adapters all hold HashMaps in memory and can't fail.
+    async fn invalidate_contacts_cache(&self) -> Result<()> {
+        Ok(())
+    }
 }
 
 // ────────────────────────────────────────────────────────────────────────────

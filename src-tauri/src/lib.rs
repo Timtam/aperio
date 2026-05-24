@@ -158,6 +158,11 @@ pub fn run() {
             // external adapter on user demand.
             commands::sync_contacts_now,
             commands::get_contacts_sync_status,
+            // Phase 10k: Settings → Kontakte. Cache management +
+            // configurable sync interval; the privacy notice is
+            // a frontend-only concern routed through user_prefs.
+            commands::clear_contacts_cache,
+            commands::set_contacts_sync_interval,
         ])
         .setup(move |app| {
             // Spawn the reminder scheduler on the Tauri/tokio runtime

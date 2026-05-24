@@ -464,6 +464,15 @@ impl ContactsFeature for MicrosoftGraphAdapter {
         self.contacts_cache.lock().await.clear();
         Ok(())
     }
+
+    async fn invalidate_contacts_cache(&self) -> CoreResult<()> {
+        // Drop both the folder-listing snapshot and the per-list
+        // contact arrays. The next `list_contact_lists` /
+        // `get_contacts` hits Graph and re-warms.
+        *self.contact_lists_cache.lock().await = None;
+        self.contacts_cache.lock().await.clear();
+        Ok(())
+    }
 }
 
 /// True for the synthetic Suggested People sentinel; the Outlook

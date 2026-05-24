@@ -15,8 +15,10 @@ import {
   createAccount,
   deleteAccount,
   discoverEwsEndpoint,
+  getUserPref,
   isCommandError,
   listAccounts,
+  setUserPref,
   testCaldavConnection,
   testEwsConnection,
   testIcalFeed,
@@ -26,6 +28,22 @@ import {
 import type { Account, AdapterKind } from '../api/types';
 import { useCalendarStore } from '../state/CalendarStore';
 import { ConfirmDialog } from './ConfirmDialog';
+import { ContactsPrivacyNoticeModal } from './ContactsPrivacyNoticeModal';
+
+/** `user_prefs` key gating the one-shot privacy notice on the first
+ *  contacts-capable account connect (DESIGN.md §10.6). Stored as the
+ *  string "true" once acknowledged. */
+const PREF_PRIVACY_NOTICE_ACK = 'contacts.privacyNoticeAcknowledged';
+
+/** Adapter kinds whose ContactsFeature impl pulls remote address-book
+ *  data and therefore trigger the privacy notice on first connect.
+ *  Local accounts are excluded — no remote pull, no notice. */
+const CONTACTS_CAPABLE_KINDS: ReadonlySet<AdapterKind> = new Set([
+  'google',
+  'microsoft_graph',
+  'ews',
+  'caldav',
+]);
 
 /**
  * Account management panel (DESIGN.md §6.2 / §6.4). Rendered inside
@@ -154,6 +172,14 @@ export function AccountsPanel() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [confirmTarget, setConfirmTarget] = useState<Account | null>(null);
+  /** When set, render the privacy-notice modal with the new
+   *  account's adapter kind so the body text can mention the
+   *  specific provider. Closed by acknowledging — which writes
+   *  the `contacts.privacyNoticeAcknowledged` flag so future
+   *  connects skip the modal. */
+  const [privacyNoticeFor, setPrivacyNoticeFor] = useState<AdapterKind | null>(
+    null,
+  );
 
   const [kind, setKind] = useState<AdapterKind>('local');
   const [displayName, setDisplayName] = useState('');
@@ -366,6 +392,31 @@ export function AccountsPanel() {
           });
         }
         announce(t('dialogs.accounts.created', { name: created.display_name }));
+        // Phase 10k privacy notice (DESIGN.md §10.6): show the
+        // one-shot modal the first time the user connects an
+        // account whose ContactsFeature impl will pull remote
+        // address-book data. Skipped on the local kind (no
+        // remote pull) and on subsequent connects (the prefs
+        // flag is sticky once set). The user_pref read happens
+        // here rather than at panel mount because the check is
+        // only meaningful at the moment of a contacts-capable
+        // connect — pre-fetching on mount would mean an extra
+        // Tauri round-trip on every Settings open.
+        if (CONTACTS_CAPABLE_KINDS.has(kind)) {
+          try {
+            const acknowledged = await getUserPref(PREF_PRIVACY_NOTICE_ACK);
+            if (acknowledged !== 'true') {
+              setPrivacyNoticeFor(kind);
+            }
+          } catch (err) {
+            // Treat a failed pref read as "already acknowledged"
+            // so a misbehaving DB doesn't block account creation
+            // with a stuck modal. The notice will surface again
+            // on the next connect if the read recovers.
+            // eslint-disable-next-line no-console
+            console.warn('privacy notice pref read failed', err);
+          }
+        }
         setDisplayName('');
         setCaldav(EMPTY_CALDAV);
         setIcal(EMPTY_ICAL);
@@ -1350,6 +1401,22 @@ export function AccountsPanel() {
         message={t('dialogs.accounts.deleteMessage', {
           name: confirmTarget?.display_name ?? '',
         })}
+      />
+      <ContactsPrivacyNoticeModal
+        isOpen={privacyNoticeFor !== null}
+        adapterKind={privacyNoticeFor}
+        onAcknowledge={() => {
+          // Fire-and-forget the pref write: if it fails the
+          // user just sees the modal one more time on the next
+          // connect, which is harmless. Closing the modal
+          // optimistically keeps the UI responsive without a
+          // spinner for a sub-second write.
+          void setUserPref(PREF_PRIVACY_NOTICE_ACK, 'true').catch((err) => {
+            // eslint-disable-next-line no-console
+            console.warn('privacy notice pref write failed', err);
+          });
+          setPrivacyNoticeFor(null);
+        }}
       />
     </>
   );

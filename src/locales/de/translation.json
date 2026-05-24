@@ -92,13 +92,45 @@
         "accounts": "Konten",
         "calendars": "Kalender",
         "colorLabels": "Farb-Labels",
-        "tasks": "Aufgaben"
+        "tasks": "Aufgaben",
+        "contacts": "Kontakte"
       },
       "calendars": {
         "hint": "Standard-Hinweise, die auf Termine ohne eigenen Hinweis angewendet werden. Hilfreich für iCloud-Kalender: iOS-„Standardhinweise“ werden nicht in den Termin geschrieben, ohne hier konfigurierten Standard erscheint der Hinweis in Aperio nicht.",
         "empty": "Noch keine Kalender — füge zuerst ein Konto hinzu.",
         "accountHeading": "{{account}}",
         "localAccount": "Lokal"
+      },
+      "contacts": {
+        "privacyTitle": "Datenschutz",
+        "privacyBody": "Aperio gleicht deine Kontakte mit den verbundenen Anbietern ab und hält dabei Namen, E-Mail-Adressen, Telefonnummern, Geburtstage und Organisationsangaben im Arbeitsspeicher vor, damit die Suche und der Teilnehmer-Picker reaktionsschnell bleiben.",
+        "privacyProvidersIntro": "Welche Daten die jeweiligen Anbieter sammeln, regeln deren eigene Datenschutzerklärungen:",
+        "providerPolicyGoogle": "Google-Datenschutzerklärung",
+        "providerPolicyMicrosoft": "Microsoft-Datenschutzerklärung",
+        "providerPolicyOthers": "Bei CardDAV-, iCloud- und Exchange-Konten gilt die Datenschutzrichtlinie deines jeweiligen Servers.",
+        "providerPolicyAria": "Datenschutzerklärung von {{provider}} öffnen",
+        "syncTitle": "Synchronisation",
+        "syncBody": "Beim App-Start und in regelmäßigen Abständen werden alle beschreibbaren Kontaktbücher abgeglichen. Globale Adresslisten (GAL, Vorgeschlagene Personen, Andere Kontakte, Verzeichnis) werden nur auf Wunsch komplett gezogen.",
+        "intervalLabel": "Sync-Intervall",
+        "intervalOption_one": "{{minutes}} Minute",
+        "intervalOption_other": "{{minutes}} Minuten",
+        "syncNow": "Jetzt synchronisieren",
+        "syncing": "Wird synchronisiert …",
+        "syncFull": "Auch Verzeichnisse einschließen",
+        "syncFullHint": "Zieht zusätzlich die schreibgeschützten Verzeichnisse (GAL / Vorgeschlagene Personen / Andere Kontakte / Workspace-Verzeichnis). Kann je nach Konto mehrere Minuten dauern.",
+        "lastSynced": "Letzter erfolgreicher Abgleich: {{time}}",
+        "neverSynced": "Noch kein Abgleich durchgeführt.",
+        "intervalChanged": "Sync-Intervall auf {{minutes}} Minuten gesetzt.",
+        "syncStarted": "Synchronisation gestartet.",
+        "syncStartedFull": "Vollständige Synchronisation (inkl. Verzeichnisse) gestartet.",
+        "cacheTitle": "Cache leeren",
+        "cacheBody": "Verwirft die im Arbeitsspeicher gehaltenen Kopien aller externen Kontaktbücher. Deine lokal angelegten Kontakte und der lokale „Kontakte\"-Ordner bleiben unberührt — der nächste Abgleich lädt die Anbieter-Daten frisch nach.",
+        "clearCache": "Cache leeren",
+        "clearing": "Wird geleert …",
+        "cacheCleared_zero": "Cache geleert — kein verbundenes Konto musste benachrichtigt werden.",
+        "cacheCleared_one": "Cache von 1 Konto geleert.",
+        "cacheCleared_other": "Cache von {{count}} Konten geleert.",
+        "cacheClearFailed": "Cache konnte nicht vollständig geleert werden. Details im Log."
       }
     },
     "tasks": {
@@ -471,6 +503,15 @@
       "deleteMessage": "Konto „{{name}}\" wirklich entfernen? Zugehörige lokale Kalender, Aufgabenlisten, Termine und Aufgaben werden mitgelöscht.",
       "created": "Konto „{{name}}\" wurde angelegt.",
       "deleted": "Konto „{{name}}\" wurde entfernt.",
+      "privacyNotice": {
+        "title": "Hinweis zum Datenschutz",
+        "body": "Aperio gleicht deine Kontakte direkt mit dem verbundenen Anbieter ab und hält die Daten im Arbeitsspeicher vor, damit der Teilnehmer-Picker und die Suche flüssig laufen. Namen, E-Mail-Adressen, Telefonnummern, Geburtstage und Organisationsangaben werden gespeichert; Fotos werden nur bei Bedarf nachgeladen.",
+        "providerLine": "Welche Daten {{provider}} sammelt und wie lange sie aufbewahrt werden, findest du in deren Datenschutzerklärung:",
+        "providerLink": "{{provider}}-Datenschutzerklärung öffnen",
+        "providerGeneric": "Für CalDAV-/CardDAV-/iCloud-/Exchange-Server gilt die Datenschutzrichtlinie deines jeweiligen Servers — dein:e Administrator:in kann dir bei Bedarf einen Link bereitstellen.",
+        "cacheHint": "Du kannst den lokalen Speicher jederzeit unter Einstellungen → Kontakte → „Cache leeren\" löschen.",
+        "acknowledge": "Verstanden"
+      },
       "listLabel": "Verbundene Konten",
       "rowLabel": "{{name}} ({{kind}}). Enter oder Entf zum Entfernen.",
       "rowLabelLocal": "{{name}} ({{kind}}). Kann nicht entfernt werden.",

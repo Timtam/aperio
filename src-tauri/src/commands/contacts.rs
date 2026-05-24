@@ -22,10 +22,16 @@ use cal_core::{Contact, ContactList, ContactPhoto, ContactsFeature, NewContact};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tauri::{AppHandle, Runtime, State};
+use tracing::warn;
 
 use super::{CommandError, CommandResult};
-use crate::contact_sync::{ContactSyncScheduler, ContactsSyncStatus};
+use crate::contact_sync::{
+    ContactSyncScheduler, ContactsSyncStatus, PREF_LAST_SYNCED_AT,
+    PREF_SYNC_INTERVAL_MINUTES,
+};
+use crate::db::DbHandle;
 use crate::registry::{AdapterRegistry, LOCAL_ID};
+use crate::user_prefs::UserPrefsRepo;
 
 /// Wire-format `ContactList` enriched with the owning account id —
 /// same shape rationale as `CalendarRow` and `TaskListRow`. Lets
@@ -345,6 +351,82 @@ pub async fn get_contacts_sync_status(
     scheduler: State<'_, Arc<ContactSyncScheduler>>,
 ) -> CommandResult<ContactsSyncStatus> {
     Ok(scheduler.status())
+}
+
+/// Drop every external adapter's in-memory contact cache and
+/// reset `contacts.lastSyncedAt` to "never". Backs the
+/// "Cache leeren" button in Settings → Kontakte (DESIGN.md §10.6).
+///
+/// Local contact rows are user data, NOT a cache — this command
+/// leaves the SQLite `contacts` / `contact_lists` tables alone.
+/// What it wipes is the per-adapter HashMap snapshots; the next
+/// sync pass (auto or manual) repopulates them from the wire.
+///
+/// Returns the number of accounts the invalidate succeeded
+/// against; failed adapters log warnings but don't sink the
+/// command — partial-success is the right outcome when one
+/// account's server is unreachable but others are fine.
+#[tauri::command]
+pub async fn clear_contacts_cache(
+    registry: State<'_, Arc<AdapterRegistry>>,
+    db: State<'_, DbHandle>,
+) -> CommandResult<usize> {
+    let mut succeeded = 0usize;
+    for (account_id, adapter) in registry.snapshot_contact_adapters() {
+        match adapter.invalidate_contacts_cache().await {
+            Ok(()) => {
+                succeeded += 1;
+            }
+            Err(err) => {
+                warn!(
+                    account_id = %account_id,
+                    ?err,
+                    "invalidate_contacts_cache failed for adapter",
+                );
+            }
+        }
+    }
+    // Reset the persisted "last synced" timestamp so the panel
+    // footer flips back to "no sync run yet" until the next pass
+    // completes. The in-memory state on `ContactSyncScheduler`
+    // isn't reset here on purpose — the next `contacts-synced`
+    // event will overwrite it. Keeping the in-memory value avoids
+    // a brief window where the footer flickers before the prefs
+    // round-trip lands.
+    let shared = db.shared();
+    let repo = UserPrefsRepo::new(&shared);
+    if let Err(err) = repo.delete(PREF_LAST_SYNCED_AT) {
+        warn!(?err, "failed to delete contacts.lastSyncedAt");
+    }
+    Ok(succeeded)
+}
+
+/// Configure the periodic-sync interval. `minutes` is clamped to
+/// at least 1 and at most 24 * 60 = 1440 so a typo doesn't pin
+/// the scheduler into a hot loop or wedge it for a calendar day.
+/// Writes the value to `user_prefs.contacts.syncIntervalMinutes`
+/// — the scheduler re-reads on every tick, so the new interval
+/// applies on the next periodic pass.
+#[tauri::command]
+pub async fn set_contacts_sync_interval(
+    db: State<'_, DbHandle>,
+    minutes: u32,
+) -> CommandResult<u32> {
+    // Clamp aggressively: 1-minute floor avoids the hot-loop
+    // edge case (scheduler also clamps in-memory, but pinning it
+    // at the persistence boundary too means a typo never makes
+    // it into the DB), 24-hour ceiling keeps the value visibly
+    // sensible — the UI's `interval` dropdown offers presets up
+    // to 240 anyway, so the ceiling is just a defensive net.
+    let clamped = minutes.clamp(1, 24 * 60);
+    let shared = db.shared();
+    let repo = UserPrefsRepo::new(&shared);
+    repo.set(PREF_SYNC_INTERVAL_MINUTES, &clamped.to_string())
+        .map_err(|err| CommandError {
+            code: "internal",
+            message: err.to_string(),
+        })?;
+    Ok(clamped)
 }
 
 /// Clear the avatar without touching any other field. Idempotent

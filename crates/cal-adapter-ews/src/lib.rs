@@ -525,6 +525,18 @@ impl ContactsFeature for EwsAdapter {
             .await
             .map_err(to_core_error)
     }
+
+    async fn invalidate_contacts_cache(&self) -> CoreResult<()> {
+        // Drop both the IPF.Contact folder listing and the
+        // expensive GAL pull snapshot. The next
+        // `list_contact_lists` / `get_contacts(GAL_LIST_ID)`
+        // walks Exchange again — which for the GAL means re-running
+        // the a-z ResolveNames enumeration, but that's exactly
+        // what the user clicked the button for.
+        *self.contact_lists_cache.lock().await = None;
+        *self.gal_cache.lock().await = None;
+        Ok(())
+    }
 }
 
 fn to_core_error(err: EwsError) -> CoreError {

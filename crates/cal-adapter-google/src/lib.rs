@@ -509,6 +509,15 @@ impl ContactsFeature for GoogleAdapter {
         self.contacts_cache.lock().await.clear();
         Ok(())
     }
+
+    async fn invalidate_contacts_cache(&self) -> CoreResult<()> {
+        // The synthetic ContactList listing itself is static
+        // (built from sentinel ids in contacts::list_contact_lists),
+        // so there's nothing to drop on the list side. The
+        // per-list contacts HashMap is the only stateful cache.
+        self.contacts_cache.lock().await.clear();
+        Ok(())
+    }
 }
 
 /// True for the two synthetic Google ContactLists that don't
