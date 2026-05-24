@@ -11,10 +11,12 @@ import {
   compactNow,
   configureSyncAdapter,
   connectDropboxOauth,
+  connectGoogledriveOauth,
   disableSyncEncryption,
   forgetSftpHostKey,
   getPinnedSftpHostKey,
   hasDropboxRefreshToken,
+  hasGoogledriveRefreshToken,
   isCommandError,
   previewSftpHostKey,
   previewSyncTarget,
@@ -76,7 +78,7 @@ export function SyncPanel() {
   // Adapter draft state. Seeded from current backend state on mount
   // so the inputs reflect the persisted choice.
   const [kindDraft, setKindDraft] = useState<
-    'local' | 'webdav' | 'sftp' | 'ftp' | 'dropbox' | 'none'
+    'local' | 'webdav' | 'sftp' | 'ftp' | 'dropbox' | 'googledrive' | 'none'
   >('local');
   const [pathDraft, setPathDraft] = useState('');
   // WebDAV-only fields. `passwordDraft` is empty on first render —
@@ -128,6 +130,19 @@ export function SyncPanel() {
    *  so the "Sign in" button flips to "Re-sign in" once auth
    *  has happened. */
   const [dropboxSignedIn, setDropboxSignedIn] = useState(false);
+  // Google Drive-only fields. Same shape as the Dropbox block,
+  // but Google requires both `client_id` and `client_secret`
+  // for installed apps and addresses files by ID rather than
+  // path — the user picks a folder name instead of a path.
+  const [gdriveClientIdDraft, setGdriveClientIdDraft] = useState('');
+  const [gdriveClientSecretDraft, setGdriveClientSecretDraft] =
+    useState('');
+  const [gdriveFolderNameDraft, setGdriveFolderNameDraft] = useState('');
+  const [busyGdriveOauth, setBusyGdriveOauth] = useState(false);
+  /** Whether a Google refresh token is already in the keychain.
+   *  Same role as `dropboxSignedIn` — toggles the OAuth button
+   *  between "Sign in" / "Re-sign in" / "Signed in ✓". */
+  const [gdriveSignedIn, setGdriveSignedIn] = useState(false);
   // Phase Sk: E2E passphrase. Two roles depending on the
   // onboarding branch:
   //   - `adopt_local` with non-empty value → mints a fresh dataset
@@ -282,6 +297,17 @@ export function SyncPanel() {
         path: dropboxPathDraft.trim(),
       };
     }
+    if (kindDraft === 'googledrive') {
+      return {
+        kind: 'googledrive',
+        client_id: gdriveClientIdDraft.trim(),
+        client_secret: gdriveClientSecretDraft.trim(),
+        // Empty string lets the adapter fall back to its
+        // built-in "Aperio" default — matches the backend
+        // `GoogleDriveAccountConfig` contract.
+        folder_name: gdriveFolderNameDraft.trim(),
+      };
+    }
     if (kindDraft === 'ftp') {
       // Same parse-or-default port pattern as SFTP. The
       // backend's `default_ftp_port` is 21 (explicit FTPS); we
@@ -327,6 +353,9 @@ export function SyncPanel() {
     dropboxClientIdDraft,
     dropboxClientSecretDraft,
     dropboxPathDraft,
+    gdriveClientIdDraft,
+    gdriveClientSecretDraft,
+    gdriveFolderNameDraft,
   ]);
 
   // Validation: the Connect button needs a path for `local`, a URL +
@@ -364,6 +393,16 @@ export function SyncPanel() {
       // refresh token the Connect step would build an adapter
       // that can't mint access tokens, so we gate on it here.
       return !dropboxClientIdDraft.trim() || !dropboxSignedIn;
+    }
+    if (kindDraft === 'googledrive') {
+      // Google's installed-app flow needs both id + secret AND
+      // a finished OAuth dance. Folder name is optional (the
+      // adapter defaults it to "Aperio").
+      return (
+        !gdriveClientIdDraft.trim()
+        || !gdriveClientSecretDraft.trim()
+        || !gdriveSignedIn
+      );
     }
     return false;
   })();
@@ -891,6 +930,60 @@ export function SyncPanel() {
     t,
   ]);
 
+  // §19.6 — Google Drive OAuth handlers. Same flow as Dropbox
+  // (probe on mount, run the dance, refresh the flag) but with
+  // a different missing-input announcement: Google needs both
+  // id AND secret before the dance can even start.
+  const refreshGdriveSignedIn = useCallback(() => {
+    hasGoogledriveRefreshToken()
+      .then(setGdriveSignedIn)
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.warn('has_googledrive_refresh_token failed', err);
+        setGdriveSignedIn(false);
+      });
+  }, []);
+
+  useEffect(() => {
+    refreshGdriveSignedIn();
+  }, [refreshGdriveSignedIn]);
+
+  const onConnectGoogledrive = useCallback(async () => {
+    const clientId = gdriveClientIdDraft.trim();
+    const clientSecret = gdriveClientSecretDraft.trim();
+    if (!clientId || !clientSecret) {
+      announce(
+        t('dialogs.settings.sync.adapterGoogledriveNeedsClientId'),
+        'assertive',
+      );
+      return;
+    }
+    setBusyGdriveOauth(true);
+    try {
+      await connectGoogledriveOauth(clientId, clientSecret);
+      announce(
+        t('dialogs.settings.sync.adapterGoogledriveSignedInAnnouncement'),
+      );
+      refreshGdriveSignedIn();
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('connect_googledrive_oauth failed', err);
+      announce(
+        `${t('dialogs.settings.sync.errorPrefix')}: ${messageForError(err)}`,
+        'assertive',
+      );
+    } finally {
+      setBusyGdriveOauth(false);
+    }
+  }, [
+    announce,
+    gdriveClientIdDraft,
+    gdriveClientSecretDraft,
+    messageForError,
+    refreshGdriveSignedIn,
+    t,
+  ]);
+
   const lastSyncedLabel = (() => {
     if (!status?.last_synced_at) return t('dialogs.settings.sync.stateNeverSynced');
     try {
@@ -1084,6 +1177,7 @@ export function SyncPanel() {
                     | 'sftp'
                     | 'ftp'
                     | 'dropbox'
+                    | 'googledrive'
                     | 'none',
                 )
               }
@@ -1102,6 +1196,9 @@ export function SyncPanel() {
               </option>
               <option value="dropbox">
                 {t('dialogs.settings.sync.adapterKindDropbox')}
+              </option>
+              <option value="googledrive">
+                {t('dialogs.settings.sync.adapterKindGoogledrive')}
               </option>
               <option value="none">
                 {t('dialogs.settings.sync.adapterKindNone')}
@@ -1580,6 +1677,91 @@ export function SyncPanel() {
                   aria-live="polite"
                 >
                   {t('dialogs.settings.sync.adapterDropboxSignedIn')}
+                </span>
+              )}
+            </div>
+          </>
+        )}
+        {kindDraft === 'googledrive' && (
+          <>
+            <p className="sync-panel__hint">
+              {t('dialogs.settings.sync.adapterGoogledriveIntro')}
+            </p>
+            <div className="sync-panel__field">
+              <label>
+                {t('dialogs.settings.sync.adapterGoogledriveClientId')}
+                <input
+                  type="text"
+                  value={gdriveClientIdDraft}
+                  onChange={(e) =>
+                    setGdriveClientIdDraft(e.target.value)
+                  }
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </label>
+              <p className="sync-panel__hint">
+                {t(
+                  'dialogs.settings.sync.adapterGoogledriveClientIdHint',
+                )}
+              </p>
+            </div>
+            <div className="sync-panel__field">
+              <label>
+                {t('dialogs.settings.sync.adapterGoogledriveClientSecret')}
+                <input
+                  type="password"
+                  value={gdriveClientSecretDraft}
+                  onChange={(e) =>
+                    setGdriveClientSecretDraft(e.target.value)
+                  }
+                  autoComplete="off"
+                />
+              </label>
+              <p className="sync-panel__hint">
+                {t(
+                  'dialogs.settings.sync.adapterGoogledriveClientSecretHint',
+                )}
+              </p>
+            </div>
+            <div className="sync-panel__field">
+              <label>
+                {t('dialogs.settings.sync.adapterGoogledriveFolderName')}
+                <input
+                  type="text"
+                  value={gdriveFolderNameDraft}
+                  onChange={(e) =>
+                    setGdriveFolderNameDraft(e.target.value)
+                  }
+                  placeholder="Aperio"
+                  spellCheck={false}
+                />
+              </label>
+              <p className="sync-panel__hint">
+                {t(
+                  'dialogs.settings.sync.adapterGoogledriveFolderNameHint',
+                )}
+              </p>
+            </div>
+            <div className="sync-panel__actions">
+              <button
+                type="button"
+                disabled={busyGdriveOauth}
+                onClick={() => void onConnectGoogledrive()}
+              >
+                {busyGdriveOauth
+                  ? t('dialogs.settings.sync.adapterGoogledriveSigningIn')
+                  : gdriveSignedIn
+                    ? t('dialogs.settings.sync.adapterGoogledriveResignIn')
+                    : t('dialogs.settings.sync.adapterGoogledriveSignIn')}
+              </button>
+              {gdriveSignedIn && (
+                <span
+                  className="sync-panel__hint"
+                  role="status"
+                  aria-live="polite"
+                >
+                  {t('dialogs.settings.sync.adapterGoogledriveSignedIn')}
                 </span>
               )}
             </div>

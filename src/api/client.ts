@@ -740,6 +740,21 @@ export type SyncAdapterConfig =
       path?: string;
     }
   | {
+      kind: 'googledrive';
+      /** Google OAuth client_id from console.cloud.google.com.
+       *  Required. */
+      client_id: string;
+      /** Google OAuth client_secret. Required — Google's
+       *  installed-app flow always exchanges the secret in
+       *  the token endpoint call, even though their docs
+       *  note it isn't strictly secret in this context. */
+      client_secret: string;
+      /** Human-readable folder name under My Drive that
+       *  holds the sync dataset. Empty string lets the
+       *  adapter default it to "Aperio". */
+      folder_name?: string;
+    }
+  | {
       kind: 'ftp';
       host: string;
       port: number;
@@ -1136,6 +1151,28 @@ export const connectDropboxOauth = (
  *  the Dropbox button in the SyncPanel. */
 export const hasDropboxRefreshToken = () =>
   invoke<boolean>('has_dropbox_refresh_token');
+
+/** §19.6 Google Drive OAuth dance. Same shape as
+ *  `connectDropboxOauth` — opens the system browser at
+ *  Google's consent screen, blocks on the loopback listener
+ *  until the user completes, stores the resulting refresh
+ *  token in the keychain. Unlike Dropbox, Google requires
+ *  `clientSecret` to be non-empty (the secret is part of the
+ *  token-exchange POST body even for installed apps). */
+export const connectGoogledriveOauth = (
+  clientId: string,
+  clientSecret: string,
+) =>
+  invoke<void>('connect_googledrive_oauth', {
+    clientId,
+    clientSecret,
+  });
+
+/** Probe for whether the keychain already holds a Google
+ *  Drive refresh token. Drives the "signed in" / "sign in"
+ *  toggle on the Google Drive button in the SyncPanel. */
+export const hasGoogledriveRefreshToken = () =>
+  invoke<boolean>('has_googledrive_refresh_token');
 
 /** Read the currently-pinned fingerprint for a host_port, or
  *  null if nothing is pinned. The SyncPanel uses this to render
