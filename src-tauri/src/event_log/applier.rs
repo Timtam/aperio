@@ -1500,6 +1500,151 @@ mod tests {
         assert_eq!(row.title, "Synced from elsewhere");
     }
 
+    /// The canonical field-level-merge scenario from DESIGN.md
+    /// §19.3: two devices each touch a different field of the
+    /// same event; both edits arrive at this device and both
+    /// must land without raising a conflict. This is the
+    /// promise that distinguishes Aperio from last-write-wins
+    /// designs.
+    #[test]
+    fn merge_concurrent_edits_to_different_fields_both_land() {
+        let (adapter, db) = fixture();
+        let me = DeviceId::from_string("dev-me".into());
+        let device_a = DeviceId::from_string("dev-a".into());
+        let device_b = DeviceId::from_string("dev-b".into());
+        let applier =
+            EventLogApplier::new(db.clone(), adapter.clone(), me);
+        seed_event(&adapter, "ev-multifield");
+
+        // Device A pushes a title change at T1=10:00.
+        let env_a = fixture_envelope(
+            device_a,
+            SyncEvent::EventUpdated(EventPayload {
+                id: "ev-multifield".into(),
+                fields: serde_json::json!({ "title": "Title from A" }),
+            }),
+            Utc.with_ymd_and_hms(2026, 5, 12, 10, 0, 0)
+                .unwrap()
+                .timestamp(),
+        );
+        // Device B pushes a location change at T2=11:00 — touches
+        // a *different* field than device A.
+        let env_b = fixture_envelope(
+            device_b,
+            SyncEvent::EventUpdated(EventPayload {
+                id: "ev-multifield".into(),
+                fields: serde_json::json!({ "location": "Room from B" }),
+            }),
+            Utc.with_ymd_and_hms(2026, 5, 12, 11, 0, 0)
+                .unwrap()
+                .timestamp(),
+        );
+
+        applier.apply_envelopes(vec![env_a, env_b]).unwrap();
+
+        // Both edits landed.
+        let row = adapter.get_event_by_id("ev-multifield").unwrap().unwrap();
+        assert_eq!(row.title, "Title from A");
+        assert_eq!(row.location.as_deref(), Some("Room from B"));
+
+        // No conflicts — the edits touched disjoint fields, so
+        // the per-field "remote vs local" check never had a
+        // reason to fire.
+        let shared = db.clone();
+        let repo = ConflictsRepo::new(&shared);
+        assert_eq!(repo.unresolved_count().unwrap(), 0);
+    }
+
+    /// Order-independence of the previous scenario. Applying
+    /// device B's envelope first then device A's should produce
+    /// the same end state. Two devices reaching cluster-wide
+    /// consistency via the event log must not depend on the
+    /// order envelopes happen to be downloaded in.
+    #[test]
+    fn merge_concurrent_edits_converge_regardless_of_apply_order() {
+        let (adapter, db) = fixture();
+        let me = DeviceId::from_string("dev-me".into());
+        let device_a = DeviceId::from_string("dev-a".into());
+        let device_b = DeviceId::from_string("dev-b".into());
+        let applier =
+            EventLogApplier::new(db.clone(), adapter.clone(), me);
+        seed_event(&adapter, "ev-order");
+
+        let env_a = fixture_envelope(
+            device_a,
+            SyncEvent::EventUpdated(EventPayload {
+                id: "ev-order".into(),
+                fields: serde_json::json!({ "title": "Title from A" }),
+            }),
+            Utc.with_ymd_and_hms(2026, 5, 12, 10, 0, 0)
+                .unwrap()
+                .timestamp(),
+        );
+        let env_b = fixture_envelope(
+            device_b,
+            SyncEvent::EventUpdated(EventPayload {
+                id: "ev-order".into(),
+                fields: serde_json::json!({ "location": "Room from B" }),
+            }),
+            Utc.with_ymd_and_hms(2026, 5, 12, 11, 0, 0)
+                .unwrap()
+                .timestamp(),
+        );
+
+        // Apply in REVERSE order — B then A.
+        applier.apply_envelopes(vec![env_b, env_a]).unwrap();
+
+        let row = adapter.get_event_by_id("ev-order").unwrap().unwrap();
+        assert_eq!(row.title, "Title from A");
+        assert_eq!(row.location.as_deref(), Some("Room from B"));
+        let shared = db.clone();
+        let repo = ConflictsRepo::new(&shared);
+        assert_eq!(repo.unresolved_count().unwrap(), 0);
+    }
+
+    /// Successive updates from the same device to the same
+    /// field LWW correctly — the second envelope's value wins,
+    /// no conflicts. Covers the simple "device A made two edits
+    /// in a row to the title; we get both eventually" case.
+    #[test]
+    fn merge_sequential_updates_from_same_device_last_write_wins() {
+        let (adapter, db) = fixture();
+        let me = DeviceId::from_string("dev-me".into());
+        let device_a = DeviceId::from_string("dev-a".into());
+        let applier =
+            EventLogApplier::new(db.clone(), adapter.clone(), me);
+        seed_event(&adapter, "ev-lww");
+
+        let env_t1 = fixture_envelope(
+            device_a.clone(),
+            SyncEvent::EventUpdated(EventPayload {
+                id: "ev-lww".into(),
+                fields: serde_json::json!({ "title": "First edit" }),
+            }),
+            Utc.with_ymd_and_hms(2026, 5, 12, 10, 0, 0)
+                .unwrap()
+                .timestamp(),
+        );
+        let env_t2 = fixture_envelope(
+            device_a,
+            SyncEvent::EventUpdated(EventPayload {
+                id: "ev-lww".into(),
+                fields: serde_json::json!({ "title": "Second edit" }),
+            }),
+            Utc.with_ymd_and_hms(2026, 5, 12, 11, 0, 0)
+                .unwrap()
+                .timestamp(),
+        );
+
+        applier.apply_envelopes(vec![env_t1, env_t2]).unwrap();
+
+        let row = adapter.get_event_by_id("ev-lww").unwrap().unwrap();
+        assert_eq!(row.title, "Second edit");
+        let shared = db.clone();
+        let repo = ConflictsRepo::new(&shared);
+        assert_eq!(repo.unresolved_count().unwrap(), 0);
+    }
+
     // Re-export `ResolutionChoice` so the warning compiler check
     // doesn't fire on the new conflicts use.
     #[allow(dead_code)]
