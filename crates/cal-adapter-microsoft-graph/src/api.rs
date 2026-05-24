@@ -117,6 +117,70 @@ impl ApiState {
         })
     }
 
+    /// GET a binary blob and return it together with the
+    /// `Content-Type` header. Used by Phase 10i for contact photo
+    /// downloads (`/me/contacts/{id}/photo/$value` returns raw
+    /// image bytes, not JSON).
+    pub async fn get_bytes(
+        &self,
+        path: &str,
+    ) -> GraphResult<(Vec<u8>, Option<String>)> {
+        let url = self.build_url(path)?;
+        let response = self
+            .send_with_refresh(|access| {
+                self.http.get(url.clone()).bearer_auth(access)
+            })
+            .await?;
+        let status = response.status();
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
+        let bytes = response.bytes().await.map_err(GraphError::from)?.to_vec();
+        if !status.is_success() {
+            let preview = String::from_utf8_lossy(
+                &bytes[..bytes.len().min(300)],
+            )
+            .to_string();
+            return Err(GraphError::Http {
+                status: status.as_u16(),
+                message: preview,
+            });
+        }
+        Ok((bytes, content_type))
+    }
+
+    /// PUT raw bytes with a chosen `Content-Type`. Used by Phase
+    /// 10i for contact photo uploads — Graph expects the image
+    /// payload as the request body, no base64 wrapping.
+    pub async fn put_bytes(
+        &self,
+        path: &str,
+        content_type: &str,
+        body: Vec<u8>,
+    ) -> GraphResult<()> {
+        let url = self.build_url(path)?;
+        let response = self
+            .send_with_refresh(|access| {
+                self.http
+                    .put(url.clone())
+                    .bearer_auth(access)
+                    .header("content-type", content_type)
+                    .body(body.clone())
+            })
+            .await?;
+        let status = response.status();
+        if status.is_success() {
+            return Ok(());
+        }
+        let text = response.text().await.unwrap_or_default();
+        Err(GraphError::Http {
+            status: status.as_u16(),
+            message: text.chars().take(300).collect(),
+        })
+    }
+
     fn build_url(&self, path_and_query: &str) -> GraphResult<Url> {
         // Graph paginates via `@odata.nextLink` which is an
         // absolute URL — allow callers to pass either a relative

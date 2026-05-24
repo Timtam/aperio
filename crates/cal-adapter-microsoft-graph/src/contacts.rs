@@ -1,0 +1,933 @@
+//! Microsoft Graph Contacts client — Phase 10i.
+//!
+//! Wraps the REST endpoints under `/me/contactFolders` and `/me/people`
+//! through the same `ApiState` plumbing the Calendar and Tasks modules
+//! use, so a 401 on any contact call triggers the shared
+//! token-refresh dance rather than carrying bespoke code per surface.
+//!
+//! ## Surface mapping (cal-core ↔ Graph)
+//!
+//! Each Outlook **contactFolder** the user owns becomes one
+//! Aperio `ContactList`:
+//!
+//!   - The default "Contacts" folder + any user-created sub-folders
+//!     enumerate from `/me/contactFolders`.
+//!   - Photos live on each contact item via the `/photo/$value`
+//!     navigation property.
+//!   - Contact ids are mailbox-wide unique, so updates and deletes
+//!     can hit `/me/contacts/{id}` directly without routing through
+//!     the owning folder (same pattern Graph events use — see the
+//!     `/me/events/{id}` shortcut in `api::update_event`).
+//!
+//! On top of the user-owned folders we surface **one synthetic
+//! read-only list — "Suggested People"** — backed by `/me/people`.
+//! That endpoint returns relevance-ranked contacts from Outlook
+//! traffic plus Azure-AD profile suggestions, which is the closest
+//! "GAL-equivalent" available without pulling in the heavy
+//! `Directory.Read.All` scope (most tenants gate that behind admin
+//! consent). The Suggested People list is read-only — its rows
+//! aren't real Contact resources, so create / update / delete /
+//! photo upload all return Unsupported against it.
+//!
+//! ## Distribution lists
+//!
+//! Outlook calls them "Contact Groups" but Microsoft never exposed
+//! a clean REST shape for them through Graph (the legacy EWS
+//! `<t:DistributionList>` shape is *not* round-tripped to /me/contacts).
+//! We deliberately don't surface them in Phase 10i — every Graph
+//! contact lands with `members = None` and the dialog renders it
+//! as a regular person.
+
+use cal_core::{Contact, ContactList, ContactPhoto, NewContact};
+use chrono::{DateTime, NaiveDate, Utc};
+use serde::{Deserialize, Serialize};
+
+use crate::api::ApiState;
+use crate::error::{GraphError, GraphResult};
+
+/// Sentinel id of the synthetic read-only "Suggested People" list
+/// backed by `/me/people`. Distinct from any real contactFolder id
+/// Graph hands out, so the dispatch in `get_contacts` can route on
+/// `list_id` without ambiguity.
+///
+/// The English label here gets re-translated in the frontend via
+/// the `intl/contactList` sentinel map (same trick the EWS GAL +
+/// Google Other / Directory lists use), so DE users see
+/// "Vorgeschlagene Personen".
+pub const GRAPH_SUGGESTED_PEOPLE_LIST_ID: &str = "graph-suggested-people";
+
+/// Field selector for `/me/contacts` reads. The default
+/// `$select=*` payload includes the full mailbox-wide address book
+/// + phone schema — a couple dozen fields the Aperio Contact model
+/// has nowhere to put. Pruning here keeps the response small even
+/// on accounts with thousands of rows.
+const CONTACT_SELECT: &str = "id,displayName,givenName,surname,companyName,\
+emailAddresses,businessPhones,homePhones,mobilePhone,birthday,personalNotes,\
+createdDateTime,lastModifiedDateTime";
+
+/// Field selector for `/me/people` reads. Person resources are a
+/// different shape — no `givenName` / `surname` split, addresses
+/// arrive as `scoredEmailAddresses`.
+const PEOPLE_SELECT: &str = "id,displayName,givenName,surname,companyName,\
+scoredEmailAddresses,phones,personType";
+
+// ── Public surface ────────────────────────────────────────────────────
+
+/// Enumerate every Aperio-visible `ContactList` for this account:
+///
+///   - every Outlook contactFolder under `/me/contactFolders` (the
+///     user's writable address books — the default "Contacts"
+///     folder plus any sub-folders they've made), and
+///   - the synthetic read-only "Suggested People" list backed by
+///     `/me/people`.
+///
+/// Listed in folder order, with Suggested People appended last so
+/// the sidebar tree puts the writable books on top and the
+/// suggestion stream below — matches the visual hierarchy users
+/// get in Outlook on the web.
+pub async fn list_contact_lists(state: &ApiState) -> GraphResult<Vec<ContactList>> {
+    let mut out: Vec<ContactList> = Vec::new();
+    let mut next: Option<String> = Some(
+        "/me/contactFolders?$select=id,displayName&$top=100".to_string(),
+    );
+    while let Some(path) = next {
+        let response: ContactFolderListResponse = state.get_json(&path).await?;
+        for folder in response.value {
+            out.push(ContactList {
+                id: folder.id,
+                name: folder.display_name.unwrap_or_else(|| "Contacts".into()),
+                color: None,
+                read_only: false,
+            });
+        }
+        next = response.next_link;
+    }
+    // Append the synthetic read-only Suggested People list. The
+    // English label here is replaced by the frontend's `intl/
+    // contactList` sentinel map, so DE users see the translated
+    // name.
+    out.push(ContactList {
+        id: GRAPH_SUGGESTED_PEOPLE_LIST_ID.to_string(),
+        name: "Suggested People".to_string(),
+        color: None,
+        read_only: true,
+    });
+    Ok(out)
+}
+
+/// Dispatch on `list_id`: route the read to the folder-scoped
+/// `/me/contactFolders/{id}/contacts` for real folders, or to
+/// `/me/people` for the synthetic Suggested People sentinel.
+/// Unknown ids yield an empty Vec so a misrouted call surfaces as
+/// "no contacts" rather than a 404.
+pub async fn get_contacts(
+    state: &ApiState,
+    list_id: &str,
+) -> GraphResult<Vec<Contact>> {
+    if list_id == GRAPH_SUGGESTED_PEOPLE_LIST_ID {
+        list_suggested_people(state).await
+    } else if list_id.is_empty() {
+        Ok(Vec::new())
+    } else {
+        list_folder_contacts(state, list_id).await
+    }
+}
+
+/// Page through every contact in a given contactFolder. Graph
+/// returns `@odata.nextLink` on overflow; we follow it verbatim
+/// until exhausted. `$top=100` mirrors the listing default and
+/// keeps each round-trip small enough that a 500-contact folder
+/// still loads in a few seconds.
+async fn list_folder_contacts(
+    state: &ApiState,
+    folder_id: &str,
+) -> GraphResult<Vec<Contact>> {
+    let folder_enc = urlencoding(folder_id);
+    let select_enc = urlencoding(CONTACT_SELECT);
+    let mut out: Vec<Contact> = Vec::new();
+    let mut next: Option<String> = Some(format!(
+        "/me/contactFolders/{folder_enc}/contacts\
+         ?$select={select_enc}&$top=100"
+    ));
+    while let Some(path) = next {
+        let response: ContactListResponse = state.get_json(&path).await?;
+        for entry in response.value {
+            out.push(map_contact(entry, folder_id));
+        }
+        next = response.next_link;
+    }
+    Ok(out)
+}
+
+/// Pull the relevance-ranked Suggested People stream from
+/// `/me/people`. The endpoint caps the response at 1000 items and
+/// doesn't paginate the way contactFolders/{id}/contacts does —
+/// callers needing more than that should use search instead.
+async fn list_suggested_people(state: &ApiState) -> GraphResult<Vec<Contact>> {
+    let select_enc = urlencoding(PEOPLE_SELECT);
+    let path = format!("/me/people?$select={select_enc}&$top=1000");
+    let response: PeopleListResponse = state.get_json(&path).await?;
+    Ok(response
+        .value
+        .into_iter()
+        // Drop the awkward `unknownFutureValue` etc. entries Graph
+        // sometimes seeds when there's nothing useful to return —
+        // they show up with empty emailAddresses + a synthetic id
+        // and would render as "(unnamed)" rows.
+        .filter(|p| {
+            !p.scored_email_addresses
+                .as_deref()
+                .unwrap_or(&[])
+                .is_empty()
+                || p.display_name.as_deref().map(str::is_empty) == Some(false)
+        })
+        .map(|p| map_person(p, GRAPH_SUGGESTED_PEOPLE_LIST_ID))
+        .collect())
+}
+
+/// Server-side typeahead. Fans out across personal contacts
+/// (`/me/contacts?$search=`) and Suggested People (`/me/people?
+/// $search=`) in parallel; results are deduped by id and the
+/// fan-out swallows per-source errors so a transient 5xx on one
+/// path doesn't sink the other.
+///
+/// Graph requires `$search` queries to be wrapped in double
+/// quotes — we add them here so callers can pass plain strings.
+pub async fn search_contacts(
+    state: &ApiState,
+    query: &str,
+) -> GraphResult<Vec<Contact>> {
+    let trimmed = query.trim();
+    if trimmed.is_empty() {
+        return Ok(Vec::new());
+    }
+    let (personal, people) = tokio::join!(
+        search_personal_contacts(state, trimmed),
+        search_suggested_people(state, trimmed),
+    );
+
+    let mut out: Vec<Contact> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for batch in [personal, people] {
+        let hits = match batch {
+            Ok(h) => h,
+            Err(err) => {
+                tracing::debug!(
+                    target: "cal_adapter_microsoft_graph::contacts",
+                    ?err,
+                    "search source returned no usable results",
+                );
+                continue;
+            }
+        };
+        for contact in hits {
+            if seen.insert(contact.id.clone()) {
+                out.push(contact);
+            }
+        }
+    }
+    Ok(out)
+}
+
+async fn search_personal_contacts(
+    state: &ApiState,
+    query: &str,
+) -> GraphResult<Vec<Contact>> {
+    // `$search="…"` requires `ConsistencyLevel: eventual` on the
+    // request, which `ApiState::get_json` doesn't set — we use the
+    // simpler `$filter=startswith(displayName, '…')` fallback that
+    // works without the extra header. Graph allows OR'd
+    // startswith clauses across the searchable fields, so we walk
+    // the obvious ones (display name, email, surname).
+    let q = odata_escape(query);
+    let filter = format!(
+        "startswith(displayName,'{q}') or startswith(givenName,'{q}') or \
+         startswith(surname,'{q}') or \
+         emailAddresses/any(e:startswith(e/address,'{q}'))"
+    );
+    let select_enc = urlencoding(CONTACT_SELECT);
+    let filter_enc = urlencoding(&filter);
+    let path = format!(
+        "/me/contacts?$select={select_enc}&$filter={filter_enc}&$top=100"
+    );
+    let response: ContactListResponse = state.get_json(&path).await?;
+    Ok(response
+        .value
+        .into_iter()
+        // Server-side filter can't tell us which folder the row
+        // came from; tag with the row's `parentFolderId` if Graph
+        // returned it, falling back to an empty list_id (the
+        // dialog handles the empty case by hiding folder-aware
+        // affordances).
+        .map(|c| {
+            let folder = c.parent_folder_id.clone().unwrap_or_default();
+            map_contact(c, &folder)
+        })
+        .collect())
+}
+
+async fn search_suggested_people(
+    state: &ApiState,
+    query: &str,
+) -> GraphResult<Vec<Contact>> {
+    // `/me/people` supports `$search` natively without the
+    // ConsistencyLevel header — wrap the query in double quotes
+    // per Graph's syntax requirement.
+    let escaped = query.replace('\\', "\\\\").replace('"', "\\\"");
+    let select_enc = urlencoding(PEOPLE_SELECT);
+    let search_enc = urlencoding(&format!("\"{escaped}\""));
+    let path = format!("/me/people?$select={select_enc}&$search={search_enc}&$top=100");
+    let response: PeopleListResponse = state.get_json(&path).await?;
+    Ok(response
+        .value
+        .into_iter()
+        .map(|p| map_person(p, GRAPH_SUGGESTED_PEOPLE_LIST_ID))
+        .collect())
+}
+
+/// Create a contact in the target folder. Graph's create
+/// endpoint sits under `/me/contactFolders/{folder}/contacts`;
+/// the resulting `id` is mailbox-wide unique so subsequent
+/// update / delete calls don't need to re-route via the folder.
+pub async fn create_contact(
+    state: &ApiState,
+    folder_id: &str,
+    new: NewContact,
+) -> GraphResult<Contact> {
+    if folder_id == GRAPH_SUGGESTED_PEOPLE_LIST_ID || folder_id.is_empty() {
+        return Err(GraphError::Http {
+            status: 405,
+            message:
+                "Suggested People is a read-only relevance stream — create a contact in a folder instead"
+                    .into(),
+        });
+    }
+    let folder_enc = urlencoding(folder_id);
+    let path = format!("/me/contactFolders/{folder_enc}/contacts");
+    let body = new_contact_to_body(&new);
+    let entry: ContactEntry = state.post_json(&path, &body).await?;
+    let mut contact = map_contact(entry, folder_id);
+    // Optional inline photo upload after the row exists. Mirrors
+    // the Google / EWS pattern: Graph's contact create body
+    // doesn't accept photo bytes either, so we do a second
+    // round-trip to PUT them. A failure here keeps the contact
+    // (no point unwinding the successful create) and just leaves
+    // the avatar empty.
+    if let Some(photo) = new.photo {
+        if !photo.data.is_empty() {
+            if let Err(err) = set_contact_photo(state, &contact.id, photo).await {
+                tracing::warn!(
+                    contact_id = %contact.id,
+                    ?err,
+                    "graph contact created but photo upload failed",
+                );
+                contact.has_photo = false;
+            } else {
+                contact.has_photo = true;
+            }
+        }
+    }
+    Ok(contact)
+}
+
+/// PATCH a contact in place. Graph's id is mailbox-wide unique so
+/// the `/me/contacts/{id}` endpoint accepts the update regardless
+/// of which folder owns the row — same shortcut Graph events use.
+pub async fn update_contact(
+    state: &ApiState,
+    contact: Contact,
+) -> GraphResult<Contact> {
+    let id_enc = urlencoding(&contact.id);
+    let path = format!("/me/contacts/{id_enc}");
+    let body = contact_to_body(&contact);
+    let entry: ContactEntry = state.patch_json(&path, &body).await?;
+    Ok(map_contact(entry, &contact.list_id))
+}
+
+/// Delete a contact by id. `/me/contacts/{id}` works regardless
+/// of folder — Graph keeps a flat id namespace.
+pub async fn delete_contact(state: &ApiState, contact_id: &str) -> GraphResult<()> {
+    let id_enc = urlencoding(contact_id);
+    let path = format!("/me/contacts/{id_enc}");
+    state.delete_request(&path).await
+}
+
+/// Fetch the binary contact photo through `/photo/$value`. Two
+/// shapes Graph can return:
+///
+///   - 200 OK with `image/jpeg` (or another image mime) bytes —
+///     the common case.
+///   - 404 — the contact exists but has no photo. We surface as
+///     `Ok(None)` so callers can treat "no avatar" without a
+///     conditional error check.
+pub async fn get_contact_photo(
+    state: &ApiState,
+    contact_id: &str,
+) -> GraphResult<Option<ContactPhoto>> {
+    let id_enc = urlencoding(contact_id);
+    let path = format!("/me/contacts/{id_enc}/photo/$value");
+    match state.get_bytes(&path).await {
+        Ok((bytes, content_type)) => {
+            if bytes.is_empty() {
+                return Ok(None);
+            }
+            Ok(Some(ContactPhoto {
+                content_type: content_type.unwrap_or_else(|| "image/jpeg".into()),
+                data: bytes,
+            }))
+        }
+        Err(GraphError::Http { status: 404, .. }) => Ok(None),
+        Err(err) => Err(err),
+    }
+}
+
+/// PUT the photo bytes back to `/photo/$value`. Graph uploads
+/// expect the raw image bytes as the request body with the
+/// matching `Content-Type` header — no base64 wrapping here.
+pub async fn set_contact_photo(
+    state: &ApiState,
+    contact_id: &str,
+    photo: ContactPhoto,
+) -> GraphResult<()> {
+    let id_enc = urlencoding(contact_id);
+    let path = format!("/me/contacts/{id_enc}/photo/$value");
+    state.put_bytes(&path, &photo.content_type, photo.data).await
+}
+
+/// Delete the photo without touching any other field on the
+/// contact. Graph wants a DELETE against `/photo/$value` — the
+/// JPEG slot, not the underlying photo navigation property.
+pub async fn delete_contact_photo(
+    state: &ApiState,
+    contact_id: &str,
+) -> GraphResult<()> {
+    let id_enc = urlencoding(contact_id);
+    let path = format!("/me/contacts/{id_enc}/photo/$value");
+    state.delete_request(&path).await
+}
+
+// ── Mappers ────────────────────────────────────────────────────────────
+
+fn map_contact(entry: ContactEntry, list_id: &str) -> Contact {
+    let emails: Vec<String> = entry
+        .email_addresses
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|e| e.address)
+        .filter(|s| !s.is_empty())
+        .collect();
+    let mut phones: Vec<String> = Vec::new();
+    if let Some(business) = entry.business_phones {
+        phones.extend(business.into_iter().filter(|s| !s.is_empty()));
+    }
+    if let Some(home) = entry.home_phones {
+        phones.extend(home.into_iter().filter(|s| !s.is_empty()));
+    }
+    if let Some(mobile) = entry.mobile_phone.filter(|s| !s.is_empty()) {
+        phones.push(mobile);
+    }
+    let birthday = entry
+        .birthday
+        .as_deref()
+        .and_then(parse_graph_birthday);
+
+    let display = best_contact_display_name(
+        entry.display_name.as_deref(),
+        entry.given_name.as_deref(),
+        entry.surname.as_deref(),
+        emails.first().map(String::as_str),
+    );
+
+    let created = entry.created_date_time.unwrap_or_else(Utc::now);
+    let updated = entry.last_modified_date_time.unwrap_or(created);
+
+    Contact {
+        id: entry.id,
+        list_id: list_id.to_string(),
+        display_name: display,
+        given_name: entry.given_name.filter(|s| !s.is_empty()),
+        family_name: entry.surname.filter(|s| !s.is_empty()),
+        organization: entry.company_name.filter(|s| !s.is_empty()),
+        emails,
+        phone_numbers: phones,
+        birthday,
+        notes: entry.personal_notes.filter(|s| !s.is_empty()),
+        members: None,
+        // `has_photo` is expensive to compute at listing time —
+        // Graph doesn't include a "has-picture" flag on the
+        // contact resource, only a navigation property under
+        // `/photo`. The frontend issues a lazy
+        // `get_contact_photo` on dialog open; until then we
+        // assume "maybe has photo" by flipping the flag on so
+        // the avatar placeholder doesn't suppress the fetch.
+        // Adapters that *can* compute the flag cheaply (EWS via
+        // `HasPicture`) set it precisely; for Graph the
+        // optimistic-true default is the best we can do without
+        // an extra round-trip per contact.
+        has_photo: true,
+        created_at: created,
+        updated_at: updated,
+        etag: entry.etag,
+    }
+}
+
+fn map_person(entry: PersonEntry, list_id: &str) -> Contact {
+    let emails: Vec<String> = entry
+        .scored_email_addresses
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|e| e.address)
+        .filter(|s| !s.is_empty())
+        .collect();
+    let phones: Vec<String> = entry
+        .phones
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|p| p.number)
+        .filter(|s| !s.is_empty())
+        .collect();
+    let display = best_contact_display_name(
+        entry.display_name.as_deref(),
+        entry.given_name.as_deref(),
+        entry.surname.as_deref(),
+        emails.first().map(String::as_str),
+    );
+    let now = Utc::now();
+    Contact {
+        id: entry.id,
+        list_id: list_id.to_string(),
+        display_name: display,
+        given_name: entry.given_name.filter(|s| !s.is_empty()),
+        family_name: entry.surname.filter(|s| !s.is_empty()),
+        organization: entry.company_name.filter(|s| !s.is_empty()),
+        emails,
+        phone_numbers: phones,
+        birthday: None,
+        notes: None,
+        members: None,
+        // People surface no photo property — no avatar.
+        has_photo: false,
+        created_at: now,
+        updated_at: now,
+        etag: None,
+    }
+}
+
+fn best_contact_display_name(
+    display: Option<&str>,
+    given: Option<&str>,
+    surname: Option<&str>,
+    email: Option<&str>,
+) -> String {
+    if let Some(d) = display {
+        let trimmed = d.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+    let composed = format!("{} {}", given.unwrap_or(""), surname.unwrap_or(""))
+        .trim()
+        .to_string();
+    if !composed.is_empty() {
+        return composed;
+    }
+    email
+        .map(str::to_string)
+        .unwrap_or_else(|| "(unnamed)".to_string())
+}
+
+fn parse_graph_birthday(raw: &str) -> Option<NaiveDate> {
+    // Graph emits ISO 8601 with timezone for birthdays —
+    // e.g. "1990-06-15T00:00:00Z". Strip the time portion;
+    // birthdays carry no useful clock component.
+    if let Ok(dt) = raw.parse::<DateTime<Utc>>() {
+        return Some(dt.date_naive());
+    }
+    NaiveDate::parse_from_str(raw, "%Y-%m-%d").ok()
+}
+
+// ── Body builders ──────────────────────────────────────────────────────
+
+fn new_contact_to_body(new: &NewContact) -> serde_json::Value {
+    contact_body(
+        &new.display_name,
+        new.given_name.as_deref(),
+        new.family_name.as_deref(),
+        new.organization.as_deref(),
+        &new.emails,
+        &new.phone_numbers,
+        new.birthday,
+        new.notes.as_deref(),
+    )
+}
+
+fn contact_to_body(contact: &Contact) -> serde_json::Value {
+    contact_body(
+        &contact.display_name,
+        contact.given_name.as_deref(),
+        contact.family_name.as_deref(),
+        contact.organization.as_deref(),
+        &contact.emails,
+        &contact.phone_numbers,
+        contact.birthday,
+        contact.notes.as_deref(),
+    )
+}
+
+fn contact_body(
+    display_name: &str,
+    given_name: Option<&str>,
+    family_name: Option<&str>,
+    organization: Option<&str>,
+    emails: &[String],
+    phones: &[String],
+    birthday: Option<NaiveDate>,
+    notes: Option<&str>,
+) -> serde_json::Value {
+    let mut body = serde_json::Map::new();
+    body.insert(
+        "displayName".into(),
+        serde_json::Value::String(display_name.to_string()),
+    );
+    if let Some(g) = given_name {
+        body.insert(
+            "givenName".into(),
+            serde_json::Value::String(g.to_string()),
+        );
+    }
+    if let Some(s) = family_name {
+        body.insert("surname".into(), serde_json::Value::String(s.to_string()));
+    }
+    if let Some(org) = organization {
+        body.insert(
+            "companyName".into(),
+            serde_json::Value::String(org.to_string()),
+        );
+    }
+    if !emails.is_empty() {
+        body.insert(
+            "emailAddresses".into(),
+            serde_json::Value::Array(
+                emails
+                    .iter()
+                    .map(|e| serde_json::json!({ "address": e }))
+                    .collect(),
+            ),
+        );
+    }
+    // Outlook splits phone numbers across three slots —
+    // businessPhones (array), homePhones (array), mobilePhone
+    // (scalar). cal-core keeps them in one flat list, so we
+    // stuff the first into mobilePhone and the remainder into
+    // businessPhones. That matches the most common usage
+    // pattern and round-trips on read because `map_contact`
+    // flattens them all back together.
+    if !phones.is_empty() {
+        body.insert(
+            "mobilePhone".into(),
+            serde_json::Value::String(phones[0].clone()),
+        );
+        if phones.len() > 1 {
+            body.insert(
+                "businessPhones".into(),
+                serde_json::Value::Array(
+                    phones[1..]
+                        .iter()
+                        .map(|p| serde_json::Value::String(p.clone()))
+                        .collect(),
+                ),
+            );
+        }
+    }
+    if let Some(bd) = birthday {
+        // Graph wants ISO-8601 with timezone — date-only strings
+        // are rejected.
+        body.insert(
+            "birthday".into(),
+            serde_json::Value::String(bd.format("%Y-%m-%dT00:00:00Z").to_string()),
+        );
+    }
+    if let Some(notes) = notes {
+        body.insert(
+            "personalNotes".into(),
+            serde_json::Value::String(notes.to_string()),
+        );
+    }
+    serde_json::Value::Object(body)
+}
+
+/// Escape a literal for use inside an OData `'…'` string. Graph
+/// follows the OData spec: single quotes within a quoted string
+/// are doubled (`O'Brien` → `O''Brien`).
+fn odata_escape(s: &str) -> String {
+    s.replace('\'', "''")
+}
+
+fn urlencoding(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char);
+            }
+            _ => out.push_str(&format!("%{:02X}", b)),
+        }
+    }
+    out
+}
+
+// ── JSON wire shapes ───────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+struct ContactFolderListResponse {
+    #[serde(default)]
+    value: Vec<ContactFolderEntry>,
+    #[serde(default, rename = "@odata.nextLink")]
+    next_link: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ContactFolderEntry {
+    id: String,
+    #[serde(default, rename = "displayName")]
+    display_name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ContactListResponse {
+    #[serde(default)]
+    value: Vec<ContactEntry>,
+    #[serde(default, rename = "@odata.nextLink")]
+    next_link: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct ContactEntry {
+    pub id: String,
+    #[serde(default, rename = "displayName")]
+    pub display_name: Option<String>,
+    #[serde(default, rename = "givenName")]
+    pub given_name: Option<String>,
+    #[serde(default)]
+    pub surname: Option<String>,
+    #[serde(default, rename = "companyName")]
+    pub company_name: Option<String>,
+    #[serde(default, rename = "emailAddresses")]
+    pub email_addresses: Option<Vec<EmailAddress>>,
+    #[serde(default, rename = "businessPhones")]
+    pub business_phones: Option<Vec<String>>,
+    #[serde(default, rename = "homePhones")]
+    pub home_phones: Option<Vec<String>>,
+    #[serde(default, rename = "mobilePhone")]
+    pub mobile_phone: Option<String>,
+    /// Graph emits this as `YYYY-MM-DDTHH:MM:SSZ`. We parse it
+    /// into a NaiveDate via `parse_graph_birthday`.
+    #[serde(default)]
+    pub birthday: Option<String>,
+    #[serde(default, rename = "personalNotes")]
+    pub personal_notes: Option<String>,
+    /// Present when the row was returned by `/me/contacts` rather
+    /// than a folder-scoped endpoint — lets us route the result
+    /// back into the right `list_id` on the cal-core side.
+    #[serde(default, rename = "parentFolderId")]
+    pub parent_folder_id: Option<String>,
+    #[serde(default, rename = "createdDateTime")]
+    pub created_date_time: Option<DateTime<Utc>>,
+    #[serde(default, rename = "lastModifiedDateTime")]
+    pub last_modified_date_time: Option<DateTime<Utc>>,
+    #[serde(default, rename = "@odata.etag")]
+    pub etag: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct EmailAddress {
+    #[serde(default)]
+    pub address: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PeopleListResponse {
+    #[serde(default)]
+    value: Vec<PersonEntry>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct PersonEntry {
+    pub id: String,
+    #[serde(default, rename = "displayName")]
+    pub display_name: Option<String>,
+    #[serde(default, rename = "givenName")]
+    pub given_name: Option<String>,
+    #[serde(default)]
+    pub surname: Option<String>,
+    #[serde(default, rename = "companyName")]
+    pub company_name: Option<String>,
+    #[serde(default, rename = "scoredEmailAddresses")]
+    pub scored_email_addresses: Option<Vec<ScoredEmailAddress>>,
+    #[serde(default)]
+    pub phones: Option<Vec<PersonPhone>>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct ScoredEmailAddress {
+    #[serde(default)]
+    pub address: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct PersonPhone {
+    #[serde(default)]
+    pub number: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn map_contact_collects_every_phone_slot() {
+        let entry = ContactEntry {
+            id: "AAA".into(),
+            display_name: Some("Anna Beispiel".into()),
+            given_name: Some("Anna".into()),
+            surname: Some("Beispiel".into()),
+            company_name: Some("Example AG".into()),
+            email_addresses: Some(vec![EmailAddress {
+                address: Some("anna@example.com".into()),
+                name: Some("Anna Beispiel".into()),
+            }]),
+            business_phones: Some(vec!["+49 30 1111".into()]),
+            home_phones: Some(vec!["+49 30 2222".into()]),
+            mobile_phone: Some("+49 170 3333".into()),
+            birthday: Some("1990-06-15T00:00:00Z".into()),
+            personal_notes: Some("met at conf".into()),
+            parent_folder_id: Some("FOLDER-1".into()),
+            created_date_time: None,
+            last_modified_date_time: None,
+            etag: Some("W/\"abc\"".into()),
+        };
+        let c = map_contact(entry, "FOLDER-1");
+        assert_eq!(c.id, "AAA");
+        assert_eq!(c.list_id, "FOLDER-1");
+        assert_eq!(c.display_name, "Anna Beispiel");
+        assert_eq!(c.given_name.as_deref(), Some("Anna"));
+        assert_eq!(c.family_name.as_deref(), Some("Beispiel"));
+        assert_eq!(c.organization.as_deref(), Some("Example AG"));
+        assert_eq!(c.emails, vec!["anna@example.com".to_string()]);
+        assert_eq!(
+            c.phone_numbers,
+            vec![
+                "+49 30 1111".to_string(),
+                "+49 30 2222".to_string(),
+                "+49 170 3333".to_string(),
+            ]
+        );
+        assert_eq!(
+            c.birthday,
+            NaiveDate::from_ymd_opt(1990, 6, 15),
+        );
+        assert_eq!(c.notes.as_deref(), Some("met at conf"));
+        assert!(c.members.is_none());
+        // Optimistic has_photo — see comment in map_contact.
+        assert!(c.has_photo);
+        assert_eq!(c.etag.as_deref(), Some("W/\"abc\""));
+    }
+
+    #[test]
+    fn map_contact_falls_back_to_email_when_names_empty() {
+        let entry = ContactEntry {
+            id: "BBB".into(),
+            display_name: Some("".into()),
+            given_name: None,
+            surname: None,
+            company_name: None,
+            email_addresses: Some(vec![EmailAddress {
+                address: Some("nobody@example.com".into()),
+                name: None,
+            }]),
+            business_phones: None,
+            home_phones: None,
+            mobile_phone: None,
+            birthday: None,
+            personal_notes: None,
+            parent_folder_id: None,
+            created_date_time: None,
+            last_modified_date_time: None,
+            etag: None,
+        };
+        let c = map_contact(entry, "FOLDER-1");
+        assert_eq!(c.display_name, "nobody@example.com");
+    }
+
+    #[test]
+    fn parse_graph_birthday_accepts_iso_and_date() {
+        assert_eq!(
+            parse_graph_birthday("1990-06-15T00:00:00Z"),
+            NaiveDate::from_ymd_opt(1990, 6, 15),
+        );
+        assert_eq!(
+            parse_graph_birthday("1990-06-15"),
+            NaiveDate::from_ymd_opt(1990, 6, 15),
+        );
+        assert!(parse_graph_birthday("nonsense").is_none());
+    }
+
+    #[test]
+    fn map_person_produces_a_contact_without_photo() {
+        let entry = PersonEntry {
+            id: "P-1".into(),
+            display_name: Some("Bob Müller".into()),
+            given_name: Some("Bob".into()),
+            surname: Some("Müller".into()),
+            company_name: Some("Contoso".into()),
+            scored_email_addresses: Some(vec![ScoredEmailAddress {
+                address: Some("bob@contoso.com".into()),
+            }]),
+            phones: Some(vec![PersonPhone {
+                number: Some("+49 30 7777".into()),
+            }]),
+        };
+        let c = map_person(entry, GRAPH_SUGGESTED_PEOPLE_LIST_ID);
+        assert_eq!(c.list_id, GRAPH_SUGGESTED_PEOPLE_LIST_ID);
+        assert_eq!(c.display_name, "Bob Müller");
+        assert_eq!(c.emails, vec!["bob@contoso.com".to_string()]);
+        assert_eq!(c.phone_numbers, vec!["+49 30 7777".to_string()]);
+        assert!(!c.has_photo);
+        assert!(c.members.is_none());
+    }
+
+    #[test]
+    fn new_contact_to_body_splits_phones_across_outlook_slots() {
+        let new = NewContact {
+            display_name: "Anna".into(),
+            given_name: Some("Anna".into()),
+            family_name: Some("Beispiel".into()),
+            organization: None,
+            emails: vec!["anna@example.com".into()],
+            phone_numbers: vec![
+                "+49 30 1111".into(),
+                "+49 30 2222".into(),
+                "+49 170 3333".into(),
+            ],
+            birthday: NaiveDate::from_ymd_opt(1990, 6, 15),
+            notes: None,
+            members: None,
+            photo: None,
+        };
+        let body = new_contact_to_body(&new);
+        assert_eq!(body["displayName"], "Anna");
+        assert_eq!(body["mobilePhone"], "+49 30 1111");
+        assert_eq!(body["businessPhones"][0], "+49 30 2222");
+        assert_eq!(body["businessPhones"][1], "+49 170 3333");
+        assert_eq!(body["emailAddresses"][0]["address"], "anna@example.com");
+        assert_eq!(body["birthday"], "1990-06-15T00:00:00Z");
+    }
+
+    #[test]
+    fn odata_escape_doubles_single_quotes() {
+        assert_eq!(odata_escape("O'Brien"), "O''Brien");
+        assert_eq!(odata_escape("plain"), "plain");
+    }
+}

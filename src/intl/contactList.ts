@@ -20,6 +20,13 @@ export const GOOGLE_OTHER_CONTACTS_LIST_ID = 'google-other-contacts';
  *  `@gmail.com` accounts. */
 export const GOOGLE_DIRECTORY_LIST_ID = 'google-directory';
 
+/** Sentinel for the read-only Microsoft Graph "Suggested People"
+ *  list — Outlook's relevance-ranked stream of people the user
+ *  interacts with, backed by `/me/people`. Picked over
+ *  `Directory.Read.All` because it doesn't require the admin
+ *  consent most tenants gate that scope behind. */
+export const GRAPH_SUGGESTED_PEOPLE_LIST_ID = 'graph-suggested-people';
+
 /** Translation-table for system-managed list ids whose names the
  *  backend hardcodes in English. Add new entries here when more
  *  adapters surface synthetic read-only lists. */
@@ -28,6 +35,7 @@ const SYSTEM_LIST_I18N_KEY: Record<string, string> = {
   [GOOGLE_CONTACTS_LIST_ID]: 'views.contacts.googleListName',
   [GOOGLE_OTHER_CONTACTS_LIST_ID]: 'views.contacts.googleOtherListName',
   [GOOGLE_DIRECTORY_LIST_ID]: 'views.contacts.googleDirectoryListName',
+  [GRAPH_SUGGESTED_PEOPLE_LIST_ID]: 'views.contacts.graphSuggestedPeopleListName',
 };
 
 /** Resolve the display name for a `ContactList`. Synthetic

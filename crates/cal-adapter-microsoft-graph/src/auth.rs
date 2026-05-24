@@ -44,6 +44,16 @@ pub const DEFAULT_AUTHORITY: &str = "common";
 ///     `/me/todo/lists` endpoint family. Microsoft consolidated all
 ///     task scenarios under To Do; the legacy Outlook-tasks endpoint
 ///     was deprecated in 2020.
+///   - `Contacts.ReadWrite` — Phase 10i. Full read/write on the
+///     user's Outlook contact folders + items. Surfaces the
+///     `/me/contactFolders` and `/me/contacts` endpoint families.
+///   - `People.Read` — Phase 10i. Read-only access to `/me/people`,
+///     Microsoft's relevance-ranked "people you interact with"
+///     endpoint (Outlook traffic + Azure AD suggestions). We surface
+///     that as a single read-only "Suggested People" ContactList —
+///     the GAL-equivalent for Graph without pulling in the heavy
+///     `Directory.Read.All` scope (which most tenants gate behind
+///     admin consent).
 ///   - `offline_access` — required so Microsoft hands out a refresh
 ///     token; without it, the access token dies after an hour and
 ///     the user has to re-consent every time
@@ -51,7 +61,8 @@ pub const DEFAULT_AUTHORITY: &str = "common";
 ///     OpenID Connect scope to issue an id_token; without it
 ///     consent works but some user-info endpoints return 403
 pub const SCOPES: &str =
-    "Calendars.ReadWrite Tasks.ReadWrite offline_access openid profile email";
+    "Calendars.ReadWrite Tasks.ReadWrite Contacts.ReadWrite People.Read \
+     offline_access openid profile email";
 
 const AUTH_TIMEOUT: Duration = Duration::from_secs(300);
 

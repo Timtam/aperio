@@ -802,6 +802,7 @@
       "googleListName": "Google-Kontakte",
       "googleOtherListName": "Andere Kontakte (Google)",
       "googleDirectoryListName": "Google-Verzeichnis",
+      "graphSuggestedPeopleListName": "Vorgeschlagene Personen",
       "searchLabel": "Kontakte durchsuchen",
       "searchPlaceholder": "Name oder E-Mail eingeben …",
       "searchHint": "Durchsucht deine Adressbücher plus verbundene Verzeichnisse wie die Globale Adressliste.",

@@ -15,16 +15,19 @@
 
 pub mod api;
 pub mod auth;
+pub mod contacts;
 pub mod error;
 pub mod mapping;
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use cal_core::{
-    Adapter, AuthToken, Calendar, CalendarFeature, Capability, ContainerColor,
-    Credentials as CoreCredentials, DateRange, Error as CoreError, Event, FreeBusy,
-    NewEvent, NewTask, Result as CoreResult, Task, TaskList, TasksFeature,
+    Adapter, AuthToken, Calendar, CalendarFeature, Capability, Contact, ContactList,
+    ContactPhoto, ContactsFeature, ContainerColor, Credentials as CoreCredentials,
+    DateRange, Error as CoreError, Event, FreeBusy, NewContact, NewEvent, NewTask,
+    Result as CoreResult, Task, TaskList, TasksFeature,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -60,6 +63,18 @@ pub struct MicrosoftGraphAdapter {
     /// to `/me/todo/lists` so the sidebar's task-list column doesn't
     /// re-fetch on every navigation.
     task_lists_cache: Mutex<Option<(Vec<TaskList>, chrono::DateTime<chrono::Utc>)>>,
+    /// Listing cache for `/me/contactFolders` + the Suggested
+    /// People sentinel. Single entry — `list_contact_lists`
+    /// returns the full set in one call.
+    contact_lists_cache:
+        Mutex<Option<(Vec<ContactList>, chrono::DateTime<chrono::Utc>)>>,
+    /// Per-`list_id` cache for `/me/contactFolders/{id}/contacts`
+    /// + `/me/people`. Keyed by list_id so a write against one
+    /// folder doesn't time out the others; a full clear on any
+    /// mutation covers the Suggested People stream too (it's
+    /// derived from cross-folder mailbox activity).
+    contacts_cache:
+        Mutex<HashMap<String, (Vec<Contact>, chrono::DateTime<chrono::Utc>)>>,
     listing_ttl: chrono::Duration,
 }
 
@@ -72,9 +87,20 @@ impl MicrosoftGraphAdapter {
             .expect("reqwest client");
         Self {
             state: ApiState::new(tokens, client_id, auth::token_url(&authority), http),
-            capabilities: vec![Capability::Calendar, Capability::Tasks],
+            // Phase 6e.1 + 6e.2 added Calendar + Tasks; Phase 10i
+            // adds Contacts. Declaring all three lets the registry
+            // wire the single adapter Arc under every feature
+            // surface, so the OAuth token state + listing caches
+            // stay coherent across reads.
+            capabilities: vec![
+                Capability::Calendar,
+                Capability::Tasks,
+                Capability::Contacts,
+            ],
             calendars_cache: Mutex::new(None),
             task_lists_cache: Mutex::new(None),
+            contact_lists_cache: Mutex::new(None),
+            contacts_cache: Mutex::new(HashMap::new()),
             listing_ttl: chrono::Duration::minutes(5),
         }
     }
@@ -116,6 +142,28 @@ impl MicrosoftGraphAdapter {
     async fn cached_task_lists(&self) -> Option<Vec<TaskList>> {
         let guard = self.task_lists_cache.lock().await;
         let (items, ts) = guard.as_ref()?;
+        let age = chrono::Utc::now().signed_duration_since(*ts);
+        if age >= chrono::Duration::zero() && age < self.listing_ttl {
+            Some(items.clone())
+        } else {
+            None
+        }
+    }
+
+    async fn cached_contact_lists(&self) -> Option<Vec<ContactList>> {
+        let guard = self.contact_lists_cache.lock().await;
+        let (items, ts) = guard.as_ref()?;
+        let age = chrono::Utc::now().signed_duration_since(*ts);
+        if age >= chrono::Duration::zero() && age < self.listing_ttl {
+            Some(items.clone())
+        } else {
+            None
+        }
+    }
+
+    async fn cached_contacts(&self, list_id: &str) -> Option<Vec<Contact>> {
+        let guard = self.contacts_cache.lock().await;
+        let (items, ts) = guard.get(list_id)?;
         let age = chrono::Utc::now().signed_duration_since(*ts);
         if age >= chrono::Duration::zero() && age < self.listing_ttl {
             Some(items.clone())
@@ -286,6 +334,160 @@ impl TasksFeature for MicrosoftGraphAdapter {
         *self.task_lists_cache.lock().await = None;
         Ok(())
     }
+}
+
+#[async_trait]
+impl ContactsFeature for MicrosoftGraphAdapter {
+    async fn list_contact_lists(&self) -> CoreResult<Vec<ContactList>> {
+        if let Some(cached) = self.cached_contact_lists().await {
+            return Ok(cached);
+        }
+        let fresh = contacts::list_contact_lists(&self.state)
+            .await
+            .map_err(to_core_error)?;
+        *self.contact_lists_cache.lock().await =
+            Some((fresh.clone(), chrono::Utc::now()));
+        Ok(fresh)
+    }
+
+    async fn get_contacts(&self, list_id: &str) -> CoreResult<Vec<Contact>> {
+        if let Some(cached) = self.cached_contacts(list_id).await {
+            return Ok(cached);
+        }
+        let fresh = contacts::get_contacts(&self.state, list_id)
+            .await
+            .map_err(to_core_error)?;
+        self.contacts_cache
+            .lock()
+            .await
+            .insert(list_id.to_string(), (fresh.clone(), chrono::Utc::now()));
+        Ok(fresh)
+    }
+
+    async fn search_contacts(&self, query: &str) -> CoreResult<Vec<Contact>> {
+        contacts::search_contacts(&self.state, query)
+            .await
+            .map_err(to_core_error)
+    }
+
+    async fn create_contact(
+        &self,
+        list_id: &str,
+        contact: NewContact,
+    ) -> CoreResult<Contact> {
+        if is_read_only_graph_list(list_id) {
+            return Err(CoreError::Unsupported(format!(
+                "the Graph list '{list_id}' is read-only and does not accept new contacts"
+            )));
+        }
+        let result = contacts::create_contact(&self.state, list_id, contact)
+            .await
+            .map_err(to_core_error)?;
+        // A new row across any folder might also surface in the
+        // Suggested People stream the next time Graph runs its
+        // relevance scoring — clear every cache slot.
+        self.contacts_cache.lock().await.clear();
+        Ok(result)
+    }
+
+    async fn update_contact(&self, contact: Contact) -> CoreResult<Contact> {
+        if is_read_only_graph_list(&contact.list_id) {
+            return Err(CoreError::Unsupported(format!(
+                "contacts in '{}' cannot be edited from Aperio",
+                contact.list_id,
+            )));
+        }
+        let result = contacts::update_contact(&self.state, contact)
+            .await
+            .map_err(to_core_error)?;
+        self.contacts_cache.lock().await.clear();
+        Ok(result)
+    }
+
+    async fn delete_contact(&self, contact_id: &str) -> CoreResult<()> {
+        contacts::delete_contact(&self.state, contact_id)
+            .await
+            .map_err(to_core_error)?;
+        self.contacts_cache.lock().await.clear();
+        Ok(())
+    }
+
+    async fn rename_contact_list(
+        &self,
+        list_id: &str,
+        new_name: &str,
+    ) -> CoreResult<()> {
+        if is_read_only_graph_list(list_id) {
+            return Err(CoreError::Unsupported(
+                "the Suggested People list is synthetic and cannot be renamed".into(),
+            ));
+        }
+        let id_enc = urlencoding(list_id);
+        let path = format!("/me/contactFolders/{id_enc}");
+        let body = serde_json::json!({ "displayName": new_name });
+        let _: serde_json::Value = self
+            .state
+            .patch_json(&path, &body)
+            .await
+            .map_err(to_core_error)?;
+        // Drop the cached folder listing — the cached display name
+        // is stale after the rename lands.
+        *self.contact_lists_cache.lock().await = None;
+        Ok(())
+    }
+
+    async fn get_contact_photo(
+        &self,
+        contact_id: &str,
+    ) -> CoreResult<Option<ContactPhoto>> {
+        contacts::get_contact_photo(&self.state, contact_id)
+            .await
+            .map_err(to_core_error)
+    }
+
+    async fn set_contact_photo(
+        &self,
+        contact_id: &str,
+        photo: ContactPhoto,
+    ) -> CoreResult<()> {
+        contacts::set_contact_photo(&self.state, contact_id, photo)
+            .await
+            .map_err(to_core_error)?;
+        self.contacts_cache.lock().await.clear();
+        Ok(())
+    }
+
+    async fn delete_contact_photo(&self, contact_id: &str) -> CoreResult<()> {
+        contacts::delete_contact_photo(&self.state, contact_id)
+            .await
+            .map_err(to_core_error)?;
+        self.contacts_cache.lock().await.clear();
+        Ok(())
+    }
+}
+
+/// True for the synthetic Suggested People sentinel; the Outlook
+/// contactFolders themselves are all writable. The frontend's
+/// read-only-aware dialog short-circuits this too, but the
+/// backend guard is the authoritative gate.
+fn is_read_only_graph_list(list_id: &str) -> bool {
+    list_id == contacts::GRAPH_SUGGESTED_PEOPLE_LIST_ID
+}
+
+/// Same percent-encoder pattern other modules use. We need it
+/// here for the `rename_contact_list` path encoding — every
+/// other contact route is built inside `contacts::*`.
+fn urlencoding(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char);
+            }
+            _ => out.push_str(&format!("%{:02X}", b)),
+        }
+    }
+    out
 }
 
 fn to_core_error(err: GraphError) -> CoreError {
