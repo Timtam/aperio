@@ -211,7 +211,15 @@ export function ContactsPanel() {
           >
             {INTERVAL_PRESETS.map((m) => (
               <option key={m} value={m}>
+                {/* `count` drives i18next's plural resolution
+                    (picks `_one` vs `_other`); `minutes` is the
+                    actual interpolation. Without `count` the
+                    base key has no plural rule and i18next falls
+                    back to printing the literal key, which is
+                    what screen readers were reading out as
+                    "dialogs.settings.contacts.intervalOption". */}
                 {t('dialogs.settings.contacts.intervalOption', {
+                  count: m,
                   minutes: m,
                 })}
               </option>
@@ -223,6 +231,7 @@ export function ContactsPanel() {
             {!INTERVAL_PRESETS.includes(interval) && (
               <option value={interval}>
                 {t('dialogs.settings.contacts.intervalOption', {
+                  count: interval,
                   minutes: interval,
                 })}
               </option>
@@ -254,7 +263,15 @@ export function ContactsPanel() {
             {t('dialogs.settings.contacts.syncFull')}
           </button>
         </div>
-        <p className="tasks-settings__hint" aria-live="polite">
+        {/* No `aria-live` on this paragraph — opening the tab
+            (or tabbing into the panel) made screen readers
+            announce "Last synced at …" out of nowhere, which
+            users reported as disorienting. The timestamp is
+            already part of the static document the user can
+            navigate to; explicit announcements for the actual
+            sync events go through `announce()` in the click
+            handlers instead. */}
+        <p className="tasks-settings__hint">
           {status?.last_synced_at
             ? t('dialogs.settings.contacts.lastSynced', {
                 time: new Date(status.last_synced_at).toLocaleString(),

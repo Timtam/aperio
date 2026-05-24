@@ -559,6 +559,27 @@ export function SyncPanel() {
     t,
   ]);
 
+  // Native directory picker for the local-FS adapter path.
+  // Same plugin / failure-mode contract as `onBrowseKey` below —
+  // the text input keeps working if the dialog plugin is
+  // unavailable.
+  const onBrowseLocalPath = useCallback(async () => {
+    try {
+      const selected = await openFileDialog({
+        multiple: false,
+        directory: true,
+        title: t('dialogs.settings.sync.adapterPathDialogTitle'),
+        defaultPath: pathDraft.trim() || undefined,
+      });
+      if (typeof selected === 'string' && selected.length > 0) {
+        setPathDraft(selected);
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('local path picker failed', err);
+    }
+  }, [pathDraft, t]);
+
   // Native file picker for the SSH key path. Uses
   // `tauri-plugin-dialog` so the user gets the platform-native
   // picker idiom; falls back silently on the (unlikely) error so
@@ -763,9 +784,14 @@ export function SyncPanel() {
         >
           {INTERVAL_PRESETS.map((min) => (
             <option key={min} value={min}>
-              {min === 1
-                ? t('dialogs.settings.sync.intervalOption_one', { minutes: min })
-                : t('dialogs.settings.sync.intervalOption_other', { minutes: min })}
+              {/* `count` lets i18next pick `_one` / `_other`
+                  automatically; `minutes` is the actual
+                  interpolation. Reads identically to the manual
+                  ternary this replaced. */}
+              {t('dialogs.settings.sync.intervalOption', {
+                count: min,
+                minutes: min,
+              })}
             </option>
           ))}
         </select>
@@ -804,12 +830,23 @@ export function SyncPanel() {
           <div className="sync-panel__field">
             <label>
               {t('dialogs.settings.sync.adapterPath')}
-              <input
-                type="text"
-                value={pathDraft}
-                onChange={(e) => setPathDraft(e.target.value)}
-                placeholder="/Volumes/NAS/aperio"
-              />
+              <div className="sync-panel__filepicker">
+                <input
+                  type="text"
+                  value={pathDraft}
+                  onChange={(e) => setPathDraft(e.target.value)}
+                  placeholder="/Volumes/NAS/aperio"
+                />
+                <button
+                  type="button"
+                  onClick={() => void onBrowseLocalPath()}
+                  aria-label={t(
+                    'dialogs.settings.sync.adapterPathBrowseAria',
+                  )}
+                >
+                  {t('dialogs.settings.sync.adapterPathBrowse')}
+                </button>
+              </div>
             </label>
             <p className="sync-panel__hint">
               {t('dialogs.settings.sync.adapterPathHint')}

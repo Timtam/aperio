@@ -150,6 +150,12 @@ export function SettingsDialog({
     [activeTab, focusTab],
   );
 
+  // Every entry in `SettingsTabId` MUST have a label here —
+  // missing entries make the corresponding tab button render
+  // empty (no accessible name, blank visual). The `satisfies`
+  // clause flips the missing-key cast into a compile error so a
+  // future tab can't slip through unlabelled the way `sync`
+  // initially did.
   const labels = useMemo(
     () =>
       ({
@@ -158,7 +164,8 @@ export function SettingsDialog({
         colorLabels: t('dialogs.settings.tabs.colorLabels'),
         tasks: t('dialogs.settings.tabs.tasks'),
         contacts: t('dialogs.settings.tabs.contacts'),
-      }) as Record<SettingsTabId, string>,
+        sync: t('dialogs.settings.tabs.sync'),
+      }) satisfies Record<SettingsTabId, string>,
     [t],
   );
 
