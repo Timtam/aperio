@@ -21,3 +21,10 @@ uuid.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true }
+
+[features]
+# Exposes the in-memory `test_support` module so downstream
+# integration tests (notably the event-log applier in src-tauri)
+# can spin up a fully-migrated SQLite without re-implementing
+# the schema replay. Off by default in production builds.
+test-support = []

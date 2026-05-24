@@ -35,6 +35,10 @@
 //! re-installing Aperio mints a new id, which is the intended
 //! "different device" semantics per §19.
 
+pub mod applier;
+
+pub use applier::{ApplyReport, EventLogApplier};
+
 use std::path::PathBuf;
 use std::sync::Arc;
 

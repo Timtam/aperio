@@ -61,6 +61,9 @@ winreg = "0.55"
 [dev-dependencies]
 tempfile = "3"
 tokio = { workspace = true }
+# Lets the event-log applier's tests reuse the LocalAdapter's
+# in-memory migrated SQLite without duplicating the schema replay.
+cal-adapter-local = { workspace = true, features = ["test-support"] }
 
 [features]
 # Default: plugins are loaded dynamically as shared libraries (desktop).

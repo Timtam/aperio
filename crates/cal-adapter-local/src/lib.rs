@@ -19,6 +19,7 @@ mod color_labels;
 mod contacts;
 mod mapping;
 mod search;
+mod sync_apply;
 mod tasks;
 
 pub use search::{EventTypeFilter, SearchFilters, SearchKind, SearchResults};
@@ -96,8 +97,17 @@ pub(crate) fn map_json_err(err: serde_json::Error) -> CoreError {
     CoreError::internal(format!("json: {err}"))
 }
 
-#[cfg(test)]
-pub(crate) mod test_support {
+/// In-memory test fixtures.
+///
+/// Gated on the `test-support` feature flag so production builds
+/// don't pull in `tempfile` etc., while still letting downstream
+/// crates' integration tests (notably the event-log applier in
+/// `src-tauri`) spin up a fully-migrated in-memory DB without
+/// re-implementing the schema replay. Not part of the stable
+/// public API — `#[doc(hidden)]` keeps it out of rustdoc.
+#[cfg(any(test, feature = "test-support"))]
+#[doc(hidden)]
+pub mod test_support {
     //! Helpers for unit tests.
 
     use std::sync::{Arc, Mutex};
@@ -129,6 +139,7 @@ pub(crate) mod test_support {
         conn.execute_batch(SCHEMA_V9).expect("apply v9 schema");
         conn.execute_batch(SCHEMA_V10).expect("apply v10 schema");
         conn.execute_batch(SCHEMA_V11).expect("apply v11 schema");
+        conn.execute_batch(SCHEMA_V12).expect("apply v12 schema");
         Arc::new(Mutex::new(conn))
     }
 
@@ -149,4 +160,6 @@ pub(crate) mod test_support {
         include_str!("../../../src-tauri/src/db/sql/0010_contact_photos.sql");
     const SCHEMA_V11: &str =
         include_str!("../../../src-tauri/src/db/sql/0011_contact_addresses.sql");
+    const SCHEMA_V12: &str =
+        include_str!("../../../src-tauri/src/db/sql/0012_sync_applied_events.sql");
 }

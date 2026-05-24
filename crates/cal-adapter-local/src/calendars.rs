@@ -397,7 +397,7 @@ const EVENT_SELECT_PREFIX: &str =
         AND end_utc   > ?
       ORDER BY start_utc";
 
-fn split_recurrence(
+pub(crate) fn split_recurrence(
     rec: &Option<EventRecurrence>,
 ) -> cal_core::Result<(Option<String>, Option<String>)> {
     match rec {
