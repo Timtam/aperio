@@ -3971,6 +3971,11 @@ dependencies = [
 [[package]]
 name = "plugin-core"
 version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
 
 [[package]]
 name = "plugin-sdk"

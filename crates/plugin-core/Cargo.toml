@@ -6,6 +6,9 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Aperio — stub for plugin-core (Phase 0; full implementation lands in a later phase)."
+description = "Aperio — plugin ABI contract: C-ABI types, plugin manifest parser, capability + plugin-type enums (DESIGN.md §20)."
 
 [dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
