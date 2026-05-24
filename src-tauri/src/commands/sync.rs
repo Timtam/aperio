@@ -35,6 +35,7 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use serde::Deserialize;
 use sync_adapter_local::LocalFsSyncAdapter;
+use sync_adapter_sftp::SftpSyncAdapter;
 use sync_adapter_webdav::{WebDavCredentials, WebDavSyncAdapter};
 use sync_core::{
     derive_key, EncryptingAdapter, EncryptionParams, SyncAdapter, KEY_LEN,
@@ -65,11 +66,24 @@ const PREF_LOCAL_PATH: &str = "sync.adapter.local.path";
 const PREF_WEBDAV_URL: &str = "sync.adapter.webdav.url";
 const PREF_WEBDAV_USER: &str = "sync.adapter.webdav.user";
 
+/// SFTP adapter config keys. Same device-local / never-synced
+/// guarantee as the WebDAV pair. Password lives in the keychain
+/// under a separate pseudo-account.
+const PREF_SFTP_HOST: &str = "sync.adapter.sftp.host";
+const PREF_SFTP_PORT: &str = "sync.adapter.sftp.port";
+const PREF_SFTP_USER: &str = "sync.adapter.sftp.user";
+const PREF_SFTP_PATH: &str = "sync.adapter.sftp.path";
+
 /// Pseudo-account id used to store the WebDAV password in the
 /// platform keychain. The `secrets` module is account-scoped; we
 /// use this fixed string so the sync adapter has its own managed
 /// keychain entry independent of any user-facing account row.
 const WEBDAV_SECRET_ACCOUNT: &str = "sync.adapter.webdav";
+
+/// Pseudo-account id for the SFTP password, separate from the
+/// WebDAV one so switching backends doesn't accidentally invalidate
+/// the other family's stored credential.
+const SFTP_SECRET_ACCOUNT: &str = "sync.adapter.sftp";
 
 /// `user_prefs` key flagging whether the current sync dataset is
 /// E2E-encrypted. Mirrors the boolean in `meta.json`; lets
@@ -117,10 +131,28 @@ pub enum SyncAdapterConfig {
         #[serde(default)]
         password: Option<String>,
     },
+    /// SFTP adapter (DESIGN.md §19.6). `host` is bare; `port`
+    /// defaults to 22 on the frontend; `path` is an absolute
+    /// remote path. Same password-Option contract as the WebDAV
+    /// variant: `None` reuses the previously-stored keychain
+    /// secret.
+    Sftp {
+        host: String,
+        #[serde(default = "default_sftp_port")]
+        port: u16,
+        user: String,
+        path: String,
+        #[serde(default)]
+        password: Option<String>,
+    },
     /// Explicit disconnect. The orchestrator drops its adapter
     /// handle; subsequent `sync_now` calls return a clear "not
     /// configured" error rather than silently no-oping.
     None,
+}
+
+fn default_sftp_port() -> u16 {
+    22
 }
 
 /// Build a fresh adapter instance from a [`SyncAdapterConfig`] —
@@ -170,6 +202,54 @@ fn build_adapter(
                 .map_err(sync_err)?;
             Ok(Arc::new(adapter))
         }
+        SyncAdapterConfig::Sftp { host, port, user, path, password } => {
+            let trimmed_host = host.trim();
+            let trimmed_user = user.trim();
+            let trimmed_path = path.trim();
+            if trimmed_host.is_empty() {
+                return Err(CommandError {
+                    code: "invalid_input",
+                    message: "SFTP host must not be empty".into(),
+                });
+            }
+            if trimmed_user.is_empty() {
+                return Err(CommandError {
+                    code: "invalid_input",
+                    message: "SFTP user must not be empty".into(),
+                });
+            }
+            if trimmed_path.is_empty() {
+                return Err(CommandError {
+                    code: "invalid_input",
+                    message: "SFTP path must not be empty".into(),
+                });
+            }
+            // Same password-reuse contract as the WebDAV branch:
+            // Some + non-empty → use the supplied value; None or
+            // empty → re-fetch the previously-stored keychain
+            // secret so URL/user edits don't require re-typing
+            // the password.
+            let resolved_password = match password.as_deref().map(str::trim) {
+                Some(p) if !p.is_empty() => p.to_string(),
+                _ => secrets::retrieve(
+                    SFTP_SECRET_ACCOUNT,
+                    SecretSlot::Password,
+                )
+                .map_err(|err| CommandError {
+                    code: "auth",
+                    message: format!(
+                        "no SFTP password configured: {err}",
+                    ),
+                })?,
+            };
+            Ok(Arc::new(SftpSyncAdapter::new(
+                trimmed_host,
+                *port,
+                trimmed_user,
+                resolved_password,
+                PathBuf::from(trimmed_path),
+            )))
+        }
         SyncAdapterConfig::None => Err(CommandError {
             code: "invalid_input",
             message: "cannot build adapter from None kind".into(),
@@ -202,6 +282,27 @@ fn persist_adapter_config(
                 if !pw.is_empty() {
                     secrets::store(
                         WEBDAV_SECRET_ACCOUNT,
+                        SecretSlot::Password,
+                        pw,
+                    )
+                    .map_err(|err| CommandError {
+                        code: "internal",
+                        message: format!("keychain store: {err}"),
+                    })?;
+                }
+            }
+            Ok(())
+        }
+        SyncAdapterConfig::Sftp { host, port, user, path, password } => {
+            prefs.set(PREF_ADAPTER_KIND, "sftp").map_err(internal)?;
+            prefs.set(PREF_SFTP_HOST, host.trim()).map_err(internal)?;
+            prefs.set(PREF_SFTP_PORT, &port.to_string()).map_err(internal)?;
+            prefs.set(PREF_SFTP_USER, user.trim()).map_err(internal)?;
+            prefs.set(PREF_SFTP_PATH, path.trim()).map_err(internal)?;
+            if let Some(pw) = password.as_deref().map(str::trim) {
+                if !pw.is_empty() {
+                    secrets::store(
+                        SFTP_SECRET_ACCOUNT,
                         SecretSlot::Password,
                         pw,
                     )
@@ -319,7 +420,9 @@ pub async fn configure_sync_adapter(
     let shared = db.shared();
     let prefs = UserPrefsRepo::new(&shared);
     match &config {
-        SyncAdapterConfig::Local { .. } | SyncAdapterConfig::Webdav { .. } => {
+        SyncAdapterConfig::Local { .. }
+        | SyncAdapterConfig::Webdav { .. }
+        | SyncAdapterConfig::Sftp { .. } => {
             // Persist BEFORE building the adapter so the keychain
             // entry for the new WebDAV password is in place; the
             // adapter constructor then reads it back when the
@@ -666,6 +769,42 @@ pub fn build_adapter_from_prefs(
             };
             let adapter = WebDavSyncAdapter::new(url.trim(), credentials).ok()?;
             Arc::new(adapter)
+        }
+        "sftp" => {
+            let host = prefs.get(PREF_SFTP_HOST).ok().flatten()?;
+            if host.trim().is_empty() {
+                return None;
+            }
+            let port = prefs
+                .get(PREF_SFTP_PORT)
+                .ok()
+                .flatten()
+                .and_then(|s| s.parse::<u16>().ok())
+                .unwrap_or(22);
+            let user = prefs.get(PREF_SFTP_USER).ok().flatten()?;
+            if user.trim().is_empty() {
+                return None;
+            }
+            let path = prefs.get(PREF_SFTP_PATH).ok().flatten()?;
+            if path.trim().is_empty() {
+                return None;
+            }
+            // Password lives in the keychain only — no fallback.
+            // If it's missing, we can't reconstruct the adapter,
+            // so signal "needs reconfigure" the same way as a
+            // missing URL.
+            let password = secrets::retrieve(
+                SFTP_SECRET_ACCOUNT,
+                SecretSlot::Password,
+            )
+            .ok()?;
+            Arc::new(SftpSyncAdapter::new(
+                host.trim(),
+                port,
+                user.trim(),
+                password,
+                PathBuf::from(path.trim()),
+            ))
         }
         // Forward-compat: an unknown kind (left over from a
         // future Aperio version) is silently treated as "no

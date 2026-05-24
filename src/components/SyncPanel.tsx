@@ -58,9 +58,9 @@ export function SyncPanel() {
 
   // Adapter draft state. Seeded from current backend state on mount
   // so the inputs reflect the persisted choice.
-  const [kindDraft, setKindDraft] = useState<'local' | 'webdav' | 'none'>(
-    'local',
-  );
+  const [kindDraft, setKindDraft] = useState<
+    'local' | 'webdav' | 'sftp' | 'none'
+  >('local');
   const [pathDraft, setPathDraft] = useState('');
   // WebDAV-only fields. `passwordDraft` is empty on first render —
   // the persisted password lives in the OS keychain and we don't
@@ -69,6 +69,14 @@ export function SyncPanel() {
   const [urlDraft, setUrlDraft] = useState('');
   const [userDraft, setUserDraft] = useState('');
   const [passwordDraft, setPasswordDraft] = useState('');
+  // SFTP-only fields. `sftpPortDraft` is a string so the input
+  // doesn't fight with React on every keystroke; we parse to u16
+  // at submit time. Default port 22 is filled in on first render.
+  const [sftpHostDraft, setSftpHostDraft] = useState('');
+  const [sftpPortDraft, setSftpPortDraft] = useState('22');
+  const [sftpUserDraft, setSftpUserDraft] = useState('');
+  const [sftpPathDraft, setSftpPathDraft] = useState('');
+  const [sftpPasswordDraft, setSftpPasswordDraft] = useState('');
   // Phase Sk: E2E passphrase. Two roles depending on the
   // onboarding branch:
   //   - `adopt_local` with non-empty value → mints a fresh dataset
@@ -134,15 +142,48 @@ export function SyncPanel() {
         password: passwordDraft.trim() || null,
       };
     }
+    if (kindDraft === 'sftp') {
+      // Parse the port; fall back to 22 on garbage. Backend
+      // re-validates so anything we miss surfaces as
+      // `invalid_input`.
+      const port = Number.parseInt(sftpPortDraft, 10);
+      return {
+        kind: 'sftp',
+        host: sftpHostDraft.trim(),
+        port: Number.isFinite(port) && port > 0 ? port : 22,
+        user: sftpUserDraft.trim(),
+        path: sftpPathDraft.trim(),
+        password: sftpPasswordDraft.trim() || null,
+      };
+    }
     return { kind: 'none' };
-  }, [kindDraft, pathDraft, urlDraft, userDraft, passwordDraft]);
+  }, [
+    kindDraft,
+    pathDraft,
+    urlDraft,
+    userDraft,
+    passwordDraft,
+    sftpHostDraft,
+    sftpPortDraft,
+    sftpUserDraft,
+    sftpPathDraft,
+    sftpPasswordDraft,
+  ]);
 
   // Validation: the Connect button needs a path for `local`, a URL +
-  // user for `webdav`. Per-kind feedback steers the user before they
-  // hit the backend's error code path.
+  // user for `webdav`, and host + user + path for `sftp`. Per-kind
+  // feedback steers the user before they hit the backend's error
+  // code path.
   const configMissingRequired = (() => {
     if (kindDraft === 'local') return !pathDraft.trim();
     if (kindDraft === 'webdav') return !urlDraft.trim() || !userDraft.trim();
+    if (kindDraft === 'sftp') {
+      return (
+        !sftpHostDraft.trim() ||
+        !sftpUserDraft.trim() ||
+        !sftpPathDraft.trim()
+      );
+    }
     return false;
   })();
 
@@ -175,10 +216,11 @@ export function SyncPanel() {
     setBusyAdapter(true);
     try {
       await configureSyncAdapter(buildConfig());
-      // Clear the password field after a successful connect so it
-      // doesn't sit in memory longer than necessary. The keychain
+      // Clear password fields after a successful connect so they
+      // don't sit in memory longer than necessary. The keychain
       // entry is the canonical store from this point on.
       if (kindDraft === 'webdav') setPasswordDraft('');
+      if (kindDraft === 'sftp') setSftpPasswordDraft('');
     } catch (err) {
       // eslint-disable-next-line no-console
       console.warn('configure_sync_adapter failed', err);
@@ -447,7 +489,9 @@ export function SyncPanel() {
             <select
               value={kindDraft}
               onChange={(e) =>
-                setKindDraft(e.target.value as 'local' | 'webdav' | 'none')
+                setKindDraft(
+                  e.target.value as 'local' | 'webdav' | 'sftp' | 'none',
+                )
               }
             >
               <option value="local">
@@ -455,6 +499,9 @@ export function SyncPanel() {
               </option>
               <option value="webdav">
                 {t('dialogs.settings.sync.adapterKindWebdav')}
+              </option>
+              <option value="sftp">
+                {t('dialogs.settings.sync.adapterKindSftp')}
               </option>
               <option value="none">
                 {t('dialogs.settings.sync.adapterKindNone')}
@@ -522,6 +569,80 @@ export function SyncPanel() {
               </label>
               <p className="sync-panel__hint">
                 {t('dialogs.settings.sync.adapterWebdavPasswordHint')}
+              </p>
+            </div>
+          </>
+        )}
+        {kindDraft === 'sftp' && (
+          <>
+            <div className="sync-panel__field">
+              <label>
+                {t('dialogs.settings.sync.adapterSftpHost')}
+                <input
+                  type="text"
+                  value={sftpHostDraft}
+                  onChange={(e) => setSftpHostDraft(e.target.value)}
+                  placeholder="nas.example.com"
+                />
+              </label>
+            </div>
+            <div className="sync-panel__field">
+              <label>
+                {t('dialogs.settings.sync.adapterSftpPort')}
+                <input
+                  type="number"
+                  value={sftpPortDraft}
+                  onChange={(e) => setSftpPortDraft(e.target.value)}
+                  min={1}
+                  max={65535}
+                />
+              </label>
+              <p className="sync-panel__hint">
+                {t('dialogs.settings.sync.adapterSftpPortHint')}
+              </p>
+            </div>
+            <div className="sync-panel__field">
+              <label>
+                {t('dialogs.settings.sync.adapterSftpUser')}
+                <input
+                  type="text"
+                  value={sftpUserDraft}
+                  onChange={(e) => setSftpUserDraft(e.target.value)}
+                  autoComplete="username"
+                />
+              </label>
+            </div>
+            <div className="sync-panel__field">
+              <label>
+                {t('dialogs.settings.sync.adapterSftpPath')}
+                <input
+                  type="text"
+                  value={sftpPathDraft}
+                  onChange={(e) => setSftpPathDraft(e.target.value)}
+                  placeholder="/home/alice/aperio"
+                />
+              </label>
+              <p className="sync-panel__hint">
+                {t('dialogs.settings.sync.adapterSftpPathHint')}
+              </p>
+            </div>
+            <div className="sync-panel__field">
+              <label>
+                {t('dialogs.settings.sync.adapterSftpPassword')}
+                <input
+                  type="password"
+                  value={sftpPasswordDraft}
+                  onChange={(e) => setSftpPasswordDraft(e.target.value)}
+                  autoComplete="new-password"
+                  placeholder={
+                    status?.configured
+                      ? t('dialogs.settings.sync.adapterWebdavPasswordKept')
+                      : undefined
+                  }
+                />
+              </label>
+              <p className="sync-panel__hint">
+                {t('dialogs.settings.sync.adapterSftpPasswordHint')}
               </p>
             </div>
           </>

@@ -640,20 +640,29 @@ export const setContactsSyncInterval = (minutes: number) =>
 /** Adapter family the user picked. `none` is the explicit
  *  disconnect — sync stops, no further pushes, but already-pushed
  *  data on the remote stays where it is. */
-export type SyncAdapterKind = 'local' | 'webdav' | 'none';
+export type SyncAdapterKind = 'local' | 'webdav' | 'sftp' | 'none';
 
 /** Adapter-family-specific config. Discriminated union keyed by
  *  `kind` — matches the Rust `SyncAdapterConfig` enum on the wire.
  *
- *  WebDAV `password` is optional: omitting it on a re-edit (URL or
- *  user only) keeps the previously-stored keychain password in
- *  place. Supplying an empty string is treated the same way. */
+ *  WebDAV / SFTP `password` is optional: omitting it on a re-edit
+ *  (URL or user only) keeps the previously-stored keychain
+ *  password in place. Supplying an empty string is treated the
+ *  same way. */
 export type SyncAdapterConfig =
   | { kind: 'local'; path: string }
   | {
       kind: 'webdav';
       url: string;
       user: string;
+      password?: string | null;
+    }
+  | {
+      kind: 'sftp';
+      host: string;
+      port: number;
+      user: string;
+      path: string;
       password?: string | null;
     }
   | { kind: 'none' };
