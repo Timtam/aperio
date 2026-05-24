@@ -300,6 +300,8 @@ pub fn run() {
             commands::preview_sync_target,
             commands::accept_remote_dataset,
             commands::adopt_local_dataset,
+            // §19.7: rotate the dataset's E2E passphrase.
+            commands::change_sync_passphrase,
             // §19.10: stale-device resume.
             commands::resume_stale_device,
             // Phase Sg (DESIGN.md §19.10): snapshot + log

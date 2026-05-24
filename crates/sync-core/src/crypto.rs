@@ -74,19 +74,39 @@ pub const DEFAULT_T_COST: u32 = 2;
 pub const DEFAULT_P_COST: u32 = 1;
 
 /// KDF parameters stored alongside the dataset in `meta.json`.
-/// Every device that wants to join derives its key from the same
-/// passphrase + the same salt + cost params, so the resulting
-/// 32-byte key is identical across devices without ever
-/// transmitting the key itself.
+///
+/// Two ages of dataset coexist here:
+///
+/// 1. **v1 (direct key)** — historical layout. The passphrase
+///    derives a 32-byte key directly, and that key is the AES
+///    data key. `wrapped_data_key` is `None`. To change the
+///    passphrase on a v1 dataset, every encrypted blob would
+///    have to be re-encrypted, so v1 effectively didn't support
+///    passphrase rotation.
+///
+/// 2. **v2 (KEK + DEK)** — the passphrase derives a *key-
+///    encryption key* (KEK) that decrypts the `wrapped_data_key`
+///    blob to recover the actual *data-encryption key* (DEK).
+///    The DEK is invariant across passphrase changes; only the
+///    KEK wrap is rewritten. v2 datasets carry
+///    `wrapped_data_key = Some(_)`.
+///
+/// Every device that wants to join derives its KEK from the
+/// same passphrase + the same `salt` + cost params, so the
+/// resulting KEK is identical across devices without ever
+/// transmitting it. On v1 the same logic produces the DEK
+/// directly.
 ///
 /// Stored as base64 strings on the wire because JSON has no
 /// binary type. Cost params are plain integers.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EncryptionParams {
-    /// Base64-encoded random salt. Generated once when E2E is
-    /// enabled on the dataset; never changes for the life of the
-    /// dataset (changing it would invalidate every device's
-    /// derived key).
+    /// Base64-encoded random salt. On v1 datasets it stays fixed
+    /// for the lifetime of the dataset (the DEK derives from it
+    /// directly). On v2 datasets it's rotated whenever the
+    /// passphrase changes — a fresh salt every change means
+    /// pre-image attacks against an old wrap give the attacker
+    /// no head start on a new one.
     pub salt: String,
     /// Argon2id memory cost in KiB. Default
     /// [`DEFAULT_M_COST`].
@@ -96,12 +116,32 @@ pub struct EncryptionParams {
     pub t_cost: u32,
     /// Argon2id parallelism. Default [`DEFAULT_P_COST`].
     pub p_cost: u32,
+    /// **v2 only** — the data-encryption key (DEK), wrapped
+    /// with the passphrase-derived KEK using the same
+    /// AES-GCM wire format as the rest of the encryption layer
+    /// (nonce || ciphertext || auth tag, base64-encoded).
+    ///
+    /// `None` on v1 datasets — the passphrase-derived key
+    /// itself is the data key.
+    ///
+    /// Adding this field is forward-compatible: older clients
+    /// (no `deny_unknown_fields`) ignore it and keep deriving
+    /// the key directly, which on a v1 dataset is still
+    /// correct. After the first passphrase change on a dataset
+    /// it migrates to v2 and old clients can't unwrap the new
+    /// key — they keep using the DEK already in their keychain,
+    /// which never changes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wrapped_data_key: Option<String>,
 }
 
 impl EncryptionParams {
     /// Mint a fresh parameter set with default cost values + a
     /// random salt. Called once when the user enables E2E on a
-    /// new dataset.
+    /// new dataset. `wrapped_data_key` is left empty here — the
+    /// onboarding service either fills it in immediately for
+    /// fresh v2 datasets (via [`with_wrapped_key`]) or leaves it
+    /// `None` for the legacy v1 path.
     pub fn fresh() -> Self {
         let mut salt = [0u8; SALT_LEN];
         rand::rngs::OsRng.fill_bytes(&mut salt);
@@ -110,7 +150,23 @@ impl EncryptionParams {
             m_cost: DEFAULT_M_COST,
             t_cost: DEFAULT_T_COST,
             p_cost: DEFAULT_P_COST,
+            wrapped_data_key: None,
         }
+    }
+
+    /// Rotate the salt to a fresh random 16-byte value. Used by
+    /// the passphrase-change path so the new KEK has no
+    /// dictionary overlap with the previous one.
+    pub fn rotate_salt(&mut self) {
+        let mut salt = [0u8; SALT_LEN];
+        rand::rngs::OsRng.fill_bytes(&mut salt);
+        self.salt = BASE64.encode(salt);
+    }
+
+    /// Convenience: return a copy with `wrapped_data_key` set.
+    pub fn with_wrapped_key(mut self, wrapped: String) -> Self {
+        self.wrapped_data_key = Some(wrapped);
+        self
     }
 
     fn salt_bytes(&self) -> SyncResult<Vec<u8>> {
@@ -164,6 +220,82 @@ pub fn encrypt(key: &[u8; KEY_LEN], plaintext: &[u8]) -> SyncResult<Vec<u8>> {
     Ok(out)
 }
 
+/// Mint a fresh random 32-byte data-encryption key (DEK).
+/// OsRng — same entropy source used for salt + nonce minting.
+/// The DEK is opaque to the user; it lives long-term in the
+/// device keychain (under [`SyncEncryptionKey`]) and is the
+/// invariant key all encrypted blobs decrypt with.
+pub fn fresh_data_key() -> [u8; KEY_LEN] {
+    let mut out = [0u8; KEY_LEN];
+    rand::rngs::OsRng.fill_bytes(&mut out);
+    out
+}
+
+/// Wrap a 32-byte data-encryption key (DEK) with a key-encryption
+/// key (KEK). Returns a base64-encoded ciphertext suitable for
+/// storage in `EncryptionParams.wrapped_data_key`.
+///
+/// Uses the same AES-256-GCM wire format as the rest of the
+/// encryption layer (nonce || ciphertext || auth tag).
+pub fn wrap_key(
+    kek: &[u8; KEY_LEN],
+    dek: &[u8; KEY_LEN],
+) -> SyncResult<String> {
+    let blob = encrypt(kek, dek)?;
+    Ok(BASE64.encode(blob))
+}
+
+/// Reverse of [`wrap_key`]: given the KEK and the base64-encoded
+/// wrap blob, recover the 32-byte DEK.
+///
+/// A failure surfaces as [`SyncError::Auth`] (same as a wrong-
+/// passphrase decrypt) so the UI can present the unified
+/// "wrong passphrase" message without distinguishing wrap-
+/// unwrap failures from data-decrypt failures.
+pub fn unwrap_key(
+    kek: &[u8; KEY_LEN],
+    wrapped_b64: &str,
+) -> SyncResult<[u8; KEY_LEN]> {
+    let blob = BASE64.decode(wrapped_b64).map_err(|err| {
+        SyncError::protocol(format!("decode wrapped key: {err}"))
+    })?;
+    let plain = decrypt(kek, &blob)?;
+    if plain.len() != KEY_LEN {
+        return Err(SyncError::protocol(format!(
+            "unwrapped key has {} bytes, expected {}",
+            plain.len(),
+            KEY_LEN,
+        )));
+    }
+    let mut out = [0u8; KEY_LEN];
+    out.copy_from_slice(&plain);
+    Ok(out)
+}
+
+/// Resolve the **data-encryption key** (DEK) for a dataset from
+/// a passphrase + `EncryptionParams`. Handles both layouts:
+///
+/// - **v2 (KEK + DEK):** when `params.wrapped_data_key` is
+///   `Some`, derive a KEK from the passphrase and use it to
+///   unwrap the stored DEK.
+/// - **v1 (direct key):** when `params.wrapped_data_key` is
+///   `None`, derive the key directly from the passphrase — that
+///   key IS the DEK on a legacy dataset.
+///
+/// Wrong-passphrase failures collapse to [`SyncError::Auth`] so
+/// the UI gets a single error code regardless of which path
+/// failed.
+pub fn resolve_data_key(
+    passphrase: &str,
+    params: &EncryptionParams,
+) -> SyncResult<[u8; KEY_LEN]> {
+    let derived = derive_key(passphrase, params)?;
+    match params.wrapped_data_key.as_deref() {
+        Some(wrap) => unwrap_key(&derived, wrap),
+        None => Ok(derived),
+    }
+}
+
 /// Decrypt a wire blob produced by [`encrypt`].
 ///
 /// Failures here typically mean **the key is wrong** — either the
@@ -213,6 +345,7 @@ mod tests {
             m_cost: 64,
             t_cost: 1,
             p_cost: 1,
+            wrapped_data_key: None,
         };
         let k1 = derive_key("hunter2", &params).unwrap();
         let k2 = derive_key("hunter2", &params).unwrap();
@@ -226,6 +359,7 @@ mod tests {
             m_cost: 64,
             t_cost: 1,
             p_cost: 1,
+            wrapped_data_key: None,
         };
         let k1 = derive_key("hunter2", &params).unwrap();
         let k2 = derive_key("hunter3", &params).unwrap();
@@ -239,12 +373,14 @@ mod tests {
             m_cost: 64,
             t_cost: 1,
             p_cost: 1,
+            wrapped_data_key: None,
         };
         let p2 = EncryptionParams {
             salt: BASE64.encode([9u8; SALT_LEN]),
             m_cost: 64,
             t_cost: 1,
             p_cost: 1,
+            wrapped_data_key: None,
         };
         let k1 = derive_key("same", &p1).unwrap();
         let k2 = derive_key("same", &p2).unwrap();
@@ -317,5 +453,128 @@ mod tests {
         let s = serde_json::to_string(&p).unwrap();
         let back: EncryptionParams = serde_json::from_str(&s).unwrap();
         assert_eq!(p, back);
+    }
+
+    /// Forward compatibility: old meta.json carrying
+    /// `EncryptionParams` without `wrapped_data_key` deserialises
+    /// fine and produces `None`. This is the read-side guarantee
+    /// the v1 → v2 migration relies on.
+    #[test]
+    fn params_without_wrapped_key_deserialises() {
+        let raw = r#"{
+            "salt": "AAAAAAAAAAAAAAAAAAAAAA==",
+            "m_cost": 19456,
+            "t_cost": 2,
+            "p_cost": 1
+        }"#;
+        let p: EncryptionParams = serde_json::from_str(raw).unwrap();
+        assert!(p.wrapped_data_key.is_none());
+    }
+
+    /// Symmetric inverse: when `wrapped_data_key` is `None`, the
+    /// field is omitted from the serialised form so a v1-style
+    /// dataset on disk stays byte-identical to before this
+    /// migration.
+    #[test]
+    fn params_with_none_wrap_omits_the_field() {
+        let p = EncryptionParams {
+            salt: BASE64.encode([1u8; SALT_LEN]),
+            m_cost: 64,
+            t_cost: 1,
+            p_cost: 1,
+            wrapped_data_key: None,
+        };
+        let s = serde_json::to_string(&p).unwrap();
+        assert!(!s.contains("wrapped_data_key"));
+    }
+
+    #[test]
+    fn wrap_then_unwrap_round_trips() {
+        let kek = [11u8; KEY_LEN];
+        let dek = [22u8; KEY_LEN];
+        let wrapped = wrap_key(&kek, &dek).unwrap();
+        let recovered = unwrap_key(&kek, &wrapped).unwrap();
+        assert_eq!(recovered, dek);
+    }
+
+    #[test]
+    fn unwrap_with_wrong_kek_returns_auth_error() {
+        let dek = [22u8; KEY_LEN];
+        let wrapped = wrap_key(&[11u8; KEY_LEN], &dek).unwrap();
+        let err = unwrap_key(&[99u8; KEY_LEN], &wrapped).unwrap_err();
+        assert!(
+            matches!(err, SyncError::Auth(_)),
+            "expected Auth, got {err:?}",
+        );
+    }
+
+    #[test]
+    fn unwrap_with_corrupt_base64_returns_protocol_error() {
+        // Garbage in the base64 layer — distinct error code so the
+        // UI doesn't claim "wrong passphrase" for a corrupted
+        // meta.json field.
+        let err = unwrap_key(&[0u8; KEY_LEN], "@@@not-base64@@@").unwrap_err();
+        assert!(matches!(err, SyncError::Protocol(_)));
+    }
+
+    /// v1 dataset → `resolve_data_key` returns the directly-
+    /// derived key (no wrap step).
+    #[test]
+    fn resolve_data_key_v1_returns_direct_key() {
+        let params = EncryptionParams {
+            salt: BASE64.encode([5u8; SALT_LEN]),
+            m_cost: 64,
+            t_cost: 1,
+            p_cost: 1,
+            wrapped_data_key: None,
+        };
+        let direct = derive_key("hunter2", &params).unwrap();
+        let resolved = resolve_data_key("hunter2", &params).unwrap();
+        assert_eq!(resolved, direct);
+    }
+
+    /// v2 dataset → `resolve_data_key` derives a KEK, unwraps,
+    /// returns the DEK. The DEK and the KEK are distinct values
+    /// — that's the whole point of the indirection.
+    #[test]
+    fn resolve_data_key_v2_returns_unwrapped_dek() {
+        let mut params = EncryptionParams {
+            salt: BASE64.encode([6u8; SALT_LEN]),
+            m_cost: 64,
+            t_cost: 1,
+            p_cost: 1,
+            wrapped_data_key: None,
+        };
+        let kek = derive_key("hunter2", &params).unwrap();
+        let dek = [42u8; KEY_LEN]; // independent random DEK
+        params.wrapped_data_key = Some(wrap_key(&kek, &dek).unwrap());
+
+        let resolved = resolve_data_key("hunter2", &params).unwrap();
+        assert_eq!(resolved, dek);
+        // KEK and DEK must differ — this is the indirection.
+        assert_ne!(kek, dek);
+    }
+
+    /// Wrong passphrase against a v2 dataset surfaces as `Auth`
+    /// — the same code as a wrong-passphrase decrypt, so the UI
+    /// can present a unified message.
+    #[test]
+    fn resolve_data_key_v2_wrong_passphrase_is_auth() {
+        let mut params = EncryptionParams {
+            salt: BASE64.encode([6u8; SALT_LEN]),
+            m_cost: 64,
+            t_cost: 1,
+            p_cost: 1,
+            wrapped_data_key: None,
+        };
+        let kek = derive_key("right", &params).unwrap();
+        let dek = [42u8; KEY_LEN];
+        params.wrapped_data_key = Some(wrap_key(&kek, &dek).unwrap());
+
+        let err = resolve_data_key("wrong", &params).unwrap_err();
+        assert!(
+            matches!(err, SyncError::Auth(_)),
+            "expected Auth, got {err:?}",
+        );
     }
 }

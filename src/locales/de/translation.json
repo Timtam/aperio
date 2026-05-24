@@ -334,7 +334,17 @@
         "e2ePassphrase": "Passwort",
         "e2eIrreversibleWarning": "Achtung: Ohne dieses Passwort sind die Daten nicht wiederherstellbar. Notiere es an einem sicheren Ort.",
         "e2ePassphraseRequired": "Bitte zuerst ein Passwort eingeben.",
-        "e2eRemoteRequiresPassphrase": "Dieser Datensatz ist verschlüsselt. Gib das Passwort ein, um die Daten dieses Geräts freizuschalten."
+        "e2eRemoteRequiresPassphrase": "Dieser Datensatz ist verschlüsselt. Gib das Passwort ein, um die Daten dieses Geräts freizuschalten.",
+        "passphraseChangeTitle": "Passphrase ändern",
+        "passphraseChangeHint": "Neue Passphrase für die Ende-zu-Ende-Verschlüsselung festlegen. Die verschlüsselten Daten selbst bleiben unverändert — bereits verbundene Geräte syncen ohne Unterbrechung weiter. Die neue Passphrase wird erst beim nächsten Hinzufügen eines weiteren Geräts benötigt.",
+        "passphraseChangeOld": "Aktuelle Passphrase",
+        "passphraseChangeNew": "Neue Passphrase",
+        "passphraseChangeAction": "Passphrase ändern",
+        "passphraseChangeRunning": "Passphrase wird geändert …",
+        "passphraseChangeOk": "Passphrase wurde geändert.",
+        "passphraseChangeErrorEmpty": "Bitte beide Passphrase-Felder ausfüllen.",
+        "passphraseChangeErrorSame": "Die neue Passphrase muss sich von der aktuellen unterscheiden.",
+        "passphraseChangeErrorAuth": "Die aktuelle Passphrase ist nicht korrekt."
       }
     },
     "syncConflicts": {

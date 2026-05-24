@@ -337,7 +337,17 @@
         "e2ePassphrase": "Passphrase",
         "e2eIrreversibleWarning": "Warning: without this passphrase the data cannot be recovered. Store it somewhere safe.",
         "e2ePassphraseRequired": "Please enter a passphrase first.",
-        "e2eRemoteRequiresPassphrase": "This dataset is encrypted. Enter the passphrase to unlock this device's view of the data."
+        "e2eRemoteRequiresPassphrase": "This dataset is encrypted. Enter the passphrase to unlock this device's view of the data.",
+        "passphraseChangeTitle": "Change passphrase",
+        "passphraseChangeHint": "Set a new passphrase for end-to-end encryption. The encrypted data itself stays unchanged — other devices that are already connected keep syncing. The new passphrase is only needed when connecting an additional device from now on.",
+        "passphraseChangeOld": "Current passphrase",
+        "passphraseChangeNew": "New passphrase",
+        "passphraseChangeAction": "Change passphrase",
+        "passphraseChangeRunning": "Changing passphrase …",
+        "passphraseChangeOk": "Passphrase changed.",
+        "passphraseChangeErrorEmpty": "Please fill in both passphrase fields.",
+        "passphraseChangeErrorSame": "The new passphrase must differ from the current one.",
+        "passphraseChangeErrorAuth": "The current passphrase is not correct."
       }
     },
     "syncConflicts": {

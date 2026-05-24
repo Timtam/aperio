@@ -7,6 +7,7 @@ import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
 import {
   acceptRemoteDataset,
   adoptLocalDataset,
+  changeSyncPassphrase,
   compactNow,
   configureSyncAdapter,
   forgetSftpHostKey,
@@ -67,6 +68,7 @@ export function SyncPanel() {
   const intervalHeadingId = useId();
   const previewHeadingId = useId();
   const protocolHeadingId = useId();
+  const passphraseHeadingId = useId();
 
   // Adapter draft state. Seeded from current backend state on mount
   // so the inputs reflect the persisted choice.
@@ -139,6 +141,20 @@ export function SyncPanel() {
   const [pinnedFingerprint, setPinnedFingerprint] = useState<string | null>(
     null,
   );
+  // §19.7 passphrase rotation. `oldPassphraseDraft` is what the
+  // user types to authorise the change; `newPassphraseDraft`
+  // becomes the new wrap key after a successful round-trip.
+  // Both clear on success so a stray window-leave doesn't leave
+  // them sitting in memory. `passphraseChangeError` /
+  // `passphraseChangeOk` drive the visible feedback line in the
+  // section.
+  const [oldPassphraseDraft, setOldPassphraseDraft] = useState('');
+  const [newPassphraseDraft, setNewPassphraseDraft] = useState('');
+  const [busyPassphraseChange, setBusyPassphraseChange] = useState(false);
+  const [passphraseChangeError, setPassphraseChangeError] = useState<
+    string | null
+  >(null);
+  const [passphraseChangeOk, setPassphraseChangeOk] = useState(false);
 
   const interval = intervalDraft ?? status?.interval_minutes ?? 5;
 
@@ -636,6 +652,60 @@ export function SyncPanel() {
       setBusyCompact(false);
     }
   }, [announce, messageForError, t]);
+
+  // §19.7 — drive the passphrase change. Inline validation
+  // first (both fields filled, new differs from old), then call
+  // the backend. Empties the inputs on success so they don't
+  // sit in memory; surfaces auth failures from the underlying
+  // wrap unwrap as the "wrong current passphrase" message.
+  const onChangePassphrase = useCallback(async () => {
+    setPassphraseChangeOk(false);
+    setPassphraseChangeError(null);
+    const oldPp = oldPassphraseDraft.trim();
+    const newPp = newPassphraseDraft.trim();
+    if (!oldPp || !newPp) {
+      setPassphraseChangeError(
+        t('dialogs.settings.sync.passphraseChangeErrorEmpty'),
+      );
+      return;
+    }
+    if (oldPp === newPp) {
+      setPassphraseChangeError(
+        t('dialogs.settings.sync.passphraseChangeErrorSame'),
+      );
+      return;
+    }
+    setBusyPassphraseChange(true);
+    try {
+      await changeSyncPassphrase(oldPp, newPp);
+      setPassphraseChangeOk(true);
+      setOldPassphraseDraft('');
+      setNewPassphraseDraft('');
+      announce(t('dialogs.settings.sync.passphraseChangeOk'));
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('change_sync_passphrase failed', err);
+      // Map `auth` to a user-friendly "wrong current passphrase"
+      // message; everything else goes through the standard
+      // messageForError translation. The auth case is by far the
+      // most likely user-visible failure.
+      if (isCommandError(err) && err.code === 'auth') {
+        setPassphraseChangeError(
+          t('dialogs.settings.sync.passphraseChangeErrorAuth'),
+        );
+      } else {
+        setPassphraseChangeError(messageForError(err));
+      }
+    } finally {
+      setBusyPassphraseChange(false);
+    }
+  }, [
+    announce,
+    messageForError,
+    newPassphraseDraft,
+    oldPassphraseDraft,
+    t,
+  ]);
 
   const lastSyncedLabel = (() => {
     if (!status?.last_synced_at) return t('dialogs.settings.sync.stateNeverSynced');
@@ -1198,6 +1268,67 @@ export function SyncPanel() {
               />
             </>
           )}
+        </section>
+      )}
+      {/* §19.7 — change passphrase. Only visible when the
+          dataset is actually encrypted and configured; a
+          non-E2E or unconfigured sync setup has nothing to
+          rotate. The DEK doesn't change so other devices
+          keep syncing without interruption — the new
+          passphrase is only needed to onboard a fresh
+          device after this point. */}
+      {status?.configured && status?.e2e_enabled && (
+        <section aria-labelledby={passphraseHeadingId}>
+          <h3 id={passphraseHeadingId}>
+            {t('dialogs.settings.sync.passphraseChangeTitle')}
+          </h3>
+          <p className="sync-panel__hint">
+            {t('dialogs.settings.sync.passphraseChangeHint')}
+          </p>
+          <div className="sync-panel__field">
+            <label>
+              {t('dialogs.settings.sync.passphraseChangeOld')}
+              <input
+                type="password"
+                value={oldPassphraseDraft}
+                onChange={(e) => setOldPassphraseDraft(e.target.value)}
+                autoComplete="current-password"
+              />
+            </label>
+          </div>
+          <div className="sync-panel__field">
+            <label>
+              {t('dialogs.settings.sync.passphraseChangeNew')}
+              <input
+                type="password"
+                value={newPassphraseDraft}
+                onChange={(e) => setNewPassphraseDraft(e.target.value)}
+                autoComplete="new-password"
+              />
+            </label>
+          </div>
+          {passphraseChangeError && (
+            <p className="sync-panel__error" role="alert">
+              {t('dialogs.settings.sync.errorPrefix')}:{' '}
+              {passphraseChangeError}
+            </p>
+          )}
+          {passphraseChangeOk && (
+            <p className="sync-panel__hint" role="status">
+              {t('dialogs.settings.sync.passphraseChangeOk')}
+            </p>
+          )}
+          <div className="sync-panel__actions">
+            <button
+              type="button"
+              disabled={busyPassphraseChange}
+              onClick={() => void onChangePassphrase()}
+            >
+              {busyPassphraseChange
+                ? t('dialogs.settings.sync.passphraseChangeRunning')
+                : t('dialogs.settings.sync.passphraseChangeAction')}
+            </button>
+          </div>
         </section>
       )}
       {/* §19.9 detailed Sync-Protokoll. Always rendered (no

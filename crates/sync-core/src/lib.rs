@@ -50,7 +50,8 @@ pub mod version;
 
 pub use adapter::{DeviceCursor, SyncAdapter};
 pub use crypto::{
-    decrypt, derive_key, encrypt, EncryptionParams, KEY_LEN, NONCE_LEN, SALT_LEN,
+    decrypt, derive_key, encrypt, fresh_data_key, resolve_data_key, unwrap_key,
+    wrap_key, EncryptionParams, KEY_LEN, NONCE_LEN, SALT_LEN,
 };
 pub use device::{DeviceId, DEVICE_ID_PREF_KEY};
 pub use encrypting_adapter::EncryptingAdapter;

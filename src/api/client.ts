@@ -948,6 +948,24 @@ export const adoptLocalDataset = (
     passphrase,
   });
 
+/** §19.7 — rotate the dataset's E2E passphrase. Verifies the
+ *  old passphrase via the wrap (or, on legacy v1 datasets, the
+ *  direct-derived key), then rewraps the long-term data key
+ *  under a new KEK + fresh salt. The blob ciphertext on the
+ *  remote stays untouched, so other devices keep syncing
+ *  without interruption — they only need the new passphrase
+ *  when they re-onboard. Errors collapse to `auth` on a wrong
+ *  current passphrase and `not_configured` when E2E isn't on.
+ */
+export const changeSyncPassphrase = (
+  oldPassphrase: string,
+  newPassphrase: string,
+) =>
+  invoke<void>('change_sync_passphrase', {
+    oldPassphrase,
+    newPassphrase,
+  });
+
 /** §19.10 stale-device resume. Called from the resume dialog
  *  when the user clicks Fortfahren. Re-pulls the current
  *  snapshot, applies it locally, replays post-snapshot logs,

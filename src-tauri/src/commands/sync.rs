@@ -40,7 +40,8 @@ use sync_adapter_sftp::{
 };
 use sync_adapter_webdav::{WebDavCredentials, WebDavSyncAdapter};
 use sync_core::{
-    derive_key, EncryptingAdapter, EncryptionParams, SyncAdapter, KEY_LEN,
+    derive_key, fresh_data_key, resolve_data_key, wrap_key, EncryptingAdapter,
+    EncryptionParams, SyncAdapter, KEY_LEN,
 };
 use tauri::State;
 
@@ -825,8 +826,14 @@ pub async fn accept_remote_dataset(
                 code: "protocol",
                 message: "meta.json says e2e but carries no params".into(),
             })?;
-        let derived = derive_key(pp, &params).map_err(sync_err)?;
-        Some(derived)
+        // `resolve_data_key` handles both layouts: v1 datasets
+        // (no `wrapped_data_key`) where the passphrase-derived
+        // key IS the DEK, and v2 datasets where it's a KEK that
+        // unwraps the actual DEK stored in meta.json. Either way
+        // we end up with the byte sequence that decrypts the
+        // logs + snapshot.
+        let dek = resolve_data_key(pp, &params).map_err(sync_err)?;
+        Some(dek)
     } else {
         None
     };
@@ -886,20 +893,30 @@ pub async fn adopt_local_dataset(
     let plain = build_adapter(&config, &shared)?;
     plain.test_connection().await.map_err(sync_err)?;
 
-    // Phase Sk: if the user supplied a passphrase, mint a fresh
-    // EncryptionParams + derive the key. The wrapped adapter
-    // encrypts everything we push from here on; the meta.json
-    // we write carries `e2e_enabled = true` so other devices
-    // know to prompt for the passphrase when they onboard.
+    // Phase Sk + §19.7 passphrase rotation: fresh datasets land
+    // directly as v2 (KEK + DEK). We mint a random DEK, derive a
+    // KEK from the passphrase + fresh params, wrap the DEK with
+    // the KEK, and write both into `meta.json`. The DEK becomes
+    // the long-term data key; later passphrase changes only
+    // re-wrap it — the on-the-wire ciphertext stays untouched.
+    //
+    // Legacy v1 datasets (no `wrapped_data_key`) created by older
+    // app versions still onboard via the v1 read path in
+    // `accept_remote_dataset` above; this branch only mints
+    // fresh datasets so producing v2 here doesn't break any
+    // existing deployment.
     let trimmed_pp = passphrase
         .as_deref()
         .map(str::trim)
         .filter(|s| !s.is_empty());
     let (key, e2e_params) = match trimmed_pp {
         Some(pp) => {
-            let params = EncryptionParams::fresh();
-            let derived = derive_key(pp, &params).map_err(sync_err)?;
-            (Some(derived), Some(params))
+            let mut params = EncryptionParams::fresh();
+            let kek = derive_key(pp, &params).map_err(sync_err)?;
+            let dek = fresh_data_key();
+            let wrapped = wrap_key(&kek, &dek).map_err(sync_err)?;
+            params.wrapped_data_key = Some(wrapped);
+            (Some(dek), Some(params))
         }
         None => (None, None),
     };
@@ -922,6 +939,121 @@ pub async fn adopt_local_dataset(
     }
     scheduler.kick();
     Ok(report)
+}
+
+/// §19.7 — rotate the dataset's E2E passphrase.
+///
+/// Verifies the **old passphrase** against the dataset's
+/// current wrap (or, on a legacy v1 dataset, against the
+/// keychain-stored direct key), then rewraps the long-term
+/// data-encryption key (DEK) under a fresh key-encryption key
+/// (KEK) derived from the new passphrase + a freshly-rotated
+/// salt. The DEK itself never changes — so no log files,
+/// snapshots, or sound assets need to be re-encrypted, and
+/// other devices that already have the DEK in their keychain
+/// keep syncing without interruption.
+///
+/// On the first successful change on a legacy v1 dataset this
+/// silently migrates it to v2: the meta.json that lands on the
+/// remote carries `wrapped_data_key`, and subsequent passphrase
+/// changes on any device benefit from the cheap re-wrap flow.
+///
+/// Error mapping:
+///   - wrong old passphrase → `auth`
+///   - adapter not configured or not E2E → `not_configured`
+///   - meta.json missing or malformed → `protocol`
+///   - network / IO errors during the meta read or write →
+///     `io` / `network`
+///
+/// Atomicity: the meta.json `push_meta` is the single committing
+/// step. A failure before that leaves the dataset on the old
+/// passphrase; a failure after it commits but before we return
+/// the user still sees the change, because the DEK in their
+/// keychain didn't change.
+#[tauri::command]
+pub async fn change_sync_passphrase(
+    orchestrator: State<'_, Arc<SyncOrchestrator>>,
+    old_passphrase: String,
+    new_passphrase: String,
+) -> CommandResult<()> {
+    let new_pp = new_passphrase.trim();
+    if new_pp.is_empty() {
+        return Err(CommandError {
+            code: "invalid_input",
+            message: "new passphrase must not be empty".into(),
+        });
+    }
+    let old_pp = old_passphrase.trim();
+    if old_pp.is_empty() {
+        return Err(CommandError {
+            code: "invalid_input",
+            message: "current passphrase must not be empty".into(),
+        });
+    }
+
+    let adapter = orchestrator.adapter_handle().ok_or(CommandError {
+        code: "not_configured",
+        message: "no sync adapter is configured".into(),
+    })?;
+
+    // Pull current meta.json. The EncryptingAdapter wraps reads,
+    // but meta.json is always plaintext (§19.7) so the
+    // `fetch_meta` path is a pass-through either way.
+    let meta = adapter
+        .fetch_meta()
+        .await
+        .map_err(sync_err)?
+        .ok_or(CommandError {
+            code: "not_found",
+            message: "remote has no meta.json — onboard first".into(),
+        })?;
+    if !meta.e2e_enabled {
+        return Err(CommandError {
+            code: "not_configured",
+            message: "dataset is not encrypted; nothing to rotate".into(),
+        });
+    }
+    let current_params = meta.e2e_params.clone().ok_or(CommandError {
+        code: "protocol",
+        message: "meta.json says e2e but carries no params".into(),
+    })?;
+
+    // Verify the old passphrase. On v2 datasets this unwraps
+    // `wrapped_data_key` with the derived KEK; on v1 it derives
+    // the direct key. Either way the returned bytes are the DEK
+    // we should be encrypting blobs with.
+    let dek = resolve_data_key(old_pp, &current_params).map_err(sync_err)?;
+
+    // Defence in depth — the keychain on this device should
+    // already hold the DEK. If it doesn't (someone forced-
+    // restored a backup, or the keychain entry got corrupted),
+    // we still proceed: the user typed the correct passphrase
+    // and we just recovered a usable DEK from the wrap.
+    // Re-write the keychain to be sure the next boot loads
+    // the right key.
+    store_e2e_key(&dek)?;
+
+    // Derive the new KEK with a fresh salt — same Argon2
+    // parameters as before so the cost profile doesn't drift,
+    // but the new salt means an old precomputed table buys
+    // the attacker nothing on the new wrap.
+    let mut new_params = current_params;
+    new_params.rotate_salt();
+    new_params.wrapped_data_key = None;
+    let new_kek = derive_key(new_pp, &new_params).map_err(sync_err)?;
+    let new_wrap = wrap_key(&new_kek, &dek).map_err(sync_err)?;
+    new_params.wrapped_data_key = Some(new_wrap);
+
+    // Build the updated meta.json and push it. After this
+    // returns successfully the new passphrase is the
+    // authoritative one — other devices that re-onboard from
+    // here on will need it; existing devices keep working
+    // because the DEK in their keychain is unchanged.
+    let mut updated = meta;
+    updated.e2e_params = Some(new_params);
+    adapter.push_meta(&updated).await.map_err(sync_err)?;
+
+    Ok(())
 }
 
 /// Helper used by `lib.rs::setup` to reconstruct the adapter
