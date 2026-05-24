@@ -66,6 +66,19 @@ export function ContactsPanel() {
   const interval = intervalDraft ?? status?.interval_minutes ?? 60;
 
   const [clearing, setClearing] = useState(false);
+  // Whether the next "Jetzt synchronisieren" should also pull the
+  // read-only provider directories (GAL / Suggested People / Other
+  // Contacts / Workspace Directory). Ephemeral — defaults back to
+  // off whenever the panel re-mounts, so a user who ticked it once
+  // doesn't pay the multi-minute scan cost on every subsequent
+  // sync without noticing.
+  //
+  // Was previously a second button labelled "Auch Verzeichnisse
+  // einschließen"; the wording read like a preference, not an
+  // action, so it's now an explicit checkbox above the sync
+  // button. The button itself stays a verb.
+  const includeDirectoriesId = useId();
+  const [includeDirectories, setIncludeDirectories] = useState(false);
 
   const onIntervalChange = useCallback(
     async (raw: string) => {
@@ -238,29 +251,38 @@ export function ContactsPanel() {
             )}
           </select>
         </div>
+        {/* The directory toggle is a checkbox because the wording
+            describes a state, not an action. The Sync-now button
+            below reads its current value at click time. Pulling
+            directories takes minutes on large tenants so we want
+            the user to opt in explicitly; the unchecked default
+            matches the periodic scheduler's behaviour. */}
+        <div className="tasks-settings__row">
+          <label htmlFor={includeDirectoriesId} className="form__checkbox">
+            <input
+              id={includeDirectoriesId}
+              type="checkbox"
+              checked={includeDirectories}
+              onChange={(e) => setIncludeDirectories(e.target.checked)}
+            />{' '}
+            {t('dialogs.settings.contacts.includeDirectoriesLabel')}
+          </label>
+          <p className="tasks-settings__hint">
+            {t('dialogs.settings.contacts.includeDirectoriesHint')}
+          </p>
+        </div>
         <div className="tasks-settings__row">
           <button
             type="button"
             className="form__action"
             onClick={() => {
-              void onSyncNow(false);
+              void onSyncNow(includeDirectories);
             }}
             disabled={status?.in_flight === true}
           >
             {status?.in_flight
               ? t('dialogs.settings.contacts.syncing')
               : t('dialogs.settings.contacts.syncNow')}
-          </button>
-          <button
-            type="button"
-            className="form__action"
-            onClick={() => {
-              void onSyncNow(true);
-            }}
-            disabled={status?.in_flight === true}
-            title={t('dialogs.settings.contacts.syncFullHint')}
-          >
-            {t('dialogs.settings.contacts.syncFull')}
           </button>
         </div>
         {/* No `aria-live` on this paragraph — opening the tab
