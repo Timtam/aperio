@@ -731,11 +731,12 @@ export type SyncAdapterConfig =
       port: number;
       user: string;
       path: string;
-      /** `"explicit"` (AUTH TLS upgrade, default port 21) or
-       *  `"implicit"` (TLS-first handshake, default port 990).
-       *  Plain FTP isn't supported — the frontend always sets
-       *  one of these two. */
-      mode: 'explicit' | 'implicit';
+      /** `"explicit"` (AUTH TLS upgrade, default port 21),
+       *  `"implicit"` (TLS-first handshake, default port 990),
+       *  or `"plain"` (no TLS, port 21). Plain is an opt-in
+       *  for legacy LAN scenarios — the frontend gates it
+       *  behind a visible warning. */
+      mode: 'explicit' | 'implicit' | 'plain';
       /** Empty / null reuses the keychain entry — same contract
        *  as the WebDAV / SFTP fields. */
       password?: string | null;

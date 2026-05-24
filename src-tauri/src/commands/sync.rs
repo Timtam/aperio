@@ -434,6 +434,11 @@ fn build_adapter(
             let parsed_mode = match mode.as_str() {
                 "implicit" => FtpsMode::Implicit,
                 "explicit" => FtpsMode::Explicit,
+                // `plain` is the opt-in unencrypted variant.
+                // The frontend gates it behind a visible
+                // warning; we trust the request when it
+                // arrives here.
+                "plain" => FtpsMode::Plain,
                 other => {
                     return Err(CommandError {
                         code: "invalid_input",
@@ -1489,9 +1494,10 @@ pub fn build_adapter_from_prefs(
                 .unwrap_or_else(|| "explicit".to_string());
             let mode = match mode_str.as_str() {
                 "implicit" => FtpsMode::Implicit,
+                "plain" => FtpsMode::Plain,
                 // "explicit" + any forward-compat unknown both
                 // fall back to explicit FTPS — the more
-                // compatible mode.
+                // compatible mode and the safer default.
                 _ => FtpsMode::Explicit,
             };
             let password =

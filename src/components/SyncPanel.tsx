@@ -109,7 +109,7 @@ export function SyncPanel() {
   const [ftpPathDraft, setFtpPathDraft] = useState('');
   const [ftpPasswordDraft, setFtpPasswordDraft] = useState('');
   const [ftpModeDraft, setFtpModeDraft] = useState<
-    'explicit' | 'implicit'
+    'explicit' | 'implicit' | 'plain'
   >('explicit');
   // Phase Sk: E2E passphrase. Two roles depending on the
   // onboarding branch:
@@ -260,6 +260,9 @@ export function SyncPanel() {
       // backend's `default_ftp_port` is 21 (explicit FTPS); we
       // honour the user's input where reasonable.
       const port = Number.parseInt(ftpPortDraft, 10);
+      // Implicit defaults to 990; explicit + plain share 21
+      // (AUTH TLS lives on the explicit-FTP port, plain talks
+      // the same port without the upgrade command).
       const fallback = ftpModeDraft === 'implicit' ? 990 : 21;
       return {
         kind: 'ftp',
@@ -1291,8 +1294,8 @@ export function SyncPanel() {
                   onChange={() => {
                     setFtpModeDraft('explicit');
                     // Swap the port default if the user
-                    // hasn't customised it from the implicit
-                    // value yet.
+                    // hasn't customised it away from the
+                    // implicit value yet.
                     if (ftpPortDraft === '990') setFtpPortDraft('21');
                   }}
                 />{' '}
@@ -1311,9 +1314,37 @@ export function SyncPanel() {
                 />{' '}
                 {t('dialogs.settings.sync.adapterFtpModeImplicit')}
               </label>
+              <label>
+                <input
+                  type="radio"
+                  name="ftp-mode"
+                  value="plain"
+                  checked={ftpModeDraft === 'plain'}
+                  onChange={() => {
+                    setFtpModeDraft('plain');
+                    // Plain shares the explicit FTPS port
+                    // (server-side they're the same listener;
+                    // plain just skips AUTH TLS).
+                    if (ftpPortDraft === '990') setFtpPortDraft('21');
+                  }}
+                />{' '}
+                {t('dialogs.settings.sync.adapterFtpModePlain')}
+              </label>
               <p className="sync-panel__hint">
                 {t('dialogs.settings.sync.adapterFtpModeHint')}
               </p>
+              {/* Plain mode gets an additional, stronger
+                  warning rendered as role="alert" so the
+                  user understands the privacy trade-off
+                  before they click Connect. */}
+              {ftpModeDraft === 'plain' && (
+                <p
+                  className="sync-panel__warning"
+                  role="alert"
+                >
+                  {t('dialogs.settings.sync.adapterFtpModePlainWarning')}
+                </p>
+              )}
             </fieldset>
             <div className="sync-panel__field">
               <label>
@@ -1369,8 +1400,18 @@ export function SyncPanel() {
                   }
                 />
               </label>
+              {/* The TLS-recommended hint is purely
+                  informational; with the Plain radio
+                  available the user might genuinely want to
+                  pick it for a LAN setup, but the surrounding
+                  warning above makes the trade-off
+                  explicit. */}
               <p className="sync-panel__hint">
-                {t('dialogs.settings.sync.adapterFtpTlsRequiredHint')}
+                {ftpModeDraft === 'plain'
+                  ? t(
+                      'dialogs.settings.sync.adapterFtpPlainPasswordHint',
+                    )
+                  : t('dialogs.settings.sync.adapterFtpTlsRequiredHint')}
               </p>
             </div>
           </>

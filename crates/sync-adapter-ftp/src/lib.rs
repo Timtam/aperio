@@ -1,15 +1,15 @@
-//! FTPS `SyncAdapter` implementation (DESIGN.md §19.6).
+//! FTPS / FTP `SyncAdapter` implementation (DESIGN.md §19.6).
 //!
-//! FTP-over-TLS — pure-Rust client built on [`suppaftp`] +
-//! [`rustls`], so the adapter compiles cleanly for Mobile
-//! targets (no OpenSSL / SChannel system deps). The DESIGN.md
-//! adapter table calls for "FTP über TLS" with username/password
-//! auth as the only mode — that's exactly what this implements.
-//!
-//! Plaintext FTP is intentionally NOT supported: even on a LAN
-//! the credentials are too visible to be acceptable, and the
-//! settings panel mandates choosing implicit or explicit FTPS
-//! at configure time.
+//! Pure-Rust client built on [`suppaftp`] + [`rustls`], so the
+//! adapter compiles cleanly for Mobile targets (no OpenSSL /
+//! SChannel system deps). The DESIGN.md adapter table calls for
+//! "FTP über TLS" with username/password auth as the only
+//! mode — both encrypted variants (explicit/implicit) are
+//! implemented; **plaintext FTP is supported as an opt-in for
+//! legacy LAN scenarios** (private networks, isolated VLANs
+//! where TLS is genuinely impossible). The settings panel
+//! gates the plain mode behind an explicit warning so users
+//! don't pick it by accident.
 //!
 //! Maps the [`SyncAdapter`] trait onto FTP commands:
 //!
@@ -24,19 +24,25 @@
 //! | `delete_log`         | `DELE`                                       |
 //! | sound asset CRUD     | `<base>/assets/sounds/<hash>.<ext>`         |
 //!
-//! ## Two modes
+//! ## Three modes
 //!
 //! - **Explicit FTPS** (default, port 21): connect plaintext,
 //!   then issue `AUTH TLS` to upgrade the control channel. Data
 //!   channels reuse the negotiated TLS state. The more
 //!   compatible mode — most servers either support it or refuse
-//!   the upgrade cleanly, in which case the adapter errors with
-//!   a clear "TLS required" message rather than falling back to
-//!   plaintext.
+//!   the upgrade cleanly.
 //!
 //! - **Implicit FTPS** (port 990 by convention): TLS handshake
 //!   happens before the FTP greeting. Slightly faster (one
 //!   fewer round-trip) but rarer in the wild.
+//!
+//! - **Plain FTP** (no TLS, port 21): credentials + payload
+//!   traverse the network unencrypted. Provided for legacy LAN
+//!   scenarios — an isolated VLAN with an FTP server that
+//!   genuinely can't do TLS, or testing setups where the cost
+//!   of a self-signed cert outweighs the lack of confidentiality.
+//!   The frontend gates this mode behind a visible warning;
+//!   never use it across an untrusted network.
 //!
 //! ## Async strategy: sync API + `spawn_blocking`
 //!
@@ -70,8 +76,6 @@
 //!
 //! ## What this crate does NOT do
 //!
-//! - **Plaintext FTP.** No. Pick SFTP or local FS if you can't
-//!   run TLS on your server.
 //! - **Connection pooling.** Per-operation connect.
 //! - **MLSD / MLST.** We parse `NLST` output (one filename per
 //!   line) — simpler + universally supported. Aperio data
@@ -96,6 +100,8 @@ use tracing::{debug, warn};
 
 use suppaftp::types::FileType;
 use suppaftp::FtpError;
+use suppaftp::FtpResult;
+use suppaftp::FtpStream;
 use suppaftp::RustlsConnector;
 use suppaftp::RustlsFtpStream;
 use suppaftp::Status;
@@ -104,9 +110,9 @@ use suppaftp::Status;
 // Config types
 // ─────────────────────────────────────────────────────────────────
 
-/// FTPS mode picker — the two ways TLS can sit on an FTP
-/// connection. Implicit goes through TLS first then talks FTP;
-/// explicit talks FTP first and upgrades via `AUTH TLS`.
+/// FTPS mode picker — the three ways FTP can sit on the wire:
+/// two encrypted variants and a legacy plain-text fallback for
+/// the isolated-LAN scenarios where TLS is genuinely impossible.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FtpsMode {
@@ -118,16 +124,119 @@ pub enum FtpsMode {
     /// TLS handshake before the FTP greeting (typically port
     /// 990). Slightly faster but rarer.
     Implicit,
+    /// Plaintext FTP (no TLS). Credentials and payload are
+    /// visible to anyone on the wire. Provided for legacy
+    /// LAN-only setups where TLS isn't an option — the
+    /// frontend warns explicitly before this mode can be
+    /// selected. NEVER use across an untrusted network.
+    Plain,
 }
 
 impl FtpsMode {
-    /// Default port for this mode: 21 for explicit, 990 for
-    /// implicit. Used by the settings dialog to suggest a
-    /// sensible port when the user picks the mode.
+    /// Default port for this mode: 21 for explicit + plain
+    /// (they share port 21 on the wire), 990 for implicit.
+    /// Used by the settings dialog to suggest a sensible port
+    /// when the user picks the mode.
     pub fn default_port(self) -> u16 {
         match self {
-            Self::Explicit => 21,
+            Self::Explicit | Self::Plain => 21,
             Self::Implicit => 990,
+        }
+    }
+
+    /// Whether this mode runs the FTP control + data channels
+    /// over TLS. `false` for `Plain` only.
+    pub fn is_encrypted(self) -> bool {
+        !matches!(self, Self::Plain)
+    }
+}
+
+/// Internal stream wrapper — picks the right suppaftp stream
+/// type at runtime so each [`SyncAdapter`] trait method can
+/// dispatch uniformly. Without this we'd have to duplicate
+/// every method body across the two FTP modes (TLS vs. plain
+/// have different generic instantiations of
+/// `suppaftp::ImplFtpStream<T>`).
+enum SessionStream {
+    Tls(RustlsFtpStream),
+    Plain(FtpStream),
+}
+
+impl SessionStream {
+    fn login(&mut self, user: &str, password: &str) -> FtpResult<()> {
+        match self {
+            Self::Tls(s) => s.login(user, password),
+            Self::Plain(s) => s.login(user, password),
+        }
+    }
+
+    fn transfer_type(&mut self, ty: FileType) -> FtpResult<()> {
+        match self {
+            Self::Tls(s) => s.transfer_type(ty),
+            Self::Plain(s) => s.transfer_type(ty),
+        }
+    }
+
+    fn noop(&mut self) -> FtpResult<()> {
+        match self {
+            Self::Tls(s) => s.noop(),
+            Self::Plain(s) => s.noop(),
+        }
+    }
+
+    fn mkdir(&mut self, path: &str) -> FtpResult<()> {
+        match self {
+            Self::Tls(s) => s.mkdir(path),
+            Self::Plain(s) => s.mkdir(path),
+        }
+    }
+
+    fn retr_as_buffer(
+        &mut self,
+        path: &str,
+    ) -> FtpResult<std::io::Cursor<Vec<u8>>> {
+        match self {
+            Self::Tls(s) => s.retr_as_buffer(path),
+            Self::Plain(s) => s.retr_as_buffer(path),
+        }
+    }
+
+    fn put_file(
+        &mut self,
+        path: &str,
+        r: &mut std::io::Cursor<&[u8]>,
+    ) -> FtpResult<u64> {
+        match self {
+            Self::Tls(s) => s.put_file(path, r),
+            Self::Plain(s) => s.put_file(path, r),
+        }
+    }
+
+    fn nlst(&mut self, path: Option<&str>) -> FtpResult<Vec<String>> {
+        match self {
+            Self::Tls(s) => s.nlst(path),
+            Self::Plain(s) => s.nlst(path),
+        }
+    }
+
+    fn rm(&mut self, path: &str) -> FtpResult<()> {
+        match self {
+            Self::Tls(s) => s.rm(path),
+            Self::Plain(s) => s.rm(path),
+        }
+    }
+
+    fn rename(&mut self, from: &str, to: &str) -> FtpResult<()> {
+        match self {
+            Self::Tls(s) => s.rename(from, to),
+            Self::Plain(s) => s.rename(from, to),
+        }
+    }
+
+    fn quit(&mut self) -> FtpResult<()> {
+        match self {
+            Self::Tls(s) => s.quit(),
+            Self::Plain(s) => s.quit(),
         }
     }
 }
@@ -183,16 +292,17 @@ impl FtpsSyncAdapter {
     }
 
     /// Run a closure on the blocking pool with a freshly-opened
-    /// FTP connection. The closure receives `&mut
-    /// RustlsFtpStream` after login + binary-mode + base-path
-    /// CWD. Returns whatever the closure returns; any FTP
-    /// error short-circuits as `SyncError`.
+    /// FTP connection. The closure receives `&mut SessionStream`
+    /// after login + binary-mode setup, regardless of whether
+    /// the underlying transport is TLS or plain — the wrapper
+    /// dispatches per call. Returns whatever the closure
+    /// returns; any FTP error short-circuits as `SyncError`.
     ///
     /// Per-operation connect — see the module-level doc for
     /// the rationale.
     async fn with_session<F, T>(&self, work: F) -> SyncResult<T>
     where
-        F: FnOnce(&mut RustlsFtpStream) -> SyncResult<T> + Send + 'static,
+        F: FnOnce(&mut SessionStream) -> SyncResult<T> + Send + 'static,
         T: Send + 'static,
     {
         let host = self.host.clone();
@@ -204,9 +314,9 @@ impl FtpsSyncAdapter {
 
         tokio::task::spawn_blocking(move || {
             let addr = format!("{host}:{port}");
-            let connector = RustlsConnector::from(tls);
             let mut stream = match mode {
                 FtpsMode::Explicit => {
+                    let connector = RustlsConnector::from(tls);
                     let plain = RustlsFtpStream::connect(&addr).map_err(
                         |err| {
                             SyncError::network(format!(
@@ -214,21 +324,33 @@ impl FtpsSyncAdapter {
                             ))
                         },
                     )?;
-                    plain.into_secure(connector, &host).map_err(|err| {
-                        SyncError::network(format!(
-                            "AUTH TLS to {host}: {err}"
-                        ))
-                    })?
+                    let secured =
+                        plain.into_secure(connector, &host).map_err(|err| {
+                            SyncError::network(format!(
+                                "AUTH TLS to {host}: {err}"
+                            ))
+                        })?;
+                    SessionStream::Tls(secured)
                 }
                 FtpsMode::Implicit => {
-                    RustlsFtpStream::connect_secure_implicit(
+                    let connector = RustlsConnector::from(tls);
+                    let secured = RustlsFtpStream::connect_secure_implicit(
                         &addr, connector, &host,
                     )
                     .map_err(|err| {
                         SyncError::network(format!(
                             "implicit TLS connect {addr}: {err}"
                         ))
-                    })?
+                    })?;
+                    SessionStream::Tls(secured)
+                }
+                FtpsMode::Plain => {
+                    let plain = FtpStream::connect(&addr).map_err(|err| {
+                        SyncError::network(format!(
+                            "plain connect {addr}: {err}"
+                        ))
+                    })?;
+                    SessionStream::Plain(plain)
                 }
             };
 
@@ -473,7 +595,7 @@ impl SyncAdapter for FtpsSyncAdapter {
 /// Ensure `dir` exists on the remote. Idempotent: an "already
 /// exists" response is folded into success. Sync because it
 /// runs inside `spawn_blocking`.
-fn ensure_dir(stream: &mut RustlsFtpStream, dir: &str) -> SyncResult<()> {
+fn ensure_dir(stream: &mut SessionStream, dir: &str) -> SyncResult<()> {
     match stream.mkdir(dir) {
         Ok(()) => Ok(()),
         Err(err) if is_already_exists(&err) => Ok(()),
@@ -483,7 +605,7 @@ fn ensure_dir(stream: &mut RustlsFtpStream, dir: &str) -> SyncResult<()> {
 
 /// `STOR` the given bytes to `path`.
 fn write_file(
-    stream: &mut RustlsFtpStream,
+    stream: &mut SessionStream,
     path: &str,
     bytes: &[u8],
 ) -> SyncResult<()> {
@@ -499,7 +621,7 @@ fn write_file(
 /// rename, which is the closest FTP gets to the local-FS
 /// atomic-replace pattern.
 fn atomic_write(
-    stream: &mut RustlsFtpStream,
+    stream: &mut SessionStream,
     path: &str,
     bytes: &[u8],
 ) -> SyncResult<()> {
@@ -662,5 +784,16 @@ mod tests {
     fn ftps_mode_default_ports() {
         assert_eq!(FtpsMode::Explicit.default_port(), 21);
         assert_eq!(FtpsMode::Implicit.default_port(), 990);
+        // Plain shares the explicit-FTPS port — server-side
+        // they're the same listener (the AUTH TLS command is
+        // what flips encryption on).
+        assert_eq!(FtpsMode::Plain.default_port(), 21);
+    }
+
+    #[test]
+    fn ftps_mode_is_encrypted_flag() {
+        assert!(FtpsMode::Explicit.is_encrypted());
+        assert!(FtpsMode::Implicit.is_encrypted());
+        assert!(!FtpsMode::Plain.is_encrypted());
     }
 }
