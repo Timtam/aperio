@@ -36,11 +36,18 @@
 //! "different device" semantics per §19.
 
 pub mod applier;
+pub mod compactor;
 pub mod onboarding;
 pub mod orchestrator;
 pub mod scheduler;
+pub mod snapshot;
+pub mod whitelist;
 
 pub use applier::{ApplyReport, EventLogApplier};
+pub use compactor::{
+    CompactionReport, Compactor, DEFAULT_MAX_AGE_DAYS, DEFAULT_MAX_BYTES,
+    DEFAULT_MAX_LOGS, PREF_MAX_AGE_DAYS, PREF_MAX_BYTES, PREF_MAX_LOGS,
+};
 pub use onboarding::{
     DeviceSummary, OnboardingReport, OnboardingService, SyncPreview,
     PREF_DEVICE_NAME, PREF_ONBOARDED,
@@ -52,6 +59,7 @@ pub use scheduler::{
     read_interval_minutes, SyncScheduler, SyncStatusPayload,
     DEFAULT_SYNC_INTERVAL_MINUTES, PREF_SYNC_INTERVAL_MINUTES,
 };
+pub use snapshot::{AperioSnapshotBody, SnapshotApplyOutcome, SnapshotBuilder};
 
 use std::path::PathBuf;
 use std::sync::Arc;

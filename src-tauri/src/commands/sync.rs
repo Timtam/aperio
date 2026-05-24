@@ -39,7 +39,7 @@ use tauri::State;
 use super::{CommandError, CommandResult};
 use crate::db::DbHandle;
 use crate::event_log::{
-    OnboardingReport, OnboardingService, SyncOrchestrator, SyncPreview,
+    CompactionReport, OnboardingReport, OnboardingService, SyncOrchestrator, SyncPreview,
     SyncRoundReport, SyncScheduler, SyncStatus,
 };
 use crate::user_prefs::UserPrefsRepo;
@@ -228,6 +228,42 @@ pub async fn get_sync_status(
     orchestrator: State<'_, Arc<SyncOrchestrator>>,
 ) -> CommandResult<SyncStatus> {
     Ok(orchestrator.status())
+}
+
+/// Manually trigger a compaction round (Phase Sg, §19.10). Snapshots
+/// the current local state, pushes `snapshot.json`, advances
+/// `meta.json.snapshot_timestamp`, and GCs every log file older than
+/// the new snapshot horizon (clamped by the slowest device's
+/// `last_seen_log`).
+///
+/// Returns counters the Settings UI can render directly. The
+/// scheduler also dispatches this same code path automatically when
+/// the thresholds (§19.10) fire — the command is the "user got
+/// impatient" override.
+#[tauri::command]
+pub async fn compact_now(
+    orchestrator: State<'_, Arc<SyncOrchestrator>>,
+) -> CommandResult<CompactionReport> {
+    // Borrow the adapter handle for the duration of the compaction.
+    // If none is configured, fail fast with a clear code rather than
+    // letting the compactor panic later.
+    let adapter = {
+        let inner = orchestrator.adapter_handle();
+        match inner {
+            Some(a) => a,
+            None => {
+                return Err(CommandError {
+                    code: "not_configured",
+                    message: "no sync adapter configured".into(),
+                });
+            }
+        }
+    };
+    orchestrator
+        .compactor()
+        .compact_now(adapter.as_ref())
+        .await
+        .map_err(sync_err)
 }
 
 // ---------------------------------------------------------------------------

@@ -32,65 +32,9 @@ use tauri::State;
 
 use super::{CommandError, CommandResult};
 use crate::db::DbHandle;
+use crate::event_log::whitelist::is_synced_key;
 use crate::event_log::EventLogWriter;
 use crate::user_prefs::{UserPrefsError, UserPrefsRepo};
-
-/// Whitelist of `user_prefs` keys (or key-prefixes) that
-/// participate in cross-device sync per DESIGN.md §19.2.1.
-///
-/// Prefix matching: an entry ending in `.` matches any key that
-/// starts with it. That covers families like `sound.*` or
-/// `reminders.defaults.*` without listing every sub-key here.
-/// Exact matches are listed without the trailing dot.
-///
-/// Anything NOT on this list stays device-local. The contact-sync
-/// scheduler's own prefs (`contacts.lastSyncedAt`, the
-/// `sync.deviceId` itself) are deliberately excluded — they're
-/// per-device state, not user preferences.
-const SYNC_WHITELIST: &[&str] = &[
-    // Appearance + locale (always-sync per §19.2.1).
-    "appearance.darkMode",
-    "appearance.colorScheme",
-    "locale",
-    // View defaults (always-sync).
-    "view.preferred",
-    "view.weekStart",
-    "view.weekNumbers",
-    // Reminder defaults — one entry per calendar / task list goes
-    // under the calendar.<id>.defaultReminders namespace.
-    "calendar.",
-    "tasks.showCompleted",
-    "reminders.defaults.",
-    // Sound configuration (Phase 14.4 — container/event/task
-    // overrides + the global default). Asset files themselves
-    // sync via the SyncAdapter's push_sound_asset path; the
-    // user_prefs values reference them by hash.
-    "sound.",
-    // Snooze options (configurable per §19.2.1).
-    "snooze.options",
-    // Which sync adapter is active. Note: adapter *credentials*
-    // stay local (keychain), only the choice itself syncs.
-    "sync.adapter",
-    "sync.intervalMinutes",
-];
-
-/// Decide whether a key participates in cross-device sync. Both
-/// exact matches and prefix matches (entries ending in `.`)
-/// count.
-fn is_synced_key(key: &str) -> bool {
-    SYNC_WHITELIST.iter().any(|pattern| {
-        if pattern.ends_with('.') {
-            // Prefix-with-trailing-dot pattern: match keys that
-            // start with the full pattern AND have at least one
-            // more character after it. The bare prefix itself
-            // (e.g. "sound." with nothing after) is NOT a valid
-            // sub-key so it doesn't match either.
-            key.starts_with(*pattern) && key.len() > pattern.len()
-        } else {
-            *pattern == key
-        }
-    })
-}
 
 #[tauri::command]
 pub async fn get_user_pref(

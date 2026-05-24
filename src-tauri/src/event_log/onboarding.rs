@@ -55,6 +55,7 @@ use sync_core::{
 use tracing::{debug, info, warn};
 
 use crate::db::SharedConn;
+use crate::event_log::snapshot::SnapshotBuilder;
 use crate::event_log::{ApplyReport, EventLogApplier, SYNC_CURSOR_PREF_KEY};
 use crate::user_prefs::UserPrefsRepo;
 
@@ -150,6 +151,11 @@ pub struct OnboardingService {
     db: SharedConn,
     local_device_id: DeviceId,
     applier: Arc<EventLogApplier>,
+    /// Phase Sg: used to consume `snapshot.json` before pulling
+    /// logs so a freshly-onboarded device pays one snapshot read
+    /// + a tiny log backlog instead of replaying months of logs
+    /// from epoch.
+    snapshot_builder: Arc<SnapshotBuilder>,
     app_version: String,
 }
 
@@ -158,12 +164,14 @@ impl OnboardingService {
         db: SharedConn,
         local_device_id: DeviceId,
         applier: Arc<EventLogApplier>,
+        snapshot_builder: Arc<SnapshotBuilder>,
         app_version: impl Into<String>,
     ) -> Self {
         Self {
             db,
             local_device_id,
             applier,
+            snapshot_builder,
             app_version: app_version.into(),
         }
     }
@@ -246,12 +254,54 @@ impl OnboardingService {
                 )
             })?;
 
-        // Pull everything. We deliberately use `epoch()` rather than
-        // the local cursor: the local cursor is from a previous
-        // adapter or stale on first launch, and the applier's
-        // idempotency table guarantees re-applying old logs is a
-        // no-op anyway.
-        let logs = adapter.fetch_new_logs(&DeviceCursor::epoch()).await?;
+        // Phase Sg: consume snapshot first if one exists. Apply
+        // its body to local SQLite + advance the cursor to the
+        // snapshot timestamp; the log pull below then only fetches
+        // the small backlog that came after compaction.
+        //
+        // We start the cursor at MIN_UTC (so a missing snapshot
+        // means "fetch everything"). A successful snapshot apply
+        // bumps it to the snapshot's own timestamp.
+        let mut starting_cursor: DateTime<Utc> = DateTime::<Utc>::MIN_UTC;
+        let mut snapshot_applied = false;
+        match adapter.fetch_snapshot().await? {
+            Some(snapshot) => {
+                info!(
+                    snapshot_ts = %snapshot.metadata.snapshot_timestamp,
+                    "consuming remote snapshot during onboarding",
+                );
+                match self.snapshot_builder.apply(&snapshot) {
+                    Ok(_outcome) => {
+                        starting_cursor = snapshot.metadata.snapshot_timestamp;
+                        snapshot_applied = true;
+                    }
+                    Err(err) => {
+                        // Refuse to silently fall back to log-only
+                        // replay — a partial snapshot apply would
+                        // leave an inconsistent dataset. Surface
+                        // so the user can retry.
+                        return Err(SyncError::internal(format!(
+                            "snapshot apply: {err}"
+                        )));
+                    }
+                }
+            }
+            None => {
+                debug!(
+                    "no remote snapshot present; falling back to full log replay",
+                );
+            }
+        }
+
+        // Pull logs newer than the snapshot timestamp (or epoch if
+        // there was no snapshot). The applier's idempotency table
+        // guarantees re-applying old logs is a no-op anyway, but
+        // skipping them saves the disk + serde cost.
+        let logs = adapter
+            .fetch_new_logs(&DeviceCursor {
+                last_seen_log: starting_cursor,
+            })
+            .await?;
         let foreign: Vec<_> = logs
             .into_iter()
             .filter(|log| log.name.device_id != self.local_device_id)
@@ -259,13 +309,15 @@ impl OnboardingService {
         let fetched_logs = foreign.len();
         info!(
             count = fetched_logs,
+            snapshot_applied = snapshot_applied,
             "accept_remote pulled remote logs",
         );
 
         // Track the newest timestamp so we can set the cursor
-        // correctly afterwards. Default to epoch so a remote with
-        // zero logs still lands a sensible cursor value.
-        let mut newest: DateTime<Utc> = DateTime::<Utc>::MIN_UTC;
+        // correctly afterwards. Default to whatever the snapshot
+        // gave us (epoch when there was none) so an empty remote
+        // still lands a sensible cursor.
+        let mut newest: DateTime<Utc> = starting_cursor;
 
         let mut report = OnboardingReport {
             remote_was_empty: false,
@@ -291,8 +343,10 @@ impl OnboardingService {
         }
 
         // Persist the cursor so the next scheduler round doesn't
-        // re-pull the same backlog. If we never bumped `newest`
-        // (empty remote), don't touch the existing cursor.
+        // re-pull the same backlog. The snapshot path bumps
+        // `newest` even when no logs followed it; if we never
+        // bumped `newest` past MIN_UTC (no snapshot AND no logs),
+        // don't touch the existing cursor.
         if newest > DateTime::<Utc>::MIN_UTC {
             self.save_cursor(newest)?;
         }
@@ -582,10 +636,21 @@ mod tests {
         let adapter = Arc::new(LocalAdapter::new(db.clone()));
         let applier = Arc::new(EventLogApplier::new(
             db.clone(),
-            adapter,
+            Arc::clone(&adapter),
             device_id.clone(),
         ));
-        OnboardingService::new(db, device_id, applier, "1.0.0-test")
+        let snapshot_builder = Arc::new(SnapshotBuilder::new(
+            db.clone(),
+            adapter,
+            "1.0.0-test",
+        ));
+        OnboardingService::new(
+            db,
+            device_id,
+            applier,
+            snapshot_builder,
+            "1.0.0-test",
+        )
     }
 
     #[tokio::test]

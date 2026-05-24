@@ -23,8 +23,8 @@ pub use paths::{resolve_data_dir, DataDirKind, DataDirResolution};
 use cal_adapter_local::LocalAdapter;
 use contact_sync::ContactSyncScheduler;
 use event_log::{
-    EventLogApplier, EventLogWriter, OnboardingService, SyncOrchestrator,
-    SyncScheduler,
+    Compactor, EventLogApplier, EventLogWriter, OnboardingService, SnapshotBuilder,
+    SyncOrchestrator, SyncScheduler,
 };
 use registry::AdapterRegistry;
 use reminders::ReminderScheduler;
@@ -123,8 +123,23 @@ pub fn run() {
     let applier_adapter = Arc::new(LocalAdapter::new(db.shared()));
     let applier = Arc::new(EventLogApplier::new(
         db.shared(),
-        applier_adapter,
+        Arc::clone(&applier_adapter),
         device_id.clone(),
+    ));
+    // Phase Sg: snapshot builder + compactor. The builder is shared
+    // with the onboarding service (for snapshot consumption on
+    // accept_remote) and with the compactor (for snapshot
+    // generation during the compaction round).
+    let snapshot_builder = Arc::new(SnapshotBuilder::new(
+        db.shared(),
+        Arc::clone(&applier_adapter),
+        env!("CARGO_PKG_VERSION"),
+    ));
+    let compactor = Arc::new(Compactor::new(
+        db.shared(),
+        Arc::clone(&snapshot_builder),
+        device_id.clone(),
+        env!("CARGO_PKG_VERSION"),
     ));
     // Phase Sf: onboarding service. Shared between the orchestrator
     // (which uses it for `meta.json` heartbeats after each round) and
@@ -134,6 +149,7 @@ pub fn run() {
         db.shared(),
         device_id.clone(),
         Arc::clone(&applier),
+        Arc::clone(&snapshot_builder),
         env!("CARGO_PKG_VERSION"),
     ));
     let sync_orchestrator = Arc::new(SyncOrchestrator::new(
@@ -146,6 +162,7 @@ pub fn run() {
         device_id,
         applier,
         Arc::clone(&onboarding),
+        Arc::clone(&compactor),
     ));
     // If the user had previously configured a sync adapter,
     // reconstruct it now so `sync_now` works without a
@@ -262,6 +279,10 @@ pub fn run() {
             commands::preview_sync_target,
             commands::accept_remote_dataset,
             commands::adopt_local_dataset,
+            // Phase Sg (DESIGN.md §19.10): snapshot + log
+            // compaction. The auto-trigger lives inside
+            // `sync_now`; this is the manual override.
+            commands::compact_now,
         ])
         .setup(move |app| {
             // Spawn the reminder scheduler on the Tauri/tokio runtime

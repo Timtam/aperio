@@ -53,7 +53,7 @@ use sync_core::{DeviceCursor, DeviceId, LogFile, SyncAdapter, SyncResult};
 use tracing::{debug, info, warn};
 
 use crate::db::SharedConn;
-use crate::event_log::{ApplyReport, EventLogApplier, OnboardingService};
+use crate::event_log::{ApplyReport, Compactor, EventLogApplier, OnboardingService};
 use crate::user_prefs::UserPrefsRepo;
 
 /// Bring the scheduler's interval pref into status reads. The
@@ -138,6 +138,11 @@ pub struct SyncOrchestrator {
     /// heartbeat in `meta.json` so other devices and the
     /// compaction algorithm see a current `last_seen_log`.
     onboarding: Arc<OnboardingService>,
+    /// Phase Sg: snapshot generator + log compactor. Polled at
+    /// the end of every sync round; if the configured thresholds
+    /// (age / log-count / byte size since last snapshot) are
+    /// breached, a compaction round runs inside the same flow.
+    compactor: Arc<Compactor>,
     /// Currently-configured adapter. `None` when the app hasn't
     /// been set up yet.
     adapter: Mutex<Option<Arc<dyn SyncAdapter>>>,
@@ -156,6 +161,7 @@ impl SyncOrchestrator {
         local_device_id: DeviceId,
         applier: Arc<EventLogApplier>,
         onboarding: Arc<OnboardingService>,
+        compactor: Arc<Compactor>,
     ) -> Self {
         Self {
             db,
@@ -163,9 +169,25 @@ impl SyncOrchestrator {
             local_device_id,
             applier,
             onboarding,
+            compactor,
             adapter: Mutex::new(None),
             in_flight: Mutex::new(false),
         }
+    }
+
+    /// Borrow the compactor handle. Used by the `compact_now`
+    /// Tauri command so manual triggers run through the same
+    /// instance that the auto-trigger uses.
+    pub fn compactor(&self) -> Arc<Compactor> {
+        Arc::clone(&self.compactor)
+    }
+
+    /// Borrow the currently-configured adapter handle, if any.
+    /// Used by the `compact_now` Tauri command so manual
+    /// compaction can run against the same adapter the
+    /// orchestrator is using, without re-building one from prefs.
+    pub fn adapter_handle(&self) -> Option<Arc<dyn SyncAdapter>> {
+        self.adapter.lock().expect("adapter mutex poison").clone()
     }
 
     /// Swap in a freshly-built adapter (the user just configured
@@ -309,6 +331,25 @@ impl SyncOrchestrator {
             warn!(?err, "meta.json heartbeat failed");
         }
 
+        // 5. (Phase Sg) Evaluate compaction thresholds. We run
+        // inline so the snapshot + log GC happens before the next
+        // scheduler tick re-pushes; missing this window once
+        // doesn't break correctness, but firing inside the same
+        // round lets the user see "compacted" status promptly.
+        // Failures are non-fatal — the next round retries.
+        match self.compactor.should_compact(adapter.as_ref()).await {
+            Ok(true) => {
+                info!("compaction thresholds breached; running inline");
+                if let Err(err) =
+                    self.compactor.compact_now(adapter.as_ref()).await
+                {
+                    warn!(?err, "auto-compaction failed");
+                }
+            }
+            Ok(false) => {}
+            Err(err) => warn!(?err, "couldn't evaluate compaction thresholds"),
+        }
+
         info!(
             pushed = report.pushed_logs,
             fetched = report.fetched_logs,
@@ -394,12 +435,19 @@ impl SyncOrchestrator {
                     continue;
                 }
             };
+            let byte_count = bytes.len();
             let log = LogFile {
                 name: parsed,
                 bytes,
             };
             match adapter.push_log(&log).await {
-                Ok(()) => pushed += 1,
+                Ok(()) => {
+                    pushed += 1;
+                    // Bump the compactor's "logs since snapshot"
+                    // counters so its threshold check picks up the
+                    // new push without an extra round-trip.
+                    self.compactor.record_pushed_log(byte_count);
+                }
                 Err(err) => warn!(name = name, ?err, "push_log failed"),
             }
         }
