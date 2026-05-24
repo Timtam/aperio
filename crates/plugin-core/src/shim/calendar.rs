@@ -42,7 +42,7 @@ pub struct FfiCalendarAdapter {
     /// because we hand individual fn pointers to `spawn_blocking`
     /// closures — those need `'static` so the borrow has to
     /// disappear before the closure runs.
-    vtable: Snapshot,
+    vtable: VtableSnapshot,
     /// Statically-cached capability list, derived once at
     /// construction time from the plugin's `capabilities()`
     /// method or — failing that — the manifest. Used by the
@@ -56,7 +56,7 @@ pub struct FfiCalendarAdapter {
 /// `spawn_blocking` closure can move its own copy without having
 /// to hold a reference back into the manager.
 #[derive(Clone, Copy)]
-struct Snapshot {
+struct VtableSnapshot {
     authenticate: Option<crate::vtables::VtableMethodFn>,
     list_calendars: Option<crate::vtables::VtableMethodFn>,
     get_events: Option<crate::vtables::VtableMethodFn>,
@@ -97,7 +97,7 @@ impl FfiCalendarAdapter {
             );
             return None;
         }
-        let snapshot = Snapshot {
+        let snapshot = VtableSnapshot {
             authenticate: vtable_ref.authenticate,
             list_calendars: vtable_ref.list_calendars,
             get_events: vtable_ref.get_events,
@@ -110,22 +110,12 @@ impl FfiCalendarAdapter {
             rename_calendar: vtable_ref.rename_calendar,
         };
 
-        let manifest_caps: Vec<Capability> = plugin
-            .manifest
-            .capabilities
-            .iter()
-            .filter_map(|c| match c {
-                crate::Capability::Calendar => Some(Capability::Calendar),
-                crate::Capability::Tasks => Some(Capability::Tasks),
-                crate::Capability::Contacts => Some(Capability::Contacts),
-                crate::Capability::Unknown(_) => None,
-            })
-            .collect();
+        let capabilities = super::manifest_capabilities(&plugin.manifest.capabilities);
 
         Some(Self {
             _plugin: plugin,
             vtable: snapshot,
-            capabilities: manifest_caps,
+            capabilities,
         })
     }
 }
