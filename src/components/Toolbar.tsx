@@ -4,6 +4,7 @@ import { useDateFormat } from '../intl/dateFormat';
 import { useDialogState } from '../state/DialogState';
 import { useViewState } from '../state/ViewState';
 import { VIEWS, type ViewId } from '../state/viewMath';
+import { SyncStatusIndicator } from './SyncStatusIndicator';
 
 const VIEW_SHORTCUT: Record<ViewId, string> = {
   day: '1',
@@ -126,6 +127,15 @@ export function Toolbar() {
         >
           {t('toolbar.newTask')}
         </button>
+      </div>
+
+      {/* Sync status sits at the right edge of the toolbar so it
+          stays visible across views without competing with the
+          create/search cluster. §19.9 mandates "permanently visible
+          in the status bar"; the toolbar IS the status bar in
+          Aperio's layout. */}
+      <div className="toolbar__group toolbar__group--status">
+        <SyncStatusIndicator />
       </div>
     </div>
   );

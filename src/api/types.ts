@@ -277,6 +277,13 @@ export interface CommandError {
     | 'protocol'
     | 'invalid_input'
     | 'unsupported'
-    | 'internal';
+    | 'internal'
+    // Phase Sd onwards — cross-device sync error codes. The Rust
+    // side maps `SyncError` variants into these so the frontend can
+    // pattern-match on a stable string.
+    | 'io'
+    | 'encryption_required'
+    | 'schema_too_old'
+    | 'not_configured';
   message: string;
 }

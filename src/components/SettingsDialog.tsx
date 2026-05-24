@@ -14,6 +14,7 @@ import { CalendarsPanel } from './CalendarsPanel';
 import { ColorLabelsPanel } from './ColorLabelsPanel';
 import { ContactsPanel } from './ContactsPanel';
 import { Modal } from './Modal';
+import { SyncPanel } from './SyncPanel';
 import { TasksPanel } from './TasksPanel';
 
 /**
@@ -43,7 +44,8 @@ export type SettingsTabId =
   | 'calendars'
   | 'colorLabels'
   | 'tasks'
-  | 'contacts';
+  | 'contacts'
+  | 'sync';
 
 const TAB_ORDER: SettingsTabId[] = [
   'accounts',
@@ -51,6 +53,7 @@ const TAB_ORDER: SettingsTabId[] = [
   'colorLabels',
   'tasks',
   'contacts',
+  'sync',
 ];
 
 export interface SettingsDialogProps {
@@ -92,6 +95,7 @@ export function SettingsDialog({
     colorLabels: null,
     tasks: null,
     contacts: null,
+    sync: null,
   });
 
   const focusTab = useCallback(
@@ -240,6 +244,7 @@ export function SettingsDialog({
           {activeTab === 'colorLabels' && <ColorLabelsPanel />}
           {activeTab === 'tasks' && <TasksPanel />}
           {activeTab === 'contacts' && <ContactsPanel />}
+          {activeTab === 'sync' && <SyncPanel />}
         </div>
       </div>
 

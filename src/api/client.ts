@@ -634,3 +634,191 @@ export const clearContactsCache = () =>
  *  so a typo gets corrected rather than crashing the scheduler. */
 export const setContactsSyncInterval = (minutes: number) =>
   invoke<number>('set_contacts_sync_interval', { minutes });
+
+// ── Cross-device sync (Phase Sd–Si, DESIGN.md §19) ───────────────────
+
+/** Adapter family the user picked. `none` is the explicit
+ *  disconnect — sync stops, no further pushes, but already-pushed
+ *  data on the remote stays where it is. */
+export type SyncAdapterKind = 'local' | 'none';
+
+/** Adapter-family-specific config. Discriminated union keyed by
+ *  `kind` — matches the Rust `SyncAdapterConfig` enum on the wire. */
+export type SyncAdapterConfig =
+  | { kind: 'local'; path: string }
+  | { kind: 'none' };
+
+/** Read-only status snapshot. The state indicator polls this on a
+ *  short cadence + refreshes on `sync-status` events. */
+export interface SyncStatus {
+  configured: boolean;
+  in_flight: boolean;
+  /** RFC 3339 timestamp of the last successful round, or `null`
+   *  when no round has completed yet. The status bar formats it
+   *  via the user's locale. */
+  last_synced_at: string | null;
+  /** Currently-configured periodic interval, minutes. Default 5
+   *  (per §19.8); the Settings → Synchronisation slider edits it
+   *  via `setSyncInterval`. */
+  interval_minutes: number;
+}
+
+/** Counters from one `syncNow` invocation. Surfaced so the
+ *  Settings → Synchronisation panel can show "12 events applied"
+ *  without a follow-up status fetch. */
+export interface SyncRoundReport {
+  pushed_logs: number;
+  fetched_logs: number;
+  applied: number;
+  skipped_own: number;
+  skipped_already_applied: number;
+  skipped_unsupported: number;
+  apply_failures: number;
+  push_failures: number;
+}
+
+/** Payload of the `sync-status` Tauri event the backend emits
+ *  before + after every sync round. `report` is set on the
+ *  post-round emit; `error` carries the orchestrator-level message
+ *  when a round failed at the adapter layer. */
+export interface SyncStatusPayload extends SyncStatus {
+  report?: SyncRoundReport;
+  error?: string;
+}
+
+/** Outcome of a compaction round (manual or auto). Surfaced in
+ *  Settings → Synchronisation. */
+export interface CompactionReport {
+  snapshot_timestamp: string | null;
+  deleted_logs: number;
+  failed_deletes: number;
+  stale_devices: number;
+  snapshot_rows: number;
+  snapshot_settings: number;
+}
+
+/** Onboarding preview result — what the §19.11 dialog needs to
+ *  render before the user picks "übernehmen" vs "neu beginnen". */
+export type SyncPreview =
+  | { kind: 'empty' }
+  | {
+      kind: 'existing';
+      schema_version: number;
+      min_app_version: string;
+      snapshot_timestamp: string | null;
+      e2e_enabled: boolean;
+      devices: SyncDeviceSummary[];
+    };
+
+export interface SyncDeviceSummary {
+  id: string;
+  name: string | null;
+  last_seen_log: string;
+  app_version: string;
+  stale: boolean;
+  /** `true` when this entry refers to the current device — the
+   *  dialog highlights it ("Dieses Gerät"). */
+  is_this_device: boolean;
+}
+
+/** Counters returned by accept/adopt onboarding. */
+export interface OnboardingReport {
+  fetched_logs: number;
+  applied: number;
+  skipped_own: number;
+  skipped_already_applied: number;
+  skipped_unsupported: number;
+  apply_failures: number;
+  remote_was_empty: boolean;
+  device_count: number;
+}
+
+/** One conflict row from `sync_conflicts`. The dialog renders
+ *  `local_value` + `remote_value` as JSON-encoded scalars (string,
+ *  number, ...); the frontend decodes them via `JSON.parse` for
+ *  display. */
+export interface SyncConflict {
+  id: number;
+  detected_at: string;
+  row_kind: 'event' | 'task' | 'task_list' | 'calendar' | 'color_label';
+  row_id: string;
+  field: string;
+  local_value: string | null;
+  remote_value: string | null;
+  remote_device_id: string;
+  remote_timestamp: string;
+  resolved: boolean;
+  resolution: SyncResolutionChoice | null;
+  resolved_at: string | null;
+}
+
+export type SyncResolutionChoice =
+  | 'keep_local'
+  | 'take_remote'
+  | 'save_both';
+
+// ── Steady-state sync commands ──
+
+export const getSyncStatus = () =>
+  invoke<SyncStatus>('get_sync_status');
+
+export const syncNow = () =>
+  invoke<SyncRoundReport>('sync_now');
+
+export const configureSyncAdapter = (config: SyncAdapterConfig) =>
+  invoke<void>('configure_sync_adapter', { config });
+
+/** Update the periodic interval (in minutes). Clamps to ≥1 on the
+ *  backend; returns the value actually persisted. */
+export const setSyncInterval = (minutes: number) =>
+  invoke<number>('set_sync_interval', { minutes });
+
+/** Manual override for the auto-trigger compaction. The auto path
+ *  fires inside `syncNow` whenever the §19.10 thresholds breach. */
+export const compactNow = () =>
+  invoke<CompactionReport>('compact_now');
+
+// ── Onboarding flow (§19.11) ──
+
+/** Probe a remote without committing the orchestrator state.
+ *  Returns `{kind: 'empty'}` for a fresh remote or `{kind: 'existing', ...}`
+ *  with the device list + snapshot metadata. */
+export const previewSyncTarget = (config: SyncAdapterConfig) =>
+  invoke<SyncPreview>('preview_sync_target', { config });
+
+/** "Datensatz übernehmen" — pull every remote log (and snapshot if
+ *  present), apply locally, register this device in meta.json,
+ *  configure the orchestrator. */
+export const acceptRemoteDataset = (
+  config: SyncAdapterConfig,
+  deviceName: string | null,
+) =>
+  invoke<OnboardingReport>('accept_remote_dataset', {
+    config,
+    deviceName,
+  });
+
+/** "Neu beginnen" — overwrite the remote `meta.json` with one
+ *  naming only this device. Caller is responsible for confirming
+ *  the destructive action. */
+export const adoptLocalDataset = (
+  config: SyncAdapterConfig,
+  deviceName: string | null,
+) =>
+  invoke<OnboardingReport>('adopt_local_dataset', {
+    config,
+    deviceName,
+  });
+
+// ── Conflict resolution (§19.3) ──
+
+export const listSyncConflicts = () =>
+  invoke<SyncConflict[]>('list_sync_conflicts');
+
+export const getSyncConflictsCount = () =>
+  invoke<number>('get_sync_conflicts_count');
+
+export const resolveSyncConflict = (
+  id: number,
+  choice: SyncResolutionChoice,
+) => invoke<void>('resolve_sync_conflict', { id, choice });

@@ -8,6 +8,7 @@ import { QuickAddDialog } from './QuickAddDialog';
 import { RemindersDialog } from './RemindersDialog';
 import { SearchDialog } from './SearchDialog';
 import { SettingsDialog } from './SettingsDialog';
+import { SyncConflictsDialog } from './SyncConflictsDialog';
 import { TaskDialog } from './TaskDialog';
 
 /**
@@ -77,6 +78,8 @@ export function DialogHost() {
           defaultListId={mode.listId}
         />
       );
+    case 'syncConflicts':
+      return <SyncConflictsDialog isOpen onClose={close} />;
     case 'none':
     default:
       return null;

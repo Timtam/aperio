@@ -58,7 +58,8 @@ export type DialogMode =
       /** Pre-select this contact list when creating a new contact.
        *  Ignored when editing (the contact's own `list_id` wins). */
       listId?: string;
-    };
+    }
+  | { kind: 'syncConflicts' };
 
 /**
  * Optional context the caller can pass when opening a *create* dialog
@@ -116,6 +117,10 @@ interface DialogStateValue {
     contact?: Contact | null,
     options?: OpenContactOptions,
   ) => void;
+  /** Open the §19.3 conflict-resolution dialog. The dialog reads its
+   *  list from `list_sync_conflicts` on mount + on every
+   *  `sync-conflicts-changed` event. */
+  openSyncConflicts: () => void;
   close: () => void;
   /**
    * Counter that bumps whenever data on the wire might have changed.
@@ -251,6 +256,10 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     },
     [push],
   );
+  const openSyncConflicts = useCallback(
+    () => push({ kind: 'syncConflicts' }),
+    [push],
+  );
 
   const close = useCallback(() => {
     const target = triggerStackRef.current.pop() ?? null;
@@ -303,6 +312,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openPlanTask,
       openDayStartReview,
       openContactDialog,
+      openSyncConflicts,
       close,
       dataVersion,
       invalidateData,
@@ -321,6 +331,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openPlanTask,
       openDayStartReview,
       openContactDialog,
+      openSyncConflicts,
       close,
       dataVersion,
       invalidateData,
