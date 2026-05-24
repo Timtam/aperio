@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useAnnouncer } from '../a11y/Announcer';
+import { FocusableNote } from '../a11y/FocusableNote';
 import {
   clearContactsCache,
   setContactsIncludeReadOnlyOnSync,
@@ -182,29 +183,18 @@ export function ContactsPanel() {
         </h3>
         {/* Informational prose. The Modal wraps the dialog body
             in `role="application"` to keep NVDA in focus mode
-            (so form fields behave like form fields — see
-            Modal.tsx for the reasoning). Side effect: static
-            `<p>` paragraphs are invisible to focus-mode tab
-            navigation. We work around that by making the prose
-            blocks tab stops in their own right via
-            `tabIndex={0}` + `role="note"`, so the user lands on
-            each paragraph as they tab through and the screen
-            reader reads the text. */}
-        <p
-          id={privacyHintId}
-          className="tasks-settings__hint"
-          role="note"
-          tabIndex={0}
-        >
+            (so form fields behave like form fields). Static
+            `<p>` paragraphs would be invisible to focus-mode
+            tab navigation; `FocusableNote` makes each one a
+            tab stop AND carries the text as `aria-label` so
+            NVDA actually reads it. See FocusableNote.tsx for
+            why `tabIndex={0}` alone isn't enough. */}
+        <FocusableNote id={privacyHintId} className="tasks-settings__hint">
           {t('dialogs.settings.contacts.privacyBody')}
-        </p>
-        <p
-          className="tasks-settings__hint"
-          role="note"
-          tabIndex={0}
-        >
+        </FocusableNote>
+        <FocusableNote className="tasks-settings__hint">
           {t('dialogs.settings.contacts.privacyProvidersIntro')}
-        </p>
+        </FocusableNote>
         {/* Provider privacy-policy links. Open in the system
             browser via Tauri's default click behaviour (the app
             shell intercepts <a target="_blank"> hrefs); each link
@@ -238,13 +228,15 @@ export function ContactsPanel() {
             </a>
           </li>
           <li>
-            {/* Same tabIndex / role treatment as the prose
-                paragraphs above — without it, NVDA in focus
-                mode tabs past this final note silently. */}
+            {/* Inline focusable note. Same pattern as
+                `FocusableNote` (text repeated as `aria-label` so
+                NVDA in focus mode reads it) but on a `<span>` to
+                preserve the inline list-item layout — a `<p>`
+                here would break out into block layout. */}
             <span
               className="tasks-settings__hint"
-              role="note"
               tabIndex={0}
+              aria-label={t('dialogs.settings.contacts.providerPolicyOthers')}
             >
               {t('dialogs.settings.contacts.providerPolicyOthers')}
             </span>
@@ -350,27 +342,22 @@ export function ContactsPanel() {
               : t('dialogs.settings.contacts.syncNow')}
           </button>
         </div>
-        {/* No `aria-live` on this paragraph — opening the tab
-            (or tabbing into the panel) made screen readers
-            announce "Last synced at …" out of nowhere, which
-            users reported as disorienting. Explicit
+        {/* No `aria-live` here — opening the tab made screen
+            readers announce "Last synced at …" out of nowhere,
+            which users reported as disorienting. Explicit
             announcements for the actual sync events go through
             `announce()` in the click handlers instead.
-            `tabIndex={0}` + `role="note"` makes the paragraph
-            a focus stop so NVDA in focus mode (the Modal wraps
-            the body in `role="application"`) can actually
-            reach + read it. */}
-        <p
-          className="tasks-settings__hint"
-          role="note"
-          tabIndex={0}
-        >
+            `FocusableNote` makes the paragraph a focus stop +
+            sets `aria-label` to the text so NVDA in focus mode
+            (the Modal wraps the body in `role="application"`)
+            can reach + read it. */}
+        <FocusableNote className="tasks-settings__hint">
           {status?.last_synced_at
             ? t('dialogs.settings.contacts.lastSynced', {
                 time: new Date(status.last_synced_at).toLocaleString(),
               })
             : t('dialogs.settings.contacts.neverSynced')}
-        </p>
+        </FocusableNote>
       </section>
 
       <section
