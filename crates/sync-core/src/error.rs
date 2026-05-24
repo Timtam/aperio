@@ -48,6 +48,14 @@ pub enum SyncError {
     #[error("e2e encryption is enabled but no key is configured")]
     EncryptionRequired,
 
+    /// Resource the caller asked for doesn't exist at the remote.
+    /// Used by the onboarding flow (§19.11) when the user picks
+    /// "Datensatz übernehmen" but no `meta.json` lives at the path
+    /// — the frontend pattern-matches this variant to fall back to
+    /// the "Neu beginnen" prompt.
+    #[error("not found: {0}")]
+    NotFound(String),
+
     /// `meta.json.min_app_version` is newer than the current app's
     /// version — the sync dataset was created by a newer Aperio and
     /// can't be read until the local install is updated.
@@ -82,6 +90,10 @@ impl SyncError {
 
     pub fn internal(msg: impl Into<String>) -> Self {
         Self::Internal(msg.into())
+    }
+
+    pub fn not_found(msg: impl Into<String>) -> Self {
+        Self::NotFound(msg.into())
     }
 }
 

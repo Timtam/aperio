@@ -53,7 +53,7 @@ use sync_core::{DeviceCursor, DeviceId, LogFile, SyncAdapter, SyncResult};
 use tracing::{debug, info, warn};
 
 use crate::db::SharedConn;
-use crate::event_log::{ApplyReport, EventLogApplier};
+use crate::event_log::{ApplyReport, EventLogApplier, OnboardingService};
 use crate::user_prefs::UserPrefsRepo;
 
 /// Bring the scheduler's interval pref into status reads. The
@@ -133,6 +133,11 @@ pub struct SyncOrchestrator {
     local_device_id: DeviceId,
     /// The applier reused across rounds.
     applier: Arc<EventLogApplier>,
+    /// Phase Sf: shared with the onboarding command layer. Used
+    /// after each successful round to refresh this device's
+    /// heartbeat in `meta.json` so other devices and the
+    /// compaction algorithm see a current `last_seen_log`.
+    onboarding: Arc<OnboardingService>,
     /// Currently-configured adapter. `None` when the app hasn't
     /// been set up yet.
     adapter: Mutex<Option<Arc<dyn SyncAdapter>>>,
@@ -150,12 +155,14 @@ impl SyncOrchestrator {
         pending_dir: PathBuf,
         local_device_id: DeviceId,
         applier: Arc<EventLogApplier>,
+        onboarding: Arc<OnboardingService>,
     ) -> Self {
         Self {
             db,
             pending_dir,
             local_device_id,
             applier,
+            onboarding,
             adapter: Mutex::new(None),
             in_flight: Mutex::new(false),
         }
@@ -283,6 +290,23 @@ impl SyncOrchestrator {
                 warn!(?err, "fetch phase of sync round failed");
                 report.push_failures += 1;
             }
+        }
+
+        // 4. Heartbeat: refresh our own entry in `meta.json` so
+        // other devices see our `last_seen_log` advance. We use
+        // `Utc::now()` rather than `newest` because the heartbeat
+        // is "this device is alive and current", not "the newest
+        // log I observed" — even an empty round still counts.
+        //
+        // Failures here are non-fatal: the next round retries, and
+        // a missed heartbeat at worst means our entry looks
+        // slightly stale in someone else's UI until then.
+        if let Err(err) = self
+            .onboarding
+            .heartbeat_meta(adapter.as_ref(), Utc::now())
+            .await
+        {
+            warn!(?err, "meta.json heartbeat failed");
         }
 
         info!(

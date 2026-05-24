@@ -22,7 +22,10 @@ pub use paths::{resolve_data_dir, DataDirKind, DataDirResolution};
 
 use cal_adapter_local::LocalAdapter;
 use contact_sync::ContactSyncScheduler;
-use event_log::{EventLogApplier, EventLogWriter, SyncOrchestrator, SyncScheduler};
+use event_log::{
+    EventLogApplier, EventLogWriter, OnboardingService, SyncOrchestrator,
+    SyncScheduler,
+};
 use registry::AdapterRegistry;
 use reminders::ReminderScheduler;
 use std::sync::Arc;
@@ -123,6 +126,16 @@ pub fn run() {
         applier_adapter,
         device_id.clone(),
     ));
+    // Phase Sf: onboarding service. Shared between the orchestrator
+    // (which uses it for `meta.json` heartbeats after each round) and
+    // the Tauri command layer (which exposes preview/accept/adopt as
+    // user-facing commands).
+    let onboarding = Arc::new(OnboardingService::new(
+        db.shared(),
+        device_id.clone(),
+        Arc::clone(&applier),
+        env!("CARGO_PKG_VERSION"),
+    ));
     let sync_orchestrator = Arc::new(SyncOrchestrator::new(
         db.shared(),
         data_dir
@@ -132,6 +145,7 @@ pub fn run() {
             .join("pending"),
         device_id,
         applier,
+        Arc::clone(&onboarding),
     ));
     // If the user had previously configured a sync adapter,
     // reconstruct it now so `sync_now` works without a
@@ -160,6 +174,7 @@ pub fn run() {
         .manage(db)
         .manage(event_log_writer)
         .manage(sync_orchestrator)
+        .manage(onboarding)
         .invoke_handler(tauri::generate_handler![
             app_info,
             commands::list_calendars,
@@ -243,6 +258,10 @@ pub fn run() {
             commands::sync_now,
             commands::get_sync_status,
             commands::set_sync_interval,
+            // Phase Sf (DESIGN.md §19.11): onboarding flow.
+            commands::preview_sync_target,
+            commands::accept_remote_dataset,
+            commands::adopt_local_dataset,
         ])
         .setup(move |app| {
             // Spawn the reminder scheduler on the Tauri/tokio runtime

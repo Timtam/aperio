@@ -36,10 +36,15 @@
 //! "different device" semantics per §19.
 
 pub mod applier;
+pub mod onboarding;
 pub mod orchestrator;
 pub mod scheduler;
 
 pub use applier::{ApplyReport, EventLogApplier};
+pub use onboarding::{
+    DeviceSummary, OnboardingReport, OnboardingService, SyncPreview,
+    PREF_DEVICE_NAME, PREF_ONBOARDED,
+};
 pub use orchestrator::{
     SyncOrchestrator, SyncRoundReport, SyncStatus, SYNC_CURSOR_PREF_KEY,
 };

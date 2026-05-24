@@ -1,0 +1,774 @@
+//! Onboarding for the cross-device sync layer (Phase Sf, DESIGN.md
+//! §19.11).
+//!
+//! Phase Sd configured a working adapter and Phase Se gave us
+//! automatic sync triggers. Phase Sf is the missing first step:
+//! **what happens when a brand-new device points at a remote that
+//! already contains another device's data.**
+//!
+//! The user-facing decision tree is from §19.11:
+//!
+//! ```text
+//! [device boots, has zero or some local data]
+//!         │
+//!         ▼
+//! configure_sync_adapter → preview_sync_target(config)
+//!         │
+//!         ├── empty remote ─────► adopt_local_dataset
+//!         │                       (push our state up — we become
+//!         │                        device 1 of N)
+//!         │
+//!         └── existing remote ──► UI asks the user:
+//!                                 "Datensatz übernehmen" → accept_remote_dataset
+//!                                 "Neu beginnen"           → adopt_local_dataset
+//!                                                            (with overwrite warning)
+//! ```
+//!
+//! The [`OnboardingService`] keeps the adapter-agnostic logic in one
+//! place; the Tauri command layer is a thin wiring around it. Tests
+//! can drive the service against a fake `SyncAdapter` without
+//! involving the Tauri runtime.
+//!
+//! ## What this module deliberately does NOT do
+//!
+//! - **E2E password prompt.** §19.11 Step 4. Lives in Phase Sk; the
+//!   meta.json `e2e_enabled` flag is surfaced to the frontend so it
+//!   can refuse to onboard if E2E is on and we don't have the key.
+//! - **Snapshot consumption.** §19.11 Step 5. Phase Sg will both
+//!   produce and consume snapshots; until then, the onboarding flow
+//!   falls back to "fetch every log and apply chronologically",
+//!   which is correct (just slower) for any dataset that hasn't
+//!   been compacted yet.
+//! - **Sound asset pull.** §19.11 Step 7. Sounds aren't synced yet
+//!   anyway (Phase Sk dependency).
+//! - **Account re-connect prompt.** §19.11 Step 8. UI in Phase Si.
+//! - **Plugin gap detection.** §19.11 Step 9. Plugins land in §20.
+
+use std::sync::Arc;
+
+use chrono::{DateTime, Utc};
+use serde::Serialize;
+use sync_core::{
+    DeviceCursor, DeviceId, DeviceRecord, MetaJson, SyncAdapter, SyncError,
+    SyncResult,
+};
+use tracing::{debug, info, warn};
+
+use crate::db::SharedConn;
+use crate::event_log::{ApplyReport, EventLogApplier, SYNC_CURSOR_PREF_KEY};
+use crate::user_prefs::UserPrefsRepo;
+
+/// `user_prefs` key holding the user-chosen device name. Surfaces in
+/// other devices' "known devices" lists via `meta.json`. Optional —
+/// when unset the meta record falls back to the bare device id.
+pub const PREF_DEVICE_NAME: &str = "sync.deviceName";
+
+/// `user_prefs` key flagging that onboarding has completed at least
+/// once. Lets the frontend tell "first launch, no adapter ever
+/// chosen" apart from "adapter currently disconnected".
+pub const PREF_ONBOARDED: &str = "sync.onboarded";
+
+/// Outcome of [`OnboardingService::preview`]. Mirrors the three
+/// cases the §19.11 onboarding dialog distinguishes.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SyncPreview {
+    /// `meta.json` doesn't exist at the remote root — this is the
+    /// "you're the first device" case. UI offers a single
+    /// "Connect & push" action.
+    Empty,
+    /// `meta.json` exists and (optionally) `snapshot.json` does too.
+    /// UI offers "Datensatz übernehmen" + "Neu beginnen (überschreibt)".
+    Existing {
+        schema_version: u32,
+        min_app_version: String,
+        /// RFC 3339 timestamp of the current snapshot, or `null`
+        /// when the dataset has never been compacted.
+        snapshot_timestamp: Option<String>,
+        e2e_enabled: bool,
+        devices: Vec<DeviceSummary>,
+    },
+}
+
+/// One row in the `Existing` preview's device list. Pre-formatted
+/// for direct display in the frontend's "known devices" table.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct DeviceSummary {
+    /// Bare device-id string. Stable identifier the frontend can
+    /// key React lists on.
+    pub id: String,
+    pub name: Option<String>,
+    pub last_seen_log: String,
+    pub app_version: String,
+    pub stale: bool,
+    /// `true` when this entry refers to the current device. Lets
+    /// the dialog highlight it ("Dieses Gerät") even though we
+    /// also list it in the table.
+    pub is_this_device: bool,
+}
+
+/// Summary returned to the frontend by [`OnboardingService::accept_remote`]
+/// and [`OnboardingService::adopt_local`]. Same shape as the
+/// orchestrator's `SyncRoundReport` minus push counts (onboarding
+/// never pushes, it adopts).
+#[derive(Debug, Default, Clone, Serialize)]
+pub struct OnboardingReport {
+    pub fetched_logs: usize,
+    pub applied: usize,
+    pub skipped_own: usize,
+    pub skipped_already_applied: usize,
+    pub skipped_unsupported: usize,
+    pub apply_failures: usize,
+    /// `true` when the remote was empty before we touched it. The
+    /// frontend can tell the user "Connected as device 1" vs
+    /// "Connected, joined N existing devices".
+    pub remote_was_empty: bool,
+    /// Number of devices in `meta.json` AFTER this device's entry
+    /// was upserted. Includes us.
+    pub device_count: usize,
+}
+
+impl OnboardingReport {
+    fn merge_apply(&mut self, report: ApplyReport) {
+        self.applied += report.applied;
+        self.skipped_own += report.skipped_own;
+        self.skipped_already_applied += report.skipped_already_applied;
+        self.skipped_unsupported += report.skipped_unsupported;
+        self.apply_failures += report.failed;
+    }
+}
+
+/// Onboarding helper. The Tauri commands hold one of these in State
+/// and dispatch the user-facing verbs through it.
+///
+/// Independent of [`SyncOrchestrator`]: the orchestrator is the
+/// "steady state" sync engine, the onboarding service is the
+/// "first connection" engine. They share the applier so an
+/// onboarded log isn't re-applied during the first scheduled
+/// round.
+pub struct OnboardingService {
+    db: SharedConn,
+    local_device_id: DeviceId,
+    applier: Arc<EventLogApplier>,
+    app_version: String,
+}
+
+impl OnboardingService {
+    pub fn new(
+        db: SharedConn,
+        local_device_id: DeviceId,
+        applier: Arc<EventLogApplier>,
+        app_version: impl Into<String>,
+    ) -> Self {
+        Self {
+            db,
+            local_device_id,
+            applier,
+            app_version: app_version.into(),
+        }
+    }
+
+    /// Borrow the device id this service tags meta.json entries
+    /// with. Used by [`SyncOrchestrator::heartbeat_meta`] so the
+    /// scheduler can refresh its own record without re-loading the
+    /// id from user_prefs.
+    pub fn device_id(&self) -> &DeviceId {
+        &self.local_device_id
+    }
+
+    pub fn app_version(&self) -> &str {
+        &self.app_version
+    }
+
+    /// Non-mutating probe. Reads `meta.json` (if any), classifies
+    /// it as Empty vs Existing, returns enough detail for the
+    /// onboarding dialog to render the device list + warnings.
+    pub async fn preview(
+        &self,
+        adapter: &dyn SyncAdapter,
+    ) -> SyncResult<SyncPreview> {
+        adapter.test_connection().await?;
+        let meta = adapter.fetch_meta().await?;
+        Ok(match meta {
+            None => SyncPreview::Empty,
+            Some(meta) => SyncPreview::Existing {
+                schema_version: meta.schema_version,
+                min_app_version: meta.min_app_version.clone(),
+                // §19.10 leaves the snapshot timestamp at "now" when
+                // the dataset was freshly minted with no snapshot yet
+                // — we surface that as None so the UI can say
+                // "noch kein Snapshot" instead of misleading the
+                // user with an empty-state pseudo-timestamp.
+                snapshot_timestamp: snapshot_ts_if_real(&meta),
+                e2e_enabled: meta.e2e_enabled,
+                devices: meta
+                    .devices
+                    .iter()
+                    .map(|(id, rec)| DeviceSummary {
+                        id: id.clone(),
+                        name: rec.name.clone(),
+                        last_seen_log: rec.last_seen_log.to_rfc3339(),
+                        app_version: rec.app_version.clone(),
+                        stale: rec.stale,
+                        is_this_device: id == self.local_device_id.as_str(),
+                    })
+                    .collect(),
+            },
+        })
+    }
+
+    /// "Datensatz übernehmen" path. Pulls every log from the remote,
+    /// hands them to the applier, registers this device in meta.json,
+    /// advances the local sync cursor.
+    ///
+    /// `device_name` is optional; when `None`, the device record
+    /// goes in without a friendly name and other devices show the
+    /// bare id until the user names it later (or it falls back to a
+    /// short id prefix in the UI).
+    ///
+    /// The orchestrator is NOT configured here — the caller (the
+    /// Tauri command) installs the adapter into the orchestrator
+    /// after a successful onboard. That keeps a half-finished
+    /// onboarding from leaving the scheduler running against an
+    /// inconsistent remote.
+    pub async fn accept_remote(
+        &self,
+        adapter: &dyn SyncAdapter,
+        device_name: Option<&str>,
+    ) -> SyncResult<OnboardingReport> {
+        adapter.test_connection().await?;
+        let mut meta = adapter
+            .fetch_meta()
+            .await?
+            .ok_or_else(|| {
+                SyncError::not_found(
+                    "remote has no meta.json — use adopt_local for a fresh dataset",
+                )
+            })?;
+
+        // Pull everything. We deliberately use `epoch()` rather than
+        // the local cursor: the local cursor is from a previous
+        // adapter or stale on first launch, and the applier's
+        // idempotency table guarantees re-applying old logs is a
+        // no-op anyway.
+        let logs = adapter.fetch_new_logs(&DeviceCursor::epoch()).await?;
+        let foreign: Vec<_> = logs
+            .into_iter()
+            .filter(|log| log.name.device_id != self.local_device_id)
+            .collect();
+        let fetched_logs = foreign.len();
+        info!(
+            count = fetched_logs,
+            "accept_remote pulled remote logs",
+        );
+
+        // Track the newest timestamp so we can set the cursor
+        // correctly afterwards. Default to epoch so a remote with
+        // zero logs still lands a sensible cursor value.
+        let mut newest: DateTime<Utc> = DateTime::<Utc>::MIN_UTC;
+
+        let mut report = OnboardingReport {
+            remote_was_empty: false,
+            ..Default::default()
+        };
+        report.fetched_logs = fetched_logs;
+
+        for log in &foreign {
+            if log.name.timestamp > newest {
+                newest = log.name.timestamp;
+            }
+            match self.applier.apply_log_file(log) {
+                Ok(apply_report) => report.merge_apply(apply_report),
+                Err(err) => {
+                    warn!(
+                        log = %log.name.to_filename(),
+                        ?err,
+                        "applier failed during onboarding",
+                    );
+                    report.apply_failures += 1;
+                }
+            }
+        }
+
+        // Persist the cursor so the next scheduler round doesn't
+        // re-pull the same backlog. If we never bumped `newest`
+        // (empty remote), don't touch the existing cursor.
+        if newest > DateTime::<Utc>::MIN_UTC {
+            self.save_cursor(newest)?;
+        }
+
+        // Persist + push the device registration.
+        self.register_self_in_meta(&mut meta, device_name);
+        adapter.push_meta(&meta).await?;
+        report.device_count = meta.devices.len();
+
+        // Save the chosen device name + the "we've onboarded" flag.
+        if let Some(name) = device_name {
+            self.save_device_name(name)?;
+        }
+        self.mark_onboarded()?;
+
+        info!(
+            applied = report.applied,
+            devices = report.device_count,
+            "accept_remote complete",
+        );
+        Ok(report)
+    }
+
+    /// "Neu beginnen" path. Builds a fresh meta.json with only this
+    /// device, pushes it to the remote, then leaves the rest to the
+    /// scheduler's next round (which will push whatever was already
+    /// queued in `pending/`).
+    ///
+    /// Caller is responsible for warning the user that any existing
+    /// remote data is now orphaned — the meta we write overwrites
+    /// the prior file, and the prior logs become unreachable on
+    /// next compaction.
+    pub async fn adopt_local(
+        &self,
+        adapter: &dyn SyncAdapter,
+        device_name: Option<&str>,
+    ) -> SyncResult<OnboardingReport> {
+        adapter.test_connection().await?;
+
+        // Best-effort peek so we can log what was there before. A
+        // missing meta means the remote was already empty and the
+        // overwrite is a no-op against prior data.
+        let prior = adapter.fetch_meta().await.unwrap_or(None);
+        let remote_was_empty = prior.is_none();
+        if let Some(prior) = &prior {
+            info!(
+                devices = prior.devices.len(),
+                "adopt_local overwriting existing meta.json",
+            );
+        }
+
+        let mut meta = MetaJson::fresh(&self.app_version);
+        self.register_self_in_meta(&mut meta, device_name);
+        adapter.push_meta(&meta).await?;
+
+        if let Some(name) = device_name {
+            self.save_device_name(name)?;
+        }
+        self.mark_onboarded()?;
+
+        Ok(OnboardingReport {
+            remote_was_empty,
+            device_count: meta.devices.len(),
+            ..Default::default()
+        })
+    }
+
+    /// Refresh this device's `last_seen_log` + `app_version` in
+    /// meta.json. Called by the orchestrator after every successful
+    /// sync round so other devices see a heartbeat and the
+    /// compaction algorithm (Phase Sg) has accurate cursors.
+    ///
+    /// Last-write-wins on the file (§19.5): two devices syncing at
+    /// the same instant can lose one update; the next round of
+    /// either re-writes its own entry and recovers. The local-FS
+    /// adapter doesn't offer etag locking, so we accept this.
+    pub async fn heartbeat_meta(
+        &self,
+        adapter: &dyn SyncAdapter,
+        last_seen_log: DateTime<Utc>,
+    ) -> SyncResult<()> {
+        let mut meta = match adapter.fetch_meta().await? {
+            Some(m) => m,
+            None => {
+                // The remote has lost its meta.json since onboarding
+                // (someone deleted it, or onboarding was incomplete).
+                // Mint a fresh one with us as the only known device.
+                debug!(
+                    "heartbeat_meta found no remote meta; reseeding with this device",
+                );
+                MetaJson::fresh(&self.app_version)
+            }
+        };
+        let name = UserPrefsRepo::new(&self.db)
+            .get(PREF_DEVICE_NAME)
+            .ok()
+            .flatten();
+        meta.upsert_device(
+            &self.local_device_id,
+            DeviceRecord {
+                name,
+                last_seen_log,
+                app_version: self.app_version.clone(),
+                stale: false,
+            },
+        );
+        adapter.push_meta(&meta).await?;
+        Ok(())
+    }
+
+    fn register_self_in_meta(
+        &self,
+        meta: &mut MetaJson,
+        device_name: Option<&str>,
+    ) {
+        let name = device_name
+            .map(str::to_string)
+            .or_else(|| {
+                UserPrefsRepo::new(&self.db)
+                    .get(PREF_DEVICE_NAME)
+                    .ok()
+                    .flatten()
+            });
+        meta.upsert_device(
+            &self.local_device_id,
+            DeviceRecord {
+                name,
+                last_seen_log: Utc::now(),
+                app_version: self.app_version.clone(),
+                stale: false,
+            },
+        );
+    }
+
+    fn save_device_name(&self, name: &str) -> SyncResult<()> {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return Ok(());
+        }
+        UserPrefsRepo::new(&self.db)
+            .set(PREF_DEVICE_NAME, trimmed)
+            .map_err(|err| {
+                SyncError::internal(format!("save device name: {err}"))
+            })?;
+        Ok(())
+    }
+
+    fn save_cursor(&self, ts: DateTime<Utc>) -> SyncResult<()> {
+        UserPrefsRepo::new(&self.db)
+            .set(SYNC_CURSOR_PREF_KEY, &ts.to_rfc3339())
+            .map_err(|err| {
+                SyncError::internal(format!("save cursor: {err}"))
+            })?;
+        Ok(())
+    }
+
+    fn mark_onboarded(&self) -> SyncResult<()> {
+        UserPrefsRepo::new(&self.db)
+            .set(PREF_ONBOARDED, "true")
+            .map_err(|err| {
+                SyncError::internal(format!("save onboarded flag: {err}"))
+            })?;
+        Ok(())
+    }
+}
+
+/// Decide whether `meta.snapshot_timestamp` represents a real
+/// compaction or just the "freshly minted" placeholder
+/// `MetaJson::fresh()` writes. We use "older than 1 second from
+/// now" as the cutoff — anything newer is plausibly a fresh meta
+/// with no snapshot, anything older is a real snapshot timestamp.
+///
+/// A nicer signal would be a dedicated `Option<DateTime>` field, but
+/// the meta schema is frozen at v1 already; this heuristic is good
+/// enough until Phase Sg adds the proper flag.
+fn snapshot_ts_if_real(meta: &MetaJson) -> Option<String> {
+    let now = Utc::now();
+    if (now - meta.snapshot_timestamp).num_seconds() > 1 {
+        Some(meta.snapshot_timestamp.to_rfc3339())
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::DbHandle;
+    use async_trait::async_trait;
+    use cal_adapter_local::LocalAdapter;
+    use std::sync::{Arc, Mutex};
+    use sync_core::{LogFile, LogFileName, Snapshot};
+    use tempfile::TempDir;
+
+    /// Minimal in-memory `SyncAdapter` for unit testing the
+    /// onboarding flow. Stores its bytes in `Mutex` so the test
+    /// doesn't need a temp directory.
+    struct FakeAdapter {
+        meta: Mutex<Option<MetaJson>>,
+        logs: Mutex<Vec<LogFile>>,
+    }
+
+    impl FakeAdapter {
+        fn new() -> Self {
+            Self {
+                meta: Mutex::new(None),
+                logs: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn with_logs(logs: Vec<LogFile>) -> Self {
+            Self {
+                meta: Mutex::new(None),
+                logs: Mutex::new(logs),
+            }
+        }
+
+        fn install_meta(&self, meta: MetaJson) {
+            *self.meta.lock().unwrap() = Some(meta);
+        }
+    }
+
+    #[async_trait]
+    impl SyncAdapter for FakeAdapter {
+        async fn test_connection(&self) -> SyncResult<()> {
+            Ok(())
+        }
+        async fn fetch_meta(&self) -> SyncResult<Option<MetaJson>> {
+            Ok(self.meta.lock().unwrap().clone())
+        }
+        async fn push_meta(&self, meta: &MetaJson) -> SyncResult<()> {
+            *self.meta.lock().unwrap() = Some(meta.clone());
+            Ok(())
+        }
+        async fn fetch_new_logs(
+            &self,
+            since: &DeviceCursor,
+        ) -> SyncResult<Vec<LogFile>> {
+            Ok(self
+                .logs
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|l| l.name.timestamp > since.last_seen_log)
+                .cloned()
+                .collect())
+        }
+        async fn push_log(&self, log: &LogFile) -> SyncResult<()> {
+            self.logs.lock().unwrap().push(log.clone());
+            Ok(())
+        }
+        async fn fetch_snapshot(&self) -> SyncResult<Option<Snapshot>> {
+            Ok(None)
+        }
+        async fn push_snapshot(&self, _snapshot: &Snapshot) -> SyncResult<()> {
+            Ok(())
+        }
+        async fn delete_log(&self, _name: &LogFileName) -> SyncResult<()> {
+            Ok(())
+        }
+        async fn push_sound_asset(
+            &self,
+            _hash: &str,
+            _extension: &str,
+            _bytes: &[u8],
+        ) -> SyncResult<()> {
+            Ok(())
+        }
+        async fn fetch_sound_asset(
+            &self,
+            _hash: &str,
+            _extension: &str,
+        ) -> SyncResult<Option<Vec<u8>>> {
+            Ok(None)
+        }
+    }
+
+    fn fresh_db() -> (TempDir, DbHandle) {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("test.sqlite");
+        let db = DbHandle::open(&path).unwrap();
+        (dir, db)
+    }
+
+    fn build_service(db: SharedConn) -> OnboardingService {
+        let device_id = DeviceId::from_string("dev-this".into());
+        let adapter = Arc::new(LocalAdapter::new(db.clone()));
+        let applier = Arc::new(EventLogApplier::new(
+            db.clone(),
+            adapter,
+            device_id.clone(),
+        ));
+        OnboardingService::new(db, device_id, applier, "1.0.0-test")
+    }
+
+    #[tokio::test]
+    async fn preview_returns_empty_when_remote_has_no_meta() {
+        let (_tmp, db) = fresh_db();
+        let svc = build_service(db.shared());
+        let adapter = FakeAdapter::new();
+        let preview = svc.preview(&adapter).await.unwrap();
+        assert_eq!(preview, SyncPreview::Empty);
+    }
+
+    #[tokio::test]
+    async fn preview_returns_existing_with_device_list() {
+        let (_tmp, db) = fresh_db();
+        let svc = build_service(db.shared());
+        let adapter = FakeAdapter::new();
+
+        let mut meta = MetaJson::fresh("1.0.0");
+        meta.upsert_device(
+            &DeviceId::from_string("dev-a".into()),
+            DeviceRecord {
+                name: Some("Desktop".into()),
+                last_seen_log: Utc::now(),
+                app_version: "1.0.0".into(),
+                stale: false,
+            },
+        );
+        adapter.install_meta(meta);
+
+        let preview = svc.preview(&adapter).await.unwrap();
+        let SyncPreview::Existing { devices, .. } = preview else {
+            panic!("expected Existing");
+        };
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].id, "dev-a");
+        assert_eq!(devices[0].name.as_deref(), Some("Desktop"));
+        // Different device — `is_this_device` flag must be false.
+        assert!(!devices[0].is_this_device);
+    }
+
+    #[tokio::test]
+    async fn accept_remote_registers_this_device_into_meta() {
+        let (_tmp, db) = fresh_db();
+        let svc = build_service(db.shared());
+        let adapter = FakeAdapter::new();
+
+        // Remote starts with one prior device, no logs.
+        let mut meta = MetaJson::fresh("1.0.0");
+        meta.upsert_device(
+            &DeviceId::from_string("dev-other".into()),
+            DeviceRecord {
+                name: Some("Other Device".into()),
+                last_seen_log: Utc::now(),
+                app_version: "1.0.0".into(),
+                stale: false,
+            },
+        );
+        adapter.install_meta(meta);
+
+        let report = svc
+            .accept_remote(&adapter, Some("Laptop"))
+            .await
+            .unwrap();
+        assert_eq!(report.device_count, 2);
+        assert!(!report.remote_was_empty);
+
+        // meta.json now lists us + the prior device.
+        let updated = adapter.fetch_meta().await.unwrap().unwrap();
+        assert!(updated.device(&DeviceId::from_string("dev-this".into())).is_some());
+        assert!(updated.device(&DeviceId::from_string("dev-other".into())).is_some());
+
+        // Device name pref was persisted.
+        let name = UserPrefsRepo::new(&db.shared())
+            .get(PREF_DEVICE_NAME)
+            .unwrap();
+        assert_eq!(name.as_deref(), Some("Laptop"));
+    }
+
+    #[tokio::test]
+    async fn accept_remote_errors_when_no_meta_present() {
+        let (_tmp, db) = fresh_db();
+        let svc = build_service(db.shared());
+        let adapter = FakeAdapter::new();
+        let err = svc.accept_remote(&adapter, None).await.unwrap_err();
+        // Should be a "not found" classification — frontend can
+        // pattern-match the SyncError::NotFound variant to render the
+        // "use adopt_local instead" hint.
+        assert!(
+            matches!(err, sync_core::SyncError::NotFound(_)),
+            "expected NotFound, got: {err:?}",
+        );
+    }
+
+    #[tokio::test]
+    async fn adopt_local_overwrites_remote_meta() {
+        let (_tmp, db) = fresh_db();
+        let svc = build_service(db.shared());
+        let adapter = FakeAdapter::new();
+
+        // Remote starts with two prior devices.
+        let mut meta = MetaJson::fresh("1.0.0");
+        meta.upsert_device(
+            &DeviceId::from_string("dev-a".into()),
+            DeviceRecord {
+                name: Some("A".into()),
+                last_seen_log: Utc::now(),
+                app_version: "1.0.0".into(),
+                stale: false,
+            },
+        );
+        meta.upsert_device(
+            &DeviceId::from_string("dev-b".into()),
+            DeviceRecord {
+                name: Some("B".into()),
+                last_seen_log: Utc::now(),
+                app_version: "1.0.0".into(),
+                stale: false,
+            },
+        );
+        adapter.install_meta(meta);
+
+        let report = svc.adopt_local(&adapter, Some("This")).await.unwrap();
+        // adopt_local overwrites, so the device count drops to just us.
+        assert_eq!(report.device_count, 1);
+        assert!(!report.remote_was_empty);
+
+        let updated = adapter.fetch_meta().await.unwrap().unwrap();
+        assert_eq!(updated.devices.len(), 1);
+        assert!(updated.device(&DeviceId::from_string("dev-this".into())).is_some());
+        assert!(updated.device(&DeviceId::from_string("dev-a".into())).is_none());
+    }
+
+    #[tokio::test]
+    async fn heartbeat_creates_meta_when_remote_lost_it() {
+        // Onboarding ran once; then the remote's meta.json vanished
+        // (user deleted the file, NAS volume rebuilt, …). The next
+        // heartbeat should re-seed without crashing.
+        let (_tmp, db) = fresh_db();
+        let svc = build_service(db.shared());
+        let adapter = FakeAdapter::new();
+        let now = Utc::now();
+        svc.heartbeat_meta(&adapter, now).await.unwrap();
+        let updated = adapter.fetch_meta().await.unwrap().unwrap();
+        let rec = updated
+            .device(&DeviceId::from_string("dev-this".into()))
+            .expect("self entry");
+        assert_eq!(rec.app_version, "1.0.0-test");
+    }
+
+    #[tokio::test]
+    async fn accept_remote_advances_local_cursor_past_newest_log() {
+        let (_tmp, db) = fresh_db();
+        let svc = build_service(db.shared());
+
+        // Pre-seed: one log from another device with a known
+        // timestamp. The applier will reject any unsupported event
+        // types as "skipped", which is fine — the test asserts on
+        // cursor advance, not on row counts.
+        let ts: DateTime<Utc> = "2026-05-01T12:34:56Z".parse().unwrap();
+        // Hard-code an envelope id rather than minting one — the
+        // applier doesn't validate id shape, and `mint_event_id` is
+        // crate-private.
+        let envelope_json = format!(
+            r#"{{"id":"ev-test-001","device_id":"dev-other","timestamp":"{}","type":"event.deleted","id_payload":{{"id":"nonexistent"}}}}"#,
+            ts.to_rfc3339(),
+        );
+        let log = LogFile {
+            name: LogFileName::new(
+                ts,
+                DeviceId::from_string("dev-other".into()),
+            ),
+            bytes: envelope_json.into_bytes(),
+        };
+        let adapter = FakeAdapter::with_logs(vec![log]);
+        adapter.install_meta(MetaJson::fresh("1.0.0"));
+
+        svc.accept_remote(&adapter, None).await.unwrap();
+
+        let cursor = UserPrefsRepo::new(&db.shared())
+            .get(SYNC_CURSOR_PREF_KEY)
+            .unwrap()
+            .expect("cursor should be persisted");
+        let parsed: DateTime<Utc> = cursor.parse().unwrap();
+        assert_eq!(parsed, ts);
+    }
+}
