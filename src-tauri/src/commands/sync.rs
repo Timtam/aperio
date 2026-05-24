@@ -35,7 +35,9 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use serde::Deserialize;
 use sync_adapter_local::LocalFsSyncAdapter;
-use sync_adapter_sftp::{SftpAuth, SftpSyncAdapter};
+use sync_adapter_sftp::{
+    HostKeyPreview, HostKeyVerifier, SftpAuth, SftpSyncAdapter,
+};
 use sync_adapter_webdav::{WebDavCredentials, WebDavSyncAdapter};
 use sync_core::{
     derive_key, EncryptingAdapter, EncryptionParams, SyncAdapter, KEY_LEN,
@@ -987,4 +989,87 @@ pub fn build_adapter_from_prefs(
     } else {
         Some(plain)
     }
+}
+
+// ---------------------------------------------------------------------------
+// Phase Sm — SFTP host-key trust dialog support.
+// ---------------------------------------------------------------------------
+
+/// Probe an SFTP server's SHA256 host-key fingerprint WITHOUT
+/// committing the pin. The frontend calls this right before it
+/// would otherwise call `configure_sync_adapter` for an SFTP
+/// target so it can:
+///
+/// - On `New` — show the §19.5 "first-use; verify the fingerprint
+///   out-of-band" trust dialog before any TOFU happens.
+/// - On `Changed` — show the §19.5 "host key changed; verify
+///   before accepting" warning, with both stored + presented
+///   fingerprints side-by-side.
+/// - On `Unchanged` — skip the dialog and proceed straight to
+///   configure.
+///
+/// Reads from the same user_prefs-backed verifier the real
+/// adapter uses, so the answers line up.
+#[tauri::command]
+pub async fn preview_sftp_host_key(
+    db: State<'_, DbHandle>,
+    host: String,
+    port: u16,
+) -> CommandResult<HostKeyPreview> {
+    let trimmed_host = host.trim();
+    if trimmed_host.is_empty() {
+        return Err(CommandError {
+            code: "invalid_input",
+            message: "SFTP host must not be empty".into(),
+        });
+    }
+    let shared = db.shared();
+    let verifier: Arc<dyn HostKeyVerifier> =
+        Arc::new(UserPrefsHostKeyVerifier::new(shared.clone()));
+    // Auth + base_path don't matter here — probe_host_key_fingerprint
+    // aborts the handshake before authenticating. Pass placeholders.
+    let adapter = SftpSyncAdapter::new(
+        trimmed_host,
+        port,
+        "preview",
+        SftpAuth::Password {
+            password: String::new(),
+        },
+        PathBuf::from("/"),
+        verifier,
+    );
+    adapter.preview_host_key().await.map_err(sync_err)
+}
+
+/// Commit a TOFU acceptance the user has explicitly confirmed in
+/// the trust dialog. The orchestrator never calls this on its
+/// own — pinning a fingerprint is always a user gesture (§19.5).
+///
+/// Used both for first-use ("New") and for key-change
+/// ("Changed") flows; in the second case the new fingerprint
+/// overwrites the stored one.
+#[tauri::command]
+pub async fn trust_sftp_host_key(
+    db: State<'_, DbHandle>,
+    host_port: String,
+    fingerprint: String,
+) -> CommandResult<()> {
+    let trimmed_host_port = host_port.trim();
+    let trimmed_fp = fingerprint.trim();
+    if trimmed_host_port.is_empty() {
+        return Err(CommandError {
+            code: "invalid_input",
+            message: "host_port must not be empty".into(),
+        });
+    }
+    if trimmed_fp.is_empty() {
+        return Err(CommandError {
+            code: "invalid_input",
+            message: "fingerprint must not be empty".into(),
+        });
+    }
+    let shared = db.shared();
+    let verifier = UserPrefsHostKeyVerifier::new(shared);
+    verifier.record(trimmed_host_port, trimmed_fp);
+    Ok(())
 }

@@ -72,6 +72,7 @@ use russh::client::{self, Handle};
 use russh::keys::ssh_key::{Algorithm, HashAlg, PublicKey};
 use russh_sftp::client::SftpSession;
 use russh_sftp::protocol::OpenFlags;
+use serde::{Deserialize, Serialize};
 use sync_core::{
     DeviceCursor, LogFile, LogFileName, MetaJson, Snapshot, SyncAdapter,
     SyncError, SyncResult,
@@ -120,6 +121,43 @@ pub enum HostKeyDecision {
     },
 }
 
+/// Snapshot the UI uses to decide between the "first use" and
+/// "fingerprint changed" trust dialogs. Built by
+/// [`SftpSyncAdapter::preview_host_key`] — see that method for the
+/// usage flow.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HostKeyPreview {
+    /// `"host:port"` form, e.g. `"nas.example.com:22"`. Echoes
+    /// back to the UI so the dialog can show it verbatim without
+    /// re-deriving from the config.
+    pub host_port: String,
+    /// The SHA256 fingerprint the server presented right now.
+    pub fingerprint: String,
+    /// What this fingerprint means relative to whatever the
+    /// verifier already has stored.
+    pub status: HostKeyPreviewStatus,
+}
+
+/// Result of comparing the freshly-observed fingerprint against
+/// whatever the verifier has pinned for this `host:port`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum HostKeyPreviewStatus {
+    /// No entry on file — the user is about to TOFU-pin this
+    /// server for the first time.
+    New,
+    /// Matches the stored fingerprint exactly; the UI can skip the
+    /// confirmation dialog and proceed straight to configure.
+    Unchanged,
+    /// A different fingerprint is on file. The UI MUST show the
+    /// stored + presented values side-by-side and force an
+    /// explicit user gesture before pinning the new key.
+    Changed {
+        /// The fingerprint that was previously pinned.
+        stored: String,
+    },
+}
+
 /// Decides whether to accept a server's host key.
 ///
 /// Implementors are called from inside the SSH handshake, so
@@ -133,14 +171,20 @@ pub enum HostKeyDecision {
 /// the standard SHA-256 fingerprint of the server's public key
 /// (`SHA256:<base64>` form per ssh-keygen).
 pub trait HostKeyVerifier: Send + Sync + std::fmt::Debug {
-    /// Look up the stored fingerprint for `host_port`. Returns
-    /// the appropriate [`HostKeyDecision`] but does NOT commit
-    /// the AcceptAndRemember case — that's `record`'s job, so a
-    /// caller that wants to dry-run the verification can do so.
+    /// Look up the stored fingerprint for `host_port` and decide
+    /// what to do with the presented one. Pure read; never
+    /// mutates the verifier's persisted state.
     fn verify(&self, host_port: &str, fingerprint: &str) -> HostKeyDecision;
-    /// Commit a TOFU acceptance — called after a successful
-    /// handshake for hosts we just learned. Implementations that
-    /// already write through in `verify` can no-op here.
+    /// Borrow the stored fingerprint for `host_port` without
+    /// changing it. Used by the preview path so the UI can show
+    /// the user both the stored and the presented key side-by-
+    /// side on a mismatch — and so it can tell "first use" apart
+    /// from "key changed".
+    fn peek(&self, host_port: &str) -> Option<String>;
+    /// Commit a TOFU acceptance — called by the command layer
+    /// AFTER the user has confirmed the fingerprint in the UI,
+    /// or by the adapter itself after a silent-TOFU connect for
+    /// callers that don't need the confirmation step.
     fn record(&self, host_port: &str, fingerprint: &str);
 }
 
@@ -178,6 +222,14 @@ impl HostKeyVerifier for InMemoryHostKeyVerifier {
                 presented: fingerprint.to_string(),
             },
         }
+    }
+
+    fn peek(&self, host_port: &str) -> Option<String> {
+        self.known
+            .lock()
+            .expect("known-hosts mutex poison")
+            .get(host_port)
+            .cloned()
     }
 
     fn record(&self, host_port: &str, fingerprint: &str) {
@@ -252,6 +304,73 @@ impl SftpSyncAdapter {
     /// "current adapter: sftp://…" display.
     pub fn base_path(&self) -> &std::path::Path {
         &self.base_path
+    }
+
+    /// Open a fresh SSH connection just long enough to capture
+    /// the server's SHA-256 host-key fingerprint, then drop the
+    /// connection without authenticating. Used by the UI to
+    /// preview the fingerprint before committing a TOFU pin or
+    /// accepting a key change.
+    ///
+    /// Doesn't consult or mutate the configured `HostKeyVerifier`
+    /// — the probe is purely informational.
+    pub async fn probe_host_key_fingerprint(&self) -> SyncResult<String> {
+        let captured = Arc::new(Mutex::new(None::<String>));
+        let handler = ProbeHandler {
+            captured: Arc::clone(&captured),
+        };
+        let config = Arc::new(client::Config::default());
+        // Connect. The handler captures the fingerprint then
+        // returns false, so russh aborts the handshake — we
+        // expect Err here. The captured side channel carries
+        // the result.
+        let _ = client::connect(
+            config,
+            (self.host.as_str(), self.port),
+            handler,
+        )
+        .await;
+        let fp = captured
+            .lock()
+            .expect("probe capture poison")
+            .take()
+            .ok_or_else(|| {
+                SyncError::network(
+                    "didn't observe a host key before connection closed",
+                )
+            })?;
+        Ok(fp)
+    }
+
+    /// Compute a [`HostKeyPreview`] for the configured server:
+    /// probe the fingerprint + compare against what the
+    /// `HostKeyVerifier` currently has stored. The UI calls this
+    /// to decide between the "first use" and "mismatch" trust
+    /// dialogs.
+    pub async fn preview_host_key(&self) -> SyncResult<HostKeyPreview> {
+        let presented = self.probe_host_key_fingerprint().await?;
+        let host_port = format!("{}:{}", self.host, self.port);
+        let stored = self.host_key_verifier.peek(&host_port);
+        let status = match stored.as_deref() {
+            None => HostKeyPreviewStatus::New,
+            Some(s) if s == presented => HostKeyPreviewStatus::Unchanged,
+            Some(s) => HostKeyPreviewStatus::Changed {
+                stored: s.to_string(),
+            },
+        };
+        Ok(HostKeyPreview {
+            host_port,
+            fingerprint: presented,
+            status,
+        })
+    }
+
+    /// Borrow the host-key verifier so the command layer can
+    /// call `record()` after the user confirms a fingerprint in
+    /// the trust dialog. The orchestrator never calls record on
+    /// its own; pinning is an explicit user gesture.
+    pub fn host_key_verifier(&self) -> &Arc<dyn HostKeyVerifier> {
+        &self.host_key_verifier
     }
 
     /// Concatenate the base path with a relative segment using
@@ -475,6 +594,39 @@ impl client::Handler for ClientHandler {
                 fingerprint,
             });
         Ok(accept)
+    }
+}
+
+/// One-shot handler used by [`SftpSyncAdapter::probe_host_key_fingerprint`]
+/// to capture the server's SHA256 fingerprint without performing
+/// SSH authentication. Writes the fingerprint into a shared
+/// `Mutex<Option<String>>` slot, then returns `Ok(false)` so russh
+/// aborts the handshake cleanly — we never go past the host-key
+/// step.
+#[derive(Clone)]
+struct ProbeHandler {
+    captured: Arc<Mutex<Option<String>>>,
+}
+
+impl std::fmt::Debug for ProbeHandler {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProbeHandler").finish()
+    }
+}
+
+impl client::Handler for ProbeHandler {
+    type Error = russh::Error;
+
+    async fn check_server_key(
+        &mut self,
+        server_public_key: &PublicKey,
+    ) -> Result<bool, Self::Error> {
+        let fingerprint =
+            server_public_key.fingerprint(HashAlg::Sha256).to_string();
+        *self.captured.lock().expect("probe capture poison") =
+            Some(fingerprint);
+        // Abort the handshake — we have what we came for.
+        Ok(false)
     }
 }
 

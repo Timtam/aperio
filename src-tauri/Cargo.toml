@@ -19,6 +19,11 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-notification = "2"
+# Native file picker for the SFTP SSH-key path (DESIGN.md §19.6).
+# A bare text input would let users mis-type the path; the picker
+# also matches the platform's "select a file" idiom (NSOpenPanel
+# on macOS, common-item-dialog on Windows, the portal on Linux).
+tauri-plugin-dialog = "2"
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

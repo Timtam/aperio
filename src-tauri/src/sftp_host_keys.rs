@@ -71,6 +71,26 @@ impl HostKeyVerifier for UserPrefsHostKeyVerifier {
         }
     }
 
+    fn peek(&self, host_port: &str) -> Option<String> {
+        let repo = UserPrefsRepo::new(&self.db);
+        match repo.get(&Self::key_for(host_port)) {
+            Ok(s) => s,
+            Err(err) => {
+                // Same treatment as `verify`: a transient read
+                // failure shouldn't trap the user. Returning None
+                // lets the preview path fall back to the "first
+                // use" dialog, which is recoverable.
+                warn!(
+                    ?err,
+                    host_port = %host_port,
+                    "couldn't read SFTP known-host entry for peek; \
+                     treating as none",
+                );
+                None
+            }
+        }
+    }
+
     fn record(&self, host_port: &str, fingerprint: &str) {
         let repo = UserPrefsRepo::new(&self.db);
         if let Err(err) = repo.set(&Self::key_for(host_port), fingerprint) {
@@ -128,6 +148,32 @@ mod tests {
                 presented: "SHA256:xyz".into(),
             },
         );
+    }
+
+    #[test]
+    fn peek_returns_none_for_unknown_host() {
+        let (_tmp, db) = fresh_db();
+        let v = UserPrefsHostKeyVerifier::new(db.shared());
+        assert_eq!(v.peek("nas:22"), None);
+    }
+
+    #[test]
+    fn peek_returns_stored_fingerprint() {
+        let (_tmp, db) = fresh_db();
+        let v = UserPrefsHostKeyVerifier::new(db.shared());
+        v.record("nas:22", "SHA256:abc");
+        assert_eq!(v.peek("nas:22"), Some("SHA256:abc".into()));
+    }
+
+    #[test]
+    fn peek_doesnt_mutate_state() {
+        let (_tmp, db) = fresh_db();
+        let v = UserPrefsHostKeyVerifier::new(db.shared());
+        v.record("nas:22", "SHA256:abc");
+        let _ = v.peek("nas:22");
+        let _ = v.peek("nas:22");
+        // Still the same entry after multiple peeks.
+        assert_eq!(v.peek("nas:22"), Some("SHA256:abc".into()));
     }
 
     #[test]

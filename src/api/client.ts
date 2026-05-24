@@ -887,3 +887,34 @@ export const resolveSyncConflict = (
   id: number,
   choice: SyncResolutionChoice,
 ) => invoke<void>('resolve_sync_conflict', { id, choice });
+
+// ── SFTP host-key trust dialog (§19.5) ──
+
+/** Snapshot returned by `previewSftpHostKey`. The frontend uses
+ *  `status.kind` to decide between the "first use" and "key
+ *  changed" confirmation dialogs (or to skip the dialog entirely
+ *  on `unchanged`). */
+export interface HostKeyPreview {
+  host_port: string;
+  fingerprint: string;
+  status: HostKeyPreviewStatus;
+}
+
+export type HostKeyPreviewStatus =
+  | { kind: 'new' }
+  | { kind: 'unchanged' }
+  | { kind: 'changed'; stored: string };
+
+/** Read the server's SHA256 host-key fingerprint without
+ *  authenticating or pinning. Used by the SyncPanel before it
+ *  configures an SFTP adapter so the user can verify the
+ *  fingerprint on first use (or refuse a changed one). */
+export const previewSftpHostKey = (host: string, port: number) =>
+  invoke<HostKeyPreview>('preview_sftp_host_key', { host, port });
+
+/** Pin a host-key fingerprint after the user has confirmed it
+ *  in the trust dialog. Overwrites any prior pin for the same
+ *  `host:port`, which is how the "key changed; accept new"
+ *  flow commits its decision. */
+export const trustSftpHostKey = (hostPort: string, fingerprint: string) =>
+  invoke<void>('trust_sftp_host_key', { hostPort, fingerprint });

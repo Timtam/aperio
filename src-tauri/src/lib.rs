@@ -188,6 +188,7 @@ pub fn run() {
 
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(local_adapter)
         .manage(registry)
         .manage(db)
@@ -292,6 +293,12 @@ pub fn run() {
             commands::list_sync_conflicts,
             commands::get_sync_conflicts_count,
             commands::resolve_sync_conflict,
+            // Phase Sm (DESIGN.md §19.5): SFTP host-key trust
+            // dialog. Preview reads the server's fingerprint
+            // without authenticating; trust commits a user-
+            // confirmed pin.
+            commands::preview_sftp_host_key,
+            commands::trust_sftp_host_key,
         ])
         .setup(move |app| {
             // Spawn the reminder scheduler on the Tauri/tokio runtime

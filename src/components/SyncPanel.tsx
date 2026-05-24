@@ -2,20 +2,26 @@ import { useCallback, useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useAnnouncer } from '../a11y/Announcer';
+import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
+
 import {
   acceptRemoteDataset,
   adoptLocalDataset,
   compactNow,
   configureSyncAdapter,
   isCommandError,
+  previewSftpHostKey,
   previewSyncTarget,
   setSyncInterval,
+  trustSftpHostKey,
+  type HostKeyPreview,
   type SyncAdapterConfig,
   type SyncPreview,
 } from '../api/client';
 import { useDateFormat } from '../intl/dateFormat';
 import { useDialogState } from '../state/DialogState';
 import { useSync } from '../state/useSync';
+import { SyncSftpTrustDialog } from './SyncSftpTrustDialog';
 
 /**
  * Settings → Synchronisation panel (DESIGN.md §19, Phase Si).
@@ -106,6 +112,18 @@ export function SyncPanel() {
   const [busyCompact, setBusyCompact] = useState(false);
   const [preview, setPreview] = useState<SyncPreview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  // Phase Sm-3: SFTP host-key trust dialog. `trustPreview` holds
+  // the snapshot the backend returned from `previewSftpHostKey`;
+  // when non-null and `status.kind !== 'unchanged'` the dialog is
+  // open. `pendingSftpConfig` carries the configure payload that
+  // was on the wire when we paused for the trust gesture — once
+  // the user accepts, we commit the pin then resume configure
+  // with this same payload.
+  const [trustPreview, setTrustPreview] = useState<HostKeyPreview | null>(
+    null,
+  );
+  const [pendingSftpConfig, setPendingSftpConfig] =
+    useState<SyncAdapterConfig | null>(null);
 
   const interval = intervalDraft ?? status?.interval_minutes ?? 5;
 
@@ -251,40 +269,126 @@ export function SyncPanel() {
     [announce, status?.interval_minutes, t],
   );
 
+  // Shared tail of the configure flow used by both the non-SFTP
+  // branch and the post-trust-dialog SFTP resume. Pulled out so
+  // both call sites stay literally identical — the trust dialog
+  // doesn't bypass any of the success bookkeeping.
+  const finishConfigure = useCallback(
+    async (config: SyncAdapterConfig) => {
+      setBusyAdapter(true);
+      try {
+        await configureSyncAdapter(config);
+        // Clear password fields after a successful connect so they
+        // don't sit in memory longer than necessary. The keychain
+        // entry is the canonical store from this point on.
+        if (config.kind === 'webdav') setPasswordDraft('');
+        if (config.kind === 'sftp') {
+          setSftpPasswordDraft('');
+          setSftpKeyPassphraseDraft('');
+        }
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('configure_sync_adapter failed', err);
+        announce(
+          `${t('dialogs.settings.sync.errorPrefix')}: ${messageForError(err)}`,
+          'assertive',
+        );
+      } finally {
+        setBusyAdapter(false);
+      }
+    },
+    [announce, messageForError, t],
+  );
+
   const onConfigure = useCallback(async () => {
     if (configMissingRequired) {
       announce(t('dialogs.settings.sync.adapterNeedPath'), 'assertive');
       return;
     }
-    setBusyAdapter(true);
-    try {
-      await configureSyncAdapter(buildConfig());
-      // Clear password fields after a successful connect so they
-      // don't sit in memory longer than necessary. The keychain
-      // entry is the canonical store from this point on.
-      if (kindDraft === 'webdav') setPasswordDraft('');
-      if (kindDraft === 'sftp') {
-        setSftpPasswordDraft('');
-        setSftpKeyPassphraseDraft('');
+    const config = buildConfig();
+    // SFTP: probe the host key BEFORE committing the configure.
+    // The user gets a deliberate trust gesture on first use or
+    // on key rotation (§19.5). `unchanged` skips the gesture —
+    // we already trust this server.
+    if (config.kind === 'sftp') {
+      setBusyAdapter(true);
+      let previewResult: HostKeyPreview;
+      try {
+        previewResult = await previewSftpHostKey(config.host, config.port);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('preview_sftp_host_key failed', err);
+        announce(
+          `${t('dialogs.settings.sync.errorPrefix')}: ${messageForError(err)}`,
+          'assertive',
+        );
+        setBusyAdapter(false);
+        return;
       }
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.warn('configure_sync_adapter failed', err);
-      announce(
-        `${t('dialogs.settings.sync.errorPrefix')}: ${messageForError(err)}`,
-        'assertive',
-      );
-    } finally {
+      if (previewResult.status.kind === 'unchanged') {
+        // Pin matches the stored one — skip the dialog. `setBusyAdapter`
+        // is reset inside `finishConfigure`.
+        setBusyAdapter(false);
+        await finishConfigure(config);
+        return;
+      }
+      // Hand off to the dialog. Park the bespoke config so the
+      // accept handler can call configure with exactly the same
+      // payload (incl. password / key bits) the user submitted.
       setBusyAdapter(false);
+      setPendingSftpConfig(config);
+      setTrustPreview(previewResult);
+      return;
     }
+    // Non-SFTP backends configure directly.
+    await finishConfigure(config);
   }, [
     announce,
     buildConfig,
     configMissingRequired,
-    kindDraft,
+    finishConfigure,
     messageForError,
     t,
   ]);
+
+  // Trust dialog: user accepted the fingerprint. Pin it via the
+  // backend then resume the parked configure call.
+  const onTrustAccept = useCallback(
+    async (fingerprint: string) => {
+      const config = pendingSftpConfig;
+      const preview = trustPreview;
+      // Close the dialog before the configure round so the
+      // backdrop / inert doesn't hover over the spinner.
+      setTrustPreview(null);
+      setPendingSftpConfig(null);
+      if (!config || !preview) return;
+      try {
+        await trustSftpHostKey(preview.host_port, fingerprint);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('trust_sftp_host_key failed', err);
+        announce(
+          `${t('dialogs.settings.sync.errorPrefix')}: ${messageForError(err)}`,
+          'assertive',
+        );
+        return;
+      }
+      await finishConfigure(config);
+    },
+    [
+      announce,
+      finishConfigure,
+      messageForError,
+      pendingSftpConfig,
+      t,
+      trustPreview,
+    ],
+  );
+
+  const onTrustCancel = useCallback(() => {
+    setTrustPreview(null);
+    setPendingSftpConfig(null);
+  }, []);
 
   const onDisconnect = useCallback(async () => {
     setBusyAdapter(true);
@@ -405,6 +509,32 @@ export function SyncPanel() {
     passphraseDraft,
     t,
   ]);
+
+  // Native file picker for the SSH key path. Uses
+  // `tauri-plugin-dialog` so the user gets the platform-native
+  // picker idiom; falls back silently on the (unlikely) error so
+  // the bare text input remains usable.
+  const onBrowseKey = useCallback(async () => {
+    try {
+      const selected = await openFileDialog({
+        multiple: false,
+        directory: false,
+        title: t('dialogs.settings.sync.adapterSftpKeyPathDialogTitle'),
+        // No platform-specific extension filters — SSH keys
+        // commonly carry no extension (`id_ed25519`) or `.pem`
+        // depending on origin. A filter would hide the file the
+        // user is looking for as often as it would help.
+      });
+      // `open` returns `string | string[] | null`. With
+      // `multiple: false` we only ever see a single path or null.
+      if (typeof selected === 'string' && selected.length > 0) {
+        setSftpKeyPathDraft(selected);
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('SSH key picker failed', err);
+    }
+  }, [t]);
 
   const onCompact = useCallback(async () => {
     setBusyCompact(true);
@@ -727,14 +857,25 @@ export function SyncPanel() {
                 <div className="sync-panel__field">
                   <label>
                     {t('dialogs.settings.sync.adapterSftpKeyPath')}
-                    <input
-                      type="text"
-                      value={sftpKeyPathDraft}
-                      onChange={(e) =>
-                        setSftpKeyPathDraft(e.target.value)
-                      }
-                      placeholder="/home/alice/.ssh/id_ed25519"
-                    />
+                    <div className="sync-panel__filepicker">
+                      <input
+                        type="text"
+                        value={sftpKeyPathDraft}
+                        onChange={(e) =>
+                          setSftpKeyPathDraft(e.target.value)
+                        }
+                        placeholder="/home/alice/.ssh/id_ed25519"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void onBrowseKey()}
+                        aria-label={t(
+                          'dialogs.settings.sync.adapterSftpKeyPathBrowseAria',
+                        )}
+                      >
+                        {t('dialogs.settings.sync.adapterSftpKeyPathBrowse')}
+                      </button>
+                    </div>
                   </label>
                   <p className="sync-panel__hint">
                     {t('dialogs.settings.sync.adapterSftpKeyPathHint')}
@@ -839,6 +980,10 @@ export function SyncPanel() {
               />
             </>
           )}
+          {/* Trust dialog is mounted as part of the panel so it can
+              reach into the `pendingSftpConfig` + `trustPreview`
+              state without going through the global DialogState
+              stack. See `SyncSftpTrustDialog` for the rationale. */}
           {preview?.kind === 'existing' && (
             <>
               {preview.e2e_enabled && (
@@ -861,6 +1006,12 @@ export function SyncPanel() {
           )}
         </section>
       )}
+      <SyncSftpTrustDialog
+        isOpen={trustPreview !== null}
+        preview={trustPreview}
+        onAccept={(fp) => void onTrustAccept(fp)}
+        onCancel={onTrustCancel}
+      />
     </div>
   );
 }
