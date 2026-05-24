@@ -305,9 +305,79 @@ pub struct Contact {
     /// haul a megabyte of JPEGs across the wire.
     #[serde(default)]
     pub has_photo: bool,
+    /// Postal addresses (DESIGN.md §10, Phase 10l / vCard ADR).
+    /// Maps to vCard `ADR`, EWS `PhysicalAddresses/Entry`, Google
+    /// People `addresses[]`, and MS Graph
+    /// `homeAddress` / `businessAddress` / `otherAddress`. Empty
+    /// `Vec` ⇒ the contact has no postal addresses on record;
+    /// `default` on serde means older wire payloads (pre-Phase
+    /// 10l) deserialise into an empty list without complaining.
+    #[serde(default)]
+    pub addresses: Vec<ContactAddress>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub etag: Option<String>,
+}
+
+/// One postal address attached to a contact. The shape is the
+/// least-common-denominator across the four wire formats we
+/// translate to:
+///
+///   - **vCard ADR** (RFC 6350 §6.3.1) has seven semicolon-
+///     separated components: po-box; extended-address; street;
+///     locality; region; postal-code; country-name. We fold
+///     po-box + extended into `street` because Aperio's input
+///     surface is a single multi-line text field — the
+///     distinction matters to formal mailing software, not to
+///     a calendar app's contact picker.
+///   - **Google People API** has the same five-field flat shape
+///     (`streetAddress` / `city` / `region` / `postalCode` /
+///     `country`) plus a `type` string ("home" / "work" /
+///     "other") that we round-trip in `label`.
+///   - **MS Graph** flattens into three named slots (homeAddress,
+///     businessAddress, otherAddress), each holding the five
+///     fields. We map our `label` onto that slot name on the
+///     write side.
+///   - **EWS** uses `PhysicalAddresses/Entry[Key]` with
+///     Street/City/State/PostalCode/CountryOrRegion children;
+///     same structure.
+///
+/// `label` is a free-form string but the four convention slots
+/// (`"home"`, `"work"`, `"other"`, `"work"` ↔ `"business"`) round-
+/// trip on every adapter that distinguishes them. Unknown labels
+/// fall through as the third "other" slot where the wire format
+/// requires a choice.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct ContactAddress {
+    /// Category tag — `"home"` / `"work"` / `"other"`. Free-form
+    /// because vCard 4 allows arbitrary TYPE parameter values; the
+    /// adapter mappers normalise the common slots.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// Street + house number, optionally including apt / extended
+    /// line. Kept as one field rather than split because the UI
+    /// only renders a single multi-line input — splitting would
+    /// force a confusing per-line decision on the user.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub street: Option<String>,
+    /// Locality / city / town.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub city: Option<String>,
+    /// Region / state / province / county. Province-shaped data
+    /// in EU contexts is fine here too — adapters that don't
+    /// model the field (e.g. CardDAV servers that only carry
+    /// locality) emit a placeholder.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
+    /// Postal code / ZIP / Postleitzahl.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub postal_code: Option<String>,
+    /// Country name as a string. We deliberately avoid an
+    /// enum-of-ISO-codes — vCard transports country names
+    /// verbatim and forcing a code dictionary would lose data on
+    /// the read side.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub country: Option<String>,
 }
 
 /// One member of a distribution list. Mirrors the
@@ -343,6 +413,12 @@ pub struct NewContact {
     pub phone_numbers: Vec<String>,
     pub birthday: Option<NaiveDate>,
     pub notes: Option<String>,
+    /// Postal addresses, same shape as `Contact::addresses`.
+    /// Defaults to empty so the existing call sites that build
+    /// a `NewContact` without thinking about addresses still
+    /// compile after the Phase 10l field is added.
+    #[serde(default)]
+    pub addresses: Vec<ContactAddress>,
     /// See `Contact::members`. `Some(empty vec)` creates a new
     /// distribution list with no initial members; `None` creates a
     /// person-contact (the common case).

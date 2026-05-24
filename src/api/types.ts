@@ -185,9 +185,27 @@ export interface Contact {
    *  `has_photo` to decide whether to issue a follow-up fetch
    *  or render the initials placeholder. */
   has_photo: boolean;
+  /** Postal addresses (Phase 10l / vCard ADR). One entry per
+   *  address; empty list ⇒ no postal addresses on record. */
+  addresses: ContactAddress[];
   created_at: string;
   updated_at: string;
   etag: string | null;
+}
+
+/** One postal address attached to a contact. Wire shape matches
+ *  cal_core::ContactAddress — every field optional because vCard
+ *  ADR allows arbitrary subsets and the four adapters round-trip
+ *  the same flexibility. */
+export interface ContactAddress {
+  /** `"home"` / `"work"` / `"other"` — free-form for forward
+   *  compatibility with custom vCard 4.0 TYPE values. */
+  label?: string | null;
+  street?: string | null;
+  city?: string | null;
+  region?: string | null;
+  postal_code?: string | null;
+  country?: string | null;
 }
 
 /** Avatar bytes attached to a contact. Round-tripped on
@@ -210,6 +228,8 @@ export interface NewContact {
   phone_numbers: string[];
   birthday: string | null;
   notes: string | null;
+  /** See `Contact.addresses`. Empty array ⇒ no postal addresses. */
+  addresses: ContactAddress[];
   /** See `Contact.members`. `null` ⇒ create a person; a non-null
    *  array (possibly empty) ⇒ create a distribution list. */
   members: GroupMember[] | null;

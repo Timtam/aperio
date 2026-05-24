@@ -1178,6 +1178,19 @@ pub fn to_contact(item: ParsedContact, list_id: &str) -> Contact {
         notes: item.body,
         members: item.members,
         has_photo: item.has_picture,
+        // Phase 10l postal addresses: EWS's `<t:PhysicalAddresses>`
+        // is a multi-keyed structure with sub-elements per Entry
+        // (Street / City / State / PostalCode / CountryOrRegion).
+        // The hand-rolled SAX parser in this file doesn't yet track
+        // the nested-state needed to materialise those — wiring it
+        // up cleanly without breaking the existing email / phone /
+        // member indexed-property handling is a follow-up. Until
+        // then EWS contacts surface with an empty addresses list,
+        // AND we deliberately omit the field from
+        // `new_contact_to_contact_item_xml` so a save doesn't
+        // overwrite the user's existing server-side addresses with
+        // a blank set.
+        addresses: Vec::new(),
         created_at: item.created.unwrap_or_else(Utc::now),
         updated_at: item.last_modified.unwrap_or_else(Utc::now),
         etag: item.change_key,
@@ -1885,6 +1898,7 @@ fn build_contact_from_new(
             .as_ref()
             .map(|p| !p.data.is_empty())
             .unwrap_or(false),
+        addresses: new.addresses.clone(),
         created_at: now,
         updated_at: now,
         etag: change_key,
@@ -2162,6 +2176,12 @@ fn persona_to_contact(p: ParsedPersona, list_id: &str) -> Contact {
         // upgrading to a custom Persona shape with `Photo` is a
         // future polish. For now, surface no photo.
         has_photo: false,
+        // ResolveNames returns a `Persona` with a different
+        // attribute namespace than the `<t:Contact>` shape; postal
+        // addresses aren't projected through it by default, so GAL
+        // hits surface without addresses. The user can open the
+        // contact in Outlook for the full detail set.
+        addresses: Vec::new(),
         created_at: now,
         updated_at: now,
         etag: None,
@@ -2464,6 +2484,7 @@ mod tests {
             phone_numbers: vec![],
             birthday: Some(NaiveDate::from_ymd_opt(1990, 6, 15).unwrap()),
             notes: None,
+            addresses: Vec::new(),
             members: None,
             photo: None,
         };
@@ -2495,6 +2516,7 @@ mod tests {
             phone_numbers: vec!["+1".into()],
             birthday: Some(NaiveDate::from_ymd_opt(2000, 1, 1).unwrap()),
             notes: Some("Note".into()),
+            addresses: Vec::new(),
             members: None,
             photo: None,
         };
@@ -2539,6 +2561,7 @@ mod tests {
             phone_numbers: vec![],
             birthday: None,
             notes: None,
+            addresses: Vec::new(),
             members: None,
             photo: None,
         };
@@ -2568,6 +2591,7 @@ mod tests {
             notes: None,
             members: None,
             has_photo: false,
+            addresses: Vec::new(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
             etag: Some("CK".into()),
@@ -2595,6 +2619,7 @@ mod tests {
             notes: None,
             members: None,
             has_photo: false,
+            addresses: Vec::new(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
             etag: Some("CK".into()),
@@ -2619,6 +2644,7 @@ mod tests {
             notes: None,
             members: None,
             has_photo: false,
+            addresses: Vec::new(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
             etag: None,

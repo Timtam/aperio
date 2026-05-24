@@ -216,6 +216,7 @@ pub async fn create_contact(
         phone_numbers: new.phone_numbers,
         birthday: new.birthday,
         notes: new.notes,
+        addresses: new.addresses,
         members: new.members,
         has_photo,
         created_at: now,

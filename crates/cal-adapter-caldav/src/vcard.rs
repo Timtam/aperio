@@ -96,6 +96,13 @@ pub fn parse_vcard(
     // both on write so round-trips survive between server kinds.
     let mut is_group = false;
     let mut members: Vec<GroupMember> = Vec::new();
+    // Postal addresses (Phase 10l). vCard ADR has 7 semicolon-
+    // separated components: po-box; extended; street; locality;
+    // region; postal-code; country-name. We fold po-box +
+    // extended into the street line so the cal-core model stays
+    // one-string-per-field. Multiple ADR properties become
+    // multiple `ContactAddress` entries.
+    let mut addresses: Vec<cal_core::ContactAddress> = Vec::new();
 
     for raw_line in unfolded.lines() {
         let line = raw_line.trim_end_matches('\r');
@@ -197,6 +204,47 @@ pub fn parse_vcard(
                     has_photo = true;
                 }
             }
+            "ADR" => {
+                // Seven components per RFC 6350 §6.3.1:
+                //   0: po-box, 1: extended-address, 2: street,
+                //   3: locality, 4: region, 5: postal-code,
+                //   6: country-name.
+                // We collapse po-box + extended + street into a
+                // single street line because Aperio's UI surfaces
+                // one multi-line text field per address — splitting
+                // them out would force a confusing per-line decision
+                // on the user.
+                let parts = split_structured(value);
+                let pobox = parts.first().map(String::as_str).unwrap_or("");
+                let extended =
+                    parts.get(1).map(String::as_str).unwrap_or("");
+                let street = parts.get(2).map(String::as_str).unwrap_or("");
+                let combined_street = [pobox, extended, street]
+                    .into_iter()
+                    .filter(|s| !s.is_empty())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let address = cal_core::ContactAddress {
+                    label: extract_type_param(head).map(normalise_address_label),
+                    street: Some(combined_street).filter(|s| !s.is_empty()),
+                    city: parts.get(3).cloned().filter(|s| !s.is_empty()),
+                    region: parts.get(4).cloned().filter(|s| !s.is_empty()),
+                    postal_code: parts.get(5).cloned().filter(|s| !s.is_empty()),
+                    country: parts.get(6).cloned().filter(|s| !s.is_empty()),
+                };
+                // Skip ADR lines that are all-empty — some vCards
+                // emit `ADR:;;;;;;` as a placeholder; pulling those
+                // into the model would clutter the UI with blank
+                // rows.
+                if address.street.is_some()
+                    || address.city.is_some()
+                    || address.region.is_some()
+                    || address.postal_code.is_some()
+                    || address.country.is_some()
+                {
+                    addresses.push(address);
+                }
+            }
             "MEMBER" | "X-ADDRESSBOOKSERVER-MEMBER" => {
                 // Spec form: `MEMBER;CN=Alice:mailto:alice@example.com`.
                 // We extract the email (after `mailto:`) and the
@@ -251,12 +299,47 @@ pub fn parse_vcard(
         phone_numbers,
         birthday,
         notes,
+        addresses,
         members: if is_group { Some(members) } else { None },
         has_photo,
         created_at: now,
         updated_at: updated_at.unwrap_or(now),
         etag,
     })
+}
+
+/// Pull the `TYPE` parameter off a property head like
+/// `ADR;TYPE=home`. Returns the first TYPE value (vCard 4.0 allows
+/// comma-separated lists like `TYPE=home,pref`; we keep "home" and
+/// drop the modifiers). Case-insensitive on the parameter name —
+/// the parameter value itself is preserved as-is so an unusual
+/// custom type (`TYPE=Postfach`) round-trips back out unchanged.
+fn extract_type_param(head: &str) -> Option<String> {
+    for part in head.split(';').skip(1) {
+        let (k, v) = part.split_once('=')?;
+        if k.eq_ignore_ascii_case("TYPE") {
+            // vCard 4.0 multi-value TYPE: take the first entry
+            // (the "primary" semantic; the rest are usually
+            // modifiers like "pref" we don't act on).
+            return v.split(',').next().map(|s| s.trim().to_string());
+        }
+    }
+    None
+}
+
+/// Fold a vCard TYPE value onto one of the canonical labels
+/// (`"home"` / `"work"` / `"other"`) so the round-trip across
+/// every adapter agrees on the slot. Unknown values pass through
+/// lower-cased — adapters that need a slot pick "other" for them.
+fn normalise_address_label(raw: String) -> String {
+    match raw.to_ascii_lowercase().as_str() {
+        "home" => "home".into(),
+        "work" | "business" => "work".into(),
+        "other" => "other".into(),
+        // Pass through anything else lowercased so we don't drop
+        // user-defined types but also don't introduce case noise.
+        _ => raw.to_ascii_lowercase(),
+    }
 }
 
 /// Extract the inline photo from a vCard body.
@@ -475,6 +558,41 @@ pub fn build_vcard(uid: &str, contact: &NewContact) -> String {
     if let Some(note) = contact.notes.as_deref().filter(|s| !s.is_empty()) {
         out.push_str(&format!("NOTE:{}\r\n", escape(note)));
     }
+    // Postal addresses (Phase 10l). One ADR property per address.
+    // We pack the (possibly multi-line) street into the third
+    // component, leaving po-box (0) and extended-address (1) empty
+    // — vCard parsers treat consecutive `;;` as "absent" so this
+    // matches what every reasonable server emits. Label rides on
+    // the `TYPE=` parameter; unrecognised labels still emit as a
+    // TYPE so the round-trip preserves user intent.
+    for address in &contact.addresses {
+        if address.street.is_none()
+            && address.city.is_none()
+            && address.region.is_none()
+            && address.postal_code.is_none()
+            && address.country.is_none()
+        {
+            continue;
+        }
+        let type_param = address
+            .label
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .map(|s| format!(";TYPE={}", escape_param(s)))
+            .unwrap_or_default();
+        // Street can hold an embedded newline from the parse-side
+        // fold of po-box / extended into street. vCard escapes `\n`
+        // as `\\n` (literal backslash-n) — the `escape` helper
+        // already does that.
+        out.push_str(&format!(
+            "ADR{type_param}:;;{};{};{};{};{}\r\n",
+            escape(address.street.as_deref().unwrap_or("")),
+            escape(address.city.as_deref().unwrap_or("")),
+            escape(address.region.as_deref().unwrap_or("")),
+            escape(address.postal_code.as_deref().unwrap_or("")),
+            escape(address.country.as_deref().unwrap_or("")),
+        ));
+    }
     // PHOTO (Phase 10g): emit the vCard 3.0 base64 form because
     // every CardDAV server in the wild — iCloud, Nextcloud,
     // Radicale, Baikal, Fastmail — round-trips it cleanly. The
@@ -572,6 +690,7 @@ pub fn rebuild_vcard(
         phone_numbers: contact.phone_numbers.clone(),
         birthday: contact.birthday,
         notes: contact.notes.clone(),
+        addresses: contact.addresses.clone(),
         members: contact.members.clone(),
         photo: preserved_photo,
     };
@@ -774,6 +893,7 @@ mod tests {
             phone_numbers: vec!["+49 30 1234567".into()],
             birthday: Some(NaiveDate::from_ymd_opt(1985, 4, 17).unwrap()),
             notes: Some("Met at conf 2024".into()),
+            addresses: Vec::new(),
             members: None,
             photo: None,
         };
@@ -926,6 +1046,7 @@ mod tests {
             phone_numbers: Vec::new(),
             birthday: None,
             notes: None,
+            addresses: Vec::new(),
             members: None,
             photo: None,
         };
@@ -947,6 +1068,7 @@ mod tests {
             phone_numbers: Vec::new(),
             birthday: None,
             notes: Some("Line one\nLine two".into()),
+            addresses: Vec::new(),
             members: None,
             photo: None,
         };
@@ -971,6 +1093,7 @@ mod tests {
             notes: None,
             members: None,
             has_photo: false,
+            addresses: Vec::new(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
             etag: Some("etag-1".into()),
@@ -1015,6 +1138,7 @@ mod tests {
             phone_numbers: Vec::new(),
             birthday: None,
             notes: None,
+            addresses: Vec::new(),
             members: None,
             photo: Some(photo.clone()),
         };
@@ -1076,6 +1200,7 @@ mod tests {
             notes: None,
             members: None,
             has_photo: true,
+            addresses: Vec::new(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
             etag: None,

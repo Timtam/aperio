@@ -137,7 +137,8 @@ impl ContactsFeature for LocalAdapter {
                 "SELECT id, list_id, display_name, given_name, family_name,
                         organization, emails, phone_numbers, birthday, notes,
                         etag, created_at, updated_at, members,
-                        (photo_data IS NOT NULL) AS has_photo
+                        (photo_data IS NOT NULL) AS has_photo,
+                        addresses
                  FROM contacts
                  WHERE list_id = ?
                  ORDER BY display_name COLLATE NOCASE",
@@ -175,7 +176,8 @@ impl ContactsFeature for LocalAdapter {
                 "SELECT c.id, c.list_id, c.display_name, c.given_name, c.family_name,
                         c.organization, c.emails, c.phone_numbers, c.birthday, c.notes,
                         c.etag, c.created_at, c.updated_at, c.members,
-                        (c.photo_data IS NOT NULL) AS has_photo
+                        (c.photo_data IS NOT NULL) AS has_photo,
+                        c.addresses
                  FROM contacts_fts f
                  JOIN contacts c ON c.id = f.id
                  WHERE contacts_fts MATCH ?
@@ -216,6 +218,10 @@ impl ContactsFeature for LocalAdapter {
             Some(m) => Some(encode_json(m)?),
             None => None,
         };
+        // Addresses live in their own JSON column (migration 0011).
+        // Empty `Vec` ⇒ '[]' rather than NULL so the schema's
+        // NOT NULL contract holds.
+        let addresses_json = encode_json(&contact.addresses)?;
         // Photo travels inline on create — Some ⇒ both columns
         // get populated, None ⇒ both stay NULL. Splitting it into
         // a follow-up `set_contact_photo` after a create would
@@ -235,8 +241,8 @@ impl ContactsFeature for LocalAdapter {
                     id, list_id, display_name, given_name, family_name,
                     organization, emails, phone_numbers, birthday, notes,
                     etag, created_at, updated_at, members,
-                    photo_data, photo_content_type
-                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)",
+                    photo_data, photo_content_type, addresses
+                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)",
                 params![
                     id,
                     list_id,
@@ -253,6 +259,7 @@ impl ContactsFeature for LocalAdapter {
                     members_json,
                     photo_data,
                     photo_content_type,
+                    addresses_json,
                 ],
             )
             .map_err(map_sql_err)?;
@@ -268,6 +275,7 @@ impl ContactsFeature for LocalAdapter {
             phone_numbers: contact.phone_numbers,
             birthday: contact.birthday,
             notes: contact.notes,
+            addresses: contact.addresses,
             members: contact.members,
             has_photo,
             created_at: now,
@@ -291,6 +299,7 @@ impl ContactsFeature for LocalAdapter {
             Some(m) => Some(encode_json(m)?),
             None => None,
         };
+        let addresses_json = encode_json(&contact.addresses)?;
 
         let changed = self
             .db()
@@ -301,7 +310,7 @@ impl ContactsFeature for LocalAdapter {
                     SET list_id = ?, display_name = ?, given_name = ?,
                         family_name = ?, organization = ?, emails = ?,
                         phone_numbers = ?, birthday = ?, notes = ?,
-                        members = ?, updated_at = ?
+                        members = ?, addresses = ?, updated_at = ?
                   WHERE id = ?",
                 params![
                     contact.list_id,
@@ -314,6 +323,7 @@ impl ContactsFeature for LocalAdapter {
                     birthday_s,
                     contact.notes.as_deref(),
                     members_json,
+                    addresses_json,
                     now_s,
                     contact.id,
                 ],
@@ -585,6 +595,12 @@ fn row_to_contact(row: &Row<'_>) -> rusqlite::Result<CoreResult<Contact>> {
         // it as an integer 0 / 1; `read_bool` lets us decode it
         // the same way `read_only` is decoded on contact lists.
         let has_photo = read_bool(row, 14)?;
+        // Addresses column (migration 0011). NOT NULL DEFAULT '[]'
+        // so a row from a pre-0011 backfill still parses as the
+        // empty list — no nullable handling required.
+        let addresses_json = req_text(row, 15)?;
+        let addresses: Vec<cal_core::ContactAddress> =
+            decode_json(&addresses_json)?;
         Ok(Contact {
             id,
             list_id,
@@ -598,6 +614,7 @@ fn row_to_contact(row: &Row<'_>) -> rusqlite::Result<CoreResult<Contact>> {
             notes,
             members,
             has_photo,
+            addresses,
             created_at,
             updated_at,
             etag,
@@ -626,6 +643,7 @@ mod tests {
             phone_numbers: vec!["+49 30 1234567".into()],
             birthday: Some(NaiveDate::from_ymd_opt(1985, 4, 17).unwrap()),
             notes: Some("Met at conf 2024".into()),
+            addresses: Vec::new(),
             members: None,
             photo: None,
         }
@@ -732,6 +750,7 @@ mod tests {
             notes: None,
             members: None,
             has_photo: false,
+            addresses: Vec::new(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
             etag: None,
@@ -787,6 +806,7 @@ mod tests {
             phone_numbers: Vec::new(),
             birthday: None,
             notes: None,
+            addresses: Vec::new(),
             members: None,
             photo: None,
         };

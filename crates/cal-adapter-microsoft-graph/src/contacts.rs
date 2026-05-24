@@ -441,6 +441,23 @@ fn map_contact(entry: ContactEntry, list_id: &str) -> Contact {
     let created = entry.created_date_time.unwrap_or_else(Utc::now);
     let updated = entry.last_modified_date_time.unwrap_or(created);
 
+    // Graph flattens postal addresses across three slots
+    // (homeAddress / businessAddress / otherAddress). Collect any
+    // non-empty ones into our normalised Vec<ContactAddress>.
+    let mut addresses: Vec<cal_core::ContactAddress> = Vec::new();
+    if let Some(addr) = graph_address_to_core(entry.home_address.as_ref(), "home") {
+        addresses.push(addr);
+    }
+    if let Some(addr) =
+        graph_address_to_core(entry.business_address.as_ref(), "work")
+    {
+        addresses.push(addr);
+    }
+    if let Some(addr) = graph_address_to_core(entry.other_address.as_ref(), "other")
+    {
+        addresses.push(addr);
+    }
+
     Contact {
         id: entry.id,
         list_id: list_id.to_string(),
@@ -465,10 +482,43 @@ fn map_contact(entry: ContactEntry, list_id: &str) -> Contact {
         // optimistic-true default is the best we can do without
         // an extra round-trip per contact.
         has_photo: true,
+        addresses,
         created_at: created,
         updated_at: updated,
         etag: entry.etag,
     }
+}
+
+/// Lift one of Graph's flat address slots into a cal-core
+/// `ContactAddress`. `default_label` is the slot's canonical name
+/// ("home" / "work" / "other") and gets baked onto the result so
+/// the round-trip back to Graph drops the entry into the matching
+/// slot. Returns `None` when the slot is missing or all-empty.
+fn graph_address_to_core(
+    raw: Option<&PhysicalAddress>,
+    default_label: &str,
+) -> Option<cal_core::ContactAddress> {
+    let raw = raw?;
+    let mapped = cal_core::ContactAddress {
+        label: Some(default_label.to_string()),
+        street: raw.street.clone().filter(|s| !s.is_empty()),
+        city: raw.city.clone().filter(|s| !s.is_empty()),
+        region: raw.state.clone().filter(|s| !s.is_empty()),
+        postal_code: raw.postal_code.clone().filter(|s| !s.is_empty()),
+        country: raw
+            .country_or_region
+            .clone()
+            .filter(|s| !s.is_empty()),
+    };
+    if mapped.street.is_none()
+        && mapped.city.is_none()
+        && mapped.region.is_none()
+        && mapped.postal_code.is_none()
+        && mapped.country.is_none()
+    {
+        return None;
+    }
+    Some(mapped)
 }
 
 fn map_person(entry: PersonEntry, list_id: &str) -> Contact {
@@ -507,6 +557,10 @@ fn map_person(entry: PersonEntry, list_id: &str) -> Contact {
         members: None,
         // People surface no photo property — no avatar.
         has_photo: false,
+        // The /me/people endpoint doesn't expose postal addresses
+        // in its default projection; relevance-ranked hits surface
+        // without them.
+        addresses: Vec::new(),
         created_at: now,
         updated_at: now,
         etag: None,
@@ -558,6 +612,7 @@ fn new_contact_to_body(new: &NewContact) -> serde_json::Value {
         &new.phone_numbers,
         new.birthday,
         new.notes.as_deref(),
+        &new.addresses,
     )
 }
 
@@ -571,6 +626,7 @@ fn contact_to_body(contact: &Contact) -> serde_json::Value {
         &contact.phone_numbers,
         contact.birthday,
         contact.notes.as_deref(),
+        &contact.addresses,
     )
 }
 
@@ -583,6 +639,7 @@ fn contact_body(
     phones: &[String],
     birthday: Option<NaiveDate>,
     notes: Option<&str>,
+    addresses: &[cal_core::ContactAddress],
 ) -> serde_json::Value {
     let mut body = serde_json::Map::new();
     body.insert(
@@ -653,7 +710,60 @@ fn contact_body(
             serde_json::Value::String(notes.to_string()),
         );
     }
+    // Postal addresses (Phase 10l). Graph's three flat slots map
+    // 1:1 to our `label`:
+    //   - "home"  → homeAddress
+    //   - "work"  → businessAddress
+    //   - "other" / unknown → otherAddress
+    // The first matching entry per slot wins; subsequent entries
+    // with the same label drop because Graph has nowhere to put
+    // them. A user wanting "two work addresses" needs to keep them
+    // separate via the otherAddress slot — same trade-off the
+    // Outlook UI surfaces.
+    let mut home: Option<&cal_core::ContactAddress> = None;
+    let mut business: Option<&cal_core::ContactAddress> = None;
+    let mut other: Option<&cal_core::ContactAddress> = None;
+    for addr in addresses {
+        match addr.label.as_deref().map(str::to_ascii_lowercase).as_deref() {
+            Some("home") => home.get_or_insert(addr),
+            Some("work") | Some("business") => business.get_or_insert(addr),
+            _ => other.get_or_insert(addr),
+        };
+    }
+    if let Some(addr) = home {
+        body.insert(
+            "homeAddress".into(),
+            address_to_json(addr),
+        );
+    }
+    if let Some(addr) = business {
+        body.insert(
+            "businessAddress".into(),
+            address_to_json(addr),
+        );
+    }
+    if let Some(addr) = other {
+        body.insert(
+            "otherAddress".into(),
+            address_to_json(addr),
+        );
+    }
     serde_json::Value::Object(body)
+}
+
+/// Serialise a single cal-core `ContactAddress` into Graph's
+/// `PhysicalAddress` JSON shape. Empty fields drop because the
+/// `PhysicalAddress` struct uses `skip_serializing_if` — keeps
+/// Graph from echoing empty strings back on the next read.
+fn address_to_json(addr: &cal_core::ContactAddress) -> serde_json::Value {
+    serde_json::to_value(PhysicalAddress {
+        street: addr.street.clone(),
+        city: addr.city.clone(),
+        state: addr.region.clone(),
+        country_or_region: addr.country.clone(),
+        postal_code: addr.postal_code.clone(),
+    })
+    .unwrap_or_else(|_| serde_json::Value::Object(Default::default()))
 }
 
 /// Escape a literal for use inside an OData `'…'` string. Graph
@@ -731,12 +841,44 @@ pub struct ContactEntry {
     /// back into the right `list_id` on the cal-core side.
     #[serde(default, rename = "parentFolderId")]
     pub parent_folder_id: Option<String>,
+    /// Graph flattens addresses into three named slots rather
+    /// than a single typed array. We round-trip onto our normalised
+    /// `Vec<ContactAddress>` via `map_contact` / `contact_body`.
+    #[serde(default, rename = "homeAddress")]
+    pub home_address: Option<PhysicalAddress>,
+    #[serde(default, rename = "businessAddress")]
+    pub business_address: Option<PhysicalAddress>,
+    #[serde(default, rename = "otherAddress")]
+    pub other_address: Option<PhysicalAddress>,
     #[serde(default, rename = "createdDateTime")]
     pub created_date_time: Option<DateTime<Utc>>,
     #[serde(default, rename = "lastModifiedDateTime")]
     pub last_modified_date_time: Option<DateTime<Utc>>,
     #[serde(default, rename = "@odata.etag")]
     pub etag: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+pub struct PhysicalAddress {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub street: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub city: Option<String>,
+    /// Graph's `state` is the region/province slot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
+    #[serde(
+        default,
+        rename = "countryOrRegion",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub country_or_region: Option<String>,
+    #[serde(
+        default,
+        rename = "postalCode",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub postal_code: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -804,6 +946,15 @@ mod tests {
             birthday: Some("1990-06-15T00:00:00Z".into()),
             personal_notes: Some("met at conf".into()),
             parent_folder_id: Some("FOLDER-1".into()),
+            home_address: Some(PhysicalAddress {
+                street: Some("Hauptstraße 1".into()),
+                city: Some("Berlin".into()),
+                state: None,
+                country_or_region: Some("Deutschland".into()),
+                postal_code: Some("10115".into()),
+            }),
+            business_address: None,
+            other_address: None,
             created_date_time: None,
             last_modified_date_time: None,
             etag: Some("W/\"abc\"".into()),
@@ -833,6 +984,13 @@ mod tests {
         // Optimistic has_photo — see comment in map_contact.
         assert!(c.has_photo);
         assert_eq!(c.etag.as_deref(), Some("W/\"abc\""));
+        // Home address lifted from the homeAddress slot with the
+        // `label="home"` tag baked on by `graph_address_to_core`.
+        assert_eq!(c.addresses.len(), 1);
+        assert_eq!(c.addresses[0].label.as_deref(), Some("home"));
+        assert_eq!(c.addresses[0].street.as_deref(), Some("Hauptstraße 1"));
+        assert_eq!(c.addresses[0].city.as_deref(), Some("Berlin"));
+        assert_eq!(c.addresses[0].postal_code.as_deref(), Some("10115"));
     }
 
     #[test]
@@ -853,6 +1011,9 @@ mod tests {
             birthday: None,
             personal_notes: None,
             parent_folder_id: None,
+            home_address: None,
+            business_address: None,
+            other_address: None,
             created_date_time: None,
             last_modified_date_time: None,
             etag: None,
@@ -913,6 +1074,14 @@ mod tests {
             ],
             birthday: NaiveDate::from_ymd_opt(1990, 6, 15),
             notes: None,
+            addresses: vec![cal_core::ContactAddress {
+                label: Some("home".into()),
+                street: Some("Hauptstraße 1".into()),
+                city: Some("Berlin".into()),
+                region: None,
+                postal_code: Some("10115".into()),
+                country: Some("Deutschland".into()),
+            }],
             members: None,
             photo: None,
         };
@@ -923,6 +1092,12 @@ mod tests {
         assert_eq!(body["businessPhones"][1], "+49 170 3333");
         assert_eq!(body["emailAddresses"][0]["address"], "anna@example.com");
         assert_eq!(body["birthday"], "1990-06-15T00:00:00Z");
+        assert_eq!(body["homeAddress"]["street"], "Hauptstraße 1");
+        assert_eq!(body["homeAddress"]["postalCode"], "10115");
+        // No work / other addresses on this fixture; serde
+        // `skip_serializing_if` keeps the keys out entirely.
+        assert!(body.get("businessAddress").is_none());
+        assert!(body.get("otherAddress").is_none());
     }
 
     #[test]

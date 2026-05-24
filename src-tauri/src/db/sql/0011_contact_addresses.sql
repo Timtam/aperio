@@ -1,0 +1,36 @@
+-- Migration 0011: postal addresses on contacts (DESIGN.md §10,
+-- Phase 10l / vCard ADR).
+--
+-- Adds a single JSON column `addresses` to the `contacts` table.
+-- One row in the array per address; the array order is the
+-- declared order (no implicit "primary" — the UI just shows them
+-- in the order they were entered).
+--
+-- Shape of each entry mirrors `cal_core::ContactAddress`:
+--
+--   {
+--     "label":       "home" | "work" | "other" | free-form,
+--     "street":      "...",
+--     "city":        "...",
+--     "region":      "...",
+--     "postal_code": "...",
+--     "country":     "..."
+--   }
+--
+-- Each field is optional — vCard's ADR property allows any subset
+-- and we round-trip that without forcing the user to fill every
+-- slot.
+--
+-- JSON column rationale matches the existing `emails`,
+-- `phone_numbers`, and `members` columns: addresses are
+-- multi-valued, only read as a unit, and never queried by an
+-- individual sub-field. The FTS5 mirror in `contacts_fts`
+-- doesn't index addresses (the picker autocomplete is name + email
+-- + organisation focused, where addresses would just be noise) —
+-- no trigger changes are needed for this migration.
+--
+-- Default `'[]'` rather than NULL: an address-less contact has an
+-- empty list semantically, not a "missing" one. Matches how
+-- `emails` and `phone_numbers` model the same situation.
+
+ALTER TABLE contacts ADD COLUMN addresses TEXT NOT NULL DEFAULT '[]';

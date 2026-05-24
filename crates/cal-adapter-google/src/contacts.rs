@@ -80,13 +80,13 @@ pub const GOOGLE_DIRECTORY_LIST_ID: &str = "google-directory";
 /// "read mask" cost so listing exactly what we'll use stays
 /// efficient even for 1000-contact accounts.
 const PERSON_FIELDS: &str = "names,emailAddresses,phoneNumbers,birthdays,\
-organizations,biographies,memberships,photos,metadata";
+organizations,biographies,memberships,photos,addresses,metadata";
 
 /// Mask we send on update calls. Has to enumerate every field we
 /// might mutate — fields not in the mask are left untouched
 /// server-side, which would silently lose user edits.
-const UPDATE_PERSON_FIELDS: &str =
-    "names,emailAddresses,phoneNumbers,birthdays,organizations,biographies";
+const UPDATE_PERSON_FIELDS: &str = "names,emailAddresses,phoneNumbers,birthdays,\
+    organizations,biographies,addresses";
 
 // ── Public surface ────────────────────────────────────────────────────
 
@@ -810,6 +810,12 @@ fn person_to_contact(person: Person, list_id: &str) -> Contact {
         .unwrap_or(&[])
         .iter()
         .any(|p| !p.default.unwrap_or(false) && p.url.is_some());
+    let addresses: Vec<cal_core::ContactAddress> = person
+        .addresses
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(person_address_to_core)
+        .collect();
     let now = Utc::now();
     Contact {
         id: person.resource_name,
@@ -824,10 +830,36 @@ fn person_to_contact(person: Person, list_id: &str) -> Contact {
         notes,
         members: None,
         has_photo,
+        addresses,
         created_at: now,
         updated_at: now,
         etag: person.etag,
     }
+}
+
+/// Translate Google's flat `PersonAddress` into a cal-core
+/// `ContactAddress`. Returns `None` for entries that are all-empty
+/// (Google sometimes emits these on freshly created contacts the
+/// user hasn't filled an address into yet) — surfacing them as
+/// blank rows would clutter the UI without adding signal.
+fn person_address_to_core(addr: PersonAddress) -> Option<cal_core::ContactAddress> {
+    let mapped = cal_core::ContactAddress {
+        label: addr.type_.filter(|s| !s.is_empty()),
+        street: addr.street_address.filter(|s| !s.is_empty()),
+        city: addr.city.filter(|s| !s.is_empty()),
+        region: addr.region.filter(|s| !s.is_empty()),
+        postal_code: addr.postal_code.filter(|s| !s.is_empty()),
+        country: addr.country.filter(|s| !s.is_empty()),
+    };
+    if mapped.street.is_none()
+        && mapped.city.is_none()
+        && mapped.region.is_none()
+        && mapped.postal_code.is_none()
+        && mapped.country.is_none()
+    {
+        return None;
+    }
+    Some(mapped)
 }
 
 fn group_to_contact(
@@ -849,6 +881,8 @@ fn group_to_contact(
         notes: None,
         members: Some(members),
         has_photo: false,
+        // Groups don't carry postal addresses in Google's model.
+        addresses: Vec::new(),
         created_at: now,
         updated_at: now,
         etag: group.etag,
@@ -865,6 +899,7 @@ fn new_contact_to_person_body(new: &NewContact) -> serde_json::Value {
         &new.phone_numbers,
         new.birthday,
         new.notes.as_deref(),
+        &new.addresses,
         None,
     )
 }
@@ -879,6 +914,7 @@ fn contact_to_person_body(contact: &Contact) -> serde_json::Value {
         &contact.phone_numbers,
         contact.birthday,
         contact.notes.as_deref(),
+        &contact.addresses,
         contact.etag.as_deref(),
     )
 }
@@ -895,6 +931,7 @@ fn person_body_from_fields(
     phone_numbers: &[String],
     birthday: Option<NaiveDate>,
     notes: Option<&str>,
+    addresses: &[cal_core::ContactAddress],
     etag: Option<&str>,
 ) -> serde_json::Value {
     let mut body = serde_json::Map::new();
@@ -960,6 +997,58 @@ fn person_body_from_fields(
             "biographies".into(),
             serde_json::json!([{ "value": notes }]),
         );
+    }
+    // Postal addresses (Phase 10l). One entry per ContactAddress;
+    // empty slots get omitted from the JSON so Google doesn't see
+    // a payload full of "" values it then tries to round-trip.
+    // The `type` key holds our `label` — Google accepts arbitrary
+    // strings here but renders the three canonical ones ("home",
+    // "work", "other") with localised UI labels.
+    if !addresses.is_empty() {
+        let entries: Vec<serde_json::Value> = addresses
+            .iter()
+            .map(|a| {
+                let mut entry = serde_json::Map::new();
+                if let Some(label) = a.label.as_deref().filter(|s| !s.is_empty()) {
+                    entry.insert(
+                        "type".into(),
+                        serde_json::Value::String(label.to_string()),
+                    );
+                }
+                if let Some(s) = a.street.as_deref().filter(|s| !s.is_empty()) {
+                    entry.insert(
+                        "streetAddress".into(),
+                        serde_json::Value::String(s.to_string()),
+                    );
+                }
+                if let Some(s) = a.city.as_deref().filter(|s| !s.is_empty()) {
+                    entry.insert(
+                        "city".into(),
+                        serde_json::Value::String(s.to_string()),
+                    );
+                }
+                if let Some(s) = a.region.as_deref().filter(|s| !s.is_empty()) {
+                    entry.insert(
+                        "region".into(),
+                        serde_json::Value::String(s.to_string()),
+                    );
+                }
+                if let Some(s) = a.postal_code.as_deref().filter(|s| !s.is_empty()) {
+                    entry.insert(
+                        "postalCode".into(),
+                        serde_json::Value::String(s.to_string()),
+                    );
+                }
+                if let Some(s) = a.country.as_deref().filter(|s| !s.is_empty()) {
+                    entry.insert(
+                        "country".into(),
+                        serde_json::Value::String(s.to_string()),
+                    );
+                }
+                serde_json::Value::Object(entry)
+            })
+            .collect();
+        body.insert("addresses".into(), serde_json::Value::Array(entries));
     }
     serde_json::Value::Object(body)
 }
@@ -1086,6 +1175,23 @@ struct Person {
     biographies: Option<Vec<PersonBiography>>,
     memberships: Option<Vec<PersonMembership>>,
     photos: Option<Vec<PersonPhoto>>,
+    /// Postal addresses (Phase 10l). Each entry carries a small
+    /// flat shape: type + street + city + region + postal +
+    /// country. We round-trip the `type` string verbatim onto our
+    /// `ContactAddress.label`.
+    addresses: Option<Vec<PersonAddress>>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct PersonAddress {
+    #[serde(rename = "type", default)]
+    type_: Option<String>,
+    street_address: Option<String>,
+    city: Option<String>,
+    region: Option<String>,
+    postal_code: Option<String>,
+    country: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -1230,6 +1336,14 @@ mod tests {
                 url: Some("https://lh3.googleusercontent.com/abc".into()),
                 default: Some(false),
             }]),
+            addresses: Some(vec![PersonAddress {
+                type_: Some("home".into()),
+                street_address: Some("Hauptstraße 1".into()),
+                city: Some("Berlin".into()),
+                region: None,
+                postal_code: Some("10115".into()),
+                country: Some("Deutschland".into()),
+            }]),
         }
     }
 
@@ -1281,6 +1395,7 @@ mod tests {
             biographies: None,
             memberships: None,
             photos: None,
+            addresses: None,
         };
         assert_eq!(
             person_to_contact(p, GOOGLE_CONTACT_LIST_ID).display_name,
@@ -1333,6 +1448,7 @@ mod tests {
             phone_numbers: vec!["+49 170 1234567".into()],
             birthday: NaiveDate::from_ymd_opt(1985, 4, 17),
             notes: Some("Note".into()),
+            addresses: Vec::new(),
             members: None,
             photo: None,
         });
@@ -1367,6 +1483,7 @@ mod tests {
             notes: None,
             members: None,
             has_photo: false,
+            addresses: Vec::new(),
             created_at: now,
             updated_at: now,
             etag: Some("etag-1".into()),
@@ -1477,6 +1594,7 @@ mod tests {
             phone_numbers: Vec::new(),
             birthday: None,
             notes: None,
+            addresses: Vec::new(),
             members: None,
             photo: None,
         });

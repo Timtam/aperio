@@ -20,7 +20,7 @@ import {
   setContactPhoto as apiSetContactPhoto,
   updateContact as apiUpdateContact,
 } from '../api/client';
-import type { Contact, ContactPhoto } from '../api/types';
+import type { Contact, ContactAddress, ContactPhoto } from '../api/types';
 import { getContactListDisplayName } from '../intl/contactList';
 import { useCalendarStore } from '../state/CalendarStore';
 import { useDialogState } from '../state/DialogState';
@@ -85,6 +85,13 @@ interface FormState {
    *  email addresses are also accepted; the name defaults to null
    *  on parse. */
   membersText: string;
+  /** Postal addresses (Phase 10l / vCard ADR). Each entry is a
+   *  flat record edited via a repeating-row sub-form. We keep
+   *  them structured in the form state (rather than CSV-shaped
+   *  like emails) because addresses have six sub-fields per row
+   *  and packing them into one string would force the user to
+   *  hand-format vCard ADR semicolons. */
+  addresses: ContactAddress[];
 }
 
 function emptyForm(): FormState {
@@ -100,6 +107,7 @@ function emptyForm(): FormState {
     notes: '',
     isGroup: false,
     membersText: '',
+    addresses: [],
   };
 }
 
@@ -122,7 +130,41 @@ function fromContact(c: Contact): FormState {
           : m.email,
       )
       .join('\n'),
+    // Defensive against backends that don't yet return the field
+    // (older Aperio versions on the read side); normalise to []
+    // so the editor doesn't blow up on undefined.
+    addresses: (c.addresses ?? []).map((a) => ({ ...a })),
   };
+}
+
+/** Drop empty address rows + serialise the form-state shape into
+ *  the wire `ContactAddress`. Empty fields collapse to `null` so
+ *  the backend can `skip_serializing_if` them and we don't write
+ *  literal empty strings to vCard ADR / Graph PhysicalAddress
+ *  slots (those would round-trip as "" rather than "absent",
+ *  showing up as confusing artefacts in the editor on re-open).
+ *
+ *  An address row is dropped entirely if every field — including
+ *  the label — is blank. We don't make the user click a "remove"
+ *  button to clean up a row they never filled. */
+function sanitiseAddresses(rows: ContactAddress[]): ContactAddress[] {
+  return rows
+    .map((a) => ({
+      label: a.label?.trim() || null,
+      street: a.street?.trim() || null,
+      city: a.city?.trim() || null,
+      region: a.region?.trim() || null,
+      postal_code: a.postal_code?.trim() || null,
+      country: a.country?.trim() || null,
+    }))
+    .filter(
+      (a) =>
+        a.street !== null ||
+        a.city !== null ||
+        a.region !== null ||
+        a.postal_code !== null ||
+        a.country !== null,
+    );
 }
 
 /** Parse the multi-line members textarea into structured
@@ -373,6 +415,7 @@ export function ContactDialog({
       // `members` marker to route the row into the right wire
       // shape (`<t:DistributionList>` on EWS, `KIND:group` on
       // CardDAV, the `members` JSON column on local SQLite).
+      const cleanedAddresses = sanitiseAddresses(form.addresses);
       const payload = form.isGroup
         ? {
             display_name: name,
@@ -383,6 +426,11 @@ export function ContactDialog({
             phone_numbers: [],
             birthday: null,
             notes: form.notes.trim() || null,
+            // Groups don't model postal addresses (vCard `KIND:group`
+            // doesn't carry ADR semantics, and EWS distribution
+            // lists don't either) — drop them on save so the
+            // round-trip doesn't surface ghost empty rows.
+            addresses: [],
             members: parseMembers(form.membersText),
           }
         : {
@@ -394,6 +442,7 @@ export function ContactDialog({
             phone_numbers: splitCsv(form.phoneNumbers),
             birthday: form.birthday || null,
             notes: form.notes.trim() || null,
+            addresses: cleanedAddresses,
             members: null,
           };
 
@@ -719,6 +768,68 @@ export function ContactDialog({
             />
           </label>
 
+          {!form.isGroup && (
+            <fieldset className="form__field">
+              <legend className="form__label">
+                {t('dialogs.contact.addressesLabel')}
+              </legend>
+              {form.addresses.length === 0 ? (
+                <p className="form__hint">
+                  {t('dialogs.contact.addressesEmpty')}
+                </p>
+              ) : (
+                <ul className="form__address-list">
+                  {form.addresses.map((addr, idx) => (
+                    <AddressRow
+                      key={idx}
+                      index={idx}
+                      address={addr}
+                      viewOnly={viewOnly}
+                      onChange={(next) => {
+                        setForm((p) => ({
+                          ...p,
+                          addresses: p.addresses.map((a, i) =>
+                            i === idx ? next : a,
+                          ),
+                        }));
+                      }}
+                      onRemove={() => {
+                        setForm((p) => ({
+                          ...p,
+                          addresses: p.addresses.filter((_, i) => i !== idx),
+                        }));
+                      }}
+                    />
+                  ))}
+                </ul>
+              )}
+              {!viewOnly && (
+                <button
+                  type="button"
+                  className="form__action"
+                  onClick={() => {
+                    setForm((p) => ({
+                      ...p,
+                      addresses: [
+                        ...p.addresses,
+                        {
+                          label: 'home',
+                          street: '',
+                          city: '',
+                          region: '',
+                          postal_code: '',
+                          country: '',
+                        },
+                      ],
+                    }));
+                  }}
+                >
+                  {t('dialogs.contact.addressAdd')}
+                </button>
+              )}
+            </fieldset>
+          )}
+
           <label className="form__field form__field--check">
             <input
               type="checkbox"
@@ -822,5 +933,144 @@ export function ContactDialog({
         })}
       />
     </>
+  );
+}
+
+/** Repeating-row editor for one postal address (Phase 10l).
+ *  Lives as a sub-component so the parent dialog's render tree
+ *  stays manageable and the address row can hold its own onChange
+ *  fan-out without leaking field handlers up. */
+function AddressRow({
+  index,
+  address,
+  viewOnly,
+  onChange,
+  onRemove,
+}: {
+  index: number;
+  address: ContactAddress;
+  viewOnly: boolean;
+  onChange: (next: ContactAddress) => void;
+  onRemove: () => void;
+}) {
+  const { t } = useTranslation();
+  // The label dropdown offers the three canonical slots the
+  // adapters round-trip natively (Google / Graph use `home` /
+  // `work` / `other` directly; vCard ADR uses them via the TYPE
+  // parameter; EWS uses Home / Business / Other Keys). A custom
+  // label still round-trips on read but the editor stays simple.
+  const labelOptions: { value: string; key: string }[] = [
+    { value: 'home', key: 'dialogs.contact.addressLabelHome' },
+    { value: 'work', key: 'dialogs.contact.addressLabelWork' },
+    { value: 'other', key: 'dialogs.contact.addressLabelOther' },
+  ];
+  const knownLabel = labelOptions.some((o) => o.value === address.label);
+  const update = <K extends keyof ContactAddress>(
+    key: K,
+    value: ContactAddress[K],
+  ) => onChange({ ...address, [key]: value });
+  return (
+    <li className="form__address-row">
+      <div className="form__address-row-header">
+        <label className="form__field">
+          <span className="form__label">
+            {t('dialogs.contact.addressLabel', { index: index + 1 })}
+          </span>
+          <select
+            value={knownLabel ? (address.label ?? '') : '__custom__'}
+            onChange={(e) => {
+              const next = e.target.value;
+              if (next === '__custom__') return;
+              update('label', next);
+            }}
+            disabled={viewOnly}
+          >
+            {labelOptions.map((o) => (
+              <option key={o.value} value={o.value}>
+                {t(o.key)}
+              </option>
+            ))}
+            {!knownLabel && address.label && (
+              <option value="__custom__">{address.label}</option>
+            )}
+          </select>
+        </label>
+        {!viewOnly && (
+          <button
+            type="button"
+            className="form__action"
+            onClick={onRemove}
+            aria-label={t('dialogs.contact.addressRemoveAria', {
+              index: index + 1,
+            })}
+          >
+            {t('dialogs.contact.addressRemove')}
+          </button>
+        )}
+      </div>
+      <label className="form__field">
+        <span className="form__label">
+          {t('dialogs.contact.addressStreet')}
+        </span>
+        <textarea
+          value={address.street ?? ''}
+          onChange={(e) => update('street', e.target.value)}
+          rows={2}
+          readOnly={viewOnly}
+        />
+      </label>
+      <div className="form__address-row-grid">
+        <label className="form__field">
+          <span className="form__label">
+            {t('dialogs.contact.addressPostalCode')}
+          </span>
+          <input
+            type="text"
+            value={address.postal_code ?? ''}
+            onChange={(e) => update('postal_code', e.target.value)}
+            readOnly={viewOnly}
+            autoComplete="postal-code"
+          />
+        </label>
+        <label className="form__field">
+          <span className="form__label">
+            {t('dialogs.contact.addressCity')}
+          </span>
+          <input
+            type="text"
+            value={address.city ?? ''}
+            onChange={(e) => update('city', e.target.value)}
+            readOnly={viewOnly}
+            autoComplete="address-level2"
+          />
+        </label>
+      </div>
+      <div className="form__address-row-grid">
+        <label className="form__field">
+          <span className="form__label">
+            {t('dialogs.contact.addressRegion')}
+          </span>
+          <input
+            type="text"
+            value={address.region ?? ''}
+            onChange={(e) => update('region', e.target.value)}
+            readOnly={viewOnly}
+            autoComplete="address-level1"
+          />
+        </label>
+        <label className="form__field">
+          <span className="form__label">
+            {t('dialogs.contact.addressCountry')}
+          </span>
+          <input
+            type="text"
+            value={address.country ?? ''}
+            onChange={(e) => update('country', e.target.value)}
+            readOnly={viewOnly}
+            autoComplete="country-name"
+          />
+        </label>
+      </div>
+    </li>
   );
 }

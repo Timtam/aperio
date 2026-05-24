@@ -17,7 +17,8 @@ pub use color::{ColorLabel, ColorLabelId, ColorSource, ContainerColor};
 pub use error::{Error, Result};
 pub use reminder::{Reminder, ReminderKind, SoundConfig, SoundSource};
 pub use types::{
-    Calendar, Contact, ContactList, ContactPhoto, DateRange, Event, EventRecurrence, FreeBusy,
-    FreeBusySlot, GroupMember, NewContact, NewEvent, NewTask, RecurrenceEnd,
-    RecurrenceFrequency, Task, TaskList, TaskPriority, TaskRecurrence, TaskStatus, Weekday,
+    Calendar, Contact, ContactAddress, ContactList, ContactPhoto, DateRange, Event,
+    EventRecurrence, FreeBusy, FreeBusySlot, GroupMember, NewContact, NewEvent, NewTask,
+    RecurrenceEnd, RecurrenceFrequency, Task, TaskList, TaskPriority, TaskRecurrence,
+    TaskStatus, Weekday,
 };
