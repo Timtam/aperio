@@ -377,7 +377,13 @@ export function ContactsPanel() {
             void onClearCache();
           }}
           disabled={clearing}
-          aria-describedby={`${cacheHintId} ${privacyHintId}`}
+          // `aria-describedby` only references the cache-specific
+          // hint. We used to also reference `privacyHintId` so the
+          // user heard the privacy implications before the
+          // destructive action, but that prose is a FocusableNote
+          // now (tab-stop with its own aria-label) — re-reading it
+          // on every button focus felt repetitive to NVDA users.
+          aria-describedby={cacheHintId}
         >
           {clearing
             ? t('dialogs.settings.contacts.clearing')
