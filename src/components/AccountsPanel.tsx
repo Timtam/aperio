@@ -18,6 +18,7 @@ import {
   getUserPref,
   isCommandError,
   listAccounts,
+  listAccountsMissingCredentials,
   setUserPref,
   testCaldavConnection,
   testEwsConnection,
@@ -27,6 +28,7 @@ import {
 } from '../api/client';
 import type { Account, AdapterKind } from '../api/types';
 import { useCalendarStore } from '../state/CalendarStore';
+import { useDialogState } from '../state/DialogState';
 import { ConfirmDialog } from './ConfirmDialog';
 import { ContactsPrivacyNoticeModal } from './ContactsPrivacyNoticeModal';
 
@@ -167,8 +169,20 @@ export function AccountsPanel() {
   // wouldn't show up until something else triggers a store refresh.
   const { refreshCalendars, refreshTaskLists, refreshAccounts } =
     useCalendarStore();
+  // §19.11 step 8 — manual entry point for the "Konten verbinden"
+  // wizard. The auto-popup only fires right after accept_remote;
+  // when an external account is added on another device and
+  // arrives here via a regular sync round it has no path back to
+  // the wizard. This panel surfaces the reconnect call site for
+  // every account whose secret slot is empty on this device.
+  const { openSyncAccountsConnect, dataVersion } = useDialogState();
 
   const [accounts, setAccounts] = useState<Account[]>([]);
+  /** Account ids that don't have a credential in the OS keychain.
+   *  Drives the banner above the listbox + a "(needs credentials)"
+   *  suffix in each affected row's aria-label. Empty set ⇒ no UI
+   *  surface, panel renders like before. */
+  const [missingIds, setMissingIds] = useState<Set<string>>(() => new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [confirmTarget, setConfirmTarget] = useState<Account | null>(null);
@@ -205,6 +219,18 @@ export function AccountsPanel() {
         else setError(String(err));
       })
       .finally(() => setLoading(false));
+    // Re-probe the missing-credentials set in parallel. Failures
+    // are logged but don't tank the panel — the banner is purely
+    // additive, the list of accounts itself is what matters.
+    listAccountsMissingCredentials()
+      .then((missing) =>
+        setMissingIds(new Set(missing.map((acc) => acc.id))),
+      )
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.warn('list_accounts_missing_credentials failed', err);
+        setMissingIds(new Set());
+      });
   }, []);
 
   // The panel mounts when the user lands on its tab, so "on mount" is
@@ -213,6 +239,31 @@ export function AccountsPanel() {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // Closing the reconnect wizard bumps `dataVersion`. Re-probe so
+  // rows that just got their credentials drop off the banner
+  // without forcing the user to leave + re-enter the tab.
+  useEffect(() => {
+    if (dataVersion === 0) return;
+    listAccountsMissingCredentials()
+      .then((missing) =>
+        setMissingIds(new Set(missing.map((acc) => acc.id))),
+      )
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.warn('list_accounts_missing_credentials failed', err);
+      });
+  }, [dataVersion]);
+
+  /** Open the wizard with the subset of accounts that currently
+   *  show as missing. Re-resolves against the live `accounts` /
+   *  `missingIds` so a stale render can't accidentally hand the
+   *  wizard a deleted row. */
+  const openReconnectWizard = useCallback(() => {
+    const targets = accounts.filter((acc) => missingIds.has(acc.id));
+    if (targets.length === 0) return;
+    openSyncAccountsConnect(targets);
+  }, [accounts, missingIds, openSyncAccountsConnect]);
 
   const validateCaldav = useCallback((): string | null => {
     if (!caldav.serverUrl.trim()) return t('dialogs.accounts.serverUrlRequired');
@@ -773,6 +824,35 @@ export function AccountsPanel() {
           </p>
         )}
 
+        {/* §19.11 step 8 — banner for accounts whose credentials
+            are missing on this device. Shown above the listbox so
+            it lives in tab order before the rows and can be
+            actioned without arrow-navigating into the list first.
+            The "Connect" button opens the existing reconnect
+            wizard with the matching subset. */}
+        {missingIds.size > 0 && (
+          <section
+            aria-labelledby={`${headingId}-missing`}
+            className="accounts-missing-banner"
+            role="status"
+          >
+            <p id={`${headingId}-missing`} className="form__hint">
+              {missingIds.size === 1
+                ? t('dialogs.accounts.missingCredentials_one')
+                : t('dialogs.accounts.missingCredentials_other', {
+                    count: missingIds.size,
+                  })}
+            </p>
+            <button
+              type="button"
+              className="form__action"
+              onClick={openReconnectWizard}
+            >
+              {t('dialogs.accounts.missingCredentialsConnect')}
+            </button>
+          </section>
+        )}
+
         <section
           ref={sectionRef}
           tabIndex={sectionTabIndex}
@@ -808,6 +888,17 @@ export function AccountsPanel() {
               {accounts.map((acc, i) => {
                 const isLocal = isLocalAt(i);
                 const focused = i === focusIndex;
+                const needsConnect = missingIds.has(acc.id);
+                // Pick the row label template: local rows get the
+                // special "can't be deleted" copy; remote rows
+                // pick up the "needs credentials" variant when
+                // the keychain probe came back empty, so SR users
+                // hear the state as they arrow through.
+                const rowLabelKey = isLocal
+                  ? 'dialogs.accounts.rowLabelLocal'
+                  : needsConnect
+                    ? 'dialogs.accounts.rowLabelMissing'
+                    : 'dialogs.accounts.rowLabel';
                 return (
                   <li
                     key={acc.id}
@@ -822,18 +913,14 @@ export function AccountsPanel() {
                     // into the list, listHasFocus flips and the right
                     // row gets aria-selected back.
                     aria-selected={listHasFocus ? focused : undefined}
-                    aria-label={t(
-                      isLocal
-                        ? 'dialogs.accounts.rowLabelLocal'
-                        : 'dialogs.accounts.rowLabel',
-                      {
-                        name: acc.display_name,
-                        kind: t(`dialogs.accounts.kindName.${acc.adapter_kind}`),
-                      },
-                    )}
+                    aria-label={t(rowLabelKey, {
+                      name: acc.display_name,
+                      kind: t(`dialogs.accounts.kindName.${acc.adapter_kind}`),
+                    })}
                     className={
                       'accounts-list__item' +
-                      (focused ? ' accounts-list__item--focused' : '')
+                      (focused ? ' accounts-list__item--focused' : '') +
+                      (needsConnect ? ' accounts-list__item--needs-connect' : '')
                     }
                     onClick={() => {
                       setFocusIndex(i);
@@ -846,6 +933,14 @@ export function AccountsPanel() {
                     <span className="accounts-list__kind">
                       {t(`dialogs.accounts.kindName.${acc.adapter_kind}`)}
                     </span>
+                    {needsConnect && (
+                      <span
+                        className="accounts-list__badge"
+                        aria-hidden="true"
+                      >
+                        {t('dialogs.accounts.missingBadge')}
+                      </span>
+                    )}
                   </li>
                 );
               })}
