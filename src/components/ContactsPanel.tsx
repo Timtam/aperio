@@ -1,9 +1,10 @@
-import { useCallback, useId, useState } from 'react';
+import { useCallback, useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useAnnouncer } from '../a11y/Announcer';
 import {
   clearContactsCache,
+  setContactsIncludeReadOnlyOnSync,
   setContactsSyncInterval,
 } from '../api/client';
 import { useContactSync } from '../state/useContactSync';
@@ -66,19 +67,33 @@ export function ContactsPanel() {
   const interval = intervalDraft ?? status?.interval_minutes ?? 60;
 
   const [clearing, setClearing] = useState(false);
-  // Whether the next "Jetzt synchronisieren" should also pull the
-  // read-only provider directories (GAL / Suggested People / Other
-  // Contacts / Workspace Directory). Ephemeral — defaults back to
-  // off whenever the panel re-mounts, so a user who ticked it once
-  // doesn't pay the multi-minute scan cost on every subsequent
-  // sync without noticing.
+  // Persisted "also pull read-only directories" toggle.
+  // Source of truth is the backend's
+  // `contacts.includeReadOnlyOnSync` pref, surfaced via
+  // `status.include_read_only_on_sync`. Local mirror lets the
+  // checkbox feel snappy — flip the UI immediately, persist in
+  // the background, reconcile against the next status fetch.
   //
-  // Was previously a second button labelled "Auch Verzeichnisse
-  // einschließen"; the wording read like a preference, not an
-  // action, so it's now an explicit checkbox above the sync
-  // button. The button itself stays a verb.
+  // Both manual ("Jetzt synchronisieren") and periodic sync
+  // passes honour this pref now (the backend reads it on every
+  // tick), so the checkbox really is a setting, not a one-shot
+  // override.
   const includeDirectoriesId = useId();
-  const [includeDirectories, setIncludeDirectories] = useState(false);
+  const [includeDirectories, setIncludeDirectories] = useState<boolean | null>(
+    null,
+  );
+  // Seed from status whenever the backend value changes. The
+  // hook's polling cycle keeps this fresh; we only overwrite the
+  // local draft when the user hasn't touched it, otherwise an
+  // in-flight setContactsIncludeReadOnlyOnSync would lose to the
+  // stale status response.
+  useEffect(() => {
+    if (status && includeDirectories === null) {
+      setIncludeDirectories(status.include_read_only_on_sync);
+    }
+  }, [status, includeDirectories]);
+  const includeDirectoriesEffective =
+    includeDirectories ?? status?.include_read_only_on_sync ?? false;
 
   const onIntervalChange = useCallback(
     async (raw: string) => {
@@ -101,6 +116,27 @@ export function ContactsPanel() {
         // Roll back the optimistic update so the select shows
         // whatever the persisted value is.
         setIntervalDraft(null);
+      }
+    },
+    [announce, t],
+  );
+
+  const onIncludeDirectoriesToggle = useCallback(
+    async (next: boolean) => {
+      // Optimistic flip so the checkbox feels instant.
+      setIncludeDirectories(next);
+      try {
+        await setContactsIncludeReadOnlyOnSync(next);
+        announce(
+          next
+            ? t('dialogs.settings.contacts.includeDirectoriesEnabled')
+            : t('dialogs.settings.contacts.includeDirectoriesDisabled'),
+        );
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('set_contacts_include_read_only_on_sync failed', err);
+        // Roll back so the checkbox reflects persisted state.
+        setIncludeDirectories(!next);
       }
     },
     [announce, t],
@@ -252,18 +288,21 @@ export function ContactsPanel() {
           </select>
         </div>
         {/* The directory toggle is a checkbox because the wording
-            describes a state, not an action. The Sync-now button
-            below reads its current value at click time. Pulling
-            directories takes minutes on large tenants so we want
-            the user to opt in explicitly; the unchecked default
-            matches the periodic scheduler's behaviour. */}
+            describes a state, not an action. Both manual and
+            periodic syncs honour it now — the backend reads
+            `contacts.includeReadOnlyOnSync` on every tick, so a
+            flip here applies on the next round. Pulling
+            directories takes minutes on large tenants; the
+            unchecked default keeps quiet accounts cheap. */}
         <div className="tasks-settings__row">
           <label htmlFor={includeDirectoriesId} className="form__checkbox">
             <input
               id={includeDirectoriesId}
               type="checkbox"
-              checked={includeDirectories}
-              onChange={(e) => setIncludeDirectories(e.target.checked)}
+              checked={includeDirectoriesEffective}
+              onChange={(e) => {
+                void onIncludeDirectoriesToggle(e.target.checked);
+              }}
             />{' '}
             {t('dialogs.settings.contacts.includeDirectoriesLabel')}
           </label>
@@ -276,7 +315,12 @@ export function ContactsPanel() {
             type="button"
             className="form__action"
             onClick={() => {
-              void onSyncNow(includeDirectories);
+              // Pass the effective UI value as an explicit
+              // override so a flip + immediate click never races
+              // with the in-flight persist. The backend would
+              // otherwise re-read the pref before the write had
+              // committed.
+              void onSyncNow(includeDirectoriesEffective);
             }}
             disabled={status?.in_flight === true}
           >

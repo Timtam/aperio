@@ -232,7 +232,13 @@ export function ContactsView() {
             type="button"
             className="form__action"
             onClick={() => {
-              void triggerSync(false);
+              // Omit the explicit `false` — defer to the user's
+              // `contacts.includeReadOnlyOnSync` pref so the
+              // Refresh button matches whatever the periodic
+              // scheduler does. Without this, refreshing the
+              // contacts list would silently skip GAL / Suggested
+              // People even when the user had opted in.
+              void triggerSync();
             }}
             disabled={triggering || syncStatus?.in_flight === true}
             aria-label={t('views.contacts.refreshAria')}

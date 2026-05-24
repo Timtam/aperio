@@ -70,6 +70,11 @@ export function useContactSync() {
         // time we receive the event.
         interval_minutes: prev?.interval_minutes ?? 60,
         in_flight: false,
+        // Same preserve-or-default pattern for the new pref —
+        // the event doesn't carry it either; ContactsPanel
+        // re-syncs against the next status fetch.
+        include_read_only_on_sync:
+          prev?.include_read_only_on_sync ?? false,
       }));
       // Bump the global data version so `useContacts` drops its
       // SWR cache. Adapter-side caches are now warm, so the
@@ -93,12 +98,12 @@ export function useContactSync() {
     };
   }, [invalidateData]);
 
-  /** Fire a manual sync pass. `includeReadOnly` opts into pulling
-   *  the heavy GAL / Suggested People / Other Contacts / Workspace
-   *  Directory sentinels; the default `false` matches the periodic
-   *  pass behaviour and is what the contacts-panel "Refresh"
-   *  button uses. */
-  const triggerSync = useCallback(async (includeReadOnly = false) => {
+  /** Fire a manual sync pass. `includeReadOnly` is an explicit
+   *  override: `true` / `false` force the choice for this one
+   *  call, `undefined` defers to the persisted
+   *  `contacts.includeReadOnlyOnSync` pref so manual + periodic
+   *  passes match. Most call sites should omit the argument. */
+  const triggerSync = useCallback(async (includeReadOnly?: boolean) => {
     setTriggering(true);
     // Optimistic in_flight flip so the spinner appears
     // immediately without waiting for the next status fetch.

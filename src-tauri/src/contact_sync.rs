@@ -59,6 +59,23 @@ pub const PREF_SYNC_INTERVAL_MINUTES: &str = "contacts.syncIntervalMinutes";
 /// "Last synced at …" footer so the value survives restarts.
 pub const PREF_LAST_SYNCED_AT: &str = "contacts.lastSyncedAt";
 
+/// `user_prefs` key for the "also pull read-only directories"
+/// toggle (Settings → Kontakte). When `true`, every sync pass —
+/// app-start, periodic, and manual — walks the expensive
+/// read-only sentinels (EWS GAL, Google Other Contacts /
+/// Workspace Directory, MS Graph Suggested People). Defaults to
+/// `false` so a quiet account doesn't pay the multi-minute scan
+/// cost without the user opting in.
+///
+/// Stored as the literal strings `"true"` / `"false"` (same
+/// convention `sync.adapter.e2eEnabled` uses) so the keychain
+/// debug view stays readable. The manual `sync_contacts_now`
+/// command keeps an explicit override parameter that beats this
+/// pref — used by background hooks that want a one-shot
+/// directory pull without flipping the user-visible setting.
+pub const PREF_INCLUDE_READ_ONLY_ON_SYNC: &str =
+    "contacts.includeReadOnlyOnSync";
+
 /// Default interval if `PREF_SYNC_INTERVAL_MINUTES` is unset or
 /// nonsense. 60 minutes per the design doc.
 pub const DEFAULT_SYNC_INTERVAL_MINUTES: u32 = 60;
@@ -95,6 +112,12 @@ pub struct ContactsSyncStatus {
     pub last_synced_at: Option<String>,
     pub interval_minutes: u32,
     pub in_flight: bool,
+    /// Current value of [`PREF_INCLUDE_READ_ONLY_ON_SYNC`]. The
+    /// Settings → Kontakte checkbox seeds itself from this so the
+    /// UI doesn't need a separate `get_user_pref` round-trip; the
+    /// `useContactSync` polling cycle already keeps the rest of
+    /// the status fresh.
+    pub include_read_only_on_sync: bool,
 }
 
 pub struct ContactSyncScheduler {
@@ -149,22 +172,28 @@ impl ContactSyncScheduler {
         let worker = scheduler.clone();
         tauri::async_runtime::spawn(async move {
             // App-start kick — let the UI settle for 5 s before
-            // pulling. Skip the read-only sentinels (GAL etc.)
-            // here too; they're explicit-opt-in territory.
+            // pulling. The directory pull (GAL etc.) honours the
+            // user's `contacts.includeReadOnlyOnSync` pref so a
+            // user who explicitly opted in gets the GAL on boot
+            // too. Default-off keeps the boot cheap for everyone
+            // else.
             tokio::time::sleep(APP_START_DELAY).await;
-            info!("running app-start contact sync pass");
-            worker.run_sync(&app, false).await;
+            let include_ro = worker.read_include_read_only_on_sync();
+            info!(include_ro, "running app-start contact sync pass");
+            worker.run_sync(&app, include_ro).await;
 
-            // Periodic loop. Re-read the interval on every tick
-            // so a settings change applies on the next pass; no
-            // restart needed.
+            // Periodic loop. Re-read both the interval and the
+            // include-read-only pref on every tick so a settings
+            // change applies on the next pass; no restart needed.
             loop {
                 let minutes = worker.read_interval_minutes();
                 let dur = Duration::from_secs(u64::from(minutes) * 60);
                 tokio::select! {
                     _ = tokio::time::sleep(dur) => {
-                        info!(?dur, "periodic contact sync tick");
-                        worker.run_sync(&app, false).await;
+                        let include_ro =
+                            worker.read_include_read_only_on_sync();
+                        info!(?dur, include_ro, "periodic contact sync tick");
+                        worker.run_sync(&app, include_ro).await;
                     }
                     _ = worker.notify.notified() => {
                         // Manual sync just landed; restart the
@@ -192,6 +221,22 @@ impl ContactSyncScheduler {
             .unwrap_or(DEFAULT_SYNC_INTERVAL_MINUTES)
     }
 
+    /// Read the current value of [`PREF_INCLUDE_READ_ONLY_ON_SYNC`].
+    /// Anything other than the literal `"true"` (case-sensitive)
+    /// reads as `false` — same lenient parse the scheduler uses
+    /// for the E2E flag.
+    ///
+    /// Re-read on every periodic tick so a checkbox change in
+    /// Settings applies on the next pass; no restart needed.
+    pub fn read_include_read_only_on_sync(&self) -> bool {
+        let repo = UserPrefsRepo::new(&self.db);
+        repo.get(PREF_INCLUDE_READ_ONLY_ON_SYNC)
+            .ok()
+            .flatten()
+            .as_deref()
+            == Some("true")
+    }
+
     /// Snapshot the current sync status — used by the
     /// `get_contacts_sync_status` Tauri command.
     pub fn status(&self) -> ContactsSyncStatus {
@@ -201,6 +246,7 @@ impl ContactSyncScheduler {
             last_synced_at: last.map(|d| d.to_rfc3339()),
             interval_minutes: self.read_interval_minutes(),
             in_flight,
+            include_read_only_on_sync: self.read_include_read_only_on_sync(),
         }
     }
 
@@ -384,5 +430,58 @@ mod tests {
         assert!(s.last_synced_at.is_none());
         assert_eq!(s.interval_minutes, 60);
         assert!(!s.in_flight);
+        // Pref defaults to false — fresh installs don't pay the
+        // GAL-pull cost without opt-in.
+        assert!(!s.include_read_only_on_sync);
+    }
+
+    #[test]
+    fn read_include_read_only_on_sync_defaults_to_false() {
+        let (_tmp, db) = fresh_db();
+        let scheduler = ContactSyncScheduler {
+            registry: Arc::new(AdapterRegistry::new()),
+            db: db.shared(),
+            last_synced_at: Arc::new(Mutex::new(None)),
+            in_flight: Arc::new(Mutex::new(false)),
+            notify: Arc::new(Notify::new()),
+        };
+        assert!(!scheduler.read_include_read_only_on_sync());
+    }
+
+    #[test]
+    fn read_include_read_only_on_sync_honours_true() {
+        let (_tmp, db) = fresh_db();
+        let shared = db.shared();
+        UserPrefsRepo::new(&shared)
+            .set(PREF_INCLUDE_READ_ONLY_ON_SYNC, "true")
+            .unwrap();
+        let scheduler = ContactSyncScheduler {
+            registry: Arc::new(AdapterRegistry::new()),
+            db: db.shared(),
+            last_synced_at: Arc::new(Mutex::new(None)),
+            in_flight: Arc::new(Mutex::new(false)),
+            notify: Arc::new(Notify::new()),
+        };
+        assert!(scheduler.read_include_read_only_on_sync());
+    }
+
+    #[test]
+    fn read_include_read_only_on_sync_other_values_are_false() {
+        // Anything but the literal "true" reads false — defensive
+        // against the case where a power user typed something
+        // else into the pref via user_prefs editing.
+        let (_tmp, db) = fresh_db();
+        let shared = db.shared();
+        UserPrefsRepo::new(&shared)
+            .set(PREF_INCLUDE_READ_ONLY_ON_SYNC, "yes")
+            .unwrap();
+        let scheduler = ContactSyncScheduler {
+            registry: Arc::new(AdapterRegistry::new()),
+            db: db.shared(),
+            last_synced_at: Arc::new(Mutex::new(None)),
+            in_flight: Arc::new(Mutex::new(false)),
+            notify: Arc::new(Notify::new()),
+        };
+        assert!(!scheduler.read_include_read_only_on_sync());
     }
 }

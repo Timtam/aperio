@@ -595,6 +595,11 @@ export interface ContactsSyncStatus {
   last_synced_at: string | null;
   interval_minutes: number;
   in_flight: boolean;
+  /** Current value of the `contacts.includeReadOnlyOnSync` pref.
+   *  The Settings → Kontakte checkbox seeds itself from this so
+   *  the toggle survives restarts and applies to both manual and
+   *  periodic sync passes. */
+  include_read_only_on_sync: boolean;
 }
 
 /** Payload of the `contacts-synced` Tauri event the backend emits
@@ -608,13 +613,25 @@ export interface ContactsSyncedPayload {
   failed_accounts: string[];
 }
 
-/** Trigger a manual sync pass. `includeReadOnly` opts into pulling
- *  the heavy read-only sentinel lists (GAL, Suggested People,
- *  Other Contacts, Workspace Directory). The auto-triggered
- *  passes default to `false`; only the explicit "force-pull
- *  everything" gesture in Settings sets it to `true`. */
-export const syncContactsNow = (includeReadOnly = false) =>
-  invoke<boolean>('sync_contacts_now', { includeReadOnly });
+/** Trigger a manual sync pass. `includeReadOnly` is an explicit
+ *  per-call override: `true` always pulls the heavy read-only
+ *  sentinel lists (GAL, Suggested People, Other Contacts,
+ *  Workspace Directory), `false` always skips them, `undefined`
+ *  (the default) reads the user's persisted
+ *  `contacts.includeReadOnlyOnSync` pref so manual and periodic
+ *  syncs share the same behaviour. */
+export const syncContactsNow = (includeReadOnly?: boolean) =>
+  invoke<boolean>('sync_contacts_now', {
+    includeReadOnly: includeReadOnly ?? null,
+  });
+
+/** Persist the "also pull read-only directories" toggle from
+ *  Settings → Kontakte. Backend writes
+ *  `user_prefs.contacts.includeReadOnlyOnSync`; the scheduler
+ *  re-reads on every tick so the new value applies on the next
+ *  pass. */
+export const setContactsIncludeReadOnlyOnSync = (enabled: boolean) =>
+  invoke<void>('set_contacts_include_read_only_on_sync', { enabled });
 
 export const getContactsSyncStatus = () =>
   invoke<ContactsSyncStatus>('get_contacts_sync_status');

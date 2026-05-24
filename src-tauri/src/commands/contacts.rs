@@ -26,8 +26,8 @@ use tracing::warn;
 
 use super::{CommandError, CommandResult};
 use crate::contact_sync::{
-    ContactSyncScheduler, ContactsSyncStatus, PREF_LAST_SYNCED_AT,
-    PREF_SYNC_INTERVAL_MINUTES,
+    ContactSyncScheduler, ContactsSyncStatus, PREF_INCLUDE_READ_ONLY_ON_SYNC,
+    PREF_LAST_SYNCED_AT, PREF_SYNC_INTERVAL_MINUTES,
 };
 use crate::db::DbHandle;
 use crate::registry::{AdapterRegistry, LOCAL_ID};
@@ -327,21 +327,23 @@ pub async fn set_contact_photo(
 /// ran, `false` when another pass was already in flight and this
 /// invocation was deduped.
 ///
-/// `include_read_only`: when `true`, also walks the expensive
-/// read-only sentinel lists (EWS GAL, Google Other Contacts /
-/// Workspace Directory, Graph Suggested People). The auto and
-/// app-start passes default to `false` to keep the bandwidth cost
-/// of a quiet account predictable; the Settings → "Force-pull
-/// everything" gesture opts in by passing `true`.
+/// `include_read_only`: explicit per-call override of the
+/// read-only-directory toggle. `Some(true)` always pulls the
+/// expensive sentinel lists (EWS GAL, Google Other Contacts /
+/// Workspace Directory, Graph Suggested People); `Some(false)`
+/// always skips them; `None` reads the user's persisted
+/// `contacts.includeReadOnlyOnSync` pref so the manual button
+/// matches whatever the periodic scheduler would do. Most
+/// callers should pass `None` to keep the behaviour consistent.
 #[tauri::command]
 pub async fn sync_contacts_now<R: Runtime>(
     scheduler: State<'_, Arc<ContactSyncScheduler>>,
     app: AppHandle<R>,
     include_read_only: Option<bool>,
 ) -> CommandResult<bool> {
-    Ok(scheduler
-        .run_sync(&app, include_read_only.unwrap_or(false))
-        .await)
+    let effective = include_read_only
+        .unwrap_or_else(|| scheduler.read_include_read_only_on_sync());
+    Ok(scheduler.run_sync(&app, effective).await)
 }
 
 /// Snapshot the contact sync status — used by the contacts view
@@ -427,6 +429,33 @@ pub async fn set_contacts_sync_interval(
             message: err.to_string(),
         })?;
     Ok(clamped)
+}
+
+/// Persist the "also pull read-only directories" toggle from
+/// Settings → Kontakte. Writes the literal string `"true"` /
+/// `"false"` to `user_prefs.contacts.includeReadOnlyOnSync`; the
+/// scheduler re-reads on every tick so the new value applies on
+/// the next pass without a restart.
+///
+/// Typed thin wrapper around `set_user_pref` — used in preference
+/// to the generic command so the wire shape (a real boolean
+/// rather than a string) catches typos at the TypeScript boundary.
+#[tauri::command]
+pub async fn set_contacts_include_read_only_on_sync(
+    db: State<'_, DbHandle>,
+    enabled: bool,
+) -> CommandResult<()> {
+    let shared = db.shared();
+    let repo = UserPrefsRepo::new(&shared);
+    repo.set(
+        PREF_INCLUDE_READ_ONLY_ON_SYNC,
+        if enabled { "true" } else { "false" },
+    )
+    .map_err(|err| CommandError {
+        code: "internal",
+        message: err.to_string(),
+    })?;
+    Ok(())
 }
 
 /// Clear the avatar without touching any other field. Idempotent
