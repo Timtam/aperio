@@ -10,6 +10,7 @@ import {
   changeSyncPassphrase,
   compactNow,
   configureSyncAdapter,
+  disableSyncEncryption,
   forgetSftpHostKey,
   getPinnedSftpHostKey,
   isCommandError,
@@ -155,6 +156,13 @@ export function SyncPanel() {
     string | null
   >(null);
   const [passphraseChangeOk, setPassphraseChangeOk] = useState(false);
+  // §19.7 disable-E2E flow. Reuses the same `oldPassphraseDraft`
+  // input (top of the section) — the user types their current
+  // passphrase once and can either change it or turn encryption
+  // off entirely. `busyDisable` gates the button + the change
+  // button so the two flows can't fire concurrently.
+  const [busyDisable, setBusyDisable] = useState(false);
+  const [disableError, setDisableError] = useState<string | null>(null);
 
   const interval = intervalDraft ?? status?.interval_minutes ?? 5;
 
@@ -706,6 +714,50 @@ export function SyncPanel() {
     oldPassphraseDraft,
     t,
   ]);
+
+  // §19.7 — turn off E2E on the dataset. Gated by the same
+  // "current passphrase" input as the change flow, plus a
+  // window.confirm whose message names the cluster-wide
+  // consequence (other devices need to re-onboard). Success
+  // clears the inputs + announces the outcome; failure surfaces
+  // inline.
+  const onDisableEncryption = useCallback(async () => {
+    setDisableError(null);
+    const oldPp = oldPassphraseDraft.trim();
+    if (!oldPp) {
+      setDisableError(
+        t('dialogs.settings.sync.disableE2eErrorNeedsPassphrase'),
+      );
+      return;
+    }
+    const confirmed = window.confirm(
+      t('dialogs.settings.sync.disableE2eConfirm'),
+    );
+    if (!confirmed) return;
+    setBusyDisable(true);
+    try {
+      const report = await disableSyncEncryption(oldPp);
+      setOldPassphraseDraft('');
+      setNewPassphraseDraft('');
+      announce(
+        t('dialogs.settings.sync.disableE2eOkAnnouncement', {
+          logs: report.logs_rewritten,
+        }),
+      );
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('disable_sync_encryption failed', err);
+      if (isCommandError(err) && err.code === 'auth') {
+        setDisableError(
+          t('dialogs.settings.sync.passphraseChangeErrorAuth'),
+        );
+      } else {
+        setDisableError(messageForError(err));
+      }
+    } finally {
+      setBusyDisable(false);
+    }
+  }, [announce, messageForError, oldPassphraseDraft, t]);
 
   const lastSyncedLabel = (() => {
     if (!status?.last_synced_at) return t('dialogs.settings.sync.stateNeverSynced');
@@ -1323,17 +1375,39 @@ export function SyncPanel() {
               {t('dialogs.settings.sync.passphraseChangeOk')}
             </p>
           )}
+          {disableError && (
+            <p className="sync-panel__error" role="alert">
+              {t('dialogs.settings.sync.errorPrefix')}: {disableError}
+            </p>
+          )}
           <div className="sync-panel__actions">
             <button
               type="button"
-              disabled={busyPassphraseChange}
+              disabled={busyPassphraseChange || busyDisable}
               onClick={() => void onChangePassphrase()}
             >
               {busyPassphraseChange
                 ? t('dialogs.settings.sync.passphraseChangeRunning')
                 : t('dialogs.settings.sync.passphraseChangeAction')}
             </button>
+            {/* "Disable encryption" — destructive, gated by the
+                same "current passphrase" input + a window.confirm.
+                Lives in the same section because both flows need
+                the user to type their current passphrase
+                first. */}
+            <button
+              type="button"
+              disabled={busyPassphraseChange || busyDisable}
+              onClick={() => void onDisableEncryption()}
+            >
+              {busyDisable
+                ? t('dialogs.settings.sync.disableE2eRunning')
+                : t('dialogs.settings.sync.disableE2eAction')}
+            </button>
           </div>
+          <p className="sync-panel__hint">
+            {t('dialogs.settings.sync.disableE2eHint')}
+          </p>
         </section>
       )}
       {/* §19.9 detailed Sync-Protokoll. Always rendered (no

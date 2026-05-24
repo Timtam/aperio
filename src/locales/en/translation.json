@@ -352,7 +352,13 @@
         "passphraseChangeOk": "Passphrase changed.",
         "passphraseChangeErrorEmpty": "Please fill in both passphrase fields.",
         "passphraseChangeErrorSame": "The new passphrase must differ from the current one.",
-        "passphraseChangeErrorAuth": "The current passphrase is not correct."
+        "passphraseChangeErrorAuth": "The current passphrase is not correct.",
+        "disableE2eAction": "Disable encryption",
+        "disableE2eRunning": "Disabling encryption …",
+        "disableE2eHint": "Disabling encryption rewrites every log and snapshot on the sync store as plaintext. Other connected devices will need to be re-onboarded after this completes — their stored key won't match the new plaintext format.",
+        "disableE2eConfirm": "Disable end-to-end encryption on this dataset? Every log and snapshot is rewritten as plaintext. Other connected devices will need to be re-onboarded — their stored key no longer matches. This cannot be undone without re-enabling encryption from scratch.",
+        "disableE2eErrorNeedsPassphrase": "Please enter the current passphrase above first.",
+        "disableE2eOkAnnouncement": "Encryption disabled. {{logs}} log files rewritten as plaintext."
       }
     },
     "syncConflicts": {

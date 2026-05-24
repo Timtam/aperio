@@ -975,6 +975,25 @@ export const changeSyncPassphrase = (
     newPassphrase,
   });
 
+/** Counters returned by `disableSyncEncryption`. */
+export interface DisableE2eReport {
+  logs_rewritten: number;
+  snapshot_rewritten: boolean;
+}
+
+/** §19.7 — turn off end-to-end encryption on the dataset. In
+ *  place: re-uploads every log and the snapshot as plaintext via
+ *  the bare adapter, then flips meta.json to e2e_enabled=false.
+ *  Verifies the current passphrase first so an accidental click
+ *  can't strip encryption. **Other devices need to re-onboard
+ *  after this completes** — their keychain still holds the old
+ *  DEK and they'll fail to decode the new plaintext. The UI
+ *  gates this behind an explicit confirmation. */
+export const disableSyncEncryption = (currentPassphrase: string) =>
+  invoke<DisableE2eReport>('disable_sync_encryption', {
+    currentPassphrase,
+  });
+
 /** §19.10 stale-device resume. Called from the resume dialog
  *  when the user clicks Fortfahren. Re-pulls the current
  *  snapshot, applies it locally, replays post-snapshot logs,

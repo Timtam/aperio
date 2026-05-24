@@ -302,6 +302,8 @@ pub fn run() {
             commands::adopt_local_dataset,
             // §19.7: rotate the dataset's E2E passphrase.
             commands::change_sync_passphrase,
+            // §19.7: turn off E2E encryption on the dataset (in-place).
+            commands::disable_sync_encryption,
             // §19.10: stale-device resume.
             commands::resume_stale_device,
             // Phase Sg (DESIGN.md §19.10): snapshot + log

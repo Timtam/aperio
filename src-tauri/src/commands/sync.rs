@@ -510,9 +510,10 @@ fn store_e2e_key(key: &[u8; KEY_LEN]) -> CommandResult<()> {
     })
 }
 
-/// Drop the keychain entry for the sync key. Used when the user
-/// explicitly disconnects from an E2E dataset.
-#[allow(dead_code)]
+/// Drop the keychain entry for the sync key. Used by
+/// `disable_sync_encryption` after the dataset has been
+/// transitioned to plaintext, and reserved for any future
+/// "disconnect + wipe keychain" flow.
 fn delete_e2e_key() {
     let _ = secrets::delete(E2E_SECRET_ACCOUNT, SecretSlot::SyncEncryptionKey);
 }
@@ -1072,6 +1073,153 @@ pub async fn change_sync_passphrase(
     adapter.push_meta(&updated).await.map_err(sync_err)?;
 
     Ok(())
+}
+
+/// Outcome counters for [`disable_sync_encryption`]. Surfaced to
+/// the user so the success message can read "12 logs rewritten,
+/// snapshot rewritten" rather than a generic "done".
+#[derive(Debug, Default, serde::Serialize)]
+pub struct DisableE2eReport {
+    pub logs_rewritten: usize,
+    pub snapshot_rewritten: bool,
+}
+
+/// §19.7 — turn off end-to-end encryption on the dataset.
+///
+/// In-place migration: verify the user's current passphrase,
+/// fetch every encrypted log + snapshot via the encrypting
+/// wrapper (which decrypts on the way), then push the plaintext
+/// bytes through the bare adapter (overwriting the encrypted
+/// originals at the same paths). The meta.json update is the
+/// last step and the atomic commit — a crash before it leaves
+/// the encrypted view authoritative, a crash after it
+/// completes makes the plaintext view authoritative.
+///
+/// **Other devices need to re-onboard** after this completes.
+/// Their local config still says e2e_enabled=true and their
+/// keychain holds the DEK — they'll try to decrypt the new
+/// plaintext bytes, get garbage, and fail the sync. The UI
+/// gates this command behind a strong confirmation so the user
+/// understands the cluster-wide impact.
+///
+/// Sound assets are intentionally NOT re-pushed here. Custom
+/// sounds the user has locally can be re-uploaded by the next
+/// sync round once disable completes (clearing the pushed
+/// marker would force exactly that re-push); sounds that exist
+/// only on the remote in encrypted form stay encrypted — they
+/// were already inaccessible to fresh devices, and disabling
+/// E2E doesn't change that.
+///
+/// Error mapping mirrors `change_sync_passphrase`:
+///   - wrong current passphrase → `auth`
+///   - adapter not configured or not E2E → `not_configured`
+///   - meta.json missing or malformed → `protocol`
+#[tauri::command]
+pub async fn disable_sync_encryption(
+    db: State<'_, DbHandle>,
+    orchestrator: State<'_, Arc<SyncOrchestrator>>,
+    current_passphrase: String,
+) -> CommandResult<DisableE2eReport> {
+    let pp = current_passphrase.trim();
+    if pp.is_empty() {
+        return Err(CommandError {
+            code: "invalid_input",
+            message: "current passphrase must not be empty".into(),
+        });
+    }
+
+    // 1. Borrow the active (encrypting) adapter so we can decrypt
+    //    on the way down.
+    let encrypting = orchestrator.adapter_handle().ok_or(CommandError {
+        code: "not_configured",
+        message: "no sync adapter is configured".into(),
+    })?;
+
+    // 2. Verify the current passphrase against the dataset's wrap.
+    //    Same logic as change_sync_passphrase — `resolve_data_key`
+    //    handles both v1 (direct key) and v2 (KEK + wrapped DEK)
+    //    layouts.
+    let meta_before = encrypting
+        .fetch_meta()
+        .await
+        .map_err(sync_err)?
+        .ok_or(CommandError {
+            code: "not_found",
+            message: "remote has no meta.json — nothing to disable".into(),
+        })?;
+    if !meta_before.e2e_enabled {
+        return Err(CommandError {
+            code: "not_configured",
+            message: "dataset is not encrypted; nothing to disable".into(),
+        });
+    }
+    let current_params = meta_before.e2e_params.clone().ok_or(CommandError {
+        code: "protocol",
+        message: "meta.json says e2e but carries no params".into(),
+    })?;
+    let _verified_dek =
+        resolve_data_key(pp, &current_params).map_err(sync_err)?;
+
+    // 3. Build a fresh PLAIN adapter from the persisted config.
+    //    The encrypting wrapper is what the orchestrator holds —
+    //    we need an unwrapped handle to push plaintext bytes. The
+    //    same builder lib.rs's app-start path uses, so the auth +
+    //    config bits are guaranteed to match.
+    let shared = db.shared();
+    let plain =
+        build_adapter_from_prefs(&shared).ok_or(CommandError {
+            code: "not_configured",
+            message: "couldn't rebuild the underlying plain adapter".into(),
+        })?;
+
+    let mut report = DisableE2eReport::default();
+
+    // 4. Re-encrypt every log: fetch via encrypting (decrypts),
+    //    push via plain (writes verbatim). Adapter push_log
+    //    overwrites at the same path, so no orphan files.
+    let logs = encrypting
+        .fetch_new_logs(&sync_core::DeviceCursor::epoch())
+        .await
+        .map_err(sync_err)?;
+    for log in logs {
+        plain.push_log(&log).await.map_err(sync_err)?;
+        report.logs_rewritten += 1;
+    }
+
+    // 5. Same for the snapshot, if one exists. Brand-new
+    //    datasets that never compacted skip this branch.
+    if let Some(snapshot) = encrypting
+        .fetch_snapshot()
+        .await
+        .map_err(sync_err)?
+    {
+        plain.push_snapshot(&snapshot).await.map_err(sync_err)?;
+        report.snapshot_rewritten = true;
+    }
+
+    // 6. Commit the disable atomically by overwriting meta.json
+    //    with e2e_enabled=false + clearing e2e_params. After
+    //    this lands, the cluster is officially plaintext.
+    let mut updated = meta_before;
+    updated.e2e_enabled = false;
+    updated.e2e_params = None;
+    plain.push_meta(&updated).await.map_err(sync_err)?;
+
+    // 7. Swap the orchestrator over to the plain adapter so
+    //    subsequent rounds in this process don't try to wrap
+    //    pushes with the (now-defunct) key.
+    orchestrator.configure(Arc::clone(&plain));
+
+    // 8. Clean up local state: drop the keychain entry and
+    //    flip the pref. Failures here are logged but don't
+    //    fail the command — the on-the-wire state is what
+    //    matters, and the local prefs catch up on the next
+    //    boot via build_adapter_from_prefs.
+    let prefs = UserPrefsRepo::new(&shared);
+    let _ = prefs.delete(PREF_E2E_ENABLED);
+    delete_e2e_key();
+
+    Ok(report)
 }
 
 /// Helper used by `lib.rs::setup` to reconstruct the adapter

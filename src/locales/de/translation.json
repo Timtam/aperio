@@ -349,7 +349,13 @@
         "passphraseChangeOk": "Passphrase wurde geändert.",
         "passphraseChangeErrorEmpty": "Bitte beide Passphrase-Felder ausfüllen.",
         "passphraseChangeErrorSame": "Die neue Passphrase muss sich von der aktuellen unterscheiden.",
-        "passphraseChangeErrorAuth": "Die aktuelle Passphrase ist nicht korrekt."
+        "passphraseChangeErrorAuth": "Die aktuelle Passphrase ist nicht korrekt.",
+        "disableE2eAction": "Verschlüsselung deaktivieren",
+        "disableE2eRunning": "Verschlüsselung wird deaktiviert …",
+        "disableE2eHint": "Beim Deaktivieren werden alle Logs und der Snapshot im Sync-Speicher als Klartext neu geschrieben. Andere verbundene Geräte müssen anschließend neu eingerichtet werden — ihr gespeicherter Schlüssel passt nicht mehr zum Klartext-Format.",
+        "disableE2eConfirm": "Ende-zu-Ende-Verschlüsselung für diesen Datensatz deaktivieren? Alle Logs und der Snapshot werden als Klartext neu geschrieben. Andere verbundene Geräte müssen neu eingerichtet werden — ihr gespeicherter Schlüssel passt nicht mehr. Dies kann nur durch erneutes Aktivieren von Grund auf rückgängig gemacht werden.",
+        "disableE2eErrorNeedsPassphrase": "Bitte zuerst oben die aktuelle Passphrase eingeben.",
+        "disableE2eOkAnnouncement": "Verschlüsselung deaktiviert. {{logs}} Log-Dateien als Klartext neu geschrieben."
       }
     },
     "syncConflicts": {
