@@ -562,3 +562,36 @@ export const deleteContactPhoto = (id: string, listId?: string) =>
     id,
     listId: listId ?? null,
   });
+
+// ── Contact sync scheduler (Phase 10j, DESIGN.md §10.5) ────────────────
+
+/** Snapshot of the backend's contact sync scheduler. `lastSyncedAt`
+ *  is RFC 3339 or `null` if no pass has completed yet; the frontend
+ *  formats it via the user's locale for the panel footer. */
+export interface ContactsSyncStatus {
+  last_synced_at: string | null;
+  interval_minutes: number;
+  in_flight: boolean;
+}
+
+/** Payload of the `contacts-synced` Tauri event the backend emits
+ *  after every sync pass completes — manual, periodic, or
+ *  app-start. The frontend uses `lastSyncedAt` to update the
+ *  footer and `succeededAccounts` / `failedAccounts` to decide
+ *  which lists to refetch. */
+export interface ContactsSyncedPayload {
+  last_synced_at: string;
+  succeeded_accounts: string[];
+  failed_accounts: string[];
+}
+
+/** Trigger a manual sync pass. `includeReadOnly` opts into pulling
+ *  the heavy read-only sentinel lists (GAL, Suggested People,
+ *  Other Contacts, Workspace Directory). The auto-triggered
+ *  passes default to `false`; only the explicit "force-pull
+ *  everything" gesture in Settings sets it to `true`. */
+export const syncContactsNow = (includeReadOnly = false) =>
+  invoke<boolean>('sync_contacts_now', { includeReadOnly });
+
+export const getContactsSyncStatus = () =>
+  invoke<ContactsSyncStatus>('get_contacts_sync_status');

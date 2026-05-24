@@ -21,9 +21,10 @@ use cal_adapter_local::LocalAdapter;
 use cal_core::{Contact, ContactList, ContactPhoto, ContactsFeature, NewContact};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tauri::State;
+use tauri::{AppHandle, Runtime, State};
 
 use super::{CommandError, CommandResult};
+use crate::contact_sync::{ContactSyncScheduler, ContactsSyncStatus};
 use crate::registry::{AdapterRegistry, LOCAL_ID};
 
 /// Wire-format `ContactList` enriched with the owning account id —
@@ -312,6 +313,38 @@ pub async fn set_contact_photo(
     };
     ext.set_contact_photo(&id, photo).await?;
     Ok(())
+}
+
+/// Run a contact sync pass on demand — used by the "Refresh"
+/// button in the contacts view and the equivalent action in
+/// Settings → Kontakte. Returns `true` when the pass actually
+/// ran, `false` when another pass was already in flight and this
+/// invocation was deduped.
+///
+/// `include_read_only`: when `true`, also walks the expensive
+/// read-only sentinel lists (EWS GAL, Google Other Contacts /
+/// Workspace Directory, Graph Suggested People). The auto and
+/// app-start passes default to `false` to keep the bandwidth cost
+/// of a quiet account predictable; the Settings → "Force-pull
+/// everything" gesture opts in by passing `true`.
+#[tauri::command]
+pub async fn sync_contacts_now<R: Runtime>(
+    scheduler: State<'_, Arc<ContactSyncScheduler>>,
+    app: AppHandle<R>,
+    include_read_only: Option<bool>,
+) -> CommandResult<bool> {
+    Ok(scheduler
+        .run_sync(&app, include_read_only.unwrap_or(false))
+        .await)
+}
+
+/// Snapshot the contact sync status — used by the contacts view
+/// footer to render "Last synced at …" + the configured interval.
+#[tauri::command]
+pub async fn get_contacts_sync_status(
+    scheduler: State<'_, Arc<ContactSyncScheduler>>,
+) -> CommandResult<ContactsSyncStatus> {
+    Ok(scheduler.status())
 }
 
 /// Clear the avatar without touching any other field. Idempotent

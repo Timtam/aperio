@@ -15,6 +15,7 @@ import type { Contact, ContactList } from '../../api/types';
 import { getContactListDisplayName } from '../../intl/contactList';
 import { useCalendarStore } from '../../state/CalendarStore';
 import { useContacts } from '../../state/useContacts';
+import { useContactSync } from '../../state/useContactSync';
 import { useDialogState } from '../../state/DialogState';
 
 /**
@@ -44,10 +45,15 @@ import { useDialogState } from '../../state/DialogState';
  */
 
 export function ContactsView() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { contactLists, selectedContactListIds } = useCalendarStore();
   const { contacts, loading, contactListById } = useContacts();
   const { openContactDialog } = useDialogState();
+  // Phase 10j: contact sync scheduler bridge. Sets up the
+  // `contacts-synced` event listener that re-drives `useContacts`
+  // after every periodic / manual / app-start pass, and exposes
+  // the trigger function for the Refresh button below.
+  const { status: syncStatus, triggering, triggerSync } = useContactSync();
 
   const headingId = useId();
   const searchId = useId();
@@ -218,6 +224,24 @@ export function ContactsView() {
           {t('views.contacts.heading')}
         </h2>
         <div className="contacts-view__actions">
+          {/* Refresh button drives a manual sync pass. Disabled while
+              a pass is in flight so accidental double-clicks don't
+              queue up. The status text below the listbox renders
+              the last-synced timestamp once a pass has completed. */}
+          <button
+            type="button"
+            className="form__action"
+            onClick={() => {
+              void triggerSync(false);
+            }}
+            disabled={triggering || syncStatus?.in_flight === true}
+            aria-label={t('views.contacts.refreshAria')}
+            title={t('views.contacts.refreshAria')}
+          >
+            {syncStatus?.in_flight || triggering
+              ? t('views.contacts.refreshing')
+              : t('views.contacts.refresh')}
+          </button>
           <button
             type="button"
             className="form__action form__action--primary"
@@ -227,6 +251,19 @@ export function ContactsView() {
           </button>
         </div>
       </header>
+      <p className="contacts-view__sync-status form__hint" aria-live="polite">
+        {/* Render last-synced time once we have it; the polite live
+            region lets screen readers pick up the change after each
+            refresh without stealing focus. */}
+        {syncStatus?.last_synced_at
+          ? t('views.contacts.lastSynced', {
+              time: formatLastSynced(
+                syncStatus.last_synced_at,
+                i18n.language,
+              ),
+            })
+          : t('views.contacts.neverSynced')}
+      </p>
 
       <div className="contacts-view__search">
         <label htmlFor={searchId} className="sr-only">
@@ -380,6 +417,50 @@ export function ContactsView() {
 // ─────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────
+
+/**
+ * Format the last-synced timestamp for the panel footer. Recent
+ * passes (under a minute ago) render as "gerade eben" / "just now"
+ * — the wall-clock timestamp is too noisy when the user clicked
+ * Refresh five seconds ago. Older values fall through to a locale
+ * "today at 13:42" / "yesterday at 13:42" / full date+time
+ * depending on how far back they reach. Pure helper so the call
+ * site stays readable.
+ */
+function formatLastSynced(iso: string, language: string): string {
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) {
+    return iso;
+  }
+  const now = new Date();
+  const deltaMs = now.getTime() - parsed.getTime();
+  // Under a minute: collapse to a relative phrase that doesn't
+  // tick — the polite live region would re-announce a ticking
+  // value on every render, which gets old fast.
+  if (deltaMs >= 0 && deltaMs < 60_000) {
+    return new Intl.RelativeTimeFormat(language, { numeric: 'auto' }).format(
+      0,
+      'minute',
+    );
+  }
+  const isSameDay =
+    parsed.getFullYear() === now.getFullYear() &&
+    parsed.getMonth() === now.getMonth() &&
+    parsed.getDate() === now.getDate();
+  if (isSameDay) {
+    return parsed.toLocaleTimeString(language, {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  }
+  return parsed.toLocaleString(language, {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
 
 type Entry =
   | { kind: 'separator'; key: string; label: string }

@@ -809,7 +809,12 @@
       "searching": "Verzeichnis wird durchsucht …",
       "searchEmpty": "Keine Kontakte für „{{query}}\" gefunden.",
       "searchResults_one": "1 Treffer",
-      "searchResults_other": "{{count}} Treffer"
+      "searchResults_other": "{{count}} Treffer",
+      "refresh": "Aktualisieren",
+      "refreshing": "Wird aktualisiert …",
+      "refreshAria": "Kontakte jetzt abgleichen",
+      "lastSynced": "Letzter Abgleich: {{time}}",
+      "neverSynced": "Noch kein Abgleich durchgeführt."
     }
   }
 }

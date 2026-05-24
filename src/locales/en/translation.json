@@ -809,7 +809,12 @@
       "searching": "Searching directory …",
       "searchEmpty": "No contacts found for \"{{query}}\".",
       "searchResults_one": "1 result",
-      "searchResults_other": "{{count}} results"
+      "searchResults_other": "{{count}} results",
+      "refresh": "Refresh",
+      "refreshing": "Refreshing …",
+      "refreshAria": "Sync contacts now",
+      "lastSynced": "Last synced: {{time}}",
+      "neverSynced": "No sync run yet."
     }
   }
 }

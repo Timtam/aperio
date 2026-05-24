@@ -6,6 +6,7 @@
 
 pub mod accounts;
 pub mod commands;
+pub mod contact_sync;
 pub mod db;
 pub mod overrides;
 mod paths;
@@ -19,6 +20,7 @@ pub use db::{DbError, DbHandle, DbResult, SharedConn};
 pub use paths::{resolve_data_dir, DataDirKind, DataDirResolution};
 
 use cal_adapter_local::LocalAdapter;
+use contact_sync::ContactSyncScheduler;
 use registry::AdapterRegistry;
 use reminders::ReminderScheduler;
 use std::sync::Arc;
@@ -72,6 +74,13 @@ pub fn run() {
     // them via Tauri's State. Both handles point at the same
     // registry instance.
     let registry_for_scheduler = Arc::clone(&registry);
+    // Phase 10j: same Arc-sharing pattern for the contact sync
+    // scheduler. A second clone lives in the background task; the
+    // primary Arc keeps living inside Tauri State so the
+    // `sync_contacts_now` command can dispatch through the same
+    // instance and benefit from the in-flight dedupe guard.
+    let registry_for_contact_sync = Arc::clone(&registry);
+    let db_for_contact_sync = db.shared();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
@@ -143,6 +152,12 @@ pub fn run() {
             commands::get_contact_photo,
             commands::set_contact_photo,
             commands::delete_contact_photo,
+            // Phase 10j: contact sync scheduler. The
+            // ContactSyncScheduler is registered into State during
+            // setup() below so these commands can fan out to every
+            // external adapter on user demand.
+            commands::sync_contacts_now,
+            commands::get_contacts_sync_status,
         ])
         .setup(move |app| {
             // Spawn the reminder scheduler on the Tauri/tokio runtime
@@ -154,6 +169,19 @@ pub fn run() {
                 app.handle().clone(),
             );
             app.manage(scheduler);
+
+            // Phase 10j: contact sync scheduler. Boots its own
+            // periodic worker (default 60 min, configurable via
+            // user_prefs) plus runs a one-shot pass shortly after
+            // app start. Stored in State so the
+            // `sync_contacts_now` command can drive a manual pass
+            // through the same in-flight guard.
+            let contact_sync = ContactSyncScheduler::spawn(
+                Arc::clone(&registry_for_contact_sync),
+                db_for_contact_sync.clone(),
+                app.handle().clone(),
+            );
+            app.manage(contact_sync);
 
             // Shared state for the native context-menu popups. The
             // global `on_menu_event` handler below routes selections
