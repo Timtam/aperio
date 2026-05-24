@@ -74,7 +74,7 @@ export function SyncPanel() {
   // Adapter draft state. Seeded from current backend state on mount
   // so the inputs reflect the persisted choice.
   const [kindDraft, setKindDraft] = useState<
-    'local' | 'webdav' | 'sftp' | 'none'
+    'local' | 'webdav' | 'sftp' | 'ftp' | 'none'
   >('local');
   const [pathDraft, setPathDraft] = useState('');
   // WebDAV-only fields. `passwordDraft` is empty on first render —
@@ -100,6 +100,17 @@ export function SyncPanel() {
   );
   const [sftpKeyPathDraft, setSftpKeyPathDraft] = useState('');
   const [sftpKeyPassphraseDraft, setSftpKeyPassphraseDraft] = useState('');
+  // FTPS-only fields. Mirrors the SFTP shape but flatter (no
+  // SSH-key auth, no host-key TOFU). Port default flips with
+  // the mode dropdown: 21 for explicit, 990 for implicit.
+  const [ftpHostDraft, setFtpHostDraft] = useState('');
+  const [ftpPortDraft, setFtpPortDraft] = useState('21');
+  const [ftpUserDraft, setFtpUserDraft] = useState('');
+  const [ftpPathDraft, setFtpPathDraft] = useState('');
+  const [ftpPasswordDraft, setFtpPasswordDraft] = useState('');
+  const [ftpModeDraft, setFtpModeDraft] = useState<
+    'explicit' | 'implicit'
+  >('explicit');
   // Phase Sk: E2E passphrase. Two roles depending on the
   // onboarding branch:
   //   - `adopt_local` with non-empty value → mints a fresh dataset
@@ -244,6 +255,24 @@ export function SyncPanel() {
             : null,
       };
     }
+    if (kindDraft === 'ftp') {
+      // Same parse-or-default port pattern as SFTP. The
+      // backend's `default_ftp_port` is 21 (explicit FTPS); we
+      // honour the user's input where reasonable.
+      const port = Number.parseInt(ftpPortDraft, 10);
+      const fallback = ftpModeDraft === 'implicit' ? 990 : 21;
+      return {
+        kind: 'ftp',
+        host: ftpHostDraft.trim(),
+        port: Number.isFinite(port) && port > 0 ? port : fallback,
+        user: ftpUserDraft.trim(),
+        path: ftpPathDraft.trim(),
+        mode: ftpModeDraft,
+        // Empty → backend reuses keychain entry, same
+        // contract as WebDAV / SFTP.
+        password: ftpPasswordDraft.trim() || null,
+      };
+    }
     return { kind: 'none' };
   }, [
     kindDraft,
@@ -259,6 +288,12 @@ export function SyncPanel() {
     sftpAuthDraft,
     sftpKeyPathDraft,
     sftpKeyPassphraseDraft,
+    ftpHostDraft,
+    ftpPortDraft,
+    ftpUserDraft,
+    ftpPathDraft,
+    ftpPasswordDraft,
+    ftpModeDraft,
   ]);
 
   // Validation: the Connect button needs a path for `local`, a URL +
@@ -283,6 +318,12 @@ export function SyncPanel() {
         return true;
       }
       return false;
+    }
+    if (kindDraft === 'ftp') {
+      // FTP requires host + user. Path is optional (defaults
+      // to the server's home directory when blank). Password
+      // can be reused from the keychain on subsequent edits.
+      return !ftpHostDraft.trim() || !ftpUserDraft.trim();
     }
     return false;
   })();
@@ -946,7 +987,12 @@ export function SyncPanel() {
               value={kindDraft}
               onChange={(e) =>
                 setKindDraft(
-                  e.target.value as 'local' | 'webdav' | 'sftp' | 'none',
+                  e.target.value as
+                    | 'local'
+                    | 'webdav'
+                    | 'sftp'
+                    | 'ftp'
+                    | 'none',
                 )
               }
             >
@@ -958,6 +1004,9 @@ export function SyncPanel() {
               </option>
               <option value="sftp">
                 {t('dialogs.settings.sync.adapterKindSftp')}
+              </option>
+              <option value="ftp">
+                {t('dialogs.settings.sync.adapterKindFtp')}
               </option>
               <option value="none">
                 {t('dialogs.settings.sync.adapterKindNone')}
@@ -1214,6 +1263,116 @@ export function SyncPanel() {
                 </div>
               </>
             )}
+          </>
+        )}
+        {kindDraft === 'ftp' && (
+          <>
+            <div className="sync-panel__field">
+              <label>
+                {t('dialogs.settings.sync.adapterFtpHost')}
+                <input
+                  type="text"
+                  value={ftpHostDraft}
+                  onChange={(e) => setFtpHostDraft(e.target.value)}
+                  placeholder="ftp.example.com"
+                />
+              </label>
+            </div>
+            <fieldset className="sync-panel__field sync-panel__authmethod">
+              <legend>
+                {t('dialogs.settings.sync.adapterFtpMode')}
+              </legend>
+              <label>
+                <input
+                  type="radio"
+                  name="ftp-mode"
+                  value="explicit"
+                  checked={ftpModeDraft === 'explicit'}
+                  onChange={() => {
+                    setFtpModeDraft('explicit');
+                    // Swap the port default if the user
+                    // hasn't customised it from the implicit
+                    // value yet.
+                    if (ftpPortDraft === '990') setFtpPortDraft('21');
+                  }}
+                />{' '}
+                {t('dialogs.settings.sync.adapterFtpModeExplicit')}
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  name="ftp-mode"
+                  value="implicit"
+                  checked={ftpModeDraft === 'implicit'}
+                  onChange={() => {
+                    setFtpModeDraft('implicit');
+                    if (ftpPortDraft === '21') setFtpPortDraft('990');
+                  }}
+                />{' '}
+                {t('dialogs.settings.sync.adapterFtpModeImplicit')}
+              </label>
+              <p className="sync-panel__hint">
+                {t('dialogs.settings.sync.adapterFtpModeHint')}
+              </p>
+            </fieldset>
+            <div className="sync-panel__field">
+              <label>
+                {t('dialogs.settings.sync.adapterFtpPort')}
+                <input
+                  type="number"
+                  value={ftpPortDraft}
+                  onChange={(e) => setFtpPortDraft(e.target.value)}
+                  min={1}
+                  max={65535}
+                />
+              </label>
+            </div>
+            <div className="sync-panel__field">
+              <label>
+                {t('dialogs.settings.sync.adapterFtpUser')}
+                <input
+                  type="text"
+                  value={ftpUserDraft}
+                  onChange={(e) => setFtpUserDraft(e.target.value)}
+                  autoComplete="username"
+                />
+              </label>
+            </div>
+            <div className="sync-panel__field">
+              <label>
+                {t('dialogs.settings.sync.adapterFtpPath')}
+                <input
+                  type="text"
+                  value={ftpPathDraft}
+                  onChange={(e) => setFtpPathDraft(e.target.value)}
+                  placeholder="/aperio"
+                />
+              </label>
+              <p className="sync-panel__hint">
+                {t('dialogs.settings.sync.adapterFtpPathHint')}
+              </p>
+            </div>
+            <div className="sync-panel__field">
+              <label>
+                {t('dialogs.settings.sync.adapterFtpPassword')}
+                <input
+                  type="password"
+                  value={ftpPasswordDraft}
+                  onChange={(e) => setFtpPasswordDraft(e.target.value)}
+                  autoComplete="new-password"
+                  placeholder={
+                    status?.configured
+                      ? t(
+                          'dialogs.settings.sync.adapterWebdavPasswordKept',
+                        )
+                      : undefined
+                  }
+                />
+              </label>
+              <p className="sync-panel__hint">
+                {t('dialogs.settings.sync.adapterFtpTlsRequiredHint')}
+              </p>
+            </div>
           </>
         )}
         <div className="sync-panel__actions">

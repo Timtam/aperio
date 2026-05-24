@@ -34,6 +34,7 @@ use std::sync::Arc;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use serde::Deserialize;
+use sync_adapter_ftp::{FtpsMode, FtpsSyncAdapter};
 use sync_adapter_local::LocalFsSyncAdapter;
 use sync_adapter_sftp::{
     HostKeyPreview, HostKeyVerifier, SftpAuth, SftpSyncAdapter,
@@ -101,6 +102,20 @@ const SFTP_SECRET_ACCOUNT: &str = "sync.adapter.sftp";
 /// own slot so a user that switches from password to key auth
 /// (or vice versa) doesn't clobber the inactive credential.
 const SFTP_KEY_SECRET_ACCOUNT: &str = "sync.adapter.sftp.key";
+
+/// FTPS adapter config keys. Same device-local / never-synced
+/// guarantee as the SFTP family. The password lives in the
+/// keychain under FTP_SECRET_ACCOUNT.
+const PREF_FTP_HOST: &str = "sync.adapter.ftp.host";
+const PREF_FTP_PORT: &str = "sync.adapter.ftp.port";
+const PREF_FTP_USER: &str = "sync.adapter.ftp.user";
+const PREF_FTP_PATH: &str = "sync.adapter.ftp.path";
+/// `"explicit"` or `"implicit"` — picks the TLS handshake
+/// timing. Mirrors the frontend's mode dropdown.
+const PREF_FTP_MODE: &str = "sync.adapter.ftp.mode";
+
+/// Pseudo-account id for the FTPS password.
+const FTP_SECRET_ACCOUNT: &str = "sync.adapter.ftp";
 
 /// `user_prefs` key flagging whether the current sync dataset is
 /// E2E-encrypted. Mirrors the boolean in `meta.json`; lets
@@ -177,6 +192,23 @@ pub enum SyncAdapterConfig {
         #[serde(default)]
         key_passphrase: Option<String>,
     },
+    /// FTPS adapter (DESIGN.md §19.6 — "FTP über TLS"). Plain
+    /// FTP is not supported; the `mode` picks between
+    /// `"explicit"` (AUTH TLS upgrade, port 21 default) and
+    /// `"implicit"` (TLS-first handshake, port 990 default).
+    /// Same `Option<String>` password reuse contract as the
+    /// other adapters: empty or omitted means "reuse keychain".
+    Ftp {
+        host: String,
+        #[serde(default = "default_ftp_port")]
+        port: u16,
+        user: String,
+        path: String,
+        #[serde(default = "default_ftp_mode")]
+        mode: String,
+        #[serde(default)]
+        password: Option<String>,
+    },
     /// Explicit disconnect. The orchestrator drops its adapter
     /// handle; subsequent `sync_now` calls return a clear "not
     /// configured" error rather than silently no-oping.
@@ -189,6 +221,18 @@ fn default_sftp_port() -> u16 {
 
 fn default_sftp_auth_method() -> String {
     "password".to_string()
+}
+
+fn default_ftp_port() -> u16 {
+    // Explicit FTPS — the default mode — talks plain FTP on
+    // port 21 then upgrades via AUTH TLS. Implicit mode (port
+    // 990) is opt-in via the `mode` field; the frontend swaps
+    // the default port when the user changes mode.
+    21
+}
+
+fn default_ftp_mode() -> String {
+    "explicit".to_string()
 }
 
 /// Build a fresh adapter instance from a [`SyncAdapterConfig`] —
@@ -346,6 +390,68 @@ fn build_adapter(
                 verifier,
             )))
         }
+        SyncAdapterConfig::Ftp {
+            host,
+            port,
+            user,
+            path,
+            mode,
+            password,
+        } => {
+            let trimmed_host = host.trim();
+            let trimmed_user = user.trim();
+            let trimmed_path = path.trim();
+            if trimmed_host.is_empty() {
+                return Err(CommandError {
+                    code: "invalid_input",
+                    message: "FTP host must not be empty".into(),
+                });
+            }
+            if trimmed_user.is_empty() {
+                return Err(CommandError {
+                    code: "invalid_input",
+                    message: "FTP user must not be empty".into(),
+                });
+            }
+            // Same Option-reuse password contract as WebDAV /
+            // SFTP: Some+non-empty → use the supplied value;
+            // None or empty → re-fetch the keychain secret so
+            // host/user edits don't require re-typing.
+            let resolved_password =
+                match password.as_deref().map(str::trim) {
+                    Some(p) if !p.is_empty() => p.to_string(),
+                    _ => secrets::retrieve(
+                        FTP_SECRET_ACCOUNT,
+                        SecretSlot::Password,
+                    )
+                    .map_err(|err| CommandError {
+                        code: "auth",
+                        message: format!(
+                            "no FTP password configured: {err}",
+                        ),
+                    })?,
+                };
+            let parsed_mode = match mode.as_str() {
+                "implicit" => FtpsMode::Implicit,
+                "explicit" => FtpsMode::Explicit,
+                other => {
+                    return Err(CommandError {
+                        code: "invalid_input",
+                        message: format!(
+                            "unknown FTPS mode: {other}",
+                        ),
+                    });
+                }
+            };
+            Ok(Arc::new(FtpsSyncAdapter::new(
+                trimmed_host,
+                *port,
+                trimmed_user,
+                resolved_password,
+                trimmed_path,
+                parsed_mode,
+            )))
+        }
         SyncAdapterConfig::None => Err(CommandError {
             code: "invalid_input",
             message: "cannot build adapter from None kind".into(),
@@ -434,6 +540,38 @@ fn persist_adapter_config(
                         SFTP_KEY_SECRET_ACCOUNT,
                         SecretSlot::Password,
                         pp,
+                    )
+                    .map_err(|err| CommandError {
+                        code: "internal",
+                        message: format!("keychain store: {err}"),
+                    })?;
+                }
+            }
+            Ok(())
+        }
+        SyncAdapterConfig::Ftp {
+            host,
+            port,
+            user,
+            path,
+            mode,
+            password,
+        } => {
+            prefs.set(PREF_ADAPTER_KIND, "ftp").map_err(internal)?;
+            prefs.set(PREF_FTP_HOST, host.trim()).map_err(internal)?;
+            prefs.set(PREF_FTP_PORT, &port.to_string()).map_err(internal)?;
+            prefs.set(PREF_FTP_USER, user.trim()).map_err(internal)?;
+            prefs.set(PREF_FTP_PATH, path.trim()).map_err(internal)?;
+            prefs.set(PREF_FTP_MODE, mode.trim()).map_err(internal)?;
+            // Only overwrite the keychain when the request
+            // carries a non-empty password — same reuse
+            // contract as WebDAV / SFTP.
+            if let Some(pw) = password.as_deref().map(str::trim) {
+                if !pw.is_empty() {
+                    secrets::store(
+                        FTP_SECRET_ACCOUNT,
+                        SecretSlot::Password,
+                        pw,
                     )
                     .map_err(|err| CommandError {
                         code: "internal",
@@ -553,7 +691,8 @@ pub async fn configure_sync_adapter(
     match &config {
         SyncAdapterConfig::Local { .. }
         | SyncAdapterConfig::Webdav { .. }
-        | SyncAdapterConfig::Sftp { .. } => {
+        | SyncAdapterConfig::Sftp { .. }
+        | SyncAdapterConfig::Ftp { .. } => {
             // Persist BEFORE building the adapter so the keychain
             // entry for the new WebDAV password is in place; the
             // adapter constructor then reads it back when the
@@ -1324,6 +1463,47 @@ pub fn build_adapter_from_prefs(
                 auth,
                 PathBuf::from(path.trim()),
                 verifier,
+            ))
+        }
+        "ftp" => {
+            let host = prefs.get(PREF_FTP_HOST).ok().flatten()?;
+            if host.trim().is_empty() {
+                return None;
+            }
+            let port = prefs
+                .get(PREF_FTP_PORT)
+                .ok()
+                .flatten()
+                .and_then(|s| s.parse::<u16>().ok())
+                .unwrap_or(21);
+            let user = prefs.get(PREF_FTP_USER).ok().flatten()?;
+            if user.trim().is_empty() {
+                return None;
+            }
+            let path =
+                prefs.get(PREF_FTP_PATH).ok().flatten().unwrap_or_default();
+            let mode_str = prefs
+                .get(PREF_FTP_MODE)
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| "explicit".to_string());
+            let mode = match mode_str.as_str() {
+                "implicit" => FtpsMode::Implicit,
+                // "explicit" + any forward-compat unknown both
+                // fall back to explicit FTPS — the more
+                // compatible mode.
+                _ => FtpsMode::Explicit,
+            };
+            let password =
+                secrets::retrieve(FTP_SECRET_ACCOUNT, SecretSlot::Password)
+                    .ok()?;
+            Arc::new(FtpsSyncAdapter::new(
+                host.trim(),
+                port,
+                user.trim(),
+                password,
+                path.trim(),
+                mode,
             ))
         }
         // Forward-compat: an unknown kind (left over from a

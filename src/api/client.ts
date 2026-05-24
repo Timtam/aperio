@@ -725,6 +725,21 @@ export type SyncAdapterConfig =
        *  passphrase" on first-run). */
       key_passphrase?: string | null;
     }
+  | {
+      kind: 'ftp';
+      host: string;
+      port: number;
+      user: string;
+      path: string;
+      /** `"explicit"` (AUTH TLS upgrade, default port 21) or
+       *  `"implicit"` (TLS-first handshake, default port 990).
+       *  Plain FTP isn't supported — the frontend always sets
+       *  one of these two. */
+      mode: 'explicit' | 'implicit';
+      /** Empty / null reuses the keychain entry — same contract
+       *  as the WebDAV / SFTP fields. */
+      password?: string | null;
+    }
   | { kind: 'none' };
 
 /** Read-only status snapshot. The state indicator polls this on a

@@ -6,6 +6,42 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Aperio — stub for sync-adapter-ftp (Phase 0; full implementation lands in a later phase)."
+description = "Aperio sync adapter targeting FTP over TLS (FTPS), implicit + explicit modes."
 
 [dependencies]
+async-trait.workspace = true
+chrono.workspace = true
+serde.workspace = true
+sync-core.workspace = true
+thiserror.workspace = true
+# `rt-multi-thread` is required for tokio::task::spawn_blocking,
+# which is how we adapt suppaftp's sync API into our async
+# SyncAdapter trait — suppaftp's async surface only supports
+# async-std, so we keep the sync API and offload it to tokio's
+# blocking pool. Per-operation connects are ~150-300 ms each,
+# acceptable on the 5-minute default sync interval.
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync", "io-util", "macros"] }
+tracing.workspace = true
+
+# Pure-Rust FTP + FTPS client. We use the sync API (`FtpStream`,
+# `RustlsFtpStream`, `RustlsConnector`) and wrap it in
+# `tokio::task::spawn_blocking`; the rustls feature stays free of
+# OpenSSL / SChannel system deps so the adapter compiles for
+# Mobile targets too (§19.6).
+suppaftp = { version = "6", default-features = false, features = [
+    "rustls",
+    # `deprecated` gates the `connect_secure_implicit` constructor
+    # — the only path to implicit-mode FTPS in the sync API. The
+    # method itself is fine; the feature flag exists because the
+    # crate prefers explicit-mode via `into_secure`. We need both
+    # modes, hence the opt-in.
+    "deprecated",
+] }
+# rustls config we hand to suppaftp's RustlsConnector. Pinned to
+# the version suppaftp 6.x consumes internally.
+rustls = { version = "0.23", default-features = false, features = [
+    "ring",
+    "tls12",
+    "std",
+] }
+webpki-roots = "0.26"
