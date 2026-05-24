@@ -1,0 +1,543 @@
+//! `FfiCalendarAdapter` — `cal_core::CalendarFeature` impl that
+//! dispatches every method across the FFI boundary into a loaded
+//! plugin's [`crate::vtables::CalendarVtable`].
+//!
+//! Canonical pattern for the other three shims (Tasks /
+//! Contacts / Sync) that P1b will add — they follow this file
+//! one-to-one: hold the [`LoadedPlugin`] Arc, hold the vtable
+//! pointer, implement the trait by going through
+//! `encode_args` → `call_method` → `decode_payload`.
+
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use cal_core::adapter::{Adapter, AuthToken, CalendarFeature, Capability, Credentials};
+use cal_core::color::ContainerColor;
+use cal_core::error::{Error, Result};
+use cal_core::types::{Calendar, DateRange, Event, FreeBusy, NewEvent};
+use serde::Serialize;
+use tracing::warn;
+
+use crate::ffi::*;
+use crate::manager::LoadedPlugin;
+use crate::vtables::CalendarVtable;
+
+use super::call::{call_method, decode_payload, encode_args, CallOutcome};
+
+/// Holds a loaded calendar-adapter plugin + a snapshot of the
+/// methods we expect on its vtable. The vtable pointer is
+/// resolved once (in [`Self::new`]) so every method call avoids
+/// the type-cast each time.
+///
+/// `Arc<LoadedPlugin>` keeps the plugin's shared library alive
+/// across every `spawn_blocking` we issue; once the shim itself
+/// drops + every consumer Arc goes away, the manager can unload
+/// the library safely.
+pub struct FfiCalendarAdapter {
+    /// Keeps the library alive. Don't dereference directly —
+    /// `vtable` already has cached pointers into it.
+    _plugin: Arc<LoadedPlugin>,
+    /// Cached copy of each method-pointer slot from the plugin's
+    /// vtable. Copies (rather than holding a `&CalendarVtable`)
+    /// because we hand individual fn pointers to `spawn_blocking`
+    /// closures — those need `'static` so the borrow has to
+    /// disappear before the closure runs.
+    vtable: Snapshot,
+    /// Statically-cached capability list, derived once at
+    /// construction time from the plugin's `capabilities()`
+    /// method or — failing that — the manifest. Used by the
+    /// `Adapter::capabilities()` trait method, which is sync
+    /// and can't go through the FFI itself.
+    capabilities: Vec<Capability>,
+}
+
+/// Owned snapshot of every fn-pointer slot. We copy these out
+/// of the [`CalendarVtable`] at construction time so each
+/// `spawn_blocking` closure can move its own copy without having
+/// to hold a reference back into the manager.
+#[derive(Clone, Copy)]
+struct Snapshot {
+    authenticate: Option<crate::vtables::VtableMethodFn>,
+    list_calendars: Option<crate::vtables::VtableMethodFn>,
+    get_events: Option<crate::vtables::VtableMethodFn>,
+    create_event: Option<crate::vtables::VtableMethodFn>,
+    update_event: Option<crate::vtables::VtableMethodFn>,
+    delete_event: Option<crate::vtables::VtableMethodFn>,
+    get_free_busy: Option<crate::vtables::VtableMethodFn>,
+    calendar_color: Option<crate::vtables::VtableMethodFn>,
+    add_event_exdate: Option<crate::vtables::VtableMethodFn>,
+    rename_calendar: Option<crate::vtables::VtableMethodFn>,
+}
+
+impl FfiCalendarAdapter {
+    /// Wrap a loaded calendar-adapter plugin so it can be
+    /// handed to the rest of the host as
+    /// `Arc<dyn CalendarFeature>`. Returns `None` when the
+    /// plugin's vtable pointer is NULL or fails the
+    /// minimum-surface check — both are signs of a buggy
+    /// plugin build and the manager will already have logged
+    /// the load-time error.
+    pub fn new(plugin: Arc<LoadedPlugin>) -> Option<Self> {
+        let raw = plugin.vtable_ptr();
+        if raw.is_null() {
+            warn!(
+                plugin_id = %plugin.manifest.id,
+                "calendar plugin has NULL vtable; refusing to wrap",
+            );
+            return None;
+        }
+        // SAFETY: the manifest's plugin_type field told us this is
+        // a calendar-adapter, so the vtable pointer points at a
+        // CalendarVtable per the ABI contract.
+        let vtable_ref: &CalendarVtable = unsafe { &*(raw as *const CalendarVtable) };
+        if !vtable_ref.has_minimum_surface() {
+            warn!(
+                plugin_id = %plugin.manifest.id,
+                "calendar plugin's vtable lacks list_calendars; refusing to wrap",
+            );
+            return None;
+        }
+        let snapshot = Snapshot {
+            authenticate: vtable_ref.authenticate,
+            list_calendars: vtable_ref.list_calendars,
+            get_events: vtable_ref.get_events,
+            create_event: vtable_ref.create_event,
+            update_event: vtable_ref.update_event,
+            delete_event: vtable_ref.delete_event,
+            get_free_busy: vtable_ref.get_free_busy,
+            calendar_color: vtable_ref.calendar_color,
+            add_event_exdate: vtable_ref.add_event_exdate,
+            rename_calendar: vtable_ref.rename_calendar,
+        };
+
+        let manifest_caps: Vec<Capability> = plugin
+            .manifest
+            .capabilities
+            .iter()
+            .filter_map(|c| match c {
+                crate::Capability::Calendar => Some(Capability::Calendar),
+                crate::Capability::Tasks => Some(Capability::Tasks),
+                crate::Capability::Contacts => Some(Capability::Contacts),
+                crate::Capability::Unknown(_) => None,
+            })
+            .collect();
+
+        Some(Self {
+            _plugin: plugin,
+            vtable: snapshot,
+            capabilities: manifest_caps,
+        })
+    }
+}
+
+/// Helper to turn a [`CallOutcome`] into either a typed value
+/// (via `decode_payload`) or the matching `cal_core::Error`.
+async fn call_then_decode<T, A>(
+    method: Option<crate::vtables::VtableMethodFn>,
+    args: &A,
+) -> Result<T>
+where
+    T: serde::de::DeserializeOwned,
+    A: Serialize,
+{
+    let bytes = encode_args(args).map_err(|e| Error::Internal(format!(
+        "encode args: {e}"
+    )))?;
+    let outcome = call_method(method, bytes).await;
+    if outcome.is_ok() {
+        decode_payload(&outcome.bytes).map_err(|e| Error::Protocol(format!(
+            "decode plugin response: {e}"
+        )))
+    } else {
+        Err(status_to_cal_error(outcome))
+    }
+}
+
+/// Same shape as [`call_then_decode`] but for trait methods that
+/// return `()` — we only care about the status code. Empty
+/// payload is fine.
+async fn call_for_unit<A: Serialize>(
+    method: Option<crate::vtables::VtableMethodFn>,
+    args: &A,
+) -> Result<()> {
+    let bytes = encode_args(args).map_err(|e| Error::Internal(format!(
+        "encode args: {e}"
+    )))?;
+    let outcome = call_method(method, bytes).await;
+    if outcome.is_ok() {
+        Ok(())
+    } else {
+        Err(status_to_cal_error(outcome))
+    }
+}
+
+/// Plugin status → `cal_core::Error` variant. Same shape as the
+/// status-code constants documented in `crate::ffi`.
+fn status_to_cal_error(outcome: CallOutcome) -> Error {
+    let msg = outcome.message();
+    match outcome.status {
+        PLUGIN_CALL_ERR_UNSUPPORTED => Error::Unsupported(msg),
+        PLUGIN_CALL_ERR_INVALID => Error::InvalidInput(msg),
+        PLUGIN_CALL_ERR_AUTH => Error::Authentication(msg),
+        PLUGIN_CALL_ERR_NETWORK => Error::Network(msg),
+        PLUGIN_CALL_ERR_NOT_FOUND => Error::NotFound(msg),
+        PLUGIN_CALL_ERR_PROTOCOL => Error::Protocol(msg),
+        PLUGIN_CALL_ERR_CONFLICT => Error::Conflict(msg),
+        PLUGIN_CALL_ERR_FORBIDDEN => Error::Forbidden(msg),
+        // cal-core has no IO variant; we already log + retry-loop
+        // around plugin calls at the orchestrator level, so an
+        // IO failure folds into Internal here.
+        PLUGIN_CALL_ERR_IO => Error::Internal(format!("plugin IO: {msg}")),
+        PLUGIN_CALL_ERR_INTERNAL => Error::Internal(msg),
+        // Any non-zero status we don't recognise gets surfaced
+        // verbatim — better than silently swallowing an
+        // unfamiliar code that some forward-rolled plugin returned.
+        other => Error::Internal(format!("plugin status {other}: {msg}")),
+    }
+}
+
+#[async_trait]
+impl Adapter for FfiCalendarAdapter {
+    async fn authenticate(&self, credentials: Credentials) -> Result<AuthToken> {
+        call_then_decode(self.vtable.authenticate, &credentials).await
+    }
+
+    fn capabilities(&self) -> &[Capability] {
+        &self.capabilities
+    }
+}
+
+// JSON-shape helpers — one struct per method that carries multiple
+// arguments. Single-arg methods reuse the typed arg directly.
+//
+// Each shape's keys match the trait method's parameter names so a
+// plugin author can read the wire protocol off the trait
+// definition without consulting a separate spec.
+
+#[derive(Serialize)]
+struct GetEventsArgs<'a> {
+    calendar_id: &'a str,
+    range: DateRange,
+}
+
+#[derive(Serialize)]
+struct CreateEventArgs<'a> {
+    calendar_id: &'a str,
+    event: NewEvent,
+}
+
+#[derive(Serialize)]
+struct GetFreeBusyArgs<'a> {
+    emails: Vec<&'a str>,
+    range: DateRange,
+}
+
+#[derive(Serialize)]
+struct AddExdateArgs<'a> {
+    event_id: &'a str,
+    occurrence: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Serialize)]
+struct RenameCalendarArgs<'a> {
+    calendar_id: &'a str,
+    new_name: &'a str,
+}
+
+#[async_trait]
+impl CalendarFeature for FfiCalendarAdapter {
+    async fn list_calendars(&self) -> Result<Vec<Calendar>> {
+        call_then_decode(self.vtable.list_calendars, &()).await
+    }
+
+    async fn get_events(
+        &self,
+        calendar_id: &str,
+        range: DateRange,
+    ) -> Result<Vec<Event>> {
+        let args = GetEventsArgs { calendar_id, range };
+        call_then_decode(self.vtable.get_events, &args).await
+    }
+
+    async fn create_event(
+        &self,
+        calendar_id: &str,
+        event: NewEvent,
+    ) -> Result<Event> {
+        let args = CreateEventArgs { calendar_id, event };
+        call_then_decode(self.vtable.create_event, &args).await
+    }
+
+    async fn update_event(&self, event: Event) -> Result<Event> {
+        call_then_decode(self.vtable.update_event, &event).await
+    }
+
+    async fn delete_event(&self, event_id: &str) -> Result<()> {
+        call_for_unit(self.vtable.delete_event, &event_id).await
+    }
+
+    async fn get_free_busy(
+        &self,
+        emails: &[&str],
+        range: DateRange,
+    ) -> Result<Vec<FreeBusy>> {
+        let args = GetFreeBusyArgs {
+            emails: emails.to_vec(),
+            range,
+        };
+        call_then_decode(self.vtable.get_free_busy, &args).await
+    }
+
+    /// Synchronous slot in the trait. We dispatch to the plugin
+    /// via `block_in_place` rather than `spawn_blocking` because
+    /// we're already off the runtime here (the trait method is
+    /// non-async).
+    fn calendar_color(&self, calendar_id: &str) -> Option<ContainerColor> {
+        let method = self.vtable.calendar_color?;
+        let args = match encode_args(&calendar_id) {
+            Ok(b) => b,
+            Err(err) => {
+                warn!(?err, "calendar_color encode args");
+                return None;
+            }
+        };
+        // SAFETY: same contract as call_method's blocking branch —
+        // args is a Vec<u8> we own; pointer is valid for the
+        // duration of the call.
+        let result = unsafe { method(args.as_ptr(), args.len()) };
+        let outcome = {
+            let bytes = unsafe { result.payload.as_slice().to_vec() };
+            let status = result.status;
+            let mut payload = result.payload;
+            unsafe { payload.free_in_place() };
+            CallOutcome { status, bytes }
+        };
+        if !outcome.is_ok() {
+            warn!(
+                status = outcome.status,
+                msg = %outcome.message(),
+                "calendar_color plugin returned non-OK status",
+            );
+            return None;
+        }
+        decode_payload::<Option<ContainerColor>>(&outcome.bytes)
+            .map_err(|err| {
+                warn!(?err, "calendar_color decode failed");
+            })
+            .ok()
+            .flatten()
+    }
+
+    async fn add_event_exdate(
+        &self,
+        event_id: &str,
+        occurrence: chrono::DateTime<chrono::Utc>,
+    ) -> Result<()> {
+        let args = AddExdateArgs { event_id, occurrence };
+        call_for_unit(self.vtable.add_event_exdate, &args).await
+    }
+
+    async fn rename_calendar(
+        &self,
+        calendar_id: &str,
+        new_name: &str,
+    ) -> Result<()> {
+        let args = RenameCalendarArgs { calendar_id, new_name };
+        call_for_unit(self.vtable.rename_calendar, &args).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::manifest::PluginManifest;
+    use crate::vtables::CalendarVtable;
+    use std::sync::Mutex;
+
+    // ─────────────────────────────────────────────────────────────
+    // Fake plugin scaffolding. We don't actually dlopen anything
+    // in unit tests — we build a CalendarVtable from C-ABI fn
+    // pointers in this module and wrap it in a synthetic
+    // LoadedPlugin via a test-only ctor.
+    //
+    // The fake state lives in `static`s because extern "C" fns
+    // can't capture environment. Each test case sets up the
+    // static state before calling into the shim.
+    // ─────────────────────────────────────────────────────────────
+
+    // For `list_calendars` we'll return a fixed 2-cal JSON. The
+    // test reads them back through the shim + asserts.
+    static LIST_CALENDARS_CALLED: Mutex<usize> = Mutex::new(0);
+
+    extern "C" fn fake_list_calendars(
+        _args_ptr: *const u8,
+        _args_len: usize,
+    ) -> PluginCallResult {
+        *LIST_CALENDARS_CALLED.lock().unwrap() += 1;
+        let cals = vec![
+            Calendar {
+                id: "cal-1".into(),
+                name: "Calendar One".into(),
+                color: None,
+                read_only: false,
+                default_sound: None,
+            },
+            Calendar {
+                id: "cal-2".into(),
+                name: "Calendar Two".into(),
+                color: None,
+                read_only: true,
+                default_sound: None,
+            },
+        ];
+        let json = serde_json::to_vec(&cals).expect("serialise");
+        // We deliberately leak the boxed buffer so the lifetime
+        // story matches what a real plugin would do (the bytes
+        // outlive the call until the host frees them).
+        let mut boxed = json.into_boxed_slice();
+        let data = boxed.as_mut_ptr();
+        let len = boxed.len();
+        std::mem::forget(boxed);
+        unsafe extern "C" fn free_boxed(data: *mut u8, len: usize) {
+            if !data.is_null() {
+                let _ = Box::from_raw(std::slice::from_raw_parts_mut(data, len));
+            }
+        }
+        PluginCallResult {
+            status: PLUGIN_CALL_OK,
+            payload: PluginBytes {
+                data,
+                len,
+                free: Some(free_boxed),
+            },
+        }
+    }
+
+    // For an error-path test: returns auth-error with a custom
+    // message that the shim translates into Error::Authentication.
+    extern "C" fn fake_authenticate(
+        _args_ptr: *const u8,
+        _args_len: usize,
+    ) -> PluginCallResult {
+        let msg = b"creds rejected".to_vec();
+        let mut boxed = msg.into_boxed_slice();
+        let data = boxed.as_mut_ptr();
+        let len = boxed.len();
+        std::mem::forget(boxed);
+        unsafe extern "C" fn free_boxed(data: *mut u8, len: usize) {
+            if !data.is_null() {
+                let _ = Box::from_raw(std::slice::from_raw_parts_mut(data, len));
+            }
+        }
+        PluginCallResult {
+            status: PLUGIN_CALL_ERR_AUTH,
+            payload: PluginBytes {
+                data,
+                len,
+                free: Some(free_boxed),
+            },
+        }
+    }
+
+    // Synthetic LoadedPlugin + FfiCalendarAdapter for tests.
+    // The library handle is None (we're not dlopening anything)
+    // and the descriptor + vtable point at heap-allocated
+    // statics that live for the test duration.
+    fn make_fake_adapter(
+        list_calendars: Option<crate::vtables::VtableMethodFn>,
+        authenticate: Option<crate::vtables::VtableMethodFn>,
+    ) -> FfiCalendarAdapter {
+        // Build a vtable with our fake methods.
+        let vtable = Box::new(CalendarVtable {
+            list_calendars,
+            authenticate,
+            ..CalendarVtable::empty()
+        });
+        let vtable_ptr = Box::into_raw(vtable) as *mut std::os::raw::c_void;
+
+        // Build a minimal C-ABI AperioPlugin descriptor that
+        // points at our fake vtable. We leak the descriptor + the
+        // backing strings so the static lifetime story holds —
+        // unit tests don't care about leaks.
+        let id_cstr = std::ffi::CString::new("test.calendar").unwrap();
+        let name_cstr = std::ffi::CString::new("Test Calendar").unwrap();
+        let version_cstr = std::ffi::CString::new("0.1.0").unwrap();
+        let type_cstr = std::ffi::CString::new("calendar-adapter").unwrap();
+        let descriptor = Box::new(crate::abi::AperioPlugin {
+            abi_version: crate::ABI_VERSION,
+            id: id_cstr.into_raw(),
+            name: name_cstr.into_raw(),
+            version: version_cstr.into_raw(),
+            plugin_type: type_cstr.into_raw(),
+            init: None,
+            destroy: None,
+            vtable: vtable_ptr,
+        });
+        let descriptor_ptr = Box::into_raw(descriptor);
+
+        // We bypass the Drop impl on LoadedPlugin (which would
+        // call our missing destroy_fn through random memory) by
+        // setting destroy_fn to a no-op that ignores its input.
+        unsafe extern "C" fn noop_destroy(
+            _: *mut crate::abi::AperioPlugin,
+        ) {
+        }
+        let loaded = crate::manager::test_support::loaded_plugin_for_tests(
+            PluginManifest {
+                id: "test.calendar".to_string(),
+                name: "Test".to_string(),
+                version: "0.1.0".to_string(),
+                plugin_type: crate::PluginType::CalendarAdapter,
+                capabilities: vec![crate::Capability::Calendar],
+                abi_version: crate::ABI_VERSION,
+                min_app_version: "0.1.0".to_string(),
+                author: None,
+                description: None,
+                signed: false,
+            },
+            descriptor_ptr,
+            noop_destroy,
+        );
+        FfiCalendarAdapter::new(Arc::new(loaded))
+            .expect("vtable has minimum surface")
+    }
+
+    #[tokio::test]
+    async fn list_calendars_round_trips_through_ffi() {
+        *LIST_CALENDARS_CALLED.lock().unwrap() = 0;
+        let adapter = make_fake_adapter(Some(fake_list_calendars), None);
+        let cals = adapter.list_calendars().await.expect("ok");
+        assert_eq!(cals.len(), 2);
+        assert_eq!(cals[0].id, "cal-1");
+        assert_eq!(cals[1].id, "cal-2");
+        assert_eq!(*LIST_CALENDARS_CALLED.lock().unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn auth_error_maps_to_cal_core_authentication() {
+        let adapter = make_fake_adapter(Some(fake_list_calendars), Some(fake_authenticate));
+        let err = adapter
+            .authenticate(Credentials::default())
+            .await
+            .unwrap_err();
+        match err {
+            Error::Authentication(msg) => assert_eq!(msg, "creds rejected"),
+            other => panic!("expected Authentication, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn missing_method_yields_unsupported() {
+        // `delete_event` isn't on our fake vtable → shim's
+        // None-handling kicks in and surfaces Unsupported.
+        let adapter = make_fake_adapter(Some(fake_list_calendars), None);
+        let err = adapter.delete_event("ignored").await.unwrap_err();
+        assert!(matches!(err, Error::Unsupported(_)));
+    }
+
+    #[test]
+    fn capabilities_reflect_manifest() {
+        let adapter = make_fake_adapter(Some(fake_list_calendars), None);
+        assert_eq!(adapter.capabilities(), &[Capability::Calendar]);
+    }
+}

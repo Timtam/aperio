@@ -6,9 +6,30 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Aperio — plugin ABI contract: C-ABI types, plugin manifest parser, capability + plugin-type enums (DESIGN.md §20)."
+description = "Aperio — plugin ABI contract, manifest parser, manager runtime, FFI shims (DESIGN.md §20)."
 
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+# Dynamic plugin loader. Phase P1 only — mobile builds will use the
+# `static-plugins` feature instead, where adapters compile straight
+# into the host binary and libloading isn't on the dep graph.
+libloading.workspace = true
+# The FFI shims (e.g. FfiCalendarAdapter) implement cal-core's
+# Feature traits by serialising args / responses through the
+# Adapter-side JSON bridge. sync-core's SyncAdapter trait does the
+# same for sync-type plugins.
+cal-core.workspace = true
+sync-core.workspace = true
+async-trait.workspace = true
+# spawn_blocking ferries synchronous FFI calls off the async runtime
+# so a slow plugin can't stall the reactor.
+tokio = { workspace = true }
+tracing.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+# The manager's bundled-dir walk + missing-manifest paths are
+# exercised via temp directories.
+tempfile = "3"
