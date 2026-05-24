@@ -6,6 +6,20 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Aperio — stub for plugin-sdk (Phase 0; full implementation lands in a later phase)."
+description = "Aperio — Rust SDK for plugin authors: ergonomic wrappers + macros over the plugin-core FFI ABI (DESIGN.md §20.11)."
 
 [dependencies]
+# Plugin authors get the ABI types + manifest + ffi primitives
+# through a single dep on the SDK.
+plugin-core.workspace = true
+# Status-code mapping helpers project cal-core::Error /
+# sync-core::SyncError onto the PLUGIN_CALL_ERR_* constants.
+cal-core.workspace = true
+sync-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+# A current-thread tokio runtime drives the plugin's async trait
+# methods inside the synchronous FFI fn pointers. Same one the
+# host uses on its side via spawn_blocking.
+tokio = { workspace = true }
+tracing.workspace = true

@@ -3999,6 +3999,15 @@ dependencies = [
 [[package]]
 name = "plugin-sdk"
 version = "0.1.0"
+dependencies = [
+ "cal-core",
+ "plugin-core",
+ "serde",
+ "serde_json",
+ "sync-core",
+ "tokio",
+ "tracing",
+]
 
 [[package]]
 name = "png"
