@@ -161,7 +161,42 @@ impl EventLogApplier {
     /// produces the same final state regardless of source order.
     pub fn apply_envelopes(
         &self,
+        envelopes: Vec<EventEnvelope>,
+    ) -> SyncResult<ApplyReport> {
+        self.apply_envelopes_inner(envelopes, false)
+    }
+
+    /// Like [`apply_envelopes`] but ignores the local-device-id
+    /// filter — every envelope goes through the apply pipeline
+    /// even if it was minted by this device.
+    ///
+    /// Normal sync rounds always skip own-device envelopes
+    /// because they were already applied at write time. The
+    /// §19.10 stale-resume flow needs the opposite: after a
+    /// snapshot apply has overwritten local SQLite to the
+    /// snapshot state, our own pending logs (which carry edits
+    /// the user made while offline) must be replayed to bring
+    /// those edits back. The applier's existing field-level
+    /// merge — using `local_updated_at vs env.timestamp` —
+    /// handles the snapshot-vs-edit ordering correctly without
+    /// any special "force" semantics.
+    ///
+    /// Callers MUST limit this to the stale-resume path. Using
+    /// it during a steady-state round would re-apply own events
+    /// twice (once at write time, once via the applier) and
+    /// could trigger spurious conflicts via the merge_fields
+    /// timestamp comparison.
+    pub fn apply_envelopes_force_own(
+        &self,
+        envelopes: Vec<EventEnvelope>,
+    ) -> SyncResult<ApplyReport> {
+        self.apply_envelopes_inner(envelopes, true)
+    }
+
+    fn apply_envelopes_inner(
+        &self,
         mut envelopes: Vec<EventEnvelope>,
+        force_own: bool,
     ) -> SyncResult<ApplyReport> {
         // Reset the per-pass conflict counter. `merge_fields`
         // bumps it on every recorded conflict; we fold the final
@@ -179,7 +214,7 @@ impl EventLogApplier {
 
         let mut report = ApplyReport::default();
         for env in envelopes {
-            if env.device_id == self.local_device_id {
+            if !force_own && env.device_id == self.local_device_id {
                 report.skipped_own += 1;
                 continue;
             }
@@ -999,6 +1034,87 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn force_own_re_applies_own_device_envelopes() {
+        // §19.10 stale-resume invariant: after a snapshot apply
+        // overwrites local rows, our own pending logs should be
+        // replayable through the applier so offline edits come
+        // back. `apply_envelopes_force_own` is the path that
+        // makes this possible — bypass the skip_own filter that
+        // a normal sync round honours.
+        let (adapter, db) = fixture();
+        let me = DeviceId::from_string("dev-me".into());
+        let applier =
+            EventLogApplier::new(db.clone(), adapter.clone(), me.clone());
+
+        let cal = fixture_calendar("cal-x");
+        let envelopes = vec![
+            fixture_envelope(
+                me.clone(),
+                SyncEvent::CalendarCreated(EventPayload {
+                    id: cal.id.clone(),
+                    fields: serde_json::to_value(&cal).unwrap(),
+                }),
+                1000,
+            ),
+            fixture_envelope(
+                me,
+                SyncEvent::EventCreated(EventPayload {
+                    id: "ev-1".into(),
+                    fields: serde_json::to_value(&fixture_event(
+                        "ev-1", "cal-x",
+                    ))
+                    .unwrap(),
+                }),
+                2000,
+            ),
+        ];
+        let report = applier.apply_envelopes_force_own(envelopes).unwrap();
+        // Both envelopes flowed through the dispatch instead of
+        // being skipped — calendar + event landed in SQLite.
+        assert_eq!(report.applied, 2);
+        assert_eq!(report.skipped_own, 0);
+        let conn = db.lock().unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM calendars WHERE id = 'cal-x'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn force_own_honours_already_applied_check() {
+        // A second `apply_envelopes_force_own` pass over the
+        // same envelopes is idempotent — the first pass writes
+        // to `sync_applied_events`, so the second sees them as
+        // already-applied and counts them in the right bucket.
+        // Important because stale-resume might re-run if the
+        // user dismisses and re-triggers.
+        let (adapter, db) = fixture();
+        let me = DeviceId::from_string("dev-me".into());
+        let applier =
+            EventLogApplier::new(db.clone(), adapter.clone(), me.clone());
+        let cal = fixture_calendar("cal-y");
+        let env = fixture_envelope(
+            me,
+            SyncEvent::CalendarCreated(EventPayload {
+                id: cal.id.clone(),
+                fields: serde_json::to_value(&cal).unwrap(),
+            }),
+            3000,
+        );
+        let first = applier
+            .apply_envelopes_force_own(vec![env.clone()])
+            .unwrap();
+        assert_eq!(first.applied, 1);
+        let second = applier.apply_envelopes_force_own(vec![env]).unwrap();
+        assert_eq!(second.applied, 0);
+        assert_eq!(second.skipped_already_applied, 1);
     }
 
     #[test]

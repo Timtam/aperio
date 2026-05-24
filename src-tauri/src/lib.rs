@@ -148,20 +148,23 @@ pub fn run() {
     // (which uses it for `meta.json` heartbeats after each round) and
     // the Tauri command layer (which exposes preview/accept/adopt as
     // user-facing commands).
+    // The pending dir is shared between the orchestrator (which
+    // pushes from it) and the onboarding service (which replays
+    // its contents during §19.10 stale-device resume). Build it
+    // once and hand both consumers a clone.
+    let pending_dir =
+        data_dir.path.join("sync").join("log").join("pending");
     let onboarding = Arc::new(OnboardingService::new(
         db.shared(),
         device_id.clone(),
         Arc::clone(&applier),
         Arc::clone(&snapshot_builder),
+        pending_dir.clone(),
         env!("CARGO_PKG_VERSION"),
     ));
     let sync_orchestrator = Arc::new(SyncOrchestrator::new(
         db.shared(),
-        data_dir
-            .path
-            .join("sync")
-            .join("log")
-            .join("pending"),
+        pending_dir,
         device_id,
         applier,
         Arc::clone(&onboarding),

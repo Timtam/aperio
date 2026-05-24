@@ -44,13 +44,14 @@
 //! - **Account re-connect prompt.** §19.11 Step 8. UI in Phase Si.
 //! - **Plugin gap detection.** §19.11 Step 9. Plugins land in §20.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use sync_core::{
-    DeviceCursor, DeviceId, DeviceRecord, MetaJson, SyncAdapter, SyncError,
-    SyncResult,
+    DeviceCursor, DeviceId, DeviceRecord, LogFile, LogFileName, MetaJson,
+    SyncAdapter, SyncError, SyncResult,
 };
 use tracing::{debug, info, warn};
 
@@ -162,6 +163,15 @@ pub struct OnboardingService {
     /// + a tiny log backlog instead of replaying months of logs
     /// from epoch.
     snapshot_builder: Arc<SnapshotBuilder>,
+    /// §19.10 stale-resume: where the writer queues
+    /// not-yet-pushed log files. The resume path reads from
+    /// here AFTER applying the snapshot so the user's offline
+    /// edits get re-established on top of the snapshot state.
+    /// Shares the same path the orchestrator pushes from; no
+    /// cross-component locking needed because resume is
+    /// single-threaded inside the orchestrator's in-flight
+    /// guard.
+    pending_dir: PathBuf,
     app_version: String,
 }
 
@@ -171,6 +181,7 @@ impl OnboardingService {
         local_device_id: DeviceId,
         applier: Arc<EventLogApplier>,
         snapshot_builder: Arc<SnapshotBuilder>,
+        pending_dir: PathBuf,
         app_version: impl Into<String>,
     ) -> Self {
         Self {
@@ -178,6 +189,7 @@ impl OnboardingService {
             local_device_id,
             applier,
             snapshot_builder,
+            pending_dir,
             app_version: app_version.into(),
         }
     }
@@ -394,28 +406,26 @@ impl OnboardingService {
     /// §19.10 stale-device resume.
     ///
     /// Called when the user clicks Fortfahren in the §19.10 "this
-    /// device was offline for a while" dialog. Re-pulls the
-    /// current snapshot, applies it to local SQLite, replays any
-    /// post-snapshot logs, clears the device's `stale` flag in
-    /// meta.json and advances the cursor.
+    /// device was offline for a while" dialog. Sequence:
     ///
-    /// ## Caveat (v1)
+    /// 1. Re-pull the current `snapshot.json` + apply via
+    ///    `SnapshotBuilder` (upserts rows from the snapshot
+    ///    body; local-only rows untouched).
+    /// 2. Pull + apply any foreign logs newer than the snapshot.
+    /// 3. Replay our own pending logs through the applier's
+    ///    force-own path. The applier's field-level merge
+    ///    handles the snapshot-vs-offline-edit ordering: if our
+    ///    pending event's timestamp is newer than the snapshot's
+    ///    `updated_at` for that row, our value wins; otherwise
+    ///    the snapshot value stays. This step is what brings
+    ///    back any local edits the user made while offline that
+    ///    the snapshot apply would otherwise have clobbered.
+    /// 4. Save the cursor + clear the device's `stale` flag in
+    ///    meta + push the updated meta.
     ///
-    /// `apply_snapshot_dump` is an upsert: rows only locally
-    /// (created during the offline window) survive; rows in both
-    /// the snapshot and locally get overwritten with the snapshot
-    /// state. That means **local edits made to shared rows during
-    /// the offline window are clobbered locally** — but the
-    /// pending logs that hold those edits are still on disk, get
-    /// pushed on the next sync round, and other devices apply
-    /// them via field-level merge. The cluster converges
-    /// correctly; the local UI may briefly show pre-edit values
-    /// for those rows until a follow-up sync brings them back via
-    /// another device's relay.
-    ///
-    /// Re-applying our own pending logs locally (which would fix
-    /// this) requires bypassing the applier's `skipped_own`
-    /// filter — out of scope for v1, marked TODO for v1.1.
+    /// Pending logs stay on disk after the replay; the next
+    /// scheduled sync round picks them up and pushes to the
+    /// remote so other devices receive them too.
     pub async fn resume_from_stale(
         &self,
         adapter: &dyn SyncAdapter,
@@ -487,6 +497,26 @@ impl OnboardingService {
             }
         }
 
+        // §19.10 v1.1: replay our own pending logs through the
+        // applier's force-own path. The snapshot apply above
+        // upserts every row from the snapshot dump — including
+        // shared rows the user edited locally during the offline
+        // window — so without this pass those local edits would
+        // disappear locally until another device relayed them
+        // back. The replay walks `pending/`, parses each .jsonl
+        // session file, and feeds the envelopes through
+        // `apply_envelopes_force_own`. The applier's field-level
+        // merge handles the ordering: edits newer than the
+        // snapshot row's `updated_at` win, edits older than the
+        // snapshot stay overwritten (matches the convergent
+        // semantics other devices would compute against the
+        // remote logs).
+        //
+        // Failures are non-fatal — the file stays on disk and
+        // the next sync round will push it; on the FOLLOWING
+        // resume (unlikely but possible) we'd re-try the replay.
+        self.replay_pending_logs(&mut report).await;
+
         // Persist the cursor before mutating meta. If we crash
         // between cursor + meta push the next sync round just
         // re-pulls the post-snapshot logs (idempotent applier).
@@ -510,6 +540,109 @@ impl OnboardingService {
             "stale resume complete",
         );
         Ok(report)
+    }
+
+    /// Walk `pending_dir` and re-apply every JSONL session file
+    /// through `apply_envelopes_force_own`. Used by stale resume
+    /// to restore offline edits over a freshly-applied snapshot.
+    ///
+    /// Per-file failures degrade gracefully: a parse error or
+    /// read error gets logged + skipped, the rest of the
+    /// directory is still processed, and the apply counts go
+    /// into the report. The files themselves stay on disk so
+    /// the next sync round can still push them to the remote.
+    async fn replay_pending_logs(&self, report: &mut OnboardingReport) {
+        let mut entries = match tokio::fs::read_dir(&self.pending_dir).await {
+            Ok(rd) => rd,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                // No writer has flushed anything this install —
+                // nothing to replay.
+                debug!("pending dir empty during stale resume; skipping replay");
+                return;
+            }
+            Err(err) => {
+                warn!(?err, "couldn't open pending dir during stale resume");
+                return;
+            }
+        };
+        let mut replayed_files = 0usize;
+        loop {
+            let entry = match entries.next_entry().await {
+                Ok(Some(e)) => e,
+                Ok(None) => break,
+                Err(err) => {
+                    warn!(?err, "read_dir entry error during replay");
+                    break;
+                }
+            };
+            let path = entry.path();
+            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            let parsed = match LogFileName::from_filename(name) {
+                Ok(p) => p,
+                Err(_) => {
+                    debug!(
+                        name = name,
+                        "skipping pending entry during replay: not a log file"
+                    );
+                    continue;
+                }
+            };
+            // Only OUR own-device logs make sense to replay —
+            // anything else in the pending dir is suspicious
+            // (the writer only emits our own session files) but
+            // bypassing skip_own on a foreign log would
+            // double-apply via the field-level merge. Guard
+            // explicitly.
+            if parsed.device_id != self.local_device_id {
+                debug!(
+                    name = name,
+                    "skipping pending entry during replay: foreign device",
+                );
+                continue;
+            }
+            let bytes = match tokio::fs::read(&path).await {
+                Ok(b) => b,
+                Err(err) => {
+                    warn!(name = name, ?err, "couldn't read pending log");
+                    continue;
+                }
+            };
+            let log = LogFile {
+                name: parsed,
+                bytes,
+            };
+            let envelopes = match log.into_envelopes() {
+                Ok(e) => e,
+                Err(err) => {
+                    warn!(
+                        name = name,
+                        ?err,
+                        "couldn't parse pending log during replay",
+                    );
+                    continue;
+                }
+            };
+            match self.applier.apply_envelopes_force_own(envelopes) {
+                Ok(apply_report) => {
+                    replayed_files += 1;
+                    report.merge_apply(apply_report);
+                }
+                Err(err) => {
+                    warn!(
+                        name = name,
+                        ?err,
+                        "force-own apply failed during stale resume",
+                    );
+                    report.apply_failures += 1;
+                }
+            }
+        }
+        info!(
+            files = replayed_files,
+            "stale resume replayed pending logs",
+        );
     }
 
     /// "Neu beginnen" path. Builds a fresh meta.json with only this
@@ -783,6 +916,18 @@ mod tests {
     }
 
     fn build_service(db: SharedConn) -> OnboardingService {
+        // Tests that don't exercise stale-resume use a stub
+        // pending dir that doesn't exist — `read_dir` returns
+        // NotFound and `replay_pending_logs` quietly no-ops. The
+        // resume-with-pending test that DOES need a real dir
+        // uses `build_service_with_pending` below.
+        build_service_with_pending(db, PathBuf::from("/non/existent/pending"))
+    }
+
+    fn build_service_with_pending(
+        db: SharedConn,
+        pending_dir: PathBuf,
+    ) -> OnboardingService {
         let device_id = DeviceId::from_string("dev-this".into());
         let adapter = Arc::new(LocalAdapter::new(db.clone()));
         let applier = Arc::new(EventLogApplier::new(
@@ -800,6 +945,7 @@ mod tests {
             device_id,
             applier,
             snapshot_builder,
+            pending_dir,
             "1.0.0-test",
         )
     }
