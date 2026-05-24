@@ -5548,6 +5548,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "sync-adapter-local-plugin"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "plugin-core",
+ "plugin-sdk",
+ "serde",
+ "serde_json",
+ "sync-adapter-local",
+ "sync-core",
+ "tempfile",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "sync-adapter-sftp"
 version = "0.1.0"
 dependencies = [

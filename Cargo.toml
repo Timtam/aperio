@@ -24,6 +24,7 @@ members = [
     "crates/sync-adapter-dropbox",
     "crates/sync-adapter-googledrive",
     "crates/sync-adapter-local",
+    "crates/sync-adapter-local-plugin",
 
     # Videokonferenz-Adapter
     "crates/vc-adapter-zoom",

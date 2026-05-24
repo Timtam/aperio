@@ -1,0 +1,36 @@
+[package]
+name = "sync-adapter-local-plugin"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Aperio — local-filesystem sync adapter packaged as a plugin (DESIGN.md §20)."
+
+[lib]
+# cdylib produces the .dll/.dylib/.so the host's PluginManager
+# dlopens at runtime; rlib is included so the crate's own
+# integration tests can call back into the FFI exports as
+# regular Rust fns without going through libloading.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+plugin-sdk.workspace = true
+sync-adapter-local = { path = "../sync-adapter-local" }
+sync-core.workspace = true
+
+serde.workspace = true
+serde_json.workspace = true
+async-trait.workspace = true
+tracing.workspace = true
+# Sound-asset bytes cross the FFI boundary as base64 strings —
+# same convention sync-core uses for the assets on disk so the
+# wire shape lines up with what the FfiSyncAdapter shim
+# expects.
+base64 = "0.22"
+
+[dev-dependencies]
+plugin-core.workspace = true
+tokio = { workspace = true }
+tempfile = "3"
