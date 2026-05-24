@@ -91,13 +91,25 @@
     "conflict_other": "{{count}} conflicts",
     "noConnection": "No connection",
     "off": "Sync off",
+    "schemaTooOld": "Update required",
     "openSettings": "Open sync settings",
     "openConflicts": "Review conflicts",
+    "openUpdateRequired": "Open update notice",
     "announceSynced": "Sync complete.",
     "announceUploading": "Sync running.",
     "announceConflict_one": "A new sync conflict needs your decision.",
     "announceConflict_other": "{{count}} sync conflicts need your decision.",
-    "announceFailure": "Sync failed: {{message}}"
+    "announceFailure": "Sync failed: {{message}}",
+    "announceSchemaTooOld": "The sync dataset was created by a newer Aperio version. Please update the app."
+  },
+  "syncSchemaTooOld": {
+    "title": "Update required",
+    "body": "The existing sync dataset was created with a newer version of Aperio and is not compatible with this version.",
+    "minVersion": "Minimum version",
+    "runningVersion": "Your version",
+    "hint": "Update the app to resume syncing. Your local data stays readable in the meantime, but no further changes are written to the sync store.",
+    "actionUpdate": "Update now",
+    "actionOffline": "Continue offline"
   },
   "dialogs": {
     "cancel": "Cancel",

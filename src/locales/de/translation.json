@@ -91,13 +91,25 @@
     "conflict_other": "{{count}} Konflikte",
     "noConnection": "Keine Verbindung",
     "off": "Sync deaktiviert",
+    "schemaTooOld": "Update erforderlich",
     "openSettings": "Sync-Einstellungen öffnen",
     "openConflicts": "Konflikte ansehen",
+    "openUpdateRequired": "Update-Hinweis öffnen",
     "announceSynced": "Synchronisation abgeschlossen.",
     "announceUploading": "Synchronisation läuft.",
     "announceConflict_one": "Ein neuer Sync-Konflikt benötigt deine Entscheidung.",
     "announceConflict_other": "{{count}} Sync-Konflikte benötigen deine Entscheidung.",
-    "announceFailure": "Sync fehlgeschlagen: {{message}}"
+    "announceFailure": "Sync fehlgeschlagen: {{message}}",
+    "announceSchemaTooOld": "Der Sync-Datensatz wurde mit einer neueren Aperio-Version erstellt. Bitte App aktualisieren."
+  },
+  "syncSchemaTooOld": {
+    "title": "Update erforderlich",
+    "body": "Der vorhandene Sync-Datensatz wurde mit einer neueren Version von Aperio erstellt und ist mit dieser Version nicht kompatibel.",
+    "minVersion": "Mindest-Version",
+    "runningVersion": "Deine Version",
+    "hint": "Aktualisiere die App, um wieder synchronisieren zu können. Bis dahin bleiben deine lokalen Daten lesbar, es werden aber keine Änderungen mehr in den Sync-Speicher geschrieben.",
+    "actionUpdate": "Jetzt aktualisieren",
+    "actionOffline": "Offline fortfahren"
   },
   "dialogs": {
     "cancel": "Abbrechen",

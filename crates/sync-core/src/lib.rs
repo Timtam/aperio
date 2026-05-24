@@ -46,6 +46,7 @@ pub mod event;
 pub mod log;
 pub mod meta;
 pub mod snapshot;
+pub mod version;
 
 pub use adapter::{DeviceCursor, SyncAdapter};
 pub use crypto::{
@@ -62,3 +63,4 @@ pub use event::{
 pub use log::{LogFile, LogFileName};
 pub use meta::{DeviceRecord, MetaJson, SCHEMA_VERSION};
 pub use snapshot::{Snapshot, SnapshotMetadata};
+pub use version::{check_compatibility, ensure_compatible, version_less, Compatibility};

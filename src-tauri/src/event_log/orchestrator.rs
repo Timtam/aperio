@@ -122,6 +122,16 @@ pub struct SyncStatus {
     /// status indicator can flip a "🔒 verschlüsselt" badge on
     /// without a network call.
     pub e2e_enabled: bool,
+    /// Phase Sl: latched `true` when the last sync round failed
+    /// with `SyncError::SchemaTooOld`. The frontend pops the
+    /// §19.13 "update required" modal off this flag; clears on
+    /// the next successful round.
+    pub schema_too_old: bool,
+    /// When `schema_too_old`, the dataset's `min_app_version`
+    /// requirement. Shown verbatim in the update prompt so the
+    /// user knows what version they need. `None` when sync is
+    /// fine.
+    pub min_app_version_required: Option<String>,
 }
 
 /// The orchestrator itself. Holds an `Option<adapter>` so the
@@ -152,6 +162,13 @@ pub struct SyncOrchestrator {
     /// Currently-configured adapter. `None` when the app hasn't
     /// been set up yet.
     adapter: Mutex<Option<Arc<dyn SyncAdapter>>>,
+    /// Phase Sl: latched schema-too-old state. Set when a sync
+    /// round (or `compatibility_state` probe) encounters a
+    /// dataset whose `min_app_version` exceeds our running
+    /// build; cleared on the next successful round. Stored as
+    /// `Option<String>` carrying the required version so the
+    /// status indicator can name it.
+    schema_too_old: Mutex<Option<String>>,
     /// One-at-a-time guard against overlapping sync rounds.
     /// `try_lock` failure → return early; the user's second
     /// click while a round is in flight produces an
@@ -177,6 +194,7 @@ impl SyncOrchestrator {
             onboarding,
             compactor,
             adapter: Mutex::new(None),
+            schema_too_old: Mutex::new(None),
             in_flight: Mutex::new(false),
         }
     }
@@ -229,12 +247,20 @@ impl SyncOrchestrator {
             .flatten()
             .as_deref()
             == Some("true");
+        let min_app_version_required = self
+            .schema_too_old
+            .lock()
+            .expect("schema_too_old mutex poison")
+            .clone();
+        let schema_too_old = min_app_version_required.is_some();
         SyncStatus {
             configured,
             in_flight,
             last_synced_at,
             interval_minutes,
             e2e_enabled,
+            schema_too_old,
+            min_app_version_required,
         }
     }
 
@@ -261,6 +287,37 @@ impl SyncOrchestrator {
                 ));
             }
         };
+
+        // Phase Sl: version gate. Read `meta.json` first to verify
+        // our running build is at least the remote's
+        // `min_app_version`. Fail loudly before any push or apply
+        // — sending logs in an old format to a newer dataset would
+        // contaminate it, and applying newer events into a
+        // codebase that doesn't understand them risks data loss.
+        if let Some(meta) = adapter.fetch_meta().await? {
+            // Returns `Err(SchemaTooOld)` when the running version
+            // is older than meta.min_app_version. We surface that
+            // verbatim to the scheduler; the status indicator
+            // picks up the `SchemaTooOld` variant and surfaces the
+            // update modal.
+            match sync_core::ensure_compatible(&meta, self.onboarding.app_version()) {
+                Ok(_) => {
+                    // Clear any prior latched state — the user
+                    // presumably updated since the last failed
+                    // round.
+                    *self.schema_too_old.lock().expect("mutex poison") = None;
+                }
+                Err(err) => {
+                    // Latch so the status indicator picks it up
+                    // until the next successful round.
+                    if let sync_core::SyncError::SchemaTooOld { required, .. } = &err {
+                        *self.schema_too_old.lock().expect("mutex poison") =
+                            Some(required.clone());
+                    }
+                    return Err(err);
+                }
+            }
+        }
 
         let mut report = SyncRoundReport::default();
 

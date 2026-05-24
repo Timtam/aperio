@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { listen } from '@tauri-apps/api/event';
 
@@ -45,12 +45,17 @@ import { useDialogState } from './DialogState';
  * consumer surface.
  */
 export function useSync() {
-  const { invalidateData } = useDialogState();
+  const { invalidateData, openSyncSchemaTooOld } = useDialogState();
   const [status, setStatus] = useState<SyncStatus | null>(null);
   const [lastReport, setLastReport] = useState<SyncRoundReport | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
   const [conflictCount, setConflictCount] = useState(0);
   const [triggering, setTriggering] = useState(false);
+  // Tracks whether we've already popped the schema-too-old modal
+  // this session. We don't want to spam the user on every sync
+  // round; the modal mounts once per app-launch unless the
+  // backend transitions out of and back into the latched state.
+  const announcedSchemaTooOldRef = useRef(false);
 
   // Initial status pull. `getSyncStatus` is cheap (no IO), so the
   // status indicator can render the correct icon before the first
@@ -121,6 +126,38 @@ export function useSync() {
       unlisten?.();
     };
   }, [invalidateData]);
+
+  // Phase Sl: when the backend latches `schema_too_old`, pop the
+  // §19.13 update modal exactly once per session. The user can
+  // dismiss the modal with "Offline fortfahren"; we don't re-pop
+  // unless the latched state cycles (e.g. dataset rolled back,
+  // then forward again).
+  useEffect(() => {
+    if (status?.schema_too_old && status.min_app_version_required) {
+      if (!announcedSchemaTooOldRef.current) {
+        announcedSchemaTooOldRef.current = true;
+        // No `running` field on the backend status; the modal
+        // copy shows it from the user's perspective ("Deine
+        // Version") but we don't need to thread it from here —
+        // the running app version is the one rendering the
+        // modal.
+        openSyncSchemaTooOld(
+          status.min_app_version_required,
+          /* running, surfaced as the literal build number from
+             the frontend; the backend already enforces the gate, so
+             this string is purely informational. */ '',
+        );
+      }
+    } else {
+      // Reset the latch so a future failure-then-recovery cycle
+      // can re-announce.
+      announcedSchemaTooOldRef.current = false;
+    }
+  }, [
+    status?.schema_too_old,
+    status?.min_app_version_required,
+    openSyncSchemaTooOld,
+  ]);
 
   // `sync-conflicts-changed` listener — fires when the applier
   // records a new conflict + after every resolve_sync_conflict

@@ -313,6 +313,7 @@ pub async fn configure_sync_adapter(
     db: State<'_, DbHandle>,
     orchestrator: State<'_, Arc<SyncOrchestrator>>,
     scheduler: State<'_, Arc<SyncScheduler>>,
+    onboarding: State<'_, Arc<OnboardingService>>,
     config: SyncAdapterConfig,
 ) -> CommandResult<()> {
     let shared = db.shared();
@@ -340,6 +341,15 @@ pub async fn configure_sync_adapter(
             // onboarding flow is the right path for "I'm joining a
             // new encrypted dataset".
             let target_meta = plain.fetch_meta().await.map_err(sync_err)?;
+            // Phase Sl: refuse the swap if the target dataset
+            // requires a newer Aperio than the running build. The
+            // Settings dialog gets the `schema_too_old` error code
+            // and renders the §19.13 update prompt; the user can
+            // either update or pick a different target.
+            if let Some(m) = target_meta.as_ref() {
+                sync_core::ensure_compatible(m, onboarding.app_version())
+                    .map_err(sync_err)?;
+            }
             let e2e_target = target_meta
                 .as_ref()
                 .map(|m| m.e2e_enabled)

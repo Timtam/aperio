@@ -5,6 +5,10 @@ import { useAnnouncer } from '../a11y/Announcer';
 import { useDialogState } from '../state/DialogState';
 import { useSync } from '../state/useSync';
 
+/** Empty string when the running version isn't surfaced — useSync
+ *  doesn't have it. The dialog body handles the empty case. */
+const RUNNING_VERSION_PLACEHOLDER = '';
+
 /**
  * Persistent sync status badge (DESIGN.md §19.9).
  *
@@ -33,14 +37,22 @@ import { useSync } from '../state/useSync';
 export function SyncStatusIndicator() {
   const { t } = useTranslation();
   const announce = useAnnouncer();
-  const { openSettings, openSyncConflicts } = useDialogState();
+  const { openSettings, openSyncConflicts, openSyncSchemaTooOld } = useDialogState();
   const { status, lastError, conflictCount } = useSync();
 
   // Pick the highest-priority state token. Order is deliberate:
-  //   conflicts > error > in_flight > synced > off
-  // — conflicts and errors need the user's attention more than a
-  // benign "currently syncing" or "all good" badge.
-  const tone: 'conflict' | 'error' | 'uploading' | 'synced' | 'off' = (() => {
+  //   schema_too_old > conflicts > error > in_flight > synced > off
+  // — schema_too_old blocks sync entirely so it dominates;
+  //   conflicts + errors need the user's attention more than a
+  //   benign "currently syncing" or "all good" badge.
+  const tone:
+    | 'schema_too_old'
+    | 'conflict'
+    | 'error'
+    | 'uploading'
+    | 'synced'
+    | 'off' = (() => {
+    if (status?.schema_too_old) return 'schema_too_old';
     if (conflictCount > 0) return 'conflict';
     if (lastError) return 'error';
     if (status?.in_flight) return 'uploading';
@@ -51,6 +63,7 @@ export function SyncStatusIndicator() {
   // Glyphs from §19.9. Stored as plain text + aria-hidden so screen
   // readers consume the localised label, not the symbol.
   const glyph: Record<typeof tone, string> = {
+    schema_too_old: '⬆',
     conflict: '⚠',
     error: '✗',
     uploading: '↑',
@@ -59,6 +72,7 @@ export function SyncStatusIndicator() {
   };
 
   const label: Record<typeof tone, string> = {
+    schema_too_old: t('syncStatus.schemaTooOld'),
     conflict:
       conflictCount === 1
         ? t('syncStatus.conflict_one')
@@ -76,7 +90,9 @@ export function SyncStatusIndicator() {
   useEffect(() => {
     if (prevTone.current === tone) return;
     prevTone.current = tone;
-    if (tone === 'conflict') {
+    if (tone === 'schema_too_old') {
+      announce(t('syncStatus.announceSchemaTooOld'), 'assertive');
+    } else if (tone === 'conflict') {
       // Assertive — the user needs to know now, conflicts block
       // cross-device convergence.
       const message =
@@ -97,11 +113,16 @@ export function SyncStatusIndicator() {
     // `off` is the no-adapter steady state; no announcement.
   }, [tone, conflictCount, lastError, announce, t]);
 
-  // Clicking the badge does one of two things depending on tone.
-  // Conflicts take you straight to the resolution dialog; anything
-  // else lands you on the Sync settings tab.
+  // Clicking the badge routes by tone: schema_too_old → update
+  // modal, conflicts → conflicts dialog, anything else → Sync
+  // settings tab.
   const onClick = () => {
-    if (tone === 'conflict') {
+    if (tone === 'schema_too_old') {
+      openSyncSchemaTooOld(
+        status?.min_app_version_required ?? '',
+        RUNNING_VERSION_PLACEHOLDER,
+      );
+    } else if (tone === 'conflict') {
       openSyncConflicts();
     } else {
       openSettings('sync');
@@ -109,9 +130,11 @@ export function SyncStatusIndicator() {
   };
 
   const aria =
-    tone === 'conflict'
-      ? t('syncStatus.openConflicts')
-      : t('syncStatus.openSettings');
+    tone === 'schema_too_old'
+      ? t('syncStatus.openUpdateRequired')
+      : tone === 'conflict'
+        ? t('syncStatus.openConflicts')
+        : t('syncStatus.openSettings');
 
   return (
     <button

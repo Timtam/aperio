@@ -59,7 +59,8 @@ export type DialogMode =
        *  Ignored when editing (the contact's own `list_id` wins). */
       listId?: string;
     }
-  | { kind: 'syncConflicts' };
+  | { kind: 'syncConflicts' }
+  | { kind: 'syncSchemaTooOld'; required: string; running: string };
 
 /**
  * Optional context the caller can pass when opening a *create* dialog
@@ -121,6 +122,11 @@ interface DialogStateValue {
    *  list from `list_sync_conflicts` on mount + on every
    *  `sync-conflicts-changed` event. */
   openSyncConflicts: () => void;
+  /** Pop the §19.13 "update required" dialog. Non-dismissible —
+   *  the user picks "Update" or "Offline fortfahren". Mounted
+   *  automatically by `useSync` when the backend latches
+   *  `schema_too_old`. */
+  openSyncSchemaTooOld: (required: string, running: string) => void;
   close: () => void;
   /**
    * Counter that bumps whenever data on the wire might have changed.
@@ -260,6 +266,11 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     () => push({ kind: 'syncConflicts' }),
     [push],
   );
+  const openSyncSchemaTooOld = useCallback(
+    (required: string, running: string) =>
+      push({ kind: 'syncSchemaTooOld', required, running }),
+    [push],
+  );
 
   const close = useCallback(() => {
     const target = triggerStackRef.current.pop() ?? null;
@@ -313,6 +324,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openDayStartReview,
       openContactDialog,
       openSyncConflicts,
+      openSyncSchemaTooOld,
       close,
       dataVersion,
       invalidateData,
@@ -332,6 +344,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openDayStartReview,
       openContactDialog,
       openSyncConflicts,
+      openSyncSchemaTooOld,
       close,
       dataVersion,
       invalidateData,

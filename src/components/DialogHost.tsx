@@ -9,6 +9,7 @@ import { RemindersDialog } from './RemindersDialog';
 import { SearchDialog } from './SearchDialog';
 import { SettingsDialog } from './SettingsDialog';
 import { SyncConflictsDialog } from './SyncConflictsDialog';
+import { SyncSchemaTooOldDialog } from './SyncSchemaTooOldDialog';
 import { TaskDialog } from './TaskDialog';
 
 /**
@@ -80,6 +81,15 @@ export function DialogHost() {
       );
     case 'syncConflicts':
       return <SyncConflictsDialog isOpen onClose={close} />;
+    case 'syncSchemaTooOld':
+      return (
+        <SyncSchemaTooOldDialog
+          isOpen
+          onClose={close}
+          required={mode.required}
+          running={mode.running}
+        />
+      );
     case 'none':
     default:
       return null;

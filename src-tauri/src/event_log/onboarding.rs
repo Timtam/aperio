@@ -88,6 +88,12 @@ pub enum SyncPreview {
         snapshot_timestamp: Option<String>,
         e2e_enabled: bool,
         devices: Vec<DeviceSummary>,
+        /// Phase Sl: how the running build relates to the
+        /// dataset's version requirements. `Ok` is the happy
+        /// path; `AppTooOld` / `SchemaAhead` let the frontend
+        /// gate the accept button and pop the §19.13 update
+        /// modal.
+        compatibility: sync_core::Compatibility,
     },
 }
 
@@ -199,29 +205,38 @@ impl OnboardingService {
         let meta = adapter.fetch_meta().await?;
         Ok(match meta {
             None => SyncPreview::Empty,
-            Some(meta) => SyncPreview::Existing {
-                schema_version: meta.schema_version,
-                min_app_version: meta.min_app_version.clone(),
-                // §19.10 leaves the snapshot timestamp at "now" when
-                // the dataset was freshly minted with no snapshot yet
-                // — we surface that as None so the UI can say
-                // "noch kein Snapshot" instead of misleading the
-                // user with an empty-state pseudo-timestamp.
-                snapshot_timestamp: snapshot_ts_if_real(&meta),
-                e2e_enabled: meta.e2e_enabled,
-                devices: meta
-                    .devices
-                    .iter()
-                    .map(|(id, rec)| DeviceSummary {
-                        id: id.clone(),
-                        name: rec.name.clone(),
-                        last_seen_log: rec.last_seen_log.to_rfc3339(),
-                        app_version: rec.app_version.clone(),
-                        stale: rec.stale,
-                        is_this_device: id == self.local_device_id.as_str(),
-                    })
-                    .collect(),
-            },
+            Some(meta) => {
+                let compatibility = sync_core::check_compatibility(
+                    meta.schema_version,
+                    &meta.min_app_version,
+                    &self.app_version,
+                    sync_core::SCHEMA_VERSION,
+                );
+                SyncPreview::Existing {
+                    schema_version: meta.schema_version,
+                    min_app_version: meta.min_app_version.clone(),
+                    // §19.10 leaves the snapshot timestamp at "now" when
+                    // the dataset was freshly minted with no snapshot yet
+                    // — we surface that as None so the UI can say
+                    // "noch kein Snapshot" instead of misleading the
+                    // user with an empty-state pseudo-timestamp.
+                    snapshot_timestamp: snapshot_ts_if_real(&meta),
+                    e2e_enabled: meta.e2e_enabled,
+                    devices: meta
+                        .devices
+                        .iter()
+                        .map(|(id, rec)| DeviceSummary {
+                            id: id.clone(),
+                            name: rec.name.clone(),
+                            last_seen_log: rec.last_seen_log.to_rfc3339(),
+                            app_version: rec.app_version.clone(),
+                            stale: rec.stale,
+                            is_this_device: id == self.local_device_id.as_str(),
+                        })
+                        .collect(),
+                    compatibility,
+                }
+            }
         })
     }
 
@@ -253,6 +268,12 @@ impl OnboardingService {
                     "remote has no meta.json — use adopt_local for a fresh dataset",
                 )
             })?;
+
+        // Phase Sl: refuse to pull from a dataset our build can't
+        // safely read. Surfaces as `SchemaTooOld` so the frontend
+        // can render the §19.13 "update required" modal instead of
+        // a generic error.
+        sync_core::ensure_compatible(&meta, &self.app_version)?;
 
         // Phase Sg: consume snapshot first if one exists. Apply
         // its body to local SQLite + advance the cursor to the

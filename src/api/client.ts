@@ -675,6 +675,14 @@ export interface SyncStatus {
    *  encrypted. Surfaced so the Settings panel can render a
    *  "🔒 verschlüsselt" badge without a separate fetch. */
   e2e_enabled: boolean;
+  /** Phase Sl — latched `true` when the last sync round failed
+   *  with `SchemaTooOld`. Triggers the non-dismissible §19.13
+   *  update modal. Cleared on the next successful round. */
+  schema_too_old: boolean;
+  /** When `schema_too_old`, the minimum Aperio version the
+   *  dataset requires. Shown verbatim in the update prompt so
+   *  the user knows which version to install. */
+  min_app_version_required: string | null;
 }
 
 /** Counters from one `syncNow` invocation. Surfaced so the
@@ -722,7 +730,18 @@ export type SyncPreview =
       snapshot_timestamp: string | null;
       e2e_enabled: boolean;
       devices: SyncDeviceSummary[];
+      /** Phase Sl — version compatibility verdict. The accept
+       *  buttons gate on this; `app_too_old` pops the update
+       *  modal instead of letting the user proceed. */
+      compatibility: SyncCompatibility;
     };
+
+/** Tagged result of `sync_core::check_compatibility`. Mirrors the
+ *  Rust enum on the wire. */
+export type SyncCompatibility =
+  | { kind: 'ok' }
+  | { kind: 'app_too_old'; required: string; running: string }
+  | { kind: 'schema_ahead'; remote: number; local: number };
 
 export interface SyncDeviceSummary {
   id: string;
