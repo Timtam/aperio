@@ -65,6 +65,16 @@ pub enum SyncError {
         running: String,
     },
 
+    /// This device's `last_seen_log` is older than the remote's
+    /// `snapshot_timestamp` — the compactor has GCed log files we
+    /// would have needed to catch up incrementally. Resuming sync
+    /// requires re-fetching the current snapshot (§19.10's "Umgang
+    /// mit veralteten Geräten"). The carried timestamp is the
+    /// remote's `snapshot_timestamp` so the dialog can show "the
+    /// current data state (snapshot from …)".
+    #[error("device is stale; snapshot from {snapshot_at} must be re-fetched")]
+    StaleDevice { snapshot_at: String },
+
     /// Catch-all for invariant violations / unexpected state — every
     /// use site carries a sentence of context for the log.
     #[error("internal error: {0}")]

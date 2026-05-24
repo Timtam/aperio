@@ -80,7 +80,8 @@ async function notifyConflicts(
  */
 export function useSync() {
   const { t } = useTranslation();
-  const { invalidateData, openSyncSchemaTooOld } = useDialogState();
+  const { invalidateData, openSyncSchemaTooOld, openSyncStaleResume } =
+    useDialogState();
   const [status, setStatus] = useState<SyncStatus | null>(null);
   const [lastReport, setLastReport] = useState<SyncRoundReport | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
@@ -91,6 +92,10 @@ export function useSync() {
   // round; the modal mounts once per app-launch unless the
   // backend transitions out of and back into the latched state.
   const announcedSchemaTooOldRef = useRef(false);
+  // Same latch pattern for the §19.10 stale-resume dialog —
+  // pops once per latch cycle so a user who dismisses it without
+  // resolving doesn't get the modal again every sync round.
+  const announcedStaleResumeRef = useRef(false);
 
   // Initial status pull. `getSyncStatus` is cheap (no IO), so the
   // status indicator can render the correct icon before the first
@@ -213,6 +218,24 @@ export function useSync() {
     status?.min_app_version_required,
     openSyncSchemaTooOld,
   ]);
+
+  // §19.10: when the backend latches `stale_device_since`, pop
+  // the resume dialog. Same once-per-cycle latch pattern as the
+  // schema-too-old modal — if the user closes without resolving,
+  // they can still trigger the resume via Settings later, or the
+  // dialog re-pops on the next stale detection (a different
+  // snapshot timestamp would also reset the latch).
+  useEffect(() => {
+    const since = status?.stale_device_since;
+    if (since) {
+      if (!announcedStaleResumeRef.current) {
+        announcedStaleResumeRef.current = true;
+        openSyncStaleResume(since);
+      }
+    } else {
+      announcedStaleResumeRef.current = false;
+    }
+  }, [status?.stale_device_since, openSyncStaleResume]);
 
   // `sync-conflicts-changed` listener — fires when the applier
   // records a new conflict + after every resolve_sync_conflict

@@ -10,6 +10,7 @@ import { SearchDialog } from './SearchDialog';
 import { SettingsDialog } from './SettingsDialog';
 import { SyncConflictsDialog } from './SyncConflictsDialog';
 import { SyncSchemaTooOldDialog } from './SyncSchemaTooOldDialog';
+import { SyncStaleResumeDialog } from './SyncStaleResumeDialog';
 import { TaskDialog } from './TaskDialog';
 
 /**
@@ -88,6 +89,14 @@ export function DialogHost() {
           onClose={close}
           required={mode.required}
           running={mode.running}
+        />
+      );
+    case 'syncStaleResume':
+      return (
+        <SyncStaleResumeDialog
+          isOpen
+          onClose={close}
+          snapshotAt={mode.snapshotAt}
         />
       );
     case 'none':

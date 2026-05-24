@@ -150,6 +150,15 @@ pub struct SyncStatus {
     /// status before emitting / serving via `get_sync_status`.
     #[serde(default)]
     pub sustained_failure: bool,
+    /// Phase §19.10: when set, this device's `meta.json` entry
+    /// has been marked stale by the compactor — its
+    /// `last_seen_log` was older than the snapshot horizon when
+    /// the last sync round opened. Sync rounds short-circuit
+    /// while this is latched; the user has to confirm a
+    /// snapshot re-pull via the resume dialog before normal
+    /// rounds can run again. RFC3339 timestamp of the snapshot
+    /// the dialog should reference.
+    pub stale_device_since: Option<String>,
 }
 
 /// The orchestrator itself. Holds an `Option<adapter>` so the
@@ -187,6 +196,12 @@ pub struct SyncOrchestrator {
     /// `Option<String>` carrying the required version so the
     /// status indicator can name it.
     schema_too_old: Mutex<Option<String>>,
+    /// §19.10: latched stale-device state. Set when a sync
+    /// round notices our `meta.devices[me].stale == true`;
+    /// cleared by `resume_from_stale` after the snapshot
+    /// re-pull. Carries the snapshot timestamp so the resume
+    /// dialog can render it.
+    stale_device_since: Mutex<Option<DateTime<Utc>>>,
     /// One-at-a-time guard against overlapping sync rounds.
     /// `try_lock` failure → return early; the user's second
     /// click while a round is in flight produces an
@@ -213,6 +228,7 @@ impl SyncOrchestrator {
             compactor,
             adapter: Mutex::new(None),
             schema_too_old: Mutex::new(None),
+            stale_device_since: Mutex::new(None),
             in_flight: Mutex::new(false),
         }
     }
@@ -271,6 +287,11 @@ impl SyncOrchestrator {
             .expect("schema_too_old mutex poison")
             .clone();
         let schema_too_old = min_app_version_required.is_some();
+        let stale_device_since = self
+            .stale_device_since
+            .lock()
+            .expect("stale_device_since mutex poison")
+            .map(|dt| dt.to_rfc3339());
         SyncStatus {
             configured,
             in_flight,
@@ -284,7 +305,28 @@ impl SyncOrchestrator {
             // `get_sync_status` does the same when serving the
             // snapshot to the frontend.
             sustained_failure: false,
+            stale_device_since,
         }
+    }
+
+    /// Borrow the stale-device latch. Used by the resume
+    /// command (clears it on a successful re-pull) and by tests
+    /// that need to assert the latched state.
+    pub fn stale_device_latch(&self) -> Option<DateTime<Utc>> {
+        *self
+            .stale_device_since
+            .lock()
+            .expect("stale_device_since mutex poison")
+    }
+
+    /// Clear the stale-device latch. Called by the resume
+    /// command after a successful snapshot re-pull so the next
+    /// sync round can proceed normally.
+    pub fn clear_stale_device(&self) {
+        *self
+            .stale_device_since
+            .lock()
+            .expect("stale_device_since mutex poison") = None;
     }
 
     /// Run one sync round. See module docs for the four steps.
@@ -311,18 +353,22 @@ impl SyncOrchestrator {
             }
         };
 
-        // Phase Sl: version gate. Read `meta.json` first to verify
-        // our running build is at least the remote's
-        // `min_app_version`. Fail loudly before any push or apply
-        // — sending logs in an old format to a newer dataset would
-        // contaminate it, and applying newer events into a
-        // codebase that doesn't understand them risks data loss.
+        // Phase Sl + §19.10: read `meta.json` once and run both
+        // gating checks against it.
+        //
+        // - Schema gate: refuse the round if our running build
+        //   is older than `min_app_version`. Sending logs in an
+        //   old format to a newer dataset would contaminate it,
+        //   and applying newer events into a codebase that
+        //   doesn't understand them risks data loss.
+        // - Stale gate: refuse the round if our device entry
+        //   carries `stale = true`. The compactor has GCed log
+        //   files we'd otherwise need to catch up incrementally;
+        //   the user has to confirm a snapshot re-pull via the
+        //   resume command before normal rounds can resume.
         if let Some(meta) = adapter.fetch_meta().await? {
             // Returns `Err(SchemaTooOld)` when the running version
-            // is older than meta.min_app_version. We surface that
-            // verbatim to the scheduler; the status indicator
-            // picks up the `SchemaTooOld` variant and surfaces the
-            // update modal.
+            // is older than meta.min_app_version.
             match sync_core::ensure_compatible(&meta, self.onboarding.app_version()) {
                 Ok(_) => {
                     // Clear any prior latched state — the user
@@ -338,6 +384,25 @@ impl SyncOrchestrator {
                             Some(required.clone());
                     }
                     return Err(err);
+                }
+            }
+            // §19.10 stale gate. The compactor marks devices
+            // whose `last_seen_log` predates the snapshot
+            // horizon; we surface that as `StaleDevice` so the
+            // frontend can pop the §19.10 resume dialog. The
+            // user clicks Fortfahren → `resume_stale_device`
+            // command clears the latch + re-pulls the snapshot.
+            if let Some(entry) = meta.devices.get(self.local_device_id.as_str())
+            {
+                if entry.stale {
+                    *self
+                        .stale_device_since
+                        .lock()
+                        .expect("stale_device_since mutex poison") =
+                        Some(meta.snapshot_timestamp);
+                    return Err(sync_core::SyncError::StaleDevice {
+                        snapshot_at: meta.snapshot_timestamp.to_rfc3339(),
+                    });
                 }
             }
         }

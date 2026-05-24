@@ -285,6 +285,8 @@ pub fn run() {
             commands::preview_sync_target,
             commands::accept_remote_dataset,
             commands::adopt_local_dataset,
+            // §19.10: stale-device resume.
+            commands::resume_stale_device,
             // Phase Sg (DESIGN.md §19.10): snapshot + log
             // compaction. The auto-trigger lives inside
             // `sync_now`; this is the manual override.

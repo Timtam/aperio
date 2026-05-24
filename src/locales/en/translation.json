@@ -115,6 +115,15 @@
     "actionUpdate": "Update now",
     "actionOffline": "Continue offline"
   },
+  "syncStaleResume": {
+    "title": "This device was offline for a while",
+    "body": "Some changes were compacted on the sync store. The current data state will now be downloaded in full (snapshot from {{time}}).",
+    "mergeHint": "Local changes you made while offline are kept in the local push queue and will be sent to the other devices on the next sync round.",
+    "actionContinue": "Continue",
+    "applying": "Downloading snapshot …",
+    "errorPrefix": "Resume failed",
+    "doneAnnouncement": "Snapshot applied: {{applied}} events updated locally."
+  },
   "dialogs": {
     "cancel": "Cancel",
     "save": "Save",

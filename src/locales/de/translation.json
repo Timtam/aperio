@@ -115,6 +115,15 @@
     "actionUpdate": "Jetzt aktualisieren",
     "actionOffline": "Offline fortfahren"
   },
+  "syncStaleResume": {
+    "title": "Dieses Gerät war lange offline",
+    "body": "Einige Änderungen wurden im Sync-Speicher kompaktiert. Der aktuelle Datenstand wird jetzt vollständig heruntergeladen (Snapshot vom {{time}}).",
+    "mergeHint": "Lokale Änderungen, die du offline gemacht hast, bleiben in der Push-Warteschlange und werden beim nächsten Sync-Durchlauf an die anderen Geräte gesendet.",
+    "actionContinue": "Fortfahren",
+    "applying": "Snapshot wird heruntergeladen …",
+    "errorPrefix": "Fortsetzung fehlgeschlagen",
+    "doneAnnouncement": "Snapshot angewendet: {{applied}} Einträge lokal aktualisiert."
+  },
   "dialogs": {
     "cancel": "Abbrechen",
     "settings": {

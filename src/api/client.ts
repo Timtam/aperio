@@ -731,6 +731,14 @@ export interface SyncStatus {
    *  that's been unreachable for a while. Cleared on the next
    *  successful round. */
   sustained_failure: boolean;
+  /** §19.10: when set, this device is "stale" — the compactor
+   *  has GCed log files we'd need for incremental catch-up. The
+   *  resume dialog opens off this latch; the value is the RFC3339
+   *  timestamp of the snapshot the user is being asked to re-pull
+   *  (shown in the dialog body so they know which point in time
+   *  the local data will jump to). Cleared after a successful
+   *  `resumeStaleDevice` call. */
+  stale_device_since: string | null;
 }
 
 /** Counters from one `syncNow` invocation. Surfaced so the
@@ -911,6 +919,14 @@ export const adoptLocalDataset = (
     deviceName,
     passphrase,
   });
+
+/** §19.10 stale-device resume. Called from the resume dialog
+ *  when the user clicks Fortfahren. Re-pulls the current
+ *  snapshot, applies it locally, replays post-snapshot logs,
+ *  clears the device's `stale` flag. Returns an OnboardingReport
+ *  shape so the dialog can show "12 events applied". */
+export const resumeStaleDevice = () =>
+  invoke<OnboardingReport>('resume_stale_device');
 
 // ── Conflict resolution (§19.3) ──
 

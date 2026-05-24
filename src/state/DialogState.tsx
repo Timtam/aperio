@@ -60,7 +60,8 @@ export type DialogMode =
       listId?: string;
     }
   | { kind: 'syncConflicts' }
-  | { kind: 'syncSchemaTooOld'; required: string; running: string };
+  | { kind: 'syncSchemaTooOld'; required: string; running: string }
+  | { kind: 'syncStaleResume'; snapshotAt: string };
 
 /**
  * Optional context the caller can pass when opening a *create* dialog
@@ -127,6 +128,10 @@ interface DialogStateValue {
    *  automatically by `useSync` when the backend latches
    *  `schema_too_old`. */
   openSyncSchemaTooOld: (required: string, running: string) => void;
+  /** §19.10 stale-device resume dialog. Mounted by `useSync`
+   *  when the backend latches `status.stale_device_since`. The
+   *  user clicks Fortfahren → resume command → latch clears. */
+  openSyncStaleResume: (snapshotAt: string) => void;
   close: () => void;
   /**
    * Counter that bumps whenever data on the wire might have changed.
@@ -271,6 +276,10 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       push({ kind: 'syncSchemaTooOld', required, running }),
     [push],
   );
+  const openSyncStaleResume = useCallback(
+    (snapshotAt: string) => push({ kind: 'syncStaleResume', snapshotAt }),
+    [push],
+  );
 
   const close = useCallback(() => {
     const target = triggerStackRef.current.pop() ?? null;
@@ -325,6 +334,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openContactDialog,
       openSyncConflicts,
       openSyncSchemaTooOld,
+      openSyncStaleResume,
       close,
       dataVersion,
       invalidateData,
@@ -345,6 +355,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openContactDialog,
       openSyncConflicts,
       openSyncSchemaTooOld,
+      openSyncStaleResume,
       close,
       dataVersion,
       invalidateData,

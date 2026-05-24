@@ -465,6 +465,7 @@ fn sync_err(err: sync_core::SyncError) -> CommandError {
         E::EncryptionRequired => "encryption_required",
         E::NotFound(_) => "not_found",
         E::SchemaTooOld { .. } => "schema_too_old",
+        E::StaleDevice { .. } => "stale_device",
         E::Internal(_) => "internal",
     };
     CommandError {
@@ -1135,6 +1136,54 @@ pub async fn trust_sftp_host_key(
     let verifier = UserPrefsHostKeyVerifier::new(shared);
     verifier.record(trimmed_host_port, trimmed_fp);
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// §19.10 — stale-device resume.
+// ---------------------------------------------------------------------------
+
+/// Re-pull the current snapshot after the user confirmed the
+/// §19.10 "this device was offline for a while" dialog. Applies
+/// the snapshot to local SQLite, replays any post-snapshot logs,
+/// clears our `stale` flag in meta.json. Clears the orchestrator
+/// latch on success so the next sync round proceeds normally.
+///
+/// Returns the resume's apply counts so the frontend can show
+/// "12 events applied" after the dialog closes — same payload
+/// shape as the onboarding `accept_remote_dataset` command.
+#[tauri::command]
+pub async fn resume_stale_device(
+    app: tauri::AppHandle,
+    orchestrator: State<'_, Arc<SyncOrchestrator>>,
+    onboarding: State<'_, Arc<OnboardingService>>,
+) -> CommandResult<OnboardingReport> {
+    let adapter = orchestrator.adapter_handle().ok_or(CommandError {
+        code: "not_configured",
+        message: "no sync adapter configured".into(),
+    })?;
+    let report = onboarding
+        .resume_from_stale(adapter.as_ref())
+        .await
+        .map_err(sync_err)?;
+    // Drop the latched stale flag so subsequent sync rounds run
+    // normally + the status badge clears.
+    orchestrator.clear_stale_device();
+    // Frontend listens to `sync-status` to refresh its `stale_device_since`
+    // mirror. Emit a synthetic status update so the resume dialog
+    // closes promptly without waiting for the next periodic round.
+    let status = orchestrator.status();
+    if let Err(err) = tauri::Emitter::emit(
+        &app,
+        "sync-status",
+        crate::event_log::SyncStatusPayload {
+            status,
+            report: None,
+            error: None,
+        },
+    ) {
+        tracing::warn!(?err, "failed to emit post-resume sync-status");
+    }
+    Ok(report)
 }
 
 // ---------------------------------------------------------------------------

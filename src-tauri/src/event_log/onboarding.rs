@@ -391,6 +391,127 @@ impl OnboardingService {
         Ok(report)
     }
 
+    /// §19.10 stale-device resume.
+    ///
+    /// Called when the user clicks Fortfahren in the §19.10 "this
+    /// device was offline for a while" dialog. Re-pulls the
+    /// current snapshot, applies it to local SQLite, replays any
+    /// post-snapshot logs, clears the device's `stale` flag in
+    /// meta.json and advances the cursor.
+    ///
+    /// ## Caveat (v1)
+    ///
+    /// `apply_snapshot_dump` is an upsert: rows only locally
+    /// (created during the offline window) survive; rows in both
+    /// the snapshot and locally get overwritten with the snapshot
+    /// state. That means **local edits made to shared rows during
+    /// the offline window are clobbered locally** — but the
+    /// pending logs that hold those edits are still on disk, get
+    /// pushed on the next sync round, and other devices apply
+    /// them via field-level merge. The cluster converges
+    /// correctly; the local UI may briefly show pre-edit values
+    /// for those rows until a follow-up sync brings them back via
+    /// another device's relay.
+    ///
+    /// Re-applying our own pending logs locally (which would fix
+    /// this) requires bypassing the applier's `skipped_own`
+    /// filter — out of scope for v1, marked TODO for v1.1.
+    pub async fn resume_from_stale(
+        &self,
+        adapter: &dyn SyncAdapter,
+    ) -> SyncResult<OnboardingReport> {
+        adapter.test_connection().await?;
+        let mut meta = adapter
+            .fetch_meta()
+            .await?
+            .ok_or_else(|| {
+                SyncError::not_found(
+                    "remote meta.json disappeared between stale detection and resume",
+                )
+            })?;
+
+        // Fetch + apply the current snapshot. Unlike the
+        // first-onboard path we expect a snapshot to exist
+        // (otherwise the compactor couldn't have flagged us
+        // stale); a missing snapshot here is a protocol error.
+        let snapshot = adapter.fetch_snapshot().await?.ok_or_else(|| {
+            SyncError::protocol(
+                "remote has no snapshot.json despite stale-device flag",
+            )
+        })?;
+        info!(
+            snapshot_ts = %snapshot.metadata.snapshot_timestamp,
+            "applying snapshot during stale-device resume",
+        );
+        self.snapshot_builder.apply(&snapshot).map_err(|err| {
+            SyncError::internal(format!("stale resume snapshot apply: {err}"))
+        })?;
+        let mut starting_cursor = snapshot.metadata.snapshot_timestamp;
+
+        // Pull + apply any logs that landed after the snapshot.
+        let logs = adapter
+            .fetch_new_logs(&DeviceCursor {
+                last_seen_log: starting_cursor,
+            })
+            .await?;
+        let foreign: Vec<_> = logs
+            .into_iter()
+            .filter(|log| log.name.device_id != self.local_device_id)
+            .collect();
+        let fetched_logs = foreign.len();
+        info!(
+            count = fetched_logs,
+            "stale resume pulled post-snapshot logs",
+        );
+
+        let mut report = OnboardingReport {
+            remote_was_empty: false,
+            ..Default::default()
+        };
+        report.fetched_logs = fetched_logs;
+
+        for log in &foreign {
+            if log.name.timestamp > starting_cursor {
+                starting_cursor = log.name.timestamp;
+            }
+            match self.applier.apply_log_file(log) {
+                Ok(apply_report) => report.merge_apply(apply_report),
+                Err(err) => {
+                    warn!(
+                        log = %log.name.to_filename(),
+                        ?err,
+                        "applier failed during stale resume",
+                    );
+                    report.apply_failures += 1;
+                }
+            }
+        }
+
+        // Persist the cursor before mutating meta. If we crash
+        // between cursor + meta push the next sync round just
+        // re-pulls the post-snapshot logs (idempotent applier).
+        self.save_cursor(starting_cursor)?;
+
+        // Clear our device's `stale` flag in meta.json + bump
+        // `last_seen_log` so other devices see us as current.
+        // This is the bit that lets a future compactor round
+        // include our cursor in its retention math.
+        if let Some(entry) = meta.devices.get_mut(self.local_device_id.as_str())
+        {
+            entry.stale = false;
+            entry.last_seen_log = starting_cursor;
+        }
+        adapter.push_meta(&meta).await?;
+        report.device_count = meta.devices.len();
+
+        info!(
+            applied = report.applied,
+            devices = report.device_count,
+            "stale resume complete",
+        );
+        Ok(report)
+    }
+
     /// "Neu beginnen" path. Builds a fresh meta.json with only this
     /// device, pushes it to the remote, then leaves the rest to the
     /// scheduler's next round (which will push whatever was already
