@@ -280,12 +280,16 @@ pub async fn delete_task(
     task_id: &str,
     etag: Option<&str>,
     credentials: &Credentials,
-) -> CaldavResult<()> {
+) -> CaldavResult<crate::events::DeleteOutcome> {
     // See `update_task` for why the resource URL has to come from the
     // server-provided href encoded into the id rather than from
-    // `{list}/{uid}.ics`. The 404 path below already swallows missing
-    // resources as success, so a wrong URL here would otherwise look
-    // like a successful delete without ever touching the real row.
+    // `{list}/{uid}.ics`.
+    //
+    // 404 → `DeleteOutcome::NotFound` rather than success. The
+    // direct-API contract still treats it as a non-error
+    // (idempotent), but the home-set walker in `lib.rs::delete_task`
+    // reads the typed outcome so it doesn't short-circuit on the
+    // first task list that returns 404.
     let resource = resource_url_for_task(list_url, task_id)?;
     let mut headers = auth_header(credentials)?;
     if let Some(etag) = etag {
@@ -295,7 +299,10 @@ pub async fn delete_task(
     }
     let response = client.delete(resource).headers(headers).send().await?;
     let status = response.status();
-    if !status.is_success() && status != StatusCode::NOT_FOUND {
+    if status == StatusCode::NOT_FOUND {
+        return Ok(crate::events::DeleteOutcome::NotFound);
+    }
+    if !status.is_success() {
         let body = response.text().await.unwrap_or_default();
         return Err(CaldavError::Http {
             status: status.as_u16(),
@@ -306,7 +313,7 @@ pub async fn delete_task(
             },
         });
     }
-    Ok(())
+    Ok(crate::events::DeleteOutcome::Deleted)
 }
 
 /// Resolve a [`Calendar`] (in CalDAV-land same as a task list, the

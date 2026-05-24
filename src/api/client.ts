@@ -65,8 +65,31 @@ export interface CreateEventRequest extends NewEvent {
 export const createEvent = (request: CreateEventRequest) =>
   invoke<CalendarEvent>('create_event', { request });
 
-export const updateEvent = (event: CalendarEvent) =>
-  invoke<CalendarEvent>('update_event', { event });
+/** Update an event in place, OR move it to a different calendar.
+ *
+ *  When the calendar field on the dialog stays unchanged this is a
+ *  plain in-place update: the backend issues one PUT (CalDAV) /
+ *  PATCH (Graph) / UPDATE (local SQLite) against the existing
+ *  resource. When the user picks a different calendar, the backend
+ *  routes via a create-on-target + delete-from-source path instead
+ *  — a single PUT to the new resource URL with the old ETag's
+ *  If-Match would always 412 because the target resource doesn't
+ *  yet exist (we hit exactly that on iCloud → iCloud moves before
+ *  this hint was wired through).
+ *
+ *  Callers pass `previousCalendarId` whenever they captured the
+ *  event's original location (EventDialog reads it from the loaded
+ *  event; MoveCopyDialog has it explicitly). Omit it for true
+ *  in-place updates where there's no candidate "previous" — the
+ *  AgendaView drag handlers, recurrence-occurrence edits, etc. */
+export const updateEvent = (
+  event: CalendarEvent,
+  previousCalendarId?: string,
+) =>
+  invoke<CalendarEvent>('update_event', {
+    event,
+    previousCalendarId: previousCalendarId ?? null,
+  });
 
 /** Delete an event. `calendarId` is optional but recommended — the
  *  backend uses it to route the delete to the right adapter when the

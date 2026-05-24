@@ -9,6 +9,11 @@ import { localDateKey } from '../../intl/dateKey';
 import { useDateFormat } from '../../intl/dateFormat';
 import { labelsLookup, resolveEventColor } from '../../intl/eventColor';
 import {
+  isExpandedOccurrence,
+  occurrenceIsoOf,
+  seriesIdOf,
+} from '../../intl/recurrence';
+import {
   expandToDayOccurrences,
   type DayOccurrence,
 } from '../../intl/multiDay';
@@ -91,15 +96,14 @@ export function AgendaView() {
   const performDelete = useCallback(
     async (ev: CalendarEvent, scope: 'occurrence' | 'series') => {
       try {
-        if (scope === 'occurrence' && ev.id.includes('@')) {
-          const [seriesId, occIso] = ev.id.split('@');
-          await addEventExdate(seriesId, occIso, ev.calendar_id);
+        const occIso = occurrenceIsoOf(ev);
+        if (scope === 'occurrence' && occIso) {
+          await addEventExdate(seriesIdOf(ev), occIso, ev.calendar_id);
           announce(
             t('dialogs.event.occurrenceDeleted', { title: ev.title }),
           );
         } else {
-          const id = ev.id.includes('@') ? ev.id.split('@')[0] : ev.id;
-          await deleteEventById(id, ev.calendar_id);
+          await deleteEventById(seriesIdOf(ev), ev.calendar_id);
           announce(t('dialogs.event.deleted', { title: ev.title }));
         }
         // Local view-state dialogs don't go through DialogState.close(),
@@ -117,7 +121,10 @@ export function AgendaView() {
   );
 
   const requestDelete = useCallback((ev: CalendarEvent) => {
-    if (ev.id.includes('@') || ev.recurrence) {
+    // Recurring-aware delete prompt: ask "this occurrence vs whole
+    // series" both for synthetic expanded occurrences AND for
+    // master rows that carry a recurrence rule.
+    if (isExpandedOccurrence(ev) || ev.recurrence) {
       setScopeTarget(ev);
     } else {
       setConfirmTarget(ev);

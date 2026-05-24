@@ -412,16 +412,17 @@ impl CalendarFeature for CaldavAdapter {
         // needs the calendar collection URL too — we recover it
         // by re-reading the discovery cache; callers that know
         // the calendar URL up front can hit `events::delete_event`
-        // directly. The current API is good enough for the
-        // registry layer where the calling code picked up the
-        // event from `get_events` first (so we know which calendar
-        // it lives on).
+        // directly.
         //
         // Without the calendar id we fall back to a best-effort:
-        // walk every calendar in the home set and try to DELETE on
-        // each. That's the lazy path; the registry will refactor
-        // the trait signature in Phase 6b.4 to thread the calendar
-        // id through delete as well.
+        // walk every calendar in the home set and try the DELETE
+        // against each. The walker keys off the typed
+        // `DeleteOutcome` rather than a plain Ok/Err — a 404 from
+        // the wrong calendar must NOT short-circuit the search.
+        // We've been bitten by exactly that before the typed
+        // outcome existed: the walker stopped on the first 404 and
+        // left the resource untouched in whichever calendar
+        // actually owned it.
         let discovery = self.discover().await.map_err(to_core_error)?;
         let cals = calendars::list_calendars(
             &self.http,
@@ -430,6 +431,7 @@ impl CalendarFeature for CaldavAdapter {
         )
         .await
         .map_err(to_core_error)?;
+        let mut last_err: Option<CoreError> = None;
         for cal in cals {
             let cal_url = match Url::parse(&cal.id) {
                 Ok(u) => u,
@@ -438,7 +440,7 @@ impl CalendarFeature for CaldavAdapter {
             // Without an ETag we don't bother with If-Match — the
             // user explicitly chose to delete this row, so a
             // concurrent modification is informational at best.
-            if let Ok(()) = events::delete_event(
+            match events::delete_event(
                 &self.http,
                 &cal_url,
                 event_id,
@@ -447,12 +449,23 @@ impl CalendarFeature for CaldavAdapter {
             )
             .await
             {
-                return Ok(());
+                Ok(events::DeleteOutcome::Deleted) => return Ok(()),
+                Ok(events::DeleteOutcome::NotFound) => continue,
+                Err(err) => {
+                    // Non-404 errors might be transient (auth
+                    // hiccup, server hiccup). Remember the last
+                    // one in case nothing else works, but keep
+                    // walking — the resource might still live in
+                    // another calendar we haven't tried yet.
+                    last_err = Some(to_core_error(err));
+                }
             }
         }
-        Err(CoreError::NotFound(format!(
-            "event '{event_id}' not found in any calendar"
-        )))
+        Err(last_err.unwrap_or_else(|| {
+            CoreError::NotFound(format!(
+                "event '{event_id}' not found in any calendar"
+            ))
+        }))
     }
 
     async fn get_free_busy(
@@ -544,10 +557,11 @@ impl TasksFeature for CaldavAdapter {
     }
 
     async fn delete_task(&self, task_id: &str) -> CoreResult<()> {
-        // Same shape as delete_event: the trait signature loses the
-        // list id so we walk the home set and try each candidate
-        // collection. 6b.4 will refactor the trait to carry the
-        // list/calendar id alongside the row id.
+        // Same shape — and same 404-must-not-short-circuit pitfall
+        // — as `delete_event`. The walker keys off
+        // `DeleteOutcome::Deleted` so a 404 from the wrong task
+        // list keeps the search going instead of fooling us into
+        // thinking the row was already gone.
         let discovery = self.discover().await.map_err(to_core_error)?;
         let lists = tasks::list_task_lists(
             &self.http,
@@ -556,12 +570,13 @@ impl TasksFeature for CaldavAdapter {
         )
         .await
         .map_err(to_core_error)?;
+        let mut last_err: Option<CoreError> = None;
         for list in lists {
             let url = match Url::parse(&list.id) {
                 Ok(u) => u,
                 Err(_) => continue,
             };
-            if let Ok(()) = tasks::delete_task(
+            match tasks::delete_task(
                 &self.http,
                 &url,
                 task_id,
@@ -570,12 +585,18 @@ impl TasksFeature for CaldavAdapter {
             )
             .await
             {
-                return Ok(());
+                Ok(events::DeleteOutcome::Deleted) => return Ok(()),
+                Ok(events::DeleteOutcome::NotFound) => continue,
+                Err(err) => {
+                    last_err = Some(to_core_error(err));
+                }
             }
         }
-        Err(CoreError::NotFound(format!(
-            "task '{task_id}' not found in any list"
-        )))
+        Err(last_err.unwrap_or_else(|| {
+            CoreError::NotFound(format!(
+                "task '{task_id}' not found in any list"
+            ))
+        }))
     }
 
     async fn rename_task_list(

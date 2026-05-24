@@ -112,3 +112,42 @@ export function isExpandedOccurrence(
 ): event is ExpandedEvent {
   return 'series_id' in event && typeof event.series_id === 'string';
 }
+
+/**
+ * Underlying series id for an event row.
+ *
+ * For expanded occurrences (the synthetic per-instance copies that
+ * `expandEvent` produces), returns the master's `series_id`. For
+ * master rows — recurring or not — returns `event.id` unchanged.
+ *
+ * Replaces the old `event.id.split('@')[0]` shortcut that was
+ * scattered across the views. That shortcut broke for Aperio-
+ * created CalDAV events: their UIDs themselves contain `@aperio`
+ * (see `create_event` in `cal-adapter-caldav`), so an expanded
+ * occurrence id like `550e8400-...@aperio@2025-12-25T...` would
+ * be `split('@')` into three parts and the `[0]` index would
+ * drop the `@aperio` half of the master UID. The walker on the
+ * backend then couldn't find a resource at the wrong URL and
+ * surfaced a "not found" / "occurrence error" to the user.
+ *
+ * Keying off the `series_id` field is the canonical fix: the
+ * expander attaches it as a separate property, and the type
+ * guard `isExpandedOccurrence` proves it's there before we read
+ * it.
+ */
+export function seriesIdOf(event: CalendarEvent): string {
+  return isExpandedOccurrence(event) ? event.series_id : event.id;
+}
+
+/**
+ * Occurrence-start ISO string for an expanded occurrence, or
+ * `null` for a master row.
+ *
+ * Drives the "delete only this occurrence" path which needs the
+ * occurrence's wall-clock start to append onto the master's
+ * EXDATE list. Master rows have nothing to append — caller
+ * should fall back to deleting the whole row instead.
+ */
+export function occurrenceIsoOf(event: CalendarEvent): string | null {
+  return isExpandedOccurrence(event) ? event.occurrence_start : null;
+}

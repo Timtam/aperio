@@ -17,6 +17,11 @@ import {
   updateEvent as apiUpdateEvent,
 } from '../api/client';
 import type { CalendarEvent } from '../api/types';
+import {
+  isExpandedOccurrence,
+  occurrenceIsoOf,
+  seriesIdOf,
+} from '../intl/recurrence';
 import { useCalendarStore } from '../state/CalendarStore';
 import { useCalendarDefaultReminders } from '../state/useCalendarDefaultReminders';
 import { AttendeePicker } from './AttendeePicker';
@@ -85,16 +90,6 @@ interface FormState {
 type EditScope = 'series' | 'occurrence';
 
 /** True when the id carries the synthetic `@ISO` suffix from `expandEvent`. */
-function isOccurrenceId(id: string): boolean {
-  return id.includes('@');
-}
-
-/** Extract the original ISO start from a synthetic occurrence id. */
-function occurrenceIsoFromId(id: string): string | null {
-  const idx = id.indexOf('@');
-  return idx >= 0 ? id.slice(idx + 1) : null;
-}
-
 export function EventDialog({
   isOpen,
   onClose,
@@ -176,7 +171,7 @@ export function EventDialog({
   // When editing a single occurrence of a recurring series the user
   // can apply changes to just this occurrence (creates an EXDATE +
   // standalone override) or to the whole series.
-  const isOccurrence = isEdit && !!event && isOccurrenceId(event.id);
+  const isOccurrence = isEdit && !!event && isExpandedOccurrence(event);
   const [editScope, setEditScope] = useState<EditScope>('occurrence');
 
   // Reset the form whenever the dialog is opened with new context. We
@@ -245,15 +240,13 @@ export function EventDialog({
           : form.reminders;
 
         if (isEdit && event) {
-          const seriesId = event.id.includes('@')
-            ? event.id.split('@')[0]
-            : event.id;
+          const seriesId = seriesIdOf(event);
 
           if (isOccurrence && editScope === 'occurrence' && event.recurrence) {
             // Single-instance override: add the original date to the
             // series EXDATE list, then create a standalone event with
             // the user's modified fields.
-            const occIso = occurrenceIsoFromId(event.id);
+            const occIso = occurrenceIsoOf(event);
             if (occIso) {
               await addEventExdate(seriesId, occIso, event.calendar_id);
               await apiCreateEvent({
@@ -293,7 +286,16 @@ export function EventDialog({
             reminders: remindersForWire,
             attendees: form.attendees,
           };
-          await apiUpdateEvent(updated);
+          // Thread the *original* calendar_id so the backend can
+          // tell an in-place edit (Save with the picker untouched)
+          // apart from a calendar-change move (Save with the picker
+          // pointing somewhere new). Without this hint, the latter
+          // would PUT to a resource that doesn't exist on the new
+          // calendar — iCloud 412s the precondition because the
+          // old etag's If-Match can never be satisfied at the new
+          // URL. The backend takes the hint and reroutes the
+          // change as a create-on-target + delete-from-source.
+          await apiUpdateEvent(updated, event.calendar_id);
           announce(t('dialogs.event.updated', { title: trimmedTitle }));
         } else {
           await apiCreateEvent({
@@ -348,11 +350,9 @@ export function EventDialog({
     setError(null);
     setSubmitting(true);
     try {
-      const seriesId = event.id.includes('@')
-        ? event.id.split('@')[0]
-        : event.id;
+      const seriesId = seriesIdOf(event);
       if (isOccurrence && editScope === 'occurrence' && event.recurrence) {
-        const occIso = occurrenceIsoFromId(event.id);
+        const occIso = occurrenceIsoOf(event);
         if (occIso) {
           await addEventExdate(seriesId, occIso, event.calendar_id);
           announce(t('dialogs.event.occurrenceDeleted', { title: event.title }));

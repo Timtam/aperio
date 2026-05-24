@@ -10,6 +10,7 @@ import {
   type ContextMenuItemRequest,
 } from '../api/client';
 import type { CalendarEvent, Task, TaskStatus } from '../api/types';
+import { seriesIdOf } from '../intl/recurrence';
 import { useDialogState } from './DialogState';
 import { useTaskStatusActions } from './useTaskStatusToggle';
 
@@ -113,9 +114,7 @@ export function useChipContextMenu(): ChipContextMenuActions {
         // to "delete the whole series". The per-occurrence variant
         // (DeleteEventScopeDialog) lives behind the per-view
         // keyboard handlers; keeping the menu simple is intentional.
-        const id = event.id.includes('@')
-          ? event.id.split('@')[0]
-          : event.id;
+        const id = seriesIdOf(event);
         try {
           await deleteEventById(id, event.calendar_id);
           announce(t('dialogs.event.deleted', { title: event.title }));

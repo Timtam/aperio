@@ -12,6 +12,11 @@ import {
   resolveTaskColor,
 } from '../../intl/eventColor';
 import { eventCoversDay, multiDayInfo } from '../../intl/multiDay';
+import {
+  isExpandedOccurrence,
+  occurrenceIsoOf,
+  seriesIdOf,
+} from '../../intl/recurrence';
 import { useCalendarStore } from '../../state/CalendarStore';
 import { useDialogState } from '../../state/DialogState';
 import { useEvents } from '../../state/useEvents';
@@ -148,15 +153,14 @@ export function DayView() {
   const performDelete = useCallback(
     async (ev: CalendarEvent, scope: 'occurrence' | 'series') => {
       try {
-        if (scope === 'occurrence' && ev.id.includes('@')) {
-          const [seriesId, occIso] = ev.id.split('@');
-          await addEventExdate(seriesId, occIso, ev.calendar_id);
+        const occIso = occurrenceIsoOf(ev);
+        if (scope === 'occurrence' && occIso) {
+          await addEventExdate(seriesIdOf(ev), occIso, ev.calendar_id);
           announce(
             t('dialogs.event.occurrenceDeleted', { title: ev.title }),
           );
         } else {
-          const id = ev.id.includes('@') ? ev.id.split('@')[0] : ev.id;
-          await deleteEventById(id, ev.calendar_id);
+          await deleteEventById(seriesIdOf(ev), ev.calendar_id);
           announce(t('dialogs.event.deleted', { title: ev.title }));
         }
         // The DeleteEventScope / Confirm dialogs are local view state,
@@ -176,7 +180,7 @@ export function DayView() {
   );
 
   const requestDelete = useCallback((ev: CalendarEvent) => {
-    if (ev.id.includes('@') || ev.recurrence) {
+    if (isExpandedOccurrence(ev) || ev.recurrence) {
       setScopeTarget(ev);
     } else {
       setConfirmTarget(ev);

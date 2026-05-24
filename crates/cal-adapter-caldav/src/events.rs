@@ -212,17 +212,42 @@ pub async fn update_event(
     })
 }
 
+/// Outcome of a DELETE attempt. Distinguishes "we just removed
+/// the row" from "the row wasn't here in the first place" so the
+/// home-set walkers in `lib.rs` know whether they've actually
+/// done the work or should keep looking in the next calendar.
+///
+/// The direct-API delete (single-calendar caller already knows
+/// the URL) treats both as success — idempotent semantics for
+/// "make sure this is gone" are the right contract there. The
+/// walkers cannot, because 404 from the *wrong* calendar must
+/// not short-circuit the search for the *right* one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeleteOutcome {
+    /// Server returned 2xx — we actually removed the resource.
+    Deleted,
+    /// Server returned 404 — the resource didn't exist at the
+    /// URL we computed. Idempotent success for direct callers,
+    /// "keep walking" for the home-set search.
+    NotFound,
+}
+
 /// Delete an event from the server. `event_id` is the UID; the URL
 /// is reconstructed as `<calendar_url>/<uid>.ics`. When the caller
 /// passes an `etag`, an `If-Match` header is added so the server
 /// refuses to delete a row that has changed under it.
+///
+/// 404 is treated as a non-error outcome (`DeleteOutcome::NotFound`)
+/// — idempotent semantics for "make sure this row is gone". The
+/// home-set walker uses the typed outcome to keep searching past
+/// 404s for the calendar that actually owns the resource.
 pub async fn delete_event(
     client: &Client,
     calendar_url: &Url,
     event_id: &str,
     etag: Option<&str>,
     credentials: &Credentials,
-) -> CaldavResult<()> {
+) -> CaldavResult<DeleteOutcome> {
     let resource = resource_url(calendar_url, event_id)?;
     let mut headers = auth_header(credentials)?;
     if let Some(etag) = etag {
@@ -236,7 +261,10 @@ pub async fn delete_event(
         .send()
         .await?;
     let status = response.status();
-    if !status.is_success() && status != StatusCode::NOT_FOUND {
+    if status == StatusCode::NOT_FOUND {
+        return Ok(DeleteOutcome::NotFound);
+    }
+    if !status.is_success() {
         let body = response.text().await.unwrap_or_default();
         return Err(CaldavError::Http {
             status: status.as_u16(),
@@ -247,7 +275,7 @@ pub async fn delete_event(
             },
         });
     }
-    Ok(())
+    Ok(DeleteOutcome::Deleted)
 }
 
 /// Read the master VEVENT at `<calendar_url>/<uid>.ics`, append
@@ -609,7 +637,7 @@ END:VCALENDAR</c:calendar-data>
     }
 
     #[tokio::test]
-    async fn delete_event_accepts_404() {
+    async fn delete_event_reports_404_as_not_found_outcome() {
         let mut server = Server::new_async().await;
         let _m = server
             .mock("DELETE", mockito::Matcher::Regex(
@@ -620,10 +648,12 @@ END:VCALENDAR</c:calendar-data>
             .await;
         let cal_url =
             Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
-        // The server already lost the row. We don't surface that
-        // as an error — the desired post-state ("the event is
-        // gone") is already true.
-        delete_event(
+        // The server already lost the row. The direct-API contract
+        // still treats this as a non-error (idempotent), but the
+        // outcome distinguishes "actually deleted" from "wasn't
+        // there" so the home-set walker doesn't short-circuit on
+        // the first 404 from a calendar that doesn't own the event.
+        let outcome = delete_event(
             &client(),
             &cal_url,
             "abc-123@aperio",
@@ -632,6 +662,31 @@ END:VCALENDAR</c:calendar-data>
         )
         .await
         .unwrap();
+        assert_eq!(outcome, DeleteOutcome::NotFound);
+    }
+
+    #[tokio::test]
+    async fn delete_event_reports_2xx_as_deleted_outcome() {
+        let mut server = Server::new_async().await;
+        let _m = server
+            .mock("DELETE", mockito::Matcher::Regex(
+                r"^/calendars/alice/work/.+\.ics$".into(),
+            ))
+            .with_status(204)
+            .create_async()
+            .await;
+        let cal_url =
+            Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let outcome = delete_event(
+            &client(),
+            &cal_url,
+            "abc-123@aperio",
+            None,
+            &creds(&server.url()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(outcome, DeleteOutcome::Deleted);
     }
 
     #[tokio::test]

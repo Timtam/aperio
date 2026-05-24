@@ -209,13 +209,122 @@ pub async fn update_event(
     registry: State<'_, Arc<AdapterRegistry>>,
     scheduler: State<'_, SchedulerHandle>,
     event: Event,
+    previous_calendar_id: Option<String>,
 ) -> CommandResult<Event> {
-    let account =
-        registry.account_for_calendar(&event.calendar_id).unwrap_or_else(|| LOCAL_ID.to_string());
-    let updated = if account == LOCAL_ID {
+    let target_account = registry
+        .account_for_calendar(&event.calendar_id)
+        .unwrap_or_else(|| LOCAL_ID.to_string());
+
+    // Cross-calendar move detection. When the frontend captured the
+    // event's *original* calendar_id on dialog open and passes it
+    // through here, we can tell that the save also moves the event
+    // — the EventDialog's calendar picker doubles as a move
+    // gesture, in addition to the dedicated MoveCopyDialog.
+    //
+    // Without this detection, a save against a different calendar
+    // would PUT to a resource that doesn't exist on the target,
+    // carrying the old calendar's ETag in If-Match. iCloud rejects
+    // that with 412 because the precondition can never be met for
+    // a non-existent target resource — the user sees "Conflict"
+    // and the move silently fails.
+    let is_move = previous_calendar_id
+        .as_deref()
+        .map(|prev| prev != event.calendar_id)
+        .unwrap_or(false);
+
+    if is_move {
+        let previous = previous_calendar_id.expect("checked above");
+        let source_account = registry
+            .account_for_calendar(&previous)
+            .unwrap_or_else(|| LOCAL_ID.to_string());
+
+        // Local ↔ Local moves go through `update_event` directly:
+        // the LocalAdapter handles the calendar_id change as a
+        // single SQL UPDATE without resource-URL gymnastics, so
+        // there's nothing to gain from a two-call dance here.
+        if source_account == LOCAL_ID && target_account == LOCAL_ID {
+            let updated = adapter.update_event(event).await?;
+            scheduler.invalidate();
+            return Ok(updated);
+        }
+
+        // Cross-calendar move involving at least one external
+        // adapter (two iCloud calendars, iCloud → Google,
+        // Local → CalDAV, etc.) all reduce to the same shape:
+        // create on the target, then delete from the source. We
+        // create FIRST so a half-failed move can never lose data
+        // — if the create succeeds and the delete fails, the user
+        // sees a duplicate they can resolve manually rather than
+        // an empty calendar where their event used to live.
+        let new_payload = NewEvent {
+            title: event.title.clone(),
+            description: event.description.clone(),
+            location: event.location.clone(),
+            start: event.start,
+            end: event.end,
+            all_day: event.all_day,
+            recurrence: event.recurrence.clone(),
+            color_label: event.color_label.clone(),
+            reminders: event.reminders.clone(),
+            sound: event.sound.clone(),
+            attendees: event.attendees.clone(),
+        };
+
+        let created = if target_account == LOCAL_ID {
+            adapter
+                .create_event(&event.calendar_id, new_payload)
+                .await?
+        } else {
+            let Some(ext) = registry.calendar_adapter(&target_account) else {
+                return Err(CommandError {
+                    code: "not_found",
+                    message: format!(
+                        "target calendar '{}' is not routable",
+                        event.calendar_id,
+                    ),
+                });
+            };
+            ext.create_event(&event.calendar_id, new_payload).await?
+        };
+
+        // Delete from source. We log on failure rather than
+        // bubbling — the create already succeeded, the event
+        // exists at the target. Bubbling here would make the
+        // command return Err even though the move is partially
+        // through, and the user might retry, doubling the
+        // duplicate. A warning + best-effort cleanup is the
+        // less-bad failure mode.
+        let delete_result = if source_account == LOCAL_ID {
+            adapter.delete_event(&event.id).await.map_err(CommandError::from)
+        } else if let Some(ext) = registry.calendar_adapter(&source_account) {
+            ext.delete_event(&event.id).await.map_err(CommandError::from)
+        } else {
+            // Source isn't routable (account was removed between
+            // the dialog opening and save). Treat as a "no
+            // cleanup needed" — the create on the target stands.
+            Ok(())
+        };
+        if let Err(err) = delete_result {
+            tracing::warn!(
+                event_id = %event.id,
+                source = %previous,
+                target = %event.calendar_id,
+                code = %err.code,
+                message = %err.message,
+                "delete from source calendar failed after move; duplicate may exist",
+            );
+        }
+
+        scheduler.invalidate();
+        return Ok(created);
+    }
+
+    // Plain in-place update — no calendar change, the existing
+    // single-PUT/SQL-UPDATE path handles it.
+    let updated = if target_account == LOCAL_ID {
         adapter.update_event(event).await?
     } else {
-        let Some(ext) = registry.calendar_adapter(&account) else {
+        let Some(ext) = registry.calendar_adapter(&target_account) else {
             return Err(CommandError {
                 code: "not_found",
                 message: format!("calendar '{}' is not routable", event.calendar_id),

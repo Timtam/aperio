@@ -419,7 +419,18 @@ export function TaskDialog({
                 ? task.completed_at ?? new Date().toISOString()
                 : null,
           };
-          await invoke<Task>('update_task', { task: updated });
+          // Pass the *original* list_id as the move hint so the
+          // backend can tell an in-place edit (list picker
+          // untouched) apart from a cross-list move (picker
+          // pointing somewhere new). Without it, a CalDAV-VTODO
+          // edit that changes the list would PATCH the wrong
+          // resource URL and iCloud-shaped servers reject the
+          // precondition with 412 / Conflict — same root cause
+          // the event-side `previousCalendarId` hint addresses.
+          await invoke<Task>('update_task', {
+            task: updated,
+            previousListId: task.list_id,
+          });
           // List-cohabitation: if a parent's list changed, every
           // descendant follows along so the family stays together.
           // Otherwise a subsequent reload would surface a parent in
@@ -431,8 +442,13 @@ export function TaskDialog({
           ) {
             const descendants = collectDescendants(task.id, tasks);
             for (const child of descendants) {
+              // Each descendant's *previous* list is wherever it
+              // already lives (task.list_id, captured before the
+              // parent's move); the post-move target is the new
+              // form.listId.
               await invoke<Task>('update_task', {
                 task: { ...child, list_id: form.listId },
+                previousListId: child.list_id,
               });
             }
           }
