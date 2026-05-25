@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { isCommandError, listPlugins } from '../api/client';
+import { isCommandError, listPlugins, setPluginEnabled } from '../api/client';
 import type { PluginInfo, PluginTypeWire } from '../api/types';
 
 /**
@@ -34,6 +34,9 @@ export function PluginsPanel() {
   const { t } = useTranslation();
   const [plugins, setPlugins] = useState<PluginInfo[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // Per-plugin error envelopes for the toggle. Cleared on
+  // successful re-flip; not persisted across re-fetches.
+  const [toggleErrors, setToggleErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -57,6 +60,45 @@ export function PluginsPanel() {
       cancelled = true;
     };
   }, []);
+
+  const onToggle = useCallback(
+    async (pluginId: string, enabled: boolean) => {
+      // Optimistic update — flip the local row immediately so
+      // the toggle feels instant. Revert on error.
+      setPlugins((prev) =>
+        prev
+          ? prev.map((p) => (p.id === pluginId ? { ...p, enabled } : p))
+          : prev,
+      );
+      setToggleErrors((prev) => {
+        if (!(pluginId in prev)) return prev;
+        const next = { ...prev };
+        delete next[pluginId];
+        return next;
+      });
+      try {
+        await setPluginEnabled({ plugin_id: pluginId, enabled });
+      } catch (err) {
+        const msg = isCommandError(err)
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : String(err);
+        // Revert the optimistic flip + surface the error
+        // inline so the user can see why the toggle didn't
+        // take.
+        setPlugins((prev) =>
+          prev
+            ? prev.map((p) =>
+                p.id === pluginId ? { ...p, enabled: !enabled } : p,
+              )
+            : prev,
+        );
+        setToggleErrors((prev) => ({ ...prev, [pluginId]: msg }));
+      }
+    },
+    [],
+  );
 
   // Group by plugin_type. Order: calendar-adapter, sync-adapter,
   // videoconference-adapter, notification, then anything else
@@ -101,7 +143,12 @@ export function PluginsPanel() {
           </h3>
           <ul className="plugins-panel__list" role="list">
             {group.plugins.map((p) => (
-              <PluginRow key={p.id} plugin={p} />
+              <PluginRow
+                key={p.id}
+                plugin={p}
+                onToggle={onToggle}
+                toggleError={toggleErrors[p.id] ?? null}
+              />
             ))}
           </ul>
         </section>
@@ -112,13 +159,19 @@ export function PluginsPanel() {
 
 interface PluginRowProps {
   plugin: PluginInfo;
+  onToggle: (pluginId: string, enabled: boolean) => void;
+  toggleError: string | null;
 }
 
-function PluginRow({ plugin }: PluginRowProps) {
+function PluginRow({ plugin, onToggle, toggleError }: PluginRowProps) {
   const { t } = useTranslation();
+  const toggleId = `plugin-toggle-${plugin.id}`;
   return (
     <li
-      className="plugins-panel__row"
+      className={
+        'plugins-panel__row' +
+        (plugin.enabled ? '' : ' plugins-panel__row--disabled')
+      }
       aria-label={t('dialogs.settings.plugins.rowAria', {
         name: plugin.name,
         version: plugin.version,
@@ -129,12 +182,32 @@ function PluginRow({ plugin }: PluginRowProps) {
         <span className="plugins-panel__version">
           {t('dialogs.settings.plugins.version', { version: plugin.version })}
         </span>
+        <div className="plugins-panel__toggle">
+          <label htmlFor={toggleId} className="plugins-panel__toggle-label">
+            {plugin.enabled
+              ? t('dialogs.settings.plugins.toggle.enabled')
+              : t('dialogs.settings.plugins.toggle.disabled')}
+          </label>
+          <input
+            id={toggleId}
+            type="checkbox"
+            role="switch"
+            checked={plugin.enabled}
+            aria-checked={plugin.enabled}
+            onChange={(e) => onToggle(plugin.id, e.target.checked)}
+          />
+        </div>
       </div>
       <div className="plugins-panel__id" aria-hidden="true">
         {plugin.id}
       </div>
       {plugin.description && (
         <p className="plugins-panel__description">{plugin.description}</p>
+      )}
+      {toggleError && (
+        <p className="form__error" role="alert">
+          {t('dialogs.settings.plugins.toggle.error', { error: toggleError })}
+        </p>
       )}
       <dl className="plugins-panel__meta">
         {plugin.author && (

@@ -312,6 +312,12 @@ export interface PluginInfo {
   has_interactive_auth: boolean;
   has_discover: boolean;
   has_probe_host_key: boolean;
+  /** `true` when the plugin is currently routable; `false`
+   *  when the user has toggled it off via the Settings panel.
+   *  The cdylib stays loaded either way — the host's
+   *  PluginManager.get() acts as if a disabled plugin weren't
+   *  installed. */
+  enabled: boolean;
 }
 
 /** Canonical plugin-type wire strings — Rust's `PluginType::as_str`

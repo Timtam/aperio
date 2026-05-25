@@ -216,6 +216,11 @@
             "label": "Host-Key-Prüfung",
             "title": "Liest den TOFU-Host-Key-Fingerabdruck eines Servers (z.B. SFTP First-Use-Dialog)."
           }
+        },
+        "toggle": {
+          "enabled": "Aktiviert",
+          "disabled": "Deaktiviert",
+          "error": "Plugin-Status konnte nicht geändert werden: {{error}}"
         }
       },
       "contacts": {

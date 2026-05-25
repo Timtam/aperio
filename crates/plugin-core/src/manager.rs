@@ -41,7 +41,7 @@
 //! [`PluginManager::register_static`] entry point is what that
 //! flag eventually calls.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_void};
 use std::path::{Path, PathBuf};
@@ -334,6 +334,14 @@ struct Inner {
     plugins: HashMap<String, Arc<LoadedPlugin>>,
     /// Stable insertion order for [`PluginManager::all`].
     order: Vec<String>,
+    /// Plugins the user has temporarily disabled via the
+    /// Settings → Plugins panel (DESIGN.md §20.10). The cdylib
+    /// stays loaded — the runtime gate just hides them from
+    /// [`PluginManager::get`] so subsequent
+    /// [`AdapterRegistry`]-side lookups behave as if the plugin
+    /// id weren't installed at all. Re-enabling lifts the gate
+    /// without re-running dlopen.
+    disabled: HashSet<String>,
 }
 
 impl PluginManager {
@@ -666,11 +674,33 @@ impl PluginManager {
         Ok(())
     }
 
-    /// Look up a plugin by manifest id. Returns `None` for any
-    /// plugin that didn't get loaded — e.g. an account whose
-    /// `adapter_kind` refers to a plugin id Aperio doesn't have
-    /// installed (the §20.8 "Plugin fehlt" trigger).
+    /// Look up an enabled plugin by manifest id. Returns `None`
+    /// for plugins that didn't get loaded (the §20.8 "Plugin
+    /// fehlt" trigger) AND for loaded-but-disabled plugins
+    /// (DESIGN.md §20.10 "Deaktivieren"). The two cases share
+    /// the same call site by design — once a plugin is gated
+    /// off the rest of the host treats it the same as if the
+    /// id were never installed.
+    ///
+    /// Use [`Self::get_including_disabled`] when the caller
+    /// genuinely needs to see disabled plugins too (the
+    /// Settings panel's enable/disable toggle is the obvious
+    /// case).
     pub fn get(&self, id: &str) -> Option<Arc<LoadedPlugin>> {
+        let inner = self.inner.read().expect("manager poisoned");
+        if inner.disabled.contains(id) {
+            return None;
+        }
+        inner.plugins.get(id).cloned()
+    }
+
+    /// Same as [`Self::get`] but ignores the disabled-flag
+    /// gate. The Settings → Plugins panel uses this so the
+    /// toggle that re-enables a plugin can read it back. The
+    /// host registry uses it from the re-enable path to find
+    /// the descriptor of a plugin it's about to start serving
+    /// again.
+    pub fn get_including_disabled(&self, id: &str) -> Option<Arc<LoadedPlugin>> {
         self.inner
             .read()
             .expect("manager poisoned")
@@ -679,8 +709,10 @@ impl PluginManager {
             .cloned()
     }
 
-    /// All loaded plugins in load order. The Settings → Plugins
-    /// panel renders this list directly.
+    /// All loaded plugins in load order — including disabled
+    /// ones. The Settings → Plugins panel renders this list
+    /// directly, paired with [`Self::is_enabled`] per row to
+    /// render the toggle state.
     pub fn all(&self) -> Vec<Arc<LoadedPlugin>> {
         let inner = self.inner.read().expect("manager poisoned");
         inner
@@ -690,6 +722,33 @@ impl PluginManager {
             .collect()
     }
 
+    /// `true` iff the plugin id is loaded AND not disabled.
+    /// `false` for both "not installed" and "installed but
+    /// disabled" — same semantics as [`Self::get`].
+    pub fn is_enabled(&self, id: &str) -> bool {
+        let inner = self.inner.read().expect("manager poisoned");
+        inner.plugins.contains_key(id) && !inner.disabled.contains(id)
+    }
+
+    /// Flip the disabled flag for `id`. Returns `true` iff the
+    /// state changed (the caller can use this to decide
+    /// whether to re-register affected accounts). A no-op
+    /// against an unknown plugin id silently does nothing —
+    /// the persistence layer (user_prefs) may carry a flag
+    /// for a plugin the user uninstalled, and we shouldn't
+    /// trip on that.
+    pub fn set_enabled(&self, id: &str, enabled: bool) -> bool {
+        let mut inner = self.inner.write().expect("manager poisoned");
+        if !inner.plugins.contains_key(id) {
+            return false;
+        }
+        if enabled {
+            inner.disabled.remove(id)
+        } else {
+            inner.disabled.insert(id.to_string())
+        }
+    }
+
     /// All plugins of a given type. The host registry cutover
     /// calls this once per call to build its per-type collections.
     pub fn by_type(&self, plugin_type: &PluginType) -> Vec<Arc<LoadedPlugin>> {
@@ -697,6 +756,47 @@ impl PluginManager {
             .into_iter()
             .filter(|p| &p.manifest.plugin_type == plugin_type)
             .collect()
+    }
+
+    /// Test-only: inject a synthetic LoadedPlugin under the
+    /// given id. The plugin is a no-op stub (no library, no
+    /// instance hooks) — enough to exercise the disabled-flag
+    /// gate paths in `get` / `is_enabled` / `set_enabled`
+    /// without standing up the full FFI machinery the shim
+    /// tests use.
+    #[cfg(test)]
+    pub(crate) fn insert_stub_for_tests(&self, id: &str, manifest: PluginManifest) {
+        unsafe extern "C" fn noop_destroy(_: *mut crate::abi::AperioPlugin) {}
+        let id_cstr = std::ffi::CString::new(id).unwrap();
+        let name_cstr = std::ffi::CString::new(manifest.name.as_str()).unwrap();
+        let version_cstr = std::ffi::CString::new(manifest.version.as_str()).unwrap();
+        let type_cstr = std::ffi::CString::new(manifest.plugin_type.as_str()).unwrap();
+        let descriptor = Box::new(crate::abi::AperioPlugin {
+            abi_version: crate::ABI_VERSION,
+            id: id_cstr.into_raw(),
+            name: name_cstr.into_raw(),
+            version: version_cstr.into_raw(),
+            plugin_type: type_cstr.into_raw(),
+            open_instance: None,
+            close_instance: None,
+            vtable: std::ptr::null_mut(),
+        });
+        let descriptor_ptr = Box::into_raw(descriptor);
+        let loaded = LoadedPlugin {
+            manifest,
+            plugin_ptr: descriptor_ptr,
+            destroy_fn: noop_destroy,
+            interactive_auth_fn: None,
+            discover_fn: None,
+            probe_host_key_fn: None,
+            library: None,
+        };
+        // Bypass the duplicate-id check the public `insert`
+        // does — tests construct each manager fresh, so this
+        // is safe + saves the .unwrap() noise.
+        let mut inner = self.inner.write().expect("manager poisoned");
+        inner.order.push(id.to_string());
+        inner.plugins.insert(id.to_string(), Arc::new(loaded));
     }
 
     /// Number of currently-loaded plugins. Cheap counter used
@@ -1152,5 +1252,85 @@ mod tests {
         let mgr = PluginManager::new("0.1.0");
         assert!(mgr.by_type(&PluginType::CalendarAdapter).is_empty());
         assert!(mgr.by_type(&PluginType::SyncAdapter).is_empty());
+    }
+
+    fn stub_manifest(id: &str) -> PluginManifest {
+        PluginManifest {
+            id: id.to_string(),
+            name: "Stub".to_string(),
+            version: "0.1.0".to_string(),
+            plugin_type: PluginType::CalendarAdapter,
+            capabilities: vec![crate::Capability::Calendar],
+            abi_version: crate::ABI_VERSION,
+            min_app_version: "0.1.0".to_string(),
+            author: None,
+            description: None,
+            signed: false,
+        }
+    }
+
+    #[test]
+    fn newly_loaded_plugin_is_enabled() {
+        let mgr = PluginManager::new("0.1.0");
+        mgr.insert_stub_for_tests("test.cal", stub_manifest("test.cal"));
+        assert!(mgr.is_enabled("test.cal"));
+        assert!(mgr.get("test.cal").is_some());
+    }
+
+    #[test]
+    fn disabled_plugin_is_hidden_from_get_and_is_enabled() {
+        let mgr = PluginManager::new("0.1.0");
+        mgr.insert_stub_for_tests("test.cal", stub_manifest("test.cal"));
+        let changed = mgr.set_enabled("test.cal", false);
+        assert!(changed, "first disable should flip the state");
+        assert!(!mgr.is_enabled("test.cal"));
+        assert!(mgr.get("test.cal").is_none());
+        // get_including_disabled still surfaces the LoadedPlugin
+        // so the Settings panel can render the toggle.
+        assert!(mgr.get_including_disabled("test.cal").is_some());
+    }
+
+    #[test]
+    fn re_enabling_a_disabled_plugin_restores_get() {
+        let mgr = PluginManager::new("0.1.0");
+        mgr.insert_stub_for_tests("test.cal", stub_manifest("test.cal"));
+        mgr.set_enabled("test.cal", false);
+        let changed = mgr.set_enabled("test.cal", true);
+        assert!(changed);
+        assert!(mgr.is_enabled("test.cal"));
+        assert!(mgr.get("test.cal").is_some());
+    }
+
+    #[test]
+    fn set_enabled_is_idempotent() {
+        let mgr = PluginManager::new("0.1.0");
+        mgr.insert_stub_for_tests("test.cal", stub_manifest("test.cal"));
+        // Re-enabling an already-enabled plugin reports no
+        // state change so callers don't trigger spurious
+        // re-registrations.
+        assert!(!mgr.set_enabled("test.cal", true));
+        mgr.set_enabled("test.cal", false);
+        assert!(!mgr.set_enabled("test.cal", false));
+    }
+
+    #[test]
+    fn set_enabled_on_unknown_plugin_is_a_noop() {
+        let mgr = PluginManager::new("0.1.0");
+        // The persistence layer (user_prefs) might carry a flag
+        // for a plugin the user uninstalled. The gate must
+        // silently ignore the call rather than tracking
+        // disabled state for ghost ids.
+        assert!(!mgr.set_enabled("ghost", false));
+        assert!(!mgr.is_enabled("ghost"));
+    }
+
+    #[test]
+    fn all_includes_disabled_plugins_in_load_order() {
+        let mgr = PluginManager::new("0.1.0");
+        mgr.insert_stub_for_tests("test.a", stub_manifest("test.a"));
+        mgr.insert_stub_for_tests("test.b", stub_manifest("test.b"));
+        mgr.set_enabled("test.a", false);
+        let ids: Vec<_> = mgr.all().iter().map(|p| p.manifest.id.clone()).collect();
+        assert_eq!(ids, vec!["test.a", "test.b"]);
     }
 }

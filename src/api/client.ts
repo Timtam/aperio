@@ -1186,6 +1186,18 @@ export const getPinnedSftpHostKey = (hostPort: string) =>
 
 /** Snapshot of every plugin currently loaded into the host's
  *  PluginManager. The Settings → Plugins panel calls this to
- *  render the read-only list. Sorted by id on the backend so
- *  re-fetches produce a stable order. */
+ *  render the list. Sorted by id on the backend so re-fetches
+ *  produce a stable order. */
 export const listPlugins = () => invoke<PluginInfo[]>('list_plugins');
+
+export interface SetPluginEnabledRequest {
+  plugin_id: string;
+  enabled: boolean;
+}
+
+/** Flip a plugin's enabled flag. Persists the new state in
+ *  user_prefs + re-syncs the AdapterRegistry (accounts whose
+ *  adapter_kind maps to the affected plugin get
+ *  unregistered/re-registered in the same gesture). */
+export const setPluginEnabled = (request: SetPluginEnabledRequest) =>
+  invoke<void>('set_plugin_enabled', { request });

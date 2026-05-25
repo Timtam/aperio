@@ -85,6 +85,34 @@ pub fn run() {
         "registered bundled cal-adapter plugins",
     );
 
+    // §20.10: hydrate the per-plugin disabled flag from
+    // user_prefs BEFORE the registry bootstraps — disabled
+    // plugins must look "not installed" to register_*'s
+    // PluginManager::get lookup. Failures here are logged + the
+    // plugin is left enabled (the user can re-disable from the
+    // Settings panel).
+    {
+        let shared = db.shared();
+        let prefs = crate::user_prefs::UserPrefsRepo::new(&shared);
+        for plugin in plugin_manager.all() {
+            let key =
+                commands::pref_key_for_disabled(&plugin.manifest.id);
+            match prefs.get(&key) {
+                Ok(Some(v)) if v == "true" => {
+                    plugin_manager.set_enabled(&plugin.manifest.id, false);
+                }
+                Ok(_) => {}
+                Err(err) => {
+                    tracing::warn!(
+                        plugin_id = %plugin.manifest.id,
+                        ?err,
+                        "couldn't read plugin-disabled flag; leaving enabled",
+                    );
+                }
+            }
+        }
+    }
+
     let registry = Arc::new(AdapterRegistry::new(Arc::clone(&plugin_manager)));
     {
         let shared = db.shared();
@@ -358,9 +386,12 @@ pub fn run() {
             commands::create_meeting,
             commands::get_meeting,
             commands::delete_meeting,
-            // §20.10 Settings → Plugins panel. Read-only list of
-            // every loaded plugin + its manifest metadata.
+            // §20.10 Settings → Plugins panel. list_plugins
+            // surfaces metadata + enabled state;
+            // set_plugin_enabled persists the toggle + re-syncs
+            // the affected accounts in the AdapterRegistry.
             commands::list_plugins,
+            commands::set_plugin_enabled,
         ])
         .setup(move |app| {
             // Spawn the reminder scheduler on the Tauri/tokio runtime

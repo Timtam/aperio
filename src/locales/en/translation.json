@@ -219,6 +219,11 @@
             "label": "Host-key probe",
             "title": "Reads a server's TOFU host-key fingerprint (e.g. SFTP first-use trust dialog)."
           }
+        },
+        "toggle": {
+          "enabled": "Enabled",
+          "disabled": "Disabled",
+          "error": "Couldn't change the plugin state: {{error}}"
         }
       },
       "contacts": {
