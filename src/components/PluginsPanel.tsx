@@ -427,31 +427,51 @@ export function PluginsPanel() {
             {t('dialogs.settings.plugins.remote.hint')}
           </p>
           <ul className="plugins-panel__list" role="list">
-            {remotePlugins.map((r) => (
-              <li key={r.id} className="plugins-panel__row">
-                <div className="plugins-panel__row-header">
-                  <span className="plugins-panel__name">
-                    {r.name ?? r.id}
-                  </span>
-                  <span className="plugins-panel__version">
-                    {t('dialogs.settings.plugins.version', {
-                      version: r.version,
-                    })}
-                  </span>
-                </div>
-                {r.name && (
-                  <div className="plugins-panel__id" aria-hidden="true">
-                    {r.id}
+            {remotePlugins.map((r) => {
+              // Same focusable-card pattern: tabindex=0 +
+              // composed aria-label so the per-row info
+              // (name, version, announcing device) is
+              // reachable in focus mode.
+              const displayName = r.name ?? r.id;
+              const deviceLabel =
+                r.announced_by_device_name ?? r.announced_by_device;
+              const ariaLabel = [
+                displayName,
+                t('dialogs.settings.plugins.version', {
+                  version: r.version,
+                }),
+                t('dialogs.settings.plugins.remote.announcedBy', {
+                  device: deviceLabel,
+                }),
+              ].join(', ');
+              return (
+                <li
+                  key={r.id}
+                  tabIndex={0}
+                  className="plugins-panel__row"
+                  aria-label={ariaLabel}
+                >
+                  <div className="plugins-panel__row-header">
+                    <span className="plugins-panel__name">{displayName}</span>
+                    <span className="plugins-panel__version">
+                      {t('dialogs.settings.plugins.version', {
+                        version: r.version,
+                      })}
+                    </span>
                   </div>
-                )}
-                <p className="form__hint">
-                  {t('dialogs.settings.plugins.remote.announcedBy', {
-                    device:
-                      r.announced_by_device_name ?? r.announced_by_device,
-                  })}
-                </p>
-              </li>
-            ))}
+                  {r.name && (
+                    <div className="plugins-panel__id" aria-hidden="true">
+                      {r.id}
+                    </div>
+                  )}
+                  <p className="form__hint">
+                    {t('dialogs.settings.plugins.remote.announcedBy', {
+                      device: deviceLabel,
+                    })}
+                  </p>
+                </li>
+              );
+            })}
           </ul>
         </section>
       )}
@@ -580,14 +600,30 @@ function FailedPluginsSection({ failed }: FailedPluginsSectionProps) {
       </h3>
       <p className="form__hint">{t('dialogs.settings.plugins.failed.hint')}</p>
       <ul className="plugins-panel__list" role="list">
-        {failed.map((f) => (
-          <li
-            key={f.plugin_dir}
-            className="plugins-panel__row plugins-panel__row--failed"
-            aria-label={t('dialogs.settings.plugins.failed.rowAria', {
-              name: f.name ?? f.id ?? f.plugin_dir,
-            })}
-          >
+        {failed.map((f) => {
+          // Same "focusable card" pattern as PluginRow:
+          // tabindex=0 + full aria-label so the per-row
+          // reason is reachable in focus mode without the
+          // user having to switch into NVDA's browse mode.
+          const displayName = f.name ?? f.id ?? basename(f.plugin_dir);
+          const ariaLabel = [
+            t('dialogs.settings.plugins.failed.rowAria', {
+              name: displayName,
+            }),
+            f.version
+              ? t('dialogs.settings.plugins.version', { version: f.version })
+              : null,
+            reasonHint(t, f.reason),
+          ]
+            .filter(Boolean)
+            .join(', ');
+          return (
+            <li
+              key={f.plugin_dir}
+              tabIndex={0}
+              className="plugins-panel__row plugins-panel__row--failed"
+              aria-label={ariaLabel}
+            >
             <div className="plugins-panel__row-header">
               <span className="plugins-panel__name">
                 {f.name ?? f.id ?? basename(f.plugin_dir)}
@@ -625,7 +661,8 @@ function FailedPluginsSection({ failed }: FailedPluginsSectionProps) {
               </dl>
             </details>
           </li>
-        ))}
+          );
+        })}
       </ul>
     </section>
   );
@@ -687,16 +724,36 @@ function PluginRow({
 }: PluginRowProps) {
   const { t } = useTranslation();
   const toggleId = `plugin-toggle-${plugin.id}`;
+  // Comprehensive aria-label so a focus-mode screen reader
+  // user gets the full row state on focus without entering
+  // browse mode. Inner controls (toggle, uninstall button)
+  // remain their own tab stops + announce themselves
+  // independently when reached — same "card with controls"
+  // pattern as native settings UIs.
+  const ariaLabel = [
+    plugin.name,
+    t('dialogs.settings.plugins.version', { version: plugin.version }),
+    typeLabel(t, plugin.plugin_type),
+    plugin.source === 'bundled'
+      ? t('dialogs.settings.plugins.source.bundled')
+      : t('dialogs.settings.plugins.source.user'),
+    plugin.enabled
+      ? t('dialogs.settings.plugins.toggle.enabled')
+      : t('dialogs.settings.plugins.toggle.disabled'),
+  ].join(', ');
   return (
     <li
+      // tabindex=0 turns the row into a real focus stop so
+      // NVDA/JAWS/VoiceOver announce the full aria-label
+      // without the user having to switch into browse mode.
+      // The pattern is conventional for "card with controls"
+      // lists (iOS Settings, Windows 11 Settings, …).
+      tabIndex={0}
       className={
         'plugins-panel__row' +
         (plugin.enabled ? '' : ' plugins-panel__row--disabled')
       }
-      aria-label={t('dialogs.settings.plugins.rowAria', {
-        name: plugin.name,
-        version: plugin.version,
-      })}
+      aria-label={ariaLabel}
     >
       <div className="plugins-panel__row-header">
         <span className="plugins-panel__name">{plugin.name}</span>

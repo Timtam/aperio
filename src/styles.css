@@ -703,6 +703,16 @@ button[aria-disabled='true'] {
   background: var(--color-bg-panel);
 }
 
+/* The row container is tabindex=0 (a real focus stop) so
+ * screen-reader users in focus mode hear the full
+ * aria-label rather than skipping straight to the inner
+ * toggle. Give sighted keyboard users the same affordance
+ * with a visible ring on focus. */
+.plugins-panel__row:focus-visible {
+  outline: 2px solid var(--focus-ring-color, var(--color-accent));
+  outline-offset: -2px;
+}
+
 /* Disabled rows dim slightly so the user sees at a glance
  * which plugins are switched off. The toggle is still
  * fully operable. */
