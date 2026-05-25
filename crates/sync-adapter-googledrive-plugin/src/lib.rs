@@ -21,15 +21,17 @@ use std::os::raw::{c_char, c_void};
 
 use base64::Engine as _;
 use plugin_sdk::plugin_core::abi::OpenInstanceResult;
-use plugin_sdk::plugin_core::ffi::{PluginCallResult, PLUGIN_CALL_ERR_INTERNAL};
+use plugin_sdk::plugin_core::ffi::PluginCallResult;
 use plugin_sdk::plugin_core::vtables::SyncVtable;
 use plugin_sdk::{
-    decode_args, error_response, ok_empty_response, ok_response,
-    open_instance_with, sync_error_to_response, PluginInstance,
+    decode_args, error_response, ok_response, open_instance_with,
+    sync_error_to_response, PluginInstance,
 };
 use serde::Deserialize;
 use sync_adapter_googledrive::{DriveSyncAdapter, GoogleDriveAccountConfig};
 use sync_core::{DeviceCursor, LogFile, LogFileName, MetaJson, Snapshot, SyncAdapter};
+
+plugin_sdk::sync_dispatch_helpers!(DriveSyncAdapter);
 
 #[derive(Debug, Deserialize)]
 struct InitConfig {
@@ -70,44 +72,6 @@ pub unsafe extern "C" fn plugin_open_instance(
 /// FFI export.
 pub unsafe extern "C" fn plugin_close_instance(handle: *mut c_void) {
     PluginInstance::<DriveSyncAdapter>::drop_handle(handle);
-}
-
-fn instance<'a>(
-    handle: *mut c_void,
-) -> Result<&'a PluginInstance<DriveSyncAdapter>, PluginCallResult> {
-    unsafe { PluginInstance::<DriveSyncAdapter>::from_handle(handle) }
-        .ok_or_else(|| error_response(PLUGIN_CALL_ERR_INTERNAL, "null instance handle"))
-}
-
-fn dispatch<T, F, Fut>(handle: *mut c_void, call: F) -> PluginCallResult
-where
-    T: serde::Serialize,
-    F: FnOnce(&'static DriveSyncAdapter) -> Fut,
-    Fut: std::future::Future<Output = sync_core::SyncResult<T>>,
-{
-    let inst = match instance(handle) { Ok(i) => i, Err(r) => return r };
-    let p: &'static DriveSyncAdapter = unsafe {
-        std::mem::transmute::<&DriveSyncAdapter, &'static DriveSyncAdapter>(inst.plugin())
-    };
-    match inst.runtime().block_on(call(p)) {
-        Ok(v) => ok_response(&v),
-        Err(e) => sync_error_to_response(e),
-    }
-}
-
-fn dispatch_unit<F, Fut>(handle: *mut c_void, call: F) -> PluginCallResult
-where
-    F: FnOnce(&'static DriveSyncAdapter) -> Fut,
-    Fut: std::future::Future<Output = sync_core::SyncResult<()>>,
-{
-    let inst = match instance(handle) { Ok(i) => i, Err(r) => return r };
-    let p: &'static DriveSyncAdapter = unsafe {
-        std::mem::transmute::<&DriveSyncAdapter, &'static DriveSyncAdapter>(inst.plugin())
-    };
-    match inst.runtime().block_on(call(p)) {
-        Ok(()) => ok_empty_response(),
-        Err(e) => sync_error_to_response(e),
-    }
 }
 
 unsafe extern "C" fn ffi_test_connection(h: *mut c_void, _a: *const u8, _l: usize) -> PluginCallResult {

@@ -106,6 +106,7 @@
 
 pub mod args;
 pub mod discover;
+pub mod dispatch;
 pub mod error_map;
 pub mod instance;
 pub mod interactive_auth;
@@ -121,6 +122,9 @@ pub use plugin_core;
 
 pub use args::decode_args;
 pub use discover::discover_with;
+pub use dispatch::{
+    cal_dispatch, cal_dispatch_unit, instance, sync_dispatch, sync_dispatch_unit,
+};
 pub use error_map::{cal_error_to_response, sync_error_to_response};
 pub use instance::{InitError, PluginInstance};
 pub use interactive_auth::interactive_auth_with;

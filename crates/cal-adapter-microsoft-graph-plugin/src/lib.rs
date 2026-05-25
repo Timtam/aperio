@@ -16,21 +16,19 @@
 use std::os::raw::{c_char, c_void};
 
 use cal_adapter_microsoft_graph::{MicrosoftGraphAdapter, TokenSet, DEFAULT_AUTHORITY};
-use cal_core::adapter::{AuthToken, Capability, Credentials as CalCredentials};
-use cal_core::error::Result as CalResult;
+use cal_core::adapter::{Capability, Credentials as CalCredentials};
 use cal_core::types::{ContactPhoto, DateRange, NewContact, NewEvent, NewTask};
 use cal_core::{CalendarFeature, ContactsFeature, TasksFeature};
 use chrono::{DateTime, Utc};
 use plugin_sdk::plugin_core::abi::OpenInstanceResult;
-use plugin_sdk::plugin_core::ffi::{PluginCallResult, PLUGIN_CALL_ERR_INTERNAL};
+use plugin_sdk::plugin_core::ffi::PluginCallResult;
 use plugin_sdk::plugin_core::vtables::{
     CalendarAdapterVtable, CalendarVtable, ContactsVtable, TasksVtable,
 };
-use plugin_sdk::{
-    cal_error_to_response, decode_args, error_response, ok_empty_response,
-    ok_response, open_instance_with, PluginInstance,
-};
+use plugin_sdk::{decode_args, ok_response, open_instance_with, PluginInstance};
 use serde::Deserialize;
+
+plugin_sdk::cal_dispatch_helpers!(MicrosoftGraphAdapter);
 
 fn default_authority() -> String {
     DEFAULT_AUTHORITY.to_string()
@@ -77,59 +75,13 @@ pub unsafe extern "C" fn plugin_close_instance(handle: *mut c_void) {
     PluginInstance::<MicrosoftGraphAdapter>::drop_handle(handle);
 }
 
-fn instance<'a>(
-    handle: *mut c_void,
-) -> Result<&'a PluginInstance<MicrosoftGraphAdapter>, PluginCallResult> {
-    unsafe { PluginInstance::<MicrosoftGraphAdapter>::from_handle(handle) }
-        .ok_or_else(|| error_response(PLUGIN_CALL_ERR_INTERNAL, "null instance handle"))
-}
-
-fn dispatch<T, F, Fut>(handle: *mut c_void, call: F) -> PluginCallResult
-where
-    T: serde::Serialize,
-    F: FnOnce(&'static MicrosoftGraphAdapter) -> Fut,
-    Fut: std::future::Future<Output = CalResult<T>>,
-{
-    let inst = match instance(handle) { Ok(i) => i, Err(r) => return r };
-    let p_static: &'static MicrosoftGraphAdapter = unsafe {
-        std::mem::transmute::<&MicrosoftGraphAdapter, &'static MicrosoftGraphAdapter>(inst.plugin())
-    };
-    match inst.runtime().block_on(call(p_static)) {
-        Ok(v) => ok_response(&v),
-        Err(e) => cal_error_to_response(e),
-    }
-}
-
-fn dispatch_unit<F, Fut>(handle: *mut c_void, call: F) -> PluginCallResult
-where
-    F: FnOnce(&'static MicrosoftGraphAdapter) -> Fut,
-    Fut: std::future::Future<Output = CalResult<()>>,
-{
-    let inst = match instance(handle) { Ok(i) => i, Err(r) => return r };
-    let p_static: &'static MicrosoftGraphAdapter = unsafe {
-        std::mem::transmute::<&MicrosoftGraphAdapter, &'static MicrosoftGraphAdapter>(inst.plugin())
-    };
-    match inst.runtime().block_on(call(p_static)) {
-        Ok(()) => ok_empty_response(),
-        Err(e) => cal_error_to_response(e),
-    }
-}
-
 // ── Adapter base ───────────────────────────────────────────
 
 unsafe extern "C" fn ffi_authenticate(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
     let creds: CalCredentials = match decode_args(a, l) { Ok(v) => v, Err(r) => return r };
-    let inst = match instance(h) { Ok(i) => i, Err(r) => return r };
-    let p_static: &'static MicrosoftGraphAdapter = unsafe {
-        std::mem::transmute::<&MicrosoftGraphAdapter, &'static MicrosoftGraphAdapter>(inst.plugin())
-    };
-    let outcome: CalResult<AuthToken> = inst.runtime().block_on(async move {
-        cal_core::Adapter::authenticate(p_static, creds).await
-    });
-    match outcome {
-        Ok(v) => ok_response(&v),
-        Err(e) => cal_error_to_response(e),
-    }
+    dispatch(h, move |p| async move {
+        cal_core::Adapter::authenticate(p, creds).await
+    })
 }
 
 unsafe extern "C" fn ffi_capabilities(h: *mut c_void, _a: *const u8, _l: usize) -> PluginCallResult {

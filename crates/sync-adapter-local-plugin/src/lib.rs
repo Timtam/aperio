@@ -22,17 +22,19 @@ use std::path::PathBuf;
 
 use base64::Engine as _;
 use plugin_sdk::plugin_core::abi::OpenInstanceResult;
-use plugin_sdk::plugin_core::ffi::{PluginCallResult, PLUGIN_CALL_ERR_INTERNAL};
+use plugin_sdk::plugin_core::ffi::PluginCallResult;
 use plugin_sdk::plugin_core::vtables::SyncVtable;
 use plugin_sdk::{
-    decode_args, error_response, ok_empty_response, ok_response,
-    open_instance_with, sync_error_to_response, PluginInstance,
+    decode_args, error_response, ok_response, open_instance_with,
+    sync_error_to_response, PluginInstance,
 };
 use serde::Deserialize;
 use sync_adapter_local::LocalFsSyncAdapter;
 use sync_core::{
     DeviceCursor, LogFile, LogFileName, MetaJson, Snapshot, SyncAdapter,
 };
+
+plugin_sdk::sync_dispatch_helpers!(LocalFsSyncAdapter);
 
 #[derive(Debug, Deserialize)]
 struct InitConfig {
@@ -59,44 +61,6 @@ pub unsafe extern "C" fn plugin_open_instance(
 /// [`plugin_open_instance`].
 pub unsafe extern "C" fn plugin_close_instance(handle: *mut c_void) {
     PluginInstance::<LocalFsSyncAdapter>::drop_handle(handle);
-}
-
-fn instance<'a>(
-    handle: *mut c_void,
-) -> Result<&'a PluginInstance<LocalFsSyncAdapter>, PluginCallResult> {
-    unsafe { PluginInstance::<LocalFsSyncAdapter>::from_handle(handle) }
-        .ok_or_else(|| error_response(PLUGIN_CALL_ERR_INTERNAL, "null instance handle"))
-}
-
-fn dispatch<T, F, Fut>(handle: *mut c_void, call: F) -> PluginCallResult
-where
-    T: serde::Serialize,
-    F: FnOnce(&'static LocalFsSyncAdapter) -> Fut,
-    Fut: std::future::Future<Output = sync_core::SyncResult<T>>,
-{
-    let inst = match instance(handle) { Ok(i) => i, Err(r) => return r };
-    let plugin_static: &'static LocalFsSyncAdapter = unsafe {
-        std::mem::transmute::<&LocalFsSyncAdapter, &'static LocalFsSyncAdapter>(inst.plugin())
-    };
-    match inst.runtime().block_on(call(plugin_static)) {
-        Ok(value) => ok_response(&value),
-        Err(err) => sync_error_to_response(err),
-    }
-}
-
-fn dispatch_unit<F, Fut>(handle: *mut c_void, call: F) -> PluginCallResult
-where
-    F: FnOnce(&'static LocalFsSyncAdapter) -> Fut,
-    Fut: std::future::Future<Output = sync_core::SyncResult<()>>,
-{
-    let inst = match instance(handle) { Ok(i) => i, Err(r) => return r };
-    let plugin_static: &'static LocalFsSyncAdapter = unsafe {
-        std::mem::transmute::<&LocalFsSyncAdapter, &'static LocalFsSyncAdapter>(inst.plugin())
-    };
-    match inst.runtime().block_on(call(plugin_static)) {
-        Ok(()) => ok_empty_response(),
-        Err(err) => sync_error_to_response(err),
-    }
 }
 
 // ─────────────────────────────────────────────────────────────

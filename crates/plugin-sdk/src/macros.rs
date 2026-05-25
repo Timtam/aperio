@@ -400,6 +400,122 @@ macro_rules! declare_discover {
 /// duration of the call; the returned payload bytes are plugin-
 /// allocated and the host drains them via the response's `free`
 /// fn-pointer right after copying.
+/// Emit the per-adapter `instance` / `dispatch` /
+/// `dispatch_unit` wrapper triplet specialised on a calendar /
+/// tasks / contacts adapter type.
+///
+/// Each plugin used to define this triplet by hand — ~30 LOC of
+/// byte-for-byte boilerplate, the only variation being the
+/// adapter type. The macro emits the same shape on demand,
+/// delegating each call to the matching plugin-sdk generic
+/// ([`crate::instance`], [`crate::cal_dispatch`],
+/// [`crate::cal_dispatch_unit`]) so the per-call-site syntax in
+/// the plugin's `ffi_*` shims stays untouched (no turbofish
+/// noise — the wrappers pin the adapter type).
+///
+/// ```ignore
+/// use plugin_sdk::cal_dispatch_helpers;
+///
+/// cal_dispatch_helpers!(MyCalendarAdapter);
+///
+/// unsafe extern "C" fn ffi_list_calendars(h: *mut c_void, _a: *const u8, _l: usize) -> PluginCallResult {
+///     dispatch(h, |p| async move { p.list_calendars().await })
+/// }
+/// ```
+///
+/// At most one invocation per crate — the macro emits items
+/// named `instance` / `dispatch` / `dispatch_unit` at the call
+/// site's module scope; two invocations would collide.
+#[macro_export]
+macro_rules! cal_dispatch_helpers {
+    ($adapter:ty) => {
+        #[allow(dead_code)]
+        fn instance<'a>(
+            handle: *mut ::std::os::raw::c_void,
+        ) -> ::std::result::Result<
+            &'a $crate::PluginInstance<$adapter>,
+            $crate::plugin_core::ffi::PluginCallResult,
+        > {
+            $crate::instance::<$adapter>(handle)
+        }
+
+        #[allow(dead_code)]
+        fn dispatch<T, F, Fut>(
+            handle: *mut ::std::os::raw::c_void,
+            call: F,
+        ) -> $crate::plugin_core::ffi::PluginCallResult
+        where
+            T: ::serde::Serialize,
+            F: ::std::ops::FnOnce(&'static $adapter) -> Fut,
+            Fut: ::std::future::Future<
+                Output = ::cal_core::error::Result<T>,
+            >,
+        {
+            $crate::cal_dispatch::<$adapter, T, F, Fut>(handle, call)
+        }
+
+        #[allow(dead_code)]
+        fn dispatch_unit<F, Fut>(
+            handle: *mut ::std::os::raw::c_void,
+            call: F,
+        ) -> $crate::plugin_core::ffi::PluginCallResult
+        where
+            F: ::std::ops::FnOnce(&'static $adapter) -> Fut,
+            Fut: ::std::future::Future<
+                Output = ::cal_core::error::Result<()>,
+            >,
+        {
+            $crate::cal_dispatch_unit::<$adapter, F, Fut>(handle, call)
+        }
+    };
+}
+
+/// Sync-adapter sibling of [`cal_dispatch_helpers!`]. Emits the
+/// `instance` / `dispatch` / `dispatch_unit` triplet wired to
+/// `sync_core::SyncResult` (sync adapters return a different
+/// error type than calendar/tasks/contacts ones).
+///
+/// At most one invocation per crate.
+#[macro_export]
+macro_rules! sync_dispatch_helpers {
+    ($adapter:ty) => {
+        #[allow(dead_code)]
+        fn instance<'a>(
+            handle: *mut ::std::os::raw::c_void,
+        ) -> ::std::result::Result<
+            &'a $crate::PluginInstance<$adapter>,
+            $crate::plugin_core::ffi::PluginCallResult,
+        > {
+            $crate::instance::<$adapter>(handle)
+        }
+
+        #[allow(dead_code)]
+        fn dispatch<T, F, Fut>(
+            handle: *mut ::std::os::raw::c_void,
+            call: F,
+        ) -> $crate::plugin_core::ffi::PluginCallResult
+        where
+            T: ::serde::Serialize,
+            F: ::std::ops::FnOnce(&'static $adapter) -> Fut,
+            Fut: ::std::future::Future<Output = ::sync_core::SyncResult<T>>,
+        {
+            $crate::sync_dispatch::<$adapter, T, F, Fut>(handle, call)
+        }
+
+        #[allow(dead_code)]
+        fn dispatch_unit<F, Fut>(
+            handle: *mut ::std::os::raw::c_void,
+            call: F,
+        ) -> $crate::plugin_core::ffi::PluginCallResult
+        where
+            F: ::std::ops::FnOnce(&'static $adapter) -> Fut,
+            Fut: ::std::future::Future<Output = ::sync_core::SyncResult<()>>,
+        {
+            $crate::sync_dispatch_unit::<$adapter, F, Fut>(handle, call)
+        }
+    };
+}
+
 #[macro_export]
 macro_rules! declare_probe_host_key {
     (handler: $handler:path $(,)?) => {

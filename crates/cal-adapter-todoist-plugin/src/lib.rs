@@ -16,18 +16,16 @@
 use std::os::raw::{c_char, c_void};
 
 use cal_adapter_todoist::TodoistAdapter;
-use cal_core::adapter::{AuthToken, Capability, Credentials as CalCredentials};
-use cal_core::error::Result as CalResult;
+use cal_core::adapter::{Capability, Credentials as CalCredentials};
 use cal_core::types::NewTask;
 use cal_core::TasksFeature;
 use plugin_sdk::plugin_core::abi::OpenInstanceResult;
-use plugin_sdk::plugin_core::ffi::{PluginCallResult, PLUGIN_CALL_ERR_INTERNAL};
+use plugin_sdk::plugin_core::ffi::PluginCallResult;
 use plugin_sdk::plugin_core::vtables::{CalendarAdapterVtable, TasksVtable};
-use plugin_sdk::{
-    cal_error_to_response, decode_args, error_response, ok_empty_response,
-    ok_response, open_instance_with, PluginInstance,
-};
+use plugin_sdk::{decode_args, ok_response, open_instance_with, PluginInstance};
 use serde::Deserialize;
+
+plugin_sdk::cal_dispatch_helpers!(TodoistAdapter);
 
 #[derive(Debug, Deserialize)]
 struct InitConfig {
@@ -56,50 +54,6 @@ pub unsafe extern "C" fn plugin_close_instance(handle: *mut c_void) {
     PluginInstance::<TodoistAdapter>::drop_handle(handle);
 }
 
-/// Borrow the instance back from the FFI handle. Returns an
-/// error response when the handle is NULL.
-fn instance<'a>(
-    handle: *mut c_void,
-) -> Result<&'a PluginInstance<TodoistAdapter>, PluginCallResult> {
-    unsafe { PluginInstance::<TodoistAdapter>::from_handle(handle) }
-        .ok_or_else(|| error_response(PLUGIN_CALL_ERR_INTERNAL, "null instance handle"))
-}
-
-fn dispatch<T, F, Fut>(handle: *mut c_void, call: F) -> PluginCallResult
-where
-    T: serde::Serialize,
-    F: FnOnce(&'static TodoistAdapter) -> Fut,
-    Fut: std::future::Future<Output = CalResult<T>>,
-{
-    let inst = match instance(handle) {
-        Ok(i) => i,
-        Err(r) => return r,
-    };
-    let p_static: &'static TodoistAdapter =
-        unsafe { std::mem::transmute::<&TodoistAdapter, &'static TodoistAdapter>(inst.plugin()) };
-    match inst.runtime().block_on(call(p_static)) {
-        Ok(v) => ok_response(&v),
-        Err(e) => cal_error_to_response(e),
-    }
-}
-
-fn dispatch_unit<F, Fut>(handle: *mut c_void, call: F) -> PluginCallResult
-where
-    F: FnOnce(&'static TodoistAdapter) -> Fut,
-    Fut: std::future::Future<Output = CalResult<()>>,
-{
-    let inst = match instance(handle) {
-        Ok(i) => i,
-        Err(r) => return r,
-    };
-    let p_static: &'static TodoistAdapter =
-        unsafe { std::mem::transmute::<&TodoistAdapter, &'static TodoistAdapter>(inst.plugin()) };
-    match inst.runtime().block_on(call(p_static)) {
-        Ok(()) => ok_empty_response(),
-        Err(e) => cal_error_to_response(e),
-    }
-}
-
 // ── Adapter base ───────────────────────────────────────────
 
 unsafe extern "C" fn ffi_authenticate(
@@ -110,19 +64,9 @@ unsafe extern "C" fn ffi_authenticate(
     let creds: CalCredentials = match decode_args(a, l) {
         Ok(v) => v, Err(r) => return r,
     };
-    let inst = match instance(h) {
-        Ok(i) => i,
-        Err(r) => return r,
-    };
-    let p_static: &'static TodoistAdapter =
-        unsafe { std::mem::transmute::<&TodoistAdapter, &'static TodoistAdapter>(inst.plugin()) };
-    let outcome: CalResult<AuthToken> = inst.runtime().block_on(async move {
-        cal_core::Adapter::authenticate(p_static, creds).await
-    });
-    match outcome {
-        Ok(v) => ok_response(&v),
-        Err(e) => cal_error_to_response(e),
-    }
+    dispatch(h, move |p| async move {
+        cal_core::Adapter::authenticate(p, creds).await
+    })
 }
 
 unsafe extern "C" fn ffi_capabilities(
