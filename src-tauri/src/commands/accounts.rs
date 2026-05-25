@@ -222,7 +222,7 @@ fn required_secret_slot(kind: AdapterKind) -> Option<SecretSlot> {
 /// wizard always errs on the side of letting the user
 /// re-authenticate.
 fn secret_present(account_id: &str, slot: SecretSlot) -> bool {
-    matches!(secrets::retrieve(account_id, slot), Ok(_))
+    secrets::retrieve(account_id, slot).is_ok()
 }
 
 /// Request payload for creating an account. `config_json` is the

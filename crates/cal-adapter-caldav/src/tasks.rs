@@ -72,7 +72,7 @@ pub async fn list_task_lists(
     Ok(entries
         .into_iter()
         .filter(|e| e.is_calendar)
-        .filter(|e| supports_vtodo(e))
+        .filter(supports_vtodo)
         .map(|e| to_task_list(home_url, e))
         .collect())
 }
@@ -375,7 +375,7 @@ fn apply_common(todo: &mut Todo, uid: &str, task: &NewTask, completed_at: Option
         TaskPriority::Medium => 5,
         TaskPriority::Low => 9,
     };
-    todo.add_property("PRIORITY", &prio.to_string());
+    todo.add_property("PRIORITY", prio.to_string());
 
     // DTSTART / DUE: emit through the typed icalendar helpers so the
     // `VALUE=DATE` parameter goes on the wire when we hand over a
@@ -411,7 +411,7 @@ fn apply_common(todo: &mut Todo, uid: &str, task: &NewTask, completed_at: Option
         todo.due(due);
     }
     if let Some(completed) = completed_at {
-        todo.add_property("COMPLETED", &completed.format("%Y%m%dT%H%M%SZ").to_string());
+        todo.add_property("COMPLETED", completed.format("%Y%m%dT%H%M%SZ").to_string());
     }
 }
 

@@ -28,3 +28,6 @@ tokio = { workspace = true }
 # can spin up a fully-migrated SQLite without re-implementing
 # the schema replay. Off by default in production builds.
 test-support = []
+
+[lints]
+workspace = true

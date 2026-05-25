@@ -520,7 +520,7 @@ fn percent_decode(s: &str) -> Option<String> {
             }
             let hi = (bytes[i + 1] as char).to_digit(16)?;
             let lo = (bytes[i + 2] as char).to_digit(16)?;
-            out.push(char::from_u32((hi * 16 + lo) as u32)?);
+            out.push(char::from_u32(hi * 16 + lo)?);
             i += 3;
         } else {
             out.push(b as char);

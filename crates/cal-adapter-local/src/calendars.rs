@@ -219,7 +219,7 @@ impl LocalAdapter {
             None => Vec::new(),
             Some(s) => decode_json(&s)?,
         };
-        if !list.iter().any(|d| *d == occurrence_utc) {
+        if !list.contains(&occurrence_utc) {
             list.push(occurrence_utc);
         }
         let exc_json = encode_json(&list)?;

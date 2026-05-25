@@ -390,7 +390,7 @@ mod tests {
         std::mem::forget(boxed);
         unsafe extern "C" fn free_boxed(data: *mut u8, len: usize) {
             if !data.is_null() {
-                let _ = Box::from_raw(std::slice::from_raw_parts_mut(data, len));
+                let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(data, len));
             }
         }
         PluginCallResult {
@@ -417,7 +417,7 @@ mod tests {
         std::mem::forget(boxed);
         unsafe extern "C" fn free_boxed(data: *mut u8, len: usize) {
             if !data.is_null() {
-                let _ = Box::from_raw(std::slice::from_raw_parts_mut(data, len));
+                let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(data, len));
             }
         }
         PluginCallResult {

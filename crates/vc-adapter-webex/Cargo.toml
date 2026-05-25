@@ -12,3 +12,6 @@ description = "Aperio — Cisco WebEx Meetings REST API adapter (DESIGN.md §11)
 vc-core.workspace = true
 async-trait.workspace = true
 serde.workspace = true
+
+[lints]
+workspace = true

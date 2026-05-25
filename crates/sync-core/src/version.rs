@@ -130,7 +130,7 @@ pub fn version_less(a: &str, b: &str) -> bool {
 
 fn parse_triple(s: &str) -> Option<(u32, u32, u32)> {
     // Trim any pre-release / build metadata suffix.
-    let trimmed = s.split(|c: char| c == '-' || c == '+').next().unwrap_or("");
+    let trimmed = s.split(['-', '+']).next().unwrap_or("");
     let mut parts = trimmed.split('.');
     let major = parts.next()?.parse::<u32>().ok()?;
     let minor = parts.next().unwrap_or("0").parse::<u32>().ok()?;

@@ -34,3 +34,6 @@ base64 = "0.22"
 plugin-core.workspace = true
 tokio = { workspace = true }
 tempfile = "3"
+
+[lints]
+workspace = true

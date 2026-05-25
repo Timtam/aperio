@@ -90,6 +90,17 @@ pub async fn delete_user_pref(
     Ok(())
 }
 
+impl From<UserPrefsError> for CommandError {
+    fn from(err: UserPrefsError) -> Self {
+        match err {
+            UserPrefsError::Sqlite(e) => CommandError {
+                code: "internal",
+                message: e.to_string(),
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -112,16 +123,5 @@ mod tests {
         // Prefix entry doesn't match the bare prefix itself.
         assert!(!is_synced_key("sound"));
         assert!(!is_synced_key("sound."));
-    }
-}
-
-impl From<UserPrefsError> for CommandError {
-    fn from(err: UserPrefsError) -> Self {
-        match err {
-            UserPrefsError::Sqlite(e) => CommandError {
-                code: "internal",
-                message: e.to_string(),
-            },
-        }
     }
 }

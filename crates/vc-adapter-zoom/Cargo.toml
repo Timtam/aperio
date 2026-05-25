@@ -12,3 +12,6 @@ description = "Aperio — Zoom Meeting API adapter (DESIGN.md §11). Stub VcAdap
 vc-core.workspace = true
 async-trait.workspace = true
 serde.workspace = true
+
+[lints]
+workspace = true

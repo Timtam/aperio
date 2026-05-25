@@ -338,7 +338,7 @@ pub async fn add_event_exdate(
         )));
     }
     let recurrence = master.recurrence.as_mut().unwrap();
-    if !recurrence.exceptions.iter().any(|e| *e == occurrence) {
+    if !recurrence.exceptions.contains(&occurrence) {
         recurrence.exceptions.push(occurrence);
     }
     let master_clone = master.clone();

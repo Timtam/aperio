@@ -12,3 +12,6 @@ description = "Aperio — Microsoft Teams (Online Meetings via Graph API) adapte
 vc-core.workspace = true
 async-trait.workspace = true
 serde.workspace = true
+
+[lints]
+workspace = true

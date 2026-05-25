@@ -115,11 +115,9 @@ pub fn parse_find_folder_response(xml: &str) -> EwsResult<Vec<ParsedFolder>> {
                     inside_folder = false;
                 }
             }
-            Ok(XmlEvent::Text(t)) => {
-                if text_target == Some("name") {
-                    let s = t.unescape().map(|c| c.to_string()).unwrap_or_default();
-                    current.display_name.push_str(&s);
-                }
+            Ok(XmlEvent::Text(t)) if text_target == Some("name") => {
+                let s = t.unescape().map(|c| c.to_string()).unwrap_or_default();
+                current.display_name.push_str(&s);
             }
             Ok(XmlEvent::Eof) => break,
             Err(err) => {

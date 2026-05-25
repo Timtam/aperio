@@ -258,7 +258,7 @@ mod tests {
 
     fn fresh_db() -> (TempDir, DbHandle) {
         let dir = TempDir::new().unwrap();
-        let db = DbHandle::open(&dir.path().join("test.sqlite")).unwrap();
+        let db = DbHandle::open(dir.path().join("test.sqlite")).unwrap();
         (dir, db)
     }
 

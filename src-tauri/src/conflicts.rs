@@ -40,6 +40,7 @@ impl ConflictKind {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "event" => Some(ConflictKind::Event),
@@ -97,6 +98,7 @@ impl ResolutionChoice {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "keep_local" => Some(ResolutionChoice::KeepLocal),
@@ -224,13 +226,12 @@ impl<'a> ConflictsRepo<'a> {
                FROM sync_conflicts
               WHERE id = ?",
         )?;
-        let row = stmt
-            .query_row(params![id], row_to_conflict)
+
+        stmt.query_row(params![id], row_to_conflict)
             .map_err(|err| match err {
                 rusqlite::Error::QueryReturnedNoRows => ConflictsError::NotFound(id),
                 other => ConflictsError::Sqlite(other),
-            })?;
-        row
+            })?
     }
 
     /// Flip `resolved = 1` and record the choice + timestamp.
@@ -326,7 +327,7 @@ mod tests {
 
     fn fresh_db() -> (TempDir, DbHandle) {
         let dir = TempDir::new().unwrap();
-        let db = DbHandle::open(&dir.path().join("test.sqlite")).unwrap();
+        let db = DbHandle::open(dir.path().join("test.sqlite")).unwrap();
         (dir, db)
     }
 

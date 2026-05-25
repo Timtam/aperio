@@ -20,3 +20,6 @@ chrono.workspace = true
 # Error variants implement std::error::Error via thiserror so the
 # command layer + per-provider adapters share a single error type.
 thiserror.workspace = true
+
+[lints]
+workspace = true

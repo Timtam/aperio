@@ -413,7 +413,7 @@ mod tests {
 
     fn build_compactor() -> (TempDir, DbHandle, Compactor) {
         let dir = TempDir::new().unwrap();
-        let db = DbHandle::open(&dir.path().join("test.sqlite")).unwrap();
+        let db = DbHandle::open(dir.path().join("test.sqlite")).unwrap();
         let adapter = Arc::new(LocalAdapter::new(db.shared()));
         let builder = Arc::new(SnapshotBuilder::new(db.shared(), adapter, "1.0.0-test"));
         let compactor = Compactor::new(

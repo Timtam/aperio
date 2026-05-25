@@ -21,3 +21,6 @@ uuid.workspace = true
 # every adapter and the command-layer serialize / deserialize the
 # same way — no per-adapter base64 quirks.
 base64 = "0.22"
+
+[lints]
+workspace = true

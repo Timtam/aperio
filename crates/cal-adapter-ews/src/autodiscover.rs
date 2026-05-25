@@ -352,10 +352,8 @@ fn parse_response(body: &str) -> EwsResult<Outcome> {
                         "action" => action_text.push_str(s),
                         "redirect_addr" => redirect_addr.push_str(s),
                         "redirect_url" => redirect_url.push_str(s),
-                        "ews_url" => {
-                            if ews_url.is_empty() {
-                                ews_url.push_str(s);
-                            }
+                        "ews_url" if ews_url.is_empty() => {
+                            ews_url.push_str(s);
                         }
                         "error_code" => error_code.push_str(s),
                         "error_message" => error_message.push_str(s),

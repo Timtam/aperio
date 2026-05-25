@@ -646,11 +646,13 @@ mod tests {
 
     #[test]
     fn to_contact_list_strips_alpha_from_hex() {
-        let mut entry = ResponseEntry::default();
-        entry.href = "/addressbooks/alice/main/".into();
-        entry.displayname = Some("Main".into());
-        entry.calendar_color = Some("#1e88e5ff".into());
-        entry.is_addressbook = true;
+        let entry = ResponseEntry {
+            href: "/addressbooks/alice/main/".into(),
+            displayname: Some("Main".into()),
+            calendar_color: Some("#1e88e5ff".into()),
+            is_addressbook: true,
+            ..ResponseEntry::default()
+        };
         let home = Url::parse("https://example.org/addressbooks/alice/").unwrap();
         let list = to_contact_list(&home, entry);
         assert_eq!(list.name, "Main");

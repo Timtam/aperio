@@ -29,3 +29,6 @@ open = "5"
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 mockito = "1"
+
+[lints]
+workspace = true

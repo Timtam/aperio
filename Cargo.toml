@@ -61,6 +61,33 @@ authors = ["Aperio Contributors"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/Timtam/Aperio"
 
+# Workspace-wide clippy policy. CI runs `cargo clippy --workspace
+# --all-targets -- -D warnings`; without these, recent clippy
+# releases (1.95+) turn newly-tightened stylistic lints into
+# hard build failures across hundreds of pre-existing doc
+# comments. The allows below opt out of the ones we judge to be
+# noise; the actual behavioural lints (correctness, perf,
+# undefined-behaviour proxies) stay on as errors.
+[workspace.lints.clippy]
+# Doc-list rules tightened in clippy 1.95: emit "doc list item
+# without indentation" (lint name: doc_lazy_continuation) and
+# "doc list item overindented" (lint name: doc_overindented_list_items)
+# against ~50 existing multi-line `///` comments in our crate
+# tree. Our doc style intentionally uses 2-space inner bullets
+# that don't always re-align with the parent; reformatting them
+# would churn the whole tree for zero reader benefit.
+doc_lazy_continuation = "allow"
+doc_overindented_list_items = "allow"
+# Signature-shape lints we choose to live with. Many of our
+# Tauri commands legitimately take more than 7 args (every
+# managed-State plus the call payload); rewriting them into
+# request structs hides what the IPC contract actually needs.
+too_many_arguments = "allow"
+# `Mutex<Option<(Vec<X>, DateTime<Utc>)>>` is the cache shape
+# every external-adapter uses; the proposed `type` alias would
+# reduce reader signal more than it adds.
+type_complexity = "allow"
+
 [workspace.dependencies]
 # Aperio internal crates
 cal-core = { path = "crates/cal-core" }

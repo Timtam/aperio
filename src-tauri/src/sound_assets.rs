@@ -381,6 +381,12 @@ fn is_sha256_hex(s: &str) -> bool {
     s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit())
 }
 
+/// Path helper. The orchestrator + onboarding both want the
+/// same place; this keeps the convention in one spot.
+pub fn sounds_dir_under(data_dir: &Path) -> PathBuf {
+    data_dir.join("assets").join("sounds")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -390,7 +396,7 @@ mod tests {
 
     fn fresh_db() -> (TempDir, DbHandle) {
         let dir = TempDir::new().unwrap();
-        let db = DbHandle::open(&dir.path().join("test.sqlite")).unwrap();
+        let db = DbHandle::open(dir.path().join("test.sqlite")).unwrap();
         (dir, db)
     }
 
@@ -654,10 +660,4 @@ mod tests {
         assert_eq!(report.missing_on_remote, 1);
         assert_eq!(report.failed, 0);
     }
-}
-
-/// Path helper. The orchestrator + onboarding both want the
-/// same place; this keeps the convention in one spot.
-pub fn sounds_dir_under(data_dir: &Path) -> PathBuf {
-    data_dir.join("assets").join("sounds")
 }

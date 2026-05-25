@@ -241,7 +241,7 @@ async fn get_gal_contacts(client: &EwsClient) -> EwsResult<Vec<Contact>> {
     // having to short-circuit on the first miss. We capture the
     // prefix in the log line so a user enabling debug tracing
     // can tell which letter dropped if results look short.
-    let personas: Vec<ParsedPersona> = stream::iter(prefixes.into_iter())
+    let personas: Vec<ParsedPersona> = stream::iter(prefixes)
         .map(move |prefix: String| {
             let client = owned_client.clone();
             async move {
@@ -790,11 +790,9 @@ pub fn parse_find_contact_folder_response(xml: &str) -> EwsResult<Vec<ParsedCont
                     inside_folder = false;
                 }
             }
-            Ok(XmlEvent::Text(t)) => {
-                if text_target == Some("name") {
-                    let s = t.unescape().map(|c| c.to_string()).unwrap_or_default();
-                    current.display_name.push_str(&s);
-                }
+            Ok(XmlEvent::Text(t)) if text_target == Some("name") => {
+                let s = t.unescape().map(|c| c.to_string()).unwrap_or_default();
+                current.display_name.push_str(&s);
             }
             Ok(XmlEvent::Eof) => break,
             Err(err) => {
@@ -967,14 +965,13 @@ pub fn parse_find_contact_item_response(xml: &str) -> EwsResult<Vec<ParsedContac
                                 // below.
                                 current.emails.push(value);
                             }
-                            Some("phone") => {
+                            Some("phone")
                                 // Dedup: the same number can be
                                 // filed under multiple keys (rare
                                 // but legal). We keep first-seen.
-                                if !current.phone_numbers.contains(&value) {
+                                if !current.phone_numbers.contains(&value) => {
                                     current.phone_numbers.push(value);
                                 }
-                            }
                             _ => {}
                         }
                     }
@@ -2021,15 +2018,13 @@ pub fn parse_resolve_names_response(xml: &str) -> EwsResult<Vec<ParsedPersona>> 
                     continue;
                 }
                 match text_target {
-                    Some("display_name") => {
-                        if current.display_name.is_empty() {
-                            current.display_name.push_str(s);
-                        }
+                    Some("display_name") if current.display_name.is_empty() => {
+                        current.display_name.push_str(s);
                     }
-                    Some("email_address") => {
-                        if s.contains('@') && !current.email_addresses.contains(&s.to_string()) {
-                            current.email_addresses.push(s.to_string());
-                        }
+                    Some("email_address")
+                        if s.contains('@') && !current.email_addresses.contains(&s.to_string()) =>
+                    {
+                        current.email_addresses.push(s.to_string());
                     }
                     Some("given_name") => {
                         current

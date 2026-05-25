@@ -57,7 +57,7 @@ pub async fn list_calendars(
     Ok(entries
         .into_iter()
         .filter(|e| e.is_calendar)
-        .filter(|e| supports_vevent(e))
+        .filter(supports_vevent)
         .map(|e| to_calendar(home_url, e))
         .collect())
 }

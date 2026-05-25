@@ -28,15 +28,11 @@ pub struct CaldavAccountConfig {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum AuthKind {
+    #[default]
     Basic,
     Bearer,
-}
-
-impl Default for AuthKind {
-    fn default() -> Self {
-        AuthKind::Basic
-    }
 }
 
 /// Combined config + secret. Constructed at call time; never stored

@@ -451,11 +451,9 @@ impl EwsAdapter {
             // Range filter applies to singles only. Masters carry
             // a recurrence and the frontend expander handles the
             // window.
-            if ev.recurrence.is_none() {
-                if ev.end < range.start || ev.start >= range.end {
-                    filtered_out_of_range += 1;
-                    continue;
-                }
+            if ev.recurrence.is_none() && (ev.end < range.start || ev.start >= range.end) {
+                filtered_out_of_range += 1;
+                continue;
             }
             // For each modified occurrence on a master, emit a
             // synthetic standalone event at the moved time. The
@@ -927,8 +925,10 @@ mod state_persistence_tests {
             let adapter =
                 EwsAdapter::new("https://example/EWS/Exchange.asmx".into(), creds.clone())
                     .with_state_dir(dir.clone());
-            let mut state = SyncedFolderState::default();
-            state.sync_state = Some("COOKIE-XYZ".into());
+            let mut state = SyncedFolderState {
+                sync_state: Some("COOKIE-XYZ".into()),
+                ..Default::default()
+            };
             state.items.insert(
                 "ITEM-1".into(),
                 ParsedItem {

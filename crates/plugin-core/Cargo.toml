@@ -41,3 +41,6 @@ base64 = "0.22"
 # The manager's bundled-dir walk + missing-manifest paths are
 # exercised via temp directories.
 tempfile = "3"
+
+[lints]
+workspace = true

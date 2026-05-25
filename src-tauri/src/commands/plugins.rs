@@ -240,7 +240,7 @@ pub async fn list_plugins(
 /// both the list payload (so the panel can hide the Uninstall
 /// button for bundled plugins) and the uninstall path (so we
 /// refuse to scrub a path we don't own).
-fn plugin_source(plugin_id: &str, user_plugins_dir: &PathBuf) -> PluginSource {
+fn plugin_source(plugin_id: &str, user_plugins_dir: &std::path::Path) -> PluginSource {
     if user_plugins_dir.join(plugin_id).is_dir() {
         PluginSource::User
     } else {

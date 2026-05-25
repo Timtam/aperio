@@ -181,26 +181,24 @@ pub fn parse_vcard(
                     });
             }
             "UID" | "PRODID" => { /* discard — adapter owns the id mapping */ }
-            "KIND" | "X-ADDRESSBOOKSERVER-KIND" => {
+            "KIND" | "X-ADDRESSBOOKSERVER-KIND"
                 // The only `KIND` value Aperio acts on is `group`.
                 // vCard 4.0 also defines `individual`, `org`,
                 // `location`, `application` — none of which change
                 // our wire mapping today, so we treat anything
                 // non-group as a regular contact.
-                if value.trim().eq_ignore_ascii_case("group") {
+                if value.trim().eq_ignore_ascii_case("group") => {
                     is_group = true;
                 }
-            }
-            "PHOTO" => {
+            "PHOTO"
                 // Any non-empty PHOTO body flips the listing flag.
                 // We don't decode here; the actual bytes are
                 // extracted on-demand by `parse_vcard_photo` so a
                 // 1000-contact PROPFIND doesn't decode a megabyte
                 // of base64 the user might never look at.
-                if !value.trim().is_empty() {
+                if !value.trim().is_empty() => {
                     has_photo = true;
                 }
-            }
             "ADR" => {
                 // Seven components per RFC 6350 §6.3.1:
                 //   0: po-box, 1: extended-address, 2: street,
@@ -390,9 +388,8 @@ fn decode_inline_photo(head: &str, value: &str) -> Option<ContactPhoto> {
         .strip_prefix("data:")
         .or_else(|| value.strip_prefix("DATA:"))
     {
-        let mut split = rest.splitn(2, ',');
-        let header = split.next()?;
-        let body = split.next()?;
+        let (header, body) = rest.split_once(',')?;
+
         // header looks like `image/jpeg;base64`. Pull out the mime
         // up to the first `;` and verify the encoding is base64.
         let (mime, params) = header.split_once(';').unwrap_or((header, ""));

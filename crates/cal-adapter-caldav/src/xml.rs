@@ -52,15 +52,13 @@ pub fn extract_response_hrefs(body: &str) -> CaldavResult<Vec<String>> {
                     capture_href = false;
                 }
             }
-            Ok(Event::Text(t)) => {
-                if capture_href {
-                    let text = t
-                        .unescape()
-                        .map_err(|e| CaldavError::Protocol(e.to_string()))?
-                        .to_string();
-                    if !text.is_empty() {
-                        hrefs.push(text);
-                    }
+            Ok(Event::Text(t)) if capture_href => {
+                let text = t
+                    .unescape()
+                    .map_err(|e| CaldavError::Protocol(e.to_string()))?
+                    .to_string();
+                if !text.is_empty() {
+                    hrefs.push(text);
                 }
             }
             Ok(Event::Eof) => break,
@@ -107,15 +105,13 @@ pub fn extract_first_nested_href(
                     capture_href = false;
                 }
             }
-            Ok(Event::Text(t)) => {
-                if capture_href && found.is_none() {
-                    let text = t
-                        .unescape()
-                        .map_err(|e| CaldavError::Protocol(e.to_string()))?
-                        .to_string();
-                    if !text.is_empty() {
-                        found = Some(text);
-                    }
+            Ok(Event::Text(t)) if capture_href && found.is_none() => {
+                let text = t
+                    .unescape()
+                    .map_err(|e| CaldavError::Protocol(e.to_string()))?
+                    .to_string();
+                if !text.is_empty() {
+                    found = Some(text);
                 }
             }
             Ok(Event::Eof) => break,
@@ -396,15 +392,11 @@ pub fn first_failed_status_code(body: &str) -> Option<u16> {
     let mut capture_status = false;
     loop {
         match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(e)) => {
-                if local_name_eq(e.name(), b"status") {
-                    capture_status = true;
-                }
+            Ok(Event::Start(e)) if local_name_eq(e.name(), b"status") => {
+                capture_status = true;
             }
-            Ok(Event::End(e)) => {
-                if local_name_eq(e.name(), b"status") {
-                    capture_status = false;
-                }
+            Ok(Event::End(e)) if local_name_eq(e.name(), b"status") => {
+                capture_status = false;
             }
             Ok(Event::Text(t)) if capture_status => {
                 if let Ok(text) = t.unescape() {

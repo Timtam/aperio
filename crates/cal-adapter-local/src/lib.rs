@@ -110,8 +110,6 @@ pub(crate) fn map_json_err(err: serde_json::Error) -> CoreError {
 #[cfg(any(test, feature = "test-support"))]
 #[doc(hidden)]
 pub mod test_support {
-    //! Helpers for unit tests.
-
     use std::sync::{Arc, Mutex};
 
     use rusqlite::Connection;

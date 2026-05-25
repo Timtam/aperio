@@ -44,3 +44,6 @@ base64 = "0.22"
 # aes-gcm crate's `OsRng` re-export pulls this in but we depend
 # explicitly for clarity.
 rand = "0.8"
+
+[lints]
+workspace = true

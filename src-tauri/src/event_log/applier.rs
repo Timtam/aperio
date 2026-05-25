@@ -961,7 +961,7 @@ mod tests {
             other,
             SyncEvent::EventCreated(EventPayload {
                 id: "ev-1".into(),
-                fields: serde_json::to_value(&fixture_event("ev-1", "cal-x")).unwrap(),
+                fields: serde_json::to_value(fixture_event("ev-1", "cal-x")).unwrap(),
             }),
             2000,
         );
@@ -1006,7 +1006,7 @@ mod tests {
                 other,
                 SyncEvent::EventCreated(EventPayload {
                     id: "ev-1".into(),
-                    fields: serde_json::to_value(&fixture_event("ev-1", "cal-x")).unwrap(),
+                    fields: serde_json::to_value(fixture_event("ev-1", "cal-x")).unwrap(),
                 }),
                 2000,
             ),
@@ -1043,7 +1043,7 @@ mod tests {
                 me,
                 SyncEvent::EventCreated(EventPayload {
                     id: "ev-1".into(),
-                    fields: serde_json::to_value(&fixture_event("ev-1", "cal-x")).unwrap(),
+                    fields: serde_json::to_value(fixture_event("ev-1", "cal-x")).unwrap(),
                 }),
                 2000,
             ),
@@ -1090,7 +1090,7 @@ mod tests {
                 me,
                 SyncEvent::EventCreated(EventPayload {
                     id: "ev-1".into(),
-                    fields: serde_json::to_value(&fixture_event("ev-1", "cal-x")).unwrap(),
+                    fields: serde_json::to_value(fixture_event("ev-1", "cal-x")).unwrap(),
                 }),
                 2000,
             ),
@@ -1163,7 +1163,7 @@ mod tests {
                     other.clone(),
                     SyncEvent::EventCreated(EventPayload {
                         id: "ev-1".into(),
-                        fields: serde_json::to_value(&fixture_event("ev-1", "cal-x")).unwrap(),
+                        fields: serde_json::to_value(fixture_event("ev-1", "cal-x")).unwrap(),
                     }),
                     2000,
                 ),

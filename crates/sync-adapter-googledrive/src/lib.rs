@@ -223,7 +223,7 @@ impl DriveSyncAdapter {
         let token = self.access_token().await?;
         match self.ensure_folder_ids(&token).await {
             Ok(ids) => Ok(ids),
-            Err(err) if matches!(err, SyncError::Auth(_)) => {
+            Err(SyncError::Auth(_)) => {
                 let token = self.force_refresh().await?;
                 self.ensure_folder_ids(&token).await
             }
@@ -454,7 +454,7 @@ impl DriveSyncAdapter {
         let token = self.access_token().await?;
         match self.upload_inner(&token, parent_id, name, &bytes).await {
             Ok(()) => Ok(()),
-            Err(err) if matches!(err, SyncError::Auth(_)) => {
+            Err(SyncError::Auth(_)) => {
                 let token = self.force_refresh().await?;
                 self.upload_inner(&token, parent_id, name, &bytes).await
             }

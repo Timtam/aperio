@@ -38,6 +38,16 @@ use crate::response::{error_response, ok_empty_response, ok_response};
 /// Borrow the per-instance handle, returning a typed
 /// [`PluginInstance`] reference or an internal error response
 /// when the handle is NULL.
+///
+/// The fn dereferences a raw pointer but stays safe by contract:
+/// every call site is itself an `unsafe extern "C"` FFI shim that
+/// just got the pointer from the host's `open_instance` round-
+/// trip — the host promises the pointer is either a valid
+/// `PluginInstance<A>` or NULL. `from_handle` returns `None` on
+/// NULL; non-NULL is dereferenced inside an `unsafe` block.
+/// Marking this fn itself `unsafe` would force every call site
+/// to wrap it in another `unsafe` block for no diagnostic gain.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn instance<'a, A>(handle: *mut c_void) -> Result<&'a PluginInstance<A>, PluginCallResult> {
     unsafe { PluginInstance::<A>::from_handle(handle) }
         .ok_or_else(|| error_response(PLUGIN_CALL_ERR_INTERNAL, "null instance handle"))

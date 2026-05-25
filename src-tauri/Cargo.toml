@@ -103,3 +103,6 @@ default = ["dynamic-plugins"]
 dynamic-plugins = []
 # Mobile targets (section 25.1): compile all adapters in statically.
 static-plugins = []
+
+[lints]
+workspace = true

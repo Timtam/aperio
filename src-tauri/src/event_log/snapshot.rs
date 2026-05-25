@@ -350,7 +350,7 @@ mod tests {
 
     fn fresh() -> (TempDir, DbHandle, Arc<LocalAdapter>) {
         let dir = TempDir::new().unwrap();
-        let db = DbHandle::open(&dir.path().join("test.sqlite")).unwrap();
+        let db = DbHandle::open(dir.path().join("test.sqlite")).unwrap();
         let adapter = Arc::new(LocalAdapter::new(db.shared()));
         (dir, db, adapter)
     }

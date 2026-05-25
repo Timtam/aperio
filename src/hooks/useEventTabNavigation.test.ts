@@ -1,4 +1,3 @@
-/// <reference types="vitest" />
 import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 

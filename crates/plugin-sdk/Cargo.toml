@@ -24,3 +24,6 @@ serde_json.workspace = true
 # host uses on its side via spawn_blocking.
 tokio = { workspace = true }
 tracing.workspace = true
+
+[lints]
+workspace = true

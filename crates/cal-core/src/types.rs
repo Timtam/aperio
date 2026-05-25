@@ -285,8 +285,9 @@ pub struct Contact {
     ///   - vCard 3.0 (Apple / older servers) uses
     ///     `X-ADDRESSBOOKSERVER-KIND:group` +
     ///     `X-ADDRESSBOOKSERVER-MEMBER`
-    /// — all funnel into this one field so the rest of the stack
-    /// stays group-agnostic.
+    ///
+    /// All three funnel into this one field so the rest of the
+    /// stack stays group-agnostic.
     ///
     /// **Serialization note:** we deliberately keep this field on
     /// the wire even when `None` (no `skip_serializing_if`). The
