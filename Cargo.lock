@@ -685,6 +685,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "cal-adapter-ical-plugin"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "cal-adapter-ical",
+ "cal-core",
+ "chrono",
+ "plugin-core",
+ "plugin-sdk",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "cal-adapter-local"
 version = "0.1.0"
 dependencies = [

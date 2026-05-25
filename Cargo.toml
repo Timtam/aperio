@@ -16,6 +16,7 @@ members = [
     "crates/cal-adapter-local",
     "crates/cal-adapter-vikunja",
     "crates/cal-adapter-todoist",
+    "crates/cal-adapter-ical-plugin",
 
     # Sync-Adapter
     "crates/sync-adapter-webdav",
