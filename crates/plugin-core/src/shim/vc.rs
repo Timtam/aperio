@@ -16,7 +16,7 @@ use tracing::warn;
 use vc_core::{Meeting, MeetingId, NewMeeting, VcAdapter, VcError, VcResult};
 
 use crate::ffi::*;
-use crate::manager::LoadedInstance;
+use crate::manager::{InFlightGuard, LoadedInstance};
 use crate::vtables::VcVtable;
 
 use super::call::{call_method, decode_payload, encode_args, CallOutcome};
@@ -25,6 +25,12 @@ pub struct FfiVcAdapter {
     _instance: Arc<LoadedInstance>,
     handle_addr: usize,
     vtable: VtableSnapshot,
+    /// In-flight counter handle shared with the
+    /// [`crate::manager::LoadedPlugin`]. Every FFI-dispatching
+    /// trait method brackets its body with an [`InFlightGuard`]
+    /// derived from this Arc so the host's unload path can
+    /// observe a deterministic "is anything in flight" gate.
+    in_flight: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 #[derive(Clone, Copy)]
@@ -70,10 +76,12 @@ impl FfiVcAdapter {
             delete_meeting: vtable_ref.delete_meeting,
         };
         let handle_addr = instance.handle() as usize;
+        let in_flight = Arc::clone(plugin.in_flight_handle());
         Some(Self {
             _instance: instance,
             handle_addr,
             vtable: snapshot,
+            in_flight,
         })
     }
 }
@@ -146,18 +154,22 @@ async fn call_for_unit<A: Serialize>(
 #[async_trait]
 impl VcAdapter for FfiVcAdapter {
     async fn test_connection(&self) -> VcResult<()> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         call_for_unit(self.vtable.test_connection, self.handle_addr, &()).await
     }
 
     async fn create_meeting(&self, spec: NewMeeting) -> VcResult<Meeting> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         call_then_decode(self.vtable.create_meeting, self.handle_addr, &spec).await
     }
 
     async fn get_meeting(&self, id: &MeetingId) -> VcResult<Option<Meeting>> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         call_then_decode(self.vtable.get_meeting, self.handle_addr, id).await
     }
 
     async fn delete_meeting(&self, id: &MeetingId) -> VcResult<()> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         call_for_unit(self.vtable.delete_meeting, self.handle_addr, id).await
     }
 }

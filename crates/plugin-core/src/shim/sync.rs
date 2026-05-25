@@ -21,7 +21,7 @@ use sync_core::{DeviceCursor, SyncAdapter};
 use tracing::warn;
 
 use crate::ffi::*;
-use crate::manager::LoadedInstance;
+use crate::manager::{InFlightGuard, LoadedInstance};
 use crate::vtables::SyncVtable;
 
 use super::call::{call_method, decode_payload, encode_args, CallOutcome};
@@ -30,6 +30,12 @@ pub struct FfiSyncAdapter {
     _instance: Arc<LoadedInstance>,
     handle_addr: usize,
     vtable: VtableSnapshot,
+    /// In-flight counter handle shared with the
+    /// [`crate::manager::LoadedPlugin`]. Every FFI-dispatching
+    /// trait method brackets its body with an [`InFlightGuard`]
+    /// derived from this Arc so the host's unload path can
+    /// observe a deterministic "is anything in flight" gate.
+    in_flight: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 #[derive(Clone, Copy)]
@@ -87,10 +93,12 @@ impl FfiSyncAdapter {
             fetch_sound_asset: vtable_ref.fetch_sound_asset,
         };
         let handle_addr = instance.handle() as usize;
+        let in_flight = Arc::clone(plugin.in_flight_handle());
         Some(Self {
             _instance: instance,
             handle_addr,
             vtable: snapshot,
+            in_flight,
         })
     }
 }
@@ -179,14 +187,17 @@ struct FetchSoundAssetArgs<'a> {
 #[async_trait]
 impl SyncAdapter for FfiSyncAdapter {
     async fn test_connection(&self) -> SyncResult<()> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         call_for_unit(self.vtable.test_connection, self.handle_addr, &()).await
     }
 
     async fn fetch_meta(&self) -> SyncResult<Option<MetaJson>> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         call_then_decode(self.vtable.fetch_meta, self.handle_addr, &()).await
     }
 
     async fn push_meta(&self, meta: &MetaJson) -> SyncResult<()> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         call_for_unit(self.vtable.push_meta, self.handle_addr, meta).await
     }
 
@@ -194,22 +205,27 @@ impl SyncAdapter for FfiSyncAdapter {
         &self,
         since: &DeviceCursor,
     ) -> SyncResult<Vec<LogFile>> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         call_then_decode(self.vtable.fetch_new_logs, self.handle_addr, since).await
     }
 
     async fn push_log(&self, log: &LogFile) -> SyncResult<()> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         call_for_unit(self.vtable.push_log, self.handle_addr, log).await
     }
 
     async fn fetch_snapshot(&self) -> SyncResult<Option<Snapshot>> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         call_then_decode(self.vtable.fetch_snapshot, self.handle_addr, &()).await
     }
 
     async fn push_snapshot(&self, snapshot: &Snapshot) -> SyncResult<()> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         call_for_unit(self.vtable.push_snapshot, self.handle_addr, snapshot).await
     }
 
     async fn delete_log(&self, name: &LogFileName) -> SyncResult<()> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         call_for_unit(self.vtable.delete_log, self.handle_addr, name).await
     }
 
@@ -219,6 +235,7 @@ impl SyncAdapter for FfiSyncAdapter {
         extension: &str,
         bytes: &[u8],
     ) -> SyncResult<()> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         use base64::Engine as _;
         let args = PushSoundAssetArgs {
             hash,
@@ -234,6 +251,7 @@ impl SyncAdapter for FfiSyncAdapter {
         hash: &str,
         extension: &str,
     ) -> SyncResult<Option<Vec<u8>>> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         use base64::Engine as _;
         let args = FetchSoundAssetArgs { hash, extension };
         let maybe_b64: Option<String> =

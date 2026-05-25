@@ -460,7 +460,8 @@ pub async fn install_plugin_archive(
                 });
             }
         }
-        try_unload_for_upgrade(&plugin_manager, &registry, &shared, &plugin_id)?;
+        try_unload_for_upgrade(&plugin_manager, &registry, &shared, &plugin_id)
+            .await?;
     }
 
     // Safe to extract. install_archive wipes any stale
@@ -547,22 +548,41 @@ pub async fn install_plugin_archive(
 /// install path can re-extract + re-load the new version.
 /// The sequence mirrors the disable path: unregister every
 /// account using the plugin, then flip the runtime gate, then
-/// hand off to `PluginManager::unload_plugin`. On
-/// [`UnloadError::StillReferenced`] we roll back (re-enable +
-/// re-register the accounts) and surface `restart_required`
-/// — an in-flight call somewhere holds an
-/// `Arc<LoadedInstance>` we can't safely yank.
+/// poll `PluginManager::unload_plugin` until the in-flight
+/// counter drains to 0.
+///
+/// Determinism: once the registry has unregistered the shim
+/// Arcs and the disabled flag is set, no NEW FFI calls can
+/// start against this plugin. Existing in-flight calls hold
+/// their guards across `.await`; the bounded retry loop waits
+/// for those guards to drop. If the deadline expires we roll
+/// back (re-enable + re-register the accounts) and surface
+/// `restart_required` — that case is reserved for OAuth dances
+/// or sync rounds that legitimately take longer than the
+/// upgrade is willing to wait.
 ///
 /// Only called from the upgrade branch of
-/// [`install_plugin_archive`]. Uninstall (a future iteration)
-/// can reuse the helper with a `re_register: false` knob if
-/// that ever lands.
-fn try_unload_for_upgrade(
+/// [`install_plugin_archive`].
+async fn try_unload_for_upgrade(
     plugin_manager: &PluginManager,
     registry: &AdapterRegistry,
     db: &crate::db::SharedConn,
     plugin_id: &str,
 ) -> CommandResult<()> {
+    /// Maximum time we wait for in-flight calls to drain
+    /// before declaring an upgrade impossible without a
+    /// restart. 1.5s comfortably covers typical sub-second
+    /// CalDAV / Graph reads + leaves headroom for slow
+    /// networks without making the user stare at a frozen
+    /// dialog.
+    const DRAIN_TIMEOUT: std::time::Duration =
+        std::time::Duration::from_millis(1500);
+    /// Poll interval between retry attempts. Short enough
+    /// that a typical FFI call completes within 1-2 polls;
+    /// long enough that we don't burn a CPU.
+    const POLL_INTERVAL: std::time::Duration =
+        std::time::Duration::from_millis(50);
+
     // 1) Walk accounts whose adapter_kind matches the plugin
     //    we're about to unload. For each, unregister + remember
     //    the account so we can re-register on rollback or
@@ -585,47 +605,57 @@ fn try_unload_for_upgrade(
 
     // 2) Gate further get() lookups. This is the same flag
     //    the toggle uses; we'll clear it on success after
-    //    load (via reload_plugin) or on rollback.
+    //    load (the registry's register() reads enabled
+    //    state) or on rollback.
     let previously_enabled = plugin_manager.is_enabled(plugin_id);
     plugin_manager.set_enabled(plugin_id, false);
 
-    // 3) Try to drop the LoadedPlugin. unload_plugin checks
-    //    Arc::strong_count and refuses if anyone (in-flight
-    //    spawn_blocking, leftover LoadedInstance Arc, …)
-    //    still holds a clone.
-    match plugin_manager.unload_plugin(plugin_id) {
-        Ok(()) => Ok(()),
-        Err(plugin_core::UnloadError::NotLoaded(_)) => {
-            // Race: someone else dropped the plugin between
-            // the install command's pre-flight check and now.
-            // Treat as success — the upgrade path proceeds
-            // straight to install + load.
-            Ok(())
-        }
-        Err(plugin_core::UnloadError::StillReferenced { id, strong_count }) => {
-            // Roll back: re-enable + re-register accounts so
-            // the user's setup keeps working. The new version
-            // can't land this round — ask the user to restart.
-            if previously_enabled {
-                plugin_manager.set_enabled(&id, true);
+    // 3) Bounded poll: wait for in_flight to drain. The
+    //    counter is monotonically non-increasing now that the
+    //    gate is set + the registry's shims dropped, so this
+    //    loop terminates deterministically.
+    let deadline = std::time::Instant::now() + DRAIN_TIMEOUT;
+    loop {
+        match plugin_manager.unload_plugin(plugin_id) {
+            Ok(()) => return Ok(()),
+            Err(plugin_core::UnloadError::NotLoaded(_)) => {
+                // Race: someone else dropped the plugin
+                // between the install command's pre-flight
+                // check and now. Treat as success.
+                return Ok(());
             }
-            for account in affected_accounts {
-                if let Err(err) = registry.register(&account) {
-                    warn!(
-                        account_id = %account.id,
-                        plugin_id = %id,
-                        ?err,
-                        "rollback re-register failed after StillReferenced unload",
-                    );
+            Err(plugin_core::UnloadError::StillReferenced {
+                id,
+                in_flight,
+            }) => {
+                if std::time::Instant::now() >= deadline {
+                    // Out of patience — roll back + report.
+                    // `in_flight` from the most recent attempt
+                    // is what the user sees in the message.
+                    if previously_enabled {
+                        plugin_manager.set_enabled(&id, true);
+                    }
+                    for account in affected_accounts {
+                        if let Err(err) = registry.register(&account) {
+                            warn!(
+                                account_id = %account.id,
+                                plugin_id = %id,
+                                ?err,
+                                "rollback re-register failed after drain timeout",
+                            );
+                        }
+                    }
+                    return Err(CommandError {
+                        code: "restart_required",
+                        message: format!(
+                            "{id} still has {in_flight} active call(s) \
+                             after {}ms; restart Aperio to install the new version",
+                            DRAIN_TIMEOUT.as_millis(),
+                        ),
+                    });
                 }
+                tokio::time::sleep(POLL_INTERVAL).await;
             }
-            Err(CommandError {
-                code: "restart_required",
-                message: format!(
-                    "{id} is in use (strong_count={strong_count}); \
-                     restart Aperio to install the new version",
-                ),
-            })
         }
     }
 }

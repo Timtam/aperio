@@ -42,6 +42,7 @@
 //! flag eventually calls.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_void};
 use std::path::{Path, PathBuf};
@@ -151,6 +152,16 @@ pub struct LoadedPlugin {
     /// don't (only SFTP today).
     probe_host_key_fn: Option<ProbeHostKeyFn>,
 
+    /// Number of FFI calls currently in flight against this
+    /// plugin. The shim wrappers' trait methods bracket each
+    /// dispatch with an [`InFlightGuard`] so the counter
+    /// tracks active calls deterministically — strong_count
+    /// on the LoadedPlugin Arc gets bumped by every shim
+    /// clone too, so it can't be used as a "safe to unload"
+    /// gate on its own. The unload path waits for this to
+    /// reach 0 after the registry has dropped its shim Arcs.
+    in_flight: Arc<AtomicUsize>,
+
     /// The dlopen'd library. Drop order:
     /// `aperio_plugin_destroy` → `library.drop()` (which calls
     /// `dlclose`). Static-plugin builds set this to `None` so
@@ -221,6 +232,45 @@ impl LoadedPlugin {
     /// `aperio_plugin_probe_host_key` symbol.
     pub fn has_probe_host_key(&self) -> bool {
         self.probe_host_key_fn.is_some()
+    }
+
+    /// Borrow the in-flight counter. Shim wrappers clone this
+    /// at construction time + use it to build an
+    /// [`InFlightGuard`] around every FFI dispatch so the
+    /// host's unload path can wait for active calls to
+    /// drain.
+    pub fn in_flight_handle(&self) -> &Arc<AtomicUsize> {
+        &self.in_flight
+    }
+}
+
+/// RAII guard that increments a plugin's in-flight counter on
+/// construction and decrements it on Drop. Held across FFI
+/// dispatches in the shim wrappers' trait-method bodies so the
+/// counter reflects every active call — even ones suspended at
+/// an `.await` point waiting on `tokio::task::spawn_blocking`.
+///
+/// The counter uses `Ordering::SeqCst` for both directions:
+/// the unload path needs a deterministic synchronisation
+/// edge between "registry dropped its Arcs" and "in_flight ==
+/// 0", and SeqCst is the cheapest correct choice on every
+/// platform Aperio targets.
+pub struct InFlightGuard {
+    counter: Arc<AtomicUsize>,
+}
+
+impl InFlightGuard {
+    /// Bump the counter + take ownership of the handle. The
+    /// returned guard's Drop decrements on its way out.
+    pub fn enter(counter: Arc<AtomicUsize>) -> Self {
+        counter.fetch_add(1, Ordering::SeqCst);
+        Self { counter }
+    }
+}
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        self.counter.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
@@ -546,6 +596,7 @@ impl PluginManager {
             interactive_auth_fn,
             discover_fn,
             probe_host_key_fn,
+            in_flight: Arc::new(AtomicUsize::new(0)),
             library: Some(library),
         };
         let id = loaded.manifest.id.clone();
@@ -584,6 +635,7 @@ impl PluginManager {
             interactive_auth_fn: None,
             discover_fn: None,
             probe_host_key_fn: None,
+            in_flight: Arc::new(AtomicUsize::new(0)),
             library: None,
         };
         let id = loaded.manifest.id.clone();
@@ -760,13 +812,21 @@ impl PluginManager {
 
     /// Tear a loaded plugin out of the manager so its
     /// underlying [`libloading::Library`] can `dlclose`. The
-    /// caller MUST have dropped every other Arc<LoadedPlugin>
-    /// and Arc<LoadedInstance> referencing this id before
-    /// calling — the manager checks the inner Arc's strong
-    /// count and refuses with [`UnloadError::StillReferenced`]
-    /// if anyone else is holding a clone. That keeps the
-    /// teardown atomic + race-free without needing a separate
-    /// in-flight-call counter.
+    /// caller MUST have dropped every shim's
+    /// `Arc<LoadedInstance>` referencing this id before
+    /// calling — the manager checks the plugin's
+    /// [`LoadedPlugin::in_flight_handle`] counter and refuses
+    /// with [`UnloadError::StillReferenced`] if any FFI call
+    /// is currently in flight.
+    ///
+    /// Why `in_flight` rather than `Arc::strong_count`: the
+    /// shim wrappers clone the LoadedPlugin Arc as a
+    /// side-effect of construction + every per-call clone,
+    /// so the strong count is noisy. The dedicated counter
+    /// bumps only inside the shim's trait-method scope (via
+    /// [`InFlightGuard::enter`]) — it goes to 0 exactly when
+    /// no FFI dispatch is active, regardless of how many
+    /// idle shim Arcs the caller forgot to drop.
     ///
     /// Typical sequence the host follows for an in-place
     /// upgrade:
@@ -774,43 +834,47 @@ impl PluginManager {
     ///      `get(id)` lookups so no fresh registrations or
     ///      vtable dispatches start.
     ///   2. Walk the registry, unregister every account using
-    ///      this plugin. This drops the registry's Arcs.
-    ///   3. Reset any other component holding an
-    ///      Arc<LoadedInstance> (the sync orchestrator if this
-    ///      is the active sync adapter).
-    ///   4. Call `unload_plugin(id)`. On success: the
-    ///      LoadedPlugin Arc drops, the Library handle drops,
-    ///      `dlclose` runs. On `StillReferenced`: roll back
-    ///      and tell the user to retry (or restart).
+    ///      this plugin. This drops the registry's shim Arcs;
+    ///      the FfiCalendarAdapter / FfiSyncAdapter / … each
+    ///      hold an `Arc<LoadedInstance>` that prevented the
+    ///      LoadedPlugin Arc from dropping. After
+    ///      unregistration, only in-flight calls (which take
+    ///      their own short-lived clone) keep references
+    ///      alive.
+    ///   3. Wait for the in-flight counter to drain to 0
+    ///      (the host's async retry loop polls
+    ///      [`Self::unload_plugin`] with a short sleep between
+    ///      attempts).
+    ///   4. Once unload_plugin returns Ok: the plugin Arcs
+    ///      drop, the Library handle drops, `dlclose` runs.
     ///
     /// The `disabled` flag is cleared by this call — once the
     /// plugin is gone, a subsequent reload via
-    /// `load_from_dir` should start with a fresh enabled
-    /// state.
+    /// `load_from_dir` starts with a fresh enabled state.
     pub fn unload_plugin(&self, id: &str) -> Result<(), UnloadError> {
         let mut inner = self.inner.write().expect("manager poisoned");
-        // Remove from the map first so the strong-count check
-        // sees only the borrowed Arc we're about to drop.
-        let Some(plugin) = inner.plugins.remove(id) else {
+        let Some(plugin) = inner.plugins.get(id).cloned() else {
             return Err(UnloadError::NotLoaded(id.to_string()));
         };
-        // Strong count == 1 means only `plugin` (our owned
-        // local) references the LoadedPlugin. Anything else
-        // is an in-flight reference and we have to put the
-        // entry back to keep the manager consistent.
-        let count = Arc::strong_count(&plugin);
-        if count != 1 {
-            inner.plugins.insert(id.to_string(), plugin);
+        let in_flight = plugin.in_flight.load(Ordering::SeqCst);
+        if in_flight > 0 {
+            // Keep the plugin in the map; the caller polls +
+            // retries.
             return Err(UnloadError::StillReferenced {
                 id: id.to_string(),
-                strong_count: count,
+                in_flight,
             });
         }
-        // Safe to drop: yank from the order vec + the
-        // disabled set; let `plugin` fall out of scope so the
-        // Library handle's Drop runs (-> dlclose).
+        // No active calls — safe to drop. Yank from the
+        // order vec + the disabled set; remove the plugin
+        // entry. The cloned `plugin` Arc above is the last
+        // reference once `inner.plugins.remove(id)` returns
+        // (the registry has unregistered, no in-flight
+        // calls), so dropping it triggers Library::drop ->
+        // dlclose.
         inner.order.retain(|other| other != id);
         inner.disabled.remove(id);
+        inner.plugins.remove(id);
         drop(inner);
         drop(plugin);
         Ok(())
@@ -847,6 +911,7 @@ impl PluginManager {
             interactive_auth_fn: None,
             discover_fn: None,
             probe_host_key_fn: None,
+            in_flight: Arc::new(AtomicUsize::new(0)),
             library: None,
         };
         // Bypass the duplicate-id check the public `insert`
@@ -948,17 +1013,14 @@ pub enum UnloadError {
     #[error("plugin not loaded: {0}")]
     NotLoaded(String),
 
-    /// At least one other component still holds an
-    /// `Arc<LoadedPlugin>` for this id — typically a
-    /// `LoadedInstance` (registry, orchestrator) or an
-    /// in-flight `spawn_blocking` task mid-call into the
-    /// plugin's vtable. The strong count is included so the
-    /// host can log it for diagnosis.
+    /// At least one FFI call into this plugin is currently
+    /// in flight. The shim wrappers track this via
+    /// [`InFlightGuard`]; the unload path polls + retries
+    /// until the counter drains.
     #[error(
-        "plugin {id} is still referenced (strong_count={strong_count}); \
-         drop every Arc<LoadedInstance> / Arc<LoadedPlugin> before unloading"
+        "plugin {id} has {in_flight} active call(s); retry after they finish"
     )]
-    StillReferenced { id: String, strong_count: usize },
+    StillReferenced { id: String, in_flight: usize },
 }
 
 /// Reasons [`PluginManager::interactive_auth`] can fail.
@@ -1258,6 +1320,7 @@ pub mod test_support {
             interactive_auth_fn: None,
             discover_fn: None,
             probe_host_key_fn: None,
+            in_flight: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             library: None,
         }
     }
@@ -1434,28 +1497,47 @@ mod tests {
     }
 
     #[test]
-    fn unload_plugin_refuses_when_arc_still_referenced() {
+    fn unload_plugin_refuses_when_in_flight_call_active() {
         let mgr = PluginManager::new("0.1.0");
         mgr.insert_stub_for_tests("test.cal", stub_manifest("test.cal"));
-        // Hold an outside clone to simulate an in-flight
-        // FfiCalendarAdapter / LoadedInstance reference.
-        let held = mgr
+        // Simulate an in-flight FFI call by entering the
+        // guard manually. Holding the guard keeps the
+        // counter at 1; dropping it should let unload
+        // succeed.
+        let plugin = mgr
             .get_including_disabled("test.cal")
             .expect("just inserted");
+        let guard = InFlightGuard::enter(Arc::clone(plugin.in_flight_handle()));
         let err = mgr.unload_plugin("test.cal").expect_err("should refuse");
         match err {
-            UnloadError::StillReferenced { id, strong_count } => {
+            UnloadError::StillReferenced { id, in_flight } => {
                 assert_eq!(id, "test.cal");
-                assert!(strong_count >= 2, "got {strong_count}");
+                assert_eq!(in_flight, 1);
             }
             other => panic!("unexpected error: {other:?}"),
         }
         // Plugin must still be in the manager so the host can
-        // recover (the caller drops its clones + retries).
+        // recover (poll + retry once the in-flight call
+        // returns).
         assert!(mgr.get_including_disabled("test.cal").is_some());
-        drop(held);
-        // After the outside clone drops, retry should succeed.
+        drop(guard);
+        drop(plugin);
         mgr.unload_plugin("test.cal").expect("unload after retry");
+    }
+
+    #[test]
+    fn in_flight_guard_decrements_on_drop() {
+        let counter = Arc::new(AtomicUsize::new(0));
+        {
+            let _g1 = InFlightGuard::enter(Arc::clone(&counter));
+            assert_eq!(counter.load(Ordering::SeqCst), 1);
+            {
+                let _g2 = InFlightGuard::enter(Arc::clone(&counter));
+                assert_eq!(counter.load(Ordering::SeqCst), 2);
+            }
+            assert_eq!(counter.load(Ordering::SeqCst), 1);
+        }
+        assert_eq!(counter.load(Ordering::SeqCst), 0);
     }
 
     #[test]

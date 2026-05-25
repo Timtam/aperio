@@ -19,7 +19,7 @@ use serde::Serialize;
 use tracing::warn;
 
 use crate::ffi::*;
-use crate::manager::LoadedInstance;
+use crate::manager::{InFlightGuard, LoadedInstance};
 use crate::vtables::{CalendarAdapterVtable, ContactsVtable};
 
 use super::call::{call_method, decode_payload, encode_args, CallOutcome};
@@ -29,6 +29,12 @@ pub struct FfiContactsAdapter {
     handle_addr: usize,
     vtable: VtableSnapshot,
     capabilities: Vec<Capability>,
+    /// In-flight counter handle shared with the
+    /// [`crate::manager::LoadedPlugin`]. Every FFI-dispatching
+    /// trait method brackets its body with an [`InFlightGuard`]
+    /// derived from this Arc so the host's unload path can
+    /// observe a deterministic "is anything in flight" gate.
+    in_flight: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 #[derive(Clone, Copy)]
@@ -97,11 +103,13 @@ impl FfiContactsAdapter {
         };
         let capabilities = super::manifest_capabilities(&plugin.manifest.capabilities);
         let handle_addr = instance.handle() as usize;
+        let in_flight = Arc::clone(plugin.in_flight_handle());
         Some(Self {
             _instance: instance,
             handle_addr,
             vtable: snapshot,
             capabilities,
+            in_flight,
         })
     }
 }
@@ -182,6 +190,7 @@ struct SetContactPhotoArgs<'a> {
 #[async_trait]
 impl Adapter for FfiContactsAdapter {
     async fn authenticate(&self, credentials: Credentials) -> Result<AuthToken> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         call_then_decode(self.vtable.authenticate, self.handle_addr, &credentials).await
     }
 
@@ -193,14 +202,17 @@ impl Adapter for FfiContactsAdapter {
 #[async_trait]
 impl ContactsFeature for FfiContactsAdapter {
     async fn list_contact_lists(&self) -> Result<Vec<ContactList>> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         call_then_decode(self.vtable.list_contact_lists, self.handle_addr, &()).await
     }
 
     async fn get_contacts(&self, list_id: &str) -> Result<Vec<Contact>> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         call_then_decode(self.vtable.get_contacts, self.handle_addr, &list_id).await
     }
 
     async fn search_contacts(&self, query: &str) -> Result<Vec<Contact>> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         call_then_decode(self.vtable.search_contacts, self.handle_addr, &query).await
     }
 
@@ -209,15 +221,18 @@ impl ContactsFeature for FfiContactsAdapter {
         list_id: &str,
         contact: NewContact,
     ) -> Result<Contact> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         let args = CreateContactArgs { list_id, contact };
         call_then_decode(self.vtable.create_contact, self.handle_addr, &args).await
     }
 
     async fn update_contact(&self, contact: Contact) -> Result<Contact> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         call_then_decode(self.vtable.update_contact, self.handle_addr, &contact).await
     }
 
     async fn delete_contact(&self, contact_id: &str) -> Result<()> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         call_for_unit(self.vtable.delete_contact, self.handle_addr, &contact_id).await
     }
 
@@ -226,6 +241,7 @@ impl ContactsFeature for FfiContactsAdapter {
         list_id: &str,
         new_name: &str,
     ) -> Result<()> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         let args = RenameContactListArgs { list_id, new_name };
         call_for_unit(self.vtable.rename_contact_list, self.handle_addr, &args).await
     }
@@ -234,6 +250,7 @@ impl ContactsFeature for FfiContactsAdapter {
         &self,
         contact_id: &str,
     ) -> Result<Option<ContactPhoto>> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         call_then_decode(self.vtable.get_contact_photo, self.handle_addr, &contact_id).await
     }
 
@@ -242,15 +259,18 @@ impl ContactsFeature for FfiContactsAdapter {
         contact_id: &str,
         photo: ContactPhoto,
     ) -> Result<()> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         let args = SetContactPhotoArgs { contact_id, photo };
         call_for_unit(self.vtable.set_contact_photo, self.handle_addr, &args).await
     }
 
     async fn delete_contact_photo(&self, contact_id: &str) -> Result<()> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         call_for_unit(self.vtable.delete_contact_photo, self.handle_addr, &contact_id).await
     }
 
     async fn invalidate_contacts_cache(&self) -> Result<()> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         call_for_unit(self.vtable.invalidate_contacts_cache, self.handle_addr, &()).await
     }
 }

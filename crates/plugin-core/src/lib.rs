@@ -54,10 +54,11 @@ pub use ffi::{
 };
 pub use archive::{inspect_archive, install_archive, InstalledArchive};
 pub use manager::{
-    DiscoverError, DiscoverFn, InteractiveAuthError, InteractiveAuthFn,
-    LoadedInstance, LoadedPlugin, PluginManager, ProbeHostKeyError,
-    ProbeHostKeyFn, UnloadError, BUNDLED_PLUGINS_DIR, SYMBOL_DISCOVER,
-    SYMBOL_INTERACTIVE_AUTH, SYMBOL_PROBE_HOST_KEY, USER_PLUGINS_DIR,
+    DiscoverError, DiscoverFn, InFlightGuard, InteractiveAuthError,
+    InteractiveAuthFn, LoadedInstance, LoadedPlugin, PluginManager,
+    ProbeHostKeyError, ProbeHostKeyFn, UnloadError, BUNDLED_PLUGINS_DIR,
+    SYMBOL_DISCOVER, SYMBOL_INTERACTIVE_AUTH, SYMBOL_PROBE_HOST_KEY,
+    USER_PLUGINS_DIR,
 };
 pub use manifest::{PluginManifest, MANIFEST_FILENAME};
 pub use plugin_type::PluginType;

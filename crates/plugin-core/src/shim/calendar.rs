@@ -19,7 +19,7 @@ use serde::Serialize;
 use tracing::warn;
 
 use crate::ffi::*;
-use crate::manager::LoadedInstance;
+use crate::manager::{InFlightGuard, LoadedInstance};
 use crate::vtables::{CalendarAdapterVtable, CalendarVtable};
 
 use super::call::{
@@ -57,6 +57,12 @@ pub struct FfiCalendarAdapter {
     /// `Adapter::capabilities()` trait method, which is sync
     /// and can't go through the FFI itself.
     capabilities: Vec<Capability>,
+    /// In-flight counter handle shared with the
+    /// [`crate::manager::LoadedPlugin`]. Every FFI-dispatching
+    /// trait method brackets its body with an [`InFlightGuard`]
+    /// derived from this Arc so the host's unload path can
+    /// observe a deterministic "is anything in flight" gate.
+    in_flight: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 /// Owned snapshot of every fn-pointer slot. We copy these out
@@ -136,12 +142,14 @@ impl FfiCalendarAdapter {
 
         let capabilities = super::manifest_capabilities(&plugin.manifest.capabilities);
         let handle_addr = instance.handle() as usize;
+        let in_flight = Arc::clone(plugin.in_flight_handle());
 
         Some(Self {
             _instance: instance,
             handle_addr,
             vtable: snapshot,
             capabilities,
+            in_flight,
         })
     }
 }
@@ -211,6 +219,7 @@ fn status_to_cal_error(outcome: CallOutcome) -> Error {
 #[async_trait]
 impl Adapter for FfiCalendarAdapter {
     async fn authenticate(&self, credentials: Credentials) -> Result<AuthToken> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         call_then_decode(self.vtable.authenticate, self.handle_addr, &credentials).await
     }
 
@@ -255,6 +264,7 @@ struct RenameCalendarArgs<'a> {
 #[async_trait]
 impl CalendarFeature for FfiCalendarAdapter {
     async fn list_calendars(&self) -> Result<Vec<Calendar>> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         call_then_decode(self.vtable.list_calendars, self.handle_addr, &()).await
     }
 
@@ -263,6 +273,7 @@ impl CalendarFeature for FfiCalendarAdapter {
         calendar_id: &str,
         range: DateRange,
     ) -> Result<Vec<Event>> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         let args = GetEventsArgs { calendar_id, range };
         call_then_decode(self.vtable.get_events, self.handle_addr, &args).await
     }
@@ -272,15 +283,18 @@ impl CalendarFeature for FfiCalendarAdapter {
         calendar_id: &str,
         event: NewEvent,
     ) -> Result<Event> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         let args = CreateEventArgs { calendar_id, event };
         call_then_decode(self.vtable.create_event, self.handle_addr, &args).await
     }
 
     async fn update_event(&self, event: Event) -> Result<Event> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         call_then_decode(self.vtable.update_event, self.handle_addr, &event).await
     }
 
     async fn delete_event(&self, event_id: &str) -> Result<()> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         call_for_unit(self.vtable.delete_event, self.handle_addr, &event_id).await
     }
 
@@ -289,6 +303,7 @@ impl CalendarFeature for FfiCalendarAdapter {
         emails: &[&str],
         range: DateRange,
     ) -> Result<Vec<FreeBusy>> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         let args = GetFreeBusyArgs {
             emails: emails.to_vec(),
             range,
@@ -302,6 +317,7 @@ impl CalendarFeature for FfiCalendarAdapter {
     /// plugin's implementation is expected to answer from
     /// in-memory state without IO.
     fn calendar_color(&self, calendar_id: &str) -> Option<ContainerColor> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         let method = self.vtable.calendar_color?;
         let args = match encode_args(&calendar_id) {
             Ok(b) => b,
@@ -332,6 +348,7 @@ impl CalendarFeature for FfiCalendarAdapter {
         event_id: &str,
         occurrence: chrono::DateTime<chrono::Utc>,
     ) -> Result<()> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         let args = AddExdateArgs { event_id, occurrence };
         call_for_unit(self.vtable.add_event_exdate, self.handle_addr, &args).await
     }
@@ -341,6 +358,7 @@ impl CalendarFeature for FfiCalendarAdapter {
         calendar_id: &str,
         new_name: &str,
     ) -> Result<()> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         let args = RenameCalendarArgs { calendar_id, new_name };
         call_for_unit(self.vtable.rename_calendar, self.handle_addr, &args).await
     }
