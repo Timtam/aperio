@@ -42,10 +42,21 @@ cal-core.workspace = true
 cal-adapter-local.workspace = true
 sync-core.workspace = true
 plugin-core.workspace = true
+# Direct sync-adapter crate deps the host still needs even after
+# the plugin migration:
+#   - sync-adapter-local: used by sound_assets.rs's tests
+#   - sync-adapter-sftp:  preview_sftp_host_key + the host-side
+#                         UserPrefsHostKeyVerifier still build a
+#                         direct SftpSyncAdapter for the §19.5
+#                         TOFU first-use trust dialog
+#   - sync-adapter-dropbox / -googledrive: OAuth dance helpers
+#                         (oauth::run) — the host runs the
+#                         consent flow before the plugin even
+#                         opens an instance.
+# sync-adapter-webdav / -ftp have no remaining direct call sites;
+# everything they did now flows through the plugins.
 sync-adapter-local = { path = "../crates/sync-adapter-local" }
-sync-adapter-webdav = { path = "../crates/sync-adapter-webdav" }
 sync-adapter-sftp = { path = "../crates/sync-adapter-sftp" }
-sync-adapter-ftp = { path = "../crates/sync-adapter-ftp" }
 sync-adapter-dropbox = { path = "../crates/sync-adapter-dropbox" }
 sync-adapter-googledrive = { path = "../crates/sync-adapter-googledrive" }
 cal-adapter-caldav = { path = "../crates/cal-adapter-caldav" }
@@ -76,6 +87,12 @@ cal-adapter-microsoft-graph-plugin = { path = "../crates/cal-adapter-microsoft-g
 cal-adapter-ews-plugin = { path = "../crates/cal-adapter-ews-plugin" }
 cal-adapter-vikunja-plugin = { path = "../crates/cal-adapter-vikunja-plugin" }
 cal-adapter-todoist-plugin = { path = "../crates/cal-adapter-todoist-plugin" }
+sync-adapter-local-plugin = { path = "../crates/sync-adapter-local-plugin" }
+sync-adapter-webdav-plugin = { path = "../crates/sync-adapter-webdav-plugin" }
+sync-adapter-ftp-plugin = { path = "../crates/sync-adapter-ftp-plugin" }
+sync-adapter-sftp-plugin = { path = "../crates/sync-adapter-sftp-plugin" }
+sync-adapter-dropbox-plugin = { path = "../crates/sync-adapter-dropbox-plugin" }
+sync-adapter-googledrive-plugin = { path = "../crates/sync-adapter-googledrive-plugin" }
 
 base64 = "0.22"
 

@@ -88,6 +88,44 @@ pub fn build_manager(app_version: &str) -> Arc<PluginManager> {
         cal_adapter_todoist_plugin::DESTROY_FN,
     );
 
+    // ── sync-adapter plugins ──────────────────────────────────
+    register_plugin(
+        &manager,
+        sync_adapter_local_manifest(),
+        unsafe { sync_adapter_local_plugin::build_descriptor() },
+        sync_adapter_local_plugin::DESTROY_FN,
+    );
+    register_plugin(
+        &manager,
+        sync_adapter_webdav_manifest(),
+        unsafe { sync_adapter_webdav_plugin::build_descriptor() },
+        sync_adapter_webdav_plugin::DESTROY_FN,
+    );
+    register_plugin(
+        &manager,
+        sync_adapter_ftp_manifest(),
+        unsafe { sync_adapter_ftp_plugin::build_descriptor() },
+        sync_adapter_ftp_plugin::DESTROY_FN,
+    );
+    register_plugin(
+        &manager,
+        sync_adapter_sftp_manifest(),
+        unsafe { sync_adapter_sftp_plugin::build_descriptor() },
+        sync_adapter_sftp_plugin::DESTROY_FN,
+    );
+    register_plugin(
+        &manager,
+        sync_adapter_dropbox_manifest(),
+        unsafe { sync_adapter_dropbox_plugin::build_descriptor() },
+        sync_adapter_dropbox_plugin::DESTROY_FN,
+    );
+    register_plugin(
+        &manager,
+        sync_adapter_googledrive_manifest(),
+        unsafe { sync_adapter_googledrive_plugin::build_descriptor() },
+        sync_adapter_googledrive_plugin::DESTROY_FN,
+    );
+
     Arc::new(manager)
 }
 
@@ -240,18 +278,116 @@ fn cal_adapter_todoist_manifest() -> PluginManifest {
     }
 }
 
+// ── sync-adapter manifests ────────────────────────────────────
+//
+// Sync plugins don't declare capabilities — `Capability` is the
+// cal-adapter feature flag (calendar / tasks / contacts). The
+// sync trait surface is single-shape; the manifest's
+// `capabilities` field stays empty for these.
+
+fn sync_adapter_local_manifest() -> PluginManifest {
+    PluginManifest {
+        id: "com.aperio.sync-adapter-local".into(),
+        name: "Aperio Local Filesystem".into(),
+        version: "0.1.0".into(),
+        plugin_type: PluginType::SyncAdapter,
+        capabilities: vec![],
+        abi_version: ABI_VERSION,
+        min_app_version: "0.1.0".into(),
+        author: Some("Aperio Contributors".into()),
+        description: Some("Bundled".into()),
+        signed: false,
+    }
+}
+
+fn sync_adapter_webdav_manifest() -> PluginManifest {
+    PluginManifest {
+        id: "com.aperio.sync-adapter-webdav".into(),
+        name: "Aperio WebDAV".into(),
+        version: "0.1.0".into(),
+        plugin_type: PluginType::SyncAdapter,
+        capabilities: vec![],
+        abi_version: ABI_VERSION,
+        min_app_version: "0.1.0".into(),
+        author: Some("Aperio Contributors".into()),
+        description: Some("Bundled".into()),
+        signed: false,
+    }
+}
+
+fn sync_adapter_ftp_manifest() -> PluginManifest {
+    PluginManifest {
+        id: "com.aperio.sync-adapter-ftp".into(),
+        name: "Aperio FTPS".into(),
+        version: "0.1.0".into(),
+        plugin_type: PluginType::SyncAdapter,
+        capabilities: vec![],
+        abi_version: ABI_VERSION,
+        min_app_version: "0.1.0".into(),
+        author: Some("Aperio Contributors".into()),
+        description: Some("Bundled".into()),
+        signed: false,
+    }
+}
+
+fn sync_adapter_sftp_manifest() -> PluginManifest {
+    PluginManifest {
+        id: "com.aperio.sync-adapter-sftp".into(),
+        name: "Aperio SFTP".into(),
+        version: "0.1.0".into(),
+        plugin_type: PluginType::SyncAdapter,
+        capabilities: vec![],
+        abi_version: ABI_VERSION,
+        min_app_version: "0.1.0".into(),
+        author: Some("Aperio Contributors".into()),
+        description: Some("Bundled".into()),
+        signed: false,
+    }
+}
+
+fn sync_adapter_dropbox_manifest() -> PluginManifest {
+    PluginManifest {
+        id: "com.aperio.sync-adapter-dropbox".into(),
+        name: "Aperio Dropbox".into(),
+        version: "0.1.0".into(),
+        plugin_type: PluginType::SyncAdapter,
+        capabilities: vec![],
+        abi_version: ABI_VERSION,
+        min_app_version: "0.1.0".into(),
+        author: Some("Aperio Contributors".into()),
+        description: Some("Bundled".into()),
+        signed: false,
+    }
+}
+
+fn sync_adapter_googledrive_manifest() -> PluginManifest {
+    PluginManifest {
+        id: "com.aperio.sync-adapter-googledrive".into(),
+        name: "Aperio Google Drive".into(),
+        version: "0.1.0".into(),
+        plugin_type: PluginType::SyncAdapter,
+        capabilities: vec![],
+        abi_version: ABI_VERSION,
+        min_app_version: "0.1.0".into(),
+        author: Some("Aperio Contributors".into()),
+        description: Some("Bundled".into()),
+        signed: false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn build_manager_registers_all_seven_plugins() {
+    fn build_manager_registers_all_thirteen_plugins() {
         let mgr = build_manager(env!("CARGO_PKG_VERSION"));
-        // The 7 cal-adapter plugins all wired up + addressable
-        // by id. A missing one would surface as None here, which
-        // means the registry would fail to bootstrap that
-        // account kind.
+        // The 7 cal-adapter plugins + 6 sync-adapter plugins all
+        // wired up + addressable by id. A missing one would
+        // surface as None here, which means the registry would
+        // fail to bootstrap that account / sync kind.
         for id in [
+            // calendar/tasks/contacts
             "com.aperio.cal-adapter-caldav",
             "com.aperio.cal-adapter-ical",
             "com.aperio.cal-adapter-google",
@@ -259,9 +395,16 @@ mod tests {
             "com.aperio.cal-adapter-ews",
             "com.aperio.cal-adapter-vikunja",
             "com.aperio.cal-adapter-todoist",
+            // sync backends (DESIGN.md §19)
+            "com.aperio.sync-adapter-local",
+            "com.aperio.sync-adapter-webdav",
+            "com.aperio.sync-adapter-ftp",
+            "com.aperio.sync-adapter-sftp",
+            "com.aperio.sync-adapter-dropbox",
+            "com.aperio.sync-adapter-googledrive",
         ] {
             assert!(mgr.get(id).is_some(), "plugin {id} not registered");
         }
-        assert_eq!(mgr.len(), 7, "exactly 7 cal-adapter plugins expected");
+        assert_eq!(mgr.len(), 13, "exactly 13 bundled plugins expected");
     }
 }

@@ -33,19 +33,21 @@ use std::sync::Arc;
 
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
+use plugin_core::shim::FfiSyncAdapter;
+use plugin_core::PluginManager;
 use serde::Deserialize;
-use sync_adapter_dropbox::{
-    oauth as dropbox_oauth, DropboxAccountConfig, DropboxSyncAdapter,
-};
-use sync_adapter_ftp::{FtpsMode, FtpsSyncAdapter};
-use sync_adapter_googledrive::{
-    oauth as gdrive_oauth, DriveSyncAdapter, GoogleDriveAccountConfig,
-};
-use sync_adapter_local::LocalFsSyncAdapter;
+use sync_adapter_dropbox::oauth as dropbox_oauth;
+use sync_adapter_googledrive::oauth as gdrive_oauth;
+// SFTP's adapter type is still imported directly because
+// `preview_sftp_host_key` runs the §19.5 first-use trust dialog
+// flow that the plugin's static-fingerprint init config can't
+// express. The orchestrator's normal sync path goes through the
+// plugin (with a pinned fingerprint we look up in user_prefs at
+// build_adapter time); only the TOFU first-use probe stays
+// direct.
 use sync_adapter_sftp::{
     HostKeyPreview, HostKeyVerifier, SftpAuth, SftpSyncAdapter,
 };
-use sync_adapter_webdav::{WebDavCredentials, WebDavSyncAdapter};
 use sync_core::{
     derive_key, fresh_data_key, resolve_data_key, wrap_key, EncryptingAdapter,
     EncryptionParams, SyncAdapter, KEY_LEN,
@@ -53,7 +55,7 @@ use sync_core::{
 use tauri::State;
 
 use super::{CommandError, CommandResult};
-use crate::db::DbHandle;
+use crate::db::{DbHandle, SharedConn};
 use crate::event_log::{
     CompactionReport, OnboardingReport, OnboardingService, SyncOrchestrator, SyncPreview,
     SyncRoundReport, SyncScheduler, SyncStatus,
@@ -62,6 +64,72 @@ use crate::secrets::{self, SecretSlot};
 use crate::sftp_host_keys::UserPrefsHostKeyVerifier;
 use crate::sync_log::{SyncLogEntry, SyncLogRepo, MAX_LOG_ROWS};
 use crate::user_prefs::UserPrefsRepo;
+
+// ── Plugin-id constants ──────────────────────────────────────
+//
+// String literals the bundled sync plugins advertise in their
+// `aperio_plugin_create` descriptor + `plugin.json`. Centralised
+// here so the per-kind plugin dispatch matches each plugin
+// verbatim.
+const PLUGIN_ID_LOCAL: &str = "com.aperio.sync-adapter-local";
+const PLUGIN_ID_WEBDAV: &str = "com.aperio.sync-adapter-webdav";
+const PLUGIN_ID_FTP: &str = "com.aperio.sync-adapter-ftp";
+const PLUGIN_ID_SFTP: &str = "com.aperio.sync-adapter-sftp";
+const PLUGIN_ID_DROPBOX: &str = "com.aperio.sync-adapter-dropbox";
+const PLUGIN_ID_GOOGLEDRIVE: &str = "com.aperio.sync-adapter-googledrive";
+
+/// Look up the user-pinned SFTP host-key fingerprint (§19.5)
+/// for the given `host:port` and surface it as the plugin's
+/// `pinned_fingerprint` init field. An empty return means the
+/// user hasn't yet gone through the trust dialog; the plugin's
+/// verifier then silently TOFUs, which is only safe because the
+/// frontend gates the connect path behind the trust step. Re-
+/// pinning a changed fingerprint goes through the existing
+/// `trust_sftp_host_key` command path; on the next build the
+/// updated value flows in here automatically.
+fn pinned_sftp_fingerprint(db: &SharedConn, host: &str, port: u16) -> String {
+    let verifier = UserPrefsHostKeyVerifier::new(db.clone());
+    let host_port = format!("{host}:{port}");
+    verifier.peek(&host_port).unwrap_or_default()
+}
+
+/// Open an instance of the named sync plugin with the supplied
+/// JSON config + wrap the result in a `Arc<dyn SyncAdapter>` the
+/// orchestrator can store. Centralises the four error paths
+/// (plugin missing, malformed config, instance open, missing
+/// sync vtable) so each match arm in [`build_adapter`] /
+/// [`build_adapter_from_prefs`] stays a single call.
+fn open_sync_plugin(
+    plugin_manager: &PluginManager,
+    plugin_id: &str,
+    config_json: String,
+) -> CommandResult<Arc<dyn SyncAdapter>> {
+    let plugin = plugin_manager.get(plugin_id).ok_or(CommandError {
+        code: "plugin_missing",
+        message: format!("plugin {plugin_id} is not loaded"),
+    })?;
+    let instance = plugin_manager
+        .open_instance(plugin, &config_json)
+        .map_err(|err| match err {
+            plugin_core::error::PluginError::InstanceOpen { message, .. } => {
+                CommandError {
+                    code: "invalid_input",
+                    message,
+                }
+            }
+            other => CommandError {
+                code: "internal",
+                message: other.to_string(),
+            },
+        })?;
+    let adapter = FfiSyncAdapter::new(instance).ok_or(CommandError {
+        code: "internal",
+        message: format!(
+            "plugin {plugin_id} doesn't expose a SyncAdapter vtable surface",
+        ),
+    })?;
+    Ok(Arc::new(adapter))
+}
 
 /// `user_prefs` key naming the currently-configured adapter
 /// family. Empty / missing → no adapter, sync disabled.
@@ -302,14 +370,18 @@ fn default_ftp_mode() -> String {
 }
 
 /// Build a fresh adapter instance from a [`SyncAdapterConfig`] —
-/// validates the inputs, returns an `Arc<dyn SyncAdapter>` ready to
+/// validates the inputs, opens a per-instance handle on the
+/// matching sync plugin via [`PluginManager::open_instance`],
+/// and returns it wrapped in `Arc<dyn SyncAdapter>` ready to
 /// hand to the orchestrator or the onboarding service.
 ///
 /// The `None` variant returns Err: the caller is asking for an
-/// adapter to operate on, and a disconnect has no adapter to make.
+/// adapter to operate on, and a disconnect has no adapter to
+/// make.
 fn build_adapter(
     config: &SyncAdapterConfig,
-    db: &crate::db::SharedConn,
+    db: &SharedConn,
+    plugin_manager: &PluginManager,
 ) -> CommandResult<Arc<dyn SyncAdapter>> {
     match config {
         SyncAdapterConfig::Local { path } => {
@@ -320,7 +392,8 @@ fn build_adapter(
                     message: "sync path must not be empty".into(),
                 });
             }
-            Ok(Arc::new(LocalFsSyncAdapter::new(PathBuf::from(trimmed))))
+            let cfg = serde_json::json!({ "remote_root": trimmed }).to_string();
+            open_sync_plugin(plugin_manager, PLUGIN_ID_LOCAL, cfg)
         }
         SyncAdapterConfig::Webdav { url, user, password } => {
             let trimmed_url = url.trim();
@@ -341,13 +414,13 @@ fn build_adapter(
                 _ => secrets::retrieve(WEBDAV_SECRET_ACCOUNT, SecretSlot::Password)
                     .ok(),
             };
-            let credentials = match (trimmed_user.is_empty(), resolved_password) {
-                (false, Some(pw)) => WebDavCredentials::basic(trimmed_user, &pw),
-                _ => WebDavCredentials::None,
-            };
-            let adapter = WebDavSyncAdapter::new(trimmed_url, credentials)
-                .map_err(sync_err)?;
-            Ok(Arc::new(adapter))
+            let cfg = serde_json::json!({
+                "url": trimmed_url,
+                "user": trimmed_user,
+                "password": resolved_password.unwrap_or_default(),
+            })
+            .to_string();
+            open_sync_plugin(plugin_manager, PLUGIN_ID_WEBDAV, cfg)
         }
         SyncAdapterConfig::Sftp {
             host,
@@ -380,81 +453,84 @@ fn build_adapter(
                     message: "SFTP path must not be empty".into(),
                 });
             }
-            // Build the auth method. `password` and `key` are the
-            // two we support; anything else surfaces as
-            // invalid_input rather than silently picking a
-            // default.
-            let auth = match auth_method.as_str() {
-                "password" => {
-                    // Same Option-reuse contract as the WebDAV
-                    // branch: Some + non-empty → use the supplied
-                    // value; None or empty → re-fetch the
-                    // previously-stored keychain secret so
-                    // host/user edits don't require re-typing.
-                    let resolved = match password.as_deref().map(str::trim) {
-                        Some(p) if !p.is_empty() => p.to_string(),
-                        _ => secrets::retrieve(
-                            SFTP_SECRET_ACCOUNT,
-                            SecretSlot::Password,
-                        )
-                        .map_err(|err| CommandError {
-                            code: "auth",
-                            message: format!(
-                                "no SFTP password configured: {err}",
-                            ),
-                        })?,
-                    };
-                    SftpAuth::Password { password: resolved }
-                }
-                "key" => {
-                    let path = key_path
-                        .as_deref()
-                        .map(str::trim)
-                        .filter(|s| !s.is_empty())
-                        .ok_or(CommandError {
-                            code: "invalid_input",
-                            message: "SSH key path must not be empty".into(),
-                        })?;
-                    // Passphrase same Option-reuse contract: empty
-                    // / None → re-fetch keychain. An unencrypted
-                    // key with neither side supplying a passphrase
-                    // round-trips as `None`.
-                    let passphrase = match key_passphrase
-                        .as_deref()
-                        .map(str::trim)
-                    {
-                        Some(p) if !p.is_empty() => Some(p.to_string()),
-                        _ => secrets::retrieve(
-                            SFTP_KEY_SECRET_ACCOUNT,
-                            SecretSlot::Password,
-                        )
-                        .ok()
-                        .filter(|s| !s.is_empty()),
-                    };
-                    SftpAuth::PrivateKey {
-                        path: PathBuf::from(path),
-                        passphrase,
+            // Resolve the auth-method credentials BEFORE handing
+            // off to the plugin so the same keychain-fallback
+            // contract the WebDAV / FTP branches use applies here
+            // too: Some+non-empty in the request body → use it;
+            // None or empty → look the previously-stored value up
+            // in the keychain so host/user edits don't require
+            // re-typing.
+            let (resolved_password, resolved_key_path, resolved_key_passphrase) =
+                match auth_method.as_str() {
+                    "password" => {
+                        let pw = match password.as_deref().map(str::trim) {
+                            Some(p) if !p.is_empty() => p.to_string(),
+                            _ => secrets::retrieve(
+                                SFTP_SECRET_ACCOUNT,
+                                SecretSlot::Password,
+                            )
+                            .map_err(|err| CommandError {
+                                code: "auth",
+                                message: format!(
+                                    "no SFTP password configured: {err}",
+                                ),
+                            })?,
+                        };
+                        (pw, String::new(), String::new())
                     }
-                }
-                other => {
-                    return Err(CommandError {
-                        code: "invalid_input",
-                        message: format!(
-                            "unknown SFTP auth method: {other}",
-                        ),
-                    });
-                }
-            };
-            let verifier =
-                Arc::new(UserPrefsHostKeyVerifier::new(db.clone()));
-            Ok(Arc::new(SftpSyncAdapter::new(
-                trimmed_host,
-                *port,
-                trimmed_user,
-                auth,
-                PathBuf::from(trimmed_path),
-                verifier,
-            )))
+                    "key" => {
+                        let kp = key_path
+                            .as_deref()
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                            .ok_or(CommandError {
+                                code: "invalid_input",
+                                message: "SSH key path must not be empty".into(),
+                            })?
+                            .to_string();
+                        let pass = match key_passphrase
+                            .as_deref()
+                            .map(str::trim)
+                        {
+                            Some(p) if !p.is_empty() => p.to_string(),
+                            _ => secrets::retrieve(
+                                SFTP_KEY_SECRET_ACCOUNT,
+                                SecretSlot::Password,
+                            )
+                            .ok()
+                            .unwrap_or_default(),
+                        };
+                        (String::new(), kp, pass)
+                    }
+                    other => {
+                        return Err(CommandError {
+                            code: "invalid_input",
+                            message: format!(
+                                "unknown SFTP auth method: {other}",
+                            ),
+                        });
+                    }
+                };
+            // Look up the user-pinned host fingerprint from the
+            // §19.5 trust dialog state so the plugin's in-memory
+            // verifier locks the handshake to that exact key.
+            // Empty fingerprint → silent TOFU; the frontend only
+            // calls connect after the trust dialog so this should
+            // never happen in production.
+            let pinned_fp = pinned_sftp_fingerprint(db, trimmed_host, *port);
+            let cfg = serde_json::json!({
+                "host": trimmed_host,
+                "port": *port,
+                "user": trimmed_user,
+                "path": trimmed_path,
+                "auth_method": auth_method,
+                "password": resolved_password,
+                "key_path": resolved_key_path,
+                "key_passphrase": resolved_key_passphrase,
+                "pinned_fingerprint": pinned_fp,
+            })
+            .to_string();
+            open_sync_plugin(plugin_manager, PLUGIN_ID_SFTP, cfg)
         }
         SyncAdapterConfig::Dropbox {
             client_id,
@@ -482,19 +558,14 @@ fn build_adapter(
                     "Dropbox sign-in required — no refresh token: {err}",
                 ),
             })?;
-            let adapter = DropboxSyncAdapter::new(
-                DropboxAccountConfig {
-                    client_id: trimmed_client_id.to_string(),
-                    client_secret: client_secret.trim().to_string(),
-                    base_path: path.trim().to_string(),
-                },
-                refresh_token,
-            )
-            .map_err(|err| CommandError {
-                code: "invalid_input",
-                message: format!("build Dropbox adapter: {err}"),
-            })?;
-            Ok(Arc::new(adapter))
+            let cfg = serde_json::json!({
+                "client_id": trimmed_client_id,
+                "client_secret": client_secret.trim(),
+                "base_path": path.trim(),
+                "refresh_token": refresh_token,
+            })
+            .to_string();
+            open_sync_plugin(plugin_manager, PLUGIN_ID_DROPBOX, cfg)
         }
         SyncAdapterConfig::GoogleDrive {
             client_id,
@@ -525,19 +596,14 @@ fn build_adapter(
                     "Google Drive sign-in required — no refresh token: {err}",
                 ),
             })?;
-            let adapter = DriveSyncAdapter::new(
-                GoogleDriveAccountConfig {
-                    client_id: trimmed_id.to_string(),
-                    client_secret: trimmed_secret.to_string(),
-                    folder_name: folder_name.trim().to_string(),
-                },
-                refresh_token,
-            )
-            .map_err(|err| CommandError {
-                code: "invalid_input",
-                message: format!("build Google Drive adapter: {err}"),
-            })?;
-            Ok(Arc::new(adapter))
+            let cfg = serde_json::json!({
+                "client_id": trimmed_id,
+                "client_secret": trimmed_secret,
+                "folder_name": folder_name.trim(),
+                "refresh_token": refresh_token,
+            })
+            .to_string();
+            open_sync_plugin(plugin_manager, PLUGIN_ID_GOOGLEDRIVE, cfg)
         }
         SyncAdapterConfig::Ftp {
             host,
@@ -580,31 +646,29 @@ fn build_adapter(
                         ),
                     })?,
                 };
-            let parsed_mode = match mode.as_str() {
-                "implicit" => FtpsMode::Implicit,
-                "explicit" => FtpsMode::Explicit,
-                // `plain` is the opt-in unencrypted variant.
-                // The frontend gates it behind a visible
-                // warning; we trust the request when it
-                // arrives here.
-                "plain" => FtpsMode::Plain,
-                other => {
-                    return Err(CommandError {
-                        code: "invalid_input",
-                        message: format!(
-                            "unknown FTPS mode: {other}",
-                        ),
-                    });
-                }
-            };
-            Ok(Arc::new(FtpsSyncAdapter::new(
-                trimmed_host,
-                *port,
-                trimmed_user,
-                resolved_password,
-                trimmed_path,
-                parsed_mode,
-            )))
+            // Plugin validates the `mode` string itself + falls
+            // back to "explicit" on unknown values, but we still
+            // catch the obviously-wrong cases here so the user
+            // gets the same "Settings dialog" error the previous
+            // direct path produced.
+            if !matches!(mode.as_str(), "implicit" | "explicit" | "plain") {
+                return Err(CommandError {
+                    code: "invalid_input",
+                    message: format!(
+                        "unknown FTPS mode: {mode}",
+                    ),
+                });
+            }
+            let cfg = serde_json::json!({
+                "host": trimmed_host,
+                "port": *port,
+                "user": trimmed_user,
+                "password": resolved_password,
+                "path": trimmed_path,
+                "mode": mode,
+            })
+            .to_string();
+            open_sync_plugin(plugin_manager, PLUGIN_ID_FTP, cfg)
         }
         SyncAdapterConfig::None => Err(CommandError {
             code: "invalid_input",
@@ -878,6 +942,7 @@ pub async fn configure_sync_adapter(
     orchestrator: State<'_, Arc<SyncOrchestrator>>,
     scheduler: State<'_, Arc<SyncScheduler>>,
     onboarding: State<'_, Arc<OnboardingService>>,
+    plugin_manager: State<'_, Arc<PluginManager>>,
     config: SyncAdapterConfig,
 ) -> CommandResult<()> {
     let shared = db.shared();
@@ -895,7 +960,7 @@ pub async fn configure_sync_adapter(
             // request body omitted the password (e.g. URL-only
             // edit). Then we probe.
             persist_adapter_config(&prefs, &config)?;
-            let plain = build_adapter(&config, &shared)?;
+            let plain = build_adapter(&config, &shared, plugin_manager.inner())?;
             // Probe the connection before keeping the adapter
             // active — misconfigurations should surface immediately
             // at the settings dialog, not hours later when the
@@ -1105,10 +1170,11 @@ pub async fn compact_now(
 #[tauri::command]
 pub async fn test_sync_adapter(
     db: State<'_, DbHandle>,
+    plugin_manager: State<'_, Arc<PluginManager>>,
     config: SyncAdapterConfig,
 ) -> CommandResult<()> {
     let shared = db.shared();
-    let adapter = build_adapter(&config, &shared)?;
+    let adapter = build_adapter(&config, &shared, plugin_manager.inner())?;
     adapter.test_connection().await.map_err(sync_err)
 }
 
@@ -1127,10 +1193,11 @@ pub async fn test_sync_adapter(
 pub async fn preview_sync_target(
     db: State<'_, DbHandle>,
     onboarding: State<'_, Arc<OnboardingService>>,
+    plugin_manager: State<'_, Arc<PluginManager>>,
     config: SyncAdapterConfig,
 ) -> CommandResult<SyncPreview> {
     let shared = db.shared();
-    let adapter = build_adapter(&config, &shared)?;
+    let adapter = build_adapter(&config, &shared, plugin_manager.inner())?;
     onboarding.preview(adapter.as_ref()).await.map_err(sync_err)
 }
 
@@ -1149,12 +1216,13 @@ pub async fn accept_remote_dataset(
     orchestrator: State<'_, Arc<SyncOrchestrator>>,
     scheduler: State<'_, Arc<SyncScheduler>>,
     onboarding: State<'_, Arc<OnboardingService>>,
+    plugin_manager: State<'_, Arc<PluginManager>>,
     config: SyncAdapterConfig,
     device_name: Option<String>,
     passphrase: Option<String>,
 ) -> CommandResult<OnboardingReport> {
     let shared = db.shared();
-    let plain = build_adapter(&config, &shared)?;
+    let plain = build_adapter(&config, &shared, plugin_manager.inner())?;
     plain.test_connection().await.map_err(sync_err)?;
 
     // Phase Sk: peek at meta.json to see if the dataset is
@@ -1239,12 +1307,13 @@ pub async fn adopt_local_dataset(
     orchestrator: State<'_, Arc<SyncOrchestrator>>,
     scheduler: State<'_, Arc<SyncScheduler>>,
     onboarding: State<'_, Arc<OnboardingService>>,
+    plugin_manager: State<'_, Arc<PluginManager>>,
     config: SyncAdapterConfig,
     device_name: Option<String>,
     passphrase: Option<String>,
 ) -> CommandResult<OnboardingReport> {
     let shared = db.shared();
-    let plain = build_adapter(&config, &shared)?;
+    let plain = build_adapter(&config, &shared, plugin_manager.inner())?;
     plain.test_connection().await.map_err(sync_err)?;
 
     // Phase Sk + §19.7 passphrase rotation: fresh datasets land
@@ -1453,6 +1522,7 @@ pub struct DisableE2eReport {
 pub async fn disable_sync_encryption(
     db: State<'_, DbHandle>,
     orchestrator: State<'_, Arc<SyncOrchestrator>>,
+    plugin_manager: State<'_, Arc<PluginManager>>,
     current_passphrase: String,
 ) -> CommandResult<DisableE2eReport> {
     let pp = current_passphrase.trim();
@@ -1502,7 +1572,7 @@ pub async fn disable_sync_encryption(
     //    config bits are guaranteed to match.
     let shared = db.shared();
     let plain =
-        build_adapter_from_prefs(&shared).ok_or(CommandError {
+        build_adapter_from_prefs(&shared, plugin_manager.inner()).ok_or(CommandError {
             code: "not_configured",
             message: "couldn't rebuild the underlying plain adapter".into(),
         })?;
@@ -1561,8 +1631,13 @@ pub async fn disable_sync_encryption(
 /// from the persisted prefs on app start. Returns `Ok(None)`
 /// when no adapter was configured before — the orchestrator
 /// stays in its initial unconfigured state.
+///
+/// Same plugin-routing shape as [`build_adapter`]: the persisted
+/// pref values become a JSON config that's handed to the
+/// matching sync plugin via `open_instance`.
 pub fn build_adapter_from_prefs(
-    db: &crate::db::SharedConn,
+    db: &SharedConn,
+    plugin_manager: &PluginManager,
 ) -> Option<Arc<dyn SyncAdapter>> {
     let prefs = UserPrefsRepo::new(db);
     let kind = prefs.get(PREF_ADAPTER_KIND).ok().flatten()?;
@@ -1572,7 +1647,8 @@ pub fn build_adapter_from_prefs(
             if path.trim().is_empty() {
                 return None;
             }
-            Arc::new(LocalFsSyncAdapter::new(PathBuf::from(path)))
+            let cfg = serde_json::json!({ "remote_root": path.trim() }).to_string();
+            open_sync_plugin(plugin_manager, PLUGIN_ID_LOCAL, cfg).ok()?
         }
         "webdav" => {
             let url = prefs.get(PREF_WEBDAV_URL).ok().flatten()?;
@@ -1584,17 +1660,17 @@ pub fn build_adapter_from_prefs(
                 .ok()
                 .flatten()
                 .unwrap_or_default();
-            let password = secrets::retrieve(
-                WEBDAV_SECRET_ACCOUNT,
-                SecretSlot::Password,
-            )
-            .ok();
-            let credentials = match (user.trim().is_empty(), password) {
-                (false, Some(pw)) => WebDavCredentials::basic(user.trim(), &pw),
-                _ => WebDavCredentials::None,
-            };
-            let adapter = WebDavSyncAdapter::new(url.trim(), credentials).ok()?;
-            Arc::new(adapter)
+            let password =
+                secrets::retrieve(WEBDAV_SECRET_ACCOUNT, SecretSlot::Password)
+                    .ok()
+                    .unwrap_or_default();
+            let cfg = serde_json::json!({
+                "url": url.trim(),
+                "user": user.trim(),
+                "password": password,
+            })
+            .to_string();
+            open_sync_plugin(plugin_manager, PLUGIN_ID_WEBDAV, cfg).ok()?
         }
         "sftp" => {
             let host = prefs.get(PREF_SFTP_HOST).ok().flatten()?;
@@ -1620,46 +1696,48 @@ pub fn build_adapter_from_prefs(
                 .ok()
                 .flatten()
                 .unwrap_or_else(|| "password".to_string());
-            let auth = match auth_method.as_str() {
-                "key" => {
-                    let key_path =
-                        prefs.get(PREF_SFTP_KEY_PATH).ok().flatten()?;
-                    if key_path.trim().is_empty() {
-                        return None;
+            let (resolved_password, resolved_key_path, resolved_key_passphrase) =
+                match auth_method.as_str() {
+                    "key" => {
+                        let kp =
+                            prefs.get(PREF_SFTP_KEY_PATH).ok().flatten()?;
+                        if kp.trim().is_empty() {
+                            return None;
+                        }
+                        let pass = secrets::retrieve(
+                            SFTP_KEY_SECRET_ACCOUNT,
+                            SecretSlot::Password,
+                        )
+                        .ok()
+                        .unwrap_or_default();
+                        (String::new(), kp.trim().to_string(), pass)
                     }
-                    let passphrase = secrets::retrieve(
-                        SFTP_KEY_SECRET_ACCOUNT,
-                        SecretSlot::Password,
-                    )
-                    .ok()
-                    .filter(|s| !s.is_empty());
-                    SftpAuth::PrivateKey {
-                        path: PathBuf::from(key_path.trim()),
-                        passphrase,
+                    // "password" + anything unknown both fall to
+                    // password auth — forward-compat for a future
+                    // auth method that an older Aperio doesn't know.
+                    _ => {
+                        let pw = secrets::retrieve(
+                            SFTP_SECRET_ACCOUNT,
+                            SecretSlot::Password,
+                        )
+                        .ok()?;
+                        (pw, String::new(), String::new())
                     }
-                }
-                // "password" + anything unknown both fall to
-                // password auth — forward-compat for a future
-                // auth method that an older Aperio doesn't know.
-                _ => {
-                    let password = secrets::retrieve(
-                        SFTP_SECRET_ACCOUNT,
-                        SecretSlot::Password,
-                    )
-                    .ok()?;
-                    SftpAuth::Password { password }
-                }
-            };
-            let verifier =
-                Arc::new(UserPrefsHostKeyVerifier::new(db.clone()));
-            Arc::new(SftpSyncAdapter::new(
-                host.trim(),
-                port,
-                user.trim(),
-                auth,
-                PathBuf::from(path.trim()),
-                verifier,
-            ))
+                };
+            let pinned_fp = pinned_sftp_fingerprint(db, host.trim(), port);
+            let cfg = serde_json::json!({
+                "host": host.trim(),
+                "port": port,
+                "user": user.trim(),
+                "path": path.trim(),
+                "auth_method": auth_method,
+                "password": resolved_password,
+                "key_path": resolved_key_path,
+                "key_passphrase": resolved_key_passphrase,
+                "pinned_fingerprint": pinned_fp,
+            })
+            .to_string();
+            open_sync_plugin(plugin_manager, PLUGIN_ID_SFTP, cfg).ok()?
         }
         "ftp" => {
             let host = prefs.get(PREF_FTP_HOST).ok().flatten()?;
@@ -1678,34 +1756,27 @@ pub fn build_adapter_from_prefs(
             }
             let path =
                 prefs.get(PREF_FTP_PATH).ok().flatten().unwrap_or_default();
-            let mode_str = prefs
+            let mode = prefs
                 .get(PREF_FTP_MODE)
                 .ok()
                 .flatten()
                 .unwrap_or_else(|| "explicit".to_string());
-            let mode = match mode_str.as_str() {
-                "implicit" => FtpsMode::Implicit,
-                "plain" => FtpsMode::Plain,
-                // "explicit" + any forward-compat unknown both
-                // fall back to explicit FTPS — the more
-                // compatible mode and the safer default.
-                _ => FtpsMode::Explicit,
-            };
             let password =
                 secrets::retrieve(FTP_SECRET_ACCOUNT, SecretSlot::Password)
                     .ok()?;
-            Arc::new(FtpsSyncAdapter::new(
-                host.trim(),
-                port,
-                user.trim(),
-                password,
-                path.trim(),
-                mode,
-            ))
+            let cfg = serde_json::json!({
+                "host": host.trim(),
+                "port": port,
+                "user": user.trim(),
+                "password": password,
+                "path": path.trim(),
+                "mode": mode,
+            })
+            .to_string();
+            open_sync_plugin(plugin_manager, PLUGIN_ID_FTP, cfg).ok()?
         }
         "dropbox" => {
-            let client_id =
-                prefs.get(PREF_DROPBOX_CLIENT_ID).ok().flatten()?;
+            let client_id = prefs.get(PREF_DROPBOX_CLIENT_ID).ok().flatten()?;
             if client_id.trim().is_empty() {
                 return None;
             }
@@ -1714,24 +1785,24 @@ pub fn build_adapter_from_prefs(
                 .ok()
                 .flatten()
                 .unwrap_or_default();
-            let path =
-                prefs.get(PREF_DROPBOX_PATH).ok().flatten().unwrap_or_default();
+            let path = prefs
+                .get(PREF_DROPBOX_PATH)
+                .ok()
+                .flatten()
+                .unwrap_or_default();
             let refresh_token = secrets::retrieve(
                 DROPBOX_SECRET_ACCOUNT,
                 SecretSlot::RefreshToken,
             )
             .ok()?;
-            Arc::new(
-                DropboxSyncAdapter::new(
-                    DropboxAccountConfig {
-                        client_id: client_id.trim().to_string(),
-                        client_secret: client_secret.trim().to_string(),
-                        base_path: path.trim().to_string(),
-                    },
-                    refresh_token,
-                )
-                .ok()?,
-            )
+            let cfg = serde_json::json!({
+                "client_id": client_id.trim(),
+                "client_secret": client_secret.trim(),
+                "base_path": path.trim(),
+                "refresh_token": refresh_token,
+            })
+            .to_string();
+            open_sync_plugin(plugin_manager, PLUGIN_ID_DROPBOX, cfg).ok()?
         }
         "googledrive" => {
             let client_id =
@@ -1759,17 +1830,14 @@ pub fn build_adapter_from_prefs(
                 SecretSlot::RefreshToken,
             )
             .ok()?;
-            Arc::new(
-                DriveSyncAdapter::new(
-                    GoogleDriveAccountConfig {
-                        client_id: client_id.trim().to_string(),
-                        client_secret: client_secret.trim().to_string(),
-                        folder_name: folder_name.trim().to_string(),
-                    },
-                    refresh_token,
-                )
-                .ok()?,
-            )
+            let cfg = serde_json::json!({
+                "client_id": client_id.trim(),
+                "client_secret": client_secret.trim(),
+                "folder_name": folder_name.trim(),
+                "refresh_token": refresh_token,
+            })
+            .to_string();
+            open_sync_plugin(plugin_manager, PLUGIN_ID_GOOGLEDRIVE, cfg).ok()?
         }
         // Forward-compat: an unknown kind (left over from a
         // future Aperio version) is silently treated as "no

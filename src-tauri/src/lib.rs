@@ -197,7 +197,7 @@ pub fn run() {
     // (per §19.2.1) and never propagate, so the user_prefs
     // lookup is the single source of truth.
     if let Some(adapter) =
-        commands::build_adapter_from_prefs(&db.shared())
+        commands::build_adapter_from_prefs(&db.shared(), &plugin_manager)
     {
         info!("restoring previously-configured sync adapter");
         sync_orchestrator.configure(adapter);
@@ -220,6 +220,7 @@ pub fn run() {
         .manage(event_log_writer)
         .manage(sync_orchestrator)
         .manage(onboarding)
+        .manage(plugin_manager)
         .invoke_handler(tauri::generate_handler![
             app_info,
             commands::list_calendars,
