@@ -324,6 +324,36 @@ impl EwsAdapter {
                     continue;
                 }
             }
+            // For each modified occurrence on a master, emit a
+            // synthetic standalone event at the moved time. The
+            // master's EXDATE list (built in `to_event`) already
+            // skips the original slot — without this emit the
+            // user would see the override-time slot empty.
+            //
+            // Content (title, body, location, reminders) inherits
+            // from the master. Outlook lets the user edit those
+            // fields per-occurrence; capturing them would require
+            // a per-override GetItem fan-out, deferred. Time
+            // changes (the most common kind of override) render
+            // correctly with the inherited content.
+            if !item.modified_occurrences.is_empty() {
+                for ov in &item.modified_occurrences {
+                    if ov.end < range.start || ov.start >= range.end {
+                        continue;
+                    }
+                    let mut override_ev = ev.clone();
+                    override_ev.id = format!(
+                        "{}#override:{}",
+                        ev.id,
+                        ov.original_start.to_rfc3339(),
+                    );
+                    override_ev.recurrence = None;
+                    override_ev.start = ov.start;
+                    override_ev.end = ov.end;
+                    override_ev.etag = ov.change_key.clone();
+                    out.push(override_ev);
+                }
+            }
             out.push(ev);
         }
 

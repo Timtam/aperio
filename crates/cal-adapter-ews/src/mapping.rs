@@ -322,6 +322,36 @@ pub struct ParsedItem {
     /// row — translates to EXDATE entries in
     /// `cal_core::EventRecurrence::exceptions` on the way down.
     pub deleted_occurrence_starts: Vec<DateTime<Utc>>,
+    /// `<t:ModifiedOccurrences>` on a RecurringMaster row — one
+    /// entry per instance whose time was moved or content was
+    /// edited server-side. The server inlines just the new
+    /// time + original time + the override's item id; the
+    /// override's actual subject/location would require a
+    /// follow-up GetItem (deferred). The adapter currently
+    /// EXDATEs out the original slot and emits a synthetic
+    /// standalone event at the moved time, inheriting the
+    /// master's content — gets the time right, may show stale
+    /// title/location for the small minority of overrides that
+    /// also edited the content fields.
+    pub modified_occurrences: Vec<ModifiedOccurrence>,
+}
+
+/// One entry from a master row's `<t:ModifiedOccurrences>` list.
+/// Carries the override's identity + new time slot + the original
+/// time slot the override displaces.
+#[derive(Debug, Clone)]
+pub struct ModifiedOccurrence {
+    /// The override's own ItemId — addressable directly for a
+    /// future per-override GetItem fan-out.
+    pub item_id: String,
+    pub change_key: Option<String>,
+    /// Where the override actually appears on the calendar.
+    pub start: DateTime<Utc>,
+    pub end: DateTime<Utc>,
+    /// Which RRULE-generated slot the override displaces; we use
+    /// this as the master's EXDATE so the expander skips the
+    /// vacated slot.
+    pub original_start: DateTime<Utc>,
 }
 
 /// Walk a `FindItemResponse` body and yield one `ParsedItem` per
@@ -519,6 +549,13 @@ pub fn parse_sync_folder_items_response(
     let mut recurrence_walker: Option<RecurrenceWalker> = None;
     let mut inside_deleted_occurrences = false;
     let mut inside_deleted_occurrence = false;
+    // ModifiedOccurrences mirrors the DeletedOccurrences shape but
+    // each child carries multiple fields (item_id, start, end,
+    // original_start) — we accumulate into `current_override` and
+    // push to the master on End.
+    let mut inside_modified_occurrences = false;
+    let mut inside_modified_occurrence = false;
+    let mut current_override = ModifiedOccurrenceBuilder::default();
 
     loop {
         match reader.read_event_into(&mut buf) {
@@ -555,7 +592,15 @@ pub fn parse_sync_folder_items_response(
                             }
                         }
                     }
-                    b"itemid" if inside_item => {
+                    // `inside_modified_occurrence` is technically a
+                    // SUBSET of `inside_item` — both are true while
+                    // we're walking a master's override list. Guard
+                    // this arm explicitly so the override's nested
+                    // ItemId doesn't silently overwrite the
+                    // master's. The override-specific arm sits
+                    // below (with the same `inside_modified_occurrence`
+                    // condition) and captures it correctly.
+                    b"itemid" if inside_item && !inside_modified_occurrence => {
                         for a in e.attributes().flatten() {
                             let key = a.key.as_ref();
                             if key.eq_ignore_ascii_case(b"Id") {
@@ -583,6 +628,32 @@ pub fn parse_sync_folder_items_response(
                     b"deletedoccurrence" if inside_deleted_occurrences => {
                         inside_deleted_occurrence = true;
                     }
+                    b"modifiedoccurrences" if inside_item => {
+                        inside_modified_occurrences = true;
+                    }
+                    b"occurrence" if inside_modified_occurrences => {
+                        inside_modified_occurrence = true;
+                        current_override =
+                            ModifiedOccurrenceBuilder::default();
+                    }
+                    // ItemId nested inside <t:Occurrence> carries the
+                    // override's address. Capture it BEFORE the
+                    // outer `b"itemid" if inside_item` arm — that
+                    // arm would overwrite the master's id with the
+                    // occurrence's id (catastrophic — every
+                    // subsequent push targets the wrong row).
+                    b"itemid" if inside_modified_occurrence => {
+                        for a in e.attributes().flatten() {
+                            let key = a.key.as_ref();
+                            if key.eq_ignore_ascii_case(b"Id") {
+                                current_override.item_id =
+                                    String::from_utf8_lossy(&a.value).into_owned();
+                            } else if key.eq_ignore_ascii_case(b"ChangeKey") {
+                                current_override.change_key =
+                                    Some(String::from_utf8_lossy(&a.value).into_owned());
+                            }
+                        }
+                    }
                     // Per-field text targets — only honoured while
                     // we're inside a CalendarItem block.
                     b"subject" if inside_item => text_target = Some("subject"),
@@ -590,6 +661,15 @@ pub fn parse_sync_folder_items_response(
                     b"location" if inside_item => text_target = Some("location"),
                     b"start" if inside_deleted_occurrence => {
                         text_target = Some("deleted_occurrence_start");
+                    }
+                    b"start" if inside_modified_occurrence => {
+                        text_target = Some("override_start");
+                    }
+                    b"end" if inside_modified_occurrence => {
+                        text_target = Some("override_end");
+                    }
+                    b"originalstart" if inside_modified_occurrence => {
+                        text_target = Some("override_original_start");
                     }
                     b"start" if inside_item => text_target = Some("start"),
                     b"end" if inside_item => text_target = Some("end"),
@@ -647,6 +727,16 @@ pub fn parse_sync_folder_items_response(
                     }
                     b"deletedoccurrence" => {
                         inside_deleted_occurrence = false;
+                    }
+                    b"modifiedoccurrences" => {
+                        inside_modified_occurrences = false;
+                    }
+                    b"occurrence" if inside_modified_occurrence => {
+                        inside_modified_occurrence = false;
+                        if let Some(o) = std::mem::take(&mut current_override).finish()
+                        {
+                            current.modified_occurrences.push(o);
+                        }
                     }
                     b"create" => {
                         if !current.item_id.is_empty() {
@@ -722,6 +812,15 @@ pub fn parse_sync_folder_items_response(
                         if let Some(dt) = parse_ews_datetime(s) {
                             current.deleted_occurrence_starts.push(dt);
                         }
+                    }
+                    Some("override_start") => {
+                        current_override.start = parse_ews_datetime(s);
+                    }
+                    Some("override_end") => {
+                        current_override.end = parse_ews_datetime(s);
+                    }
+                    Some("override_original_start") => {
+                        current_override.original_start = parse_ews_datetime(s);
                     }
                     Some("all_day") => {
                         current.is_all_day = s.eq_ignore_ascii_case("true");
@@ -842,9 +941,24 @@ pub fn to_event(item: ParsedItem, calendar_id: &str) -> EwsResult<Event> {
     //    RRULE + EXDATE list so the frontend expander handles the
     //    series exactly like CalDAV/iCal.
     let recurrence: Option<EventRecurrence> = item.recurrence.as_ref().map(|r| {
+        // Each modified occurrence DISPLACES the RRULE slot at
+        // `original_start`; the moved instance is emitted as a
+        // standalone event by the caller (refresh_and_read_events).
+        // We add the original slot to the EXDATE list so the
+        // expander doesn't double-render — once at the original
+        // (wrong) time and once at the moved time.
+        let mut exceptions: Vec<DateTime<Utc>> =
+            Vec::with_capacity(
+                item.deleted_occurrence_starts.len()
+                    + item.modified_occurrences.len(),
+            );
+        exceptions.extend_from_slice(&item.deleted_occurrence_starts);
+        for o in &item.modified_occurrences {
+            exceptions.push(o.original_start);
+        }
         EventRecurrence {
             rrule: r.to_rrule(),
-            exceptions: item.deleted_occurrence_starts.clone(),
+            exceptions,
         }
     });
 
@@ -1769,6 +1883,38 @@ enum RangeBuilder {
     EndDate { end: String },
 }
 
+/// Scratch type used while walking a single `<t:Occurrence>`
+/// child of `<t:ModifiedOccurrences>`. Becomes a
+/// [`ModifiedOccurrence`] on completion.
+#[derive(Default)]
+struct ModifiedOccurrenceBuilder {
+    item_id: String,
+    change_key: Option<String>,
+    start: Option<DateTime<Utc>>,
+    end: Option<DateTime<Utc>>,
+    original_start: Option<DateTime<Utc>>,
+}
+
+impl ModifiedOccurrenceBuilder {
+    fn finish(self) -> Option<ModifiedOccurrence> {
+        // All three time fields + item_id are mandatory per the EWS
+        // schema. A missing one means a malformed response — drop
+        // the override rather than emitting a half-built event that
+        // would surface at the wrong time.
+        Some(ModifiedOccurrence {
+            item_id: if self.item_id.is_empty() {
+                return None;
+            } else {
+                self.item_id
+            },
+            change_key: self.change_key,
+            start: self.start?,
+            end: self.end?,
+            original_start: self.original_start?,
+        })
+    }
+}
+
 impl RangeBuilder {
     fn finish(self) -> EwsResult<EwsRecurrenceRange> {
         match self {
@@ -2013,6 +2159,7 @@ mod tests {
             item_type: None,
             recurrence: None,
             deleted_occurrence_starts: Vec::new(),
+            modified_occurrences: Vec::new(),
         };
         let ev = to_event(item, "FID|CK").unwrap();
         // No `<t:CalendarItemType>` element → defaults to Single,
@@ -2276,6 +2423,7 @@ mod tests {
             item_type: item_type.map(String::from),
             recurrence: None,
             deleted_occurrence_starts: Vec::new(),
+            modified_occurrences: Vec::new(),
         };
         assert_eq!(to_event(mk(Some("Single")), "FID").unwrap().id, "S:IID|ICK");
         assert_eq!(to_event(mk(Some("Occurrence")), "FID").unwrap().id, "O:IID|ICK");
@@ -2734,6 +2882,120 @@ mod tests {
             item.deleted_occurrence_starts[1].to_rfc3339(),
             "2026-06-15T09:00:00+00:00",
         );
+    }
+
+    #[test]
+    fn parse_sync_response_captures_modified_occurrences() {
+        // A master with one moved instance. Critical regression
+        // guards:
+        //   - the override's nested ItemId does NOT overwrite the
+        //     master's ItemId (would silently retarget every
+        //     subsequent push at the wrong row);
+        //   - the override's nested Start/End/OriginalStart land
+        //     in the right collection, NOT in the master's own
+        //     start/end fields.
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+               xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types"
+               xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages">
+  <soap:Body>
+    <m:SyncFolderItemsResponse>
+      <m:ResponseMessages>
+        <m:SyncFolderItemsResponseMessage ResponseClass="Success">
+          <m:ResponseCode>NoError</m:ResponseCode>
+          <m:SyncState>STATE</m:SyncState>
+          <m:IncludesLastItemInRange>true</m:IncludesLastItemInRange>
+          <m:Changes>
+            <t:Create>
+              <t:CalendarItem>
+                <t:ItemId Id="MASTER-X" ChangeKey="CK-MX"/>
+                <t:Subject>Daily standup</t:Subject>
+                <t:Start>2026-06-01T09:00:00Z</t:Start>
+                <t:End>2026-06-01T09:30:00Z</t:End>
+                <t:IsRecurring>true</t:IsRecurring>
+                <t:CalendarItemType>RecurringMaster</t:CalendarItemType>
+                <t:Recurrence>
+                  <t:DailyRecurrence><t:Interval>1</t:Interval></t:DailyRecurrence>
+                  <t:NumberedRecurrence>
+                    <t:StartDate>2026-06-01</t:StartDate>
+                    <t:NumberOfOccurrences>10</t:NumberOfOccurrences>
+                  </t:NumberedRecurrence>
+                </t:Recurrence>
+                <t:ModifiedOccurrences>
+                  <t:Occurrence>
+                    <t:ItemId Id="OCC-MOVED" ChangeKey="CK-OM"/>
+                    <t:Start>2026-06-03T14:00:00Z</t:Start>
+                    <t:End>2026-06-03T14:30:00Z</t:End>
+                    <t:OriginalStart>2026-06-03T09:00:00Z</t:OriginalStart>
+                  </t:Occurrence>
+                </t:ModifiedOccurrences>
+              </t:CalendarItem>
+            </t:Create>
+          </m:Changes>
+        </m:SyncFolderItemsResponseMessage>
+      </m:ResponseMessages>
+    </m:SyncFolderItemsResponse>
+  </soap:Body>
+</soap:Envelope>"#;
+        let r = parse_sync_folder_items_response(xml).unwrap();
+        let item = match &r.changes[0] {
+            SyncChange::Create(i) => i,
+            other => panic!("expected Create, got {other:?}"),
+        };
+        // Master fields preserved.
+        assert_eq!(item.item_id, "MASTER-X");
+        assert_eq!(item.change_key.as_deref(), Some("CK-MX"));
+        assert_eq!(
+            item.start.unwrap().to_rfc3339(),
+            "2026-06-01T09:00:00+00:00",
+        );
+        // One override captured with correct fields.
+        assert_eq!(item.modified_occurrences.len(), 1);
+        let ov = &item.modified_occurrences[0];
+        assert_eq!(ov.item_id, "OCC-MOVED");
+        assert_eq!(ov.change_key.as_deref(), Some("CK-OM"));
+        assert_eq!(ov.start.to_rfc3339(), "2026-06-03T14:00:00+00:00");
+        assert_eq!(ov.original_start.to_rfc3339(), "2026-06-03T09:00:00+00:00");
+    }
+
+    #[test]
+    fn to_event_folds_override_original_start_into_exdate_list() {
+        // Modified occurrences displace the RRULE slot at their
+        // OriginalStart — the master's EXDATE list must include
+        // that slot so the frontend expander doesn't render two
+        // events (the wrongly-placed master-expanded one + the
+        // override). The deleted-occurrence list survives the
+        // merge intact.
+        let mut item = ParsedItem {
+            item_id: "M".into(),
+            subject: "X".into(),
+            start: Some("2026-01-01T08:00:00Z".parse().unwrap()),
+            end: Some("2026-01-01T08:30:00Z".parse().unwrap()),
+            is_recurring: true,
+            item_type: Some("RecurringMaster".into()),
+            ..ParsedItem::default()
+        };
+        item.recurrence = Some(EwsRecurrence {
+            pattern: EwsRecurrencePattern::Daily { interval: 1 },
+            range: EwsRecurrenceRange::Numbered { occurrences: 30 },
+        });
+        item.deleted_occurrence_starts =
+            vec!["2026-01-05T08:00:00Z".parse().unwrap()];
+        item.modified_occurrences = vec![ModifiedOccurrence {
+            item_id: "OCC".into(),
+            change_key: None,
+            start: "2026-01-10T15:00:00Z".parse().unwrap(),
+            end: "2026-01-10T15:30:00Z".parse().unwrap(),
+            original_start: "2026-01-10T08:00:00Z".parse().unwrap(),
+        }];
+
+        let ev = to_event(item, "cal").unwrap();
+        let rec = ev.recurrence.expect("master has recurrence");
+        // Both the deleted slot AND the displaced slot land in
+        // exceptions; the deleted-only one keeps its place.
+        assert_eq!(rec.exceptions.len(), 2);
+        assert_eq!(rec.exceptions[0].to_rfc3339(), "2026-01-05T08:00:00+00:00");
+        assert_eq!(rec.exceptions[1].to_rfc3339(), "2026-01-10T08:00:00+00:00");
     }
 
     #[test]
