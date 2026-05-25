@@ -167,13 +167,56 @@
         "colorLabels": "Farb-Labels",
         "tasks": "Aufgaben",
         "contacts": "Kontakte",
-        "sync": "Synchronisation"
+        "sync": "Synchronisation",
+        "plugins": "Plugins"
       },
       "calendars": {
         "hint": "Standard-Hinweise, die auf Termine ohne eigenen Hinweis angewendet werden. Hilfreich für iCloud-Kalender: iOS-„Standardhinweise“ werden nicht in den Termin geschrieben, ohne hier konfigurierten Standard erscheint der Hinweis in Aperio nicht.",
         "empty": "Noch keine Kalender — füge zuerst ein Konto hinzu.",
         "accountHeading": "{{account}}",
         "localAccount": "Lokal"
+      },
+      "plugins": {
+        "hint": "Plugins erweitern Aperio um Kalender-, Sync-, Videokonferenz- und Benachrichtigungs-Adapter. Mitgelieferte Plugins kommen mit der App; Community-Plugins landen unter plugins/user/.",
+        "empty": "Keine Plugins geladen.",
+        "loadError": "Plugins konnten nicht aufgelistet werden: {{error}}",
+        "groupAria": "{{type}}",
+        "rowAria": "{{name}}, Version {{version}}",
+        "version": "Version {{version}}",
+        "author": "Autor",
+        "abiVersion": "ABI-Version",
+        "minAppVersion": "Mindest-Aperio-Version",
+        "signed": {
+          "label": "Signiert",
+          "yes": "Ja",
+          "no": "Nein"
+        },
+        "type": {
+          "calendarAdapter": "Kalender-Adapter",
+          "syncAdapter": "Sync-Adapter",
+          "videoconferenceAdapter": "Videokonferenz-Adapter",
+          "notification": "Benachrichtigungs-Kanäle"
+        },
+        "capability": {
+          "calendar": "Kalender",
+          "tasks": "Aufgaben",
+          "contacts": "Kontakte",
+          "title": "Capability: {{value}}"
+        },
+        "hook": {
+          "interactiveAuth": {
+            "label": "Anmeldung",
+            "title": "Führt einen interaktiven OAuth-Anmeldevorgang durch."
+          },
+          "discover": {
+            "label": "Diensterkennung",
+            "title": "Erkennt Server-Endpunkte automatisch (z.B. EWS Autodiscover)."
+          },
+          "probeHostKey": {
+            "label": "Host-Key-Prüfung",
+            "title": "Liest den TOFU-Host-Key-Fingerabdruck eines Servers (z.B. SFTP First-Use-Dialog)."
+          }
+        }
       },
       "contacts": {
         "privacyTitle": "Datenschutz",

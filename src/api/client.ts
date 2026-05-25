@@ -17,6 +17,7 @@ import type {
   ContactPhoto,
   NewContact,
   NewEvent,
+  PluginInfo,
   SearchResults,
   Task,
   TaskList,
@@ -1180,3 +1181,11 @@ export const hasGoogledriveRefreshToken = () =>
  *  pin-management UI works even when the server is unreachable. */
 export const getPinnedSftpHostKey = (hostPort: string) =>
   invoke<string | null>('get_pinned_sftp_host_key', { hostPort });
+
+// ── Plugins (§20.10) ──────────────────────────────────────────────
+
+/** Snapshot of every plugin currently loaded into the host's
+ *  PluginManager. The Settings → Plugins panel calls this to
+ *  render the read-only list. Sorted by id on the backend so
+ *  re-fetches produce a stable order. */
+export const listPlugins = () => invoke<PluginInfo[]>('list_plugins');

@@ -358,6 +358,9 @@ pub fn run() {
             commands::create_meeting,
             commands::get_meeting,
             commands::delete_meeting,
+            // §20.10 Settings → Plugins panel. Read-only list of
+            // every loaded plugin + its manifest metadata.
+            commands::list_plugins,
         ])
         .setup(move |app| {
             // Spawn the reminder scheduler on the Tauri/tokio runtime

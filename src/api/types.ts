@@ -255,7 +255,11 @@ export type AdapterKind =
   | 'microsoft_graph'
   | 'ews'
   | 'vikunja'
-  | 'todoist';
+  | 'todoist'
+  | 'zoom'
+  | 'teams'
+  | 'meet'
+  | 'webex';
 
 export interface Account {
   id: string;
@@ -284,6 +288,38 @@ export interface CommandError {
     | 'io'
     | 'encryption_required'
     | 'schema_too_old'
-    | 'not_configured';
+    | 'not_configured'
+    // §20 plugin-system surface — `list_plugins` and friends
+    // emit these when a plugin is missing from the
+    // `PluginManager` or doesn't export a required entry point.
+    | 'plugin_missing';
   message: string;
 }
+
+/** Snapshot of one loaded plugin from `list_plugins`. Mirrors
+ *  `src-tauri/src/commands/plugins.rs::PluginInfo`. */
+export interface PluginInfo {
+  id: string;
+  name: string;
+  version: string;
+  plugin_type: PluginTypeWire;
+  capabilities: string[];
+  abi_version: number;
+  min_app_version: string;
+  author: string | null;
+  description: string | null;
+  signed: boolean;
+  has_interactive_auth: boolean;
+  has_discover: boolean;
+  has_probe_host_key: boolean;
+}
+
+/** Canonical plugin-type wire strings — Rust's `PluginType::as_str`
+ *  emits these. Unknown future tags round-trip as plain strings;
+ *  the panel renders them under "Other". */
+export type PluginTypeWire =
+  | 'calendar-adapter'
+  | 'sync-adapter'
+  | 'videoconference-adapter'
+  | 'notification'
+  | string;

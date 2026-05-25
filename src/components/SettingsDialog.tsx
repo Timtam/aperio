@@ -14,6 +14,7 @@ import { CalendarsPanel } from './CalendarsPanel';
 import { ColorLabelsPanel } from './ColorLabelsPanel';
 import { ContactsPanel } from './ContactsPanel';
 import { Modal } from './Modal';
+import { PluginsPanel } from './PluginsPanel';
 import { SyncPanel } from './SyncPanel';
 import { TasksPanel } from './TasksPanel';
 
@@ -45,7 +46,8 @@ export type SettingsTabId =
   | 'colorLabels'
   | 'tasks'
   | 'contacts'
-  | 'sync';
+  | 'sync'
+  | 'plugins';
 
 const TAB_ORDER: SettingsTabId[] = [
   'accounts',
@@ -54,6 +56,7 @@ const TAB_ORDER: SettingsTabId[] = [
   'tasks',
   'contacts',
   'sync',
+  'plugins',
 ];
 
 export interface SettingsDialogProps {
@@ -96,6 +99,7 @@ export function SettingsDialog({
     tasks: null,
     contacts: null,
     sync: null,
+    plugins: null,
   });
 
   const focusTab = useCallback(
@@ -165,6 +169,7 @@ export function SettingsDialog({
         tasks: t('dialogs.settings.tabs.tasks'),
         contacts: t('dialogs.settings.tabs.contacts'),
         sync: t('dialogs.settings.tabs.sync'),
+        plugins: t('dialogs.settings.tabs.plugins'),
       }) satisfies Record<SettingsTabId, string>,
     [t],
   );
@@ -252,6 +257,7 @@ export function SettingsDialog({
           {activeTab === 'tasks' && <TasksPanel />}
           {activeTab === 'contacts' && <ContactsPanel />}
           {activeTab === 'sync' && <SyncPanel />}
+          {activeTab === 'plugins' && <PluginsPanel />}
         </div>
       </div>
 

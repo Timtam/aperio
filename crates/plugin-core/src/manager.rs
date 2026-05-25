@@ -202,6 +202,26 @@ impl LoadedPlugin {
             .to_str()
             .unwrap_or("<non-utf8 id>")
     }
+
+    /// `true` iff the plugin exported an
+    /// `aperio_plugin_interactive_auth` symbol that we cached at
+    /// load time. Drives the Settings → Plugins panel's
+    /// capability badges.
+    pub fn has_interactive_auth(&self) -> bool {
+        self.interactive_auth_fn.is_some()
+    }
+
+    /// `true` iff the plugin exported an
+    /// `aperio_plugin_discover` symbol.
+    pub fn has_discover(&self) -> bool {
+        self.discover_fn.is_some()
+    }
+
+    /// `true` iff the plugin exported an
+    /// `aperio_plugin_probe_host_key` symbol.
+    pub fn has_probe_host_key(&self) -> bool {
+        self.probe_host_key_fn.is_some()
+    }
 }
 
 impl Drop for LoadedPlugin {

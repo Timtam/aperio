@@ -170,13 +170,56 @@
         "colorLabels": "Color labels",
         "tasks": "Tasks",
         "contacts": "Contacts",
-        "sync": "Sync"
+        "sync": "Sync",
+        "plugins": "Plugins"
       },
       "calendars": {
         "hint": "Default reminders that apply to events without their own reminder. Useful for iCloud calendars: iOS “Default Alert Times” aren't written into the event itself, so without a default here the alarm doesn't show in Aperio.",
         "empty": "No calendars yet — add an account first.",
         "accountHeading": "{{account}}",
         "localAccount": "Local"
+      },
+      "plugins": {
+        "hint": "Plugins extend Aperio with calendar, sync, videoconference and notification adapters. Bundled plugins ship with the app; community plugins land in plugins/user/.",
+        "empty": "No plugins loaded.",
+        "loadError": "Couldn't list plugins: {{error}}",
+        "groupAria": "{{type}} plugins",
+        "rowAria": "{{name}}, version {{version}}",
+        "version": "Version {{version}}",
+        "author": "Author",
+        "abiVersion": "ABI version",
+        "minAppVersion": "Minimum Aperio version",
+        "signed": {
+          "label": "Signed",
+          "yes": "Yes",
+          "no": "No"
+        },
+        "type": {
+          "calendarAdapter": "Calendar adapters",
+          "syncAdapter": "Sync adapters",
+          "videoconferenceAdapter": "Videoconference adapters",
+          "notification": "Notification channels"
+        },
+        "capability": {
+          "calendar": "Calendar",
+          "tasks": "Tasks",
+          "contacts": "Contacts",
+          "title": "Capability: {{value}}"
+        },
+        "hook": {
+          "interactiveAuth": {
+            "label": "Sign-in",
+            "title": "Runs an interactive OAuth-style sign-in flow."
+          },
+          "discover": {
+            "label": "Service discovery",
+            "title": "Probes the user's domain for service endpoints (e.g. EWS Autodiscover)."
+          },
+          "probeHostKey": {
+            "label": "Host-key probe",
+            "title": "Reads a server's TOFU host-key fingerprint (e.g. SFTP first-use trust dialog)."
+          }
+        }
       },
       "contacts": {
         "privacyTitle": "Privacy",
