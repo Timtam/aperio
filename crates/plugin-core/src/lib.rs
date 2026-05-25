@@ -53,8 +53,9 @@ pub use ffi::{
 };
 pub use manager::{
     DiscoverError, DiscoverFn, InteractiveAuthError, InteractiveAuthFn,
-    LoadedInstance, LoadedPlugin, PluginManager, BUNDLED_PLUGINS_DIR,
-    SYMBOL_DISCOVER, SYMBOL_INTERACTIVE_AUTH, USER_PLUGINS_DIR,
+    LoadedInstance, LoadedPlugin, PluginManager, ProbeHostKeyError,
+    ProbeHostKeyFn, BUNDLED_PLUGINS_DIR, SYMBOL_DISCOVER,
+    SYMBOL_INTERACTIVE_AUTH, SYMBOL_PROBE_HOST_KEY, USER_PLUGINS_DIR,
 };
 pub use manifest::{PluginManifest, MANIFEST_FILENAME};
 pub use plugin_type::PluginType;

@@ -20,7 +20,9 @@ mod sync;
 mod tasks;
 mod user_prefs;
 
-use plugin_core::manager::{DiscoverError, InteractiveAuthError};
+use plugin_core::manager::{
+    DiscoverError, InteractiveAuthError, ProbeHostKeyError,
+};
 use plugin_core::PluginManager;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -161,6 +163,45 @@ pub fn discover_error_to_command(err: DiscoverError) -> CommandError {
         // the actionable text.
         DiscoverError::Plugin(msg) => CommandError {
             code: "not_found",
+            message: msg,
+        },
+    }
+}
+
+/// Run a TOFU host-key probe via the plugin manager and
+/// deserialise the result into the caller's `T` (typically
+/// `{"fingerprint": "SHA256:..."}`). Same shape as
+/// [`run_plugin_discover`].
+pub async fn run_plugin_probe_host_key<T: DeserializeOwned>(
+    plugin_manager: &PluginManager,
+    plugin_id: &str,
+    args_json: Value,
+) -> Result<T, CommandError> {
+    let bytes = plugin_manager
+        .probe_host_key(plugin_id, &args_json.to_string())
+        .await
+        .map_err(probe_host_key_error_to_command)?;
+    serde_json::from_slice(&bytes).map_err(|e| CommandError {
+        code: "protocol",
+        message: format!("plugin {plugin_id} returned non-JSON probe blob: {e}"),
+    })
+}
+
+pub fn probe_host_key_error_to_command(err: ProbeHostKeyError) -> CommandError {
+    match err {
+        ProbeHostKeyError::PluginMissing(id) => CommandError {
+            code: "plugin_missing",
+            message: format!("plugin {id} is not loaded"),
+        },
+        ProbeHostKeyError::Unsupported(id) => CommandError {
+            code: "unsupported",
+            message: format!("plugin {id} doesn't support probe_host_key"),
+        },
+        // Probe failures land under `network` — most are
+        // connection problems (dead host, TLS handshake, …). The
+        // plugin's own message text carries the actionable bits.
+        ProbeHostKeyError::Plugin(msg) => CommandError {
+            code: "network",
             message: msg,
         },
     }

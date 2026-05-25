@@ -98,10 +98,11 @@
 //!   `PLUGIN_CALL_ERR_*` status codes.
 //! - [`args`] — decode the host's JSON-encoded args pointer pair
 //!   into a typed value.
-//! - [`interactive_auth`] / [`discover`] — optional FFI entry
-//!   points for OAuth flows + service-discovery cascades.
+//! - [`interactive_auth`] / [`discover`] / [`probe_host_key`] —
+//!   optional FFI entry points for OAuth flows, service-discovery
+//!   cascades, and TOFU host-key fingerprint probes.
 //! - [`macros`] — `declare_lifecycle!`, `declare_interactive_auth!`,
-//!   `declare_discover!`.
+//!   `declare_discover!`, `declare_probe_host_key!`.
 
 pub mod args;
 pub mod discover;
@@ -110,6 +111,7 @@ pub mod instance;
 pub mod interactive_auth;
 pub mod macros;
 pub mod open_instance;
+pub mod probe_host_key;
 pub mod response;
 pub mod runtime;
 
@@ -123,6 +125,7 @@ pub use error_map::{cal_error_to_response, sync_error_to_response};
 pub use instance::{InitError, PluginInstance};
 pub use interactive_auth::interactive_auth_with;
 pub use open_instance::{error_result, open_instance_with};
+pub use probe_host_key::probe_host_key_with;
 pub use response::{
     bytes_to_response, error_response, free_boxed_slice, ok_empty_response,
     ok_response,

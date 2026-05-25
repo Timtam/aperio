@@ -361,6 +361,72 @@ macro_rules! declare_discover {
     };
 }
 
+/// Emit the optional `aperio_plugin_probe_host_key` symbol —
+/// the TOFU-transport host-key probe entry point the host's
+/// [`plugin_core::PluginManager::probe_host_key`] looks up via
+/// libloading.
+///
+/// Sibling of [`declare_discover!`] /
+/// [`declare_interactive_auth!`]: the plugin author writes a
+/// single typed handler, the macro emits the `#[no_mangle]`
+/// wrapper that bridges the raw FFI args to a fresh tokio
+/// runtime via [`crate::probe_host_key::probe_host_key_with`].
+///
+/// ```ignore
+/// async fn run_probe(json: String) -> Result<Vec<u8>, String> {
+///     let cfg: MyProbeConfig = serde_json::from_str(&json)
+///         .map_err(|e| e.to_string())?;
+///     let fingerprint = my_probe(&cfg.host, cfg.port)
+///         .await
+///         .map_err(|e| e.to_string())?;
+///     Ok(serde_json::to_vec(&serde_json::json!({
+///         "fingerprint": fingerprint,
+///     })).unwrap())
+/// }
+///
+/// plugin_sdk::declare_probe_host_key! {
+///     handler: run_probe,
+/// }
+/// ```
+///
+/// At most one `declare_probe_host_key!` invocation per crate —
+/// emitting two copies of `aperio_plugin_probe_host_key` would
+/// collide at link time.
+///
+/// ## Memory ownership
+///
+/// Same contract as the other declare_* macros: `args_ptr` +
+/// `args_len` is a host-owned byte buffer valid for the
+/// duration of the call; the returned payload bytes are plugin-
+/// allocated and the host drains them via the response's `free`
+/// fn-pointer right after copying.
+#[macro_export]
+macro_rules! declare_probe_host_key {
+    (handler: $handler:path $(,)?) => {
+        /// `aperio_plugin_probe_host_key` symbol — see
+        /// `aperio_plugin.h`. The host looks this up by name via
+        /// libloading; plugins that don't export it surface as
+        /// `ProbeHostKeyError::Unsupported`.
+        ///
+        /// # Safety
+        ///
+        /// FFI export. `args_ptr` + `args_len` must describe a
+        /// valid byte buffer the host owns for the duration of
+        /// the call.
+        #[no_mangle]
+        pub unsafe extern "C" fn aperio_plugin_probe_host_key(
+            args_ptr: *const u8,
+            args_len: usize,
+        ) -> $crate::plugin_core::ffi::PluginCallResult {
+            $crate::probe_host_key::probe_host_key_with(
+                args_ptr,
+                args_len,
+                |json| async move { $handler(json).await },
+            )
+        }
+    };
+}
+
 #[cfg(test)]
 mod tests {
     //! The macro-expansion happens inside tests via a sub-module

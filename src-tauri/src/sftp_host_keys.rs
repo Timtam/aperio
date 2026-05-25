@@ -1,5 +1,4 @@
-//! User-prefs-backed [`HostKeyVerifier`] for the SFTP sync
-//! adapter (DESIGN.md §19.5).
+//! User-prefs-backed SFTP host-key pin store (DESIGN.md §19.5).
 //!
 //! Stores accepted fingerprints under a per-host
 //! `user_prefs.sync.adapter.sftp.knownHosts.<host:port>` key so
@@ -8,15 +7,15 @@
 //! `event_log::whitelist`), so even with cross-device sync
 //! enabled each device pins independently.
 //!
-//! ## Threading concerns
-//!
-//! `HostKeyVerifier::verify` + `record` run on the russh
-//! handshake task, which is async. Our [`UserPrefsRepo`] holds a
-//! `std::sync::Mutex` around the SQLite connection; the lock
-//! window is microseconds, so a blocking `lock()` from the async
-//! context is fine (no `.await` happens while it's held).
+//! Iteration 9 split: the actual "verify a presented
+//! fingerprint" decision moved into the SFTP plugin (which
+//! receives the pinned fingerprint via init_config) — the host
+//! no longer implements `HostKeyVerifier`. What stays here is
+//! the pin store: peek (for `preview_sftp_host_key`'s
+//! comparison + the build_adapter_from_prefs path's pinned
+//! lookup), record (for `trust_sftp_host_key`'s user-confirmed
+//! acceptance), and forget (for the "Vergessen" button).
 
-use sync_adapter_sftp::{HostKeyDecision, HostKeyVerifier};
 use tracing::warn;
 
 use crate::db::SharedConn;
@@ -27,7 +26,7 @@ use crate::user_prefs::UserPrefsRepo;
 /// fine here; user_prefs stores opaque strings.
 const PREFIX: &str = "sync.adapter.sftp.knownHosts.";
 
-/// Concrete verifier backed by the SQLite-backed `user_prefs`
+/// Concrete pin store backed by the SQLite-backed `user_prefs`
 /// table. Wraps a `SharedConn` clone.
 #[derive(Debug)]
 pub struct UserPrefsHostKeyVerifier {
@@ -42,44 +41,22 @@ impl UserPrefsHostKeyVerifier {
     fn key_for(host_port: &str) -> String {
         format!("{PREFIX}{host_port}")
     }
-}
 
-impl HostKeyVerifier for UserPrefsHostKeyVerifier {
-    fn verify(&self, host_port: &str, fingerprint: &str) -> HostKeyDecision {
-        let repo = UserPrefsRepo::new(&self.db);
-        let stored = match repo.get(&Self::key_for(host_port)) {
-            Ok(s) => s,
-            Err(err) => {
-                // Read failure is unusual — log and treat as
-                // "unknown host" so the user gets a fresh TOFU
-                // prompt rather than a permanent blocker.
-                warn!(
-                    ?err,
-                    host_port = %host_port,
-                    "couldn't read SFTP known-host entry; treating as new",
-                );
-                None
-            }
-        };
-        match stored {
-            None => HostKeyDecision::AcceptAndRemember,
-            Some(s) if s == fingerprint => HostKeyDecision::Accept,
-            Some(s) => HostKeyDecision::Mismatch {
-                stored: s,
-                presented: fingerprint.to_string(),
-            },
-        }
-    }
-
-    fn peek(&self, host_port: &str) -> Option<String> {
+    /// Look up the pinned fingerprint for `host_port`, or
+    /// `None` if nothing is pinned yet. Used by
+    /// `preview_sftp_host_key` (to classify a freshly-probed
+    /// fingerprint as New / Unchanged / Changed) and by
+    /// `pinned_sftp_fingerprint` (to thread the pin into the
+    /// plugin's init_config).
+    pub fn peek(&self, host_port: &str) -> Option<String> {
         let repo = UserPrefsRepo::new(&self.db);
         match repo.get(&Self::key_for(host_port)) {
             Ok(s) => s,
             Err(err) => {
-                // Same treatment as `verify`: a transient read
-                // failure shouldn't trap the user. Returning None
-                // lets the preview path fall back to the "first
-                // use" dialog, which is recoverable.
+                // A transient read failure shouldn't trap the
+                // user. Returning None lets the preview path
+                // fall back to the "first use" dialog, which is
+                // recoverable.
                 warn!(
                     ?err,
                     host_port = %host_port,
@@ -91,7 +68,10 @@ impl HostKeyVerifier for UserPrefsHostKeyVerifier {
         }
     }
 
-    fn record(&self, host_port: &str, fingerprint: &str) {
+    /// Persist the fingerprint as the user-confirmed pin for
+    /// `host_port`. Called only from `trust_sftp_host_key` —
+    /// pinning is always an explicit user gesture (§19.5).
+    pub fn record(&self, host_port: &str, fingerprint: &str) {
         let repo = UserPrefsRepo::new(&self.db);
         if let Err(err) = repo.set(&Self::key_for(host_port), fingerprint) {
             warn!(
@@ -102,7 +82,9 @@ impl HostKeyVerifier for UserPrefsHostKeyVerifier {
         }
     }
 
-    fn forget(&self, host_port: &str) {
+    /// Drop the pinned fingerprint for `host_port`. Driven by
+    /// the "Vergessen" button in the SyncPanel.
+    pub fn forget(&self, host_port: &str) {
         let repo = UserPrefsRepo::new(&self.db);
         if let Err(err) = repo.delete(&Self::key_for(host_port)) {
             warn!(
@@ -127,41 +109,6 @@ mod tests {
     }
 
     #[test]
-    fn first_use_returns_accept_and_remember() {
-        let (_tmp, db) = fresh_db();
-        let v = UserPrefsHostKeyVerifier::new(db.shared());
-        assert_eq!(
-            v.verify("nas:22", "SHA256:abc"),
-            HostKeyDecision::AcceptAndRemember,
-        );
-    }
-
-    #[test]
-    fn record_persists_for_subsequent_verify() {
-        let (_tmp, db) = fresh_db();
-        let v = UserPrefsHostKeyVerifier::new(db.shared());
-        v.record("nas:22", "SHA256:abc");
-        assert_eq!(
-            v.verify("nas:22", "SHA256:abc"),
-            HostKeyDecision::Accept,
-        );
-    }
-
-    #[test]
-    fn mismatch_returns_stored_and_presented() {
-        let (_tmp, db) = fresh_db();
-        let v = UserPrefsHostKeyVerifier::new(db.shared());
-        v.record("nas:22", "SHA256:abc");
-        assert_eq!(
-            v.verify("nas:22", "SHA256:xyz"),
-            HostKeyDecision::Mismatch {
-                stored: "SHA256:abc".into(),
-                presented: "SHA256:xyz".into(),
-            },
-        );
-    }
-
-    #[test]
     fn peek_returns_none_for_unknown_host() {
         let (_tmp, db) = fresh_db();
         let v = UserPrefsHostKeyVerifier::new(db.shared());
@@ -169,11 +116,20 @@ mod tests {
     }
 
     #[test]
-    fn peek_returns_stored_fingerprint() {
+    fn record_persists_for_subsequent_peek() {
         let (_tmp, db) = fresh_db();
         let v = UserPrefsHostKeyVerifier::new(db.shared());
         v.record("nas:22", "SHA256:abc");
         assert_eq!(v.peek("nas:22"), Some("SHA256:abc".into()));
+    }
+
+    #[test]
+    fn record_overwrites_previous_pin() {
+        let (_tmp, db) = fresh_db();
+        let v = UserPrefsHostKeyVerifier::new(db.shared());
+        v.record("nas:22", "SHA256:abc");
+        v.record("nas:22", "SHA256:xyz");
+        assert_eq!(v.peek("nas:22"), Some("SHA256:xyz".into()));
     }
 
     #[test]
@@ -183,11 +139,6 @@ mod tests {
         v.record("nas:22", "SHA256:abc");
         v.forget("nas:22");
         assert_eq!(v.peek("nas:22"), None);
-        // The next verify should treat this as first-use.
-        assert_eq!(
-            v.verify("nas:22", "SHA256:xyz"),
-            HostKeyDecision::AcceptAndRemember,
-        );
     }
 
     #[test]
@@ -215,19 +166,7 @@ mod tests {
         let v = UserPrefsHostKeyVerifier::new(db.shared());
         v.record("nas-a:22", "SHA256:a");
         v.record("nas-b:22", "SHA256:b");
-        assert_eq!(
-            v.verify("nas-a:22", "SHA256:a"),
-            HostKeyDecision::Accept,
-        );
-        assert_eq!(
-            v.verify("nas-b:22", "SHA256:b"),
-            HostKeyDecision::Accept,
-        );
-        // Cross-check returns Mismatch since the other host's
-        // fingerprint doesn't match.
-        assert!(matches!(
-            v.verify("nas-a:22", "SHA256:b"),
-            HostKeyDecision::Mismatch { .. },
-        ));
+        assert_eq!(v.peek("nas-a:22"), Some("SHA256:a".into()));
+        assert_eq!(v.peek("nas-b:22"), Some("SHA256:b".into()));
     }
 }

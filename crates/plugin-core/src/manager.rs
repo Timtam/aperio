@@ -93,6 +93,26 @@ pub type DiscoverFn =
 /// Canonical symbol name for the discover entry point.
 pub const SYMBOL_DISCOVER: &[u8] = b"aperio_plugin_discover";
 
+/// Function-pointer type for the optional
+/// `aperio_plugin_probe_host_key` symbol. Plugins that wrap a
+/// TOFU-style transport (SFTP today; could extend to MQTT-over-
+/// TLS or similar later) expose this so the host's trust dialog
+/// can read the server's presented host-key fingerprint without
+/// committing a pin or even authenticating.
+///
+/// `args_ptr` / `args_len` carry the connection inputs as JSON
+/// (e.g. `{"host": "...", "port": 22}`); the returned
+/// [`PluginCallResult`]'s payload is a JSON document carrying
+/// the observed fingerprint. The host compares the fingerprint
+/// against its own pinned-key store (kept device-local in
+/// user_prefs) and renders the "first use" / "key changed" /
+/// "unchanged" trust dialog accordingly.
+pub type ProbeHostKeyFn =
+    unsafe extern "C" fn(args_ptr: *const u8, args_len: usize) -> PluginCallResult;
+
+/// Canonical symbol name for the probe-host-key entry point.
+pub const SYMBOL_PROBE_HOST_KEY: &[u8] = b"aperio_plugin_probe_host_key";
+
 /// One loaded plugin — manifest + library handle + descriptor
 /// pointer + the `destroy` symbol we need to call before unload.
 ///
@@ -125,6 +145,11 @@ pub struct LoadedPlugin {
     /// known URIs and Microsoft Graph endpoint probing are
     /// candidates for later).
     discover_fn: Option<DiscoverFn>,
+
+    /// Cached `aperio_plugin_probe_host_key` fn-pointer. `None`
+    /// when the plugin doesn't wrap a TOFU transport — most
+    /// don't (only SFTP today).
+    probe_host_key_fn: Option<ProbeHostKeyFn>,
 
     /// The dlopen'd library. Drop order:
     /// `aperio_plugin_destroy` → `library.drop()` (which calls
@@ -437,6 +462,16 @@ impl PluginManager {
                 .map(|sym| *sym)
         };
 
+        // `aperio_plugin_probe_host_key` is optional too — only
+        // adapters wrapping a TOFU transport (SFTP today) export
+        // it. Same caching shape as the other named-symbol hooks.
+        let probe_host_key_fn: Option<ProbeHostKeyFn> = unsafe {
+            library
+                .get::<ProbeHostKeyFn>(SYMBOL_PROBE_HOST_KEY)
+                .ok()
+                .map(|sym| *sym)
+        };
+
         // ABI cross-check between the manifest's claim + the
         // descriptor's claim. They MUST match — a divergence
         // would mean either the plugin's build hooked up the
@@ -482,6 +517,7 @@ impl PluginManager {
             destroy_fn,
             interactive_auth_fn,
             discover_fn,
+            probe_host_key_fn,
             library: Some(library),
         };
         let id = loaded.manifest.id.clone();
@@ -494,12 +530,12 @@ impl PluginManager {
     /// come straight from the plugin crate that's part of the
     /// host binary — no `dlopen`, no [`Library`] to retain.
     ///
-    /// Static-linked plugins don't get an `interactive_auth_fn`
-    /// or `discover_fn` — the named-symbol lookup mechanism the
-    /// dlopen path uses has no static-link analogue. Plugins
-    /// that need either entry point must therefore be dlopen-
-    /// loaded (relevant for any OAuth-style or Autodiscover-
-    /// style adapter).
+    /// Static-linked plugins don't get any of the optional named-
+    /// symbol hooks (`interactive_auth_fn`, `discover_fn`,
+    /// `probe_host_key_fn`) — the named-symbol lookup mechanism
+    /// the dlopen path uses has no static-link analogue. Plugins
+    /// that need them must therefore be dlopen-loaded (relevant
+    /// for any OAuth / Autodiscover / TOFU adapter).
     pub fn register_static(
         &self,
         manifest: PluginManifest,
@@ -519,6 +555,7 @@ impl PluginManager {
             destroy_fn,
             interactive_auth_fn: None,
             discover_fn: None,
+            probe_host_key_fn: None,
             library: None,
         };
         let id = loaded.manifest.id.clone();
@@ -827,6 +864,91 @@ pub enum DiscoverError {
     Plugin(String),
 }
 
+impl PluginManager {
+    /// Run the given plugin's `probe_host_key` hook with the
+    /// supplied JSON args + return the resulting fingerprint
+    /// blob (typically `{"fingerprint": "SHA256:..."}`). Async
+    /// because the probe opens a TCP+TLS/SSH connection and
+    /// reads the server's identity — a few hundred ms in the
+    /// happy path, several seconds for a dead host.
+    ///
+    /// Errors mirror [`Self::interactive_auth`] +
+    /// [`Self::discover`]:
+    ///   - [`ProbeHostKeyError::PluginMissing`] — no plugin
+    ///     loaded under the given id.
+    ///   - [`ProbeHostKeyError::Unsupported`] — plugin exists
+    ///     but doesn't export the
+    ///     `aperio_plugin_probe_host_key` symbol (adapters that
+    ///     don't wrap a TOFU transport).
+    ///   - [`ProbeHostKeyError::Plugin`] — the plugin returned
+    ///     a non-OK status; the message comes through verbatim
+    ///     so the user sees actionable text ("connection
+    ///     refused", "TLS handshake failed", …).
+    pub async fn probe_host_key(
+        &self,
+        plugin_id: &str,
+        args_json: &str,
+    ) -> Result<Vec<u8>, ProbeHostKeyError> {
+        let plugin = self
+            .get(plugin_id)
+            .ok_or_else(|| ProbeHostKeyError::PluginMissing(plugin_id.to_string()))?;
+        let probe_fn = plugin
+            .probe_host_key_fn
+            .ok_or_else(|| ProbeHostKeyError::Unsupported(plugin_id.to_string()))?;
+        let plugin_for_drop = plugin.clone();
+        let args = args_json.as_bytes().to_vec();
+        let join = tokio::task::spawn_blocking(move || {
+            // SAFETY: probe_fn was looked up out of the same
+            // library that plugin_for_drop holds open; args is a
+            // Vec<u8> we own for the duration of the synchronous
+            // call.
+            let result = unsafe { probe_fn(args.as_ptr(), args.len()) };
+            // SAFETY: result.payload is owned by the plugin; we
+            // copy bytes out + free in place before the buffer
+            // goes out of scope on the plugin's side.
+            let bytes = unsafe { result.payload.as_slice().to_vec() };
+            let status = result.status;
+            let mut payload = result.payload;
+            unsafe { payload.free_in_place() };
+            (status, bytes)
+        })
+        .await;
+        drop(plugin_for_drop);
+        let (status, bytes) = join.map_err(|err| {
+            ProbeHostKeyError::Plugin(format!("plugin task: {err}"))
+        })?;
+        if status == PLUGIN_CALL_OK {
+            Ok(bytes)
+        } else {
+            let msg = String::from_utf8_lossy(&bytes).into_owned();
+            Err(ProbeHostKeyError::Plugin(format!(
+                "plugin status {status}: {msg}",
+            )))
+        }
+    }
+}
+
+/// Reasons [`PluginManager::probe_host_key`] can fail.
+#[derive(Debug, thiserror::Error)]
+pub enum ProbeHostKeyError {
+    /// No plugin loaded under this id.
+    #[error("plugin not installed: {0}")]
+    PluginMissing(String),
+
+    /// Plugin is loaded but doesn't expose an
+    /// `aperio_plugin_probe_host_key` entry point — the host
+    /// should fall back to skipping the trust dialog (or
+    /// fail-closed, depending on the workflow).
+    #[error("plugin {0} doesn't support probe_host_key")]
+    Unsupported(String),
+
+    /// Plugin returned a non-OK status. Carries the plugin's
+    /// own error message so the user sees actionable text
+    /// ("connection refused", "TLS handshake failed", …).
+    #[error("{0}")]
+    Plugin(String),
+}
+
 
 /// Default subdir under the data dir / app dir where bundled
 /// plugins are staged. The release build pipeline copies each
@@ -933,6 +1055,7 @@ pub mod test_support {
             destroy_fn,
             interactive_auth_fn: None,
             discover_fn: None,
+            probe_host_key_fn: None,
             library: None,
         }
     }

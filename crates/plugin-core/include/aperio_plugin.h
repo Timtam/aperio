@@ -321,6 +321,42 @@ PluginCallResult aperio_plugin_discover(
     size_t         args_len
 );
 
+/*
+ * Optional: TOFU-transport host-key probe entry point.
+ *
+ * Plugins wrapping a transport that pins server identity at
+ * first use (SFTP today; potentially MQTT-over-TLS or similar
+ * later) expose this so the host's trust dialog can read the
+ * presented fingerprint *without* committing the pin or even
+ * authenticating. Plugins that don't — most — leave the symbol
+ * unexported and the host's PluginManager surfaces
+ * `ProbeHostKeyError::Unsupported` for any call against them.
+ *
+ * `args_json` carries the connection inputs — for SFTP that's
+ * typically `{"host": "...", "port": 22}`. The plugin opens a
+ * single connection, captures the server's host-key
+ * fingerprint, drops the connection without authenticating, +
+ * returns the fingerprint as a JSON document
+ * (`{"fingerprint": "SHA256:..."}`) in the PluginCallResult's
+ * payload. The host compares the fingerprint against its own
+ * pinned-key store (kept device-local in user_prefs) and
+ * renders the "first use" / "key changed" / "unchanged" trust
+ * dialog accordingly.
+ *
+ * Returning `APERIO_PLUGIN_CALL_ERR_NETWORK` (or any other
+ * non-OK status) surfaces the plugin's payload bytes verbatim
+ * as the error message ("connection refused", "host
+ * unreachable", …).
+ *
+ * The function may block for several seconds waiting on TCP
+ * connect / SSH handshake. The host invokes it inside its own
+ * `tokio::task::spawn_blocking` so the reactor stays free.
+ */
+PluginCallResult aperio_plugin_probe_host_key(
+    const uint8_t *args_ptr,
+    size_t         args_len
+);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

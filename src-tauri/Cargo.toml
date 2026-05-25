@@ -36,28 +36,21 @@ cal-core.workspace = true
 cal-adapter-local.workspace = true
 sync-core.workspace = true
 plugin-core.workspace = true
-# Direct sync-adapter crate dep the host still needs after the
-# plugin migration:
-#   - sync-adapter-sftp:  preview_sftp_host_key + the host-side
-#                         UserPrefsHostKeyVerifier still build a
-#                         direct SftpSyncAdapter for the §19.5
-#                         TOFU first-use trust dialog. Plugin
-#                         migration needs a `probe_host_key` ABI
-#                         extension — separate iteration.
-# Dropbox / Google Drive OAuth dances moved into the plugins
-# themselves via `interactive_auth` (Iteration 7); the host
-# routes through `PluginManager::interactive_auth` instead of
-# linking the adapter crates directly.
-sync-adapter-sftp = { path = "../crates/sync-adapter-sftp" }
-# No direct calendar-adapter deps left after Iteration 8.
-# EWS Autodiscover moved into the cal-adapter-ews plugin via
-# `aperio_plugin_discover` (DESIGN.md §20 service-discovery
-# extension); the host routes through `PluginManager::discover`
-# with a local `DiscoveredEndpoints` serde shape that matches
-# the plugin's response JSON. Google / Microsoft Graph OAuth
-# already left in Iteration 7; the 4 simple adapters (caldav,
-# ical, vikunja, todoist) were fully plugin-routed end-to-end
-# after Iteration 6b.
+# Zero direct adapter deps left after Iteration 9. Every
+# external service (CalDAV/iCal/EWS/Vikunja/Todoist/Google/
+# Microsoft Graph for calendars; WebDAV/FTP/SFTP/Dropbox/
+# Google Drive/local for sync) is reached exclusively via
+# dlopen-loaded plugins. Plugin-side hooks the host calls:
+#   - normal vtable methods (CalendarAdapterVtable / SyncVtable):
+#     all data-plane traffic.
+#   - `aperio_plugin_interactive_auth` (Iteration 7): OAuth
+#     dances for the 4 OAuth adapters.
+#   - `aperio_plugin_discover` (Iteration 8): EWS Autodiscover.
+#   - `aperio_plugin_probe_host_key` (Iteration 9): SFTP TOFU
+#     first-use trust dialog probe.
+# The local adapter (cal-adapter-local) stays as a workspace
+# dep because the host uses its in-memory SQLite directly for
+# the read-side (it IS the cache layer, not a remote service).
 
 # NOTE: the 13 *-plugin crates are NOT listed as deps here.
 # Plugins are loaded via dlopen from `plugins/bundled/` at

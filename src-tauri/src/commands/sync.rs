@@ -28,31 +28,22 @@
 //! (per §19.2.1) — they're device-local. The user_prefs whitelist
 //! already excludes everything under `sync.adapter.*`.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use plugin_core::shim::FfiSyncAdapter;
 use plugin_core::PluginManager;
-use serde::Deserialize;
-// SFTP's adapter type is still imported directly because
-// `preview_sftp_host_key` runs the §19.5 first-use trust dialog
-// flow that the plugin's static-fingerprint init config can't
-// express. The orchestrator's normal sync path goes through the
-// plugin (with a pinned fingerprint we look up in user_prefs at
-// build_adapter time); only the TOFU first-use probe stays
-// direct.
-use sync_adapter_sftp::{
-    HostKeyPreview, HostKeyVerifier, SftpAuth, SftpSyncAdapter,
-};
+use serde::{Deserialize, Serialize};
 use sync_core::{
     derive_key, fresh_data_key, resolve_data_key, wrap_key, EncryptingAdapter,
     EncryptionParams, SyncAdapter, KEY_LEN,
 };
 use tauri::State;
 
-use super::{run_plugin_auth, CommandError, CommandResult};
+use super::{
+    run_plugin_auth, run_plugin_probe_host_key, CommandError, CommandResult,
+};
 use crate::db::{DbHandle, SharedConn};
 use crate::event_log::{
     CompactionReport, OnboardingReport, OnboardingService, SyncOrchestrator, SyncPreview,
@@ -2036,11 +2027,17 @@ pub async fn has_googledrive_refresh_token() -> CommandResult<bool> {
 /// - On `Unchanged` — skip the dialog and proceed straight to
 ///   configure.
 ///
-/// Reads from the same user_prefs-backed verifier the real
-/// adapter uses, so the answers line up.
+/// The TCP+SSH probe runs inside the SFTP plugin via
+/// `aperio_plugin_probe_host_key`; the host then compares the
+/// presented fingerprint against its own user_prefs-backed pin
+/// store to decide between the three outcomes. This split keeps
+/// the trust-store responsibility host-side (the plugin never
+/// reads/writes user_prefs) while the network probe stays
+/// adapter-local.
 #[tauri::command]
 pub async fn preview_sftp_host_key(
     db: State<'_, DbHandle>,
+    plugin_manager: State<'_, Arc<PluginManager>>,
     host: String,
     port: u16,
 ) -> CommandResult<HostKeyPreview> {
@@ -2051,22 +2048,55 @@ pub async fn preview_sftp_host_key(
             message: "SFTP host must not be empty".into(),
         });
     }
-    let shared = db.shared();
-    let verifier: Arc<dyn HostKeyVerifier> =
-        Arc::new(UserPrefsHostKeyVerifier::new(shared.clone()));
-    // Auth + base_path don't matter here — probe_host_key_fingerprint
-    // aborts the handshake before authenticating. Pass placeholders.
-    let adapter = SftpSyncAdapter::new(
-        trimmed_host,
-        port,
-        "preview",
-        SftpAuth::Password {
-            password: String::new(),
-        },
-        PathBuf::from("/"),
-        verifier,
-    );
-    adapter.preview_host_key().await.map_err(sync_err)
+    let probe: HostKeyProbeResult = run_plugin_probe_host_key(
+        plugin_manager.inner(),
+        PLUGIN_ID_SFTP,
+        serde_json::json!({ "host": trimmed_host, "port": port }),
+    )
+    .await?;
+    let host_port = format!("{trimmed_host}:{port}");
+    let verifier = UserPrefsHostKeyVerifier::new(db.shared());
+    let status = match verifier.peek(&host_port) {
+        None => HostKeyPreviewStatus::New,
+        Some(s) if s == probe.fingerprint => HostKeyPreviewStatus::Unchanged,
+        Some(s) => HostKeyPreviewStatus::Changed { stored: s },
+    };
+    Ok(HostKeyPreview {
+        host_port,
+        fingerprint: probe.fingerprint,
+        status,
+    })
+}
+
+/// JSON shape the SFTP plugin returns from
+/// `aperio_plugin_probe_host_key`. Mirrors
+/// `sync_adapter_sftp_plugin::ProbeResult`.
+#[derive(Debug, Deserialize)]
+struct HostKeyProbeResult {
+    fingerprint: String,
+}
+
+/// Host-side mirror of the SFTP-adapter `HostKeyPreview` shape.
+/// Kept stable so the frontend's existing
+/// `{ host_port, fingerprint, status }` payload stays byte-
+/// identical after the plugin-routing migration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HostKeyPreview {
+    pub host_port: String,
+    pub fingerprint: String,
+    pub status: HostKeyPreviewStatus,
+}
+
+/// What the freshly-observed fingerprint means relative to
+/// whatever the user_prefs trust store has pinned. Tagged JSON
+/// shape that lines up with the adapter crate's enum so the
+/// frontend's discriminator stays unchanged.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum HostKeyPreviewStatus {
+    New,
+    Unchanged,
+    Changed { stored: String },
 }
 
 /// Commit a TOFU acceptance the user has explicitly confirmed in

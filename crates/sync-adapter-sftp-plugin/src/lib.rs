@@ -251,3 +251,60 @@ plugin_sdk::declare_lifecycle! {
     open_instance: plugin_open_instance,
     close_instance: plugin_close_instance,
 }
+
+// ─────────────────────────────────────────────────────────────
+// TOFU host-key probe (§19.5 first-use / key-change trust flow)
+// ─────────────────────────────────────────────────────────────
+//
+// The host calls this right before it would otherwise open an
+// SFTP instance so it can render the trust dialog. The probe
+// connects, captures the server's SHA-256 fingerprint, drops
+// the connection without authenticating — pure observation, no
+// state mutation.
+//
+// The host owns the pinned-key store (kept in user_prefs); the
+// plugin just reports what the server presents. The host then
+// renders "first use" / "fingerprint changed" / "unchanged"
+// based on its own comparison.
+
+#[derive(Debug, Deserialize)]
+struct ProbeArgs {
+    host: String,
+    #[serde(default = "default_port")]
+    port: u16,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct ProbeResult {
+    fingerprint: String,
+}
+
+async fn plugin_probe_host_key(args_json: String) -> Result<Vec<u8>, String> {
+    let args: ProbeArgs = serde_json::from_str(&args_json)
+        .map_err(|e| format!("malformed probe args: {e}"))?;
+    let host = args.host.trim();
+    if host.is_empty() {
+        return Err("host must not be empty".to_string());
+    }
+    // `probe_host_key_fingerprint` doesn't consult the verifier
+    // and aborts before authenticating — auth + base_path +
+    // verifier are placeholders here.
+    let adapter = SftpSyncAdapter::new(
+        host,
+        args.port,
+        "probe",
+        SftpAuth::Password { password: String::new() },
+        PathBuf::from("/"),
+        Arc::new(InMemoryHostKeyVerifier::new()),
+    );
+    let fingerprint = adapter
+        .probe_host_key_fingerprint()
+        .await
+        .map_err(|e| format!("SFTP probe: {e}"))?;
+    serde_json::to_vec(&ProbeResult { fingerprint })
+        .map_err(|e| format!("serialise probe result: {e}"))
+}
+
+plugin_sdk::declare_probe_host_key! {
+    handler: plugin_probe_host_key,
+}
