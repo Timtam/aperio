@@ -20,7 +20,7 @@ use tracing::warn;
 
 use crate::ffi::*;
 use crate::manager::LoadedPlugin;
-use crate::vtables::ContactsVtable;
+use crate::vtables::{CalendarAdapterVtable, ContactsVtable};
 
 use super::call::{call_method, decode_payload, encode_args, CallOutcome};
 
@@ -47,6 +47,10 @@ struct VtableSnapshot {
 }
 
 impl FfiContactsAdapter {
+    /// Wrap a loaded plugin's contacts surface. Returns `None`
+    /// if the plugin doesn't declare the contacts capability
+    /// (the [`CalendarAdapterVtable::contacts`] slot is null) or
+    /// the sub-vtable fails the minimum-surface check.
     pub fn new(plugin: Arc<LoadedPlugin>) -> Option<Self> {
         let raw = plugin.vtable_ptr();
         if raw.is_null() {
@@ -56,10 +60,17 @@ impl FfiContactsAdapter {
             );
             return None;
         }
-        // SAFETY: the manifest tells us this is a contacts-capable
-        // adapter, so the vtable points at ContactsVtable.
-        let vtable_ref: &ContactsVtable =
-            unsafe { &*(raw as *const ContactsVtable) };
+        // SAFETY: manifest plugin_type = "calendar-adapter" so
+        // the vtable is a CalendarAdapterVtable.
+        let outer: &CalendarAdapterVtable =
+            unsafe { &*(raw as *const CalendarAdapterVtable) };
+        if outer.contacts.is_null() {
+            return None;
+        }
+        // SAFETY: outer.contacts is non-null + points at a static
+        // in the plugin's library; the LoadedPlugin Arc keeps it
+        // alive.
+        let vtable_ref: &ContactsVtable = unsafe { &*outer.contacts };
         if !vtable_ref.has_minimum_surface() {
             warn!(
                 plugin_id = %plugin.manifest.id,

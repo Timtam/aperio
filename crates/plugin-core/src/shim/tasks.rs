@@ -16,7 +16,7 @@ use tracing::warn;
 
 use crate::ffi::*;
 use crate::manager::LoadedPlugin;
-use crate::vtables::TasksVtable;
+use crate::vtables::{CalendarAdapterVtable, TasksVtable};
 
 use super::call::{call_method, decode_payload, encode_args, CallOutcome};
 
@@ -38,9 +38,10 @@ struct VtableSnapshot {
 }
 
 impl FfiTasksAdapter {
-    /// Wrap a loaded plugin's tasks vtable. Returns `None` if the
-    /// vtable pointer is NULL or the minimum-surface check (a
-    /// non-`None` `list_task_lists`) fails.
+    /// Wrap a loaded plugin's tasks surface. Returns `None` if
+    /// the plugin doesn't declare the tasks capability (the
+    /// [`CalendarAdapterVtable::tasks`] slot is null) or the
+    /// sub-vtable fails the minimum-surface check.
     pub fn new(plugin: Arc<LoadedPlugin>) -> Option<Self> {
         let raw = plugin.vtable_ptr();
         if raw.is_null() {
@@ -50,10 +51,18 @@ impl FfiTasksAdapter {
             );
             return None;
         }
-        // SAFETY: the plugin's manifest declares plugin_type =
-        // sync/calendar with tasks capability, so the vtable
-        // points at a TasksVtable per the ABI contract.
-        let vtable_ref: &TasksVtable = unsafe { &*(raw as *const TasksVtable) };
+        // SAFETY: the manifest says plugin_type =
+        // "calendar-adapter", so the vtable is a
+        // CalendarAdapterVtable per the ABI contract.
+        let outer: &CalendarAdapterVtable =
+            unsafe { &*(raw as *const CalendarAdapterVtable) };
+        if outer.tasks.is_null() {
+            return None;
+        }
+        // SAFETY: outer.tasks is non-null per the check above +
+        // points at a static in the plugin's library; the
+        // LoadedPlugin Arc keeps it alive.
+        let vtable_ref: &TasksVtable = unsafe { &*outer.tasks };
         if !vtable_ref.has_minimum_surface() {
             warn!(
                 plugin_id = %plugin.manifest.id,

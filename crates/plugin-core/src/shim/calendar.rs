@@ -20,7 +20,7 @@ use tracing::warn;
 
 use crate::ffi::*;
 use crate::manager::LoadedPlugin;
-use crate::vtables::CalendarVtable;
+use crate::vtables::{CalendarAdapterVtable, CalendarVtable};
 
 use super::call::{call_method, decode_payload, encode_args, CallOutcome};
 
@@ -73,10 +73,13 @@ impl FfiCalendarAdapter {
     /// Wrap a loaded calendar-adapter plugin so it can be
     /// handed to the rest of the host as
     /// `Arc<dyn CalendarFeature>`. Returns `None` when the
-    /// plugin's vtable pointer is NULL or fails the
-    /// minimum-surface check — both are signs of a buggy
-    /// plugin build and the manager will already have logged
-    /// the load-time error.
+    /// plugin doesn't actually provide the calendar capability
+    /// (its [`CalendarAdapterVtable::calendar`] slot is null) or
+    /// fails the minimum-surface check.
+    ///
+    /// Multi-capability plugins (e.g. CalDAV providing
+    /// calendar + tasks + contacts) wrap the same loaded plugin
+    /// once per capability via the three FfiAdapter shims.
     pub fn new(plugin: Arc<LoadedPlugin>) -> Option<Self> {
         let raw = plugin.vtable_ptr();
         if raw.is_null() {
@@ -86,10 +89,21 @@ impl FfiCalendarAdapter {
             );
             return None;
         }
-        // SAFETY: the manifest's plugin_type field told us this is
-        // a calendar-adapter, so the vtable pointer points at a
-        // CalendarVtable per the ABI contract.
-        let vtable_ref: &CalendarVtable = unsafe { &*(raw as *const CalendarVtable) };
+        // SAFETY: the manifest's plugin_type field told us this
+        // is a calendar-adapter, so the vtable pointer points at
+        // a CalendarAdapterVtable per the ABI contract.
+        let outer: &CalendarAdapterVtable =
+            unsafe { &*(raw as *const CalendarAdapterVtable) };
+        if outer.calendar.is_null() {
+            // Plugin didn't declare Capability::Calendar — not an
+            // error, just means the registry should skip the
+            // calendar slot for this plugin.
+            return None;
+        }
+        // SAFETY: outer.calendar is non-null and points at a
+        // CalendarVtable static in the plugin library; the
+        // LoadedPlugin Arc keeps it alive.
+        let vtable_ref: &CalendarVtable = unsafe { &*outer.calendar };
         if !vtable_ref.has_minimum_surface() {
             warn!(
                 plugin_id = %plugin.manifest.id,
@@ -437,13 +451,22 @@ mod tests {
         list_calendars: Option<crate::vtables::VtableMethodFn>,
         authenticate: Option<crate::vtables::VtableMethodFn>,
     ) -> FfiCalendarAdapter {
-        // Build a vtable with our fake methods.
-        let vtable = Box::new(CalendarVtable {
+        // Build a CalendarVtable with our fake methods, then wrap
+        // it in a CalendarAdapterVtable so the test exercises the
+        // same multi-capability cast path the real shim uses.
+        let cal_vtable = Box::new(CalendarVtable {
             list_calendars,
             authenticate,
             ..CalendarVtable::empty()
         });
-        let vtable_ptr = Box::into_raw(vtable) as *mut std::os::raw::c_void;
+        let cal_ptr: *const CalendarVtable = Box::into_raw(cal_vtable);
+        let outer = Box::new(CalendarAdapterVtable {
+            vtable_version: crate::ABI_VERSION,
+            calendar: cal_ptr,
+            tasks: std::ptr::null(),
+            contacts: std::ptr::null(),
+        });
+        let vtable_ptr = Box::into_raw(outer) as *mut std::os::raw::c_void;
 
         // Build a minimal C-ABI AperioPlugin descriptor that
         // points at our fake vtable. We leak the descriptor + the
