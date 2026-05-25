@@ -45,6 +45,10 @@ pub async fn list_calendars(
     registry: State<'_, Arc<AdapterRegistry>>,
     db: State<'_, DbHandle>,
 ) -> CommandResult<Vec<CalendarRow>> {
+    tracing::info!(
+        target: "aperio::commands",
+        "list_calendars command invoked",
+    );
     // Local first so the implicit "local" account stays at the top
     // of the user's calendar list. Each local calendar id is
     // pre-registered in the route map so the write-path commands
@@ -55,6 +59,12 @@ pub async fn list_calendars(
         registry.note_calendar_route(&c.id, LOCAL_ID);
     }
     let mut external = registry.list_external_calendars().await;
+    tracing::info!(
+        target: "aperio::commands",
+        local_count = local.len(),
+        external_count = external.len(),
+        "list_calendars aggregation",
+    );
     let mut out = local;
     out.append(&mut external);
     // Stamp local rename overrides on top of whatever each adapter

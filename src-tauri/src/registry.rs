@@ -320,10 +320,21 @@ impl AdapterRegistry {
     /// other accounts still get to show up.
     pub async fn list_external_calendars(&self) -> Vec<cal_core::Calendar> {
         let snapshot = self.snapshot_calendar_adapters();
+        tracing::info!(
+            target: "aperio::registry",
+            adapter_count = snapshot.len(),
+            "list_external_calendars iterating registered CalendarFeature adapters",
+        );
         let mut out = Vec::new();
         for (account_id, adapter) in snapshot {
             match adapter.list_calendars().await {
                 Ok(cals) => {
+                    tracing::info!(
+                        target: "aperio::registry",
+                        account_id = %account_id,
+                        count = cals.len(),
+                        "list_calendars returned",
+                    );
                     let mut routes = self.routes.lock().expect("registry routes poison");
                     for c in &cals {
                         routes
