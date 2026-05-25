@@ -53,6 +53,32 @@ pub fn pref_key_for_disabled(plugin_id: &str) -> String {
     format!("{PREF_PREFIX_PLUGIN_DISABLED}{plugin_id}")
 }
 
+/// Inverse of [`adapter_kind_for_plugin`]: maps an
+/// [`AdapterKind`] to the canonical plugin id used to serve
+/// it. Returns `None` for kinds that aren't backed by a
+/// plugin (currently just `Local`, which is host-internal).
+/// Used by `list_accounts` to compute the `plugin_loaded`
+/// status per row + by the §20.8 "Plugin fehlt" indicator on
+/// AccountsPanel.
+pub fn plugin_id_for_adapter_kind(kind: AdapterKind) -> Option<&'static str> {
+    match kind {
+        AdapterKind::Local => None,
+        AdapterKind::Caldav => Some("com.aperio.cal-adapter-caldav"),
+        AdapterKind::Ical => Some("com.aperio.cal-adapter-ical"),
+        AdapterKind::Google => Some("com.aperio.cal-adapter-google"),
+        AdapterKind::MicrosoftGraph => {
+            Some("com.aperio.cal-adapter-microsoft-graph")
+        }
+        AdapterKind::Ews => Some("com.aperio.cal-adapter-ews"),
+        AdapterKind::Vikunja => Some("com.aperio.cal-adapter-vikunja"),
+        AdapterKind::Todoist => Some("com.aperio.cal-adapter-todoist"),
+        AdapterKind::Zoom => Some("com.aperio.vc-adapter-zoom"),
+        AdapterKind::Teams => Some("com.aperio.vc-adapter-teams"),
+        AdapterKind::Meet => Some("com.aperio.vc-adapter-meet"),
+        AdapterKind::Webex => Some("com.aperio.vc-adapter-webex"),
+    }
+}
+
 /// Map a plugin id to the [`AdapterKind`] used to find
 /// matching account rows. Returns `None` for plugin types that
 /// aren't account-scoped (sync adapters live in user_prefs,

@@ -269,6 +269,17 @@ export interface Account {
   config_json: string;
   created_at: string;
   updated_at: string;
+  /** Derived at list-time by the backend: `true` when this
+   *  account's `adapter_kind` maps to a plugin id that's
+   *  currently loaded + enabled in the host's PluginManager.
+   *  `false` triggers the §20.8 "Plugin fehlt" indicator on
+   *  the AccountsPanel row. Local accounts always return
+   *  `true` (host-internal, no plugin to resolve).
+   *
+   *  Optional in the wire shape so legacy `list_accounts`
+   *  consumers that read this struct outside the panel
+   *  context (e.g. snapshot serialisation) don't trip. */
+  plugin_loaded?: boolean;
 }
 
 export interface CommandError {

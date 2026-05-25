@@ -889,16 +889,32 @@ export function AccountsPanel() {
                 const isLocal = isLocalAt(i);
                 const focused = i === focusIndex;
                 const needsConnect = missingIds.has(acc.id);
+                // §20.8 — the backend enriches each row with
+                // a `plugin_loaded` flag. `false` here means
+                // the adapter_kind maps to a plugin id that
+                // isn't loaded (uninstalled, disabled, or
+                // never installed on this device). Local
+                // accounts ship with plugin_loaded=true even
+                // though they're host-internal; the missing
+                // signal is the broader "the wire payload
+                // omitted the field" case which we treat as
+                // backwards-compatible "fine".
+                const needsPlugin = acc.plugin_loaded === false;
                 // Pick the row label template: local rows get the
                 // special "can't be deleted" copy; remote rows
                 // pick up the "needs credentials" variant when
                 // the keychain probe came back empty, so SR users
-                // hear the state as they arrow through.
+                // hear the state as they arrow through. The
+                // missing-plugin state takes precedence over the
+                // missing-credentials state — without the plugin,
+                // re-entering credentials wouldn't help.
                 const rowLabelKey = isLocal
                   ? 'dialogs.accounts.rowLabelLocal'
-                  : needsConnect
-                    ? 'dialogs.accounts.rowLabelMissing'
-                    : 'dialogs.accounts.rowLabel';
+                  : needsPlugin
+                    ? 'dialogs.accounts.rowLabelMissingPlugin'
+                    : needsConnect
+                      ? 'dialogs.accounts.rowLabelMissing'
+                      : 'dialogs.accounts.rowLabel';
                 return (
                   <li
                     key={acc.id}
@@ -920,7 +936,8 @@ export function AccountsPanel() {
                     className={
                       'accounts-list__item' +
                       (focused ? ' accounts-list__item--focused' : '') +
-                      (needsConnect ? ' accounts-list__item--needs-connect' : '')
+                      (needsConnect ? ' accounts-list__item--needs-connect' : '') +
+                      (needsPlugin ? ' accounts-list__item--needs-plugin' : '')
                     }
                     onClick={() => {
                       setFocusIndex(i);
@@ -933,7 +950,15 @@ export function AccountsPanel() {
                     <span className="accounts-list__kind">
                       {t(`dialogs.accounts.kindName.${acc.adapter_kind}`)}
                     </span>
-                    {needsConnect && (
+                    {needsPlugin && (
+                      <span
+                        className="accounts-list__badge accounts-list__badge--plugin"
+                        aria-hidden="true"
+                      >
+                        {t('dialogs.accounts.missingPluginBadge')}
+                      </span>
+                    )}
+                    {!needsPlugin && needsConnect && (
                       <span
                         className="accounts-list__badge"
                         aria-hidden="true"

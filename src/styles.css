@@ -917,6 +917,29 @@ button[aria-disabled='true'] {
   color: var(--color-fg-muted);
 }
 
+/* Per-row status badge. The base styling is shared between
+ * the "needs credentials" + "plugin missing" variants; the
+ * modifier shifts the colour so the two states read
+ * distinctly when both could apply to nearby rows. */
+.accounts-list__badge {
+  font-size: var(--font-size-xs);
+  padding: 2px var(--space-2);
+  border-radius: 999px;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  color: var(--color-fg-muted);
+}
+
+/* §20.8 "Plugin fehlt" — emphasises that the row is more
+ * broken than a credentials-missing row (re-entering the
+ * password won't help; the user has to go install the
+ * plugin). Uses the workspace's danger token. */
+.accounts-list__badge--plugin {
+  background: var(--color-danger-bg, rgba(220, 50, 47, 0.08));
+  border-color: var(--color-danger, #dc322f);
+  color: var(--color-danger, #dc322f);
+}
+
 .accounts-add-section {
   margin-top: var(--space-3);
 }

@@ -8,7 +8,10 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use tauri::State;
 
-use super::{run_plugin_auth, run_plugin_discover, CommandError, CommandResult};
+use super::{
+    plugin_id_for_adapter_kind, run_plugin_auth, run_plugin_discover,
+    CommandError, CommandResult,
+};
 use crate::accounts::{Account, AccountsError, AccountsRepo, AdapterKind};
 use crate::db::DbHandle;
 use crate::registry::AdapterRegistry;
@@ -26,13 +29,52 @@ const PLUGIN_ID_TODOIST: &str = "com.aperio.cal-adapter-todoist";
 const PLUGIN_ID_GOOGLE: &str = "com.aperio.cal-adapter-google";
 const PLUGIN_ID_GRAPH: &str = "com.aperio.cal-adapter-microsoft-graph";
 
+/// Wire-shape entry returned by [`list_accounts`]. Wraps the
+/// persisted [`Account`] with derived per-row status the
+/// AccountsPanel renders without a second round-trip:
+///
+///   - `plugin_loaded` — `true` when the plugin id this
+///     account's adapter_kind maps to is currently loaded in
+///     the host's [`PluginManager`] (and not disabled).
+///     `false` triggers the §20.8 "Plugin fehlt" indicator
+///     pointing the user at Settings → Plugins. Local
+///     accounts always return `true` — they're host-internal.
+///
+/// The wrapper keeps the persisted [`Account`] struct free of
+/// runtime-derived noise + lets future iterations add more
+/// status fields (e.g. "credentials present") without
+/// changing the storage layer.
+#[derive(Debug, Serialize)]
+pub struct AccountListEntry {
+    #[serde(flatten)]
+    pub account: Account,
+    pub plugin_loaded: bool,
+}
+
 #[tauri::command]
 pub async fn list_accounts(
     db: State<'_, DbHandle>,
-) -> CommandResult<Vec<Account>> {
+    plugin_manager: State<'_, Arc<PluginManager>>,
+) -> CommandResult<Vec<AccountListEntry>> {
     let shared = db.shared();
     let repo = AccountsRepo::new(&shared);
-    Ok(repo.list()?)
+    let accounts = repo.list()?;
+    let out = accounts
+        .into_iter()
+        .map(|account| {
+            let plugin_loaded = match plugin_id_for_adapter_kind(account.adapter_kind) {
+                // Local accounts have no plugin to look up —
+                // they're host-internal and always available.
+                None => true,
+                Some(plugin_id) => plugin_manager.is_enabled(plugin_id),
+            };
+            AccountListEntry {
+                account,
+                plugin_loaded,
+            }
+        })
+        .collect();
+    Ok(out)
 }
 
 /// §19.11 step 8 — list accounts whose keychain credentials are
