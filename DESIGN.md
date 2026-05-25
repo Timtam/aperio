@@ -436,7 +436,7 @@ Aperio/
 │   ├── cal-adapter-ews/              # Exchange on-premise (Kalender + Tasks + Contacts, nativ gebundelt)
 │   ├── cal-adapter-caldav/           # CalDAV + CardDAV, inkl. iCloud (nativ gebundelt)
 │   ├── cal-adapter-ical/             # .ics-Dateien (nativ gebundelt)
-│   ├── cal-adapter-local/            # Lokaler Kalender (nativ gebundelt)
+│   ├── cal-adapter-local/            # Lokaler Kalender (host-intern, kein Plugin — siehe §20.2)
 │   ├── cal-adapter-vikunja/          # Vikunja REST API (nativ gebundelt)
 │   ├── cal-adapter-todoist/          # Todoist REST API (nativ gebundelt)
 │   ├── sync-adapter-webdav/          # WebDAV (nativ gebundelt)
@@ -2634,7 +2634,7 @@ Das Plugin-System ist die architektonische Grundlage für alle Adapter (Kalender
 
 | Typ | Beschreibung | Beispiele |
 |---|---|---|
-| `calendar-adapter` | Datenquelle für Kalender, Aufgabenlisten und/oder Kontakte (je nach deklarierten Capabilities) | Google, CalDAV, Microsoft Graph, Lokal, Vikunja, Todoist |
+| `calendar-adapter` | Datenquelle für Kalender, Aufgabenlisten und/oder Kontakte (je nach deklarierten Capabilities) | Google, CalDAV, Microsoft Graph, Vikunja, Todoist |
 | `sync-adapter` | Geräteübergreifende DB-Synchronisation | WebDAV, Dropbox, SFTP |
 | `videoconference-adapter` | Videokonferenz-Integration (Link-Generierung + Raumverwaltung) | Zoom, Microsoft Teams, Google Meet, Cisco WebEx |
 | `notification` | Benachrichtigungs-Kanal | System, E-Mail, Webhook |
@@ -2642,6 +2642,8 @@ Das Plugin-System ist die architektonische Grundlage für alle Adapter (Kalender
 Neue Plugin-Typen können in zukünftigen Versionen hinzugefügt werden, ohne bestehende Plugins zu brechen.
 
 > **Hinweis:** Es gibt **keinen** separaten `task-adapter`-Plugin-Typ. Reine Aufgabenlisten-Anbieter (Vikunja, Todoist, Google Tasks etc.) werden als `calendar-adapter` mit `"capabilities": ["tasks"]` implementiert – siehe Abschnitt 10.2 zur Capability-Trennung. Das hält die Plugin-ABI einfach und vermeidet Doppelimplementierungen für Adapter, die sowohl Kalender als auch Aufgaben anbieten (Google, Microsoft, CalDAV).
+
+> **Hinweis:** Der **lokale Kalender-Adapter** (`cal-adapter-local`) ist bewusst **kein** Plugin. Er teilt sich die SQLite-Datenbank des Hosts (Termine, Aufgaben, Kontakte, Einstellungen) und gehört damit zur Identität der App selbst, nicht zur austauschbaren Plugin-Schicht. Ein Plugin lebt in einer separaten shared library und kann die `Arc<Mutex<Connection>>` des Hosts nicht über die FFI-Grenze hinweg teilen; gleichzeitig ergäben "Lokal deaktivieren" / "Lokal deinstallieren" im Plugin-Manager-UI keinen sinnvollen Use Case (es ist die Heimat der lokal angelegten Daten des Nutzers). Der `LocalAdapter` wird daher direkt von src-tauri als gewöhnlicher Rust-Trait-Impl konstruiert und über alle Stellen gereicht, die ihn brauchen. Das Plugin-System (`PluginManager`, `plugins/bundled/`, Settings → Plugins) bedient ausschließlich **externe Datenquellen**.
 
 ### 20.3 Plugin-ABI: Stabiles C-Interface
 
@@ -2761,7 +2763,6 @@ static-plugins  = [           # Mobile: statisch einkompilieren
     "cal-adapter-ews",
     "cal-adapter-caldav",
     "cal-adapter-ical",
-    "cal-adapter-local",
     "cal-adapter-vikunja",
     "cal-adapter-todoist",
     "sync-adapter-webdav",
@@ -2776,6 +2777,8 @@ static-plugins  = [           # Mobile: statisch einkompilieren
     "vc-adapter-webex",
 ]
 ```
+
+`cal-adapter-local` taucht in dieser Liste bewusst nicht auf — er ist host-intern (siehe Hinweis in §20.2) und wird direkt von src-tauri als gewöhnliche Bibliothek genutzt, nicht über den Plugin-Manager. Auf Mobile gilt dasselbe wie auf Desktop: der `LocalAdapter` ist Teil der App-Binary, nicht ein zu ladendes Artefakt.
 
 Der Plugin-Manager erkennt zur Laufzeit, welcher Modus aktiv ist, und lädt Plugins entsprechend. Die Plugin-API bleibt für den Rest der App identisch.
 
