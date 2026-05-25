@@ -447,9 +447,26 @@ fn parse_ews_datetime(s: &str) -> Option<DateTime<Utc>> {
 /// supplied by the caller (the API layer knows which folder we just
 /// listed). Recurrence is left as `None` for now — EWS returns
 /// `CalendarView` results already expanded, so each row is an
-/// individual occurrence rather than a master + RRULE pair. When the
-/// write-side lands in 6f.1b we'll wire `Recurrence`-element parsing
-/// here too.
+/// individual occurrence rather than a master + RRULE pair.
+///
+/// **Known gap (deferred):** every occurrence of a recurring series
+/// currently arrives in cal-core as an independent single event
+/// rather than as a master with an RRULE. The frontend's local
+/// expander (`src/intl/recurrence.ts`) therefore never sees a
+/// series and series-aware UX (chip, bulk edit, EXDATE skip) doesn't
+/// fire on EWS.
+///
+/// Planned fix: switch the read path away from `FindItem` +
+/// `CalendarView` (server-side expansion, no master visible) to
+/// `SyncFolderItems` with a persisted sync-state cookie per folder
+/// — what Outlook itself uses. A single delta-sync request returns
+/// masters with `<t:Recurrence>` inline, plus their
+/// `ModifiedOccurrences` (exception overrides) and
+/// `DeletedOccurrences` (EXDATEs), with no GetItem fan-out. Local
+/// expansion via the existing rrule.js path matches the
+/// CalDAV/iCal behaviour. Tracked as its own iteration — needs a
+/// sync-state cache, an EWS-Recurrence → RRULE parser (inverse of
+/// `rrule_to_ews_recurrence`), and exception/EXDATE handling.
 pub fn to_event(item: ParsedItem, calendar_id: &str) -> EwsResult<Event> {
     let start = item.start.ok_or_else(|| {
         EwsError::Protocol("CalendarItem missing Start".into())
@@ -483,13 +500,14 @@ pub fn to_event(item: ParsedItem, calendar_id: &str) -> EwsResult<Event> {
     // `is_recurring=true` on a CalendarView row means "this row is one
     // expanded occurrence of a series". We don't have the master's
     // RRULE here, but we still want the frontend to render the series
-    // hint (the chip in EventCard / MonthCell). Encoding it as a
-    // synthetic `FREQ=DAILY;COUNT=1` would lie about the cadence — so
-    // we drop the recurrence info on the read path and let the write
-    // path (6f.1b) reach into Recurrence on a per-master GetItem when
-    // it needs to edit a series.
+    // hint eventually. Encoding it as a synthetic `FREQ=DAILY;COUNT=1`
+    // would lie about the cadence — so we drop the recurrence info on
+    // the read path and let the `SyncFolderItems` migration (see
+    // doc-comment above) supply real masters + RRULEs in a future
+    // iteration. The write path already reaches into Recurrence on a
+    // per-master GetItem when it needs to edit a series.
     let recurrence: Option<EventRecurrence> = None;
-    let _ = item.is_recurring; // suppress unused-field warning until 6f.1b
+    let _ = item.is_recurring; // suppress unused-field warning
 
     Ok(Event {
         id,
