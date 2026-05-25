@@ -285,10 +285,19 @@ export function useSync() {
       // eslint-disable-next-line no-console
       console.warn('sync_now failed', err);
       setLastError(err instanceof Error ? err.message : String(err));
+    } finally {
+      // Always clear `in_flight` — the sync_now command's
+      // matching `sync-status` event is the source of truth,
+      // but it can arrive after the awaited promise resolves
+      // (the emit happens during the same backend call but
+      // travels through Tauri's IPC channel separately). If
+      // the listener hasn't fired yet by the time we land
+      // here, this keeps the button from sitting stuck on
+      // "Synchronisiert …" — the listener's later flip to the
+      // same value is a no-op.
       setStatus((prev) =>
         prev ? { ...prev, in_flight: false } : prev,
       );
-    } finally {
       setTriggering(false);
     }
   }, [invalidateData]);

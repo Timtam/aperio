@@ -367,6 +367,17 @@ impl SyncScheduler {
         duration_ms: u64,
     ) {
         self.write_sync_log(app, trigger, result, duration_ms);
+        // Mirror the scheduler-loop bookkeeping: emit a fresh
+        // `sync-status` so the frontend's listener sees
+        // `in_flight = false` and the matching `report` /
+        // `error` payload. Without this, the manual-sync path
+        // optimistically sets `in_flight` in the frontend on
+        // click and never gets the clearing event back — the
+        // Sync now button stayed stuck on "Synchronisiert …".
+        match result {
+            Ok(report) => self.emit_status(app, Some(report.clone()), None),
+            Err(err) => self.emit_status(app, None, Some(err.to_string())),
+        }
     }
 
     /// §19.10 — record a compaction outcome in the Protokoll so
