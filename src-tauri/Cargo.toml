@@ -44,28 +44,39 @@ sync-core.workspace = true
 plugin-core.workspace = true
 # Direct sync-adapter crate deps the host still needs even after
 # the plugin migration:
-#   - sync-adapter-local: used by sound_assets.rs's tests
 #   - sync-adapter-sftp:  preview_sftp_host_key + the host-side
 #                         UserPrefsHostKeyVerifier still build a
 #                         direct SftpSyncAdapter for the §19.5
-#                         TOFU first-use trust dialog
+#                         TOFU first-use trust dialog. Plugin
+#                         migration needs a `probe_host_key` ABI
+#                         extension — separate iteration.
 #   - sync-adapter-dropbox / -googledrive: OAuth dance helpers
 #                         (oauth::run) — the host runs the
 #                         consent flow before the plugin even
 #                         opens an instance.
-# sync-adapter-webdav / -ftp have no remaining direct call sites;
-# everything they did now flows through the plugins.
-sync-adapter-local = { path = "../crates/sync-adapter-local" }
+# sync-adapter-webdav / -ftp / -local have no remaining
+# non-test call sites; everything they did flows through the
+# plugins now. (sync-adapter-local moved to [dev-dependencies]
+# for sound_assets's test fixtures below.)
 sync-adapter-sftp = { path = "../crates/sync-adapter-sftp" }
 sync-adapter-dropbox = { path = "../crates/sync-adapter-dropbox" }
 sync-adapter-googledrive = { path = "../crates/sync-adapter-googledrive" }
-cal-adapter-caldav = { path = "../crates/cal-adapter-caldav" }
-cal-adapter-ical = { path = "../crates/cal-adapter-ical" }
+# Calendar-adapter direct deps the host still needs after the
+# plugin migration:
+#   - cal-adapter-google / -microsoft-graph: OAuth dance helpers
+#     (authenticate_interactive). Moving these into the plugins
+#     themselves requires an `interactive_auth(config_json)` ABI
+#     extension — separate iteration.
+#   - cal-adapter-ews: Microsoft Autodiscover.svc service-
+#     discovery helpers (discover, discover_client) used by the
+#     `discover_ews_endpoint` command. Same story: no plugin-
+#     side discovery surface yet.
+# The 4 simple adapters (caldav, ical, vikunja, todoist) are
+# fully plugin-routed end-to-end after Iteration 6b; their
+# smoke-tests open ephemeral plugin instances + drop them.
 cal-adapter-google = { path = "../crates/cal-adapter-google" }
 cal-adapter-microsoft-graph = { path = "../crates/cal-adapter-microsoft-graph" }
 cal-adapter-ews = { path = "../crates/cal-adapter-ews" }
-cal-adapter-vikunja = { path = "../crates/cal-adapter-vikunja" }
-cal-adapter-todoist = { path = "../crates/cal-adapter-todoist" }
 
 # NOTE: the 13 *-plugin crates are NOT listed as deps here.
 # Plugins are loaded via dlopen from `plugins/bundled/` at
@@ -105,6 +116,11 @@ tokio = { workspace = true }
 # Lets the event-log applier's tests reuse the LocalAdapter's
 # in-memory migrated SQLite without duplicating the schema replay.
 cal-adapter-local = { workspace = true, features = ["test-support"] }
+# sound_assets's tests need a concrete SyncAdapter to drive
+# the manifest+sync round; LocalFsSyncAdapter is the natural
+# choice. Not needed by the main binary — the orchestrator
+# reaches it via the dlopen'd sync-adapter-local-plugin.
+sync-adapter-local = { path = "../crates/sync-adapter-local" }
 
 [features]
 # Default: plugins are loaded dynamically as shared libraries (desktop).

@@ -41,18 +41,10 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 
-use cal_adapter_caldav::{
-    config::{CaldavAccountConfig, AuthKind as CaldavAuthKind},
-};
-use cal_adapter_ews::EwsAccountConfig;
-use cal_adapter_google::GoogleAccountConfig;
-use cal_adapter_todoist::TodoistAccountConfig;
-use cal_adapter_vikunja::VikunjaAccountConfig;
-use cal_adapter_ical::IcalAccountConfig;
-use cal_adapter_microsoft_graph::GraphAccountConfig;
 use cal_core::{CalendarFeature, ContactsFeature, TasksFeature};
 use plugin_core::shim::{FfiCalendarAdapter, FfiContactsAdapter, FfiTasksAdapter};
 use plugin_core::{LoadedInstance, LoadedPlugin, PluginManager};
+use serde_json::{json, Map, Value};
 use tracing::warn;
 
 use crate::accounts::{Account, AccountsRepo, AdapterKind, LOCAL_ACCOUNT_ID};
@@ -514,24 +506,12 @@ impl AdapterRegistry {
     }
 
     fn register_caldav(&self, account: &Account) -> Result<(), RegistryError> {
-        let config: CaldavAccountConfig = serde_json::from_str(&account.config_json)
-            .map_err(|e| RegistryError::Config(e.to_string()))?;
         let secret = secrets::retrieve(&account.id, SecretSlot::Password)
             .map_err(|e| RegistryError::Secret(format!("missing password: {e}")))?;
-        // CalDAV's auth_kind is the snake-case-serialising AuthKind enum;
-        // the plugin's InitConfig deserialises it back through the same
-        // serde shape, so we just round-trip via json! { "auth_kind": ... }.
-        let auth_kind = match config.auth_kind {
-            CaldavAuthKind::Basic => "basic",
-            CaldavAuthKind::Bearer => "bearer",
-        };
-        let plugin_config = serde_json::json!({
-            "server_url": config.server_url,
-            "username": config.username,
-            "auth_kind": auth_kind,
-            "secret": secret,
-        })
-        .to_string();
+        let plugin_config = merge_account_config(
+            &account.config_json,
+            &[("secret", Value::String(secret))],
+        )?;
         let instance = self.open_plugin_instance(PLUGIN_ID_CALDAV, plugin_config)?;
         // The same LoadedInstance Arc is cloned into all three
         // FfiAdapters — the underlying CaldavAdapter inside the
@@ -544,25 +524,8 @@ impl AdapterRegistry {
     }
 
     fn register_google(&self, account: &Account) -> Result<(), RegistryError> {
-        let config: GoogleAccountConfig = serde_json::from_str(&account.config_json)
-            .map_err(|e| RegistryError::Config(e.to_string()))?;
-        let access = secrets::retrieve(&account.id, SecretSlot::AccessToken)
-            .map_err(|e| RegistryError::Secret(format!("missing access token: {e}")))?;
-        let refresh = secrets::retrieve(&account.id, SecretSlot::RefreshToken)
-            .ok()
-            .filter(|s| !s.is_empty());
-        // expires_at is left at epoch — the plugin's API client
-        // refreshes lazily on 401 so the persisted access token
-        // doesn't need to be fresh across app restarts.
-        let plugin_config = serde_json::json!({
-            "client_id": config.client_id,
-            "client_secret": config.client_secret,
-            "access_token": access,
-            "refresh_token": refresh,
-            "expires_at": "1970-01-01T00:00:00Z",
-            "scope": null,
-        })
-        .to_string();
+        let plugin_config =
+            oauth_plugin_config(&account.id, &account.config_json)?;
         let instance = self.open_plugin_instance(PLUGIN_ID_GOOGLE, plugin_config)?;
         self.insert_calendar(&account.id, instance.clone())?;
         self.insert_tasks(&account.id, instance.clone())?;
@@ -571,22 +534,8 @@ impl AdapterRegistry {
     }
 
     fn register_microsoft_graph(&self, account: &Account) -> Result<(), RegistryError> {
-        let config: GraphAccountConfig = serde_json::from_str(&account.config_json)
-            .map_err(|e| RegistryError::Config(e.to_string()))?;
-        let access = secrets::retrieve(&account.id, SecretSlot::AccessToken)
-            .map_err(|e| RegistryError::Secret(format!("missing access token: {e}")))?;
-        let refresh = secrets::retrieve(&account.id, SecretSlot::RefreshToken)
-            .ok()
-            .filter(|s| !s.is_empty());
-        let plugin_config = serde_json::json!({
-            "client_id": config.client_id,
-            "authority": config.authority,
-            "access_token": access,
-            "refresh_token": refresh,
-            "expires_at": "1970-01-01T00:00:00Z",
-            "scope": null,
-        })
-        .to_string();
+        let plugin_config =
+            oauth_plugin_config(&account.id, &account.config_json)?;
         let instance = self.open_plugin_instance(PLUGIN_ID_GRAPH, plugin_config)?;
         self.insert_calendar(&account.id, instance.clone())?;
         self.insert_tasks(&account.id, instance.clone())?;
@@ -595,16 +544,12 @@ impl AdapterRegistry {
     }
 
     fn register_ews(&self, account: &Account) -> Result<(), RegistryError> {
-        let config: EwsAccountConfig = serde_json::from_str(&account.config_json)
-            .map_err(|e| RegistryError::Config(e.to_string()))?;
         let password = secrets::retrieve(&account.id, SecretSlot::Password)
             .map_err(|e| RegistryError::Secret(format!("missing password: {e}")))?;
-        let plugin_config = serde_json::json!({
-            "endpoint": config.endpoint,
-            "username": config.username,
-            "password": password,
-        })
-        .to_string();
+        let plugin_config = merge_account_config(
+            &account.config_json,
+            &[("password", Value::String(password))],
+        )?;
         let instance = self.open_plugin_instance(PLUGIN_ID_EWS, plugin_config)?;
         self.insert_calendar(&account.id, instance.clone())?;
         self.insert_tasks(&account.id, instance.clone())?;
@@ -613,54 +558,121 @@ impl AdapterRegistry {
     }
 
     fn register_vikunja(&self, account: &Account) -> Result<(), RegistryError> {
-        let config: VikunjaAccountConfig = serde_json::from_str(&account.config_json)
-            .map_err(|e| RegistryError::Config(e.to_string()))?;
         let token = secrets::retrieve(&account.id, SecretSlot::ApiToken)
             .map_err(|e| RegistryError::Secret(format!("missing API token: {e}")))?;
-        let plugin_config = serde_json::json!({
-            "server_url": config.server_url,
-            "token": token,
-        })
-        .to_string();
+        let plugin_config = merge_account_config(
+            &account.config_json,
+            &[("token", Value::String(token))],
+        )?;
         let instance = self.open_plugin_instance(PLUGIN_ID_VIKUNJA, plugin_config)?;
         self.insert_tasks(&account.id, instance)?;
         Ok(())
     }
 
     fn register_todoist(&self, account: &Account) -> Result<(), RegistryError> {
-        // Empty `config_json` is allowed — the TodoistAccountConfig
-        // only holds an optional account label and Todoist itself
-        // doesn't need anything but the token. Parse with defaults
-        // so older accounts written as `{}` still work.
-        let _config: TodoistAccountConfig =
-            serde_json::from_str(&account.config_json).unwrap_or_default();
+        // Todoist's persisted config carries only an optional
+        // account label; the plugin needs just `token`. We could
+        // merge into the existing config but it's cleaner to
+        // start fresh — the plugin ignores anything but `token`.
         let token = secrets::retrieve(&account.id, SecretSlot::ApiToken)
             .map_err(|e| RegistryError::Secret(format!("missing API token: {e}")))?;
-        let plugin_config = serde_json::json!({ "token": token }).to_string();
+        let plugin_config = json!({ "token": token }).to_string();
         let instance = self.open_plugin_instance(PLUGIN_ID_TODOIST, plugin_config)?;
         self.insert_tasks(&account.id, instance)?;
         Ok(())
     }
 
     fn register_ical(&self, account: &Account) -> Result<(), RegistryError> {
-        let config: IcalAccountConfig = serde_json::from_str(&account.config_json)
-            .map_err(|e| RegistryError::Config(e.to_string()))?;
         // Basic-auth password is optional for iCal — most public
         // feeds are anonymous. A missing keychain entry is
-        // therefore not an error.
+        // therefore not an error; merge it as JSON null so the
+        // plugin's Option<String> deserialiser is happy.
         let password = secrets::retrieve(&account.id, SecretSlot::Password)
             .ok()
             .filter(|s| !s.is_empty());
-        let plugin_config = serde_json::json!({
-            "feed_url": config.feed_url,
-            "username": config.username,
-            "password": password,
-        })
-        .to_string();
+        let password_value =
+            password.map(Value::String).unwrap_or(Value::Null);
+        let plugin_config = merge_account_config(
+            &account.config_json,
+            &[("password", password_value)],
+        )?;
         let instance = self.open_plugin_instance(PLUGIN_ID_ICAL, plugin_config)?;
         self.insert_calendar(&account.id, instance)?;
         Ok(())
     }
+}
+
+/// Merge keychain-sourced secret fields into the account's
+/// persisted JSON config + return the resulting string.
+///
+/// `account_config_json` MUST be a JSON object — every adapter's
+/// `AccountConfig` is a struct, so this is always true in
+/// practice; non-object payloads are surfaced as
+/// `RegistryError::Config`.
+///
+/// Replaced the per-adapter "parse typed struct → re-encode as
+/// plugin JSON" round-trip from the pre-plugin-routing era.
+/// Each plugin's `InitConfig` deserialiser carries the field
+/// names + types it expects; the registry just needs to make
+/// sure the right secret value ends up in the right field. By
+/// treating the persisted config as opaque JSON we eliminate
+/// the host's compile-time knowledge of each adapter crate's
+/// `AccountConfig` shape.
+fn merge_account_config(
+    account_config_json: &str,
+    secrets: &[(&str, Value)],
+) -> Result<String, RegistryError> {
+    let mut parsed: Value = serde_json::from_str(account_config_json)
+        .map_err(|e| RegistryError::Config(e.to_string()))?;
+    let obj = parsed.as_object_mut().ok_or_else(|| {
+        RegistryError::Config(
+            "account config_json must be a JSON object".to_string(),
+        )
+    })?;
+    for (key, val) in secrets {
+        obj.insert((*key).to_string(), val.clone());
+    }
+    Ok(parsed.to_string())
+}
+
+/// Shared OAuth plugin-config builder for Google + Microsoft
+/// Graph. Both plugins expect `access_token` + `refresh_token`
+/// + `expires_at` + `scope` on top of whatever their persisted
+/// `client_id` / `client_secret` / `authority` config carries.
+///
+/// `expires_at` is left at epoch — the plugin's API client
+/// refreshes lazily on 401, so the persisted access token
+/// doesn't need to be fresh across app restarts.
+fn oauth_plugin_config(
+    account_id: &str,
+    account_config_json: &str,
+) -> Result<String, RegistryError> {
+    let access = secrets::retrieve(account_id, SecretSlot::AccessToken)
+        .map_err(|e| RegistryError::Secret(format!("missing access token: {e}")))?;
+    let refresh = secrets::retrieve(account_id, SecretSlot::RefreshToken)
+        .ok()
+        .filter(|s| !s.is_empty());
+    let refresh_value =
+        refresh.map(Value::String).unwrap_or(Value::Null);
+
+    let mut extras = Map::with_capacity(4);
+    extras.insert("access_token".into(), Value::String(access));
+    extras.insert("refresh_token".into(), refresh_value);
+    extras.insert(
+        "expires_at".into(),
+        Value::String("1970-01-01T00:00:00Z".into()),
+    );
+    extras.insert("scope".into(), Value::Null);
+
+    let mut parsed: Value = serde_json::from_str(account_config_json)
+        .map_err(|e| RegistryError::Config(e.to_string()))?;
+    let obj = parsed.as_object_mut().ok_or_else(|| {
+        RegistryError::Config(
+            "account config_json must be a JSON object".to_string(),
+        )
+    })?;
+    obj.extend(extras);
+    Ok(parsed.to_string())
 }
 
 #[derive(Debug, thiserror::Error)]

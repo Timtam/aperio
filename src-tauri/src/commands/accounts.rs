@@ -1,22 +1,23 @@
 //! Account management commands (DESIGN.md §6.2 + §6.4).
 
-use cal_adapter_caldav::{
-    config::{AuthKind, CaldavAccountConfig, Credentials as CaldavCredentials},
-    CaldavAdapter,
-};
+// EWS keeps a direct import for the Microsoft Autodiscover.svc
+// flow + its typed errors — the plugin ABI doesn't expose a
+// service-discovery surface yet (deferred to its own iteration).
 use cal_adapter_ews::{
     discover as ews_discover, discover_client as ews_discover_client,
-    BasicCredentials as EwsCredentials, DiscoveredEndpoints, EwsAccountConfig,
-    EwsAdapter, EwsError,
+    DiscoveredEndpoints, EwsError,
 };
+// Google + Microsoft Graph keep direct imports for the OAuth
+// dance (`authenticate_interactive` opens a browser + binds a
+// loopback TCP listener for the redirect). Moving that into the
+// plugins themselves requires an `interactive_auth(config_json)`
+// ABI extension — separate iteration.
 use cal_adapter_google::{GoogleAccountConfig, GoogleAdapter};
-use cal_adapter_ical::{
-    Credentials as IcalCredentials, IcalAccountConfig, IcalAdapter,
-};
 use cal_adapter_microsoft_graph::{GraphAccountConfig, MicrosoftGraphAdapter};
-use cal_adapter_todoist::{TodoistAdapter, TodoistError};
-use cal_adapter_vikunja::{VikunjaAccountConfig, VikunjaAdapter, VikunjaError};
-use cal_core::CalendarFeature;
+use cal_core::{CalendarFeature, TasksFeature};
+use plugin_core::shim::{FfiCalendarAdapter, FfiTasksAdapter};
+use plugin_core::PluginManager;
+use serde_json::{json, Value};
 use std::sync::Arc;
 use tauri::State;
 
@@ -25,6 +26,16 @@ use crate::accounts::{Account, AccountsError, AccountsRepo, AdapterKind};
 use crate::db::DbHandle;
 use crate::registry::AdapterRegistry;
 use crate::secrets::{self, SecretSlot};
+
+// ── Plugin-id constants ──────────────────────────────────────
+//
+// Centralised so onboarding's smoke-test fns route to the same
+// plugin ids the registry uses at bootstrap time.
+const PLUGIN_ID_CALDAV: &str = "com.aperio.cal-adapter-caldav";
+const PLUGIN_ID_ICAL: &str = "com.aperio.cal-adapter-ical";
+const PLUGIN_ID_EWS: &str = "com.aperio.cal-adapter-ews";
+const PLUGIN_ID_VIKUNJA: &str = "com.aperio.cal-adapter-vikunja";
+const PLUGIN_ID_TODOIST: &str = "com.aperio.cal-adapter-todoist";
 
 #[tauri::command]
 pub async fn list_accounts(
@@ -125,6 +136,7 @@ fn default_config_json() -> String {
 pub async fn create_account(
     db: State<'_, DbHandle>,
     registry: State<'_, Arc<AdapterRegistry>>,
+    plugin_manager: State<'_, Arc<PluginManager>>,
     request: CreateAccountRequest,
 ) -> CommandResult<Account> {
     // Reject adapter kinds we have no construction path for yet.
@@ -151,12 +163,31 @@ pub async fn create_account(
         });
     }
 
-    // For CalDAV we smoke-test the credentials *before* writing
-    // anything so the user sees auth / network errors instantly
-    // instead of "saved, but doesn't work". The test runs against
-    // an ephemeral adapter built from the request payload; the
-    // real adapter is constructed again later from the persisted
-    // config so the request and the stored shape stay in sync.
+    // Smoke-test credentials BEFORE writing anything so the user
+    // sees auth / network errors instantly instead of "saved, but
+    // doesn't work". Each smoke runs against an ephemeral plugin
+    // instance built from the request payload + closes it
+    // immediately; the persisted account gets a fresh instance
+    // opened by the registry on the way in.
+    //
+    // The request's `config_json` is the same shape the registry
+    // persists — pulling fields out of it via `Value::get` keeps
+    // the host adapter-crate-agnostic. Any required field that's
+    // missing surfaces as "invalid_input" from the plugin's own
+    // InitConfig deserialiser, so we don't pre-validate here.
+    let plugin_manager_ref: &PluginManager = plugin_manager.inner();
+    let request_config: Value = serde_json::from_str(&request.config_json)
+        .map_err(|e| CommandError {
+            code: "invalid_input",
+            message: format!("invalid config JSON: {e}"),
+        })?;
+    let str_field = |key: &str| -> &str {
+        request_config
+            .get(key)
+            .and_then(Value::as_str)
+            .unwrap_or("")
+    };
+
     if request.adapter_kind == AdapterKind::Caldav {
         let Some(secret) = request.secret.as_deref() else {
             return Err(CommandError {
@@ -164,30 +195,35 @@ pub async fn create_account(
                 message: "CalDAV needs a password to authenticate.".into(),
             });
         };
-        let config: CaldavAccountConfig = serde_json::from_str(&request.config_json)
-            .map_err(|e| CommandError {
-                code: "invalid_input",
-                message: format!("invalid CalDAV config: {e}"),
-            })?;
-        smoke_test_caldav(&config, secret).await?;
+        // Persisted CaldavAccountConfig serialises `auth_kind`
+        // as `"basic"` / `"bearer"`; the plugin's InitConfig
+        // expects the same snake-case wire form. Default to
+        // basic when the field is missing (older accounts
+        // pre-AuthKind).
+        let auth_kind = request_config
+            .get("auth_kind")
+            .and_then(Value::as_str)
+            .unwrap_or("basic");
+        smoke_test_caldav(
+            plugin_manager_ref,
+            str_field("server_url"),
+            str_field("username"),
+            auth_kind,
+            secret,
+        )
+        .await?;
     }
 
-    // Same idea for iCal: a one-shot HEAD/GET against the feed URL
-    // confirms the URL is reachable and (if Basic auth is provided)
-    // the credentials are accepted. Public feeds run anonymously.
     if request.adapter_kind == AdapterKind::Ical {
-        let config: IcalAccountConfig = serde_json::from_str(&request.config_json)
-            .map_err(|e| CommandError {
-                code: "invalid_input",
-                message: format!("invalid iCal config: {e}"),
-            })?;
-        smoke_test_ical(&config, request.secret.as_deref()).await?;
+        smoke_test_ical(
+            plugin_manager_ref,
+            str_field("feed_url"),
+            request_config.get("username").and_then(Value::as_str),
+            request.secret.as_deref(),
+        )
+        .await?;
     }
 
-    // EWS smoke-test: a single FindFolder round-trip against the
-    // user-supplied endpoint with Basic auth — surfaces wrong URL,
-    // certificate problems, or wrong credentials before we persist
-    // anything.
     if request.adapter_kind == AdapterKind::Ews {
         let Some(secret) = request.secret.as_deref() else {
             return Err(CommandError {
@@ -195,18 +231,15 @@ pub async fn create_account(
                 message: "EWS needs a password to authenticate.".into(),
             });
         };
-        let config: EwsAccountConfig = serde_json::from_str(&request.config_json)
-            .map_err(|e| CommandError {
-                code: "invalid_input",
-                message: format!("invalid EWS config: {e}"),
-            })?;
-        smoke_test_ews(&config, secret).await?;
+        smoke_test_ews(
+            plugin_manager_ref,
+            str_field("endpoint"),
+            str_field("username"),
+            secret,
+        )
+        .await?;
     }
 
-    // Vikunja smoke-test: a single `GET /projects?per_page=1` against
-    // the user-supplied server URL with the Bearer token. Catches
-    // typo'd URLs, dead servers and revoked tokens before we
-    // persist anything.
     if request.adapter_kind == AdapterKind::Vikunja {
         let Some(secret) = request.secret.as_deref() else {
             return Err(CommandError {
@@ -214,16 +247,14 @@ pub async fn create_account(
                 message: "Vikunja needs an API token to authenticate.".into(),
             });
         };
-        let config: VikunjaAccountConfig = serde_json::from_str(&request.config_json)
-            .map_err(|e| CommandError {
-                code: "invalid_input",
-                message: format!("invalid Vikunja config: {e}"),
-            })?;
-        smoke_test_vikunja(&config, secret).await?;
+        smoke_test_vikunja(
+            plugin_manager_ref,
+            str_field("server_url"),
+            secret,
+        )
+        .await?;
     }
 
-    // Todoist smoke-test: hit `GET /projects` with the supplied
-    // Bearer token. Catches revoked tokens before persistence.
     if request.adapter_kind == AdapterKind::Todoist {
         let Some(secret) = request.secret.as_deref() else {
             return Err(CommandError {
@@ -231,7 +262,7 @@ pub async fn create_account(
                 message: "Todoist needs an API token to authenticate.".into(),
             });
         };
-        smoke_test_todoist(secret).await?;
+        smoke_test_todoist(plugin_manager_ref, secret).await?;
     }
 
     let shared = db.shared();
@@ -289,153 +320,162 @@ pub async fn create_account(
 /// purely to surface a clear "credentials work?" answer ahead of
 /// persisting anything.
 async fn smoke_test_caldav(
-    config: &CaldavAccountConfig,
+    plugin_manager: &PluginManager,
+    server_url: &str,
+    username: &str,
+    auth_kind: &str,
     secret: &str,
 ) -> Result<(), CommandError> {
-    let credentials = CaldavCredentials::new(
-        CaldavAccountConfig {
-            server_url: config.server_url.clone(),
-            username: config.username.clone(),
-            auth_kind: config.auth_kind,
-        },
-        secret.to_string(),
-    );
-    let adapter = CaldavAdapter::new(credentials, None).map_err(|err| CommandError {
-        code: "internal",
-        message: err.to_string(),
-    })?;
-    // A successful list_calendars implies discovery + auth + at
-    // least one PROPFIND round-trip worked.
-    adapter
-        .list_calendars()
-        .await
-        .map_err(|err| caldav_core_error_to_command(err))?;
-    Ok(())
+    let config = json!({
+        "server_url": server_url,
+        "username": username,
+        "auth_kind": auth_kind,
+        "secret": secret,
+    });
+    smoke_via_calendar_plugin(plugin_manager, PLUGIN_ID_CALDAV, config).await
 }
 
 /// One-shot fetch of the iCal feed. Confirms the URL resolves, the
 /// server answers, and (if credentials are provided) Basic auth is
-/// accepted. The ephemeral adapter is dropped after the call — the
-/// real one gets constructed again from the persisted config so the
-/// request and storage stay in sync.
+/// accepted. The ephemeral plugin instance is dropped after the
+/// call — the real one gets opened again from the persisted
+/// config so the request and storage stay in sync.
 async fn smoke_test_ical(
-    config: &IcalAccountConfig,
+    plugin_manager: &PluginManager,
+    feed_url: &str,
+    username: Option<&str>,
     password: Option<&str>,
 ) -> Result<(), CommandError> {
-    let credentials = IcalCredentials::new(
-        IcalAccountConfig {
-            feed_url: config.feed_url.clone(),
-            username: config.username.clone(),
-        },
-        password.filter(|s| !s.is_empty()).map(|s| s.to_string()),
-    );
-    let adapter = IcalAdapter::new(credentials).map_err(|err| CommandError {
-        code: "invalid_input",
-        message: err.to_string(),
-    })?;
-    adapter
-        .smoke_test()
-        .await
-        .map_err(|err| ical_error_to_command(err))?;
-    Ok(())
+    let config = json!({
+        "feed_url": feed_url,
+        "username": username,
+        "password": password.filter(|s| !s.is_empty()),
+    });
+    smoke_via_calendar_plugin(plugin_manager, PLUGIN_ID_ICAL, config).await
 }
 
-/// Discover-step equivalent for EWS: list calendars against the
-/// supplied endpoint + credentials, drop the result. Same pattern as
-/// `smoke_test_caldav` — it catches wrong URL, wrong password, and
-/// firewall problems ahead of persisting anything.
+/// EWS smoke-test: open a plugin instance against the supplied
+/// endpoint + Basic-auth credentials, run `list_calendars`,
+/// drop. Same pattern as `smoke_test_caldav` — surfaces wrong
+/// URL, wrong password, firewall problems ahead of persisting
+/// anything.
 async fn smoke_test_ews(
-    config: &EwsAccountConfig,
+    plugin_manager: &PluginManager,
+    endpoint: &str,
+    username: &str,
+    password: &str,
+) -> Result<(), CommandError> {
+    let config = json!({
+        "endpoint": endpoint,
+        "username": username,
+        "password": password,
+    });
+    smoke_via_calendar_plugin(plugin_manager, PLUGIN_ID_EWS, config).await
+}
+
+/// Vikunja round-trip: open a plugin instance against the
+/// supplied server + token and hit `list_task_lists`. Surfaces
+/// wrong URL / wrong token / firewall problems before we
+/// persist anything.
+async fn smoke_test_vikunja(
+    plugin_manager: &PluginManager,
+    server_url: &str,
     secret: &str,
 ) -> Result<(), CommandError> {
-    let credentials = EwsCredentials {
-        username: config.username.clone(),
-        password: secret.to_string(),
-    };
-    let adapter = EwsAdapter::new(config.endpoint.clone(), credentials);
+    let config = json!({
+        "server_url": server_url,
+        "token": secret,
+    });
+    smoke_via_tasks_plugin(plugin_manager, PLUGIN_ID_VIKUNJA, config).await
+}
+
+/// Todoist round-trip: open a plugin instance with the supplied
+/// token and hit `list_task_lists`. Surfaces revoked tokens /
+/// network problems before persistence.
+async fn smoke_test_todoist(
+    plugin_manager: &PluginManager,
+    secret: &str,
+) -> Result<(), CommandError> {
+    let config = json!({ "token": secret });
+    smoke_via_tasks_plugin(plugin_manager, PLUGIN_ID_TODOIST, config).await
+}
+
+/// Shared smoke-test for plugins that expose `CalendarFeature`:
+/// opens an ephemeral instance, runs `list_calendars`, then
+/// drops the instance. The trait method exercises the full
+/// auth + protocol round-trip, which is exactly what the
+/// "credentials work?" question needs answered.
+async fn smoke_via_calendar_plugin(
+    plugin_manager: &PluginManager,
+    plugin_id: &str,
+    config: Value,
+) -> Result<(), CommandError> {
+    let instance = open_smoke_instance(plugin_manager, plugin_id, config)?;
+    let adapter = FfiCalendarAdapter::new(instance).ok_or(CommandError {
+        code: "internal",
+        message: format!(
+            "plugin {plugin_id} doesn't expose CalendarFeature",
+        ),
+    })?;
     adapter
         .list_calendars()
         .await
-        .map_err(caldav_core_error_to_command)?;
-    Ok(())
+        .map(|_| ())
+        .map_err(plugin_cal_error_to_command)
 }
 
-/// Vikunja round-trip: build an ephemeral adapter from the request
-/// payload and hit `GET /projects?per_page=1` via
-/// `VikunjaAdapter::smoke_test`. Surfaces wrong URL / wrong token /
-/// firewall problems before we persist anything.
-async fn smoke_test_vikunja(
-    config: &VikunjaAccountConfig,
-    secret: &str,
+/// Tasks-side counterpart to [`smoke_via_calendar_plugin`].
+async fn smoke_via_tasks_plugin(
+    plugin_manager: &PluginManager,
+    plugin_id: &str,
+    config: Value,
 ) -> Result<(), CommandError> {
-    let adapter = VikunjaAdapter::new(&config.server_url, secret.to_string())
-        .map_err(vikunja_error_to_command)?;
-    adapter
-        .smoke_test()
-        .await
-        .map_err(caldav_core_error_to_command)?;
-    Ok(())
-}
-
-fn vikunja_error_to_command(err: VikunjaError) -> CommandError {
-    use VikunjaError::*;
-    let (code, message) = match err {
-        Network(m) => ("network", m),
-        Http { status: 401, message } | Http { status: 403, message } => {
-            ("auth", message)
-        }
-        Http { status, message } => (
-            "protocol",
-            format!("Vikunja HTTP {status}: {message}"),
+    let instance = open_smoke_instance(plugin_manager, plugin_id, config)?;
+    let adapter = FfiTasksAdapter::new(instance).ok_or(CommandError {
+        code: "internal",
+        message: format!(
+            "plugin {plugin_id} doesn't expose TasksFeature",
         ),
-        Protocol(m) => ("protocol", m),
-        Config(m) => ("invalid_input", m),
-    };
-    CommandError { code, message }
-}
-
-/// Todoist round-trip: build an ephemeral adapter from the supplied
-/// token and hit `GET /projects` via `TodoistAdapter::smoke_test`.
-/// Surfaces revoked tokens / network problems before persistence.
-async fn smoke_test_todoist(secret: &str) -> Result<(), CommandError> {
-    let adapter = TodoistAdapter::new(secret.to_string());
+    })?;
     adapter
-        .smoke_test()
+        .list_task_lists()
         .await
-        .map_err(caldav_core_error_to_command)?;
-    Ok(())
+        .map(|_| ())
+        .map_err(plugin_cal_error_to_command)
 }
 
-#[allow(dead_code)]
-fn todoist_error_to_command(err: TodoistError) -> CommandError {
-    use TodoistError::*;
-    let (code, message) = match err {
-        Network(m) => ("network", m),
-        Http { status: 401, message } | Http { status: 403, message } => {
-            ("auth", message)
-        }
-        Http { status, message } => (
-            "protocol",
-            format!("Todoist HTTP {status}: {message}"),
-        ),
-        Protocol(m) => ("protocol", m),
-        Config(m) => ("invalid_input", m),
-    };
-    CommandError { code, message }
+/// Open an ephemeral plugin instance for a smoke test. The
+/// returned Arc is dropped by the caller's scope, which fires
+/// the plugin's `close_instance` hook + releases the runtime.
+fn open_smoke_instance(
+    plugin_manager: &PluginManager,
+    plugin_id: &str,
+    config: Value,
+) -> Result<Arc<plugin_core::LoadedInstance>, CommandError> {
+    let plugin = plugin_manager.get(plugin_id).ok_or(CommandError {
+        code: "plugin_missing",
+        message: format!("plugin {plugin_id} is not loaded"),
+    })?;
+    plugin_manager
+        .open_instance(plugin, &config.to_string())
+        .map_err(|err| match err {
+            plugin_core::error::PluginError::InstanceOpen { message, .. } => {
+                CommandError {
+                    code: "invalid_input",
+                    message,
+                }
+            }
+            other => CommandError {
+                code: "internal",
+                message: other.to_string(),
+            },
+        })
 }
 
-fn ical_error_to_command(err: cal_adapter_ical::IcalError) -> CommandError {
-    use cal_adapter_ical::IcalError::*;
-    let (code, message) = match err {
-        Auth(_) => ("auth", err.to_string()),
-        Url(_) | Config(_) => ("invalid_input", err.to_string()),
-        Parse(_) => ("protocol", err.to_string()),
-        Server(_) | Network(_) => ("network", err.to_string()),
-    };
-    CommandError { code, message }
-}
-
-fn caldav_core_error_to_command(err: cal_core::Error) -> CommandError {
+/// Map `cal_core::Error` (the error type the FfiCalendarAdapter
+/// / FfiTasksAdapter shims surface from the plugin) into the
+/// uniform `CommandError` shape the frontend understands.
+fn plugin_cal_error_to_command(err: cal_core::Error) -> CommandError {
     use cal_core::Error::*;
     let (code, message) = match err {
         Authentication(m) => ("auth", m),
@@ -455,15 +495,20 @@ fn caldav_core_error_to_command(err: cal_core::Error) -> CommandError {
 /// Used by the AccountsDialog's optional "Test connection" button.
 #[tauri::command]
 pub async fn test_caldav_connection(
+    plugin_manager: State<'_, Arc<PluginManager>>,
     request: TestCaldavRequest,
 ) -> CommandResult<()> {
-    let config = CaldavAccountConfig {
-        server_url: request.server_url,
-        username: request.username,
-        auth_kind: AuthKind::Basic,
-    };
-    smoke_test_caldav(&config, &request.password).await?;
-    Ok(())
+    smoke_test_caldav(
+        plugin_manager.inner(),
+        &request.server_url,
+        &request.username,
+        // The "Test connection" button is wired against the
+        // Basic-auth half of the CalDAV form today; Bearer
+        // configurations go through the create flow instead.
+        "basic",
+        &request.password,
+    )
+    .await
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -477,14 +522,16 @@ pub struct TestCaldavRequest {
 /// persisting anything. Same pattern as [`test_caldav_connection`].
 #[tauri::command]
 pub async fn test_ical_feed(
+    plugin_manager: State<'_, Arc<PluginManager>>,
     request: TestIcalRequest,
 ) -> CommandResult<()> {
-    let config = IcalAccountConfig {
-        feed_url: request.feed_url,
-        username: request.username,
-    };
-    smoke_test_ical(&config, request.password.as_deref()).await?;
-    Ok(())
+    smoke_test_ical(
+        plugin_manager.inner(),
+        &request.feed_url,
+        request.username.as_deref(),
+        request.password.as_deref(),
+    )
+    .await
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -498,15 +545,16 @@ pub struct TestIcalRequest {
 /// Used by AccountsDialog's "Test connection" button on the EWS form.
 #[tauri::command]
 pub async fn test_ews_connection(
+    plugin_manager: State<'_, Arc<PluginManager>>,
     request: TestEwsRequest,
 ) -> CommandResult<()> {
-    let config = EwsAccountConfig {
-        endpoint: request.endpoint,
-        username: request.username,
-        account_label: None,
-    };
-    smoke_test_ews(&config, &request.password).await?;
-    Ok(())
+    smoke_test_ews(
+        plugin_manager.inner(),
+        &request.endpoint,
+        &request.username,
+        &request.password,
+    )
+    .await
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -522,14 +570,15 @@ pub struct TestEwsRequest {
 /// secret) → smoke-test` shape with `secret` being the API token.
 #[tauri::command]
 pub async fn test_vikunja_connection(
+    plugin_manager: State<'_, Arc<PluginManager>>,
     request: TestVikunjaRequest,
 ) -> CommandResult<()> {
-    let config = VikunjaAccountConfig {
-        server_url: request.server_url,
-        account_label: None,
-    };
-    smoke_test_vikunja(&config, &request.api_token).await?;
-    Ok(())
+    smoke_test_vikunja(
+        plugin_manager.inner(),
+        &request.server_url,
+        &request.api_token,
+    )
+    .await
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -544,10 +593,10 @@ pub struct TestVikunjaRequest {
 /// hosted, the base URL is hard-coded in the adapter.
 #[tauri::command]
 pub async fn test_todoist_connection(
+    plugin_manager: State<'_, Arc<PluginManager>>,
     request: TestTodoistRequest,
 ) -> CommandResult<()> {
-    smoke_test_todoist(&request.api_token).await?;
-    Ok(())
+    smoke_test_todoist(plugin_manager.inner(), &request.api_token).await
 }
 
 #[derive(Debug, serde::Deserialize)]
