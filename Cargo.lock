@@ -756,6 +756,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "cal-adapter-todoist-plugin"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "cal-adapter-todoist",
+ "cal-core",
+ "plugin-core",
+ "plugin-sdk",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "cal-adapter-vikunja"
 version = "0.1.0"
 dependencies = [
@@ -770,6 +785,21 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "cal-adapter-vikunja-plugin"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "cal-adapter-vikunja",
+ "cal-core",
+ "plugin-core",
+ "plugin-sdk",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
