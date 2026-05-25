@@ -25,11 +25,12 @@ use crate::error::{EwsError, EwsResult};
 use crate::mapping::{
     decode_event_id, encode_event_id, event_to_update_field_xml, new_event_to_calendar_item_xml,
     parse_find_folder_response, parse_find_item_response, parse_first_item_id,
-    split_calendar_id, to_calendar, to_event, DecodedEventId, EventIdKind,
+    parse_sync_folder_items_response, split_calendar_id, to_calendar, to_event, DecodedEventId,
+    EventIdKind, ParsedItem, SyncChange,
 };
 use crate::soap::{
     check_for_fault, create_calendar_item, delete_calendar_item, find_calendar_folders,
-    find_items_in_range, get_recurring_master, update_calendar_item,
+    find_items_in_range, get_recurring_master, sync_folder_items, update_calendar_item,
     update_folder_displayname,
 };
 
@@ -131,6 +132,14 @@ pub async fn list_calendars(client: &EwsClient) -> EwsResult<Vec<Calendar>> {
 /// expands recurring series server-side via `CalendarView`, so the
 /// result is a flat list of occurrences — no client-side expansion
 /// needed.
+///
+/// **Deprecated read path.** Recurring series come back as N
+/// flattened occurrences with no master/RRULE, so the frontend
+/// can't render them as series (the "series chip", bulk edit and
+/// EXDATE skip all silently miss). Kept for tests of the parser
+/// alone; the live adapter uses [`sync_events_to_completion`] +
+/// the local cache instead.
+#[allow(dead_code)]
 pub async fn get_events(
     client: &EwsClient,
     calendar_id: &str,
@@ -145,6 +154,75 @@ pub async fn get_events(
         .into_iter()
         .map(|item| to_event(item, calendar_id))
         .collect()
+}
+
+/// Result of one full `SyncFolderItems` drain against `folder_id`:
+/// the absolute set of currently-known items + the cookie to pass
+/// next time. The caller (the adapter wrapper) folds this into its
+/// per-folder cache.
+#[derive(Debug, Clone, Default)]
+pub struct SyncedFolderState {
+    /// All items currently believed to live in the folder, keyed
+    /// by EWS ItemId. After Create/Update merges and Delete
+    /// removals, this is "the truth as of `new_sync_state`".
+    pub items: std::collections::HashMap<String, ParsedItem>,
+    /// Server cookie to pass back on the next sync. `None` only
+    /// when this state has never seen a successful round.
+    pub sync_state: Option<String>,
+}
+
+/// How many changes to ask for per `SyncFolderItems` request.
+/// Exchange Online caps at 512 per call; smaller is fine but means
+/// more round-trips on the initial drain. We pick the maximum to
+/// minimise initial-sync latency on cold caches.
+const SYNC_BATCH_SIZE: u32 = 512;
+
+/// Run `SyncFolderItems` in a loop against `calendar_id` until the
+/// server reports `IncludesLastItemInRange=true`, applying each
+/// batch's changes to `state`. Returns the updated state with the
+/// freshest sync-cookie.
+///
+/// On `ErrorInvalidSyncStateData` (the cookie has aged out or the
+/// mailbox was rebuilt), the caller should drop `state` and call
+/// again with `None` to do a full re-sync. We surface that error
+/// verbatim so the caller can branch — handling it inline would
+/// silently mask other auth/protocol failures.
+pub async fn sync_events_to_completion(
+    client: &EwsClient,
+    calendar_id: &str,
+    mut state: SyncedFolderState,
+) -> EwsResult<SyncedFolderState> {
+    let (folder_id, change_key) = split_calendar_id(calendar_id);
+    // Bound the loop in case a buggy server keeps reporting
+    // includes_last=false. 64 pages × 512 items = 32 768 items per
+    // refresh, well past any plausible calendar size.
+    for _ in 0..64 {
+        let body = sync_folder_items(
+            &folder_id,
+            change_key.as_deref(),
+            state.sync_state.as_deref(),
+            SYNC_BATCH_SIZE,
+        );
+        let xml = client.post_soap(body).await?;
+        let result = parse_sync_folder_items_response(&xml)?;
+        for change in result.changes {
+            match change {
+                SyncChange::Create(item) | SyncChange::Update(item) => {
+                    state.items.insert(item.item_id.clone(), item);
+                }
+                SyncChange::Delete(id) => {
+                    state.items.remove(&id);
+                }
+            }
+        }
+        state.sync_state = Some(result.new_sync_state);
+        if result.includes_last {
+            return Ok(state);
+        }
+    }
+    Err(EwsError::Protocol(
+        "SyncFolderItems didn't terminate after 64 pages".into(),
+    ))
 }
 
 /// Create a new calendar item in `calendar_id`. Returns the
@@ -438,6 +516,99 @@ mod tests {
         assert_eq!(cals[0].name, "Calendar");
         assert!(!cals[0].read_only); // 6f.1b made EWS calendars writable
         assert_eq!(cals[1].id, "FB");
+    }
+
+    #[tokio::test]
+    async fn sync_events_drains_two_pages_and_returns_final_cookie() {
+        // Two-page drain: first response has includes_last=false +
+        // one Create; second has includes_last=true + one more
+        // Create with a different id. The mock matches FIFO, so
+        // the first POST gets page 1, the second gets page 2.
+        let mut server = Server::new_async().await;
+        let page1 = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body>
+    <m:SyncFolderItemsResponse>
+      <m:ResponseMessages>
+        <m:SyncFolderItemsResponseMessage ResponseClass="Success">
+          <m:ResponseCode>NoError</m:ResponseCode>
+          <m:SyncState>COOKIE-1</m:SyncState>
+          <m:IncludesLastItemInRange>false</m:IncludesLastItemInRange>
+          <m:Changes>
+            <t:Create>
+              <t:CalendarItem>
+                <t:ItemId Id="A" ChangeKey="CKA"/>
+                <t:Subject>First</t:Subject>
+                <t:Start>2026-05-01T08:00:00Z</t:Start>
+                <t:End>2026-05-01T09:00:00Z</t:End>
+                <t:CalendarItemType>Single</t:CalendarItemType>
+              </t:CalendarItem>
+            </t:Create>
+          </m:Changes>
+        </m:SyncFolderItemsResponseMessage>
+      </m:ResponseMessages>
+    </m:SyncFolderItemsResponse>
+  </s:Body>
+</s:Envelope>"#;
+        let page2 = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body>
+    <m:SyncFolderItemsResponse>
+      <m:ResponseMessages>
+        <m:SyncFolderItemsResponseMessage ResponseClass="Success">
+          <m:ResponseCode>NoError</m:ResponseCode>
+          <m:SyncState>COOKIE-2</m:SyncState>
+          <m:IncludesLastItemInRange>true</m:IncludesLastItemInRange>
+          <m:Changes>
+            <t:Create>
+              <t:CalendarItem>
+                <t:ItemId Id="B" ChangeKey="CKB"/>
+                <t:Subject>Second</t:Subject>
+                <t:Start>2026-05-02T08:00:00Z</t:Start>
+                <t:End>2026-05-02T09:00:00Z</t:End>
+                <t:CalendarItemType>Single</t:CalendarItemType>
+              </t:CalendarItem>
+            </t:Create>
+          </m:Changes>
+        </m:SyncFolderItemsResponseMessage>
+      </m:ResponseMessages>
+    </m:SyncFolderItemsResponse>
+  </s:Body>
+</s:Envelope>"#;
+        let _m1 = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_header("content-type", "text/xml; charset=utf-8")
+            .with_body(page1)
+            .expect(1)
+            .create_async()
+            .await;
+        let _m2 = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_header("content-type", "text/xml; charset=utf-8")
+            .with_body(page2)
+            .expect(1)
+            .create_async()
+            .await;
+        let client = client_for(&server);
+        let updated = sync_events_to_completion(
+            &client,
+            "FA|FCK",
+            SyncedFolderState::default(),
+        )
+        .await
+        .unwrap();
+        // Both items present in the merged cache.
+        assert_eq!(updated.items.len(), 2);
+        assert!(updated.items.contains_key("A"));
+        assert!(updated.items.contains_key("B"));
+        // Cookie advanced to the last page's cookie.
+        assert_eq!(updated.sync_state.as_deref(), Some("COOKIE-2"));
     }
 
     #[tokio::test]

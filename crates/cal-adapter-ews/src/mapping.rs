@@ -313,6 +313,15 @@ pub struct ParsedItem {
     /// `Single` when EWS omits it (e.g. older servers that don't
     /// honour the property request).
     pub item_type: Option<String>,
+    /// On a RecurringMaster row from `SyncFolderItems`, the
+    /// `<t:Recurrence>` element parses to this. `None` on singles
+    /// and on read paths that don't request the field (the legacy
+    /// `FindItem + CalendarView` parser leaves this empty).
+    pub recurrence: Option<EwsRecurrence>,
+    /// `<t:DeletedOccurrences>` start datetimes on a RecurringMaster
+    /// row — translates to EXDATE entries in
+    /// `cal_core::EventRecurrence::exceptions` on the way down.
+    pub deleted_occurrence_starts: Vec<DateTime<Utc>>,
 }
 
 /// Walk a `FindItemResponse` body and yield one `ParsedItem` per
@@ -497,15 +506,32 @@ pub fn parse_sync_folder_items_response(
     //     we're inside a t:Create/t:Update/t:Delete block.
     //   - inside_item: true while inside a <t:CalendarItem> (Create
     //     and Update wrap one; Delete just carries an ItemId).
+    //   - recurrence_walker: Some(_) while inside a <t:Recurrence>
+    //     subtree. The walker accumulates pattern/range state; the
+    //     outer End triggers finish + assignment to ParsedItem.
+    //   - inside_deleted_occurrence: bumped on each
+    //     <t:DeletedOccurrence> Start so the inner <t:Start> text
+    //     routes to the right collection.
     let mut inside_change_kind: Option<&'static str> = None;
     let mut inside_item = false;
     let mut current = ParsedItem::default();
     let mut text_target: Option<&'static str> = None;
+    let mut recurrence_walker: Option<RecurrenceWalker> = None;
+    let mut inside_deleted_occurrences = false;
+    let mut inside_deleted_occurrence = false;
 
     loop {
         match reader.read_event_into(&mut buf) {
             Ok(XmlEvent::Start(e)) | Ok(XmlEvent::Empty(e)) => {
                 let local = e.local_name().as_ref().to_ascii_lowercase();
+                // Recurrence subtree: route to the shared walker
+                // instead of the outer item state machine, so the
+                // pattern/range elements don't collide with
+                // CalendarItem's `<t:Start>` / `<t:End>` text fields.
+                if let Some(walker) = recurrence_walker.as_mut() {
+                    walker.observe_start(local.as_slice())?;
+                    continue;
+                }
                 match local.as_slice() {
                     b"create" => inside_change_kind = Some("create"),
                     b"update" => inside_change_kind = Some("update"),
@@ -541,11 +567,30 @@ pub fn parse_sync_folder_items_response(
                             }
                         }
                     }
+                    // Recurrence subtree start — hand off to the
+                    // shared walker until matching End.
+                    b"recurrence" if inside_item => {
+                        recurrence_walker = Some(RecurrenceWalker::default());
+                    }
+                    // DeletedOccurrences block — each child carries
+                    // a `<t:Start>` that we want to collect as an
+                    // EXDATE. Track depth so the inner `<t:Start>`
+                    // text doesn't accidentally rewrite the master's
+                    // own start/end.
+                    b"deletedoccurrences" if inside_item => {
+                        inside_deleted_occurrences = true;
+                    }
+                    b"deletedoccurrence" if inside_deleted_occurrences => {
+                        inside_deleted_occurrence = true;
+                    }
                     // Per-field text targets — only honoured while
                     // we're inside a CalendarItem block.
                     b"subject" if inside_item => text_target = Some("subject"),
                     b"body" if inside_item => text_target = Some("body"),
                     b"location" if inside_item => text_target = Some("location"),
+                    b"start" if inside_deleted_occurrence => {
+                        text_target = Some("deleted_occurrence_start");
+                    }
                     b"start" if inside_item => text_target = Some("start"),
                     b"end" if inside_item => text_target = Some("end"),
                     b"isalldayevent" if inside_item => {
@@ -574,7 +619,35 @@ pub fn parse_sync_folder_items_response(
             }
             Ok(XmlEvent::End(e)) => {
                 let local = e.local_name().as_ref().to_ascii_lowercase();
+                // Recurrence outer-end → finish walker, assign to
+                // current ParsedItem (or drop with a Protocol error
+                // if the subtree was malformed). We DON'T forward
+                // this End to the walker — the walker handles
+                // inner Ends only via observe_end_generic, which
+                // we already routed in the bottom branch.
+                if local.as_slice() == b"recurrence" {
+                    if let Some(walker) = recurrence_walker.take() {
+                        // `finish` may legitimately error (e.g. on
+                        // RelativeMonthly) — propagate so the caller
+                        // can decide whether to skip the row.
+                        current.recurrence = Some(walker.finish()?);
+                    }
+                    text_target = None;
+                    continue;
+                }
+                // Inside the recurrence subtree all other Ends just
+                // clear the walker's text target.
+                if let Some(walker) = recurrence_walker.as_mut() {
+                    walker.observe_end_generic();
+                    continue;
+                }
                 match local.as_slice() {
+                    b"deletedoccurrences" => {
+                        inside_deleted_occurrences = false;
+                    }
+                    b"deletedoccurrence" => {
+                        inside_deleted_occurrence = false;
+                    }
                     b"create" => {
                         if !current.item_id.is_empty() {
                             changes.push(SyncChange::Create(std::mem::take(
@@ -611,13 +684,22 @@ pub fn parse_sync_folder_items_response(
                 }
                 text_target = None;
             }
-            Ok(XmlEvent::Text(t)) if text_target.is_some() => {
+            Ok(XmlEvent::Text(t)) => {
                 let raw = match t.unescape() {
                     Ok(c) => c.to_string(),
                     Err(_) => continue,
                 };
                 let s = raw.trim();
                 if s.is_empty() {
+                    continue;
+                }
+                // Recurrence subtree text routes to the walker,
+                // bypassing the outer item field map entirely.
+                if let Some(walker) = recurrence_walker.as_mut() {
+                    walker.observe_text(s);
+                    continue;
+                }
+                if text_target.is_none() {
                     continue;
                 }
                 match text_target {
@@ -636,6 +718,11 @@ pub fn parse_sync_folder_items_response(
                     }
                     Some("start") => current.start = parse_ews_datetime(s),
                     Some("end") => current.end = parse_ews_datetime(s),
+                    Some("deleted_occurrence_start") => {
+                        if let Some(dt) = parse_ews_datetime(s) {
+                            current.deleted_occurrence_starts.push(dt);
+                        }
+                    }
                     Some("all_day") => {
                         current.is_all_day = s.eq_ignore_ascii_case("true");
                     }
@@ -742,17 +829,24 @@ pub fn to_event(item: ParsedItem, calendar_id: &str) -> EwsResult<Event> {
         Vec::new()
     };
 
-    // `is_recurring=true` on a CalendarView row means "this row is one
-    // expanded occurrence of a series". We don't have the master's
-    // RRULE here, but we still want the frontend to render the series
-    // hint eventually. Encoding it as a synthetic `FREQ=DAILY;COUNT=1`
-    // would lie about the cadence — so we drop the recurrence info on
-    // the read path and let the `SyncFolderItems` migration (see
-    // doc-comment above) supply real masters + RRULEs in a future
-    // iteration. The write path already reaches into Recurrence on a
-    // per-master GetItem when it needs to edit a series.
-    let recurrence: Option<EventRecurrence> = None;
-    let _ = item.is_recurring; // suppress unused-field warning
+    // Two paths produce ParsedItem today:
+    //
+    //  - Legacy FindItem+CalendarView (parse_find_item_response):
+    //    `is_recurring=true` means "this row is one expanded
+    //    occurrence". The master's RRULE isn't visible here, so we
+    //    fall through with `recurrence = None`.
+    //  - SyncFolderItems (parse_sync_folder_items_response): rows
+    //    with `is_recurring=true` are masters carrying their
+    //    `<t:Recurrence>` element, which the parser already shaped
+    //    into `item.recurrence`. We translate it to a cal_core
+    //    RRULE + EXDATE list so the frontend expander handles the
+    //    series exactly like CalDAV/iCal.
+    let recurrence: Option<EventRecurrence> = item.recurrence.as_ref().map(|r| {
+        EventRecurrence {
+            rrule: r.to_rrule(),
+            exceptions: item.deleted_occurrence_starts.clone(),
+        }
+    });
 
     Ok(Event {
         id,
@@ -1418,168 +1512,32 @@ impl EwsRecurrence {
 /// support yet (`RelativeMonthlyRecurrence`, `RelativeYearlyRecurrence`,
 /// missing pattern or range, …) so the caller can decide whether to
 /// drop the master entirely or surface a user-visible warning.
+///
+/// Shares its actual walking logic with [`RecurrenceWalker`] so the
+/// `SyncFolderItems` parser can re-use it inline (no XML-slicing
+/// gymnastics required to carve out the subtree).
 pub fn parse_ews_recurrence(xml: &str) -> EwsResult<EwsRecurrence> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
+    let mut walker = RecurrenceWalker::default();
     let mut buf = Vec::new();
-
-    // Both the pattern and the range elements arrive as direct
-    // children of `<t:Recurrence>`. We walk all start tags and
-    // record which "container" we're currently inside; field
-    // elements (`<t:Interval>`, `<t:DaysOfWeek>`, …) attach to that
-    // container. Two-level state machine — flat but readable.
-    let mut current_pattern: Option<PatternBuilder> = None;
-    let mut current_range: Option<RangeBuilder> = None;
-    let mut text_target: Option<&'static str> = None;
-
     loop {
         match reader.read_event_into(&mut buf) {
             Ok(XmlEvent::Start(e)) | Ok(XmlEvent::Empty(e)) => {
                 let local = e.local_name().as_ref().to_ascii_lowercase();
-                match local.as_slice() {
-                    // Pattern containers.
-                    b"dailyrecurrence" => {
-                        current_pattern = Some(PatternBuilder::Daily {
-                            interval: 1,
-                        });
-                    }
-                    b"weeklyrecurrence" => {
-                        current_pattern = Some(PatternBuilder::Weekly {
-                            interval: 1,
-                            days_of_week: Vec::new(),
-                        });
-                    }
-                    b"absolutemonthlyrecurrence" => {
-                        current_pattern = Some(PatternBuilder::AbsoluteMonthly {
-                            interval: 1,
-                            day_of_month: 1,
-                        });
-                    }
-                    b"absoluteyearlyrecurrence" => {
-                        current_pattern = Some(PatternBuilder::AbsoluteYearly {
-                            day_of_month: 1,
-                            month: None,
-                        });
-                    }
-                    b"relativemonthlyrecurrence" => {
-                        return Err(EwsError::Protocol(
-                            "RelativeMonthlyRecurrence is not supported by Aperio yet".into(),
-                        ));
-                    }
-                    b"relativeyearlyrecurrence" => {
-                        return Err(EwsError::Protocol(
-                            "RelativeYearlyRecurrence is not supported by Aperio yet".into(),
-                        ));
-                    }
-                    // Range containers.
-                    b"noendrecurrence" => {
-                        current_range = Some(RangeBuilder::NoEnd);
-                    }
-                    b"numberedrecurrence" => {
-                        current_range = Some(RangeBuilder::Numbered {
-                            occurrences: 0,
-                        });
-                    }
-                    b"enddaterecurrence" => {
-                        current_range = Some(RangeBuilder::EndDate {
-                            end: String::new(),
-                        });
-                    }
-                    // Field elements — text content arrives next.
-                    b"interval" => text_target = Some("interval"),
-                    b"daysofweek" => text_target = Some("days_of_week"),
-                    b"dayofmonth" => text_target = Some("day_of_month"),
-                    b"month" => text_target = Some("month"),
-                    b"numberofoccurrences" => {
-                        text_target = Some("number_of_occurrences");
-                    }
-                    b"enddate" => text_target = Some("end_date"),
-                    _ => {}
-                }
+                walker.observe_start(local.as_slice())?;
             }
-            Ok(XmlEvent::Text(t)) if text_target.is_some() => {
+            Ok(XmlEvent::Text(t)) => {
                 let raw = match t.unescape() {
                     Ok(c) => c.to_string(),
                     Err(_) => continue,
                 };
                 let s = raw.trim();
-                if s.is_empty() {
-                    continue;
-                }
-                match text_target {
-                    Some("interval") => {
-                        let v = s.parse::<u32>().unwrap_or(1).max(1);
-                        match current_pattern.as_mut() {
-                            Some(PatternBuilder::Daily { interval })
-                            | Some(PatternBuilder::Weekly { interval, .. })
-                            | Some(PatternBuilder::AbsoluteMonthly {
-                                interval, ..
-                            }) => *interval = v,
-                            _ => {}
-                        }
-                    }
-                    Some("days_of_week") => {
-                        // EWS sends space-separated full names:
-                        // "Monday Wednesday Friday".
-                        if let Some(PatternBuilder::Weekly {
-                            days_of_week,
-                            ..
-                        }) = current_pattern.as_mut()
-                        {
-                            for tok in s.split_whitespace() {
-                                if let Some(day) = EwsDay::from_wire(tok) {
-                                    days_of_week.push(day);
-                                }
-                            }
-                        }
-                    }
-                    Some("day_of_month") => {
-                        let v = s.parse::<u8>().unwrap_or(1).clamp(1, 31);
-                        match current_pattern.as_mut() {
-                            Some(PatternBuilder::AbsoluteMonthly {
-                                day_of_month,
-                                ..
-                            })
-                            | Some(PatternBuilder::AbsoluteYearly {
-                                day_of_month,
-                                ..
-                            }) => *day_of_month = v,
-                            _ => {}
-                        }
-                    }
-                    Some("month") => {
-                        if let Some(PatternBuilder::AbsoluteYearly {
-                            month, ..
-                        }) = current_pattern.as_mut()
-                        {
-                            *month = EwsMonth::from_wire(s);
-                        }
-                    }
-                    Some("number_of_occurrences") => {
-                        if let Some(RangeBuilder::Numbered {
-                            occurrences,
-                        }) = current_range.as_mut()
-                        {
-                            *occurrences = s.parse::<u32>().unwrap_or(0);
-                        }
-                    }
-                    Some("end_date") => {
-                        if let Some(RangeBuilder::EndDate { end }) =
-                            current_range.as_mut()
-                        {
-                            // Strip any time-zone suffix some servers
-                            // append (e.g. "2026-12-31+02:00"); the
-                            // date portion is canonical.
-                            let trimmed = s.split(['T', '+']).next().unwrap_or(s);
-                            *end = trimmed.to_string();
-                        }
-                    }
-                    _ => {}
+                if !s.is_empty() {
+                    walker.observe_text(s);
                 }
             }
-            Ok(XmlEvent::End(_)) => {
-                text_target = None;
-            }
+            Ok(XmlEvent::End(_)) => walker.observe_end_generic(),
             Ok(XmlEvent::Eof) => break,
             Ok(_) => {}
             Err(err) => {
@@ -1590,18 +1548,7 @@ pub fn parse_ews_recurrence(xml: &str) -> EwsResult<EwsRecurrence> {
         }
         buf.clear();
     }
-
-    let pattern = current_pattern
-        .ok_or_else(|| {
-            EwsError::Protocol("Recurrence missing pattern element".into())
-        })?
-        .finish()?;
-    let range = current_range
-        .ok_or_else(|| {
-            EwsError::Protocol("Recurrence missing range element".into())
-        })?
-        .finish()?;
-    Ok(EwsRecurrence { pattern, range })
+    walker.finish()
 }
 
 /// Convenience: parse + translate to RRULE in one step. Used by
@@ -1611,6 +1558,165 @@ pub fn parse_ews_recurrence_to_rrule(xml: &str) -> EwsResult<String> {
 }
 
 // ── builders (mutable scratch types used during XML walk) ─────────────────
+
+/// Stateful walker over the contents of a `<t:Recurrence>` block.
+/// Both the standalone [`parse_ews_recurrence`] and the
+/// `SyncFolderItems` walker route events through this so the
+/// pattern/range accumulation logic lives in exactly one place.
+///
+/// Usage: feed every Start/Text/End event you see while you're
+/// inside the Recurrence subtree; on the matching outer End, call
+/// [`Self::finish`] for the assembled value.
+#[derive(Default)]
+pub(crate) struct RecurrenceWalker {
+    pattern: Option<PatternBuilder>,
+    range: Option<RangeBuilder>,
+    text_target: Option<&'static str>,
+}
+
+impl RecurrenceWalker {
+    /// Handle a Start (or Empty) event's local-name. Errors only
+    /// on shapes we explicitly refuse (Relative* recurrences).
+    pub(crate) fn observe_start(&mut self, local: &[u8]) -> EwsResult<()> {
+        match local {
+            b"dailyrecurrence" => {
+                self.pattern = Some(PatternBuilder::Daily { interval: 1 });
+            }
+            b"weeklyrecurrence" => {
+                self.pattern = Some(PatternBuilder::Weekly {
+                    interval: 1,
+                    days_of_week: Vec::new(),
+                });
+            }
+            b"absolutemonthlyrecurrence" => {
+                self.pattern = Some(PatternBuilder::AbsoluteMonthly {
+                    interval: 1,
+                    day_of_month: 1,
+                });
+            }
+            b"absoluteyearlyrecurrence" => {
+                self.pattern = Some(PatternBuilder::AbsoluteYearly {
+                    day_of_month: 1,
+                    month: None,
+                });
+            }
+            b"relativemonthlyrecurrence" => {
+                return Err(EwsError::Protocol(
+                    "RelativeMonthlyRecurrence is not supported by Aperio yet".into(),
+                ));
+            }
+            b"relativeyearlyrecurrence" => {
+                return Err(EwsError::Protocol(
+                    "RelativeYearlyRecurrence is not supported by Aperio yet".into(),
+                ));
+            }
+            b"noendrecurrence" => self.range = Some(RangeBuilder::NoEnd),
+            b"numberedrecurrence" => {
+                self.range = Some(RangeBuilder::Numbered { occurrences: 0 });
+            }
+            b"enddaterecurrence" => {
+                self.range = Some(RangeBuilder::EndDate { end: String::new() });
+            }
+            b"interval" => self.text_target = Some("interval"),
+            b"daysofweek" => self.text_target = Some("days_of_week"),
+            b"dayofmonth" => self.text_target = Some("day_of_month"),
+            b"month" => self.text_target = Some("month"),
+            b"numberofoccurrences" => {
+                self.text_target = Some("number_of_occurrences");
+            }
+            b"enddate" => self.text_target = Some("end_date"),
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Feed text content (already trimmed + non-empty). Routed to
+    /// whichever element's child text is currently active.
+    pub(crate) fn observe_text(&mut self, s: &str) {
+        match self.text_target {
+            Some("interval") => {
+                let v = s.parse::<u32>().unwrap_or(1).max(1);
+                match self.pattern.as_mut() {
+                    Some(PatternBuilder::Daily { interval })
+                    | Some(PatternBuilder::Weekly { interval, .. })
+                    | Some(PatternBuilder::AbsoluteMonthly { interval, .. }) => {
+                        *interval = v;
+                    }
+                    _ => {}
+                }
+            }
+            Some("days_of_week") => {
+                if let Some(PatternBuilder::Weekly { days_of_week, .. }) =
+                    self.pattern.as_mut()
+                {
+                    for tok in s.split_whitespace() {
+                        if let Some(day) = EwsDay::from_wire(tok) {
+                            days_of_week.push(day);
+                        }
+                    }
+                }
+            }
+            Some("day_of_month") => {
+                let v = s.parse::<u8>().unwrap_or(1).clamp(1, 31);
+                match self.pattern.as_mut() {
+                    Some(PatternBuilder::AbsoluteMonthly { day_of_month, .. })
+                    | Some(PatternBuilder::AbsoluteYearly { day_of_month, .. }) => {
+                        *day_of_month = v;
+                    }
+                    _ => {}
+                }
+            }
+            Some("month") => {
+                if let Some(PatternBuilder::AbsoluteYearly { month, .. }) =
+                    self.pattern.as_mut()
+                {
+                    *month = EwsMonth::from_wire(s);
+                }
+            }
+            Some("number_of_occurrences") => {
+                if let Some(RangeBuilder::Numbered { occurrences }) =
+                    self.range.as_mut()
+                {
+                    *occurrences = s.parse::<u32>().unwrap_or(0);
+                }
+            }
+            Some("end_date") => {
+                if let Some(RangeBuilder::EndDate { end }) = self.range.as_mut() {
+                    // Some servers append a TZ suffix
+                    // ("2026-12-31+02:00"); keep the date part only.
+                    let trimmed = s.split(['T', '+']).next().unwrap_or(s);
+                    *end = trimmed.to_string();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Handle any End event by clearing the active text target.
+    /// The caller is responsible for tracking when the OUTER
+    /// `</t:Recurrence>` arrives.
+    pub(crate) fn observe_end_generic(&mut self) {
+        self.text_target = None;
+    }
+
+    /// Assemble the parsed recurrence. Errors on missing or
+    /// incomplete pattern/range elements.
+    pub(crate) fn finish(self) -> EwsResult<EwsRecurrence> {
+        let pattern = self
+            .pattern
+            .ok_or_else(|| {
+                EwsError::Protocol("Recurrence missing pattern element".into())
+            })?
+            .finish()?;
+        let range = self
+            .range
+            .ok_or_else(|| {
+                EwsError::Protocol("Recurrence missing range element".into())
+            })?
+            .finish()?;
+        Ok(EwsRecurrence { pattern, range })
+    }
+}
 
 enum PatternBuilder {
     Daily { interval: u32 },
@@ -1905,6 +2011,8 @@ mod tests {
             created: Some("2026-05-19T08:00:00Z".parse().unwrap()),
             last_modified: Some("2026-05-19T09:00:00Z".parse().unwrap()),
             item_type: None,
+            recurrence: None,
+            deleted_occurrence_starts: Vec::new(),
         };
         let ev = to_event(item, "FID|CK").unwrap();
         // No `<t:CalendarItemType>` element → defaults to Single,
@@ -2166,6 +2274,8 @@ mod tests {
             created: None,
             last_modified: None,
             item_type: item_type.map(String::from),
+            recurrence: None,
+            deleted_occurrence_starts: Vec::new(),
         };
         assert_eq!(to_event(mk(Some("Single")), "FID").unwrap().id, "S:IID|ICK");
         assert_eq!(to_event(mk(Some("Occurrence")), "FID").unwrap().id, "O:IID|ICK");
@@ -2533,6 +2643,126 @@ mod tests {
         assert!(body.contains(r#"FieldURI="calendar:Recurrence""#));
         assert!(body.contains(r#"FieldURI="calendar:ModifiedOccurrences""#));
         assert!(body.contains(r#"FieldURI="calendar:DeletedOccurrences""#));
+    }
+
+    #[test]
+    fn parse_sync_response_captures_recurrence_and_deleted_occurrences() {
+        // A master row carrying a `<t:Recurrence>` block PLUS a
+        // `<t:DeletedOccurrences>` list — the two pieces of
+        // metadata the read path needs to render the series
+        // correctly. The walker has to handle them inline (no
+        // collision with the master's own `<t:Start>`).
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+               xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types"
+               xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages">
+  <soap:Body>
+    <m:SyncFolderItemsResponse>
+      <m:ResponseMessages>
+        <m:SyncFolderItemsResponseMessage ResponseClass="Success">
+          <m:ResponseCode>NoError</m:ResponseCode>
+          <m:SyncState>NEW-STATE</m:SyncState>
+          <m:IncludesLastItemInRange>true</m:IncludesLastItemInRange>
+          <m:Changes>
+            <t:Create>
+              <t:CalendarItem>
+                <t:ItemId Id="MASTER-1" ChangeKey="CK-A"/>
+                <t:Subject>Wöchentliches Standup</t:Subject>
+                <t:Start>2026-05-04T09:00:00Z</t:Start>
+                <t:End>2026-05-04T09:30:00Z</t:End>
+                <t:IsAllDayEvent>false</t:IsAllDayEvent>
+                <t:IsRecurring>true</t:IsRecurring>
+                <t:CalendarItemType>RecurringMaster</t:CalendarItemType>
+                <t:Recurrence>
+                  <t:WeeklyRecurrence>
+                    <t:Interval>1</t:Interval>
+                    <t:DaysOfWeek>Monday</t:DaysOfWeek>
+                  </t:WeeklyRecurrence>
+                  <t:NoEndRecurrence>
+                    <t:StartDate>2026-05-04</t:StartDate>
+                  </t:NoEndRecurrence>
+                </t:Recurrence>
+                <t:DeletedOccurrences>
+                  <t:DeletedOccurrence>
+                    <t:Start>2026-05-18T09:00:00Z</t:Start>
+                  </t:DeletedOccurrence>
+                  <t:DeletedOccurrence>
+                    <t:Start>2026-06-15T09:00:00Z</t:Start>
+                  </t:DeletedOccurrence>
+                </t:DeletedOccurrences>
+              </t:CalendarItem>
+            </t:Create>
+          </m:Changes>
+        </m:SyncFolderItemsResponseMessage>
+      </m:ResponseMessages>
+    </m:SyncFolderItemsResponse>
+  </soap:Body>
+</soap:Envelope>"#;
+        let r = parse_sync_folder_items_response(xml).unwrap();
+        assert_eq!(r.changes.len(), 1);
+        let item = match &r.changes[0] {
+            SyncChange::Create(i) => i,
+            other => panic!("expected Create, got {other:?}"),
+        };
+        // Master fields survived the recurrence subtree walk —
+        // critical guard: the inner `<t:Start>` in DeletedOccurrence
+        // must NOT overwrite the master's own start.
+        assert_eq!(item.item_id, "MASTER-1");
+        assert_eq!(item.subject, "Wöchentliches Standup");
+        assert_eq!(
+            item.start.unwrap().to_rfc3339(),
+            "2026-05-04T09:00:00+00:00",
+        );
+        // Recurrence assembled.
+        let rec = item.recurrence.as_ref().expect("recurrence parsed");
+        assert_eq!(
+            rec.pattern,
+            EwsRecurrencePattern::Weekly {
+                interval: 1,
+                days_of_week: vec![EwsDay::Monday],
+            },
+        );
+        assert_eq!(rec.range, EwsRecurrenceRange::NoEnd);
+        // Deleted occurrences captured as datetimes — the master's
+        // own start (May 4) is NOT in this list.
+        assert_eq!(item.deleted_occurrence_starts.len(), 2);
+        assert_eq!(
+            item.deleted_occurrence_starts[0].to_rfc3339(),
+            "2026-05-18T09:00:00+00:00",
+        );
+        assert_eq!(
+            item.deleted_occurrence_starts[1].to_rfc3339(),
+            "2026-06-15T09:00:00+00:00",
+        );
+    }
+
+    #[test]
+    fn to_event_translates_master_with_recurrence_into_rrule() {
+        // End-to-end: ParsedItem with recurrence + EXDATEs
+        // round-trips through `to_event` into a cal-core Event
+        // whose `recurrence` field carries the RRULE the frontend
+        // expander expects.
+        let mut item = ParsedItem {
+            item_id: "MASTER-2".into(),
+            change_key: Some("CK-B".into()),
+            subject: "Daily standup".into(),
+            start: Some("2026-01-01T08:00:00Z".parse().unwrap()),
+            end: Some("2026-01-01T08:15:00Z".parse().unwrap()),
+            is_recurring: true,
+            item_type: Some("RecurringMaster".into()),
+            ..ParsedItem::default()
+        };
+        item.recurrence = Some(EwsRecurrence {
+            pattern: EwsRecurrencePattern::Daily { interval: 1 },
+            range: EwsRecurrenceRange::Numbered { occurrences: 20 },
+        });
+        item.deleted_occurrence_starts =
+            vec!["2026-01-05T08:00:00Z".parse().unwrap()];
+
+        let ev = to_event(item, "cal-id").unwrap();
+        let rec = ev.recurrence.expect("event carries recurrence");
+        assert_rrule_equivalent(&rec.rrule, "FREQ=DAILY;COUNT=20");
+        assert_eq!(rec.exceptions.len(), 1);
     }
 
     #[test]

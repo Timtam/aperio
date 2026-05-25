@@ -37,6 +37,7 @@ pub mod mapping;
 pub mod soap;
 pub mod tasks;
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -48,6 +49,9 @@ use cal_core::{
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
+
+use crate::api::SyncedFolderState;
+use crate::mapping::to_event;
 
 pub use auth::BasicCredentials;
 pub use autodiscover::{discover, discover_client, DiscoveredEndpoints};
@@ -86,6 +90,18 @@ pub struct EwsAdapter {
     gal_fetch_lock: Mutex<()>,
     listing_ttl: chrono::Duration,
     gal_ttl: chrono::Duration,
+    /// Per-folder cache for the Outlook-style `SyncFolderItems`
+    /// read path. Keyed by the Aperio calendar id (the encoded
+    /// `<folder-id>|<change-key>` form). Each entry holds every
+    /// item the adapter has ever heard about for that folder
+    /// plus the server-issued sync cookie so the next round only
+    /// pulls deltas.
+    ///
+    /// Lives in memory only — on adapter reopen we start from
+    /// scratch (one full sync per folder on first read). A
+    /// future iteration could persist the cookies via a host
+    /// callback to skip that cold-start cost across restarts.
+    events_sync: Mutex<HashMap<String, SyncedFolderState>>,
 }
 
 impl EwsAdapter {
@@ -113,6 +129,7 @@ impl EwsAdapter {
             gal_fetch_lock: Mutex::new(()),
             listing_ttl: chrono::Duration::minutes(5),
             gal_ttl: chrono::Duration::minutes(30),
+            events_sync: Mutex::new(HashMap::new()),
         }
     }
 
@@ -211,6 +228,127 @@ impl EwsAdapter {
             None
         }
     }
+
+    /// Drive a `SyncFolderItems` delta against `calendar_id`,
+    /// merge the changes into the per-folder cache, then translate
+    /// the cached items into cal-core Events.
+    ///
+    /// Filtering rules:
+    ///   - Recurring masters always pass through (the frontend
+    ///     expander computes occurrences within the visible range).
+    ///   - Single events pass through only when their start/end
+    ///     overlap `[range.start, range.end]`. Cached singles
+    ///     outside the window stay in the cache (the next call for
+    ///     a different range surfaces them) but don't bloat the
+    ///     returned vec.
+    ///
+    /// On `ErrorInvalidSyncStateData`, we discard the cookie + the
+    /// cached items and retry once with a fresh full sync. That
+    /// recovers from server-side state expiry / mailbox rebuilds
+    /// without surfacing a user-visible error.
+    async fn refresh_and_read_events(
+        &self,
+        calendar_id: &str,
+        range: DateRange,
+    ) -> EwsResult<Vec<Event>> {
+        // Lock the map briefly to take the current state, run the
+        // sync without holding the global lock, then re-acquire to
+        // write back. Concurrent calls to refresh_and_read_events
+        // for DIFFERENT folders proceed in parallel; same-folder
+        // concurrent callers serialise on the second take.
+        let prior = {
+            let mut guard = self.events_sync.lock().await;
+            guard.remove(calendar_id).unwrap_or_default()
+        };
+        let updated = match api::sync_events_to_completion(
+            &self.client,
+            calendar_id,
+            prior,
+        )
+        .await
+        {
+            Ok(s) => s,
+            Err(err) if is_sync_state_invalid(&err) => {
+                tracing::warn!(
+                    target: "cal_adapter_ews::sync",
+                    calendar = %calendar_id,
+                    "SyncFolderItems cookie invalid; doing a full re-sync",
+                );
+                api::sync_events_to_completion(
+                    &self.client,
+                    calendar_id,
+                    SyncedFolderState::default(),
+                )
+                .await?
+            }
+            Err(err) => return Err(err),
+        };
+
+        // Translate cached items to cal-core Events. The map order
+        // is non-deterministic; the frontend sorts events anyway,
+        // so we don't bother stabilising here.
+        let mut out: Vec<Event> = Vec::with_capacity(updated.items.len());
+        for (_, item) in updated.items.iter() {
+            // Skip Occurrence rows that might have leaked in via
+            // older protocol responses — `SyncFolderItems` on a
+            // calendar folder shouldn't emit them, but a defensive
+            // filter keeps the read path honest.
+            if item
+                .item_type
+                .as_deref()
+                .map(|t| t.eq_ignore_ascii_case("Occurrence"))
+                .unwrap_or(false)
+            {
+                continue;
+            }
+            // Translate. On the rare per-item failure
+            // (RelativeMonthly etc.) log and drop the row rather
+            // than failing the whole refresh.
+            let ev = match to_event(item.clone(), calendar_id) {
+                Ok(ev) => ev,
+                Err(err) => {
+                    tracing::warn!(
+                        target: "cal_adapter_ews::sync",
+                        item_id = %item.item_id,
+                        ?err,
+                        "skipping item: could not translate to cal-core Event",
+                    );
+                    continue;
+                }
+            };
+            // Range filter applies to singles only. Masters carry
+            // a recurrence and the frontend expander handles the
+            // window.
+            if ev.recurrence.is_none() {
+                if ev.end < range.start || ev.start >= range.end {
+                    continue;
+                }
+            }
+            out.push(ev);
+        }
+
+        // Write the updated state back into the map for the next
+        // round to consume.
+        {
+            let mut guard = self.events_sync.lock().await;
+            guard.insert(calendar_id.to_string(), updated);
+        }
+        Ok(out)
+    }
+}
+
+/// EWS reports an expired / unknown sync cookie via the
+/// `ErrorInvalidSyncStateData` response code. The SOAP fault
+/// surfaces through `check_for_fault` as a `EwsError::Soap`
+/// with the code carried in the message. We pattern-match on the
+/// substring rather than introducing a typed variant for one
+/// case — the alternative happens often enough that the caller
+/// branches once.
+fn is_sync_state_invalid(err: &EwsError) -> bool {
+    matches!(
+        err,
+        EwsError::Soap { code, .. } if code == "ErrorInvalidSyncStateData",
+    )
 }
 
 #[async_trait]
@@ -250,7 +388,12 @@ impl CalendarFeature for EwsAdapter {
         calendar_id: &str,
         range: DateRange,
     ) -> CoreResult<Vec<Event>> {
-        api::get_events(&self.client, calendar_id, range.start, range.end)
+        // SyncFolderItems-backed read path: pull deltas into the
+        // per-folder cache, then translate cached ParsedItems to
+        // cal-core Events. Masters keep their RRULE; singles are
+        // filtered by the date range. Frontend handles the local
+        // expansion exactly like CalDAV/iCal.
+        self.refresh_and_read_events(calendar_id, range)
             .await
             .map_err(to_core_error)
     }
