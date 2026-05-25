@@ -3,7 +3,7 @@
   "name": "Aperio Microsoft Teams",
   "version": "0.1.0",
   "plugin_type": "videoconference-adapter",
-  "abi_version": 1,
+  "abi_version": 2,
   "min_app_version": "0.1.0",
   "author": "Aperio Contributors",
   "description": "Generate Microsoft Teams meeting links via the Graph API's Online Meetings endpoint. Shares the OAuth token of the Aperio Microsoft Graph calendar adapter — no separate sign-in needed.",

@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "plugin_type": "calendar-adapter",
   "capabilities": ["tasks"],
-  "abi_version": 1,
+  "abi_version": 2,
   "min_app_version": "0.1.0",
   "author": "Aperio Contributors",
   "description": "Bundled tasks adapter for Vikunja (self-hosted or hosted instance, REST API).",

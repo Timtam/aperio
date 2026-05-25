@@ -3,7 +3,7 @@
   "name": "Aperio SFTP",
   "version": "0.1.0",
   "plugin_type": "sync-adapter",
-  "abi_version": 1,
+  "abi_version": 2,
   "min_app_version": "0.1.0",
   "author": "Aperio Contributors",
   "description": "Bundled sync adapter for SFTP servers — password or SSH-key auth, host-key pinning via pre-validated fingerprint.",

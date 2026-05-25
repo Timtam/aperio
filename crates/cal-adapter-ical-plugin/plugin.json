@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "plugin_type": "calendar-adapter",
   "capabilities": ["calendar"],
-  "abi_version": 1,
+  "abi_version": 2,
   "min_app_version": "0.1.0",
   "author": "Aperio Contributors",
   "description": "Bundled read-only calendar adapter for .ics-feed URLs — public calendars, hosted .ics files, share links from Google/Apple/iCloud.",
