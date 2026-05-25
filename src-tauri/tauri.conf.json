@@ -4,8 +4,8 @@
   "version": "0.1.0",
   "identifier": "com.aperio.app",
   "build": {
-    "beforeDevCommand": "cargo build --workspace --quiet && npm run dev",
-    "beforeBuildCommand": "cargo build --workspace --release --quiet && npm run build",
+    "beforeDevCommand": "cargo build --workspace --quiet && cargo build -p aperio --quiet && npm run dev",
+    "beforeBuildCommand": "cargo build --workspace --release --quiet && cargo build -p aperio --release --quiet && npm run build",
     "devUrl": "http://localhost:5173",
     "frontendDist": "../dist"
   },

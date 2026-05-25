@@ -55,8 +55,18 @@ jobs:
       # `scan_bundled_loads_every_expected_plugin_when_staged`
       # silently skips and the end-to-end dlopen path is
       # never verified on CI.
-      - name: cargo build (workspace)
-        run: cargo build --workspace
+      #
+      # Two build invocations are needed: the first produces
+      # the cdylibs alongside aperio in parallel (aperio's
+      # build.rs runs but the cdylibs may not exist yet —
+      # there's no dep edge to enforce ordering, by design).
+      # The second triggers aperio's build.rs to re-run via
+      # `cargo:rerun-if-changed=<cdylib_src>` so the now-
+      # present cdylibs get staged into plugins/bundled/.
+      - name: cargo build (workspace + stage plugins)
+        run: |
+          cargo build --workspace
+          cargo build -p aperio
 
       - name: cargo test
         run: cargo test --workspace

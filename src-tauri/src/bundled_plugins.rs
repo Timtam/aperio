@@ -22,25 +22,46 @@
 //!
 //! ## Dev workflow
 //!
-//! `cargo build` (or `cargo build --workspace`) from the
-//! workspace root builds every plugin cdylib as part of the
-//! workspace round and `build.rs` stages them into
-//! `target/<profile>/plugins/bundled/<id>/`. Subsequent
-//! `cargo run -p aperio` then scans that directory + loads
-//! each plugin via `libloading`.
+//! `cargo build --workspace` builds every plugin cdylib;
+//! `build.rs` stages them into
+//! `target/<profile>/plugins/bundled/<id>/`. A subsequent
+//! `cargo run -p aperio` scans that directory + loads each
+//! plugin via `libloading`.
 //!
-//! `cargo tauri dev` and `cargo tauri build` automate this:
-//! `tauri.conf.json`'s `beforeDevCommand` /
-//! `beforeBuildCommand` chain a `cargo build --workspace`
-//! ahead of the frontend build so the cdylibs are always
-//! current before tauri-build runs. On a warm tree the
-//! workspace build is a near-instant up-to-date check.
+//! ### The two-build race
+//!
+//! On a fresh `target/` (e.g. after `cargo clean`), a SINGLE
+//! `cargo build --workspace` is not enough. The plugin
+//! crates and `aperio` have NO cargo-dep edges between them
+//! (by design — adding them would link 17×`#[no_mangle]
+//! aperio_plugin_create` into the host binary + collide at
+//! link time). Cargo therefore schedules them in parallel.
+//! `aperio`'s `build.rs` runs at some non-deterministic
+//! point during the workspace build and may see an empty
+//! target dir if the cdylibs haven't landed yet. Its
+//! `cargo:rerun-if-changed=<cdylib_src>` would re-fire the
+//! staging next time, but in a single-invocation build
+//! "next time" never comes.
+//!
+//! The fix is two cargo invocations chained:
+//!
+//! 1. `cargo build --workspace` — produces every cdylib.
+//!    aperio's build.rs may not stage anything this round.
+//! 2. `cargo build -p aperio` — cargo sees the cdylibs are
+//!    now present where they were absent before;
+//!    rerun-if-changed fires; build.rs stages.
+//!
+//! `cargo tauri dev` + `cargo tauri build` automate this
+//! via `tauri.conf.json`'s `beforeDevCommand` /
+//! `beforeBuildCommand` (both chain the two-build sequence
+//! ahead of the frontend build). On a warm tree both builds
+//! collapse to ~1 s of up-to-date checks.
 //!
 //! Running `cargo run -p aperio` directly (bypassing tauri)
-//! ALONE (without a prior workspace build) leaves the
-//! bundled-plugins dir empty; aperio still starts but every
-//! external calendar/sync/vc adapter surfaces as "plugin
-//! missing" until the workspace build runs.
+//! ALONE leaves the bundled-plugins dir empty; aperio still
+//! starts but every external calendar/sync/vc adapter
+//! surfaces as "plugin missing" until the two-build chain
+//! has run at least once.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
