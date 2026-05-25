@@ -359,6 +359,12 @@ pub fn run() {
             commands::change_sync_passphrase,
             // §19.7: turn off E2E encryption on the dataset (in-place).
             commands::disable_sync_encryption,
+            // §19.7: turn on E2E encryption on an existing dataset
+            // (in-place re-encryption of every log + snapshot).
+            commands::enable_sync_encryption,
+            // §19.7: adopt encryption that was activated on another
+            // device — pure passphrase-unlock, no migration.
+            commands::adopt_remote_encryption,
             // §19.10: stale-device resume.
             commands::resume_stale_device,
             // Phase Sg (DESIGN.md §19.10): snapshot + log

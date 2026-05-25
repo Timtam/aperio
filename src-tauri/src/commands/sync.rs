@@ -1616,6 +1616,231 @@ pub async fn disable_sync_encryption(
     Ok(report)
 }
 
+/// Outcome counters for [`enable_sync_encryption`]. Mirrors
+/// [`DisableE2eReport`] so the UI can render the same "N logs
+/// rewritten, snapshot rewritten" line in either direction.
+#[derive(Debug, Default, serde::Serialize)]
+pub struct EnableE2eReport {
+    pub logs_rewritten: usize,
+    pub snapshot_rewritten: bool,
+}
+
+/// §19.7 — turn on end-to-end encryption for an already-configured
+/// dataset that was originally onboarded without it.
+///
+/// Mirror image of [`disable_sync_encryption`]: fetch every log
+/// + snapshot via the plain adapter (they're plaintext on the
+/// wire today), then push them back via an `EncryptingAdapter`
+/// wrapping the same plain adapter (which AES-GCM-encrypts on
+/// the way up, overwriting the plaintext originals at the same
+/// paths). The meta.json update is the atomic commit: it lands
+/// last with `e2e_enabled = true` + the v2 `e2e_params` (KEK
+/// salt + wrapped DEK). A crash before that commit leaves the
+/// remote half-encrypted but still flagged plaintext — the next
+/// successful round on this device would push plaintext copies
+/// back, restoring consistency. A crash after the commit means
+/// the dataset is officially encrypted; the few remaining
+/// plaintext logs (if any) get overwritten on the next sync
+/// round.
+///
+/// **Other devices need to re-onboard with the new passphrase**
+/// after this completes. They'll detect the flip on their next
+/// preview (`e2e_enabled` flips false → true) and the standard
+/// `E2ePassphrasePrompt` flow takes over; the UI also surfaces
+/// a dedicated banner so they understand why the prompt
+/// suddenly appeared.
+///
+/// Error mapping:
+///   - empty passphrase → `invalid_input`
+///   - adapter not configured → `not_configured`
+///   - meta.json missing → `not_found`
+///   - meta.json already says `e2e_enabled = true` → `conflict`
+///   - network / IO errors during the bulk re-push → `io` /
+///     `network`
+#[tauri::command]
+pub async fn enable_sync_encryption(
+    orchestrator: State<'_, Arc<SyncOrchestrator>>,
+    db: State<'_, DbHandle>,
+    new_passphrase: String,
+) -> CommandResult<EnableE2eReport> {
+    let pp = new_passphrase.trim();
+    if pp.is_empty() {
+        return Err(CommandError {
+            code: "invalid_input",
+            message: "passphrase must not be empty".into(),
+        });
+    }
+
+    // 1. Borrow the currently-configured (plain) adapter. Reads
+    //    pass through unmodified — this is the plaintext source
+    //    of truth right now.
+    let plain = orchestrator.adapter_handle().ok_or(CommandError {
+        code: "not_configured",
+        message: "no sync adapter is configured".into(),
+    })?;
+
+    // 2. Fetch meta.json and refuse if encryption is already on.
+    //    Two reasons it might say `e2e_enabled = true` already:
+    //    (a) another device flipped it since our last round, in
+    //    which case the user wants the `E2ePassphrasePrompt`
+    //    flow, not this command; (b) local state is stale. Either
+    //    way, surfacing as `conflict` makes the situation explicit
+    //    instead of silently re-keying.
+    let meta_before = plain
+        .fetch_meta()
+        .await
+        .map_err(sync_err)?
+        .ok_or(CommandError {
+            code: "not_found",
+            message: "remote has no meta.json — onboard first".into(),
+        })?;
+    if meta_before.e2e_enabled {
+        return Err(CommandError {
+            code: "conflict",
+            message:
+                "dataset is already encrypted; nothing to enable".into(),
+        });
+    }
+
+    // 3. Mint v2 key material: fresh DEK + wrapping params, KEK
+    //    derived from the passphrase, wrap the DEK. Same shape
+    //    `adopt_local_dataset` produces for a brand-new dataset.
+    let mut e2e_params = EncryptionParams::fresh();
+    let kek = derive_key(pp, &e2e_params).map_err(sync_err)?;
+    let dek = fresh_data_key();
+    let wrapped = wrap_key(&kek, &dek).map_err(sync_err)?;
+    e2e_params.wrapped_data_key = Some(wrapped);
+
+    // 4. Build the encrypting wrapper around the plain adapter.
+    //    Pushes through this re-encrypt blobs in flight; reads
+    //    decrypt — but we read via `plain` (step 5) so the
+    //    wrapper is only used for the write path here.
+    let encrypting: Arc<dyn SyncAdapter> =
+        Arc::new(EncryptingAdapter::new(Arc::clone(&plain), dek));
+
+    let mut report = EnableE2eReport::default();
+
+    // 5. Re-encrypt every log: fetch via plain (no decrypt
+    //    needed — it's already plaintext), push via encrypting
+    //    (writes ciphertext at the same path).
+    let logs = plain
+        .fetch_new_logs(&sync_core::DeviceCursor::epoch())
+        .await
+        .map_err(sync_err)?;
+    for log in logs {
+        encrypting.push_log(&log).await.map_err(sync_err)?;
+        report.logs_rewritten += 1;
+    }
+
+    // 6. Same for the snapshot, if one exists.
+    if let Some(snapshot) = plain.fetch_snapshot().await.map_err(sync_err)? {
+        encrypting
+            .push_snapshot(&snapshot)
+            .await
+            .map_err(sync_err)?;
+        report.snapshot_rewritten = true;
+    }
+
+    // 7. Commit the enable atomically by overwriting meta.json.
+    //    meta.json is always plaintext (§19.7), so pushing via
+    //    the plain adapter is correct and avoids the wrapper
+    //    second-guessing the bytes.
+    let mut updated = meta_before;
+    updated.e2e_enabled = true;
+    updated.e2e_params = Some(e2e_params);
+    plain.push_meta(&updated).await.map_err(sync_err)?;
+
+    // 8. Swap the orchestrator over to the encrypting adapter so
+    //    subsequent rounds in this process wrap pushes with the
+    //    DEK + decrypt pulls with the same.
+    orchestrator.configure(Arc::clone(&encrypting));
+
+    // 9. Persist local state: stash the DEK in the keychain so
+    //    the next boot's `build_adapter_from_prefs` can rebuild
+    //    the wrapper, and flip the pref that drives that branch.
+    let shared = db.shared();
+    let prefs = UserPrefsRepo::new(&shared);
+    store_e2e_key(&dek)?;
+    prefs.set(PREF_E2E_ENABLED, "true").map_err(internal)?;
+
+    Ok(report)
+}
+
+/// §19.7 — adopt encryption that was activated on another
+/// device. Pure unlock flow: derive the dataset's DEK from the
+/// passphrase + meta's `e2e_params`, stash it in the keychain,
+/// flip the local pref, swap the orchestrator over to an
+/// encrypting adapter. No re-encryption, no device registration
+/// — those already ran on the device that called
+/// [`enable_sync_encryption`].
+///
+/// Triggered from the UI banner that appears when `sync_now`
+/// fails with `last_error_code = encryption_required` on a
+/// dataset this device was previously syncing without
+/// encryption.
+///
+/// Error mapping:
+///   - empty passphrase → `invalid_input`
+///   - adapter not configured → `not_configured`
+///   - meta.json missing → `not_found`
+///   - meta.json says `e2e_enabled = false` → `not_configured`
+///     (the user clicked the banner from a stale state — the
+///     remote is plaintext again)
+///   - wrong passphrase → `auth` (via `resolve_data_key`)
+#[tauri::command]
+pub async fn adopt_remote_encryption(
+    orchestrator: State<'_, Arc<SyncOrchestrator>>,
+    db: State<'_, DbHandle>,
+    passphrase: String,
+) -> CommandResult<()> {
+    let pp = passphrase.trim();
+    if pp.is_empty() {
+        return Err(CommandError {
+            code: "invalid_input",
+            message: "passphrase must not be empty".into(),
+        });
+    }
+
+    // The currently-configured adapter is plain (we entered this
+    // path precisely because local thinks e2e is off).
+    let plain = orchestrator.adapter_handle().ok_or(CommandError {
+        code: "not_configured",
+        message: "no sync adapter is configured".into(),
+    })?;
+
+    let meta = plain
+        .fetch_meta()
+        .await
+        .map_err(sync_err)?
+        .ok_or(CommandError {
+            code: "not_found",
+            message: "remote has no meta.json".into(),
+        })?;
+    if !meta.e2e_enabled {
+        return Err(CommandError {
+            code: "not_configured",
+            message:
+                "remote is not encrypted; nothing to adopt".into(),
+        });
+    }
+    let params = meta.e2e_params.clone().ok_or(CommandError {
+        code: "protocol",
+        message: "meta.json says e2e but carries no params".into(),
+    })?;
+
+    let dek = resolve_data_key(pp, &params).map_err(sync_err)?;
+    let encrypting: Arc<dyn SyncAdapter> =
+        Arc::new(EncryptingAdapter::new(Arc::clone(&plain), dek));
+
+    let shared = db.shared();
+    let prefs = UserPrefsRepo::new(&shared);
+    store_e2e_key(&dek)?;
+    prefs.set(PREF_E2E_ENABLED, "true").map_err(internal)?;
+    orchestrator.configure(encrypting);
+
+    Ok(())
+}
+
 /// Helper used by `lib.rs::setup` to reconstruct the adapter
 /// from the persisted prefs on app start. Returns `Ok(None)`
 /// when no adapter was configured before — the orchestrator

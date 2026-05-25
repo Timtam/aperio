@@ -7,12 +7,14 @@ import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
 import {
   acceptRemoteDataset,
   adoptLocalDataset,
+  adoptRemoteEncryption,
   changeSyncPassphrase,
   compactNow,
   configureSyncAdapter,
   connectDropboxOauth,
   connectGoogledriveOauth,
   disableSyncEncryption,
+  enableSyncEncryption,
   forgetSftpHostKey,
   getPinnedSftpHostKey,
   hasDropboxRefreshToken,
@@ -74,6 +76,11 @@ export function SyncPanel() {
   const previewHeadingId = useId();
   const protocolHeadingId = useId();
   const passphraseHeadingId = useId();
+  // §19.7 — heading id for the "enable encryption on an existing
+  // (unencrypted) dataset" section. Mirrors `passphraseHeadingId`
+  // but the section it labels only appears in the inverse state
+  // (configured && !e2e_enabled).
+  const enableE2eHeadingId = useId();
 
   // Adapter draft state. Seeded from current backend state on mount
   // so the inputs reflect the persisted choice.
@@ -206,6 +213,28 @@ export function SyncPanel() {
   // button so the two flows can't fire concurrently.
   const [busyDisable, setBusyDisable] = useState(false);
   const [disableError, setDisableError] = useState<string | null>(null);
+  // §19.7 enable-E2E flow on an already-configured but
+  // unencrypted dataset. `enableNewPpDraft` is the passphrase the
+  // user picks; success migrates every blob on the remote to
+  // ciphertext. The button stays separate from the
+  // passphrase-change section because they're mutually exclusive
+  // (one renders only when e2e is OFF, the other only when it's
+  // ON).
+  const [enableNewPpDraft, setEnableNewPpDraft] = useState('');
+  const [busyEnable, setBusyEnable] = useState(false);
+  const [enableError, setEnableError] = useState<string | null>(null);
+  const [enableOk, setEnableOk] = useState(false);
+  // §19.7 cross-device adoption. State for the banner that
+  // appears when another device flipped encryption on and our
+  // next sync round failed with `last_error_code =
+  // encryption_required`. The user types the dataset passphrase
+  // once; backend unlocks the DEK + swaps adapters; a follow-up
+  // sync_now should succeed without re-onboarding.
+  const [adoptRemotePpDraft, setAdoptRemotePpDraft] = useState('');
+  const [busyAdoptRemote, setBusyAdoptRemote] = useState(false);
+  const [adoptRemoteError, setAdoptRemoteError] = useState<
+    string | null
+  >(null);
 
   const interval = intervalDraft ?? status?.interval_minutes ?? 5;
 
@@ -878,6 +907,96 @@ export function SyncPanel() {
       setBusyDisable(false);
     }
   }, [announce, messageForError, oldPassphraseDraft, t]);
+
+  // §19.7 — turn ON encryption for a dataset that was originally
+  // adopted without it. Mirrors `onDisableEncryption` in shape:
+  // validate the new passphrase, gate behind a window.confirm
+  // (the bulk re-encryption is destructive of the remote's
+  // plaintext copies + other devices need the new passphrase to
+  // keep syncing), then call into the backend. Success clears
+  // the input + flips the inline ok message; failure surfaces
+  // the message.
+  const onEnableEncryption = useCallback(async () => {
+    setEnableError(null);
+    setEnableOk(false);
+    const newPp = enableNewPpDraft.trim();
+    if (!newPp) {
+      setEnableError(
+        t('dialogs.settings.sync.enableE2eErrorNeedsPassphrase'),
+      );
+      return;
+    }
+    const confirmed = window.confirm(
+      t('dialogs.settings.sync.enableE2eConfirm'),
+    );
+    if (!confirmed) return;
+    setBusyEnable(true);
+    try {
+      const report = await enableSyncEncryption(newPp);
+      setEnableNewPpDraft('');
+      setEnableOk(true);
+      announce(
+        t('dialogs.settings.sync.enableE2eOkAnnouncement', {
+          logs: report.logs_rewritten,
+        }),
+      );
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('enable_sync_encryption failed', err);
+      // `conflict` is the "another device flipped it first" race;
+      // surface a dedicated hint so the user knows to re-onboard
+      // via the standard passphrase prompt instead of retrying
+      // this command.
+      if (isCommandError(err) && err.code === 'conflict') {
+        setEnableError(
+          t('dialogs.settings.sync.enableE2eErrorConflict'),
+        );
+      } else {
+        setEnableError(messageForError(err));
+      }
+    } finally {
+      setBusyEnable(false);
+    }
+  }, [announce, enableNewPpDraft, messageForError, t]);
+
+  // §19.7 — adopt encryption that was activated on another
+  // device. Triggered from the cross-device banner that mounts
+  // when local thinks e2e is off but the last sync round failed
+  // with `encryption_required` (= remote meta says it's on).
+  // Pure unlock; a `kick()`-style refresh after success would be
+  // nice but a manual "Sync now" by the user is also fine since
+  // the orchestrator is already swapped over.
+  const onAdoptRemoteEncryption = useCallback(async () => {
+    setAdoptRemoteError(null);
+    const pp = adoptRemotePpDraft.trim();
+    if (!pp) {
+      setAdoptRemoteError(
+        t('dialogs.settings.sync.enableE2eErrorNeedsPassphrase'),
+      );
+      return;
+    }
+    setBusyAdoptRemote(true);
+    try {
+      await adoptRemoteEncryption(pp);
+      setAdoptRemotePpDraft('');
+      announce(t('dialogs.settings.sync.adoptRemoteE2eOk'));
+      // Kick a fresh sync round so the indicator + lastError
+      // clear without the user having to click Sync now.
+      void triggerSync();
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('adopt_remote_encryption failed', err);
+      if (isCommandError(err) && err.code === 'auth') {
+        setAdoptRemoteError(
+          t('dialogs.settings.sync.passphraseChangeErrorAuth'),
+        );
+      } else {
+        setAdoptRemoteError(messageForError(err));
+      }
+    } finally {
+      setBusyAdoptRemote(false);
+    }
+  }, [adoptRemotePpDraft, announce, messageForError, t, triggerSync]);
 
   // §19.6 — Dropbox OAuth handlers.
   const refreshDropboxSignedIn = useCallback(() => {
@@ -1876,6 +1995,104 @@ export function SyncPanel() {
               />
             </>
           )}
+        </section>
+      )}
+      {/* §19.7 — cross-device adoption banner. Appears when
+          local thinks E2E is off but the last sync round failed
+          with `encryption_required` (= another device just
+          flipped meta.json to `e2e_enabled = true`). The user
+          enters the dataset passphrase; the backend unlocks the
+          DEK + swaps adapters; the follow-up sync_now resumes
+          syncing transparently. */}
+      {status?.configured &&
+        !status?.e2e_enabled &&
+        status?.last_error_code === 'encryption_required' && (
+          <section
+            className="sync-panel__remote-e2e-banner"
+            role="alert"
+          >
+            <h3>
+              {t('dialogs.settings.sync.adoptRemoteE2eTitle')}
+            </h3>
+            <p>{t('dialogs.settings.sync.adoptRemoteE2eHint')}</p>
+            <div className="sync-panel__field">
+              <label>
+                {t('dialogs.settings.sync.adoptRemoteE2ePassphraseLabel')}
+                <input
+                  type="password"
+                  value={adoptRemotePpDraft}
+                  onChange={(e) => setAdoptRemotePpDraft(e.target.value)}
+                  autoComplete="current-password"
+                />
+              </label>
+            </div>
+            {adoptRemoteError && (
+              <p className="sync-panel__error" role="alert">
+                {t('dialogs.settings.sync.errorPrefix')}:{' '}
+                {adoptRemoteError}
+              </p>
+            )}
+            <div className="sync-panel__actions">
+              <button
+                type="button"
+                disabled={busyAdoptRemote}
+                onClick={() => void onAdoptRemoteEncryption()}
+              >
+                {busyAdoptRemote
+                  ? t('dialogs.settings.sync.adoptRemoteE2eRunning')
+                  : t('dialogs.settings.sync.adoptRemoteE2eAction')}
+              </button>
+            </div>
+          </section>
+        )}
+      {/* §19.7 — turn on encryption for an existing,
+          unencrypted dataset. Only visible when the dataset is
+          configured but `e2e_enabled` is false. Mirror image of
+          the passphrase-change section below: never both at
+          once. */}
+      {status?.configured && !status?.e2e_enabled && (
+        <section aria-labelledby={enableE2eHeadingId}>
+          <h3 id={enableE2eHeadingId}>
+            {t('dialogs.settings.sync.enableE2eTitle')}
+          </h3>
+          <p className="sync-panel__hint">
+            {t('dialogs.settings.sync.enableE2eHint')}
+          </p>
+          <p className="sync-panel__hint sync-panel__hint--warning">
+            {t('dialogs.settings.sync.enableE2eMultiDeviceWarning')}
+          </p>
+          <div className="sync-panel__field">
+            <label>
+              {t('dialogs.settings.sync.enableE2ePassphraseLabel')}
+              <input
+                type="password"
+                value={enableNewPpDraft}
+                onChange={(e) => setEnableNewPpDraft(e.target.value)}
+                autoComplete="new-password"
+              />
+            </label>
+          </div>
+          {enableError && (
+            <p className="sync-panel__error" role="alert">
+              {t('dialogs.settings.sync.errorPrefix')}: {enableError}
+            </p>
+          )}
+          {enableOk && (
+            <p className="sync-panel__hint" role="status">
+              {t('dialogs.settings.sync.enableE2eOk')}
+            </p>
+          )}
+          <div className="sync-panel__actions">
+            <button
+              type="button"
+              disabled={busyEnable}
+              onClick={() => void onEnableEncryption()}
+            >
+              {busyEnable
+                ? t('dialogs.settings.sync.enableE2eRunning')
+                : t('dialogs.settings.sync.enableE2eAction')}
+            </button>
+          </div>
         </section>
       )}
       {/* §19.7 — change passphrase. Only visible when the

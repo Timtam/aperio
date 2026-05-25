@@ -507,7 +507,24 @@
         "disableE2eHint": "Disabling encryption rewrites every log and snapshot on the sync store as plaintext. Other connected devices will need to be re-onboarded after this completes — their stored key won't match the new plaintext format.",
         "disableE2eConfirm": "Disable end-to-end encryption on this dataset? Every log and snapshot is rewritten as plaintext. Other connected devices will need to be re-onboarded — their stored key no longer matches. This cannot be undone without re-enabling encryption from scratch.",
         "disableE2eErrorNeedsPassphrase": "Please enter the current passphrase above first.",
-        "disableE2eOkAnnouncement": "Encryption disabled. {{logs}} log files rewritten as plaintext."
+        "disableE2eOkAnnouncement": "Encryption disabled. {{logs}} log files rewritten as plaintext.",
+        "enableE2eTitle": "Enable end-to-end encryption",
+        "enableE2eHint": "Encrypts every log and snapshot already on the sync store, then any future round, with AES-256-GCM. The storage will only see ciphertext from this point on. The passphrase you set here is the only way to recover the dataset — there is no backup or reset.",
+        "enableE2eMultiDeviceWarning": "If other devices are already syncing this dataset, they will need to enter the new passphrase once before they can continue syncing. Devices that already finished syncing before you click here keep working — they only stall on the next round.",
+        "enableE2ePassphraseLabel": "New passphrase",
+        "enableE2eAction": "Enable encryption",
+        "enableE2eRunning": "Encrypting dataset …",
+        "enableE2eOk": "Encryption enabled.",
+        "enableE2eConfirm": "Enable end-to-end encryption on this dataset? Every log and snapshot on the sync store is re-uploaded as ciphertext. Other connected devices will need to enter the new passphrase once before they can continue syncing. This passphrase is the only way to recover the dataset — make sure you can recall it.",
+        "enableE2eErrorNeedsPassphrase": "Please choose a passphrase first.",
+        "enableE2eErrorConflict": "Another device just turned encryption on for this dataset. Enter the passphrase that device chose to continue syncing.",
+        "enableE2eOkAnnouncement": "Encryption enabled. {{logs}} log files re-uploaded as ciphertext.",
+        "adoptRemoteE2eTitle": "Encryption was enabled on another device",
+        "adoptRemoteE2eHint": "Another device on this dataset has turned on end-to-end encryption. Enter the passphrase that device chose to continue syncing here.",
+        "adoptRemoteE2ePassphraseLabel": "Dataset passphrase",
+        "adoptRemoteE2eAction": "Unlock and continue",
+        "adoptRemoteE2eRunning": "Unlocking …",
+        "adoptRemoteE2eOk": "Encryption unlocked. Resuming sync."
       }
     },
     "syncConflicts": {

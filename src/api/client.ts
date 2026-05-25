@@ -1043,6 +1043,38 @@ export const disableSyncEncryption = (currentPassphrase: string) =>
     currentPassphrase,
   });
 
+/** Counters returned by `enableSyncEncryption`. */
+export interface EnableE2eReport {
+  logs_rewritten: number;
+  snapshot_rewritten: boolean;
+}
+
+/** §19.7 — turn on end-to-end encryption for an existing,
+ *  previously-unencrypted dataset. Mirror image of
+ *  `disableSyncEncryption`: fetches every log + snapshot via
+ *  the plain adapter, pushes them back via an encrypting
+ *  wrapper, then flips meta.json to `e2e_enabled = true`. The
+ *  passphrase becomes the dataset's KEK; other devices on the
+ *  same dataset need to re-onboard with it after this
+ *  completes. Maps to `conflict` if the dataset is already
+ *  encrypted (race against another device). */
+export const enableSyncEncryption = (newPassphrase: string) =>
+  invoke<EnableE2eReport>('enable_sync_encryption', {
+    newPassphrase,
+  });
+
+/** §19.7 — adopt encryption that was activated on another
+ *  device. Pure unlock: derives the DEK from the passphrase +
+ *  meta's e2e_params, stashes it locally, swaps the in-memory
+ *  adapter over to the encrypting wrapper. Triggered from the
+ *  cross-device banner that appears when sync_now fails with
+ *  `encryption_required` on a previously-unencrypted dataset.
+ *  Returns `auth` on a wrong passphrase. */
+export const adoptRemoteEncryption = (passphrase: string) =>
+  invoke<void>('adopt_remote_encryption', {
+    passphrase,
+  });
+
 /** §19.10 stale-device resume. Called from the resume dialog
  *  when the user clicks Fortfahren. Re-pulls the current
  *  snapshot, applies it locally, replays post-snapshot logs,
