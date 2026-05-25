@@ -137,6 +137,24 @@ impl WebDavSyncAdapter {
             // A 60 s read budget tolerates slow links without
             // wedging a sync round forever.
             .timeout(std::time::Duration::from_secs(60))
+            // Force HTTP/1.1 — Synology DSM's bundled WebDAV server
+            // (the most commonly self-hosted WebDAV target) ALPN-
+            // negotiates HTTP/2 but then closes the socket mid-
+            // response on real requests, surfacing as "connection
+            // closed before message completed". Nextcloud /
+            // Apache / nginx all happily speak HTTP/1.1, so
+            // pinning the version costs nothing and removes a
+            // class of "works once, fails next round" reports.
+            .http1_only()
+            // Don't pool idle connections. Servers behind home
+            // routers / reverse proxies often have short keep-
+            // alive timeouts (~10 s); reqwest's pool would hand
+            // out a stale socket on the next round, which then
+            // surfaces as "connection closed" before we've even
+            // sent a request. Sync round-trips are infrequent
+            // enough that the per-request TCP+TLS handshake cost
+            // is unnoticeable next to the round latency anyway.
+            .pool_max_idle_per_host(0)
             .build()
             .map_err(|err| {
                 SyncError::internal(format!("build reqwest client: {err}"))
