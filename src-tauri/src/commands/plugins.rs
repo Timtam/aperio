@@ -19,6 +19,7 @@
 //! until the user flips the toggle back. Re-enabling
 //! re-registers the same accounts in the same gesture.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use plugin_core::PluginManager;
@@ -31,6 +32,12 @@ use crate::accounts::{AccountsRepo, AdapterKind};
 use crate::db::DbHandle;
 use crate::registry::AdapterRegistry;
 use crate::user_prefs::UserPrefsRepo;
+
+/// Newtype Tauri state carrying the resolved
+/// `<data_dir>/plugins/user/` path. Wrapped so the State
+/// lookup doesn't collide with other PathBuf state.
+#[derive(Clone)]
+pub struct UserPluginsDir(pub PathBuf);
 
 /// `user_prefs` key prefix carrying the disabled flag for each
 /// plugin. The full key is `plugin.disabled.<plugin_id>`; the
@@ -313,4 +320,235 @@ pub async fn set_plugin_enabled(
     }
 
     Ok(())
+}
+
+// ─────────────────────────────────────────────────────────────
+// §20.7 — .aperio community-plugin installer
+// ─────────────────────────────────────────────────────────────
+
+/// Preview the manifest of a `.aperio` archive without writing
+/// anything to disk. The Settings → Plugins install dialog
+/// renders this before asking the user to confirm.
+///
+/// Also reports whether the plugin id is already loaded so the
+/// frontend can render the dialog as "install" vs "update"
+/// without a second round-trip.
+#[derive(Debug, Clone, Serialize)]
+pub struct PluginArchivePreview {
+    /// Parsed manifest fields. Same shape as [`PluginInfo`]
+    /// but without the runtime flags (the manifest doesn't
+    /// know about hooks; signed is forward-compat only).
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub plugin_type: String,
+    pub capabilities: Vec<String>,
+    pub abi_version: u32,
+    pub min_app_version: String,
+    pub author: Option<String>,
+    pub description: Option<String>,
+    pub signed: bool,
+    /// `true` when a plugin with the same id is already
+    /// loaded. The frontend uses this to phrase the dialog as
+    /// an update + (eventually) refuse downgrades.
+    pub already_installed: bool,
+    /// Currently-installed version (manifest.version), or
+    /// `None` when [`Self::already_installed`] is false.
+    pub installed_version: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct InspectPluginArchiveRequest {
+    /// Absolute path to the `.aperio` archive the user picked
+    /// in the file dialog.
+    pub archive_path: String,
+}
+
+#[tauri::command]
+pub async fn inspect_plugin_archive(
+    plugin_manager: State<'_, Arc<PluginManager>>,
+    request: InspectPluginArchiveRequest,
+) -> CommandResult<PluginArchivePreview> {
+    let manifest = plugin_core::inspect_archive(&request.archive_path)
+        .map_err(plugin_error_to_command)?;
+    let existing = plugin_manager.get_including_disabled(&manifest.id);
+    let installed_version = existing.as_ref().map(|p| p.manifest.version.clone());
+    Ok(PluginArchivePreview {
+        id: manifest.id.clone(),
+        name: manifest.name.clone(),
+        version: manifest.version.clone(),
+        plugin_type: manifest.plugin_type.as_str().to_string(),
+        capabilities: manifest
+            .capabilities
+            .iter()
+            .map(|c| c.as_str().to_string())
+            .collect(),
+        abi_version: manifest.abi_version,
+        min_app_version: manifest.min_app_version.clone(),
+        author: manifest.author.clone(),
+        description: manifest.description.clone(),
+        signed: manifest.signed,
+        already_installed: existing.is_some(),
+        installed_version,
+    })
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct InstallPluginArchiveRequest {
+    pub archive_path: String,
+}
+
+/// Extract a `.aperio` archive into `<data_dir>/plugins/user/
+/// <plugin_id>/`, load it via [`PluginManager::load_from_dir`],
+/// and re-register any account whose adapter_kind maps to the
+/// freshly-installed plugin (a previous bootstrap attempt may
+/// have failed with PluginMissing because the plugin wasn't
+/// yet installed). Returns the populated [`PluginInfo`] so the
+/// frontend can splice it straight into the panel's list
+/// without a follow-up `list_plugins`.
+///
+/// Per DESIGN §20.7 every community plugin is treated as
+/// unsigned in this phase — the dialog that calls this fn has
+/// already shown the "install from trusted sources only"
+/// warning + got an explicit confirmation, so the command
+/// itself doesn't second-guess that.
+#[tauri::command]
+pub async fn install_plugin_archive(
+    db: State<'_, DbHandle>,
+    registry: State<'_, Arc<AdapterRegistry>>,
+    plugin_manager: State<'_, Arc<PluginManager>>,
+    user_plugins_dir: State<'_, UserPluginsDir>,
+    request: InstallPluginArchiveRequest,
+) -> CommandResult<PluginInfo> {
+    // Extract first. plugin_core::install_archive parses the
+    // manifest, wipes any existing plugin dir under the same
+    // id, then unzips the archive into <user>/<plugin_id>/.
+    let installed = plugin_core::install_archive(
+        &request.archive_path,
+        &user_plugins_dir.0,
+    )
+    .map_err(plugin_error_to_command)?;
+
+    // If this is an update — same id was already loaded — we
+    // need to drop the old in-memory copy before re-loading
+    // the freshly-extracted version. We don't have a public
+    // `unload_plugin` API yet; the simplest correct path for
+    // v1 is to refuse the install with a clear message
+    // telling the user to restart. (A future iteration can
+    // add a graceful unload-and-reload once we audit which
+    // host components hold references to LoadedInstance Arcs.)
+    if plugin_manager
+        .get_including_disabled(&installed.manifest.id)
+        .is_some()
+    {
+        return Err(CommandError {
+            code: "restart_required",
+            message: format!(
+                "{} is already loaded; restart Aperio to pick up the new version",
+                installed.manifest.id,
+            ),
+        });
+    }
+
+    // Load + insert. Errors here leave the freshly-extracted
+    // files in place — the user can retry without re-picking
+    // the archive.
+    plugin_manager
+        .load_from_dir(&installed.plugin_dir)
+        .map_err(plugin_error_to_command)?;
+
+    // The plugin landed; now re-register any account whose
+    // adapter_kind maps to it. Accounts whose plugin was
+    // missing at bootstrap will have stayed unregistered;
+    // installing the plugin should bring them back online
+    // without an app restart.
+    let plugin_id = installed.manifest.id.clone();
+    if let Some(kind) = adapter_kind_for_plugin(&plugin_id) {
+        let shared = db.shared();
+        let accounts_repo = AccountsRepo::new(&shared);
+        let accounts = accounts_repo.list().map_err(|e| CommandError {
+            code: "internal",
+            message: format!("list accounts for post-install register: {e}"),
+        })?;
+        for account in accounts {
+            if account.adapter_kind != kind {
+                continue;
+            }
+            if let Err(err) = registry.register(&account) {
+                warn!(
+                    account_id = %account.id,
+                    plugin_id = %plugin_id,
+                    ?err,
+                    "post-install register failed",
+                );
+            }
+        }
+    }
+
+    // Build the PluginInfo from the just-loaded LoadedPlugin
+    // so the response shape matches the panel's list payload.
+    let loaded = plugin_manager
+        .get_including_disabled(&plugin_id)
+        .ok_or_else(|| CommandError {
+            code: "internal",
+            message: format!(
+                "plugin {} extracted but not in manager after load",
+                plugin_id,
+            ),
+        })?;
+    let m = &loaded.manifest;
+    Ok(PluginInfo {
+        id: m.id.clone(),
+        name: m.name.clone(),
+        version: m.version.clone(),
+        plugin_type: m.plugin_type.as_str().to_string(),
+        capabilities: m
+            .capabilities
+            .iter()
+            .map(|c| c.as_str().to_string())
+            .collect(),
+        abi_version: m.abi_version,
+        min_app_version: m.min_app_version.clone(),
+        author: m.author.clone(),
+        description: m.description.clone(),
+        signed: m.signed,
+        has_interactive_auth: loaded.has_interactive_auth(),
+        has_discover: loaded.has_discover(),
+        has_probe_host_key: loaded.has_probe_host_key(),
+        enabled: plugin_manager.is_enabled(&plugin_id),
+    })
+}
+
+/// Map plugin-core's error type onto the frontend-friendly
+/// envelope. The PluginError variants are narrower than the
+/// generic CommandError code list so we collapse onto the
+/// closest match (`Io` / `Manifest` / `Version` mostly mean
+/// "bad input" from the user's perspective).
+fn plugin_error_to_command(err: plugin_core::error::PluginError) -> CommandError {
+    use plugin_core::error::PluginError::*;
+    let (code, message) = match err {
+        Io(m) => ("invalid_input", format!("io error: {m}")),
+        Manifest(m) => ("invalid_input", m),
+        Semver { value, reason } => (
+            "invalid_input",
+            format!("malformed version {value:?}: {reason}"),
+        ),
+        AbiMismatch { host, plugin } => (
+            "invalid_input",
+            format!(
+                "plugin ABI version {plugin} doesn't match host's {host}",
+            ),
+        ),
+        AppTooOld { required, running } => (
+            "invalid_input",
+            format!(
+                "plugin requires Aperio {required} or newer; this build is {running}",
+            ),
+        ),
+        InstanceOpen { status, message } => (
+            "internal",
+            format!("open_instance(status {status}): {message}"),
+        ),
+    };
+    CommandError { code, message }
 }

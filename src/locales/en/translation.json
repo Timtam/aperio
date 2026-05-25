@@ -225,6 +225,22 @@
           "disabled": "Disabled",
           "error": "Couldn't change the plugin state: {{error}}",
           "activeSyncConflict": "This is the sync adapter you're currently using. Switch to a different one in Settings → Sync, then come back to disable it."
+        },
+        "install": {
+          "button": "Install plugin…",
+          "filterName": "Aperio plugin archive",
+          "titleNew": "Install plugin",
+          "titleUpdate": "Update plugin",
+          "name": "Name",
+          "version": "Version",
+          "versionUpgrade": "{{from}} → {{to}}",
+          "type": "Type",
+          "unsignedWarning": "⚠ This plugin is not signed. Only install plugins from trusted sources.",
+          "confirm": "Install anyway",
+          "cancel": "Cancel",
+          "installing": "Installing…",
+          "error": "Install failed: {{error}}",
+          "restartRequired": "A previous version of this plugin is already loaded. Restart Aperio so the new version takes effect."
         }
       },
       "contacts": {

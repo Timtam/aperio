@@ -16,6 +16,9 @@ thiserror.workspace = true
 # `static-plugins` feature instead, where adapters compile straight
 # into the host binary and libloading isn't on the dep graph.
 libloading.workspace = true
+# `.aperio` community-plugin archives are ZIP-based — the
+# archive module unzips them under plugins/user/.
+zip.workspace = true
 # The FFI shims (e.g. FfiCalendarAdapter) implement cal-core's
 # Feature traits by serialising args / responses through the
 # Adapter-side JSON bridge. sync-core's SyncAdapter trait does the

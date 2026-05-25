@@ -79,11 +79,18 @@ pub fn run() {
     // calls have a populated PluginManager to look up against.
     // The eventual dlopen pipeline (DESIGN.md §22.2) replaces
     // this with a `scan_dir("plugins/bundled/")` round.
-    let plugin_manager = bundled_plugins::build_manager(env!("CARGO_PKG_VERSION"));
+    let plugin_manager = bundled_plugins::build_manager(
+        env!("CARGO_PKG_VERSION"),
+        &data_dir.path,
+    );
     info!(
         plugin_count = plugin_manager.len(),
-        "registered bundled cal-adapter plugins",
+        "registered bundled + user plugins",
     );
+    // Resolve the per-user plugins dir once so the install /
+    // uninstall commands can grab it from Tauri state without
+    // re-deriving it from data_dir each time.
+    let user_plugins_dir = bundled_plugins::user_plugins_dir(&data_dir.path);
 
     // §20.10: hydrate the per-plugin disabled flag from
     // user_prefs BEFORE the registry bootstraps — disabled
@@ -249,6 +256,10 @@ pub fn run() {
         .manage(sync_orchestrator)
         .manage(onboarding)
         .manage(plugin_manager)
+        // §20.7 install commands need to know where to extract
+        // user plugins; the newtype wrapper keeps the State
+        // lookup unambiguous.
+        .manage(commands::UserPluginsDir(user_plugins_dir))
         .invoke_handler(tauri::generate_handler![
             app_info,
             commands::list_calendars,
@@ -390,8 +401,14 @@ pub fn run() {
             // surfaces metadata + enabled state;
             // set_plugin_enabled persists the toggle + re-syncs
             // the affected accounts in the AdapterRegistry.
+            // §20.7 install: inspect previews the .aperio
+            // archive before the user confirms; install
+            // extracts under plugins/user/, loads, re-registers
+            // matching accounts.
             commands::list_plugins,
             commands::set_plugin_enabled,
+            commands::inspect_plugin_archive,
+            commands::install_plugin_archive,
         ])
         .setup(move |app| {
             // Spawn the reminder scheduler on the Tauri/tokio runtime

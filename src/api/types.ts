@@ -297,7 +297,11 @@ export interface CommandError {
     // the user is currently configured to sync with — letting
     // them through would silently break every subsequent sync
     // round.
-    | 'active_sync_conflict';
+    | 'active_sync_conflict'
+    // `install_plugin_archive` refuses an in-place upgrade
+    // when the plugin id is already loaded — v1 needs a
+    // restart to swap libraries safely.
+    | 'restart_required';
   message: string;
 }
 
@@ -323,6 +327,30 @@ export interface PluginInfo {
    *  PluginManager.get() acts as if a disabled plugin weren't
    *  installed. */
   enabled: boolean;
+}
+
+/** Preview of a `.aperio` archive's manifest, returned by
+ *  `inspect_plugin_archive`. Mirrors
+ *  `src-tauri/src/commands/plugins.rs::PluginArchivePreview`. */
+export interface PluginArchivePreview {
+  id: string;
+  name: string;
+  version: string;
+  plugin_type: PluginTypeWire;
+  capabilities: string[];
+  abi_version: number;
+  min_app_version: string;
+  author: string | null;
+  description: string | null;
+  signed: boolean;
+  /** `true` when a plugin with the same id is already
+   *  loaded. The install dialog rephrases itself as an
+   *  update prompt + shows the currently-installed version
+   *  next to the incoming one. */
+  already_installed: boolean;
+  /** Currently-installed version, or `null` when
+   *  [`Self::already_installed`] is false. */
+  installed_version: string | null;
 }
 
 /** Canonical plugin-type wire strings — Rust's `PluginType::as_str`

@@ -34,40 +34,69 @@
 //! starts but external calendar/sync adapters surface as
 //! "plugin missing" until the workspace build runs.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use plugin_core::{PluginManager, BUNDLED_PLUGINS_DIR};
+use plugin_core::{PluginManager, BUNDLED_PLUGINS_DIR, USER_PLUGINS_DIR};
 use tracing::{info, warn};
 
 /// Build a [`PluginManager`] populated by `dlopen`ing every
-/// shared library found under `<binary-dir>/plugins/bundled/`.
+/// shared library found under `<binary-dir>/plugins/bundled/`
+/// (read-only, ships with the app) AND
+/// `<data_dir>/plugins/user/` (user-writable, populated by the
+/// §20.7 `.aperio` installer).
 ///
 /// Per-plugin load errors are logged but never fail the startup
 /// — a broken plugin must NEVER keep the rest of the app from
 /// coming up.
-pub fn build_manager(app_version: &str) -> Arc<PluginManager> {
+pub fn build_manager(app_version: &str, data_dir: &Path) -> Arc<PluginManager> {
     let manager = PluginManager::new(app_version);
-    let bundled = match bundled_dir() {
-        Some(p) => p,
+
+    // Bundled scan first — these are guaranteed to be present
+    // on every install and shouldn't be overridden by a
+    // community plugin with the same id (the duplicate-id
+    // check in `PluginManager::insert` ensures the user-side
+    // load fails, leaving the bundled copy active).
+    match bundled_dir() {
+        Some(bundled) => {
+            info!(
+                path = %bundled.display(),
+                "scanning bundled plugins directory",
+            );
+            let errors = manager.scan_dir(&bundled);
+            for err in errors {
+                warn!(?err, "bundled plugin failed to load");
+            }
+        }
         None => {
             warn!(
                 "couldn't resolve `plugins/bundled/` relative to current_exe(); \
                  no bundled plugins will load",
             );
-            return Arc::new(manager);
         }
-    };
-    info!(
-        path = %bundled.display(),
-        "scanning bundled plugins directory",
-    );
-    let errors = manager.scan_dir(&bundled);
-    for err in errors {
-        warn!(?err, "bundled plugin failed to load");
     }
-    info!(plugin_count = manager.len(), "bundled plugins loaded");
+
+    // User scan: `<data_dir>/plugins/user/`. Missing dir is
+    // first-run-normal and PluginManager::scan_dir handles
+    // that silently.
+    let user_dir = user_plugins_dir(data_dir);
+    info!(
+        path = %user_dir.display(),
+        "scanning user plugins directory",
+    );
+    let errors = manager.scan_dir(&user_dir);
+    for err in errors {
+        warn!(?err, "user plugin failed to load");
+    }
+
+    info!(plugin_count = manager.len(), "all plugins loaded");
     Arc::new(manager)
+}
+
+/// `<data_dir>/plugins/user/` — where the §20.7 installer
+/// extracts `.aperio` archives.
+pub fn user_plugins_dir(data_dir: &Path) -> PathBuf {
+    data_dir.join(USER_PLUGINS_DIR)
 }
 
 /// Compute the bundled-plugins directory path:

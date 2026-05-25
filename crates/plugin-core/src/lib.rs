@@ -26,6 +26,7 @@
 //!     the Tasks / Contacts / Sync shims arrive in P1b.
 
 pub mod abi;
+pub mod archive;
 pub mod capability;
 pub mod error;
 pub mod ffi;
@@ -51,6 +52,7 @@ pub use ffi::{
     PLUGIN_CALL_ERR_NETWORK, PLUGIN_CALL_ERR_NOT_FOUND,
     PLUGIN_CALL_ERR_PROTOCOL, PLUGIN_CALL_ERR_UNSUPPORTED, PLUGIN_CALL_OK,
 };
+pub use archive::{inspect_archive, install_archive, InstalledArchive};
 pub use manager::{
     DiscoverError, DiscoverFn, InteractiveAuthError, InteractiveAuthFn,
     LoadedInstance, LoadedPlugin, PluginManager, ProbeHostKeyError,

@@ -107,6 +107,9 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 
 # Plugin-System
 libloading = "0.8"
+# `.aperio` community-plugin archives are ZIP-based; the
+# plugin-core installer extracts them under plugins/user/.
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 # System
 dirs = "5"

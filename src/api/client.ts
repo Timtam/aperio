@@ -17,6 +17,7 @@ import type {
   ContactPhoto,
   NewContact,
   NewEvent,
+  PluginArchivePreview,
   PluginInfo,
   SearchResults,
   Task,
@@ -1201,3 +1202,25 @@ export interface SetPluginEnabledRequest {
  *  unregistered/re-registered in the same gesture). */
 export const setPluginEnabled = (request: SetPluginEnabledRequest) =>
   invoke<void>('set_plugin_enabled', { request });
+
+export interface InspectPluginArchiveRequest {
+  archive_path: string;
+}
+
+/** Preview a `.aperio` archive's manifest without writing
+ *  anything to disk. The install dialog uses this to render
+ *  the unsigned-warning confirmation. */
+export const inspectPluginArchive = (request: InspectPluginArchiveRequest) =>
+  invoke<PluginArchivePreview>('inspect_plugin_archive', { request });
+
+export interface InstallPluginArchiveRequest {
+  archive_path: string;
+}
+
+/** Extract + load a `.aperio` archive. Returns the populated
+ *  PluginInfo so the panel can splice it straight into the
+ *  list. May return `restart_required` when the plugin id
+ *  was already loaded (in-place upgrades need a restart for
+ *  v1). */
+export const installPluginArchive = (request: InstallPluginArchiveRequest) =>
+  invoke<PluginInfo>('install_plugin_archive', { request });

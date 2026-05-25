@@ -1,8 +1,21 @@
+import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { isCommandError, listPlugins, setPluginEnabled } from '../api/client';
-import type { CommandError, PluginInfo, PluginTypeWire } from '../api/types';
+import {
+  inspectPluginArchive,
+  installPluginArchive,
+  isCommandError,
+  listPlugins,
+  setPluginEnabled,
+} from '../api/client';
+import type {
+  CommandError,
+  PluginArchivePreview,
+  PluginInfo,
+  PluginTypeWire,
+} from '../api/types';
+import { Modal } from './Modal';
 
 /** Shape stored per-row in the toggle-error map. We keep the
  *  full envelope so the row can branch on the error code
@@ -49,6 +62,21 @@ export function PluginsPanel() {
   const [toggleErrors, setToggleErrors] = useState<
     Record<string, ToggleErrorEntry>
   >({});
+
+  // Install dialog state. `pendingInstall` holds the
+  // archive-path + preview pair the §20.7 confirmation modal
+  // renders against; it stays `null` while no install is
+  // in-flight. `installing` gates the dialog buttons during
+  // the actual extract + load call. `installError` surfaces
+  // any inspect / install failure inline in the modal.
+  const [pendingInstall, setPendingInstall] = useState<{
+    archivePath: string;
+    preview: PluginArchivePreview;
+  } | null>(null);
+  const [installing, setInstalling] = useState(false);
+  const [installError, setInstallError] = useState<ToggleErrorEntry | null>(
+    null,
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -114,6 +142,83 @@ export function PluginsPanel() {
     [],
   );
 
+  const onClickInstall = useCallback(async () => {
+    setInstallError(null);
+    // Native file picker — the dialog plugin is already
+    // initialised by the host (see lib.rs's invoke_handler
+    // setup). Single-file selection; user can cancel.
+    let picked: string | null;
+    try {
+      picked = (await openFileDialog({
+        multiple: false,
+        directory: false,
+        filters: [
+          {
+            name: t('dialogs.settings.plugins.install.filterName'),
+            extensions: ['aperio'],
+          },
+        ],
+      })) as string | null;
+    } catch (err) {
+      setInstallError({
+        code: 'unknown',
+        message: err instanceof Error ? err.message : String(err),
+      });
+      return;
+    }
+    if (!picked) return;
+    try {
+      const preview = await inspectPluginArchive({ archive_path: picked });
+      setPendingInstall({ archivePath: picked, preview });
+    } catch (err) {
+      const entry: ToggleErrorEntry = isCommandError(err)
+        ? { code: err.code, message: err.message }
+        : {
+            code: 'unknown',
+            message: err instanceof Error ? err.message : String(err),
+          };
+      setInstallError(entry);
+    }
+  }, [t]);
+
+  const onConfirmInstall = useCallback(async () => {
+    if (!pendingInstall) return;
+    setInstalling(true);
+    setInstallError(null);
+    try {
+      const installed = await installPluginArchive({
+        archive_path: pendingInstall.archivePath,
+      });
+      // Splice the freshly-installed plugin into the list so
+      // the user sees it appear without a full refresh. Sort
+      // by id to match the backend's stable order.
+      setPlugins((prev) => {
+        if (!prev) return [installed];
+        const without = prev.filter((p) => p.id !== installed.id);
+        return [...without, installed].sort((a, b) =>
+          a.id.localeCompare(b.id),
+        );
+      });
+      setPendingInstall(null);
+    } catch (err) {
+      const entry: ToggleErrorEntry = isCommandError(err)
+        ? { code: err.code, message: err.message }
+        : {
+            code: 'unknown',
+            message: err instanceof Error ? err.message : String(err),
+          };
+      setInstallError(entry);
+    } finally {
+      setInstalling(false);
+    }
+  }, [pendingInstall]);
+
+  const onCancelInstall = useCallback(() => {
+    if (installing) return;
+    setPendingInstall(null);
+    setInstallError(null);
+  }, [installing]);
+
   // Group by plugin_type. Order: calendar-adapter, sync-adapter,
   // videoconference-adapter, notification, then anything else
   // (forward-compat tags) alphabetised. Within each group plugins
@@ -133,6 +238,29 @@ export function PluginsPanel() {
   return (
     <div className="settings-panel plugins-panel">
       <p className="form__hint">{t('dialogs.settings.plugins.hint')}</p>
+
+      <div className="plugins-panel__actions">
+        <button
+          type="button"
+          className="form__button"
+          onClick={onClickInstall}
+        >
+          {t('dialogs.settings.plugins.install.button')}
+        </button>
+      </div>
+
+      {/* When no install is in flight, surface inspect / picker
+          errors here at the top of the panel so the user sees
+          why their file pick didn't open the dialog. The
+          modal carries its own error region for install-time
+          failures (see ConfirmInstallModal). */}
+      {!pendingInstall && installError && (
+        <p className="form__error" role="alert">
+          {t('dialogs.settings.plugins.install.error', {
+            error: installError.message,
+          })}
+        </p>
+      )}
 
       {loadError && (
         <p className="form__error" role="alert">
@@ -167,7 +295,98 @@ export function PluginsPanel() {
           </ul>
         </section>
       ))}
+
+      {pendingInstall && (
+        <ConfirmInstallModal
+          preview={pendingInstall.preview}
+          installing={installing}
+          error={installError}
+          onConfirm={onConfirmInstall}
+          onCancel={onCancelInstall}
+        />
+      )}
     </div>
+  );
+}
+
+interface ConfirmInstallModalProps {
+  preview: PluginArchivePreview;
+  installing: boolean;
+  error: ToggleErrorEntry | null;
+  onConfirm: () => void;
+  onCancel: () => void;
+}
+
+function ConfirmInstallModal({
+  preview,
+  installing,
+  error,
+  onConfirm,
+  onCancel,
+}: ConfirmInstallModalProps) {
+  const { t } = useTranslation();
+  const title = preview.already_installed
+    ? t('dialogs.settings.plugins.install.titleUpdate')
+    : t('dialogs.settings.plugins.install.titleNew');
+  return (
+    <Modal isOpen={true} onClose={onCancel} title={title}>
+      <dl className="plugins-panel__meta">
+        <dt>{t('dialogs.settings.plugins.install.name')}</dt>
+        <dd>{preview.name}</dd>
+        {preview.author && (
+          <>
+            <dt>{t('dialogs.settings.plugins.author')}</dt>
+            <dd>{preview.author}</dd>
+          </>
+        )}
+        <dt>{t('dialogs.settings.plugins.install.version')}</dt>
+        <dd>
+          {preview.already_installed && preview.installed_version
+            ? t('dialogs.settings.plugins.install.versionUpgrade', {
+                from: preview.installed_version,
+                to: preview.version,
+              })
+            : preview.version}
+        </dd>
+        <dt>{t('dialogs.settings.plugins.install.type')}</dt>
+        <dd>{typeLabel(t, preview.plugin_type)}</dd>
+      </dl>
+      {preview.description && (
+        <p className="plugins-panel__description">{preview.description}</p>
+      )}
+      <p className="form__hint" role="note">
+        {t('dialogs.settings.plugins.install.unsignedWarning')}
+      </p>
+      {error && (
+        <p className="form__error" role="alert">
+          {error.code === 'restart_required'
+            ? t('dialogs.settings.plugins.install.restartRequired')
+            : t('dialogs.settings.plugins.install.error', {
+                error: error.message,
+              })}
+        </p>
+      )}
+      <div className="form__actions">
+        <button
+          type="button"
+          className="form__button form__button--primary"
+          onClick={onConfirm}
+          disabled={installing}
+        >
+          {installing
+            ? t('dialogs.settings.plugins.install.installing')
+            : t('dialogs.settings.plugins.install.confirm')}
+        </button>
+        <button
+          type="button"
+          className="form__button"
+          onClick={onCancel}
+          disabled={installing}
+        >
+          {t('dialogs.settings.plugins.install.cancel')}
+        </button>
+      </div>
+    </Modal>
   );
 }
 
