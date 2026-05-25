@@ -555,24 +555,59 @@ impl Adapter for EwsAdapter {
 impl CalendarFeature for EwsAdapter {
     async fn list_calendars(&self) -> CoreResult<Vec<Calendar>> {
         if let Some(cached) = self.cached_calendars().await {
+            tracing::debug!(
+                target: "cal_adapter_ews::sync",
+                count = cached.len(),
+                "EwsAdapter::list_calendars cache hit",
+            );
             return Ok(cached);
         }
-        let fresh = api::list_calendars(&self.client)
-            .await
-            .map_err(to_core_error)?;
+        let result = api::list_calendars(&self.client).await;
+        match &result {
+            Ok(fresh) => tracing::info!(
+                target: "cal_adapter_ews::sync",
+                count = fresh.len(),
+                "EwsAdapter::list_calendars fetched",
+            ),
+            Err(err) => tracing::warn!(
+                target: "cal_adapter_ews::sync",
+                ?err,
+                "EwsAdapter::list_calendars failed",
+            ),
+        }
+        let fresh = result.map_err(to_core_error)?;
         *self.calendars_cache.lock().await = Some((fresh.clone(), chrono::Utc::now()));
         Ok(fresh)
     }
 
     async fn get_events(&self, calendar_id: &str, range: DateRange) -> CoreResult<Vec<Event>> {
+        // INFO-level entry log so a user diagnosing "EWS events
+        // don't show up" can immediately tell whether the trait
+        // is even being hit — separates "frontend isn't asking"
+        // from "frontend is asking but sync fails" / "sync ok but
+        // 0 events emitted".
+        tracing::info!(
+            target: "cal_adapter_ews::sync",
+            calendar = %calendar_id,
+            range_start = %range.start.to_rfc3339(),
+            range_end = %range.end.to_rfc3339(),
+            "EwsAdapter::get_events called",
+        );
         // SyncFolderItems-backed read path: pull deltas into the
         // per-folder cache, then translate cached ParsedItems to
         // cal-core Events. Masters keep their RRULE; singles are
         // filtered by the date range. Frontend handles the local
         // expansion exactly like CalDAV/iCal.
-        self.refresh_and_read_events(calendar_id, range)
-            .await
-            .map_err(to_core_error)
+        let result = self.refresh_and_read_events(calendar_id, range).await;
+        if let Err(ref err) = result {
+            tracing::warn!(
+                target: "cal_adapter_ews::sync",
+                calendar = %calendar_id,
+                ?err,
+                "EwsAdapter::get_events failed",
+            );
+        }
+        result.map_err(to_core_error)
     }
 
     async fn create_event(&self, calendar_id: &str, event: NewEvent) -> CoreResult<Event> {
