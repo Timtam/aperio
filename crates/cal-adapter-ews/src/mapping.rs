@@ -436,6 +436,251 @@ pub fn parse_find_item_response(xml: &str) -> EwsResult<Vec<ParsedItem>> {
     Ok(items)
 }
 
+// ── SyncFolderItems response ───────────────────────────────────────────────
+
+/// One change reported by `SyncFolderItems`. The server groups
+/// per-item notifications under `<m:Changes>`:
+///
+/// ```xml
+/// <m:Changes>
+///   <t:Create><t:CalendarItem>…</t:CalendarItem></t:Create>
+///   <t:Update><t:CalendarItem>…</t:CalendarItem></t:Update>
+///   <t:Delete><t:ItemId Id="…"/></t:Delete>
+///   <t:ReadFlagChange>…</t:ReadFlagChange>  (calendar items don't emit this)
+/// </m:Changes>
+/// ```
+///
+/// We map Create/Update to the same `ParsedItem` shape the
+/// FindItem path produces so the downstream cal-core conversion
+/// stays single-source. Delete carries only the item id — the
+/// caller drops the corresponding row from its local cache.
+#[derive(Debug, Clone)]
+pub enum SyncChange {
+    Create(ParsedItem),
+    Update(ParsedItem),
+    Delete(String),
+}
+
+/// Result of one `SyncFolderItems` round-trip. The caller stashes
+/// `new_sync_state` for the next call and uses `includes_last` to
+/// decide whether to keep paging.
+#[derive(Debug, Clone)]
+pub struct SyncFolderItemsResult {
+    pub changes: Vec<SyncChange>,
+    pub new_sync_state: String,
+    pub includes_last: bool,
+}
+
+/// Walk a `SyncFolderItemsResponse` body. Returns one
+/// `SyncFolderItemsResult` per call — the caller loops on
+/// `includes_last == false` to drain the rest of the deltas with
+/// the freshly-returned `new_sync_state`.
+///
+/// Field plumbing inside each `<t:CalendarItem>` mirrors
+/// [`parse_find_item_response`] so the data shape stays uniform
+/// across read paths. (The duplication is intentional — extracting
+/// a shared walker would couple the two responses' state machines
+/// without removing meaningful logic.)
+pub fn parse_sync_folder_items_response(
+    xml: &str,
+) -> EwsResult<SyncFolderItemsResult> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+
+    let mut changes: Vec<SyncChange> = Vec::new();
+    let mut new_sync_state = String::new();
+    let mut includes_last = false;
+
+    // Where in the response tree are we?
+    //   - inside_change_kind: Some("create"|"update"|"delete") while
+    //     we're inside a t:Create/t:Update/t:Delete block.
+    //   - inside_item: true while inside a <t:CalendarItem> (Create
+    //     and Update wrap one; Delete just carries an ItemId).
+    let mut inside_change_kind: Option<&'static str> = None;
+    let mut inside_item = false;
+    let mut current = ParsedItem::default();
+    let mut text_target: Option<&'static str> = None;
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(XmlEvent::Start(e)) | Ok(XmlEvent::Empty(e)) => {
+                let local = e.local_name().as_ref().to_ascii_lowercase();
+                match local.as_slice() {
+                    b"create" => inside_change_kind = Some("create"),
+                    b"update" => inside_change_kind = Some("update"),
+                    b"delete" => inside_change_kind = Some("delete"),
+                    b"syncstate" => text_target = Some("sync_state"),
+                    b"includeslastiteminrange" => {
+                        text_target = Some("includes_last");
+                    }
+                    b"calendaritem" if inside_change_kind.is_some() => {
+                        inside_item = true;
+                        current = ParsedItem::default();
+                    }
+                    // Delete carries the ItemId directly under the
+                    // wrapping `t:Delete`. Capture it as the change
+                    // payload and emit on the End of the Delete block.
+                    b"itemid" if inside_change_kind == Some("delete") => {
+                        for a in e.attributes().flatten() {
+                            if a.key.as_ref().eq_ignore_ascii_case(b"Id") {
+                                current.item_id =
+                                    String::from_utf8_lossy(&a.value).into_owned();
+                            }
+                        }
+                    }
+                    b"itemid" if inside_item => {
+                        for a in e.attributes().flatten() {
+                            let key = a.key.as_ref();
+                            if key.eq_ignore_ascii_case(b"Id") {
+                                current.item_id =
+                                    String::from_utf8_lossy(&a.value).into_owned();
+                            } else if key.eq_ignore_ascii_case(b"ChangeKey") {
+                                current.change_key =
+                                    Some(String::from_utf8_lossy(&a.value).into_owned());
+                            }
+                        }
+                    }
+                    // Per-field text targets — only honoured while
+                    // we're inside a CalendarItem block.
+                    b"subject" if inside_item => text_target = Some("subject"),
+                    b"body" if inside_item => text_target = Some("body"),
+                    b"location" if inside_item => text_target = Some("location"),
+                    b"start" if inside_item => text_target = Some("start"),
+                    b"end" if inside_item => text_target = Some("end"),
+                    b"isalldayevent" if inside_item => {
+                        text_target = Some("all_day");
+                    }
+                    b"isrecurring" if inside_item => {
+                        text_target = Some("recurring");
+                    }
+                    b"reminderisset" if inside_item => {
+                        text_target = Some("reminder_on");
+                    }
+                    b"reminderminutesbeforestart" if inside_item => {
+                        text_target = Some("reminder_mins");
+                    }
+                    b"datetimecreated" if inside_item => {
+                        text_target = Some("created");
+                    }
+                    b"lastmodifiedtime" if inside_item => {
+                        text_target = Some("modified");
+                    }
+                    b"calendaritemtype" if inside_item => {
+                        text_target = Some("item_type");
+                    }
+                    _ => {}
+                }
+            }
+            Ok(XmlEvent::End(e)) => {
+                let local = e.local_name().as_ref().to_ascii_lowercase();
+                match local.as_slice() {
+                    b"create" => {
+                        if !current.item_id.is_empty() {
+                            changes.push(SyncChange::Create(std::mem::take(
+                                &mut current,
+                            )));
+                        }
+                        inside_change_kind = None;
+                        inside_item = false;
+                    }
+                    b"update" => {
+                        if !current.item_id.is_empty() {
+                            changes.push(SyncChange::Update(std::mem::take(
+                                &mut current,
+                            )));
+                        }
+                        inside_change_kind = None;
+                        inside_item = false;
+                    }
+                    b"delete" => {
+                        if !current.item_id.is_empty() {
+                            let id = std::mem::take(&mut current.item_id);
+                            current = ParsedItem::default();
+                            changes.push(SyncChange::Delete(id));
+                        }
+                        inside_change_kind = None;
+                    }
+                    b"calendaritem" => {
+                        // Item completes inside Create/Update — the
+                        // wrapping End above is what actually emits
+                        // the change.
+                        inside_item = false;
+                    }
+                    _ => {}
+                }
+                text_target = None;
+            }
+            Ok(XmlEvent::Text(t)) if text_target.is_some() => {
+                let raw = match t.unescape() {
+                    Ok(c) => c.to_string(),
+                    Err(_) => continue,
+                };
+                let s = raw.trim();
+                if s.is_empty() {
+                    continue;
+                }
+                match text_target {
+                    Some("sync_state") => new_sync_state.push_str(s),
+                    Some("includes_last") => {
+                        includes_last = s.eq_ignore_ascii_case("true");
+                    }
+                    Some("subject") => current.subject.push_str(s),
+                    Some("body") => {
+                        let acc = current.body.get_or_insert_with(String::new);
+                        acc.push_str(s);
+                    }
+                    Some("location") => {
+                        let acc = current.location.get_or_insert_with(String::new);
+                        acc.push_str(s);
+                    }
+                    Some("start") => current.start = parse_ews_datetime(s),
+                    Some("end") => current.end = parse_ews_datetime(s),
+                    Some("all_day") => {
+                        current.is_all_day = s.eq_ignore_ascii_case("true");
+                    }
+                    Some("recurring") => {
+                        current.is_recurring = s.eq_ignore_ascii_case("true");
+                    }
+                    Some("reminder_on") => {
+                        current.reminder_is_set = s.eq_ignore_ascii_case("true");
+                    }
+                    Some("reminder_mins") => {
+                        current.reminder_minutes_before_start = s.parse::<i64>().ok();
+                    }
+                    Some("created") => current.created = parse_ews_datetime(s),
+                    Some("modified") => current.last_modified = parse_ews_datetime(s),
+                    Some("item_type") => {
+                        let acc = current.item_type.get_or_insert_with(String::new);
+                        acc.push_str(s);
+                    }
+                    _ => {}
+                }
+            }
+            Ok(XmlEvent::Eof) => break,
+            Err(err) => {
+                return Err(EwsError::Protocol(format!(
+                    "SyncFolderItems xml parse: {err}"
+                )));
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    if new_sync_state.is_empty() {
+        return Err(EwsError::Protocol(
+            "SyncFolderItems response missing SyncState".into(),
+        ));
+    }
+
+    Ok(SyncFolderItemsResult {
+        changes,
+        new_sync_state,
+        includes_last,
+    })
+}
+
 /// EWS serialises timestamps as `YYYY-MM-DDTHH:MM:SSZ` (or
 /// `YYYY-MM-DDTHH:MM:SS.fffZ`). Both parse cleanly through
 /// `DateTime::parse_from_rfc3339`.
@@ -2134,5 +2379,171 @@ mod tests {
           </t:Recurrence>"#;
         let err = parse_ews_recurrence(xml).unwrap_err();
         assert!(matches!(err, EwsError::Protocol(_)));
+    }
+
+    // ── SyncFolderItems response parser ──────────────────────────
+
+    #[test]
+    fn parse_sync_response_with_create_update_delete() {
+        // Exercises all three change kinds in one batch + the
+        // SyncState + IncludesLastItemInRange tail. Folder/IDs
+        // come from a real EWS log so the shape matches what
+        // Exchange Online actually emits.
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+               xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types"
+               xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages">
+  <soap:Body>
+    <m:SyncFolderItemsResponse>
+      <m:ResponseMessages>
+        <m:SyncFolderItemsResponseMessage ResponseClass="Success">
+          <m:ResponseCode>NoError</m:ResponseCode>
+          <m:SyncState>STATE-COOKIE-VALUE</m:SyncState>
+          <m:IncludesLastItemInRange>false</m:IncludesLastItemInRange>
+          <m:Changes>
+            <t:Create>
+              <t:CalendarItem>
+                <t:ItemId Id="NEW-1" ChangeKey="CK-1"/>
+                <t:Subject>Brand new</t:Subject>
+                <t:Start>2026-05-20T08:00:00Z</t:Start>
+                <t:End>2026-05-20T09:00:00Z</t:End>
+                <t:IsAllDayEvent>false</t:IsAllDayEvent>
+                <t:IsRecurring>false</t:IsRecurring>
+                <t:CalendarItemType>Single</t:CalendarItemType>
+              </t:CalendarItem>
+            </t:Create>
+            <t:Update>
+              <t:CalendarItem>
+                <t:ItemId Id="UPD-1" ChangeKey="CK-2"/>
+                <t:Subject>Edited</t:Subject>
+                <t:Start>2026-05-21T10:00:00Z</t:Start>
+                <t:End>2026-05-21T11:00:00Z</t:End>
+                <t:IsAllDayEvent>false</t:IsAllDayEvent>
+                <t:IsRecurring>true</t:IsRecurring>
+                <t:CalendarItemType>RecurringMaster</t:CalendarItemType>
+              </t:CalendarItem>
+            </t:Update>
+            <t:Delete>
+              <t:ItemId Id="DEL-1" ChangeKey="CK-3"/>
+            </t:Delete>
+          </m:Changes>
+        </m:SyncFolderItemsResponseMessage>
+      </m:ResponseMessages>
+    </m:SyncFolderItemsResponse>
+  </soap:Body>
+</soap:Envelope>"#;
+        let r = parse_sync_folder_items_response(xml).unwrap();
+        assert_eq!(r.new_sync_state, "STATE-COOKIE-VALUE");
+        assert!(!r.includes_last);
+        assert_eq!(r.changes.len(), 3);
+        match &r.changes[0] {
+            SyncChange::Create(item) => {
+                assert_eq!(item.item_id, "NEW-1");
+                assert_eq!(item.change_key.as_deref(), Some("CK-1"));
+                assert_eq!(item.subject, "Brand new");
+                assert_eq!(item.item_type.as_deref(), Some("Single"));
+            }
+            other => panic!("expected Create, got {other:?}"),
+        }
+        match &r.changes[1] {
+            SyncChange::Update(item) => {
+                assert_eq!(item.item_id, "UPD-1");
+                assert_eq!(item.subject, "Edited");
+                assert!(item.is_recurring);
+                assert_eq!(item.item_type.as_deref(), Some("RecurringMaster"));
+            }
+            other => panic!("expected Update, got {other:?}"),
+        }
+        match &r.changes[2] {
+            SyncChange::Delete(id) => assert_eq!(id, "DEL-1"),
+            other => panic!("expected Delete, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_sync_response_includes_last_true_signals_end_of_pagination() {
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+               xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types"
+               xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages">
+  <soap:Body>
+    <m:SyncFolderItemsResponse>
+      <m:ResponseMessages>
+        <m:SyncFolderItemsResponseMessage ResponseClass="Success">
+          <m:ResponseCode>NoError</m:ResponseCode>
+          <m:SyncState>FINAL-COOKIE</m:SyncState>
+          <m:IncludesLastItemInRange>true</m:IncludesLastItemInRange>
+          <m:Changes/>
+        </m:SyncFolderItemsResponseMessage>
+      </m:ResponseMessages>
+    </m:SyncFolderItemsResponse>
+  </soap:Body>
+</soap:Envelope>"#;
+        let r = parse_sync_folder_items_response(xml).unwrap();
+        assert_eq!(r.new_sync_state, "FINAL-COOKIE");
+        assert!(r.includes_last);
+        assert!(r.changes.is_empty());
+    }
+
+    #[test]
+    fn parse_sync_response_rejects_missing_sync_state() {
+        // A response without `<m:SyncState>` is malformed — the
+        // caller would otherwise persist an empty cookie and
+        // accidentally restart the sync from scratch.
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+               xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types"
+               xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages">
+  <soap:Body>
+    <m:SyncFolderItemsResponse>
+      <m:ResponseMessages>
+        <m:SyncFolderItemsResponseMessage ResponseClass="Success">
+          <m:ResponseCode>NoError</m:ResponseCode>
+          <m:IncludesLastItemInRange>true</m:IncludesLastItemInRange>
+          <m:Changes/>
+        </m:SyncFolderItemsResponseMessage>
+      </m:ResponseMessages>
+    </m:SyncFolderItemsResponse>
+  </soap:Body>
+</soap:Envelope>"#;
+        let err = parse_sync_folder_items_response(xml).unwrap_err();
+        assert!(matches!(err, EwsError::Protocol(_)));
+    }
+
+    // ── SOAP envelope (sync_folder_items) ────────────────────────
+
+    #[test]
+    fn sync_folder_items_envelope_includes_recurrence_fields_and_sync_state() {
+        let body = crate::soap::sync_folder_items(
+            "FOLDER-ID",
+            Some("FOLDER-CK"),
+            Some("PRIOR-COOKIE"),
+            512,
+        );
+        // SyncFolderItems wrapper + folder id + change key.
+        assert!(body.contains("<m:SyncFolderItems>"));
+        assert!(body.contains(r#"<t:FolderId Id="FOLDER-ID" ChangeKey="FOLDER-CK"/>"#));
+        // Prior state cookie is echoed back so the server replies
+        // with deltas only.
+        assert!(body.contains("<m:SyncState>PRIOR-COOKIE</m:SyncState>"));
+        // MaxChangesReturned matches what we asked for.
+        assert!(body.contains("<m:MaxChangesReturned>512</m:MaxChangesReturned>"));
+        // Recurrence + exception field URIs requested — otherwise
+        // EWS would drop them from the default shape.
+        assert!(body.contains(r#"FieldURI="calendar:Recurrence""#));
+        assert!(body.contains(r#"FieldURI="calendar:ModifiedOccurrences""#));
+        assert!(body.contains(r#"FieldURI="calendar:DeletedOccurrences""#));
+    }
+
+    #[test]
+    fn sync_folder_items_envelope_omits_sync_state_on_initial_sync() {
+        let body =
+            crate::soap::sync_folder_items("FOLDER-ID", None, None, 100);
+        // Initial sync has no prior cookie — the SyncState
+        // element MUST be absent (sending an empty one makes EWS
+        // think the cookie is invalid).
+        assert!(!body.contains("<m:SyncState>"));
+        // FolderId without ChangeKey.
+        assert!(body.contains(r#"<t:FolderId Id="FOLDER-ID"/>"#));
     }
 }

@@ -64,6 +64,79 @@ pub fn find_calendar_folders() -> String {
     wrap(body)
 }
 
+/// SOAP body for `SyncFolderItems`: Outlook-style delta sync of a
+/// calendar folder. Returns one batch of Create/Update/Delete
+/// notifications plus a fresh sync-state cookie. The caller stashes
+/// the cookie and passes it back on the next call so we only pay
+/// for the deltas.
+///
+/// Unlike `FindItem + CalendarView`, this returns **master items
+/// with their `<t:Recurrence>` inline** plus separate notifications
+/// for modified / deleted occurrences — exactly what Outlook itself
+/// uses, and what the read path needs to surface recurring events
+/// as series rather than N expanded single events.
+///
+/// `sync_state` is `None` on the initial sync; subsequent calls
+/// pass the cookie the server returned last time. If the server
+/// has discarded that state (cookie too old, mailbox rebuilt, …)
+/// it surfaces an `ErrorInvalidSyncStateData` SOAP fault and the
+/// caller resets to `None`.
+///
+/// `max_changes` caps the batch size; the server is free to return
+/// fewer. The response's `IncludesLastItemInRange` flag tells the
+/// caller whether more pages remain.
+pub fn sync_folder_items(
+    folder_id: &str,
+    change_key: Option<&str>,
+    sync_state: Option<&str>,
+    max_changes: u32,
+) -> String {
+    let folder_id_attr = match change_key {
+        Some(ck) => format!(
+            r#"<t:FolderId Id="{}" ChangeKey="{}"/>"#,
+            escape_xml(folder_id),
+            escape_xml(ck)
+        ),
+        None => format!(r#"<t:FolderId Id="{}"/>"#, escape_xml(folder_id)),
+    };
+    let sync_state_xml = match sync_state {
+        Some(s) if !s.is_empty() => {
+            format!("<m:SyncState>{}</m:SyncState>", escape_xml(s))
+        }
+        _ => String::new(),
+    };
+    let body = format!(
+        r#"    <m:SyncFolderItems>
+      <m:ItemShape>
+        <t:BaseShape>Default</t:BaseShape>
+        <t:AdditionalProperties>
+          <t:FieldURI FieldURI="item:Body"/>
+          <t:FieldURI FieldURI="item:DateTimeCreated"/>
+          <t:FieldURI FieldURI="item:LastModifiedTime"/>
+          <t:FieldURI FieldURI="item:ReminderIsSet"/>
+          <t:FieldURI FieldURI="item:ReminderMinutesBeforeStart"/>
+          <t:FieldURI FieldURI="calendar:Location"/>
+          <t:FieldURI FieldURI="calendar:Start"/>
+          <t:FieldURI FieldURI="calendar:End"/>
+          <t:FieldURI FieldURI="calendar:IsAllDayEvent"/>
+          <t:FieldURI FieldURI="calendar:IsRecurring"/>
+          <t:FieldURI FieldURI="calendar:CalendarItemType"/>
+          <t:FieldURI FieldURI="calendar:Recurrence"/>
+          <t:FieldURI FieldURI="calendar:ModifiedOccurrences"/>
+          <t:FieldURI FieldURI="calendar:DeletedOccurrences"/>
+        </t:AdditionalProperties>
+      </m:ItemShape>
+      <m:SyncFolderId>
+        {folder_id_attr}
+      </m:SyncFolderId>
+      {sync_state_xml}
+      <m:MaxChangesReturned>{max_changes}</m:MaxChangesReturned>
+      <m:SyncScope>NormalItems</m:SyncScope>
+    </m:SyncFolderItems>"#,
+    );
+    wrap(&body)
+}
+
 /// SOAP body for `FindItem` with a `CalendarView` window: get every
 /// event (recurring instances *expanded* by the server) in
 /// `[start, end)`. Pulls extra fields beyond the default shape so
