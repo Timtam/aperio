@@ -228,6 +228,12 @@ pub struct SyncOrchestrator {
     /// "AlreadyRunning" status instead of starting a parallel
     /// push that would race.
     in_flight: Mutex<bool>,
+    /// Timestamp of THIS process launch. Used by the push loop
+    /// to tell apart "leftover empty session file from a prior
+    /// run" (safe to delete) and "current writer's session file
+    /// that just happens to be empty so far" (must keep —
+    /// future events in this session would land in it).
+    boot_at: DateTime<Utc>,
 }
 
 impl SyncOrchestrator {
@@ -252,6 +258,7 @@ impl SyncOrchestrator {
             schema_too_old: Mutex::new(None),
             stale_device_since: Mutex::new(None),
             in_flight: Mutex::new(false),
+            boot_at: Utc::now(),
         }
     }
 
@@ -680,6 +687,40 @@ impl SyncOrchestrator {
                     continue;
                 }
             };
+            // The EventLogWriter pre-creates a session file at
+            // app start, before knowing whether the session will
+            // produce any events. If it doesn't (e.g. the user
+            // opens Aperio, browses, closes), we end up with a
+            // 0-byte file in `pending/`. Pushing those would
+            // clutter the remote sync folder with empty
+            // placeholders — skip + delete the local stub.
+            // We can only safely delete the file if the writer
+            // for THIS session has already rotated away from it.
+            // Cheap check: if the timestamp in the filename is
+            // older than this app launch, the writer can't be
+            // appending to it. We use the parsed timestamp
+            // directly; the writer mints a fresh name per
+            // session so this never races with the active
+            // session file.
+            if bytes.is_empty() {
+                if parsed.timestamp < self.boot_at {
+                    if let Err(err) = tokio::fs::remove_file(&path).await {
+                        debug!(
+                            name = name,
+                            ?err,
+                            "couldn't remove empty pending log",
+                        );
+                    } else {
+                        debug!(name = name, "skipped + removed empty pending log");
+                    }
+                } else {
+                    debug!(
+                        name = name,
+                        "skipping empty pending log (current session)",
+                    );
+                }
+                continue;
+            }
             let byte_count = bytes.len();
             let log = LogFile {
                 name: parsed,

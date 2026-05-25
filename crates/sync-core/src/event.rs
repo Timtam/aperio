@@ -213,6 +213,33 @@ pub enum SyncEvent {
     #[serde(rename = "plugin.uninstalled")]
     PluginUninstalled(IdPayload),
 
+    /// External account (CalDAV, iCal, EWS, Vikunja, Todoist,
+    /// Google, Microsoft Graph) was added locally. The payload
+    /// carries only non-secret metadata — `display_name`,
+    /// `adapter_kind`, `config_json` (server URL, username,
+    /// etc.). Secrets (passwords, OAuth tokens) stay in the
+    /// device's keychain; other devices surface the
+    /// "credentials missing" wizard so the user enters them
+    /// per-device. The applier upserts the row; on the device
+    /// that originated the event it's a no-op (the row already
+    /// exists from the create command's repo write).
+    #[serde(rename = "account.created")]
+    AccountCreated(AccountPayload),
+
+    /// External account metadata changed — typically a rename
+    /// (`display_name`) or a config tweak. Same payload shape
+    /// as `account.created`; the applier upserts so a missing
+    /// row from a device that hadn't seen the create event
+    /// still ends up in the right state.
+    #[serde(rename = "account.updated")]
+    AccountUpdated(AccountPayload),
+
+    /// External account removed. Other devices delete the row +
+    /// any "credentials missing" badge that may have been
+    /// hanging on it.
+    #[serde(rename = "account.deleted")]
+    AccountDeleted(IdPayload),
+
     /// Keyboard shortcut for an action was set or rebound
     /// (§15.10 + §19.2.1).
     #[serde(rename = "shortcut.set")]
@@ -299,6 +326,34 @@ pub struct PluginPayload {
     /// `notification`). Optional for backward compat.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin_type: Option<String>,
+}
+
+/// Payload for `account.created` / `account.updated`. Non-secret
+/// account metadata sufficient to recreate the row on another
+/// device (`adapter_kind`, `display_name`, `config_json`). The
+/// secret half (CalDAV password, OAuth refresh token, …) stays
+/// in the originating device's keychain — receiving devices
+/// surface the "credentials missing" wizard so the user enters
+/// the secret per-device. `created_at` / `updated_at` round-trip
+/// to keep the snapshot path and the event path producing the
+/// same timestamps on the receiving side.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AccountPayload {
+    /// Stable account id (UUID minted on the originating device).
+    pub id: String,
+    /// Adapter kind wire string (`caldav`, `ical`, `ews`,
+    /// `vikunja`, `todoist`, `google`, `microsoft_graph`, …).
+    pub adapter_kind: String,
+    pub display_name: String,
+    /// Adapter-specific non-secret config (server URL, username,
+    /// OAuth client_id, …) as a JSON string. The applier stores
+    /// it opaquely; the actual schema is owned by each adapter.
+    pub config_json: String,
+    /// RFC3339 timestamps from the originating device. Carried
+    /// so the row on the receiving device matches what a future
+    /// snapshot apply would produce.
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 /// Payload for `shortcut.set` — the action key plus the new
@@ -510,6 +565,23 @@ mod tests {
                 plugin_type: Some("calendar-adapter".into()),
             }),
             SyncEvent::PluginUninstalled(IdPayload { id: "p".into() }),
+            SyncEvent::AccountCreated(AccountPayload {
+                id: "acc-1".into(),
+                adapter_kind: "caldav".into(),
+                display_name: "Work".into(),
+                config_json: "{\"server_url\":\"https://dav.example.com\"}".into(),
+                created_at: "2025-05-12T09:14:22.341Z".into(),
+                updated_at: "2025-05-12T09:14:22.341Z".into(),
+            }),
+            SyncEvent::AccountUpdated(AccountPayload {
+                id: "acc-1".into(),
+                adapter_kind: "caldav".into(),
+                display_name: "Work (renamed)".into(),
+                config_json: "{\"server_url\":\"https://dav.example.com\"}".into(),
+                created_at: "2025-05-12T09:14:22.341Z".into(),
+                updated_at: "2025-05-12T09:20:00.000Z".into(),
+            }),
+            SyncEvent::AccountDeleted(IdPayload { id: "acc-1".into() }),
             SyncEvent::ShortcutSet(ShortcutPayload {
                 action: "x".into(),
                 binding: "Mod+X".into(),

@@ -14,8 +14,26 @@ use super::{
 };
 use crate::accounts::{Account, AccountsError, AccountsRepo, AdapterKind};
 use crate::db::DbHandle;
+use crate::event_log::EventLogWriter;
 use crate::registry::AdapterRegistry;
 use crate::secrets::{self, SecretSlot};
+use sync_core::{AccountPayload, IdPayload, SyncEvent};
+
+/// Build an `AccountPayload` from a freshly-created or updated
+/// `Account` row. Centralised so create / Google connect /
+/// Microsoft connect emit the same shape — the applier on
+/// receiving devices then upserts a row that's byte-identical
+/// to what the snapshot path would produce.
+fn account_payload(acc: &Account) -> AccountPayload {
+    AccountPayload {
+        id: acc.id.clone(),
+        adapter_kind: acc.adapter_kind.as_str().to_string(),
+        display_name: acc.display_name.clone(),
+        config_json: acc.config_json.clone(),
+        created_at: acc.created_at.clone(),
+        updated_at: acc.updated_at.clone(),
+    }
+}
 
 // ── Plugin-id constants ──────────────────────────────────────
 //
@@ -178,6 +196,7 @@ pub async fn create_account(
     db: State<'_, DbHandle>,
     registry: State<'_, Arc<AdapterRegistry>>,
     plugin_manager: State<'_, Arc<PluginManager>>,
+    event_log: State<'_, Arc<EventLogWriter>>,
     request: CreateAccountRequest,
 ) -> CommandResult<Account> {
     // Reject adapter kinds we have no construction path for yet.
@@ -353,6 +372,11 @@ pub async fn create_account(
             });
         }
     }
+    // Sync the new account row to other devices. Secrets stay in
+    // this device's keychain — `AccountPayload` carries only the
+    // non-secret metadata, and the receiver surfaces the
+    // "credentials missing" wizard for the device-local secret.
+    event_log.append(SyncEvent::AccountCreated(account_payload(&created)));
     Ok(created)
 }
 
@@ -714,6 +738,7 @@ pub struct DiscoveredEndpoints {
 pub async fn delete_account(
     db: State<'_, DbHandle>,
     registry: State<'_, Arc<AdapterRegistry>>,
+    event_log: State<'_, Arc<EventLogWriter>>,
     id: String,
 ) -> CommandResult<()> {
     let shared = db.shared();
@@ -725,6 +750,7 @@ pub async fn delete_account(
     if let Err(err) = secrets::delete_all(&id) {
         tracing::warn!(?err, account_id = %id, "secrets cleanup failed");
     }
+    event_log.append(SyncEvent::AccountDeleted(IdPayload { id }));
     Ok(())
 }
 
@@ -766,6 +792,7 @@ pub async fn connect_google_account(
     db: State<'_, DbHandle>,
     registry: State<'_, Arc<AdapterRegistry>>,
     plugin_manager: State<'_, Arc<PluginManager>>,
+    event_log: State<'_, Arc<EventLogWriter>>,
     request: ConnectGoogleRequest,
 ) -> CommandResult<Account> {
     let name = request.display_name.trim();
@@ -861,6 +888,7 @@ pub async fn connect_google_account(
             message: format!("adapter registration failed: {err}"),
         });
     }
+    event_log.append(SyncEvent::AccountCreated(account_payload(&created)));
     Ok(created)
 }
 
@@ -880,6 +908,7 @@ pub async fn connect_microsoft_account(
     db: State<'_, DbHandle>,
     registry: State<'_, Arc<AdapterRegistry>>,
     plugin_manager: State<'_, Arc<PluginManager>>,
+    event_log: State<'_, Arc<EventLogWriter>>,
     request: ConnectMicrosoftRequest,
 ) -> CommandResult<Account> {
     let name = request.display_name.trim();
@@ -957,6 +986,7 @@ pub async fn connect_microsoft_account(
             message: format!("adapter registration failed: {err}"),
         });
     }
+    event_log.append(SyncEvent::AccountCreated(account_payload(&created)));
     Ok(created)
 }
 

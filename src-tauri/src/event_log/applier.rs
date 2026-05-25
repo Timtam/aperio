@@ -54,8 +54,8 @@ use rusqlite::params;
 use serde::Serialize;
 use serde_json::Value;
 use sync_core::{
-    DeviceId, EventEnvelope, EventPayload, IdPayload, LogFile, PluginPayload,
-    SettingsPayload, SyncError, SyncEvent, SyncResult,
+    AccountPayload, DeviceId, EventEnvelope, EventPayload, IdPayload, LogFile,
+    PluginPayload, SettingsPayload, SyncError, SyncEvent, SyncResult,
 };
 use tracing::{debug, warn};
 
@@ -357,6 +357,15 @@ impl EventLogApplier {
             }
             SyncEvent::PluginUninstalled(payload) => {
                 self.apply_plugin_uninstall(payload)?;
+                Ok(true)
+            }
+            SyncEvent::AccountCreated(payload)
+            | SyncEvent::AccountUpdated(payload) => {
+                self.apply_account_upsert(payload)?;
+                Ok(true)
+            }
+            SyncEvent::AccountDeleted(payload) => {
+                self.apply_account_delete(payload)?;
                 Ok(true)
             }
             SyncEvent::ShortcutSet(_)
@@ -856,6 +865,70 @@ impl EventLogApplier {
                 payload.id,
             ))
         })
+    }
+
+    /// Insert-or-update the `accounts` row mirroring a
+    /// `account.created` / `account.updated` event from another
+    /// device. Same upsert shape as the snapshot path in
+    /// `upsert_snapshot_account` — kept inline here so the
+    /// applier doesn't take a dependency on snapshot.rs. Secrets
+    /// are NOT included in the payload; the receiving device
+    /// surfaces the existing `list_accounts_missing_credentials`
+    /// wizard for the user to enter them locally. The implicit
+    /// `local` account is skipped so a stray event from a peer
+    /// can't overwrite its bootstrap timestamps.
+    fn apply_account_upsert(&self, payload: &AccountPayload) -> SyncResult<()> {
+        if payload.id == "local" {
+            return Ok(());
+        }
+        let conn = self.db.lock().expect("db mutex poisoned");
+        conn.execute(
+            "INSERT INTO accounts
+                (id, adapter_kind, display_name, config_json,
+                 created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET
+                adapter_kind = excluded.adapter_kind,
+                display_name = excluded.display_name,
+                config_json  = excluded.config_json,
+                updated_at   = excluded.updated_at",
+            params![
+                payload.id,
+                payload.adapter_kind,
+                payload.display_name,
+                payload.config_json,
+                payload.created_at,
+                payload.updated_at,
+            ],
+        )
+        .map_err(|err| {
+            SyncError::internal(format!(
+                "accounts upsert for {}: {err}",
+                payload.id,
+            ))
+        })?;
+        Ok(())
+    }
+
+    /// Remove the `accounts` row matching an `account.deleted`
+    /// event. Refuses to touch `local` for the same reason
+    /// `apply_account_upsert` does. Secret cleanup is a host
+    /// concern (we don't have keychain access at this layer);
+    /// the originating device already cleaned its own keychain
+    /// in `delete_account`.
+    fn apply_account_delete(&self, payload: &IdPayload) -> SyncResult<()> {
+        if payload.id == "local" {
+            return Ok(());
+        }
+        let conn = self.db.lock().expect("db mutex poisoned");
+        conn.execute("DELETE FROM accounts WHERE id = ?", params![payload.id])
+            .map_err(|err| {
+                SyncError::internal(format!(
+                    "accounts delete for {}: {err}",
+                    payload.id,
+                ))
+            })?;
+        Ok(())
     }
 
     fn is_already_applied(&self, event_id: &str) -> SyncResult<bool> {
@@ -1700,5 +1773,78 @@ mod tests {
     #[allow(dead_code)]
     fn _exercise_resolution_choice() {
         let _ = ResolutionChoice::KeepLocal;
+    }
+
+    /// AccountCreated from another device should land as an
+    /// upsert in the local `accounts` table; AccountUpdated
+    /// on the same id mutates the row; AccountDeleted drops it.
+    #[test]
+    fn account_events_round_trip_through_applier() {
+        use sync_core::AccountPayload;
+        let (adapter, db) = fixture();
+        let other = DeviceId::from_string("dev-other".into());
+        let me = DeviceId::from_string("dev-me".into());
+        let applier = EventLogApplier::new(db.clone(), adapter, me);
+
+        let envs = vec![
+            fixture_envelope(
+                other.clone(),
+                SyncEvent::AccountCreated(AccountPayload {
+                    id: "acc-1".into(),
+                    adapter_kind: "caldav".into(),
+                    display_name: "Work".into(),
+                    config_json: r#"{"server_url":"https://dav.example.com"}"#
+                        .into(),
+                    created_at: "2026-05-12T09:14:22Z".into(),
+                    updated_at: "2026-05-12T09:14:22Z".into(),
+                }),
+                1000,
+            ),
+            fixture_envelope(
+                other.clone(),
+                SyncEvent::AccountUpdated(AccountPayload {
+                    id: "acc-1".into(),
+                    adapter_kind: "caldav".into(),
+                    display_name: "Work (renamed)".into(),
+                    config_json: r#"{"server_url":"https://dav.example.com"}"#
+                        .into(),
+                    created_at: "2026-05-12T09:14:22Z".into(),
+                    updated_at: "2026-05-12T09:20:00Z".into(),
+                }),
+                2000,
+            ),
+        ];
+        let report = applier.apply_envelopes(envs).unwrap();
+        assert_eq!(report.applied, 2);
+        assert_eq!(report.failed, 0);
+
+        let conn = db.lock().unwrap();
+        let name: String = conn
+            .query_row(
+                "SELECT display_name FROM accounts WHERE id = ?",
+                params!["acc-1"],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(name, "Work (renamed)");
+        drop(conn);
+
+        let env_del = fixture_envelope(
+            other,
+            SyncEvent::AccountDeleted(IdPayload { id: "acc-1".into() }),
+            3000,
+        );
+        let report = applier.apply_envelopes(vec![env_del]).unwrap();
+        assert_eq!(report.applied, 1);
+
+        let conn = db.lock().unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM accounts WHERE id = ?",
+                params!["acc-1"],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0);
     }
 }
