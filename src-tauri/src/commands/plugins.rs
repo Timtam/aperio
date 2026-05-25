@@ -420,35 +420,39 @@ pub async fn install_plugin_archive(
     user_plugins_dir: State<'_, UserPluginsDir>,
     request: InstallPluginArchiveRequest,
 ) -> CommandResult<PluginInfo> {
-    // Extract first. plugin_core::install_archive parses the
-    // manifest, wipes any existing plugin dir under the same
-    // id, then unzips the archive into <user>/<plugin_id>/.
-    let installed = plugin_core::install_archive(
-        &request.archive_path,
-        &user_plugins_dir.0,
-    )
-    .map_err(plugin_error_to_command)?;
-
-    // If this is an update — same id was already loaded — we
-    // need to drop the old in-memory copy before re-loading
-    // the freshly-extracted version. We don't have a public
-    // `unload_plugin` API yet; the simplest correct path for
-    // v1 is to refuse the install with a clear message
-    // telling the user to restart. (A future iteration can
-    // add a graceful unload-and-reload once we audit which
-    // host components hold references to LoadedInstance Arcs.)
+    // Pre-flight: read the manifest WITHOUT extracting. Lets
+    // us refuse an in-place upgrade before install_archive
+    // wipes the existing plugin dir. v1 doesn't have a safe
+    // unload-and-reload path for an already-loaded plugin
+    // (would need to audit every host component holding an
+    // Arc<LoadedInstance> + tear them down in order); the
+    // friendly fallback is to ask the user to restart.
+    let preflight_manifest =
+        plugin_core::inspect_archive(&request.archive_path)
+            .map_err(plugin_error_to_command)?;
     if plugin_manager
-        .get_including_disabled(&installed.manifest.id)
+        .get_including_disabled(&preflight_manifest.id)
         .is_some()
     {
         return Err(CommandError {
             code: "restart_required",
             message: format!(
-                "{} is already loaded; restart Aperio to pick up the new version",
-                installed.manifest.id,
+                "{} is already loaded; restart Aperio to install the new version",
+                preflight_manifest.id,
             ),
         });
     }
+
+    // Safe to extract — no in-memory state references the id
+    // we're about to write. install_archive wipes any stale
+    // directory under the same id (left over from a previous
+    // install whose plugin then got unloaded between
+    // restarts).
+    let installed = plugin_core::install_archive(
+        &request.archive_path,
+        &user_plugins_dir.0,
+    )
+    .map_err(plugin_error_to_command)?;
 
     // Load + insert. Errors here leave the freshly-extracted
     // files in place — the user can retry without re-picking
