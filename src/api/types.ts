@@ -292,7 +292,12 @@ export interface CommandError {
     // §20 plugin-system surface — `list_plugins` and friends
     // emit these when a plugin is missing from the
     // `PluginManager` or doesn't export a required entry point.
-    | 'plugin_missing';
+    | 'plugin_missing'
+    // `set_plugin_enabled` refuses to disable the sync plugin
+    // the user is currently configured to sync with — letting
+    // them through would silently break every subsequent sync
+    // round.
+    | 'active_sync_conflict';
   message: string;
 }
 

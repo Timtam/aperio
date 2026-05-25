@@ -2,7 +2,17 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { isCommandError, listPlugins, setPluginEnabled } from '../api/client';
-import type { PluginInfo, PluginTypeWire } from '../api/types';
+import type { CommandError, PluginInfo, PluginTypeWire } from '../api/types';
+
+/** Shape stored per-row in the toggle-error map. We keep the
+ *  full envelope so the row can branch on the error code
+ *  (active-sync-conflict gets a more actionable message that
+ *  points the user at the Sync tab) without re-string-matching
+ *  the message body. */
+interface ToggleErrorEntry {
+  code: CommandError['code'] | 'unknown';
+  message: string;
+}
 
 /**
  * Settings → Plugins panel (DESIGN.md §20.10).
@@ -36,7 +46,9 @@ export function PluginsPanel() {
   const [loadError, setLoadError] = useState<string | null>(null);
   // Per-plugin error envelopes for the toggle. Cleared on
   // successful re-flip; not persisted across re-fetches.
-  const [toggleErrors, setToggleErrors] = useState<Record<string, string>>({});
+  const [toggleErrors, setToggleErrors] = useState<
+    Record<string, ToggleErrorEntry>
+  >({});
 
   useEffect(() => {
     let cancelled = false;
@@ -79,11 +91,13 @@ export function PluginsPanel() {
       try {
         await setPluginEnabled({ plugin_id: pluginId, enabled });
       } catch (err) {
-        const msg = isCommandError(err)
-          ? err.message
-          : err instanceof Error
-            ? err.message
-            : String(err);
+        const entry: ToggleErrorEntry = isCommandError(err)
+          ? { code: err.code, message: err.message }
+          : {
+              code: 'unknown',
+              message:
+                err instanceof Error ? err.message : String(err),
+            };
         // Revert the optimistic flip + surface the error
         // inline so the user can see why the toggle didn't
         // take.
@@ -94,7 +108,7 @@ export function PluginsPanel() {
               )
             : prev,
         );
-        setToggleErrors((prev) => ({ ...prev, [pluginId]: msg }));
+        setToggleErrors((prev) => ({ ...prev, [pluginId]: entry }));
       }
     },
     [],
@@ -160,7 +174,7 @@ export function PluginsPanel() {
 interface PluginRowProps {
   plugin: PluginInfo;
   onToggle: (pluginId: string, enabled: boolean) => void;
-  toggleError: string | null;
+  toggleError: ToggleErrorEntry | null;
 }
 
 function PluginRow({ plugin, onToggle, toggleError }: PluginRowProps) {
@@ -206,7 +220,11 @@ function PluginRow({ plugin, onToggle, toggleError }: PluginRowProps) {
       )}
       {toggleError && (
         <p className="form__error" role="alert">
-          {t('dialogs.settings.plugins.toggle.error', { error: toggleError })}
+          {toggleError.code === 'active_sync_conflict'
+            ? t('dialogs.settings.plugins.toggle.activeSyncConflict')
+            : t('dialogs.settings.plugins.toggle.error', {
+                error: toggleError.message,
+              })}
         </p>
       )}
       <dl className="plugins-panel__meta">

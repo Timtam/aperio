@@ -65,6 +65,29 @@ fn adapter_kind_for_plugin(plugin_id: &str) -> Option<AdapterKind> {
     }
 }
 
+/// Map a sync-adapter plugin id to the `sync.adapter.kind`
+/// wire string the SyncPanel persists. Returns `None` for
+/// plugins that aren't sync adapters — the active-sync guard
+/// only fires when there's a real match risk.
+fn sync_kind_for_plugin(plugin_id: &str) -> Option<&'static str> {
+    match plugin_id {
+        "com.aperio.sync-adapter-local" => Some("local"),
+        "com.aperio.sync-adapter-webdav" => Some("webdav"),
+        "com.aperio.sync-adapter-ftp" => Some("ftp"),
+        "com.aperio.sync-adapter-sftp" => Some("sftp"),
+        "com.aperio.sync-adapter-dropbox" => Some("dropbox"),
+        "com.aperio.sync-adapter-googledrive" => Some("googledrive"),
+        _ => None,
+    }
+}
+
+/// `user_prefs` key naming the currently-configured sync
+/// adapter family. Duplicated from `commands/sync.rs`'s
+/// `PREF_ADAPTER_KIND` constant on purpose — keeping the
+/// guard self-contained avoids dragging the sync module into
+/// this command's dependency surface.
+const PREF_ADAPTER_KIND: &str = "sync.adapter.kind";
+
 /// Frontend-facing snapshot of one loaded plugin. Mirrors the
 /// `plugin.json` manifest fields the Settings panel renders +
 /// flags any optional named-symbol entry points the plugin
@@ -206,11 +229,40 @@ pub async fn set_plugin_enabled(
         });
     }
 
+    let shared = db.shared();
+    let prefs = UserPrefsRepo::new(&shared);
+
+    // Refuse to disable the sync adapter the user is currently
+    // using — the orchestrator would start failing every round
+    // with "plugin missing" the moment the gate flips. The
+    // frontend surfaces this as a "switch sync first" hint
+    // pointing the user at the Sync tab.
+    if !request.enabled {
+        if let Some(plugin_sync_kind) = sync_kind_for_plugin(&request.plugin_id) {
+            let active_kind = prefs
+                .get(PREF_ADAPTER_KIND)
+                .map_err(|e| CommandError {
+                    code: "internal",
+                    message: format!("read sync.adapter.kind: {e}"),
+                })?
+                .filter(|s| !s.is_empty());
+            if active_kind.as_deref() == Some(plugin_sync_kind) {
+                return Err(CommandError {
+                    code: "active_sync_conflict",
+                    message: format!(
+                        "{} is the sync adapter you're currently using; \
+                         switch to a different one in Settings → Sync \
+                         before disabling it.",
+                        request.plugin_id,
+                    ),
+                });
+            }
+        }
+    }
+
     // 1) Persist first. If a later step fails, the user's
     //    intent is at least recorded and the next app start
     //    will honour it.
-    let shared = db.shared();
-    let prefs = UserPrefsRepo::new(&shared);
     let key = pref_key_for_disabled(&request.plugin_id);
     let persist_result = if request.enabled {
         prefs.delete(&key)

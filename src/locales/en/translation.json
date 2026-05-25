@@ -223,7 +223,8 @@
         "toggle": {
           "enabled": "Enabled",
           "disabled": "Disabled",
-          "error": "Couldn't change the plugin state: {{error}}"
+          "error": "Couldn't change the plugin state: {{error}}",
+          "activeSyncConflict": "This is the sync adapter you're currently using. Switch to a different one in Settings → Sync, then come back to disable it."
         }
       },
       "contacts": {

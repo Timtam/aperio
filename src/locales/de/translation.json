@@ -220,7 +220,8 @@
         "toggle": {
           "enabled": "Aktiviert",
           "disabled": "Deaktiviert",
-          "error": "Plugin-Status konnte nicht geändert werden: {{error}}"
+          "error": "Plugin-Status konnte nicht geändert werden: {{error}}",
+          "activeSyncConflict": "Das ist der Sync-Adapter, den du gerade verwendest. Wechsle in Einstellungen → Synchronisation zuerst auf einen anderen Adapter und deaktiviere ihn dann."
         }
       },
       "contacts": {
