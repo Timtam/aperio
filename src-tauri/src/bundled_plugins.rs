@@ -29,10 +29,18 @@
 //! `cargo run -p aperio` then scans that directory + loads
 //! each plugin via `libloading`.
 //!
-//! `cargo run -p aperio` ALONE (without a prior workspace
-//! build) leaves the bundled-plugins dir empty; aperio still
-//! starts but external calendar/sync adapters surface as
-//! "plugin missing" until the workspace build runs.
+//! `cargo tauri dev` and `cargo tauri build` automate this:
+//! `tauri.conf.json`'s `beforeDevCommand` /
+//! `beforeBuildCommand` chain a `cargo build --workspace`
+//! ahead of the frontend build so the cdylibs are always
+//! current before tauri-build runs. On a warm tree the
+//! workspace build is a near-instant up-to-date check.
+//!
+//! Running `cargo run -p aperio` directly (bypassing tauri)
+//! ALONE (without a prior workspace build) leaves the
+//! bundled-plugins dir empty; aperio still starts but every
+//! external calendar/sync/vc adapter surfaces as "plugin
+//! missing" until the workspace build runs.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
