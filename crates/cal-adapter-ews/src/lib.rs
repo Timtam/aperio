@@ -424,6 +424,13 @@ impl EwsAdapter {
         // Translate cached items to cal-core Events. The map order
         // is non-deterministic; the frontend sorts events anyway,
         // so we don't bother stabilising here.
+        let cache_size = updated.items.len();
+        let mut translate_failures = 0usize;
+        let mut skipped_occurrence = 0usize;
+        let mut filtered_out_of_range = 0usize;
+        let mut overrides_emitted = 0usize;
+        let mut masters_emitted = 0usize;
+        let mut singles_emitted = 0usize;
         let mut out: Vec<Event> = Vec::with_capacity(updated.items.len());
         for (_, item) in updated.items.iter() {
             // Skip Occurrence rows that might have leaked in via
@@ -436,6 +443,7 @@ impl EwsAdapter {
                 .map(|t| t.eq_ignore_ascii_case("Occurrence"))
                 .unwrap_or(false)
             {
+                skipped_occurrence += 1;
                 continue;
             }
             // Translate. On the rare per-item failure
@@ -444,6 +452,7 @@ impl EwsAdapter {
             let ev = match to_event(item.clone(), calendar_id) {
                 Ok(ev) => ev,
                 Err(err) => {
+                    translate_failures += 1;
                     tracing::warn!(
                         target: "cal_adapter_ews::sync",
                         item_id = %item.item_id,
@@ -458,6 +467,7 @@ impl EwsAdapter {
             // window.
             if ev.recurrence.is_none() {
                 if ev.end < range.start || ev.start >= range.end {
+                    filtered_out_of_range += 1;
                     continue;
                 }
             }
@@ -488,11 +498,30 @@ impl EwsAdapter {
                     override_ev.start = ov.start;
                     override_ev.end = ov.end;
                     override_ev.etag = ov.change_key.clone();
+                    overrides_emitted += 1;
                     out.push(override_ev);
                 }
             }
+            if ev.recurrence.is_some() {
+                masters_emitted += 1;
+            } else {
+                singles_emitted += 1;
+            }
             out.push(ev);
         }
+
+        tracing::info!(
+            target: "cal_adapter_ews::sync",
+            calendar = %calendar_id,
+            cache_size,
+            singles_emitted,
+            masters_emitted,
+            overrides_emitted,
+            filtered_out_of_range,
+            skipped_occurrence,
+            translate_failures,
+            "EWS get_events: cache → cal-core",
+        );
 
         // Write the updated state back into the map for the next
         // round to consume.

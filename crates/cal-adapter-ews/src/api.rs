@@ -193,10 +193,23 @@ pub async fn sync_events_to_completion(
     mut state: SyncedFolderState,
 ) -> EwsResult<SyncedFolderState> {
     let (folder_id, change_key) = split_calendar_id(calendar_id);
+    let cold_start = state.sync_state.is_none();
+    let items_before = state.items.len();
+    let started = std::time::Instant::now();
+    tracing::info!(
+        target: "cal_adapter_ews::sync",
+        calendar = %calendar_id,
+        cold_start,
+        items_before,
+        "starting SyncFolderItems drain",
+    );
+    let mut page = 0usize;
+    let mut totals = (0usize, 0usize, 0usize); // creates, updates, deletes
     // Bound the loop in case a buggy server keeps reporting
     // includes_last=false. 64 pages × 512 items = 32 768 items per
     // refresh, well past any plausible calendar size.
     for _ in 0..64 {
+        page += 1;
         let body = sync_folder_items(
             &folder_id,
             change_key.as_deref(),
@@ -205,18 +218,50 @@ pub async fn sync_events_to_completion(
         );
         let xml = client.post_soap(body).await?;
         let result = parse_sync_folder_items_response(&xml)?;
+        let (mut c, mut u, mut d) = (0usize, 0usize, 0usize);
         for change in result.changes {
             match change {
-                SyncChange::Create(item) | SyncChange::Update(item) => {
+                SyncChange::Create(item) => {
+                    c += 1;
+                    state.items.insert(item.item_id.clone(), item);
+                }
+                SyncChange::Update(item) => {
+                    u += 1;
                     state.items.insert(item.item_id.clone(), item);
                 }
                 SyncChange::Delete(id) => {
+                    d += 1;
                     state.items.remove(&id);
                 }
             }
         }
+        totals.0 += c;
+        totals.1 += u;
+        totals.2 += d;
+        tracing::debug!(
+            target: "cal_adapter_ews::sync",
+            calendar = %calendar_id,
+            page,
+            creates = c,
+            updates = u,
+            deletes = d,
+            includes_last = result.includes_last,
+            "SyncFolderItems page",
+        );
         state.sync_state = Some(result.new_sync_state);
         if result.includes_last {
+            tracing::info!(
+                target: "cal_adapter_ews::sync",
+                calendar = %calendar_id,
+                cold_start,
+                pages = page,
+                creates = totals.0,
+                updates = totals.1,
+                deletes = totals.2,
+                items_after = state.items.len(),
+                duration_ms = started.elapsed().as_millis() as u64,
+                "SyncFolderItems drain complete",
+            );
             return Ok(state);
         }
     }

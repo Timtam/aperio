@@ -322,6 +322,10 @@ pub struct ParsedItem {
     /// `<t:DeletedOccurrences>` start datetimes on a RecurringMaster
     /// row — translates to EXDATE entries in
     /// `cal_core::EventRecurrence::exceptions` on the way down.
+    /// `#[serde(default)]` so a future schema where this field
+    /// is absent in older persisted state files loads cleanly
+    /// instead of triggering a full re-sync.
+    #[serde(default)]
     pub deleted_occurrence_starts: Vec<DateTime<Utc>>,
     /// `<t:ModifiedOccurrences>` on a RecurringMaster row — one
     /// entry per instance whose time was moved or content was
@@ -334,6 +338,7 @@ pub struct ParsedItem {
     /// master's content — gets the time right, may show stale
     /// title/location for the small minority of overrides that
     /// also edited the content fields.
+    #[serde(default)]
     pub modified_occurrences: Vec<ModifiedOccurrence>,
 }
 
