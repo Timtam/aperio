@@ -122,7 +122,10 @@ pub fn run() {
         }
     }
 
-    let registry = Arc::new(AdapterRegistry::new(Arc::clone(&plugin_manager)));
+    let registry = Arc::new(AdapterRegistry::with_data_dir(
+        Arc::clone(&plugin_manager),
+        Some(data_dir.path.clone()),
+    ));
     {
         let shared = db.shared();
         let repo = accounts::AccountsRepo::new(&shared);

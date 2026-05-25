@@ -111,6 +111,15 @@ pub struct AdapterRegistry {
     /// the test path (in which case `register_*` calls fail
     /// cleanly with `RegistryError::PluginMissing`).
     plugin_manager: Arc<PluginManager>,
+    /// Root for plugin-side persistent state — per-account
+    /// `<data_dir>/plugin_state/<plugin>/<account_id>/` directories
+    /// are computed off this and spliced into the InitConfig at
+    /// open-instance time. Plugins that opt into a `state_dir`
+    /// field (EWS, today) get a stable per-account location for
+    /// caches, sync cookies, etc. Other plugins ignore the field.
+    /// `None` on the test path so legacy `AdapterRegistry::new`
+    /// call sites keep working without plumbing a temp dir.
+    data_dir: Option<std::path::PathBuf>,
 }
 
 impl AdapterRegistry {
@@ -121,6 +130,18 @@ impl AdapterRegistry {
     /// `PluginManager::new("0.1.0")` when they don't exercise the
     /// register / bootstrap path.
     pub fn new(plugin_manager: Arc<PluginManager>) -> Self {
+        Self::with_data_dir(plugin_manager, None)
+    }
+
+    /// Variant that records the host's data directory so per-
+    /// account plugin state (sync cookies + cached items) can be
+    /// persisted across restarts. Production startup uses this;
+    /// tests can still call `new(plugin_manager)` and accept the
+    /// "no persistence" fallback.
+    pub fn with_data_dir(
+        plugin_manager: Arc<PluginManager>,
+        data_dir: Option<std::path::PathBuf>,
+    ) -> Self {
         Self {
             external_cal: RwLock::new(HashMap::new()),
             external_tasks: RwLock::new(HashMap::new()),
@@ -128,7 +149,35 @@ impl AdapterRegistry {
             external_vc: RwLock::new(HashMap::new()),
             routes: Mutex::new(Routes::default()),
             plugin_manager,
+            data_dir,
         }
+    }
+
+    /// Compute the per-account state directory for `plugin_id`,
+    /// creating it on disk if it doesn't exist yet. Returns
+    /// `None` when the registry was built without a data_dir
+    /// (test path) or when directory creation fails — the
+    /// adapter then falls back to in-memory state, exactly as
+    /// before the persistence work landed.
+    fn plugin_state_dir(
+        &self,
+        plugin_id: &str,
+        account_id: &str,
+    ) -> Option<std::path::PathBuf> {
+        let root = self.data_dir.as_ref()?;
+        let dir = root
+            .join("plugin_state")
+            .join(plugin_id)
+            .join(account_id);
+        if let Err(err) = std::fs::create_dir_all(&dir) {
+            tracing::warn!(
+                ?err,
+                path = %dir.display(),
+                "couldn't create plugin state dir; persistence disabled",
+            );
+            return None;
+        }
+        Some(dir)
     }
 
     /// Build adapters for every persisted external account. Failures
@@ -617,10 +666,21 @@ impl AdapterRegistry {
     fn register_ews(&self, account: &Account) -> Result<(), RegistryError> {
         let password = secrets::retrieve(&account.id, SecretSlot::Password)
             .map_err(|e| RegistryError::Secret(format!("missing password: {e}")))?;
-        let plugin_config = merge_account_config(
-            &account.config_json,
-            &[("password", Value::String(password))],
-        )?;
+        // Splice the host-computed per-account state directory
+        // into the InitConfig so the adapter can persist its
+        // sync cookie + item cache across restarts. EwsAccountConfig
+        // reads `state_dir` via serde(default), so absence is fine
+        // (test path / older registry builds without data_dir).
+        let mut extras: Vec<(&str, Value)> =
+            vec![("password", Value::String(password))];
+        let state_dir = self.plugin_state_dir(PLUGIN_ID_EWS, &account.id);
+        if let Some(dir) = state_dir.as_ref() {
+            extras.push((
+                "state_dir",
+                Value::String(dir.to_string_lossy().into_owned()),
+            ));
+        }
+        let plugin_config = merge_account_config(&account.config_json, &extras)?;
         let instance = self.open_plugin_instance(PLUGIN_ID_EWS, plugin_config)?;
         self.insert_calendar(&account.id, instance.clone())?;
         self.insert_tasks(&account.id, instance.clone())?;

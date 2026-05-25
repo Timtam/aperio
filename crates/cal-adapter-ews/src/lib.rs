@@ -38,6 +38,7 @@ pub mod soap;
 pub mod tasks;
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -68,6 +69,13 @@ pub struct EwsAccountConfig {
     pub username: String,
     #[serde(default)]
     pub account_label: Option<String>,
+    /// Host-supplied directory the adapter may use to persist
+    /// per-account state (the SyncFolderItems cookie + cached
+    /// item set). Spliced in at `register_ews` time off the host's
+    /// data_dir. Absent on the test path / smoke-test ephemeral
+    /// instances; the adapter then keeps state in memory only.
+    #[serde(default)]
+    pub state_dir: Option<String>,
 }
 
 #[derive(Debug)]
@@ -97,11 +105,17 @@ pub struct EwsAdapter {
     /// plus the server-issued sync cookie so the next round only
     /// pulls deltas.
     ///
-    /// Lives in memory only — on adapter reopen we start from
-    /// scratch (one full sync per folder on first read). A
-    /// future iteration could persist the cookies via a host
-    /// callback to skip that cold-start cost across restarts.
+    /// Lives in memory by default. When the plugin's
+    /// `InitConfig.state_dir` is set, the adapter additionally
+    /// loads the prior state at construction time and writes it
+    /// back after every successful refresh — so an app restart
+    /// resumes from a delta-sync against the persisted cookie
+    /// instead of doing a full re-sync of every folder.
     events_sync: Mutex<HashMap<String, SyncedFolderState>>,
+    /// Host-supplied directory for persistent state. `None`
+    /// disables persistence entirely (test path, smoke-test
+    /// ephemeral instances).
+    state_dir: Option<PathBuf>,
 }
 
 impl EwsAdapter {
@@ -130,6 +144,129 @@ impl EwsAdapter {
             listing_ttl: chrono::Duration::minutes(5),
             gal_ttl: chrono::Duration::minutes(30),
             events_sync: Mutex::new(HashMap::new()),
+            state_dir: None,
+        }
+    }
+
+    /// Attach a persistent state directory. Called by the plugin's
+    /// `open_instance` when the host provides one (production
+    /// path); leaves the adapter in pure-memory mode when omitted
+    /// (test path / smoke-test ephemeral instances).
+    ///
+    /// On attach the constructor synchronously loads the previous
+    /// sync state from `<dir>/events_sync.json` (best-effort:
+    /// missing/corrupt → start from scratch + log). Subsequent
+    /// successful refreshes write back atomically.
+    pub fn with_state_dir(mut self, dir: PathBuf) -> Self {
+        // Best-effort load: a missing or malformed file is not
+        // fatal — a full re-sync recovers either way. We log so
+        // an unexpected deserialize failure shows up in the
+        // protocol viewer.
+        let path = dir.join("events_sync.json");
+        match std::fs::read(&path) {
+            Ok(bytes) => match serde_json::from_slice::<
+                HashMap<String, SyncedFolderState>,
+            >(&bytes)
+            {
+                Ok(restored) => {
+                    let count = restored.len();
+                    // Replace the empty Mutex with the loaded
+                    // map. Safe because nothing has touched
+                    // `self.events_sync` yet (we're still inside
+                    // `with_state_dir`).
+                    self.events_sync = Mutex::new(restored);
+                    tracing::debug!(
+                        target: "cal_adapter_ews::sync",
+                        path = %path.display(),
+                        folders = count,
+                        "loaded persisted sync state",
+                    );
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        target: "cal_adapter_ews::sync",
+                        path = %path.display(),
+                        ?err,
+                        "couldn't deserialize sync state; starting fresh",
+                    );
+                }
+            },
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                // First run for this account; no state to load.
+            }
+            Err(err) => {
+                tracing::warn!(
+                    target: "cal_adapter_ews::sync",
+                    path = %path.display(),
+                    ?err,
+                    "couldn't read sync state; starting fresh",
+                );
+            }
+        }
+        self.state_dir = Some(dir);
+        self
+    }
+
+    /// Snapshot the current sync map to disk. Called from
+    /// `refresh_and_read_events` after each successful round so
+    /// the next process boot can resume from the persisted
+    /// cookie. Atomic via write-then-rename so a crash during
+    /// the serialise can't leave a half-written file that fails
+    /// to deserialize next boot.
+    ///
+    /// Best-effort: failures log but don't fail the refresh —
+    /// the next round will retry, and the worst case is "next
+    /// boot does a full re-sync", same as before persistence
+    /// shipped.
+    async fn persist_events_sync(
+        &self,
+        snapshot: &HashMap<String, SyncedFolderState>,
+    ) {
+        let Some(dir) = self.state_dir.as_ref() else {
+            return;
+        };
+        let path = dir.join("events_sync.json");
+        let tmp = dir.join("events_sync.json.tmp");
+        let bytes = match serde_json::to_vec(snapshot) {
+            Ok(b) => b,
+            Err(err) => {
+                tracing::warn!(
+                    target: "cal_adapter_ews::sync",
+                    ?err,
+                    "couldn't serialize sync state",
+                );
+                return;
+            }
+        };
+        // The actual file I/O is sync; run it on the blocking
+        // pool so we don't stall the async runtime on slow disks.
+        let path_for_task = path.clone();
+        let tmp_for_task = tmp.clone();
+        let result = tokio::task::spawn_blocking(move || -> std::io::Result<()> {
+            std::fs::write(&tmp_for_task, &bytes)?;
+            std::fs::rename(&tmp_for_task, &path_for_task)?;
+            Ok(())
+        })
+        .await;
+        match result {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => {
+                tracing::warn!(
+                    target: "cal_adapter_ews::sync",
+                    path = %path.display(),
+                    ?err,
+                    "couldn't write sync state",
+                );
+            }
+            Err(err) => {
+                // JoinError from spawn_blocking — pool shutdown
+                // or the task panicked. Log + move on.
+                tracing::warn!(
+                    target: "cal_adapter_ews::sync",
+                    ?err,
+                    "sync state write task failed",
+                );
+            }
         }
     }
 
@@ -359,10 +496,16 @@ impl EwsAdapter {
 
         // Write the updated state back into the map for the next
         // round to consume.
-        {
+        let snapshot = {
             let mut guard = self.events_sync.lock().await;
             guard.insert(calendar_id.to_string(), updated);
-        }
+            // Clone the full map so the persist runs without
+            // holding the lock — the file write hops over to a
+            // blocking task, and we don't want other folders'
+            // refreshes blocking on disk I/O.
+            guard.clone()
+        };
+        self.persist_events_sync(&snapshot).await;
         Ok(out)
     }
 }
@@ -737,5 +880,104 @@ fn to_core_error(err: EwsError) -> CoreError {
         Protocol(m) => CoreError::Protocol(m),
         Config(m) => CoreError::InvalidInput(m),
         DiscoveryFailed(m) => CoreError::NotFound(m),
+    }
+}
+
+#[cfg(test)]
+mod state_persistence_tests {
+    use super::*;
+    use crate::mapping::ParsedItem;
+
+    /// `with_state_dir` should ROUNDTRIP through disk: a freshly
+    /// constructed adapter with a pre-populated state file must
+    /// surface the same sync_state cookie + cached items the
+    /// previous instance wrote out.
+    #[tokio::test]
+    async fn state_roundtrip_through_disk() {
+        // Unique temp dir per run — multiple test invocations in
+        // parallel get isolated state.
+        let dir = std::env::temp_dir().join(format!(
+            "aperio-ews-state-test-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0),
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let creds = BasicCredentials {
+            username: "u".into(),
+            password: "p".into(),
+        };
+
+        // Round 1: adapter writes one folder's worth of state.
+        {
+            let adapter = EwsAdapter::new(
+                "https://example/EWS/Exchange.asmx".into(),
+                creds.clone(),
+            )
+            .with_state_dir(dir.clone());
+            let mut state = SyncedFolderState::default();
+            state.sync_state = Some("COOKIE-XYZ".into());
+            state.items.insert(
+                "ITEM-1".into(),
+                ParsedItem {
+                    item_id: "ITEM-1".into(),
+                    subject: "Persisted".into(),
+                    ..ParsedItem::default()
+                },
+            );
+            let mut snap = HashMap::new();
+            snap.insert("CAL-1".into(), state);
+            adapter.persist_events_sync(&snap).await;
+        }
+
+        // Round 2: a fresh adapter constructed against the same
+        // dir picks up the previous state on load.
+        let adapter2 = EwsAdapter::new(
+            "https://example/EWS/Exchange.asmx".into(),
+            creds,
+        )
+        .with_state_dir(dir.clone());
+        let loaded = adapter2.events_sync.lock().await;
+        let restored = loaded.get("CAL-1").expect("CAL-1 state restored");
+        assert_eq!(restored.sync_state.as_deref(), Some("COOKIE-XYZ"));
+        assert!(restored.items.contains_key("ITEM-1"));
+        assert_eq!(restored.items["ITEM-1"].subject, "Persisted");
+
+        // Cleanup — best-effort, doesn't fail the test if the
+        // dir lingers.
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A corrupt state file must NOT prevent the adapter from
+    /// constructing — it should log + start with an empty
+    /// `events_sync` so the next refresh does a full re-sync.
+    #[tokio::test]
+    async fn corrupt_state_file_is_not_fatal() {
+        let dir = std::env::temp_dir().join(format!(
+            "aperio-ews-state-corrupt-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0),
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("events_sync.json"),
+            b"{not valid json at all",
+        )
+        .unwrap();
+
+        let adapter = EwsAdapter::new(
+            "https://example/EWS/Exchange.asmx".into(),
+            BasicCredentials {
+                username: "u".into(),
+                password: "p".into(),
+            },
+        )
+        .with_state_dir(dir.clone());
+        let map = adapter.events_sync.lock().await;
+        assert!(
+            map.is_empty(),
+            "corrupt state should fall back to empty map",
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

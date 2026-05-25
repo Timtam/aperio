@@ -16,8 +16,9 @@ futures.workspace = true
 quick-xml.workspace = true
 reqwest.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["sync"] }
+tokio = { workspace = true, features = ["sync", "rt"] }
 tracing.workspace = true
 url = "2"
 base64 = "0.22"

@@ -36,6 +36,7 @@
 use chrono::{DateTime, Utc};
 use quick_xml::events::Event as XmlEvent;
 use quick_xml::reader::Reader;
+use serde::{Deserialize, Serialize};
 
 use cal_core::{Calendar, Event, EventRecurrence, Reminder, ReminderKind};
 
@@ -294,7 +295,7 @@ pub fn decode_event_id(s: &str) -> DecodedEventId {
 }
 
 /// One calendar item pulled from a `FindItem` response.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ParsedItem {
     pub item_id: String,
     pub change_key: Option<String>,
@@ -339,7 +340,7 @@ pub struct ParsedItem {
 /// One entry from a master row's `<t:ModifiedOccurrences>` list.
 /// Carries the override's identity + new time slot + the original
 /// time slot the override displaces.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModifiedOccurrence {
     /// The override's own ItemId — addressable directly for a
     /// future per-override GetItem fan-out.
@@ -1440,14 +1441,14 @@ fn parse_until_date(until: &str) -> Option<String> {
 /// Structured `<t:Recurrence>` parsed straight out of EWS XML. Each
 /// pattern + range variant carries only the fields RFC 5545 needs;
 /// the conversion to RRULE happens via [`Self::to_rrule`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EwsRecurrence {
     pub pattern: EwsRecurrencePattern,
     pub range: EwsRecurrenceRange,
 }
 
 /// Pattern half of an EWS recurrence (the "how often" part).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EwsRecurrencePattern {
     Daily { interval: u32 },
     Weekly { interval: u32, days_of_week: Vec<EwsDay> },
@@ -1456,7 +1457,7 @@ pub enum EwsRecurrencePattern {
 }
 
 /// Range half (the "when does it stop" part).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EwsRecurrenceRange {
     NoEnd,
     Numbered { occurrences: u32 },
@@ -1465,7 +1466,7 @@ pub enum EwsRecurrenceRange {
 
 /// Day-of-week as EWS spells it. Carrying the variant rather than
 /// the wire string keeps the RRULE translation total.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EwsDay {
     Monday,
     Tuesday,
@@ -1503,7 +1504,7 @@ impl EwsDay {
 }
 
 /// Calendar month as EWS spells it (full English name).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EwsMonth {
     January,
     February,

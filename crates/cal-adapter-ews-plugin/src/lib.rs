@@ -38,6 +38,15 @@ struct InitConfig {
     endpoint: String,
     username: String,
     password: String,
+    /// Optional per-account state directory the host computed
+    /// off its data_dir. Hands the adapter a stable filesystem
+    /// location to cache the SyncFolderItems cookie + the
+    /// per-folder item snapshots so a restart doesn't trigger
+    /// a full re-sync. Absent on the smoke-test path (one-shot
+    /// ephemeral instance) — the adapter then runs purely in
+    /// memory.
+    #[serde(default)]
+    state_dir: Option<String>,
 }
 
 /// # Safety
@@ -58,7 +67,11 @@ pub unsafe extern "C" fn plugin_open_instance(
             username: cfg.username,
             password: cfg.password,
         };
-        Ok(EwsAdapter::new(cfg.endpoint, creds))
+        let mut adapter = EwsAdapter::new(cfg.endpoint, creds);
+        if let Some(dir) = cfg.state_dir {
+            adapter = adapter.with_state_dir(std::path::PathBuf::from(dir));
+        }
+        Ok(adapter)
     })
 }
 

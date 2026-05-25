@@ -160,7 +160,7 @@ pub async fn get_events(
 /// the absolute set of currently-known items + the cookie to pass
 /// next time. The caller (the adapter wrapper) folds this into its
 /// per-folder cache.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct SyncedFolderState {
     /// All items currently believed to live in the folder, keyed
     /// by EWS ItemId. After Create/Update merges and Delete
