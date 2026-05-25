@@ -67,32 +67,15 @@ cal-adapter-ews = { path = "../crates/cal-adapter-ews" }
 cal-adapter-vikunja = { path = "../crates/cal-adapter-vikunja" }
 cal-adapter-todoist = { path = "../crates/cal-adapter-todoist" }
 
-# Plugin builds of every external calendar/tasks/contacts adapter
-# (DESIGN.md §20). The host registers each via PluginManager::
-# register_static at startup so the runtime calendar/tasks/contacts
-# routing goes through the FFI bridge. The crates above stay in the
-# deps tree because the new-account flow in commands/accounts.rs
-# still uses their typed OAuth + error types directly.
-# The host reaches into each plugin via its always-emitted typed
-# `build_descriptor()` + `DESTROY_FN` accessors — see
-# bundled_plugins.rs. The C-ABI `aperio_plugin_create` / `_destroy`
-# `#[no_mangle]` exports are deferred to a separate per-plugin
-# exports crate that the dlopen pipeline (DESIGN.md §22.2) will
-# introduce; until then the static-link path here doesn't need
-# them.
-cal-adapter-caldav-plugin = { path = "../crates/cal-adapter-caldav-plugin" }
-cal-adapter-ical-plugin = { path = "../crates/cal-adapter-ical-plugin" }
-cal-adapter-google-plugin = { path = "../crates/cal-adapter-google-plugin" }
-cal-adapter-microsoft-graph-plugin = { path = "../crates/cal-adapter-microsoft-graph-plugin" }
-cal-adapter-ews-plugin = { path = "../crates/cal-adapter-ews-plugin" }
-cal-adapter-vikunja-plugin = { path = "../crates/cal-adapter-vikunja-plugin" }
-cal-adapter-todoist-plugin = { path = "../crates/cal-adapter-todoist-plugin" }
-sync-adapter-local-plugin = { path = "../crates/sync-adapter-local-plugin" }
-sync-adapter-webdav-plugin = { path = "../crates/sync-adapter-webdav-plugin" }
-sync-adapter-ftp-plugin = { path = "../crates/sync-adapter-ftp-plugin" }
-sync-adapter-sftp-plugin = { path = "../crates/sync-adapter-sftp-plugin" }
-sync-adapter-dropbox-plugin = { path = "../crates/sync-adapter-dropbox-plugin" }
-sync-adapter-googledrive-plugin = { path = "../crates/sync-adapter-googledrive-plugin" }
+# NOTE: the 13 *-plugin crates are NOT listed as deps here.
+# Plugins are loaded via dlopen from `plugins/bundled/` at
+# runtime (DESIGN.md §20.5 + §22.2). Listing them as deps would
+# force the host to link the plugin rlibs, which would collide
+# on `#[no_mangle] aperio_plugin_create` across all 13 plugins.
+# `build.rs` stages the cdylibs into `target/<profile>/plugins/
+# bundled/<id>/` so `cargo run -p aperio` can find them at
+# startup — but `cargo build --workspace` must have run first
+# to actually produce those cdylibs.
 
 base64 = "0.22"
 

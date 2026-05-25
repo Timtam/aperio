@@ -1,393 +1,160 @@
-//! Wire the seven bundled cal-adapter plugins into a fresh
-//! [`plugin_core::PluginManager`] at host startup (DESIGN.md
-//! §20.6 + §22.2).
+//! Load the bundled cal-adapter and sync-adapter plugins at
+//! host startup (DESIGN.md §20.5 + §22.2).
 //!
-//! ## Why `register_static` instead of dlopen
+//! ## Path resolution
 //!
-//! The §22.2 release pipeline says bundled plugins live in
-//! `plugins/bundled/*.{dll,dylib,so}` next to the Aperio binary
-//! and the manager dlopens them at startup. That requires a
-//! build-time pipeline that copies each plugin's cdylib into the
-//! release artifact + a runtime path resolution dance. Neither
-//! exists yet — they're tracked as a separate phase.
+//! The release zip lays plugins out next to the binary:
 //!
-//! In the meantime the same effect is achieved by linking each
-//! plugin crate directly into the host binary and calling
-//! [`plugin_core::PluginManager::register_static`] with the
-//! plugin's typed `build_descriptor()` accessor. The Tauri
-//! command surface sees the same `Arc<PluginManager>` regardless
-//! of which path produced it, so the eventual dlopen flip-over
-//! is a single-file change here without touching the registry or
-//! the commands.
+//! ```text
+//! Aperio-VERSION-PLATFORM/
+//! ├── Aperio.exe
+//! └── plugins/
+//!     └── bundled/
+//!         └── com.aperio.cal-adapter-caldav/
+//!             ├── plugin.json
+//!             └── com.aperio.cal-adapter-caldav.dll
+//! ```
 //!
-//! ## Why the typed accessors (not aperio_plugin_create)
+//! At runtime [`build_manager`] looks `plugins/bundled/` up
+//! relative to [`std::env::current_exe`], which gives the same
+//! layout for the in-tree dev build (`target/<profile>/`) and
+//! the release artifact.
 //!
-//! Each plugin's `declare_lifecycle!` macro emits the C-ABI
-//! `aperio_plugin_create` / `aperio_plugin_destroy` symbols
-//! behind a `cdylib-exports` cargo feature (default-on). The
-//! host disables that feature on its plugin deps so the 7
-//! `#[no_mangle]` symbols don't collide at link time. The macro
-//! also always emits typed Rust accessors (`build_descriptor()`
-//! + `DESTROY_FN` constant), which the host uses below.
+//! ## Dev workflow
+//!
+//! `cargo build` (or `cargo build --workspace`) from the
+//! workspace root builds every plugin cdylib as part of the
+//! workspace round and `build.rs` stages them into
+//! `target/<profile>/plugins/bundled/<id>/`. Subsequent
+//! `cargo run -p aperio` then scans that directory + loads
+//! each plugin via `libloading`.
+//!
+//! `cargo run -p aperio` ALONE (without a prior workspace
+//! build) leaves the bundled-plugins dir empty; aperio still
+//! starts but external calendar/sync adapters surface as
+//! "plugin missing" until the workspace build runs.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
-use plugin_core::{
-    manifest::PluginManifest, Capability, PluginError, PluginManager, PluginType,
-    ABI_VERSION,
-};
-use tracing::warn;
+use plugin_core::{PluginManager, BUNDLED_PLUGINS_DIR};
+use tracing::{info, warn};
 
-/// Build a [`PluginManager`] with every bundled cal-adapter
-/// plugin registered statically. Errors registering any
-/// individual plugin are logged + skipped — one broken plugin
-/// must NEVER prevent the app from coming up.
+/// Build a [`PluginManager`] populated by `dlopen`ing every
+/// shared library found under `<binary-dir>/plugins/bundled/`.
+///
+/// Per-plugin load errors are logged but never fail the startup
+/// — a broken plugin must NEVER keep the rest of the app from
+/// coming up.
 pub fn build_manager(app_version: &str) -> Arc<PluginManager> {
     let manager = PluginManager::new(app_version);
-
-    register_plugin(
-        &manager,
-        cal_adapter_caldav_manifest(),
-        unsafe { cal_adapter_caldav_plugin::build_descriptor() },
-        cal_adapter_caldav_plugin::DESTROY_FN,
+    let bundled = match bundled_dir() {
+        Some(p) => p,
+        None => {
+            warn!(
+                "couldn't resolve `plugins/bundled/` relative to current_exe(); \
+                 no bundled plugins will load",
+            );
+            return Arc::new(manager);
+        }
+    };
+    info!(
+        path = %bundled.display(),
+        "scanning bundled plugins directory",
     );
-    register_plugin(
-        &manager,
-        cal_adapter_ical_manifest(),
-        unsafe { cal_adapter_ical_plugin::build_descriptor() },
-        cal_adapter_ical_plugin::DESTROY_FN,
-    );
-    register_plugin(
-        &manager,
-        cal_adapter_google_manifest(),
-        unsafe { cal_adapter_google_plugin::build_descriptor() },
-        cal_adapter_google_plugin::DESTROY_FN,
-    );
-    register_plugin(
-        &manager,
-        cal_adapter_microsoft_graph_manifest(),
-        unsafe { cal_adapter_microsoft_graph_plugin::build_descriptor() },
-        cal_adapter_microsoft_graph_plugin::DESTROY_FN,
-    );
-    register_plugin(
-        &manager,
-        cal_adapter_ews_manifest(),
-        unsafe { cal_adapter_ews_plugin::build_descriptor() },
-        cal_adapter_ews_plugin::DESTROY_FN,
-    );
-    register_plugin(
-        &manager,
-        cal_adapter_vikunja_manifest(),
-        unsafe { cal_adapter_vikunja_plugin::build_descriptor() },
-        cal_adapter_vikunja_plugin::DESTROY_FN,
-    );
-    register_plugin(
-        &manager,
-        cal_adapter_todoist_manifest(),
-        unsafe { cal_adapter_todoist_plugin::build_descriptor() },
-        cal_adapter_todoist_plugin::DESTROY_FN,
-    );
-
-    // ── sync-adapter plugins ──────────────────────────────────
-    register_plugin(
-        &manager,
-        sync_adapter_local_manifest(),
-        unsafe { sync_adapter_local_plugin::build_descriptor() },
-        sync_adapter_local_plugin::DESTROY_FN,
-    );
-    register_plugin(
-        &manager,
-        sync_adapter_webdav_manifest(),
-        unsafe { sync_adapter_webdav_plugin::build_descriptor() },
-        sync_adapter_webdav_plugin::DESTROY_FN,
-    );
-    register_plugin(
-        &manager,
-        sync_adapter_ftp_manifest(),
-        unsafe { sync_adapter_ftp_plugin::build_descriptor() },
-        sync_adapter_ftp_plugin::DESTROY_FN,
-    );
-    register_plugin(
-        &manager,
-        sync_adapter_sftp_manifest(),
-        unsafe { sync_adapter_sftp_plugin::build_descriptor() },
-        sync_adapter_sftp_plugin::DESTROY_FN,
-    );
-    register_plugin(
-        &manager,
-        sync_adapter_dropbox_manifest(),
-        unsafe { sync_adapter_dropbox_plugin::build_descriptor() },
-        sync_adapter_dropbox_plugin::DESTROY_FN,
-    );
-    register_plugin(
-        &manager,
-        sync_adapter_googledrive_manifest(),
-        unsafe { sync_adapter_googledrive_plugin::build_descriptor() },
-        sync_adapter_googledrive_plugin::DESTROY_FN,
-    );
-
+    let errors = manager.scan_dir(&bundled);
+    for err in errors {
+        warn!(?err, "bundled plugin failed to load");
+    }
+    info!(plugin_count = manager.len(), "bundled plugins loaded");
     Arc::new(manager)
 }
 
-fn register_plugin(
-    manager: &PluginManager,
-    manifest: PluginManifest,
-    descriptor: *mut plugin_core::AperioPlugin,
-    destroy_fn: unsafe extern "C" fn(*mut plugin_core::AperioPlugin),
-) {
-    let id = manifest.id.clone();
-    if let Err(err) = manager.register_static(manifest, descriptor, destroy_fn) {
-        match err {
-            PluginError::AbiMismatch { .. } | PluginError::AppTooOld { .. } => {
-                warn!(plugin_id = %id, ?err, "bundled plugin rejected on register");
-            }
-            _ => warn!(plugin_id = %id, ?err, "bundled plugin failed to register"),
-        }
-    }
-}
-
-// ─────────────────────────────────────────────────────────────
-// Manifests
-//
-// Every bundled plugin ships its own `plugin.json` next to the
-// cdylib for the dlopen path, and the values below must match
-// exactly. Kept in code rather than parsing the JSON because
-// the host doesn't have a stable working directory at startup
-// (the manifests live inside the source tree, not next to the
-// running binary).
-// ─────────────────────────────────────────────────────────────
-
-fn cal_adapter_caldav_manifest() -> PluginManifest {
-    PluginManifest {
-        id: "com.aperio.cal-adapter-caldav".into(),
-        name: "Aperio CalDAV".into(),
-        version: "0.1.0".into(),
-        plugin_type: PluginType::CalendarAdapter,
-        capabilities: vec![
-            Capability::Calendar,
-            Capability::Tasks,
-            Capability::Contacts,
-        ],
-        abi_version: ABI_VERSION,
-        min_app_version: "0.1.0".into(),
-        author: Some("Aperio Contributors".into()),
-        description: Some("Bundled".into()),
-        signed: false,
-    }
-}
-
-fn cal_adapter_ical_manifest() -> PluginManifest {
-    PluginManifest {
-        id: "com.aperio.cal-adapter-ical".into(),
-        name: "Aperio iCal Feed".into(),
-        version: "0.1.0".into(),
-        plugin_type: PluginType::CalendarAdapter,
-        capabilities: vec![Capability::Calendar],
-        abi_version: ABI_VERSION,
-        min_app_version: "0.1.0".into(),
-        author: Some("Aperio Contributors".into()),
-        description: Some("Bundled".into()),
-        signed: false,
-    }
-}
-
-fn cal_adapter_google_manifest() -> PluginManifest {
-    PluginManifest {
-        id: "com.aperio.cal-adapter-google".into(),
-        name: "Aperio Google".into(),
-        version: "0.1.0".into(),
-        plugin_type: PluginType::CalendarAdapter,
-        capabilities: vec![
-            Capability::Calendar,
-            Capability::Tasks,
-            Capability::Contacts,
-        ],
-        abi_version: ABI_VERSION,
-        min_app_version: "0.1.0".into(),
-        author: Some("Aperio Contributors".into()),
-        description: Some("Bundled".into()),
-        signed: false,
-    }
-}
-
-fn cal_adapter_microsoft_graph_manifest() -> PluginManifest {
-    PluginManifest {
-        id: "com.aperio.cal-adapter-microsoft-graph".into(),
-        name: "Aperio Microsoft 365".into(),
-        version: "0.1.0".into(),
-        plugin_type: PluginType::CalendarAdapter,
-        capabilities: vec![
-            Capability::Calendar,
-            Capability::Tasks,
-            Capability::Contacts,
-        ],
-        abi_version: ABI_VERSION,
-        min_app_version: "0.1.0".into(),
-        author: Some("Aperio Contributors".into()),
-        description: Some("Bundled".into()),
-        signed: false,
-    }
-}
-
-fn cal_adapter_ews_manifest() -> PluginManifest {
-    PluginManifest {
-        id: "com.aperio.cal-adapter-ews".into(),
-        name: "Aperio Exchange (EWS)".into(),
-        version: "0.1.0".into(),
-        plugin_type: PluginType::CalendarAdapter,
-        capabilities: vec![
-            Capability::Calendar,
-            Capability::Tasks,
-            Capability::Contacts,
-        ],
-        abi_version: ABI_VERSION,
-        min_app_version: "0.1.0".into(),
-        author: Some("Aperio Contributors".into()),
-        description: Some("Bundled".into()),
-        signed: false,
-    }
-}
-
-fn cal_adapter_vikunja_manifest() -> PluginManifest {
-    PluginManifest {
-        id: "com.aperio.cal-adapter-vikunja".into(),
-        name: "Aperio Vikunja".into(),
-        version: "0.1.0".into(),
-        plugin_type: PluginType::CalendarAdapter,
-        capabilities: vec![Capability::Tasks],
-        abi_version: ABI_VERSION,
-        min_app_version: "0.1.0".into(),
-        author: Some("Aperio Contributors".into()),
-        description: Some("Bundled".into()),
-        signed: false,
-    }
-}
-
-fn cal_adapter_todoist_manifest() -> PluginManifest {
-    PluginManifest {
-        id: "com.aperio.cal-adapter-todoist".into(),
-        name: "Aperio Todoist".into(),
-        version: "0.1.0".into(),
-        plugin_type: PluginType::CalendarAdapter,
-        capabilities: vec![Capability::Tasks],
-        abi_version: ABI_VERSION,
-        min_app_version: "0.1.0".into(),
-        author: Some("Aperio Contributors".into()),
-        description: Some("Bundled".into()),
-        signed: false,
-    }
-}
-
-// ── sync-adapter manifests ────────────────────────────────────
-//
-// Sync plugins don't declare capabilities — `Capability` is the
-// cal-adapter feature flag (calendar / tasks / contacts). The
-// sync trait surface is single-shape; the manifest's
-// `capabilities` field stays empty for these.
-
-fn sync_adapter_local_manifest() -> PluginManifest {
-    PluginManifest {
-        id: "com.aperio.sync-adapter-local".into(),
-        name: "Aperio Local Filesystem".into(),
-        version: "0.1.0".into(),
-        plugin_type: PluginType::SyncAdapter,
-        capabilities: vec![],
-        abi_version: ABI_VERSION,
-        min_app_version: "0.1.0".into(),
-        author: Some("Aperio Contributors".into()),
-        description: Some("Bundled".into()),
-        signed: false,
-    }
-}
-
-fn sync_adapter_webdav_manifest() -> PluginManifest {
-    PluginManifest {
-        id: "com.aperio.sync-adapter-webdav".into(),
-        name: "Aperio WebDAV".into(),
-        version: "0.1.0".into(),
-        plugin_type: PluginType::SyncAdapter,
-        capabilities: vec![],
-        abi_version: ABI_VERSION,
-        min_app_version: "0.1.0".into(),
-        author: Some("Aperio Contributors".into()),
-        description: Some("Bundled".into()),
-        signed: false,
-    }
-}
-
-fn sync_adapter_ftp_manifest() -> PluginManifest {
-    PluginManifest {
-        id: "com.aperio.sync-adapter-ftp".into(),
-        name: "Aperio FTPS".into(),
-        version: "0.1.0".into(),
-        plugin_type: PluginType::SyncAdapter,
-        capabilities: vec![],
-        abi_version: ABI_VERSION,
-        min_app_version: "0.1.0".into(),
-        author: Some("Aperio Contributors".into()),
-        description: Some("Bundled".into()),
-        signed: false,
-    }
-}
-
-fn sync_adapter_sftp_manifest() -> PluginManifest {
-    PluginManifest {
-        id: "com.aperio.sync-adapter-sftp".into(),
-        name: "Aperio SFTP".into(),
-        version: "0.1.0".into(),
-        plugin_type: PluginType::SyncAdapter,
-        capabilities: vec![],
-        abi_version: ABI_VERSION,
-        min_app_version: "0.1.0".into(),
-        author: Some("Aperio Contributors".into()),
-        description: Some("Bundled".into()),
-        signed: false,
-    }
-}
-
-fn sync_adapter_dropbox_manifest() -> PluginManifest {
-    PluginManifest {
-        id: "com.aperio.sync-adapter-dropbox".into(),
-        name: "Aperio Dropbox".into(),
-        version: "0.1.0".into(),
-        plugin_type: PluginType::SyncAdapter,
-        capabilities: vec![],
-        abi_version: ABI_VERSION,
-        min_app_version: "0.1.0".into(),
-        author: Some("Aperio Contributors".into()),
-        description: Some("Bundled".into()),
-        signed: false,
-    }
-}
-
-fn sync_adapter_googledrive_manifest() -> PluginManifest {
-    PluginManifest {
-        id: "com.aperio.sync-adapter-googledrive".into(),
-        name: "Aperio Google Drive".into(),
-        version: "0.1.0".into(),
-        plugin_type: PluginType::SyncAdapter,
-        capabilities: vec![],
-        abi_version: ABI_VERSION,
-        min_app_version: "0.1.0".into(),
-        author: Some("Aperio Contributors".into()),
-        description: Some("Bundled".into()),
-        signed: false,
-    }
+/// Compute the bundled-plugins directory path:
+/// `<dir-of-current-exe>/plugins/bundled/`. Returns `None` only
+/// when [`std::env::current_exe`] fails (very rare — would mean
+/// the OS lost track of the process binary).
+fn bundled_dir() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let exe_dir = exe.parent()?;
+    Some(exe_dir.join(BUNDLED_PLUGINS_DIR))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use tempfile::TempDir;
 
+    /// scan_dir against an empty directory returns 0 plugins +
+    /// no errors. Mirrors the "first launch before any plugin
+    /// has been staged" state.
     #[test]
-    fn build_manager_registers_all_thirteen_plugins() {
-        let mgr = build_manager(env!("CARGO_PKG_VERSION"));
-        // The 7 cal-adapter plugins + 6 sync-adapter plugins all
-        // wired up + addressable by id. A missing one would
-        // surface as None here, which means the registry would
-        // fail to bootstrap that account / sync kind.
+    fn scan_empty_dir_loads_zero_plugins() {
+        let tmp = TempDir::new().expect("tempdir");
+        let bundled = tmp.path().join("plugins").join("bundled");
+        fs::create_dir_all(&bundled).expect("mkdir");
+        let manager = PluginManager::new("0.1.0");
+        let errors = manager.scan_dir(&bundled);
+        assert!(errors.is_empty(), "empty dir scan should report no errors");
+        assert_eq!(manager.len(), 0);
+    }
+
+    /// `bundled_dir()` returns a path under the dir of the
+    /// currently-running test binary. The path may or may not
+    /// exist depending on whether `cargo build --workspace`
+    /// has populated it — but the resolution itself shouldn't
+    /// fail.
+    #[test]
+    fn bundled_dir_resolves_under_current_exe() {
+        let dir = bundled_dir().expect("current_exe should resolve");
+        assert!(dir.ends_with("plugins/bundled") || dir.ends_with("plugins\\bundled"));
+    }
+
+    /// End-to-end dlopen smoke: scan the staged
+    /// `target/<profile>/plugins/bundled/` (populated by
+    /// `cargo build --workspace` via `build.rs`) and verify the
+    /// manager picks up every expected plugin id. Skipped when
+    /// the dir is empty so a fresh checkout that only ran
+    /// `cargo test -p aperio` still passes — the workspace
+    /// build is what populates the dir, and CI scripts run it
+    /// before the test step.
+    #[test]
+    fn scan_bundled_loads_every_expected_plugin_when_staged() {
+        // bundled_dir() resolves relative to current_exe(). For
+        // a `cargo test -p aperio --lib` run, current_exe is
+        // `target/<profile>/deps/aperio-<hash>.exe`, so the
+        // bundled dir resolves to `target/<profile>/deps/
+        // plugins/bundled/` — which `build.rs` doesn't
+        // populate. The real workspace build stages plugins
+        // under `target/<profile>/plugins/bundled/` (one level
+        // up). Walk both to find whichever exists.
+        let direct = bundled_dir().expect("current_exe");
+        let parent_alt = direct
+            .parent()
+            .and_then(|p| p.parent())
+            .map(|p| p.join("plugins").join("bundled"));
+        let scan_dir = if direct.is_dir() {
+            direct
+        } else if let Some(p) = parent_alt.filter(|p| p.is_dir()) {
+            p
+        } else {
+            eprintln!(
+                "skipping: no staged plugins dir found — run `cargo build --workspace` first",
+            );
+            return;
+        };
+
+        let manager = PluginManager::new(env!("CARGO_PKG_VERSION"));
+        let errors = manager.scan_dir(&scan_dir);
+        assert!(
+            errors.is_empty(),
+            "scan_dir against staged plugins should report no errors, got {errors:?}",
+        );
+
+        // Every plugin the workspace produces should be present.
+        // Mirrors the list in build.rs::PLUGINS.
         for id in [
-            // calendar/tasks/contacts
             "com.aperio.cal-adapter-caldav",
             "com.aperio.cal-adapter-ical",
             "com.aperio.cal-adapter-google",
@@ -395,7 +162,6 @@ mod tests {
             "com.aperio.cal-adapter-ews",
             "com.aperio.cal-adapter-vikunja",
             "com.aperio.cal-adapter-todoist",
-            // sync backends (DESIGN.md §19)
             "com.aperio.sync-adapter-local",
             "com.aperio.sync-adapter-webdav",
             "com.aperio.sync-adapter-ftp",
@@ -403,8 +169,11 @@ mod tests {
             "com.aperio.sync-adapter-dropbox",
             "com.aperio.sync-adapter-googledrive",
         ] {
-            assert!(mgr.get(id).is_some(), "plugin {id} not registered");
+            assert!(
+                manager.get(id).is_some(),
+                "plugin {id} not loaded — check that build.rs staged it",
+            );
         }
-        assert_eq!(mgr.len(), 13, "exactly 13 bundled plugins expected");
+        assert_eq!(manager.len(), 13);
     }
 }

@@ -148,29 +148,62 @@ macro_rules! declare_lifecycle {
             let _ = Box::from_raw(plugin);
         }
 
-        /// Typed Rust accessor for the plugin's descriptor.
-        /// Equivalent to the C-ABI `aperio_plugin_create` from
-        /// DESIGN.md §20.3, just without the `#[no_mangle]`
-        /// export — host code that statically links many plugin
-        /// crates into one binary can't tolerate duplicate
-        /// `#[no_mangle]` symbols, and the eventual dlopen
-        /// pipeline (§22.2) will reintroduce the C-ABI exports
-        /// from a separate per-plugin exports crate.
+        /// `aperio_plugin_create` per DESIGN.md §20.3 — the C-ABI
+        /// entry point Aperio's [`plugin_core::PluginManager`]
+        /// looks up by symbol name after `dlopen`-ing the
+        /// plugin's shared library.
+        ///
+        /// The host MUST NOT link plugin rlibs into its main
+        /// binary — that would collide on this `#[no_mangle]`
+        /// symbol across the N bundled plugins. The dlopen path
+        /// avoids the issue: each plugin's cdylib owns its own
+        /// copy of the symbol; the host loads them as separate
+        /// shared libraries at runtime.
         ///
         /// # Safety
         ///
-        /// Same contract as `aperio_plugin_create` in the C
-        /// header. The returned pointer must eventually be
-        /// passed back to [`DESTROY_FN`].
+        /// FFI export. Called once by the host immediately after
+        /// `dlopen`. No precondition on host state.
+        #[no_mangle]
+        pub unsafe extern "C" fn aperio_plugin_create() -> *mut $crate::plugin_core::AperioPlugin {
+            __aperio_build_descriptor()
+        }
+
+        /// `aperio_plugin_destroy` per DESIGN.md §20.3.
+        ///
+        /// # Safety
+        ///
+        /// `plugin` must be the pointer returned by the
+        /// preceding `aperio_plugin_create` call, not yet freed.
+        /// The host's [`plugin_core::manager::LoadedPlugin::drop`]
+        /// guarantees this.
+        #[no_mangle]
+        pub unsafe extern "C" fn aperio_plugin_destroy(
+            plugin: *mut $crate::plugin_core::AperioPlugin,
+        ) {
+            __aperio_destroy_descriptor(plugin)
+        }
+
+        /// Typed Rust accessor for the plugin's descriptor.
+        /// Mirrors [`aperio_plugin_create`] (same implementation)
+        /// but is callable from Rust code that links the plugin
+        /// as an rlib — used by the plugin's own integration
+        /// tests, which exercise the `PluginManager::register_static`
+        /// path without going through dlopen.
+        ///
+        /// # Safety
+        ///
+        /// Same contract as `aperio_plugin_create`. The returned
+        /// pointer must eventually be passed back to [`DESTROY_FN`].
         pub unsafe fn build_descriptor() -> *mut $crate::plugin_core::AperioPlugin {
             __aperio_build_descriptor()
         }
 
-        /// Destroy fn-pointer that pairs with
-        /// [`build_descriptor`]. The host hands this to
-        /// [`plugin_core::PluginManager::register_static`] so
-        /// the manager can release the descriptor when the
-        /// loaded plugin drops.
+        /// Typed destroy fn-pointer that pairs with
+        /// [`build_descriptor`]. Same body as
+        /// `aperio_plugin_destroy`; exposed so the integration-
+        /// test path can hand it to
+        /// [`plugin_core::PluginManager::register_static`].
         pub const DESTROY_FN: unsafe extern "C" fn(
             *mut $crate::plugin_core::AperioPlugin,
         ) = __aperio_destroy_descriptor;
