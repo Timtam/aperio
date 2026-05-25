@@ -90,12 +90,16 @@ pub async fn list_accounts(
 ///
 /// The credentials check is per-`adapter_kind`:
 ///
-/// - `caldav`, `ical`, `ews`: needs a `Password` slot.
+/// - `caldav`, `ews`: needs a `Password` slot.
 /// - `vikunja`, `todoist`: needs an `ApiToken` slot.
 /// - `google`, `microsoft_graph`: needs a `RefreshToken` slot
 ///   (the access token is short-lived and the registry can
 ///   re-mint it from the refresh token; an account with only
 ///   an access token would shortly need re-auth anyway).
+/// - `ical`, `local`: no secret required — iCal feeds are
+///   typically public HTTP(S) URLs, and the rare Basic-auth
+///   private feed surfaces a clear 401 on the first fetch
+///   instead of nagging the user up front.
 ///
 /// A `NotFound` from the keychain → missing credential; any
 /// other error → log + treat as missing (better to prompt the
@@ -112,7 +116,9 @@ pub async fn list_accounts_missing_credentials(
         if acc.id == "local" || acc.adapter_kind == AdapterKind::Local {
             continue;
         }
-        let slot = required_secret_slot(acc.adapter_kind);
+        let Some(slot) = required_secret_slot(acc.adapter_kind) else {
+            continue;
+        };
         if !secret_present(&acc.id, slot) {
             out.push(acc);
         }
@@ -121,16 +127,20 @@ pub async fn list_accounts_missing_credentials(
 }
 
 /// Which keychain slot a fully-configured account of this kind
-/// must have populated. Kept separate from the connect-side
-/// logic so the two stay consistent: any future adapter that
-/// needs a different secret shape adds itself here too.
-fn required_secret_slot(kind: AdapterKind) -> SecretSlot {
+/// must have populated. `None` means the adapter has no required
+/// secret (iCal feeds are typically public URLs; an optional
+/// Basic-auth password fails open and surfaces as a 401 on the
+/// first fetch). Kept separate from the connect-side logic so
+/// the two stay consistent: any future adapter that needs a
+/// different secret shape adds itself here too.
+fn required_secret_slot(kind: AdapterKind) -> Option<SecretSlot> {
     match kind {
-        AdapterKind::Vikunja | AdapterKind::Todoist => SecretSlot::ApiToken,
+        AdapterKind::Ical | AdapterKind::Local => None,
+        AdapterKind::Vikunja | AdapterKind::Todoist => Some(SecretSlot::ApiToken),
         AdapterKind::Google | AdapterKind::MicrosoftGraph => {
-            SecretSlot::RefreshToken
+            Some(SecretSlot::RefreshToken)
         }
-        _ => SecretSlot::Password,
+        _ => Some(SecretSlot::Password),
     }
 }
 
@@ -1183,45 +1193,43 @@ mod tests {
 
     /// §19.11.8 — the missing-credentials check picks the right
     /// keychain slot per `AdapterKind`. Drives the dialog's
-    /// password vs API-token vs OAuth branching.
+    /// password vs API-token vs OAuth branching. iCal + Local
+    /// return `None` because they have no required secret —
+    /// iCal feeds are typically public URLs.
     #[test]
     fn required_secret_slot_maps_each_kind() {
         // Password-based providers.
         assert!(matches!(
             required_secret_slot(AdapterKind::Caldav),
-            SecretSlot::Password
-        ));
-        assert!(matches!(
-            required_secret_slot(AdapterKind::Ical),
-            SecretSlot::Password
+            Some(SecretSlot::Password)
         ));
         assert!(matches!(
             required_secret_slot(AdapterKind::Ews),
-            SecretSlot::Password
+            Some(SecretSlot::Password)
         ));
-        assert!(matches!(
-            required_secret_slot(AdapterKind::Local),
-            SecretSlot::Password
-        ));
+        // No-secret providers — iCal feeds are public; Local
+        // is host-internal.
+        assert!(required_secret_slot(AdapterKind::Ical).is_none());
+        assert!(required_secret_slot(AdapterKind::Local).is_none());
         // API-token providers — surfaced as "API token" in the UI.
         assert!(matches!(
             required_secret_slot(AdapterKind::Vikunja),
-            SecretSlot::ApiToken
+            Some(SecretSlot::ApiToken)
         ));
         assert!(matches!(
             required_secret_slot(AdapterKind::Todoist),
-            SecretSlot::ApiToken
+            Some(SecretSlot::ApiToken)
         ));
         // OAuth providers — slot we probe for "is the user
         // signed in" is the refresh token, since the access
         // token rotates on its own.
         assert!(matches!(
             required_secret_slot(AdapterKind::Google),
-            SecretSlot::RefreshToken
+            Some(SecretSlot::RefreshToken)
         ));
         assert!(matches!(
             required_secret_slot(AdapterKind::MicrosoftGraph),
-            SecretSlot::RefreshToken
+            Some(SecretSlot::RefreshToken)
         ));
     }
 }
