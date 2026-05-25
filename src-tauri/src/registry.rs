@@ -186,13 +186,27 @@ impl AdapterRegistry {
             if account.adapter_kind == AdapterKind::Local {
                 continue;
             }
-            if let Err(err) = self.try_register(&account) {
-                warn!(
-                    account_id = %account.id,
-                    kind = ?account.adapter_kind,
-                    ?err,
-                    "skipping account at bootstrap"
-                );
+            match self.try_register(&account) {
+                Ok(()) => {
+                    // INFO-level so a user diagnosing "calendar X
+                    // shows no events" can verify the adapter
+                    // actually came up for that account.
+                    tracing::info!(
+                        target: "aperio::registry",
+                        account_id = %account.id,
+                        kind = ?account.adapter_kind,
+                        display_name = %account.display_name,
+                        "registered external account adapter",
+                    );
+                }
+                Err(err) => {
+                    warn!(
+                        account_id = %account.id,
+                        kind = ?account.adapter_kind,
+                        ?err,
+                        "skipping account at bootstrap"
+                    );
+                }
             }
         }
     }
