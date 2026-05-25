@@ -46,6 +46,18 @@ jobs:
       - name: clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      # Build the workspace BEFORE testing so the plugin
+      # cdylibs (workspace members, but not cargo deps of
+      # aperio — they're loaded via dlopen) land in
+      # target/<profile>/ and src-tauri/build.rs stages them
+      # into target/<profile>/plugins/bundled/<id>/. Without
+      # this step the integration test
+      # `scan_bundled_loads_every_expected_plugin_when_staged`
+      # silently skips and the end-to-end dlopen path is
+      # never verified on CI.
+      - name: cargo build (workspace)
+        run: cargo build --workspace
+
       - name: cargo test
         run: cargo test --workspace
 
