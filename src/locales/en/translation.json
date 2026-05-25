@@ -250,8 +250,7 @@
         "uninstall": {
           "button": "Uninstall…",
           "title": "Uninstall plugin",
-          "bodyPrefix": "Remove",
-          "bodyVersion": "(version {{version}}) from this device?",
+          "body": "Remove {{name}} (version {{version}}) from this device?",
           "warning": "⚠ Accounts that use this plugin will stop working until you re-install it. Their configuration stays in place — they re-activate automatically once the plugin is available again.",
           "confirm": "Uninstall",
           "cancel": "Cancel",
@@ -319,8 +318,9 @@
       },
       "sync": {
         "stateTitle": "State",
-        "stateConfigured": "Adapter connected: {{path}}",
+        "stateConfiguredSimple": "Sync adapter is connected. See the connection details below.",
         "stateUnconfigured": "No sync adapter configured yet.",
+        "connectedSummary": "Connected to {{kind}}: {{detail}}",
         "stateInFlight": "Syncing …",
         "stateLastSynced": "Last successful sync: {{time}}",
         "stateNeverSynced": "No sync run yet.",
@@ -426,6 +426,7 @@
         "sftpTrustAcceptChanged": "Accept new fingerprint",
         "sftpTrustCancel": "Cancel",
         "sftpPinCurrent": "Pinned fingerprint",
+        "sftpPinCurrentWithValue": "Pinned fingerprint: {{fingerprint}}",
         "sftpPinHint": "Aperio will reject any connection to this server whose key doesn't match. Drop the pin when you know the server's key has rotated (e.g. after a reinstall).",
         "sftpForgetPin": "Forget pin",
         "sftpForgetPinConfirm": "Drop the pinned fingerprint for {{hostPort}}? The next connection will go through the first-use confirmation dialog again.",

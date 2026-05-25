@@ -1094,6 +1094,85 @@ pub async fn get_sync_status(
     Ok(scheduler.current_status())
 }
 
+/// Non-secret summary of the persisted adapter configuration.
+/// Used by the Settings → Sync panel to render a compact
+/// "Verbunden mit X" card when the adapter is configured,
+/// instead of leaving the full editable form visible (which
+/// reads as "you can have multiple adapters" and prompts users
+/// to type into fields that won't apply unless they hit
+/// Configure again).
+///
+/// `detail` is intentionally a single display string — the
+/// frontend doesn't need to switch on the kind to render it,
+/// and we never put secrets (password, key passphrase,
+/// client_secret, refresh token) in there.
+#[derive(Debug, Serialize)]
+pub struct SyncAdapterSummary {
+    pub kind: String,
+    pub detail: String,
+}
+
+/// Build a [`SyncAdapterSummary`] from the persisted user_prefs.
+/// Returns `Ok(None)` when no adapter is configured (the form
+/// should be visible) or when the kind is `"none"` (explicitly
+/// disconnected).
+#[tauri::command]
+pub fn get_sync_adapter_summary(
+    db: State<'_, DbHandle>,
+) -> CommandResult<Option<SyncAdapterSummary>> {
+    let shared = db.shared();
+    let prefs = UserPrefsRepo::new(&shared);
+    let Some(kind) = prefs.get(PREF_ADAPTER_KIND).map_err(internal)? else {
+        return Ok(None);
+    };
+    let detail = match kind.as_str() {
+        "local" => prefs.get(PREF_LOCAL_PATH).map_err(internal)?.unwrap_or_default(),
+        "webdav" => {
+            let url = prefs.get(PREF_WEBDAV_URL).map_err(internal)?.unwrap_or_default();
+            let user = prefs
+                .get(PREF_WEBDAV_USER)
+                .map_err(internal)?
+                .unwrap_or_default();
+            if user.is_empty() {
+                url
+            } else {
+                format!("{user}@{url}")
+            }
+        }
+        "sftp" => {
+            let host = prefs.get(PREF_SFTP_HOST).map_err(internal)?.unwrap_or_default();
+            let port = prefs
+                .get(PREF_SFTP_PORT)
+                .map_err(internal)?
+                .unwrap_or_else(|| "22".into());
+            let user = prefs.get(PREF_SFTP_USER).map_err(internal)?.unwrap_or_default();
+            let path = prefs.get(PREF_SFTP_PATH).map_err(internal)?.unwrap_or_default();
+            format!("{user}@{host}:{port}{path}")
+        }
+        "ftp" => {
+            let host = prefs.get(PREF_FTP_HOST).map_err(internal)?.unwrap_or_default();
+            let port = prefs
+                .get(PREF_FTP_PORT)
+                .map_err(internal)?
+                .unwrap_or_else(|| "21".into());
+            let user = prefs.get(PREF_FTP_USER).map_err(internal)?.unwrap_or_default();
+            let path = prefs.get(PREF_FTP_PATH).map_err(internal)?.unwrap_or_default();
+            format!("{user}@{host}:{port}{path}")
+        }
+        "dropbox" => prefs
+            .get(PREF_DROPBOX_PATH)
+            .map_err(internal)?
+            .unwrap_or_default(),
+        "googledrive" => prefs
+            .get(PREF_GOOGLEDRIVE_FOLDER_NAME)
+            .map_err(internal)?
+            .unwrap_or_default(),
+        "none" => return Ok(None),
+        _ => String::new(),
+    };
+    Ok(Some(SyncAdapterSummary { kind, detail }))
+}
+
 /// Manually trigger a compaction round (Phase Sg, §19.10). Snapshots
 /// the current local state, pushes `snapshot.json`, advances
 /// `meta.json.snapshot_timestamp`, and GCs every log file older than

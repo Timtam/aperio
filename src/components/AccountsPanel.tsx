@@ -9,6 +9,7 @@ import {
 import { useTranslation } from 'react-i18next';
 
 import { useAnnouncer } from '../a11y/Announcer';
+import { FocusableNote } from '../a11y/FocusableNote';
 import {
   connectGoogleAccount,
   connectMicrosoftAccount,
@@ -1211,9 +1212,9 @@ export function AccountsPanel() {
                     {t('dialogs.accounts.googleClientSecretHint')}
                   </span>
                 </label>
-                <p className="form__hint accounts-google-flow-hint">
+                <FocusableNote className="form__hint accounts-google-flow-hint">
                   {t('dialogs.accounts.googleFlowHint')}
-                </p>
+                </FocusableNote>
               </>
             )}
 
@@ -1270,9 +1271,9 @@ export function AccountsPanel() {
                     {t('dialogs.accounts.microsoftAuthorityHint')}
                   </span>
                 </label>
-                <p className="form__hint accounts-google-flow-hint">
+                <FocusableNote className="form__hint accounts-google-flow-hint">
                   {t('dialogs.accounts.microsoftFlowHint')}
-                </p>
+                </FocusableNote>
               </>
             )}
 
@@ -1341,9 +1342,9 @@ export function AccountsPanel() {
                     {t('dialogs.accounts.passwordHint')}
                   </span>
                 </label>
-                <p className="form__hint accounts-google-flow-hint">
+                <FocusableNote className="form__hint accounts-google-flow-hint">
                   {t('dialogs.accounts.ewsReadOnlyHint')}
-                </p>
+                </FocusableNote>
                 {testMessage && kind === 'ews' && (
                   <p
                     role="status"

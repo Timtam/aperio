@@ -1,4 +1,5 @@
 import { useId, useMemo } from 'react';
+import { FocusableNote } from '../a11y/FocusableNote';
 import { useTranslation } from 'react-i18next';
 
 import { useCalendarStore } from '../state/CalendarStore';
@@ -267,7 +268,7 @@ export function TasksPanel() {
           {t('dialogs.tasks.perList.hint')}
         </p>
         {taskLists.length === 0 && (
-          <p className="form__hint">{t('dialogs.tasks.perList.empty')}</p>
+          <FocusableNote className="form__hint">{t('dialogs.tasks.perList.empty')}</FocusableNote>
         )}
         {listGroups.map((group) => (
           <section

@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { FocusableNote } from '../a11y/FocusableNote';
 import { useTranslation } from 'react-i18next';
 
 import { useCalendarStore } from '../state/CalendarStore';
@@ -71,9 +72,9 @@ export function CalendarsPanel() {
 
   return (
     <div className="settings-panel calendars-panel">
-      <p className="form__hint">
+      <FocusableNote className="form__hint">
         {t('dialogs.settings.calendars.hint')}
-      </p>
+      </FocusableNote>
 
       {hydrating && (
         <p className="form__hint" aria-live="polite">
@@ -82,9 +83,9 @@ export function CalendarsPanel() {
       )}
 
       {!hydrating && calendars.length === 0 && (
-        <p className="form__hint">
+        <FocusableNote className="form__hint">
           {t('dialogs.settings.calendars.empty')}
-        </p>
+        </FocusableNote>
       )}
 
       {!hydrating &&

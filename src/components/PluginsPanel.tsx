@@ -1,4 +1,5 @@
 import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
+import { FocusableNote } from '../a11y/FocusableNote';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -351,7 +352,7 @@ export function PluginsPanel() {
 
   return (
     <div className="settings-panel plugins-panel">
-      <p className="form__hint">{t('dialogs.settings.plugins.hint')}</p>
+      <FocusableNote className="form__hint">{t('dialogs.settings.plugins.hint')}</FocusableNote>
 
       <div className="plugins-panel__actions">
         <button
@@ -387,7 +388,7 @@ export function PluginsPanel() {
       )}
 
       {plugins.length === 0 && !loadError && (
-        <p className="form__hint">{t('dialogs.settings.plugins.empty')}</p>
+        <FocusableNote className="form__hint">{t('dialogs.settings.plugins.empty')}</FocusableNote>
       )}
 
       {groups.map((group) => (
@@ -423,9 +424,9 @@ export function PluginsPanel() {
           <h3 className="plugins-panel__type-heading">
             {t('dialogs.settings.plugins.remote.heading')}
           </h3>
-          <p className="form__hint">
+          <FocusableNote className="form__hint">
             {t('dialogs.settings.plugins.remote.hint')}
-          </p>
+          </FocusableNote>
           <ul className="plugins-panel__list" role="list">
             {remotePlugins.map((r) => {
               // Same focusable-card pattern: tabindex=0 +
@@ -464,11 +465,11 @@ export function PluginsPanel() {
                       {r.id}
                     </div>
                   )}
-                  <p className="form__hint">
+                  <FocusableNote className="form__hint">
                     {t('dialogs.settings.plugins.remote.announcedBy', {
                       device: deviceLabel,
                     })}
-                  </p>
+                  </FocusableNote>
                 </li>
               );
             })}
@@ -541,7 +542,7 @@ function ConfirmInstallModal({
         <dd>{typeLabel(t, preview.plugin_type)}</dd>
       </dl>
       {preview.description && (
-        <p className="plugins-panel__description">{preview.description}</p>
+        <FocusableNote className="plugins-panel__description">{preview.description}</FocusableNote>
       )}
       <p className="form__hint" role="note">
         {t('dialogs.settings.plugins.install.unsignedWarning')}
@@ -598,7 +599,7 @@ function FailedPluginsSection({ failed }: FailedPluginsSectionProps) {
       <h3 className="plugins-panel__type-heading">
         {t('dialogs.settings.plugins.failed.heading')}
       </h3>
-      <p className="form__hint">{t('dialogs.settings.plugins.failed.hint')}</p>
+      <FocusableNote className="form__hint">{t('dialogs.settings.plugins.failed.hint')}</FocusableNote>
       <ul className="plugins-panel__list" role="list">
         {failed.map((f) => {
           // Same "focusable card" pattern as PluginRow:
@@ -780,7 +781,7 @@ function PluginRow({
         {plugin.id}
       </div>
       {plugin.description && (
-        <p className="plugins-panel__description">{plugin.description}</p>
+        <FocusableNote className="plugins-panel__description">{plugin.description}</FocusableNote>
       )}
       {toggleError && (
         <p className="form__error" role="alert">
@@ -853,16 +854,15 @@ function ConfirmUninstallModal({
       onClose={onCancel}
       title={t('dialogs.settings.plugins.uninstall.title')}
     >
-      <p>
-        {t('dialogs.settings.plugins.uninstall.bodyPrefix')}{' '}
-        <strong>{plugin.name}</strong>{' '}
-        {t('dialogs.settings.plugins.uninstall.bodyVersion', {
+      <FocusableNote>
+        {t('dialogs.settings.plugins.uninstall.body', {
+          name: plugin.name,
           version: plugin.version,
         })}
-      </p>
-      <p className="form__hint" role="note">
+      </FocusableNote>
+      <FocusableNote className="form__hint">
         {t('dialogs.settings.plugins.uninstall.warning')}
-      </p>
+      </FocusableNote>
       {error && (
         <p className="form__error" role="alert">
           {error.code === 'active_sync_conflict'

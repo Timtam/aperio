@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useAnnouncer } from '../a11y/Announcer';
+import { FocusableNote } from '../a11y/FocusableNote';
 import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
 
 import {
@@ -17,6 +18,7 @@ import {
   enableSyncEncryption,
   forgetSftpHostKey,
   getPinnedSftpHostKey,
+  getSyncAdapterSummary,
   hasDropboxRefreshToken,
   hasGoogledriveRefreshToken,
   isCommandError,
@@ -27,6 +29,7 @@ import {
   trustSftpHostKey,
   type HostKeyPreview,
   type SyncAdapterConfig,
+  type SyncAdapterSummary,
   type SyncPreview,
 } from '../api/client';
 import { useDateFormat } from '../intl/dateFormat';
@@ -235,6 +238,13 @@ export function SyncPanel() {
   const [adoptRemoteError, setAdoptRemoteError] = useState<
     string | null
   >(null);
+  // Compact non-secret summary of the persisted adapter config.
+  // Rendered in place of the full editable form when
+  // `status?.configured`, so the "you can have multiple
+  // adapters" reading of the editable form goes away. `null`
+  // when no adapter is configured (the form takes over).
+  const [adapterSummary, setAdapterSummary] =
+    useState<SyncAdapterSummary | null>(null);
 
   const interval = intervalDraft ?? status?.interval_minutes ?? 5;
 
@@ -474,6 +484,33 @@ export function SyncPanel() {
           setSftpPasswordDraft('');
           setSftpKeyPassphraseDraft('');
         }
+        // Refresh the persisted-adapter summary so the
+        // "Verbunden mit X" card lands immediately, without
+        // waiting for the next sync-status event.
+        getSyncAdapterSummary()
+          .then(setAdapterSummary)
+          .catch((err) => {
+            // eslint-disable-next-line no-console
+            console.warn('get_sync_adapter_summary failed', err);
+          });
+        // Auto-fire preview so the user lands directly on the
+        // Adopt/Accept + E2E-checkbox step instead of having to
+        // click "Datensatz prüfen" as a separate gesture (which
+        // hid the E2E option entirely if they didn't realise
+        // the second click was needed).
+        setBusyPreview(true);
+        setPreviewError(null);
+        try {
+          const result = await previewSyncTarget(config);
+          setPreview(result);
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn('preview after configure failed', err);
+          setPreviewError(messageForError(err));
+          setPreview(null);
+        } finally {
+          setBusyPreview(false);
+        }
       } catch (err) {
         // eslint-disable-next-line no-console
         console.warn('configure_sync_adapter failed', err);
@@ -618,6 +655,7 @@ export function SyncPanel() {
     try {
       await configureSyncAdapter({ kind: 'none' });
       setPreview(null);
+      setAdapterSummary(null);
     } catch (err) {
       // eslint-disable-next-line no-console
       console.warn('configure_sync_adapter(none) failed', err);
@@ -1158,6 +1196,23 @@ export function SyncPanel() {
     };
   }, [kindDraft, sftpHostDraft, sftpPortDraft]);
 
+  // Reload the persisted-adapter summary. Called on mount, after
+  // configure succeeds (form → summary), and after disconnect
+  // (summary → form). Cheap: no IO, just a few pref reads.
+  const refreshAdapterSummary = useCallback(() => {
+    getSyncAdapterSummary()
+      .then(setAdapterSummary)
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.warn('get_sync_adapter_summary failed', err);
+        setAdapterSummary(null);
+      });
+  }, []);
+
+  useEffect(() => {
+    refreshAdapterSummary();
+  }, [refreshAdapterSummary, status?.configured]);
+
   // "Pin vergessen" — drop the stored fingerprint so the next
   // connect goes through the first-use trust dialog again. Used
   // when the user knows their server key was rotated and wants
@@ -1190,27 +1245,27 @@ export function SyncPanel() {
     <div className="sync-panel">
       <section aria-labelledby={stateHeadingId}>
         <h3 id={stateHeadingId}>{t('dialogs.settings.sync.stateTitle')}</h3>
-        <p>
+        <FocusableNote className="sync-panel__hint">
           {status?.configured
-            ? t('dialogs.settings.sync.stateConfigured', { path: pathDraft || '–' })
+            ? t('dialogs.settings.sync.stateConfiguredSimple')
             : t('dialogs.settings.sync.stateUnconfigured')}
-        </p>
+        </FocusableNote>
         {status?.configured && (
-          <p>
+          <FocusableNote className="sync-panel__hint">
             {status.e2e_enabled
               ? t('dialogs.settings.sync.e2eActive')
               : t('dialogs.settings.sync.e2eInactive')}
-          </p>
+          </FocusableNote>
         )}
-        <p>{lastSyncedLabel}</p>
+        <FocusableNote className="sync-panel__hint">{lastSyncedLabel}</FocusableNote>
         {lastReport && (
-          <p>
+          <FocusableNote className="sync-panel__hint">
             {t('dialogs.settings.sync.lastReport', {
               pushed: lastReport.pushed_logs,
               fetched: lastReport.fetched_logs,
               applied: lastReport.applied,
             })}
-          </p>
+          </FocusableNote>
         )}
         {lastError && (
           <p className="sync-panel__error" role="alert">
@@ -1282,7 +1337,38 @@ export function SyncPanel() {
 
       <section aria-labelledby={adapterHeadingId}>
         <h3 id={adapterHeadingId}>{t('dialogs.settings.sync.adapterTitle')}</h3>
-        <p>{t('dialogs.settings.sync.adapterBody')}</p>
+        {/* When configured: show a non-editable summary card plus
+            a single Disconnect button. The full form below is
+            hidden so the UI no longer reads as "you can have
+            multiple adapters" / "type into these fields to
+            switch". To swap adapters, the user has to disconnect
+            first. */}
+        {status?.configured && adapterSummary ? (
+          <div className="sync-panel__connected-summary">
+            <FocusableNote className="sync-panel__hint">
+              {t('dialogs.settings.sync.connectedSummary', {
+                kind: t(`dialogs.settings.sync.adapterKind${
+                  adapterSummary.kind.charAt(0).toUpperCase() +
+                  adapterSummary.kind.slice(1)
+                }`),
+                detail: adapterSummary.detail || '–',
+              })}
+            </FocusableNote>
+            <div className="sync-panel__actions">
+              <button
+                type="button"
+                disabled={busyAdapter}
+                onClick={() => void onDisconnect()}
+              >
+                {t('dialogs.settings.sync.adapterDisconnect')}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+        <FocusableNote className="sync-panel__hint">
+          {t('dialogs.settings.sync.adapterBody')}
+        </FocusableNote>
         <div className="sync-panel__field">
           <label>
             {t('dialogs.settings.sync.adapterKind')}
@@ -1347,9 +1433,9 @@ export function SyncPanel() {
                 </button>
               </div>
             </label>
-            <p className="sync-panel__hint">
+            <FocusableNote className="sync-panel__hint">
               {t('dialogs.settings.sync.adapterPathHint')}
-            </p>
+            </FocusableNote>
           </div>
         )}
         {kindDraft === 'webdav' && (
@@ -1364,9 +1450,9 @@ export function SyncPanel() {
                   placeholder="https://cloud.example.com/remote.php/dav/files/alice/aperio/"
                 />
               </label>
-              <p className="sync-panel__hint">
+              <FocusableNote className="sync-panel__hint">
                 {t('dialogs.settings.sync.adapterWebdavUrlHint')}
-              </p>
+              </FocusableNote>
             </div>
             <div className="sync-panel__field">
               <label>
@@ -1394,9 +1480,9 @@ export function SyncPanel() {
                   }
                 />
               </label>
-              <p className="sync-panel__hint">
+              <FocusableNote className="sync-panel__hint">
                 {t('dialogs.settings.sync.adapterWebdavPasswordHint')}
-              </p>
+              </FocusableNote>
             </div>
           </>
         )}
@@ -1424,9 +1510,9 @@ export function SyncPanel() {
                   max={65535}
                 />
               </label>
-              <p className="sync-panel__hint">
+              <FocusableNote className="sync-panel__hint">
                 {t('dialogs.settings.sync.adapterSftpPortHint')}
-              </p>
+              </FocusableNote>
             </div>
             <div className="sync-panel__field">
               <label>
@@ -1449,9 +1535,9 @@ export function SyncPanel() {
                   placeholder="/home/alice/aperio"
                 />
               </label>
-              <p className="sync-panel__hint">
+              <FocusableNote className="sync-panel__hint">
                 {t('dialogs.settings.sync.adapterSftpPathHint')}
-              </p>
+              </FocusableNote>
             </div>
             <fieldset className="sync-panel__field sync-panel__authmethod">
               <legend>
@@ -1498,21 +1584,21 @@ export function SyncPanel() {
                     }
                   />
                 </label>
-                <p className="sync-panel__hint">
+                <FocusableNote className="sync-panel__hint">
                   {t('dialogs.settings.sync.adapterSftpPasswordHint')}
-                </p>
+                </FocusableNote>
               </div>
             )}
             {pinnedFingerprint && (
               <div className="sync-panel__field sync-panel__pin">
-                <p>
-                  {t('dialogs.settings.sync.sftpPinCurrent')}
-                  {': '}
-                  <code>{pinnedFingerprint}</code>
-                </p>
-                <p className="sync-panel__hint">
+                <FocusableNote className="sync-panel__hint">
+                  {t('dialogs.settings.sync.sftpPinCurrentWithValue', {
+                    fingerprint: pinnedFingerprint,
+                  })}
+                </FocusableNote>
+                <FocusableNote className="sync-panel__hint">
                   {t('dialogs.settings.sync.sftpPinHint')}
-                </p>
+                </FocusableNote>
                 <button type="button" onClick={() => void onForgetPin()}>
                   {t('dialogs.settings.sync.sftpForgetPin')}
                 </button>
@@ -1543,9 +1629,9 @@ export function SyncPanel() {
                       </button>
                     </div>
                   </label>
-                  <p className="sync-panel__hint">
+                  <FocusableNote className="sync-panel__hint">
                     {t('dialogs.settings.sync.adapterSftpKeyPathHint')}
-                  </p>
+                  </FocusableNote>
                 </div>
                 <div className="sync-panel__field">
                   <label>
@@ -1566,11 +1652,11 @@ export function SyncPanel() {
                       }
                     />
                   </label>
-                  <p className="sync-panel__hint">
+                  <FocusableNote className="sync-panel__hint">
                     {t(
                       'dialogs.settings.sync.adapterSftpKeyPassphraseHint',
                     )}
-                  </p>
+                  </FocusableNote>
                 </div>
               </>
             )}
@@ -1638,9 +1724,9 @@ export function SyncPanel() {
                 />{' '}
                 {t('dialogs.settings.sync.adapterFtpModePlain')}
               </label>
-              <p className="sync-panel__hint">
+              <FocusableNote className="sync-panel__hint">
                 {t('dialogs.settings.sync.adapterFtpModeHint')}
-              </p>
+              </FocusableNote>
               {/* Plain mode gets an additional, stronger
                   warning rendered as role="alert" so the
                   user understands the privacy trade-off
@@ -1687,9 +1773,9 @@ export function SyncPanel() {
                   placeholder="/aperio"
                 />
               </label>
-              <p className="sync-panel__hint">
+              <FocusableNote className="sync-panel__hint">
                 {t('dialogs.settings.sync.adapterFtpPathHint')}
-              </p>
+              </FocusableNote>
             </div>
             <div className="sync-panel__field">
               <label>
@@ -1714,21 +1800,21 @@ export function SyncPanel() {
                   pick it for a LAN setup, but the surrounding
                   warning above makes the trade-off
                   explicit. */}
-              <p className="sync-panel__hint">
+              <FocusableNote className="sync-panel__hint">
                 {ftpModeDraft === 'plain'
                   ? t(
                       'dialogs.settings.sync.adapterFtpPlainPasswordHint',
                     )
                   : t('dialogs.settings.sync.adapterFtpTlsRequiredHint')}
-              </p>
+              </FocusableNote>
             </div>
           </>
         )}
         {kindDraft === 'dropbox' && (
           <>
-            <p className="sync-panel__hint">
+            <FocusableNote className="sync-panel__hint">
               {t('dialogs.settings.sync.adapterDropboxIntro')}
-            </p>
+            </FocusableNote>
             <div className="sync-panel__field">
               <label>
                 {t('dialogs.settings.sync.adapterDropboxClientId')}
@@ -1742,9 +1828,9 @@ export function SyncPanel() {
                   spellCheck={false}
                 />
               </label>
-              <p className="sync-panel__hint">
+              <FocusableNote className="sync-panel__hint">
                 {t('dialogs.settings.sync.adapterDropboxClientIdHint')}
-              </p>
+              </FocusableNote>
             </div>
             <div className="sync-panel__field">
               <label>
@@ -1758,9 +1844,9 @@ export function SyncPanel() {
                   autoComplete="off"
                 />
               </label>
-              <p className="sync-panel__hint">
+              <FocusableNote className="sync-panel__hint">
                 {t('dialogs.settings.sync.adapterDropboxClientSecretHint')}
-              </p>
+              </FocusableNote>
             </div>
             <div className="sync-panel__field">
               <label>
@@ -1773,9 +1859,9 @@ export function SyncPanel() {
                   spellCheck={false}
                 />
               </label>
-              <p className="sync-panel__hint">
+              <FocusableNote className="sync-panel__hint">
                 {t('dialogs.settings.sync.adapterDropboxPathHint')}
-              </p>
+              </FocusableNote>
             </div>
             <div className="sync-panel__actions">
               <button
@@ -1803,9 +1889,9 @@ export function SyncPanel() {
         )}
         {kindDraft === 'googledrive' && (
           <>
-            <p className="sync-panel__hint">
+            <FocusableNote className="sync-panel__hint">
               {t('dialogs.settings.sync.adapterGoogledriveIntro')}
-            </p>
+            </FocusableNote>
             <div className="sync-panel__field">
               <label>
                 {t('dialogs.settings.sync.adapterGoogledriveClientId')}
@@ -1819,11 +1905,11 @@ export function SyncPanel() {
                   spellCheck={false}
                 />
               </label>
-              <p className="sync-panel__hint">
+              <FocusableNote className="sync-panel__hint">
                 {t(
                   'dialogs.settings.sync.adapterGoogledriveClientIdHint',
                 )}
-              </p>
+              </FocusableNote>
             </div>
             <div className="sync-panel__field">
               <label>
@@ -1837,11 +1923,11 @@ export function SyncPanel() {
                   autoComplete="off"
                 />
               </label>
-              <p className="sync-panel__hint">
+              <FocusableNote className="sync-panel__hint">
                 {t(
                   'dialogs.settings.sync.adapterGoogledriveClientSecretHint',
                 )}
-              </p>
+              </FocusableNote>
             </div>
             <div className="sync-panel__field">
               <label>
@@ -1856,11 +1942,11 @@ export function SyncPanel() {
                   spellCheck={false}
                 />
               </label>
-              <p className="sync-panel__hint">
+              <FocusableNote className="sync-panel__hint">
                 {t(
                   'dialogs.settings.sync.adapterGoogledriveFolderNameHint',
                 )}
-              </p>
+              </FocusableNote>
             </div>
             <div className="sync-panel__actions">
               <button
@@ -1911,24 +1997,22 @@ export function SyncPanel() {
                 : t('dialogs.settings.sync.adapterTest')}
             </button>
           )}
-          {status?.configured && (
-            <button
-              type="button"
-              disabled={busyAdapter}
-              onClick={() => void onDisconnect()}
-            >
-              {t('dialogs.settings.sync.adapterDisconnect')}
-            </button>
-          )}
         </div>
+          </>
+        )}
       </section>
 
-      {!status?.configured && (
+      {/* Preview/onboarding stays visible while a preview result
+          is in hand, even after `status.configured` flips to true
+          (the auto-preview that fires after configure relies on
+          this — the user lands directly on the Adopt/Accept +
+          E2E checkbox without losing the section). */}
+      {(!status?.configured || preview !== null) && (
         <section aria-labelledby={previewHeadingId}>
           <h3 id={previewHeadingId}>
             {t('dialogs.settings.sync.previewTitle')}
           </h3>
-          <p>{t('dialogs.settings.sync.previewBody')}</p>
+          <FocusableNote>{t('dialogs.settings.sync.previewBody')}</FocusableNote>
           <div className="sync-panel__field">
             <label>
               {t('dialogs.settings.sync.deviceName')}
@@ -1939,9 +2023,9 @@ export function SyncPanel() {
                 placeholder="Desktop"
               />
             </label>
-            <p className="sync-panel__hint">
+            <FocusableNote className="sync-panel__hint">
               {t('dialogs.settings.sync.deviceNameHint')}
-            </p>
+            </FocusableNote>
           </div>
           <button
             type="button"
@@ -2014,7 +2098,7 @@ export function SyncPanel() {
             <h3>
               {t('dialogs.settings.sync.adoptRemoteE2eTitle')}
             </h3>
-            <p>{t('dialogs.settings.sync.adoptRemoteE2eHint')}</p>
+            <FocusableNote>{t('dialogs.settings.sync.adoptRemoteE2eHint')}</FocusableNote>
             <div className="sync-panel__field">
               <label>
                 {t('dialogs.settings.sync.adoptRemoteE2ePassphraseLabel')}
@@ -2055,12 +2139,12 @@ export function SyncPanel() {
           <h3 id={enableE2eHeadingId}>
             {t('dialogs.settings.sync.enableE2eTitle')}
           </h3>
-          <p className="sync-panel__hint">
+          <FocusableNote className="sync-panel__hint">
             {t('dialogs.settings.sync.enableE2eHint')}
-          </p>
-          <p className="sync-panel__hint sync-panel__hint--warning">
+          </FocusableNote>
+          <FocusableNote className="sync-panel__hint sync-panel__hint--warning">
             {t('dialogs.settings.sync.enableE2eMultiDeviceWarning')}
-          </p>
+          </FocusableNote>
           <div className="sync-panel__field">
             <label>
               {t('dialogs.settings.sync.enableE2ePassphraseLabel')}
@@ -2107,9 +2191,9 @@ export function SyncPanel() {
           <h3 id={passphraseHeadingId}>
             {t('dialogs.settings.sync.passphraseChangeTitle')}
           </h3>
-          <p className="sync-panel__hint">
+          <FocusableNote className="sync-panel__hint">
             {t('dialogs.settings.sync.passphraseChangeHint')}
-          </p>
+          </FocusableNote>
           <div className="sync-panel__field">
             <label>
               {t('dialogs.settings.sync.passphraseChangeOld')}
@@ -2173,9 +2257,9 @@ export function SyncPanel() {
                 : t('dialogs.settings.sync.disableE2eAction')}
             </button>
           </div>
-          <p className="sync-panel__hint">
+          <FocusableNote className="sync-panel__hint">
             {t('dialogs.settings.sync.disableE2eHint')}
-          </p>
+          </FocusableNote>
         </section>
       )}
       {/* §19.9 detailed Sync-Protokoll. Always rendered (no
@@ -2203,7 +2287,7 @@ function PreviewEmpty({
 }) {
   return (
     <div className="sync-panel__preview">
-      <p>{t('dialogs.settings.sync.previewEmpty')}</p>
+      <FocusableNote>{t('dialogs.settings.sync.previewEmpty')}</FocusableNote>
       <button
         type="button"
         disabled={busyAdopt}
@@ -2256,17 +2340,17 @@ function PreviewExisting({
     .join(', ');
   return (
     <div className="sync-panel__preview">
-      <p>{summary}</p>
-      <p>
+      <FocusableNote>{summary}</FocusableNote>
+      <FocusableNote>
         {t('dialogs.settings.sync.previewDevices', {
           count: preview.devices.length,
           names,
         })}
-      </p>
+      </FocusableNote>
       <div className="sync-panel__preview-actions">
         <div>
           <h4>{t('dialogs.settings.sync.previewAcceptTitle')}</h4>
-          <p>{t('dialogs.settings.sync.previewAcceptBody')}</p>
+          <FocusableNote>{t('dialogs.settings.sync.previewAcceptBody')}</FocusableNote>
           <button
             type="button"
             disabled={busyAccept}
@@ -2277,7 +2361,7 @@ function PreviewExisting({
         </div>
         <div>
           <h4>{t('dialogs.settings.sync.previewAdoptTitle')}</h4>
-          <p>{t('dialogs.settings.sync.previewAdoptBody')}</p>
+          <FocusableNote>{t('dialogs.settings.sync.previewAdoptBody')}</FocusableNote>
           <button
             type="button"
             disabled={busyAdopt}
@@ -2320,9 +2404,9 @@ function E2eEnableInput({
         />{' '}
         {t('dialogs.settings.sync.e2eEnableLabel')}
       </label>
-      <p className="sync-panel__hint">
+      <FocusableNote className="sync-panel__hint">
         {t('dialogs.settings.sync.e2eEnableHint')}
-      </p>
+      </FocusableNote>
       {enabled && (
         <div className="sync-panel__field">
           <label>
@@ -2334,9 +2418,9 @@ function E2eEnableInput({
               autoComplete="new-password"
             />
           </label>
-          <p className="sync-panel__hint sync-panel__hint--warning">
+          <FocusableNote className="sync-panel__hint sync-panel__hint--warning">
             {t('dialogs.settings.sync.e2eIrreversibleWarning')}
-          </p>
+          </FocusableNote>
         </div>
       )}
     </div>
@@ -2358,7 +2442,7 @@ function E2ePassphrasePrompt({
 }) {
   return (
     <div className="sync-panel__e2e">
-      <p>{t('dialogs.settings.sync.e2eRemoteRequiresPassphrase')}</p>
+      <FocusableNote>{t('dialogs.settings.sync.e2eRemoteRequiresPassphrase')}</FocusableNote>
       <div className="sync-panel__field">
         <label>
           {t('dialogs.settings.sync.e2ePassphrase')}

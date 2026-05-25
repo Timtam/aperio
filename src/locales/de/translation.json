@@ -247,8 +247,7 @@
         "uninstall": {
           "button": "Deinstallieren…",
           "title": "Plugin deinstallieren",
-          "bodyPrefix": "",
-          "bodyVersion": "(Version {{version}}) von diesem Gerät entfernen?",
+          "body": "{{name}} (Version {{version}}) von diesem Gerät entfernen?",
           "warning": "⚠ Konten, die dieses Plugin nutzen, funktionieren nicht mehr, bis du es erneut installierst. Ihre Konfiguration bleibt erhalten — sie werden automatisch wieder aktiv, sobald das Plugin verfügbar ist.",
           "confirm": "Deinstallieren",
           "cancel": "Abbrechen",
@@ -316,8 +315,9 @@
       },
       "sync": {
         "stateTitle": "Status",
-        "stateConfigured": "Adapter verbunden: {{path}}",
+        "stateConfiguredSimple": "Synchronisations-Adapter ist verbunden. Verbindungsdetails siehe unten.",
         "stateUnconfigured": "Noch kein Sync-Adapter eingerichtet.",
+        "connectedSummary": "Verbunden mit {{kind}}: {{detail}}",
         "stateInFlight": "Wird synchronisiert …",
         "stateLastSynced": "Letzter erfolgreicher Abgleich: {{time}}",
         "stateNeverSynced": "Noch kein Abgleich durchgeführt.",
@@ -423,6 +423,7 @@
         "sftpTrustAcceptChanged": "Neuen Fingerprint akzeptieren",
         "sftpTrustCancel": "Abbrechen",
         "sftpPinCurrent": "Gespeicherter Fingerprint",
+        "sftpPinCurrentWithValue": "Gespeicherter Fingerprint: {{fingerprint}}",
         "sftpPinHint": "Aperio lehnt jede Verbindung zu diesem Server ab, deren Schlüssel nicht zum Pin passt. Den Pin verwerfen, wenn der Server-Schlüssel bekanntermaßen rotiert wurde (z.B. nach einem Reinstall).",
         "sftpForgetPin": "Pin verwerfen",
         "sftpForgetPinConfirm": "Den gespeicherten Fingerprint für {{hostPort}} verwerfen? Die nächste Verbindung läuft erneut über den Erstkontakt-Bestätigungsdialog.",

@@ -350,6 +350,7 @@ pub fn run() {
             commands::test_sync_adapter,
             commands::sync_now,
             commands::get_sync_status,
+            commands::get_sync_adapter_summary,
             commands::set_sync_interval,
             // Phase Sf (DESIGN.md §19.11): onboarding flow.
             commands::preview_sync_target,

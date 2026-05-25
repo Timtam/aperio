@@ -942,6 +942,18 @@ export type SyncResolutionChoice =
 export const getSyncStatus = () =>
   invoke<SyncStatus>('get_sync_status');
 
+/** Non-secret summary of the persisted adapter config. Returns
+ *  `null` when no adapter is configured (or kind == none).
+ *  Used by the Settings → Sync panel's "Verbunden mit X" card
+ *  so the user sees what they're connected to without exposing
+ *  the editable form. */
+export interface SyncAdapterSummary {
+  kind: string;
+  detail: string;
+}
+export const getSyncAdapterSummary = () =>
+  invoke<SyncAdapterSummary | null>('get_sync_adapter_summary');
+
 export const syncNow = () =>
   invoke<SyncRoundReport>('sync_now');
 
