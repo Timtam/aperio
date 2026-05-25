@@ -297,6 +297,70 @@ macro_rules! declare_interactive_auth {
     };
 }
 
+/// Emit the optional `aperio_plugin_discover` symbol — the
+/// service-discovery entry point the host's
+/// [`plugin_core::PluginManager::discover`] looks up via
+/// libloading.
+///
+/// Sibling of [`declare_interactive_auth!`]: the plugin author
+/// writes a single typed handler, the macro emits the
+/// `#[no_mangle]` wrapper that bridges the raw FFI args to a
+/// fresh tokio runtime via
+/// [`crate::discover::discover_with`].
+///
+/// ```ignore
+/// async fn run_autodiscover(json: String) -> Result<Vec<u8>, String> {
+///     let cfg: MyDiscoverConfig = serde_json::from_str(&json)
+///         .map_err(|e| e.to_string())?;
+///     let endpoints = my_discover(&cfg.email, &cfg.password)
+///         .await
+///         .map_err(|e| e.to_string())?;
+///     Ok(serde_json::to_vec(&endpoints).unwrap())
+/// }
+///
+/// plugin_sdk::declare_discover! {
+///     handler: run_autodiscover,
+/// }
+/// ```
+///
+/// At most one `declare_discover!` invocation per crate —
+/// emitting two copies of `aperio_plugin_discover` would
+/// collide at link time.
+///
+/// ## Memory ownership
+///
+/// Same contract as [`declare_interactive_auth!`]: `args_ptr`
+/// + `args_len` is a host-owned byte buffer valid for the
+/// duration of the call; the returned payload bytes are
+/// plugin-allocated and the host drains them via the
+/// response's `free` fn-pointer right after copying.
+#[macro_export]
+macro_rules! declare_discover {
+    (handler: $handler:path $(,)?) => {
+        /// `aperio_plugin_discover` symbol — see
+        /// `aperio_plugin.h`. The host looks this up by name via
+        /// libloading; plugins that don't export it surface as
+        /// `DiscoverError::Unsupported`.
+        ///
+        /// # Safety
+        ///
+        /// FFI export. `args_ptr` + `args_len` must describe a
+        /// valid byte buffer the host owns for the duration of
+        /// the call.
+        #[no_mangle]
+        pub unsafe extern "C" fn aperio_plugin_discover(
+            args_ptr: *const u8,
+            args_len: usize,
+        ) -> $crate::plugin_core::ffi::PluginCallResult {
+            $crate::discover::discover_with(
+                args_ptr,
+                args_len,
+                |json| async move { $handler(json).await },
+            )
+        }
+    };
+}
+
 #[cfg(test)]
 mod tests {
     //! The macro-expansion happens inside tests via a sub-module

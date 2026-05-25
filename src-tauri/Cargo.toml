@@ -49,20 +49,15 @@ plugin-core.workspace = true
 # routes through `PluginManager::interactive_auth` instead of
 # linking the adapter crates directly.
 sync-adapter-sftp = { path = "../crates/sync-adapter-sftp" }
-# Calendar-adapter direct dep the host still needs after the
-# plugin migration:
-#   - cal-adapter-ews: Microsoft Autodiscover.svc service-
-#     discovery helpers (discover, discover_client) used by the
-#     `discover_ews_endpoint` command. No plugin-side discovery
-#     surface yet — separate iteration.
-# Google / Microsoft Graph OAuth dances moved into the plugins
-# themselves via `interactive_auth` (Iteration 7); the host
-# routes through `PluginManager::interactive_auth` instead of
-# linking the adapter crates directly. The 4 simple adapters
-# (caldav, ical, vikunja, todoist) are fully plugin-routed end-
-# to-end after Iteration 6b; their smoke-tests open ephemeral
-# plugin instances + drop them.
-cal-adapter-ews = { path = "../crates/cal-adapter-ews" }
+# No direct calendar-adapter deps left after Iteration 8.
+# EWS Autodiscover moved into the cal-adapter-ews plugin via
+# `aperio_plugin_discover` (DESIGN.md §20 service-discovery
+# extension); the host routes through `PluginManager::discover`
+# with a local `DiscoveredEndpoints` serde shape that matches
+# the plugin's response JSON. Google / Microsoft Graph OAuth
+# already left in Iteration 7; the 4 simple adapters (caldav,
+# ical, vikunja, todoist) were fully plugin-routed end-to-end
+# after Iteration 6b.
 
 # NOTE: the 13 *-plugin crates are NOT listed as deps here.
 # Plugins are loaded via dlopen from `plugins/bundled/` at

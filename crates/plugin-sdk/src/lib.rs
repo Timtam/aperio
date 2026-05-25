@@ -98,9 +98,13 @@
 //!   `PLUGIN_CALL_ERR_*` status codes.
 //! - [`args`] — decode the host's JSON-encoded args pointer pair
 //!   into a typed value.
-//! - [`macros`] — `declare_lifecycle!`, the only macro for now.
+//! - [`interactive_auth`] / [`discover`] — optional FFI entry
+//!   points for OAuth flows + service-discovery cascades.
+//! - [`macros`] — `declare_lifecycle!`, `declare_interactive_auth!`,
+//!   `declare_discover!`.
 
 pub mod args;
+pub mod discover;
 pub mod error_map;
 pub mod instance;
 pub mod interactive_auth;
@@ -114,6 +118,7 @@ pub mod runtime;
 pub use plugin_core;
 
 pub use args::decode_args;
+pub use discover::discover_with;
 pub use error_map::{cal_error_to_response, sync_error_to_response};
 pub use instance::{InitError, PluginInstance};
 pub use interactive_auth::interactive_auth_with;

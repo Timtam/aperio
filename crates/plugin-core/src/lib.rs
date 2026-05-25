@@ -52,9 +52,9 @@ pub use ffi::{
     PLUGIN_CALL_ERR_PROTOCOL, PLUGIN_CALL_ERR_UNSUPPORTED, PLUGIN_CALL_OK,
 };
 pub use manager::{
-    InteractiveAuthError, InteractiveAuthFn, LoadedInstance, LoadedPlugin,
-    PluginManager, BUNDLED_PLUGINS_DIR, SYMBOL_INTERACTIVE_AUTH,
-    USER_PLUGINS_DIR,
+    DiscoverError, DiscoverFn, InteractiveAuthError, InteractiveAuthFn,
+    LoadedInstance, LoadedPlugin, PluginManager, BUNDLED_PLUGINS_DIR,
+    SYMBOL_DISCOVER, SYMBOL_INTERACTIVE_AUTH, USER_PLUGINS_DIR,
 };
 pub use manifest::{PluginManifest, MANIFEST_FILENAME};
 pub use plugin_type::PluginType;

@@ -358,3 +358,37 @@ plugin_sdk::declare_lifecycle! {
     open_instance: plugin_open_instance,
     close_instance: plugin_close_instance,
 }
+
+// ─────────────────────────────────────────────────────────────
+// Service discovery (Microsoft POX Autodiscover)
+// ─────────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+struct DiscoverArgs {
+    email: String,
+    password: String,
+}
+
+async fn plugin_discover(args_json: String) -> Result<Vec<u8>, String> {
+    let args: DiscoverArgs = serde_json::from_str(&args_json)
+        .map_err(|e| format!("malformed discover args: {e}"))?;
+    let email = args.email.trim();
+    let password = args.password.as_str();
+    if email.is_empty() {
+        return Err("email must not be empty".to_string());
+    }
+    if password.is_empty() {
+        return Err("password must not be empty".to_string());
+    }
+    let http = cal_adapter_ews::discover_client()
+        .map_err(|e| format!("build discover client: {e}"))?;
+    let endpoints = cal_adapter_ews::discover(email, password, &http)
+        .await
+        .map_err(|e| format!("EWS Autodiscover: {e}"))?;
+    serde_json::to_vec(&endpoints)
+        .map_err(|e| format!("serialise DiscoveredEndpoints: {e}"))
+}
+
+plugin_sdk::declare_discover! {
+    handler: plugin_discover,
+}

@@ -20,8 +20,9 @@ mod sync;
 mod tasks;
 mod user_prefs;
 
-use plugin_core::manager::InteractiveAuthError;
+use plugin_core::manager::{DiscoverError, InteractiveAuthError};
 use plugin_core::PluginManager;
+use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
 
@@ -118,6 +119,48 @@ pub fn interactive_auth_error_to_command(err: InteractiveAuthError) -> CommandEr
         // frontend renders it next to the Sign-in button.
         InteractiveAuthError::Plugin(msg) => CommandError {
             code: "auth",
+            message: msg,
+        },
+    }
+}
+
+/// Run a service-discovery cascade via the plugin manager and
+/// deserialise the result into the caller's `T` (the host stays
+/// adapter-crate-agnostic — only the plugin knows the discovery
+/// protocol's response shape; the host names the JSON layout it
+/// expects via `T`).
+pub async fn run_plugin_discover<T: DeserializeOwned>(
+    plugin_manager: &PluginManager,
+    plugin_id: &str,
+    args_json: Value,
+) -> Result<T, CommandError> {
+    let bytes = plugin_manager
+        .discover(plugin_id, &args_json.to_string())
+        .await
+        .map_err(discover_error_to_command)?;
+    serde_json::from_slice(&bytes).map_err(|e| CommandError {
+        code: "protocol",
+        message: format!("plugin {plugin_id} returned non-JSON discover blob: {e}"),
+    })
+}
+
+pub fn discover_error_to_command(err: DiscoverError) -> CommandError {
+    match err {
+        DiscoverError::PluginMissing(id) => CommandError {
+            code: "plugin_missing",
+            message: format!("plugin {id} is not loaded"),
+        },
+        DiscoverError::Unsupported(id) => CommandError {
+            code: "unsupported",
+            message: format!("plugin {id} doesn't support discover"),
+        },
+        // Discovery failures land under `not_found` so the
+        // AccountsDialog can suggest "enter the endpoint
+        // manually" — the plugin's own message ("Autodiscover
+        // HTTP 401", "no endpoint for hs-anhalt.de", …) carries
+        // the actionable text.
+        DiscoverError::Plugin(msg) => CommandError {
+            code: "not_found",
             message: msg,
         },
     }

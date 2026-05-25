@@ -287,6 +287,40 @@ PluginCallResult aperio_plugin_interactive_auth(
     size_t         args_len
 );
 
+/*
+ * Optional: service-discovery entry point.
+ *
+ * Plugins that own a service-discovery protocol (EWS
+ * Autodiscover today; CalDAV well-known URIs / Microsoft Graph
+ * endpoint probing are candidates for later) expose this
+ * symbol in addition to the lifecycle exports. Plugins that
+ * don't — most — leave it unexported and the host's
+ * PluginManager surfaces `DiscoverError::Unsupported` for any
+ * call against them.
+ *
+ * `args_json` carries whatever inputs the discovery cascade
+ * needs — for EWS that's typically `{"email": "...",
+ * "password": "..."}`. The plugin runs the cascade to
+ * completion and returns the resolved endpoint(s) as a JSON
+ * document in the PluginCallResult's payload. The host parses
+ * the JSON into its UI-facing shape.
+ *
+ * Returning `APERIO_PLUGIN_CALL_ERR_NOT_FOUND` (or any other
+ * non-OK status) surfaces the plugin's payload bytes verbatim
+ * as the error message, so discovery-specific errors keep their
+ * actionable text ("no endpoint for hs-anhalt.de",
+ * "Autodiscover HTTP 401", …).
+ *
+ * The function may block for several seconds while the cascade
+ * runs (each probe is one HTTP request). The host invokes it
+ * inside its own `tokio::task::spawn_blocking` so the reactor
+ * stays free.
+ */
+PluginCallResult aperio_plugin_discover(
+    const uint8_t *args_ptr,
+    size_t         args_len
+);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

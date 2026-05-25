@@ -1,20 +1,14 @@
 //! Account management commands (DESIGN.md §6.2 + §6.4).
 
-// EWS keeps a direct import for the Microsoft Autodiscover.svc
-// flow + its typed errors — the plugin ABI doesn't expose a
-// service-discovery surface yet (deferred to its own iteration).
-use cal_adapter_ews::{
-    discover as ews_discover, discover_client as ews_discover_client,
-    DiscoveredEndpoints, EwsError,
-};
 use cal_core::{CalendarFeature, TasksFeature};
 use plugin_core::shim::{FfiCalendarAdapter, FfiTasksAdapter};
 use plugin_core::PluginManager;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::sync::Arc;
 use tauri::State;
 
-use super::{run_plugin_auth, CommandError, CommandResult};
+use super::{run_plugin_auth, run_plugin_discover, CommandError, CommandResult};
 use crate::accounts::{Account, AccountsError, AccountsRepo, AdapterKind};
 use crate::db::DbHandle;
 use crate::registry::AdapterRegistry;
@@ -599,17 +593,31 @@ pub struct TestTodoistRequest {
     pub api_token: String,
 }
 
-/// Probe the user's domain for an EWS endpoint via POX Autodiscover.
-/// The frontend's "Discover" button calls this with the e-mail
-/// address + password (those are the only inputs Microsoft's
-/// autodiscover surface needs). On success the resolved EWS URL is
-/// echoed back so the dialog can pre-fill the endpoint field.
+/// Probe the user's domain for an EWS endpoint via POX
+/// Autodiscover. The frontend's "Discover" button calls this
+/// with the e-mail address + password (those are the only
+/// inputs Microsoft's autodiscover surface needs). On success
+/// the resolved EWS URL is echoed back so the dialog can pre-
+/// fill the endpoint field.
 ///
-/// We return `DiscoveredEndpoints` rather than a bare URL so a later
-/// patch can surface a second result (e.g. OOF / OAB URL) without
-/// having to break the command shape.
+/// The cascade runs inside the EWS plugin via
+/// `aperio_plugin_discover`; the host stays adapter-crate-
+/// agnostic by declaring the response shape locally
+/// ([`DiscoveredEndpoints`]) and letting `run_plugin_discover`
+/// deserialise the plugin's JSON into it. The Tauri command's
+/// JSON envelope is unchanged so the frontend keeps working.
+///
+/// Trade-off vs the pre-plugin path: the typed `EwsError`
+/// variants no longer cross into the host — all
+/// `Autodiscover HTTP {status}` / SOAP fault messages flow back
+/// under `code: "not_found"` with the plugin's message text
+/// verbatim. The frontend already renders the message field, so
+/// the user-visible UX is unchanged; a future plugin-ABI
+/// extension could thread a typed status enum across the FFI
+/// boundary if we want per-category styling back.
 #[tauri::command]
 pub async fn discover_ews_endpoint(
+    plugin_manager: State<'_, Arc<PluginManager>>,
     request: DiscoverEwsRequest,
 ) -> CommandResult<DiscoveredEndpoints> {
     let email = request.email.trim();
@@ -626,38 +634,28 @@ pub async fn discover_ews_endpoint(
             message: "Password must not be empty.".into(),
         });
     }
-    let http = ews_discover_client().map_err(ews_discover_error_to_command)?;
-    ews_discover(email, password, &http)
-        .await
-        .map_err(ews_discover_error_to_command)
+    run_plugin_discover(
+        plugin_manager.inner(),
+        PLUGIN_ID_EWS,
+        json!({ "email": email, "password": password }),
+    )
+    .await
 }
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct DiscoverEwsRequest {
     pub email: String,
     pub password: String,
 }
 
-fn ews_discover_error_to_command(err: EwsError) -> CommandError {
-    use EwsError::*;
-    let (code, message) = match err {
-        Network(m) => ("network", m),
-        Http {
-            status: 401,
-            message,
-        } => ("auth", message),
-        Http { status, message } => (
-            "protocol",
-            format!("Autodiscover HTTP {status}: {message}"),
-        ),
-        Protocol(m) => ("protocol", m),
-        Config(m) => ("invalid_input", m),
-        Soap { code, message } => {
-            ("protocol", format!("Autodiscover SOAP {code}: {message}"))
-        }
-        DiscoveryFailed(m) => ("not_found", m),
-    };
-    CommandError { code, message }
+/// Host-side mirror of `cal_adapter_ews::DiscoveredEndpoints`.
+/// Field names + types match the plugin's serialised shape so
+/// `serde_json` round-trips cleanly and the frontend's existing
+/// `{ ews_url, account_email }` payload stays byte-identical.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiscoveredEndpoints {
+    pub ews_url: String,
+    pub account_email: String,
 }
 
 #[tauri::command]

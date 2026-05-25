@@ -77,6 +77,22 @@ pub type InteractiveAuthFn =
 /// Canonical symbol name for the interactive-auth entry point.
 pub const SYMBOL_INTERACTIVE_AUTH: &[u8] = b"aperio_plugin_interactive_auth";
 
+/// Function-pointer type for the optional
+/// `aperio_plugin_discover` symbol. Plugins that own a service-
+/// discovery surface (EWS Autodiscover, CalDAV well-known URIs,
+/// …) export this alongside the lifecycle exports.
+///
+/// `args_ptr` / `args_len` carry a JSON document with the inputs
+/// discovery needs (e.g. `{"email": "...", "password": "..."}`);
+/// the returned [`PluginCallResult`]'s payload is a JSON document
+/// the host parses into its UI-facing shape. The host stays
+/// adapter-crate-agnostic — only the plugin knows the protocol.
+pub type DiscoverFn =
+    unsafe extern "C" fn(args_ptr: *const u8, args_len: usize) -> PluginCallResult;
+
+/// Canonical symbol name for the discover entry point.
+pub const SYMBOL_DISCOVER: &[u8] = b"aperio_plugin_discover";
+
 /// One loaded plugin — manifest + library handle + descriptor
 /// pointer + the `destroy` symbol we need to call before unload.
 ///
@@ -102,6 +118,13 @@ pub struct LoadedPlugin {
     /// when the plugin doesn't export the symbol — most plugins
     /// don't need an OAuth dance + leave it unexported.
     interactive_auth_fn: Option<InteractiveAuthFn>,
+
+    /// Cached `aperio_plugin_discover` fn-pointer. `None` when
+    /// the plugin doesn't expose a service-discovery surface —
+    /// most don't (only EWS Autodiscover today; CalDAV well-
+    /// known URIs and Microsoft Graph endpoint probing are
+    /// candidates for later).
+    discover_fn: Option<DiscoverFn>,
 
     /// The dlopen'd library. Drop order:
     /// `aperio_plugin_destroy` → `library.drop()` (which calls
@@ -403,6 +426,17 @@ impl PluginManager {
                 .map(|sym| *sym)
         };
 
+        // `aperio_plugin_discover` is optional too — only adapters
+        // that own a discovery protocol (EWS Autodiscover today)
+        // export it. Same caching shape as interactive_auth so the
+        // per-call path stays a function-pointer dispatch.
+        let discover_fn: Option<DiscoverFn> = unsafe {
+            library
+                .get::<DiscoverFn>(SYMBOL_DISCOVER)
+                .ok()
+                .map(|sym| *sym)
+        };
+
         // ABI cross-check between the manifest's claim + the
         // descriptor's claim. They MUST match — a divergence
         // would mean either the plugin's build hooked up the
@@ -447,6 +481,7 @@ impl PluginManager {
             plugin_ptr,
             destroy_fn,
             interactive_auth_fn,
+            discover_fn,
             library: Some(library),
         };
         let id = loaded.manifest.id.clone();
@@ -460,10 +495,11 @@ impl PluginManager {
     /// host binary — no `dlopen`, no [`Library`] to retain.
     ///
     /// Static-linked plugins don't get an `interactive_auth_fn`
-    /// — the named-symbol lookup mechanism the dlopen path uses
-    /// has no static-link analogue. Plugins that need
-    /// interactive_auth must therefore be dlopen-loaded
-    /// (relevant for any OAuth-style adapter).
+    /// or `discover_fn` — the named-symbol lookup mechanism the
+    /// dlopen path uses has no static-link analogue. Plugins
+    /// that need either entry point must therefore be dlopen-
+    /// loaded (relevant for any OAuth-style or Autodiscover-
+    /// style adapter).
     pub fn register_static(
         &self,
         manifest: PluginManifest,
@@ -482,6 +518,7 @@ impl PluginManager {
             plugin_ptr: descriptor,
             destroy_fn,
             interactive_auth_fn: None,
+            discover_fn: None,
             library: None,
         };
         let id = loaded.manifest.id.clone();
@@ -705,6 +742,91 @@ pub enum InteractiveAuthError {
     Plugin(String),
 }
 
+impl PluginManager {
+    /// Run the given plugin's `discover` hook with the supplied
+    /// JSON args + return the resulting endpoints blob (typically
+    /// a JSON document the host parses into its UI shape). Async
+    /// because service-discovery cascades can take a few seconds
+    /// per probe and shouldn't block the reactor — the call runs
+    /// on the host's blocking pool via
+    /// `tokio::task::spawn_blocking`.
+    ///
+    /// Errors mirror [`Self::interactive_auth`]:
+    ///   - [`DiscoverError::PluginMissing`] — no plugin loaded
+    ///     under the given id.
+    ///   - [`DiscoverError::Unsupported`] — plugin exists but
+    ///     doesn't export the `aperio_plugin_discover` symbol
+    ///     (adapters whose endpoints are hard-coded or supplied
+    ///     by the user directly).
+    ///   - [`DiscoverError::Plugin`] — the plugin returned a
+    ///     non-OK status; the message comes through verbatim
+    ///     so the user sees actionable text ("no EWS endpoint
+    ///     found for hs-anhalt.de", "autodiscover HTTP 401",
+    ///     …).
+    pub async fn discover(
+        &self,
+        plugin_id: &str,
+        args_json: &str,
+    ) -> Result<Vec<u8>, DiscoverError> {
+        let plugin = self
+            .get(plugin_id)
+            .ok_or_else(|| DiscoverError::PluginMissing(plugin_id.to_string()))?;
+        let discover_fn = plugin
+            .discover_fn
+            .ok_or_else(|| DiscoverError::Unsupported(plugin_id.to_string()))?;
+        let plugin_for_drop = plugin.clone();
+        let args = args_json.as_bytes().to_vec();
+        let join = tokio::task::spawn_blocking(move || {
+            // SAFETY: discover_fn was looked up out of the same
+            // library that plugin_for_drop holds open; args is a
+            // Vec<u8> we own for the duration of the synchronous
+            // call.
+            let result = unsafe { discover_fn(args.as_ptr(), args.len()) };
+            // SAFETY: result.payload is owned by the plugin; we
+            // copy bytes out + free in place before the buffer
+            // goes out of scope on the plugin's side.
+            let bytes = unsafe { result.payload.as_slice().to_vec() };
+            let status = result.status;
+            let mut payload = result.payload;
+            unsafe { payload.free_in_place() };
+            (status, bytes)
+        })
+        .await;
+        drop(plugin_for_drop);
+        let (status, bytes) = join.map_err(|err| {
+            DiscoverError::Plugin(format!("plugin task: {err}"))
+        })?;
+        if status == PLUGIN_CALL_OK {
+            Ok(bytes)
+        } else {
+            let msg = String::from_utf8_lossy(&bytes).into_owned();
+            Err(DiscoverError::Plugin(format!(
+                "plugin status {status}: {msg}",
+            )))
+        }
+    }
+}
+
+/// Reasons [`PluginManager::discover`] can fail.
+#[derive(Debug, thiserror::Error)]
+pub enum DiscoverError {
+    /// No plugin loaded under this id.
+    #[error("plugin not installed: {0}")]
+    PluginMissing(String),
+
+    /// Plugin is loaded but doesn't expose an
+    /// `aperio_plugin_discover` entry point — the host should
+    /// fall back to user-supplied endpoint input.
+    #[error("plugin {0} doesn't support discover")]
+    Unsupported(String),
+
+    /// Plugin returned a non-OK status. Carries the plugin's
+    /// own error message so the user sees actionable text
+    /// ("no endpoint found for hs-anhalt.de", "HTTP 401", …).
+    #[error("{0}")]
+    Plugin(String),
+}
+
 
 /// Default subdir under the data dir / app dir where bundled
 /// plugins are staged. The release build pipeline copies each
@@ -810,6 +932,7 @@ pub mod test_support {
             plugin_ptr: descriptor,
             destroy_fn,
             interactive_auth_fn: None,
+            discover_fn: None,
             library: None,
         }
     }
