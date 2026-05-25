@@ -1,0 +1,11 @@
+{
+  "id": "com.aperio.sync-adapter-googledrive",
+  "name": "Aperio Google Drive",
+  "version": "0.1.0",
+  "plugin_type": "sync-adapter",
+  "abi_version": 1,
+  "min_app_version": "0.1.0",
+  "author": "Aperio Contributors",
+  "description": "Bundled sync adapter for Google Drive (API v3 + OAuth2 PKCE, drive.file scope).",
+  "signed": false
+}

@@ -25,6 +25,11 @@ members = [
     "crates/sync-adapter-googledrive",
     "crates/sync-adapter-local",
     "crates/sync-adapter-local-plugin",
+    "crates/sync-adapter-webdav-plugin",
+    "crates/sync-adapter-ftp-plugin",
+    "crates/sync-adapter-sftp-plugin",
+    "crates/sync-adapter-dropbox-plugin",
+    "crates/sync-adapter-googledrive-plugin",
 
     # Videokonferenz-Adapter
     "crates/vc-adapter-zoom",

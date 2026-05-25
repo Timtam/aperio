@@ -1,0 +1,11 @@
+{
+  "id": "com.aperio.sync-adapter-ftp",
+  "name": "Aperio FTPS",
+  "version": "0.1.0",
+  "plugin_type": "sync-adapter",
+  "abi_version": 1,
+  "min_app_version": "0.1.0",
+  "author": "Aperio Contributors",
+  "description": "Bundled sync adapter for FTP servers — explicit FTPS (AUTH TLS), implicit FTPS, or plain unencrypted FTP for legacy LAN setups.",
+  "signed": false
+}

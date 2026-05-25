@@ -5496,6 +5496,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "sync-adapter-dropbox-plugin"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "plugin-core",
+ "plugin-sdk",
+ "serde",
+ "serde_json",
+ "sync-adapter-dropbox",
+ "sync-core",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "sync-adapter-ftp"
 version = "0.1.0"
 dependencies = [
@@ -5509,6 +5525,22 @@ dependencies = [
  "tokio",
  "tracing",
  "webpki-roots 0.26.11",
+]
+
+[[package]]
+name = "sync-adapter-ftp-plugin"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "plugin-core",
+ "plugin-sdk",
+ "serde",
+ "serde_json",
+ "sync-adapter-ftp",
+ "sync-core",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -5530,6 +5562,22 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "sync-adapter-googledrive-plugin"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "plugin-core",
+ "plugin-sdk",
+ "serde",
+ "serde_json",
+ "sync-adapter-googledrive",
+ "sync-core",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -5581,6 +5629,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "sync-adapter-sftp-plugin"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "plugin-core",
+ "plugin-sdk",
+ "serde",
+ "serde_json",
+ "sync-adapter-sftp",
+ "sync-core",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "sync-adapter-webdav"
 version = "0.1.0"
 dependencies = [
@@ -5596,6 +5660,22 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "sync-adapter-webdav-plugin"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "plugin-core",
+ "plugin-sdk",
+ "serde",
+ "serde_json",
+ "sync-adapter-webdav",
+ "sync-core",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
