@@ -650,6 +650,157 @@ button[aria-disabled='true'] {
   line-height: 1.4;
 }
 
+/* Plugins panel (Settings → Plugins, DESIGN.md §20.10).
+ * Groups plugins by plugin_type with one card per loaded
+ * plugin; cards hold name + version + enable toggle in the
+ * header, metadata in a definition list, capability/hook
+ * badges, and (for community plugins) an Uninstall button at
+ * the bottom. */
+.plugins-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-1);
+}
+
+.plugins-panel__actions {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.plugins-panel__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.plugins-panel__type-heading {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.plugins-panel__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.plugins-panel__row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-panel);
+}
+
+/* Disabled rows dim slightly so the user sees at a glance
+ * which plugins are switched off. The toggle is still
+ * fully operable. */
+.plugins-panel__row--disabled {
+  opacity: 0.65;
+}
+
+.plugins-panel__row-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.plugins-panel__name {
+  font-weight: 600;
+  flex: 1 1 auto;
+}
+
+.plugins-panel__version {
+  font-size: var(--font-size-sm);
+  color: var(--color-fg-muted);
+}
+
+.plugins-panel__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-left: auto;
+}
+
+.plugins-panel__toggle-label {
+  font-size: var(--font-size-sm);
+  color: var(--color-fg-muted);
+  cursor: pointer;
+}
+
+.plugins-panel__id {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: var(--font-size-xs);
+  color: var(--color-fg-muted);
+  word-break: break-all;
+}
+
+.plugins-panel__description {
+  margin: 0;
+  line-height: 1.4;
+}
+
+/* Definition-list grid: 2 columns (label / value). Labels
+ * read as compact captions; values fill the remaining
+ * width. */
+.plugins-panel__meta {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+  font-size: var(--font-size-sm);
+}
+
+.plugins-panel__meta dt {
+  color: var(--color-fg-muted);
+  font-weight: 500;
+}
+
+.plugins-panel__meta dd {
+  margin: 0;
+}
+
+/* Capability + hook badges. Inline-list of small pills under
+ * the metadata; title tooltips carry the full description for
+ * screen reader users. */
+.plugins-panel__badges {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.plugins-panel__badge {
+  font-size: var(--font-size-xs);
+  padding: 2px var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-bg-elevated);
+  color: var(--color-fg-muted);
+}
+
+/* Per-row action area (currently just the Uninstall button
+ * for community plugins). Right-aligned so it doesn't fight
+ * the metadata for the eye. */
+.plugins-panel__row-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .reminders__list {
   display: flex;
   flex-direction: column;

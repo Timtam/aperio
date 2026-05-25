@@ -290,7 +290,7 @@ export function PluginsPanel() {
       <div className="plugins-panel__actions">
         <button
           type="button"
-          className="form__button"
+          className="form__action"
           onClick={onClickInstall}
         >
           {t('dialogs.settings.plugins.install.button')}
@@ -427,7 +427,7 @@ function ConfirmInstallModal({
       <div className="form__actions">
         <button
           type="button"
-          className="form__button form__button--primary"
+          className="form__action form__action--primary"
           onClick={onConfirm}
           disabled={installing}
         >
@@ -437,7 +437,7 @@ function ConfirmInstallModal({
         </button>
         <button
           type="button"
-          className="form__button"
+          className="form__action"
           onClick={onCancel}
           disabled={installing}
         >
@@ -539,7 +539,7 @@ function PluginRow({
         <div className="plugins-panel__row-actions">
           <button
             type="button"
-            className="form__button form__button--danger"
+            className="form__action form__action--danger"
             onClick={() => onUninstall(plugin)}
           >
             {t('dialogs.settings.plugins.uninstall.button')}
@@ -598,7 +598,7 @@ function ConfirmUninstallModal({
       <div className="form__actions">
         <button
           type="button"
-          className="form__button form__button--danger"
+          className="form__action form__action--danger"
           onClick={onConfirm}
           disabled={uninstalling}
         >
@@ -608,7 +608,7 @@ function ConfirmUninstallModal({
         </button>
         <button
           type="button"
-          className="form__button"
+          className="form__action"
           onClick={onCancel}
           disabled={uninstalling}
         >
