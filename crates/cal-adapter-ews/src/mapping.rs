@@ -958,6 +958,490 @@ fn parse_until_date(until: &str) -> Option<String> {
 
 // ── CreateItem / UpdateItem response parsers ─────────────────────────────
 
+// ── EWS recurrence → RRULE (inverse of rrule_to_ews_recurrence) ───────────
+//
+// The Outlook-style read path (SyncFolderItems / FindItem without
+// CalendarView) delivers recurring series as a single master with a
+// `<t:Recurrence>` child carrying the structured pattern + range.
+// cal-core's `Event.recurrence.rrule` holds RFC-5545 RRULE strings,
+// matching what CalDAV/iCal produce — so the bridge below
+// translates the structured EWS shape into an RRULE so the frontend
+// expander (`src/intl/recurrence.ts`) renders EWS series the same
+// way as the other adapters.
+//
+// Coverage tracks the writer (rrule_to_ews_recurrence) one-to-one:
+//
+//   - DailyRecurrence            ↔  FREQ=DAILY[;INTERVAL=n]
+//   - WeeklyRecurrence           ↔  FREQ=WEEKLY[;INTERVAL=n][;BYDAY=...]
+//   - AbsoluteMonthlyRecurrence  ↔  FREQ=MONTHLY[;INTERVAL=n];BYMONTHDAY=n
+//   - AbsoluteYearlyRecurrence   ↔  FREQ=YEARLY;BYMONTH=n;BYMONTHDAY=n
+//   - NoEndRecurrence            ↔  (no UNTIL / COUNT)
+//   - NumberedRecurrence         ↔  COUNT=n
+//   - EndDateRecurrence          ↔  UNTIL=YYYYMMDD
+//
+// Relative monthly/yearly ("first Monday") still falls under "not
+// yet supported by Aperio's EWS writer" — we surface those as a
+// Protocol error so they don't silently turn into the wrong rule on
+// the read side either.
+
+/// Structured `<t:Recurrence>` parsed straight out of EWS XML. Each
+/// pattern + range variant carries only the fields RFC 5545 needs;
+/// the conversion to RRULE happens via [`Self::to_rrule`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EwsRecurrence {
+    pub pattern: EwsRecurrencePattern,
+    pub range: EwsRecurrenceRange,
+}
+
+/// Pattern half of an EWS recurrence (the "how often" part).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EwsRecurrencePattern {
+    Daily { interval: u32 },
+    Weekly { interval: u32, days_of_week: Vec<EwsDay> },
+    AbsoluteMonthly { interval: u32, day_of_month: u8 },
+    AbsoluteYearly { day_of_month: u8, month: EwsMonth },
+}
+
+/// Range half (the "when does it stop" part).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EwsRecurrenceRange {
+    NoEnd,
+    Numbered { occurrences: u32 },
+    EndDate { end: String },
+}
+
+/// Day-of-week as EWS spells it. Carrying the variant rather than
+/// the wire string keeps the RRULE translation total.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EwsDay {
+    Monday,
+    Tuesday,
+    Wednesday,
+    Thursday,
+    Friday,
+    Saturday,
+    Sunday,
+}
+
+impl EwsDay {
+    fn from_wire(s: &str) -> Option<Self> {
+        Some(match s {
+            "Monday" => Self::Monday,
+            "Tuesday" => Self::Tuesday,
+            "Wednesday" => Self::Wednesday,
+            "Thursday" => Self::Thursday,
+            "Friday" => Self::Friday,
+            "Saturday" => Self::Saturday,
+            "Sunday" => Self::Sunday,
+            _ => return None,
+        })
+    }
+    fn to_rrule(self) -> &'static str {
+        match self {
+            Self::Monday => "MO",
+            Self::Tuesday => "TU",
+            Self::Wednesday => "WE",
+            Self::Thursday => "TH",
+            Self::Friday => "FR",
+            Self::Saturday => "SA",
+            Self::Sunday => "SU",
+        }
+    }
+}
+
+/// Calendar month as EWS spells it (full English name).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EwsMonth {
+    January,
+    February,
+    March,
+    April,
+    May,
+    June,
+    July,
+    August,
+    September,
+    October,
+    November,
+    December,
+}
+
+impl EwsMonth {
+    fn from_wire(s: &str) -> Option<Self> {
+        Some(match s {
+            "January" => Self::January,
+            "February" => Self::February,
+            "March" => Self::March,
+            "April" => Self::April,
+            "May" => Self::May,
+            "June" => Self::June,
+            "July" => Self::July,
+            "August" => Self::August,
+            "September" => Self::September,
+            "October" => Self::October,
+            "November" => Self::November,
+            "December" => Self::December,
+            _ => return None,
+        })
+    }
+    fn to_rrule_number(self) -> u32 {
+        match self {
+            Self::January => 1,
+            Self::February => 2,
+            Self::March => 3,
+            Self::April => 4,
+            Self::May => 5,
+            Self::June => 6,
+            Self::July => 7,
+            Self::August => 8,
+            Self::September => 9,
+            Self::October => 10,
+            Self::November => 11,
+            Self::December => 12,
+        }
+    }
+}
+
+impl EwsRecurrence {
+    /// Translate to an RFC 5545 RRULE string. Inverse of
+    /// [`rrule_to_ews_recurrence`]; roundtrip-checked in tests.
+    pub fn to_rrule(&self) -> String {
+        let mut parts: Vec<String> = Vec::new();
+        match &self.pattern {
+            EwsRecurrencePattern::Daily { interval } => {
+                parts.push("FREQ=DAILY".into());
+                if *interval > 1 {
+                    parts.push(format!("INTERVAL={interval}"));
+                }
+            }
+            EwsRecurrencePattern::Weekly {
+                interval,
+                days_of_week,
+            } => {
+                parts.push("FREQ=WEEKLY".into());
+                if *interval > 1 {
+                    parts.push(format!("INTERVAL={interval}"));
+                }
+                if !days_of_week.is_empty() {
+                    let csv = days_of_week
+                        .iter()
+                        .map(|d| d.to_rrule())
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    parts.push(format!("BYDAY={csv}"));
+                }
+            }
+            EwsRecurrencePattern::AbsoluteMonthly {
+                interval,
+                day_of_month,
+            } => {
+                parts.push("FREQ=MONTHLY".into());
+                if *interval > 1 {
+                    parts.push(format!("INTERVAL={interval}"));
+                }
+                parts.push(format!("BYMONTHDAY={day_of_month}"));
+            }
+            EwsRecurrencePattern::AbsoluteYearly {
+                day_of_month,
+                month,
+            } => {
+                parts.push("FREQ=YEARLY".into());
+                parts.push(format!("BYMONTH={}", month.to_rrule_number()));
+                parts.push(format!("BYMONTHDAY={day_of_month}"));
+            }
+        }
+        match &self.range {
+            EwsRecurrenceRange::NoEnd => {}
+            EwsRecurrenceRange::Numbered { occurrences } => {
+                parts.push(format!("COUNT={occurrences}"));
+            }
+            EwsRecurrenceRange::EndDate { end } => {
+                // EWS sends EndDate as YYYY-MM-DD; RRULE UNTIL wants
+                // YYYYMMDD (date-only form is legal per RFC 5545).
+                let compact: String =
+                    end.chars().filter(|c| *c != '-').collect();
+                parts.push(format!("UNTIL={compact}"));
+            }
+        }
+        parts.join(";")
+    }
+}
+
+/// Parse a `<t:Recurrence>...</t:Recurrence>` block (the full XML
+/// fragment including the wrapping element) into a structured
+/// [`EwsRecurrence`]. Returns `Err(Protocol)` on shapes we don't
+/// support yet (`RelativeMonthlyRecurrence`, `RelativeYearlyRecurrence`,
+/// missing pattern or range, …) so the caller can decide whether to
+/// drop the master entirely or surface a user-visible warning.
+pub fn parse_ews_recurrence(xml: &str) -> EwsResult<EwsRecurrence> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+
+    // Both the pattern and the range elements arrive as direct
+    // children of `<t:Recurrence>`. We walk all start tags and
+    // record which "container" we're currently inside; field
+    // elements (`<t:Interval>`, `<t:DaysOfWeek>`, …) attach to that
+    // container. Two-level state machine — flat but readable.
+    let mut current_pattern: Option<PatternBuilder> = None;
+    let mut current_range: Option<RangeBuilder> = None;
+    let mut text_target: Option<&'static str> = None;
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(XmlEvent::Start(e)) | Ok(XmlEvent::Empty(e)) => {
+                let local = e.local_name().as_ref().to_ascii_lowercase();
+                match local.as_slice() {
+                    // Pattern containers.
+                    b"dailyrecurrence" => {
+                        current_pattern = Some(PatternBuilder::Daily {
+                            interval: 1,
+                        });
+                    }
+                    b"weeklyrecurrence" => {
+                        current_pattern = Some(PatternBuilder::Weekly {
+                            interval: 1,
+                            days_of_week: Vec::new(),
+                        });
+                    }
+                    b"absolutemonthlyrecurrence" => {
+                        current_pattern = Some(PatternBuilder::AbsoluteMonthly {
+                            interval: 1,
+                            day_of_month: 1,
+                        });
+                    }
+                    b"absoluteyearlyrecurrence" => {
+                        current_pattern = Some(PatternBuilder::AbsoluteYearly {
+                            day_of_month: 1,
+                            month: None,
+                        });
+                    }
+                    b"relativemonthlyrecurrence" => {
+                        return Err(EwsError::Protocol(
+                            "RelativeMonthlyRecurrence is not supported by Aperio yet".into(),
+                        ));
+                    }
+                    b"relativeyearlyrecurrence" => {
+                        return Err(EwsError::Protocol(
+                            "RelativeYearlyRecurrence is not supported by Aperio yet".into(),
+                        ));
+                    }
+                    // Range containers.
+                    b"noendrecurrence" => {
+                        current_range = Some(RangeBuilder::NoEnd);
+                    }
+                    b"numberedrecurrence" => {
+                        current_range = Some(RangeBuilder::Numbered {
+                            occurrences: 0,
+                        });
+                    }
+                    b"enddaterecurrence" => {
+                        current_range = Some(RangeBuilder::EndDate {
+                            end: String::new(),
+                        });
+                    }
+                    // Field elements — text content arrives next.
+                    b"interval" => text_target = Some("interval"),
+                    b"daysofweek" => text_target = Some("days_of_week"),
+                    b"dayofmonth" => text_target = Some("day_of_month"),
+                    b"month" => text_target = Some("month"),
+                    b"numberofoccurrences" => {
+                        text_target = Some("number_of_occurrences");
+                    }
+                    b"enddate" => text_target = Some("end_date"),
+                    _ => {}
+                }
+            }
+            Ok(XmlEvent::Text(t)) if text_target.is_some() => {
+                let raw = match t.unescape() {
+                    Ok(c) => c.to_string(),
+                    Err(_) => continue,
+                };
+                let s = raw.trim();
+                if s.is_empty() {
+                    continue;
+                }
+                match text_target {
+                    Some("interval") => {
+                        let v = s.parse::<u32>().unwrap_or(1).max(1);
+                        match current_pattern.as_mut() {
+                            Some(PatternBuilder::Daily { interval })
+                            | Some(PatternBuilder::Weekly { interval, .. })
+                            | Some(PatternBuilder::AbsoluteMonthly {
+                                interval, ..
+                            }) => *interval = v,
+                            _ => {}
+                        }
+                    }
+                    Some("days_of_week") => {
+                        // EWS sends space-separated full names:
+                        // "Monday Wednesday Friday".
+                        if let Some(PatternBuilder::Weekly {
+                            days_of_week,
+                            ..
+                        }) = current_pattern.as_mut()
+                        {
+                            for tok in s.split_whitespace() {
+                                if let Some(day) = EwsDay::from_wire(tok) {
+                                    days_of_week.push(day);
+                                }
+                            }
+                        }
+                    }
+                    Some("day_of_month") => {
+                        let v = s.parse::<u8>().unwrap_or(1).clamp(1, 31);
+                        match current_pattern.as_mut() {
+                            Some(PatternBuilder::AbsoluteMonthly {
+                                day_of_month,
+                                ..
+                            })
+                            | Some(PatternBuilder::AbsoluteYearly {
+                                day_of_month,
+                                ..
+                            }) => *day_of_month = v,
+                            _ => {}
+                        }
+                    }
+                    Some("month") => {
+                        if let Some(PatternBuilder::AbsoluteYearly {
+                            month, ..
+                        }) = current_pattern.as_mut()
+                        {
+                            *month = EwsMonth::from_wire(s);
+                        }
+                    }
+                    Some("number_of_occurrences") => {
+                        if let Some(RangeBuilder::Numbered {
+                            occurrences,
+                        }) = current_range.as_mut()
+                        {
+                            *occurrences = s.parse::<u32>().unwrap_or(0);
+                        }
+                    }
+                    Some("end_date") => {
+                        if let Some(RangeBuilder::EndDate { end }) =
+                            current_range.as_mut()
+                        {
+                            // Strip any time-zone suffix some servers
+                            // append (e.g. "2026-12-31+02:00"); the
+                            // date portion is canonical.
+                            let trimmed = s.split(['T', '+']).next().unwrap_or(s);
+                            *end = trimmed.to_string();
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Ok(XmlEvent::End(_)) => {
+                text_target = None;
+            }
+            Ok(XmlEvent::Eof) => break,
+            Ok(_) => {}
+            Err(err) => {
+                return Err(EwsError::Protocol(format!(
+                    "Recurrence XML parse error: {err}"
+                )));
+            }
+        }
+        buf.clear();
+    }
+
+    let pattern = current_pattern
+        .ok_or_else(|| {
+            EwsError::Protocol("Recurrence missing pattern element".into())
+        })?
+        .finish()?;
+    let range = current_range
+        .ok_or_else(|| {
+            EwsError::Protocol("Recurrence missing range element".into())
+        })?
+        .finish()?;
+    Ok(EwsRecurrence { pattern, range })
+}
+
+/// Convenience: parse + translate to RRULE in one step. Used by
+/// callers that don't need the structured form (most read-path code).
+pub fn parse_ews_recurrence_to_rrule(xml: &str) -> EwsResult<String> {
+    Ok(parse_ews_recurrence(xml)?.to_rrule())
+}
+
+// ── builders (mutable scratch types used during XML walk) ─────────────────
+
+enum PatternBuilder {
+    Daily { interval: u32 },
+    Weekly { interval: u32, days_of_week: Vec<EwsDay> },
+    AbsoluteMonthly { interval: u32, day_of_month: u8 },
+    AbsoluteYearly { day_of_month: u8, month: Option<EwsMonth> },
+}
+
+impl PatternBuilder {
+    fn finish(self) -> EwsResult<EwsRecurrencePattern> {
+        match self {
+            Self::Daily { interval } => {
+                Ok(EwsRecurrencePattern::Daily { interval })
+            }
+            Self::Weekly {
+                interval,
+                days_of_week,
+            } => Ok(EwsRecurrencePattern::Weekly {
+                interval,
+                days_of_week,
+            }),
+            Self::AbsoluteMonthly {
+                interval,
+                day_of_month,
+            } => Ok(EwsRecurrencePattern::AbsoluteMonthly {
+                interval,
+                day_of_month,
+            }),
+            Self::AbsoluteYearly {
+                day_of_month,
+                month,
+            } => {
+                let month = month.ok_or_else(|| {
+                    EwsError::Protocol(
+                        "AbsoluteYearlyRecurrence missing Month".into(),
+                    )
+                })?;
+                Ok(EwsRecurrencePattern::AbsoluteYearly {
+                    day_of_month,
+                    month,
+                })
+            }
+        }
+    }
+}
+
+enum RangeBuilder {
+    NoEnd,
+    Numbered { occurrences: u32 },
+    EndDate { end: String },
+}
+
+impl RangeBuilder {
+    fn finish(self) -> EwsResult<EwsRecurrenceRange> {
+        match self {
+            Self::NoEnd => Ok(EwsRecurrenceRange::NoEnd),
+            Self::Numbered { occurrences } => {
+                if occurrences == 0 {
+                    return Err(EwsError::Protocol(
+                        "NumberedRecurrence missing or zero NumberOfOccurrences".into(),
+                    ));
+                }
+                Ok(EwsRecurrenceRange::Numbered { occurrences })
+            }
+            Self::EndDate { end } => {
+                if end.is_empty() {
+                    return Err(EwsError::Protocol(
+                        "EndDateRecurrence missing EndDate".into(),
+                    ));
+                }
+                Ok(EwsRecurrenceRange::EndDate { end })
+            }
+        }
+    }
+}
+
 /// Pulled-out version of the ItemId attribute pair so the api layer
 /// can hand the ChangeKey back to the caller as the new ETag.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1473,5 +1957,182 @@ mod tests {
         let r = parse_first_item_id(xml).unwrap();
         assert_eq!(r.id, "NEWID");
         assert_eq!(r.change_key.as_deref(), Some("NEWCK"));
+    }
+
+    // ── EWS recurrence parser ────────────────────────────────────
+
+    /// Each test below runs the same script: hand-craft the
+    /// expected RRULE → `rrule_to_ews_recurrence` to obtain the
+    /// XML the server would send → `parse_ews_recurrence` →
+    /// `to_rrule()`. The roundtrip must produce a semantically
+    /// equivalent rule string (same key/value pairs, order may
+    /// differ — we compare after normalising).
+    fn normalise_rrule(s: &str) -> Vec<String> {
+        let mut parts: Vec<String> = s.split(';').map(str::to_string).collect();
+        parts.sort();
+        parts
+    }
+    fn assert_rrule_equivalent(a: &str, b: &str) {
+        assert_eq!(
+            normalise_rrule(a),
+            normalise_rrule(b),
+            "RRULE not equivalent: {a} vs {b}",
+        );
+    }
+
+    #[test]
+    fn parse_daily_recurrence_roundtrips() {
+        let start: DateTime<Utc> = "2026-05-20T08:00:00Z".parse().unwrap();
+        let xml = rrule_to_ews_recurrence("FREQ=DAILY;INTERVAL=3", start)
+            .unwrap();
+        let rec = parse_ews_recurrence(&xml).unwrap();
+        assert_eq!(
+            rec.pattern,
+            EwsRecurrencePattern::Daily { interval: 3 },
+        );
+        assert_eq!(rec.range, EwsRecurrenceRange::NoEnd);
+        assert_rrule_equivalent(&rec.to_rrule(), "FREQ=DAILY;INTERVAL=3");
+    }
+
+    #[test]
+    fn parse_weekly_with_byday_roundtrips() {
+        let start: DateTime<Utc> = "2026-05-20T08:00:00Z".parse().unwrap();
+        let xml = rrule_to_ews_recurrence(
+            "FREQ=WEEKLY;BYDAY=MO,WE,FR;COUNT=10",
+            start,
+        )
+        .unwrap();
+        let rec = parse_ews_recurrence(&xml).unwrap();
+        assert_eq!(
+            rec.pattern,
+            EwsRecurrencePattern::Weekly {
+                interval: 1,
+                days_of_week: vec![EwsDay::Monday, EwsDay::Wednesday, EwsDay::Friday],
+            },
+        );
+        assert_eq!(
+            rec.range,
+            EwsRecurrenceRange::Numbered { occurrences: 10 },
+        );
+        assert_rrule_equivalent(
+            &rec.to_rrule(),
+            "FREQ=WEEKLY;BYDAY=MO,WE,FR;COUNT=10",
+        );
+    }
+
+    #[test]
+    fn parse_absolute_monthly_with_enddate_roundtrips() {
+        let start: DateTime<Utc> = "2026-05-15T08:00:00Z".parse().unwrap();
+        let xml = rrule_to_ews_recurrence(
+            "FREQ=MONTHLY;BYMONTHDAY=15;UNTIL=20271231T000000Z",
+            start,
+        )
+        .unwrap();
+        let rec = parse_ews_recurrence(&xml).unwrap();
+        assert_eq!(
+            rec.pattern,
+            EwsRecurrencePattern::AbsoluteMonthly {
+                interval: 1,
+                day_of_month: 15,
+            },
+        );
+        assert_eq!(
+            rec.range,
+            EwsRecurrenceRange::EndDate {
+                end: "2027-12-31".into(),
+            },
+        );
+        // Writer drops the time portion in EndDate → reader's
+        // UNTIL is date-only. Both are RFC 5545 legal.
+        assert_rrule_equivalent(
+            &rec.to_rrule(),
+            "FREQ=MONTHLY;BYMONTHDAY=15;UNTIL=20271231",
+        );
+    }
+
+    #[test]
+    fn parse_absolute_yearly_roundtrips() {
+        let start: DateTime<Utc> = "2026-03-21T09:00:00Z".parse().unwrap();
+        let xml = rrule_to_ews_recurrence(
+            "FREQ=YEARLY;BYMONTH=3;BYMONTHDAY=21",
+            start,
+        )
+        .unwrap();
+        let rec = parse_ews_recurrence(&xml).unwrap();
+        assert_eq!(
+            rec.pattern,
+            EwsRecurrencePattern::AbsoluteYearly {
+                day_of_month: 21,
+                month: EwsMonth::March,
+            },
+        );
+        assert_eq!(rec.range, EwsRecurrenceRange::NoEnd);
+        assert_rrule_equivalent(
+            &rec.to_rrule(),
+            "FREQ=YEARLY;BYMONTH=3;BYMONTHDAY=21",
+        );
+    }
+
+    #[test]
+    fn parse_recurrence_rejects_relative_monthly() {
+        // We don't author RelativeMonthlyRecurrence today, but
+        // legacy series on the server might use it. Surface as
+        // Protocol so the caller can drop the master (and the
+        // user sees a recognisable error in logs).
+        let xml = r#"<t:Recurrence>
+            <t:RelativeMonthlyRecurrence>
+              <t:Interval>1</t:Interval>
+              <t:DaysOfWeek>Monday</t:DaysOfWeek>
+              <t:DayOfWeekIndex>First</t:DayOfWeekIndex>
+            </t:RelativeMonthlyRecurrence>
+            <t:NoEndRecurrence>
+              <t:StartDate>2026-01-01</t:StartDate>
+            </t:NoEndRecurrence>
+          </t:Recurrence>"#;
+        let err = parse_ews_recurrence(xml).unwrap_err();
+        match err {
+            EwsError::Protocol(m) => {
+                assert!(m.contains("RelativeMonthlyRecurrence"), "got {m}");
+            }
+            other => panic!("expected Protocol, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_recurrence_handles_unprefixed_namespaces() {
+        // Some servers (or aggressive XML stripping intermediaries)
+        // drop the `t:` namespace prefix on element names. The
+        // walker compares on local names already, so this should
+        // still parse — guard the invariant with a test.
+        let xml = r#"<Recurrence>
+            <DailyRecurrence>
+              <Interval>2</Interval>
+            </DailyRecurrence>
+            <NoEndRecurrence>
+              <StartDate>2026-01-01</StartDate>
+            </NoEndRecurrence>
+          </Recurrence>"#;
+        let rec = parse_ews_recurrence(xml).unwrap();
+        assert_eq!(rec.pattern, EwsRecurrencePattern::Daily { interval: 2 });
+    }
+
+    #[test]
+    fn parse_recurrence_rejects_missing_pattern() {
+        let xml = r#"<t:Recurrence>
+            <t:NoEndRecurrence>
+              <t:StartDate>2026-01-01</t:StartDate>
+            </t:NoEndRecurrence>
+          </t:Recurrence>"#;
+        let err = parse_ews_recurrence(xml).unwrap_err();
+        assert!(matches!(err, EwsError::Protocol(_)));
+    }
+
+    #[test]
+    fn parse_recurrence_rejects_missing_range() {
+        let xml = r#"<t:Recurrence>
+            <t:DailyRecurrence><t:Interval>1</t:Interval></t:DailyRecurrence>
+          </t:Recurrence>"#;
+        let err = parse_ews_recurrence(xml).unwrap_err();
+        assert!(matches!(err, EwsError::Protocol(_)));
     }
 }
