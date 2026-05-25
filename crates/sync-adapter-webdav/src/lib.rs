@@ -444,14 +444,53 @@ impl SyncAdapter for WebDavSyncAdapter {
 }
 
 /// Wrap a reqwest error into a `SyncError`. Connection-level
-/// failures map to `Network`; everything else to `Internal`.
+/// failures, request-send failures (TLS handshake, broken pipe,
+/// stream errors that happen during `.send()`) and body-streaming
+/// failures all map to `Network` — they're all "the transport
+/// didn't carry our request through" cases, which the user can
+/// retry / investigate at the network layer. Only genuinely
+/// unexpected error shapes (decode failures inside reqwest, …)
+/// fall through to `Internal`.
+///
+/// The displayed message walks `source()` so the user sees the
+/// actual root cause ("invalid peer certificate: UnknownIssuer",
+/// "connection refused", …) instead of the bare top-level
+/// "error sending request for url (…)" which carries no
+/// diagnostic information on its own.
 fn network_err(err: reqwest::Error) -> SyncError {
-    if err.is_timeout() || err.is_connect() {
-        SyncError::network(err.to_string())
+    let message = full_chain(&err);
+    if err.is_timeout()
+        || err.is_connect()
+        || err.is_request()
+        || err.is_body()
+    {
+        SyncError::network(message)
     } else {
         warn!(?err, "unexpected reqwest error");
-        SyncError::internal(err.to_string())
+        SyncError::internal(message)
     }
+}
+
+/// Stringify an error plus every entry in its `source()` chain,
+/// separated by `": "`. The top-level reqwest error description
+/// ("error sending request for url (…)") is essentially a label
+/// — the actual cause lives a few layers down (hyper → rustls →
+/// "invalid peer certificate", or hyper → tokio → "connection
+/// refused"). Without this the user sees the label and has no
+/// path to debugging.
+fn full_chain(err: &dyn std::error::Error) -> String {
+    let mut parts = vec![err.to_string()];
+    let mut source = err.source();
+    while let Some(s) = source {
+        let text = s.to_string();
+        // Skip duplicates — some wrappers re-stringify their
+        // child's message verbatim.
+        if !parts.last().map(|prev| prev == &text).unwrap_or(false) {
+            parts.push(text);
+        }
+        source = s.source();
+    }
+    parts.join(": ")
 }
 
 /// Translate an HTTP status code into the right `SyncError`
@@ -581,5 +620,53 @@ mod tests {
         let url = Url::parse("https://example.com/").unwrap();
         let err = http_err(StatusCode::INTERNAL_SERVER_ERROR, &url);
         assert!(matches!(err, SyncError::Network(_)));
+    }
+
+    /// The source-chain walker is what turns the bare reqwest
+    /// "error sending request for url (…)" into something the
+    /// user can actually debug from. Verify it flattens a
+    /// hand-built chain in order, deduplicates adjacent
+    /// duplicates, and survives a leaf with no source.
+    #[test]
+    fn full_chain_flattens_source_chain() {
+        use std::error::Error as StdError;
+        use std::fmt;
+
+        #[derive(Debug)]
+        struct Layer {
+            msg: &'static str,
+            source: Option<Box<dyn StdError + 'static>>,
+        }
+        impl fmt::Display for Layer {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str(self.msg)
+            }
+        }
+        impl StdError for Layer {
+            fn source(&self) -> Option<&(dyn StdError + 'static)> {
+                self.source.as_deref()
+            }
+        }
+
+        let leaf = Layer { msg: "connection refused", source: None };
+        let mid = Layer { msg: "dns or tcp", source: Some(Box::new(leaf)) };
+        let top = Layer {
+            msg: "error sending request",
+            source: Some(Box::new(mid)),
+        };
+        assert_eq!(
+            full_chain(&top),
+            "error sending request: dns or tcp: connection refused",
+        );
+
+        // Dedup of adjacent duplicates (some wrappers re-stringify
+        // their child verbatim).
+        let leaf2 = Layer { msg: "boom", source: None };
+        let dup = Layer { msg: "boom", source: Some(Box::new(leaf2)) };
+        assert_eq!(full_chain(&dup), "boom");
+
+        // Leaf alone — just the top-level message.
+        let alone = Layer { msg: "alone", source: None };
+        assert_eq!(full_chain(&alone), "alone");
     }
 }
