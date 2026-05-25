@@ -421,32 +421,52 @@ pub async fn install_plugin_archive(
     request: InstallPluginArchiveRequest,
 ) -> CommandResult<PluginInfo> {
     // Pre-flight: read the manifest WITHOUT extracting. Lets
-    // us refuse an in-place upgrade before install_archive
-    // wipes the existing plugin dir. v1 doesn't have a safe
-    // unload-and-reload path for an already-loaded plugin
-    // (would need to audit every host component holding an
-    // Arc<LoadedInstance> + tear them down in order); the
-    // friendly fallback is to ask the user to restart.
+    // us decide between "fresh install" and "upgrade" paths
+    // before install_archive wipes the existing plugin dir.
     let preflight_manifest =
         plugin_core::inspect_archive(&request.archive_path)
             .map_err(plugin_error_to_command)?;
-    if plugin_manager
-        .get_including_disabled(&preflight_manifest.id)
-        .is_some()
-    {
-        return Err(CommandError {
-            code: "restart_required",
-            message: format!(
-                "{} is already loaded; restart Aperio to install the new version",
-                preflight_manifest.id,
-            ),
-        });
+    let plugin_id = preflight_manifest.id.clone();
+    let shared = db.shared();
+
+    // If this is an in-place upgrade, try to tear the old
+    // copy down first. The active-sync guard (parallel to
+    // iteration 14's disable guard) refuses upfront — a
+    // mid-sync upgrade would be disruptive even if the unload
+    // succeeded, and the user can fix it by switching sync
+    // adapters first.
+    let is_upgrade = plugin_manager
+        .get_including_disabled(&plugin_id)
+        .is_some();
+    if is_upgrade {
+        if let Some(plugin_sync_kind) = sync_kind_for_plugin(&plugin_id) {
+            let prefs = UserPrefsRepo::new(&shared);
+            let active_kind = prefs
+                .get(PREF_ADAPTER_KIND)
+                .map_err(|e| CommandError {
+                    code: "internal",
+                    message: format!("read sync.adapter.kind: {e}"),
+                })?
+                .filter(|s| !s.is_empty());
+            if active_kind.as_deref() == Some(plugin_sync_kind) {
+                return Err(CommandError {
+                    code: "active_sync_conflict",
+                    message: format!(
+                        "{} is the sync adapter you're currently using; \
+                         switch to a different one in Settings → Sync \
+                         before upgrading it.",
+                        plugin_id,
+                    ),
+                });
+            }
+        }
+        try_unload_for_upgrade(&plugin_manager, &registry, &shared, &plugin_id)?;
     }
 
-    // Safe to extract — no in-memory state references the id
-    // we're about to write. install_archive wipes any stale
-    // directory under the same id (left over from a previous
-    // install whose plugin then got unloaded between
+    // Safe to extract. install_archive wipes any stale
+    // directory under the same id (an upgrade that just got
+    // its in-memory copy unloaded, or a leftover from a
+    // previous install whose plugin then got unloaded between
     // restarts).
     let installed = plugin_core::install_archive(
         &request.archive_path,
@@ -521,6 +541,93 @@ pub async fn install_plugin_archive(
         has_probe_host_key: loaded.has_probe_host_key(),
         enabled: plugin_manager.is_enabled(&plugin_id),
     })
+}
+
+/// Tear down the in-memory copy of `plugin_id` so the
+/// install path can re-extract + re-load the new version.
+/// The sequence mirrors the disable path: unregister every
+/// account using the plugin, then flip the runtime gate, then
+/// hand off to `PluginManager::unload_plugin`. On
+/// [`UnloadError::StillReferenced`] we roll back (re-enable +
+/// re-register the accounts) and surface `restart_required`
+/// — an in-flight call somewhere holds an
+/// `Arc<LoadedInstance>` we can't safely yank.
+///
+/// Only called from the upgrade branch of
+/// [`install_plugin_archive`]. Uninstall (a future iteration)
+/// can reuse the helper with a `re_register: false` knob if
+/// that ever lands.
+fn try_unload_for_upgrade(
+    plugin_manager: &PluginManager,
+    registry: &AdapterRegistry,
+    db: &crate::db::SharedConn,
+    plugin_id: &str,
+) -> CommandResult<()> {
+    // 1) Walk accounts whose adapter_kind matches the plugin
+    //    we're about to unload. For each, unregister + remember
+    //    the account so we can re-register on rollback or
+    //    after the new version loads.
+    let mut affected_accounts = Vec::new();
+    if let Some(kind) = adapter_kind_for_plugin(plugin_id) {
+        let accounts_repo = AccountsRepo::new(db);
+        let accounts = accounts_repo.list().map_err(|e| CommandError {
+            code: "internal",
+            message: format!("list accounts for upgrade unload: {e}"),
+        })?;
+        for account in accounts {
+            if account.adapter_kind != kind {
+                continue;
+            }
+            registry.unregister(&account.id);
+            affected_accounts.push(account);
+        }
+    }
+
+    // 2) Gate further get() lookups. This is the same flag
+    //    the toggle uses; we'll clear it on success after
+    //    load (via reload_plugin) or on rollback.
+    let previously_enabled = plugin_manager.is_enabled(plugin_id);
+    plugin_manager.set_enabled(plugin_id, false);
+
+    // 3) Try to drop the LoadedPlugin. unload_plugin checks
+    //    Arc::strong_count and refuses if anyone (in-flight
+    //    spawn_blocking, leftover LoadedInstance Arc, …)
+    //    still holds a clone.
+    match plugin_manager.unload_plugin(plugin_id) {
+        Ok(()) => Ok(()),
+        Err(plugin_core::UnloadError::NotLoaded(_)) => {
+            // Race: someone else dropped the plugin between
+            // the install command's pre-flight check and now.
+            // Treat as success — the upgrade path proceeds
+            // straight to install + load.
+            Ok(())
+        }
+        Err(plugin_core::UnloadError::StillReferenced { id, strong_count }) => {
+            // Roll back: re-enable + re-register accounts so
+            // the user's setup keeps working. The new version
+            // can't land this round — ask the user to restart.
+            if previously_enabled {
+                plugin_manager.set_enabled(&id, true);
+            }
+            for account in affected_accounts {
+                if let Err(err) = registry.register(&account) {
+                    warn!(
+                        account_id = %account.id,
+                        plugin_id = %id,
+                        ?err,
+                        "rollback re-register failed after StillReferenced unload",
+                    );
+                }
+            }
+            Err(CommandError {
+                code: "restart_required",
+                message: format!(
+                    "{id} is in use (strong_count={strong_count}); \
+                     restart Aperio to install the new version",
+                ),
+            })
+        }
+    }
 }
 
 /// Map plugin-core's error type onto the frontend-friendly

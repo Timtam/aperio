@@ -758,6 +758,64 @@ impl PluginManager {
             .collect()
     }
 
+    /// Tear a loaded plugin out of the manager so its
+    /// underlying [`libloading::Library`] can `dlclose`. The
+    /// caller MUST have dropped every other Arc<LoadedPlugin>
+    /// and Arc<LoadedInstance> referencing this id before
+    /// calling — the manager checks the inner Arc's strong
+    /// count and refuses with [`UnloadError::StillReferenced`]
+    /// if anyone else is holding a clone. That keeps the
+    /// teardown atomic + race-free without needing a separate
+    /// in-flight-call counter.
+    ///
+    /// Typical sequence the host follows for an in-place
+    /// upgrade:
+    ///   1. `set_enabled(id, false)` — block new
+    ///      `get(id)` lookups so no fresh registrations or
+    ///      vtable dispatches start.
+    ///   2. Walk the registry, unregister every account using
+    ///      this plugin. This drops the registry's Arcs.
+    ///   3. Reset any other component holding an
+    ///      Arc<LoadedInstance> (the sync orchestrator if this
+    ///      is the active sync adapter).
+    ///   4. Call `unload_plugin(id)`. On success: the
+    ///      LoadedPlugin Arc drops, the Library handle drops,
+    ///      `dlclose` runs. On `StillReferenced`: roll back
+    ///      and tell the user to retry (or restart).
+    ///
+    /// The `disabled` flag is cleared by this call — once the
+    /// plugin is gone, a subsequent reload via
+    /// `load_from_dir` should start with a fresh enabled
+    /// state.
+    pub fn unload_plugin(&self, id: &str) -> Result<(), UnloadError> {
+        let mut inner = self.inner.write().expect("manager poisoned");
+        // Remove from the map first so the strong-count check
+        // sees only the borrowed Arc we're about to drop.
+        let Some(plugin) = inner.plugins.remove(id) else {
+            return Err(UnloadError::NotLoaded(id.to_string()));
+        };
+        // Strong count == 1 means only `plugin` (our owned
+        // local) references the LoadedPlugin. Anything else
+        // is an in-flight reference and we have to put the
+        // entry back to keep the manager consistent.
+        let count = Arc::strong_count(&plugin);
+        if count != 1 {
+            inner.plugins.insert(id.to_string(), plugin);
+            return Err(UnloadError::StillReferenced {
+                id: id.to_string(),
+                strong_count: count,
+            });
+        }
+        // Safe to drop: yank from the order vec + the
+        // disabled set; let `plugin` fall out of scope so the
+        // Library handle's Drop runs (-> dlclose).
+        inner.order.retain(|other| other != id);
+        inner.disabled.remove(id);
+        drop(inner);
+        drop(plugin);
+        Ok(())
+    }
+
     /// Test-only: inject a synthetic LoadedPlugin under the
     /// given id. The plugin is a no-op stub (no library, no
     /// instance hooks) — enough to exercise the disabled-flag
@@ -877,6 +935,30 @@ impl PluginManager {
             )))
         }
     }
+}
+
+/// Reasons [`PluginManager::unload_plugin`] can fail.
+#[derive(Debug, thiserror::Error)]
+pub enum UnloadError {
+    /// No plugin loaded under this id. The caller's
+    /// already-loaded check + unload should normally be
+    /// guarded against this, but the manager surfaces it
+    /// rather than silently no-op'ing to make a logic bug in
+    /// the host obvious.
+    #[error("plugin not loaded: {0}")]
+    NotLoaded(String),
+
+    /// At least one other component still holds an
+    /// `Arc<LoadedPlugin>` for this id — typically a
+    /// `LoadedInstance` (registry, orchestrator) or an
+    /// in-flight `spawn_blocking` task mid-call into the
+    /// plugin's vtable. The strong count is included so the
+    /// host can log it for diagnosis.
+    #[error(
+        "plugin {id} is still referenced (strong_count={strong_count}); \
+         drop every Arc<LoadedInstance> / Arc<LoadedPlugin> before unloading"
+    )]
+    StillReferenced { id: String, strong_count: usize },
 }
 
 /// Reasons [`PluginManager::interactive_auth`] can fail.
@@ -1332,5 +1414,54 @@ mod tests {
         mgr.set_enabled("test.a", false);
         let ids: Vec<_> = mgr.all().iter().map(|p| p.manifest.id.clone()).collect();
         assert_eq!(ids, vec!["test.a", "test.b"]);
+    }
+
+    #[test]
+    fn unload_plugin_drops_unique_arc_and_clears_state() {
+        let mgr = PluginManager::new("0.1.0");
+        mgr.insert_stub_for_tests("test.cal", stub_manifest("test.cal"));
+        mgr.set_enabled("test.cal", false);
+        // No outside Arc clones live in this test, so the
+        // strong count is just the inner map's.
+        mgr.unload_plugin("test.cal").expect("unload should succeed");
+        assert!(mgr.get_including_disabled("test.cal").is_none());
+        assert!(!mgr.is_enabled("test.cal"));
+        assert!(mgr.all().is_empty());
+        // Re-disabling should now report no-op because the
+        // plugin id is gone — same semantics as set_enabled
+        // on an unknown plugin.
+        assert!(!mgr.set_enabled("test.cal", false));
+    }
+
+    #[test]
+    fn unload_plugin_refuses_when_arc_still_referenced() {
+        let mgr = PluginManager::new("0.1.0");
+        mgr.insert_stub_for_tests("test.cal", stub_manifest("test.cal"));
+        // Hold an outside clone to simulate an in-flight
+        // FfiCalendarAdapter / LoadedInstance reference.
+        let held = mgr
+            .get_including_disabled("test.cal")
+            .expect("just inserted");
+        let err = mgr.unload_plugin("test.cal").expect_err("should refuse");
+        match err {
+            UnloadError::StillReferenced { id, strong_count } => {
+                assert_eq!(id, "test.cal");
+                assert!(strong_count >= 2, "got {strong_count}");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+        // Plugin must still be in the manager so the host can
+        // recover (the caller drops its clones + retries).
+        assert!(mgr.get_including_disabled("test.cal").is_some());
+        drop(held);
+        // After the outside clone drops, retry should succeed.
+        mgr.unload_plugin("test.cal").expect("unload after retry");
+    }
+
+    #[test]
+    fn unload_plugin_on_unknown_id_yields_not_loaded() {
+        let mgr = PluginManager::new("0.1.0");
+        let err = mgr.unload_plugin("ghost").expect_err("ghost id");
+        assert!(matches!(err, UnloadError::NotLoaded(id) if id == "ghost"));
     }
 }
