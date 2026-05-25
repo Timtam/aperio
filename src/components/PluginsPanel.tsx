@@ -6,6 +6,7 @@ import {
   inspectPluginArchive,
   installPluginArchive,
   isCommandError,
+  listFailedPlugins,
   listPlugins,
   listRemotePlugins,
   setPluginEnabled,
@@ -13,6 +14,7 @@ import {
 } from '../api/client';
 import type {
   CommandError,
+  FailedPluginInfo,
   PluginArchivePreview,
   PluginInfo,
   PluginTypeWire,
@@ -103,6 +105,13 @@ export function PluginsPanel() {
     RemotePluginAnnouncement[]
   >([]);
 
+  // Plugin directories the manager refused to load at
+  // startup. Most commonly an ABI mismatch after an Aperio
+  // update where the user has stale community plugins —
+  // without this section those plugins would silently
+  // vanish from the loaded list.
+  const [failedPlugins, setFailedPlugins] = useState<FailedPluginInfo[]>([]);
+
   useEffect(() => {
     let cancelled = false;
     listPlugins()
@@ -137,6 +146,22 @@ export function PluginsPanel() {
         // Quiet failure — the section just doesn't render.
         // The main plugin list still works, and the next
         // sync round will repopulate.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    listFailedPlugins()
+      .then((list) => {
+        if (cancelled) return;
+        setFailedPlugins(list);
+      })
+      .catch(() => {
+        // Same posture as the remote-plugins fetch — quiet
+        // failure, panel without the section.
       });
     return () => {
       cancelled = true;
@@ -248,6 +273,12 @@ export function PluginsPanel() {
       setRemotePlugins((prev) =>
         prev.filter((r) => r.id !== installed.id),
       );
+      // Same for the failed-loads section: if the freshly
+      // installed plugin replaces a stale incompatible one,
+      // drop its failure row locally.
+      setFailedPlugins((prev) =>
+        prev.filter((f) => f.id !== installed.id),
+      );
       setPendingInstall(null);
     } catch (err) {
       const entry: ToggleErrorEntry = isCommandError(err)
@@ -349,6 +380,10 @@ export function PluginsPanel() {
         <p className="form__error" role="alert">
           {t('dialogs.settings.plugins.loadError', { error: loadError })}
         </p>
+      )}
+
+      {failedPlugins.length > 0 && (
+        <FailedPluginsSection failed={failedPlugins} />
       )}
 
       {plugins.length === 0 && !loadError && (
@@ -522,6 +557,119 @@ function ConfirmInstallModal({
       </div>
     </Modal>
   );
+}
+
+interface FailedPluginsSectionProps {
+  failed: FailedPluginInfo[];
+}
+
+/** "Konnten nicht geladen werden"-section. Renders at the
+ *  top of the panel (above the per-type groups) because a
+ *  user who just updated Aperio + has stale community
+ *  plugins should see this prominently. Each row carries an
+ *  actionable hint derived from the failure reason. */
+function FailedPluginsSection({ failed }: FailedPluginsSectionProps) {
+  const { t } = useTranslation();
+  return (
+    <section
+      className="plugins-panel__group plugins-panel__group--failed"
+      aria-label={t('dialogs.settings.plugins.failed.sectionAria')}
+    >
+      <h3 className="plugins-panel__type-heading">
+        {t('dialogs.settings.plugins.failed.heading')}
+      </h3>
+      <p className="form__hint">{t('dialogs.settings.plugins.failed.hint')}</p>
+      <ul className="plugins-panel__list" role="list">
+        {failed.map((f) => (
+          <li
+            key={f.plugin_dir}
+            className="plugins-panel__row plugins-panel__row--failed"
+            aria-label={t('dialogs.settings.plugins.failed.rowAria', {
+              name: f.name ?? f.id ?? f.plugin_dir,
+            })}
+          >
+            <div className="plugins-panel__row-header">
+              <span className="plugins-panel__name">
+                {f.name ?? f.id ?? basename(f.plugin_dir)}
+              </span>
+              {f.version && (
+                <span className="plugins-panel__version">
+                  {t('dialogs.settings.plugins.version', {
+                    version: f.version,
+                  })}
+                </span>
+              )}
+            </div>
+            <p className="form__error" role="alert">
+              {reasonHint(t, f.reason)}
+            </p>
+            <details className="plugins-panel__failed-details">
+              <summary>
+                {t('dialogs.settings.plugins.failed.detailsSummary')}
+              </summary>
+              <dl className="plugins-panel__meta">
+                {f.id && (
+                  <>
+                    <dt>{t('dialogs.settings.plugins.failed.idLabel')}</dt>
+                    <dd>{f.id}</dd>
+                  </>
+                )}
+                <dt>{t('dialogs.settings.plugins.failed.dirLabel')}</dt>
+                <dd>
+                  <code>{f.plugin_dir}</code>
+                </dd>
+                <dt>{t('dialogs.settings.plugins.failed.errorLabel')}</dt>
+                <dd>
+                  <code>{f.error_message}</code>
+                </dd>
+              </dl>
+            </details>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function basename(path: string): string {
+  // Last segment of either / or \ separated path. Used as a
+  // last-ditch label when the failure was so early the
+  // manifest didn't parse.
+  const parts = path.split(/[\\/]/);
+  return parts[parts.length - 1] || path;
+}
+
+function reasonHint(
+  t: (k: string, opts?: Record<string, unknown>) => string,
+  reason: FailedPluginInfo['reason'],
+): string {
+  switch (reason.kind) {
+    case 'abi_mismatch':
+      // host > plugin → plugin is outdated; host < plugin →
+      // user needs to update Aperio. Both cases get distinct
+      // copy so the user knows which side to act on.
+      return reason.plugin < reason.host
+        ? t('dialogs.settings.plugins.failed.reason.abiMismatchOlderPlugin', {
+            host: reason.host,
+            plugin: reason.plugin,
+          })
+        : t('dialogs.settings.plugins.failed.reason.abiMismatchNewerPlugin', {
+            host: reason.host,
+            plugin: reason.plugin,
+          });
+    case 'app_too_old':
+      return t('dialogs.settings.plugins.failed.reason.appTooOld', {
+        required: reason.required,
+        running: reason.running,
+      });
+    case 'manifest_invalid':
+      return t('dialogs.settings.plugins.failed.reason.manifestInvalid');
+    case 'library_load':
+      return t('dialogs.settings.plugins.failed.reason.libraryLoad');
+    case 'other':
+    default:
+      return t('dialogs.settings.plugins.failed.reason.other');
+  }
 }
 
 interface PluginRowProps {

@@ -801,6 +801,32 @@ button[aria-disabled='true'] {
   justify-content: flex-end;
 }
 
+/* "Konnten nicht geladen werden"-section. Sits at the top of
+ * the panel above the per-type groups so a user who just
+ * updated Aperio + has stale community plugins sees the
+ * problem first. Each row tints with the danger token to
+ * read as actionable, not informational. */
+.plugins-panel__group--failed .plugins-panel__row--failed {
+  border-color: var(--color-danger, #dc322f);
+  background: var(--color-danger-bg, rgba(220, 50, 47, 0.04));
+}
+
+.plugins-panel__failed-details {
+  font-size: var(--font-size-sm);
+  color: var(--color-fg-muted);
+}
+
+.plugins-panel__failed-details summary {
+  cursor: pointer;
+  user-select: none;
+}
+
+.plugins-panel__failed-details code {
+  word-break: break-all;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: var(--font-size-xs);
+}
+
 .reminders__list {
   display: flex;
   flex-direction: column;

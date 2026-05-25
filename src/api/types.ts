@@ -345,6 +345,35 @@ export interface PluginInfo {
   source: 'bundled' | 'user';
 }
 
+/** A plugin directory the host's PluginManager refused to
+ *  load at startup. Returned by `list_failed_plugins`;
+ *  PluginsPanel renders these as the "Konnten nicht geladen
+ *  werden"-section so stale community plugins after an
+ *  Aperio update aren't invisible to the user. */
+export interface FailedPluginInfo {
+  plugin_dir: string;
+  /** Manifest fields, populated when plugin.json parsed
+   *  successfully (most failure modes apart from JSON parse
+   *  errors). `null` for parse-time failures — the panel
+   *  falls back to `plugin_dir`'s basename. */
+  id: string | null;
+  name: string | null;
+  version: string | null;
+  plugin_type: string | null;
+  author: string | null;
+  reason: FailedPluginReason;
+  error_message: string;
+}
+
+/** Discriminated reason for the failure. The panel branches
+ *  on `kind` to render an actionable hint per type. */
+export type FailedPluginReason =
+  | { kind: 'abi_mismatch'; host: number; plugin: number }
+  | { kind: 'app_too_old'; required: string; running: string }
+  | { kind: 'manifest_invalid' }
+  | { kind: 'library_load' }
+  | { kind: 'other' };
+
 /** A plugin announcement another device has emitted into
  *  the shared Event Log (DESIGN.md §20.8) that THIS device
  *  doesn't have installed locally. Returned by

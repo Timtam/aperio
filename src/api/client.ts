@@ -15,6 +15,7 @@ import type {
   Contact,
   ContactList,
   ContactPhoto,
+  FailedPluginInfo,
   NewContact,
   NewEvent,
   PluginArchivePreview,
@@ -1243,3 +1244,10 @@ export const uninstallPlugin = (request: UninstallPluginRequest) =>
  *  the Settings → Plugins panel. */
 export const listRemotePlugins = () =>
   invoke<RemotePluginAnnouncement[]>('list_remote_plugins');
+
+/** Plugin directories the host's PluginManager refused to
+ *  load at startup (ABI mismatch, malformed manifest,
+ *  dlopen failure, …). Drives the "Konnten nicht geladen
+ *  werden"-section of the Settings → Plugins panel. */
+export const listFailedPlugins = () =>
+  invoke<FailedPluginInfo[]>('list_failed_plugins');

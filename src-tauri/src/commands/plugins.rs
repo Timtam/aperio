@@ -542,6 +542,12 @@ pub async fn install_plugin_archive(
         .load_from_dir(&installed.plugin_dir)
         .map_err(plugin_error_to_command)?;
 
+    // Drop any stale failed-load record for this plugin dir
+    // — the install just made it loadable. The Settings
+    // panel's "Konnten nicht geladen werden"-section will
+    // remove the row on next list_failed_plugins.
+    plugin_manager.clear_failed_load(&installed.plugin_dir);
+
     // The plugin landed; now re-register any account whose
     // adapter_kind maps to it. Accounts whose plugin was
     // missing at bootstrap will have stayed unregistered;
@@ -755,6 +761,119 @@ async fn try_unload_for_upgrade(
             }
         }
     }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Failed plugin loads — surfaced in Settings → Plugins
+// ─────────────────────────────────────────────────────────────
+
+/// Frontend-friendly snapshot of one plugin directory the
+/// manager refused to load. Drives the "Konnten nicht
+/// geladen werden"-section in PluginsPanel so the user sees
+/// WHY a plugin disappeared (rather than it silently being
+/// absent from the loaded list).
+#[derive(Debug, Clone, Serialize)]
+pub struct FailedPluginInfo {
+    /// Path the manager tried to load. Useful UI anchor +
+    /// disambiguates two community plugins that might end up
+    /// in different subdirectories with the same id.
+    pub plugin_dir: String,
+    /// Manifest fields, if the manifest parsed. `None` when
+    /// the failure was at JSON parse time.
+    pub id: Option<String>,
+    pub name: Option<String>,
+    pub version: Option<String>,
+    pub plugin_type: Option<String>,
+    pub author: Option<String>,
+    /// Tagged-union reason — drives the per-row hint
+    /// rendered by the panel ("ABI mismatch — re-install
+    /// the plugin", "Update Aperio", etc.).
+    pub reason: FailedPluginReason,
+    /// Raw underlying error text. Always populated; surfaced
+    /// in the UI as the detail line so plugin authors /
+    /// power users can diagnose.
+    pub error_message: String,
+}
+
+/// Tagged-union mirror of [`plugin_core::FailedLoadReason`].
+/// Re-emitted as a discriminated JSON envelope so the React
+/// side can branch deterministically rather than parsing
+/// error strings.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum FailedPluginReason {
+    /// Manifest's `abi_version` doesn't match host's
+    /// [`plugin_core::ABI_VERSION`]. The plugin is from a
+    /// different ABI generation; either side needs an update
+    /// for the binary to be loadable.
+    AbiMismatch { host: u32, plugin: u32 },
+    /// Plugin requires a newer Aperio than the running build.
+    AppTooOld { required: String, running: String },
+    /// `plugin.json` is missing, malformed, or has an
+    /// unknown `plugin_type` tag.
+    ManifestInvalid,
+    /// `dlopen` / `LoadLibrary` failed at runtime — corrupt
+    /// cdylib, missing dep, wrong architecture.
+    LibraryLoad,
+    /// Anything else — the panel falls back to the raw
+    /// error message under this discriminator.
+    Other,
+}
+
+impl From<plugin_core::FailedLoadReason> for FailedPluginReason {
+    fn from(value: plugin_core::FailedLoadReason) -> Self {
+        use plugin_core::FailedLoadReason as R;
+        match value {
+            R::AbiMismatch { host, plugin } => {
+                Self::AbiMismatch { host, plugin }
+            }
+            R::AppTooOld { required, running } => {
+                Self::AppTooOld { required, running }
+            }
+            R::ManifestInvalid => Self::ManifestInvalid,
+            R::LibraryLoad => Self::LibraryLoad,
+            R::Other => Self::Other,
+        }
+    }
+}
+
+/// List plugins the manager refused to load since startup.
+/// Drives the §20.10 + ABI-mismatch hint in the Settings
+/// panel.
+#[tauri::command]
+pub async fn list_failed_plugins(
+    plugin_manager: State<'_, Arc<PluginManager>>,
+) -> CommandResult<Vec<FailedPluginInfo>> {
+    let mut out: Vec<FailedPluginInfo> = plugin_manager
+        .failed_loads()
+        .into_iter()
+        .map(|failed| {
+            let manifest = failed.manifest.as_ref();
+            FailedPluginInfo {
+                plugin_dir: failed.plugin_dir.to_string_lossy().into_owned(),
+                id: manifest.map(|m| m.id.clone()),
+                name: manifest.map(|m| m.name.clone()),
+                version: manifest.map(|m| m.version.clone()),
+                plugin_type: manifest
+                    .map(|m| m.plugin_type.as_str().to_string()),
+                author: manifest.and_then(|m| m.author.clone()),
+                reason: failed.reason.into(),
+                error_message: failed.error_message,
+            }
+        })
+        .collect();
+    // Sort by name (fallback id, fallback plugin_dir) so the
+    // panel renders a stable order across re-fetches.
+    out.sort_by(|a, b| {
+        let key = |f: &FailedPluginInfo| {
+            f.name
+                .clone()
+                .or_else(|| f.id.clone())
+                .unwrap_or_else(|| f.plugin_dir.clone())
+        };
+        key(a).cmp(&key(b))
+    });
+    Ok(out)
 }
 
 // ─────────────────────────────────────────────────────────────

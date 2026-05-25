@@ -264,6 +264,24 @@
           "sectionAria": "Plugins announced by other devices",
           "hint": "These plugins are installed on your other devices but not on this one. Install the matching .aperio archive via the button above to make them available here.",
           "announcedBy": "Used on device: {{device}}"
+        },
+        "failed": {
+          "heading": "Couldn't be loaded",
+          "sectionAria": "Plugins that failed to load",
+          "hint": "These plugin files are installed but Aperio refused to load them. Accounts that depend on them are inactive until you re-install a compatible version.",
+          "rowAria": "Failed to load: {{name}}",
+          "detailsSummary": "Show technical details",
+          "idLabel": "Plugin ID",
+          "dirLabel": "Location",
+          "errorLabel": "Underlying error",
+          "reason": {
+            "abiMismatchOlderPlugin": "This plugin was built for an older Aperio (ABI v{{plugin}}; this Aperio speaks ABI v{{host}}). Install a newer version of the plugin built for the current Aperio.",
+            "abiMismatchNewerPlugin": "This plugin was built for a newer Aperio (ABI v{{plugin}}; this Aperio speaks ABI v{{host}}). Update Aperio to use this plugin.",
+            "appTooOld": "This plugin requires Aperio {{required}} or newer; you're running {{running}}. Update Aperio and restart.",
+            "manifestInvalid": "The plugin's manifest is missing, malformed, or declares an unknown plugin type. Re-install from a fresh .aperio archive.",
+            "libraryLoad": "Aperio couldn't load the plugin's shared library — it may be corrupt or built for a different operating system / architecture. Re-install from a fresh .aperio archive for your platform.",
+            "other": "Aperio couldn't load this plugin. See the technical details below."
+          }
         }
       },
       "contacts": {

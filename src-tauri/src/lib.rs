@@ -416,6 +416,12 @@ pub fn run() {
             // that aren't installed locally; drives the
             // "Plugin benötigt" section in the Settings panel.
             commands::list_remote_plugins,
+            // List plugins the manager refused to load at
+            // startup (ABI mismatch, dlopen failure, …).
+            // Drives the "Konnten nicht geladen werden"-
+            // section so stale community plugins after an
+            // Aperio update don't silently disappear.
+            commands::list_failed_plugins,
         ])
         .setup(move |app| {
             // Spawn the reminder scheduler on the Tauri/tokio runtime

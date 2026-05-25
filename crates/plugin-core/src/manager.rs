@@ -392,6 +392,103 @@ struct Inner {
     /// id weren't installed at all. Re-enabling lifts the gate
     /// without re-running dlopen.
     disabled: HashSet<String>,
+    /// Plugin directories `scan_dir` tried to load but
+    /// couldn't (ABI mismatch, app-too-old, malformed
+    /// manifest, dlopen failure …). The Settings panel
+    /// reads this so the user sees WHY a community plugin
+    /// they installed isn't appearing in the loaded list —
+    /// otherwise a stale plugin after an Aperio update just
+    /// silently disappears. Cleared by [`Self::clear_failed_loads`]
+    /// when a directory has been re-installed via the §20.7
+    /// installer.
+    failed_loads: Vec<FailedPluginLoad>,
+}
+
+/// Metadata for a plugin directory the manager refused to
+/// load. Returned from [`PluginManager::failed_loads`] so the
+/// Settings panel can render a clear "this plugin couldn't be
+/// loaded because …" row.
+#[derive(Debug, Clone)]
+pub struct FailedPluginLoad {
+    /// The directory we tried to load from. Useful as a UI
+    /// anchor + for the uninstall command path (community
+    /// plugins live under `<data_dir>/plugins/user/<id>/`).
+    pub plugin_dir: PathBuf,
+    /// Parsed manifest if it got that far. `None` when the
+    /// failure was at read / parse time (missing plugin.json,
+    /// malformed JSON, missing required field).
+    pub manifest: Option<PluginManifest>,
+    /// User-facing categorisation. Drives the per-row hint
+    /// the UI renders (ABI mismatch → "outdated plugin";
+    /// AppTooOld → "update Aperio"; etc.).
+    pub reason: FailedLoadReason,
+    /// Underlying error message — surfaced to the user as
+    /// the detail line so a plugin author / advanced user
+    /// can diagnose. Always populated.
+    pub error_message: String,
+}
+
+/// Coarse-grained reason a plugin failed to load. The
+/// manager translates `PluginError` variants into one of
+/// these so the UI can branch on intent rather than parsing
+/// error strings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FailedLoadReason {
+    /// The manifest's `abi_version` doesn't match the host's
+    /// [`crate::ABI_VERSION`]. The plugin needs to be
+    /// rebuilt against the running Aperio's ABI, or the
+    /// user needs to upgrade/downgrade Aperio.
+    AbiMismatch { host: u32, plugin: u32 },
+    /// `min_app_version` is newer than the running Aperio.
+    /// User should update Aperio.
+    AppTooOld { required: String, running: String },
+    /// plugin.json is missing, malformed, or has an unknown
+    /// `plugin_type` tag (forward-compat). The UI surfaces
+    /// this as "this plugin's manifest is invalid".
+    ManifestInvalid,
+    /// dlopen / LoadLibrary failed at runtime — typically a
+    /// corrupt cdylib, wrong architecture, or a missing
+    /// system dependency.
+    LibraryLoad,
+    /// Anything the categoriser couldn't bucket cleanly.
+    /// UI falls back to showing the bare error message.
+    Other,
+}
+
+impl FailedLoadReason {
+    /// Bucket a [`PluginError`] into a UI-friendly reason.
+    pub fn from_error(err: &PluginError) -> Self {
+        match err {
+            PluginError::AbiMismatch { host, plugin } => Self::AbiMismatch {
+                host: *host,
+                plugin: *plugin,
+            },
+            PluginError::AppTooOld { required, running } => Self::AppTooOld {
+                required: required.clone(),
+                running: running.clone(),
+            },
+            PluginError::Io(_) | PluginError::Semver { .. } => {
+                Self::ManifestInvalid
+            }
+            PluginError::Manifest(msg) => {
+                // PluginError::Manifest is overloaded: it
+                // carries both "your JSON is broken" and the
+                // post-parse "dlopen(...) failed" messages
+                // (the manager's load_from_dir wraps libloading
+                // errors as Manifest). The prefix lets us
+                // disambiguate without a wider error-enum
+                // refactor — if the message names a dlopen
+                // call site we bucket it as LibraryLoad,
+                // otherwise as ManifestInvalid.
+                if msg.starts_with("dlopen(") || msg.starts_with("LoadLibrary") {
+                    Self::LibraryLoad
+                } else {
+                    Self::ManifestInvalid
+                }
+            }
+            PluginError::InstanceOpen { .. } => Self::Other,
+        }
+    }
 }
 
 impl PluginManager {
@@ -410,8 +507,11 @@ impl PluginManager {
     /// Walk `dir` looking for plugin subdirectories. Every
     /// immediate child directory that contains a `plugin.json`
     /// is treated as a plugin; missing manifests + parse errors
-    /// + ABI mismatches are logged and skipped — one bad plugin
-    ///   must NEVER prevent the rest from loading.
+    /// + ABI mismatches are logged AND recorded into the
+    /// manager's failed-loads list so the Settings panel can
+    /// surface them — one bad plugin must NEVER prevent the
+    /// rest from loading, but it must ALSO not disappear
+    /// silently from the user's view.
     ///
     /// Missing `dir` is not an error: typical first-launch
     /// behaviour is that `plugins/user/` doesn't exist yet.
@@ -439,12 +539,57 @@ impl PluginManager {
             if !path.is_dir() {
                 continue;
             }
+            // Parse the manifest separately so we can attach
+            // it to the failure record even if a later step
+            // (dlopen, descriptor checks) is what actually
+            // failed. The Settings panel needs the name +
+            // version to render a useful row.
+            let manifest_path = path.join(MANIFEST_FILENAME);
+            let parsed = PluginManifest::read_from(&manifest_path).ok();
             if let Err(err) = self.load_from_dir(&path) {
                 warn!(plugin_dir = %path.display(), ?err, "plugin load failed");
+                let reason = FailedLoadReason::from_error(&err);
+                let error_message = err.to_string();
+                self.inner
+                    .write()
+                    .expect("manager poisoned")
+                    .failed_loads
+                    .push(FailedPluginLoad {
+                        plugin_dir: path.clone(),
+                        manifest: parsed,
+                        reason,
+                        error_message,
+                    });
                 errors.push(err);
             }
         }
         errors
+    }
+
+    /// Snapshot of every plugin directory the manager
+    /// refused to load since startup. The Settings → Plugins
+    /// panel reads this to render the "Konnten nicht
+    /// geladen werden"-section so the user knows WHY a
+    /// previously-working community plugin isn't appearing
+    /// after an Aperio update (most commonly: ABI mismatch
+    /// because the host bumped ABI_VERSION and the plugin
+    /// needs to be rebuilt).
+    pub fn failed_loads(&self) -> Vec<FailedPluginLoad> {
+        self.inner
+            .read()
+            .expect("manager poisoned")
+            .failed_loads
+            .clone()
+    }
+
+    /// Drop the failure record for `plugin_dir` from the
+    /// manager's list. Called by `install_plugin_archive`
+    /// after a successful install — once we have the new
+    /// version on disk, the old failure is no longer
+    /// actionable.
+    pub fn clear_failed_load(&self, plugin_dir: &Path) {
+        let mut inner = self.inner.write().expect("manager poisoned");
+        inner.failed_loads.retain(|f| f.plugin_dir != plugin_dir);
     }
 
     /// Load one plugin from `plugin_dir`. The directory MUST
@@ -1538,6 +1683,77 @@ mod tests {
             assert_eq!(counter.load(Ordering::SeqCst), 1);
         }
         assert_eq!(counter.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn scan_dir_records_failed_loads_for_broken_plugin() {
+        let mgr = PluginManager::new("0.1.0");
+        let tmp = tempdir().expect("tempdir");
+        // Two subdirs: one with a malformed plugin.json
+        // (parse failure), one with a wrong-ABI manifest.
+        // Both should land in failed_loads with the right
+        // reason.
+        let broken_json = tmp.path().join("com.example.broken");
+        std::fs::create_dir(&broken_json).unwrap();
+        std::fs::write(broken_json.join("plugin.json"), b"{ not json")
+            .unwrap();
+
+        let wrong_abi = tmp.path().join("com.example.wrong-abi");
+        std::fs::create_dir(&wrong_abi).unwrap();
+        std::fs::write(
+            wrong_abi.join("plugin.json"),
+            br#"{
+                "id": "com.example.wrong-abi",
+                "name": "Wrong ABI",
+                "version": "1.0.0",
+                "plugin_type": "calendar-adapter",
+                "abi_version": 999,
+                "min_app_version": "0.1.0"
+            }"#,
+        )
+        .unwrap();
+
+        let errors = mgr.scan_dir(tmp.path());
+        assert_eq!(errors.len(), 2, "both bad subdirs should fail");
+
+        let failed = mgr.failed_loads();
+        assert_eq!(failed.len(), 2);
+
+        let by_dir: HashMap<_, _> = failed
+            .iter()
+            .map(|f| (f.plugin_dir.clone(), f))
+            .collect();
+
+        let broken = by_dir.get(&broken_json).expect("broken_json recorded");
+        assert!(broken.manifest.is_none(), "manifest didn't parse");
+        assert_eq!(broken.reason, FailedLoadReason::ManifestInvalid);
+
+        let abi = by_dir.get(&wrong_abi).expect("wrong_abi recorded");
+        assert!(abi.manifest.is_some(), "manifest parsed even though ABI mismatched");
+        assert_eq!(
+            abi.reason,
+            FailedLoadReason::AbiMismatch {
+                host: crate::ABI_VERSION,
+                plugin: 999,
+            },
+        );
+    }
+
+    #[test]
+    fn clear_failed_load_drops_only_the_matching_entry() {
+        let mgr = PluginManager::new("0.1.0");
+        let tmp = tempdir().expect("tempdir");
+        for name in ["com.example.a", "com.example.b"] {
+            let dir = tmp.path().join(name);
+            std::fs::create_dir(&dir).unwrap();
+            std::fs::write(dir.join("plugin.json"), b"{ bad").unwrap();
+        }
+        mgr.scan_dir(tmp.path());
+        assert_eq!(mgr.failed_loads().len(), 2);
+        mgr.clear_failed_load(&tmp.path().join("com.example.a"));
+        let remaining = mgr.failed_loads();
+        assert_eq!(remaining.len(), 1);
+        assert!(remaining[0].plugin_dir.ends_with("com.example.b"));
     }
 
     #[test]

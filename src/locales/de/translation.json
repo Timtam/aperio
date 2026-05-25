@@ -261,6 +261,24 @@
           "sectionAria": "Auf anderen Geräten angekündigte Plugins",
           "hint": "Diese Plugins sind auf deinen anderen Geräten installiert, aber nicht auf diesem. Installiere das passende .aperio-Archiv über die Schaltfläche oben, damit sie hier verfügbar werden.",
           "announcedBy": "Auf Gerät installiert: {{device}}"
+        },
+        "failed": {
+          "heading": "Konnten nicht geladen werden",
+          "sectionAria": "Plugins, die nicht geladen werden konnten",
+          "hint": "Diese Plugin-Dateien sind installiert, aber Aperio konnte sie nicht laden. Konten, die diese Plugins benötigen, sind inaktiv, bis du eine kompatible Version installierst.",
+          "rowAria": "Konnte nicht geladen werden: {{name}}",
+          "detailsSummary": "Technische Details anzeigen",
+          "idLabel": "Plugin-ID",
+          "dirLabel": "Ort",
+          "errorLabel": "Zugrundeliegender Fehler",
+          "reason": {
+            "abiMismatchOlderPlugin": "Dieses Plugin wurde für ein älteres Aperio gebaut (ABI v{{plugin}}; dieses Aperio nutzt ABI v{{host}}). Installiere eine neuere Plugin-Version, die für das aktuelle Aperio gebaut wurde.",
+            "abiMismatchNewerPlugin": "Dieses Plugin wurde für ein neueres Aperio gebaut (ABI v{{plugin}}; dieses Aperio nutzt ABI v{{host}}). Aktualisiere Aperio, um dieses Plugin zu verwenden.",
+            "appTooOld": "Dieses Plugin benötigt Aperio {{required}} oder neuer; du nutzt {{running}}. Aktualisiere Aperio und starte neu.",
+            "manifestInvalid": "Das Manifest des Plugins fehlt, ist fehlerhaft oder deklariert einen unbekannten Plugin-Typ. Installiere es aus einem frischen .aperio-Archiv neu.",
+            "libraryLoad": "Aperio konnte die Shared Library des Plugins nicht laden — sie ist möglicherweise beschädigt oder für ein anderes Betriebssystem / eine andere Architektur gebaut. Installiere es aus einem für deine Plattform passenden .aperio-Archiv neu.",
+            "other": "Aperio konnte dieses Plugin nicht laden. Siehe die technischen Details unten."
+          }
         }
       },
       "contacts": {
