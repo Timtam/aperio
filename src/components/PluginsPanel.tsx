@@ -8,6 +8,7 @@ import {
   isCommandError,
   listPlugins,
   setPluginEnabled,
+  uninstallPlugin,
 } from '../api/client';
 import type {
   CommandError,
@@ -75,6 +76,19 @@ export function PluginsPanel() {
   } | null>(null);
   const [installing, setInstalling] = useState(false);
   const [installError, setInstallError] = useState<ToggleErrorEntry | null>(
+    null,
+  );
+
+  // Uninstall confirmation state. Stores the plugin pending
+  // removal so the modal can render its name + id; the
+  // `uninstalling` flag gates the dialog buttons during the
+  // actual command call; per-plugin error entries surface
+  // inline so the user sees why a removal didn't take.
+  const [pendingUninstall, setPendingUninstall] = useState<PluginInfo | null>(
+    null,
+  );
+  const [uninstalling, setUninstalling] = useState(false);
+  const [uninstallError, setUninstallError] = useState<ToggleErrorEntry | null>(
     null,
   );
 
@@ -219,6 +233,40 @@ export function PluginsPanel() {
     setInstallError(null);
   }, [installing]);
 
+  const onClickUninstall = useCallback((plugin: PluginInfo) => {
+    setUninstallError(null);
+    setPendingUninstall(plugin);
+  }, []);
+
+  const onConfirmUninstall = useCallback(async () => {
+    if (!pendingUninstall) return;
+    setUninstalling(true);
+    setUninstallError(null);
+    try {
+      await uninstallPlugin({ plugin_id: pendingUninstall.id });
+      setPlugins((prev) =>
+        prev ? prev.filter((p) => p.id !== pendingUninstall.id) : prev,
+      );
+      setPendingUninstall(null);
+    } catch (err) {
+      const entry: ToggleErrorEntry = isCommandError(err)
+        ? { code: err.code, message: err.message }
+        : {
+            code: 'unknown',
+            message: err instanceof Error ? err.message : String(err),
+          };
+      setUninstallError(entry);
+    } finally {
+      setUninstalling(false);
+    }
+  }, [pendingUninstall]);
+
+  const onCancelUninstall = useCallback(() => {
+    if (uninstalling) return;
+    setPendingUninstall(null);
+    setUninstallError(null);
+  }, [uninstalling]);
+
   // Group by plugin_type. Order: calendar-adapter, sync-adapter,
   // videoconference-adapter, notification, then anything else
   // (forward-compat tags) alphabetised. Within each group plugins
@@ -290,6 +338,7 @@ export function PluginsPanel() {
                 plugin={p}
                 onToggle={onToggle}
                 toggleError={toggleErrors[p.id] ?? null}
+                onUninstall={onClickUninstall}
               />
             ))}
           </ul>
@@ -303,6 +352,15 @@ export function PluginsPanel() {
           error={installError}
           onConfirm={onConfirmInstall}
           onCancel={onCancelInstall}
+        />
+      )}
+      {pendingUninstall && (
+        <ConfirmUninstallModal
+          plugin={pendingUninstall}
+          uninstalling={uninstalling}
+          error={uninstallError}
+          onConfirm={onConfirmUninstall}
+          onCancel={onCancelUninstall}
         />
       )}
     </div>
@@ -394,9 +452,15 @@ interface PluginRowProps {
   plugin: PluginInfo;
   onToggle: (pluginId: string, enabled: boolean) => void;
   toggleError: ToggleErrorEntry | null;
+  onUninstall: (plugin: PluginInfo) => void;
 }
 
-function PluginRow({ plugin, onToggle, toggleError }: PluginRowProps) {
+function PluginRow({
+  plugin,
+  onToggle,
+  toggleError,
+  onUninstall,
+}: PluginRowProps) {
   const { t } = useTranslation();
   const toggleId = `plugin-toggle-${plugin.id}`;
   return (
@@ -463,9 +527,95 @@ function PluginRow({ plugin, onToggle, toggleError }: PluginRowProps) {
             ? t('dialogs.settings.plugins.signed.yes')
             : t('dialogs.settings.plugins.signed.no')}
         </dd>
+        <dt>{t('dialogs.settings.plugins.source.label')}</dt>
+        <dd>
+          {plugin.source === 'bundled'
+            ? t('dialogs.settings.plugins.source.bundled')
+            : t('dialogs.settings.plugins.source.user')}
+        </dd>
       </dl>
       <PluginBadges plugin={plugin} />
+      {plugin.source === 'user' && (
+        <div className="plugins-panel__row-actions">
+          <button
+            type="button"
+            className="form__button form__button--danger"
+            onClick={() => onUninstall(plugin)}
+          >
+            {t('dialogs.settings.plugins.uninstall.button')}
+          </button>
+        </div>
+      )}
     </li>
+  );
+}
+
+interface ConfirmUninstallModalProps {
+  plugin: PluginInfo;
+  uninstalling: boolean;
+  error: ToggleErrorEntry | null;
+  onConfirm: () => void;
+  onCancel: () => void;
+}
+
+function ConfirmUninstallModal({
+  plugin,
+  uninstalling,
+  error,
+  onConfirm,
+  onCancel,
+}: ConfirmUninstallModalProps) {
+  const { t } = useTranslation();
+  return (
+    <Modal
+      isOpen={true}
+      onClose={onCancel}
+      title={t('dialogs.settings.plugins.uninstall.title')}
+    >
+      <p>
+        {t('dialogs.settings.plugins.uninstall.bodyPrefix')}{' '}
+        <strong>{plugin.name}</strong>{' '}
+        {t('dialogs.settings.plugins.uninstall.bodyVersion', {
+          version: plugin.version,
+        })}
+      </p>
+      <p className="form__hint" role="note">
+        {t('dialogs.settings.plugins.uninstall.warning')}
+      </p>
+      {error && (
+        <p className="form__error" role="alert">
+          {error.code === 'active_sync_conflict'
+            ? t('dialogs.settings.plugins.toggle.activeSyncConflict')
+            : error.code === 'restart_required'
+              ? t('dialogs.settings.plugins.uninstall.restartRequired', {
+                  error: error.message,
+                })
+              : t('dialogs.settings.plugins.uninstall.error', {
+                  error: error.message,
+                })}
+        </p>
+      )}
+      <div className="form__actions">
+        <button
+          type="button"
+          className="form__button form__button--danger"
+          onClick={onConfirm}
+          disabled={uninstalling}
+        >
+          {uninstalling
+            ? t('dialogs.settings.plugins.uninstall.uninstalling')
+            : t('dialogs.settings.plugins.uninstall.confirm')}
+        </button>
+        <button
+          type="button"
+          className="form__button"
+          onClick={onCancel}
+          disabled={uninstalling}
+        >
+          {t('dialogs.settings.plugins.uninstall.cancel')}
+        </button>
+      </div>
+    </Modal>
   );
 }
 

@@ -238,6 +238,23 @@
           "installing": "Installiere…",
           "error": "Installation fehlgeschlagen: {{error}}",
           "restartRequired": "Eine ältere Version dieses Plugins ist bereits geladen. Starte Aperio neu, damit die neue Version wirksam wird."
+        },
+        "source": {
+          "label": "Herkunft",
+          "bundled": "Mitgeliefert",
+          "user": "Community-Plugin"
+        },
+        "uninstall": {
+          "button": "Deinstallieren…",
+          "title": "Plugin deinstallieren",
+          "bodyPrefix": "",
+          "bodyVersion": "(Version {{version}}) von diesem Gerät entfernen?",
+          "warning": "⚠ Konten, die dieses Plugin nutzen, funktionieren nicht mehr, bis du es erneut installierst. Ihre Konfiguration bleibt erhalten — sie werden automatisch wieder aktiv, sobald das Plugin verfügbar ist.",
+          "confirm": "Deinstallieren",
+          "cancel": "Abbrechen",
+          "uninstalling": "Deinstalliere…",
+          "error": "Deinstallation fehlgeschlagen: {{error}}",
+          "restartRequired": "Plugin konnte nicht entfernt werden: {{error}}. Starte Aperio neu und versuche es erneut."
         }
       },
       "contacts": {

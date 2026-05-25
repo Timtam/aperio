@@ -1224,3 +1224,14 @@ export interface InstallPluginArchiveRequest {
  *  v1). */
 export const installPluginArchive = (request: InstallPluginArchiveRequest) =>
   invoke<PluginInfo>('install_plugin_archive', { request });
+
+export interface UninstallPluginRequest {
+  plugin_id: string;
+}
+
+/** Drop a community plugin: drain in-flight calls, unload,
+ *  scrub plugins/user/<id>/, clear the disabled flag.
+ *  Refuses bundled plugins (`unsupported`) and the active
+ *  sync plugin (`active_sync_conflict`). */
+export const uninstallPlugin = (request: UninstallPluginRequest) =>
+  invoke<void>('uninstall_plugin', { request });

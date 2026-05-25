@@ -327,6 +327,11 @@ export interface PluginInfo {
    *  PluginManager.get() acts as if a disabled plugin weren't
    *  installed. */
   enabled: boolean;
+  /** Where the plugin lives on disk. `"bundled"` plugins ship
+   *  with the app and CANNOT be uninstalled; `"user"` plugins
+   *  were installed via the §20.7 `.aperio` flow and have an
+   *  Uninstall button in the panel. */
+  source: 'bundled' | 'user';
 }
 
 /** Preview of a `.aperio` archive's manifest, returned by

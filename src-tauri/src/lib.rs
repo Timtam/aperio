@@ -409,6 +409,7 @@ pub fn run() {
             commands::set_plugin_enabled,
             commands::inspect_plugin_archive,
             commands::install_plugin_archive,
+            commands::uninstall_plugin,
         ])
         .setup(move |app| {
             // Spawn the reminder scheduler on the Tauri/tokio runtime

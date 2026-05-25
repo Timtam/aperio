@@ -241,6 +241,23 @@
           "installing": "Installing…",
           "error": "Install failed: {{error}}",
           "restartRequired": "A previous version of this plugin is already loaded. Restart Aperio so the new version takes effect."
+        },
+        "source": {
+          "label": "Source",
+          "bundled": "Bundled with Aperio",
+          "user": "Community plugin"
+        },
+        "uninstall": {
+          "button": "Uninstall…",
+          "title": "Uninstall plugin",
+          "bodyPrefix": "Remove",
+          "bodyVersion": "(version {{version}}) from this device?",
+          "warning": "⚠ Accounts that use this plugin will stop working until you re-install it. Their configuration stays in place — they re-activate automatically once the plugin is available again.",
+          "confirm": "Uninstall",
+          "cancel": "Cancel",
+          "uninstalling": "Uninstalling…",
+          "error": "Uninstall failed: {{error}}",
+          "restartRequired": "Couldn't drop the plugin: {{error}}. Restart Aperio and try again."
         }
       },
       "contacts": {

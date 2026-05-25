@@ -151,6 +151,19 @@ pub struct PluginInfo {
     /// cdylib stays loaded but the host treats the id as
     /// uninstalled until the toggle goes back on.
     pub enabled: bool,
+    /// Where the plugin lives on disk: `"bundled"` ships with
+    /// the app under `<binary>/plugins/bundled/` and CANNOT
+    /// be uninstalled; `"user"` was installed via the §20.7
+    /// `.aperio` flow under `<data_dir>/plugins/user/` and can
+    /// be removed via the Settings → Plugins panel.
+    pub source: PluginSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PluginSource {
+    Bundled,
+    User,
 }
 
 /// Return metadata for every plugin currently loaded into the
@@ -159,7 +172,9 @@ pub struct PluginInfo {
 #[tauri::command]
 pub async fn list_plugins(
     plugin_manager: State<'_, Arc<PluginManager>>,
+    user_plugins_dir: State<'_, UserPluginsDir>,
 ) -> CommandResult<Vec<PluginInfo>> {
+    let user_dir = &user_plugins_dir.0;
     let mut out: Vec<PluginInfo> = plugin_manager
         .all()
         .into_iter()
@@ -184,11 +199,26 @@ pub async fn list_plugins(
                 has_discover: plugin.has_discover(),
                 has_probe_host_key: plugin.has_probe_host_key(),
                 enabled: plugin_manager.is_enabled(&m.id),
+                source: plugin_source(&m.id, user_dir),
             }
         })
         .collect();
     out.sort_by(|a, b| a.id.cmp(&b.id));
     Ok(out)
+}
+
+/// Decide whether a plugin id maps to a user-installed
+/// directory under `<user_plugins_dir>/<id>/` (Source::User)
+/// or the read-only bundled tree (Source::Bundled). Used by
+/// both the list payload (so the panel can hide the Uninstall
+/// button for bundled plugins) and the uninstall path (so we
+/// refuse to scrub a path we don't own).
+fn plugin_source(plugin_id: &str, user_plugins_dir: &PathBuf) -> PluginSource {
+    if user_plugins_dir.join(plugin_id).is_dir() {
+        PluginSource::User
+    } else {
+        PluginSource::Bundled
+    }
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -541,6 +571,12 @@ pub async fn install_plugin_archive(
         has_discover: loaded.has_discover(),
         has_probe_host_key: loaded.has_probe_host_key(),
         enabled: plugin_manager.is_enabled(&plugin_id),
+        // Just installed via the §20.7 archive flow, so this
+        // is always Source::User. (The bundled scan happens
+        // at startup against a different directory; nothing
+        // we do at runtime can promote a user plugin to
+        // bundled.)
+        source: PluginSource::User,
     })
 }
 
@@ -658,6 +694,115 @@ async fn try_unload_for_upgrade(
             }
         }
     }
+}
+
+// ─────────────────────────────────────────────────────────────
+// §20.10 — uninstall verb (community plugins only)
+// ─────────────────────────────────────────────────────────────
+
+#[derive(Debug, serde::Deserialize)]
+pub struct UninstallPluginRequest {
+    pub plugin_id: String,
+}
+
+/// Drop a community plugin: drain in-flight calls, unload
+/// from the manager, scrub `<user_plugins_dir>/<plugin_id>/`,
+/// clear the user_prefs disabled flag for the id.
+///
+/// Refuses bundled plugins (DESIGN.md §20.10 explicitly notes
+/// these are not user-removable) and the active sync plugin
+/// (parallel to the disable + upgrade guards). Accounts that
+/// reference the uninstalled plugin are unregistered from
+/// the registry but NOT deleted from the accounts table —
+/// the §20.8 "Plugin fehlt" path is what surfaces them in
+/// the UI as needing attention, and the user might re-install
+/// the plugin later. Wiping the rows on uninstall would be a
+/// destructive surprise.
+#[tauri::command]
+pub async fn uninstall_plugin(
+    db: State<'_, DbHandle>,
+    registry: State<'_, Arc<AdapterRegistry>>,
+    plugin_manager: State<'_, Arc<PluginManager>>,
+    user_plugins_dir: State<'_, UserPluginsDir>,
+    request: UninstallPluginRequest,
+) -> CommandResult<()> {
+    let plugin_id = request.plugin_id;
+
+    // 1) Bundled plugins are read-only. Refuse before we
+    //    touch any state.
+    if plugin_source(&plugin_id, &user_plugins_dir.0) == PluginSource::Bundled {
+        return Err(CommandError {
+            code: "unsupported",
+            message: format!(
+                "{plugin_id} is a bundled plugin; bundled plugins can't be uninstalled.",
+            ),
+        });
+    }
+
+    // 2) Active-sync guard. Uninstalling the sync adapter
+    //    the user is actively syncing with would break every
+    //    subsequent sync round; same posture as iterations
+    //    14 + 17.
+    let shared = db.shared();
+    if let Some(plugin_sync_kind) = sync_kind_for_plugin(&plugin_id) {
+        let prefs = UserPrefsRepo::new(&shared);
+        let active_kind = prefs
+            .get(PREF_ADAPTER_KIND)
+            .map_err(|e| CommandError {
+                code: "internal",
+                message: format!("read sync.adapter.kind: {e}"),
+            })?
+            .filter(|s| !s.is_empty());
+        if active_kind.as_deref() == Some(plugin_sync_kind) {
+            return Err(CommandError {
+                code: "active_sync_conflict",
+                message: format!(
+                    "{plugin_id} is the sync adapter you're currently using; \
+                     switch to a different one in Settings → Sync before uninstalling it.",
+                ),
+            });
+        }
+    }
+
+    // 3) If the plugin is currently loaded, tear it down via
+    //    the same drain-and-unload helper that the upgrade
+    //    flow uses. On `restart_required` rollback the helper
+    //    re-registers the affected accounts so the user keeps
+    //    a functional setup until they retry / restart.
+    if plugin_manager.get_including_disabled(&plugin_id).is_some() {
+        try_unload_for_upgrade(&plugin_manager, &registry, &shared, &plugin_id)
+            .await?;
+    }
+
+    // 4) Scrub the plugin directory. Best-effort: if the dir
+    //    is somehow already gone, treat as success (matches
+    //    user intent — "I want this plugin gone, full stop").
+    let plugin_dir = user_plugins_dir.0.join(&plugin_id);
+    if plugin_dir.is_dir() {
+        std::fs::remove_dir_all(&plugin_dir).map_err(|e| CommandError {
+            code: "internal",
+            message: format!(
+                "remove plugin directory {}: {e}",
+                plugin_dir.display(),
+            ),
+        })?;
+    }
+
+    // 5) Housekeeping: drop the user_prefs disabled flag so
+    //    a re-install starts from a clean enabled state.
+    //    Deletion errors are non-fatal — the install path
+    //    will overwrite the row if it ever exists again.
+    let prefs = UserPrefsRepo::new(&shared);
+    let key = pref_key_for_disabled(&plugin_id);
+    if let Err(err) = prefs.delete(&key) {
+        warn!(
+            plugin_id = %plugin_id,
+            ?err,
+            "uninstall: couldn't drop plugin.disabled flag from user_prefs",
+        );
+    }
+
+    Ok(())
 }
 
 /// Map plugin-core's error type onto the frontend-friendly
