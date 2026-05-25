@@ -20,7 +20,7 @@
 //! relative `<href>` values from the server are joined against the
 //! right base.
 
-use reqwest::header::{HeaderValue, CONTENT_TYPE, HeaderName};
+use reqwest::header::{HeaderName, HeaderValue, CONTENT_TYPE};
 use reqwest::{Client, Method, Response, StatusCode};
 use tracing::debug;
 use url::Url;
@@ -85,8 +85,7 @@ pub async fn run(client: &Client, credentials: &Credentials) -> CaldavResult<Dis
     let base = parse_base_url(&credentials.config.server_url)?;
     let dav_root = resolve_well_known(client, &base, credentials).await?;
     let principal_url = find_principal(client, &dav_root, credentials).await?;
-    let calendar_home_url =
-        find_calendar_home(client, &principal_url, credentials).await?;
+    let calendar_home_url = find_calendar_home(client, &principal_url, credentials).await?;
     // Addressbook home is best-effort: a missing or 404 response
     // means "this server doesn't surface CardDAV", which is fine —
     // we just don't expose the Contacts capability. Anything else
@@ -182,7 +181,10 @@ async fn resolve_well_known(
     }
     // Anything else (5xx, 401) we treat as soft — let the next step
     // surface a real error against the base URL.
-    debug!(?status, "well-known returned unexpected status; using base URL");
+    debug!(
+        ?status,
+        "well-known returned unexpected status; using base URL"
+    );
     Ok(base.clone())
 }
 
@@ -193,12 +195,9 @@ async fn find_principal(
 ) -> CaldavResult<Url> {
     let response = propfind(client, dav_root, PRINCIPAL_BODY, credentials, 0).await?;
     let body = expect_207(response).await?;
-    let href = extract_first_nested_href(&body, b"current-user-principal")?
-        .ok_or_else(|| {
-            CaldavError::Discovery(
-                "server did not return a current-user-principal".into(),
-            )
-        })?;
+    let href = extract_first_nested_href(&body, b"current-user-principal")?.ok_or_else(|| {
+        CaldavError::Discovery("server did not return a current-user-principal".into())
+    })?;
     dav_root.join(&href).map_err(Into::into)
 }
 
@@ -209,12 +208,9 @@ async fn find_calendar_home(
 ) -> CaldavResult<Url> {
     let response = propfind(client, principal_url, HOME_SET_BODY, credentials, 0).await?;
     let body = expect_207(response).await?;
-    let href = extract_first_nested_href(&body, b"calendar-home-set")?
-        .ok_or_else(|| {
-            CaldavError::Discovery(
-                "server did not return a calendar-home-set".into(),
-            )
-        })?;
+    let href = extract_first_nested_href(&body, b"calendar-home-set")?.ok_or_else(|| {
+        CaldavError::Discovery("server did not return a calendar-home-set".into())
+    })?;
     principal_url.join(&href).map_err(Into::into)
 }
 
@@ -223,16 +219,18 @@ async fn find_addressbook_home(
     principal_url: &Url,
     credentials: &Credentials,
 ) -> CaldavResult<Url> {
-    let response =
-        propfind(client, principal_url, ADDRESSBOOK_HOME_SET_BODY, credentials, 0)
-            .await?;
+    let response = propfind(
+        client,
+        principal_url,
+        ADDRESSBOOK_HOME_SET_BODY,
+        credentials,
+        0,
+    )
+    .await?;
     let body = expect_207(response).await?;
-    let href = extract_first_nested_href(&body, b"addressbook-home-set")?
-        .ok_or_else(|| {
-            CaldavError::Discovery(
-                "server did not return an addressbook-home-set".into(),
-            )
-        })?;
+    let href = extract_first_nested_href(&body, b"addressbook-home-set")?.ok_or_else(|| {
+        CaldavError::Discovery("server did not return an addressbook-home-set".into())
+    })?;
     principal_url.join(&href).map_err(Into::into)
 }
 
@@ -360,10 +358,7 @@ mod tests {
 
         let client = test_client();
         let discovery = run(&client, &creds(&server.url())).await.unwrap();
-        assert_eq!(
-            discovery.principal_url.path(),
-            "/principals/users/alice/"
-        );
+        assert_eq!(discovery.principal_url.path(), "/principals/users/alice/");
         assert_eq!(discovery.calendar_home_url.path(), "/calendars/alice/");
     }
 

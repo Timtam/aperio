@@ -26,8 +26,8 @@ use rusqlite::{params, Row};
 use uuid::Uuid;
 
 use crate::mapping::{
-    decode_json, encode_json, fmt_date, fmt_utc, opt_text, parse_date, parse_utc,
-    read_bool, read_container_color, req_text, write_container_color,
+    decode_json, encode_json, fmt_date, fmt_utc, opt_text, parse_date, parse_utc, read_bool,
+    read_container_color, req_text, write_container_color,
 };
 use crate::{map_sql_err, LocalAdapter, SOURCE_ID};
 
@@ -56,15 +56,7 @@ impl LocalAdapter {
                     id, account_id, source, name, color_hex, color_source,
                     read_only, etag, created_at, updated_at
                  ) VALUES (?, 'local', ?, ?, ?, ?, 0, NULL, ?, ?)",
-                params![
-                    id,
-                    SOURCE_ID,
-                    name,
-                    color_hex,
-                    color_source,
-                    now_s,
-                    now_s,
-                ],
+                params![id, SOURCE_ID, name, color_hex, color_source, now_s, now_s,],
             )
             .map_err(map_sql_err)?;
         Ok(ContactList {
@@ -195,11 +187,7 @@ impl ContactsFeature for LocalAdapter {
         Ok(out)
     }
 
-    async fn create_contact(
-        &self,
-        list_id: &str,
-        contact: NewContact,
-    ) -> CoreResult<Contact> {
+    async fn create_contact(&self, list_id: &str, contact: NewContact) -> CoreResult<Contact> {
         if contact.display_name.trim().is_empty() {
             return Err(CoreError::InvalidInput(
                 "display_name must not be empty".into(),
@@ -357,10 +345,7 @@ impl ContactsFeature for LocalAdapter {
         Ok(())
     }
 
-    async fn get_contact_photo(
-        &self,
-        contact_id: &str,
-    ) -> CoreResult<Option<ContactPhoto>> {
+    async fn get_contact_photo(&self, contact_id: &str) -> CoreResult<Option<ContactPhoto>> {
         let conn = self.db().lock().expect("db mutex poisoned");
         // First pass: confirm the contact row exists at all so we
         // can distinguish "no photo on a real contact" from "id
@@ -396,10 +381,7 @@ impl ContactsFeature for LocalAdapter {
             )
             .map_err(map_sql_err)?;
         match row {
-            (Some(data), Some(content_type)) => Ok(Some(ContactPhoto {
-                content_type,
-                data,
-            })),
+            (Some(data), Some(content_type)) => Ok(Some(ContactPhoto { content_type, data })),
             // No photo set, or content type missing (shouldn't
             // happen — the columns are written as a pair — but
             // we tolerate it). Treat as "no photo".
@@ -407,11 +389,7 @@ impl ContactsFeature for LocalAdapter {
         }
     }
 
-    async fn set_contact_photo(
-        &self,
-        contact_id: &str,
-        photo: ContactPhoto,
-    ) -> CoreResult<()> {
+    async fn set_contact_photo(&self, contact_id: &str, photo: ContactPhoto) -> CoreResult<()> {
         if photo.content_type.trim().is_empty() {
             return Err(CoreError::InvalidInput(
                 "photo content_type must not be empty".into(),
@@ -465,11 +443,7 @@ impl ContactsFeature for LocalAdapter {
         Ok(())
     }
 
-    async fn rename_contact_list(
-        &self,
-        list_id: &str,
-        new_name: &str,
-    ) -> CoreResult<()> {
+    async fn rename_contact_list(&self, list_id: &str, new_name: &str) -> CoreResult<()> {
         if new_name.trim().is_empty() {
             return Err(CoreError::InvalidInput(
                 "contact list name must not be empty".into(),
@@ -573,9 +547,7 @@ fn row_to_contact(row: &Row<'_>) -> rusqlite::Result<CoreResult<Contact>> {
         let organization = opt_text(row, 5)?;
         let emails_json = req_text(row, 6)?;
         let phones_json = req_text(row, 7)?;
-        let birthday = opt_text(row, 8)?
-            .map(|s| parse_date(&s))
-            .transpose()?;
+        let birthday = opt_text(row, 8)?.map(|s| parse_date(&s)).transpose()?;
         let notes = opt_text(row, 9)?;
         let etag = opt_text(row, 10)?;
         let created_at = parse_utc(&req_text(row, 11)?)?;
@@ -599,8 +571,7 @@ fn row_to_contact(row: &Row<'_>) -> rusqlite::Result<CoreResult<Contact>> {
         // so a row from a pre-0011 backfill still parses as the
         // empty list — no nullable handling required.
         let addresses_json = req_text(row, 15)?;
-        let addresses: Vec<cal_core::ContactAddress> =
-            decode_json(&addresses_json)?;
+        let addresses: Vec<cal_core::ContactAddress> = decode_json(&addresses_json)?;
         Ok(Contact {
             id,
             list_id,
@@ -777,10 +748,7 @@ mod tests {
     #[tokio::test]
     async fn delete_missing_yields_not_found() {
         let adapter = fixture_adapter();
-        let err = adapter
-            .delete_contact("not-real")
-            .await
-            .unwrap_err();
+        let err = adapter.delete_contact("not-real").await.unwrap_err();
         assert!(matches!(err, CoreError::NotFound(_)));
     }
 
@@ -833,10 +801,7 @@ mod tests {
     async fn create_contact_list_round_trips() {
         let adapter = fixture_adapter();
         let list = adapter
-            .create_contact_list(
-                "Friends",
-                Some(ContainerColor::custom("#ff00ff")),
-            )
+            .create_contact_list("Friends", Some(ContainerColor::custom("#ff00ff")))
             .unwrap();
         let lists = adapter.list_contact_lists().await.unwrap();
         // Seed + new one = 2; ordered case-insensitively by name.
@@ -947,10 +912,7 @@ mod tests {
             .await
             .unwrap();
         // Hit before rename via the list_name column.
-        assert_eq!(
-            adapter.search_contacts("Contacts").await.unwrap().len(),
-            1,
-        );
+        assert_eq!(adapter.search_contacts("Contacts").await.unwrap().len(), 1,);
         adapter
             .rename_contact_list(LOCAL_DEFAULT_CONTACT_LIST_ID, "Friends")
             .await
@@ -958,22 +920,14 @@ mod tests {
         // Old name no longer matches; new name now does. Proves
         // the `contact_lists_fts_rename` trigger rewrites the
         // denormalised column.
-        assert_eq!(
-            adapter.search_contacts("Contacts").await.unwrap().len(),
-            0,
-        );
-        assert_eq!(
-            adapter.search_contacts("Friends").await.unwrap().len(),
-            1,
-        );
+        assert_eq!(adapter.search_contacts("Contacts").await.unwrap().len(), 0,);
+        assert_eq!(adapter.search_contacts("Friends").await.unwrap().len(), 1,);
     }
 
     #[tokio::test]
     async fn delete_list_cascades_to_contacts() {
         let adapter = fixture_adapter();
-        let list = adapter
-            .create_contact_list("Burner list", None)
-            .unwrap();
+        let list = adapter.create_contact_list("Burner list", None).unwrap();
         let _ = adapter
             .create_contact(&list.id, sample_new_contact())
             .await
@@ -1111,10 +1065,7 @@ mod tests {
             .create_contact(LOCAL_DEFAULT_CONTACT_LIST_ID, payload)
             .await
             .unwrap();
-        adapter
-            .delete_contact_photo(&created.id)
-            .await
-            .unwrap();
+        adapter.delete_contact_photo(&created.id).await.unwrap();
         // get_contact_photo returns None and the listing's flag
         // flips back to false.
         assert!(adapter
@@ -1132,10 +1083,7 @@ mod tests {
     #[tokio::test]
     async fn delete_photo_on_unknown_id_yields_not_found() {
         let adapter = fixture_adapter();
-        let err = adapter
-            .delete_contact_photo("nope")
-            .await
-            .unwrap_err();
+        let err = adapter.delete_contact_photo("nope").await.unwrap_err();
         assert!(matches!(err, CoreError::NotFound(_)));
     }
 }

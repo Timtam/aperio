@@ -81,21 +81,18 @@ pub async fn get_tasks(client: &EwsClient, list_id: &str) -> EwsResult<Vec<Task>
 /// server-assigned ItemId from the response, and synthesize the
 /// returned `Task` from the request fields. Saves a follow-up
 /// GetItem round-trip.
-pub async fn create_task(
-    client: &EwsClient,
-    list_id: &str,
-    task: NewTask,
-) -> EwsResult<Task> {
+pub async fn create_task(client: &EwsClient, list_id: &str, task: NewTask) -> EwsResult<Task> {
     let (folder_id, folder_change_key) = split_calendar_id(list_id);
     let item_xml = new_task_to_task_item_xml(&task);
-    let envelope = create_task_in_folder(
-        &folder_id,
-        folder_change_key.as_deref(),
-        &item_xml,
-    );
+    let envelope = create_task_in_folder(&folder_id, folder_change_key.as_deref(), &item_xml);
     let response = client.post_soap(envelope).await?;
     let item_ref = parse_first_item_id(&response)?;
-    Ok(build_task_from_new(&task, list_id, &item_ref.id, item_ref.change_key))
+    Ok(build_task_from_new(
+        &task,
+        list_id,
+        &item_ref.id,
+        item_ref.change_key,
+    ))
 }
 
 /// Update an existing task. Every field is set or deleted explicitly
@@ -104,12 +101,7 @@ pub async fn create_task(
 pub async fn update_task(client: &EwsClient, task: &Task) -> EwsResult<Task> {
     let (item_id, change_key) = split_calendar_id(&task.id);
     let (set_xml, delete_xml) = task_to_update_field_xml(task);
-    let envelope = update_task_item(
-        &item_id,
-        change_key.as_deref(),
-        &set_xml,
-        &delete_xml,
-    );
+    let envelope = update_task_item(&item_id, change_key.as_deref(), &set_xml, &delete_xml);
     let response = client.post_soap(envelope).await?;
     let item_ref = parse_first_item_id(&response)?;
     let new_id = encode_task_id(&item_ref.id, item_ref.change_key.as_deref());
@@ -135,14 +127,9 @@ pub async fn delete_task(client: &EwsClient, task_id: &str) -> EwsResult<()> {
 /// for any folder type; we just have to send the `<t:TasksFolder>`
 /// wrapper inside `SetFolderField` so the server applies the change
 /// to the right folder kind.
-pub async fn rename_task_list(
-    client: &EwsClient,
-    list_id: &str,
-    new_name: &str,
-) -> EwsResult<()> {
+pub async fn rename_task_list(client: &EwsClient, list_id: &str, new_name: &str) -> EwsResult<()> {
     let (folder_id, change_key) = split_calendar_id(list_id);
-    let envelope =
-        update_tasks_folder_displayname(&folder_id, change_key.as_deref(), new_name);
+    let envelope = update_tasks_folder_displayname(&folder_id, change_key.as_deref(), new_name);
     client.post_soap(envelope).await?;
     Ok(())
 }
@@ -230,11 +217,7 @@ pub fn find_tasks_in_folder(folder_id: &str, change_key: Option<&str>) -> String
 /// pre-rendered `<t:Task>` payload in the appropriate envelope,
 /// pinning `SavedItemFolderId` so the server files the task under
 /// the right folder rather than the default one.
-fn create_task_in_folder(
-    folder_id: &str,
-    change_key: Option<&str>,
-    task_item_xml: &str,
-) -> String {
+fn create_task_in_folder(folder_id: &str, change_key: Option<&str>, task_item_xml: &str) -> String {
     let folder_id_attr = match change_key {
         Some(ck) => format!(
             r#"<t:FolderId Id="{}" ChangeKey="{}"/>"#,
@@ -340,9 +323,7 @@ pub struct ParsedTaskFolder {
 /// Walk a `FindFolderResponse` body emitted with the IPF.Task
 /// restriction and yield one `ParsedTaskFolder` per
 /// `<t:TasksFolder>` block.
-pub fn parse_find_task_folder_response(
-    xml: &str,
-) -> EwsResult<Vec<ParsedTaskFolder>> {
+pub fn parse_find_task_folder_response(xml: &str) -> EwsResult<Vec<ParsedTaskFolder>> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
     let mut buf = Vec::new();
@@ -372,8 +353,7 @@ pub fn parse_find_task_folder_response(
                     for a in e.attributes().flatten() {
                         let key = a.key.as_ref();
                         if key.eq_ignore_ascii_case(b"Id") {
-                            current.folder_id =
-                                String::from_utf8_lossy(&a.value).into_owned();
+                            current.folder_id = String::from_utf8_lossy(&a.value).into_owned();
                         } else if key.eq_ignore_ascii_case(b"ChangeKey") {
                             current.change_key =
                                 Some(String::from_utf8_lossy(&a.value).into_owned());
@@ -462,8 +442,7 @@ pub fn parse_find_task_item_response(xml: &str) -> EwsResult<Vec<ParsedTask>> {
                         for a in e.attributes().flatten() {
                             let key = a.key.as_ref();
                             if key.eq_ignore_ascii_case(b"Id") {
-                                current.item_id =
-                                    String::from_utf8_lossy(&a.value).into_owned();
+                                current.item_id = String::from_utf8_lossy(&a.value).into_owned();
                             } else if key.eq_ignore_ascii_case(b"ChangeKey") {
                                 current.change_key =
                                     Some(String::from_utf8_lossy(&a.value).into_owned());
@@ -513,7 +492,10 @@ pub fn parse_find_task_item_response(xml: &str) -> EwsResult<Vec<ParsedTask>> {
                         current.status.get_or_insert_with(String::new).push_str(s);
                     }
                     Some("importance") => {
-                        current.importance.get_or_insert_with(String::new).push_str(s);
+                        current
+                            .importance
+                            .get_or_insert_with(String::new)
+                            .push_str(s);
                     }
                     Some("start_date") => current.start_date = parse_ews_datetime(s),
                     Some("due_date") => current.due_date = parse_ews_datetime(s),
@@ -745,26 +727,11 @@ pub fn task_to_update_field_xml(task: &Task) -> (String, String) {
 
     match first_absolute_reminder(&task.reminders) {
         Some(at) => {
-            push_set_task_raw(
-                &mut set,
-                "item:ReminderIsSet",
-                "ReminderIsSet",
-                "true",
-            );
-            push_set_task_datetime(
-                &mut set,
-                "item:ReminderDueBy",
-                "ReminderDueBy",
-                at,
-            );
+            push_set_task_raw(&mut set, "item:ReminderIsSet", "ReminderIsSet", "true");
+            push_set_task_datetime(&mut set, "item:ReminderDueBy", "ReminderDueBy", at);
         }
         None => {
-            push_set_task_raw(
-                &mut set,
-                "item:ReminderIsSet",
-                "ReminderIsSet",
-                "false",
-            );
+            push_set_task_raw(&mut set, "item:ReminderIsSet", "ReminderIsSet", "false");
             del.push_str(&delete_field_xml("item:ReminderDueBy"));
         }
     }
@@ -861,10 +828,7 @@ fn split_ews_date(dt: Option<DateTime<Utc>>) -> (Option<NaiveDate>, Option<Naive
 /// into the UTC slot the EWS field expects. No timezone math —
 /// matches Outlook's task semantics where dates are wall-clock
 /// without a zone.
-fn combine_date_time(
-    date: Option<NaiveDate>,
-    time: Option<NaiveTime>,
-) -> Option<DateTime<Utc>> {
+fn combine_date_time(date: Option<NaiveDate>, time: Option<NaiveTime>) -> Option<DateTime<Utc>> {
     let d = date?;
     let t = time.unwrap_or_else(|| NaiveTime::from_hms_opt(0, 0, 0).expect("00:00 valid"));
     Some(DateTime::<Utc>::from_naive_utc_and_offset(
@@ -876,7 +840,9 @@ fn combine_date_time(
 /// EWS serialises timestamps as `YYYY-MM-DDTHH:MM:SSZ` (with optional
 /// fractional seconds). RFC 3339 parsing handles both shapes.
 fn parse_ews_datetime(s: &str) -> Option<DateTime<Utc>> {
-    DateTime::parse_from_rfc3339(s).ok().map(|d| d.with_timezone(&Utc))
+    DateTime::parse_from_rfc3339(s)
+        .ok()
+        .map(|d| d.with_timezone(&Utc))
 }
 
 fn format_ews_datetime(ts: DateTime<Utc>) -> String {
@@ -903,12 +869,7 @@ fn push_set_task_raw(out: &mut String, field_uri: &str, tag: &str, raw_inner: &s
     ));
 }
 
-fn push_set_task_datetime(
-    out: &mut String,
-    field_uri: &str,
-    tag: &str,
-    value: DateTime<Utc>,
-) {
+fn push_set_task_datetime(out: &mut String, field_uri: &str, tag: &str, value: DateTime<Utc>) {
     push_set_task_raw(out, field_uri, tag, &format_ews_datetime(value));
 }
 
@@ -1021,8 +982,14 @@ mod tests {
     #[test]
     fn status_mapping_round_trips_the_four_primary_states() {
         assert_eq!(ews_status_to_task_status("NotStarted"), TaskStatus::Open);
-        assert_eq!(ews_status_to_task_status("InProgress"), TaskStatus::InProgress);
-        assert_eq!(ews_status_to_task_status("Completed"), TaskStatus::Completed);
+        assert_eq!(
+            ews_status_to_task_status("InProgress"),
+            TaskStatus::InProgress
+        );
+        assert_eq!(
+            ews_status_to_task_status("Completed"),
+            TaskStatus::Completed
+        );
         assert_eq!(ews_status_to_task_status("Deferred"), TaskStatus::Cancelled);
 
         assert_eq!(task_status_to_ews(TaskStatus::Open), "NotStarted");
@@ -1087,15 +1054,9 @@ mod tests {
 
     #[test]
     fn date_combine_writes_midnight_for_date_only() {
-        let combined = combine_date_time(
-            Some(NaiveDate::from_ymd_opt(2026, 5, 20).unwrap()),
-            None,
-        )
-        .unwrap();
-        assert_eq!(
-            combined.to_rfc3339(),
-            "2026-05-20T00:00:00+00:00",
-        );
+        let combined =
+            combine_date_time(Some(NaiveDate::from_ymd_opt(2026, 5, 20).unwrap()), None).unwrap();
+        assert_eq!(combined.to_rfc3339(), "2026-05-20T00:00:00+00:00",);
     }
 
     #[test]
@@ -1105,10 +1066,7 @@ mod tests {
             Some(NaiveTime::from_hms_opt(14, 30, 0).unwrap()),
         )
         .unwrap();
-        assert_eq!(
-            combined.to_rfc3339(),
-            "2026-05-20T14:30:00+00:00",
-        );
+        assert_eq!(combined.to_rfc3339(), "2026-05-20T14:30:00+00:00",);
     }
 
     // ── Parsers ─────────────────────────────────────────────────────
@@ -1489,5 +1447,3 @@ mod tests {
         delete_task(&client_for(&server), "TID|TCK").await.unwrap();
     }
 }
-
-

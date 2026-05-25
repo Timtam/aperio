@@ -34,40 +34,36 @@ pub mod manager;
 pub mod manifest;
 pub mod plugin_type;
 pub mod shim;
-pub mod vtables;
 pub mod version;
+pub mod vtables;
 
 pub use abi::{
-    AperioPlugin, AperioPluginCreateFn, AperioPluginDestroyFn,
-    AperioPluginType, OpenInstanceResult, PLUGIN_ERR_INIT, PLUGIN_ERR_INTERNAL,
-    PLUGIN_ERR_INVALID_CONFIG, PLUGIN_OK, SYMBOL_CREATE, SYMBOL_DESTROY,
+    AperioPlugin, AperioPluginCreateFn, AperioPluginDestroyFn, AperioPluginType,
+    OpenInstanceResult, PLUGIN_ERR_INIT, PLUGIN_ERR_INTERNAL, PLUGIN_ERR_INVALID_CONFIG, PLUGIN_OK,
+    SYMBOL_CREATE, SYMBOL_DESTROY,
 };
+pub use archive::{inspect_archive, install_archive, InstalledArchive};
 pub use capability::Capability;
 pub use error::{PluginError, PluginResult};
 pub use ffi::{
-    PluginBytes, PluginCallResult, PLUGIN_CALL_ERR_AUTH,
-    PLUGIN_CALL_ERR_CONFLICT, PLUGIN_CALL_ERR_FORBIDDEN,
-    PLUGIN_CALL_ERR_INTERNAL as PLUGIN_CALL_ERR_INTERNAL_FFI,
-    PLUGIN_CALL_ERR_INVALID, PLUGIN_CALL_ERR_IO,
-    PLUGIN_CALL_ERR_NETWORK, PLUGIN_CALL_ERR_NOT_FOUND,
-    PLUGIN_CALL_ERR_PROTOCOL, PLUGIN_CALL_ERR_UNSUPPORTED, PLUGIN_CALL_OK,
+    PluginBytes, PluginCallResult, PLUGIN_CALL_ERR_AUTH, PLUGIN_CALL_ERR_CONFLICT,
+    PLUGIN_CALL_ERR_FORBIDDEN, PLUGIN_CALL_ERR_INTERNAL as PLUGIN_CALL_ERR_INTERNAL_FFI,
+    PLUGIN_CALL_ERR_INVALID, PLUGIN_CALL_ERR_IO, PLUGIN_CALL_ERR_NETWORK,
+    PLUGIN_CALL_ERR_NOT_FOUND, PLUGIN_CALL_ERR_PROTOCOL, PLUGIN_CALL_ERR_UNSUPPORTED,
+    PLUGIN_CALL_OK,
 };
-pub use archive::{inspect_archive, install_archive, InstalledArchive};
 pub use manager::{
-    DiscoverError, DiscoverFn, FailedLoadReason, FailedPluginLoad,
-    InFlightGuard, InteractiveAuthError, InteractiveAuthFn, LoadedInstance,
-    LoadedPlugin, PluginManager, ProbeHostKeyError, ProbeHostKeyFn,
-    UnloadError, BUNDLED_PLUGINS_DIR, SYMBOL_DISCOVER,
+    DiscoverError, DiscoverFn, FailedLoadReason, FailedPluginLoad, InFlightGuard,
+    InteractiveAuthError, InteractiveAuthFn, LoadedInstance, LoadedPlugin, PluginManager,
+    ProbeHostKeyError, ProbeHostKeyFn, UnloadError, BUNDLED_PLUGINS_DIR, SYMBOL_DISCOVER,
     SYMBOL_INTERACTIVE_AUTH, SYMBOL_PROBE_HOST_KEY, USER_PLUGINS_DIR,
 };
 pub use manifest::{PluginManifest, MANIFEST_FILENAME};
 pub use plugin_type::PluginType;
 pub use shim::{
-    FfiCalendarAdapter, FfiContactsAdapter, FfiSyncAdapter, FfiTasksAdapter,
-    FfiVcAdapter,
+    FfiCalendarAdapter, FfiContactsAdapter, FfiSyncAdapter, FfiTasksAdapter, FfiVcAdapter,
 };
 pub use version::{check_abi_version, check_min_app_version, Version, ABI_VERSION};
 pub use vtables::{
-    CalendarAdapterVtable, CalendarVtable, ContactsVtable, SyncVtable, TasksVtable,
-    VcVtable,
+    CalendarAdapterVtable, CalendarVtable, ContactsVtable, SyncVtable, TasksVtable, VcVtable,
 };

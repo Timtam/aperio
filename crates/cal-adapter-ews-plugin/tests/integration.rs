@@ -3,7 +3,9 @@
 use std::sync::Arc;
 
 use plugin_core::{
-    abi::AperioPlugin, manager::PluginManager, manifest::PluginManifest,
+    abi::AperioPlugin,
+    manager::PluginManager,
+    manifest::PluginManifest,
     shim::{FfiCalendarAdapter, FfiContactsAdapter, FfiTasksAdapter},
     Capability, PluginType, ABI_VERSION,
 };
@@ -29,11 +31,9 @@ fn manifest() -> PluginManifest {
 
 fn register() -> PluginManager {
     let m = PluginManager::new("0.1.0");
-    let d: *mut AperioPlugin =
-        unsafe { cal_adapter_ews_plugin::build_descriptor() };
+    let d: *mut AperioPlugin = unsafe { cal_adapter_ews_plugin::build_descriptor() };
     assert!(!d.is_null());
-    let dx: unsafe extern "C" fn(*mut AperioPlugin) =
-        cal_adapter_ews_plugin::DESTROY_FN;
+    let dx: unsafe extern "C" fn(*mut AperioPlugin) = cal_adapter_ews_plugin::DESTROY_FN;
     m.register_static(manifest(), d, dx).unwrap();
     m
 }
@@ -45,28 +45,30 @@ fn open_one(manager: &PluginManager, endpoint: &str) -> Arc<plugin_core::LoadedI
         "username": "alice@example.invalid",
         "password": "hunter2",
     });
-    manager.open_instance(loaded, &cfg.to_string()).expect("open")
+    manager
+        .open_instance(loaded, &cfg.to_string())
+        .expect("open")
 }
 
 #[test]
 fn ews_plugin_exposes_all_three_surfaces() {
     let manager = register();
     let inst = open_one(&manager, "https://mail.example.invalid/EWS/Exchange.asmx");
-    let _cal: Arc<FfiCalendarAdapter> = Arc::new(
-        FfiCalendarAdapter::new(inst.clone()).expect("calendar slot present"),
-    );
-    let _tasks: Arc<FfiTasksAdapter> = Arc::new(
-        FfiTasksAdapter::new(inst.clone()).expect("tasks slot present"),
-    );
-    let _contacts: Arc<FfiContactsAdapter> = Arc::new(
-        FfiContactsAdapter::new(inst).expect("contacts slot present"),
-    );
+    let _cal: Arc<FfiCalendarAdapter> =
+        Arc::new(FfiCalendarAdapter::new(inst.clone()).expect("calendar slot present"));
+    let _tasks: Arc<FfiTasksAdapter> =
+        Arc::new(FfiTasksAdapter::new(inst.clone()).expect("tasks slot present"));
+    let _contacts: Arc<FfiContactsAdapter> =
+        Arc::new(FfiContactsAdapter::new(inst).expect("contacts slot present"));
 }
 
 #[test]
 fn multiple_ews_servers_get_distinct_handles() {
     let manager = register();
-    let on_prem = open_one(&manager, "https://exchange.intern.invalid/EWS/Exchange.asmx");
+    let on_prem = open_one(
+        &manager,
+        "https://exchange.intern.invalid/EWS/Exchange.asmx",
+    );
     let kerio = open_one(&manager, "https://kerio.intern.invalid/EWS/Exchange.asmx");
     assert_ne!(on_prem.handle() as usize, kerio.handle() as usize);
 }

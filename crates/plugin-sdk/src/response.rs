@@ -13,9 +13,7 @@
 //! the [`PluginBytes`] so the host can hand the buffer back to
 //! the plugin's allocator when it's done with it.
 
-use plugin_core::ffi::{
-    PluginBytes, PluginCallResult, PLUGIN_CALL_ERR_INTERNAL, PLUGIN_CALL_OK,
-};
+use plugin_core::ffi::{PluginBytes, PluginCallResult, PLUGIN_CALL_ERR_INTERNAL, PLUGIN_CALL_OK};
 use serde::Serialize;
 use std::os::raw::c_int;
 
@@ -40,9 +38,7 @@ pub unsafe extern "C" fn free_boxed_slice(data: *mut u8, len: usize) {
     // Box::into_raw on the Box<[u8]>. We rebuild the fat pointer
     // with the same length so the allocator's bookkeeping
     // matches the original allocation.
-    let _ = unsafe {
-        Box::from_raw(std::ptr::slice_from_raw_parts_mut(data, len))
-    };
+    let _ = unsafe { Box::from_raw(std::ptr::slice_from_raw_parts_mut(data, len)) };
 }
 
 /// Wrap raw bytes + status into a [`PluginCallResult`]. Used by
@@ -78,10 +74,7 @@ pub fn bytes_to_response(status: c_int, bytes: Vec<u8>) -> PluginCallResult {
 pub fn ok_response<T: Serialize>(value: &T) -> PluginCallResult {
     match serde_json::to_vec(value) {
         Ok(bytes) => bytes_to_response(PLUGIN_CALL_OK, bytes),
-        Err(err) => error_response(
-            PLUGIN_CALL_ERR_INTERNAL,
-            &format!("encode response: {err}"),
-        ),
+        Err(err) => error_response(PLUGIN_CALL_ERR_INTERNAL, &format!("encode response: {err}")),
     }
 }
 

@@ -22,8 +22,8 @@ use plugin_sdk::plugin_core::abi::OpenInstanceResult;
 use plugin_sdk::plugin_core::ffi::PluginCallResult;
 use plugin_sdk::plugin_core::vtables::SyncVtable;
 use plugin_sdk::{
-    decode_args, error_response, ok_response, open_instance_with,
-    sync_error_to_response, PluginInstance,
+    decode_args, error_response, ok_response, open_instance_with, sync_error_to_response,
+    PluginInstance,
 };
 use serde::Deserialize;
 use sync_adapter_dropbox::{DropboxAccountConfig, DropboxSyncAdapter};
@@ -43,12 +43,10 @@ struct InitConfig {
 
 /// # Safety
 /// FFI export; `config_json` must be NUL-terminated UTF-8.
-pub unsafe extern "C" fn plugin_open_instance(
-    config_json: *const c_char,
-) -> OpenInstanceResult {
+pub unsafe extern "C" fn plugin_open_instance(config_json: *const c_char) -> OpenInstanceResult {
     open_instance_with(config_json, |json| {
-        let cfg: InitConfig = serde_json::from_str(json)
-            .map_err(|e| format!("malformed init config: {e}"))?;
+        let cfg: InitConfig =
+            serde_json::from_str(json).map_err(|e| format!("malformed init config: {e}"))?;
         if cfg.client_id.trim().is_empty() || cfg.refresh_token.trim().is_empty() {
             return Err("client_id and refresh_token must not be empty".to_string());
         }
@@ -70,7 +68,11 @@ pub unsafe extern "C" fn plugin_close_instance(handle: *mut c_void) {
     PluginInstance::<DropboxSyncAdapter>::drop_handle(handle);
 }
 
-unsafe extern "C" fn ffi_test_connection(h: *mut c_void, _a: *const u8, _l: usize) -> PluginCallResult {
+unsafe extern "C" fn ffi_test_connection(
+    h: *mut c_void,
+    _a: *const u8,
+    _l: usize,
+) -> PluginCallResult {
     dispatch_unit(h, |p| async move { p.test_connection().await })
 }
 
@@ -79,45 +81,82 @@ unsafe extern "C" fn ffi_fetch_meta(h: *mut c_void, _a: *const u8, _l: usize) ->
 }
 
 unsafe extern "C" fn ffi_push_meta(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let meta: MetaJson = match decode_args(a, l) { Ok(m) => m, Err(r) => return r };
+    let meta: MetaJson = match decode_args(a, l) {
+        Ok(m) => m,
+        Err(r) => return r,
+    };
     dispatch_unit(h, |p| async move { p.push_meta(&meta).await })
 }
 
-unsafe extern "C" fn ffi_fetch_new_logs(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let cursor: DeviceCursor = match decode_args(a, l) { Ok(c) => c, Err(r) => return r };
+unsafe extern "C" fn ffi_fetch_new_logs(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let cursor: DeviceCursor = match decode_args(a, l) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
     dispatch(h, |p| async move { p.fetch_new_logs(&cursor).await })
 }
 
 unsafe extern "C" fn ffi_push_log(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let log: LogFile = match decode_args(a, l) { Ok(l) => l, Err(r) => return r };
+    let log: LogFile = match decode_args(a, l) {
+        Ok(l) => l,
+        Err(r) => return r,
+    };
     dispatch_unit(h, |p| async move { p.push_log(&log).await })
 }
 
-unsafe extern "C" fn ffi_fetch_snapshot(h: *mut c_void, _a: *const u8, _l: usize) -> PluginCallResult {
+unsafe extern "C" fn ffi_fetch_snapshot(
+    h: *mut c_void,
+    _a: *const u8,
+    _l: usize,
+) -> PluginCallResult {
     dispatch(h, |p| async move { p.fetch_snapshot().await })
 }
 
 unsafe extern "C" fn ffi_push_snapshot(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let snap: Snapshot = match decode_args(a, l) { Ok(s) => s, Err(r) => return r };
+    let snap: Snapshot = match decode_args(a, l) {
+        Ok(s) => s,
+        Err(r) => return r,
+    };
     dispatch_unit(h, |p| async move { p.push_snapshot(&snap).await })
 }
 
 unsafe extern "C" fn ffi_delete_log(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let name: LogFileName = match decode_args(a, l) { Ok(n) => n, Err(r) => return r };
+    let name: LogFileName = match decode_args(a, l) {
+        Ok(n) => n,
+        Err(r) => return r,
+    };
     dispatch_unit(h, |p| async move { p.delete_log(&name).await })
 }
 
 #[derive(Debug, Deserialize)]
-struct PushSoundAssetArgs { hash: String, extension: String, bytes_base64: String }
+struct PushSoundAssetArgs {
+    hash: String,
+    extension: String,
+    bytes_base64: String,
+}
 
-unsafe extern "C" fn ffi_push_sound_asset(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let args: PushSoundAssetArgs = match decode_args(a, l) { Ok(a) => a, Err(r) => return r };
-    let bytes = match base64::engine::general_purpose::STANDARD.decode(args.bytes_base64.as_bytes()) {
+unsafe extern "C" fn ffi_push_sound_asset(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let args: PushSoundAssetArgs = match decode_args(a, l) {
+        Ok(a) => a,
+        Err(r) => return r,
+    };
+    let bytes = match base64::engine::general_purpose::STANDARD.decode(args.bytes_base64.as_bytes())
+    {
         Ok(b) => b,
-        Err(err) => return error_response(
-            plugin_sdk::plugin_core::ffi::PLUGIN_CALL_ERR_INVALID,
-            &format!("bad base64: {err}"),
-        ),
+        Err(err) => {
+            return error_response(
+                plugin_sdk::plugin_core::ffi::PLUGIN_CALL_ERR_INVALID,
+                &format!("bad base64: {err}"),
+            )
+        }
     };
     dispatch_unit(h, move |p| {
         let hash = args.hash;
@@ -127,17 +166,30 @@ unsafe extern "C" fn ffi_push_sound_asset(h: *mut c_void, a: *const u8, l: usize
 }
 
 #[derive(Debug, Deserialize)]
-struct FetchSoundAssetArgs { hash: String, extension: String }
+struct FetchSoundAssetArgs {
+    hash: String,
+    extension: String,
+}
 
-unsafe extern "C" fn ffi_fetch_sound_asset(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let args: FetchSoundAssetArgs = match decode_args(a, l) { Ok(a) => a, Err(r) => return r };
-    let inst = match instance(h) { Ok(i) => i, Err(r) => return r };
+unsafe extern "C" fn ffi_fetch_sound_asset(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let args: FetchSoundAssetArgs = match decode_args(a, l) {
+        Ok(a) => a,
+        Err(r) => return r,
+    };
+    let inst = match instance(h) {
+        Ok(i) => i,
+        Err(r) => return r,
+    };
     let p: &'static DropboxSyncAdapter = unsafe {
         std::mem::transmute::<&DropboxSyncAdapter, &'static DropboxSyncAdapter>(inst.plugin())
     };
-    let outcome = inst.runtime().block_on(async move {
-        p.fetch_sound_asset(&args.hash, &args.extension).await
-    });
+    let outcome = inst
+        .runtime()
+        .block_on(async move { p.fetch_sound_asset(&args.hash, &args.extension).await });
     match outcome {
         Ok(None) => ok_response(&Option::<String>::None),
         Ok(Some(bytes)) => {
@@ -193,15 +245,11 @@ async fn plugin_interactive_auth(args_json: String) -> Result<Vec<u8>, String> {
     // parameter so it can share one across many calls; for the
     // one-shot OAuth dance we just spin up a fresh one.
     let http = reqwest::Client::new();
-    let tokens = sync_adapter_dropbox::oauth::run(
-        args.client_id.trim(),
-        args.client_secret.trim(),
-        &http,
-    )
-    .await
-    .map_err(|e| format!("Dropbox OAuth: {e}"))?;
-    serde_json::to_vec(&tokens)
-        .map_err(|e| format!("serialise TokenSet: {e}"))
+    let tokens =
+        sync_adapter_dropbox::oauth::run(args.client_id.trim(), args.client_secret.trim(), &http)
+            .await
+            .map_err(|e| format!("Dropbox OAuth: {e}"))?;
+    serde_json::to_vec(&tokens).map_err(|e| format!("serialise TokenSet: {e}"))
 }
 
 plugin_sdk::declare_interactive_auth! {

@@ -123,18 +123,15 @@ pub use plugin_core;
 pub use args::decode_args;
 pub use discover::discover_with;
 pub use dispatch::{
-    cal_dispatch, cal_dispatch_unit, instance, sync_dispatch, sync_dispatch_unit,
-    vc_dispatch, vc_dispatch_unit,
+    cal_dispatch, cal_dispatch_unit, instance, sync_dispatch, sync_dispatch_unit, vc_dispatch,
+    vc_dispatch_unit,
 };
-pub use error_map::{
-    cal_error_to_response, sync_error_to_response, vc_error_to_response,
-};
+pub use error_map::{cal_error_to_response, sync_error_to_response, vc_error_to_response};
 pub use instance::{InitError, PluginInstance};
 pub use interactive_auth::interactive_auth_with;
 pub use open_instance::{error_result, open_instance_with};
 pub use probe_host_key::probe_host_key_with;
 pub use response::{
-    bytes_to_response, error_response, free_boxed_slice, ok_empty_response,
-    ok_response,
+    bytes_to_response, error_response, free_boxed_slice, ok_empty_response, ok_response,
 };
 pub use runtime::PluginRuntime;

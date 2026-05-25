@@ -62,8 +62,7 @@ impl FfiTasksAdapter {
         // SAFETY: the manifest says plugin_type =
         // "calendar-adapter", so the vtable is a
         // CalendarAdapterVtable per the ABI contract.
-        let outer: &CalendarAdapterVtable =
-            unsafe { &*(raw as *const CalendarAdapterVtable) };
+        let outer: &CalendarAdapterVtable = unsafe { &*(raw as *const CalendarAdapterVtable) };
         if outer.tasks.is_null() {
             return None;
         }
@@ -130,14 +129,11 @@ where
     T: serde::de::DeserializeOwned,
     A: Serialize,
 {
-    let bytes = encode_args(args).map_err(|e| Error::Internal(format!(
-        "encode args: {e}"
-    )))?;
+    let bytes = encode_args(args).map_err(|e| Error::Internal(format!("encode args: {e}")))?;
     let outcome = call_method(method, instance_addr, bytes).await;
     if outcome.is_ok() {
-        decode_payload(&outcome.bytes).map_err(|e| Error::Protocol(format!(
-            "decode plugin response: {e}"
-        )))
+        decode_payload(&outcome.bytes)
+            .map_err(|e| Error::Protocol(format!("decode plugin response: {e}")))
     } else {
         Err(status_to_cal_error(outcome))
     }
@@ -148,9 +144,7 @@ async fn call_for_unit<A: Serialize>(
     instance_addr: usize,
     args: &A,
 ) -> Result<()> {
-    let bytes = encode_args(args).map_err(|e| Error::Internal(format!(
-        "encode args: {e}"
-    )))?;
+    let bytes = encode_args(args).map_err(|e| Error::Internal(format!("encode args: {e}")))?;
     let outcome = call_method(method, instance_addr, bytes).await;
     if outcome.is_ok() {
         Ok(())
@@ -211,11 +205,7 @@ impl TasksFeature for FfiTasksAdapter {
         call_for_unit(self.vtable.delete_task, self.handle_addr, &task_id).await
     }
 
-    async fn rename_task_list(
-        &self,
-        list_id: &str,
-        new_name: &str,
-    ) -> Result<()> {
+    async fn rename_task_list(&self, list_id: &str, new_name: &str) -> Result<()> {
         let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         let args = RenameTaskListArgs { list_id, new_name };
         call_for_unit(self.vtable.rename_task_list, self.handle_addr, &args).await

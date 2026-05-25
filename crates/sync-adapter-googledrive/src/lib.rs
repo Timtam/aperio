@@ -56,8 +56,7 @@ use chrono::Utc;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use sync_core::{
-    DeviceCursor, LogFile, LogFileName, MetaJson, Snapshot, SyncAdapter,
-    SyncError, SyncResult,
+    DeviceCursor, LogFile, LogFileName, MetaJson, Snapshot, SyncAdapter, SyncError, SyncResult,
 };
 use tokio::sync::Mutex;
 use tracing::{debug, warn};
@@ -176,10 +175,7 @@ impl DriveSyncAdapter {
     /// Resolve + cache the four folder IDs (base, log,
     /// assets, sounds). Idempotent: subsequent calls
     /// short-circuit once the cache is filled.
-    async fn ensure_folder_ids(
-        &self,
-        access_token: &str,
-    ) -> SyncResult<FolderIds> {
+    async fn ensure_folder_ids(&self, access_token: &str) -> SyncResult<FolderIds> {
         let mut guard = self.folders.lock().await;
         if guard.base.is_some()
             && guard.log.is_some()
@@ -192,14 +188,9 @@ impl DriveSyncAdapter {
         // user's My Drive root). create_folder is idempotent
         // — it find_childs first and only creates on miss.
         if guard.base.is_none() {
-            let id = files::create_folder(
-                &self.http,
-                access_token,
-                "root",
-                &self.folder_name,
-            )
-            .await
-            .map_err(drive_to_sync)?;
+            let id = files::create_folder(&self.http, access_token, "root", &self.folder_name)
+                .await
+                .map_err(drive_to_sync)?;
             guard.base = Some(id);
         }
         let base_id = guard.base.as_ref().unwrap().clone();
@@ -210,26 +201,16 @@ impl DriveSyncAdapter {
             guard.log = Some(id);
         }
         if guard.assets.is_none() {
-            let id = files::create_folder(
-                &self.http,
-                access_token,
-                &base_id,
-                "assets",
-            )
-            .await
-            .map_err(drive_to_sync)?;
+            let id = files::create_folder(&self.http, access_token, &base_id, "assets")
+                .await
+                .map_err(drive_to_sync)?;
             guard.assets = Some(id);
         }
         let assets_id = guard.assets.as_ref().unwrap().clone();
         if guard.sounds.is_none() {
-            let id = files::create_folder(
-                &self.http,
-                access_token,
-                &assets_id,
-                "sounds",
-            )
-            .await
-            .map_err(drive_to_sync)?;
+            let id = files::create_folder(&self.http, access_token, &assets_id, "sounds")
+                .await
+                .map_err(drive_to_sync)?;
             guard.sounds = Some(id);
         }
         Ok(guard.clone())
@@ -269,29 +250,19 @@ impl SyncAdapter for DriveSyncAdapter {
         let folders = self.ensure_folder_ids_with_retry().await?;
         let base_id = folders.base.unwrap();
         let token = self.access_token().await?;
-        let id =
-            match files::find_child(&self.http, &token, &base_id, "meta.json")
-                .await
-            {
-                Ok(Some(id)) => id,
-                Ok(None) => return Ok(None),
-                Err(err) if err.is_auth() => {
-                    let token = self.force_refresh().await?;
-                    match files::find_child(
-                        &self.http,
-                        &token,
-                        &base_id,
-                        "meta.json",
-                    )
-                    .await
-                    {
-                        Ok(Some(id)) => id,
-                        Ok(None) => return Ok(None),
-                        Err(err) => return Err(drive_to_sync(err)),
-                    }
+        let id = match files::find_child(&self.http, &token, &base_id, "meta.json").await {
+            Ok(Some(id)) => id,
+            Ok(None) => return Ok(None),
+            Err(err) if err.is_auth() => {
+                let token = self.force_refresh().await?;
+                match files::find_child(&self.http, &token, &base_id, "meta.json").await {
+                    Ok(Some(id)) => id,
+                    Ok(None) => return Ok(None),
+                    Err(err) => return Err(drive_to_sync(err)),
                 }
-                Err(err) => return Err(drive_to_sync(err)),
-            };
+            }
+            Err(err) => return Err(drive_to_sync(err)),
+        };
         let token = self.access_token().await?;
         let bytes = files::download(&self.http, &token, &id)
             .await
@@ -309,15 +280,11 @@ impl SyncAdapter for DriveSyncAdapter {
         self.upload_to_parent(&base_id, "meta.json", bytes).await
     }
 
-    async fn fetch_new_logs(
-        &self,
-        since: &DeviceCursor,
-    ) -> SyncResult<Vec<LogFile>> {
+    async fn fetch_new_logs(&self, since: &DeviceCursor) -> SyncResult<Vec<LogFile>> {
         let folders = self.ensure_folder_ids_with_retry().await?;
         let log_id = folders.log.unwrap();
         let token = self.access_token().await?;
-        let names = match files::list_children(&self.http, &token, &log_id).await
-        {
+        let names = match files::list_children(&self.http, &token, &log_id).await {
             Ok(n) => n,
             Err(err) if err.is_auth() => {
                 let token = self.force_refresh().await?;
@@ -347,14 +314,7 @@ impl SyncAdapter for DriveSyncAdapter {
         for parsed in wanted {
             let token = self.access_token().await?;
             let filename = parsed.to_filename();
-            let id = match files::find_child(
-                &self.http,
-                &token,
-                &log_id,
-                &filename,
-            )
-            .await
-            {
+            let id = match files::find_child(&self.http, &token, &log_id, &filename).await {
                 Ok(Some(id)) => id,
                 Ok(None) => {
                     debug!(name = %filename, "log listed but no longer present");
@@ -389,26 +349,12 @@ impl SyncAdapter for DriveSyncAdapter {
         let folders = self.ensure_folder_ids_with_retry().await?;
         let base_id = folders.base.unwrap();
         let token = self.access_token().await?;
-        let id = match files::find_child(
-            &self.http,
-            &token,
-            &base_id,
-            "snapshot.json",
-        )
-        .await
-        {
+        let id = match files::find_child(&self.http, &token, &base_id, "snapshot.json").await {
             Ok(Some(id)) => id,
             Ok(None) => return Ok(None),
             Err(err) if err.is_auth() => {
                 let token = self.force_refresh().await?;
-                match files::find_child(
-                    &self.http,
-                    &token,
-                    &base_id,
-                    "snapshot.json",
-                )
-                .await
-                {
+                match files::find_child(&self.http, &token, &base_id, "snapshot.json").await {
                     Ok(Some(id)) => id,
                     Ok(None) => return Ok(None),
                     Err(err) => return Err(drive_to_sync(err)),
@@ -430,7 +376,8 @@ impl SyncAdapter for DriveSyncAdapter {
         let folders = self.ensure_folder_ids_with_retry().await?;
         let base_id = folders.base.unwrap();
         let bytes = snapshot.to_bytes()?;
-        self.upload_to_parent(&base_id, "snapshot.json", bytes).await
+        self.upload_to_parent(&base_id, "snapshot.json", bytes)
+            .await
     }
 
     async fn delete_log(&self, name: &LogFileName) -> SyncResult<()> {
@@ -438,44 +385,29 @@ impl SyncAdapter for DriveSyncAdapter {
         let log_id = folders.log.unwrap();
         let token = self.access_token().await?;
         let filename = name.to_filename();
-        let id =
-            match files::find_child(&self.http, &token, &log_id, &filename)
-                .await
-            {
-                Ok(Some(id)) => id,
-                // "Already gone" is the goal of delete; honour
-                // the SFTP / FTP / Dropbox convention.
-                Ok(None) => return Ok(()),
-                Err(err) if err.is_auth() => {
-                    let token = self.force_refresh().await?;
-                    match files::find_child(
-                        &self.http,
-                        &token,
-                        &log_id,
-                        &filename,
-                    )
-                    .await
-                    {
-                        Ok(Some(id)) => id,
-                        Ok(None) => return Ok(()),
-                        Err(err) => return Err(drive_to_sync(err)),
-                    }
+        let id = match files::find_child(&self.http, &token, &log_id, &filename).await {
+            Ok(Some(id)) => id,
+            // "Already gone" is the goal of delete; honour
+            // the SFTP / FTP / Dropbox convention.
+            Ok(None) => return Ok(()),
+            Err(err) if err.is_auth() => {
+                let token = self.force_refresh().await?;
+                match files::find_child(&self.http, &token, &log_id, &filename).await {
+                    Ok(Some(id)) => id,
+                    Ok(None) => return Ok(()),
+                    Err(err) => return Err(drive_to_sync(err)),
                 }
-                Err(err) if err.is_not_found() => return Ok(()),
-                Err(err) => return Err(drive_to_sync(err)),
-            };
+            }
+            Err(err) if err.is_not_found() => return Ok(()),
+            Err(err) => return Err(drive_to_sync(err)),
+        };
         let token = self.access_token().await?;
         files::delete(&self.http, &token, &id)
             .await
             .map_err(drive_to_sync)
     }
 
-    async fn push_sound_asset(
-        &self,
-        hash: &str,
-        extension: &str,
-        bytes: &[u8],
-    ) -> SyncResult<()> {
+    async fn push_sound_asset(&self, hash: &str, extension: &str, bytes: &[u8]) -> SyncResult<()> {
         let folders = self.ensure_folder_ids_with_retry().await?;
         let sounds_id = folders.sounds.unwrap();
         let name = format!("{hash}.{extension}");
@@ -483,25 +415,17 @@ impl SyncAdapter for DriveSyncAdapter {
             .await
     }
 
-    async fn fetch_sound_asset(
-        &self,
-        hash: &str,
-        extension: &str,
-    ) -> SyncResult<Option<Vec<u8>>> {
+    async fn fetch_sound_asset(&self, hash: &str, extension: &str) -> SyncResult<Option<Vec<u8>>> {
         let folders = self.ensure_folder_ids_with_retry().await?;
         let sounds_id = folders.sounds.unwrap();
         let name = format!("{hash}.{extension}");
         let token = self.access_token().await?;
-        let id = match files::find_child(&self.http, &token, &sounds_id, &name)
-            .await
-        {
+        let id = match files::find_child(&self.http, &token, &sounds_id, &name).await {
             Ok(Some(id)) => id,
             Ok(None) => return Ok(None),
             Err(err) if err.is_auth() => {
                 let token = self.force_refresh().await?;
-                match files::find_child(&self.http, &token, &sounds_id, &name)
-                    .await
-                {
+                match files::find_child(&self.http, &token, &sounds_id, &name).await {
                     Ok(Some(id)) => id,
                     Ok(None) => return Ok(None),
                     Err(err) => return Err(drive_to_sync(err)),
@@ -528,10 +452,7 @@ impl DriveSyncAdapter {
         bytes: Vec<u8>,
     ) -> SyncResult<()> {
         let token = self.access_token().await?;
-        match self
-            .upload_inner(&token, parent_id, name, &bytes)
-            .await
-        {
+        match self.upload_inner(&token, parent_id, name, &bytes).await {
             Ok(()) => Ok(()),
             Err(err) if matches!(err, SyncError::Auth(_)) => {
                 let token = self.force_refresh().await?;
@@ -578,12 +499,8 @@ fn drive_to_sync(err: GoogleDriveError) -> SyncError {
             SyncError::network(format!("HTTP {status}: {message}"))
         }
         GoogleDriveError::Io(msg) => SyncError::io(msg),
-        GoogleDriveError::Csrf => {
-            SyncError::auth("OAuth state mismatch (CSRF)")
-        }
-        GoogleDriveError::AuthTimeout => {
-            SyncError::auth("OAuth dance timed out")
-        }
+        GoogleDriveError::Csrf => SyncError::auth("OAuth state mismatch (CSRF)"),
+        GoogleDriveError::AuthTimeout => SyncError::auth("OAuth dance timed out"),
         GoogleDriveError::AuthDenied(msg) => {
             SyncError::auth(format!("OAuth consent denied: {msg}"))
         }

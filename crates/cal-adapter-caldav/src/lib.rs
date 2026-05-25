@@ -35,9 +35,9 @@ use std::time::Duration;
 use async_trait::async_trait;
 use cal_core::{
     Adapter, AuthToken, Calendar, CalendarFeature, Capability, Contact, ContactList,
-    ContactsFeature, ContainerColor, Credentials as CoreCredentials, DateRange,
-    Error as CoreError, Event, FreeBusy, NewContact, NewEvent, NewTask,
-    Result as CoreResult, Task, TaskList, TasksFeature,
+    ContactsFeature, ContainerColor, Credentials as CoreCredentials, DateRange, Error as CoreError,
+    Event, FreeBusy, NewContact, NewEvent, NewTask, Result as CoreResult, Task, TaskList,
+    TasksFeature,
 };
 use reqwest::Client;
 use url::Url;
@@ -114,10 +114,7 @@ impl CaldavAdapter {
     /// `connect_timeout` defaults to 10s when `None` — most CalDAV
     /// servers respond within that window and the user should not
     /// be left waiting on a typo'd URL for the full system default.
-    pub fn new(
-        credentials: Credentials,
-        connect_timeout: Option<Duration>,
-    ) -> CaldavResult<Self> {
+    pub fn new(credentials: Credentials, connect_timeout: Option<Duration>) -> CaldavResult<Self> {
         let connect = connect_timeout.unwrap_or(Duration::from_secs(10));
         // Production client: follow redirects up to 5 hops. CalDAV
         // PROPFIND / PROPPATCH / REPORT / PUT / DELETE on a moved
@@ -160,8 +157,8 @@ impl CaldavAdapter {
     /// they want to verify the network-fetch path runs every time.
     #[doc(hidden)]
     pub fn with_listing_ttl(mut self, ttl: std::time::Duration) -> Self {
-        self.listing_ttl = chrono::Duration::from_std(ttl)
-            .unwrap_or_else(|_| chrono::Duration::zero());
+        self.listing_ttl =
+            chrono::Duration::from_std(ttl).unwrap_or_else(|_| chrono::Duration::zero());
         self
     }
 
@@ -223,8 +220,7 @@ impl CaldavAdapter {
         let discovery = self.discover().await.map_err(to_core_error)?;
         discovery.addressbook_home_url.clone().ok_or_else(|| {
             CoreError::NotFound(
-                "no addressbook-home-set; this server does not advertise CardDAV"
-                    .into(),
+                "no addressbook-home-set; this server does not advertise CardDAV".into(),
             )
         })
     }
@@ -304,13 +300,10 @@ impl CalendarFeature for CaldavAdapter {
             return Ok(cached);
         }
         let discovery = self.discover().await.map_err(to_core_error)?;
-        let fresh = calendars::list_calendars(
-            &self.http,
-            &discovery.calendar_home_url,
-            &self.credentials,
-        )
-        .await
-        .map_err(to_core_error)?;
+        let fresh =
+            calendars::list_calendars(&self.http, &discovery.calendar_home_url, &self.credentials)
+                .await
+                .map_err(to_core_error)?;
         *self.calendars_cache.lock().expect("poison") = Some(ListingCache {
             items: fresh.clone(),
             cached_at: chrono::Utc::now(),
@@ -318,29 +311,21 @@ impl CalendarFeature for CaldavAdapter {
         Ok(fresh)
     }
 
-    async fn get_events(
-        &self,
-        calendar_id: &str,
-        range: DateRange,
-    ) -> CoreResult<Vec<Event>> {
+    async fn get_events(&self, calendar_id: &str, range: DateRange) -> CoreResult<Vec<Event>> {
         // The calendar id is the absolute collection URL produced
         // by `list_calendars`. Re-parse it so the request lands at
         // the exact path the server told us about; falling back to
         // a join against the discovered home would be too lax.
-        let cal_url = Url::parse(calendar_id)
-            .map_err(|err| CoreError::InvalidInput(err.to_string()))?;
+        let cal_url =
+            Url::parse(calendar_id).map_err(|err| CoreError::InvalidInput(err.to_string()))?;
         events::get_events(&self.http, &cal_url, range, &self.credentials)
             .await
             .map_err(to_core_error)
     }
 
-    async fn create_event(
-        &self,
-        calendar_id: &str,
-        event: NewEvent,
-    ) -> CoreResult<Event> {
-        let cal_url = Url::parse(calendar_id)
-            .map_err(|err| CoreError::InvalidInput(err.to_string()))?;
+    async fn create_event(&self, calendar_id: &str, event: NewEvent) -> CoreResult<Event> {
+        let cal_url =
+            Url::parse(calendar_id).map_err(|err| CoreError::InvalidInput(err.to_string()))?;
         events::create_event(&self.http, &cal_url, event, &self.credentials)
             .await
             .map_err(to_core_error)
@@ -366,13 +351,10 @@ impl CalendarFeature for CaldavAdapter {
         // fallback if a caller forgot to thread the calendar_id
         // through.
         let discovery = self.discover().await.map_err(to_core_error)?;
-        let cals = calendars::list_calendars(
-            &self.http,
-            &discovery.calendar_home_url,
-            &self.credentials,
-        )
-        .await
-        .map_err(to_core_error)?;
+        let cals =
+            calendars::list_calendars(&self.http, &discovery.calendar_home_url, &self.credentials)
+                .await
+                .map_err(to_core_error)?;
         let mut last_err: Option<CoreError> = None;
         for cal in cals {
             let cal_url = match Url::parse(&cal.id) {
@@ -401,9 +383,7 @@ impl CalendarFeature for CaldavAdapter {
             }
         }
         Err(last_err.unwrap_or_else(|| {
-            CoreError::NotFound(format!(
-                "event '{event_id}' not found in any calendar"
-            ))
+            CoreError::NotFound(format!("event '{event_id}' not found in any calendar"))
         }))
     }
 
@@ -424,13 +404,10 @@ impl CalendarFeature for CaldavAdapter {
         // left the resource untouched in whichever calendar
         // actually owned it.
         let discovery = self.discover().await.map_err(to_core_error)?;
-        let cals = calendars::list_calendars(
-            &self.http,
-            &discovery.calendar_home_url,
-            &self.credentials,
-        )
-        .await
-        .map_err(to_core_error)?;
+        let cals =
+            calendars::list_calendars(&self.http, &discovery.calendar_home_url, &self.credentials)
+                .await
+                .map_err(to_core_error)?;
         let mut last_err: Option<CoreError> = None;
         for cal in cals {
             let cal_url = match Url::parse(&cal.id) {
@@ -440,14 +417,8 @@ impl CalendarFeature for CaldavAdapter {
             // Without an ETag we don't bother with If-Match — the
             // user explicitly chose to delete this row, so a
             // concurrent modification is informational at best.
-            match events::delete_event(
-                &self.http,
-                &cal_url,
-                event_id,
-                None,
-                &self.credentials,
-            )
-            .await
+            match events::delete_event(&self.http, &cal_url, event_id, None, &self.credentials)
+                .await
             {
                 Ok(events::DeleteOutcome::Deleted) => return Ok(()),
                 Ok(events::DeleteOutcome::NotFound) => continue,
@@ -462,9 +433,7 @@ impl CalendarFeature for CaldavAdapter {
             }
         }
         Err(last_err.unwrap_or_else(|| {
-            CoreError::NotFound(format!(
-                "event '{event_id}' not found in any calendar"
-            ))
+            CoreError::NotFound(format!("event '{event_id}' not found in any calendar"))
         }))
     }
 
@@ -487,15 +456,10 @@ impl CalendarFeature for CaldavAdapter {
         None
     }
 
-    async fn rename_calendar(
-        &self,
-        calendar_id: &str,
-        new_name: &str,
-    ) -> CoreResult<()> {
+    async fn rename_calendar(&self, calendar_id: &str, new_name: &str) -> CoreResult<()> {
         // Calendar id == collection URL in CalDAV (see `to_calendar`).
-        let url = Url::parse(calendar_id).map_err(|e| {
-            CoreError::InvalidInput(format!("calendar id is not a URL: {e}"))
-        })?;
+        let url = Url::parse(calendar_id)
+            .map_err(|e| CoreError::InvalidInput(format!("calendar id is not a URL: {e}")))?;
         calendars::proppatch_displayname(&self.http, &url, new_name, &self.credentials)
             .await
             .map_err(to_core_error)?;
@@ -516,13 +480,10 @@ impl TasksFeature for CaldavAdapter {
             return Ok(cached);
         }
         let discovery = self.discover().await.map_err(to_core_error)?;
-        let fresh = tasks::list_task_lists(
-            &self.http,
-            &discovery.calendar_home_url,
-            &self.credentials,
-        )
-        .await
-        .map_err(to_core_error)?;
+        let fresh =
+            tasks::list_task_lists(&self.http, &discovery.calendar_home_url, &self.credentials)
+                .await
+                .map_err(to_core_error)?;
         *self.task_lists_cache.lock().expect("poison") = Some(ListingCache {
             items: fresh.clone(),
             cached_at: chrono::Utc::now(),
@@ -531,20 +492,16 @@ impl TasksFeature for CaldavAdapter {
     }
 
     async fn get_tasks(&self, list_id: &str) -> CoreResult<Vec<Task>> {
-        let list_url = Url::parse(list_id)
-            .map_err(|err| CoreError::InvalidInput(err.to_string()))?;
+        let list_url =
+            Url::parse(list_id).map_err(|err| CoreError::InvalidInput(err.to_string()))?;
         tasks::get_tasks(&self.http, &list_url, &self.credentials)
             .await
             .map_err(to_core_error)
     }
 
-    async fn create_task(
-        &self,
-        list_id: &str,
-        task: NewTask,
-    ) -> CoreResult<Task> {
-        let list_url = Url::parse(list_id)
-            .map_err(|err| CoreError::InvalidInput(err.to_string()))?;
+    async fn create_task(&self, list_id: &str, task: NewTask) -> CoreResult<Task> {
+        let list_url =
+            Url::parse(list_id).map_err(|err| CoreError::InvalidInput(err.to_string()))?;
         tasks::create_task(&self.http, &list_url, task, &self.credentials)
             .await
             .map_err(to_core_error)
@@ -563,28 +520,17 @@ impl TasksFeature for CaldavAdapter {
         // list keeps the search going instead of fooling us into
         // thinking the row was already gone.
         let discovery = self.discover().await.map_err(to_core_error)?;
-        let lists = tasks::list_task_lists(
-            &self.http,
-            &discovery.calendar_home_url,
-            &self.credentials,
-        )
-        .await
-        .map_err(to_core_error)?;
+        let lists =
+            tasks::list_task_lists(&self.http, &discovery.calendar_home_url, &self.credentials)
+                .await
+                .map_err(to_core_error)?;
         let mut last_err: Option<CoreError> = None;
         for list in lists {
             let url = match Url::parse(&list.id) {
                 Ok(u) => u,
                 Err(_) => continue,
             };
-            match tasks::delete_task(
-                &self.http,
-                &url,
-                task_id,
-                None,
-                &self.credentials,
-            )
-            .await
-            {
+            match tasks::delete_task(&self.http, &url, task_id, None, &self.credentials).await {
                 Ok(events::DeleteOutcome::Deleted) => return Ok(()),
                 Ok(events::DeleteOutcome::NotFound) => continue,
                 Err(err) => {
@@ -593,22 +539,15 @@ impl TasksFeature for CaldavAdapter {
             }
         }
         Err(last_err.unwrap_or_else(|| {
-            CoreError::NotFound(format!(
-                "task '{task_id}' not found in any list"
-            ))
+            CoreError::NotFound(format!("task '{task_id}' not found in any list"))
         }))
     }
 
-    async fn rename_task_list(
-        &self,
-        list_id: &str,
-        new_name: &str,
-    ) -> CoreResult<()> {
+    async fn rename_task_list(&self, list_id: &str, new_name: &str) -> CoreResult<()> {
         // Same as calendars — VTODO collections are renamed via the
         // same PROPPATCH on the collection URL.
-        let url = Url::parse(list_id).map_err(|e| {
-            CoreError::InvalidInput(format!("task list id is not a URL: {e}"))
-        })?;
+        let url = Url::parse(list_id)
+            .map_err(|e| CoreError::InvalidInput(format!("task list id is not a URL: {e}")))?;
         calendars::proppatch_displayname(&self.http, &url, new_name, &self.credentials)
             .await
             .map_err(to_core_error)?;
@@ -636,10 +575,9 @@ impl ContactsFeature for CaldavAdapter {
             });
             return Ok(Vec::new());
         };
-        let fresh =
-            contacts::list_contact_lists(&self.http, home, &self.credentials)
-                .await
-                .map_err(to_core_error)?;
+        let fresh = contacts::list_contact_lists(&self.http, home, &self.credentials)
+            .await
+            .map_err(to_core_error)?;
         *self.contact_lists_cache.lock().expect("poison") = Some(ListingCache {
             items: fresh.clone(),
             cached_at: chrono::Utc::now(),
@@ -648,8 +586,8 @@ impl ContactsFeature for CaldavAdapter {
     }
 
     async fn get_contacts(&self, list_id: &str) -> CoreResult<Vec<Contact>> {
-        let list_url = Url::parse(list_id)
-            .map_err(|err| CoreError::InvalidInput(err.to_string()))?;
+        let list_url =
+            Url::parse(list_id).map_err(|err| CoreError::InvalidInput(err.to_string()))?;
         contacts::get_contacts(&self.http, &list_url, &self.credentials)
             .await
             .map_err(to_core_error)
@@ -687,13 +625,9 @@ impl ContactsFeature for CaldavAdapter {
         Ok(out)
     }
 
-    async fn create_contact(
-        &self,
-        list_id: &str,
-        contact: NewContact,
-    ) -> CoreResult<Contact> {
-        let list_url = Url::parse(list_id)
-            .map_err(|err| CoreError::InvalidInput(err.to_string()))?;
+    async fn create_contact(&self, list_id: &str, contact: NewContact) -> CoreResult<Contact> {
+        let list_url =
+            Url::parse(list_id).map_err(|err| CoreError::InvalidInput(err.to_string()))?;
         contacts::create_contact(&self.http, &list_url, contact, &self.credentials)
             .await
             .map_err(to_core_error)
@@ -716,23 +650,16 @@ impl ContactsFeature for CaldavAdapter {
                 "no addressbook-home-set; contact '{contact_id}' is not routable",
             )));
         };
-        let lists =
-            contacts::list_contact_lists(&self.http, home, &self.credentials)
-                .await
-                .map_err(to_core_error)?;
+        let lists = contacts::list_contact_lists(&self.http, home, &self.credentials)
+            .await
+            .map_err(to_core_error)?;
         let mut last_err: Option<CaldavError> = None;
         for list in lists {
             let Ok(url) = Url::parse(&list.id) else {
                 continue;
             };
-            match contacts::delete_contact(
-                &self.http,
-                &url,
-                contact_id,
-                None,
-                &self.credentials,
-            )
-            .await
+            match contacts::delete_contact(&self.http, &url, contact_id, None, &self.credentials)
+                .await
             {
                 Ok(()) => return Ok(()),
                 Err(err) => {
@@ -750,11 +677,7 @@ impl ContactsFeature for CaldavAdapter {
         }))
     }
 
-    async fn rename_contact_list(
-        &self,
-        list_id: &str,
-        new_name: &str,
-    ) -> CoreResult<()> {
+    async fn rename_contact_list(&self, list_id: &str, new_name: &str) -> CoreResult<()> {
         // Address book displayname rename is the same PROPPATCH
         // shape as calendars / task lists. iCloud rejects this
         // (read-only address books); other servers (Nextcloud,
@@ -762,9 +685,8 @@ impl ContactsFeature for CaldavAdapter {
         // falls back to a local rename on Unsupported, but we
         // surface server-side errors verbatim here so the user
         // sees the real reason.
-        let url = Url::parse(list_id).map_err(|e| {
-            CoreError::InvalidInput(format!("contact list id is not a URL: {e}"))
-        })?;
+        let url = Url::parse(list_id)
+            .map_err(|e| CoreError::InvalidInput(format!("contact list id is not a URL: {e}")))?;
         calendars::proppatch_displayname(&self.http, &url, new_name, &self.credentials)
             .await
             .map_err(to_core_error)?;
@@ -790,15 +712,9 @@ impl ContactsFeature for CaldavAdapter {
         photo: cal_core::ContactPhoto,
     ) -> CoreResult<()> {
         let base = self.contact_resource_base().await?;
-        contacts::set_contact_photo(
-            &self.http,
-            &base,
-            contact_id,
-            photo,
-            &self.credentials,
-        )
-        .await
-        .map_err(to_core_error)
+        contacts::set_contact_photo(&self.http, &base, contact_id, photo, &self.credentials)
+            .await
+            .map_err(to_core_error)
     }
 
     async fn delete_contact_photo(&self, contact_id: &str) -> CoreResult<()> {
@@ -834,7 +750,9 @@ fn contact_matches(c: &Contact, needle_lower: &str) -> bool {
     {
         return true;
     }
-    c.emails.iter().any(|e| e.to_lowercase().contains(needle_lower))
+    c.emails
+        .iter()
+        .any(|e| e.to_lowercase().contains(needle_lower))
 }
 
 #[cfg(test)]

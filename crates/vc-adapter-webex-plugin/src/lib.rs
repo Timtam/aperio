@@ -43,20 +43,15 @@ struct InitConfig {
 
 /// # Safety
 /// FFI export; `config_json` must be NUL-terminated UTF-8.
-pub unsafe extern "C" fn plugin_open_instance(
-    config_json: *const c_char,
-) -> OpenInstanceResult {
+pub unsafe extern "C" fn plugin_open_instance(config_json: *const c_char) -> OpenInstanceResult {
     open_instance_with(config_json, |json| {
-        let cfg: InitConfig = serde_json::from_str(json)
-            .map_err(|e| format!("malformed init config: {e}"))?;
+        let cfg: InitConfig =
+            serde_json::from_str(json).map_err(|e| format!("malformed init config: {e}"))?;
         if cfg.client_id.trim().is_empty()
             || cfg.client_secret.trim().is_empty()
             || cfg.refresh_token.trim().is_empty()
         {
-            return Err(
-                "client_id, client_secret and refresh_token must not be empty"
-                    .to_string(),
-            );
+            return Err("client_id, client_secret and refresh_token must not be empty".to_string());
         }
         Ok(WebexAdapter::new(
             WebexAccountConfig {
@@ -94,11 +89,7 @@ unsafe extern "C" fn ffi_create_meeting(
     dispatch(h, move |p| async move { p.create_meeting(spec).await })
 }
 
-unsafe extern "C" fn ffi_get_meeting(
-    h: *mut c_void,
-    a: *const u8,
-    l: usize,
-) -> PluginCallResult {
+unsafe extern "C" fn ffi_get_meeting(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
     let id: MeetingId = match decode_args(a, l) {
         Ok(v) => v,
         Err(r) => return r,

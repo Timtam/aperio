@@ -69,8 +69,14 @@ pub async fn list_contact_lists(
     home_url: &Url,
     credentials: &Credentials,
 ) -> CaldavResult<Vec<ContactList>> {
-    let entries =
-        propfind(client, home_url, ADDRESSBOOK_LIST_PROPFIND_BODY, credentials, 1).await?;
+    let entries = propfind(
+        client,
+        home_url,
+        ADDRESSBOOK_LIST_PROPFIND_BODY,
+        credentials,
+        1,
+    )
+    .await?;
     Ok(entries
         .into_iter()
         .filter(|e| e.is_addressbook)
@@ -230,9 +236,8 @@ pub async fn update_contact(
     contact: Contact,
     credentials: &Credentials,
 ) -> CaldavResult<Contact> {
-    let list_url = Url::parse(&contact.list_id).map_err(|e| {
-        CaldavError::Config(format!("contact.list_id is not a URL: {e}"))
-    })?;
+    let list_url = Url::parse(&contact.list_id)
+        .map_err(|e| CaldavError::Config(format!("contact.list_id is not a URL: {e}")))?;
     let resource = resource_url_for_contact(&list_url, &contact.id)?;
     let (_, uid) = decode_id(&contact.id);
     // Photo preservation: vCard PUTs are full-resource replacements
@@ -268,8 +273,7 @@ pub async fn update_contact(
         HeaderValue::from_static("text/vcard; charset=utf-8"),
     );
     if let Some(etag) = &contact.etag {
-        let value = HeaderValue::from_str(etag)
-            .map_err(|e| CaldavError::Config(e.to_string()))?;
+        let value = HeaderValue::from_str(etag).map_err(|e| CaldavError::Config(e.to_string()))?;
         headers.insert(IF_MATCH, value);
     }
     let response = client
@@ -445,8 +449,7 @@ pub async fn delete_contact(
     let resource = resource_url_for_contact(addressbook_url, contact_id)?;
     let mut headers = auth_header(credentials)?;
     if let Some(etag) = etag {
-        let value = HeaderValue::from_str(etag)
-            .map_err(|e| CaldavError::Config(e.to_string()))?;
+        let value = HeaderValue::from_str(etag).map_err(|e| CaldavError::Config(e.to_string()))?;
         headers.insert(IF_MATCH, value);
     }
     let response = client.delete(resource).headers(headers).send().await?;
@@ -597,7 +600,8 @@ mod tests {
 
     #[test]
     fn extract_uid_pulls_canonical_value() {
-        let body = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Test\r\nUID:abc-123@example.org\r\nEND:VCARD\r\n";
+        let body =
+            "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Test\r\nUID:abc-123@example.org\r\nEND:VCARD\r\n";
         assert_eq!(
             extract_vcard_uid(body).as_deref(),
             Some("abc-123@example.org"),
@@ -629,24 +633,15 @@ mod tests {
         let base = Url::parse("https://example.org/addressbooks/alice/main/").unwrap();
         let url = resource_url(&base, "abc@aperio").unwrap();
         // URL-encoded `@` should be `%40`.
-        assert_eq!(
-            url.path(),
-            "/addressbooks/alice/main/abc%40aperio.vcf",
-        );
+        assert_eq!(url.path(), "/addressbooks/alice/main/abc%40aperio.vcf",);
     }
 
     #[test]
     fn resource_url_for_contact_prefers_server_href() {
         let base = Url::parse("https://example.org/addressbooks/alice/main/").unwrap();
-        let url = resource_url_for_contact(
-            &base,
-            "/addressbooks/alice/main/server-chosen.vcf|abc",
-        )
-        .unwrap();
-        assert_eq!(
-            url.path(),
-            "/addressbooks/alice/main/server-chosen.vcf",
-        );
+        let url = resource_url_for_contact(&base, "/addressbooks/alice/main/server-chosen.vcf|abc")
+            .unwrap();
+        assert_eq!(url.path(), "/addressbooks/alice/main/server-chosen.vcf",);
     }
 
     #[test]
@@ -775,8 +770,7 @@ END:VCARD&#13;
             .create_async()
             .await;
 
-        let book =
-            Url::parse(&format!("{}/addressbooks/alice/main/", server.url())).unwrap();
+        let book = Url::parse(&format!("{}/addressbooks/alice/main/", server.url())).unwrap();
         let contacts = get_contacts(&client(), &book, &creds(&server.url()))
             .await
             .unwrap();
@@ -803,8 +797,7 @@ END:VCARD&#13;
             .with_status(204)
             .create_async()
             .await;
-        let book =
-            Url::parse(&format!("{}/addressbooks/alice/main/", server.url())).unwrap();
+        let book = Url::parse(&format!("{}/addressbooks/alice/main/", server.url())).unwrap();
         delete_contact(
             &client(),
             &book,
@@ -824,8 +817,7 @@ END:VCARD&#13;
             .with_status(404)
             .create_async()
             .await;
-        let book =
-            Url::parse(&format!("{}/addressbooks/alice/main/", server.url())).unwrap();
+        let book = Url::parse(&format!("{}/addressbooks/alice/main/", server.url())).unwrap();
         // 404 ⇒ "already gone" ⇒ treat as success. Same shape the
         // calendars / tasks delete paths use.
         delete_contact(

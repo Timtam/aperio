@@ -72,8 +72,7 @@ pub const SCOPE_CONTACTS_OTHER_READONLY: &str =
 /// returns useful results for Workspace accounts; personal
 /// `@gmail.com` accounts respond with 403 / empty, so the list
 /// renders as empty there and that's the documented behaviour.
-pub const SCOPE_DIRECTORY_READONLY: &str =
-    "https://www.googleapis.com/auth/directory.readonly";
+pub const SCOPE_DIRECTORY_READONLY: &str = "https://www.googleapis.com/auth/directory.readonly";
 /// The combined scope string we request on the consent screen.
 /// Google's OAuth dialog renders one entry per space-separated
 /// scope; granting once covers every feature this adapter exposes
@@ -152,7 +151,10 @@ pub async fn run(
     // default browser, headless container) we surface the URL via the
     // error so the user can copy-paste it manually.
     if let Err(e) = open::that(auth.as_str()) {
-        warn!(?e, "failed to launch browser; user must copy the URL manually");
+        warn!(
+            ?e,
+            "failed to launch browser; user must copy the URL manually"
+        );
     }
 
     let (code, returned_state) = wait_for_redirect(listener).await?;
@@ -269,9 +271,7 @@ fn build_auth_url(
 
 /// Accept one HTTP request, parse `code` + `state` from the query,
 /// respond with a friendly close-this-tab page.
-async fn wait_for_redirect(
-    listener: TcpListener,
-) -> GoogleResult<(String, String)> {
+async fn wait_for_redirect(listener: TcpListener) -> GoogleResult<(String, String)> {
     let accept = tokio::time::timeout(AUTH_TIMEOUT, listener.accept()).await;
     let (socket, _peer) = match accept {
         Err(_) => return Err(GoogleError::AuthTimeout),
@@ -410,8 +410,7 @@ async fn parse_token_response(
         // Subtract a 30 s safety margin from `expires_in` so the
         // adapter starts trying to refresh before the token strictly
         // dies — saves a wasted 401 round-trip.
-        expires_at: requested_at
-            + chrono::Duration::seconds((raw.expires_in - 30).max(0)),
+        expires_at: requested_at + chrono::Duration::seconds((raw.expires_in - 30).max(0)),
         scope: raw.scope,
     })
 }
@@ -462,8 +461,7 @@ mod tests {
         assert_eq!(challenge.len(), 43);
         // The challenge is the URL-safe base64 of SHA-256(verifier).
         let digest = Sha256::digest(verifier.as_bytes());
-        let expected =
-            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest);
+        let expected = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest);
         assert_eq!(challenge, expected);
     }
 
@@ -485,14 +483,29 @@ mod tests {
         )
         .unwrap();
         let pairs: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
-        assert_eq!(pairs.get("client_id").map(String::as_str), Some("my-client-id.apps.googleusercontent.com"));
-        assert_eq!(pairs.get("redirect_uri").map(String::as_str), Some("http://127.0.0.1:12345"));
+        assert_eq!(
+            pairs.get("client_id").map(String::as_str),
+            Some("my-client-id.apps.googleusercontent.com")
+        );
+        assert_eq!(
+            pairs.get("redirect_uri").map(String::as_str),
+            Some("http://127.0.0.1:12345")
+        );
         assert_eq!(pairs.get("response_type").map(String::as_str), Some("code"));
         assert_eq!(pairs.get("scope").map(String::as_str), Some(SCOPES));
-        assert_eq!(pairs.get("code_challenge_method").map(String::as_str), Some("S256"));
-        assert_eq!(pairs.get("code_challenge").map(String::as_str), Some("challenge"));
+        assert_eq!(
+            pairs.get("code_challenge_method").map(String::as_str),
+            Some("S256")
+        );
+        assert_eq!(
+            pairs.get("code_challenge").map(String::as_str),
+            Some("challenge")
+        );
         assert_eq!(pairs.get("state").map(String::as_str), Some("state"));
-        assert_eq!(pairs.get("access_type").map(String::as_str), Some("offline"));
+        assert_eq!(
+            pairs.get("access_type").map(String::as_str),
+            Some("offline")
+        );
         assert_eq!(pairs.get("prompt").map(String::as_str), Some("consent"));
     }
 
@@ -579,9 +592,7 @@ mod tests {
                 "client_secret=shh-secret".to_string(),
             ))
             .with_status(200)
-            .with_body(
-                r#"{"access_token":"ya29.fake","expires_in":3600,"token_type":"Bearer"}"#,
-            )
+            .with_body(r#"{"access_token":"ya29.fake","expires_in":3600,"token_type":"Bearer"}"#)
             .expect(1)
             .create_async()
             .await;
@@ -637,9 +648,7 @@ mod tests {
         server
             .mock("POST", "/token")
             .with_status(400)
-            .with_body(
-                r#"{"error":"invalid_grant","error_description":"code expired"}"#,
-            )
+            .with_body(r#"{"error":"invalid_grant","error_description":"code expired"}"#)
             .create_async()
             .await;
         let http = reqwest::Client::new();

@@ -288,11 +288,9 @@ macro_rules! declare_interactive_auth {
             args_ptr: *const u8,
             args_len: usize,
         ) -> $crate::plugin_core::ffi::PluginCallResult {
-            $crate::interactive_auth::interactive_auth_with(
-                args_ptr,
-                args_len,
-                |json| async move { $handler(json).await },
-            )
+            $crate::interactive_auth::interactive_auth_with(args_ptr, args_len, |json| async move {
+                $handler(json).await
+            })
         }
     };
 }
@@ -352,11 +350,9 @@ macro_rules! declare_discover {
             args_ptr: *const u8,
             args_len: usize,
         ) -> $crate::plugin_core::ffi::PluginCallResult {
-            $crate::discover::discover_with(
-                args_ptr,
-                args_len,
-                |json| async move { $handler(json).await },
-            )
+            $crate::discover::discover_with(args_ptr, args_len, |json| async move {
+                $handler(json).await
+            })
         }
     };
 }
@@ -447,9 +443,7 @@ macro_rules! cal_dispatch_helpers {
         where
             T: ::serde::Serialize,
             F: ::std::ops::FnOnce(&'static $adapter) -> Fut,
-            Fut: ::std::future::Future<
-                Output = ::cal_core::error::Result<T>,
-            >,
+            Fut: ::std::future::Future<Output = ::cal_core::error::Result<T>>,
         {
             $crate::cal_dispatch::<$adapter, T, F, Fut>(handle, call)
         }
@@ -461,9 +455,7 @@ macro_rules! cal_dispatch_helpers {
         ) -> $crate::plugin_core::ffi::PluginCallResult
         where
             F: ::std::ops::FnOnce(&'static $adapter) -> Fut,
-            Fut: ::std::future::Future<
-                Output = ::cal_core::error::Result<()>,
-            >,
+            Fut: ::std::future::Future<Output = ::cal_core::error::Result<()>>,
         {
             $crate::cal_dispatch_unit::<$adapter, F, Fut>(handle, call)
         }
@@ -579,11 +571,9 @@ macro_rules! declare_probe_host_key {
             args_ptr: *const u8,
             args_len: usize,
         ) -> $crate::plugin_core::ffi::PluginCallResult {
-            $crate::probe_host_key::probe_host_key_with(
-                args_ptr,
-                args_len,
-                |json| async move { $handler(json).await },
-            )
+            $crate::probe_host_key::probe_host_key_with(args_ptr, args_len, |json| async move {
+                $handler(json).await
+            })
         }
     };
 }
@@ -630,10 +620,7 @@ mod tests {
         let plugin_ptr = unsafe { build_descriptor() };
         assert!(!plugin_ptr.is_null());
         let descriptor = unsafe { &*plugin_ptr };
-        assert_eq!(
-            descriptor.abi_version,
-            plugin_core::ABI_VERSION
-        );
+        assert_eq!(descriptor.abi_version, plugin_core::ABI_VERSION);
         let id = unsafe { CStr::from_ptr(descriptor.id) }
             .to_str()
             .expect("utf8");
@@ -655,9 +642,7 @@ mod tests {
         assert!(!descriptor.vtable.is_null());
         // SAFETY: vtable points at our TEST_VTABLE static
         // (CalendarVtable::empty()).
-        let vtable: &CalendarVtable = unsafe {
-            &*(descriptor.vtable as *const CalendarVtable)
-        };
+        let vtable: &CalendarVtable = unsafe { &*(descriptor.vtable as *const CalendarVtable) };
         assert!(vtable.list_calendars.is_none());
 
         unsafe { DESTROY_FN(plugin_ptr) };

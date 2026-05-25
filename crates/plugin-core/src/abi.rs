@@ -142,9 +142,8 @@ pub struct AperioPlugin {
     /// state — the host then dispatches vtable methods with a
     /// NULL instance handle. Notification channels and other
     /// process-global plugins are the typical case.
-    pub open_instance: Option<
-        unsafe extern "C" fn(config_json: *const c_char) -> OpenInstanceResult,
-    >,
+    pub open_instance:
+        Option<unsafe extern "C" fn(config_json: *const c_char) -> OpenInstanceResult>,
 
     /// Release an instance previously returned by
     /// [`Self::open_instance`]. Called by the host when the

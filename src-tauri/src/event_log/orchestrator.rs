@@ -306,13 +306,8 @@ impl SyncOrchestrator {
     }
 
     pub fn status(&self) -> SyncStatus {
-        let configured = self
-            .adapter
-            .lock()
-            .expect("adapter mutex poison")
-            .is_some();
-        let in_flight =
-            *self.in_flight.lock().expect("in-flight mutex poison");
+        let configured = self.adapter.lock().expect("adapter mutex poison").is_some();
+        let in_flight = *self.in_flight.lock().expect("in-flight mutex poison");
         let last_synced_at = UserPrefsRepo::new(&self.db)
             .get(SYNC_LAST_ROUND_PREF_KEY)
             .ok()
@@ -390,17 +385,10 @@ impl SyncOrchestrator {
         // `return` past this point still clears it.
         let _guard = InFlightGuard::acquire(&self.in_flight)?;
 
-        let adapter = match self
-            .adapter
-            .lock()
-            .expect("adapter mutex poison")
-            .clone()
-        {
+        let adapter = match self.adapter.lock().expect("adapter mutex poison").clone() {
             Some(a) => a,
             None => {
-                return Err(sync_core::SyncError::internal(
-                    "no sync adapter configured",
-                ));
+                return Err(sync_core::SyncError::internal("no sync adapter configured"));
             }
         };
 
@@ -431,8 +419,7 @@ impl SyncOrchestrator {
                     // Latch so the status indicator picks it up
                     // until the next successful round.
                     if let sync_core::SyncError::SchemaTooOld { required, .. } = &err {
-                        *self.schema_too_old.lock().expect("mutex poison") =
-                            Some(required.clone());
+                        *self.schema_too_old.lock().expect("mutex poison") = Some(required.clone());
                     }
                     return Err(err);
                 }
@@ -462,14 +449,12 @@ impl SyncOrchestrator {
             // frontend can pop the §19.10 resume dialog. The
             // user clicks Fortfahren → `resume_stale_device`
             // command clears the latch + re-pulls the snapshot.
-            if let Some(entry) = meta.devices.get(self.local_device_id.as_str())
-            {
+            if let Some(entry) = meta.devices.get(self.local_device_id.as_str()) {
                 if entry.stale {
                     *self
                         .stale_device_since
                         .lock()
-                        .expect("stale_device_since mutex poison") =
-                        Some(meta.snapshot_timestamp);
+                        .expect("stale_device_since mutex poison") = Some(meta.snapshot_timestamp);
                     return Err(sync_core::SyncError::StaleDevice {
                         snapshot_at: meta.snapshot_timestamp.to_rfc3339(),
                     });
@@ -565,13 +550,7 @@ impl SyncOrchestrator {
         // failure here doesn't sink the round, the next pass
         // retries. The asset bytes flow OUT-OF-BAND from the
         // event log — see `sound_assets` for the algorithm.
-        match crate::sound_assets::sync_assets(
-            &self.db,
-            &self.sounds_dir,
-            adapter.as_ref(),
-        )
-        .await
-        {
+        match crate::sound_assets::sync_assets(&self.db, &self.sounds_dir, adapter.as_ref()).await {
             Ok(asset_report) => {
                 if asset_report.pushed > 0
                     || asset_report.fetched > 0
@@ -605,11 +584,8 @@ impl SyncOrchestrator {
             Ok(true) => {
                 info!("compaction thresholds breached; running inline");
                 let started = std::time::Instant::now();
-                let outcome =
-                    self.compactor.compact_now(adapter.as_ref()).await;
-                let duration_ms =
-                    u64::try_from(started.elapsed().as_millis())
-                        .unwrap_or(u64::MAX);
+                let outcome = self.compactor.compact_now(adapter.as_ref()).await;
+                let duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
                 if let Err(err) = &outcome {
                     warn!(?err, "auto-compaction failed");
                 }
@@ -625,8 +601,8 @@ impl SyncOrchestrator {
         // foreign logs, so on a single-device setup it would
         // never move and the user would forever see "noch kein
         // Abgleich" even after dozens of successful rounds.
-        if let Err(err) = UserPrefsRepo::new(&self.db)
-            .set(SYNC_LAST_ROUND_PREF_KEY, &Utc::now().to_rfc3339())
+        if let Err(err) =
+            UserPrefsRepo::new(&self.db).set(SYNC_LAST_ROUND_PREF_KEY, &Utc::now().to_rfc3339())
         {
             warn!(?err, "couldn't persist last-round timestamp");
         }
@@ -652,17 +628,10 @@ impl SyncOrchestrator {
     /// shutdown round.
     pub async fn push_now(&self) -> SyncResult<usize> {
         let _guard = InFlightGuard::acquire(&self.in_flight)?;
-        let adapter = match self
-            .adapter
-            .lock()
-            .expect("adapter mutex poison")
-            .clone()
-        {
+        let adapter = match self.adapter.lock().expect("adapter mutex poison").clone() {
             Some(a) => a,
             None => {
-                return Err(sync_core::SyncError::internal(
-                    "no sync adapter configured",
-                ));
+                return Err(sync_core::SyncError::internal("no sync adapter configured"));
             }
         };
         self.push_pending(adapter.as_ref()).await
@@ -678,10 +647,7 @@ impl SyncOrchestrator {
     /// for the rest of this app run, and we'd lose those
     /// additions. Older session files are kept around too — Phase
     /// Sg's compaction handles their eventual GC.
-    async fn push_pending(
-        &self,
-        adapter: &dyn SyncAdapter,
-    ) -> SyncResult<usize> {
+    async fn push_pending(&self, adapter: &dyn SyncAdapter) -> SyncResult<usize> {
         let mut entries = match tokio::fs::read_dir(&self.pending_dir).await {
             Ok(rd) => rd,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
@@ -734,19 +700,12 @@ impl SyncOrchestrator {
             if bytes.is_empty() {
                 if parsed.timestamp < self.boot_at {
                     if let Err(err) = tokio::fs::remove_file(&path).await {
-                        debug!(
-                            name = name,
-                            ?err,
-                            "couldn't remove empty pending log",
-                        );
+                        debug!(name = name, ?err, "couldn't remove empty pending log",);
                     } else {
                         debug!(name = name, "skipped + removed empty pending log");
                     }
                 } else {
-                    debug!(
-                        name = name,
-                        "skipping empty pending log (current session)",
-                    );
+                    debug!(name = name, "skipping empty pending log (current session)",);
                 }
                 continue;
             }
@@ -789,11 +748,7 @@ impl SyncOrchestrator {
     fn save_cursor(&self, ts: DateTime<Utc>) -> SyncResult<()> {
         UserPrefsRepo::new(&self.db)
             .set(SYNC_CURSOR_PREF_KEY, &ts.to_rfc3339())
-            .map_err(|err| {
-                sync_core::SyncError::internal(format!(
-                    "save cursor: {err}"
-                ))
-            })?;
+            .map_err(|err| sync_core::SyncError::internal(format!("save cursor: {err}")))?;
         Ok(())
     }
 
@@ -813,10 +768,7 @@ impl SyncOrchestrator {
     /// `run_round`) will trigger a frontend refresh.
     fn record_compaction_row(
         &self,
-        result: &Result<
-            crate::event_log::compactor::CompactionReport,
-            sync_core::SyncError,
-        >,
+        result: &Result<crate::event_log::compactor::CompactionReport, sync_core::SyncError>,
         duration_ms: u64,
     ) {
         use crate::sync_log::{SyncLogCounters, SyncLogRepo, SyncTrigger};
@@ -837,20 +789,13 @@ impl SyncOrchestrator {
                     SyncLogCounters {
                         pushed_logs: None,
                         fetched_logs: None,
-                        applied: Some(
-                            u32::try_from(report.deleted_logs)
-                                .unwrap_or(u32::MAX),
-                        ),
+                        applied: Some(u32::try_from(report.deleted_logs).unwrap_or(u32::MAX)),
                         conflicts: None,
                     },
                     error,
                 )
             }
-            Err(err) => (
-                false,
-                SyncLogCounters::default(),
-                Some(err.to_string()),
-            ),
+            Err(err) => (false, SyncLogCounters::default(), Some(err.to_string())),
         };
         let repo = SyncLogRepo::new(&self.db);
         if let Err(err) = repo.record(
@@ -882,9 +827,7 @@ impl<'a> InFlightGuard<'a> {
     fn acquire(flag: &'a Mutex<bool>) -> SyncResult<Self> {
         let mut guard = flag.lock().expect("in-flight mutex poison");
         if *guard {
-            return Err(sync_core::SyncError::internal(
-                "sync already in progress",
-            ));
+            return Err(sync_core::SyncError::internal("sync already in progress"));
         }
         *guard = true;
         Ok(Self { flag })

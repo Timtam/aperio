@@ -50,8 +50,8 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use sync_core::{
-    DeviceCursor, DeviceId, DeviceRecord, LogFile, LogFileName, MetaJson,
-    SyncAdapter, SyncError, SyncResult,
+    DeviceCursor, DeviceId, DeviceRecord, LogFile, LogFileName, MetaJson, SyncAdapter, SyncError,
+    SyncResult,
 };
 use tracing::{debug, info, warn};
 
@@ -217,10 +217,7 @@ impl OnboardingService {
     /// Non-mutating probe. Reads `meta.json` (if any), classifies
     /// it as Empty vs Existing, returns enough detail for the
     /// onboarding dialog to render the device list + warnings.
-    pub async fn preview(
-        &self,
-        adapter: &dyn SyncAdapter,
-    ) -> SyncResult<SyncPreview> {
+    pub async fn preview(&self, adapter: &dyn SyncAdapter) -> SyncResult<SyncPreview> {
         adapter.test_connection().await?;
         let meta = adapter.fetch_meta().await?;
         Ok(match meta {
@@ -280,14 +277,9 @@ impl OnboardingService {
         device_name: Option<&str>,
     ) -> SyncResult<OnboardingReport> {
         adapter.test_connection().await?;
-        let mut meta = adapter
-            .fetch_meta()
-            .await?
-            .ok_or_else(|| {
-                SyncError::not_found(
-                    "remote has no meta.json — use adopt_local for a fresh dataset",
-                )
-            })?;
+        let mut meta = adapter.fetch_meta().await?.ok_or_else(|| {
+            SyncError::not_found("remote has no meta.json — use adopt_local for a fresh dataset")
+        })?;
 
         // Phase Sl: refuse to pull from a dataset our build can't
         // safely read. Surfaces as `SchemaTooOld` so the frontend
@@ -321,16 +313,12 @@ impl OnboardingService {
                         // replay — a partial snapshot apply would
                         // leave an inconsistent dataset. Surface
                         // so the user can retry.
-                        return Err(SyncError::internal(format!(
-                            "snapshot apply: {err}"
-                        )));
+                        return Err(SyncError::internal(format!("snapshot apply: {err}")));
                     }
                 }
             }
             None => {
-                debug!(
-                    "no remote snapshot present; falling back to full log replay",
-                );
+                debug!("no remote snapshot present; falling back to full log replay",);
             }
         }
 
@@ -408,13 +396,7 @@ impl OnboardingService {
         // means some reminders will be silent until the next
         // periodic sound-asset sync round; the rest of the
         // dataset has already converged.
-        match crate::sound_assets::sync_assets(
-            &self.db,
-            &self.sounds_dir,
-            adapter,
-        )
-        .await
-        {
+        match crate::sound_assets::sync_assets(&self.db, &self.sounds_dir, adapter).await {
             Ok(asset_report) => info!(
                 pushed = asset_report.pushed,
                 fetched = asset_report.fetched,
@@ -459,31 +441,24 @@ impl OnboardingService {
         adapter: &dyn SyncAdapter,
     ) -> SyncResult<OnboardingReport> {
         adapter.test_connection().await?;
-        let mut meta = adapter
-            .fetch_meta()
-            .await?
-            .ok_or_else(|| {
-                SyncError::not_found(
-                    "remote meta.json disappeared between stale detection and resume",
-                )
-            })?;
+        let mut meta = adapter.fetch_meta().await?.ok_or_else(|| {
+            SyncError::not_found("remote meta.json disappeared between stale detection and resume")
+        })?;
 
         // Fetch + apply the current snapshot. Unlike the
         // first-onboard path we expect a snapshot to exist
         // (otherwise the compactor couldn't have flagged us
         // stale); a missing snapshot here is a protocol error.
         let snapshot = adapter.fetch_snapshot().await?.ok_or_else(|| {
-            SyncError::protocol(
-                "remote has no snapshot.json despite stale-device flag",
-            )
+            SyncError::protocol("remote has no snapshot.json despite stale-device flag")
         })?;
         info!(
             snapshot_ts = %snapshot.metadata.snapshot_timestamp,
             "applying snapshot during stale-device resume",
         );
-        self.snapshot_builder.apply(&snapshot).map_err(|err| {
-            SyncError::internal(format!("stale resume snapshot apply: {err}"))
-        })?;
+        self.snapshot_builder
+            .apply(&snapshot)
+            .map_err(|err| SyncError::internal(format!("stale resume snapshot apply: {err}")))?;
         let mut starting_cursor = snapshot.metadata.snapshot_timestamp;
 
         // Pull + apply any logs that landed after the snapshot.
@@ -554,8 +529,7 @@ impl OnboardingService {
         // `last_seen_log` so other devices see us as current.
         // This is the bit that lets a future compactor round
         // include our cursor in its retention math.
-        if let Some(entry) = meta.devices.get_mut(self.local_device_id.as_str())
-        {
+        if let Some(entry) = meta.devices.get_mut(self.local_device_id.as_str()) {
             entry.stale = false;
             entry.last_seen_log = starting_cursor;
         }
@@ -566,13 +540,7 @@ impl OnboardingService {
         // The snapshot pull above may have referenced new sound
         // hashes; pull them now so the user hears reminders
         // correctly after the resume.
-        match crate::sound_assets::sync_assets(
-            &self.db,
-            &self.sounds_dir,
-            adapter,
-        )
-        .await
-        {
+        match crate::sound_assets::sync_assets(&self.db, &self.sounds_dir, adapter).await {
             Ok(asset_report) => info!(
                 pushed = asset_report.pushed,
                 fetched = asset_report.fetched,
@@ -686,10 +654,7 @@ impl OnboardingService {
                 }
             }
         }
-        info!(
-            files = replayed_files,
-            "stale resume replayed pending logs",
-        );
+        info!(files = replayed_files, "stale resume replayed pending logs",);
     }
 
     /// "Neu beginnen" path. Builds a fresh meta.json with only this
@@ -765,9 +730,7 @@ impl OnboardingService {
                 // The remote has lost its meta.json since onboarding
                 // (someone deleted it, or onboarding was incomplete).
                 // Mint a fresh one with us as the only known device.
-                debug!(
-                    "heartbeat_meta found no remote meta; reseeding with this device",
-                );
+                debug!("heartbeat_meta found no remote meta; reseeding with this device",);
                 MetaJson::fresh(&self.app_version)
             }
         };
@@ -788,19 +751,13 @@ impl OnboardingService {
         Ok(())
     }
 
-    fn register_self_in_meta(
-        &self,
-        meta: &mut MetaJson,
-        device_name: Option<&str>,
-    ) {
-        let name = device_name
-            .map(str::to_string)
-            .or_else(|| {
-                UserPrefsRepo::new(&self.db)
-                    .get(PREF_DEVICE_NAME)
-                    .ok()
-                    .flatten()
-            });
+    fn register_self_in_meta(&self, meta: &mut MetaJson, device_name: Option<&str>) {
+        let name = device_name.map(str::to_string).or_else(|| {
+            UserPrefsRepo::new(&self.db)
+                .get(PREF_DEVICE_NAME)
+                .ok()
+                .flatten()
+        });
         meta.upsert_device(
             &self.local_device_id,
             DeviceRecord {
@@ -819,27 +776,21 @@ impl OnboardingService {
         }
         UserPrefsRepo::new(&self.db)
             .set(PREF_DEVICE_NAME, trimmed)
-            .map_err(|err| {
-                SyncError::internal(format!("save device name: {err}"))
-            })?;
+            .map_err(|err| SyncError::internal(format!("save device name: {err}")))?;
         Ok(())
     }
 
     fn save_cursor(&self, ts: DateTime<Utc>) -> SyncResult<()> {
         UserPrefsRepo::new(&self.db)
             .set(SYNC_CURSOR_PREF_KEY, &ts.to_rfc3339())
-            .map_err(|err| {
-                SyncError::internal(format!("save cursor: {err}"))
-            })?;
+            .map_err(|err| SyncError::internal(format!("save cursor: {err}")))?;
         Ok(())
     }
 
     fn mark_onboarded(&self) -> SyncResult<()> {
         UserPrefsRepo::new(&self.db)
             .set(PREF_ONBOARDED, "true")
-            .map_err(|err| {
-                SyncError::internal(format!("save onboarded flag: {err}"))
-            })?;
+            .map_err(|err| SyncError::internal(format!("save onboarded flag: {err}")))?;
         Ok(())
     }
 }
@@ -912,10 +863,7 @@ mod tests {
             *self.meta.lock().unwrap() = Some(meta.clone());
             Ok(())
         }
-        async fn fetch_new_logs(
-            &self,
-            since: &DeviceCursor,
-        ) -> SyncResult<Vec<LogFile>> {
+        async fn fetch_new_logs(&self, since: &DeviceCursor) -> SyncResult<Vec<LogFile>> {
             Ok(self
                 .logs
                 .lock()
@@ -970,10 +918,7 @@ mod tests {
         build_service_with_pending(db, PathBuf::from("/non/existent/pending"))
     }
 
-    fn build_service_with_pending(
-        db: SharedConn,
-        pending_dir: PathBuf,
-    ) -> OnboardingService {
+    fn build_service_with_pending(db: SharedConn, pending_dir: PathBuf) -> OnboardingService {
         let device_id = DeviceId::from_string("dev-this".into());
         let adapter = Arc::new(LocalAdapter::new(db.clone()));
         let applier = Arc::new(EventLogApplier::new(
@@ -981,11 +926,7 @@ mod tests {
             Arc::clone(&adapter),
             device_id.clone(),
         ));
-        let snapshot_builder = Arc::new(SnapshotBuilder::new(
-            db.clone(),
-            adapter,
-            "1.0.0-test",
-        ));
+        let snapshot_builder = Arc::new(SnapshotBuilder::new(db.clone(), adapter, "1.0.0-test"));
         OnboardingService::new(
             db,
             device_id,
@@ -1057,17 +998,18 @@ mod tests {
         );
         adapter.install_meta(meta);
 
-        let report = svc
-            .accept_remote(&adapter, Some("Laptop"))
-            .await
-            .unwrap();
+        let report = svc.accept_remote(&adapter, Some("Laptop")).await.unwrap();
         assert_eq!(report.device_count, 2);
         assert!(!report.remote_was_empty);
 
         // meta.json now lists us + the prior device.
         let updated = adapter.fetch_meta().await.unwrap().unwrap();
-        assert!(updated.device(&DeviceId::from_string("dev-this".into())).is_some());
-        assert!(updated.device(&DeviceId::from_string("dev-other".into())).is_some());
+        assert!(updated
+            .device(&DeviceId::from_string("dev-this".into()))
+            .is_some());
+        assert!(updated
+            .device(&DeviceId::from_string("dev-other".into()))
+            .is_some());
 
         // Device name pref was persisted.
         let name = UserPrefsRepo::new(&db.shared())
@@ -1126,8 +1068,12 @@ mod tests {
 
         let updated = adapter.fetch_meta().await.unwrap().unwrap();
         assert_eq!(updated.devices.len(), 1);
-        assert!(updated.device(&DeviceId::from_string("dev-this".into())).is_some());
-        assert!(updated.device(&DeviceId::from_string("dev-a".into())).is_none());
+        assert!(updated
+            .device(&DeviceId::from_string("dev-this".into()))
+            .is_some());
+        assert!(updated
+            .device(&DeviceId::from_string("dev-a".into()))
+            .is_none());
     }
 
     #[tokio::test]
@@ -1165,10 +1111,7 @@ mod tests {
             ts.to_rfc3339(),
         );
         let log = LogFile {
-            name: LogFileName::new(
-                ts,
-                DeviceId::from_string("dev-other".into()),
-            ),
+            name: LogFileName::new(ts, DeviceId::from_string("dev-other".into())),
             bytes: envelope_json.into_bytes(),
         };
         let adapter = FakeAdapter::with_logs(vec![log]);

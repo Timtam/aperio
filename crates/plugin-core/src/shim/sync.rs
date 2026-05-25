@@ -113,20 +113,14 @@ impl FfiSyncAdapter {
 fn status_to_sync_error(outcome: CallOutcome) -> SyncError {
     let msg = outcome.message();
     match outcome.status {
-        PLUGIN_CALL_ERR_UNSUPPORTED => {
-            SyncError::Protocol(format!("plugin missing method: {msg}"))
-        }
-        PLUGIN_CALL_ERR_INVALID => {
-            SyncError::Protocol(format!("plugin rejected args: {msg}"))
-        }
+        PLUGIN_CALL_ERR_UNSUPPORTED => SyncError::Protocol(format!("plugin missing method: {msg}")),
+        PLUGIN_CALL_ERR_INVALID => SyncError::Protocol(format!("plugin rejected args: {msg}")),
         PLUGIN_CALL_ERR_AUTH | PLUGIN_CALL_ERR_FORBIDDEN => SyncError::Auth(msg),
         PLUGIN_CALL_ERR_NETWORK => SyncError::Network(msg),
         PLUGIN_CALL_ERR_NOT_FOUND => SyncError::NotFound(msg),
         PLUGIN_CALL_ERR_PROTOCOL => SyncError::Protocol(msg),
         PLUGIN_CALL_ERR_IO => SyncError::Io(msg),
-        PLUGIN_CALL_ERR_CONFLICT => {
-            SyncError::Protocol(format!("conflict: {msg}"))
-        }
+        PLUGIN_CALL_ERR_CONFLICT => SyncError::Protocol(format!("conflict: {msg}")),
         PLUGIN_CALL_ERR_INTERNAL => SyncError::Internal(msg),
         other => SyncError::Internal(format!("plugin status {other}: {msg}")),
     }
@@ -141,14 +135,11 @@ where
     T: serde::de::DeserializeOwned,
     A: Serialize,
 {
-    let bytes = encode_args(args).map_err(|e| SyncError::Internal(format!(
-        "encode args: {e}"
-    )))?;
+    let bytes = encode_args(args).map_err(|e| SyncError::Internal(format!("encode args: {e}")))?;
     let outcome = call_method(method, instance_addr, bytes).await;
     if outcome.is_ok() {
-        decode_payload(&outcome.bytes).map_err(|e| SyncError::Protocol(format!(
-            "decode plugin response: {e}"
-        )))
+        decode_payload(&outcome.bytes)
+            .map_err(|e| SyncError::Protocol(format!("decode plugin response: {e}")))
     } else {
         Err(status_to_sync_error(outcome))
     }
@@ -159,9 +150,7 @@ async fn call_for_unit<A: Serialize>(
     instance_addr: usize,
     args: &A,
 ) -> SyncResult<()> {
-    let bytes = encode_args(args).map_err(|e| SyncError::Internal(format!(
-        "encode args: {e}"
-    )))?;
+    let bytes = encode_args(args).map_err(|e| SyncError::Internal(format!("encode args: {e}")))?;
     let outcome = call_method(method, instance_addr, bytes).await;
     if outcome.is_ok() {
         Ok(())
@@ -201,10 +190,7 @@ impl SyncAdapter for FfiSyncAdapter {
         call_for_unit(self.vtable.push_meta, self.handle_addr, meta).await
     }
 
-    async fn fetch_new_logs(
-        &self,
-        since: &DeviceCursor,
-    ) -> SyncResult<Vec<LogFile>> {
+    async fn fetch_new_logs(&self, since: &DeviceCursor) -> SyncResult<Vec<LogFile>> {
         let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         call_then_decode(self.vtable.fetch_new_logs, self.handle_addr, since).await
     }
@@ -229,12 +215,7 @@ impl SyncAdapter for FfiSyncAdapter {
         call_for_unit(self.vtable.delete_log, self.handle_addr, name).await
     }
 
-    async fn push_sound_asset(
-        &self,
-        hash: &str,
-        extension: &str,
-        bytes: &[u8],
-    ) -> SyncResult<()> {
+    async fn push_sound_asset(&self, hash: &str, extension: &str, bytes: &[u8]) -> SyncResult<()> {
         let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         use base64::Engine as _;
         let args = PushSoundAssetArgs {
@@ -246,11 +227,7 @@ impl SyncAdapter for FfiSyncAdapter {
         call_for_unit(self.vtable.push_sound_asset, self.handle_addr, &args).await
     }
 
-    async fn fetch_sound_asset(
-        &self,
-        hash: &str,
-        extension: &str,
-    ) -> SyncResult<Option<Vec<u8>>> {
+    async fn fetch_sound_asset(&self, hash: &str, extension: &str) -> SyncResult<Option<Vec<u8>>> {
         let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         use base64::Engine as _;
         let args = FetchSoundAssetArgs { hash, extension };
@@ -261,9 +238,9 @@ impl SyncAdapter for FfiSyncAdapter {
             Some(s) => base64::engine::general_purpose::STANDARD
                 .decode(s)
                 .map(Some)
-                .map_err(|e| SyncError::Protocol(format!(
-                    "plugin returned bad base64 for sound asset: {e}"
-                ))),
+                .map_err(|e| {
+                    SyncError::Protocol(format!("plugin returned bad base64 for sound asset: {e}"))
+                }),
         }
     }
 }

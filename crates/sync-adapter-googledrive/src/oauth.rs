@@ -114,11 +114,13 @@ pub async fn run_against(
     let (verifier, challenge) = generate_pkce();
     let state = generate_state();
 
-    let auth =
-        build_auth_url(auth_url, client_id, &redirect_uri, &challenge, &state)?;
+    let auth = build_auth_url(auth_url, client_id, &redirect_uri, &challenge, &state)?;
     debug!(url = %auth, "opening Google Drive consent screen");
     if let Err(e) = open::that(auth.as_str()) {
-        warn!(?e, "failed to launch browser; user must copy the URL manually");
+        warn!(
+            ?e,
+            "failed to launch browser; user must copy the URL manually"
+        );
     }
 
     let (code, returned_state) = wait_for_redirect(listener).await?;
@@ -153,9 +155,7 @@ pub async fn refresh(
         ("client_id", client_id),
         ("client_secret", client_secret),
     ])
-    .map_err(|e| {
-        GoogleDriveError::Protocol(format!("encode refresh body: {e}"))
-    })?;
+    .map_err(|e| GoogleDriveError::Protocol(format!("encode refresh body: {e}")))?;
     let response = http
         .post(GOOGLE_TOKEN_URL)
         .header("content-type", "application/x-www-form-urlencoded")
@@ -189,9 +189,8 @@ fn build_auth_url(
     challenge: &str,
     state: &str,
 ) -> GoogleDriveResult<url::Url> {
-    let mut url = url::Url::parse(auth_url).map_err(|e| {
-        GoogleDriveError::Config(format!("invalid auth_url: {e}"))
-    })?;
+    let mut url = url::Url::parse(auth_url)
+        .map_err(|e| GoogleDriveError::Config(format!("invalid auth_url: {e}")))?;
     url.query_pairs_mut()
         .append_pair("client_id", client_id)
         .append_pair("redirect_uri", redirect_uri)
@@ -212,9 +211,7 @@ fn build_auth_url(
     Ok(url)
 }
 
-async fn wait_for_redirect(
-    listener: TcpListener,
-) -> GoogleDriveResult<(String, String)> {
+async fn wait_for_redirect(listener: TcpListener) -> GoogleDriveResult<(String, String)> {
     let accept = tokio::time::timeout(AUTH_TIMEOUT, listener.accept()).await;
     let (socket, _peer) = match accept {
         Err(_) => return Err(GoogleDriveError::AuthTimeout),
@@ -236,13 +233,9 @@ async fn wait_for_redirect(
     let path = request_line
         .split_whitespace()
         .nth(1)
-        .ok_or_else(|| {
-            GoogleDriveError::Protocol("malformed request line".into())
-        })?;
+        .ok_or_else(|| GoogleDriveError::Protocol("malformed request line".into()))?;
     let pseudo = url::Url::parse(&format!("http://127.0.0.1{path}"))
-        .map_err(|e| {
-            GoogleDriveError::Protocol(format!("query parse: {e}"))
-        })?;
+        .map_err(|e| GoogleDriveError::Protocol(format!("query parse: {e}")))?;
 
     let mut code = None;
     let mut state = None;
@@ -286,12 +279,8 @@ async fn wait_for_redirect(
         return Err(GoogleDriveError::AuthDenied(err));
     }
     Ok((
-        code.ok_or_else(|| {
-            GoogleDriveError::Protocol("redirect missing `code`".into())
-        })?,
-        state.ok_or_else(|| {
-            GoogleDriveError::Protocol("redirect missing `state`".into())
-        })?,
+        code.ok_or_else(|| GoogleDriveError::Protocol("redirect missing `code`".into()))?,
+        state.ok_or_else(|| GoogleDriveError::Protocol("redirect missing `state`".into()))?,
     ))
 }
 
@@ -347,8 +336,7 @@ async fn parse_token_response(
     Ok(TokenSet {
         access_token: raw.access_token,
         refresh_token: raw.refresh_token,
-        expires_at: requested_at
-            + chrono::Duration::seconds((raw.expires_in - 30).max(0)),
+        expires_at: requested_at + chrono::Duration::seconds((raw.expires_in - 30).max(0)),
     })
 }
 
@@ -373,13 +361,9 @@ mod serde_urlencoded {
         let mut out = String::with_capacity(input.len());
         for byte in input.bytes() {
             match byte {
-                b'A'..=b'Z'
-                | b'a'..=b'z'
-                | b'0'..=b'9'
-                | b'-'
-                | b'.'
-                | b'_'
-                | b'~' => out.push(byte as char),
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                    out.push(byte as char)
+                }
                 _ => {
                     out.push('%');
                     out.push_str(&format!("{byte:02X}"));

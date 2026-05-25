@@ -47,10 +47,7 @@ impl GoogleDriveError {
     pub fn is_auth(&self) -> bool {
         matches!(
             self,
-            Self::Auth(_)
-                | Self::Csrf
-                | Self::AuthTimeout
-                | Self::AuthDenied(_)
+            Self::Auth(_) | Self::Csrf | Self::AuthTimeout | Self::AuthDenied(_)
         )
     }
 

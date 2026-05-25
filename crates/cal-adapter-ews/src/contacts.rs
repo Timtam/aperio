@@ -130,10 +130,9 @@ const GAL_CONCURRENCY: usize = 3;
 /// known limitation we'd fix by recursing into two-letter
 /// prefixes when a result set looks suspiciously full.
 const GAL_ENUM_PREFIXES: &[&str] = &[
-    "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m",
-    "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z",
-    "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
-    "ä", "ö", "ü",
+    "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s",
+    "t", "u", "v", "w", "x", "y", "z", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "ä", "ö",
+    "ü",
 ];
 
 // ── Public adapter-side surface ────────────────────────────────────────
@@ -153,8 +152,7 @@ pub async fn list_contact_lists(client: &EwsClient) -> EwsResult<Vec<ContactList
     let body = find_contact_folders();
     let xml = client.post_soap(body).await?;
     let folders = parse_find_contact_folder_response(&xml)?;
-    let mut out: Vec<ContactList> =
-        folders.into_iter().map(to_contact_list).collect();
+    let mut out: Vec<ContactList> = folders.into_iter().map(to_contact_list).collect();
     out.push(gal_contact_list());
     Ok(out)
 }
@@ -235,8 +233,7 @@ async fn get_gal_contacts(client: &EwsClient) -> EwsResult<Vec<Contact>> {
     // borrowing a `&str` from the closure argument; owned
     // strings sidestep the issue entirely without the cost (39
     // single-character allocations is nothing).
-    let prefixes: Vec<String> =
-        GAL_ENUM_PREFIXES.iter().map(|s| (*s).to_string()).collect();
+    let prefixes: Vec<String> = GAL_ENUM_PREFIXES.iter().map(|s| (*s).to_string()).collect();
 
     // Run all prefix queries with bounded concurrency. Each
     // future swallows its own per-prefix errors so the stream
@@ -361,25 +358,16 @@ pub async fn create_contact(
         // We reject up front rather than letting EWS surface a
         // confusing `ErrorInvalidIdMalformed` for the sentinel.
         return Err(EwsError::Protocol(
-            "the Global Address List is read-only; cannot create contacts there"
-                .into(),
+            "the Global Address List is read-only; cannot create contacts there".into(),
         ));
     }
     let (folder_id, folder_change_key) = split_calendar_id(list_id);
     let item_xml = new_contact_to_contact_item_xml(&contact);
-    let envelope = create_contact_in_folder(
-        &folder_id,
-        folder_change_key.as_deref(),
-        &item_xml,
-    );
+    let envelope = create_contact_in_folder(&folder_id, folder_change_key.as_deref(), &item_xml);
     let response = client.post_soap(envelope).await?;
     let item_ref = parse_first_item_id(&response)?;
-    let created = build_contact_from_new(
-        &contact,
-        list_id,
-        &item_ref.id,
-        item_ref.change_key.clone(),
-    );
+    let created =
+        build_contact_from_new(&contact, list_id, &item_ref.id, item_ref.change_key.clone());
 
     // Inline photo upload: the contact item now exists, so we
     // CreateAttachment with IsContactPhoto=true. The follow-up
@@ -388,13 +376,9 @@ pub async fn create_contact(
     // ErrorAttachmentNestLevelExceeded.
     if let Some(photo) = contact.photo.as_ref() {
         if !photo.data.is_empty() {
-            if let Err(err) = upload_contact_photo(
-                client,
-                &item_ref.id,
-                item_ref.change_key.as_deref(),
-                photo,
-            )
-            .await
+            if let Err(err) =
+                upload_contact_photo(client, &item_ref.id, item_ref.change_key.as_deref(), photo)
+                    .await
             {
                 tracing::warn!(
                     item_id = %item_ref.id,
@@ -482,10 +466,7 @@ pub async fn set_contact_photo(
 /// Strip the avatar by deleting every ContactPicture attachment
 /// on the contact. Errors per attachment surface to the caller;
 /// the no-photo case (no matching attachments) yields `Ok(())`.
-pub async fn delete_contact_photo(
-    client: &EwsClient,
-    contact_id: &str,
-) -> EwsResult<()> {
+pub async fn delete_contact_photo(client: &EwsClient, contact_id: &str) -> EwsResult<()> {
     let (item_id, change_key) = split_calendar_id(contact_id);
     let envelope = get_item_attachments_envelope(&item_id, change_key.as_deref());
     let response = client.post_soap(envelope).await?;
@@ -520,18 +501,12 @@ async fn upload_contact_photo(
 pub async fn update_contact(client: &EwsClient, contact: &Contact) -> EwsResult<Contact> {
     if contact.list_id == GAL_LIST_ID {
         return Err(EwsError::Protocol(
-            "the Global Address List is read-only; cannot update directory entries"
-                .into(),
+            "the Global Address List is read-only; cannot update directory entries".into(),
         ));
     }
     let (item_id, change_key) = split_calendar_id(&contact.id);
     let (set_xml, delete_xml) = contact_to_update_field_xml(contact);
-    let envelope = update_contact_item(
-        &item_id,
-        change_key.as_deref(),
-        &set_xml,
-        &delete_xml,
-    );
+    let envelope = update_contact_item(&item_id, change_key.as_deref(), &set_xml, &delete_xml);
     let response = client.post_soap(envelope).await?;
     let item_ref = parse_first_item_id(&response)?;
     let new_id = encode_contact_id(&item_ref.id, item_ref.change_key.as_deref());
@@ -562,8 +537,7 @@ pub async fn rename_contact_list(
     new_name: &str,
 ) -> EwsResult<()> {
     let (folder_id, change_key) = split_calendar_id(list_id);
-    let envelope =
-        update_contacts_folder_displayname(&folder_id, change_key.as_deref(), new_name);
+    let envelope = update_contacts_folder_displayname(&folder_id, change_key.as_deref(), new_name);
     client.post_soap(envelope).await?;
     Ok(())
 }
@@ -763,9 +737,7 @@ pub struct ParsedContactFolder {
 /// Walk a `FindFolderResponse` body emitted with the `IPF.Contact`
 /// restriction and yield one `ParsedContactFolder` per
 /// `<t:ContactsFolder>` block.
-pub fn parse_find_contact_folder_response(
-    xml: &str,
-) -> EwsResult<Vec<ParsedContactFolder>> {
+pub fn parse_find_contact_folder_response(xml: &str) -> EwsResult<Vec<ParsedContactFolder>> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
     let mut buf = Vec::new();
@@ -795,8 +767,7 @@ pub fn parse_find_contact_folder_response(
                     for a in e.attributes().flatten() {
                         let key = a.key.as_ref();
                         if key.eq_ignore_ascii_case(b"Id") {
-                            current.folder_id =
-                                String::from_utf8_lossy(&a.value).into_owned();
+                            current.folder_id = String::from_utf8_lossy(&a.value).into_owned();
                         } else if key.eq_ignore_ascii_case(b"ChangeKey") {
                             current.change_key =
                                 Some(String::from_utf8_lossy(&a.value).into_owned());
@@ -928,8 +899,7 @@ pub fn parse_find_contact_item_response(xml: &str) -> EwsResult<Vec<ParsedContac
                         for a in e.attributes().flatten() {
                             let key = a.key.as_ref();
                             if key.eq_ignore_ascii_case(b"Id") {
-                                current.item_id =
-                                    String::from_utf8_lossy(&a.value).into_owned();
+                                current.item_id = String::from_utf8_lossy(&a.value).into_owned();
                             } else if key.eq_ignore_ascii_case(b"ChangeKey") {
                                 current.change_key =
                                     Some(String::from_utf8_lossy(&a.value).into_owned());
@@ -1016,8 +986,7 @@ pub fn parse_find_contact_item_response(xml: &str) -> EwsResult<Vec<ParsedContac
                     // email. Members without an email (e.g. a
                     // <t:Mailbox> with only a routing type) are
                     // dropped since the picker can't act on them.
-                    if let Some(email) = current_member_email.take().filter(|s| !s.is_empty())
-                    {
+                    if let Some(email) = current_member_email.take().filter(|s| !s.is_empty()) {
                         let name = current_member_name.take().filter(|s| !s.is_empty());
                         if let Some(members) = current.members.as_mut() {
                             members.push(GroupMember { name, email });
@@ -1029,10 +998,7 @@ pub fn parse_find_contact_item_response(xml: &str) -> EwsResult<Vec<ParsedContac
                     text_target = None;
                     continue;
                 }
-                if local == b"emailaddresses"
-                    || local == b"phonenumbers"
-                    || local == b"members"
-                {
+                if local == b"emailaddresses" || local == b"phonenumbers" || local == b"members" {
                     in_collection = None;
                     continue;
                 }
@@ -1053,7 +1019,10 @@ pub fn parse_find_contact_item_response(xml: &str) -> EwsResult<Vec<ParsedContac
                         current.file_as.get_or_insert_with(String::new).push_str(s);
                     }
                     Some("given_name") => {
-                        current.given_name.get_or_insert_with(String::new).push_str(s);
+                        current
+                            .given_name
+                            .get_or_insert_with(String::new)
+                            .push_str(s);
                     }
                     Some("surname") => {
                         current.surname.get_or_insert_with(String::new).push_str(s);
@@ -1472,13 +1441,7 @@ pub fn contact_to_update_field_xml(contact: &Contact) -> (String, String) {
     for (idx, key) in phone_keys.iter().enumerate() {
         match contact.phone_numbers.get(idx) {
             Some(phone) if !phone.is_empty() => {
-                push_set_indexed(
-                    &mut set,
-                    "contacts:PhoneNumber",
-                    "PhoneNumbers",
-                    key,
-                    phone,
-                );
+                push_set_indexed(&mut set, "contacts:PhoneNumber", "PhoneNumbers", key, phone);
             }
             _ => {
                 del.push_str(&delete_indexed_xml("contacts:PhoneNumber", key));
@@ -1528,7 +1491,9 @@ fn phone_key_for_slot(idx: usize) -> &'static str {
 /// the task adapter uses — RFC 3339 handles the fractional-seconds
 /// variant too.
 fn parse_ews_datetime(s: &str) -> Option<DateTime<Utc>> {
-    DateTime::parse_from_rfc3339(s).ok().map(|d| d.with_timezone(&Utc))
+    DateTime::parse_from_rfc3339(s)
+        .ok()
+        .map(|d| d.with_timezone(&Utc))
 }
 
 /// Format a `NaiveDate` as a midnight-UTC `xs:dateTime`. EWS does
@@ -1564,13 +1529,7 @@ fn push_set_contact_body(out: &mut String, value: &str) {
 /// entries on UpdateItem. The shape differs from the regular
 /// FieldURI set: the entry is wrapped in the parent collection
 /// element under `<t:Contact>`.
-fn push_set_indexed(
-    out: &mut String,
-    field_uri: &str,
-    collection: &str,
-    key: &str,
-    value: &str,
-) {
+fn push_set_indexed(out: &mut String, field_uri: &str, collection: &str, key: &str, value: &str) {
     out.push_str(&format!(
         "            <t:SetItemField>\n              <t:IndexedFieldURI FieldURI=\"{field_uri}\" FieldIndex=\"{key}\"/>\n              <t:Contact>\n                <t:{collection}>\n                  <t:Entry Key=\"{key}\">{value}</t:Entry>\n                </t:{collection}>\n              </t:Contact>\n            </t:SetItemField>\n",
         value = escape_xml(value),
@@ -1735,8 +1694,7 @@ fn parse_attachment_index(xml: &str) -> EwsResult<Vec<AttachmentIndexEntry>> {
                     for a in e.attributes().flatten() {
                         let key = a.key.as_ref();
                         if key.eq_ignore_ascii_case(b"Id") {
-                            current.attachment_id =
-                                String::from_utf8_lossy(&a.value).into_owned();
+                            current.attachment_id = String::from_utf8_lossy(&a.value).into_owned();
                         }
                     }
                 }
@@ -2025,9 +1983,7 @@ pub fn parse_resolve_names_response(xml: &str) -> EwsResult<Vec<ParsedPersona>> 
             Ok(XmlEvent::End(e)) => {
                 let local = e.local_name().as_ref().to_ascii_lowercase();
                 if local == b"resolution" {
-                    if !current.display_name.is_empty()
-                        || !current.email_addresses.is_empty()
-                    {
+                    if !current.display_name.is_empty() || !current.email_addresses.is_empty() {
                         out.push(std::mem::take(&mut current));
                     }
                     inside_resolution = false;
@@ -2071,9 +2027,7 @@ pub fn parse_resolve_names_response(xml: &str) -> EwsResult<Vec<ParsedPersona>> 
                         }
                     }
                     Some("email_address") => {
-                        if s.contains('@')
-                            && !current.email_addresses.contains(&s.to_string())
-                        {
+                        if s.contains('@') && !current.email_addresses.contains(&s.to_string()) {
                             current.email_addresses.push(s.to_string());
                         }
                     }
@@ -2522,12 +2476,12 @@ mod tests {
         };
         let xml = new_contact_to_contact_item_xml(&nc);
         let order_check = |earlier: &str, later: &str| {
-            let e = xml.find(earlier).unwrap_or_else(|| {
-                panic!("expected `{earlier}` in produced xml:\n{xml}")
-            });
-            let l = xml.find(later).unwrap_or_else(|| {
-                panic!("expected `{later}` in produced xml:\n{xml}")
-            });
+            let e = xml
+                .find(earlier)
+                .unwrap_or_else(|| panic!("expected `{earlier}` in produced xml:\n{xml}"));
+            let l = xml
+                .find(later)
+                .unwrap_or_else(|| panic!("expected `{later}` in produced xml:\n{xml}"));
             assert!(
                 e < l,
                 "expected `{earlier}` before `{later}`, got `{earlier}` at {e}, `{later}` at {l}\n{xml}",
@@ -2552,12 +2506,7 @@ mod tests {
             organization: None,
             // Four emails — fourth should be silently dropped because
             // EWS only defines slots 1, 2, 3.
-            emails: vec![
-                "a@e".into(),
-                "b@e".into(),
-                "c@e".into(),
-                "d@e".into(),
-            ],
+            emails: vec!["a@e".into(), "b@e".into(), "c@e".into(), "d@e".into()],
             phone_numbers: vec![],
             birthday: None,
             notes: None,
@@ -2718,12 +2667,11 @@ mod tests {
         // — round-tripped through base64 inside a minimal EWS
         // GetAttachmentResponse envelope.
         const PNG_1X1: &[u8] = &[
-            0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49,
-            0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06,
-            0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44,
-            0x41, 0x54, 0x78, 0x9c, 0x63, 0xfa, 0xcf, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01,
-            0xe5, 0x27, 0xde, 0xfc, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
-            0x42, 0x60, 0x82,
+            0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48,
+            0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00,
+            0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78,
+            0x9c, 0x63, 0xfa, 0xcf, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01, 0xe5, 0x27, 0xde, 0xfc,
+            0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
         ];
         let b64 = base64::engine::general_purpose::STANDARD.encode(PNG_1X1);
         let xml = format!(

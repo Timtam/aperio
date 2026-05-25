@@ -23,10 +23,10 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use cal_core::{
-    Adapter, AuthToken, Calendar, CalendarFeature, Capability, Contact, ContactList,
-    ContactPhoto, ContactsFeature, ContainerColor, Credentials as CoreCredentials,
-    DateRange, Error as CoreError, Event, FreeBusy, NewContact, NewEvent, NewTask,
-    Result as CoreResult, Task, TaskList, TasksFeature,
+    Adapter, AuthToken, Calendar, CalendarFeature, Capability, Contact, ContactList, ContactPhoto,
+    ContactsFeature, ContainerColor, Credentials as CoreCredentials, DateRange, Error as CoreError,
+    Event, FreeBusy, NewContact, NewEvent, NewTask, Result as CoreResult, Task, TaskList,
+    TasksFeature,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -86,8 +86,7 @@ pub struct GoogleAdapter {
     /// touches relationships across lists (rare but possible
     /// via group membership changes that affect personal +
     /// directory views).
-    contacts_cache:
-        Mutex<HashMap<String, (Vec<Contact>, chrono::DateTime<chrono::Utc>)>>,
+    contacts_cache: Mutex<HashMap<String, (Vec<Contact>, chrono::DateTime<chrono::Utc>)>>,
     listing_ttl: chrono::Duration,
 }
 
@@ -125,8 +124,8 @@ impl GoogleAdapter {
     /// zero to keep the network-fetch path reachable.
     #[doc(hidden)]
     pub fn with_listing_ttl(mut self, ttl: Duration) -> Self {
-        self.listing_ttl = chrono::Duration::from_std(ttl)
-            .unwrap_or_else(|_| chrono::Duration::zero());
+        self.listing_ttl =
+            chrono::Duration::from_std(ttl).unwrap_or_else(|_| chrono::Duration::zero());
         self
     }
 
@@ -188,10 +187,7 @@ impl GoogleAdapter {
 
 #[async_trait]
 impl Adapter for GoogleAdapter {
-    async fn authenticate(
-        &self,
-        _credentials: CoreCredentials,
-    ) -> CoreResult<AuthToken> {
+    async fn authenticate(&self, _credentials: CoreCredentials) -> CoreResult<AuthToken> {
         // Google's auth happens before adapter construction (the
         // OAuth dance runs in `authenticate_interactive` and stores
         // tokens in keychain). Once the adapter exists, tokens are
@@ -214,26 +210,17 @@ impl CalendarFeature for GoogleAdapter {
         let fresh = api::list_calendars(&self.state)
             .await
             .map_err(to_core_error)?;
-        *self.calendars_cache.lock().await =
-            Some((fresh.clone(), chrono::Utc::now()));
+        *self.calendars_cache.lock().await = Some((fresh.clone(), chrono::Utc::now()));
         Ok(fresh)
     }
 
-    async fn get_events(
-        &self,
-        calendar_id: &str,
-        range: DateRange,
-    ) -> CoreResult<Vec<Event>> {
+    async fn get_events(&self, calendar_id: &str, range: DateRange) -> CoreResult<Vec<Event>> {
         api::get_events(&self.state, calendar_id, range.start, range.end)
             .await
             .map_err(to_core_error)
     }
 
-    async fn create_event(
-        &self,
-        calendar_id: &str,
-        event: NewEvent,
-    ) -> CoreResult<Event> {
+    async fn create_event(&self, calendar_id: &str, event: NewEvent) -> CoreResult<Event> {
         api::create_event(&self.state, calendar_id, event)
             .await
             .map_err(to_core_error)
@@ -255,7 +242,10 @@ impl CalendarFeature for GoogleAdapter {
         // copes with the same signature gap.
         let cals = self.list_calendars().await?;
         for cal in cals {
-            if api::delete_event(&self.state, &cal.id, event_id).await.is_ok() {
+            if api::delete_event(&self.state, &cal.id, event_id)
+                .await
+                .is_ok()
+            {
                 return Ok(());
             }
         }
@@ -279,11 +269,7 @@ impl CalendarFeature for GoogleAdapter {
         None
     }
 
-    async fn rename_calendar(
-        &self,
-        calendar_id: &str,
-        new_name: &str,
-    ) -> CoreResult<()> {
+    async fn rename_calendar(&self, calendar_id: &str, new_name: &str) -> CoreResult<()> {
         api::rename_calendar(&self.state, calendar_id, new_name)
             .await
             .map_err(to_core_error)?;
@@ -325,8 +311,7 @@ impl TasksFeature for GoogleAdapter {
         let fresh = tasks::list_task_lists(&self.state)
             .await
             .map_err(to_core_error)?;
-        *self.task_lists_cache.lock().await =
-            Some((fresh.clone(), chrono::Utc::now()));
+        *self.task_lists_cache.lock().await = Some((fresh.clone(), chrono::Utc::now()));
         Ok(fresh)
     }
 
@@ -336,11 +321,7 @@ impl TasksFeature for GoogleAdapter {
             .map_err(to_core_error)
     }
 
-    async fn create_task(
-        &self,
-        list_id: &str,
-        task: NewTask,
-    ) -> CoreResult<Task> {
+    async fn create_task(&self, list_id: &str, task: NewTask) -> CoreResult<Task> {
         tasks::create_task(&self.state, list_id, task)
             .await
             .map_err(to_core_error)
@@ -373,11 +354,7 @@ impl TasksFeature for GoogleAdapter {
         )))
     }
 
-    async fn rename_task_list(
-        &self,
-        list_id: &str,
-        new_name: &str,
-    ) -> CoreResult<()> {
+    async fn rename_task_list(&self, list_id: &str, new_name: &str) -> CoreResult<()> {
         tasks::rename_task_list(&self.state, list_id, new_name)
             .await
             .map_err(to_core_error)?;
@@ -426,11 +403,7 @@ impl ContactsFeature for GoogleAdapter {
             .map_err(to_core_error)
     }
 
-    async fn create_contact(
-        &self,
-        list_id: &str,
-        contact: NewContact,
-    ) -> CoreResult<Contact> {
+    async fn create_contact(&self, list_id: &str, contact: NewContact) -> CoreResult<Contact> {
         if is_read_only_google_list(list_id) {
             return Err(CoreError::Unsupported(format!(
                 "the Google list '{list_id}' is read-only and does not accept new contacts"
@@ -467,11 +440,7 @@ impl ContactsFeature for GoogleAdapter {
         Ok(())
     }
 
-    async fn rename_contact_list(
-        &self,
-        _list_id: &str,
-        _new_name: &str,
-    ) -> CoreResult<()> {
+    async fn rename_contact_list(&self, _list_id: &str, _new_name: &str) -> CoreResult<()> {
         // The synthetic "Google Contacts" list isn't a real
         // server-side container — there's nothing to PATCH. The
         // command layer falls back to a local override on
@@ -481,20 +450,13 @@ impl ContactsFeature for GoogleAdapter {
         ))
     }
 
-    async fn get_contact_photo(
-        &self,
-        contact_id: &str,
-    ) -> CoreResult<Option<ContactPhoto>> {
+    async fn get_contact_photo(&self, contact_id: &str) -> CoreResult<Option<ContactPhoto>> {
         contacts::get_contact_photo(&self.state, contact_id)
             .await
             .map_err(to_core_error)
     }
 
-    async fn set_contact_photo(
-        &self,
-        contact_id: &str,
-        photo: ContactPhoto,
-    ) -> CoreResult<()> {
+    async fn set_contact_photo(&self, contact_id: &str, photo: ContactPhoto) -> CoreResult<()> {
         contacts::set_contact_photo(&self.state, contact_id, photo)
             .await
             .map_err(to_core_error)?;
@@ -542,12 +504,8 @@ fn to_core_error(err: GoogleError) -> CoreError {
         },
         Protocol(m) => CoreError::Protocol(m),
         AuthDenied(m) => CoreError::Authentication(format!("denied: {m}")),
-        AuthTimeout => CoreError::Authentication(
-            "consent screen timed out".into(),
-        ),
-        Csrf => CoreError::Protocol(
-            "CSRF state mismatch on OAuth callback".into(),
-        ),
+        AuthTimeout => CoreError::Authentication("consent screen timed out".into()),
+        Csrf => CoreError::Protocol("CSRF state mismatch on OAuth callback".into()),
         Io(m) => CoreError::Internal(m),
         Config(m) => CoreError::InvalidInput(m),
     }

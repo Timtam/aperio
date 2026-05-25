@@ -113,14 +113,16 @@ impl LocalAdapter {
     /// `upsert_event_from_sync`. Crucially **not**
     /// `INSERT OR REPLACE` because that would cascade-delete
     /// every event whose `calendar_id` matches.
-    pub fn upsert_calendar_from_sync(
-        &self,
-        cal: &Calendar,
-    ) -> cal_core::Result<()> {
+    pub fn upsert_calendar_from_sync(&self, cal: &Calendar) -> cal_core::Result<()> {
         let (hex, source) = cal
             .color
             .as_ref()
-            .map(|c| (Some(c.hex.clone()), Some(color_source_to_text(c.source).to_string())))
+            .map(|c| {
+                (
+                    Some(c.hex.clone()),
+                    Some(color_source_to_text(c.source).to_string()),
+                )
+            })
             .unwrap_or((None, None));
         let sound_json = write_sound(&cal.default_sound)?;
         let now_s = fmt_utc(&Utc::now());
@@ -152,10 +154,7 @@ impl LocalAdapter {
         Ok(())
     }
 
-    pub fn delete_calendar_from_sync(
-        &self,
-        calendar_id: &str,
-    ) -> cal_core::Result<()> {
+    pub fn delete_calendar_from_sync(&self, calendar_id: &str) -> cal_core::Result<()> {
         let conn = self.db().lock().expect("db mutex poisoned");
         conn.execute("DELETE FROM calendars WHERE id = ?", params![calendar_id])
             .map_err(map_sql_err)?;
@@ -232,14 +231,16 @@ impl LocalAdapter {
         Ok(())
     }
 
-    pub fn upsert_task_list_from_sync(
-        &self,
-        list: &TaskList,
-    ) -> cal_core::Result<()> {
+    pub fn upsert_task_list_from_sync(&self, list: &TaskList) -> cal_core::Result<()> {
         let (hex, source) = list
             .color
             .as_ref()
-            .map(|c| (Some(c.hex.clone()), Some(color_source_to_text(c.source).to_string())))
+            .map(|c| {
+                (
+                    Some(c.hex.clone()),
+                    Some(color_source_to_text(c.source).to_string()),
+                )
+            })
             .unwrap_or((None, None));
         let sound_json = write_sound(&list.default_sound)?;
         let now_s = fmt_utc(&Utc::now());
@@ -273,20 +274,14 @@ impl LocalAdapter {
         Ok(())
     }
 
-    pub fn delete_task_list_from_sync(
-        &self,
-        list_id: &str,
-    ) -> cal_core::Result<()> {
+    pub fn delete_task_list_from_sync(&self, list_id: &str) -> cal_core::Result<()> {
         let conn = self.db().lock().expect("db mutex poisoned");
         conn.execute("DELETE FROM task_lists WHERE id = ?", params![list_id])
             .map_err(map_sql_err)?;
         Ok(())
     }
 
-    pub fn upsert_color_label_from_sync(
-        &self,
-        label: &ColorLabel,
-    ) -> cal_core::Result<()> {
+    pub fn upsert_color_label_from_sync(&self, label: &ColorLabel) -> cal_core::Result<()> {
         let conn = self.db().lock().expect("db mutex poisoned");
         conn.execute(
             "INSERT INTO color_labels (id, name, hex)
@@ -300,16 +295,10 @@ impl LocalAdapter {
         Ok(())
     }
 
-    pub fn delete_color_label_from_sync(
-        &self,
-        label_id: &str,
-    ) -> cal_core::Result<()> {
+    pub fn delete_color_label_from_sync(&self, label_id: &str) -> cal_core::Result<()> {
         let conn = self.db().lock().expect("db mutex poisoned");
-        conn.execute(
-            "DELETE FROM color_labels WHERE id = ?",
-            params![label_id],
-        )
-        .map_err(map_sql_err)?;
+        conn.execute("DELETE FROM color_labels WHERE id = ?", params![label_id])
+            .map_err(map_sql_err)?;
         Ok(())
     }
 }

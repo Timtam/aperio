@@ -60,8 +60,7 @@ pub const DEFAULT_AUTHORITY: &str = "common";
 ///   - `openid` / `profile` / `email` — Graph requires at least one
 ///     OpenID Connect scope to issue an id_token; without it
 ///     consent works but some user-info endpoints return 403
-pub const SCOPES: &str =
-    "Calendars.ReadWrite Tasks.ReadWrite Contacts.ReadWrite People.Read \
+pub const SCOPES: &str = "Calendars.ReadWrite Tasks.ReadWrite Contacts.ReadWrite People.Read \
      offline_access openid profile email";
 
 const AUTH_TIMEOUT: Duration = Duration::from_secs(300);
@@ -75,9 +74,7 @@ pub struct TokenSet {
 }
 
 pub fn authorize_url(authority: &str) -> String {
-    format!(
-        "https://login.microsoftonline.com/{authority}/oauth2/v2.0/authorize"
-    )
+    format!("https://login.microsoftonline.com/{authority}/oauth2/v2.0/authorize")
 }
 
 pub fn token_url(authority: &str) -> String {
@@ -106,7 +103,10 @@ pub async fn run(
     let auth = build_auth_url(authority_url, client_id, &redirect_uri, &challenge, &state)?;
     debug!(url = %auth, "opening Microsoft consent screen");
     if let Err(e) = open::that(auth.as_str()) {
-        warn!(?e, "failed to launch browser; user must copy the URL manually");
+        warn!(
+            ?e,
+            "failed to launch browser; user must copy the URL manually"
+        );
     }
 
     let (code, returned_state) = wait_for_redirect(listener).await?;
@@ -114,7 +114,15 @@ pub async fn run(
         return Err(GraphError::Csrf);
     }
 
-    exchange_code(http, token_endpoint, client_id, &code, &verifier, &redirect_uri).await
+    exchange_code(
+        http,
+        token_endpoint,
+        client_id,
+        &code,
+        &verifier,
+        &redirect_uri,
+    )
+    .await
 }
 
 pub async fn run_default(
@@ -329,8 +337,7 @@ async fn parse_token_response(
     Ok(TokenSet {
         access_token: raw.access_token,
         refresh_token: raw.refresh_token,
-        expires_at: requested_at
-            + chrono::Duration::seconds((raw.expires_in - 30).max(0)),
+        expires_at: requested_at + chrono::Duration::seconds((raw.expires_in - 30).max(0)),
         scope: raw.scope,
     })
 }
@@ -380,12 +387,10 @@ mod tests {
 
     #[test]
     fn authority_urls_format_correctly() {
-        assert!(authorize_url("common").starts_with(
-            "https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
-        ));
-        assert!(token_url("organizations").starts_with(
-            "https://login.microsoftonline.com/organizations/oauth2/v2.0/token"
-        ));
+        assert!(authorize_url("common")
+            .starts_with("https://login.microsoftonline.com/common/oauth2/v2.0/authorize"));
+        assert!(token_url("organizations")
+            .starts_with("https://login.microsoftonline.com/organizations/oauth2/v2.0/token"));
     }
 
     #[test]
@@ -398,13 +403,21 @@ mod tests {
             "state",
         )
         .unwrap();
-        let pairs: std::collections::HashMap<_, _> =
-            url.query_pairs().into_owned().collect();
-        assert_eq!(pairs.get("client_id").map(String::as_str), Some("my-client"));
+        let pairs: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
+        assert_eq!(
+            pairs.get("client_id").map(String::as_str),
+            Some("my-client")
+        );
         assert_eq!(pairs.get("response_type").map(String::as_str), Some("code"));
         assert_eq!(pairs.get("scope").map(String::as_str), Some(SCOPES));
-        assert_eq!(pairs.get("code_challenge_method").map(String::as_str), Some("S256"));
-        assert_eq!(pairs.get("prompt").map(String::as_str), Some("select_account"));
+        assert_eq!(
+            pairs.get("code_challenge_method").map(String::as_str),
+            Some("S256")
+        );
+        assert_eq!(
+            pairs.get("prompt").map(String::as_str),
+            Some("select_account")
+        );
         assert!(!pairs.contains_key("client_secret"));
     }
 
@@ -451,9 +464,7 @@ mod tests {
             .mock("POST", "/token")
             .match_body(mockito::Matcher::Regex("grant_type=refresh_token".into()))
             .with_status(200)
-            .with_body(
-                r#"{"access_token":"refreshed","expires_in":3600,"token_type":"Bearer"}"#,
-            )
+            .with_body(r#"{"access_token":"refreshed","expires_in":3600,"token_type":"Bearer"}"#)
             .create_async()
             .await;
 

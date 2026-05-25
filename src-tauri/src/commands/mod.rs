@@ -22,9 +22,7 @@ mod tasks;
 mod user_prefs;
 mod videoconference;
 
-use plugin_core::manager::{
-    DiscoverError, InteractiveAuthError, ProbeHostKeyError,
-};
+use plugin_core::manager::{DiscoverError, InteractiveAuthError, ProbeHostKeyError};
 use plugin_core::PluginManager;
 use serde::de::DeserializeOwned;
 use serde::Serialize;

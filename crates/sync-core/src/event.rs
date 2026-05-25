@@ -399,11 +399,9 @@ mod tests {
         let env = EventEnvelope {
             id: "evt_test".into(),
             device_id: fixture_device_id(),
-            timestamp: chrono::DateTime::parse_from_rfc3339(
-                "2025-05-12T09:14:22.341Z",
-            )
-            .unwrap()
-            .with_timezone(&Utc),
+            timestamp: chrono::DateTime::parse_from_rfc3339("2025-05-12T09:14:22.341Z")
+                .unwrap()
+                .with_timezone(&Utc),
             event: SyncEvent::EventCreated(EventPayload {
                 id: "cal_evt_abc123".into(),
                 fields: serde_json::json!({
@@ -586,12 +584,8 @@ mod tests {
                 action: "x".into(),
                 binding: "Mod+X".into(),
             }),
-            SyncEvent::ShortcutReset(ShortcutKeyPayload {
-                action: "y".into(),
-            }),
-            SyncEvent::ShortcutCleared(ShortcutKeyPayload {
-                action: "z".into(),
-            }),
+            SyncEvent::ShortcutReset(ShortcutKeyPayload { action: "y".into() }),
+            SyncEvent::ShortcutCleared(ShortcutKeyPayload { action: "z".into() }),
             SyncEvent::SettingsUpdated(SettingsPayload {
                 key: "k".into(),
                 value: serde_json::json!(42),

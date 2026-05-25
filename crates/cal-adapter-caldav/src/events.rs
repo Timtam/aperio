@@ -15,7 +15,7 @@
 use cal_core::{DateRange, Event, EventRecurrence, NewEvent};
 use chrono::{DateTime, Utc};
 use reqwest::{
-    header::{HeaderName, HeaderValue, ACCEPT, CONTENT_TYPE, IF_MATCH, IF_NONE_MATCH, ETAG},
+    header::{HeaderName, HeaderValue, ACCEPT, CONTENT_TYPE, ETAG, IF_MATCH, IF_NONE_MATCH},
     Client, Method, StatusCode,
 };
 use url::Url;
@@ -179,9 +179,8 @@ pub async fn update_event(
     event: Event,
     credentials: &Credentials,
 ) -> CaldavResult<Event> {
-    let cal_url = Url::parse(&event.calendar_id).map_err(|e| {
-        CaldavError::Config(format!("event.calendar_id is not a URL: {e}"))
-    })?;
+    let cal_url = Url::parse(&event.calendar_id)
+        .map_err(|e| CaldavError::Config(format!("event.calendar_id is not a URL: {e}")))?;
     let resource = resource_url(&cal_url, &event.id)?;
     let body = event_to_ical(&event);
 
@@ -191,8 +190,7 @@ pub async fn update_event(
         HeaderValue::from_static("text/calendar; charset=utf-8"),
     );
     if let Some(etag) = &event.etag {
-        let value = HeaderValue::from_str(etag)
-            .map_err(|e| CaldavError::Config(e.to_string()))?;
+        let value = HeaderValue::from_str(etag).map_err(|e| CaldavError::Config(e.to_string()))?;
         headers.insert(IF_MATCH, value);
     }
 
@@ -251,8 +249,7 @@ pub async fn delete_event(
     let resource = resource_url(calendar_url, event_id)?;
     let mut headers = auth_header(credentials)?;
     if let Some(etag) = etag {
-        let value =
-            HeaderValue::from_str(etag).map_err(|e| CaldavError::Config(e.to_string()))?;
+        let value = HeaderValue::from_str(etag).map_err(|e| CaldavError::Config(e.to_string()))?;
         headers.insert(IF_MATCH, value);
     }
     let response = client
@@ -333,9 +330,7 @@ pub async fn add_event_exdate(
         .iter_mut()
         .find(|e| e.id == event_id)
         .ok_or_else(|| {
-            CaldavError::Discovery(format!(
-                "event '{event_id}' missing from its own resource"
-            ))
+            CaldavError::Discovery(format!("event '{event_id}' missing from its own resource"))
         })?;
     if master.recurrence.is_none() {
         return Err(CaldavError::Discovery(format!(
@@ -495,8 +490,7 @@ END:VCALENDAR</c:calendar-data>
             .create_async()
             .await;
 
-        let cal_url =
-            Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
         let range = DateRange::new(
             Utc.with_ymd_and_hms(2026, 5, 20, 0, 0, 0).unwrap(),
             Utc.with_ymd_and_hms(2026, 5, 21, 0, 0, 0).unwrap(),
@@ -533,16 +527,16 @@ END:VCALENDAR</c:calendar-data>
     async fn create_event_puts_with_if_none_match_and_returns_etag() {
         let mut server = Server::new_async().await;
         let m = server
-            .mock("PUT", mockito::Matcher::Regex(
-                r"^/calendars/alice/work/.+\.ics$".into(),
-            ))
+            .mock(
+                "PUT",
+                mockito::Matcher::Regex(r"^/calendars/alice/work/.+\.ics$".into()),
+            )
             .match_header("if-none-match", "*")
             .with_status(201)
             .with_header("etag", "\"server-etag-1\"")
             .create_async()
             .await;
-        let cal_url =
-            Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
         let created = create_event(
             &client(),
             &cal_url,
@@ -561,17 +555,17 @@ END:VCALENDAR</c:calendar-data>
     async fn update_event_sends_if_match_with_existing_etag() {
         let mut server = Server::new_async().await;
         let m = server
-            .mock("PUT", mockito::Matcher::Regex(
-                r"^/calendars/alice/work/.+\.ics$".into(),
-            ))
+            .mock(
+                "PUT",
+                mockito::Matcher::Regex(r"^/calendars/alice/work/.+\.ics$".into()),
+            )
             .match_header("if-match", "\"old-etag\"")
             .with_status(204)
             .with_header("etag", "\"new-etag\"")
             .create_async()
             .await;
 
-        let cal_url =
-            Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
         let existing = Event {
             id: "abc-123@aperio".into(),
             calendar_id: cal_url.to_string(),
@@ -590,8 +584,9 @@ END:VCALENDAR</c:calendar-data>
             updated_at: Utc::now(),
             etag: Some("\"old-etag\"".into()),
         };
-        let updated =
-            update_event(&client(), existing, &creds(&server.url())).await.unwrap();
+        let updated = update_event(&client(), existing, &creds(&server.url()))
+            .await
+            .unwrap();
         m.assert_async().await;
         assert_eq!(updated.etag.as_deref(), Some("\"new-etag\""));
     }
@@ -600,15 +595,15 @@ END:VCALENDAR</c:calendar-data>
     async fn update_event_412_surfaces_as_conflict() {
         let mut server = Server::new_async().await;
         let _m = server
-            .mock("PUT", mockito::Matcher::Regex(
-                r"^/calendars/alice/work/.+\.ics$".into(),
-            ))
+            .mock(
+                "PUT",
+                mockito::Matcher::Regex(r"^/calendars/alice/work/.+\.ics$".into()),
+            )
             .with_status(412)
             .with_body("Precondition Failed")
             .create_async()
             .await;
-        let cal_url =
-            Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
         let existing = Event {
             id: "abc-123@aperio".into(),
             calendar_id: cal_url.to_string(),
@@ -640,14 +635,14 @@ END:VCALENDAR</c:calendar-data>
     async fn delete_event_reports_404_as_not_found_outcome() {
         let mut server = Server::new_async().await;
         let _m = server
-            .mock("DELETE", mockito::Matcher::Regex(
-                r"^/calendars/alice/work/.+\.ics$".into(),
-            ))
+            .mock(
+                "DELETE",
+                mockito::Matcher::Regex(r"^/calendars/alice/work/.+\.ics$".into()),
+            )
             .with_status(404)
             .create_async()
             .await;
-        let cal_url =
-            Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
         // The server already lost the row. The direct-API contract
         // still treats this as a non-error (idempotent), but the
         // outcome distinguishes "actually deleted" from "wasn't
@@ -669,14 +664,14 @@ END:VCALENDAR</c:calendar-data>
     async fn delete_event_reports_2xx_as_deleted_outcome() {
         let mut server = Server::new_async().await;
         let _m = server
-            .mock("DELETE", mockito::Matcher::Regex(
-                r"^/calendars/alice/work/.+\.ics$".into(),
-            ))
+            .mock(
+                "DELETE",
+                mockito::Matcher::Regex(r"^/calendars/alice/work/.+\.ics$".into()),
+            )
             .with_status(204)
             .create_async()
             .await;
-        let cal_url =
-            Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
         let outcome = delete_event(
             &client(),
             &cal_url,
@@ -698,8 +693,7 @@ END:VCALENDAR</c:calendar-data>
             .with_body("Forbidden")
             .create_async()
             .await;
-        let cal_url =
-            Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let cal_url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
         let range = DateRange::new(
             Utc.with_ymd_and_hms(2026, 5, 20, 0, 0, 0).unwrap(),
             Utc.with_ymd_and_hms(2026, 5, 21, 0, 0, 0).unwrap(),

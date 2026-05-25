@@ -36,14 +36,12 @@ use plugin_core::shim::FfiSyncAdapter;
 use plugin_core::PluginManager;
 use serde::{Deserialize, Serialize};
 use sync_core::{
-    derive_key, fresh_data_key, resolve_data_key, wrap_key, EncryptingAdapter,
-    EncryptionParams, SyncAdapter, KEY_LEN,
+    derive_key, fresh_data_key, resolve_data_key, wrap_key, EncryptingAdapter, EncryptionParams,
+    SyncAdapter, KEY_LEN,
 };
 use tauri::State;
 
-use super::{
-    run_plugin_auth, run_plugin_probe_host_key, CommandError, CommandResult,
-};
+use super::{run_plugin_auth, run_plugin_probe_host_key, CommandError, CommandResult};
 use crate::db::{DbHandle, SharedConn};
 use crate::event_log::{
     CompactionReport, OnboardingReport, OnboardingService, SyncOrchestrator, SyncPreview,
@@ -100,12 +98,10 @@ fn open_sync_plugin(
     let instance = plugin_manager
         .open_instance(plugin, &config_json)
         .map_err(|err| match err {
-            plugin_core::error::PluginError::InstanceOpen { message, .. } => {
-                CommandError {
-                    code: "invalid_input",
-                    message,
-                }
-            }
+            plugin_core::error::PluginError::InstanceOpen { message, .. } => CommandError {
+                code: "invalid_input",
+                message,
+            },
             other => CommandError {
                 code: "internal",
                 message: other.to_string(),
@@ -113,9 +109,7 @@ fn open_sync_plugin(
         })?;
     let adapter = FfiSyncAdapter::new(instance).ok_or(CommandError {
         code: "internal",
-        message: format!(
-            "plugin {plugin_id} doesn't expose a SyncAdapter vtable surface",
-        ),
+        message: format!("plugin {plugin_id} doesn't expose a SyncAdapter vtable surface",),
     })?;
     Ok(Arc::new(adapter))
 }
@@ -185,8 +179,7 @@ const FTP_SECRET_ACCOUNT: &str = "sync.adapter.ftp";
 /// non-secret app-config bits sit here so they survive a
 /// re-launch.
 const PREF_DROPBOX_CLIENT_ID: &str = "sync.adapter.dropbox.clientId";
-const PREF_DROPBOX_CLIENT_SECRET: &str =
-    "sync.adapter.dropbox.clientSecret";
+const PREF_DROPBOX_CLIENT_SECRET: &str = "sync.adapter.dropbox.clientSecret";
 const PREF_DROPBOX_PATH: &str = "sync.adapter.dropbox.path";
 
 /// Pseudo-account id for the Dropbox refresh token.
@@ -196,10 +189,8 @@ const DROPBOX_SECRET_ACCOUNT: &str = "sync.adapter.dropbox";
 /// Dropbox set; the refresh token lives in the keychain
 /// under GOOGLEDRIVE_SECRET_ACCOUNT.
 const PREF_GOOGLEDRIVE_CLIENT_ID: &str = "sync.adapter.googledrive.clientId";
-const PREF_GOOGLEDRIVE_CLIENT_SECRET: &str =
-    "sync.adapter.googledrive.clientSecret";
-const PREF_GOOGLEDRIVE_FOLDER_NAME: &str =
-    "sync.adapter.googledrive.folderName";
+const PREF_GOOGLEDRIVE_CLIENT_SECRET: &str = "sync.adapter.googledrive.clientSecret";
+const PREF_GOOGLEDRIVE_FOLDER_NAME: &str = "sync.adapter.googledrive.folderName";
 
 /// Pseudo-account id for the Google Drive refresh token.
 const GOOGLEDRIVE_SECRET_ACCOUNT: &str = "sync.adapter.googledrive";
@@ -384,7 +375,11 @@ fn build_adapter(
             let cfg = serde_json::json!({ "remote_root": trimmed }).to_string();
             open_sync_plugin(plugin_manager, PLUGIN_ID_LOCAL, cfg)
         }
-        SyncAdapterConfig::Webdav { url, user, password } => {
+        SyncAdapterConfig::Webdav {
+            url,
+            user,
+            password,
+        } => {
             let trimmed_url = url.trim();
             if trimmed_url.is_empty() {
                 return Err(CommandError {
@@ -400,8 +395,7 @@ fn build_adapter(
             //     start when restoring from prefs)
             let resolved_password = match password.as_deref().map(str::trim) {
                 Some(p) if !p.is_empty() => Some(p.to_string()),
-                _ => secrets::retrieve(WEBDAV_SECRET_ACCOUNT, SecretSlot::Password)
-                    .ok(),
+                _ => secrets::retrieve(WEBDAV_SECRET_ACCOUNT, SecretSlot::Password).ok(),
             };
             let cfg = serde_json::json!({
                 "url": trimmed_url,
@@ -454,16 +448,11 @@ fn build_adapter(
                     "password" => {
                         let pw = match password.as_deref().map(str::trim) {
                             Some(p) if !p.is_empty() => p.to_string(),
-                            _ => secrets::retrieve(
-                                SFTP_SECRET_ACCOUNT,
-                                SecretSlot::Password,
-                            )
-                            .map_err(|err| CommandError {
-                                code: "auth",
-                                message: format!(
-                                    "no SFTP password configured: {err}",
-                                ),
-                            })?,
+                            _ => secrets::retrieve(SFTP_SECRET_ACCOUNT, SecretSlot::Password)
+                                .map_err(|err| CommandError {
+                                    code: "auth",
+                                    message: format!("no SFTP password configured: {err}",),
+                                })?,
                         };
                         (pw, String::new(), String::new())
                     }
@@ -477,26 +466,18 @@ fn build_adapter(
                                 message: "SSH key path must not be empty".into(),
                             })?
                             .to_string();
-                        let pass = match key_passphrase
-                            .as_deref()
-                            .map(str::trim)
-                        {
+                        let pass = match key_passphrase.as_deref().map(str::trim) {
                             Some(p) if !p.is_empty() => p.to_string(),
-                            _ => secrets::retrieve(
-                                SFTP_KEY_SECRET_ACCOUNT,
-                                SecretSlot::Password,
-                            )
-                            .ok()
-                            .unwrap_or_default(),
+                            _ => secrets::retrieve(SFTP_KEY_SECRET_ACCOUNT, SecretSlot::Password)
+                                .ok()
+                                .unwrap_or_default(),
                         };
                         (String::new(), kp, pass)
                     }
                     other => {
                         return Err(CommandError {
                             code: "invalid_input",
-                            message: format!(
-                                "unknown SFTP auth method: {other}",
-                            ),
+                            message: format!("unknown SFTP auth method: {other}",),
                         });
                     }
                 };
@@ -537,16 +518,11 @@ fn build_adapter(
             // runs — the refresh token is the entry credential
             // we need to mint access tokens. Missing keychain
             // entry → user hasn't signed in yet.
-            let refresh_token = secrets::retrieve(
-                DROPBOX_SECRET_ACCOUNT,
-                SecretSlot::RefreshToken,
-            )
-            .map_err(|err| CommandError {
-                code: "auth",
-                message: format!(
-                    "Dropbox sign-in required — no refresh token: {err}",
-                ),
-            })?;
+            let refresh_token = secrets::retrieve(DROPBOX_SECRET_ACCOUNT, SecretSlot::RefreshToken)
+                .map_err(|err| CommandError {
+                    code: "auth",
+                    message: format!("Dropbox sign-in required — no refresh token: {err}",),
+                })?;
             let cfg = serde_json::json!({
                 "client_id": trimmed_client_id,
                 "client_secret": client_secret.trim(),
@@ -581,9 +557,7 @@ fn build_adapter(
             )
             .map_err(|err| CommandError {
                 code: "auth",
-                message: format!(
-                    "Google Drive sign-in required — no refresh token: {err}",
-                ),
+                message: format!("Google Drive sign-in required — no refresh token: {err}",),
             })?;
             let cfg = serde_json::json!({
                 "client_id": trimmed_id,
@@ -624,16 +598,12 @@ fn build_adapter(
             let resolved_password =
                 match password.as_deref().map(str::trim) {
                     Some(p) if !p.is_empty() => p.to_string(),
-                    _ => secrets::retrieve(
-                        FTP_SECRET_ACCOUNT,
-                        SecretSlot::Password,
-                    )
-                    .map_err(|err| CommandError {
-                        code: "auth",
-                        message: format!(
-                            "no FTP password configured: {err}",
-                        ),
-                    })?,
+                    _ => secrets::retrieve(FTP_SECRET_ACCOUNT, SecretSlot::Password).map_err(
+                        |err| CommandError {
+                            code: "auth",
+                            message: format!("no FTP password configured: {err}",),
+                        },
+                    )?,
                 };
             // Plugin validates the `mode` string itself + falls
             // back to "explicit" on unknown values, but we still
@@ -643,9 +613,7 @@ fn build_adapter(
             if !matches!(mode.as_str(), "implicit" | "explicit" | "plain") {
                 return Err(CommandError {
                     code: "invalid_input",
-                    message: format!(
-                        "unknown FTPS mode: {mode}",
-                    ),
+                    message: format!("unknown FTPS mode: {mode}",),
                 });
             }
             let cfg = serde_json::json!({
@@ -669,10 +637,7 @@ fn build_adapter(
 /// Persist the (already-validated) adapter config into `user_prefs`
 /// so the next app start restores the same adapter. Mirrors what
 /// `build_adapter_from_prefs` will read back.
-fn persist_adapter_config(
-    prefs: &UserPrefsRepo,
-    config: &SyncAdapterConfig,
-) -> CommandResult<()> {
+fn persist_adapter_config(prefs: &UserPrefsRepo, config: &SyncAdapterConfig) -> CommandResult<()> {
     match config {
         SyncAdapterConfig::Local { path } => {
             let trimmed = path.trim();
@@ -680,7 +645,11 @@ fn persist_adapter_config(
             prefs.set(PREF_LOCAL_PATH, trimmed).map_err(internal)?;
             Ok(())
         }
-        SyncAdapterConfig::Webdav { url, user, password } => {
+        SyncAdapterConfig::Webdav {
+            url,
+            user,
+            password,
+        } => {
             prefs.set(PREF_ADAPTER_KIND, "webdav").map_err(internal)?;
             prefs.set(PREF_WEBDAV_URL, url.trim()).map_err(internal)?;
             prefs.set(PREF_WEBDAV_USER, user.trim()).map_err(internal)?;
@@ -689,15 +658,12 @@ fn persist_adapter_config(
             // edits that omit the password keep the prior secret.
             if let Some(pw) = password.as_deref().map(str::trim) {
                 if !pw.is_empty() {
-                    secrets::store(
-                        WEBDAV_SECRET_ACCOUNT,
-                        SecretSlot::Password,
-                        pw,
-                    )
-                    .map_err(|err| CommandError {
-                        code: "internal",
-                        message: format!("keychain store: {err}"),
-                    })?;
+                    secrets::store(WEBDAV_SECRET_ACCOUNT, SecretSlot::Password, pw).map_err(
+                        |err| CommandError {
+                            code: "internal",
+                            message: format!("keychain store: {err}"),
+                        },
+                    )?;
                 }
             }
             Ok(())
@@ -714,7 +680,9 @@ fn persist_adapter_config(
         } => {
             prefs.set(PREF_ADAPTER_KIND, "sftp").map_err(internal)?;
             prefs.set(PREF_SFTP_HOST, host.trim()).map_err(internal)?;
-            prefs.set(PREF_SFTP_PORT, &port.to_string()).map_err(internal)?;
+            prefs
+                .set(PREF_SFTP_PORT, &port.to_string())
+                .map_err(internal)?;
             prefs.set(PREF_SFTP_USER, user.trim()).map_err(internal)?;
             prefs.set(PREF_SFTP_PATH, path.trim()).map_err(internal)?;
             prefs
@@ -730,28 +698,22 @@ fn persist_adapter_config(
             // reasoning as the WebDAV branch.
             if let Some(pw) = password.as_deref().map(str::trim) {
                 if !pw.is_empty() {
-                    secrets::store(
-                        SFTP_SECRET_ACCOUNT,
-                        SecretSlot::Password,
-                        pw,
-                    )
-                    .map_err(|err| CommandError {
-                        code: "internal",
-                        message: format!("keychain store: {err}"),
-                    })?;
+                    secrets::store(SFTP_SECRET_ACCOUNT, SecretSlot::Password, pw).map_err(
+                        |err| CommandError {
+                            code: "internal",
+                            message: format!("keychain store: {err}"),
+                        },
+                    )?;
                 }
             }
             if let Some(pp) = key_passphrase.as_deref().map(str::trim) {
                 if !pp.is_empty() {
-                    secrets::store(
-                        SFTP_KEY_SECRET_ACCOUNT,
-                        SecretSlot::Password,
-                        pp,
-                    )
-                    .map_err(|err| CommandError {
-                        code: "internal",
-                        message: format!("keychain store: {err}"),
-                    })?;
+                    secrets::store(SFTP_KEY_SECRET_ACCOUNT, SecretSlot::Password, pp).map_err(
+                        |err| CommandError {
+                            code: "internal",
+                            message: format!("keychain store: {err}"),
+                        },
+                    )?;
                 }
             }
             Ok(())
@@ -772,7 +734,9 @@ fn persist_adapter_config(
             prefs
                 .set(PREF_DROPBOX_CLIENT_SECRET, client_secret.trim())
                 .map_err(internal)?;
-            prefs.set(PREF_DROPBOX_PATH, path.trim()).map_err(internal)?;
+            prefs
+                .set(PREF_DROPBOX_PATH, path.trim())
+                .map_err(internal)?;
             Ok(())
         }
         SyncAdapterConfig::GoogleDrive {
@@ -784,7 +748,9 @@ fn persist_adapter_config(
             // already lives in the keychain from
             // `connect_googledrive_oauth`; we only persist the
             // non-secret app-config bits.
-            prefs.set(PREF_ADAPTER_KIND, "googledrive").map_err(internal)?;
+            prefs
+                .set(PREF_ADAPTER_KIND, "googledrive")
+                .map_err(internal)?;
             prefs
                 .set(PREF_GOOGLEDRIVE_CLIENT_ID, client_id.trim())
                 .map_err(internal)?;
@@ -806,7 +772,9 @@ fn persist_adapter_config(
         } => {
             prefs.set(PREF_ADAPTER_KIND, "ftp").map_err(internal)?;
             prefs.set(PREF_FTP_HOST, host.trim()).map_err(internal)?;
-            prefs.set(PREF_FTP_PORT, &port.to_string()).map_err(internal)?;
+            prefs
+                .set(PREF_FTP_PORT, &port.to_string())
+                .map_err(internal)?;
             prefs.set(PREF_FTP_USER, user.trim()).map_err(internal)?;
             prefs.set(PREF_FTP_PATH, path.trim()).map_err(internal)?;
             prefs.set(PREF_FTP_MODE, mode.trim()).map_err(internal)?;
@@ -815,15 +783,12 @@ fn persist_adapter_config(
             // contract as WebDAV / SFTP.
             if let Some(pw) = password.as_deref().map(str::trim) {
                 if !pw.is_empty() {
-                    secrets::store(
-                        FTP_SECRET_ACCOUNT,
-                        SecretSlot::Password,
-                        pw,
-                    )
-                    .map_err(|err| CommandError {
-                        code: "internal",
-                        message: format!("keychain store: {err}"),
-                    })?;
+                    secrets::store(FTP_SECRET_ACCOUNT, SecretSlot::Password, pw).map_err(
+                        |err| CommandError {
+                            code: "internal",
+                            message: format!("keychain store: {err}"),
+                        },
+                    )?;
                 }
             }
             Ok(())
@@ -884,14 +849,11 @@ fn load_e2e_key() -> Option<[u8; KEY_LEN]> {
 /// Persist the 32-byte AES key in the keychain.
 fn store_e2e_key(key: &[u8; KEY_LEN]) -> CommandResult<()> {
     let encoded = BASE64.encode(key);
-    secrets::store(
-        E2E_SECRET_ACCOUNT,
-        SecretSlot::SyncEncryptionKey,
-        &encoded,
-    )
-    .map_err(|err| CommandError {
-        code: "internal",
-        message: format!("keychain store sync key: {err}"),
+    secrets::store(E2E_SECRET_ACCOUNT, SecretSlot::SyncEncryptionKey, &encoded).map_err(|err| {
+        CommandError {
+            code: "internal",
+            message: format!("keychain store sync key: {err}"),
+        }
     })
 }
 
@@ -970,13 +932,9 @@ pub async fn configure_sync_adapter(
             // and renders the §19.13 update prompt; the user can
             // either update or pick a different target.
             if let Some(m) = target_meta.as_ref() {
-                sync_core::ensure_compatible(m, onboarding.app_version())
-                    .map_err(sync_err)?;
+                sync_core::ensure_compatible(m, onboarding.app_version()).map_err(sync_err)?;
             }
-            let e2e_target = target_meta
-                .as_ref()
-                .map(|m| m.e2e_enabled)
-                .unwrap_or(false);
+            let e2e_target = target_meta.as_ref().map(|m| m.e2e_enabled).unwrap_or(false);
             let key = if e2e_target {
                 let k = load_e2e_key().ok_or(CommandError {
                     code: "encryption_required",
@@ -1027,10 +985,12 @@ pub async fn set_sync_interval(
     scheduler: State<'_, Arc<SyncScheduler>>,
     minutes: u32,
 ) -> CommandResult<u32> {
-    scheduler.set_interval_minutes(minutes).map_err(|err| CommandError {
-        code: "internal",
-        message: err,
-    })
+    scheduler
+        .set_interval_minutes(minutes)
+        .map_err(|err| CommandError {
+            code: "internal",
+            message: err,
+        })
 }
 
 /// Trigger one sync round (push pending logs + fetch & apply
@@ -1072,9 +1032,7 @@ pub async fn sync_now(
     // the frontend's conflict-count refetch + notification
     // path. Same logic as the periodic scheduler's `run_round`.
     if report.conflicts > 0 {
-        if let Err(err) =
-            tauri::Emitter::emit(&app, "sync-conflicts-changed", ())
-        {
+        if let Err(err) = tauri::Emitter::emit(&app, "sync-conflicts-changed", ()) {
             tracing::warn!(
                 ?err,
                 "failed to emit sync-conflicts-changed after manual sync",
@@ -1126,9 +1084,15 @@ pub fn get_sync_adapter_summary(
         return Ok(None);
     };
     let detail = match kind.as_str() {
-        "local" => prefs.get(PREF_LOCAL_PATH).map_err(internal)?.unwrap_or_default(),
+        "local" => prefs
+            .get(PREF_LOCAL_PATH)
+            .map_err(internal)?
+            .unwrap_or_default(),
         "webdav" => {
-            let url = prefs.get(PREF_WEBDAV_URL).map_err(internal)?.unwrap_or_default();
+            let url = prefs
+                .get(PREF_WEBDAV_URL)
+                .map_err(internal)?
+                .unwrap_or_default();
             let user = prefs
                 .get(PREF_WEBDAV_USER)
                 .map_err(internal)?
@@ -1140,23 +1104,41 @@ pub fn get_sync_adapter_summary(
             }
         }
         "sftp" => {
-            let host = prefs.get(PREF_SFTP_HOST).map_err(internal)?.unwrap_or_default();
+            let host = prefs
+                .get(PREF_SFTP_HOST)
+                .map_err(internal)?
+                .unwrap_or_default();
             let port = prefs
                 .get(PREF_SFTP_PORT)
                 .map_err(internal)?
                 .unwrap_or_else(|| "22".into());
-            let user = prefs.get(PREF_SFTP_USER).map_err(internal)?.unwrap_or_default();
-            let path = prefs.get(PREF_SFTP_PATH).map_err(internal)?.unwrap_or_default();
+            let user = prefs
+                .get(PREF_SFTP_USER)
+                .map_err(internal)?
+                .unwrap_or_default();
+            let path = prefs
+                .get(PREF_SFTP_PATH)
+                .map_err(internal)?
+                .unwrap_or_default();
             format!("{user}@{host}:{port}{path}")
         }
         "ftp" => {
-            let host = prefs.get(PREF_FTP_HOST).map_err(internal)?.unwrap_or_default();
+            let host = prefs
+                .get(PREF_FTP_HOST)
+                .map_err(internal)?
+                .unwrap_or_default();
             let port = prefs
                 .get(PREF_FTP_PORT)
                 .map_err(internal)?
                 .unwrap_or_else(|| "21".into());
-            let user = prefs.get(PREF_FTP_USER).map_err(internal)?.unwrap_or_default();
-            let path = prefs.get(PREF_FTP_PATH).map_err(internal)?.unwrap_or_default();
+            let user = prefs
+                .get(PREF_FTP_USER)
+                .map_err(internal)?
+                .unwrap_or_default();
+            let path = prefs
+                .get(PREF_FTP_PATH)
+                .map_err(internal)?
+                .unwrap_or_default();
             format!("{user}@{host}:{port}{path}")
         }
         "dropbox" => prefs
@@ -1205,12 +1187,8 @@ pub async fn compact_now(
         }
     };
     let started = std::time::Instant::now();
-    let result = orchestrator
-        .compactor()
-        .compact_now(adapter.as_ref())
-        .await;
-    let duration_ms =
-        u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+    let result = orchestrator.compactor().compact_now(adapter.as_ref()).await;
+    let duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
     // §19.10 — surface the outcome in the Protokoll regardless of
     // success/failure so the user has an audit trail of every
     // compaction run. Mirrors the manual-sync_now bookkeeping.
@@ -1298,16 +1276,15 @@ pub async fn accept_remote_dataset(
     // accept_remote flow tries to read snapshots or logs — the
     // applier needs decrypted bytes.
     let meta = plain.fetch_meta().await.map_err(sync_err)?;
-    let e2e_active = meta
-        .as_ref()
-        .map(|m| m.e2e_enabled)
-        .unwrap_or(false);
+    let e2e_active = meta.as_ref().map(|m| m.e2e_enabled).unwrap_or(false);
     let key: Option<[u8; KEY_LEN]> = if e2e_active {
-        let pp = passphrase.as_deref().map(str::trim).filter(|s| !s.is_empty());
+        let pp = passphrase
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
         let pp = pp.ok_or(CommandError {
             code: "encryption_required",
-            message: "this dataset is encrypted; a passphrase is required"
-                .into(),
+            message: "this dataset is encrypted; a passphrase is required".into(),
         })?;
         let params = meta
             .as_ref()
@@ -1333,7 +1310,10 @@ pub async fn accept_remote_dataset(
     // no meta.json or the passphrase is wrong → applier fails to
     // parse JSON), we haven't yet altered the orchestrator's
     // state — the next attempt can pick a different path.
-    let trimmed = device_name.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let trimmed = device_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
     let report = onboarding
         .accept_remote(adapter.as_ref(), trimmed)
         .await
@@ -1413,7 +1393,10 @@ pub async fn adopt_local_dataset(
     };
     let adapter = wrap_if_encrypted(Arc::clone(&plain), key);
 
-    let trimmed = device_name.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let trimmed = device_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
     let report = onboarding
         .adopt_local(adapter.as_ref(), trimmed, e2e_params)
         .await
@@ -1630,8 +1613,7 @@ pub async fn disable_sync_encryption(
         code: "protocol",
         message: "meta.json says e2e but carries no params".into(),
     })?;
-    let _verified_dek =
-        resolve_data_key(pp, &current_params).map_err(sync_err)?;
+    let _verified_dek = resolve_data_key(pp, &current_params).map_err(sync_err)?;
 
     // 3. Build a fresh PLAIN adapter from the persisted config.
     //    The encrypting wrapper is what the orchestrator holds —
@@ -1639,11 +1621,10 @@ pub async fn disable_sync_encryption(
     //    same builder lib.rs's app-start path uses, so the auth +
     //    config bits are guaranteed to match.
     let shared = db.shared();
-    let plain =
-        build_adapter_from_prefs(&shared, plugin_manager.inner()).ok_or(CommandError {
-            code: "not_configured",
-            message: "couldn't rebuild the underlying plain adapter".into(),
-        })?;
+    let plain = build_adapter_from_prefs(&shared, plugin_manager.inner()).ok_or(CommandError {
+        code: "not_configured",
+        message: "couldn't rebuild the underlying plain adapter".into(),
+    })?;
 
     let mut report = DisableE2eReport::default();
 
@@ -1661,11 +1642,7 @@ pub async fn disable_sync_encryption(
 
     // 5. Same for the snapshot, if one exists. Brand-new
     //    datasets that never compacted skip this branch.
-    if let Some(snapshot) = encrypting
-        .fetch_snapshot()
-        .await
-        .map_err(sync_err)?
-    {
+    if let Some(snapshot) = encrypting.fetch_snapshot().await.map_err(sync_err)? {
         plain.push_snapshot(&snapshot).await.map_err(sync_err)?;
         report.snapshot_rewritten = true;
     }
@@ -1776,8 +1753,7 @@ pub async fn enable_sync_encryption(
     if meta_before.e2e_enabled {
         return Err(CommandError {
             code: "conflict",
-            message:
-                "dataset is already encrypted; nothing to enable".into(),
+            message: "dataset is already encrypted; nothing to enable".into(),
         });
     }
 
@@ -1898,8 +1874,7 @@ pub async fn adopt_remote_encryption(
     if !meta.e2e_enabled {
         return Err(CommandError {
             code: "not_configured",
-            message:
-                "remote is not encrypted; nothing to adopt".into(),
+            message: "remote is not encrypted; nothing to adopt".into(),
         });
     }
     let params = meta.e2e_params.clone().ok_or(CommandError {
@@ -1953,10 +1928,9 @@ pub fn build_adapter_from_prefs(
                 .ok()
                 .flatten()
                 .unwrap_or_default();
-            let password =
-                secrets::retrieve(WEBDAV_SECRET_ACCOUNT, SecretSlot::Password)
-                    .ok()
-                    .unwrap_or_default();
+            let password = secrets::retrieve(WEBDAV_SECRET_ACCOUNT, SecretSlot::Password)
+                .ok()
+                .unwrap_or_default();
             let cfg = serde_json::json!({
                 "url": url.trim(),
                 "user": user.trim(),
@@ -1989,34 +1963,27 @@ pub fn build_adapter_from_prefs(
                 .ok()
                 .flatten()
                 .unwrap_or_else(|| "password".to_string());
-            let (resolved_password, resolved_key_path, resolved_key_passphrase) =
-                match auth_method.as_str() {
-                    "key" => {
-                        let kp =
-                            prefs.get(PREF_SFTP_KEY_PATH).ok().flatten()?;
-                        if kp.trim().is_empty() {
-                            return None;
-                        }
-                        let pass = secrets::retrieve(
-                            SFTP_KEY_SECRET_ACCOUNT,
-                            SecretSlot::Password,
-                        )
+            let (resolved_password, resolved_key_path, resolved_key_passphrase) = match auth_method
+                .as_str()
+            {
+                "key" => {
+                    let kp = prefs.get(PREF_SFTP_KEY_PATH).ok().flatten()?;
+                    if kp.trim().is_empty() {
+                        return None;
+                    }
+                    let pass = secrets::retrieve(SFTP_KEY_SECRET_ACCOUNT, SecretSlot::Password)
                         .ok()
                         .unwrap_or_default();
-                        (String::new(), kp.trim().to_string(), pass)
-                    }
-                    // "password" + anything unknown both fall to
-                    // password auth — forward-compat for a future
-                    // auth method that an older Aperio doesn't know.
-                    _ => {
-                        let pw = secrets::retrieve(
-                            SFTP_SECRET_ACCOUNT,
-                            SecretSlot::Password,
-                        )
-                        .ok()?;
-                        (pw, String::new(), String::new())
-                    }
-                };
+                    (String::new(), kp.trim().to_string(), pass)
+                }
+                // "password" + anything unknown both fall to
+                // password auth — forward-compat for a future
+                // auth method that an older Aperio doesn't know.
+                _ => {
+                    let pw = secrets::retrieve(SFTP_SECRET_ACCOUNT, SecretSlot::Password).ok()?;
+                    (pw, String::new(), String::new())
+                }
+            };
             let pinned_fp = pinned_sftp_fingerprint(db, host.trim(), port);
             let cfg = serde_json::json!({
                 "host": host.trim(),
@@ -2047,16 +2014,13 @@ pub fn build_adapter_from_prefs(
             if user.trim().is_empty() {
                 return None;
             }
-            let path =
-                prefs.get(PREF_FTP_PATH).ok().flatten().unwrap_or_default();
+            let path = prefs.get(PREF_FTP_PATH).ok().flatten().unwrap_or_default();
             let mode = prefs
                 .get(PREF_FTP_MODE)
                 .ok()
                 .flatten()
                 .unwrap_or_else(|| "explicit".to_string());
-            let password =
-                secrets::retrieve(FTP_SECRET_ACCOUNT, SecretSlot::Password)
-                    .ok()?;
+            let password = secrets::retrieve(FTP_SECRET_ACCOUNT, SecretSlot::Password).ok()?;
             let cfg = serde_json::json!({
                 "host": host.trim(),
                 "port": port,
@@ -2083,11 +2047,8 @@ pub fn build_adapter_from_prefs(
                 .ok()
                 .flatten()
                 .unwrap_or_default();
-            let refresh_token = secrets::retrieve(
-                DROPBOX_SECRET_ACCOUNT,
-                SecretSlot::RefreshToken,
-            )
-            .ok()?;
+            let refresh_token =
+                secrets::retrieve(DROPBOX_SECRET_ACCOUNT, SecretSlot::RefreshToken).ok()?;
             let cfg = serde_json::json!({
                 "client_id": client_id.trim(),
                 "client_secret": client_secret.trim(),
@@ -2098,8 +2059,7 @@ pub fn build_adapter_from_prefs(
             open_sync_plugin(plugin_manager, PLUGIN_ID_DROPBOX, cfg).ok()?
         }
         "googledrive" => {
-            let client_id =
-                prefs.get(PREF_GOOGLEDRIVE_CLIENT_ID).ok().flatten()?;
+            let client_id = prefs.get(PREF_GOOGLEDRIVE_CLIENT_ID).ok().flatten()?;
             if client_id.trim().is_empty() {
                 return None;
             }
@@ -2108,8 +2068,7 @@ pub fn build_adapter_from_prefs(
             // finished the Settings form. Treat that as
             // "not configured" rather than booting a half-built
             // adapter.
-            let client_secret =
-                prefs.get(PREF_GOOGLEDRIVE_CLIENT_SECRET).ok().flatten()?;
+            let client_secret = prefs.get(PREF_GOOGLEDRIVE_CLIENT_SECRET).ok().flatten()?;
             if client_secret.trim().is_empty() {
                 return None;
             }
@@ -2118,11 +2077,8 @@ pub fn build_adapter_from_prefs(
                 .ok()
                 .flatten()
                 .unwrap_or_default();
-            let refresh_token = secrets::retrieve(
-                GOOGLEDRIVE_SECRET_ACCOUNT,
-                SecretSlot::RefreshToken,
-            )
-            .ok()?;
+            let refresh_token =
+                secrets::retrieve(GOOGLEDRIVE_SECRET_ACCOUNT, SecretSlot::RefreshToken).ok()?;
             let cfg = serde_json::json!({
                 "client_id": client_id.trim(),
                 "client_secret": client_secret.trim(),
@@ -2145,12 +2101,7 @@ pub fn build_adapter_from_prefs(
     // key. If the key is missing (keychain wiped, fresh OS
     // install with the same data dir), bail out so the user
     // re-runs onboarding rather than syncing garbage.
-    let e2e_on = prefs
-        .get(PREF_E2E_ENABLED)
-        .ok()
-        .flatten()
-        .as_deref()
-        == Some("true");
+    let e2e_on = prefs.get(PREF_E2E_ENABLED).ok().flatten().as_deref() == Some("true");
     if e2e_on {
         let key = load_e2e_key()?;
         Some(wrap_if_encrypted(plain, Some(key)))
@@ -2202,16 +2153,16 @@ pub async fn connect_dropbox_oauth(
         }),
     )
     .await?;
-    let refresh_token = tokens
-        .get("refresh_token")
-        .and_then(|v| v.as_str())
-        .ok_or(CommandError {
-            code: "protocol",
-            message:
-                "Dropbox returned no refresh token — the app config may \
+    let refresh_token =
+        tokens
+            .get("refresh_token")
+            .and_then(|v| v.as_str())
+            .ok_or(CommandError {
+                code: "protocol",
+                message: "Dropbox returned no refresh token — the app config may \
                  be missing offline access"
                     .into(),
-        })?;
+            })?;
     secrets::store(
         DROPBOX_SECRET_ACCOUNT,
         SecretSlot::RefreshToken,
@@ -2229,8 +2180,7 @@ pub async fn connect_dropbox_oauth(
 /// in the SyncPanel.
 #[tauri::command]
 pub async fn has_dropbox_refresh_token() -> CommandResult<bool> {
-    Ok(secrets::retrieve(DROPBOX_SECRET_ACCOUNT, SecretSlot::RefreshToken)
-        .is_ok())
+    Ok(secrets::retrieve(DROPBOX_SECRET_ACCOUNT, SecretSlot::RefreshToken).is_ok())
 }
 
 // ---------------------------------------------------------------------------
@@ -2282,16 +2232,16 @@ pub async fn connect_googledrive_oauth(
         }),
     )
     .await?;
-    let refresh_token = tokens
-        .get("refresh_token")
-        .and_then(|v| v.as_str())
-        .ok_or(CommandError {
-            code: "protocol",
-            message:
-                "Google returned no refresh token — make sure the \
+    let refresh_token =
+        tokens
+            .get("refresh_token")
+            .and_then(|v| v.as_str())
+            .ok_or(CommandError {
+                code: "protocol",
+                message: "Google returned no refresh token — make sure the \
                  consent screen is configured for offline access"
                     .into(),
-        })?;
+            })?;
     secrets::store(
         GOOGLEDRIVE_SECRET_ACCOUNT,
         SecretSlot::RefreshToken,
@@ -2309,11 +2259,7 @@ pub async fn connect_googledrive_oauth(
 /// button in the SyncPanel.
 #[tauri::command]
 pub async fn has_googledrive_refresh_token() -> CommandResult<bool> {
-    Ok(secrets::retrieve(
-        GOOGLEDRIVE_SECRET_ACCOUNT,
-        SecretSlot::RefreshToken,
-    )
-    .is_ok())
+    Ok(secrets::retrieve(GOOGLEDRIVE_SECRET_ACCOUNT, SecretSlot::RefreshToken).is_ok())
 }
 
 // ---------------------------------------------------------------------------
@@ -2526,10 +2472,7 @@ pub async fn clear_sync_log(db: State<'_, DbHandle>) -> CommandResult<()> {
 /// with a mismatch dialog. The next connect goes through the
 /// first-use trust dialog again.
 #[tauri::command]
-pub async fn forget_sftp_host_key(
-    db: State<'_, DbHandle>,
-    host_port: String,
-) -> CommandResult<()> {
+pub async fn forget_sftp_host_key(db: State<'_, DbHandle>, host_port: String) -> CommandResult<()> {
     let trimmed = host_port.trim();
     if trimmed.is_empty() {
         return Err(CommandError {

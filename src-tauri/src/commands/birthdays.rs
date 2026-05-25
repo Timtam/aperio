@@ -38,9 +38,7 @@
 //! reach the sidebar.
 
 use cal_adapter_local::LocalAdapter;
-use cal_core::{
-    Calendar, ColorSource, ContactsFeature, ContainerColor, DateRange, Event,
-};
+use cal_core::{Calendar, ColorSource, ContactsFeature, ContainerColor, DateRange, Event};
 use chrono::{Datelike, NaiveDate, TimeZone, Utc};
 use std::sync::Arc;
 
@@ -209,10 +207,7 @@ async fn list_has_birthdays(adapter: &LocalAdapter, list_id: &str) -> bool {
     }
 }
 
-async fn external_list_has_birthdays(
-    adapter: &dyn ContactsFeature,
-    list_id: &str,
-) -> bool {
+async fn external_list_has_birthdays(adapter: &dyn ContactsFeature, list_id: &str) -> bool {
     match adapter.get_contacts(list_id).await {
         Ok(contacts) => contacts.iter().any(|c| c.birthday.is_some()),
         Err(_) => false,
@@ -250,8 +245,7 @@ fn events_for_contacts(
             // address book has the canonical date and we render
             // it on years that have it. Same tradeoff iOS Contacts
             // makes.
-            let Some(date) = NaiveDate::from_ymd_opt(year, bday.month(), bday.day())
-            else {
+            let Some(date) = NaiveDate::from_ymd_opt(year, bday.month(), bday.day()) else {
                 continue;
             };
             let Some(midnight) = date.and_hms_opt(0, 0, 0) else {
@@ -273,10 +267,7 @@ fn events_for_contacts(
                 continue;
             }
             out.push(Event {
-                id: format!(
-                    "aperio-birthday:{}:{}",
-                    contact.id, year,
-                ),
+                id: format!("aperio-birthday:{}:{}", contact.id, year,),
                 calendar_id: calendar_id.to_string(),
                 title: contact.display_name.clone(),
                 description: birthday_description(&contact, year, &bday),
@@ -400,8 +391,7 @@ mod tests {
         )];
         let start = Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2025, 12, 31, 23, 59, 59).unwrap();
-        let events =
-            events_for_contacts(contacts, "cal", DateRange::new(start, end));
+        let events = events_for_contacts(contacts, "cal", DateRange::new(start, end));
         // 2023 and 2025 are non-leap → only 2024 should produce
         // an event.
         assert_eq!(events.len(), 1);
@@ -411,13 +401,15 @@ mod tests {
     #[test]
     fn events_for_contacts_drops_contacts_without_birthday() {
         let contacts = vec![
-            make_contact("Has-Birthday", Some(NaiveDate::from_ymd_opt(1990, 6, 1).unwrap())),
+            make_contact(
+                "Has-Birthday",
+                Some(NaiveDate::from_ymd_opt(1990, 6, 1).unwrap()),
+            ),
             make_contact("No-Birthday", None),
         ];
         let start = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2026, 12, 31, 23, 59, 59).unwrap();
-        let events =
-            events_for_contacts(contacts, "cal", DateRange::new(start, end));
+        let events = events_for_contacts(contacts, "cal", DateRange::new(start, end));
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].title, "Has-Birthday");
     }
@@ -431,8 +423,7 @@ mod tests {
         )];
         let start = Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2026, 8, 31, 23, 59, 59).unwrap();
-        let events =
-            events_for_contacts(contacts, "cal", DateRange::new(start, end));
+        let events = events_for_contacts(contacts, "cal", DateRange::new(start, end));
         assert!(events.is_empty());
     }
 
@@ -442,18 +433,12 @@ mod tests {
         assert!(cal.read_only);
         assert_eq!(cal.name, "Birthdays – Family");
         assert_eq!(cal.id, "aperio-birthdays:list-id");
-        assert_eq!(
-            cal.color.as_ref().unwrap().hex,
-            BIRTHDAY_LAYER_COLOR_HEX,
-        );
+        assert_eq!(cal.color.as_ref().unwrap().hex, BIRTHDAY_LAYER_COLOR_HEX,);
     }
 
     #[test]
     fn birthday_description_emits_age_when_birth_year_is_sensible() {
-        let contact = make_contact(
-            "Max",
-            Some(NaiveDate::from_ymd_opt(1985, 4, 17).unwrap()),
-        );
+        let contact = make_contact("Max", Some(NaiveDate::from_ymd_opt(1985, 4, 17).unwrap()));
         let desc = birthday_description(
             &contact,
             2026,
@@ -466,10 +451,7 @@ mod tests {
     fn birthday_description_omits_age_for_placeholder_year() {
         // vCard with no birth year sometimes encodes as year 1604
         // or similar sentinel; we skip the age in that case.
-        let contact = make_contact(
-            "Anon",
-            Some(NaiveDate::from_ymd_opt(1604, 5, 1).unwrap()),
-        );
+        let contact = make_contact("Anon", Some(NaiveDate::from_ymd_opt(1604, 5, 1).unwrap()));
         let desc = birthday_description(
             &contact,
             2026,

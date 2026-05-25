@@ -72,8 +72,7 @@ use chrono::Utc;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use sync_core::{
-    DeviceCursor, LogFile, LogFileName, MetaJson, Snapshot, SyncAdapter,
-    SyncError, SyncResult,
+    DeviceCursor, LogFile, LogFileName, MetaJson, Snapshot, SyncAdapter, SyncError, SyncResult,
 };
 use tokio::sync::Mutex;
 use tracing::{debug, warn};
@@ -131,9 +130,7 @@ impl DropboxSyncAdapter {
         refresh_token: impl Into<String>,
     ) -> DropboxResult<Self> {
         if config.client_id.trim().is_empty() {
-            return Err(DropboxError::Config(
-                "client_id must not be empty".into(),
-            ));
+            return Err(DropboxError::Config("client_id must not be empty".into()));
         }
         Ok(Self {
             client_id: config.client_id,
@@ -225,27 +222,15 @@ impl SyncAdapter for DropboxSyncAdapter {
                 .await
                 .map_err(dropbox_to_sync)?;
         }
-        files::create_folder(
-            &self.http,
-            &token,
-            &self.remote_path("log"),
-        )
-        .await
-        .map_err(dropbox_to_sync)?;
-        files::create_folder(
-            &self.http,
-            &token,
-            &self.remote_path("assets"),
-        )
-        .await
-        .map_err(dropbox_to_sync)?;
-        files::create_folder(
-            &self.http,
-            &token,
-            &self.remote_path("assets/sounds"),
-        )
-        .await
-        .map_err(dropbox_to_sync)?;
+        files::create_folder(&self.http, &token, &self.remote_path("log"))
+            .await
+            .map_err(dropbox_to_sync)?;
+        files::create_folder(&self.http, &token, &self.remote_path("assets"))
+            .await
+            .map_err(dropbox_to_sync)?;
+        files::create_folder(&self.http, &token, &self.remote_path("assets/sounds"))
+            .await
+            .map_err(dropbox_to_sync)?;
         Ok(())
     }
 
@@ -264,14 +249,10 @@ impl SyncAdapter for DropboxSyncAdapter {
         self.upload_with_retry(&path, bytes).await
     }
 
-    async fn fetch_new_logs(
-        &self,
-        since: &DeviceCursor,
-    ) -> SyncResult<Vec<LogFile>> {
+    async fn fetch_new_logs(&self, since: &DeviceCursor) -> SyncResult<Vec<LogFile>> {
         let log_dir = self.remote_path("log");
         let token = self.access_token().await?;
-        let entries = match files::list_folder(&self.http, &token, &log_dir).await
-        {
+        let entries = match files::list_folder(&self.http, &token, &log_dir).await {
             Ok(e) => e,
             // Auth retry: one shot, then surface.
             Err(err) if err.is_auth() => {
@@ -333,15 +314,10 @@ impl SyncAdapter for DropboxSyncAdapter {
         // Lazy-create log/ on first push so a brand-new dataset
         // doesn't bounce off path/not_found.
         let token = self.access_token().await?;
-        files::create_folder(
-            &self.http,
-            &token,
-            &self.remote_path("log"),
-        )
-        .await
-        .map_err(dropbox_to_sync)?;
-        let path = self
-            .remote_path(&format!("log/{}", log.name.to_filename()));
+        files::create_folder(&self.http, &token, &self.remote_path("log"))
+            .await
+            .map_err(dropbox_to_sync)?;
+        let path = self.remote_path(&format!("log/{}", log.name.to_filename()));
         self.upload_with_retry(&path, log.bytes.clone()).await
     }
 
@@ -368,8 +344,9 @@ impl SyncAdapter for DropboxSyncAdapter {
             Ok(()) => Ok(()),
             Err(err) if err.is_auth() => {
                 let token = self.force_refresh().await?;
-                files::delete(&self.http, &token, &path).await.map_err(
-                    |e| {
+                files::delete(&self.http, &token, &path)
+                    .await
+                    .map_err(|e| {
                         if e.is_not_found() {
                             return SyncError::network(format!(
                                 // Map not_found to Network so the
@@ -382,8 +359,7 @@ impl SyncAdapter for DropboxSyncAdapter {
                             ));
                         }
                         dropbox_to_sync(e)
-                    },
-                )?;
+                    })?;
                 Ok(())
             }
             // Not-found = goal already met (file is gone); same
@@ -393,39 +369,20 @@ impl SyncAdapter for DropboxSyncAdapter {
         }
     }
 
-    async fn push_sound_asset(
-        &self,
-        hash: &str,
-        extension: &str,
-        bytes: &[u8],
-    ) -> SyncResult<()> {
+    async fn push_sound_asset(&self, hash: &str, extension: &str, bytes: &[u8]) -> SyncResult<()> {
         let token = self.access_token().await?;
-        files::create_folder(
-            &self.http,
-            &token,
-            &self.remote_path("assets"),
-        )
-        .await
-        .map_err(dropbox_to_sync)?;
-        files::create_folder(
-            &self.http,
-            &token,
-            &self.remote_path("assets/sounds"),
-        )
-        .await
-        .map_err(dropbox_to_sync)?;
-        let path = self
-            .remote_path(&format!("assets/sounds/{hash}.{extension}"));
+        files::create_folder(&self.http, &token, &self.remote_path("assets"))
+            .await
+            .map_err(dropbox_to_sync)?;
+        files::create_folder(&self.http, &token, &self.remote_path("assets/sounds"))
+            .await
+            .map_err(dropbox_to_sync)?;
+        let path = self.remote_path(&format!("assets/sounds/{hash}.{extension}"));
         self.upload_with_retry(&path, bytes.to_vec()).await
     }
 
-    async fn fetch_sound_asset(
-        &self,
-        hash: &str,
-        extension: &str,
-    ) -> SyncResult<Option<Vec<u8>>> {
-        let path = self
-            .remote_path(&format!("assets/sounds/{hash}.{extension}"));
+    async fn fetch_sound_asset(&self, hash: &str, extension: &str) -> SyncResult<Option<Vec<u8>>> {
+        let path = self.remote_path(&format!("assets/sounds/{hash}.{extension}"));
         self.download_with_retry(&path).await
     }
 }
@@ -436,11 +393,7 @@ impl DropboxSyncAdapter {
     /// invalidation); refresh and retry once. Same body bytes
     /// are reused — the upload-tmp + rename dance isn't needed
     /// because Dropbox supports `mode: "overwrite"` atomically.
-    async fn upload_with_retry(
-        &self,
-        path: &str,
-        bytes: Vec<u8>,
-    ) -> SyncResult<()> {
+    async fn upload_with_retry(&self, path: &str, bytes: Vec<u8>) -> SyncResult<()> {
         let token = self.access_token().await?;
         match files::upload(&self.http, &token, path, &bytes).await {
             Ok(()) => Ok(()),
@@ -458,10 +411,7 @@ impl DropboxSyncAdapter {
     /// `Ok(None)` covers `path/not_found` — the read-side
     /// "doesn't exist" path that the upper layer folds into
     /// "fresh dataset" or "compactor raced us" branches.
-    async fn download_with_retry(
-        &self,
-        path: &str,
-    ) -> SyncResult<Option<Vec<u8>>> {
+    async fn download_with_retry(&self, path: &str) -> SyncResult<Option<Vec<u8>>> {
         let token = self.access_token().await?;
         match files::download(&self.http, &token, path).await {
             Ok(Some(bytes)) => Ok(Some(bytes)),
@@ -536,15 +486,9 @@ fn dropbox_to_sync(err: DropboxError) -> SyncError {
             SyncError::network(format!("HTTP {status}: {message}"))
         }
         DropboxError::Io(msg) => SyncError::io(msg),
-        DropboxError::Csrf => {
-            SyncError::auth("OAuth state mismatch (CSRF)")
-        }
-        DropboxError::AuthTimeout => {
-            SyncError::auth("OAuth dance timed out")
-        }
-        DropboxError::AuthDenied(msg) => {
-            SyncError::auth(format!("OAuth consent denied: {msg}"))
-        }
+        DropboxError::Csrf => SyncError::auth("OAuth state mismatch (CSRF)"),
+        DropboxError::AuthTimeout => SyncError::auth("OAuth dance timed out"),
+        DropboxError::AuthDenied(msg) => SyncError::auth(format!("OAuth consent denied: {msg}")),
     }
 }
 
@@ -567,15 +511,9 @@ mod tests {
     #[test]
     fn remote_path_joins_against_normalised_base() {
         assert_eq!(remote_path_for("/aperio", ""), "/aperio");
+        assert_eq!(remote_path_for("/aperio", "meta.json"), "/aperio/meta.json",);
         assert_eq!(
-            remote_path_for("/aperio", "meta.json"),
-            "/aperio/meta.json",
-        );
-        assert_eq!(
-            remote_path_for(
-                "/aperio",
-                "log/2026-01-01T00:00:00Z_dev-a.jsonl",
-            ),
+            remote_path_for("/aperio", "log/2026-01-01T00:00:00Z_dev-a.jsonl",),
             "/aperio/log/2026-01-01T00:00:00Z_dev-a.jsonl",
         );
 

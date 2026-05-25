@@ -20,9 +20,7 @@
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_int};
 
-use plugin_core::abi::{
-    OpenInstanceResult, PLUGIN_ERR_INIT, PLUGIN_ERR_INVALID_CONFIG, PLUGIN_OK,
-};
+use plugin_core::abi::{OpenInstanceResult, PLUGIN_ERR_INIT, PLUGIN_ERR_INVALID_CONFIG, PLUGIN_OK};
 use plugin_core::ffi::PluginBytes;
 
 use crate::instance::PluginInstance;
@@ -49,10 +47,7 @@ use crate::instance::PluginInstance;
 /// `config_json` must be NUL-terminated UTF-8 as the C ABI
 /// requires (the host's [`plugin_core::manager::PluginManager::open_instance`]
 /// guarantees this).
-pub unsafe fn open_instance_with<T, F>(
-    config_json: *const c_char,
-    build: F,
-) -> OpenInstanceResult
+pub unsafe fn open_instance_with<T, F>(config_json: *const c_char, build: F) -> OpenInstanceResult
 where
     F: FnOnce(&str) -> Result<T, String>,
 {
@@ -62,10 +57,7 @@ where
         match CStr::from_ptr(config_json).to_str() {
             Ok(s) => s,
             Err(_) => {
-                return error_result(
-                    PLUGIN_ERR_INVALID_CONFIG,
-                    "config_json is not valid UTF-8",
-                )
+                return error_result(PLUGIN_ERR_INVALID_CONFIG, "config_json is not valid UTF-8")
             }
         }
     };
@@ -128,8 +120,8 @@ mod tests {
         assert!(!result.instance.is_null());
         // Borrow back + verify the value crossed the boxing
         // boundary intact.
-        let inst = unsafe { PluginInstance::<u32>::from_handle(result.instance) }
-            .expect("non-null");
+        let inst =
+            unsafe { PluginInstance::<u32>::from_handle(result.instance) }.expect("non-null");
         assert_eq!(*inst.plugin(), 42);
         // Drop to keep miri happy.
         unsafe { PluginInstance::<u32>::drop_handle(result.instance) };

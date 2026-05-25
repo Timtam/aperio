@@ -65,23 +65,29 @@ impl Version {
                 value: input.to_string(),
                 reason: format!("major: {e}"),
             })?;
-        let minor = parts
-            .next()
-            .unwrap_or("0")
-            .parse::<u64>()
-            .map_err(|e| PluginError::Semver {
-                value: input.to_string(),
-                reason: format!("minor: {e}"),
-            })?;
-        let patch = parts
-            .next()
-            .unwrap_or("0")
-            .parse::<u64>()
-            .map_err(|e| PluginError::Semver {
-                value: input.to_string(),
-                reason: format!("patch: {e}"),
-            })?;
-        Ok(Self { major, minor, patch })
+        let minor =
+            parts
+                .next()
+                .unwrap_or("0")
+                .parse::<u64>()
+                .map_err(|e| PluginError::Semver {
+                    value: input.to_string(),
+                    reason: format!("minor: {e}"),
+                })?;
+        let patch =
+            parts
+                .next()
+                .unwrap_or("0")
+                .parse::<u64>()
+                .map_err(|e| PluginError::Semver {
+                    value: input.to_string(),
+                    reason: format!("patch: {e}"),
+                })?;
+        Ok(Self {
+            major,
+            minor,
+            patch,
+        })
     }
 
     /// Render back to `"major.minor.patch"`. Round-trips with
@@ -98,10 +104,7 @@ impl Version {
 /// the running build is older — same UX shape as the sync engine's
 /// schema-too-old gate (the user updates the app, the plugin file
 /// stays on disk untouched).
-pub fn check_min_app_version(
-    min_app_version: &str,
-    app_version: &str,
-) -> PluginResult<()> {
+pub fn check_min_app_version(min_app_version: &str, app_version: &str) -> PluginResult<()> {
     let required = Version::parse(min_app_version)?;
     let running = Version::parse(app_version)?;
     if running >= required {
@@ -143,13 +146,27 @@ mod tests {
     #[test]
     fn parse_strips_prerelease_and_metadata() {
         let v = Version::parse("0.1.0-alpha+build").expect("parses");
-        assert_eq!(v, Version { major: 0, minor: 1, patch: 0 });
+        assert_eq!(
+            v,
+            Version {
+                major: 0,
+                minor: 1,
+                patch: 0
+            }
+        );
     }
 
     #[test]
     fn parse_fills_missing_components_with_zero() {
         let v = Version::parse("2").expect("parses");
-        assert_eq!(v, Version { major: 2, minor: 0, patch: 0 });
+        assert_eq!(
+            v,
+            Version {
+                major: 2,
+                minor: 0,
+                patch: 0
+            }
+        );
     }
 
     #[test]

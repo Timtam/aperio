@@ -2,9 +2,8 @@
 
 use async_trait::async_trait;
 use cal_core::{
-    ColorLabelId, ContainerColor, NewTask, RecurrenceEnd, RecurrenceFrequency,
-    Reminder, SoundConfig, Task, TaskList, TaskPriority, TaskRecurrence, TaskStatus, TasksFeature,
-    Weekday,
+    ColorLabelId, ContainerColor, NewTask, RecurrenceEnd, RecurrenceFrequency, Reminder,
+    SoundConfig, Task, TaskList, TaskPriority, TaskRecurrence, TaskStatus, TasksFeature, Weekday,
 };
 use chrono::{Datelike, Days, Months, NaiveDate, Utc};
 use rusqlite::{params, OptionalExtension};
@@ -535,11 +534,7 @@ impl TasksFeature for LocalAdapter {
         Ok(())
     }
 
-    async fn rename_task_list(
-        &self,
-        list_id: &str,
-        new_name: &str,
-    ) -> cal_core::Result<()> {
+    async fn rename_task_list(&self, list_id: &str, new_name: &str) -> cal_core::Result<()> {
         let trimmed = new_name.trim();
         if trimmed.is_empty() {
             return Err(cal_core::Error::InvalidInput(
@@ -1003,10 +998,7 @@ mod tests {
     #[tokio::test]
     async fn rename_task_list_returns_not_found_for_unknown_id() {
         let (a, _list) = adapter_with_list();
-        let err = a
-            .rename_task_list("does-not-exist", "X")
-            .await
-            .unwrap_err();
+        let err = a.rename_task_list("does-not-exist", "X").await.unwrap_err();
         assert!(matches!(err, cal_core::Error::NotFound(_)));
     }
 }

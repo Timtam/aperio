@@ -37,8 +37,8 @@ use std::time::{Duration, Instant};
 
 use cal_adapter_local::SharedConn;
 use cal_core::{
-    DateRange, Event, EventRecurrence, RecurrenceEnd, RecurrenceFrequency, Reminder,
-    ReminderKind, Task, TaskRecurrence,
+    DateRange, Event, EventRecurrence, RecurrenceEnd, RecurrenceFrequency, Reminder, ReminderKind,
+    Task, TaskRecurrence,
 };
 use chrono::{DateTime, Duration as ChronoDuration, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use rrule::{RRule, RRuleSet, Tz as RruleTz};
@@ -287,8 +287,7 @@ impl ReminderScheduler {
                     let reminders_json: Option<String> = row.get(4).unwrap_or(None);
                     let rrule: Option<String> = row.get(5).unwrap_or(None);
                     let exceptions_json: Option<String> = row.get(6).unwrap_or(None);
-                    let Some(reminders) = parse_reminders(reminders_json.as_deref())
-                    else {
+                    let Some(reminders) = parse_reminders(reminders_json.as_deref()) else {
                         continue;
                     };
                     let Ok(start) = start_str.parse::<DateTime<Utc>>() else {
@@ -332,8 +331,7 @@ impl ReminderScheduler {
                     let reminders_json: Option<String> = row.get(6).unwrap_or(None);
                     let recurrence_json: Option<String> = row.get(7).unwrap_or(None);
 
-                    let Some(reminders) = parse_reminders(reminders_json.as_deref())
-                    else {
+                    let Some(reminders) = parse_reminders(reminders_json.as_deref()) else {
                         continue;
                     };
 
@@ -358,11 +356,9 @@ impl ReminderScheduler {
                         .as_deref()
                         .and_then(|s| serde_json::from_str::<TaskRecurrence>(s).ok())
                         .and_then(|rec| {
-                            task_recurrence_to_rrule_body(&rec).map(|rrule| {
-                                EventRecurrence {
-                                    rrule,
-                                    exceptions: Vec::new(),
-                                }
+                            task_recurrence_to_rrule_body(&rec).map(|rrule| EventRecurrence {
+                                rrule,
+                                exceptions: Vec::new(),
                             })
                         });
 
@@ -600,8 +596,7 @@ impl ReminderScheduler {
                         let title: String = row.get(1).unwrap_or_default();
                         let start_str: String = row.get(2).unwrap_or_default();
                         let reminders_json: Option<String> = row.get(4).unwrap_or(None);
-                        let Some(reminders) = parse_reminders(reminders_json.as_deref())
-                        else {
+                        let Some(reminders) = parse_reminders(reminders_json.as_deref()) else {
                             continue;
                         };
                         let Ok(start) = start_str.parse::<DateTime<Utc>>() else {
@@ -650,16 +645,13 @@ impl ReminderScheduler {
                         let deadline_date: Option<String> = row.get(4).unwrap_or(None);
                         let deadline_time: Option<String> = row.get(5).unwrap_or(None);
                         let reminders_json: Option<String> = row.get(6).unwrap_or(None);
-                        let Some(reminders) = parse_reminders(reminders_json.as_deref())
-                        else {
+                        let Some(reminders) = parse_reminders(reminders_json.as_deref()) else {
                             continue;
                         };
                         // Mirror the new scanner: pair each date
                         // with its own time-of-day rather than
                         // collapsing both into deadline_time.
-                        let date = scheduled_date
-                            .as_deref()
-                            .or(deadline_date.as_deref());
+                        let date = scheduled_date.as_deref().or(deadline_date.as_deref());
                         let time = if scheduled_date.is_some() {
                             scheduled_time.as_deref()
                         } else {
@@ -1067,9 +1059,7 @@ fn master_due(
     } else {
         return None;
     };
-    let nt = time.unwrap_or_else(|| {
-        NaiveTime::from_hms_opt(9, 0, 0).expect("9:00 is valid")
-    });
+    let nt = time.unwrap_or_else(|| NaiveTime::from_hms_opt(9, 0, 0).expect("9:00 is valid"));
     let local = chrono::Local
         .from_local_datetime(&NaiveDateTime::new(date, nt))
         .single()?;
@@ -1133,10 +1123,7 @@ fn task_recurrence_to_rrule_body(rec: &TaskRecurrence) -> Option<String> {
             // DTSTART-with-time series. We use the same trick the
             // CalDAV adapter uses elsewhere — anchor at end-of-day
             // UTC so the picked date is inclusive.
-            parts.push(format!(
-                "UNTIL={}T235959Z",
-                date.format("%Y%m%d"),
-            ));
+            parts.push(format!("UNTIL={}T235959Z", date.format("%Y%m%d"),));
         }
         Some(RecurrenceEnd::Never) | None => {}
     }
@@ -1170,10 +1157,7 @@ fn catchup_eligible(t: &Trigger, now: DateTime<Utc>, grace: ChronoDuration) -> b
     t.trigger_at > now || t.relevant_until + grace > now
 }
 
-fn trigger_time_for(
-    kind: &ReminderKind,
-    reference: DateTime<Utc>,
-) -> Option<DateTime<Utc>> {
+fn trigger_time_for(kind: &ReminderKind, reference: DateTime<Utc>) -> Option<DateTime<Utc>> {
     match kind {
         ReminderKind::Relative { minutes_before } => {
             Some(reference - ChronoDuration::minutes(*minutes_before))
@@ -1223,9 +1207,7 @@ fn task_due_time(
     let nd = NaiveDate::parse_from_str(date, "%Y-%m-%d").ok()?;
     let nt = time
         .and_then(parse_local_time)
-        .unwrap_or_else(|| {
-            NaiveTime::from_hms_opt(9, 0, 0).expect("9:00 is valid")
-        });
+        .unwrap_or_else(|| NaiveTime::from_hms_opt(9, 0, 0).expect("9:00 is valid"));
     let local = chrono::Local
         .from_local_datetime(&NaiveDateTime::new(nd, nt))
         .single()?;
@@ -1432,10 +1414,7 @@ mod tests {
             Utc.with_ymd_and_hms(2026, 6, 4, 0, 0, 0).unwrap(),
         );
         // Master + week 3 expected (week 2 skipped).
-        let dates: Vec<_> = triggers
-            .iter()
-            .map(|t| t.trigger_at.date_naive())
-            .collect();
+        let dates: Vec<_> = triggers.iter().map(|t| t.trigger_at.date_naive()).collect();
         assert!(dates.contains(&chrono::NaiveDate::from_ymd_opt(2026, 5, 20).unwrap()));
         assert!(!dates.contains(&chrono::NaiveDate::from_ymd_opt(2026, 5, 27).unwrap()));
         assert!(dates.contains(&chrono::NaiveDate::from_ymd_opt(2026, 6, 3).unwrap()));
@@ -1504,7 +1483,10 @@ mod tests {
         // test is portable. The original date wins (scheduled), not
         // 2026-05-25 (deadline).
         let dt_local = chrono::Local.from_utc_datetime(&triggers[0].trigger_at.naive_utc());
-        assert_eq!(dt_local.date_naive(), NaiveDate::from_ymd_opt(2026, 5, 20).unwrap());
+        assert_eq!(
+            dt_local.date_naive(),
+            NaiveDate::from_ymd_opt(2026, 5, 20).unwrap()
+        );
     }
 
     #[test]
@@ -1557,7 +1539,10 @@ mod tests {
         let rec = TaskRecurrence {
             frequency: RecurrenceFrequency::Weekly,
             interval: 2,
-            day_of_week: Some(vec![cal_core::Weekday::Wednesday, cal_core::Weekday::Friday]),
+            day_of_week: Some(vec![
+                cal_core::Weekday::Wednesday,
+                cal_core::Weekday::Friday,
+            ]),
             day_of_month: None,
             end: Some(RecurrenceEnd::After { occurrences: 4 }),
         };
@@ -1650,7 +1635,11 @@ mod tests {
             Utc.with_ymd_and_hms(2026, 5, 19, 0, 0, 0).unwrap(),
             Utc.with_ymd_and_hms(2026, 6, 17, 0, 0, 0).unwrap(),
         );
-        assert_eq!(triggers.len(), 4, "expected four weekly Wednesday occurrences");
+        assert_eq!(
+            triggers.len(),
+            4,
+            "expected four weekly Wednesday occurrences"
+        );
     }
 
     #[test]
@@ -1774,12 +1763,8 @@ mod tests {
         assert_eq!(triggers.len(), 1);
         // relevant_until == due time. Local-time 09:00 round-trips
         // through chrono::Local to UTC; assert the date-level fact.
-        let due_local =
-            chrono::Local.from_utc_datetime(&triggers[0].relevant_until.naive_utc());
-        assert_eq!(
-            due_local.time(),
-            NaiveTime::from_hms_opt(9, 0, 0).unwrap(),
-        );
+        let due_local = chrono::Local.from_utc_datetime(&triggers[0].relevant_until.naive_utc());
+        assert_eq!(due_local.time(), NaiveTime::from_hms_opt(9, 0, 0).unwrap(),);
     }
 
     #[test]

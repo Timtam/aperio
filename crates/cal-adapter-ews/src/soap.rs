@@ -274,9 +274,7 @@ pub fn check_for_fault(body: &str) -> EwsResult<()> {
                         }
                     }
                 }
-                if (inside_response_message || inside_response_wrapper_error)
-                    && error_class_seen
-                {
+                if (inside_response_message || inside_response_wrapper_error) && error_class_seen {
                     if local == b"messagetext" {
                         current_text_target = Some("et");
                     } else if local == b"responsecode" {

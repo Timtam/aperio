@@ -44,11 +44,7 @@ impl TodoistClient {
     /// stand-in HTTP server. Stays `#[doc(hidden)]` so production
     /// callers don't accidentally take a dependency on it.
     #[doc(hidden)]
-    pub fn with_base_url_for_tests(
-        token: String,
-        http: reqwest::Client,
-        base_url: String,
-    ) -> Self {
+    pub fn with_base_url_for_tests(token: String, http: reqwest::Client, base_url: String) -> Self {
         Self {
             base_url,
             token,
@@ -65,21 +61,14 @@ impl TodoistClient {
         let value = format!("Bearer {}", self.token);
         headers.insert(
             AUTHORIZATION,
-            HeaderValue::from_str(&value).map_err(|e| {
-                TodoistError::Config(format!("auth header: {e}"))
-            })?,
+            HeaderValue::from_str(&value)
+                .map_err(|e| TodoistError::Config(format!("auth header: {e}")))?,
         );
-        headers.insert(
-            CONTENT_TYPE,
-            HeaderValue::from_static("application/json"),
-        );
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         Ok(headers)
     }
 
-    pub async fn get_json<T: serde::de::DeserializeOwned>(
-        &self,
-        path: &str,
-    ) -> TodoistResult<T> {
+    pub async fn get_json<T: serde::de::DeserializeOwned>(&self, path: &str) -> TodoistResult<T> {
         let response = self.send(Method::GET, path, Option::<&()>::None).await?;
         decode_json(response).await
     }
@@ -98,9 +87,7 @@ impl TodoistClient {
     /// Content` on success. Anything 2xx counts; the body (if any)
     /// is discarded.
     pub async fn post_empty(&self, path: &str) -> TodoistResult<()> {
-        let response = self
-            .send::<()>(Method::POST, path, None)
-            .await?;
+        let response = self.send::<()>(Method::POST, path, None).await?;
         let status = response.status();
         if status.is_success() {
             return Ok(());
@@ -113,9 +100,7 @@ impl TodoistClient {
     }
 
     pub async fn delete(&self, path: &str) -> TodoistResult<()> {
-        let response = self
-            .send(Method::DELETE, path, Option::<&()>::None)
-            .await?;
+        let response = self.send(Method::DELETE, path, Option::<&()>::None).await?;
         let status = response.status();
         if status.is_success() {
             return Ok(());
@@ -135,8 +120,10 @@ impl TodoistClient {
     ) -> TodoistResult<Response> {
         let url = format!("{}{}", self.base_url, path);
         debug!(?method, %url, "todoist request");
-        let mut builder =
-            self.http.request(method, &url).headers(self.auth_headers()?);
+        let mut builder = self
+            .http
+            .request(method, &url)
+            .headers(self.auth_headers()?);
         if let Some(b) = body {
             builder = builder.json(b);
         }

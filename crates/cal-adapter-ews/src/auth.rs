@@ -26,8 +26,7 @@ pub fn basic_auth_header(creds: &BasicCredentials) -> EwsResult<HeaderMap> {
     let mut headers = HeaderMap::new();
     headers.insert(
         AUTHORIZATION,
-        HeaderValue::from_str(&value)
-            .map_err(|e| EwsError::Config(format!("auth header: {e}")))?,
+        HeaderValue::from_str(&value).map_err(|e| EwsError::Config(format!("auth header: {e}")))?,
     );
     Ok(headers)
 }
@@ -43,11 +42,7 @@ mod tests {
             password: "hunter2".into(),
         };
         let headers = basic_auth_header(&creds).unwrap();
-        let value = headers
-            .get(AUTHORIZATION)
-            .unwrap()
-            .to_str()
-            .unwrap();
+        let value = headers.get(AUTHORIZATION).unwrap().to_str().unwrap();
         assert!(value.starts_with("Basic "));
         // alice@example.com:hunter2 -> YWxpY2VAZXhhbXBsZS5jb206aHVudGVyMg==
         assert_eq!(value, "Basic YWxpY2VAZXhhbXBsZS5jb206aHVudGVyMg==");

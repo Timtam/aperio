@@ -21,8 +21,8 @@ use url::Url;
 use crate::auth::{self, TokenSet, GOOGLE_TOKEN_URL};
 use crate::error::{GoogleError, GoogleResult};
 use crate::mapping::{
-    event_to_body, map_calendar, map_event, new_event_to_body,
-    CalendarListResponse, EventEntry, EventListResponse,
+    event_to_body, map_calendar, map_event, new_event_to_body, CalendarListResponse, EventEntry,
+    EventListResponse,
 };
 
 const API_BASE: &str = "https://www.googleapis.com/calendar/v3";
@@ -69,15 +69,10 @@ impl ApiState {
     /// the retry doesn't accidentally reuse a stale URL when a
     /// caller embeds the access token in the URL itself (we don't,
     /// but defensive).
-    pub async fn get_json<T: DeserializeOwned>(
-        &self,
-        path_and_query: &str,
-    ) -> GoogleResult<T> {
+    pub async fn get_json<T: DeserializeOwned>(&self, path_and_query: &str) -> GoogleResult<T> {
         let url = self.build_url(path_and_query)?;
         let response = self
-            .send_with_refresh(|access| {
-                self.http.get(url.clone()).bearer_auth(access)
-            })
+            .send_with_refresh(|access| self.http.get(url.clone()).bearer_auth(access))
             .await?;
         decode_json(response).await
     }
@@ -128,9 +123,7 @@ impl ApiState {
     pub async fn delete_request(&self, path: &str) -> GoogleResult<()> {
         let url = self.build_url(path)?;
         let response = self
-            .send_with_refresh(|access| {
-                self.http.delete(url.clone()).bearer_auth(access)
-            })
+            .send_with_refresh(|access| self.http.delete(url.clone()).bearer_auth(access))
             .await?;
         let status = response.status();
         if status.is_success() {
@@ -228,8 +221,7 @@ pub(crate) async fn decode_json<T: DeserializeOwned>(
             message: text.chars().take(300).collect(),
         });
     }
-    serde_json::from_str(&text)
-        .map_err(|e| GoogleError::Protocol(format!("json: {e}: {text}")))
+    serde_json::from_str(&text).map_err(|e| GoogleError::Protocol(format!("json: {e}: {text}")))
 }
 
 // ── Absolute-URL helpers shared across modules ─────────────────────────
@@ -454,18 +446,13 @@ pub async fn update_event(state: &ApiState, ev: &Event) -> GoogleResult<Event> {
     let path = format!("/calendars/{cal_enc}/events/{ev_enc}");
     let body = event_to_body(ev);
     let entry: EventEntry = state.patch_json(&path, &body).await?;
-    map_event(entry, &ev.calendar_id)?.ok_or_else(|| {
-        GoogleError::Protocol("update returned cancelled event".into())
-    })
+    map_event(entry, &ev.calendar_id)?
+        .ok_or_else(|| GoogleError::Protocol("update returned cancelled event".into()))
 }
 
 /// `DELETE /calendars/{id}/events/{eventId}` — delete an entire
 /// event row (or a single non-recurring instance).
-pub async fn delete_event(
-    state: &ApiState,
-    calendar_id: &str,
-    event_id: &str,
-) -> GoogleResult<()> {
+pub async fn delete_event(state: &ApiState, calendar_id: &str, event_id: &str) -> GoogleResult<()> {
     let cal_enc = urlencoding(calendar_id);
     let ev_enc = urlencoding(event_id);
     let path = format!("/calendars/{cal_enc}/events/{ev_enc}");
@@ -486,16 +473,16 @@ pub async fn add_event_exdate(
     let path = format!("/calendars/{cal_enc}/events/{ev_enc}");
     let entry: EventEntry = state.get_json(&path).await?;
     let mut master = map_event(entry, calendar_id)?.ok_or_else(|| {
-        GoogleError::Protocol(
-            "cannot add EXDATE to a cancelled / missing master".into(),
-        )
+        GoogleError::Protocol("cannot add EXDATE to a cancelled / missing master".into())
     })?;
     // Append the new exception, keeping any existing ones. The
     // RRULE itself is unchanged.
-    let mut rec = master.recurrence.unwrap_or_else(|| cal_core::EventRecurrence {
-        rrule: String::new(),
-        exceptions: Vec::new(),
-    });
+    let mut rec = master
+        .recurrence
+        .unwrap_or_else(|| cal_core::EventRecurrence {
+            rrule: String::new(),
+            exceptions: Vec::new(),
+        });
     rec.exceptions.push(occurrence);
     master.recurrence = Some(rec);
     let body = event_to_body(&master);
@@ -624,13 +611,9 @@ mod tests {
         // Refresh-token POST → mint a new access token.
         let refresh = server
             .mock("POST", "/token")
-            .match_body(mockito::Matcher::Regex(
-                "grant_type=refresh_token".into(),
-            ))
+            .match_body(mockito::Matcher::Regex("grant_type=refresh_token".into()))
             .with_status(200)
-            .with_body(
-                r#"{"access_token":"new-token","expires_in":3600,"token_type":"Bearer"}"#,
-            )
+            .with_body(r#"{"access_token":"new-token","expires_in":3600,"token_type":"Bearer"}"#)
             .expect(1)
             .create_async()
             .await;
@@ -685,7 +668,9 @@ mod tests {
             description: None,
             location: None,
             start: chrono::Utc.with_ymd_and_hms(2026, 5, 25, 10, 0, 0).unwrap(),
-            end: chrono::Utc.with_ymd_and_hms(2026, 5, 25, 10, 30, 0).unwrap(),
+            end: chrono::Utc
+                .with_ymd_and_hms(2026, 5, 25, 10, 30, 0)
+                .unwrap(),
             all_day: false,
             recurrence: None,
             color_label: None,
@@ -716,9 +701,7 @@ mod tests {
         let mut server = mockito::Server::new_async().await;
         let m = server
             .mock("PATCH", "/calendars/primary")
-            .match_body(mockito::Matcher::Regex(
-                "\"summary\":\"Arbeit\"".into(),
-            ))
+            .match_body(mockito::Matcher::Regex("\"summary\":\"Arbeit\"".into()))
             .with_status(200)
             .with_body(r##"{"id":"primary","summary":"Arbeit"}"##)
             .create_async()
@@ -753,18 +736,22 @@ mod tests {
                 "EXDATE;VALUE=DATE-TIME:20260601T180000Z".into(),
             ))
             .with_status(200)
-            .with_body(r##"{
+            .with_body(
+                r##"{
                 "id": "master-1",
                 "summary": "Weekly",
                 "start": { "dateTime": "2026-05-25T18:00:00Z" },
                 "end":   { "dateTime": "2026-05-25T19:00:00Z" }
-            }"##)
+            }"##,
+            )
             .create_async()
             .await;
 
         let state = fixture_state(&server.url());
         let occ = chrono::Utc.with_ymd_and_hms(2026, 6, 1, 18, 0, 0).unwrap();
-        add_event_exdate(&state, "primary", "master-1", occ).await.unwrap();
+        add_event_exdate(&state, "primary", "master-1", occ)
+            .await
+            .unwrap();
         get_mock.assert_async().await;
         patch_mock.assert_async().await;
     }

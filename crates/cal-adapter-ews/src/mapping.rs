@@ -393,8 +393,7 @@ pub fn parse_find_item_response(xml: &str) -> EwsResult<Vec<ParsedItem>> {
                         for a in e.attributes().flatten() {
                             let key = a.key.as_ref();
                             if key.eq_ignore_ascii_case(b"Id") {
-                                current.item_id =
-                                    String::from_utf8_lossy(&a.value).into_owned();
+                                current.item_id = String::from_utf8_lossy(&a.value).into_owned();
                             } else if key.eq_ignore_ascii_case(b"ChangeKey") {
                                 current.change_key =
                                     Some(String::from_utf8_lossy(&a.value).into_owned());
@@ -526,9 +525,7 @@ pub struct SyncFolderItemsResult {
 /// across read paths. (The duplication is intentional — extracting
 /// a shared walker would couple the two responses' state machines
 /// without removing meaningful logic.)
-pub fn parse_sync_folder_items_response(
-    xml: &str,
-) -> EwsResult<SyncFolderItemsResult> {
+pub fn parse_sync_folder_items_response(xml: &str) -> EwsResult<SyncFolderItemsResult> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
     let mut buf = Vec::new();
@@ -593,8 +590,7 @@ pub fn parse_sync_folder_items_response(
                     b"itemid" if inside_change_kind == Some("delete") => {
                         for a in e.attributes().flatten() {
                             if a.key.as_ref().eq_ignore_ascii_case(b"Id") {
-                                current.item_id =
-                                    String::from_utf8_lossy(&a.value).into_owned();
+                                current.item_id = String::from_utf8_lossy(&a.value).into_owned();
                             }
                         }
                     }
@@ -610,8 +606,7 @@ pub fn parse_sync_folder_items_response(
                         for a in e.attributes().flatten() {
                             let key = a.key.as_ref();
                             if key.eq_ignore_ascii_case(b"Id") {
-                                current.item_id =
-                                    String::from_utf8_lossy(&a.value).into_owned();
+                                current.item_id = String::from_utf8_lossy(&a.value).into_owned();
                             } else if key.eq_ignore_ascii_case(b"ChangeKey") {
                                 current.change_key =
                                     Some(String::from_utf8_lossy(&a.value).into_owned());
@@ -639,8 +634,7 @@ pub fn parse_sync_folder_items_response(
                     }
                     b"occurrence" if inside_modified_occurrences => {
                         inside_modified_occurrence = true;
-                        current_override =
-                            ModifiedOccurrenceBuilder::default();
+                        current_override = ModifiedOccurrenceBuilder::default();
                     }
                     // ItemId nested inside <t:Occurrence> carries the
                     // override's address. Capture it BEFORE the
@@ -739,25 +733,20 @@ pub fn parse_sync_folder_items_response(
                     }
                     b"occurrence" if inside_modified_occurrence => {
                         inside_modified_occurrence = false;
-                        if let Some(o) = std::mem::take(&mut current_override).finish()
-                        {
+                        if let Some(o) = std::mem::take(&mut current_override).finish() {
                             current.modified_occurrences.push(o);
                         }
                     }
                     b"create" => {
                         if !current.item_id.is_empty() {
-                            changes.push(SyncChange::Create(std::mem::take(
-                                &mut current,
-                            )));
+                            changes.push(SyncChange::Create(std::mem::take(&mut current)));
                         }
                         inside_change_kind = None;
                         inside_item = false;
                     }
                     b"update" => {
                         if !current.item_id.is_empty() {
-                            changes.push(SyncChange::Update(std::mem::take(
-                                &mut current,
-                            )));
+                            changes.push(SyncChange::Update(std::mem::take(&mut current)));
                         }
                         inside_change_kind = None;
                         inside_item = false;
@@ -877,7 +866,9 @@ pub fn parse_sync_folder_items_response(
 /// `YYYY-MM-DDTHH:MM:SS.fffZ`). Both parse cleanly through
 /// `DateTime::parse_from_rfc3339`.
 fn parse_ews_datetime(s: &str) -> Option<DateTime<Utc>> {
-    DateTime::parse_from_rfc3339(s).ok().map(|d| d.with_timezone(&Utc))
+    DateTime::parse_from_rfc3339(s)
+        .ok()
+        .map(|d| d.with_timezone(&Utc))
 }
 
 /// Translate a parsed item into a cal-core `Event`. The calendar id is
@@ -905,12 +896,12 @@ fn parse_ews_datetime(s: &str) -> Option<DateTime<Utc>> {
 /// sync-state cache, an EWS-Recurrence → RRULE parser (inverse of
 /// `rrule_to_ews_recurrence`), and exception/EXDATE handling.
 pub fn to_event(item: ParsedItem, calendar_id: &str) -> EwsResult<Event> {
-    let start = item.start.ok_or_else(|| {
-        EwsError::Protocol("CalendarItem missing Start".into())
-    })?;
-    let end = item.end.ok_or_else(|| {
-        EwsError::Protocol("CalendarItem missing End".into())
-    })?;
+    let start = item
+        .start
+        .ok_or_else(|| EwsError::Protocol("CalendarItem missing Start".into()))?;
+    let end = item
+        .end
+        .ok_or_else(|| EwsError::Protocol("CalendarItem missing End".into()))?;
 
     // Prefix the id with the CalendarItemType so writes know how to
     // route — series-wide ops resolve the master from an Occurrence
@@ -953,11 +944,9 @@ pub fn to_event(item: ParsedItem, calendar_id: &str) -> EwsResult<Event> {
         // We add the original slot to the EXDATE list so the
         // expander doesn't double-render — once at the original
         // (wrong) time and once at the moved time.
-        let mut exceptions: Vec<DateTime<Utc>> =
-            Vec::with_capacity(
-                item.deleted_occurrence_starts.len()
-                    + item.modified_occurrences.len(),
-            );
+        let mut exceptions: Vec<DateTime<Utc>> = Vec::with_capacity(
+            item.deleted_occurrence_starts.len() + item.modified_occurrences.len(),
+        );
         exceptions.extend_from_slice(&item.deleted_occurrence_starts);
         for o in &item.modified_occurrences {
             exceptions.push(o.original_start);
@@ -1050,11 +1039,7 @@ pub fn new_event_to_calendar_item_xml(event: &NewEvent) -> EwsResult<String> {
     if event.all_day {
         out.push_str("          <t:IsAllDayEvent>true</t:IsAllDayEvent>\n");
     }
-    if let Some(location) = event
-        .location
-        .as_deref()
-        .filter(|s| !s.is_empty())
-    {
+    if let Some(location) = event.location.as_deref().filter(|s| !s.is_empty()) {
         out.push_str(&format!(
             "          <t:Location>{}</t:Location>\n",
             escape_xml(location)
@@ -1098,7 +1083,12 @@ pub fn event_to_update_field_xml(event: &Event) -> EwsResult<(String, String)> {
     }
     push_set_datetime(&mut set, "calendar:Start", "Start", event.start);
     push_set_datetime(&mut set, "calendar:End", "End", event.end);
-    push_set_bool(&mut set, "calendar:IsAllDayEvent", "IsAllDayEvent", event.all_day);
+    push_set_bool(
+        &mut set,
+        "calendar:IsAllDayEvent",
+        "IsAllDayEvent",
+        event.all_day,
+    );
 
     let reminder_minutes = first_relative_reminder_minutes(&event.reminders);
     push_set_bool(
@@ -1208,14 +1198,12 @@ fn delete_item_field_xml(field_uri: &str) -> String {
 /// Translate an RFC-5545 RRULE into an EWS `<t:Recurrence>` block.
 /// `start` is the master event's start date, used as the
 /// recurrence's StartDate (EWS requires it on every range type).
-pub fn rrule_to_ews_recurrence(
-    rrule: &str,
-    start: DateTime<Utc>,
-) -> EwsResult<String> {
+pub fn rrule_to_ews_recurrence(rrule: &str, start: DateTime<Utc>) -> EwsResult<String> {
     let parts = parse_rrule(rrule);
-    let freq = parts.get("FREQ").cloned().ok_or_else(|| {
-        EwsError::Protocol(format!("RRULE missing FREQ: {rrule}"))
-    })?;
+    let freq = parts
+        .get("FREQ")
+        .cloned()
+        .ok_or_else(|| EwsError::Protocol(format!("RRULE missing FREQ: {rrule}")))?;
     let interval = parts
         .get("INTERVAL")
         .and_then(|v| v.parse::<u32>().ok())
@@ -1223,9 +1211,9 @@ pub fn rrule_to_ews_recurrence(
         .max(1);
 
     let pattern_xml = match freq.as_str() {
-        "DAILY" => format!(
-            "<t:DailyRecurrence><t:Interval>{interval}</t:Interval></t:DailyRecurrence>",
-        ),
+        "DAILY" => {
+            format!("<t:DailyRecurrence><t:Interval>{interval}</t:Interval></t:DailyRecurrence>",)
+        }
         "WEEKLY" => {
             let days = parts
                 .get("BYDAY")
@@ -1274,9 +1262,7 @@ pub fn rrule_to_ews_recurrence(
                 .and_then(|v| v.parse::<u32>().ok())
                 .unwrap_or_else(|| start.month());
             let month_name = month_number_to_name(month_num).ok_or_else(|| {
-                EwsError::Protocol(format!(
-                    "RRULE BYMONTH out of range: {month_num}"
-                ))
+                EwsError::Protocol(format!("RRULE BYMONTH out of range: {month_num}"))
             })?;
             format!(
                 "<t:AbsoluteYearlyRecurrence><t:DayOfMonth>{day}</t:DayOfMonth><t:Month>{month_name}</t:Month></t:AbsoluteYearlyRecurrence>",
@@ -1291,23 +1277,20 @@ pub fn rrule_to_ews_recurrence(
 
     let start_date = start.format("%Y-%m-%d").to_string();
     let range_xml = if let Some(count_str) = parts.get("COUNT") {
-        let count = count_str.parse::<u32>().map_err(|_| {
-            EwsError::Protocol(format!("RRULE COUNT not numeric: {count_str}"))
-        })?;
+        let count = count_str
+            .parse::<u32>()
+            .map_err(|_| EwsError::Protocol(format!("RRULE COUNT not numeric: {count_str}")))?;
         format!(
             "<t:NumberedRecurrence><t:StartDate>{start_date}</t:StartDate><t:NumberOfOccurrences>{count}</t:NumberOfOccurrences></t:NumberedRecurrence>",
         )
     } else if let Some(until_str) = parts.get("UNTIL") {
-        let end_date = parse_until_date(until_str).ok_or_else(|| {
-            EwsError::Protocol(format!("RRULE UNTIL not parseable: {until_str}"))
-        })?;
+        let end_date = parse_until_date(until_str)
+            .ok_or_else(|| EwsError::Protocol(format!("RRULE UNTIL not parseable: {until_str}")))?;
         format!(
             "<t:EndDateRecurrence><t:StartDate>{start_date}</t:StartDate><t:EndDate>{end_date}</t:EndDate></t:EndDateRecurrence>",
         )
     } else {
-        format!(
-            "<t:NoEndRecurrence><t:StartDate>{start_date}</t:StartDate></t:NoEndRecurrence>",
-        )
+        format!("<t:NoEndRecurrence><t:StartDate>{start_date}</t:StartDate></t:NoEndRecurrence>",)
     };
 
     Ok(format!(
@@ -1343,7 +1326,8 @@ fn rrule_byday_to_ews_days(byday: &str) -> EwsResult<String> {
         // weekly branch above doesn't accept those, but the early
         // bail lives in the caller — here we just strip the ordinal
         // off so a stray prefix doesn't crash the day-name lookup.
-        let stripped: &str = tok.trim_start_matches(|c: char| c.is_ascii_digit() || c == '-' || c == '+');
+        let stripped: &str =
+            tok.trim_start_matches(|c: char| c.is_ascii_digit() || c == '-' || c == '+');
         let name = match stripped {
             "MO" => "Monday",
             "TU" => "Tuesday",
@@ -1455,10 +1439,21 @@ pub struct EwsRecurrence {
 /// Pattern half of an EWS recurrence (the "how often" part).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EwsRecurrencePattern {
-    Daily { interval: u32 },
-    Weekly { interval: u32, days_of_week: Vec<EwsDay> },
-    AbsoluteMonthly { interval: u32, day_of_month: u8 },
-    AbsoluteYearly { day_of_month: u8, month: EwsMonth },
+    Daily {
+        interval: u32,
+    },
+    Weekly {
+        interval: u32,
+        days_of_week: Vec<EwsDay>,
+    },
+    AbsoluteMonthly {
+        interval: u32,
+        day_of_month: u8,
+    },
+    AbsoluteYearly {
+        day_of_month: u8,
+        month: EwsMonth,
+    },
 }
 
 /// Range half (the "when does it stop" part).
@@ -1617,8 +1612,7 @@ impl EwsRecurrence {
             EwsRecurrenceRange::EndDate { end } => {
                 // EWS sends EndDate as YYYY-MM-DD; RRULE UNTIL wants
                 // YYYYMMDD (date-only form is legal per RFC 5545).
-                let compact: String =
-                    end.chars().filter(|c| *c != '-').collect();
+                let compact: String = end.chars().filter(|c| *c != '-').collect();
                 parts.push(format!("UNTIL={compact}"));
             }
         }
@@ -1766,9 +1760,7 @@ impl RecurrenceWalker {
                 }
             }
             Some("days_of_week") => {
-                if let Some(PatternBuilder::Weekly { days_of_week, .. }) =
-                    self.pattern.as_mut()
-                {
+                if let Some(PatternBuilder::Weekly { days_of_week, .. }) = self.pattern.as_mut() {
                     for tok in s.split_whitespace() {
                         if let Some(day) = EwsDay::from_wire(tok) {
                             days_of_week.push(day);
@@ -1787,16 +1779,12 @@ impl RecurrenceWalker {
                 }
             }
             Some("month") => {
-                if let Some(PatternBuilder::AbsoluteYearly { month, .. }) =
-                    self.pattern.as_mut()
-                {
+                if let Some(PatternBuilder::AbsoluteYearly { month, .. }) = self.pattern.as_mut() {
                     *month = EwsMonth::from_wire(s);
                 }
             }
             Some("number_of_occurrences") => {
-                if let Some(RangeBuilder::Numbered { occurrences }) =
-                    self.range.as_mut()
-                {
+                if let Some(RangeBuilder::Numbered { occurrences }) = self.range.as_mut() {
                     *occurrences = s.parse::<u32>().unwrap_or(0);
                 }
             }
@@ -1824,33 +1812,38 @@ impl RecurrenceWalker {
     pub(crate) fn finish(self) -> EwsResult<EwsRecurrence> {
         let pattern = self
             .pattern
-            .ok_or_else(|| {
-                EwsError::Protocol("Recurrence missing pattern element".into())
-            })?
+            .ok_or_else(|| EwsError::Protocol("Recurrence missing pattern element".into()))?
             .finish()?;
         let range = self
             .range
-            .ok_or_else(|| {
-                EwsError::Protocol("Recurrence missing range element".into())
-            })?
+            .ok_or_else(|| EwsError::Protocol("Recurrence missing range element".into()))?
             .finish()?;
         Ok(EwsRecurrence { pattern, range })
     }
 }
 
 enum PatternBuilder {
-    Daily { interval: u32 },
-    Weekly { interval: u32, days_of_week: Vec<EwsDay> },
-    AbsoluteMonthly { interval: u32, day_of_month: u8 },
-    AbsoluteYearly { day_of_month: u8, month: Option<EwsMonth> },
+    Daily {
+        interval: u32,
+    },
+    Weekly {
+        interval: u32,
+        days_of_week: Vec<EwsDay>,
+    },
+    AbsoluteMonthly {
+        interval: u32,
+        day_of_month: u8,
+    },
+    AbsoluteYearly {
+        day_of_month: u8,
+        month: Option<EwsMonth>,
+    },
 }
 
 impl PatternBuilder {
     fn finish(self) -> EwsResult<EwsRecurrencePattern> {
         match self {
-            Self::Daily { interval } => {
-                Ok(EwsRecurrencePattern::Daily { interval })
-            }
+            Self::Daily { interval } => Ok(EwsRecurrencePattern::Daily { interval }),
             Self::Weekly {
                 interval,
                 days_of_week,
@@ -1870,9 +1863,7 @@ impl PatternBuilder {
                 month,
             } => {
                 let month = month.ok_or_else(|| {
-                    EwsError::Protocol(
-                        "AbsoluteYearlyRecurrence missing Month".into(),
-                    )
+                    EwsError::Protocol("AbsoluteYearlyRecurrence missing Month".into())
                 })?;
                 Ok(EwsRecurrencePattern::AbsoluteYearly {
                     day_of_month,
@@ -2113,14 +2104,8 @@ mod tests {
         assert!(!it.is_recurring);
         assert!(it.reminder_is_set);
         assert_eq!(it.reminder_minutes_before_start, Some(10));
-        assert_eq!(
-            it.start.unwrap().to_rfc3339(),
-            "2026-05-20T08:00:00+00:00"
-        );
-        assert_eq!(
-            it.end.unwrap().to_rfc3339(),
-            "2026-05-20T08:30:00+00:00"
-        );
+        assert_eq!(it.start.unwrap().to_rfc3339(), "2026-05-20T08:00:00+00:00");
+        assert_eq!(it.end.unwrap().to_rfc3339(), "2026-05-20T08:30:00+00:00");
     }
 
     #[test]
@@ -2269,11 +2254,7 @@ mod tests {
     #[test]
     fn rrule_weekly_with_byday_translates_day_names() {
         let start: DateTime<Utc> = "2026-05-20T08:00:00Z".parse().unwrap();
-        let xml = rrule_to_ews_recurrence(
-            "FREQ=WEEKLY;BYDAY=MO,WE,FR",
-            start,
-        )
-        .unwrap();
+        let xml = rrule_to_ews_recurrence("FREQ=WEEKLY;BYDAY=MO,WE,FR", start).unwrap();
         assert!(xml.contains("<t:WeeklyRecurrence>"));
         assert!(xml.contains("<t:DaysOfWeek>Monday Wednesday Friday</t:DaysOfWeek>"));
     }
@@ -2281,8 +2262,7 @@ mod tests {
     #[test]
     fn rrule_monthly_with_bymonthday_translates_to_absolute_monthly() {
         let start: DateTime<Utc> = "2026-05-20T08:00:00Z".parse().unwrap();
-        let xml = rrule_to_ews_recurrence("FREQ=MONTHLY;BYMONTHDAY=15", start)
-            .unwrap();
+        let xml = rrule_to_ews_recurrence("FREQ=MONTHLY;BYMONTHDAY=15", start).unwrap();
         assert!(xml.contains("<t:AbsoluteMonthlyRecurrence>"));
         assert!(xml.contains("<t:DayOfMonth>15</t:DayOfMonth>"));
     }
@@ -2290,11 +2270,7 @@ mod tests {
     #[test]
     fn rrule_yearly_with_bymonth_translates_to_absolute_yearly() {
         let start: DateTime<Utc> = "2026-05-20T08:00:00Z".parse().unwrap();
-        let xml = rrule_to_ews_recurrence(
-            "FREQ=YEARLY;BYMONTH=3;BYMONTHDAY=15",
-            start,
-        )
-        .unwrap();
+        let xml = rrule_to_ews_recurrence("FREQ=YEARLY;BYMONTH=3;BYMONTHDAY=15", start).unwrap();
         assert!(xml.contains("<t:AbsoluteYearlyRecurrence>"));
         assert!(xml.contains("<t:Month>March</t:Month>"));
         assert!(xml.contains("<t:DayOfMonth>15</t:DayOfMonth>"));
@@ -2311,11 +2287,8 @@ mod tests {
     #[test]
     fn rrule_until_translates_to_end_date_recurrence() {
         let start: DateTime<Utc> = "2026-05-20T08:00:00Z".parse().unwrap();
-        let xml = rrule_to_ews_recurrence(
-            "FREQ=WEEKLY;BYDAY=TU;UNTIL=20260901T235959Z",
-            start,
-        )
-        .unwrap();
+        let xml =
+            rrule_to_ews_recurrence("FREQ=WEEKLY;BYDAY=TU;UNTIL=20260901T235959Z", start).unwrap();
         assert!(xml.contains("<t:EndDateRecurrence>"));
         assert!(xml.contains("<t:EndDate>2026-09-01</t:EndDate>"));
     }
@@ -2323,11 +2296,7 @@ mod tests {
     #[test]
     fn rrule_with_relative_monthly_rejected() {
         let start: DateTime<Utc> = "2026-05-20T08:00:00Z".parse().unwrap();
-        let err = rrule_to_ews_recurrence(
-            "FREQ=MONTHLY;BYDAY=2WE",
-            start,
-        )
-        .unwrap_err();
+        let err = rrule_to_ews_recurrence("FREQ=MONTHLY;BYDAY=2WE", start).unwrap_err();
         match err {
             EwsError::Protocol(m) => assert!(m.contains("relative monthly")),
             other => panic!("expected Protocol, got {other:?}"),
@@ -2432,8 +2401,14 @@ mod tests {
             modified_occurrences: Vec::new(),
         };
         assert_eq!(to_event(mk(Some("Single")), "FID").unwrap().id, "S:IID|ICK");
-        assert_eq!(to_event(mk(Some("Occurrence")), "FID").unwrap().id, "O:IID|ICK");
-        assert_eq!(to_event(mk(Some("Exception")), "FID").unwrap().id, "E:IID|ICK");
+        assert_eq!(
+            to_event(mk(Some("Occurrence")), "FID").unwrap().id,
+            "O:IID|ICK"
+        );
+        assert_eq!(
+            to_event(mk(Some("Exception")), "FID").unwrap().id,
+            "E:IID|ICK"
+        );
         assert_eq!(
             to_event(mk(Some("RecurringMaster")), "FID").unwrap().id,
             "M:IID|ICK",
@@ -2492,13 +2467,9 @@ mod tests {
     #[test]
     fn parse_daily_recurrence_roundtrips() {
         let start: DateTime<Utc> = "2026-05-20T08:00:00Z".parse().unwrap();
-        let xml = rrule_to_ews_recurrence("FREQ=DAILY;INTERVAL=3", start)
-            .unwrap();
+        let xml = rrule_to_ews_recurrence("FREQ=DAILY;INTERVAL=3", start).unwrap();
         let rec = parse_ews_recurrence(&xml).unwrap();
-        assert_eq!(
-            rec.pattern,
-            EwsRecurrencePattern::Daily { interval: 3 },
-        );
+        assert_eq!(rec.pattern, EwsRecurrencePattern::Daily { interval: 3 },);
         assert_eq!(rec.range, EwsRecurrenceRange::NoEnd);
         assert_rrule_equivalent(&rec.to_rrule(), "FREQ=DAILY;INTERVAL=3");
     }
@@ -2506,11 +2477,7 @@ mod tests {
     #[test]
     fn parse_weekly_with_byday_roundtrips() {
         let start: DateTime<Utc> = "2026-05-20T08:00:00Z".parse().unwrap();
-        let xml = rrule_to_ews_recurrence(
-            "FREQ=WEEKLY;BYDAY=MO,WE,FR;COUNT=10",
-            start,
-        )
-        .unwrap();
+        let xml = rrule_to_ews_recurrence("FREQ=WEEKLY;BYDAY=MO,WE,FR;COUNT=10", start).unwrap();
         let rec = parse_ews_recurrence(&xml).unwrap();
         assert_eq!(
             rec.pattern,
@@ -2519,24 +2486,16 @@ mod tests {
                 days_of_week: vec![EwsDay::Monday, EwsDay::Wednesday, EwsDay::Friday],
             },
         );
-        assert_eq!(
-            rec.range,
-            EwsRecurrenceRange::Numbered { occurrences: 10 },
-        );
-        assert_rrule_equivalent(
-            &rec.to_rrule(),
-            "FREQ=WEEKLY;BYDAY=MO,WE,FR;COUNT=10",
-        );
+        assert_eq!(rec.range, EwsRecurrenceRange::Numbered { occurrences: 10 },);
+        assert_rrule_equivalent(&rec.to_rrule(), "FREQ=WEEKLY;BYDAY=MO,WE,FR;COUNT=10");
     }
 
     #[test]
     fn parse_absolute_monthly_with_enddate_roundtrips() {
         let start: DateTime<Utc> = "2026-05-15T08:00:00Z".parse().unwrap();
-        let xml = rrule_to_ews_recurrence(
-            "FREQ=MONTHLY;BYMONTHDAY=15;UNTIL=20271231T000000Z",
-            start,
-        )
-        .unwrap();
+        let xml =
+            rrule_to_ews_recurrence("FREQ=MONTHLY;BYMONTHDAY=15;UNTIL=20271231T000000Z", start)
+                .unwrap();
         let rec = parse_ews_recurrence(&xml).unwrap();
         assert_eq!(
             rec.pattern,
@@ -2553,20 +2512,13 @@ mod tests {
         );
         // Writer drops the time portion in EndDate → reader's
         // UNTIL is date-only. Both are RFC 5545 legal.
-        assert_rrule_equivalent(
-            &rec.to_rrule(),
-            "FREQ=MONTHLY;BYMONTHDAY=15;UNTIL=20271231",
-        );
+        assert_rrule_equivalent(&rec.to_rrule(), "FREQ=MONTHLY;BYMONTHDAY=15;UNTIL=20271231");
     }
 
     #[test]
     fn parse_absolute_yearly_roundtrips() {
         let start: DateTime<Utc> = "2026-03-21T09:00:00Z".parse().unwrap();
-        let xml = rrule_to_ews_recurrence(
-            "FREQ=YEARLY;BYMONTH=3;BYMONTHDAY=21",
-            start,
-        )
-        .unwrap();
+        let xml = rrule_to_ews_recurrence("FREQ=YEARLY;BYMONTH=3;BYMONTHDAY=21", start).unwrap();
         let rec = parse_ews_recurrence(&xml).unwrap();
         assert_eq!(
             rec.pattern,
@@ -2576,10 +2528,7 @@ mod tests {
             },
         );
         assert_eq!(rec.range, EwsRecurrenceRange::NoEnd);
-        assert_rrule_equivalent(
-            &rec.to_rrule(),
-            "FREQ=YEARLY;BYMONTH=3;BYMONTHDAY=21",
-        );
+        assert_rrule_equivalent(&rec.to_rrule(), "FREQ=YEARLY;BYMONTH=3;BYMONTHDAY=21");
     }
 
     #[test]
@@ -2985,8 +2934,7 @@ mod tests {
             pattern: EwsRecurrencePattern::Daily { interval: 1 },
             range: EwsRecurrenceRange::Numbered { occurrences: 30 },
         });
-        item.deleted_occurrence_starts =
-            vec!["2026-01-05T08:00:00Z".parse().unwrap()];
+        item.deleted_occurrence_starts = vec!["2026-01-05T08:00:00Z".parse().unwrap()];
         item.modified_occurrences = vec![ModifiedOccurrence {
             item_id: "OCC".into(),
             change_key: None,
@@ -3024,8 +2972,7 @@ mod tests {
             pattern: EwsRecurrencePattern::Daily { interval: 1 },
             range: EwsRecurrenceRange::Numbered { occurrences: 20 },
         });
-        item.deleted_occurrence_starts =
-            vec!["2026-01-05T08:00:00Z".parse().unwrap()];
+        item.deleted_occurrence_starts = vec!["2026-01-05T08:00:00Z".parse().unwrap()];
 
         let ev = to_event(item, "cal-id").unwrap();
         let rec = ev.recurrence.expect("event carries recurrence");
@@ -3035,8 +2982,7 @@ mod tests {
 
     #[test]
     fn sync_folder_items_envelope_omits_sync_state_on_initial_sync() {
-        let body =
-            crate::soap::sync_folder_items("FOLDER-ID", None, None, 100);
+        let body = crate::soap::sync_folder_items("FOLDER-ID", None, None, 100);
         // Initial sync has no prior cookie — the SyncState
         // element MUST be absent (sending an empty one makes EWS
         // think the cookie is invalid).

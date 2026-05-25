@@ -102,10 +102,7 @@ pub async fn list_task_lists(client: &VikunjaClient) -> VikunjaResult<Vec<TaskLi
 
 /// `GET /projects/{id}/tasks`. Vikunja's "all tasks in this project"
 /// endpoint with the same page-walk logic as `list_task_lists`.
-pub async fn get_tasks(
-    client: &VikunjaClient,
-    list_id: &str,
-) -> VikunjaResult<Vec<Task>> {
+pub async fn get_tasks(client: &VikunjaClient, list_id: &str) -> VikunjaResult<Vec<Task>> {
     let project_id = parse_id(list_id, "task list id")?;
     let mut out = Vec::new();
     let mut page: u32 = 1;
@@ -155,10 +152,7 @@ pub async fn create_task(
 /// `POST /tasks/{id}`. Vikunja accepts a partial body and returns
 /// the merged result. We send every user-visible field so the
 /// server's view matches the local one without diffing logic.
-pub async fn update_task(
-    client: &VikunjaClient,
-    task: &Task,
-) -> VikunjaResult<Task> {
+pub async fn update_task(client: &VikunjaClient, task: &Task) -> VikunjaResult<Task> {
     let task_id = parse_id(&task.id, "task id")?;
     let path = format!("/tasks/{task_id}");
     let body = task_to_body(task);
@@ -416,10 +410,7 @@ fn parse_vikunja_datetime(raw: &str) -> Option<DateTime<Utc>> {
 /// entirely. Returning the `0001-01-01` sentinel is the alternative
 /// — same wire effect — but omitting the field is cleaner when the
 /// API contract supports it (Vikunja does).
-fn combine_date_time(
-    date: Option<NaiveDate>,
-    time: Option<NaiveTime>,
-) -> Option<String> {
+fn combine_date_time(date: Option<NaiveDate>, time: Option<NaiveTime>) -> Option<String> {
     let d = date?;
     let t = time.unwrap_or_else(|| NaiveTime::from_hms_opt(0, 0, 0).unwrap());
     let naive = d.and_time(t);
@@ -521,10 +512,7 @@ mod tests {
         });
         assert_eq!(list.id, "42");
         assert_eq!(list.name, "Work");
-        assert_eq!(
-            list.color.as_ref().map(|c| c.hex.as_str()),
-            Some("#ff8800"),
-        );
+        assert_eq!(list.color.as_ref().map(|c| c.hex.as_str()), Some("#ff8800"),);
     }
 
     #[test]

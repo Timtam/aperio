@@ -137,8 +137,7 @@ impl LocalAdapter {
             );
             binds.push(Box::new(LIMIT as i64));
             let mut stmt = conn.prepare(&sql).map_err(map_sql_err)?;
-            let bind_refs: Vec<&dyn rusqlite::ToSql> =
-                binds.iter().map(|b| b.as_ref()).collect();
+            let bind_refs: Vec<&dyn rusqlite::ToSql> = binds.iter().map(|b| b.as_ref()).collect();
             let rows = stmt
                 .query_map(rusqlite::params_from_iter(bind_refs), |row| {
                     Ok(row_to_event(row))
@@ -169,16 +168,12 @@ impl LocalAdapter {
             // are excluded when a range is active — they can't be
             // shown as "in this period".
             if let Some(since) = &filters.since {
-                clauses.push(
-                    " AND COALESCE(t.scheduled_date, t.deadline_date) >= ?".into(),
-                );
+                clauses.push(" AND COALESCE(t.scheduled_date, t.deadline_date) >= ?".into());
                 let date_part = iso_date_part(since);
                 binds.push(Box::new(date_part));
             }
             if let Some(until) = &filters.until {
-                clauses.push(
-                    " AND COALESCE(t.scheduled_date, t.deadline_date) <= ?".into(),
-                );
+                clauses.push(" AND COALESCE(t.scheduled_date, t.deadline_date) <= ?".into());
                 let date_part = iso_date_part(until);
                 binds.push(Box::new(date_part));
             }
@@ -203,8 +198,7 @@ impl LocalAdapter {
             );
             binds.push(Box::new(LIMIT as i64));
             let mut stmt = conn.prepare(&sql).map_err(map_sql_err)?;
-            let bind_refs: Vec<&dyn rusqlite::ToSql> =
-                binds.iter().map(|b| b.as_ref()).collect();
+            let bind_refs: Vec<&dyn rusqlite::ToSql> = binds.iter().map(|b| b.as_ref()).collect();
             let rows = stmt
                 .query_map(rusqlite::params_from_iter(bind_refs), |row| {
                     Ok(row_to_task(row))

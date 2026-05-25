@@ -29,10 +29,7 @@ const CONTENT_HOST: &str = "https://content.dropboxapi.com";
 /// `/2/check/user` — Dropbox's official "auth probe" endpoint.
 /// Returns Ok on 200 + matching `result` body; surfaces 401 as
 /// `DropboxError::Auth`.
-pub async fn check_user(
-    http: &Client,
-    access_token: &str,
-) -> DropboxResult<()> {
+pub async fn check_user(http: &Client, access_token: &str) -> DropboxResult<()> {
     let response = http
         .post(format!("{API_HOST}/2/check/user"))
         .bearer_auth(access_token)
@@ -47,11 +44,7 @@ pub async fn check_user(
 /// `path/conflict/folder` (already exists) is folded into Ok
 /// so callers can call it unconditionally on every sync round
 /// without an exists-probe first.
-pub async fn create_folder(
-    http: &Client,
-    access_token: &str,
-    path: &str,
-) -> DropboxResult<()> {
+pub async fn create_folder(http: &Client, access_token: &str, path: &str) -> DropboxResult<()> {
     // Dropbox refuses MKD on the literal root with
     // `path/cant_move_folder_into_itself`; skip the call when
     // the user wants the root folder.
@@ -76,8 +69,7 @@ pub async fn create_folder(
         // map that to Ok since the caller's intent (make sure
         // the folder is there) is already satisfied.
         Err(DropboxError::Protocol(msg))
-            if msg.contains("path/conflict")
-                || msg.contains("already exists") =>
+            if msg.contains("path/conflict") || msg.contains("already exists") =>
         {
             Ok(())
         }
@@ -154,11 +146,7 @@ pub async fn download(
 /// `POST /2/files/delete_v2`. Idempotent semantics handled
 /// upstream — the SyncAdapter wrapper folds `path/not_found`
 /// into success.
-pub async fn delete(
-    http: &Client,
-    access_token: &str,
-    path: &str,
-) -> DropboxResult<()> {
+pub async fn delete(http: &Client, access_token: &str, path: &str) -> DropboxResult<()> {
     let body = json!({ "path": path });
     let response = http
         .post(format!("{API_HOST}/2/files/delete_v2"))
@@ -217,13 +205,7 @@ pub async fn list_folder(
     }
     while current.has_more {
         let body = json!({ "cursor": current.cursor }).to_string();
-        current = post_rpc_json(
-            http,
-            access_token,
-            "/2/files/list_folder/continue",
-            body,
-        )
-        .await?;
+        current = post_rpc_json(http, access_token, "/2/files/list_folder/continue", body).await?;
         for entry in &current.entries {
             if entry.tag == "file" {
                 names.push(entry.name.clone());
@@ -272,10 +254,7 @@ async fn post_rpc_json<T: for<'de> Deserialize<'de>>(
 /// Drop the body, just check the response succeeded. Used by
 /// endpoints whose successful result we don't care about
 /// (upload, create_folder_v2, delete_v2).
-async fn rpc_no_body(
-    response: reqwest::Response,
-    label: &str,
-) -> DropboxResult<()> {
+async fn rpc_no_body(response: reqwest::Response, label: &str) -> DropboxResult<()> {
     let status = response.status();
     if status.is_success() {
         // Drain the body so the connection can be reused;

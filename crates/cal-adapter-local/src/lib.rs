@@ -152,19 +152,14 @@ pub mod test_support {
     const SCHEMA_V4: &str =
         include_str!("../../../src-tauri/src/db/sql/0004_container_overrides.sql");
     const SCHEMA_V5: &str = include_str!("../../../src-tauri/src/db/sql/0005_user_prefs.sql");
-    const SCHEMA_V6: &str =
-        include_str!("../../../src-tauri/src/db/sql/0006_task_time_fields.sql");
+    const SCHEMA_V6: &str = include_str!("../../../src-tauri/src/db/sql/0006_task_time_fields.sql");
     const SCHEMA_V7: &str = include_str!("../../../src-tauri/src/db/sql/0007_contacts.sql");
-    const SCHEMA_V8: &str =
-        include_str!("../../../src-tauri/src/db/sql/0008_contacts_fts.sql");
-    const SCHEMA_V9: &str =
-        include_str!("../../../src-tauri/src/db/sql/0009_contact_members.sql");
-    const SCHEMA_V10: &str =
-        include_str!("../../../src-tauri/src/db/sql/0010_contact_photos.sql");
+    const SCHEMA_V8: &str = include_str!("../../../src-tauri/src/db/sql/0008_contacts_fts.sql");
+    const SCHEMA_V9: &str = include_str!("../../../src-tauri/src/db/sql/0009_contact_members.sql");
+    const SCHEMA_V10: &str = include_str!("../../../src-tauri/src/db/sql/0010_contact_photos.sql");
     const SCHEMA_V11: &str =
         include_str!("../../../src-tauri/src/db/sql/0011_contact_addresses.sql");
     const SCHEMA_V12: &str =
         include_str!("../../../src-tauri/src/db/sql/0012_sync_applied_events.sql");
-    const SCHEMA_V13: &str =
-        include_str!("../../../src-tauri/src/db/sql/0013_sync_conflicts.sql");
+    const SCHEMA_V13: &str = include_str!("../../../src-tauri/src/db/sql/0013_sync_conflicts.sql");
 }

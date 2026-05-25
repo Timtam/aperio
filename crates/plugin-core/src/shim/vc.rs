@@ -96,17 +96,13 @@ fn status_to_vc_error(outcome: CallOutcome) -> VcError {
         PLUGIN_CALL_ERR_UNSUPPORTED => {
             VcError::Unsupported(format!("plugin missing method: {msg}"))
         }
-        PLUGIN_CALL_ERR_INVALID => {
-            VcError::InvalidInput(format!("plugin rejected args: {msg}"))
-        }
+        PLUGIN_CALL_ERR_INVALID => VcError::InvalidInput(format!("plugin rejected args: {msg}")),
         PLUGIN_CALL_ERR_AUTH => VcError::Authentication(msg),
         PLUGIN_CALL_ERR_FORBIDDEN => VcError::Forbidden(msg),
         PLUGIN_CALL_ERR_NETWORK => VcError::Network(msg),
         PLUGIN_CALL_ERR_NOT_FOUND => VcError::NotFound(msg),
         PLUGIN_CALL_ERR_PROTOCOL => VcError::Protocol(msg),
-        PLUGIN_CALL_ERR_CONFLICT => {
-            VcError::Protocol(format!("conflict: {msg}"))
-        }
+        PLUGIN_CALL_ERR_CONFLICT => VcError::Protocol(format!("conflict: {msg}")),
         PLUGIN_CALL_ERR_IO => VcError::Network(format!("io: {msg}")),
         PLUGIN_CALL_ERR_INTERNAL => VcError::Internal(msg),
         other => VcError::Internal(format!("plugin status {other}: {msg}")),
@@ -122,14 +118,11 @@ where
     T: serde::de::DeserializeOwned,
     A: Serialize,
 {
-    let bytes = encode_args(args).map_err(|e| VcError::Internal(format!(
-        "encode args: {e}"
-    )))?;
+    let bytes = encode_args(args).map_err(|e| VcError::Internal(format!("encode args: {e}")))?;
     let outcome = call_method(method, instance_addr, bytes).await;
     if outcome.is_ok() {
-        decode_payload(&outcome.bytes).map_err(|e| VcError::Protocol(format!(
-            "decode plugin response: {e}"
-        )))
+        decode_payload(&outcome.bytes)
+            .map_err(|e| VcError::Protocol(format!("decode plugin response: {e}")))
     } else {
         Err(status_to_vc_error(outcome))
     }
@@ -140,9 +133,7 @@ async fn call_for_unit<A: Serialize>(
     instance_addr: usize,
     args: &A,
 ) -> VcResult<()> {
-    let bytes = encode_args(args).map_err(|e| VcError::Internal(format!(
-        "encode args: {e}"
-    )))?;
+    let bytes = encode_args(args).map_err(|e| VcError::Internal(format!("encode args: {e}")))?;
     let outcome = call_method(method, instance_addr, bytes).await;
     if outcome.is_ok() {
         Ok(())

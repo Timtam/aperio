@@ -68,10 +68,7 @@ pub async fn list_task_lists(client: &TodoistClient) -> TodoistResult<Vec<TaskLi
 /// `/tasks/completed/by_due_date` Sync-API surface; surfacing them
 /// here is a follow-up if anyone misses them in the Aperio
 /// "completed today" view.
-pub async fn get_tasks(
-    client: &TodoistClient,
-    list_id: &str,
-) -> TodoistResult<Vec<Task>> {
+pub async fn get_tasks(client: &TodoistClient, list_id: &str) -> TodoistResult<Vec<Task>> {
     let encoded = urlencoding(list_id);
     let path = format!("/tasks?project_id={encoded}");
     let entries: Vec<TaskEntry> = client.get_json(&path).await?;
@@ -107,13 +104,12 @@ pub async fn create_task(
 /// `is_completed` flag in line with the desired status. Both API
 /// calls are idempotent — a `/close` against an already-completed
 /// task is a 204 no-op.
-pub async fn update_task(
-    client: &TodoistClient,
-    task: &Task,
-) -> TodoistResult<Task> {
+pub async fn update_task(client: &TodoistClient, task: &Task) -> TodoistResult<Task> {
     let encoded = urlencoding(&task.id);
     let body = task_to_update_body(task);
-    let entry: TaskEntry = client.post_json(&format!("/tasks/{encoded}"), &body).await?;
+    let entry: TaskEntry = client
+        .post_json(&format!("/tasks/{encoded}"), &body)
+        .await?;
     // The update body never carries status — drive it via the
     // dedicated endpoints. We unconditionally fire either close or
     // reopen so the wire state matches `task.status` even if the
@@ -330,8 +326,7 @@ fn new_task_to_create_body(list_id: &str, new: &NewTask) -> CreateTaskBody {
         !new.reminders.is_empty(),
         new.parent_id.as_deref(),
     );
-    let (due_date, due_datetime) =
-        format_scheduled(new.scheduled_date, new.scheduled_time);
+    let (due_date, due_datetime) = format_scheduled(new.scheduled_date, new.scheduled_time);
     CreateTaskBody {
         project_id: Some(list_id.to_string()),
         content: Some(new.title.clone()),
@@ -350,8 +345,7 @@ fn task_to_update_body(task: &Task) -> UpdateTaskBody {
         !task.reminders.is_empty(),
         task.parent_id.as_deref(),
     );
-    let (due_date, due_datetime) =
-        format_scheduled(task.scheduled_date, task.scheduled_time);
+    let (due_date, due_datetime) = format_scheduled(task.scheduled_date, task.scheduled_time);
     UpdateTaskBody {
         content: Some(task.title.clone()),
         description: task.description.clone().filter(|s| !s.is_empty()),
@@ -362,11 +356,7 @@ fn task_to_update_body(task: &Task) -> UpdateTaskBody {
     }
 }
 
-fn warn_on_unsupported_fields(
-    has_recurrence: bool,
-    has_reminders: bool,
-    parent_id: Option<&str>,
-) {
+fn warn_on_unsupported_fields(has_recurrence: bool, has_reminders: bool, parent_id: Option<&str>) {
     if has_recurrence {
         tracing::warn!(
             "Todoist adapter dropping recurrence on write — Todoist uses natural-language due_string for recurrence, not Aperio's enum",
@@ -448,7 +438,10 @@ fn format_scheduled(
         Some(t) => {
             let naive = d.and_time(t);
             let utc = Utc.from_utc_datetime(&naive);
-            (None, Some(utc.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)))
+            (
+                None,
+                Some(utc.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)),
+            )
         }
         None => (Some(format_date(d)), None),
     }

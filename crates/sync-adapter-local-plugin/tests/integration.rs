@@ -18,8 +18,8 @@
 use std::sync::Arc;
 
 use plugin_core::{
-    abi::AperioPlugin, manager::PluginManager, manifest::PluginManifest,
-    shim::FfiSyncAdapter, Capability, PluginType, ABI_VERSION,
+    abi::AperioPlugin, manager::PluginManager, manifest::PluginManifest, shim::FfiSyncAdapter,
+    Capability, PluginType, ABI_VERSION,
 };
 use sync_core::{DeviceCursor, MetaJson, SyncAdapter};
 use tempfile::TempDir;
@@ -44,11 +44,9 @@ fn plugin_manifest() -> PluginManifest {
 /// on the "duplicate id" check.
 fn make_manager() -> PluginManager {
     let manager = PluginManager::new("0.1.0");
-    let descriptor: *mut AperioPlugin =
-        unsafe { sync_adapter_local_plugin::build_descriptor() };
+    let descriptor: *mut AperioPlugin = unsafe { sync_adapter_local_plugin::build_descriptor() };
     assert!(!descriptor.is_null(), "create returned NULL");
-    let destroy_fn: unsafe extern "C" fn(*mut AperioPlugin) =
-        sync_adapter_local_plugin::DESTROY_FN;
+    let destroy_fn: unsafe extern "C" fn(*mut AperioPlugin) = sync_adapter_local_plugin::DESTROY_FN;
     manager
         .register_static(plugin_manifest(), descriptor, destroy_fn)
         .expect("register_static");
@@ -64,7 +62,9 @@ fn setup() -> (TempDir, PluginManager, Arc<FfiSyncAdapter>) {
     std::fs::create_dir_all(&remote_root).expect("mkdir");
 
     let manager = make_manager();
-    let loaded = manager.get("com.aperio.sync-adapter-local").expect("registered");
+    let loaded = manager
+        .get("com.aperio.sync-adapter-local")
+        .expect("registered");
     let cfg = serde_json::json!({
         "remote_root": remote_root.to_string_lossy(),
     });
@@ -78,7 +78,10 @@ fn setup() -> (TempDir, PluginManager, Arc<FfiSyncAdapter>) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_connection_succeeds_against_a_valid_root() {
     let (_tmp, _mgr, adapter) = setup();
-    adapter.test_connection().await.expect("test_connection should succeed");
+    adapter
+        .test_connection()
+        .await
+        .expect("test_connection should succeed");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -153,12 +156,18 @@ async fn two_instances_have_independent_remote_roots() {
     std::fs::create_dir_all(&root_b).expect("mkdir b");
 
     let manager = make_manager();
-    let loaded = manager.get("com.aperio.sync-adapter-local").expect("registered");
+    let loaded = manager
+        .get("com.aperio.sync-adapter-local")
+        .expect("registered");
 
     let cfg_a = serde_json::json!({ "remote_root": root_a.to_string_lossy() });
     let cfg_b = serde_json::json!({ "remote_root": root_b.to_string_lossy() });
-    let inst_a = manager.open_instance(loaded.clone(), &cfg_a.to_string()).expect("open a");
-    let inst_b = manager.open_instance(loaded, &cfg_b.to_string()).expect("open b");
+    let inst_a = manager
+        .open_instance(loaded.clone(), &cfg_a.to_string())
+        .expect("open a");
+    let inst_b = manager
+        .open_instance(loaded, &cfg_b.to_string())
+        .expect("open b");
     assert_ne!(
         inst_a.handle() as usize,
         inst_b.handle() as usize,
@@ -169,9 +178,15 @@ async fn two_instances_have_independent_remote_roots() {
     let adapter_b = FfiSyncAdapter::new(inst_b).expect("b");
 
     // Push meta to A; B's remote stays empty.
-    adapter_a.push_meta(&MetaJson::fresh("0.1.0")).await.expect("push a");
+    adapter_a
+        .push_meta(&MetaJson::fresh("0.1.0"))
+        .await
+        .expect("push a");
     let meta_b = adapter_b.fetch_meta().await.expect("fetch b");
-    assert!(meta_b.is_none(), "instance B should NOT see instance A's data");
+    assert!(
+        meta_b.is_none(),
+        "instance B should NOT see instance A's data"
+    );
 }
 
 #[test]

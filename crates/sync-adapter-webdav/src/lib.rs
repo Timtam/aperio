@@ -64,8 +64,7 @@ use async_trait::async_trait;
 use base64::Engine;
 use reqwest::{Client, ClientBuilder, Method, StatusCode};
 use sync_core::{
-    DeviceCursor, LogFile, LogFileName, MetaJson, Snapshot, SyncAdapter,
-    SyncError, SyncResult,
+    DeviceCursor, LogFile, LogFileName, MetaJson, Snapshot, SyncAdapter, SyncError, SyncResult,
 };
 use tracing::{debug, warn};
 use url::Url;
@@ -122,9 +121,8 @@ impl WebDavSyncAdapter {
     /// Returns `Err(SyncError::InvalidInput)` when the URL is
     /// missing a scheme or has no host.
     pub fn new(base_url: &str, credentials: WebDavCredentials) -> SyncResult<Self> {
-        let mut url = Url::parse(base_url).map_err(|err| {
-            SyncError::internal(format!("invalid WebDAV URL: {err}"))
-        })?;
+        let mut url = Url::parse(base_url)
+            .map_err(|err| SyncError::internal(format!("invalid WebDAV URL: {err}")))?;
         if !url.path().ends_with('/') {
             let p = format!("{}/", url.path());
             url.set_path(&p);
@@ -156,9 +154,7 @@ impl WebDavSyncAdapter {
             // is unnoticeable next to the round latency anyway.
             .pool_max_idle_per_host(0)
             .build()
-            .map_err(|err| {
-                SyncError::internal(format!("build reqwest client: {err}"))
-            })?;
+            .map_err(|err| SyncError::internal(format!("build reqwest client: {err}")))?;
         Ok(Self {
             base_url: url,
             credentials,
@@ -173,17 +169,13 @@ impl WebDavSyncAdapter {
     }
 
     fn url_for(&self, relative: &str) -> SyncResult<Url> {
-        self.base_url.join(relative).map_err(|err| {
-            SyncError::internal(format!("URL join {relative}: {err}"))
-        })
+        self.base_url
+            .join(relative)
+            .map_err(|err| SyncError::internal(format!("URL join {relative}: {err}")))
     }
 
     /// Build a request with auth + standard headers attached.
-    fn request(
-        &self,
-        method: Method,
-        url: Url,
-    ) -> reqwest::RequestBuilder {
+    fn request(&self, method: Method, url: Url) -> reqwest::RequestBuilder {
         let mut builder = self.client.request(method, url);
         if let Some(header) = self.credentials.header() {
             builder = builder.header(reqwest::header::AUTHORIZATION, header);
@@ -358,10 +350,7 @@ impl SyncAdapter for WebDavSyncAdapter {
         self.put_bytes("meta.json", bytes, "application/json").await
     }
 
-    async fn fetch_new_logs(
-        &self,
-        since: &DeviceCursor,
-    ) -> SyncResult<Vec<LogFile>> {
+    async fn fetch_new_logs(&self, since: &DeviceCursor) -> SyncResult<Vec<LogFile>> {
         // 1. List the log directory via PROPFIND.
         let entries = self.propfind("log/").await?;
         // 2. Filter to *.jsonl files newer than the cursor; the
@@ -418,7 +407,8 @@ impl SyncAdapter for WebDavSyncAdapter {
         // Ensure the collection exists. Cheap on the happy path
         // (test_connection already created it).
         let _ = self.mkcol("log/").await;
-        self.put_bytes(&relative, log.bytes.clone(), "application/json").await
+        self.put_bytes(&relative, log.bytes.clone(), "application/json")
+            .await
     }
 
     async fn fetch_snapshot(&self) -> SyncResult<Option<Snapshot>> {
@@ -430,7 +420,8 @@ impl SyncAdapter for WebDavSyncAdapter {
 
     async fn push_snapshot(&self, snapshot: &Snapshot) -> SyncResult<()> {
         let bytes = snapshot.to_bytes()?;
-        self.put_bytes("snapshot.json", bytes, "application/json").await
+        self.put_bytes("snapshot.json", bytes, "application/json")
+            .await
     }
 
     async fn delete_log(&self, name: &LogFileName) -> SyncResult<()> {
@@ -438,12 +429,7 @@ impl SyncAdapter for WebDavSyncAdapter {
         self.delete(&relative).await
     }
 
-    async fn push_sound_asset(
-        &self,
-        hash: &str,
-        extension: &str,
-        bytes: &[u8],
-    ) -> SyncResult<()> {
+    async fn push_sound_asset(&self, hash: &str, extension: &str, bytes: &[u8]) -> SyncResult<()> {
         let relative = format!("assets/sounds/{hash}.{extension}");
         let _ = self.mkcol("assets/").await;
         let _ = self.mkcol("assets/sounds/").await;
@@ -451,11 +437,7 @@ impl SyncAdapter for WebDavSyncAdapter {
             .await
     }
 
-    async fn fetch_sound_asset(
-        &self,
-        hash: &str,
-        extension: &str,
-    ) -> SyncResult<Option<Vec<u8>>> {
+    async fn fetch_sound_asset(&self, hash: &str, extension: &str) -> SyncResult<Option<Vec<u8>>> {
         let relative = format!("assets/sounds/{hash}.{extension}");
         self.get_bytes(&relative).await
     }
@@ -477,11 +459,7 @@ impl SyncAdapter for WebDavSyncAdapter {
 /// diagnostic information on its own.
 fn network_err(err: reqwest::Error) -> SyncError {
     let message = full_chain(&err);
-    if err.is_timeout()
-        || err.is_connect()
-        || err.is_request()
-        || err.is_body()
-    {
+    if err.is_timeout() || err.is_connect() || err.is_request() || err.is_body() {
         SyncError::network(message)
     } else {
         warn!(?err, "unexpected reqwest error");
@@ -575,29 +553,26 @@ mod tests {
 
     #[test]
     fn new_rejects_url_without_scheme() {
-        let err = WebDavSyncAdapter::new("nope/aperio", WebDavCredentials::None)
-            .unwrap_err();
+        let err = WebDavSyncAdapter::new("nope/aperio", WebDavCredentials::None).unwrap_err();
         assert!(matches!(err, SyncError::Internal(_)));
     }
 
     #[test]
     fn new_adds_trailing_slash_to_path() {
-        let adapter = WebDavSyncAdapter::new(
-            "https://example.com/dav/aperio",
-            WebDavCredentials::None,
-        )
-        .unwrap();
+        let adapter =
+            WebDavSyncAdapter::new("https://example.com/dav/aperio", WebDavCredentials::None)
+                .unwrap();
         assert!(adapter.base_url().path().ends_with('/'));
     }
 
     #[test]
     fn url_for_resolves_relative_path() {
-        let adapter = WebDavSyncAdapter::new(
-            "https://example.com/dav/aperio/",
-            WebDavCredentials::None,
-        )
-        .unwrap();
-        let url = adapter.url_for("log/2026-05-01T00-00-00Z_dev-a.jsonl").unwrap();
+        let adapter =
+            WebDavSyncAdapter::new("https://example.com/dav/aperio/", WebDavCredentials::None)
+                .unwrap();
+        let url = adapter
+            .url_for("log/2026-05-01T00-00-00Z_dev-a.jsonl")
+            .unwrap();
         assert_eq!(
             url.as_str(),
             "https://example.com/dav/aperio/log/2026-05-01T00-00-00Z_dev-a.jsonl",
@@ -666,8 +641,14 @@ mod tests {
             }
         }
 
-        let leaf = Layer { msg: "connection refused", source: None };
-        let mid = Layer { msg: "dns or tcp", source: Some(Box::new(leaf)) };
+        let leaf = Layer {
+            msg: "connection refused",
+            source: None,
+        };
+        let mid = Layer {
+            msg: "dns or tcp",
+            source: Some(Box::new(leaf)),
+        };
         let top = Layer {
             msg: "error sending request",
             source: Some(Box::new(mid)),
@@ -679,12 +660,21 @@ mod tests {
 
         // Dedup of adjacent duplicates (some wrappers re-stringify
         // their child verbatim).
-        let leaf2 = Layer { msg: "boom", source: None };
-        let dup = Layer { msg: "boom", source: Some(Box::new(leaf2)) };
+        let leaf2 = Layer {
+            msg: "boom",
+            source: None,
+        };
+        let dup = Layer {
+            msg: "boom",
+            source: Some(Box::new(leaf2)),
+        };
         assert_eq!(full_chain(&dup), "boom");
 
         // Leaf alone — just the top-level message.
-        let alone = Layer { msg: "alone", source: None };
+        let alone = Layer {
+            msg: "alone",
+            source: None,
+        };
         assert_eq!(full_chain(&alone), "alone");
     }
 }

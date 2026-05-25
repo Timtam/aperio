@@ -55,10 +55,7 @@ pub enum Compatibility {
     /// The running app is older than the dataset requires —
     /// `running_app_version < remote.min_app_version`. The user
     /// must update before the sync engine touches anything.
-    AppTooOld {
-        required: String,
-        running: String,
-    },
+    AppTooOld { required: String, running: String },
     /// The remote `schema_version` is newer than this build's
     /// `SCHEMA_VERSION`. Different from `AppTooOld` because it
     /// can occur even when the running version satisfies
@@ -68,10 +65,7 @@ pub enum Compatibility {
     /// changes). Treated as a strict warning: we proceed because
     /// the spec promises additive changes are
     /// backward-compatible, but the frontend can show a chip.
-    SchemaAhead {
-        remote: u32,
-        local: u32,
-    },
+    SchemaAhead { remote: u32, local: u32 },
 }
 
 impl Compatibility {
@@ -136,10 +130,7 @@ pub fn version_less(a: &str, b: &str) -> bool {
 
 fn parse_triple(s: &str) -> Option<(u32, u32, u32)> {
     // Trim any pre-release / build metadata suffix.
-    let trimmed = s
-        .split(|c: char| c == '-' || c == '+')
-        .next()
-        .unwrap_or("");
+    let trimmed = s.split(|c: char| c == '-' || c == '+').next().unwrap_or("");
     let mut parts = trimmed.split('.');
     let major = parts.next()?.parse::<u32>().ok()?;
     let minor = parts.next().unwrap_or("0").parse::<u32>().ok()?;

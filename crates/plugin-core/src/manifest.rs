@@ -186,15 +186,18 @@ mod tests {
 
     #[test]
     fn parses_full_manifest() {
-        let m = PluginManifest::from_bytes(sample_manifest_json().as_bytes())
-            .expect("parses");
+        let m = PluginManifest::from_bytes(sample_manifest_json().as_bytes()).expect("parses");
         assert_eq!(m.id, "com.aperio.cal-adapter-local");
         assert_eq!(m.name, "Aperio Local");
         assert_eq!(m.version, "0.1.0");
         assert_eq!(m.plugin_type, PluginType::CalendarAdapter);
         assert_eq!(
             m.capabilities,
-            vec![Capability::Calendar, Capability::Tasks, Capability::Contacts]
+            vec![
+                Capability::Calendar,
+                Capability::Tasks,
+                Capability::Contacts
+            ]
         );
         assert_eq!(m.abi_version, ABI_VERSION);
         assert_eq!(m.author.as_deref(), Some("Aperio Contributors"));
@@ -277,8 +280,7 @@ mod tests {
 
     #[test]
     fn compatible_with_passes_for_current_build() {
-        let m = PluginManifest::from_bytes(sample_manifest_json().as_bytes())
-            .expect("parses");
+        let m = PluginManifest::from_bytes(sample_manifest_json().as_bytes()).expect("parses");
         // Sample asks for 0.1.0; pretend the host is the same.
         m.compatible_with("0.1.0").expect("compatible");
     }
@@ -320,8 +322,7 @@ mod tests {
 
     #[test]
     fn has_capability_returns_membership() {
-        let m = PluginManifest::from_bytes(sample_manifest_json().as_bytes())
-            .expect("parses");
+        let m = PluginManifest::from_bytes(sample_manifest_json().as_bytes()).expect("parses");
         assert!(m.has_capability(&Capability::Calendar));
         assert!(m.has_capability(&Capability::Tasks));
         assert!(m.has_capability(&Capability::Contacts));
@@ -330,8 +331,8 @@ mod tests {
 
     #[test]
     fn manifest_round_trips_through_serde() {
-        let original = PluginManifest::from_bytes(sample_manifest_json().as_bytes())
-            .expect("parses");
+        let original =
+            PluginManifest::from_bytes(sample_manifest_json().as_bytes()).expect("parses");
         let json = serde_json::to_string(&original).expect("serialise");
         let back = PluginManifest::from_bytes(json.as_bytes()).expect("re-parses");
         assert_eq!(original, back);

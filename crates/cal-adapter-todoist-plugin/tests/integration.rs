@@ -11,7 +11,9 @@
 use std::sync::Arc;
 
 use plugin_core::{
-    abi::AperioPlugin, manager::PluginManager, manifest::PluginManifest,
+    abi::AperioPlugin,
+    manager::PluginManager,
+    manifest::PluginManifest,
     shim::{FfiCalendarAdapter, FfiContactsAdapter, FfiTasksAdapter},
     Capability, PluginType, ABI_VERSION,
 };
@@ -33,11 +35,9 @@ fn manifest() -> PluginManifest {
 
 fn register() -> PluginManager {
     let m = PluginManager::new("0.1.0");
-    let d: *mut AperioPlugin =
-        unsafe { cal_adapter_todoist_plugin::build_descriptor() };
+    let d: *mut AperioPlugin = unsafe { cal_adapter_todoist_plugin::build_descriptor() };
     assert!(!d.is_null());
-    let dx: unsafe extern "C" fn(*mut AperioPlugin) =
-        cal_adapter_todoist_plugin::DESTROY_FN;
+    let dx: unsafe extern "C" fn(*mut AperioPlugin) = cal_adapter_todoist_plugin::DESTROY_FN;
     m.register_static(manifest(), d, dx).unwrap();
     m
 }
@@ -45,16 +45,17 @@ fn register() -> PluginManager {
 fn open_one(manager: &PluginManager, token: &str) -> Arc<plugin_core::LoadedInstance> {
     let loaded = manager.get("com.aperio.cal-adapter-todoist").unwrap();
     let cfg = serde_json::json!({ "token": token });
-    manager.open_instance(loaded, &cfg.to_string()).expect("open")
+    manager
+        .open_instance(loaded, &cfg.to_string())
+        .expect("open")
 }
 
 #[test]
 fn todoist_plugin_wraps_through_ffi_tasks_adapter() {
     let manager = register();
     let inst = open_one(&manager, "test-token-a");
-    let _adapter: Arc<FfiTasksAdapter> = Arc::new(
-        FfiTasksAdapter::new(inst).expect("tasks slot present"),
-    );
+    let _adapter: Arc<FfiTasksAdapter> =
+        Arc::new(FfiTasksAdapter::new(inst).expect("tasks slot present"));
 }
 
 #[test]
@@ -80,12 +81,8 @@ fn multiple_instances_per_library_get_distinct_handles() {
         "v2 must hand out one handle per open_instance call",
     );
     // Both should wrap independently.
-    let _wrap_a: Arc<FfiTasksAdapter> = Arc::new(
-        FfiTasksAdapter::new(a).expect("a"),
-    );
-    let _wrap_b: Arc<FfiTasksAdapter> = Arc::new(
-        FfiTasksAdapter::new(b).expect("b"),
-    );
+    let _wrap_a: Arc<FfiTasksAdapter> = Arc::new(FfiTasksAdapter::new(a).expect("a"));
+    let _wrap_b: Arc<FfiTasksAdapter> = Arc::new(FfiTasksAdapter::new(b).expect("b"));
 }
 
 #[test]
@@ -93,7 +90,9 @@ fn open_instance_rejects_empty_token() {
     let manager = register();
     let loaded = manager.get("com.aperio.cal-adapter-todoist").unwrap();
     let bad_cfg = serde_json::json!({ "token": "   " });
-    let err = manager.open_instance(loaded, &bad_cfg.to_string()).unwrap_err();
+    let err = manager
+        .open_instance(loaded, &bad_cfg.to_string())
+        .unwrap_err();
     match err {
         plugin_core::error::PluginError::InstanceOpen { status, .. } => {
             assert_eq!(

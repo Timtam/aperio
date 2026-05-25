@@ -60,10 +60,7 @@ pub enum SyncError {
     /// version — the sync dataset was created by a newer Aperio and
     /// can't be read until the local install is updated.
     #[error("dataset requires app version {required}; running {running}")]
-    SchemaTooOld {
-        required: String,
-        running: String,
-    },
+    SchemaTooOld { required: String, running: String },
 
     /// This device's `last_seen_log` is older than the remote's
     /// `snapshot_timestamp` — the compactor has GCed log files we

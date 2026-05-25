@@ -48,15 +48,10 @@ impl ApiState {
         }
     }
 
-    pub async fn get_json<T: DeserializeOwned>(
-        &self,
-        path_and_query: &str,
-    ) -> GraphResult<T> {
+    pub async fn get_json<T: DeserializeOwned>(&self, path_and_query: &str) -> GraphResult<T> {
         let url = self.build_url(path_and_query)?;
         let response = self
-            .send_with_refresh(|access| {
-                self.http.get(url.clone()).bearer_auth(access)
-            })
+            .send_with_refresh(|access| self.http.get(url.clone()).bearer_auth(access))
             .await?;
         decode_json(response).await
     }
@@ -102,9 +97,7 @@ impl ApiState {
     pub async fn delete_request(&self, path: &str) -> GraphResult<()> {
         let url = self.build_url(path)?;
         let response = self
-            .send_with_refresh(|access| {
-                self.http.delete(url.clone()).bearer_auth(access)
-            })
+            .send_with_refresh(|access| self.http.delete(url.clone()).bearer_auth(access))
             .await?;
         let status = response.status();
         if status.is_success() {
@@ -121,15 +114,10 @@ impl ApiState {
     /// `Content-Type` header. Used by Phase 10i for contact photo
     /// downloads (`/me/contacts/{id}/photo/$value` returns raw
     /// image bytes, not JSON).
-    pub async fn get_bytes(
-        &self,
-        path: &str,
-    ) -> GraphResult<(Vec<u8>, Option<String>)> {
+    pub async fn get_bytes(&self, path: &str) -> GraphResult<(Vec<u8>, Option<String>)> {
         let url = self.build_url(path)?;
         let response = self
-            .send_with_refresh(|access| {
-                self.http.get(url.clone()).bearer_auth(access)
-            })
+            .send_with_refresh(|access| self.http.get(url.clone()).bearer_auth(access))
             .await?;
         let status = response.status();
         let content_type = response
@@ -139,10 +127,7 @@ impl ApiState {
             .map(|s| s.to_string());
         let bytes = response.bytes().await.map_err(GraphError::from)?.to_vec();
         if !status.is_success() {
-            let preview = String::from_utf8_lossy(
-                &bytes[..bytes.len().min(300)],
-            )
-            .to_string();
+            let preview = String::from_utf8_lossy(&bytes[..bytes.len().min(300)]).to_string();
             return Err(GraphError::Http {
                 status: status.as_u16(),
                 message: preview,
@@ -186,8 +171,7 @@ impl ApiState {
         // absolute URL — allow callers to pass either a relative
         // path or a full link.
         if path_and_query.starts_with("http://") || path_and_query.starts_with("https://") {
-            Url::parse(path_and_query)
-                .map_err(|e| GraphError::Config(format!("bad url: {e}")))
+            Url::parse(path_and_query).map_err(|e| GraphError::Config(format!("bad url: {e}")))
         } else {
             Url::parse(&format!("{}{}", self.api_base, path_and_query))
                 .map_err(|e| GraphError::Config(format!("bad url: {e}")))
@@ -235,9 +219,7 @@ impl ApiState {
     }
 }
 
-async fn decode_json<T: DeserializeOwned>(
-    response: reqwest::Response,
-) -> GraphResult<T> {
+async fn decode_json<T: DeserializeOwned>(response: reqwest::Response) -> GraphResult<T> {
     let status = response.status();
     let text = response.text().await.unwrap_or_default();
     if !status.is_success() {
@@ -246,8 +228,7 @@ async fn decode_json<T: DeserializeOwned>(
             message: text.chars().take(300).collect(),
         });
     }
-    serde_json::from_str(&text)
-        .map_err(|e| GraphError::Protocol(format!("json: {e}: {text}")))
+    serde_json::from_str(&text).map_err(|e| GraphError::Protocol(format!("json: {e}: {text}")))
 }
 
 // ── Reads ───────────────────────────────────────────────────────────────
@@ -322,9 +303,8 @@ pub async fn update_event(state: &ApiState, ev: &Event) -> GraphResult<Event> {
     let path = format!("/me/events/{id_enc}");
     let body = event_to_body(ev)?;
     let entry: EventEntry = state.patch_json(&path, &body).await?;
-    map_event(entry, &ev.calendar_id)?.ok_or_else(|| {
-        GraphError::Protocol("update returned cancelled event".into())
-    })
+    map_event(entry, &ev.calendar_id)?
+        .ok_or_else(|| GraphError::Protocol("update returned cancelled event".into()))
 }
 
 pub async fn delete_event(state: &ApiState, event_id: &str) -> GraphResult<()> {
@@ -379,11 +359,7 @@ pub async fn get_tasks(state: &ApiState, list_id: &str) -> GraphResult<Vec<Task>
     Ok(out)
 }
 
-pub async fn create_task(
-    state: &ApiState,
-    list_id: &str,
-    new: NewTask,
-) -> GraphResult<Task> {
+pub async fn create_task(state: &ApiState, list_id: &str, new: NewTask) -> GraphResult<Task> {
     let list_enc = urlencoding(list_id);
     let path = format!("/me/todo/lists/{list_enc}/tasks");
     let body = new_task_to_body(&new)?;
@@ -420,11 +396,7 @@ pub async fn delete_task(state: &ApiState, task_id: &str) -> GraphResult<()> {
     state.delete_request(&path).await
 }
 
-pub async fn rename_task_list(
-    state: &ApiState,
-    list_id: &str,
-    new_name: &str,
-) -> GraphResult<()> {
+pub async fn rename_task_list(state: &ApiState, list_id: &str, new_name: &str) -> GraphResult<()> {
     let list_enc = urlencoding(list_id);
     let path = format!("/me/todo/lists/{list_enc}");
     let body = serde_json::json!({ "displayName": new_name });
@@ -496,8 +468,7 @@ mod tests {
             .mock(
                 "GET",
                 mockito::Matcher::Regex(
-                    r"^/me/calendars/cal-1/calendarView\?startDateTime=.*endDateTime="
-                        .to_string(),
+                    r"^/me/calendars/cal-1/calendarView\?startDateTime=.*endDateTime=".to_string(),
                 ),
             )
             .with_status(200)
@@ -537,7 +508,9 @@ mod tests {
             description: None,
             location: None,
             start: chrono::Utc.with_ymd_and_hms(2026, 5, 25, 10, 0, 0).unwrap(),
-            end: chrono::Utc.with_ymd_and_hms(2026, 5, 25, 10, 30, 0).unwrap(),
+            end: chrono::Utc
+                .with_ymd_and_hms(2026, 5, 25, 10, 30, 0)
+                .unwrap(),
             all_day: false,
             recurrence: None,
             color_label: None,
@@ -567,9 +540,7 @@ mod tests {
         let mut server = mockito::Server::new_async().await;
         let m = server
             .mock("PATCH", "/me/calendars/cal-1")
-            .match_body(mockito::Matcher::Regex(
-                "\"name\":\"Arbeit\"".into(),
-            ))
+            .match_body(mockito::Matcher::Regex("\"name\":\"Arbeit\"".into()))
             .with_status(200)
             .with_body(r##"{"id":"cal-1","name":"Arbeit"}"##)
             .create_async()
@@ -592,9 +563,7 @@ mod tests {
         server
             .mock("POST", "/token")
             .with_status(200)
-            .with_body(
-                r#"{"access_token":"new","expires_in":3600,"token_type":"Bearer"}"#,
-            )
+            .with_body(r#"{"access_token":"new","expires_in":3600,"token_type":"Bearer"}"#)
             .expect(1)
             .create_async()
             .await;
@@ -631,9 +600,7 @@ mod tests {
         server
             .mock("GET", "/me/todo/lists?$skiptoken=abc")
             .with_status(200)
-            .with_body(
-                r#"{"value": [{"id":"L2","displayName":"Groceries","isOwner":true}]}"#,
-            )
+            .with_body(r#"{"value": [{"id":"L2","displayName":"Groceries","isOwner":true}]}"#)
             .create_async()
             .await;
         let state = fixture_state(&server.url());
@@ -647,7 +614,10 @@ mod tests {
     async fn get_tasks_round_trips_and_packs_list_id() {
         let mut server = mockito::Server::new_async().await;
         server
-            .mock("GET", mockito::Matcher::Regex("/me/todo/lists/.+/tasks".into()))
+            .mock(
+                "GET",
+                mockito::Matcher::Regex("/me/todo/lists/.+/tasks".into()),
+            )
             .with_status(200)
             .with_body(
                 r#"{"value":[

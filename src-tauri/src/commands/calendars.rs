@@ -173,8 +173,9 @@ pub async fn get_events(
         // the layer ticked, the next refresh will drop it.
         return Ok(Vec::new());
     }
-    let account =
-        registry.account_for_calendar(&request.calendar_id).unwrap_or_else(|| LOCAL_ID.to_string());
+    let account = registry
+        .account_for_calendar(&request.calendar_id)
+        .unwrap_or_else(|| LOCAL_ID.to_string());
     if account == LOCAL_ID {
         return Ok(adapter.get_events(&request.calendar_id, range).await?);
     }
@@ -202,8 +203,9 @@ pub async fn create_event(
     event_log: State<'_, Arc<EventLogWriter>>,
     request: CreateEventRequest,
 ) -> CommandResult<Event> {
-    let account =
-        registry.account_for_calendar(&request.calendar_id).unwrap_or_else(|| LOCAL_ID.to_string());
+    let account = registry
+        .account_for_calendar(&request.calendar_id)
+        .unwrap_or_else(|| LOCAL_ID.to_string());
     let is_local = account == LOCAL_ID;
     let event = if is_local {
         adapter
@@ -216,7 +218,8 @@ pub async fn create_event(
                 message: format!("calendar '{}' is not routable", request.calendar_id),
             });
         };
-        ext.create_event(&request.calendar_id, request.event).await?
+        ext.create_event(&request.calendar_id, request.event)
+            .await?
     };
     // Only LOCAL events flow through the event log — external
     // adapters (Google, iCloud, EWS, Graph) handle their own
@@ -320,10 +323,7 @@ pub async fn update_event(
             let Some(ext) = registry.calendar_adapter(&target_account) else {
                 return Err(CommandError {
                     code: "not_found",
-                    message: format!(
-                        "target calendar '{}' is not routable",
-                        event.calendar_id,
-                    ),
+                    message: format!("target calendar '{}' is not routable", event.calendar_id,),
                 });
             };
             ext.create_event(&event.calendar_id, new_payload).await?
@@ -337,9 +337,14 @@ pub async fn update_event(
         // duplicate. A warning + best-effort cleanup is the
         // less-bad failure mode.
         let delete_result = if source_account == LOCAL_ID {
-            adapter.delete_event(&event.id).await.map_err(CommandError::from)
+            adapter
+                .delete_event(&event.id)
+                .await
+                .map_err(CommandError::from)
         } else if let Some(ext) = registry.calendar_adapter(&source_account) {
-            ext.delete_event(&event.id).await.map_err(CommandError::from)
+            ext.delete_event(&event.id)
+                .await
+                .map_err(CommandError::from)
         } else {
             // Source isn't routable (account was removed between
             // the dialog opening and save). Treat as a "no

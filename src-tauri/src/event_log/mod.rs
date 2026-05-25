@@ -45,19 +45,17 @@ pub mod whitelist;
 
 pub use applier::{ApplyReport, EventLogApplier};
 pub use compactor::{
-    CompactionReport, Compactor, DEFAULT_MAX_AGE_DAYS, DEFAULT_MAX_BYTES,
-    DEFAULT_MAX_LOGS, PREF_MAX_AGE_DAYS, PREF_MAX_BYTES, PREF_MAX_LOGS,
+    CompactionReport, Compactor, DEFAULT_MAX_AGE_DAYS, DEFAULT_MAX_BYTES, DEFAULT_MAX_LOGS,
+    PREF_MAX_AGE_DAYS, PREF_MAX_BYTES, PREF_MAX_LOGS,
 };
 pub use onboarding::{
-    DeviceSummary, OnboardingReport, OnboardingService, SyncPreview,
-    PREF_DEVICE_NAME, PREF_ONBOARDED,
+    DeviceSummary, OnboardingReport, OnboardingService, SyncPreview, PREF_DEVICE_NAME,
+    PREF_ONBOARDED,
 };
-pub use orchestrator::{
-    SyncOrchestrator, SyncRoundReport, SyncStatus, SYNC_CURSOR_PREF_KEY,
-};
+pub use orchestrator::{SyncOrchestrator, SyncRoundReport, SyncStatus, SYNC_CURSOR_PREF_KEY};
 pub use scheduler::{
-    read_interval_minutes, SyncScheduler, SyncStatusPayload,
-    DEFAULT_SYNC_INTERVAL_MINUTES, PREF_SYNC_INTERVAL_MINUTES,
+    read_interval_minutes, SyncScheduler, SyncStatusPayload, DEFAULT_SYNC_INTERVAL_MINUTES,
+    PREF_SYNC_INTERVAL_MINUTES,
 };
 pub use snapshot::{AperioSnapshotBody, SnapshotApplyOutcome, SnapshotBuilder};
 
@@ -125,11 +123,7 @@ impl EventLogWriter {
             kick,
         });
         let pending_dir = data_dir.join("sync").join("log").join("pending");
-        tauri::async_runtime::spawn(drain_loop(
-            pending_dir,
-            device_id,
-            receiver,
-        ));
+        tauri::async_runtime::spawn(drain_loop(pending_dir, device_id, receiver));
         writer
     }
 
@@ -145,9 +139,7 @@ impl EventLogWriter {
     pub fn load_or_mint_device_id(db: &SharedConn) -> DeviceId {
         let repo = UserPrefsRepo::new(db);
         match repo.get(DEVICE_ID_PREF_KEY) {
-            Ok(Some(stored)) if !stored.is_empty() => {
-                DeviceId::from_string(stored)
-            }
+            Ok(Some(stored)) if !stored.is_empty() => DeviceId::from_string(stored),
             _ => {
                 let fresh = DeviceId::new();
                 // Persist immediately. If the write fails (unlikely
@@ -257,13 +249,9 @@ async fn drain_loop(
 /// after every write — mutations happen at user speed (one at a
 /// time, not bursts), so the per-event flush cost is invisible
 /// and gives us durability across crashes.
-async fn write_one(
-    file: &mut File,
-    envelope: &EventEnvelope,
-) -> Result<(), std::io::Error> {
-    let line = serde_json::to_vec(envelope).map_err(|err| {
-        std::io::Error::new(std::io::ErrorKind::InvalidData, err)
-    })?;
+async fn write_one(file: &mut File, envelope: &EventEnvelope) -> Result<(), std::io::Error> {
+    let line = serde_json::to_vec(envelope)
+        .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?;
     file.write_all(&line).await?;
     file.write_all(b"\n").await?;
     file.flush().await?;
@@ -288,9 +276,7 @@ mod tests {
             id: "ev-1".into(),
             fields: serde_json::json!({ "title": "hello" }),
         }));
-        writer.append(SyncEvent::EventDeleted(IdPayload {
-            id: "ev-1".into(),
-        }));
+        writer.append(SyncEvent::EventDeleted(IdPayload { id: "ev-1".into() }));
 
         // Drop our handle so the drain loop exits and the file is
         // flushed/closed. The test then reads it back.
@@ -304,8 +290,7 @@ mod tests {
                 if let Ok(Some(entry)) = entries.next_entry().await {
                     let bytes = tokio::fs::read(entry.path()).await.unwrap();
                     let text = String::from_utf8_lossy(&bytes);
-                    let lines: Vec<&str> =
-                        text.lines().filter(|l| !l.is_empty()).collect();
+                    let lines: Vec<&str> = text.lines().filter(|l| !l.is_empty()).collect();
                     if lines.len() >= 2 {
                         // First line should be the created event.
                         assert!(
@@ -334,9 +319,7 @@ mod tests {
             tmp.path().to_path_buf(),
             DeviceId::from_string("dev-format".into()),
         );
-        writer.append(SyncEvent::EventDeleted(IdPayload {
-            id: "x".into(),
-        }));
+        writer.append(SyncEvent::EventDeleted(IdPayload { id: "x".into() }));
         drop(writer);
 
         for _ in 0..50 {
@@ -352,8 +335,7 @@ mod tests {
                     // we round-trip is the bare "dev-format"
                     // string; the timestamp restoration check is
                     // implicit because the parser is the contract.
-                    let parsed = LogFileName::from_filename(&name_str)
-                        .expect("filename parseable");
+                    let parsed = LogFileName::from_filename(&name_str).expect("filename parseable");
                     assert_eq!(parsed.device_id.as_str(), "dev-format");
                     return;
                 }

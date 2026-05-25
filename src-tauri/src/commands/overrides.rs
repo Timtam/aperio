@@ -97,12 +97,8 @@ pub async fn rename_container(
     let push_result: cal_core::Result<()> = if account == LOCAL_ID {
         // Local SQLite — typed adapter handle, not a trait object.
         match kind {
-            ContainerKind::Calendar => {
-                local.rename_calendar(&container_id, trimmed).await
-            }
-            ContainerKind::TaskList => {
-                local.rename_task_list(&container_id, trimmed).await
-            }
+            ContainerKind::Calendar => local.rename_calendar(&container_id, trimmed).await,
+            ContainerKind::TaskList => local.rename_task_list(&container_id, trimmed).await,
         }
     } else {
         match kind {

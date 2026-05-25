@@ -191,7 +191,12 @@ impl LocalAdapter {
             .query_row(
                 "SELECT rrule, rrule_exceptions FROM events WHERE id = ?",
                 params![event_id],
-                |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, Option<String>>(1)?)),
+                |r| {
+                    Ok((
+                        r.get::<_, Option<String>>(0)?,
+                        r.get::<_, Option<String>>(1)?,
+                    ))
+                },
             )
             .optional()
             .map_err(map_sql_err)?;
@@ -394,11 +399,7 @@ impl CalendarFeature for LocalAdapter {
         .flatten()
     }
 
-    async fn rename_calendar(
-        &self,
-        calendar_id: &str,
-        new_name: &str,
-    ) -> cal_core::Result<()> {
+    async fn rename_calendar(&self, calendar_id: &str, new_name: &str) -> cal_core::Result<()> {
         let trimmed = new_name.trim();
         if trimmed.is_empty() {
             return Err(cal_core::Error::InvalidInput(

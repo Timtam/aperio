@@ -100,10 +100,7 @@ impl AdapterKind {
     pub fn is_videoconference(self) -> bool {
         matches!(
             self,
-            AdapterKind::Zoom
-                | AdapterKind::Teams
-                | AdapterKind::Meet
-                | AdapterKind::Webex,
+            AdapterKind::Zoom | AdapterKind::Teams | AdapterKind::Meet | AdapterKind::Webex,
         )
     }
 }
@@ -170,9 +167,7 @@ impl<'a> AccountsRepo<'a> {
         let row = stmt
             .query_row(params![id], row_to_account)
             .map_err(|err| match err {
-                rusqlite::Error::QueryReturnedNoRows => {
-                    AccountsError::NotFound(id.to_string())
-                }
+                rusqlite::Error::QueryReturnedNoRows => AccountsError::NotFound(id.to_string()),
                 other => AccountsError::Sqlite(other),
             });
         match row {
@@ -195,7 +190,14 @@ impl<'a> AccountsRepo<'a> {
             "INSERT INTO accounts (id, adapter_kind, display_name,
                                    config_json, created_at, updated_at)
              VALUES (?, ?, ?, ?, ?, ?)",
-            params![id, adapter_kind.as_str(), display_name, config_json, now, now],
+            params![
+                id,
+                adapter_kind.as_str(),
+                display_name,
+                config_json,
+                now,
+                now
+            ],
         )?;
         Ok(Account {
             id,

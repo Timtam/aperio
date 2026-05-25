@@ -50,13 +50,25 @@ const PLUGINS: &[(&str, &str)] = &[
         "com.aperio.cal-adapter-microsoft-graph",
     ),
     ("cal-adapter-ews-plugin", "com.aperio.cal-adapter-ews"),
-    ("cal-adapter-vikunja-plugin", "com.aperio.cal-adapter-vikunja"),
-    ("cal-adapter-todoist-plugin", "com.aperio.cal-adapter-todoist"),
+    (
+        "cal-adapter-vikunja-plugin",
+        "com.aperio.cal-adapter-vikunja",
+    ),
+    (
+        "cal-adapter-todoist-plugin",
+        "com.aperio.cal-adapter-todoist",
+    ),
     ("sync-adapter-local-plugin", "com.aperio.sync-adapter-local"),
-    ("sync-adapter-webdav-plugin", "com.aperio.sync-adapter-webdav"),
+    (
+        "sync-adapter-webdav-plugin",
+        "com.aperio.sync-adapter-webdav",
+    ),
     ("sync-adapter-ftp-plugin", "com.aperio.sync-adapter-ftp"),
     ("sync-adapter-sftp-plugin", "com.aperio.sync-adapter-sftp"),
-    ("sync-adapter-dropbox-plugin", "com.aperio.sync-adapter-dropbox"),
+    (
+        "sync-adapter-dropbox-plugin",
+        "com.aperio.sync-adapter-dropbox",
+    ),
     (
         "sync-adapter-googledrive-plugin",
         "com.aperio.sync-adapter-googledrive",
@@ -73,8 +85,7 @@ fn main() {
 }
 
 fn stage_bundled_plugins() {
-    let manifest_dir =
-        PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
     let workspace_root = manifest_dir
         .parent()
         .expect("src-tauri lives one level below the workspace root")
@@ -118,14 +129,8 @@ fn stage_bundled_plugins() {
         //     cdylib lands on the first pass + needs to pick
         //     it up on the next build round.
         println!("cargo:rerun-if-changed={}/src", src_dir.display());
-        println!(
-            "cargo:rerun-if-changed={}/plugin.json",
-            src_dir.display(),
-        );
-        println!(
-            "cargo:rerun-if-changed={}/Cargo.toml",
-            src_dir.display(),
-        );
+        println!("cargo:rerun-if-changed={}/plugin.json", src_dir.display(),);
+        println!("cargo:rerun-if-changed={}/Cargo.toml", src_dir.display(),);
         println!("cargo:rerun-if-changed={}", cdylib_src.display());
 
         if !cdylib_src.is_file() {
@@ -171,9 +176,7 @@ fn stage_bundled_plugins() {
         let manifest_src = src_dir.join("plugin.json");
         let manifest_dst = dst_subdir.join("plugin.json");
         if let Err(err) = fs::copy(&manifest_src, &manifest_dst) {
-            println!(
-                "cargo:warning=bundled plugin {plugin_id}: copy plugin.json: {err}",
-            );
+            println!("cargo:warning=bundled plugin {plugin_id}: copy plugin.json: {err}",);
             continue;
         }
     }

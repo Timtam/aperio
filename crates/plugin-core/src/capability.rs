@@ -77,7 +77,11 @@ mod tests {
 
     #[test]
     fn known_capabilities_round_trip() {
-        for cap in [Capability::Calendar, Capability::Tasks, Capability::Contacts] {
+        for cap in [
+            Capability::Calendar,
+            Capability::Tasks,
+            Capability::Contacts,
+        ] {
             let json = serde_json::to_string(&cap).expect("serialise");
             let back: Capability = serde_json::from_str(&json).expect("deserialise");
             assert_eq!(cap, back, "round trip for {}", cap.as_str());

@@ -121,11 +121,7 @@ pub struct SnapshotBuilder {
 }
 
 impl SnapshotBuilder {
-    pub fn new(
-        db: SharedConn,
-        adapter: Arc<LocalAdapter>,
-        app_version: impl Into<String>,
-    ) -> Self {
+    pub fn new(db: SharedConn, adapter: Arc<LocalAdapter>, app_version: impl Into<String>) -> Self {
         Self {
             db,
             adapter,
@@ -151,7 +147,11 @@ impl SnapshotBuilder {
             accounts,
         };
         let body_value = serde_json::to_value(&body)?;
-        Ok(Snapshot::new(Utc::now(), self.app_version.clone(), body_value))
+        Ok(Snapshot::new(
+            Utc::now(),
+            self.app_version.clone(),
+            body_value,
+        ))
     }
 
     /// Apply a snapshot to the local SQLite. Parses the body,
@@ -163,15 +163,12 @@ impl SnapshotBuilder {
     /// would emit `settings.updated` events for each restore — not
     /// what we want during onboarding).
     pub fn apply(&self, snapshot: &Snapshot) -> SyncResult<SnapshotApplyOutcome> {
-        let body: AperioSnapshotBody =
-            serde_json::from_value(snapshot.body.clone())?;
+        let body: AperioSnapshotBody = serde_json::from_value(snapshot.body.clone())?;
         let mut outcome = SnapshotApplyOutcome::default();
         let report = self
             .adapter
             .apply_snapshot_dump(&body.dump)
-            .map_err(|err| {
-                SyncError::internal(format!("apply rows: {err}"))
-            })?;
+            .map_err(|err| SyncError::internal(format!("apply rows: {err}")))?;
         outcome.merge_rows(report);
 
         let prefs = UserPrefsRepo::new(&self.db);
@@ -242,9 +239,7 @@ impl SnapshotBuilder {
                   WHERE id != 'local'
                   ORDER BY display_name COLLATE NOCASE",
             )
-            .map_err(|err| {
-                SyncError::internal(format!("dump accounts prepare: {err}"))
-            })?;
+            .map_err(|err| SyncError::internal(format!("dump accounts prepare: {err}")))?;
         let rows = stmt
             .query_map([], |row| {
                 Ok(SnapshotAccount {
@@ -256,14 +251,10 @@ impl SnapshotBuilder {
                     updated_at: row.get(5)?,
                 })
             })
-            .map_err(|err| {
-                SyncError::internal(format!("dump accounts query: {err}"))
-            })?;
+            .map_err(|err| SyncError::internal(format!("dump accounts query: {err}")))?;
         let mut out = Vec::new();
         for r in rows {
-            out.push(r.map_err(|err| {
-                SyncError::internal(format!("dump accounts row: {err}"))
-            })?);
+            out.push(r.map_err(|err| SyncError::internal(format!("dump accounts row: {err}")))?);
         }
         Ok(out)
     }
@@ -282,21 +273,16 @@ impl SnapshotBuilder {
                 // would also reject).
                 let mut stmt = conn
                     .prepare("SELECT key, value FROM user_prefs WHERE key LIKE ?")
-                    .map_err(|err| {
-                        SyncError::internal(format!("dump settings: {err}"))
-                    })?;
+                    .map_err(|err| SyncError::internal(format!("dump settings: {err}")))?;
                 let like = format!("{pattern}%");
                 let rows = stmt
                     .query_map(params![like], |row| {
                         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
                     })
-                    .map_err(|err| {
-                        SyncError::internal(format!("dump settings: {err}"))
-                    })?;
+                    .map_err(|err| SyncError::internal(format!("dump settings: {err}")))?;
                 for r in rows {
-                    let (key, value) = r.map_err(|err| {
-                        SyncError::internal(format!("dump settings: {err}"))
-                    })?;
+                    let (key, value) =
+                        r.map_err(|err| SyncError::internal(format!("dump settings: {err}")))?;
                     if is_synced_key(&key) {
                         out.insert(key, value);
                     }
@@ -328,10 +314,7 @@ impl SnapshotBuilder {
 /// row already exists, and overwriting it with a snapshot copy
 /// from another device would clobber its (locally-meaningful)
 /// timestamps without any user-visible benefit.
-fn upsert_snapshot_account(
-    db: &SharedConn,
-    acc: &SnapshotAccount,
-) -> rusqlite::Result<()> {
+fn upsert_snapshot_account(db: &SharedConn, acc: &SnapshotAccount) -> rusqlite::Result<()> {
     if acc.id == "local" {
         return Ok(());
     }
@@ -397,11 +380,16 @@ mod tests {
 
         // The wire body should contain exactly the whitelisted keys
         // plus the one calendar.
-        let body: AperioSnapshotBody =
-            serde_json::from_value(snap.body.clone()).unwrap();
+        let body: AperioSnapshotBody = serde_json::from_value(snap.body.clone()).unwrap();
         assert_eq!(body.dump.calendars.len(), 1);
-        assert_eq!(body.settings.get("appearance.darkMode").map(String::as_str), Some("true"));
-        assert_eq!(body.settings.get("locale").map(String::as_str), Some("de-DE"));
+        assert_eq!(
+            body.settings.get("appearance.darkMode").map(String::as_str),
+            Some("true")
+        );
+        assert_eq!(
+            body.settings.get("locale").map(String::as_str),
+            Some("de-DE")
+        );
         assert!(!body.settings.contains_key("sidebar.expansion"));
 
         // Apply to a fresh device — the original DB has the data
@@ -463,8 +451,7 @@ mod tests {
 
         // The wire body should include exactly the one external
         // account row — the implicit `local` row is excluded.
-        let body: AperioSnapshotBody =
-            serde_json::from_value(snap.body.clone()).unwrap();
+        let body: AperioSnapshotBody = serde_json::from_value(snap.body.clone()).unwrap();
         assert_eq!(body.accounts.len(), 1);
         assert_eq!(body.accounts[0].id, "acc-1");
         assert_eq!(body.accounts[0].adapter_kind, "caldav");
@@ -472,8 +459,7 @@ mod tests {
 
         // Apply to a fresh device — should land the same row.
         let (_tmp2, db2, adapter2) = fresh();
-        let builder2 =
-            SnapshotBuilder::new(db2.shared(), adapter2.clone(), "1.0.0-test");
+        let builder2 = SnapshotBuilder::new(db2.shared(), adapter2.clone(), "1.0.0-test");
         let outcome = builder2.apply(&snap).unwrap();
         assert_eq!(outcome.accounts_applied, 1);
         assert_eq!(outcome.accounts_failed, 0);
@@ -515,8 +501,7 @@ mod tests {
         }
         let builder = SnapshotBuilder::new(db.shared(), adapter, "1.0.0-test");
         let snap = builder.build().unwrap();
-        let body: AperioSnapshotBody =
-            serde_json::from_value(snap.body.clone()).unwrap();
+        let body: AperioSnapshotBody = serde_json::from_value(snap.body.clone()).unwrap();
         // No `local` row in the dumped accounts list.
         assert!(body.accounts.iter().all(|acc| acc.id != "local"));
     }

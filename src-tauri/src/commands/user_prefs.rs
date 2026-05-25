@@ -37,10 +37,7 @@ use crate::event_log::EventLogWriter;
 use crate::user_prefs::{UserPrefsError, UserPrefsRepo};
 
 #[tauri::command]
-pub async fn get_user_pref(
-    db: State<'_, DbHandle>,
-    key: String,
-) -> CommandResult<Option<String>> {
+pub async fn get_user_pref(db: State<'_, DbHandle>, key: String) -> CommandResult<Option<String>> {
     let shared = db.shared();
     let repo = UserPrefsRepo::new(&shared);
     Ok(repo.get(&key)?)

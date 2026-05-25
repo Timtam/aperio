@@ -21,16 +21,11 @@
 //! all round-trip. Reminders (VALARM) and sound overrides come with
 //! the later wave that addresses VALARM mapping in general.
 
-use cal_core::{
-    AdapterSource, Calendar, NewTask, Task, TaskList, TaskPriority,
-    TaskStatus,
-};
+use cal_core::{AdapterSource, Calendar, NewTask, Task, TaskList, TaskPriority, TaskStatus};
 use chrono::{DateTime, NaiveDate, NaiveTime, TimeZone, Utc};
-use icalendar::{
-    Calendar as ICalendar, CalendarDateTime, Component, DatePerhapsTime, Todo,
-};
+use icalendar::{Calendar as ICalendar, CalendarDateTime, Component, DatePerhapsTime, Todo};
 use reqwest::{
-    header::{HeaderName, HeaderValue, CONTENT_TYPE, IF_MATCH, IF_NONE_MATCH, ETAG},
+    header::{HeaderName, HeaderValue, CONTENT_TYPE, ETAG, IF_MATCH, IF_NONE_MATCH},
     Client, Method, StatusCode,
 };
 use url::Url;
@@ -73,8 +68,7 @@ pub async fn list_task_lists(
     home_url: &Url,
     credentials: &Credentials,
 ) -> CaldavResult<Vec<TaskList>> {
-    let entries = propfind(client, home_url, TASK_LIST_PROPFIND_BODY, credentials, 1)
-        .await?;
+    let entries = propfind(client, home_url, TASK_LIST_PROPFIND_BODY, credentials, 1).await?;
     Ok(entries
         .into_iter()
         .filter(|e| e.is_calendar)
@@ -239,9 +233,8 @@ pub async fn update_task(
     task: Task,
     credentials: &Credentials,
 ) -> CaldavResult<Task> {
-    let list_url = Url::parse(&task.list_id).map_err(|e| {
-        CaldavError::Config(format!("task.list_id is not a URL: {e}"))
-    })?;
+    let list_url = Url::parse(&task.list_id)
+        .map_err(|e| CaldavError::Config(format!("task.list_id is not a URL: {e}")))?;
     // Resolve the actual resource URL the server stored the VTODO at.
     // `get_tasks` encodes `{href}|{uid}` into task.id so we can recover
     // the server's filename here — iCloud chooses its own paths for
@@ -256,8 +249,7 @@ pub async fn update_task(
         HeaderValue::from_static("text/calendar; charset=utf-8"),
     );
     if let Some(etag) = &task.etag {
-        let value = HeaderValue::from_str(etag)
-            .map_err(|e| CaldavError::Config(e.to_string()))?;
+        let value = HeaderValue::from_str(etag).map_err(|e| CaldavError::Config(e.to_string()))?;
         headers.insert(IF_MATCH, value);
     }
     let response = client
@@ -293,8 +285,7 @@ pub async fn delete_task(
     let resource = resource_url_for_task(list_url, task_id)?;
     let mut headers = auth_header(credentials)?;
     if let Some(etag) = etag {
-        let value =
-            HeaderValue::from_str(etag).map_err(|e| CaldavError::Config(e.to_string()))?;
+        let value = HeaderValue::from_str(etag).map_err(|e| CaldavError::Config(e.to_string()))?;
         headers.insert(IF_MATCH, value);
     }
     let response = client.delete(resource).headers(headers).send().await?;
@@ -361,12 +352,7 @@ fn build_vtodo_from_task(task: &Task) -> String {
     build_vtodo_body(uid, &new, task.completed_at)
 }
 
-fn apply_common(
-    todo: &mut Todo,
-    uid: &str,
-    task: &NewTask,
-    completed_at: Option<DateTime<Utc>>,
-) {
+fn apply_common(todo: &mut Todo, uid: &str, task: &NewTask, completed_at: Option<DateTime<Utc>>) {
     todo.uid(uid);
     todo.summary(&task.title);
     if let Some(desc) = &task.description {
@@ -425,13 +411,9 @@ fn apply_common(
         todo.due(due);
     }
     if let Some(completed) = completed_at {
-        todo.add_property(
-            "COMPLETED",
-            &completed.format("%Y%m%dT%H%M%SZ").to_string(),
-        );
+        todo.add_property("COMPLETED", &completed.format("%Y%m%dT%H%M%SZ").to_string());
     }
 }
-
 
 fn map_todo(todo: &Todo, list_id: &str, href: Option<&str>) -> Option<Task> {
     let uid_raw = todo.get_uid()?.to_string();
@@ -471,9 +453,7 @@ fn map_todo(todo: &Todo, list_id: &str, href: Option<&str>) -> Option<Task> {
 
     let (scheduled_date, scheduled_time) = parse_dt(todo, "DTSTART");
     let (deadline_date, deadline_time) = parse_dt(todo, "DUE");
-    let completed_at = todo
-        .property_value("COMPLETED")
-        .and_then(parse_compact_utc);
+    let completed_at = todo.property_value("COMPLETED").and_then(parse_compact_utc);
     let created_at = todo
         .property_value("CREATED")
         .and_then(parse_compact_utc)
@@ -756,9 +736,10 @@ END:VCALENDAR</c:calendar-data>
             .with_body(body)
             .create_async()
             .await;
-        let url =
-            Url::parse(&format!("{}/calendars/alice/tasks/", server.url())).unwrap();
-        let tasks = get_tasks(&client(), &url, &creds(&server.url())).await.unwrap();
+        let url = Url::parse(&format!("{}/calendars/alice/tasks/", server.url())).unwrap();
+        let tasks = get_tasks(&client(), &url, &creds(&server.url()))
+            .await
+            .unwrap();
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].title, "Buy milk");
         assert!(matches!(tasks[0].status, TaskStatus::Open));
@@ -848,8 +829,7 @@ END:VCALENDAR</c:calendar-data>
             .with_header("etag", "\"new\"")
             .create_async()
             .await;
-        let url =
-            Url::parse(&format!("{}/calendars/alice/tasks/", server.url())).unwrap();
+        let url = Url::parse(&format!("{}/calendars/alice/tasks/", server.url())).unwrap();
         let created = create_task(&client(), &url, sample_new_task(), &creds(&server.url()))
             .await
             .unwrap();
@@ -873,8 +853,7 @@ END:VCALENDAR</c:calendar-data>
 
     #[test]
     fn resource_url_for_task_prefers_server_href() {
-        let list_url =
-            Url::parse("https://server.example/calendars/alice/tasks/").unwrap();
+        let list_url = Url::parse("https://server.example/calendars/alice/tasks/").unwrap();
         // With href the resolved URL must use the server's filename,
         // not `{list}/{uid}.ics` — that's the regression that made
         // every iCloud task delete silently 404.
@@ -911,10 +890,8 @@ END:VCALENDAR</c:calendar-data>
             .expect(1)
             .create_async()
             .await;
-        let url =
-            Url::parse(&format!("{}/calendars/alice/tasks/", server.url())).unwrap();
-        let composite_id =
-            "/calendars/alice/tasks/8B0F-EE.ics|todo-1@aperio";
+        let url = Url::parse(&format!("{}/calendars/alice/tasks/", server.url())).unwrap();
+        let composite_id = "/calendars/alice/tasks/8B0F-EE.ics|todo-1@aperio";
         delete_task(&client(), &url, composite_id, None, &creds(&server.url()))
             .await
             .unwrap();
@@ -952,9 +929,10 @@ END:VCALENDAR</c:calendar-data>
             .with_body(body)
             .create_async()
             .await;
-        let url =
-            Url::parse(&format!("{}/calendars/alice/tasks/", server.url())).unwrap();
-        let tasks = get_tasks(&client(), &url, &creds(&server.url())).await.unwrap();
+        let url = Url::parse(&format!("{}/calendars/alice/tasks/", server.url())).unwrap();
+        let tasks = get_tasks(&client(), &url, &creds(&server.url()))
+            .await
+            .unwrap();
         assert_eq!(tasks.len(), 1);
         assert_eq!(
             tasks[0].id,

@@ -110,10 +110,7 @@ impl SyncAdapter for EncryptingAdapter {
         self.inner.push_meta(meta).await
     }
 
-    async fn fetch_new_logs(
-        &self,
-        since: &DeviceCursor,
-    ) -> SyncResult<Vec<LogFile>> {
+    async fn fetch_new_logs(&self, since: &DeviceCursor) -> SyncResult<Vec<LogFile>> {
         let raw = self.inner.fetch_new_logs(since).await?;
         let mut out = Vec::with_capacity(raw.len());
         for log in raw {
@@ -151,9 +148,7 @@ impl SyncAdapter for EncryptingAdapter {
             .and_then(Value::as_str)
         {
             let blob = BASE64.decode(blob_b64).map_err(|err| {
-                SyncError::protocol(format!(
-                    "decode encrypted snapshot body: {err}"
-                ))
+                SyncError::protocol(format!("decode encrypted snapshot body: {err}"))
             })?;
             let plaintext = decrypt(&self.key, &blob)?;
             let body: Value = serde_json::from_slice(&plaintext)?;
@@ -180,23 +175,14 @@ impl SyncAdapter for EncryptingAdapter {
         self.inner.delete_log(name).await
     }
 
-    async fn push_sound_asset(
-        &self,
-        hash: &str,
-        extension: &str,
-        bytes: &[u8],
-    ) -> SyncResult<()> {
+    async fn push_sound_asset(&self, hash: &str, extension: &str, bytes: &[u8]) -> SyncResult<()> {
         let ciphertext = encrypt(&self.key, bytes)?;
         self.inner
             .push_sound_asset(hash, extension, &ciphertext)
             .await
     }
 
-    async fn fetch_sound_asset(
-        &self,
-        hash: &str,
-        extension: &str,
-    ) -> SyncResult<Option<Vec<u8>>> {
+    async fn fetch_sound_asset(&self, hash: &str, extension: &str) -> SyncResult<Option<Vec<u8>>> {
         match self.inner.fetch_sound_asset(hash, extension).await? {
             Some(blob) => Ok(Some(decrypt(&self.key, &blob)?)),
             None => Ok(None),
@@ -245,10 +231,7 @@ mod tests {
             *self.meta.lock().unwrap() = Some(meta.clone());
             Ok(())
         }
-        async fn fetch_new_logs(
-            &self,
-            _since: &DeviceCursor,
-        ) -> SyncResult<Vec<LogFile>> {
+        async fn fetch_new_logs(&self, _since: &DeviceCursor) -> SyncResult<Vec<LogFile>> {
             Ok(self.logs.lock().unwrap().clone())
         }
         async fn push_log(&self, log: &LogFile) -> SyncResult<()> {
@@ -267,23 +250,14 @@ mod tests {
             logs.retain(|l| l.name.to_filename() != name.to_filename());
             Ok(())
         }
-        async fn push_sound_asset(
-            &self,
-            hash: &str,
-            ext: &str,
-            bytes: &[u8],
-        ) -> SyncResult<()> {
+        async fn push_sound_asset(&self, hash: &str, ext: &str, bytes: &[u8]) -> SyncResult<()> {
             self.sounds
                 .lock()
                 .unwrap()
                 .push((hash.to_string(), ext.to_string(), bytes.to_vec()));
             Ok(())
         }
-        async fn fetch_sound_asset(
-            &self,
-            hash: &str,
-            ext: &str,
-        ) -> SyncResult<Option<Vec<u8>>> {
+        async fn fetch_sound_asset(&self, hash: &str, ext: &str) -> SyncResult<Option<Vec<u8>>> {
             Ok(self
                 .sounds
                 .lock()
@@ -347,10 +321,7 @@ mod tests {
         // The original "title": "secret" string must NOT appear
         // in the on-disk body anywhere — that's the whole point.
         let raw = serde_json::to_string(&stored.body).unwrap();
-        assert!(
-            !raw.contains("secret"),
-            "plaintext leaked through: {raw}",
-        );
+        assert!(!raw.contains("secret"), "plaintext leaked through: {raw}",);
 
         // The wrapper round-trips the snapshot body back.
         let fetched = encrypting.fetch_snapshot().await.unwrap().unwrap();
@@ -403,10 +374,8 @@ mod tests {
         // key B → AES-GCM's auth tag fails, surface as Auth so
         // the UI prompts for the correct passphrase.
         let inner: Arc<dyn SyncAdapter> = Arc::new(FakeAdapter::new());
-        let push_wrap =
-            EncryptingAdapter::new(Arc::clone(&inner), [1u8; KEY_LEN]);
-        let fetch_wrap =
-            EncryptingAdapter::new(Arc::clone(&inner), [2u8; KEY_LEN]);
+        let push_wrap = EncryptingAdapter::new(Arc::clone(&inner), [1u8; KEY_LEN]);
+        let fetch_wrap = EncryptingAdapter::new(Arc::clone(&inner), [2u8; KEY_LEN]);
         push_wrap
             .push_log(&LogFile {
                 name: fixture_logname(),
@@ -428,14 +397,9 @@ mod tests {
         // the encrypting wrapper. The body is returned as-is so
         // the user can still read the pre-E2E history.
         let inner: Arc<dyn SyncAdapter> = Arc::new(FakeAdapter::new());
-        let snap = Snapshot::new(
-            Utc::now(),
-            "1.0.0",
-            serde_json::json!({ "events": [] }),
-        );
+        let snap = Snapshot::new(Utc::now(), "1.0.0", serde_json::json!({ "events": [] }));
         inner.push_snapshot(&snap).await.unwrap();
-        let encrypting =
-            EncryptingAdapter::new(Arc::clone(&inner), [8u8; KEY_LEN]);
+        let encrypting = EncryptingAdapter::new(Arc::clone(&inner), [8u8; KEY_LEN]);
         let fetched = encrypting.fetch_snapshot().await.unwrap().unwrap();
         assert_eq!(fetched.body, snap.body);
     }

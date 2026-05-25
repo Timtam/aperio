@@ -27,9 +27,7 @@
 
 use std::os::raw::{c_char, c_void};
 
-use cal_adapter_caldav::{
-    AuthKind, CaldavAccountConfig, CaldavAdapter, Credentials,
-};
+use cal_adapter_caldav::{AuthKind, CaldavAccountConfig, CaldavAdapter, Credentials};
 use cal_core::adapter::{Capability, Credentials as CalCredentials};
 use cal_core::types::{ContactPhoto, DateRange, NewContact, NewEvent, NewTask};
 use cal_core::{CalendarFeature, ContactsFeature, TasksFeature};
@@ -54,12 +52,10 @@ struct InitConfig {
 
 /// # Safety
 /// FFI export; `config_json` must be NUL-terminated UTF-8.
-pub unsafe extern "C" fn plugin_open_instance(
-    config_json: *const c_char,
-) -> OpenInstanceResult {
+pub unsafe extern "C" fn plugin_open_instance(config_json: *const c_char) -> OpenInstanceResult {
     open_instance_with(config_json, |json| {
-        let cfg: InitConfig = serde_json::from_str(json)
-            .map_err(|e| format!("malformed init config: {e}"))?;
+        let cfg: InitConfig =
+            serde_json::from_str(json).map_err(|e| format!("malformed init config: {e}"))?;
         if cfg.server_url.trim().is_empty()
             || cfg.username.trim().is_empty()
             || cfg.secret.is_empty()
@@ -74,8 +70,7 @@ pub unsafe extern "C" fn plugin_open_instance(
             },
             cfg.secret,
         );
-        CaldavAdapter::new(credentials, None)
-            .map_err(|e| format!("adapter ctor failed: {e:?}"))
+        CaldavAdapter::new(credentials, None).map_err(|e| format!("adapter ctor failed: {e:?}"))
     })
 }
 
@@ -90,13 +85,10 @@ pub unsafe extern "C" fn plugin_close_instance(handle: *mut c_void) {
 // Adapter base trait
 // ─────────────────────────────────────────────────────────────
 
-unsafe extern "C" fn ffi_authenticate(
-    h: *mut c_void,
-    a: *const u8,
-    l: usize,
-) -> PluginCallResult {
+unsafe extern "C" fn ffi_authenticate(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
     let creds: CalCredentials = match decode_args(a, l) {
-        Ok(v) => v, Err(r) => return r,
+        Ok(v) => v,
+        Err(r) => return r,
     };
     dispatch(h, move |p| async move {
         cal_core::Adapter::authenticate(p, creds).await
@@ -120,7 +112,11 @@ unsafe extern "C" fn ffi_capabilities(
 // CalendarFeature
 // ─────────────────────────────────────────────────────────────
 
-unsafe extern "C" fn ffi_list_calendars(h: *mut c_void, _a: *const u8, _l: usize) -> PluginCallResult {
+unsafe extern "C" fn ffi_list_calendars(
+    h: *mut c_void,
+    _a: *const u8,
+    _l: usize,
+) -> PluginCallResult {
     dispatch(h, |p| async move { p.list_calendars().await })
 }
 
@@ -131,8 +127,13 @@ struct GetEventsArgs {
 }
 
 unsafe extern "C" fn ffi_get_events(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let args: GetEventsArgs = match decode_args(a, l) { Ok(v) => v, Err(r) => return r };
-    dispatch(h, move |p| async move { p.get_events(&args.calendar_id, args.range).await })
+    let args: GetEventsArgs = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch(h, move |p| async move {
+        p.get_events(&args.calendar_id, args.range).await
+    })
 }
 
 #[derive(Debug, Deserialize)]
@@ -142,17 +143,28 @@ struct CreateEventArgs {
 }
 
 unsafe extern "C" fn ffi_create_event(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let args: CreateEventArgs = match decode_args(a, l) { Ok(v) => v, Err(r) => return r };
-    dispatch(h, move |p| async move { p.create_event(&args.calendar_id, args.event).await })
+    let args: CreateEventArgs = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch(h, move |p| async move {
+        p.create_event(&args.calendar_id, args.event).await
+    })
 }
 
 unsafe extern "C" fn ffi_update_event(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let event: cal_core::Event = match decode_args(a, l) { Ok(v) => v, Err(r) => return r };
+    let event: cal_core::Event = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
     dispatch(h, move |p| async move { p.update_event(event).await })
 }
 
 unsafe extern "C" fn ffi_delete_event(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let event_id: String = match decode_args(a, l) { Ok(v) => v, Err(r) => return r };
+    let event_id: String = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
     dispatch_unit(h, move |p| async move { p.delete_event(&event_id).await })
 }
 
@@ -163,16 +175,29 @@ struct GetFreeBusyArgs {
 }
 
 unsafe extern "C" fn ffi_get_free_busy(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let args: GetFreeBusyArgs = match decode_args(a, l) { Ok(v) => v, Err(r) => return r };
+    let args: GetFreeBusyArgs = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
     dispatch(h, move |p| async move {
         let refs: Vec<&str> = args.emails.iter().map(|s| s.as_str()).collect();
         p.get_free_busy(&refs, args.range).await
     })
 }
 
-unsafe extern "C" fn ffi_calendar_color(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let calendar_id: String = match decode_args(a, l) { Ok(v) => v, Err(r) => return r };
-    let inst = match instance(h) { Ok(i) => i, Err(r) => return r };
+unsafe extern "C" fn ffi_calendar_color(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let calendar_id: String = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    let inst = match instance(h) {
+        Ok(i) => i,
+        Err(r) => return r,
+    };
     let color = inst.plugin().calendar_color(&calendar_id);
     ok_response(&color)
 }
@@ -183,9 +208,18 @@ struct AddExdateArgs {
     occurrence: chrono::DateTime<chrono::Utc>,
 }
 
-unsafe extern "C" fn ffi_add_event_exdate(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let args: AddExdateArgs = match decode_args(a, l) { Ok(v) => v, Err(r) => return r };
-    dispatch_unit(h, move |p| async move { p.add_event_exdate(&args.event_id, args.occurrence).await })
+unsafe extern "C" fn ffi_add_event_exdate(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let args: AddExdateArgs = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch_unit(h, move |p| async move {
+        p.add_event_exdate(&args.event_id, args.occurrence).await
+    })
 }
 
 #[derive(Debug, Deserialize)]
@@ -194,21 +228,37 @@ struct RenameCalendarArgs {
     new_name: String,
 }
 
-unsafe extern "C" fn ffi_rename_calendar(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let args: RenameCalendarArgs = match decode_args(a, l) { Ok(v) => v, Err(r) => return r };
-    dispatch_unit(h, move |p| async move { p.rename_calendar(&args.calendar_id, &args.new_name).await })
+unsafe extern "C" fn ffi_rename_calendar(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let args: RenameCalendarArgs = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch_unit(h, move |p| async move {
+        p.rename_calendar(&args.calendar_id, &args.new_name).await
+    })
 }
 
 // ─────────────────────────────────────────────────────────────
 // TasksFeature
 // ─────────────────────────────────────────────────────────────
 
-unsafe extern "C" fn ffi_list_task_lists(h: *mut c_void, _a: *const u8, _l: usize) -> PluginCallResult {
+unsafe extern "C" fn ffi_list_task_lists(
+    h: *mut c_void,
+    _a: *const u8,
+    _l: usize,
+) -> PluginCallResult {
     dispatch(h, |p| async move { p.list_task_lists().await })
 }
 
 unsafe extern "C" fn ffi_get_tasks(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let list_id: String = match decode_args(a, l) { Ok(v) => v, Err(r) => return r };
+    let list_id: String = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
     dispatch(h, move |p| async move { p.get_tasks(&list_id).await })
 }
 
@@ -219,17 +269,28 @@ struct CreateTaskArgs {
 }
 
 unsafe extern "C" fn ffi_create_task(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let args: CreateTaskArgs = match decode_args(a, l) { Ok(v) => v, Err(r) => return r };
-    dispatch(h, move |p| async move { p.create_task(&args.list_id, args.task).await })
+    let args: CreateTaskArgs = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch(h, move |p| async move {
+        p.create_task(&args.list_id, args.task).await
+    })
 }
 
 unsafe extern "C" fn ffi_update_task(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let task: cal_core::Task = match decode_args(a, l) { Ok(v) => v, Err(r) => return r };
+    let task: cal_core::Task = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
     dispatch(h, move |p| async move { p.update_task(task).await })
 }
 
 unsafe extern "C" fn ffi_delete_task(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let task_id: String = match decode_args(a, l) { Ok(v) => v, Err(r) => return r };
+    let task_id: String = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
     dispatch_unit(h, move |p| async move { p.delete_task(&task_id).await })
 }
 
@@ -239,26 +300,49 @@ struct RenameTaskListArgs {
     new_name: String,
 }
 
-unsafe extern "C" fn ffi_rename_task_list(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let args: RenameTaskListArgs = match decode_args(a, l) { Ok(v) => v, Err(r) => return r };
-    dispatch_unit(h, move |p| async move { p.rename_task_list(&args.list_id, &args.new_name).await })
+unsafe extern "C" fn ffi_rename_task_list(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let args: RenameTaskListArgs = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch_unit(h, move |p| async move {
+        p.rename_task_list(&args.list_id, &args.new_name).await
+    })
 }
 
 // ─────────────────────────────────────────────────────────────
 // ContactsFeature
 // ─────────────────────────────────────────────────────────────
 
-unsafe extern "C" fn ffi_list_contact_lists(h: *mut c_void, _a: *const u8, _l: usize) -> PluginCallResult {
+unsafe extern "C" fn ffi_list_contact_lists(
+    h: *mut c_void,
+    _a: *const u8,
+    _l: usize,
+) -> PluginCallResult {
     dispatch(h, |p| async move { p.list_contact_lists().await })
 }
 
 unsafe extern "C" fn ffi_get_contacts(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let list_id: String = match decode_args(a, l) { Ok(v) => v, Err(r) => return r };
+    let list_id: String = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
     dispatch(h, move |p| async move { p.get_contacts(&list_id).await })
 }
 
-unsafe extern "C" fn ffi_search_contacts(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let query: String = match decode_args(a, l) { Ok(v) => v, Err(r) => return r };
+unsafe extern "C" fn ffi_search_contacts(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let query: String = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
     dispatch(h, move |p| async move { p.search_contacts(&query).await })
 }
 
@@ -268,19 +352,45 @@ struct CreateContactArgs {
     contact: NewContact,
 }
 
-unsafe extern "C" fn ffi_create_contact(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let args: CreateContactArgs = match decode_args(a, l) { Ok(v) => v, Err(r) => return r };
-    dispatch(h, move |p| async move { p.create_contact(&args.list_id, args.contact).await })
+unsafe extern "C" fn ffi_create_contact(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let args: CreateContactArgs = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch(h, move |p| async move {
+        p.create_contact(&args.list_id, args.contact).await
+    })
 }
 
-unsafe extern "C" fn ffi_update_contact(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let contact: cal_core::Contact = match decode_args(a, l) { Ok(v) => v, Err(r) => return r };
+unsafe extern "C" fn ffi_update_contact(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let contact: cal_core::Contact = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
     dispatch(h, move |p| async move { p.update_contact(contact).await })
 }
 
-unsafe extern "C" fn ffi_delete_contact(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let contact_id: String = match decode_args(a, l) { Ok(v) => v, Err(r) => return r };
-    dispatch_unit(h, move |p| async move { p.delete_contact(&contact_id).await })
+unsafe extern "C" fn ffi_delete_contact(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let contact_id: String = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch_unit(
+        h,
+        move |p| async move { p.delete_contact(&contact_id).await },
+    )
 }
 
 #[derive(Debug, Deserialize)]
@@ -289,14 +399,33 @@ struct RenameContactListArgs {
     new_name: String,
 }
 
-unsafe extern "C" fn ffi_rename_contact_list(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let args: RenameContactListArgs = match decode_args(a, l) { Ok(v) => v, Err(r) => return r };
-    dispatch_unit(h, move |p| async move { p.rename_contact_list(&args.list_id, &args.new_name).await })
+unsafe extern "C" fn ffi_rename_contact_list(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let args: RenameContactListArgs = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch_unit(h, move |p| async move {
+        p.rename_contact_list(&args.list_id, &args.new_name).await
+    })
 }
 
-unsafe extern "C" fn ffi_get_contact_photo(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let contact_id: String = match decode_args(a, l) { Ok(v) => v, Err(r) => return r };
-    dispatch(h, move |p| async move { p.get_contact_photo(&contact_id).await })
+unsafe extern "C" fn ffi_get_contact_photo(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let contact_id: String = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch(
+        h,
+        move |p| async move { p.get_contact_photo(&contact_id).await },
+    )
 }
 
 #[derive(Debug, Deserialize)]
@@ -305,17 +434,39 @@ struct SetContactPhotoArgs {
     photo: ContactPhoto,
 }
 
-unsafe extern "C" fn ffi_set_contact_photo(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let args: SetContactPhotoArgs = match decode_args(a, l) { Ok(v) => v, Err(r) => return r };
-    dispatch_unit(h, move |p| async move { p.set_contact_photo(&args.contact_id, args.photo).await })
+unsafe extern "C" fn ffi_set_contact_photo(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let args: SetContactPhotoArgs = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch_unit(h, move |p| async move {
+        p.set_contact_photo(&args.contact_id, args.photo).await
+    })
 }
 
-unsafe extern "C" fn ffi_delete_contact_photo(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let contact_id: String = match decode_args(a, l) { Ok(v) => v, Err(r) => return r };
-    dispatch_unit(h, move |p| async move { p.delete_contact_photo(&contact_id).await })
+unsafe extern "C" fn ffi_delete_contact_photo(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let contact_id: String = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch_unit(h, move |p| async move {
+        p.delete_contact_photo(&contact_id).await
+    })
 }
 
-unsafe extern "C" fn ffi_invalidate_contacts_cache(h: *mut c_void, _a: *const u8, _l: usize) -> PluginCallResult {
+unsafe extern "C" fn ffi_invalidate_contacts_cache(
+    h: *mut c_void,
+    _a: *const u8,
+    _l: usize,
+) -> PluginCallResult {
     dispatch_unit(h, |p| async move { p.invalidate_contacts_cache().await })
 }
 

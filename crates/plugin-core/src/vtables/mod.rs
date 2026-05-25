@@ -131,9 +131,7 @@ impl CalendarAdapterVtable {
     /// where all three are null is degenerate — the host refuses
     /// to wrap it.
     pub fn has_any_surface(&self) -> bool {
-        !self.calendar.is_null()
-            || !self.tasks.is_null()
-            || !self.contacts.is_null()
+        !self.calendar.is_null() || !self.tasks.is_null() || !self.contacts.is_null()
     }
 }
 

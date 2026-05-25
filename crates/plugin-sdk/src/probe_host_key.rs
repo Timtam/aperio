@@ -31,8 +31,8 @@
 use std::future::Future;
 
 use plugin_core::ffi::{
-    PluginCallResult, PLUGIN_CALL_ERR_INTERNAL, PLUGIN_CALL_ERR_INVALID,
-    PLUGIN_CALL_ERR_NETWORK, PLUGIN_CALL_OK,
+    PluginCallResult, PLUGIN_CALL_ERR_INTERNAL, PLUGIN_CALL_ERR_INVALID, PLUGIN_CALL_ERR_NETWORK,
+    PLUGIN_CALL_OK,
 };
 
 use crate::response::{bytes_to_response, error_response};
@@ -88,10 +88,7 @@ where
     let runtime = match PluginRuntime::new() {
         Ok(r) => r,
         Err(err) => {
-            return error_response(
-                PLUGIN_CALL_ERR_INTERNAL,
-                &format!("build runtime: {err}"),
-            )
+            return error_response(PLUGIN_CALL_ERR_INTERNAL, &format!("build runtime: {err}"))
         }
     };
     match runtime.block_on(handler(json_str)) {
@@ -135,10 +132,7 @@ mod tests {
         };
         assert_eq!(result.status, PLUGIN_CALL_ERR_NETWORK);
         let bytes = unsafe { result.payload.as_slice() };
-        assert_eq!(
-            std::str::from_utf8(bytes).unwrap(),
-            "connection refused",
-        );
+        assert_eq!(std::str::from_utf8(bytes).unwrap(), "connection refused",);
         unsafe { result.payload.free_in_place() };
     }
 

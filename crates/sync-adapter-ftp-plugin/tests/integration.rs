@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use plugin_core::{
-    abi::AperioPlugin, manager::PluginManager, manifest::PluginManifest,
-    shim::FfiSyncAdapter, PluginType, ABI_VERSION,
+    abi::AperioPlugin, manager::PluginManager, manifest::PluginManifest, shim::FfiSyncAdapter,
+    PluginType, ABI_VERSION,
 };
 
 fn manifest() -> PluginManifest {
@@ -24,17 +24,17 @@ fn manifest() -> PluginManifest {
 
 fn make_manager() -> PluginManager {
     let m = PluginManager::new("0.1.0");
-    let d: *mut AperioPlugin =
-        unsafe { sync_adapter_ftp_plugin::build_descriptor() };
+    let d: *mut AperioPlugin = unsafe { sync_adapter_ftp_plugin::build_descriptor() };
     assert!(!d.is_null());
-    let dx: unsafe extern "C" fn(*mut AperioPlugin) =
-        sync_adapter_ftp_plugin::DESTROY_FN;
+    let dx: unsafe extern "C" fn(*mut AperioPlugin) = sync_adapter_ftp_plugin::DESTROY_FN;
     m.register_static(manifest(), d, dx).expect("register");
     m
 }
 
 fn open_one(manager: &PluginManager, host: &str) -> Arc<plugin_core::LoadedInstance> {
-    let loaded = manager.get("com.aperio.sync-adapter-ftp").expect("registered");
+    let loaded = manager
+        .get("com.aperio.sync-adapter-ftp")
+        .expect("registered");
     let cfg = serde_json::json!({
         "host": host,
         "port": 21,
@@ -43,16 +43,17 @@ fn open_one(manager: &PluginManager, host: &str) -> Arc<plugin_core::LoadedInsta
         "path": "/aperio",
         "mode": "explicit",
     });
-    manager.open_instance(loaded, &cfg.to_string()).expect("open")
+    manager
+        .open_instance(loaded, &cfg.to_string())
+        .expect("open")
 }
 
 #[test]
 fn plugin_loads_and_wraps_through_ffi_sync_adapter() {
     let manager = make_manager();
     let inst = open_one(&manager, "ftp.example.invalid");
-    let _adapter: Arc<FfiSyncAdapter> = Arc::new(
-        FfiSyncAdapter::new(inst).expect("vtable surface"),
-    );
+    let _adapter: Arc<FfiSyncAdapter> =
+        Arc::new(FfiSyncAdapter::new(inst).expect("vtable surface"));
 }
 
 #[test]

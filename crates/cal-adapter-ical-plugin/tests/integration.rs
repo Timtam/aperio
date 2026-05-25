@@ -3,7 +3,9 @@
 use std::sync::Arc;
 
 use plugin_core::{
-    abi::AperioPlugin, manager::PluginManager, manifest::PluginManifest,
+    abi::AperioPlugin,
+    manager::PluginManager,
+    manifest::PluginManifest,
     shim::{FfiCalendarAdapter, FfiContactsAdapter, FfiTasksAdapter},
     Capability, PluginType, ABI_VERSION,
 };
@@ -25,11 +27,9 @@ fn manifest() -> PluginManifest {
 
 fn register() -> PluginManager {
     let m = PluginManager::new("0.1.0");
-    let d: *mut AperioPlugin =
-        unsafe { cal_adapter_ical_plugin::build_descriptor() };
+    let d: *mut AperioPlugin = unsafe { cal_adapter_ical_plugin::build_descriptor() };
     assert!(!d.is_null());
-    let dx: unsafe extern "C" fn(*mut AperioPlugin) =
-        cal_adapter_ical_plugin::DESTROY_FN;
+    let dx: unsafe extern "C" fn(*mut AperioPlugin) = cal_adapter_ical_plugin::DESTROY_FN;
     m.register_static(manifest(), d, dx).unwrap();
     m
 }
@@ -41,16 +41,17 @@ fn open_one(manager: &PluginManager, feed_url: &str) -> Arc<plugin_core::LoadedI
         "username": null,
         "password": null,
     });
-    manager.open_instance(loaded, &cfg.to_string()).expect("open")
+    manager
+        .open_instance(loaded, &cfg.to_string())
+        .expect("open")
 }
 
 #[test]
 fn ical_plugin_wraps_through_ffi_calendar_adapter() {
     let manager = register();
     let inst = open_one(&manager, "https://example.invalid/holidays.ics");
-    let _adapter: Arc<FfiCalendarAdapter> = Arc::new(
-        FfiCalendarAdapter::new(inst).expect("calendar slot present"),
-    );
+    let _adapter: Arc<FfiCalendarAdapter> =
+        Arc::new(FfiCalendarAdapter::new(inst).expect("calendar slot present"));
 }
 
 #[test]

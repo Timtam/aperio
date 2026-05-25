@@ -9,8 +9,7 @@ use std::sync::Arc;
 use tauri::State;
 
 use super::{
-    plugin_id_for_adapter_kind, run_plugin_auth, run_plugin_discover,
-    CommandError, CommandResult,
+    plugin_id_for_adapter_kind, run_plugin_auth, run_plugin_discover, CommandError, CommandResult,
 };
 use crate::accounts::{Account, AccountsError, AccountsRepo, AdapterKind};
 use crate::db::DbHandle;
@@ -43,8 +42,7 @@ fn account_payload(acc: &Account) -> AccountPayload {
 /// first boot after the upgrade we walk those rows once and
 /// emit catch-up events so the next sync round actually carries
 /// them to the remote.
-const PREF_ACCOUNTS_BACKFILLED: &str =
-    "sync.accounts.eventBackfillDone";
+const PREF_ACCOUNTS_BACKFILLED: &str = "sync.accounts.eventBackfillDone";
 
 /// Catch-up emit: idempotent. Walks every non-local account in
 /// the local accounts table and pushes an `AccountCreated`
@@ -60,10 +58,7 @@ const PREF_ACCOUNTS_BACKFILLED: &str =
 /// surfaces as a `warn!` log and leaves the backfill
 /// un-flagged, so the next boot retries. We never want a
 /// backfill problem to block app startup.
-pub fn backfill_account_events(
-    db: &crate::db::DbHandle,
-    event_log: &EventLogWriter,
-) {
+pub fn backfill_account_events(db: &crate::db::DbHandle, event_log: &EventLogWriter) {
     let shared = db.shared();
     let prefs = crate::user_prefs::UserPrefsRepo::new(&shared);
     match prefs.get(PREF_ACCOUNTS_BACKFILLED) {
@@ -217,9 +212,7 @@ fn required_secret_slot(kind: AdapterKind) -> Option<SecretSlot> {
     match kind {
         AdapterKind::Ical | AdapterKind::Local => None,
         AdapterKind::Vikunja | AdapterKind::Todoist => Some(SecretSlot::ApiToken),
-        AdapterKind::Google | AdapterKind::MicrosoftGraph => {
-            Some(SecretSlot::RefreshToken)
-        }
+        AdapterKind::Google | AdapterKind::MicrosoftGraph => Some(SecretSlot::RefreshToken),
         _ => Some(SecretSlot::Password),
     }
 }
@@ -298,8 +291,8 @@ pub async fn create_account(
     // missing surfaces as "invalid_input" from the plugin's own
     // InitConfig deserialiser, so we don't pre-validate here.
     let plugin_manager_ref: &PluginManager = plugin_manager.inner();
-    let request_config: Value = serde_json::from_str(&request.config_json)
-        .map_err(|e| CommandError {
+    let request_config: Value =
+        serde_json::from_str(&request.config_json).map_err(|e| CommandError {
             code: "invalid_input",
             message: format!("invalid config JSON: {e}"),
         })?;
@@ -369,12 +362,7 @@ pub async fn create_account(
                 message: "Vikunja needs an API token to authenticate.".into(),
             });
         };
-        smoke_test_vikunja(
-            plugin_manager_ref,
-            str_field("server_url"),
-            secret,
-        )
-        .await?;
+        smoke_test_vikunja(plugin_manager_ref, str_field("server_url"), secret).await?;
     }
 
     if request.adapter_kind == AdapterKind::Todoist {
@@ -540,9 +528,7 @@ async fn smoke_via_calendar_plugin(
     let instance = open_smoke_instance(plugin_manager, plugin_id, config)?;
     let adapter = FfiCalendarAdapter::new(instance).ok_or(CommandError {
         code: "internal",
-        message: format!(
-            "plugin {plugin_id} doesn't expose CalendarFeature",
-        ),
+        message: format!("plugin {plugin_id} doesn't expose CalendarFeature",),
     })?;
     adapter
         .list_calendars()
@@ -560,9 +546,7 @@ async fn smoke_via_tasks_plugin(
     let instance = open_smoke_instance(plugin_manager, plugin_id, config)?;
     let adapter = FfiTasksAdapter::new(instance).ok_or(CommandError {
         code: "internal",
-        message: format!(
-            "plugin {plugin_id} doesn't expose TasksFeature",
-        ),
+        message: format!("plugin {plugin_id} doesn't expose TasksFeature",),
     })?;
     adapter
         .list_task_lists()
@@ -586,12 +570,10 @@ fn open_smoke_instance(
     plugin_manager
         .open_instance(plugin, &config.to_string())
         .map_err(|err| match err {
-            plugin_core::error::PluginError::InstanceOpen { message, .. } => {
-                CommandError {
-                    code: "invalid_input",
-                    message,
-                }
-            }
+            plugin_core::error::PluginError::InstanceOpen { message, .. } => CommandError {
+                code: "invalid_input",
+                message,
+            },
             other => CommandError {
                 code: "internal",
                 message: other.to_string(),
@@ -926,9 +908,7 @@ pub async fn connect_google_account(
         });
     }
     if let Some(refresh) = tokens.get("refresh_token").and_then(Value::as_str) {
-        if let Err(err) =
-            secrets::store(&created.id, SecretSlot::RefreshToken, refresh)
-        {
+        if let Err(err) = secrets::store(&created.id, SecretSlot::RefreshToken, refresh) {
             let _ = secrets::delete_all(&created.id);
             let _ = repo.delete(&created.id);
             return Err(CommandError {
@@ -1028,9 +1008,7 @@ pub async fn connect_microsoft_account(
         });
     }
     if let Some(refresh) = tokens.get("refresh_token").and_then(Value::as_str) {
-        if let Err(err) =
-            secrets::store(&created.id, SecretSlot::RefreshToken, refresh)
-        {
+        if let Err(err) = secrets::store(&created.id, SecretSlot::RefreshToken, refresh) {
             let _ = secrets::delete_all(&created.id);
             let _ = repo.delete(&created.id);
             return Err(CommandError {
@@ -1236,16 +1214,13 @@ where
     if account.adapter_kind != expected_kind {
         return Err(CommandError {
             code: "invalid_input",
-            message: format!(
-                "account is not a {plugin_label} account",
-            ),
+            message: format!("account is not a {plugin_label} account",),
         });
     }
-    let config: Value =
-        serde_json::from_str(&account.config_json).map_err(|err| CommandError {
-            code: "internal",
-            message: format!("parse {plugin_label} config: {err}"),
-        })?;
+    let config: Value = serde_json::from_str(&account.config_json).map_err(|err| CommandError {
+        code: "internal",
+        message: format!("parse {plugin_label} config: {err}"),
+    })?;
     let args = build_args(&config);
     let tokens = run_plugin_auth(plugin_manager, plugin_id, args).await?;
 
@@ -1256,19 +1231,17 @@ where
             code: "protocol",
             message: format!("{plugin_label} plugin returned no access_token"),
         })?;
-    secrets::store(&account.id, SecretSlot::AccessToken, access).map_err(
-        |err| CommandError {
-            code: "internal",
-            message: format!("failed to store access token: {err}"),
-        },
-    )?;
+    secrets::store(&account.id, SecretSlot::AccessToken, access).map_err(|err| CommandError {
+        code: "internal",
+        message: format!("failed to store access token: {err}"),
+    })?;
     if let Some(refresh) = tokens.get("refresh_token").and_then(Value::as_str) {
-        secrets::store(&account.id, SecretSlot::RefreshToken, refresh).map_err(
-            |err| CommandError {
+        secrets::store(&account.id, SecretSlot::RefreshToken, refresh).map_err(|err| {
+            CommandError {
                 code: "internal",
                 message: format!("failed to store refresh token: {err}"),
-            },
-        )?;
+            }
+        })?;
     }
     if let Err(err) = registry.register(&account) {
         return Err(CommandError {

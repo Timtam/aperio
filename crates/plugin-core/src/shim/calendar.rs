@@ -22,9 +22,7 @@ use crate::ffi::*;
 use crate::manager::{InFlightGuard, LoadedInstance};
 use crate::vtables::{CalendarAdapterVtable, CalendarVtable};
 
-use super::call::{
-    call_method, call_method_sync, decode_payload, encode_args, CallOutcome,
-};
+use super::call::{call_method, call_method_sync, decode_payload, encode_args, CallOutcome};
 
 /// Holds a loaded calendar-adapter plugin instance + a snapshot
 /// of the methods we expect on its vtable. The vtable pointer is
@@ -108,8 +106,7 @@ impl FfiCalendarAdapter {
         // SAFETY: the manifest's plugin_type field told us this
         // is a calendar-adapter, so the vtable pointer points at
         // a CalendarAdapterVtable per the ABI contract.
-        let outer: &CalendarAdapterVtable =
-            unsafe { &*(raw as *const CalendarAdapterVtable) };
+        let outer: &CalendarAdapterVtable = unsafe { &*(raw as *const CalendarAdapterVtable) };
         if outer.calendar.is_null() {
             // Plugin didn't declare Capability::Calendar — not an
             // error, just means the registry should skip the
@@ -165,14 +162,11 @@ where
     T: serde::de::DeserializeOwned,
     A: Serialize,
 {
-    let bytes = encode_args(args).map_err(|e| Error::Internal(format!(
-        "encode args: {e}"
-    )))?;
+    let bytes = encode_args(args).map_err(|e| Error::Internal(format!("encode args: {e}")))?;
     let outcome = call_method(method, instance_addr, bytes).await;
     if outcome.is_ok() {
-        decode_payload(&outcome.bytes).map_err(|e| Error::Protocol(format!(
-            "decode plugin response: {e}"
-        )))
+        decode_payload(&outcome.bytes)
+            .map_err(|e| Error::Protocol(format!("decode plugin response: {e}")))
     } else {
         Err(status_to_cal_error(outcome))
     }
@@ -186,9 +180,7 @@ async fn call_for_unit<A: Serialize>(
     instance_addr: usize,
     args: &A,
 ) -> Result<()> {
-    let bytes = encode_args(args).map_err(|e| Error::Internal(format!(
-        "encode args: {e}"
-    )))?;
+    let bytes = encode_args(args).map_err(|e| Error::Internal(format!("encode args: {e}")))?;
     let outcome = call_method(method, instance_addr, bytes).await;
     if outcome.is_ok() {
         Ok(())
@@ -268,21 +260,13 @@ impl CalendarFeature for FfiCalendarAdapter {
         call_then_decode(self.vtable.list_calendars, self.handle_addr, &()).await
     }
 
-    async fn get_events(
-        &self,
-        calendar_id: &str,
-        range: DateRange,
-    ) -> Result<Vec<Event>> {
+    async fn get_events(&self, calendar_id: &str, range: DateRange) -> Result<Vec<Event>> {
         let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         let args = GetEventsArgs { calendar_id, range };
         call_then_decode(self.vtable.get_events, self.handle_addr, &args).await
     }
 
-    async fn create_event(
-        &self,
-        calendar_id: &str,
-        event: NewEvent,
-    ) -> Result<Event> {
+    async fn create_event(&self, calendar_id: &str, event: NewEvent) -> Result<Event> {
         let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         let args = CreateEventArgs { calendar_id, event };
         call_then_decode(self.vtable.create_event, self.handle_addr, &args).await
@@ -298,11 +282,7 @@ impl CalendarFeature for FfiCalendarAdapter {
         call_for_unit(self.vtable.delete_event, self.handle_addr, &event_id).await
     }
 
-    async fn get_free_busy(
-        &self,
-        emails: &[&str],
-        range: DateRange,
-    ) -> Result<Vec<FreeBusy>> {
+    async fn get_free_busy(&self, emails: &[&str], range: DateRange) -> Result<Vec<FreeBusy>> {
         let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         let args = GetFreeBusyArgs {
             emails: emails.to_vec(),
@@ -349,17 +329,19 @@ impl CalendarFeature for FfiCalendarAdapter {
         occurrence: chrono::DateTime<chrono::Utc>,
     ) -> Result<()> {
         let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
-        let args = AddExdateArgs { event_id, occurrence };
+        let args = AddExdateArgs {
+            event_id,
+            occurrence,
+        };
         call_for_unit(self.vtable.add_event_exdate, self.handle_addr, &args).await
     }
 
-    async fn rename_calendar(
-        &self,
-        calendar_id: &str,
-        new_name: &str,
-    ) -> Result<()> {
+    async fn rename_calendar(&self, calendar_id: &str, new_name: &str) -> Result<()> {
         let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
-        let args = RenameCalendarArgs { calendar_id, new_name };
+        let args = RenameCalendarArgs {
+            calendar_id,
+            new_name,
+        };
         call_for_unit(self.vtable.rename_calendar, self.handle_addr, &args).await
     }
 }
@@ -501,12 +483,9 @@ mod tests {
             noop_destroy,
         );
         let plugin = Arc::new(loaded);
-        let instance = crate::manager::test_support::loaded_instance_for_tests(
-            plugin,
-            std::ptr::null_mut(),
-        );
-        FfiCalendarAdapter::new(instance)
-            .expect("vtable has minimum surface")
+        let instance =
+            crate::manager::test_support::loaded_instance_for_tests(plugin, std::ptr::null_mut());
+        FfiCalendarAdapter::new(instance).expect("vtable has minimum surface")
     }
 
     #[tokio::test]

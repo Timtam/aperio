@@ -46,12 +46,8 @@ pub unsafe fn decode_args<T: DeserializeOwned>(
         // for `len` bytes for the duration of the call.
         std::slice::from_raw_parts(ptr, len)
     };
-    serde_json::from_slice::<T>(bytes).map_err(|err| {
-        error_response(
-            PLUGIN_CALL_ERR_INVALID,
-            &format!("decode args: {err}"),
-        )
-    })
+    serde_json::from_slice::<T>(bytes)
+        .map_err(|err| error_response(PLUGIN_CALL_ERR_INVALID, &format!("decode args: {err}")))
 }
 
 #[cfg(test)]
@@ -67,8 +63,7 @@ mod tests {
     #[test]
     fn decodes_typed_json() {
         let json = br#"{"list_id":"cal-1"}"#;
-        let parsed: ListArgs =
-            unsafe { decode_args(json.as_ptr(), json.len()).expect("parses") };
+        let parsed: ListArgs = unsafe { decode_args(json.as_ptr(), json.len()).expect("parses") };
         assert_eq!(
             parsed,
             ListArgs {
@@ -79,16 +74,14 @@ mod tests {
 
     #[test]
     fn empty_pointer_decodes_as_null() {
-        let parsed: Option<u32> =
-            unsafe { decode_args(std::ptr::null(), 0).expect("parses") };
+        let parsed: Option<u32> = unsafe { decode_args(std::ptr::null(), 0).expect("parses") };
         assert!(parsed.is_none());
     }
 
     #[test]
     fn empty_len_decodes_as_null() {
         let bytes = b"";
-        let parsed: Option<u32> =
-            unsafe { decode_args(bytes.as_ptr(), 0).expect("parses") };
+        let parsed: Option<u32> = unsafe { decode_args(bytes.as_ptr(), 0).expect("parses") };
         assert!(parsed.is_none());
     }
 

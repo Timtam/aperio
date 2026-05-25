@@ -81,10 +81,7 @@ pub fn run() {
     // calls have a populated PluginManager to look up against.
     // The eventual dlopen pipeline (DESIGN.md §22.2) replaces
     // this with a `scan_dir("plugins/bundled/")` round.
-    let plugin_manager = bundled_plugins::build_manager(
-        env!("CARGO_PKG_VERSION"),
-        &data_dir.path,
-    );
+    let plugin_manager = bundled_plugins::build_manager(env!("CARGO_PKG_VERSION"), &data_dir.path);
     info!(
         plugin_count = plugin_manager.len(),
         "registered bundled + user plugins",
@@ -104,8 +101,7 @@ pub fn run() {
         let shared = db.shared();
         let prefs = crate::user_prefs::UserPrefsRepo::new(&shared);
         for plugin in plugin_manager.all() {
-            let key =
-                commands::pref_key_for_disabled(&plugin.manifest.id);
+            let key = commands::pref_key_for_disabled(&plugin.manifest.id);
             match prefs.get(&key) {
                 Ok(Some(v)) if v == "true" => {
                     plugin_manager.set_enabled(&plugin.manifest.id, false);
@@ -152,8 +148,7 @@ pub fn run() {
     // `<data_dir>/sync/log/pending/` and appends every local
     // mutation that flows through the command layer's writer
     // hooks. Wrapped in Arc so cloning into Tauri State is free.
-    let device_id =
-        EventLogWriter::load_or_mint_device_id(&db.shared());
+    let device_id = EventLogWriter::load_or_mint_device_id(&db.shared());
     info!(
         device_id = %device_id,
         "event-log writer device id",
@@ -214,8 +209,7 @@ pub fn run() {
     // pushes from it) and the onboarding service (which replays
     // its contents during §19.10 stale-device resume). Build it
     // once and hand both consumers a clone.
-    let pending_dir =
-        data_dir.path.join("sync").join("log").join("pending");
+    let pending_dir = data_dir.path.join("sync").join("log").join("pending");
     // Local custom-sound store. Same convention used by the
     // §19.10 / §19.11.7 sound-asset sync. Lives outside the
     // sync/ subtree because the audio files are user content,
@@ -244,9 +238,7 @@ pub fn run() {
     // re-configure step. Adapter credentials are device-local
     // (per §19.2.1) and never propagate, so the user_prefs
     // lookup is the single source of truth.
-    if let Some(adapter) =
-        commands::build_adapter_from_prefs(&db.shared(), &plugin_manager)
-    {
+    if let Some(adapter) = commands::build_adapter_from_prefs(&db.shared(), &plugin_manager) {
         info!("restoring previously-configured sync adapter");
         sync_orchestrator.configure(adapter);
     }
@@ -521,17 +513,9 @@ pub fn run() {
             // will tune this per-adapter.
             tauri::async_runtime::block_on(async move {
                 let push = orchestrator.push_now();
-                match tokio::time::timeout(
-                    std::time::Duration::from_secs(10),
-                    push,
-                )
-                .await
-                {
+                match tokio::time::timeout(std::time::Duration::from_secs(10), push).await {
                     Ok(Ok(count)) => {
-                        info!(
-                            pushed = count,
-                            "app-exit sync push complete",
-                        );
+                        info!(pushed = count, "app-exit sync push complete",);
                     }
                     Ok(Err(err)) => {
                         warn!(?err, "app-exit sync push failed");

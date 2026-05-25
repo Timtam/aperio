@@ -35,10 +35,7 @@ use crate::error::{CaldavError, CaldavResult};
 /// chronologically sorted list of events. One VCALENDAR body may
 /// carry multiple VEVENTs (RFC 5545 allows it); we emit one
 /// `cal_core::Event` per top-level VEVENT.
-pub fn parse_calendar_data(
-    body: &str,
-    calendar_id: &str,
-) -> CaldavResult<Vec<Event>> {
+pub fn parse_calendar_data(body: &str, calendar_id: &str) -> CaldavResult<Vec<Event>> {
     let parsed: ICalendar = body
         .parse()
         .map_err(|err: String| CaldavError::Protocol(format!("ical: {err}")))?;
@@ -56,13 +53,10 @@ pub fn parse_calendar_data(
     Ok(out)
 }
 
-fn map_event(
-    ev: &icalendar::Event,
-    calendar_id: &str,
-) -> CaldavResult<Event> {
-    let uid = ev.get_uid().ok_or_else(|| {
-        CaldavError::Protocol("VEVENT without UID".to_string())
-    })?;
+fn map_event(ev: &icalendar::Event, calendar_id: &str) -> CaldavResult<Event> {
+    let uid = ev
+        .get_uid()
+        .ok_or_else(|| CaldavError::Protocol("VEVENT without UID".to_string()))?;
     let summary = ev.get_summary().unwrap_or("").to_string();
     let description = ev.get_description().map(|s| s.to_string());
     let location = ev.get_location().map(|s| s.to_string());
@@ -138,10 +132,7 @@ fn parse_valarms(ev: &icalendar::Event) -> Vec<Reminder> {
 /// Decide whether `TRIGGER` carries an absolute date-time or a
 /// relative ISO 8601 duration, and combine that with the ACTION
 /// to pick the right `ReminderKind`.
-fn resolve_trigger(
-    trigger: &icalendar::Property,
-    action: &str,
-) -> Option<ReminderKind> {
+fn resolve_trigger(trigger: &icalendar::Property, action: &str) -> Option<ReminderKind> {
     let raw = trigger.value();
     let is_absolute = trigger
         .params()
@@ -240,16 +231,13 @@ fn parse_iso_duration_to_minutes_before(raw: &str) -> Option<i64> {
     Some(-sign * total_minutes)
 }
 
-
 /// Pull DTSTART and DTEND into UTC. Several shapes are possible:
 ///   - DATE-TIME with explicit UTC ("Z" suffix) — most common
 ///   - DATE-TIME with a TZID — converted to UTC via chrono-tz
 ///     (icalendar already does this when it can; we accept naive
 ///     and assume UTC as a last-resort fallback)
 ///   - DATE without time — all-day event; we anchor at 00:00 UTC
-fn resolve_range(
-    ev: &icalendar::Event,
-) -> CaldavResult<(DateTime<Utc>, DateTime<Utc>, bool)> {
+fn resolve_range(ev: &icalendar::Event) -> CaldavResult<(DateTime<Utc>, DateTime<Utc>, bool)> {
     let start = ev
         .get_start()
         .ok_or_else(|| CaldavError::Protocol("VEVENT without DTSTART".into()))?;
@@ -272,10 +260,7 @@ fn resolve_range(
 
 fn datetime_to_utc(value: DatePerhapsTime) -> (DateTime<Utc>, bool) {
     match value {
-        DatePerhapsTime::Date(d) => (
-            naive_date_to_utc(d),
-            true,
-        ),
+        DatePerhapsTime::Date(d) => (naive_date_to_utc(d), true),
         DatePerhapsTime::DateTime(dt) => {
             // icalendar's CalendarDateTime is an enum with three
             // shapes (UTC / local-with-tz / floating). We normalise
@@ -342,13 +327,9 @@ fn collect_exdates(ev: &icalendar::Event) -> Vec<DateTime<Utc>> {
             if trimmed.is_empty() {
                 continue;
             }
-            if let Ok(dt) =
-                chrono::NaiveDateTime::parse_from_str(trimmed, "%Y%m%dT%H%M%SZ")
-            {
+            if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(trimmed, "%Y%m%dT%H%M%SZ") {
                 out.push(Utc.from_utc_datetime(&dt));
-            } else if let Ok(d) =
-                chrono::NaiveDate::parse_from_str(trimmed, "%Y%m%d")
-            {
+            } else if let Ok(d) = chrono::NaiveDate::parse_from_str(trimmed, "%Y%m%d") {
                 out.push(naive_date_to_utc(d));
             }
         }
@@ -413,10 +394,7 @@ fn apply_common(ical_ev: &mut icalendar::Event, uid: &str, event: &NewEvent) {
     if let Some(rec) = &event.recurrence {
         ical_ev.add_property("RRULE", &rec.rrule);
         for exdate in &rec.exceptions {
-            ical_ev.add_multi_property(
-                "EXDATE",
-                &format_utc_compact(*exdate),
-            );
+            ical_ev.add_multi_property("EXDATE", &format_utc_compact(*exdate));
         }
     }
     // VALARM children — one per Reminder so iCloud's iOS / Alexa
@@ -453,9 +431,7 @@ fn reminder_to_alarm(reminder: &Reminder, fallback_summary: &str) -> Option<ical
             let dur = chrono::Duration::minutes(-*minutes_before);
             Some(Alarm::display(&summary, Trigger::from(dur)).done())
         }
-        ReminderKind::Absolute { at } => {
-            Some(Alarm::display(&summary, Trigger::from(*at)).done())
-        }
+        ReminderKind::Absolute { at } => Some(Alarm::display(&summary, Trigger::from(*at)).done()),
         ReminderKind::Email { minutes_before } => {
             // icalendar 0.16 doesn't expose a typed `Alarm::email`
             // constructor yet (the source carries a TODO). We build
@@ -501,10 +477,7 @@ END:VCALENDAR\r
             ev.start,
             Utc.with_ymd_and_hms(2026, 5, 20, 8, 0, 0).unwrap()
         );
-        assert_eq!(
-            ev.end,
-            Utc.with_ymd_and_hms(2026, 5, 20, 8, 30, 0).unwrap()
-        );
+        assert_eq!(ev.end, Utc.with_ymd_and_hms(2026, 5, 20, 8, 30, 0).unwrap());
         assert!(!ev.all_day);
     }
 
@@ -528,10 +501,7 @@ END:VCALENDAR\r
             Utc.with_ymd_and_hms(2026, 5, 20, 0, 0, 0).unwrap()
         );
         // Missing DTEND on an all-day event: end of day.
-        assert_eq!(
-            ev.end,
-            Utc.with_ymd_and_hms(2026, 5, 21, 0, 0, 0).unwrap()
-        );
+        assert_eq!(ev.end, Utc.with_ymd_and_hms(2026, 5, 21, 0, 0, 0).unwrap());
     }
 
     #[test]
@@ -571,9 +541,7 @@ END:VCALENDAR\r
             all_day: false,
             recurrence: Some(EventRecurrence {
                 rrule: "FREQ=WEEKLY;BYDAY=WE".into(),
-                exceptions: vec![Utc
-                    .with_ymd_and_hms(2026, 6, 3, 8, 0, 0)
-                    .unwrap()],
+                exceptions: vec![Utc.with_ymd_and_hms(2026, 6, 3, 8, 0, 0).unwrap()],
             }),
             color_label: None,
             reminders: Vec::new(),
@@ -678,14 +646,13 @@ END:VCALENDAR\r
         assert_eq!(reminders.len(), 2);
         assert!(matches!(
             reminders[0].kind,
-            ReminderKind::Relative { minutes_before: 1440 }
+            ReminderKind::Relative {
+                minutes_before: 1440
+            }
         ));
         match &reminders[1].kind {
             ReminderKind::Absolute { at } => {
-                assert_eq!(
-                    *at,
-                    Utc.with_ymd_and_hms(2026, 5, 19, 20, 0, 0).unwrap()
-                );
+                assert_eq!(*at, Utc.with_ymd_and_hms(2026, 5, 19, 20, 0, 0).unwrap());
             }
             other => panic!("expected Absolute, got {other:?}"),
         }
@@ -795,10 +762,7 @@ END:VCALENDAR\r
             parse_iso_duration_to_minutes_before("-P1DT12H"),
             Some(1440 + 720)
         );
-        assert_eq!(
-            parse_iso_duration_to_minutes_before("-PT1H30M"),
-            Some(90)
-        );
+        assert_eq!(parse_iso_duration_to_minutes_before("-PT1H30M"), Some(90));
         // No sign = positive iCal duration = fires *after* reference,
         // so minutes_before is negative.
         assert_eq!(parse_iso_duration_to_minutes_before("PT15M"), Some(-15));
@@ -844,11 +808,7 @@ END:VCALENDAR\r
         let events = parse_calendar_data(body, "cal-1").unwrap();
         assert_eq!(events.len(), 1, "expected one VEVENT");
         let reminders = &events[0].reminders;
-        assert_eq!(
-            reminders.len(),
-            1,
-            "iCloud VALARM was dropped during parse",
-        );
+        assert_eq!(reminders.len(), 1, "iCloud VALARM was dropped during parse",);
         match &reminders[0].kind {
             ReminderKind::Relative { minutes_before } => {
                 assert_eq!(*minutes_before, 15);

@@ -66,8 +66,7 @@ pub async fn create_task_list(
     event_log: State<'_, Arc<EventLogWriter>>,
     request: CreateTaskListRequest,
 ) -> CommandResult<TaskListRow> {
-    let list =
-        adapter.create_task_list(&request.name, None, None, request.embedded_in_calendar)?;
+    let list = adapter.create_task_list(&request.name, None, None, request.embedded_in_calendar)?;
     if let Ok(fields) = serde_json::to_value(&list) {
         event_log.append(SyncEvent::TaskListCreated(EventPayload {
             id: list.id.clone(),
@@ -236,17 +235,12 @@ pub async fn update_task(
         };
 
         let created = if target_account == LOCAL_ID {
-            adapter
-                .create_task(&task.list_id, new_payload)
-                .await?
+            adapter.create_task(&task.list_id, new_payload).await?
         } else {
             let Some(ext) = registry.task_adapter(&target_account) else {
                 return Err(CommandError {
                     code: "not_found",
-                    message: format!(
-                        "target task list '{}' is not routable",
-                        task.list_id,
-                    ),
+                    message: format!("target task list '{}' is not routable", task.list_id,),
                 });
             };
             ext.create_task(&task.list_id, new_payload).await?

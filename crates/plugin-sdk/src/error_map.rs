@@ -16,9 +16,8 @@
 use cal_core::error::Error as CalError;
 use plugin_core::ffi::{
     PLUGIN_CALL_ERR_AUTH, PLUGIN_CALL_ERR_CONFLICT, PLUGIN_CALL_ERR_FORBIDDEN,
-    PLUGIN_CALL_ERR_INTERNAL, PLUGIN_CALL_ERR_INVALID, PLUGIN_CALL_ERR_IO,
-    PLUGIN_CALL_ERR_NETWORK, PLUGIN_CALL_ERR_NOT_FOUND, PLUGIN_CALL_ERR_PROTOCOL,
-    PLUGIN_CALL_ERR_UNSUPPORTED,
+    PLUGIN_CALL_ERR_INTERNAL, PLUGIN_CALL_ERR_INVALID, PLUGIN_CALL_ERR_IO, PLUGIN_CALL_ERR_NETWORK,
+    PLUGIN_CALL_ERR_NOT_FOUND, PLUGIN_CALL_ERR_PROTOCOL, PLUGIN_CALL_ERR_UNSUPPORTED,
 };
 use plugin_core::PluginCallResult;
 use sync_core::error::SyncError;
@@ -66,9 +65,7 @@ pub fn sync_error_to_response(err: SyncError) -> PluginCallResult {
         ),
         SyncError::SchemaTooOld { required, running } => (
             PLUGIN_CALL_ERR_PROTOCOL,
-            format!(
-                "schema too old: dataset needs {required}; running {running}"
-            ),
+            format!("schema too old: dataset needs {required}; running {running}"),
         ),
         SyncError::StaleDevice { snapshot_at } => (
             PLUGIN_CALL_ERR_PROTOCOL,
@@ -102,9 +99,7 @@ mod tests {
 
     #[test]
     fn cal_authentication_maps_to_auth_status() {
-        let r = cal_error_to_response(CalError::Authentication(
-            "bad creds".to_string(),
-        ));
+        let r = cal_error_to_response(CalError::Authentication("bad creds".to_string()));
         assert_eq!(r.status, PLUGIN_CALL_ERR_AUTH);
         let slice = unsafe { r.payload.as_slice() };
         assert_eq!(slice, b"bad creds");
@@ -130,9 +125,7 @@ mod tests {
 
     #[test]
     fn vc_authentication_maps_to_auth_status() {
-        let r = vc_error_to_response(VcError::Authentication(
-            "expired token".to_string(),
-        ));
+        let r = vc_error_to_response(VcError::Authentication("expired token".to_string()));
         assert_eq!(r.status, PLUGIN_CALL_ERR_AUTH);
         let mut p = r.payload;
         unsafe { p.free_in_place() };

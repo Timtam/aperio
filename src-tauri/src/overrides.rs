@@ -84,8 +84,7 @@ impl<'a> OverridesRepo<'a> {
             let kind_str: String = row.get(1)?;
             Ok(NameOverride {
                 container_id: row.get(0)?,
-                kind: ContainerKind::parse(&kind_str)
-                    .unwrap_or(ContainerKind::Calendar),
+                kind: ContainerKind::parse(&kind_str).unwrap_or(ContainerKind::Calendar),
                 name: row.get(2)?,
                 updated_at: row.get(3)?,
             })
@@ -124,11 +123,7 @@ impl<'a> OverridesRepo<'a> {
 
     /// Drop the override. The next read of the container will use
     /// the source name again.
-    pub fn clear(
-        &self,
-        container_id: &str,
-        kind: ContainerKind,
-    ) -> Result<(), OverridesError> {
+    pub fn clear(&self, container_id: &str, kind: ContainerKind) -> Result<(), OverridesError> {
         let conn = self.db.lock().expect("db mutex poisoned");
         conn.execute(
             "DELETE FROM container_name_overrides
@@ -148,14 +143,14 @@ pub struct NameOverride {
 }
 
 /// Apply every override that matches one of the given calendars in place.
-pub fn apply_to_calendars(
-    repo: &OverridesRepo<'_>,
-    calendars: &mut [cal_core::Calendar],
-) {
+pub fn apply_to_calendars(repo: &OverridesRepo<'_>, calendars: &mut [cal_core::Calendar]) {
     let overrides = match repo.list() {
         Ok(o) => o,
         Err(err) => {
-            tracing::warn!(?err, "failed to load name overrides; falling back to source names");
+            tracing::warn!(
+                ?err,
+                "failed to load name overrides; falling back to source names"
+            );
             return;
         }
     };
@@ -172,14 +167,14 @@ pub fn apply_to_calendars(
 }
 
 /// Apply every override that matches one of the given task lists in place.
-pub fn apply_to_task_lists(
-    repo: &OverridesRepo<'_>,
-    lists: &mut [cal_core::TaskList],
-) {
+pub fn apply_to_task_lists(repo: &OverridesRepo<'_>, lists: &mut [cal_core::TaskList]) {
     let overrides = match repo.list() {
         Ok(o) => o,
         Err(err) => {
-            tracing::warn!(?err, "failed to load name overrides; falling back to source names");
+            tracing::warn!(
+                ?err,
+                "failed to load name overrides; falling back to source names"
+            );
             return;
         }
     };
@@ -272,7 +267,8 @@ mod tests {
         let (_tmp, db) = fresh_db();
         let shared = db.shared();
         let repo = OverridesRepo::new(&shared);
-        repo.set("ical:42", ContainerKind::Calendar, "Ferien").unwrap();
+        repo.set("ical:42", ContainerKind::Calendar, "Ferien")
+            .unwrap();
 
         let mut cals = vec![
             cal_core::Calendar {

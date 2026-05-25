@@ -73,8 +73,7 @@ pub const PREF_LAST_SYNCED_AT: &str = "contacts.lastSyncedAt";
 /// command keeps an explicit override parameter that beats this
 /// pref — used by background hooks that want a one-shot
 /// directory pull without flipping the user-visible setting.
-pub const PREF_INCLUDE_READ_ONLY_ON_SYNC: &str =
-    "contacts.includeReadOnlyOnSync";
+pub const PREF_INCLUDE_READ_ONLY_ON_SYNC: &str = "contacts.includeReadOnlyOnSync";
 
 /// Default interval if `PREF_SYNC_INTERVAL_MINUTES` is unset or
 /// nonsense. 60 minutes per the design doc.
@@ -258,11 +257,7 @@ impl ContactSyncScheduler {
     /// Returns `true` when this call actually ran the pass, `false`
     /// when another pass was already in flight and this invocation
     /// was deduped.
-    pub async fn run_sync<R: Runtime>(
-        &self,
-        app: &AppHandle<R>,
-        include_read_only: bool,
-    ) -> bool {
+    pub async fn run_sync<R: Runtime>(&self, app: &AppHandle<R>, include_read_only: bool) -> bool {
         // Acquire the in-flight guard. Release-on-drop would be
         // cleaner but the lock is sync, the closure body is async,
         // and the guard would have to cross await points — so we

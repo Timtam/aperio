@@ -32,9 +32,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use cal_core::{
-    Adapter, AuthToken, Capability, Credentials as CoreCredentials,
-    Error as CoreError, NewTask, Result as CoreResult, Task, TaskList,
-    TasksFeature,
+    Adapter, AuthToken, Capability, Credentials as CoreCredentials, Error as CoreError, NewTask,
+    Result as CoreResult, Task, TaskList, TasksFeature,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -104,8 +103,8 @@ impl TodoistAdapter {
 
     #[doc(hidden)]
     pub fn with_listing_ttl(mut self, ttl: Duration) -> Self {
-        self.listing_ttl = chrono::Duration::from_std(ttl)
-            .unwrap_or_else(|_| chrono::Duration::zero());
+        self.listing_ttl =
+            chrono::Duration::from_std(ttl).unwrap_or_else(|_| chrono::Duration::zero());
         self
     }
 
@@ -158,8 +157,7 @@ impl TasksFeature for TodoistAdapter {
         let fresh = tasks::list_task_lists(&self.client)
             .await
             .map_err(to_core_error)?;
-        *self.task_lists_cache.lock().await =
-            Some((fresh.clone(), chrono::Utc::now()));
+        *self.task_lists_cache.lock().await = Some((fresh.clone(), chrono::Utc::now()));
         Ok(fresh)
     }
 
@@ -169,11 +167,7 @@ impl TasksFeature for TodoistAdapter {
             .map_err(to_core_error)
     }
 
-    async fn create_task(
-        &self,
-        list_id: &str,
-        task: NewTask,
-    ) -> CoreResult<Task> {
+    async fn create_task(&self, list_id: &str, task: NewTask) -> CoreResult<Task> {
         tasks::create_task(&self.client, list_id, task)
             .await
             .map_err(to_core_error)
@@ -191,11 +185,7 @@ impl TasksFeature for TodoistAdapter {
             .map_err(to_core_error)
     }
 
-    async fn rename_task_list(
-        &self,
-        list_id: &str,
-        new_name: &str,
-    ) -> CoreResult<()> {
+    async fn rename_task_list(&self, list_id: &str, new_name: &str) -> CoreResult<()> {
         tasks::rename_task_list(&self.client, list_id, new_name)
             .await
             .map_err(to_core_error)?;

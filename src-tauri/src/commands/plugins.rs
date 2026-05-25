@@ -66,9 +66,7 @@ pub fn plugin_id_for_adapter_kind(kind: AdapterKind) -> Option<&'static str> {
         AdapterKind::Caldav => Some("com.aperio.cal-adapter-caldav"),
         AdapterKind::Ical => Some("com.aperio.cal-adapter-ical"),
         AdapterKind::Google => Some("com.aperio.cal-adapter-google"),
-        AdapterKind::MicrosoftGraph => {
-            Some("com.aperio.cal-adapter-microsoft-graph")
-        }
+        AdapterKind::MicrosoftGraph => Some("com.aperio.cal-adapter-microsoft-graph"),
         AdapterKind::Ews => Some("com.aperio.cal-adapter-ews"),
         AdapterKind::Vikunja => Some("com.aperio.cal-adapter-vikunja"),
         AdapterKind::Todoist => Some("com.aperio.cal-adapter-todoist"),
@@ -428,8 +426,8 @@ pub async fn inspect_plugin_archive(
     plugin_manager: State<'_, Arc<PluginManager>>,
     request: InspectPluginArchiveRequest,
 ) -> CommandResult<PluginArchivePreview> {
-    let manifest = plugin_core::inspect_archive(&request.archive_path)
-        .map_err(plugin_error_to_command)?;
+    let manifest =
+        plugin_core::inspect_archive(&request.archive_path).map_err(plugin_error_to_command)?;
     let existing = plugin_manager.get_including_disabled(&manifest.id);
     let installed_version = existing.as_ref().map(|p| p.manifest.version.clone());
     Ok(PluginArchivePreview {
@@ -484,8 +482,7 @@ pub async fn install_plugin_archive(
     // us decide between "fresh install" and "upgrade" paths
     // before install_archive wipes the existing plugin dir.
     let preflight_manifest =
-        plugin_core::inspect_archive(&request.archive_path)
-            .map_err(plugin_error_to_command)?;
+        plugin_core::inspect_archive(&request.archive_path).map_err(plugin_error_to_command)?;
     let plugin_id = preflight_manifest.id.clone();
     let shared = db.shared();
 
@@ -495,9 +492,7 @@ pub async fn install_plugin_archive(
     // mid-sync upgrade would be disruptive even if the unload
     // succeeded, and the user can fix it by switching sync
     // adapters first.
-    let is_upgrade = plugin_manager
-        .get_including_disabled(&plugin_id)
-        .is_some();
+    let is_upgrade = plugin_manager.get_including_disabled(&plugin_id).is_some();
     if is_upgrade {
         if let Some(plugin_sync_kind) = sync_kind_for_plugin(&plugin_id) {
             let prefs = UserPrefsRepo::new(&shared);
@@ -520,8 +515,7 @@ pub async fn install_plugin_archive(
                 });
             }
         }
-        try_unload_for_upgrade(&plugin_manager, &registry, &shared, &plugin_id)
-            .await?;
+        try_unload_for_upgrade(&plugin_manager, &registry, &shared, &plugin_id).await?;
     }
 
     // Safe to extract. install_archive wipes any stale
@@ -529,11 +523,8 @@ pub async fn install_plugin_archive(
     // its in-memory copy unloaded, or a leftover from a
     // previous install whose plugin then got unloaded between
     // restarts).
-    let installed = plugin_core::install_archive(
-        &request.archive_path,
-        &user_plugins_dir.0,
-    )
-    .map_err(plugin_error_to_command)?;
+    let installed = plugin_core::install_archive(&request.archive_path, &user_plugins_dir.0)
+        .map_err(plugin_error_to_command)?;
 
     // Load + insert. Errors here leave the freshly-extracted
     // files in place — the user can retry without re-picking
@@ -678,13 +669,11 @@ async fn try_unload_for_upgrade(
     /// CalDAV / Graph reads + leaves headroom for slow
     /// networks without making the user stare at a frozen
     /// dialog.
-    const DRAIN_TIMEOUT: std::time::Duration =
-        std::time::Duration::from_millis(1500);
+    const DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1500);
     /// Poll interval between retry attempts. Short enough
     /// that a typical FFI call completes within 1-2 polls;
     /// long enough that we don't burn a CPU.
-    const POLL_INTERVAL: std::time::Duration =
-        std::time::Duration::from_millis(50);
+    const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
 
     // 1) Walk accounts whose adapter_kind matches the plugin
     //    we're about to unload. For each, unregister + remember
@@ -727,10 +716,7 @@ async fn try_unload_for_upgrade(
                 // check and now. Treat as success.
                 return Ok(());
             }
-            Err(plugin_core::UnloadError::StillReferenced {
-                id,
-                in_flight,
-            }) => {
+            Err(plugin_core::UnloadError::StillReferenced { id, in_flight }) => {
                 if std::time::Instant::now() >= deadline {
                     // Out of patience — roll back + report.
                     // `in_flight` from the most recent attempt
@@ -824,12 +810,8 @@ impl From<plugin_core::FailedLoadReason> for FailedPluginReason {
     fn from(value: plugin_core::FailedLoadReason) -> Self {
         use plugin_core::FailedLoadReason as R;
         match value {
-            R::AbiMismatch { host, plugin } => {
-                Self::AbiMismatch { host, plugin }
-            }
-            R::AppTooOld { required, running } => {
-                Self::AppTooOld { required, running }
-            }
+            R::AbiMismatch { host, plugin } => Self::AbiMismatch { host, plugin },
+            R::AppTooOld { required, running } => Self::AppTooOld { required, running },
             R::ManifestInvalid => Self::ManifestInvalid,
             R::LibraryLoad => Self::LibraryLoad,
             R::Other => Self::Other,
@@ -854,8 +836,7 @@ pub async fn list_failed_plugins(
                 id: manifest.map(|m| m.id.clone()),
                 name: manifest.map(|m| m.name.clone()),
                 version: manifest.map(|m| m.version.clone()),
-                plugin_type: manifest
-                    .map(|m| m.plugin_type.as_str().to_string()),
+                plugin_type: manifest.map(|m| m.plugin_type.as_str().to_string()),
                 author: manifest.and_then(|m| m.author.clone()),
                 reason: failed.reason.into(),
                 error_message: failed.error_message,
@@ -986,8 +967,7 @@ pub async fn uninstall_plugin(
     //    re-registers the affected accounts so the user keeps
     //    a functional setup until they retry / restart.
     if plugin_manager.get_including_disabled(&plugin_id).is_some() {
-        try_unload_for_upgrade(&plugin_manager, &registry, &shared, &plugin_id)
-            .await?;
+        try_unload_for_upgrade(&plugin_manager, &registry, &shared, &plugin_id).await?;
     }
 
     // 4) Scrub the plugin directory. Best-effort: if the dir
@@ -997,10 +977,7 @@ pub async fn uninstall_plugin(
     if plugin_dir.is_dir() {
         std::fs::remove_dir_all(&plugin_dir).map_err(|e| CommandError {
             code: "internal",
-            message: format!(
-                "remove plugin directory {}: {e}",
-                plugin_dir.display(),
-            ),
+            message: format!("remove plugin directory {}: {e}", plugin_dir.display(),),
         })?;
     }
 
@@ -1057,15 +1034,11 @@ fn plugin_error_to_command(err: plugin_core::error::PluginError) -> CommandError
         ),
         AbiMismatch { host, plugin } => (
             "invalid_input",
-            format!(
-                "plugin ABI version {plugin} doesn't match host's {host}",
-            ),
+            format!("plugin ABI version {plugin} doesn't match host's {host}",),
         ),
         AppTooOld { required, running } => (
             "invalid_input",
-            format!(
-                "plugin requires Aperio {required} or newer; this build is {running}",
-            ),
+            format!("plugin requires Aperio {required} or newer; this build is {running}",),
         ),
         InstanceOpen { status, message } => (
             "internal",

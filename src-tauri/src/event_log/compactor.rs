@@ -91,11 +91,7 @@ pub struct CompactionReport {
 }
 
 impl CompactionReport {
-    fn record_snapshot(
-        &mut self,
-        ts: DateTime<Utc>,
-        outcome: SnapshotApplyOutcome,
-    ) {
+    fn record_snapshot(&mut self, ts: DateTime<Utc>, outcome: SnapshotApplyOutcome) {
         self.snapshot_timestamp = Some(ts.to_rfc3339());
         // The applier's `rows_applied` is the dump size at build
         // time — surface that as the snapshot row count.
@@ -133,10 +129,7 @@ impl Compactor {
     /// from `user_prefs` (with defaults) and compares against
     /// either `meta.snapshot_timestamp` (age check) or the local
     /// since-snapshot counters (log count + byte size).
-    pub async fn should_compact(
-        &self,
-        adapter: &dyn SyncAdapter,
-    ) -> SyncResult<bool> {
+    pub async fn should_compact(&self, adapter: &dyn SyncAdapter) -> SyncResult<bool> {
         // Age threshold uses meta.snapshot_timestamp as the
         // anchor. If meta is missing, treat the dataset as
         // brand-new — no compaction needed yet.
@@ -182,10 +175,7 @@ impl Compactor {
     /// Run one round of compaction. See module docs for the
     /// algorithm. Returns a [`CompactionReport`] with the
     /// observable side-effects.
-    pub async fn compact_now(
-        &self,
-        adapter: &dyn SyncAdapter,
-    ) -> SyncResult<CompactionReport> {
+    pub async fn compact_now(&self, adapter: &dyn SyncAdapter) -> SyncResult<CompactionReport> {
         // 1. Build + push the snapshot.
         let snapshot = self.builder.build()?;
         let snapshot_ts = snapshot.metadata.snapshot_timestamp;
@@ -282,8 +272,7 @@ impl Compactor {
     pub fn record_pushed_log(&self, bytes: usize) {
         let prefs = UserPrefsRepo::new(&self.db);
         let new_logs = self.read_counter_u64(PREF_LOGS_SINCE_SNAPSHOT) + 1;
-        let new_bytes = self.read_counter_u64(PREF_BYTES_SINCE_SNAPSHOT)
-            + bytes as u64;
+        let new_bytes = self.read_counter_u64(PREF_BYTES_SINCE_SNAPSHOT) + bytes as u64;
         let _ = prefs.set(PREF_LOGS_SINCE_SNAPSHOT, &new_logs.to_string());
         let _ = prefs.set(PREF_BYTES_SINCE_SNAPSHOT, &new_bytes.to_string());
     }
@@ -317,16 +306,12 @@ impl Compactor {
 
     /// Inspect a snapshot we just generated and surface the size
     /// counters the report wants — no actual mutation.
-    fn snapshot_size_counters(
-        &self,
-        snapshot: &sync_core::Snapshot,
-    ) -> SnapshotApplyOutcome {
+    fn snapshot_size_counters(&self, snapshot: &sync_core::Snapshot) -> SnapshotApplyOutcome {
         // We could re-parse the body here, but the dump we built
         // 50 lines ago already has the counts. Simplest:
         // re-deserialise into the typed shape and count.
         let body: crate::event_log::snapshot::AperioSnapshotBody =
-            serde_json::from_value(snapshot.body.clone())
-                .unwrap_or_default();
+            serde_json::from_value(snapshot.body.clone()).unwrap_or_default();
         SnapshotApplyOutcome {
             rows_applied: body.dump.calendars.len()
                 + body.dump.events.len()
@@ -383,10 +368,7 @@ mod tests {
             *self.meta.lock().unwrap() = Some(meta.clone());
             Ok(())
         }
-        async fn fetch_new_logs(
-            &self,
-            since: &DeviceCursor,
-        ) -> SyncResult<Vec<LogFile>> {
+        async fn fetch_new_logs(&self, since: &DeviceCursor) -> SyncResult<Vec<LogFile>> {
             Ok(self
                 .logs
                 .lock()
@@ -433,11 +415,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let db = DbHandle::open(&dir.path().join("test.sqlite")).unwrap();
         let adapter = Arc::new(LocalAdapter::new(db.shared()));
-        let builder = Arc::new(SnapshotBuilder::new(
-            db.shared(),
-            adapter,
-            "1.0.0-test",
-        ));
+        let builder = Arc::new(SnapshotBuilder::new(db.shared(), adapter, "1.0.0-test"));
         let compactor = Compactor::new(
             db.shared(),
             builder,
@@ -481,30 +459,15 @@ mod tests {
         // future (so it's newer than the snapshot the compactor
         // about to build).
         let old_ts: DateTime<Utc> = "2020-01-01T00:00:00Z".parse().unwrap();
-        let fresh_ts: DateTime<Utc> = (Utc::now() + ChronoDuration::days(1))
-            .with_timezone(&Utc);
-        adapter
-            .logs
-            .lock()
-            .unwrap()
-            .push(LogFile {
-                name: LogFileName::new(
-                    old_ts,
-                    DeviceId::from_string("dev-other".into()),
-                ),
-                bytes: b"{}".to_vec(),
-            });
-        adapter
-            .logs
-            .lock()
-            .unwrap()
-            .push(LogFile {
-                name: LogFileName::new(
-                    fresh_ts,
-                    DeviceId::from_string("dev-other".into()),
-                ),
-                bytes: b"{}".to_vec(),
-            });
+        let fresh_ts: DateTime<Utc> = (Utc::now() + ChronoDuration::days(1)).with_timezone(&Utc);
+        adapter.logs.lock().unwrap().push(LogFile {
+            name: LogFileName::new(old_ts, DeviceId::from_string("dev-other".into())),
+            bytes: b"{}".to_vec(),
+        });
+        adapter.logs.lock().unwrap().push(LogFile {
+            name: LogFileName::new(fresh_ts, DeviceId::from_string("dev-other".into())),
+            bytes: b"{}".to_vec(),
+        });
 
         // Pre-populate meta so the other device's last_seen_log
         // is recent enough that `safe_cutoff` doesn't fall back

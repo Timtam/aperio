@@ -24,10 +24,10 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use cal_core::{
-    Adapter, AuthToken, Calendar, CalendarFeature, Capability, Contact, ContactList,
-    ContactPhoto, ContactsFeature, ContainerColor, Credentials as CoreCredentials,
-    DateRange, Error as CoreError, Event, FreeBusy, NewContact, NewEvent, NewTask,
-    Result as CoreResult, Task, TaskList, TasksFeature,
+    Adapter, AuthToken, Calendar, CalendarFeature, Capability, Contact, ContactList, ContactPhoto,
+    ContactsFeature, ContainerColor, Credentials as CoreCredentials, DateRange, Error as CoreError,
+    Event, FreeBusy, NewContact, NewEvent, NewTask, Result as CoreResult, Task, TaskList,
+    TasksFeature,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -66,15 +66,13 @@ pub struct MicrosoftGraphAdapter {
     /// Listing cache for `/me/contactFolders` + the Suggested
     /// People sentinel. Single entry — `list_contact_lists`
     /// returns the full set in one call.
-    contact_lists_cache:
-        Mutex<Option<(Vec<ContactList>, chrono::DateTime<chrono::Utc>)>>,
+    contact_lists_cache: Mutex<Option<(Vec<ContactList>, chrono::DateTime<chrono::Utc>)>>,
     /// Per-`list_id` cache for `/me/contactFolders/{id}/contacts`
     /// + `/me/people`. Keyed by list_id so a write against one
     /// folder doesn't time out the others; a full clear on any
     /// mutation covers the Suggested People stream too (it's
     /// derived from cross-folder mailbox activity).
-    contacts_cache:
-        Mutex<HashMap<String, (Vec<Contact>, chrono::DateTime<chrono::Utc>)>>,
+    contacts_cache: Mutex<HashMap<String, (Vec<Contact>, chrono::DateTime<chrono::Utc>)>>,
     listing_ttl: chrono::Duration,
 }
 
@@ -107,8 +105,8 @@ impl MicrosoftGraphAdapter {
 
     #[doc(hidden)]
     pub fn with_listing_ttl(mut self, ttl: Duration) -> Self {
-        self.listing_ttl = chrono::Duration::from_std(ttl)
-            .unwrap_or_else(|_| chrono::Duration::zero());
+        self.listing_ttl =
+            chrono::Duration::from_std(ttl).unwrap_or_else(|_| chrono::Duration::zero());
         self
     }
 
@@ -175,10 +173,7 @@ impl MicrosoftGraphAdapter {
 
 #[async_trait]
 impl Adapter for MicrosoftGraphAdapter {
-    async fn authenticate(
-        &self,
-        _credentials: CoreCredentials,
-    ) -> CoreResult<AuthToken> {
+    async fn authenticate(&self, _credentials: CoreCredentials) -> CoreResult<AuthToken> {
         Ok(AuthToken::default())
     }
 
@@ -196,26 +191,17 @@ impl CalendarFeature for MicrosoftGraphAdapter {
         let fresh = api::list_calendars(&self.state)
             .await
             .map_err(to_core_error)?;
-        *self.calendars_cache.lock().await =
-            Some((fresh.clone(), chrono::Utc::now()));
+        *self.calendars_cache.lock().await = Some((fresh.clone(), chrono::Utc::now()));
         Ok(fresh)
     }
 
-    async fn get_events(
-        &self,
-        calendar_id: &str,
-        range: DateRange,
-    ) -> CoreResult<Vec<Event>> {
+    async fn get_events(&self, calendar_id: &str, range: DateRange) -> CoreResult<Vec<Event>> {
         api::get_events(&self.state, calendar_id, range.start, range.end)
             .await
             .map_err(to_core_error)
     }
 
-    async fn create_event(
-        &self,
-        calendar_id: &str,
-        event: NewEvent,
-    ) -> CoreResult<Event> {
+    async fn create_event(&self, calendar_id: &str, event: NewEvent) -> CoreResult<Event> {
         api::create_event(&self.state, calendar_id, event)
             .await
             .map_err(to_core_error)
@@ -247,11 +233,7 @@ impl CalendarFeature for MicrosoftGraphAdapter {
         None
     }
 
-    async fn rename_calendar(
-        &self,
-        calendar_id: &str,
-        new_name: &str,
-    ) -> CoreResult<()> {
+    async fn rename_calendar(&self, calendar_id: &str, new_name: &str) -> CoreResult<()> {
         api::rename_calendar(&self.state, calendar_id, new_name)
             .await
             .map_err(to_core_error)?;
@@ -290,8 +272,7 @@ impl TasksFeature for MicrosoftGraphAdapter {
         let fresh = api::list_task_lists(&self.state)
             .await
             .map_err(to_core_error)?;
-        *self.task_lists_cache.lock().await =
-            Some((fresh.clone(), chrono::Utc::now()));
+        *self.task_lists_cache.lock().await = Some((fresh.clone(), chrono::Utc::now()));
         Ok(fresh)
     }
 
@@ -301,11 +282,7 @@ impl TasksFeature for MicrosoftGraphAdapter {
             .map_err(to_core_error)
     }
 
-    async fn create_task(
-        &self,
-        list_id: &str,
-        task: NewTask,
-    ) -> CoreResult<Task> {
+    async fn create_task(&self, list_id: &str, task: NewTask) -> CoreResult<Task> {
         api::create_task(&self.state, list_id, task)
             .await
             .map_err(to_core_error)
@@ -323,11 +300,7 @@ impl TasksFeature for MicrosoftGraphAdapter {
             .map_err(to_core_error)
     }
 
-    async fn rename_task_list(
-        &self,
-        list_id: &str,
-        new_name: &str,
-    ) -> CoreResult<()> {
+    async fn rename_task_list(&self, list_id: &str, new_name: &str) -> CoreResult<()> {
         api::rename_task_list(&self.state, list_id, new_name)
             .await
             .map_err(to_core_error)?;
@@ -345,8 +318,7 @@ impl ContactsFeature for MicrosoftGraphAdapter {
         let fresh = contacts::list_contact_lists(&self.state)
             .await
             .map_err(to_core_error)?;
-        *self.contact_lists_cache.lock().await =
-            Some((fresh.clone(), chrono::Utc::now()));
+        *self.contact_lists_cache.lock().await = Some((fresh.clone(), chrono::Utc::now()));
         Ok(fresh)
     }
 
@@ -370,11 +342,7 @@ impl ContactsFeature for MicrosoftGraphAdapter {
             .map_err(to_core_error)
     }
 
-    async fn create_contact(
-        &self,
-        list_id: &str,
-        contact: NewContact,
-    ) -> CoreResult<Contact> {
+    async fn create_contact(&self, list_id: &str, contact: NewContact) -> CoreResult<Contact> {
         if is_read_only_graph_list(list_id) {
             return Err(CoreError::Unsupported(format!(
                 "the Graph list '{list_id}' is read-only and does not accept new contacts"
@@ -412,11 +380,7 @@ impl ContactsFeature for MicrosoftGraphAdapter {
         Ok(())
     }
 
-    async fn rename_contact_list(
-        &self,
-        list_id: &str,
-        new_name: &str,
-    ) -> CoreResult<()> {
+    async fn rename_contact_list(&self, list_id: &str, new_name: &str) -> CoreResult<()> {
         if is_read_only_graph_list(list_id) {
             return Err(CoreError::Unsupported(
                 "the Suggested People list is synthetic and cannot be renamed".into(),
@@ -436,20 +400,13 @@ impl ContactsFeature for MicrosoftGraphAdapter {
         Ok(())
     }
 
-    async fn get_contact_photo(
-        &self,
-        contact_id: &str,
-    ) -> CoreResult<Option<ContactPhoto>> {
+    async fn get_contact_photo(&self, contact_id: &str) -> CoreResult<Option<ContactPhoto>> {
         contacts::get_contact_photo(&self.state, contact_id)
             .await
             .map_err(to_core_error)
     }
 
-    async fn set_contact_photo(
-        &self,
-        contact_id: &str,
-        photo: ContactPhoto,
-    ) -> CoreResult<()> {
+    async fn set_contact_photo(&self, contact_id: &str, photo: ContactPhoto) -> CoreResult<()> {
         contacts::set_contact_photo(&self.state, contact_id, photo)
             .await
             .map_err(to_core_error)?;
@@ -511,12 +468,8 @@ fn to_core_error(err: GraphError) -> CoreError {
         },
         Protocol(m) => CoreError::Protocol(m),
         AuthDenied(m) => CoreError::Authentication(format!("denied: {m}")),
-        AuthTimeout => CoreError::Authentication(
-            "consent screen timed out".into(),
-        ),
-        Csrf => CoreError::Protocol(
-            "CSRF state mismatch on OAuth callback".into(),
-        ),
+        AuthTimeout => CoreError::Authentication("consent screen timed out".into()),
+        Csrf => CoreError::Protocol("CSRF state mismatch on OAuth callback".into()),
         Io(m) => CoreError::Internal(m),
         Config(m) => CoreError::InvalidInput(m),
     }

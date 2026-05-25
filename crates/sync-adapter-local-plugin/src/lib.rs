@@ -25,14 +25,12 @@ use plugin_sdk::plugin_core::abi::OpenInstanceResult;
 use plugin_sdk::plugin_core::ffi::PluginCallResult;
 use plugin_sdk::plugin_core::vtables::SyncVtable;
 use plugin_sdk::{
-    decode_args, error_response, ok_response, open_instance_with,
-    sync_error_to_response, PluginInstance,
+    decode_args, error_response, ok_response, open_instance_with, sync_error_to_response,
+    PluginInstance,
 };
 use serde::Deserialize;
 use sync_adapter_local::LocalFsSyncAdapter;
-use sync_core::{
-    DeviceCursor, LogFile, LogFileName, MetaJson, Snapshot, SyncAdapter,
-};
+use sync_core::{DeviceCursor, LogFile, LogFileName, MetaJson, Snapshot, SyncAdapter};
 
 plugin_sdk::sync_dispatch_helpers!(LocalFsSyncAdapter);
 
@@ -43,12 +41,10 @@ struct InitConfig {
 
 /// # Safety
 /// FFI export; `config_json` must be NUL-terminated UTF-8.
-pub unsafe extern "C" fn plugin_open_instance(
-    config_json: *const c_char,
-) -> OpenInstanceResult {
+pub unsafe extern "C" fn plugin_open_instance(config_json: *const c_char) -> OpenInstanceResult {
     open_instance_with(config_json, |json| {
-        let cfg: InitConfig = serde_json::from_str(json)
-            .map_err(|e| format!("malformed init config: {e}"))?;
+        let cfg: InitConfig =
+            serde_json::from_str(json).map_err(|e| format!("malformed init config: {e}"))?;
         if cfg.remote_root.trim().is_empty() {
             return Err("remote_root must not be empty".to_string());
         }
@@ -89,7 +85,8 @@ unsafe extern "C" fn ffi_push_meta(
     args_len: usize,
 ) -> PluginCallResult {
     let meta: MetaJson = match decode_args(args_ptr, args_len) {
-        Ok(m) => m, Err(r) => return r,
+        Ok(m) => m,
+        Err(r) => return r,
     };
     dispatch_unit(h, |plugin| async move { plugin.push_meta(&meta).await })
 }
@@ -100,9 +97,13 @@ unsafe extern "C" fn ffi_fetch_new_logs(
     args_len: usize,
 ) -> PluginCallResult {
     let cursor: DeviceCursor = match decode_args(args_ptr, args_len) {
-        Ok(c) => c, Err(r) => return r,
+        Ok(c) => c,
+        Err(r) => return r,
     };
-    dispatch(h, |plugin| async move { plugin.fetch_new_logs(&cursor).await })
+    dispatch(
+        h,
+        |plugin| async move { plugin.fetch_new_logs(&cursor).await },
+    )
 }
 
 unsafe extern "C" fn ffi_push_log(
@@ -111,7 +112,8 @@ unsafe extern "C" fn ffi_push_log(
     args_len: usize,
 ) -> PluginCallResult {
     let log: LogFile = match decode_args(args_ptr, args_len) {
-        Ok(l) => l, Err(r) => return r,
+        Ok(l) => l,
+        Err(r) => return r,
     };
     dispatch_unit(h, |plugin| async move { plugin.push_log(&log).await })
 }
@@ -130,7 +132,8 @@ unsafe extern "C" fn ffi_push_snapshot(
     args_len: usize,
 ) -> PluginCallResult {
     let snap: Snapshot = match decode_args(args_ptr, args_len) {
-        Ok(s) => s, Err(r) => return r,
+        Ok(s) => s,
+        Err(r) => return r,
     };
     dispatch_unit(h, |plugin| async move { plugin.push_snapshot(&snap).await })
 }
@@ -141,7 +144,8 @@ unsafe extern "C" fn ffi_delete_log(
     args_len: usize,
 ) -> PluginCallResult {
     let name: LogFileName = match decode_args(args_ptr, args_len) {
-        Ok(n) => n, Err(r) => return r,
+        Ok(n) => n,
+        Err(r) => return r,
     };
     dispatch_unit(h, |plugin| async move { plugin.delete_log(&name).await })
 }
@@ -159,10 +163,10 @@ unsafe extern "C" fn ffi_push_sound_asset(
     args_len: usize,
 ) -> PluginCallResult {
     let args: PushSoundAssetArgs = match decode_args(args_ptr, args_len) {
-        Ok(a) => a, Err(r) => return r,
+        Ok(a) => a,
+        Err(r) => return r,
     };
-    let bytes = match base64::engine::general_purpose::STANDARD
-        .decode(args.bytes_base64.as_bytes())
+    let bytes = match base64::engine::general_purpose::STANDARD.decode(args.bytes_base64.as_bytes())
     {
         Ok(b) => b,
         Err(err) => {
@@ -191,14 +195,20 @@ unsafe extern "C" fn ffi_fetch_sound_asset(
     args_len: usize,
 ) -> PluginCallResult {
     let args: FetchSoundAssetArgs = match decode_args(args_ptr, args_len) {
-        Ok(a) => a, Err(r) => return r,
+        Ok(a) => a,
+        Err(r) => return r,
     };
-    let inst = match instance(h) { Ok(i) => i, Err(r) => return r };
+    let inst = match instance(h) {
+        Ok(i) => i,
+        Err(r) => return r,
+    };
     let plugin_static: &'static LocalFsSyncAdapter = unsafe {
         std::mem::transmute::<&LocalFsSyncAdapter, &'static LocalFsSyncAdapter>(inst.plugin())
     };
     let outcome = inst.runtime().block_on(async move {
-        plugin_static.fetch_sound_asset(&args.hash, &args.extension).await
+        plugin_static
+            .fetch_sound_asset(&args.hash, &args.extension)
+            .await
     });
     match outcome {
         Ok(None) => ok_response(&Option::<String>::None),

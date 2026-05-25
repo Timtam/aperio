@@ -257,19 +257,14 @@ pub async fn show_context_menu(
     // OS-window handle), not the `WebviewWindow` (window + embedded
     // webview). `as_ref().clone()` peels the wrapper off cheaply —
     // `Window` is a `Clone` newtype around an `Arc`.
-    let webview = app
-        .get_webview_window("main")
-        .ok_or_else(|| CommandError {
-            code: "internal",
-            message: "main window missing".into(),
-        })?;
+    let webview = app.get_webview_window("main").ok_or_else(|| CommandError {
+        code: "internal",
+        message: "main window missing".into(),
+    })?;
     let window = webview.as_ref().window().clone();
 
     let popup_result = match &request.position {
-        Some(pos) => menu.popup_at(
-            window,
-            tauri::LogicalPosition::new(pos.x, pos.y),
-        ),
+        Some(pos) => menu.popup_at(window, tauri::LogicalPosition::new(pos.x, pos.y)),
         None => menu.popup(window),
     };
     popup_result.map_err(|e| CommandError {

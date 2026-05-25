@@ -95,11 +95,7 @@ pub fn parse_propfind_response(body: &str) -> SyncResult<Vec<PropfindEntry>> {
             Ok(Event::Text(ref e)) => {
                 let text = e
                     .unescape()
-                    .map_err(|err| {
-                        SyncError::protocol(format!(
-                            "PROPFIND XML decode: {err}"
-                        ))
-                    })?
+                    .map_err(|err| SyncError::protocol(format!("PROPFIND XML decode: {err}")))?
                     .into_owned();
                 if let Some(top) = name_stack.last() {
                     if let Some(b) = current.as_mut() {
@@ -115,9 +111,7 @@ pub fn parse_propfind_response(body: &str) -> SyncResult<Vec<PropfindEntry>> {
             }
             Ok(Event::Eof) => break,
             Err(err) => {
-                return Err(SyncError::protocol(format!(
-                    "PROPFIND XML parse: {err}",
-                )));
+                return Err(SyncError::protocol(format!("PROPFIND XML parse: {err}",)));
             }
             _ => {}
         }
@@ -199,10 +193,7 @@ mod tests {
         assert_eq!(entries.len(), 3);
 
         // First entry: the collection itself.
-        assert_eq!(
-            entries[0].href,
-            "/remote.php/dav/files/alice/aperio/log/",
-        );
+        assert_eq!(entries[0].href, "/remote.php/dav/files/alice/aperio/log/",);
         assert!(entries[0].is_collection);
         assert!(entries[0].content_length.is_none());
 

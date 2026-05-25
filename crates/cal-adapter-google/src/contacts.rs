@@ -48,8 +48,8 @@ use chrono::{NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::api::{
-    delete_absolute, get_absolute, get_absolute_bytes, patch_absolute, post_absolute,
-    put_absolute, ApiState,
+    delete_absolute, get_absolute, get_absolute_bytes, patch_absolute, post_absolute, put_absolute,
+    ApiState,
 };
 use crate::error::{GoogleError, GoogleResult};
 
@@ -129,10 +129,7 @@ pub fn list_contact_lists() -> Vec<ContactList> {
 /// the Workspace Directory. Unknown ids yield an empty Vec so
 /// a misrouted call surfaces as "no contacts" rather than an
 /// error.
-pub async fn get_contacts(
-    state: &ApiState,
-    list_id: &str,
-) -> GoogleResult<Vec<Contact>> {
+pub async fn get_contacts(state: &ApiState, list_id: &str) -> GoogleResult<Vec<Contact>> {
     match list_id {
         GOOGLE_CONTACT_LIST_ID => list_personal_contacts(state).await,
         GOOGLE_OTHER_CONTACTS_LIST_ID => list_other_contacts(state).await,
@@ -203,7 +200,9 @@ async fn list_personal_contacts(state: &ApiState) -> GoogleResult<Vec<Contact>> 
         if matches!(group.group_type.as_deref(), Some("SYSTEM_CONTACT_GROUP")) {
             continue;
         }
-        let members = group_members.remove(&group.resource_name).unwrap_or_default();
+        let members = group_members
+            .remove(&group.resource_name)
+            .unwrap_or_default();
         out.push(group_to_contact(group, members, GOOGLE_CONTACT_LIST_ID));
     }
     Ok(out)
@@ -221,9 +220,7 @@ async fn list_other_contacts(state: &ApiState) -> GoogleResult<Vec<Contact>> {
     let mut page_token: Option<String> = None;
     let read_mask = urlencoding("names,emailAddresses,phoneNumbers,metadata");
     loop {
-        let mut url = format!(
-            "{PEOPLE_API_BASE}/otherContacts?pageSize=500&readMask={read_mask}",
-        );
+        let mut url = format!("{PEOPLE_API_BASE}/otherContacts?pageSize=500&readMask={read_mask}",);
         if let Some(t) = &page_token {
             url.push_str("&pageToken=");
             url.push_str(&urlencoding(t));
@@ -307,10 +304,7 @@ async fn list_directory_people(state: &ApiState) -> GoogleResult<Vec<Contact>> {
 /// account) doesn't sink personal hits. Results are deduped by
 /// resourceName because the same address can appear in both
 /// personal + Other or personal + Directory.
-pub async fn search_contacts(
-    state: &ApiState,
-    query: &str,
-) -> GoogleResult<Vec<Contact>> {
+pub async fn search_contacts(state: &ApiState, query: &str) -> GoogleResult<Vec<Contact>> {
     let trimmed = query.trim();
     if trimmed.is_empty() {
         return Ok(Vec::new());
@@ -343,10 +337,7 @@ pub async fn search_contacts(
     Ok(out)
 }
 
-async fn search_personal_contacts(
-    state: &ApiState,
-    query: &str,
-) -> GoogleResult<Vec<Contact>> {
+async fn search_personal_contacts(state: &ApiState, query: &str) -> GoogleResult<Vec<Contact>> {
     let url = format!(
         "{PEOPLE_API_BASE}/people:searchContacts?query={}&readMask={}",
         urlencoding(query),
@@ -361,10 +352,7 @@ async fn search_personal_contacts(
         .collect())
 }
 
-async fn search_other_contacts(
-    state: &ApiState,
-    query: &str,
-) -> GoogleResult<Vec<Contact>> {
+async fn search_other_contacts(state: &ApiState, query: &str) -> GoogleResult<Vec<Contact>> {
     let url = format!(
         "{PEOPLE_API_BASE}/otherContacts:search?query={}&readMask={}",
         urlencoding(query),
@@ -379,10 +367,7 @@ async fn search_other_contacts(
         .collect())
 }
 
-async fn search_directory_people(
-    state: &ApiState,
-    query: &str,
-) -> GoogleResult<Vec<Contact>> {
+async fn search_directory_people(state: &ApiState, query: &str) -> GoogleResult<Vec<Contact>> {
     let url = format!(
         "{PEOPLE_API_BASE}/people:searchDirectoryPeople\
          ?query={}&readMask={}\
@@ -401,10 +386,7 @@ async fn search_directory_people(
 
 /// Create a person (regular contact) or a contactGroup
 /// (distribution list) depending on whether `members` is set.
-pub async fn create_contact(
-    state: &ApiState,
-    new: NewContact,
-) -> GoogleResult<Contact> {
+pub async fn create_contact(state: &ApiState, new: NewContact) -> GoogleResult<Contact> {
     if new.members.is_some() {
         create_contact_group(state, new).await
     } else {
@@ -414,10 +396,7 @@ pub async fn create_contact(
 
 /// Update a person or contactGroup. The contact's id encodes
 /// the resourceName so the route stays unambiguous.
-pub async fn update_contact(
-    state: &ApiState,
-    contact: Contact,
-) -> GoogleResult<Contact> {
+pub async fn update_contact(state: &ApiState, contact: Contact) -> GoogleResult<Contact> {
     if contact.members.is_some() {
         update_contact_group(state, contact).await
     } else {
@@ -458,9 +437,7 @@ pub async fn get_contact_photo(
         // Groups don't carry photos in the People API model.
         return Ok(None);
     }
-    let url = format!(
-        "{PEOPLE_API_BASE}/{contact_id}?personFields=photos",
-    );
+    let url = format!("{PEOPLE_API_BASE}/{contact_id}?personFields=photos",);
     let person: Person = get_absolute(state, &url).await?;
     let Some(photo_url) = primary_photo_url(&person) else {
         return Ok(None);
@@ -501,10 +478,7 @@ pub async fn set_contact_photo(
 }
 
 /// Delete the photo, leaving the rest of the contact alone.
-pub async fn delete_contact_photo(
-    state: &ApiState,
-    contact_id: &str,
-) -> GoogleResult<()> {
+pub async fn delete_contact_photo(state: &ApiState, contact_id: &str) -> GoogleResult<()> {
     if contact_id.starts_with("contactGroups/") {
         return Ok(());
     }
@@ -612,10 +586,7 @@ async fn update_person(state: &ApiState, contact: Contact) -> GoogleResult<Conta
 
 // ── Internal: contact group CRUD ───────────────────────────────────────
 
-async fn create_contact_group(
-    state: &ApiState,
-    new: NewContact,
-) -> GoogleResult<Contact> {
+async fn create_contact_group(state: &ApiState, new: NewContact) -> GoogleResult<Contact> {
     let url = format!("{PEOPLE_API_BASE}/contactGroups");
     let body = serde_json::json!({
         "contactGroup": {
@@ -637,10 +608,7 @@ async fn create_contact_group(
     ))
 }
 
-async fn update_contact_group(
-    state: &ApiState,
-    contact: Contact,
-) -> GoogleResult<Contact> {
+async fn update_contact_group(state: &ApiState, contact: Contact) -> GoogleResult<Contact> {
     let url = format!("{PEOPLE_API_BASE}/{}", contact.id);
     let body = serde_json::json!({
         "contactGroup": {
@@ -659,8 +627,7 @@ async fn update_contact_group(
         contact.id,
     );
     let existing: ContactGroup = get_absolute(state, &existing_url).await?;
-    let existing_member_ids: Vec<String> =
-        existing.member_resource_names.unwrap_or_default();
+    let existing_member_ids: Vec<String> = existing.member_resource_names.unwrap_or_default();
 
     let desired_members = contact.members.clone().unwrap_or_default();
     // Look up resource names for desired members. Google's group
@@ -670,7 +637,9 @@ async fn update_contact_group(
     // and easier than maintaining a parallel cache.
     let mut desired_member_ids: Vec<String> = Vec::with_capacity(desired_members.len());
     for member in &desired_members {
-        let hits = search_contacts(state, &member.email).await.unwrap_or_default();
+        let hits = search_contacts(state, &member.email)
+            .await
+            .unwrap_or_default();
         if let Some(hit) = hits.into_iter().find(|c| {
             c.emails
                 .iter()
@@ -720,7 +689,9 @@ async fn apply_group_members(
 ) -> GoogleResult<()> {
     let mut to_add: Vec<String> = Vec::with_capacity(desired.len());
     for member in desired {
-        let hits = search_contacts(state, &member.email).await.unwrap_or_default();
+        let hits = search_contacts(state, &member.email)
+            .await
+            .unwrap_or_default();
         if let Some(hit) = hits.into_iter().find(|c| {
             c.emails
                 .iter()
@@ -743,9 +714,7 @@ async fn apply_group_members_ids(
     if to_add.is_empty() && to_remove.is_empty() {
         return Ok(());
     }
-    let url = format!(
-        "{PEOPLE_API_BASE}/{group_resource_name}/members:modify",
-    );
+    let url = format!("{PEOPLE_API_BASE}/{group_resource_name}/members:modify",);
     let body = serde_json::json!({
         "resourceNamesToAdd": to_add,
         "resourceNamesToRemove": to_remove,
@@ -862,11 +831,7 @@ fn person_address_to_core(addr: PersonAddress) -> Option<cal_core::ContactAddres
     Some(mapped)
 }
 
-fn group_to_contact(
-    group: ContactGroup,
-    members: Vec<GroupMember>,
-    list_id: &str,
-) -> Contact {
+fn group_to_contact(group: ContactGroup, members: Vec<GroupMember>, list_id: &str) -> Contact {
     let now = Utc::now();
     Contact {
         id: group.resource_name,
@@ -936,10 +901,7 @@ fn person_body_from_fields(
 ) -> serde_json::Value {
     let mut body = serde_json::Map::new();
     if let Some(etag) = etag {
-        body.insert(
-            "etag".into(),
-            serde_json::Value::String(etag.to_string()),
-        );
+        body.insert("etag".into(), serde_json::Value::String(etag.to_string()));
     }
     // `names` is an array per the spec; we only ever set one. We
     // emit displayName so consumers that read it directly (i.e.
@@ -953,10 +915,7 @@ fn person_body_from_fields(
         }]),
     );
     if let Some(org) = organization {
-        body.insert(
-            "organizations".into(),
-            serde_json::json!([{ "name": org }]),
-        );
+        body.insert("organizations".into(), serde_json::json!([{ "name": org }]));
     }
     if !emails.is_empty() {
         body.insert(
@@ -1010,10 +969,7 @@ fn person_body_from_fields(
             .map(|a| {
                 let mut entry = serde_json::Map::new();
                 if let Some(label) = a.label.as_deref().filter(|s| !s.is_empty()) {
-                    entry.insert(
-                        "type".into(),
-                        serde_json::Value::String(label.to_string()),
-                    );
+                    entry.insert("type".into(), serde_json::Value::String(label.to_string()));
                 }
                 if let Some(s) = a.street.as_deref().filter(|s| !s.is_empty()) {
                     entry.insert(
@@ -1022,16 +978,10 @@ fn person_body_from_fields(
                     );
                 }
                 if let Some(s) = a.city.as_deref().filter(|s| !s.is_empty()) {
-                    entry.insert(
-                        "city".into(),
-                        serde_json::Value::String(s.to_string()),
-                    );
+                    entry.insert("city".into(), serde_json::Value::String(s.to_string()));
                 }
                 if let Some(s) = a.region.as_deref().filter(|s| !s.is_empty()) {
-                    entry.insert(
-                        "region".into(),
-                        serde_json::Value::String(s.to_string()),
-                    );
+                    entry.insert("region".into(), serde_json::Value::String(s.to_string()));
                 }
                 if let Some(s) = a.postal_code.as_deref().filter(|s| !s.is_empty()) {
                     entry.insert(
@@ -1040,10 +990,7 @@ fn person_body_from_fields(
                     );
                 }
                 if let Some(s) = a.country.as_deref().filter(|s| !s.is_empty()) {
-                    entry.insert(
-                        "country".into(),
-                        serde_json::Value::String(s.to_string()),
-                    );
+                    entry.insert("country".into(), serde_json::Value::String(s.to_string()));
                 }
                 serde_json::Value::Object(entry)
             })
@@ -1327,9 +1274,7 @@ mod tests {
             }]),
             memberships: Some(vec![PersonMembership {
                 contact_group_membership: Some(ContactGroupMembership {
-                    contact_group_resource_name: Some(
-                        "contactGroups/myContacts".into(),
-                    ),
+                    contact_group_resource_name: Some("contactGroups/myContacts".into()),
                 }),
             }]),
             photos: Some(vec![PersonPhoto {
@@ -1358,10 +1303,7 @@ mod tests {
         assert_eq!(c.organization.as_deref(), Some("Example GmbH"));
         assert_eq!(c.emails, vec!["anna@example.com".to_string()]);
         assert_eq!(c.phone_numbers, vec!["+49 30 1234567".to_string()]);
-        assert_eq!(
-            c.birthday,
-            NaiveDate::from_ymd_opt(1990, 6, 15),
-        );
+        assert_eq!(c.birthday, NaiveDate::from_ymd_opt(1990, 6, 15),);
         assert_eq!(c.notes.as_deref(), Some("Met at conf"));
         assert!(c.has_photo);
         assert!(c.members.is_none());
@@ -1532,7 +1474,10 @@ mod tests {
     async fn search_contacts_parses_results() {
         let mut server = Server::new_async().await;
         let _m = server
-            .mock("GET", mockito::Matcher::Regex("/people:searchContacts.*".into()))
+            .mock(
+                "GET",
+                mockito::Matcher::Regex("/people:searchContacts.*".into()),
+            )
             .with_status(200)
             .with_body(
                 r#"{"results":[
@@ -1555,8 +1500,7 @@ mod tests {
             server.url(),
             urlencoding(PERSON_FIELDS),
         );
-        let response: SearchContactsResponse =
-            get_absolute(&state, &url).await.unwrap();
+        let response: SearchContactsResponse = get_absolute(&state, &url).await.unwrap();
         let contacts: Vec<Contact> = response
             .results
             .into_iter()
@@ -1637,8 +1581,7 @@ mod tests {
             .create_async()
             .await;
         let state = fixture_state(&server.url());
-        let url =
-            format!("{}/contactGroups/abc?deleteContacts=false", server.url());
+        let url = format!("{}/contactGroups/abc?deleteContacts=false", server.url());
         delete_absolute(&state, &url).await.unwrap();
     }
 
@@ -1646,7 +1589,10 @@ mod tests {
     async fn list_people_pages_through_next_page_token() {
         let mut server = Server::new_async().await;
         let _page1 = server
-            .mock("GET", mockito::Matcher::Regex("/people/me/connections.*".into()))
+            .mock(
+                "GET",
+                mockito::Matcher::Regex("/people/me/connections.*".into()),
+            )
             .with_status(200)
             .with_body(
                 r#"{"connections":[
@@ -1664,8 +1610,7 @@ mod tests {
         // happily answer subsequent identical requests with the
         // same body — so we instead parse one page directly.
         let url = format!("{}/people/me/connections", server.url());
-        let response: ListConnectionsResponse =
-            get_absolute(&state, &url).await.unwrap();
+        let response: ListConnectionsResponse = get_absolute(&state, &url).await.unwrap();
         assert_eq!(response.connections.unwrap().len(), 1);
         assert_eq!(response.next_page_token.as_deref(), Some("PAGE2"));
     }
@@ -1674,9 +1619,18 @@ mod tests {
     fn list_contact_lists_returns_three_lists_with_correct_readonly_flags() {
         let lists = list_contact_lists();
         assert_eq!(lists.len(), 3);
-        let personal = lists.iter().find(|l| l.id == GOOGLE_CONTACT_LIST_ID).unwrap();
-        let other = lists.iter().find(|l| l.id == GOOGLE_OTHER_CONTACTS_LIST_ID).unwrap();
-        let directory = lists.iter().find(|l| l.id == GOOGLE_DIRECTORY_LIST_ID).unwrap();
+        let personal = lists
+            .iter()
+            .find(|l| l.id == GOOGLE_CONTACT_LIST_ID)
+            .unwrap();
+        let other = lists
+            .iter()
+            .find(|l| l.id == GOOGLE_OTHER_CONTACTS_LIST_ID)
+            .unwrap();
+        let directory = lists
+            .iter()
+            .find(|l| l.id == GOOGLE_DIRECTORY_LIST_ID)
+            .unwrap();
         assert!(!personal.read_only);
         assert!(other.read_only);
         assert!(directory.read_only);
@@ -1703,10 +1657,7 @@ mod tests {
     async fn list_other_contacts_swallows_403_into_empty_vec() {
         let mut server = Server::new_async().await;
         let _m = server
-            .mock(
-                "GET",
-                mockito::Matcher::Regex("/otherContacts.*".into()),
-            )
+            .mock("GET", mockito::Matcher::Regex("/otherContacts.*".into()))
             .with_status(403)
             .with_body(r#"{"error":{"code":403,"message":"insufficient scope"}}"#)
             .create_async()

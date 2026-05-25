@@ -32,10 +32,7 @@ pub const FOLDER_MIME: &str = "application/vnd.google-apps.folder";
 
 /// Probe the access token via `GET /about?fields=user`. Cheap
 /// "does the token still work" check used by `test_connection`.
-pub async fn check_user(
-    http: &Client,
-    access_token: &str,
-) -> GoogleDriveResult<()> {
+pub async fn check_user(http: &Client, access_token: &str) -> GoogleDriveResult<()> {
     let response = http
         .get(format!("{API_BASE}/about?fields=user"))
         .bearer_auth(access_token)
@@ -96,9 +93,8 @@ pub async fn find_child(
     struct FileEntry {
         id: String,
     }
-    let parsed: ListResponse = serde_json::from_str(&text).map_err(|e| {
-        GoogleDriveError::Protocol(format!("decode find_child: {e}"))
-    })?;
+    let parsed: ListResponse = serde_json::from_str(&text)
+        .map_err(|e| GoogleDriveError::Protocol(format!("decode find_child: {e}")))?;
     Ok(parsed.files.into_iter().next().map(|f| f.id))
 }
 
@@ -113,9 +109,7 @@ pub async fn list_children(
 ) -> GoogleDriveResult<Vec<String>> {
     let mut out = Vec::new();
     let mut page_token: Option<String> = None;
-    let q = format!(
-        "'{parent_id}' in parents and trashed = false and mimeType != '{FOLDER_MIME}'"
-    );
+    let q = format!("'{parent_id}' in parents and trashed = false and mimeType != '{FOLDER_MIME}'");
     loop {
         let mut params: Vec<(&str, &str)> = vec![
             ("q", q.as_str()),
@@ -154,10 +148,8 @@ pub async fn list_children(
         struct FileEntry {
             name: String,
         }
-        let parsed: ListResponse =
-            serde_json::from_str(&text).map_err(|e| {
-                GoogleDriveError::Protocol(format!("decode list: {e}"))
-            })?;
+        let parsed: ListResponse = serde_json::from_str(&text)
+            .map_err(|e| GoogleDriveError::Protocol(format!("decode list: {e}")))?;
         for entry in parsed.files {
             out.push(entry.name);
         }
@@ -184,9 +176,7 @@ pub async fn upload(
     if let Some(id) = existing_id {
         // PATCH content via /upload/drive/v3/files/{id}?uploadType=media
         let response = http
-            .patch(format!(
-                "{UPLOAD_BASE}/files/{id}?uploadType=media",
-            ))
+            .patch(format!("{UPLOAD_BASE}/files/{id}?uploadType=media",))
             .bearer_auth(access_token)
             .header("content-type", "application/octet-stream")
             .body(bytes.to_vec())
@@ -248,9 +238,8 @@ pub async fn upload(
     struct CreateResponse {
         id: String,
     }
-    let parsed: CreateResponse = serde_json::from_str(&text).map_err(|e| {
-        GoogleDriveError::Protocol(format!("decode upload response: {e}"))
-    })?;
+    let parsed: CreateResponse = serde_json::from_str(&text)
+        .map_err(|e| GoogleDriveError::Protocol(format!("decode upload response: {e}")))?;
     Ok(parsed.id)
 }
 
@@ -286,11 +275,7 @@ pub async fn download(
 /// Delete a file by ID. 404 is folded into success so the
 /// caller's "make sure it's gone" semantic matches the
 /// SFTP / FTP / Dropbox adapters.
-pub async fn delete(
-    http: &Client,
-    access_token: &str,
-    file_id: &str,
-) -> GoogleDriveResult<()> {
+pub async fn delete(http: &Client, access_token: &str, file_id: &str) -> GoogleDriveResult<()> {
     let response = http
         .delete(format!("{API_BASE}/files/{file_id}"))
         .bearer_auth(access_token)
@@ -352,9 +337,8 @@ pub async fn create_folder(
     struct CreateResponse {
         id: String,
     }
-    let parsed: CreateResponse = serde_json::from_str(&text).map_err(|e| {
-        GoogleDriveError::Protocol(format!("decode create_folder: {e}"))
-    })?;
+    let parsed: CreateResponse = serde_json::from_str(&text)
+        .map_err(|e| GoogleDriveError::Protocol(format!("decode create_folder: {e}")))?;
     Ok(parsed.id)
 }
 
@@ -397,19 +381,14 @@ mod tests {
 
     #[test]
     fn classify_401_picks_auth() {
-        let err = classify_response_text(
-            401,
-            r#"{"error":{"code":401,"message":"invalid_token"}}"#,
-        );
+        let err =
+            classify_response_text(401, r#"{"error":{"code":401,"message":"invalid_token"}}"#);
         assert!(matches!(err, GoogleDriveError::Auth(_)));
     }
 
     #[test]
     fn classify_400_picks_protocol() {
-        let err = classify_response_text(
-            400,
-            r#"{"error":{"code":400,"message":"Bad Request"}}"#,
-        );
+        let err = classify_response_text(400, r#"{"error":{"code":400,"message":"Bad Request"}}"#);
         assert!(matches!(err, GoogleDriveError::Protocol(_)));
     }
 

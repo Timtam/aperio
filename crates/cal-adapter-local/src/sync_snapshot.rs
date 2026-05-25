@@ -302,8 +302,8 @@ mod tests {
     use super::*;
     use crate::test_support::open_test_db;
     use cal_core::{
-        Calendar, CalendarFeature, ColorLabel, ColorLabelId, ContainerColor, Event, Task,
-        TaskList, TaskPriority, TaskStatus,
+        Calendar, CalendarFeature, ColorLabel, ColorLabelId, ContainerColor, Event, Task, TaskList,
+        TaskPriority, TaskStatus,
     };
     use chrono::{TimeZone, Utc};
 
@@ -402,10 +402,14 @@ mod tests {
         // the higher-level create paths so the test stays focused
         // on dump/apply rather than CalendarFeature ergonomics.
         let src = make_adapter();
-        src.upsert_calendar_from_sync(&fake_calendar("cal-1", "Work")).unwrap();
-        src.upsert_event_from_sync(&fake_event("ev-1", "cal-1")).unwrap();
-        src.upsert_task_list_from_sync(&fake_task_list("list-1", "Personal")).unwrap();
-        src.upsert_task_from_sync(&fake_task("task-1", "list-1")).unwrap();
+        src.upsert_calendar_from_sync(&fake_calendar("cal-1", "Work"))
+            .unwrap();
+        src.upsert_event_from_sync(&fake_event("ev-1", "cal-1"))
+            .unwrap();
+        src.upsert_task_list_from_sync(&fake_task_list("list-1", "Personal"))
+            .unwrap();
+        src.upsert_task_from_sync(&fake_task("task-1", "list-1"))
+            .unwrap();
         src.upsert_color_label_from_sync(&ColorLabel {
             id: ColorLabelId::new("lbl-1".to_string()),
             name: "Red".into(),

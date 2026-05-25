@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use plugin_core::{
-    abi::AperioPlugin, manager::PluginManager, manifest::PluginManifest,
-    shim::FfiSyncAdapter, PluginType, ABI_VERSION,
+    abi::AperioPlugin, manager::PluginManager, manifest::PluginManifest, shim::FfiSyncAdapter,
+    PluginType, ABI_VERSION,
 };
 use sync_core::SyncAdapter;
 
@@ -25,23 +25,27 @@ fn manifest() -> PluginManifest {
 
 fn make_manager() -> PluginManager {
     let manager = PluginManager::new("0.1.0");
-    let desc: *mut AperioPlugin =
-        unsafe { sync_adapter_webdav_plugin::build_descriptor() };
+    let desc: *mut AperioPlugin = unsafe { sync_adapter_webdav_plugin::build_descriptor() };
     assert!(!desc.is_null());
-    let destroy: unsafe extern "C" fn(*mut AperioPlugin) =
-        sync_adapter_webdav_plugin::DESTROY_FN;
-    manager.register_static(manifest(), desc, destroy).expect("register");
+    let destroy: unsafe extern "C" fn(*mut AperioPlugin) = sync_adapter_webdav_plugin::DESTROY_FN;
+    manager
+        .register_static(manifest(), desc, destroy)
+        .expect("register");
     manager
 }
 
 fn open_one(manager: &PluginManager, url: &str) -> Arc<plugin_core::LoadedInstance> {
-    let loaded = manager.get("com.aperio.sync-adapter-webdav").expect("registered");
+    let loaded = manager
+        .get("com.aperio.sync-adapter-webdav")
+        .expect("registered");
     let cfg = serde_json::json!({
         "url": url,
         "user": "tester",
         "password": "swordfish",
     });
-    manager.open_instance(loaded, &cfg.to_string()).expect("open")
+    manager
+        .open_instance(loaded, &cfg.to_string())
+        .expect("open")
 }
 
 fn make_adapter() -> (PluginManager, Arc<FfiSyncAdapter>) {
@@ -74,10 +78,15 @@ async fn test_connection_against_bogus_url_surfaces_network_error() {
 #[test]
 fn rejects_empty_url_at_open() {
     let manager = make_manager();
-    let loaded = manager.get("com.aperio.sync-adapter-webdav").expect("registered");
+    let loaded = manager
+        .get("com.aperio.sync-adapter-webdav")
+        .expect("registered");
     let bad = serde_json::json!({ "url": "", "user": "", "password": "" });
     let err = manager.open_instance(loaded, &bad.to_string()).unwrap_err();
-    assert!(matches!(err, plugin_core::error::PluginError::InstanceOpen { .. }));
+    assert!(matches!(
+        err,
+        plugin_core::error::PluginError::InstanceOpen { .. }
+    ));
 }
 
 #[test]

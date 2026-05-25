@@ -29,8 +29,8 @@
 use std::future::Future;
 
 use plugin_core::ffi::{
-    PluginCallResult, PLUGIN_CALL_ERR_INTERNAL, PLUGIN_CALL_ERR_INVALID,
-    PLUGIN_CALL_ERR_NOT_FOUND, PLUGIN_CALL_OK,
+    PluginCallResult, PLUGIN_CALL_ERR_INTERNAL, PLUGIN_CALL_ERR_INVALID, PLUGIN_CALL_ERR_NOT_FOUND,
+    PLUGIN_CALL_OK,
 };
 
 use crate::response::{bytes_to_response, error_response};
@@ -79,19 +79,13 @@ where
     let json_str = match std::str::from_utf8(args_bytes) {
         Ok(s) => s.to_string(),
         Err(_) => {
-            return error_response(
-                PLUGIN_CALL_ERR_INVALID,
-                "discover args are not valid UTF-8",
-            )
+            return error_response(PLUGIN_CALL_ERR_INVALID, "discover args are not valid UTF-8")
         }
     };
     let runtime = match PluginRuntime::new() {
         Ok(r) => r,
         Err(err) => {
-            return error_response(
-                PLUGIN_CALL_ERR_INTERNAL,
-                &format!("build runtime: {err}"),
-            )
+            return error_response(PLUGIN_CALL_ERR_INTERNAL, &format!("build runtime: {err}"))
         }
     };
     match runtime.block_on(handler(json_str)) {
@@ -112,8 +106,7 @@ mod tests {
         let mut result = unsafe {
             discover_with(args.as_ptr(), args.len(), |json| async move {
                 assert_eq!(json, r#"{"email":"alice@hs-anhalt.de"}"#);
-                Ok(br#"{"ews_url":"https://owa.hs-anhalt.de/EWS/Exchange.asmx"}"#
-                    .to_vec())
+                Ok(br#"{"ews_url":"https://owa.hs-anhalt.de/EWS/Exchange.asmx"}"#.to_vec())
             })
         };
         assert_eq!(result.status, plugin_core::ffi::PLUGIN_CALL_OK);

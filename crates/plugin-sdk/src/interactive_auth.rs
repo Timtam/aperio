@@ -30,8 +30,8 @@
 use std::future::Future;
 
 use plugin_core::ffi::{
-    PluginCallResult, PLUGIN_CALL_ERR_AUTH, PLUGIN_CALL_ERR_INTERNAL,
-    PLUGIN_CALL_ERR_INVALID, PLUGIN_CALL_OK,
+    PluginCallResult, PLUGIN_CALL_ERR_AUTH, PLUGIN_CALL_ERR_INTERNAL, PLUGIN_CALL_ERR_INVALID,
+    PLUGIN_CALL_OK,
 };
 
 use crate::response::{bytes_to_response, error_response};
@@ -93,10 +93,7 @@ where
     let runtime = match PluginRuntime::new() {
         Ok(r) => r,
         Err(err) => {
-            return error_response(
-                PLUGIN_CALL_ERR_INTERNAL,
-                &format!("build runtime: {err}"),
-            )
+            return error_response(PLUGIN_CALL_ERR_INTERNAL, &format!("build runtime: {err}"))
         }
     };
     match runtime.block_on(handler(json_str)) {

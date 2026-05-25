@@ -26,8 +26,7 @@ use tauri::{AppHandle, Emitter, Runtime, State};
 
 use super::{CommandError, CommandResult};
 use crate::conflicts::{
-    ConflictKind, ConflictRecord, ConflictsError, ConflictsRepo,
-    ResolutionChoice,
+    ConflictKind, ConflictRecord, ConflictsError, ConflictsRepo, ResolutionChoice,
 };
 use crate::db::DbHandle;
 use crate::event_log::EventLogWriter;
@@ -37,8 +36,9 @@ impl From<ConflictsError> for CommandError {
     fn from(err: ConflictsError) -> Self {
         let code: &'static str = match &err {
             ConflictsError::NotFound(_) => "not_found",
-            ConflictsError::InvalidKind(_)
-            | ConflictsError::InvalidResolution(_) => "invalid_input",
+            ConflictsError::InvalidKind(_) | ConflictsError::InvalidResolution(_) => {
+                "invalid_input"
+            }
             ConflictsError::Sqlite(_) => "internal",
         };
         CommandError {
@@ -50,9 +50,7 @@ impl From<ConflictsError> for CommandError {
 
 /// Read every unresolved conflict for the dialog.
 #[tauri::command]
-pub async fn list_sync_conflicts(
-    db: State<'_, DbHandle>,
-) -> CommandResult<Vec<ConflictRecord>> {
+pub async fn list_sync_conflicts(db: State<'_, DbHandle>) -> CommandResult<Vec<ConflictRecord>> {
     let shared = db.shared();
     let repo = ConflictsRepo::new(&shared);
     Ok(repo.list_unresolved()?)
@@ -62,9 +60,7 @@ pub async fn list_sync_conflicts(
 /// query) so the indicator can poll on a short cadence without
 /// pulling the full list.
 #[tauri::command]
-pub async fn get_sync_conflicts_count(
-    db: State<'_, DbHandle>,
-) -> CommandResult<usize> {
+pub async fn get_sync_conflicts_count(db: State<'_, DbHandle>) -> CommandResult<usize> {
     let shared = db.shared();
     let repo = ConflictsRepo::new(&shared);
     Ok(repo.unresolved_count()?)
@@ -298,19 +294,13 @@ fn apply_take_remote(
 /// through `Value`, writes the field, deserialises back. Used by
 /// every `apply_take_remote` branch so the per-type code stays
 /// boilerplate-free.
-fn patch_field<T>(
-    row: &mut T,
-    field: &str,
-    value: &serde_json::Value,
-) -> CommandResult<()>
+fn patch_field<T>(row: &mut T, field: &str, value: &serde_json::Value) -> CommandResult<()>
 where
     T: serde::Serialize + serde::de::DeserializeOwned,
 {
-    let mut serialised = serde_json::to_value(&*row).map_err(|err| {
-        CommandError {
-            code: "internal",
-            message: format!("serialise row for patch: {err}"),
-        }
+    let mut serialised = serde_json::to_value(&*row).map_err(|err| CommandError {
+        code: "internal",
+        message: format!("serialise row for patch: {err}"),
     })?;
     if let Some(obj) = serialised.as_object_mut() {
         obj.insert(field.to_string(), value.clone());

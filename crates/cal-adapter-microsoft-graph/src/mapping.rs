@@ -15,8 +15,7 @@
 //! refusing the write.
 
 use cal_core::{
-    Calendar, ColorSource, ContainerColor, Event, EventRecurrence, NewEvent,
-    Reminder, ReminderKind,
+    Calendar, ColorSource, ContainerColor, Event, EventRecurrence, NewEvent, Reminder, ReminderKind,
 };
 use chrono::{DateTime, Datelike, NaiveDate, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
@@ -141,21 +140,15 @@ impl GraphDateTime {
             || self.time_zone.eq_ignore_ascii_case("Etc/UTC")
         {
             let with_z = format!("{trimmed}Z");
-            return with_z.parse::<DateTime<Utc>>().map_err(|e| {
-                GraphError::Protocol(format!("graph datetime: {e}: {with_z}"))
-            });
+            return with_z
+                .parse::<DateTime<Utc>>()
+                .map_err(|e| GraphError::Protocol(format!("graph datetime: {e}: {with_z}")));
         }
         let tz: chrono_tz::Tz = self.time_zone.parse().map_err(|e| {
-            GraphError::Protocol(format!(
-                "unknown timezone '{}': {e:?}",
-                self.time_zone
-            ))
+            GraphError::Protocol(format!("unknown timezone '{}': {e:?}", self.time_zone))
         })?;
-        let naive = chrono::NaiveDateTime::parse_from_str(
-            &trimmed,
-            "%Y-%m-%dT%H:%M:%S",
-        )
-        .map_err(|e| GraphError::Protocol(format!("graph naive datetime: {e}")))?;
+        let naive = chrono::NaiveDateTime::parse_from_str(&trimmed, "%Y-%m-%dT%H:%M:%S")
+            .map_err(|e| GraphError::Protocol(format!("graph naive datetime: {e}")))?;
         tz.from_local_datetime(&naive)
             .single()
             .ok_or_else(|| {
@@ -328,10 +321,7 @@ pub fn recurrence_to_rrule(r: &RecurrenceObject) -> Option<String> {
         "endDate" => {
             if let Some(end) = r.range.end_date.as_deref() {
                 if let Ok(d) = NaiveDate::parse_from_str(end, "%Y-%m-%d") {
-                    parts.push(format!(
-                        "UNTIL={}",
-                        d.format("%Y%m%dT235959Z")
-                    ));
+                    parts.push(format!("UNTIL={}", d.format("%Y%m%dT235959Z")));
                 }
             }
         }
@@ -349,10 +339,7 @@ pub fn recurrence_to_rrule(r: &RecurrenceObject) -> Option<String> {
 /// Inverse: parse an RRULE body into Graph's structured form.
 /// Returns `Err(Protocol)` when the rule uses features Graph can't
 /// represent — e.g. BYSETPOS without a known BYDAY pattern.
-pub fn rrule_to_recurrence(
-    rrule: &str,
-    start: DateTime<Utc>,
-) -> GraphResult<RecurrenceObject> {
+pub fn rrule_to_recurrence(rrule: &str, start: DateTime<Utc>) -> GraphResult<RecurrenceObject> {
     let parts: std::collections::HashMap<String, String> = rrule
         .split(';')
         .filter_map(|p| {
@@ -383,24 +370,18 @@ pub fn rrule_to_recurrence(
         "WEEKLY" => {
             pattern.kind = "weekly".into();
             if let Some(byday) = parts.get("BYDAY") {
-                pattern.days_of_week = byday
-                    .split(',')
-                    .filter_map(rrule_day_to_name)
-                    .collect();
+                pattern.days_of_week = byday.split(',').filter_map(rrule_day_to_name).collect();
             }
             if pattern.days_of_week.is_empty() {
                 // Default to the weekday of `start`.
-                pattern
-                    .days_of_week
-                    .push(weekday_to_name(start.weekday()));
+                pattern.days_of_week.push(weekday_to_name(start.weekday()));
             }
         }
         "MONTHLY" => {
             if let Some(dom) = parts.get("BYMONTHDAY").and_then(|s| s.parse().ok()) {
                 pattern.kind = "absoluteMonthly".into();
                 pattern.day_of_month = Some(dom);
-            } else if parts.contains_key("BYDAY") && parts.contains_key("BYSETPOS")
-            {
+            } else if parts.contains_key("BYDAY") && parts.contains_key("BYSETPOS") {
                 // Relative monthly — beyond 6e.1 scope.
                 return Err(GraphError::Protocol(
                     "relative monthly recurrence not supported on write yet".into(),
@@ -422,9 +403,7 @@ pub fn rrule_to_recurrence(
                 .or(Some(start.day()));
         }
         other => {
-            return Err(GraphError::Protocol(format!(
-                "unsupported FREQ: {other}"
-            )));
+            return Err(GraphError::Protocol(format!("unsupported FREQ: {other}")));
         }
     }
 
@@ -507,7 +486,10 @@ pub struct EventWriteBody {
     pub location: Option<EventLocationWrite>,
     #[serde(rename = "isReminderOn")]
     pub is_reminder_on: bool,
-    #[serde(skip_serializing_if = "Option::is_none", rename = "reminderMinutesBeforeStart")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        rename = "reminderMinutesBeforeStart"
+    )]
     pub reminder_minutes_before_start: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub recurrence: Option<RecurrenceObject>,
@@ -544,9 +526,10 @@ pub fn new_event_to_body(new: &NewEvent) -> GraphResult<EventWriteBody> {
         start: write_datetime(new.start, new.all_day),
         end: write_datetime(new.end, new.all_day),
         is_all_day: new.all_day,
-        location: new.location.clone().map(|l| EventLocationWrite {
-            display_name: l,
-        }),
+        location: new
+            .location
+            .clone()
+            .map(|l| EventLocationWrite { display_name: l }),
         is_reminder_on: first_reminder_minutes(&new.reminders).is_some(),
         reminder_minutes_before_start: first_reminder_minutes(&new.reminders),
         recurrence: match new.recurrence.as_ref() {
@@ -567,9 +550,10 @@ pub fn event_to_body(ev: &Event) -> GraphResult<EventWriteBody> {
         start: write_datetime(ev.start, ev.all_day),
         end: write_datetime(ev.end, ev.all_day),
         is_all_day: ev.all_day,
-        location: ev.location.clone().map(|l| EventLocationWrite {
-            display_name: l,
-        }),
+        location: ev
+            .location
+            .clone()
+            .map(|l| EventLocationWrite { display_name: l }),
         is_reminder_on: first_reminder_minutes(&ev.reminders).is_some(),
         reminder_minutes_before_start: first_reminder_minutes(&ev.reminders),
         recurrence: match ev.recurrence.as_ref() {
@@ -748,10 +732,7 @@ pub fn map_task(entry: TodoTaskEntry, list_id: &str) -> GraphResult<Task> {
         // server-side keeps the round-trip lossy but readable.
         // Aperio's TaskDialog doesn't render HTML, so a `<p>x</p>`
         // showing up verbatim would be worse than a plain "x".
-        if matches!(
-            b.content_type.as_deref(),
-            Some("html") | Some("HTML")
-        ) {
+        if matches!(b.content_type.as_deref(), Some("html") | Some("HTML")) {
             Some(strip_html_tags(&raw))
         } else {
             Some(raw)
@@ -895,21 +876,24 @@ pub struct TodoTaskBodyWrite {
 pub fn new_task_to_body(new: &NewTask) -> GraphResult<TodoTaskWriteBody> {
     Ok(TodoTaskWriteBody {
         title: new.title.clone(),
-        body: new.description.as_deref().filter(|s| !s.is_empty()).map(|s| {
-            TodoTaskBodyWrite {
+        body: new
+            .description
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .map(|s| TodoTaskBodyWrite {
                 content: s.to_string(),
                 content_type: "text",
-            }
-        }),
+            }),
         importance: priority_to_importance(new.priority),
         status: task_status_to_graph(new.status),
         due_date_time: build_due_datetime(new.deadline_date, new.deadline_time),
         start_date_time: build_start_datetime(new.scheduled_date, new.scheduled_time),
-        reminder_date_time: first_absolute_reminder_at(&new.reminders)
-            .map(|at| GraphDateTimeWrite {
+        reminder_date_time: first_absolute_reminder_at(&new.reminders).map(|at| {
+            GraphDateTimeWrite {
                 date_time: at.format("%Y-%m-%dT%H:%M:%S").to_string(),
                 time_zone: "UTC".into(),
-            }),
+            }
+        }),
         is_reminder_on: first_absolute_reminder_at(&new.reminders).is_some(),
         recurrence: new
             .recurrence
@@ -922,21 +906,24 @@ pub fn new_task_to_body(new: &NewTask) -> GraphResult<TodoTaskWriteBody> {
 pub fn task_to_body(task: &Task) -> GraphResult<TodoTaskWriteBody> {
     Ok(TodoTaskWriteBody {
         title: task.title.clone(),
-        body: task.description.as_deref().filter(|s| !s.is_empty()).map(|s| {
-            TodoTaskBodyWrite {
+        body: task
+            .description
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .map(|s| TodoTaskBodyWrite {
                 content: s.to_string(),
                 content_type: "text",
-            }
-        }),
+            }),
         importance: priority_to_importance(task.priority),
         status: task_status_to_graph(task.status),
         due_date_time: build_due_datetime(task.deadline_date, task.deadline_time),
         start_date_time: build_start_datetime(task.scheduled_date, task.scheduled_time),
-        reminder_date_time: first_absolute_reminder_at(&task.reminders)
-            .map(|at| GraphDateTimeWrite {
+        reminder_date_time: first_absolute_reminder_at(&task.reminders).map(|at| {
+            GraphDateTimeWrite {
                 date_time: at.format("%Y-%m-%dT%H:%M:%S").to_string(),
                 time_zone: "UTC".into(),
-            }),
+            }
+        }),
         is_reminder_on: first_absolute_reminder_at(&task.reminders).is_some(),
         recurrence: task
             .recurrence
@@ -1006,9 +993,7 @@ fn first_absolute_reminder_at(reminders: &[Reminder]) -> Option<DateTime<Utc>> {
 // + range. We map cal-core's `TaskRecurrence` (a simple frequency +
 // interval + optional BYDAY / BYMONTHDAY + end) to that.
 
-pub fn task_recurrence_to_graph(
-    rec: &cal_core::TaskRecurrence,
-) -> GraphResult<RecurrenceObject> {
+pub fn task_recurrence_to_graph(rec: &cal_core::TaskRecurrence) -> GraphResult<RecurrenceObject> {
     use cal_core::{RecurrenceEnd, RecurrenceFrequency};
     let interval = rec.interval.max(1);
     let pattern = match rec.frequency {
@@ -1214,7 +1199,10 @@ mod tests {
         let entry: EventEntry = serde_json::from_str(raw).unwrap();
         let ev = map_event(entry, "primary").unwrap().unwrap();
         assert_eq!(ev.title, "Standup");
-        assert_eq!(ev.start, Utc.with_ymd_and_hms(2026, 5, 25, 10, 0, 0).unwrap());
+        assert_eq!(
+            ev.start,
+            Utc.with_ymd_and_hms(2026, 5, 25, 10, 0, 0).unwrap()
+        );
         assert_eq!(ev.reminders.len(), 1);
         match ev.reminders[0].kind {
             ReminderKind::Relative { minutes_before } => assert_eq!(minutes_before, 15),
@@ -1234,7 +1222,10 @@ mod tests {
         let entry: EventEntry = serde_json::from_str(raw).unwrap();
         let ev = map_event(entry, "primary").unwrap().unwrap();
         // Berlin is CEST (UTC+2) on 25 May.
-        assert_eq!(ev.start, Utc.with_ymd_and_hms(2026, 5, 25, 10, 0, 0).unwrap());
+        assert_eq!(
+            ev.start,
+            Utc.with_ymd_and_hms(2026, 5, 25, 10, 0, 0).unwrap()
+        );
     }
 
     #[test]
@@ -1370,9 +1361,7 @@ mod tests {
             }),
             color_label: None,
             reminders: vec![Reminder {
-                kind: ReminderKind::Relative {
-                    minutes_before: 10,
-                },
+                kind: ReminderKind::Relative { minutes_before: 10 },
                 sound: None,
             }],
             sound: None,
@@ -1384,10 +1373,7 @@ mod tests {
         assert_eq!(json["isReminderOn"], true);
         assert_eq!(json["reminderMinutesBeforeStart"], 10);
         assert_eq!(json["recurrence"]["pattern"]["type"], "weekly");
-        assert_eq!(
-            json["recurrence"]["pattern"]["daysOfWeek"][0],
-            "monday"
-        );
+        assert_eq!(json["recurrence"]["pattern"]["daysOfWeek"][0], "monday");
         assert_eq!(json["location"]["displayName"], "Studio");
     }
 
@@ -1395,10 +1381,9 @@ mod tests {
 
     #[test]
     fn task_list_is_owner_false_maps_to_read_only() {
-        let entry: TodoListEntry = serde_json::from_str(
-            r##"{"id":"L1","displayName":"Shared list","isOwner":false}"##,
-        )
-        .unwrap();
+        let entry: TodoListEntry =
+            serde_json::from_str(r##"{"id":"L1","displayName":"Shared list","isOwner":false}"##)
+                .unwrap();
         let list = map_task_list(entry);
         assert!(list.read_only);
         assert_eq!(list.name, "Shared list");

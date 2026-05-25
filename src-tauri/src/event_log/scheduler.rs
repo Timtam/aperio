@@ -195,7 +195,7 @@ impl SyncScheduler {
 
             // Main loop. tokio::select! gives us three wake-up paths:
             //   - the periodic timer fires → full round
-                //   - the kick `Notify` fires → debounce, then round
+            //   - the kick `Notify` fires → debounce, then round
             //   - both fire close together → handle the first one;
             //     the second remains pending and wakes the next
             //     iteration immediately (Notify is a one-shot
@@ -247,16 +247,11 @@ impl SyncScheduler {
     /// there. `trigger` tags WHY this round ran so the user can
     /// filter manual / periodic / startup attempts apart in the
     /// rare bug-report scenario where it matters.
-    async fn run_round<R: Runtime>(
-        &self,
-        app: &AppHandle<R>,
-        trigger: SyncTrigger,
-    ) {
+    async fn run_round<R: Runtime>(&self, app: &AppHandle<R>, trigger: SyncTrigger) {
         self.emit_status(app, None, None);
         let started = Instant::now();
         let result = self.orchestrator.sync_now().await;
-        let duration_ms = u64::try_from(started.elapsed().as_millis())
-            .unwrap_or(u64::MAX);
+        let duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
         match &result {
             Ok(report) => {
                 info!(
@@ -323,9 +318,7 @@ impl SyncScheduler {
                     pushed_logs: Some(u32::try_from(report.pushed_logs).unwrap_or(u32::MAX)),
                     fetched_logs: Some(u32::try_from(report.fetched_logs).unwrap_or(u32::MAX)),
                     applied: Some(u32::try_from(report.applied).unwrap_or(u32::MAX)),
-                    conflicts: Some(
-                        u32::try_from(report.conflicts).unwrap_or(u32::MAX),
-                    ),
+                    conflicts: Some(u32::try_from(report.conflicts).unwrap_or(u32::MAX)),
                 },
                 None,
             ),
@@ -421,20 +414,13 @@ impl SyncScheduler {
                         // with bogus push/fetch counts.
                         pushed_logs: None,
                         fetched_logs: None,
-                        applied: Some(
-                            u32::try_from(report.deleted_logs)
-                                .unwrap_or(u32::MAX),
-                        ),
+                        applied: Some(u32::try_from(report.deleted_logs).unwrap_or(u32::MAX)),
                         conflicts: None,
                     },
                     error,
                 )
             }
-            Err(err) => (
-                false,
-                SyncLogCounters::default(),
-                Some(err.to_string()),
-            ),
+            Err(err) => (false, SyncLogCounters::default(), Some(err.to_string())),
         };
         let repo = SyncLogRepo::new(&self.db);
         if let Err(err) = repo.record(
@@ -561,8 +547,7 @@ impl SyncScheduler {
     /// polls or listens.
     pub fn current_status(&self) -> SyncStatus {
         let mut status = self.orchestrator.status();
-        status.sustained_failure =
-            self.consecutive_failures() >= SUSTAINED_FAILURE_THRESHOLD;
+        status.sustained_failure = self.consecutive_failures() >= SUSTAINED_FAILURE_THRESHOLD;
         status.last_error_code = self.last_error_code();
         status
     }
@@ -588,8 +573,7 @@ impl SyncScheduler {
     /// safe range AND already saturates at the MAX_BACKOFF cap for
     /// any base interval we'd realistically configure.
     fn interval_duration(&self) -> Duration {
-        let base =
-            Duration::from_secs(u64::from(self.read_interval_minutes()) * 60);
+        let base = Duration::from_secs(u64::from(self.read_interval_minutes()) * 60);
         backoff_duration(base, self.consecutive_failures())
     }
 

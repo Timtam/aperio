@@ -104,10 +104,7 @@ pub trait SyncAdapter: Send + Sync {
     /// optimistic-locking on the file's etag (where the backend
     /// supports it; local FS and FTPS don't, so the spec
     /// tolerates last-write-wins on this file specifically).
-    async fn push_meta(
-        &self,
-        meta: &crate::meta::MetaJson,
-    ) -> SyncResult<()>;
+    async fn push_meta(&self, meta: &crate::meta::MetaJson) -> SyncResult<()>;
 
     /// Enumerate log files newer than `since`. The return order
     /// MAY be chronological (some backends already sort) but the
@@ -118,10 +115,7 @@ pub trait SyncAdapter: Send + Sync {
     /// large backlogs, the caller will set a sensible cursor
     /// (e.g. only fetch the last 90 days when bootstrapping) so
     /// the adapter doesn't have to stream.
-    async fn fetch_new_logs(
-        &self,
-        since: &DeviceCursor,
-    ) -> SyncResult<Vec<LogFile>>;
+    async fn fetch_new_logs(&self, since: &DeviceCursor) -> SyncResult<Vec<LogFile>>;
 
     /// Upload one log file. The adapter writes it to
     /// `sync/log/<filename>` exactly. Idempotent: if a file by
@@ -145,27 +139,17 @@ pub trait SyncAdapter: Send + Sync {
     /// don't expose a bulk-delete because some backends don't
     /// implement it natively and the per-file pattern is
     /// universal.
-    async fn delete_log(&self, name: &crate::log::LogFileName)
-        -> SyncResult<()>;
+    async fn delete_log(&self, name: &crate::log::LogFileName) -> SyncResult<()>;
 
     /// Upload a binary asset (sound file). Keyed by its sha256
     /// hash so the adapter writes to
     /// `assets/sounds/<hash>.<ext>`. Returns `Ok` if the file
     /// already existed — content-addressed paths are immutable
     /// once written, so a duplicate upload is a no-op.
-    async fn push_sound_asset(
-        &self,
-        hash: &str,
-        extension: &str,
-        bytes: &[u8],
-    ) -> SyncResult<()>;
+    async fn push_sound_asset(&self, hash: &str, extension: &str, bytes: &[u8]) -> SyncResult<()>;
 
     /// Fetch a sound file by hash. `Ok(None)` when missing —
     /// callers fall back to silence for that particular sound
     /// reference without erroring the whole sync.
-    async fn fetch_sound_asset(
-        &self,
-        hash: &str,
-        extension: &str,
-    ) -> SyncResult<Option<Vec<u8>>>;
+    async fn fetch_sound_asset(&self, hash: &str, extension: &str) -> SyncResult<Option<Vec<u8>>>;
 }

@@ -151,9 +151,7 @@ pub(crate) fn call_method_sync(
 /// Decode the OK payload into a typed value. Empty payload is
 /// interpreted as JSON `null` so void-returning methods can keep
 /// their FFI shape trivial.
-pub(crate) fn decode_payload<T: serde::de::DeserializeOwned>(
-    bytes: &[u8],
-) -> Result<T, String> {
+pub(crate) fn decode_payload<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, String> {
     if bytes.is_empty() {
         // serde_json's null handles all the Option, (), and Vec
         // shapes our shims need to deserialise.

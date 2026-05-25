@@ -232,14 +232,16 @@ mod tests {
         let (_tmp, db) = fresh_db();
         let shared = db.shared();
         let repo = RemotePluginsRepo::new(&shared);
-        repo.upsert("a", None, "1.0.0", None, None, "alpha").unwrap();
+        repo.upsert("a", None, "1.0.0", None, None, "alpha")
+            .unwrap();
         // The sleep is overkill for production but the test
         // needs distinct RFC 3339 timestamps; chrono's
         // resolution is microseconds which the SQL ORDER BY
         // sees correctly without sleeping in 99.9% of cases,
         // but we sleep 2ms to be safe across CI runners.
         std::thread::sleep(std::time::Duration::from_millis(2));
-        repo.upsert("b", None, "1.0.0", None, None, "alpha").unwrap();
+        repo.upsert("b", None, "1.0.0", None, None, "alpha")
+            .unwrap();
         let list = repo.list().unwrap();
         assert_eq!(list[0].id, "b");
         assert_eq!(list[1].id, "a");

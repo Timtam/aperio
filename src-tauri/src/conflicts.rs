@@ -227,9 +227,7 @@ impl<'a> ConflictsRepo<'a> {
         let row = stmt
             .query_row(params![id], row_to_conflict)
             .map_err(|err| match err {
-                rusqlite::Error::QueryReturnedNoRows => {
-                    ConflictsError::NotFound(id)
-                }
+                rusqlite::Error::QueryReturnedNoRows => ConflictsError::NotFound(id),
                 other => ConflictsError::Sqlite(other),
             })?;
         row
@@ -239,11 +237,7 @@ impl<'a> ConflictsRepo<'a> {
     /// The caller has already executed whatever side-effect the
     /// choice implies (no-op for `KeepLocal`, an upsert for
     /// `TakeRemote`, a clone for `SaveBoth`).
-    pub fn mark_resolved(
-        &self,
-        id: i64,
-        choice: ResolutionChoice,
-    ) -> ConflictsResult<()> {
+    pub fn mark_resolved(&self, id: i64, choice: ResolutionChoice) -> ConflictsResult<()> {
         let conn = self.db.lock().expect("db mutex poisoned");
         let affected = conn.execute(
             "UPDATE sync_conflicts
@@ -251,11 +245,7 @@ impl<'a> ConflictsRepo<'a> {
                     resolution = ?,
                     resolved_at = ?
               WHERE id = ?",
-            params![
-                choice.as_str(),
-                Utc::now().to_rfc3339(),
-                id,
-            ],
+            params![choice.as_str(), Utc::now().to_rfc3339(), id,],
         )?;
         if affected == 0 {
             return Err(ConflictsError::NotFound(id));
@@ -276,9 +266,7 @@ impl<'a> ConflictsRepo<'a> {
     }
 }
 
-fn row_to_conflict(
-    row: &rusqlite::Row<'_>,
-) -> rusqlite::Result<ConflictsResult<ConflictRecord>> {
+fn row_to_conflict(row: &rusqlite::Row<'_>) -> rusqlite::Result<ConflictsResult<ConflictRecord>> {
     let id: i64 = row.get(0)?;
     let detected_at_raw: String = row.get(1)?;
     let row_kind_raw: String = row.get(2)?;
@@ -313,9 +301,7 @@ fn row_to_conflict(
             remote_timestamp: parse_ts(&remote_timestamp_raw)?,
             resolved: resolved_int != 0,
             resolution,
-            resolved_at: resolved_at_raw
-                .map(|s| parse_ts(&s))
-                .transpose()?,
+            resolved_at: resolved_at_raw.map(|s| parse_ts(&s)).transpose()?,
         })
     })())
 }
@@ -417,7 +403,8 @@ mod tests {
         let repo = ConflictsRepo::new(&shared);
         let id1 = repo.record(fake_conflict("title")).unwrap();
         let _id2 = repo.record(fake_conflict("location")).unwrap();
-        repo.mark_resolved(id1, ResolutionChoice::TakeRemote).unwrap();
+        repo.mark_resolved(id1, ResolutionChoice::TakeRemote)
+            .unwrap();
         assert_eq!(repo.unresolved_count().unwrap(), 1);
     }
 
@@ -430,7 +417,8 @@ mod tests {
         let shared = db.shared();
         let repo = ConflictsRepo::new(&shared);
         let id1 = repo.record(fake_conflict("title")).unwrap();
-        repo.mark_resolved(id1, ResolutionChoice::KeepLocal).unwrap();
+        repo.mark_resolved(id1, ResolutionChoice::KeepLocal)
+            .unwrap();
         // Same field, fresh divergence:
         repo.record(fake_conflict("title")).unwrap();
         assert_eq!(repo.unresolved_count().unwrap(), 1);

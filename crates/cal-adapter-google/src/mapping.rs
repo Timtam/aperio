@@ -11,8 +11,7 @@
 //! (`tasks` API, not Calendar API) land in Phase 6d.2.
 
 use cal_core::{
-    Calendar, ColorSource, ContainerColor, Event, EventRecurrence, NewEvent, Reminder,
-    ReminderKind,
+    Calendar, ColorSource, ContainerColor, Event, EventRecurrence, NewEvent, Reminder, ReminderKind,
 };
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
@@ -385,10 +384,7 @@ fn range_to_write(when: DateTime<Utc>, all_day: bool) -> EventDateTimeWrite {
     }
 }
 
-fn recurrence_to_lines(
-    rrule: &str,
-    exceptions: &[DateTime<Utc>],
-) -> Vec<String> {
+fn recurrence_to_lines(rrule: &str, exceptions: &[DateTime<Utc>]) -> Vec<String> {
     let mut lines = Vec::with_capacity(1 + exceptions.len());
     // Google expects the RFC 5545 prefix; the rest of Aperio stores
     // the bare rule body.
@@ -404,10 +400,8 @@ fn recurrence_to_lines(
 }
 
 fn reminders_to_write(reminders: &[Reminder]) -> EventRemindersWrite {
-    let overrides: Vec<ReminderOverride> = reminders
-        .iter()
-        .filter_map(reminder_to_override)
-        .collect();
+    let overrides: Vec<ReminderOverride> =
+        reminders.iter().filter_map(reminder_to_override).collect();
     if overrides.is_empty() {
         // No per-event reminders — let Google use whatever the
         // calendar defaults are. Setting `useDefault: false` with
@@ -503,10 +497,7 @@ mod tests {
         let entry: EventEntry = serde_json::from_str(raw).unwrap();
         let ev = map_event(entry, "primary").unwrap().unwrap();
         assert!(ev.all_day);
-        assert_eq!(
-            ev.start,
-            Utc.with_ymd_and_hms(2026, 7, 4, 0, 0, 0).unwrap()
-        );
+        assert_eq!(ev.start, Utc.with_ymd_and_hms(2026, 7, 4, 0, 0, 0).unwrap());
     }
 
     #[test]
@@ -655,9 +646,7 @@ mod tests {
             all_day: false,
             recurrence: Some(EventRecurrence {
                 rrule: "FREQ=WEEKLY;BYDAY=MO".into(),
-                exceptions: vec![
-                    Utc.with_ymd_and_hms(2026, 6, 1, 18, 0, 0).unwrap(),
-                ],
+                exceptions: vec![Utc.with_ymd_and_hms(2026, 6, 1, 18, 0, 0).unwrap()],
             }),
             color_label: None,
             reminders: vec![],
@@ -691,9 +680,7 @@ mod tests {
                     sound: None,
                 },
                 Reminder {
-                    kind: ReminderKind::Absolute {
-                        at: Utc::now(),
-                    },
+                    kind: ReminderKind::Absolute { at: Utc::now() },
                     sound: None,
                 },
                 Reminder {

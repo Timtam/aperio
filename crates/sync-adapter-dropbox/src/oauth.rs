@@ -102,9 +102,7 @@ pub async fn run_against(
     http: &reqwest::Client,
 ) -> DropboxResult<TokenSet> {
     if client_id.trim().is_empty() {
-        return Err(DropboxError::Config(
-            "client_id must not be empty".into(),
-        ));
+        return Err(DropboxError::Config("client_id must not be empty".into()));
     }
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let port = listener.local_addr()?.port();
@@ -113,14 +111,16 @@ pub async fn run_against(
     let (verifier, challenge) = generate_pkce();
     let state = generate_state();
 
-    let auth =
-        build_auth_url(auth_url, client_id, &redirect_uri, &challenge, &state)?;
+    let auth = build_auth_url(auth_url, client_id, &redirect_uri, &challenge, &state)?;
     debug!(url = %auth, "opening Dropbox consent screen");
     // open::that is best-effort. On headless / no-browser hosts
     // we surface the URL via tracing so the user can copy-paste
     // it manually.
     if let Err(e) = open::that(auth.as_str()) {
-        warn!(?e, "failed to launch browser; user must copy the URL manually");
+        warn!(
+            ?e,
+            "failed to launch browser; user must copy the URL manually"
+        );
     }
 
     let (code, returned_state) = wait_for_redirect(listener).await?;
@@ -223,9 +223,7 @@ fn build_auth_url(
 
 /// Accept one HTTP request, parse `code` + `state` from the
 /// query string, respond with a friendly close-this-tab page.
-async fn wait_for_redirect(
-    listener: TcpListener,
-) -> DropboxResult<(String, String)> {
+async fn wait_for_redirect(listener: TcpListener) -> DropboxResult<(String, String)> {
     let accept = tokio::time::timeout(AUTH_TIMEOUT, listener.accept()).await;
     let (socket, _peer) = match accept {
         Err(_) => return Err(DropboxError::AuthTimeout),
@@ -298,12 +296,8 @@ async fn wait_for_redirect(
         return Err(DropboxError::AuthDenied(err));
     }
     Ok((
-        code.ok_or_else(|| {
-            DropboxError::Protocol("redirect missing `code`".into())
-        })?,
-        state.ok_or_else(|| {
-            DropboxError::Protocol("redirect missing `state`".into())
-        })?,
+        code.ok_or_else(|| DropboxError::Protocol("redirect missing `code`".into()))?,
+        state.ok_or_else(|| DropboxError::Protocol("redirect missing `state`".into()))?,
     ))
 }
 
@@ -373,8 +367,7 @@ async fn parse_token_response(
         refresh_token: raw.refresh_token,
         // 30 s safety margin so the adapter refreshes a little
         // before the strict expiry, saving a wasted 401.
-        expires_at: requested_at
-            + chrono::Duration::seconds((raw.expires_in - 30).max(0)),
+        expires_at: requested_at + chrono::Duration::seconds((raw.expires_in - 30).max(0)),
     })
 }
 
@@ -402,13 +395,9 @@ mod serde_urlencoded {
             // RFC 3986 unreserved + the few "form-data is fine"
             // characters; everything else goes percent-encoded.
             match byte {
-                b'A'..=b'Z'
-                | b'a'..=b'z'
-                | b'0'..=b'9'
-                | b'-'
-                | b'.'
-                | b'_'
-                | b'~' => out.push(byte as char),
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                    out.push(byte as char)
+                }
                 _ => {
                     out.push('%');
                     out.push_str(&format!("{byte:02X}"));

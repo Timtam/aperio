@@ -71,8 +71,7 @@ impl FfiContactsAdapter {
         }
         // SAFETY: manifest plugin_type = "calendar-adapter" so
         // the vtable is a CalendarAdapterVtable.
-        let outer: &CalendarAdapterVtable =
-            unsafe { &*(raw as *const CalendarAdapterVtable) };
+        let outer: &CalendarAdapterVtable = unsafe { &*(raw as *const CalendarAdapterVtable) };
         if outer.contacts.is_null() {
             return None;
         }
@@ -140,14 +139,11 @@ where
     T: serde::de::DeserializeOwned,
     A: Serialize,
 {
-    let bytes = encode_args(args).map_err(|e| Error::Internal(format!(
-        "encode args: {e}"
-    )))?;
+    let bytes = encode_args(args).map_err(|e| Error::Internal(format!("encode args: {e}")))?;
     let outcome = call_method(method, instance_addr, bytes).await;
     if outcome.is_ok() {
-        decode_payload(&outcome.bytes).map_err(|e| Error::Protocol(format!(
-            "decode plugin response: {e}"
-        )))
+        decode_payload(&outcome.bytes)
+            .map_err(|e| Error::Protocol(format!("decode plugin response: {e}")))
     } else {
         Err(status_to_cal_error(outcome))
     }
@@ -158,9 +154,7 @@ async fn call_for_unit<A: Serialize>(
     instance_addr: usize,
     args: &A,
 ) -> Result<()> {
-    let bytes = encode_args(args).map_err(|e| Error::Internal(format!(
-        "encode args: {e}"
-    )))?;
+    let bytes = encode_args(args).map_err(|e| Error::Internal(format!("encode args: {e}")))?;
     let outcome = call_method(method, instance_addr, bytes).await;
     if outcome.is_ok() {
         Ok(())
@@ -216,11 +210,7 @@ impl ContactsFeature for FfiContactsAdapter {
         call_then_decode(self.vtable.search_contacts, self.handle_addr, &query).await
     }
 
-    async fn create_contact(
-        &self,
-        list_id: &str,
-        contact: NewContact,
-    ) -> Result<Contact> {
+    async fn create_contact(&self, list_id: &str, contact: NewContact) -> Result<Contact> {
         let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         let args = CreateContactArgs { list_id, contact };
         call_then_decode(self.vtable.create_contact, self.handle_addr, &args).await
@@ -236,29 +226,18 @@ impl ContactsFeature for FfiContactsAdapter {
         call_for_unit(self.vtable.delete_contact, self.handle_addr, &contact_id).await
     }
 
-    async fn rename_contact_list(
-        &self,
-        list_id: &str,
-        new_name: &str,
-    ) -> Result<()> {
+    async fn rename_contact_list(&self, list_id: &str, new_name: &str) -> Result<()> {
         let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         let args = RenameContactListArgs { list_id, new_name };
         call_for_unit(self.vtable.rename_contact_list, self.handle_addr, &args).await
     }
 
-    async fn get_contact_photo(
-        &self,
-        contact_id: &str,
-    ) -> Result<Option<ContactPhoto>> {
+    async fn get_contact_photo(&self, contact_id: &str) -> Result<Option<ContactPhoto>> {
         let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         call_then_decode(self.vtable.get_contact_photo, self.handle_addr, &contact_id).await
     }
 
-    async fn set_contact_photo(
-        &self,
-        contact_id: &str,
-        photo: ContactPhoto,
-    ) -> Result<()> {
+    async fn set_contact_photo(&self, contact_id: &str, photo: ContactPhoto) -> Result<()> {
         let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         let args = SetContactPhotoArgs { contact_id, photo };
         call_for_unit(self.vtable.set_contact_photo, self.handle_addr, &args).await
@@ -266,7 +245,12 @@ impl ContactsFeature for FfiContactsAdapter {
 
     async fn delete_contact_photo(&self, contact_id: &str) -> Result<()> {
         let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
-        call_for_unit(self.vtable.delete_contact_photo, self.handle_addr, &contact_id).await
+        call_for_unit(
+            self.vtable.delete_contact_photo,
+            self.handle_addr,
+            &contact_id,
+        )
+        .await
     }
 
     async fn invalidate_contacts_cache(&self) -> Result<()> {

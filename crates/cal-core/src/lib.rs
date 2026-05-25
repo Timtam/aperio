@@ -19,6 +19,6 @@ pub use reminder::{Reminder, ReminderKind, SoundConfig, SoundSource};
 pub use types::{
     Calendar, Contact, ContactAddress, ContactList, ContactPhoto, DateRange, Event,
     EventRecurrence, FreeBusy, FreeBusySlot, GroupMember, NewContact, NewEvent, NewTask,
-    RecurrenceEnd, RecurrenceFrequency, Task, TaskList, TaskPriority, TaskRecurrence,
-    TaskStatus, Weekday,
+    RecurrenceEnd, RecurrenceFrequency, Task, TaskList, TaskPriority, TaskRecurrence, TaskStatus,
+    Weekday,
 };

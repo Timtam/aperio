@@ -74,8 +74,7 @@ use russh_sftp::client::SftpSession;
 use russh_sftp::protocol::OpenFlags;
 use serde::{Deserialize, Serialize};
 use sync_core::{
-    DeviceCursor, LogFile, LogFileName, MetaJson, Snapshot, SyncAdapter,
-    SyncError, SyncResult,
+    DeviceCursor, LogFile, LogFileName, MetaJson, Snapshot, SyncAdapter, SyncError, SyncResult,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tracing::{debug, warn};
@@ -91,7 +90,9 @@ use tracing::{debug, warn};
 /// this enum without changing the trait surface.
 #[derive(Debug, Clone)]
 pub enum SftpAuth {
-    Password { password: String },
+    Password {
+        password: String,
+    },
     PrivateKey {
         /// Absolute path to a PEM or OpenSSH-format private key
         /// file. We don't keep the key material itself in memory
@@ -115,10 +116,7 @@ pub enum HostKeyDecision {
     /// Known host but the fingerprint changed since last connect.
     /// Includes both the stored + presented forms so the
     /// surfaced error can show them to the user.
-    Mismatch {
-        stored: String,
-        presented: String,
-    },
+    Mismatch { stored: String, presented: String },
 }
 
 /// Snapshot the UI uses to decide between the "first use" and
@@ -339,20 +337,13 @@ impl SftpSyncAdapter {
         // returns false, so russh aborts the handshake — we
         // expect Err here. The captured side channel carries
         // the result.
-        let _ = client::connect(
-            config,
-            (self.host.as_str(), self.port),
-            handler,
-        )
-        .await;
+        let _ = client::connect(config, (self.host.as_str(), self.port), handler).await;
         let fp = captured
             .lock()
             .expect("probe capture poison")
             .take()
             .ok_or_else(|| {
-                SyncError::network(
-                    "didn't observe a host key before connection closed",
-                )
+                SyncError::network("didn't observe a host key before connection closed")
             })?;
         Ok(fp)
     }
@@ -392,10 +383,7 @@ impl SftpSyncAdapter {
     /// forward slashes — SFTP paths are always POSIX-style even
     /// when the local OS is Windows.
     fn remote_path(&self, relative: &str) -> String {
-        let base = self
-            .base_path
-            .to_string_lossy()
-            .replace('\\', "/");
+        let base = self.base_path.to_string_lossy().replace('\\', "/");
         let trimmed_base = base.trim_end_matches('/');
         let trimmed_rel = relative.trim_start_matches('/');
         if trimmed_rel.is_empty() {
@@ -427,24 +415,18 @@ impl SftpSyncAdapter {
             outcome: Arc::clone(&outcome),
         };
         let config = Arc::new(client::Config::default());
-        let connect_result = client::connect(
-            config,
-            (self.host.as_str(), self.port),
-            handler,
-        )
-        .await;
+        let connect_result =
+            client::connect(config, (self.host.as_str(), self.port), handler).await;
 
         // Inspect the side channel BEFORE the connect error is
         // surfaced — a mismatch verdict beats a generic russh
         // disconnect message.
-        let recorded_outcome =
-            outcome.lock().expect("handshake outcome poison").take();
+        let recorded_outcome = outcome.lock().expect("handshake outcome poison").take();
         let mut handle = match connect_result {
             Ok(h) => h,
             Err(err) => {
                 if let Some(HandshakeOutcome {
-                    decision:
-                        HostKeyDecision::Mismatch { stored, presented },
+                    decision: HostKeyDecision::Mismatch { stored, presented },
                     ..
                 }) = recorded_outcome
                 {
@@ -454,9 +436,7 @@ impl SftpSyncAdapter {
                          out-of-band before re-connecting",
                     )));
                 }
-                return Err(SyncError::network(format!(
-                    "ssh connect: {err}",
-                )));
+                return Err(SyncError::network(format!("ssh connect: {err}",)));
             }
         };
 
@@ -468,9 +448,7 @@ impl SftpSyncAdapter {
                 let authed = handle
                     .authenticate_password(self.user.as_str(), password)
                     .await
-                    .map_err(|err| {
-                        SyncError::auth(format!("ssh auth: {err}"))
-                    })?;
+                    .map_err(|err| SyncError::auth(format!("ssh auth: {err}")))?;
                 if !authed.success() {
                     return Err(SyncError::auth(
                         "SSH password authentication rejected by server",
@@ -489,20 +467,13 @@ impl SftpSyncAdapter {
                 // the four-line match here rather than fight the
                 // visibility.
                 let alg = hash_alg_for(&key.algorithm());
-                let auth_key = russh::keys::PrivateKeyWithHashAlg::new(
-                    Arc::new(key),
-                    alg,
-                );
+                let auth_key = russh::keys::PrivateKeyWithHashAlg::new(Arc::new(key), alg);
                 let authed = handle
                     .authenticate_publickey(self.user.as_str(), auth_key)
                     .await
-                    .map_err(|err| {
-                        SyncError::auth(format!("ssh key auth: {err}"))
-                    })?;
+                    .map_err(|err| SyncError::auth(format!("ssh key auth: {err}")))?;
                 if !authed.success() {
-                    return Err(SyncError::auth(
-                        "SSH key authentication rejected by server",
-                    ));
+                    return Err(SyncError::auth("SSH key authentication rejected by server"));
                 }
             }
         }
@@ -523,18 +494,14 @@ impl SftpSyncAdapter {
         let channel = handle
             .channel_open_session()
             .await
-            .map_err(|err| {
-                SyncError::network(format!("open session channel: {err}"))
-            })?;
+            .map_err(|err| SyncError::network(format!("open session channel: {err}")))?;
         channel
             .request_subsystem(true, "sftp")
             .await
-            .map_err(|err| {
-                SyncError::network(format!("request sftp subsystem: {err}"))
-            })?;
-        let sftp = SftpSession::new(channel.into_stream()).await.map_err(
-            |err| SyncError::network(format!("sftp init: {err}")),
-        )?;
+            .map_err(|err| SyncError::network(format!("request sftp subsystem: {err}")))?;
+        let sftp = SftpSession::new(channel.into_stream())
+            .await
+            .map_err(|err| SyncError::network(format!("sftp init: {err}")))?;
         Ok((handle, sftp))
     }
 
@@ -599,15 +566,13 @@ impl client::Handler for ClientHandler {
         &mut self,
         server_public_key: &PublicKey,
     ) -> Result<bool, Self::Error> {
-        let fingerprint =
-            server_public_key.fingerprint(HashAlg::Sha256).to_string();
+        let fingerprint = server_public_key.fingerprint(HashAlg::Sha256).to_string();
         let decision = self.verifier.verify(&self.host_port, &fingerprint);
         let accept = !matches!(decision, HostKeyDecision::Mismatch { .. });
-        *self.outcome.lock().expect("handshake outcome poison") =
-            Some(HandshakeOutcome {
-                decision,
-                fingerprint,
-            });
+        *self.outcome.lock().expect("handshake outcome poison") = Some(HandshakeOutcome {
+            decision,
+            fingerprint,
+        });
         Ok(accept)
     }
 }
@@ -636,10 +601,8 @@ impl client::Handler for ProbeHandler {
         &mut self,
         server_public_key: &PublicKey,
     ) -> Result<bool, Self::Error> {
-        let fingerprint =
-            server_public_key.fingerprint(HashAlg::Sha256).to_string();
-        *self.captured.lock().expect("probe capture poison") =
-            Some(fingerprint);
+        let fingerprint = server_public_key.fingerprint(HashAlg::Sha256).to_string();
+        *self.captured.lock().expect("probe capture poison") = Some(fingerprint);
         // Abort the handshake — we have what we came for.
         Ok(false)
     }
@@ -650,10 +613,7 @@ impl client::Handler for ProbeHandler {
 /// russh's helper. Errors map to `SyncError::Auth` so the UI
 /// can show a "key file unreadable / wrong passphrase" message
 /// instead of a generic IO error.
-fn load_private_key(
-    path: &Path,
-    passphrase: Option<&str>,
-) -> SyncResult<russh::keys::PrivateKey> {
+fn load_private_key(path: &Path, passphrase: Option<&str>) -> SyncResult<russh::keys::PrivateKey> {
     russh::keys::load_secret_key(path, passphrase).map_err(|err| {
         SyncError::auth(format!(
             "couldn't load SSH key at {}: {err}",
@@ -686,7 +646,8 @@ impl SyncAdapter for SftpSyncAdapter {
         }
         // Lazy-create log/ + assets/sounds/ so first-push works.
         self.mkdir_p(&sftp, &self.remote_path("log")).await?;
-        self.mkdir_p(&sftp, &self.remote_path("assets/sounds")).await?;
+        self.mkdir_p(&sftp, &self.remote_path("assets/sounds"))
+            .await?;
         Ok(())
     }
 
@@ -696,15 +657,13 @@ impl SyncAdapter for SftpSyncAdapter {
         match sftp.open(&path).await {
             Ok(mut file) => {
                 let mut bytes = Vec::new();
-                file.read_to_end(&mut bytes).await.map_err(|err| {
-                    SyncError::network(format!("read meta.json: {err}"))
-                })?;
+                file.read_to_end(&mut bytes)
+                    .await
+                    .map_err(|err| SyncError::network(format!("read meta.json: {err}")))?;
                 Ok(Some(MetaJson::from_bytes(&bytes)?))
             }
             Err(err) if is_not_found(&err) => Ok(None),
-            Err(err) => Err(SyncError::network(format!(
-                "open meta.json: {err}"
-            ))),
+            Err(err) => Err(SyncError::network(format!("open meta.json: {err}"))),
         }
     }
 
@@ -714,19 +673,14 @@ impl SyncAdapter for SftpSyncAdapter {
         atomic_write(&sftp, &self.remote_path("meta.json"), &bytes).await
     }
 
-    async fn fetch_new_logs(
-        &self,
-        since: &DeviceCursor,
-    ) -> SyncResult<Vec<LogFile>> {
+    async fn fetch_new_logs(&self, since: &DeviceCursor) -> SyncResult<Vec<LogFile>> {
         let (_handle, sftp) = self.connect().await?;
         let log_dir = self.remote_path("log");
         let entries = match sftp.read_dir(&log_dir).await {
             Ok(e) => e,
             Err(err) if is_not_found(&err) => return Ok(Vec::new()),
             Err(err) => {
-                return Err(SyncError::network(format!(
-                    "read_dir log/: {err}"
-                )));
+                return Err(SyncError::network(format!("read_dir log/: {err}")));
             }
         };
 
@@ -799,15 +753,13 @@ impl SyncAdapter for SftpSyncAdapter {
         match sftp.open(&path).await {
             Ok(mut file) => {
                 let mut bytes = Vec::new();
-                file.read_to_end(&mut bytes).await.map_err(|err| {
-                    SyncError::network(format!("read snapshot.json: {err}"))
-                })?;
+                file.read_to_end(&mut bytes)
+                    .await
+                    .map_err(|err| SyncError::network(format!("read snapshot.json: {err}")))?;
                 Ok(Some(Snapshot::from_bytes(&bytes)?))
             }
             Err(err) if is_not_found(&err) => Ok(None),
-            Err(err) => Err(SyncError::network(format!(
-                "open snapshot.json: {err}"
-            ))),
+            Err(err) => Err(SyncError::network(format!("open snapshot.json: {err}"))),
         }
     }
 
@@ -825,80 +777,56 @@ impl SyncAdapter for SftpSyncAdapter {
             // Not-found is treated as success — the goal is "make
             // sure it's gone", and absent already satisfies that.
             Err(err) if is_not_found(&err) => Ok(()),
-            Err(err) => Err(SyncError::network(format!(
-                "delete {path}: {err}"
-            ))),
+            Err(err) => Err(SyncError::network(format!("delete {path}: {err}"))),
         }
     }
 
-    async fn push_sound_asset(
-        &self,
-        hash: &str,
-        extension: &str,
-        bytes: &[u8],
-    ) -> SyncResult<()> {
+    async fn push_sound_asset(&self, hash: &str, extension: &str, bytes: &[u8]) -> SyncResult<()> {
         let (_handle, sftp) = self.connect().await?;
-        self.mkdir_p(&sftp, &self.remote_path("assets/sounds")).await?;
-        let path = self
-            .remote_path(&format!("assets/sounds/{hash}.{extension}"));
+        self.mkdir_p(&sftp, &self.remote_path("assets/sounds"))
+            .await?;
+        let path = self.remote_path(&format!("assets/sounds/{hash}.{extension}"));
         write_file(&sftp, &path, bytes).await
     }
 
-    async fn fetch_sound_asset(
-        &self,
-        hash: &str,
-        extension: &str,
-    ) -> SyncResult<Option<Vec<u8>>> {
+    async fn fetch_sound_asset(&self, hash: &str, extension: &str) -> SyncResult<Option<Vec<u8>>> {
         let (_handle, sftp) = self.connect().await?;
-        let path = self
-            .remote_path(&format!("assets/sounds/{hash}.{extension}"));
+        let path = self.remote_path(&format!("assets/sounds/{hash}.{extension}"));
         match sftp.open(&path).await {
             Ok(mut file) => {
                 let mut out = Vec::new();
-                file.read_to_end(&mut out).await.map_err(|err| {
-                    SyncError::network(format!("read sound asset: {err}"))
-                })?;
+                file.read_to_end(&mut out)
+                    .await
+                    .map_err(|err| SyncError::network(format!("read sound asset: {err}")))?;
                 Ok(Some(out))
             }
             Err(err) if is_not_found(&err) => Ok(None),
-            Err(err) => Err(SyncError::network(format!(
-                "open sound asset: {err}"
-            ))),
+            Err(err) => Err(SyncError::network(format!("open sound asset: {err}"))),
         }
     }
 }
 
 /// Write bytes to `path`. Creates / truncates / writes / closes.
-async fn write_file(
-    sftp: &SftpSession,
-    path: &str,
-    bytes: &[u8],
-) -> SyncResult<()> {
+async fn write_file(sftp: &SftpSession, path: &str, bytes: &[u8]) -> SyncResult<()> {
     let mut file = sftp
         .open_with_flags(
             path,
             OpenFlags::CREATE | OpenFlags::WRITE | OpenFlags::TRUNCATE,
         )
         .await
-        .map_err(|err| {
-            SyncError::network(format!("create {path}: {err}"))
-        })?;
-    file.write_all(bytes).await.map_err(|err| {
-        SyncError::network(format!("write {path}: {err}"))
-    })?;
-    file.shutdown().await.map_err(|err| {
-        SyncError::network(format!("close {path}: {err}"))
-    })?;
+        .map_err(|err| SyncError::network(format!("create {path}: {err}")))?;
+    file.write_all(bytes)
+        .await
+        .map_err(|err| SyncError::network(format!("write {path}: {err}")))?;
+    file.shutdown()
+        .await
+        .map_err(|err| SyncError::network(format!("close {path}: {err}")))?;
     Ok(())
 }
 
 /// Atomic write via temp + rename. Used for meta.json + snapshot.json
 /// so a crash mid-write can't leave a corrupt control file.
-async fn atomic_write(
-    sftp: &SftpSession,
-    path: &str,
-    bytes: &[u8],
-) -> SyncResult<()> {
+async fn atomic_write(sftp: &SftpSession, path: &str, bytes: &[u8]) -> SyncResult<()> {
     let tmp = format!("{path}.tmp");
     write_file(sftp, &tmp, bytes).await?;
     // POSIX rename is atomic on the same filesystem. SFTP's
@@ -908,9 +836,9 @@ async fn atomic_write(
     if let Err(err) = sftp.rename(&tmp, path).await {
         debug!(?err, "rename failed; falling back to remove + rename");
         let _ = sftp.remove_file(path).await;
-        sftp.rename(&tmp, path).await.map_err(|err| {
-            SyncError::network(format!("rename {tmp} → {path}: {err}"))
-        })?;
+        sftp.rename(&tmp, path)
+            .await
+            .map_err(|err| SyncError::network(format!("rename {tmp} → {path}: {err}")))?;
     }
     Ok(())
 }
@@ -933,17 +861,9 @@ mod tests {
 
     #[test]
     fn remote_path_joins_relative_segments() {
-        let a = SftpSyncAdapter::new_password(
-            "h",
-            22,
-            "u",
-            "p",
-            PathBuf::from("/home/alice/aperio"),
-        );
-        assert_eq!(
-            a.remote_path("meta.json"),
-            "/home/alice/aperio/meta.json",
-        );
+        let a =
+            SftpSyncAdapter::new_password("h", 22, "u", "p", PathBuf::from("/home/alice/aperio"));
+        assert_eq!(a.remote_path("meta.json"), "/home/alice/aperio/meta.json",);
         assert_eq!(
             a.remote_path("log/2026-05-01T08-00-00Z_dev-a.jsonl"),
             "/home/alice/aperio/log/2026-05-01T08-00-00Z_dev-a.jsonl",
@@ -952,17 +872,9 @@ mod tests {
 
     #[test]
     fn remote_path_trims_redundant_slashes() {
-        let a = SftpSyncAdapter::new_password(
-            "h",
-            22,
-            "u",
-            "p",
-            PathBuf::from("/home/alice/aperio/"),
-        );
-        assert_eq!(
-            a.remote_path("/meta.json"),
-            "/home/alice/aperio/meta.json",
-        );
+        let a =
+            SftpSyncAdapter::new_password("h", 22, "u", "p", PathBuf::from("/home/alice/aperio/"));
+        assert_eq!(a.remote_path("/meta.json"), "/home/alice/aperio/meta.json",);
         // Empty relative returns the base.
         assert_eq!(a.remote_path(""), "/home/alice/aperio");
     }
@@ -1023,10 +935,7 @@ mod tests {
             HostKeyDecision::AcceptAndRemember,
         );
         v.record("nas:22", "SHA256:abc");
-        assert_eq!(
-            v.verify("nas:22", "SHA256:abc"),
-            HostKeyDecision::Accept,
-        );
+        assert_eq!(v.verify("nas:22", "SHA256:abc"), HostKeyDecision::Accept,);
     }
 
     #[test]
@@ -1057,9 +966,6 @@ mod tests {
         // returns Accept.
         let v = InMemoryHostKeyVerifier::with_known("nas:22", "SHA256:old");
         v.record("nas:22", "SHA256:new");
-        assert_eq!(
-            v.verify("nas:22", "SHA256:new"),
-            HostKeyDecision::Accept,
-        );
+        assert_eq!(v.verify("nas:22", "SHA256:new"), HostKeyDecision::Accept,);
     }
 }

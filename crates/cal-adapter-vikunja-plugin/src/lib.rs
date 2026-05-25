@@ -35,12 +35,10 @@ struct InitConfig {
 
 /// # Safety
 /// FFI export; `config_json` must be NUL-terminated UTF-8.
-pub unsafe extern "C" fn plugin_open_instance(
-    config_json: *const c_char,
-) -> OpenInstanceResult {
+pub unsafe extern "C" fn plugin_open_instance(config_json: *const c_char) -> OpenInstanceResult {
     open_instance_with(config_json, |json| {
-        let cfg: InitConfig = serde_json::from_str(json)
-            .map_err(|e| format!("malformed init config: {e}"))?;
+        let cfg: InitConfig =
+            serde_json::from_str(json).map_err(|e| format!("malformed init config: {e}"))?;
         if cfg.server_url.trim().is_empty() || cfg.token.trim().is_empty() {
             return Err("server_url and token must not be empty".to_string());
         }
@@ -58,13 +56,10 @@ pub unsafe extern "C" fn plugin_close_instance(handle: *mut c_void) {
 
 // ── Adapter base ───────────────────────────────────────────
 
-unsafe extern "C" fn ffi_authenticate(
-    h: *mut c_void,
-    a: *const u8,
-    l: usize,
-) -> PluginCallResult {
+unsafe extern "C" fn ffi_authenticate(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
     let creds: CalCredentials = match decode_args(a, l) {
-        Ok(v) => v, Err(r) => return r,
+        Ok(v) => v,
+        Err(r) => return r,
     };
     dispatch(h, move |p| async move {
         cal_core::Adapter::authenticate(p, creds).await
@@ -94,13 +89,10 @@ unsafe extern "C" fn ffi_list_task_lists(
     dispatch(h, |p| async move { p.list_task_lists().await })
 }
 
-unsafe extern "C" fn ffi_get_tasks(
-    h: *mut c_void,
-    a: *const u8,
-    l: usize,
-) -> PluginCallResult {
+unsafe extern "C" fn ffi_get_tasks(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
     let list_id: String = match decode_args(a, l) {
-        Ok(v) => v, Err(r) => return r,
+        Ok(v) => v,
+        Err(r) => return r,
     };
     dispatch(h, move |p| async move { p.get_tasks(&list_id).await })
 }
@@ -111,35 +103,28 @@ struct CreateTaskArgs {
     task: NewTask,
 }
 
-unsafe extern "C" fn ffi_create_task(
-    h: *mut c_void,
-    a: *const u8,
-    l: usize,
-) -> PluginCallResult {
+unsafe extern "C" fn ffi_create_task(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
     let args: CreateTaskArgs = match decode_args(a, l) {
-        Ok(v) => v, Err(r) => return r,
+        Ok(v) => v,
+        Err(r) => return r,
     };
-    dispatch(h, move |p| async move { p.create_task(&args.list_id, args.task).await })
+    dispatch(h, move |p| async move {
+        p.create_task(&args.list_id, args.task).await
+    })
 }
 
-unsafe extern "C" fn ffi_update_task(
-    h: *mut c_void,
-    a: *const u8,
-    l: usize,
-) -> PluginCallResult {
+unsafe extern "C" fn ffi_update_task(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
     let task: cal_core::Task = match decode_args(a, l) {
-        Ok(v) => v, Err(r) => return r,
+        Ok(v) => v,
+        Err(r) => return r,
     };
     dispatch(h, move |p| async move { p.update_task(task).await })
 }
 
-unsafe extern "C" fn ffi_delete_task(
-    h: *mut c_void,
-    a: *const u8,
-    l: usize,
-) -> PluginCallResult {
+unsafe extern "C" fn ffi_delete_task(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
     let task_id: String = match decode_args(a, l) {
-        Ok(v) => v, Err(r) => return r,
+        Ok(v) => v,
+        Err(r) => return r,
     };
     dispatch_unit(h, move |p| async move { p.delete_task(&task_id).await })
 }
@@ -156,7 +141,8 @@ unsafe extern "C" fn ffi_rename_task_list(
     l: usize,
 ) -> PluginCallResult {
     let args: RenameTaskListArgs = match decode_args(a, l) {
-        Ok(v) => v, Err(r) => return r,
+        Ok(v) => v,
+        Err(r) => return r,
     };
     dispatch_unit(h, move |p| async move {
         p.rename_task_list(&args.list_id, &args.new_name).await

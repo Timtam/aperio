@@ -38,11 +38,7 @@ impl<'a> DeviceNamesRepo<'a> {
     /// Upsert a single device's name. `None` is stored
     /// verbatim — the row still gets created so a future
     /// upsert can fill the name in once meta.json gets one.
-    pub fn upsert(
-        &self,
-        device_id: &str,
-        name: Option<&str>,
-    ) -> DeviceNamesResult<()> {
+    pub fn upsert(&self, device_id: &str, name: Option<&str>) -> DeviceNamesResult<()> {
         let conn = self.db.lock().expect("db mutex poisoned");
         conn.execute(
             "INSERT INTO device_names (device_id, name)
@@ -58,8 +54,7 @@ impl<'a> DeviceNamesRepo<'a> {
     /// DeviceRecord didn't carry a name.
     pub fn get(&self, device_id: &str) -> DeviceNamesResult<Option<String>> {
         let conn = self.db.lock().expect("db mutex poisoned");
-        let mut stmt =
-            conn.prepare("SELECT name FROM device_names WHERE device_id = ?")?;
+        let mut stmt = conn.prepare("SELECT name FROM device_names WHERE device_id = ?")?;
         let row = stmt
             .query_row(params![device_id], |row| row.get::<_, Option<String>>(0))
             .ok()
@@ -86,7 +81,10 @@ mod tests {
         let shared = db.shared();
         let repo = DeviceNamesRepo::new(&shared);
         repo.upsert("device-alpha", Some("MacBook")).unwrap();
-        assert_eq!(repo.get("device-alpha").unwrap().as_deref(), Some("MacBook"));
+        assert_eq!(
+            repo.get("device-alpha").unwrap().as_deref(),
+            Some("MacBook")
+        );
     }
 
     #[test]

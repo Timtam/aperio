@@ -154,8 +154,7 @@ mod tests {
         let handle = inst.into_raw_handle();
         // SAFETY: handle came from into_raw_handle::<u32> on the
         // line above; not yet freed.
-        let borrowed = unsafe { PluginInstance::<u32>::from_handle(handle) }
-            .expect("non-null");
+        let borrowed = unsafe { PluginInstance::<u32>::from_handle(handle) }.expect("non-null");
         assert_eq!(*borrowed.plugin(), 42);
         // SAFETY: same — drop reclaims the box exactly once.
         unsafe { PluginInstance::<u32>::drop_handle(handle) };

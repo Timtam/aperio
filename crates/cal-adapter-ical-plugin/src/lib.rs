@@ -27,10 +27,10 @@
 
 use std::os::raw::{c_char, c_void};
 
+use cal_adapter_ical::{Credentials as IcalCredentials, IcalAccountConfig, IcalAdapter};
 use cal_core::adapter::{Capability, Credentials as CalCredentials};
 use cal_core::types::DateRange;
 use cal_core::CalendarFeature;
-use cal_adapter_ical::{Credentials as IcalCredentials, IcalAccountConfig, IcalAdapter};
 use plugin_sdk::plugin_core::abi::OpenInstanceResult;
 use plugin_sdk::plugin_core::ffi::PluginCallResult;
 use plugin_sdk::plugin_core::vtables::{CalendarAdapterVtable, CalendarVtable};
@@ -52,12 +52,10 @@ struct InitConfig {
 
 /// # Safety
 /// FFI export; `config_json` must be NUL-terminated UTF-8.
-pub unsafe extern "C" fn plugin_open_instance(
-    config_json: *const c_char,
-) -> OpenInstanceResult {
+pub unsafe extern "C" fn plugin_open_instance(config_json: *const c_char) -> OpenInstanceResult {
     open_instance_with(config_json, |json| {
-        let cfg: InitConfig = serde_json::from_str(json)
-            .map_err(|e| format!("malformed init config: {e}"))?;
+        let cfg: InitConfig =
+            serde_json::from_str(json).map_err(|e| format!("malformed init config: {e}"))?;
         if cfg.feed_url.trim().is_empty() {
             return Err("feed_url must not be empty".to_string());
         }
@@ -68,8 +66,7 @@ pub unsafe extern "C" fn plugin_open_instance(
             },
             cfg.password,
         );
-        IcalAdapter::new(credentials)
-            .map_err(|e| format!("adapter ctor failed: {e:?}"))
+        IcalAdapter::new(credentials).map_err(|e| format!("adapter ctor failed: {e:?}"))
     })
 }
 
@@ -84,13 +81,10 @@ pub unsafe extern "C" fn plugin_close_instance(handle: *mut c_void) {
 // Adapter base trait
 // ─────────────────────────────────────────────────────────────
 
-unsafe extern "C" fn ffi_authenticate(
-    h: *mut c_void,
-    a: *const u8,
-    l: usize,
-) -> PluginCallResult {
+unsafe extern "C" fn ffi_authenticate(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
     let creds: CalCredentials = match decode_args(a, l) {
-        Ok(v) => v, Err(r) => return r,
+        Ok(v) => v,
+        Err(r) => return r,
     };
     dispatch(h, move |p| async move {
         cal_core::Adapter::authenticate(p, creds).await
@@ -128,13 +122,10 @@ struct GetEventsArgs {
     range: DateRange,
 }
 
-unsafe extern "C" fn ffi_get_events(
-    h: *mut c_void,
-    a: *const u8,
-    l: usize,
-) -> PluginCallResult {
+unsafe extern "C" fn ffi_get_events(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
     let args: GetEventsArgs = match decode_args(a, l) {
-        Ok(v) => v, Err(r) => return r,
+        Ok(v) => v,
+        Err(r) => return r,
     };
     dispatch(h, move |p| async move {
         p.get_events(&args.calendar_id, args.range).await
@@ -147,13 +138,10 @@ struct GetFreeBusyArgs {
     range: DateRange,
 }
 
-unsafe extern "C" fn ffi_get_free_busy(
-    h: *mut c_void,
-    a: *const u8,
-    l: usize,
-) -> PluginCallResult {
+unsafe extern "C" fn ffi_get_free_busy(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
     let args: GetFreeBusyArgs = match decode_args(a, l) {
-        Ok(v) => v, Err(r) => return r,
+        Ok(v) => v,
+        Err(r) => return r,
     };
     dispatch(h, move |p| async move {
         let refs: Vec<&str> = args.emails.iter().map(|s| s.as_str()).collect();
@@ -167,7 +155,8 @@ unsafe extern "C" fn ffi_calendar_color(
     l: usize,
 ) -> PluginCallResult {
     let calendar_id: String = match decode_args(a, l) {
-        Ok(v) => v, Err(r) => return r,
+        Ok(v) => v,
+        Err(r) => return r,
     };
     let inst = match instance(h) {
         Ok(i) => i,

@@ -23,18 +23,14 @@ pub enum PluginError {
     /// [`crate::ABI_VERSION`]. Surfaced to the user as "Plugin XY
     /// needs a newer/older Aperio". The two fields let the UI
     /// decide which side to nudge.
-    #[error(
-        "plugin requires ABI version {plugin}; this Aperio speaks v{host}"
-    )]
+    #[error("plugin requires ABI version {plugin}; this Aperio speaks v{host}")]
     AbiMismatch { host: u32, plugin: u32 },
 
     /// The manifest's `min_app_version` is newer than the running
     /// Aperio. Same diagnostic story as the sync engine's
     /// [`sync_core::Compatibility::AppTooOld`] — the user is told
     /// to update Aperio, the plugin stays untouched.
-    #[error(
-        "plugin needs Aperio ≥ {required}; running v{running}"
-    )]
+    #[error("plugin needs Aperio ≥ {required}; running v{running}")]
     AppTooOld { required: String, running: String },
 
     /// A semver value couldn't be parsed (either the host's own

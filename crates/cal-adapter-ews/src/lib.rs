@@ -44,9 +44,9 @@ use std::time::Duration;
 use async_trait::async_trait;
 use cal_core::{
     Adapter, AuthToken, Calendar, CalendarFeature, Capability, Contact, ContactList,
-    ContactsFeature, ContainerColor, Credentials as CoreCredentials, DateRange,
-    Error as CoreError, Event, FreeBusy, NewContact, NewEvent, NewTask,
-    Result as CoreResult, Task, TaskList, TasksFeature,
+    ContactsFeature, ContainerColor, Credentials as CoreCredentials, DateRange, Error as CoreError,
+    Event, FreeBusy, NewContact, NewEvent, NewTask, Result as CoreResult, Task, TaskList,
+    TasksFeature,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -84,8 +84,7 @@ pub struct EwsAdapter {
     capabilities: Vec<Capability>,
     calendars_cache: Mutex<Option<(Vec<Calendar>, chrono::DateTime<chrono::Utc>)>>,
     task_lists_cache: Mutex<Option<(Vec<TaskList>, chrono::DateTime<chrono::Utc>)>>,
-    contact_lists_cache:
-        Mutex<Option<(Vec<ContactList>, chrono::DateTime<chrono::Utc>)>>,
+    contact_lists_cache: Mutex<Option<(Vec<ContactList>, chrono::DateTime<chrono::Utc>)>>,
     /// GAL enumeration is a 39-prefix ResolveNames walk that
     /// burns ~3-5 seconds plus full server round-trips. Cache
     /// the result for half an hour so a second panel open
@@ -93,8 +92,7 @@ pub struct EwsAdapter {
     /// dedupes concurrent first-call attempts (e.g. React
     /// StrictMode's double-invocation in dev) so the server
     /// never sees the parallel double-walk.
-    gal_cache:
-        Mutex<Option<(Vec<Contact>, chrono::DateTime<chrono::Utc>)>>,
+    gal_cache: Mutex<Option<(Vec<Contact>, chrono::DateTime<chrono::Utc>)>>,
     gal_fetch_lock: Mutex<()>,
     listing_ttl: chrono::Duration,
     gal_ttl: chrono::Duration,
@@ -164,9 +162,7 @@ impl EwsAdapter {
         // protocol viewer.
         let path = dir.join("events_sync.json");
         match std::fs::read(&path) {
-            Ok(bytes) => match serde_json::from_slice::<
-                HashMap<String, SyncedFolderState>,
-            >(&bytes)
+            Ok(bytes) => match serde_json::from_slice::<HashMap<String, SyncedFolderState>>(&bytes)
             {
                 Ok(restored) => {
                     let count = restored.len();
@@ -218,10 +214,7 @@ impl EwsAdapter {
     /// the next round will retry, and the worst case is "next
     /// boot does a full re-sync", same as before persistence
     /// shipped.
-    async fn persist_events_sync(
-        &self,
-        snapshot: &HashMap<String, SyncedFolderState>,
-    ) {
+    async fn persist_events_sync(&self, snapshot: &HashMap<String, SyncedFolderState>) {
         let Some(dir) = self.state_dir.as_ref() else {
             return;
         };
@@ -272,8 +265,8 @@ impl EwsAdapter {
 
     #[doc(hidden)]
     pub fn with_listing_ttl(mut self, ttl: Duration) -> Self {
-        self.listing_ttl = chrono::Duration::from_std(ttl)
-            .unwrap_or_else(|_| chrono::Duration::zero());
+        self.listing_ttl =
+            chrono::Duration::from_std(ttl).unwrap_or_else(|_| chrono::Duration::zero());
         self
     }
 
@@ -342,8 +335,7 @@ impl EwsAdapter {
         let fresh = contacts::get_contacts(&self.client, contacts::GAL_LIST_ID)
             .await
             .map_err(to_core_error)?;
-        *self.gal_cache.lock().await =
-            Some((fresh.clone(), chrono::Utc::now()));
+        *self.gal_cache.lock().await = Some((fresh.clone(), chrono::Utc::now()));
         tracing::debug!(
             target: "cal_adapter_ews::gal",
             count = fresh.len(),
@@ -397,13 +389,7 @@ impl EwsAdapter {
             let mut guard = self.events_sync.lock().await;
             guard.remove(calendar_id).unwrap_or_default()
         };
-        let updated = match api::sync_events_to_completion(
-            &self.client,
-            calendar_id,
-            prior,
-        )
-        .await
-        {
+        let updated = match api::sync_events_to_completion(&self.client, calendar_id, prior).await {
             Ok(s) => s,
             Err(err) if is_sync_state_invalid(&err) => {
                 tracing::warn!(
@@ -489,11 +475,8 @@ impl EwsAdapter {
                         continue;
                     }
                     let mut override_ev = ev.clone();
-                    override_ev.id = format!(
-                        "{}#override:{}",
-                        ev.id,
-                        ov.original_start.to_rfc3339(),
-                    );
+                    override_ev.id =
+                        format!("{}#override:{}", ev.id, ov.original_start.to_rfc3339(),);
                     override_ev.recurrence = None;
                     override_ev.start = ov.start;
                     override_ev.end = ov.end;
@@ -555,10 +538,7 @@ fn is_sync_state_invalid(err: &EwsError) -> bool {
 
 #[async_trait]
 impl Adapter for EwsAdapter {
-    async fn authenticate(
-        &self,
-        _credentials: CoreCredentials,
-    ) -> CoreResult<AuthToken> {
+    async fn authenticate(&self, _credentials: CoreCredentials) -> CoreResult<AuthToken> {
         // EWS uses Basic auth carried per-request; there's no
         // separate auth step the way OAuth has. We return an empty
         // token so the trait stays satisfied, and the registry never
@@ -580,16 +560,11 @@ impl CalendarFeature for EwsAdapter {
         let fresh = api::list_calendars(&self.client)
             .await
             .map_err(to_core_error)?;
-        *self.calendars_cache.lock().await =
-            Some((fresh.clone(), chrono::Utc::now()));
+        *self.calendars_cache.lock().await = Some((fresh.clone(), chrono::Utc::now()));
         Ok(fresh)
     }
 
-    async fn get_events(
-        &self,
-        calendar_id: &str,
-        range: DateRange,
-    ) -> CoreResult<Vec<Event>> {
+    async fn get_events(&self, calendar_id: &str, range: DateRange) -> CoreResult<Vec<Event>> {
         // SyncFolderItems-backed read path: pull deltas into the
         // per-folder cache, then translate cached ParsedItems to
         // cal-core Events. Masters keep their RRULE; singles are
@@ -600,11 +575,7 @@ impl CalendarFeature for EwsAdapter {
             .map_err(to_core_error)
     }
 
-    async fn create_event(
-        &self,
-        calendar_id: &str,
-        event: NewEvent,
-    ) -> CoreResult<Event> {
+    async fn create_event(&self, calendar_id: &str, event: NewEvent) -> CoreResult<Event> {
         api::create_event(&self.client, calendar_id, event)
             .await
             .map_err(to_core_error)
@@ -622,11 +593,7 @@ impl CalendarFeature for EwsAdapter {
             .map_err(to_core_error)
     }
 
-    async fn rename_calendar(
-        &self,
-        calendar_id: &str,
-        new_name: &str,
-    ) -> CoreResult<()> {
+    async fn rename_calendar(&self, calendar_id: &str, new_name: &str) -> CoreResult<()> {
         api::rename_calendar(&self.client, calendar_id, new_name)
             .await
             .map_err(to_core_error)?;
@@ -685,8 +652,7 @@ impl TasksFeature for EwsAdapter {
         let fresh = tasks::list_task_lists(&self.client)
             .await
             .map_err(to_core_error)?;
-        *self.task_lists_cache.lock().await =
-            Some((fresh.clone(), chrono::Utc::now()));
+        *self.task_lists_cache.lock().await = Some((fresh.clone(), chrono::Utc::now()));
         Ok(fresh)
     }
 
@@ -696,11 +662,7 @@ impl TasksFeature for EwsAdapter {
             .map_err(to_core_error)
     }
 
-    async fn create_task(
-        &self,
-        list_id: &str,
-        task: NewTask,
-    ) -> CoreResult<Task> {
+    async fn create_task(&self, list_id: &str, task: NewTask) -> CoreResult<Task> {
         tasks::create_task(&self.client, list_id, task)
             .await
             .map_err(to_core_error)
@@ -718,11 +680,7 @@ impl TasksFeature for EwsAdapter {
             .map_err(to_core_error)
     }
 
-    async fn rename_task_list(
-        &self,
-        list_id: &str,
-        new_name: &str,
-    ) -> CoreResult<()> {
+    async fn rename_task_list(&self, list_id: &str, new_name: &str) -> CoreResult<()> {
         tasks::rename_task_list(&self.client, list_id, new_name)
             .await
             .map_err(to_core_error)?;
@@ -743,8 +701,7 @@ impl ContactsFeature for EwsAdapter {
         let fresh = contacts::list_contact_lists(&self.client)
             .await
             .map_err(to_core_error)?;
-        *self.contact_lists_cache.lock().await =
-            Some((fresh.clone(), chrono::Utc::now()));
+        *self.contact_lists_cache.lock().await = Some((fresh.clone(), chrono::Utc::now()));
         Ok(fresh)
     }
 
@@ -810,11 +767,7 @@ impl ContactsFeature for EwsAdapter {
         Ok(out)
     }
 
-    async fn create_contact(
-        &self,
-        list_id: &str,
-        contact: NewContact,
-    ) -> CoreResult<Contact> {
+    async fn create_contact(&self, list_id: &str, contact: NewContact) -> CoreResult<Contact> {
         contacts::create_contact(&self.client, list_id, contact)
             .await
             .map_err(to_core_error)
@@ -832,11 +785,7 @@ impl ContactsFeature for EwsAdapter {
             .map_err(to_core_error)
     }
 
-    async fn rename_contact_list(
-        &self,
-        list_id: &str,
-        new_name: &str,
-    ) -> CoreResult<()> {
+    async fn rename_contact_list(&self, list_id: &str, new_name: &str) -> CoreResult<()> {
         contacts::rename_contact_list(&self.client, list_id, new_name)
             .await
             .map_err(to_core_error)?;
@@ -900,8 +849,10 @@ fn to_core_error(err: EwsError) -> CoreError {
             // codes into the matching cal-core variants so the UI can
             // present "wrong password" specifically rather than a
             // generic protocol error.
-            "ErrorAccessDenied" | "ErrorInvalidAccessToken"
-            | "ErrorPasswordExpired" | "ErrorADUnavailable"
+            "ErrorAccessDenied"
+            | "ErrorInvalidAccessToken"
+            | "ErrorPasswordExpired"
+            | "ErrorADUnavailable"
             | "ErrorNoFreeBusyAccess" => CoreError::Authentication(message),
             "ErrorItemNotFound" | "ErrorFolderNotFound" => CoreError::NotFound(message),
             _ => CoreError::Protocol(format!("EWS SOAP {code}: {message}")),
@@ -938,11 +889,9 @@ mod state_persistence_tests {
 
         // Round 1: adapter writes one folder's worth of state.
         {
-            let adapter = EwsAdapter::new(
-                "https://example/EWS/Exchange.asmx".into(),
-                creds.clone(),
-            )
-            .with_state_dir(dir.clone());
+            let adapter =
+                EwsAdapter::new("https://example/EWS/Exchange.asmx".into(), creds.clone())
+                    .with_state_dir(dir.clone());
             let mut state = SyncedFolderState::default();
             state.sync_state = Some("COOKIE-XYZ".into());
             state.items.insert(
@@ -960,11 +909,8 @@ mod state_persistence_tests {
 
         // Round 2: a fresh adapter constructed against the same
         // dir picks up the previous state on load.
-        let adapter2 = EwsAdapter::new(
-            "https://example/EWS/Exchange.asmx".into(),
-            creds,
-        )
-        .with_state_dir(dir.clone());
+        let adapter2 = EwsAdapter::new("https://example/EWS/Exchange.asmx".into(), creds)
+            .with_state_dir(dir.clone());
         let loaded = adapter2.events_sync.lock().await;
         let restored = loaded.get("CAL-1").expect("CAL-1 state restored");
         assert_eq!(restored.sync_state.as_deref(), Some("COOKIE-XYZ"));
@@ -987,11 +933,7 @@ mod state_persistence_tests {
             chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0),
         ));
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(
-            dir.join("events_sync.json"),
-            b"{not valid json at all",
-        )
-        .unwrap();
+        std::fs::write(dir.join("events_sync.json"), b"{not valid json at all").unwrap();
 
         let adapter = EwsAdapter::new(
             "https://example/EWS/Exchange.asmx".into(),

@@ -454,8 +454,7 @@ mod tests {
                 </d:propstat>
               </d:response>
             </d:multistatus>"#;
-        let href =
-            extract_first_nested_href(body, b"current-user-principal").unwrap();
+        let href = extract_first_nested_href(body, b"current-user-principal").unwrap();
         assert_eq!(href.as_deref(), Some("/principals/users/alice/"));
     }
 
@@ -477,8 +476,7 @@ mod tests {
                 </d:propstat>
               </d:response>
             </d:multistatus>"#;
-        let href =
-            extract_first_nested_href(body, b"calendar-home-set").unwrap();
+        let href = extract_first_nested_href(body, b"calendar-home-set").unwrap();
         assert_eq!(href.as_deref(), Some("/calendars/alice/"));
     }
 
@@ -693,7 +691,10 @@ END:VCALENDAR</c:calendar-data>
 </d:multistatus>"#;
         let entries = parse_multistatus(body).unwrap();
         let data = entries[0].calendar_data.as_deref().unwrap();
-        assert!(data.contains("Tom & Jerry"), "entity reference dropped or split: {data}");
+        assert!(
+            data.contains("Tom & Jerry"),
+            "entity reference dropped or split: {data}"
+        );
         assert!(data.contains("BEGIN:VALARM"));
         assert!(data.contains("TRIGGER:-PT10M"));
     }

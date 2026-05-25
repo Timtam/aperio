@@ -3,7 +3,9 @@
 use std::sync::Arc;
 
 use plugin_core::{
-    abi::AperioPlugin, manager::PluginManager, manifest::PluginManifest,
+    abi::AperioPlugin,
+    manager::PluginManager,
+    manifest::PluginManifest,
     shim::{FfiCalendarAdapter, FfiContactsAdapter, FfiTasksAdapter},
     Capability, PluginType, ABI_VERSION,
 };
@@ -29,11 +31,9 @@ fn manifest() -> PluginManifest {
 
 fn register() -> PluginManager {
     let m = PluginManager::new("0.1.0");
-    let d: *mut AperioPlugin =
-        unsafe { cal_adapter_caldav_plugin::build_descriptor() };
+    let d: *mut AperioPlugin = unsafe { cal_adapter_caldav_plugin::build_descriptor() };
     assert!(!d.is_null());
-    let dx: unsafe extern "C" fn(*mut AperioPlugin) =
-        cal_adapter_caldav_plugin::DESTROY_FN;
+    let dx: unsafe extern "C" fn(*mut AperioPlugin) = cal_adapter_caldav_plugin::DESTROY_FN;
     m.register_static(manifest(), d, dx).unwrap();
     m
 }
@@ -46,22 +46,21 @@ fn open_one(manager: &PluginManager, server: &str, user: &str) -> Arc<plugin_cor
         "auth_kind": "basic",
         "secret": "hunter2",
     });
-    manager.open_instance(loaded, &cfg.to_string()).expect("open")
+    manager
+        .open_instance(loaded, &cfg.to_string())
+        .expect("open")
 }
 
 #[test]
 fn caldav_plugin_exposes_all_three_surfaces() {
     let manager = register();
     let inst = open_one(&manager, "https://caldav.example.invalid/", "alice");
-    let _cal: Arc<FfiCalendarAdapter> = Arc::new(
-        FfiCalendarAdapter::new(inst.clone()).expect("calendar slot present"),
-    );
-    let _tasks: Arc<FfiTasksAdapter> = Arc::new(
-        FfiTasksAdapter::new(inst.clone()).expect("tasks slot present"),
-    );
-    let _contacts: Arc<FfiContactsAdapter> = Arc::new(
-        FfiContactsAdapter::new(inst).expect("contacts slot present"),
-    );
+    let _cal: Arc<FfiCalendarAdapter> =
+        Arc::new(FfiCalendarAdapter::new(inst.clone()).expect("calendar slot present"));
+    let _tasks: Arc<FfiTasksAdapter> =
+        Arc::new(FfiTasksAdapter::new(inst.clone()).expect("tasks slot present"));
+    let _contacts: Arc<FfiContactsAdapter> =
+        Arc::new(FfiContactsAdapter::new(inst).expect("contacts slot present"));
 }
 
 #[test]

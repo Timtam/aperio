@@ -26,8 +26,8 @@ use tracing::warn;
 
 use super::{CommandError, CommandResult};
 use crate::contact_sync::{
-    ContactSyncScheduler, ContactsSyncStatus, PREF_INCLUDE_READ_ONLY_ON_SYNC,
-    PREF_LAST_SYNCED_AT, PREF_SYNC_INTERVAL_MINUTES,
+    ContactSyncScheduler, ContactsSyncStatus, PREF_INCLUDE_READ_ONLY_ON_SYNC, PREF_LAST_SYNCED_AT,
+    PREF_SYNC_INTERVAL_MINUTES,
 };
 use crate::db::DbHandle;
 use crate::registry::{AdapterRegistry, LOCAL_ID};
@@ -134,13 +134,12 @@ pub async fn create_contact(
     let Some(ext) = registry.contact_adapter(&account) else {
         return Err(CommandError {
             code: "not_found",
-            message: format!(
-                "contact list '{}' is not routable",
-                request.list_id
-            ),
+            message: format!("contact list '{}' is not routable", request.list_id),
         });
     };
-    Ok(ext.create_contact(&request.list_id, request.contact).await?)
+    Ok(ext
+        .create_contact(&request.list_id, request.contact)
+        .await?)
 }
 
 #[tauri::command]
@@ -158,10 +157,7 @@ pub async fn update_contact(
     let Some(ext) = registry.contact_adapter(&account) else {
         return Err(CommandError {
             code: "not_found",
-            message: format!(
-                "contact list '{}' is not routable",
-                contact.list_id
-            ),
+            message: format!("contact list '{}' is not routable", contact.list_id),
         });
     };
     Ok(ext.update_contact(contact).await?)
@@ -261,10 +257,7 @@ pub async fn rename_contact_list(
 /// known external book). Returns the account id alongside so the
 /// caller can decide whether to invoke the local or external
 /// path. Mirrors the lookup pattern `delete_contact` uses.
-fn resolve_contact_account(
-    registry: &AdapterRegistry,
-    list_id: Option<&str>,
-) -> String {
+fn resolve_contact_account(registry: &AdapterRegistry, list_id: Option<&str>) -> String {
     list_id
         .and_then(|lid| registry.account_for_contact_list(lid))
         .unwrap_or_else(|| LOCAL_ID.to_string())
@@ -341,8 +334,7 @@ pub async fn sync_contacts_now<R: Runtime>(
     app: AppHandle<R>,
     include_read_only: Option<bool>,
 ) -> CommandResult<bool> {
-    let effective = include_read_only
-        .unwrap_or_else(|| scheduler.read_include_read_only_on_sync());
+    let effective = include_read_only.unwrap_or_else(|| scheduler.read_include_read_only_on_sync());
     Ok(scheduler.run_sync(&app, effective).await)
 }
 

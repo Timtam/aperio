@@ -42,18 +42,18 @@
 //! flag eventually calls.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_void};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
 use libloading::Library;
 use tracing::{info, warn};
 
 use crate::abi::{
-    AperioPlugin, AperioPluginCreateFn, AperioPluginDestroyFn, OpenInstanceResult,
-    PLUGIN_OK, SYMBOL_CREATE, SYMBOL_DESTROY,
+    AperioPlugin, AperioPluginCreateFn, AperioPluginDestroyFn, OpenInstanceResult, PLUGIN_OK,
+    SYMBOL_CREATE, SYMBOL_DESTROY,
 };
 use crate::error::{PluginError, PluginResult};
 use crate::ffi::{PluginCallResult, PLUGIN_CALL_OK};
@@ -467,9 +467,7 @@ impl FailedLoadReason {
                 required: required.clone(),
                 running: running.clone(),
             },
-            PluginError::Io(_) | PluginError::Semver { .. } => {
-                Self::ManifestInvalid
-            }
+            PluginError::Io(_) | PluginError::Semver { .. } => Self::ManifestInvalid,
             PluginError::Manifest(msg) => {
                 // PluginError::Manifest is overloaded: it
                 // carries both "your JSON is broken" and the
@@ -623,20 +621,19 @@ impl PluginManager {
         // unixes) runs arbitrary code. We accept that — the
         // user has agreed via the §20.7 install dialog that they
         // trust the plugin author.
-        let library = unsafe { Library::new(&lib_path) }
-            .map_err(|err| PluginError::Manifest(format!(
-                "dlopen({}): {err}",
-                lib_path.display()
-            )))?;
+        let library = unsafe { Library::new(&lib_path) }.map_err(|err| {
+            PluginError::Manifest(format!("dlopen({}): {err}", lib_path.display()))
+        })?;
 
         let plugin_ptr = unsafe {
-            let create: libloading::Symbol<AperioPluginCreateFn> = library
-                .get(SYMBOL_CREATE)
-                .map_err(|err| PluginError::Manifest(format!(
-                    "missing `{}` symbol in {}: {err}",
-                    std::str::from_utf8(SYMBOL_CREATE).unwrap_or("?"),
-                    lib_path.display()
-                )))?;
+            let create: libloading::Symbol<AperioPluginCreateFn> =
+                library.get(SYMBOL_CREATE).map_err(|err| {
+                    PluginError::Manifest(format!(
+                        "missing `{}` symbol in {}: {err}",
+                        std::str::from_utf8(SYMBOL_CREATE).unwrap_or("?"),
+                        lib_path.display()
+                    ))
+                })?;
             create()
         };
         if plugin_ptr.is_null() {
@@ -651,13 +648,14 @@ impl PluginManager {
         // We move the resolved fn pointer into the struct; the
         // library handle keeps the pointed-at code alive.
         let destroy_fn = unsafe {
-            let sym: libloading::Symbol<AperioPluginDestroyFn> = library
-                .get(SYMBOL_DESTROY)
-                .map_err(|err| PluginError::Manifest(format!(
-                    "missing `{}` symbol in {}: {err}",
-                    std::str::from_utf8(SYMBOL_DESTROY).unwrap_or("?"),
-                    lib_path.display()
-                )))?;
+            let sym: libloading::Symbol<AperioPluginDestroyFn> =
+                library.get(SYMBOL_DESTROY).map_err(|err| {
+                    PluginError::Manifest(format!(
+                        "missing `{}` symbol in {}: {err}",
+                        std::str::from_utf8(SYMBOL_DESTROY).unwrap_or("?"),
+                        lib_path.display()
+                    ))
+                })?;
             *sym
         };
 
@@ -817,9 +815,7 @@ impl PluginManager {
             }));
         };
         let c_config = CString::new(config_json)
-            .map_err(|e| PluginError::Manifest(format!(
-                "config_json contains NUL byte: {e}"
-            )))?;
+            .map_err(|e| PluginError::Manifest(format!("config_json contains NUL byte: {e}")))?;
         // SAFETY: the plugin contract says open_instance accepts a
         // NUL-terminated UTF-8 pointer. We own the CString for the
         // duration of the call.
@@ -848,8 +844,7 @@ impl PluginManager {
         if result.instance.is_null() {
             return Err(PluginError::InstanceOpen {
                 status: result.status,
-                message: "open_instance returned NULL handle with OK status"
-                    .to_string(),
+                message: "open_instance returned NULL handle with OK status".to_string(),
             });
         }
         Ok(Arc::new(LoadedInstance {
@@ -862,9 +857,7 @@ impl PluginManager {
     fn insert(&self, id: String, loaded: Arc<LoadedPlugin>) -> PluginResult<()> {
         let mut inner = self.inner.write().expect("manager poisoned");
         if inner.plugins.contains_key(&id) {
-            return Err(PluginError::Manifest(format!(
-                "duplicate plugin id {id}"
-            )));
+            return Err(PluginError::Manifest(format!("duplicate plugin id {id}")));
         }
         inner.order.push(id.clone());
         inner.plugins.insert(id, loaded);
@@ -1133,9 +1126,8 @@ impl PluginManager {
         .await;
         // Hold the plugin Arc until after spawn_blocking returns.
         drop(plugin_for_drop);
-        let (status, bytes) = join.map_err(|err| {
-            InteractiveAuthError::Plugin(format!("plugin task: {err}"))
-        })?;
+        let (status, bytes) =
+            join.map_err(|err| InteractiveAuthError::Plugin(format!("plugin task: {err}")))?;
         if status == PLUGIN_CALL_OK {
             Ok(bytes)
         } else {
@@ -1162,9 +1154,7 @@ pub enum UnloadError {
     /// in flight. The shim wrappers track this via
     /// [`InFlightGuard`]; the unload path polls + retries
     /// until the counter drains.
-    #[error(
-        "plugin {id} has {in_flight} active call(s); retry after they finish"
-    )]
+    #[error("plugin {id} has {in_flight} active call(s); retry after they finish")]
     StillReferenced { id: String, in_flight: usize },
 }
 
@@ -1239,9 +1229,8 @@ impl PluginManager {
         })
         .await;
         drop(plugin_for_drop);
-        let (status, bytes) = join.map_err(|err| {
-            DiscoverError::Plugin(format!("plugin task: {err}"))
-        })?;
+        let (status, bytes) =
+            join.map_err(|err| DiscoverError::Plugin(format!("plugin task: {err}")))?;
         if status == PLUGIN_CALL_OK {
             Ok(bytes)
         } else {
@@ -1323,9 +1312,8 @@ impl PluginManager {
         })
         .await;
         drop(plugin_for_drop);
-        let (status, bytes) = join.map_err(|err| {
-            ProbeHostKeyError::Plugin(format!("plugin task: {err}"))
-        })?;
+        let (status, bytes) =
+            join.map_err(|err| ProbeHostKeyError::Plugin(format!("plugin task: {err}")))?;
         if status == PLUGIN_CALL_OK {
             Ok(bytes)
         } else {
@@ -1358,7 +1346,6 @@ pub enum ProbeHostKeyError {
     Plugin(String),
 }
 
-
 /// Default subdir under the data dir / app dir where bundled
 /// plugins are staged. The release build pipeline copies each
 /// adapter's shared library here.
@@ -1377,10 +1364,7 @@ pub const USER_PLUGINS_DIR: &str = "plugins/user";
 ///      whatever filename their build system produced).
 ///
 /// Returns `PluginError::Io` if nothing usable is found.
-fn locate_library(
-    plugin_dir: &Path,
-    manifest: &PluginManifest,
-) -> PluginResult<PathBuf> {
+fn locate_library(plugin_dir: &Path, manifest: &PluginManifest) -> PluginResult<PathBuf> {
     let exts: &[&str] = if cfg!(target_os = "windows") {
         &["dll"]
     } else if cfg!(target_os = "macos") {
@@ -1399,10 +1383,7 @@ fn locate_library(
         }
     }
     let mut hits: Vec<PathBuf> = std::fs::read_dir(plugin_dir)
-        .map_err(|err| PluginError::Io(format!(
-            "scan {}: {err}",
-            plugin_dir.display()
-        )))?
+        .map_err(|err| PluginError::Io(format!("scan {}: {err}", plugin_dir.display())))?
         .flatten()
         .map(|e| e.path())
         .filter(|p| {
@@ -1413,11 +1394,13 @@ fn locate_library(
         })
         .collect();
     hits.sort();
-    hits.into_iter().next().ok_or_else(|| PluginError::Io(format!(
-        "no shared library found in {} (looked for {:?})",
-        plugin_dir.display(),
-        exts
-    )))
+    hits.into_iter().next().ok_or_else(|| {
+        PluginError::Io(format!(
+            "no shared library found in {} (looked for {:?})",
+            plugin_dir.display(),
+            exts
+        ))
+    })
 }
 
 /// Read a C string from a raw pointer into an owned String,
@@ -1631,7 +1614,8 @@ mod tests {
         mgr.set_enabled("test.cal", false);
         // No outside Arc clones live in this test, so the
         // strong count is just the inner map's.
-        mgr.unload_plugin("test.cal").expect("unload should succeed");
+        mgr.unload_plugin("test.cal")
+            .expect("unload should succeed");
         assert!(mgr.get_including_disabled("test.cal").is_none());
         assert!(!mgr.is_enabled("test.cal"));
         assert!(mgr.all().is_empty());
@@ -1695,8 +1679,7 @@ mod tests {
         // reason.
         let broken_json = tmp.path().join("com.example.broken");
         std::fs::create_dir(&broken_json).unwrap();
-        std::fs::write(broken_json.join("plugin.json"), b"{ not json")
-            .unwrap();
+        std::fs::write(broken_json.join("plugin.json"), b"{ not json").unwrap();
 
         let wrong_abi = tmp.path().join("com.example.wrong-abi");
         std::fs::create_dir(&wrong_abi).unwrap();
@@ -1719,17 +1702,17 @@ mod tests {
         let failed = mgr.failed_loads();
         assert_eq!(failed.len(), 2);
 
-        let by_dir: HashMap<_, _> = failed
-            .iter()
-            .map(|f| (f.plugin_dir.clone(), f))
-            .collect();
+        let by_dir: HashMap<_, _> = failed.iter().map(|f| (f.plugin_dir.clone(), f)).collect();
 
         let broken = by_dir.get(&broken_json).expect("broken_json recorded");
         assert!(broken.manifest.is_none(), "manifest didn't parse");
         assert_eq!(broken.reason, FailedLoadReason::ManifestInvalid);
 
         let abi = by_dir.get(&wrong_abi).expect("wrong_abi recorded");
-        assert!(abi.manifest.is_some(), "manifest parsed even though ABI mismatched");
+        assert!(
+            abi.manifest.is_some(),
+            "manifest parsed even though ABI mismatched"
+        );
         assert_eq!(
             abi.reason,
             FailedLoadReason::AbiMismatch {

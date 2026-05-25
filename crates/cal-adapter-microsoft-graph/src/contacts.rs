@@ -87,9 +87,8 @@ scoredEmailAddresses,phones,personType";
 /// get in Outlook on the web.
 pub async fn list_contact_lists(state: &ApiState) -> GraphResult<Vec<ContactList>> {
     let mut out: Vec<ContactList> = Vec::new();
-    let mut next: Option<String> = Some(
-        "/me/contactFolders?$select=id,displayName&$top=100".to_string(),
-    );
+    let mut next: Option<String> =
+        Some("/me/contactFolders?$select=id,displayName&$top=100".to_string());
     while let Some(path) = next {
         let response: ContactFolderListResponse = state.get_json(&path).await?;
         for folder in response.value {
@@ -120,10 +119,7 @@ pub async fn list_contact_lists(state: &ApiState) -> GraphResult<Vec<ContactList
 /// `/me/people` for the synthetic Suggested People sentinel.
 /// Unknown ids yield an empty Vec so a misrouted call surfaces as
 /// "no contacts" rather than a 404.
-pub async fn get_contacts(
-    state: &ApiState,
-    list_id: &str,
-) -> GraphResult<Vec<Contact>> {
+pub async fn get_contacts(state: &ApiState, list_id: &str) -> GraphResult<Vec<Contact>> {
     if list_id == GRAPH_SUGGESTED_PEOPLE_LIST_ID {
         list_suggested_people(state).await
     } else if list_id.is_empty() {
@@ -138,10 +134,7 @@ pub async fn get_contacts(
 /// until exhausted. `$top=100` mirrors the listing default and
 /// keeps each round-trip small enough that a 500-contact folder
 /// still loads in a few seconds.
-async fn list_folder_contacts(
-    state: &ApiState,
-    folder_id: &str,
-) -> GraphResult<Vec<Contact>> {
+async fn list_folder_contacts(state: &ApiState, folder_id: &str) -> GraphResult<Vec<Contact>> {
     let folder_enc = urlencoding(folder_id);
     let select_enc = urlencoding(CONTACT_SELECT);
     let mut out: Vec<Contact> = Vec::new();
@@ -193,10 +186,7 @@ async fn list_suggested_people(state: &ApiState) -> GraphResult<Vec<Contact>> {
 ///
 /// Graph requires `$search` queries to be wrapped in double
 /// quotes — we add them here so callers can pass plain strings.
-pub async fn search_contacts(
-    state: &ApiState,
-    query: &str,
-) -> GraphResult<Vec<Contact>> {
+pub async fn search_contacts(state: &ApiState, query: &str) -> GraphResult<Vec<Contact>> {
     let trimmed = query.trim();
     if trimmed.is_empty() {
         return Ok(Vec::new());
@@ -229,10 +219,7 @@ pub async fn search_contacts(
     Ok(out)
 }
 
-async fn search_personal_contacts(
-    state: &ApiState,
-    query: &str,
-) -> GraphResult<Vec<Contact>> {
+async fn search_personal_contacts(state: &ApiState, query: &str) -> GraphResult<Vec<Contact>> {
     // `$search="…"` requires `ConsistencyLevel: eventual` on the
     // request, which `ApiState::get_json` doesn't set — we use the
     // simpler `$filter=startswith(displayName, '…')` fallback that
@@ -247,9 +234,7 @@ async fn search_personal_contacts(
     );
     let select_enc = urlencoding(CONTACT_SELECT);
     let filter_enc = urlencoding(&filter);
-    let path = format!(
-        "/me/contacts?$select={select_enc}&$filter={filter_enc}&$top=100"
-    );
+    let path = format!("/me/contacts?$select={select_enc}&$filter={filter_enc}&$top=100");
     let response: ContactListResponse = state.get_json(&path).await?;
     Ok(response
         .value
@@ -266,10 +251,7 @@ async fn search_personal_contacts(
         .collect())
 }
 
-async fn search_suggested_people(
-    state: &ApiState,
-    query: &str,
-) -> GraphResult<Vec<Contact>> {
+async fn search_suggested_people(state: &ApiState, query: &str) -> GraphResult<Vec<Contact>> {
     // `/me/people` supports `$search` natively without the
     // ConsistencyLevel header — wrap the query in double quotes
     // per Graph's syntax requirement.
@@ -333,10 +315,7 @@ pub async fn create_contact(
 /// PATCH a contact in place. Graph's id is mailbox-wide unique so
 /// the `/me/contacts/{id}` endpoint accepts the update regardless
 /// of which folder owns the row — same shortcut Graph events use.
-pub async fn update_contact(
-    state: &ApiState,
-    contact: Contact,
-) -> GraphResult<Contact> {
+pub async fn update_contact(state: &ApiState, contact: Contact) -> GraphResult<Contact> {
     let id_enc = urlencoding(&contact.id);
     let path = format!("/me/contacts/{id_enc}");
     let body = contact_to_body(&contact);
@@ -391,16 +370,15 @@ pub async fn set_contact_photo(
 ) -> GraphResult<()> {
     let id_enc = urlencoding(contact_id);
     let path = format!("/me/contacts/{id_enc}/photo/$value");
-    state.put_bytes(&path, &photo.content_type, photo.data).await
+    state
+        .put_bytes(&path, &photo.content_type, photo.data)
+        .await
 }
 
 /// Delete the photo without touching any other field on the
 /// contact. Graph wants a DELETE against `/photo/$value` — the
 /// JPEG slot, not the underlying photo navigation property.
-pub async fn delete_contact_photo(
-    state: &ApiState,
-    contact_id: &str,
-) -> GraphResult<()> {
+pub async fn delete_contact_photo(state: &ApiState, contact_id: &str) -> GraphResult<()> {
     let id_enc = urlencoding(contact_id);
     let path = format!("/me/contacts/{id_enc}/photo/$value");
     state.delete_request(&path).await
@@ -426,10 +404,7 @@ fn map_contact(entry: ContactEntry, list_id: &str) -> Contact {
     if let Some(mobile) = entry.mobile_phone.filter(|s| !s.is_empty()) {
         phones.push(mobile);
     }
-    let birthday = entry
-        .birthday
-        .as_deref()
-        .and_then(parse_graph_birthday);
+    let birthday = entry.birthday.as_deref().and_then(parse_graph_birthday);
 
     let display = best_contact_display_name(
         entry.display_name.as_deref(),
@@ -448,13 +423,10 @@ fn map_contact(entry: ContactEntry, list_id: &str) -> Contact {
     if let Some(addr) = graph_address_to_core(entry.home_address.as_ref(), "home") {
         addresses.push(addr);
     }
-    if let Some(addr) =
-        graph_address_to_core(entry.business_address.as_ref(), "work")
-    {
+    if let Some(addr) = graph_address_to_core(entry.business_address.as_ref(), "work") {
         addresses.push(addr);
     }
-    if let Some(addr) = graph_address_to_core(entry.other_address.as_ref(), "other")
-    {
+    if let Some(addr) = graph_address_to_core(entry.other_address.as_ref(), "other") {
         addresses.push(addr);
     }
 
@@ -505,10 +477,7 @@ fn graph_address_to_core(
         city: raw.city.clone().filter(|s| !s.is_empty()),
         region: raw.state.clone().filter(|s| !s.is_empty()),
         postal_code: raw.postal_code.clone().filter(|s| !s.is_empty()),
-        country: raw
-            .country_or_region
-            .clone()
-            .filter(|s| !s.is_empty()),
+        country: raw.country_or_region.clone().filter(|s| !s.is_empty()),
     };
     if mapped.street.is_none()
         && mapped.city.is_none()
@@ -647,10 +616,7 @@ fn contact_body(
         serde_json::Value::String(display_name.to_string()),
     );
     if let Some(g) = given_name {
-        body.insert(
-            "givenName".into(),
-            serde_json::Value::String(g.to_string()),
-        );
+        body.insert("givenName".into(), serde_json::Value::String(g.to_string()));
     }
     if let Some(s) = family_name {
         body.insert("surname".into(), serde_json::Value::String(s.to_string()));
@@ -724,29 +690,25 @@ fn contact_body(
     let mut business: Option<&cal_core::ContactAddress> = None;
     let mut other: Option<&cal_core::ContactAddress> = None;
     for addr in addresses {
-        match addr.label.as_deref().map(str::to_ascii_lowercase).as_deref() {
+        match addr
+            .label
+            .as_deref()
+            .map(str::to_ascii_lowercase)
+            .as_deref()
+        {
             Some("home") => home.get_or_insert(addr),
             Some("work") | Some("business") => business.get_or_insert(addr),
             _ => other.get_or_insert(addr),
         };
     }
     if let Some(addr) = home {
-        body.insert(
-            "homeAddress".into(),
-            address_to_json(addr),
-        );
+        body.insert("homeAddress".into(), address_to_json(addr));
     }
     if let Some(addr) = business {
-        body.insert(
-            "businessAddress".into(),
-            address_to_json(addr),
-        );
+        body.insert("businessAddress".into(), address_to_json(addr));
     }
     if let Some(addr) = other {
-        body.insert(
-            "otherAddress".into(),
-            address_to_json(addr),
-        );
+        body.insert("otherAddress".into(), address_to_json(addr));
     }
     serde_json::Value::Object(body)
 }
@@ -975,10 +937,7 @@ mod tests {
                 "+49 170 3333".to_string(),
             ]
         );
-        assert_eq!(
-            c.birthday,
-            NaiveDate::from_ymd_opt(1990, 6, 15),
-        );
+        assert_eq!(c.birthday, NaiveDate::from_ymd_opt(1990, 6, 15),);
         assert_eq!(c.notes.as_deref(), Some("met at conf"));
         assert!(c.members.is_none());
         // Optimistic has_photo — see comment in map_contact.

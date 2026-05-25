@@ -40,11 +40,7 @@ impl VikunjaClient {
     /// canonicalised so the caller can paste `https://vikunja.example.org`
     /// or `https://vikunja.example.org/api/v1/` or any of the
     /// variations in between and get a working client.
-    pub fn new(
-        server_url: &str,
-        token: String,
-        http: reqwest::Client,
-    ) -> VikunjaResult<Self> {
+    pub fn new(server_url: &str, token: String, http: reqwest::Client) -> VikunjaResult<Self> {
         Ok(Self {
             server_root: canonicalise_server_url(server_url)?,
             token,
@@ -66,14 +62,10 @@ impl VikunjaClient {
         let value = format!("Bearer {}", self.token);
         headers.insert(
             AUTHORIZATION,
-            HeaderValue::from_str(&value).map_err(|e| {
-                VikunjaError::Config(format!("auth header: {e}"))
-            })?,
+            HeaderValue::from_str(&value)
+                .map_err(|e| VikunjaError::Config(format!("auth header: {e}")))?,
         );
-        headers.insert(
-            CONTENT_TYPE,
-            HeaderValue::from_static("application/json"),
-        );
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         Ok(headers)
     }
 
@@ -88,10 +80,7 @@ impl VikunjaClient {
     /// `VikunjaError::Http` on non-2xx with the response body
     /// trimmed to 300 chars (enough to spot a Vikunja error
     /// envelope without overwhelming logs).
-    pub async fn get_json<T: serde::de::DeserializeOwned>(
-        &self,
-        path: &str,
-    ) -> VikunjaResult<T> {
+    pub async fn get_json<T: serde::de::DeserializeOwned>(&self, path: &str) -> VikunjaResult<T> {
         let response = self.send(Method::GET, path, Option::<&()>::None).await?;
         decode_json(response).await
     }
@@ -127,9 +116,7 @@ impl VikunjaClient {
     /// returns 200 + `{"message": "Successfully deleted."}` for the
     /// task delete endpoint).
     pub async fn delete(&self, path: &str) -> VikunjaResult<()> {
-        let response = self
-            .send(Method::DELETE, path, Option::<&()>::None)
-            .await?;
+        let response = self.send(Method::DELETE, path, Option::<&()>::None).await?;
         let status = response.status();
         if status.is_success() {
             return Ok(());
@@ -151,7 +138,10 @@ impl VikunjaClient {
     ) -> VikunjaResult<Response> {
         let url = format!("{}{}{}", self.server_root, API_PATH, path);
         debug!(?method, %url, "vikunja request");
-        let mut builder = self.http.request(method, &url).headers(self.auth_headers()?);
+        let mut builder = self
+            .http
+            .request(method, &url)
+            .headers(self.auth_headers()?);
         if let Some(b) = body {
             builder = builder.json(b);
         }
@@ -203,17 +193,17 @@ fn canonicalise_server_url(input: &str) -> VikunjaResult<String> {
     if trimmed.is_empty() {
         return Err(VikunjaError::Config("server URL must not be empty".into()));
     }
-    let parsed = url::Url::parse(trimmed)
-        .map_err(|e| VikunjaError::Config(format!("server URL: {e}")))?;
+    let parsed =
+        url::Url::parse(trimmed).map_err(|e| VikunjaError::Config(format!("server URL: {e}")))?;
     if !matches!(parsed.scheme(), "http" | "https") {
         return Err(VikunjaError::Config(format!(
             "server URL scheme must be http(s), got '{}'",
             parsed.scheme(),
         )));
     }
-    let host = parsed.host_str().ok_or_else(|| {
-        VikunjaError::Config("server URL must have a host".into())
-    })?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| VikunjaError::Config("server URL must have a host".into()))?;
     let mut root = format!("{}://{}", parsed.scheme(), host);
     if let Some(port) = parsed.port() {
         root.push(':');
@@ -274,8 +264,7 @@ mod tests {
 
     #[test]
     fn canonicalise_rejects_deep_path() {
-        let err = canonicalise_server_url("https://vikunja.example.org/some/page")
-            .unwrap_err();
+        let err = canonicalise_server_url("https://vikunja.example.org/some/page").unwrap_err();
         match err {
             VikunjaError::Config(msg) => assert!(msg.contains("path")),
             other => panic!("expected Config, got {other:?}"),

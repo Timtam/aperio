@@ -154,10 +154,7 @@ mod tests {
         // A get on a non-existent entry should error with NoEntry on
         // a reachable backend; if it errors with anything else the
         // backend is up but unhappy, so we still skip.
-        matches!(
-            probe.get_password(),
-            Err(keyring::Error::NoEntry) | Ok(_)
-        )
+        matches!(probe.get_password(), Err(keyring::Error::NoEntry) | Ok(_))
     }
 
     #[test]

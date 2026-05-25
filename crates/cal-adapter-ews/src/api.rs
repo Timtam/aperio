@@ -16,8 +16,8 @@
 //! whose `Content-Type` isn't `text/xml; charset=utf-8`, so we set it
 //! explicitly even though reqwest would default to no header.
 
-use chrono::{DateTime, Utc};
 use cal_core::{Calendar, Event, NewEvent};
+use chrono::{DateTime, Utc};
 use reqwest::header::{HeaderValue, CONTENT_TYPE};
 
 use crate::auth::{basic_auth_header, BasicCredentials};
@@ -75,14 +75,10 @@ impl EwsClient {
             request = %truncate_for_log(&body),
             "EWS request",
         );
-        let mut req = self
-            .http
-            .post(&self.endpoint)
-            .body(body)
-            .header(
-                CONTENT_TYPE,
-                HeaderValue::from_static("text/xml; charset=utf-8"),
-            );
+        let mut req = self.http.post(&self.endpoint).body(body).header(
+            CONTENT_TYPE,
+            HeaderValue::from_static("text/xml; charset=utf-8"),
+        );
         // Microsoft documents `SOAPAction: ""` (empty) for EWS; some
         // older servers reject a missing header and accept the empty
         // string only.
@@ -205,9 +201,9 @@ pub async fn sync_events_to_completion(
     );
     let mut page = 0usize;
     let mut totals = (0usize, 0usize, 0usize); // creates, updates, deletes
-    // Bound the loop in case a buggy server keeps reporting
-    // includes_last=false. 64 pages × 512 items = 32 768 items per
-    // refresh, well past any plausible calendar size.
+                                               // Bound the loop in case a buggy server keeps reporting
+                                               // includes_last=false. 64 pages × 512 items = 32 768 items per
+                                               // refresh, well past any plausible calendar size.
     for _ in 0..64 {
         page += 1;
         let body = sync_folder_items(
@@ -288,11 +284,7 @@ pub async fn create_event(
 ) -> EwsResult<Event> {
     let (folder_id, folder_change_key) = split_calendar_id(calendar_id);
     let item_xml = new_event_to_calendar_item_xml(&event)?;
-    let envelope = create_calendar_item(
-        &folder_id,
-        folder_change_key.as_deref(),
-        &item_xml,
-    );
+    let envelope = create_calendar_item(&folder_id, folder_change_key.as_deref(), &item_xml);
     let response = client.post_soap(envelope).await?;
     let item_ref = parse_first_item_id(&response)?;
     // A freshly created item is a RecurringMaster when it has a
@@ -362,8 +354,7 @@ pub async fn update_event(client: &EwsClient, event: &Event) -> EwsResult<Event>
 pub async fn delete_event(client: &EwsClient, event_id: &str) -> EwsResult<()> {
     let decoded = decode_event_id(event_id);
     let target = resolve_write_target(client, &decoded).await?;
-    let envelope =
-        delete_calendar_item(&target.item_id, target.change_key.as_deref());
+    let envelope = delete_calendar_item(&target.item_id, target.change_key.as_deref());
     client.post_soap(envelope).await?;
     Ok(())
 }
@@ -381,8 +372,7 @@ pub async fn delete_event(client: &EwsClient, event_id: &str) -> EwsResult<()> {
 /// delete button.
 pub async fn add_event_exdate(client: &EwsClient, event_id: &str) -> EwsResult<()> {
     let decoded = decode_event_id(event_id);
-    let envelope =
-        delete_calendar_item(&decoded.item_id, decoded.change_key.as_deref());
+    let envelope = delete_calendar_item(&decoded.item_id, decoded.change_key.as_deref());
     client.post_soap(envelope).await?;
     Ok(())
 }
@@ -404,8 +394,7 @@ async fn resolve_write_target(
             change_key: decoded.change_key.clone(),
         });
     }
-    let envelope =
-        get_recurring_master(&decoded.item_id, decoded.change_key.as_deref());
+    let envelope = get_recurring_master(&decoded.item_id, decoded.change_key.as_deref());
     let response = client.post_soap(envelope).await?;
     let master = parse_first_item_id(&response)?;
     Ok(WriteTarget {
@@ -433,8 +422,7 @@ pub async fn rename_calendar(
     new_name: &str,
 ) -> EwsResult<()> {
     let (folder_id, change_key) = split_calendar_id(calendar_id);
-    let envelope =
-        update_folder_displayname(&folder_id, change_key.as_deref(), new_name);
+    let envelope = update_folder_displayname(&folder_id, change_key.as_deref(), new_name);
     client.post_soap(envelope).await?;
     Ok(())
 }
@@ -641,13 +629,9 @@ mod tests {
             .create_async()
             .await;
         let client = client_for(&server);
-        let updated = sync_events_to_completion(
-            &client,
-            "FA|FCK",
-            SyncedFolderState::default(),
-        )
-        .await
-        .unwrap();
+        let updated = sync_events_to_completion(&client, "FA|FCK", SyncedFolderState::default())
+            .await
+            .unwrap();
         // Both items present in the merged cache.
         assert_eq!(updated.items.len(), 2);
         assert!(updated.items.contains_key("A"));
@@ -872,10 +856,9 @@ mod tests {
             .with_body(fault_body)
             .create_async()
             .await;
-        let err =
-            create_event(&client_for(&server), "FOLDER-ID|FCK", new_event("X"))
-                .await
-                .unwrap_err();
+        let err = create_event(&client_for(&server), "FOLDER-ID|FCK", new_event("X"))
+            .await
+            .unwrap_err();
         match err {
             EwsError::Soap { code, .. } => assert_eq!(code, "ErrorAccessDenied"),
             other => panic!("expected Soap, got {other:?}"),
@@ -953,9 +936,7 @@ mod tests {
 </s:Envelope>"#;
         let _m = server
             .mock("POST", "/")
-            .match_body(mockito::Matcher::Regex(
-                r#"Id="ITEM-ID""#.to_string(),
-            ))
+            .match_body(mockito::Matcher::Regex(r#"Id="ITEM-ID""#.to_string()))
             .with_status(200)
             .with_body(body)
             .create_async()
@@ -1175,9 +1156,7 @@ mod tests {
 </s:Envelope>"#;
         let _m = server
             .mock("POST", "/")
-            .match_body(mockito::Matcher::Regex(
-                "DisplayName".to_string(),
-            ))
+            .match_body(mockito::Matcher::Regex("DisplayName".to_string()))
             .with_status(200)
             .with_body(body)
             .create_async()

@@ -21,8 +21,8 @@ use plugin_sdk::plugin_core::abi::OpenInstanceResult;
 use plugin_sdk::plugin_core::ffi::PluginCallResult;
 use plugin_sdk::plugin_core::vtables::SyncVtable;
 use plugin_sdk::{
-    decode_args, error_response, ok_response, open_instance_with,
-    sync_error_to_response, PluginInstance,
+    decode_args, error_response, ok_response, open_instance_with, sync_error_to_response,
+    PluginInstance,
 };
 use serde::Deserialize;
 use sync_adapter_webdav::{WebDavCredentials, WebDavSyncAdapter};
@@ -41,12 +41,10 @@ struct InitConfig {
 
 /// # Safety
 /// FFI export; `config_json` must be NUL-terminated UTF-8.
-pub unsafe extern "C" fn plugin_open_instance(
-    config_json: *const c_char,
-) -> OpenInstanceResult {
+pub unsafe extern "C" fn plugin_open_instance(config_json: *const c_char) -> OpenInstanceResult {
     open_instance_with(config_json, |json| {
-        let cfg: InitConfig = serde_json::from_str(json)
-            .map_err(|e| format!("malformed init config: {e}"))?;
+        let cfg: InitConfig =
+            serde_json::from_str(json).map_err(|e| format!("malformed init config: {e}"))?;
         if cfg.url.trim().is_empty() {
             return Err("url must not be empty".to_string());
         }
@@ -66,7 +64,11 @@ pub unsafe extern "C" fn plugin_close_instance(handle: *mut c_void) {
     PluginInstance::<WebDavSyncAdapter>::drop_handle(handle);
 }
 
-unsafe extern "C" fn ffi_test_connection(h: *mut c_void, _a: *const u8, _l: usize) -> PluginCallResult {
+unsafe extern "C" fn ffi_test_connection(
+    h: *mut c_void,
+    _a: *const u8,
+    _l: usize,
+) -> PluginCallResult {
     dispatch_unit(h, |p| async move { p.test_connection().await })
 }
 
@@ -75,31 +77,54 @@ unsafe extern "C" fn ffi_fetch_meta(h: *mut c_void, _a: *const u8, _l: usize) ->
 }
 
 unsafe extern "C" fn ffi_push_meta(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let meta: MetaJson = match decode_args(a, l) { Ok(m) => m, Err(r) => return r };
+    let meta: MetaJson = match decode_args(a, l) {
+        Ok(m) => m,
+        Err(r) => return r,
+    };
     dispatch_unit(h, |p| async move { p.push_meta(&meta).await })
 }
 
-unsafe extern "C" fn ffi_fetch_new_logs(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let cursor: DeviceCursor = match decode_args(a, l) { Ok(c) => c, Err(r) => return r };
+unsafe extern "C" fn ffi_fetch_new_logs(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let cursor: DeviceCursor = match decode_args(a, l) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
     dispatch(h, |p| async move { p.fetch_new_logs(&cursor).await })
 }
 
 unsafe extern "C" fn ffi_push_log(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let log: LogFile = match decode_args(a, l) { Ok(l) => l, Err(r) => return r };
+    let log: LogFile = match decode_args(a, l) {
+        Ok(l) => l,
+        Err(r) => return r,
+    };
     dispatch_unit(h, |p| async move { p.push_log(&log).await })
 }
 
-unsafe extern "C" fn ffi_fetch_snapshot(h: *mut c_void, _a: *const u8, _l: usize) -> PluginCallResult {
+unsafe extern "C" fn ffi_fetch_snapshot(
+    h: *mut c_void,
+    _a: *const u8,
+    _l: usize,
+) -> PluginCallResult {
     dispatch(h, |p| async move { p.fetch_snapshot().await })
 }
 
 unsafe extern "C" fn ffi_push_snapshot(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let snap: Snapshot = match decode_args(a, l) { Ok(s) => s, Err(r) => return r };
+    let snap: Snapshot = match decode_args(a, l) {
+        Ok(s) => s,
+        Err(r) => return r,
+    };
     dispatch_unit(h, |p| async move { p.push_snapshot(&snap).await })
 }
 
 unsafe extern "C" fn ffi_delete_log(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let name: LogFileName = match decode_args(a, l) { Ok(n) => n, Err(r) => return r };
+    let name: LogFileName = match decode_args(a, l) {
+        Ok(n) => n,
+        Err(r) => return r,
+    };
     dispatch_unit(h, |p| async move { p.delete_log(&name).await })
 }
 
@@ -110,14 +135,24 @@ struct PushSoundAssetArgs {
     bytes_base64: String,
 }
 
-unsafe extern "C" fn ffi_push_sound_asset(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let args: PushSoundAssetArgs = match decode_args(a, l) { Ok(a) => a, Err(r) => return r };
-    let bytes = match base64::engine::general_purpose::STANDARD.decode(args.bytes_base64.as_bytes()) {
+unsafe extern "C" fn ffi_push_sound_asset(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let args: PushSoundAssetArgs = match decode_args(a, l) {
+        Ok(a) => a,
+        Err(r) => return r,
+    };
+    let bytes = match base64::engine::general_purpose::STANDARD.decode(args.bytes_base64.as_bytes())
+    {
         Ok(b) => b,
-        Err(err) => return error_response(
-            plugin_sdk::plugin_core::ffi::PLUGIN_CALL_ERR_INVALID,
-            &format!("bad base64: {err}"),
-        ),
+        Err(err) => {
+            return error_response(
+                plugin_sdk::plugin_core::ffi::PLUGIN_CALL_ERR_INVALID,
+                &format!("bad base64: {err}"),
+            )
+        }
     };
     dispatch_unit(h, move |p| {
         let hash = args.hash;
@@ -132,14 +167,26 @@ struct FetchSoundAssetArgs {
     extension: String,
 }
 
-unsafe extern "C" fn ffi_fetch_sound_asset(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let args: FetchSoundAssetArgs = match decode_args(a, l) { Ok(a) => a, Err(r) => return r };
-    let inst = match instance(h) { Ok(i) => i, Err(r) => return r };
+unsafe extern "C" fn ffi_fetch_sound_asset(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let args: FetchSoundAssetArgs = match decode_args(a, l) {
+        Ok(a) => a,
+        Err(r) => return r,
+    };
+    let inst = match instance(h) {
+        Ok(i) => i,
+        Err(r) => return r,
+    };
     let p_static: &'static WebDavSyncAdapter = unsafe {
         std::mem::transmute::<&WebDavSyncAdapter, &'static WebDavSyncAdapter>(inst.plugin())
     };
     let outcome = inst.runtime().block_on(async move {
-        p_static.fetch_sound_asset(&args.hash, &args.extension).await
+        p_static
+            .fetch_sound_asset(&args.hash, &args.extension)
+            .await
     });
     match outcome {
         Ok(None) => ok_response(&Option::<String>::None),

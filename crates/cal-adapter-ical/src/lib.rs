@@ -29,12 +29,10 @@ use base64::Engine;
 use cal_adapter_caldav::mapping;
 use cal_core::{
     Adapter, AuthToken, Calendar, CalendarFeature, Capability, ContainerColor,
-    Credentials as CoreCredentials, DateRange, Error, Event, FreeBusy, NewEvent,
-    Result,
+    Credentials as CoreCredentials, DateRange, Error, Event, FreeBusy, NewEvent, Result,
 };
 use reqwest::header::{
-    HeaderValue, ACCEPT, AUTHORIZATION, ETAG, IF_MODIFIED_SINCE, IF_NONE_MATCH,
-    LAST_MODIFIED,
+    HeaderValue, ACCEPT, AUTHORIZATION, ETAG, IF_MODIFIED_SINCE, IF_NONE_MATCH, LAST_MODIFIED,
 };
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
@@ -133,8 +131,7 @@ impl IcalAdapter {
         }
         // Validate URL eagerly so the user finds out at account
         // creation, not on the first failed fetch.
-        Url::parse(&credentials.config.feed_url)
-            .map_err(|e| IcalError::Url(e.to_string()))?;
+        Url::parse(&credentials.config.feed_url).map_err(|e| IcalError::Url(e.to_string()))?;
 
         let http = Client::builder()
             .connect_timeout(Duration::from_secs(10))
@@ -172,8 +169,8 @@ impl IcalAdapter {
     /// `If-None-Match`).
     #[doc(hidden)]
     pub fn with_cache_ttl(mut self, ttl: std::time::Duration) -> Self {
-        self.cache_ttl = chrono::Duration::from_std(ttl)
-            .unwrap_or_else(|_| chrono::Duration::zero());
+        self.cache_ttl =
+            chrono::Duration::from_std(ttl).unwrap_or_else(|_| chrono::Duration::zero());
         self
     }
 
@@ -238,8 +235,7 @@ impl IcalAdapter {
             self.credentials.config.username.as_ref(),
             self.credentials.password.as_ref(),
         ) {
-            let token = base64::engine::general_purpose::STANDARD
-                .encode(format!("{user}:{pass}"));
+            let token = base64::engine::general_purpose::STANDARD.encode(format!("{user}:{pass}"));
             if let Ok(v) = HeaderValue::from_str(&format!("Basic {token}")) {
                 req = req.header(AUTHORIZATION, v);
             }
@@ -370,11 +366,7 @@ impl CalendarFeature for IcalAdapter {
         }])
     }
 
-    async fn get_events(
-        &self,
-        calendar_id: &str,
-        range: DateRange,
-    ) -> Result<Vec<Event>> {
+    async fn get_events(&self, calendar_id: &str, range: DateRange) -> Result<Vec<Event>> {
         if calendar_id != self.calendar_id() {
             // Routed to the wrong adapter. The registry shouldn't do
             // this, but be defensive — return an empty list rather
@@ -396,17 +388,11 @@ impl CalendarFeature for IcalAdapter {
         // them in the user's local timezone via rrule.js and applies
         // the visible-range clip after expansion.
         let DateRange { start, end } = range;
-        events.retain(|ev| {
-            ev.recurrence.is_some() || (ev.end > start && ev.start < end)
-        });
+        events.retain(|ev| ev.recurrence.is_some() || (ev.end > start && ev.start < end));
         Ok(events)
     }
 
-    async fn create_event(
-        &self,
-        _calendar_id: &str,
-        _event: NewEvent,
-    ) -> Result<Event> {
+    async fn create_event(&self, _calendar_id: &str, _event: NewEvent) -> Result<Event> {
         Err(Error::Unsupported(
             "iCal feed accounts are read-only".into(),
         ))
@@ -424,11 +410,7 @@ impl CalendarFeature for IcalAdapter {
         ))
     }
 
-    async fn get_free_busy(
-        &self,
-        _emails: &[&str],
-        _range: DateRange,
-    ) -> Result<Vec<FreeBusy>> {
+    async fn get_free_busy(&self, _emails: &[&str], _range: DateRange) -> Result<Vec<FreeBusy>> {
         // iCal feeds don't carry per-attendee availability — they're
         // single-author distribution. Return empty rather than
         // Unsupported so the aggregating free/busy command can still
@@ -505,9 +487,9 @@ mod tests {
 
     #[test]
     fn derive_calendar_name_reads_x_wr_calname() {
-        let adapter =
-            IcalAdapter::new(cfg("https://example.com/cal.ics")).unwrap();
-        let body = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nX-WR-CALNAME:My Schedule\r\nEND:VCALENDAR\r\n";
+        let adapter = IcalAdapter::new(cfg("https://example.com/cal.ics")).unwrap();
+        let body =
+            "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nX-WR-CALNAME:My Schedule\r\nEND:VCALENDAR\r\n";
         assert_eq!(adapter.derive_calendar_name(body), "My Schedule");
     }
 
@@ -539,8 +521,7 @@ mod tests {
 
     #[test]
     fn derive_calendar_name_strips_ics_extension_case_insensitively() {
-        let adapter =
-            IcalAdapter::new(cfg("https://example.com/Holidays.ICS")).unwrap();
+        let adapter = IcalAdapter::new(cfg("https://example.com/Holidays.ICS")).unwrap();
         let body = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nEND:VCALENDAR\r\n";
         assert_eq!(adapter.derive_calendar_name(body), "Holidays");
     }
@@ -649,10 +630,7 @@ mod tests {
     #[tokio::test]
     async fn write_operations_return_unsupported() {
         let adapter = IcalAdapter::new(cfg("https://example.com/cal.ics")).unwrap();
-        let err = adapter
-            .delete_event("anything")
-            .await
-            .unwrap_err();
+        let err = adapter.delete_event("anything").await.unwrap_err();
         assert!(matches!(err, Error::Unsupported(_)));
     }
 

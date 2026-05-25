@@ -81,20 +81,12 @@ pub fn install_archive(
             ))
         })?;
     }
-    fs::create_dir_all(&plugin_dir).map_err(|e| {
-        PluginError::Io(format!(
-            "mkdir {}: {e}",
-            plugin_dir.display()
-        ))
-    })?;
+    fs::create_dir_all(&plugin_dir)
+        .map_err(|e| PluginError::Io(format!("mkdir {}: {e}", plugin_dir.display())))?;
 
     // Open + iterate.
-    let file = fs::File::open(archive_path).map_err(|e| {
-        PluginError::Io(format!(
-            "open {}: {e}",
-            archive_path.display(),
-        ))
-    })?;
+    let file = fs::File::open(archive_path)
+        .map_err(|e| PluginError::Io(format!("open {}: {e}", archive_path.display(),)))?;
     let mut zip = zip::ZipArchive::new(file).map_err(zip_to_plugin_error)?;
     for i in 0..zip.len() {
         let mut entry = zip.by_index(i).map_err(zip_to_plugin_error)?;
@@ -114,34 +106,18 @@ pub fn install_archive(
         }
         let out_path = plugin_dir.join(&rel_path);
         if entry.is_dir() {
-            fs::create_dir_all(&out_path).map_err(|e| {
-                PluginError::Io(format!(
-                    "mkdir {}: {e}",
-                    out_path.display(),
-                ))
-            })?;
+            fs::create_dir_all(&out_path)
+                .map_err(|e| PluginError::Io(format!("mkdir {}: {e}", out_path.display(),)))?;
             continue;
         }
         if let Some(parent) = out_path.parent() {
-            fs::create_dir_all(parent).map_err(|e| {
-                PluginError::Io(format!(
-                    "mkdir {}: {e}",
-                    parent.display(),
-                ))
-            })?;
+            fs::create_dir_all(parent)
+                .map_err(|e| PluginError::Io(format!("mkdir {}: {e}", parent.display(),)))?;
         }
-        let mut out_file = fs::File::create(&out_path).map_err(|e| {
-            PluginError::Io(format!(
-                "create {}: {e}",
-                out_path.display(),
-            ))
-        })?;
-        io::copy(&mut entry, &mut out_file).map_err(|e| {
-            PluginError::Io(format!(
-                "write {}: {e}",
-                out_path.display(),
-            ))
-        })?;
+        let mut out_file = fs::File::create(&out_path)
+            .map_err(|e| PluginError::Io(format!("create {}: {e}", out_path.display(),)))?;
+        io::copy(&mut entry, &mut out_file)
+            .map_err(|e| PluginError::Io(format!("write {}: {e}", out_path.display(),)))?;
     }
 
     Ok(InstalledArchive {
@@ -170,18 +146,12 @@ pub struct InstalledArchive {
 /// [`install_archive`] (which uses the bytes to early-validate
 /// the manifest before laying down any files).
 fn read_manifest_bytes(archive_path: &Path) -> PluginResult<Vec<u8>> {
-    let file = fs::File::open(archive_path).map_err(|e| {
-        PluginError::Io(format!(
-            "open {}: {e}",
-            archive_path.display(),
-        ))
-    })?;
+    let file = fs::File::open(archive_path)
+        .map_err(|e| PluginError::Io(format!("open {}: {e}", archive_path.display(),)))?;
     let mut zip = zip::ZipArchive::new(file).map_err(zip_to_plugin_error)?;
     let mut manifest_entry = zip.by_name(MANIFEST_FILENAME).map_err(|err| {
         if matches!(err, zip::result::ZipError::FileNotFound) {
-            PluginError::Manifest(format!(
-                "archive is missing the {MANIFEST_FILENAME} entry",
-            ))
+            PluginError::Manifest(format!("archive is missing the {MANIFEST_FILENAME} entry",))
         } else {
             zip_to_plugin_error(err)
         }
@@ -200,9 +170,7 @@ fn zip_to_plugin_error(err: zip::result::ZipError) -> PluginError {
         InvalidArchive(msg) | UnsupportedArchive(msg) => {
             PluginError::Manifest(format!("invalid plugin archive: {msg}"))
         }
-        FileNotFound => PluginError::Manifest(
-            "archive missing expected entry".to_string(),
-        ),
+        FileNotFound => PluginError::Manifest("archive missing expected entry".to_string()),
         _ => PluginError::Manifest(format!("zip error: {err}")),
     }
 }
@@ -233,9 +201,8 @@ mod tests {
     fn make_archive(path: &Path, manifest: &[u8]) {
         let file = fs::File::create(path).unwrap();
         let mut writer = zip::ZipWriter::new(file);
-        let opts: zip::write::SimpleFileOptions =
-            zip::write::SimpleFileOptions::default()
-                .compression_method(zip::CompressionMethod::Stored);
+        let opts: zip::write::SimpleFileOptions = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
         writer.start_file(MANIFEST_FILENAME, opts).unwrap();
         writer.write_all(manifest).unwrap();
         writer
@@ -262,8 +229,7 @@ mod tests {
         let path = dir.path().join("bogus.aperio");
         let file = fs::File::create(&path).unwrap();
         let mut writer = zip::ZipWriter::new(file);
-        let opts: zip::write::SimpleFileOptions =
-            zip::write::SimpleFileOptions::default();
+        let opts: zip::write::SimpleFileOptions = zip::write::SimpleFileOptions::default();
         writer.start_file("README.md", opts).unwrap();
         writer.write_all(b"no manifest").unwrap();
         writer.finish().unwrap();
@@ -290,8 +256,8 @@ mod tests {
 
         let target_root = dir.path().join("user_plugins");
         fs::create_dir_all(&target_root).unwrap();
-        let installed = install_archive(&archive_path, &target_root)
-            .expect("install should succeed");
+        let installed =
+            install_archive(&archive_path, &target_root).expect("install should succeed");
         assert_eq!(installed.manifest.id, "com.example.test-plugin");
         assert_eq!(
             installed.plugin_dir,
@@ -336,8 +302,7 @@ mod tests {
         let archive_path = dir.path().join("evil.aperio");
         let file = fs::File::create(&archive_path).unwrap();
         let mut writer = zip::ZipWriter::new(file);
-        let opts: zip::write::SimpleFileOptions =
-            zip::write::SimpleFileOptions::default();
+        let opts: zip::write::SimpleFileOptions = zip::write::SimpleFileOptions::default();
         writer.start_file(MANIFEST_FILENAME, opts).unwrap();
         writer.write_all(&sample_manifest_json()).unwrap();
         // Path-traversal entry. zip-rs canonicalises this and
@@ -349,8 +314,8 @@ mod tests {
 
         let target_root = dir.path().join("user_plugins");
         fs::create_dir_all(&target_root).unwrap();
-        let err = install_archive(&archive_path, &target_root)
-            .expect_err("traversal must be rejected");
+        let err =
+            install_archive(&archive_path, &target_root).expect_err("traversal must be rejected");
         match err {
             PluginError::Manifest(msg) => {
                 assert!(msg.contains("unsafe path"), "got: {msg}");

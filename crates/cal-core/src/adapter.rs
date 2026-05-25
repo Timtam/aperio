@@ -13,8 +13,8 @@ use crate::color::ContainerColor;
 use crate::error::{Error, Result};
 use crate::reminder::SoundConfig;
 use crate::types::{
-    Calendar, Contact, ContactList, ContactPhoto, DateRange, Event, FreeBusy, NewContact,
-    NewEvent, NewTask, Task, TaskList,
+    Calendar, Contact, ContactList, ContactPhoto, DateRange, Event, FreeBusy, NewContact, NewEvent,
+    NewTask, Task, TaskList,
 };
 
 /// Stable identifier for the adapter source (e.g. "google", "caldav",
@@ -105,11 +105,7 @@ pub trait CalendarFeature: Adapter {
     /// adapters and any other read-only source leave the default in
     /// place, which the command layer translates into "write a local
     /// override only".
-    async fn rename_calendar(
-        &self,
-        _calendar_id: &str,
-        _new_name: &str,
-    ) -> Result<()> {
+    async fn rename_calendar(&self, _calendar_id: &str, _new_name: &str) -> Result<()> {
         Err(Error::Unsupported(
             "rename_calendar is not supported on this adapter".into(),
         ))
@@ -130,11 +126,7 @@ pub trait TasksFeature: Adapter {
     /// to push to the source, read-only adapters leave the default
     /// `Unsupported` and the command layer falls back to a local
     /// override.
-    async fn rename_task_list(
-        &self,
-        _list_id: &str,
-        _new_name: &str,
-    ) -> Result<()> {
+    async fn rename_task_list(&self, _list_id: &str, _new_name: &str) -> Result<()> {
         Err(Error::Unsupported(
             "rename_task_list is not supported on this adapter".into(),
         ))
@@ -167,11 +159,7 @@ pub trait ContactsFeature: Adapter {
     async fn update_contact(&self, contact: Contact) -> Result<Contact>;
     async fn delete_contact(&self, contact_id: &str) -> Result<()>;
 
-    async fn rename_contact_list(
-        &self,
-        _list_id: &str,
-        _new_name: &str,
-    ) -> Result<()> {
+    async fn rename_contact_list(&self, _list_id: &str, _new_name: &str) -> Result<()> {
         Err(Error::Unsupported(
             "rename_contact_list is not supported on this adapter".into(),
         ))
@@ -194,10 +182,7 @@ pub trait ContactsFeature: Adapter {
     /// Adapters that don't model photos at all default to `Ok(None)`
     /// — the frontend renders the no-photo placeholder and the user
     /// sees no error.
-    async fn get_contact_photo(
-        &self,
-        _contact_id: &str,
-    ) -> Result<Option<ContactPhoto>> {
+    async fn get_contact_photo(&self, _contact_id: &str) -> Result<Option<ContactPhoto>> {
         Ok(None)
     }
 
@@ -208,11 +193,7 @@ pub trait ContactsFeature: Adapter {
     /// attachment write. Default `Unsupported` so adapters that
     /// haven't grown the feature surface a clear error rather
     /// than silently swallowing the write.
-    async fn set_contact_photo(
-        &self,
-        _contact_id: &str,
-        _photo: ContactPhoto,
-    ) -> Result<()> {
+    async fn set_contact_photo(&self, _contact_id: &str, _photo: ContactPhoto) -> Result<()> {
         Err(Error::Unsupported(
             "set_contact_photo is not supported on this adapter".into(),
         ))

@@ -227,11 +227,13 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<SyncLogResult<SyncL
             // error rather than panicking. In practice the only
             // writer is our own `record()` which always writes
             // RFC3339, so this is defensive.
-            return Ok(Err(SyncLogError::Sqlite(rusqlite::Error::FromSqlConversionFailure(
-                1,
-                rusqlite::types::Type::Text,
-                Box::new(err),
-            ))));
+            return Ok(Err(SyncLogError::Sqlite(
+                rusqlite::Error::FromSqlConversionFailure(
+                    1,
+                    rusqlite::types::Type::Text,
+                    Box::new(err),
+                ),
+            )));
         }
     };
     Ok(Ok(SyncLogEntry {
@@ -312,14 +314,26 @@ mod tests {
         let (_tmp, db) = fresh_db();
         let shared = db.shared();
         let repo = SyncLogRepo::new(&shared);
-        repo.record(SyncTrigger::AppStart, true, &SyncLogCounters::default(), None, None)
-            .unwrap();
+        repo.record(
+            SyncTrigger::AppStart,
+            true,
+            &SyncLogCounters::default(),
+            None,
+            None,
+        )
+        .unwrap();
         // Sleep just long enough for the next RFC3339 timestamp to
         // sort strictly after the previous one. Millisecond
         // precision is the rfc3339 floor we use.
         std::thread::sleep(std::time::Duration::from_millis(20));
-        repo.record(SyncTrigger::Manual, true, &SyncLogCounters::default(), None, None)
-            .unwrap();
+        repo.record(
+            SyncTrigger::Manual,
+            true,
+            &SyncLogCounters::default(),
+            None,
+            None,
+        )
+        .unwrap();
         let entries = repo.list(10).unwrap();
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].trigger, "manual");

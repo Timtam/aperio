@@ -33,9 +33,7 @@ pub async fn list_upcoming_reminders(
 /// fire-and-forget notify) so callers can lean on it whenever
 /// they've touched something the scheduler reads.
 #[tauri::command]
-pub async fn invalidate_reminders(
-    scheduler: State<'_, SchedulerHandle>,
-) -> CommandResult<()> {
+pub async fn invalidate_reminders(scheduler: State<'_, SchedulerHandle>) -> CommandResult<()> {
     scheduler.invalidate_external_cache();
     scheduler.invalidate();
     Ok(())

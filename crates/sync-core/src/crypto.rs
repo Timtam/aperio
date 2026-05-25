@@ -170,27 +170,22 @@ impl EncryptionParams {
     }
 
     fn salt_bytes(&self) -> SyncResult<Vec<u8>> {
-        BASE64.decode(&self.salt).map_err(|err| {
-            SyncError::protocol(format!("decode salt: {err}"))
-        })
+        BASE64
+            .decode(&self.salt)
+            .map_err(|err| SyncError::protocol(format!("decode salt: {err}")))
     }
 }
 
 /// Derive a 32-byte AES key from `passphrase` and the dataset's
 /// Argon2 parameters. Deterministic — calling twice with the same
 /// inputs returns the same key.
-pub fn derive_key(
-    passphrase: &str,
-    params: &EncryptionParams,
-) -> SyncResult<[u8; KEY_LEN]> {
+pub fn derive_key(passphrase: &str, params: &EncryptionParams) -> SyncResult<[u8; KEY_LEN]> {
     let salt = params.salt_bytes()?;
     let argon = Argon2::new(
         argon2::Algorithm::Argon2id,
         argon2::Version::V0x13,
         argon2::Params::new(params.m_cost, params.t_cost, params.p_cost, None)
-            .map_err(|err| {
-                SyncError::internal(format!("argon2 params: {err}"))
-            })?,
+            .map_err(|err| SyncError::internal(format!("argon2 params: {err}")))?,
     );
     let mut out = [0u8; KEY_LEN];
     argon
@@ -211,9 +206,9 @@ pub fn encrypt(key: &[u8; KEY_LEN], plaintext: &[u8]) -> SyncResult<Vec<u8>> {
     let mut nonce_bytes = [0u8; NONCE_LEN];
     rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
     let nonce = Nonce::from_slice(&nonce_bytes);
-    let ciphertext = cipher.encrypt(nonce, plaintext).map_err(|err| {
-        SyncError::internal(format!("AES-GCM encrypt: {err}"))
-    })?;
+    let ciphertext = cipher
+        .encrypt(nonce, plaintext)
+        .map_err(|err| SyncError::internal(format!("AES-GCM encrypt: {err}")))?;
     let mut out = Vec::with_capacity(NONCE_LEN + ciphertext.len());
     out.extend_from_slice(&nonce_bytes);
     out.extend_from_slice(&ciphertext);
@@ -237,10 +232,7 @@ pub fn fresh_data_key() -> [u8; KEY_LEN] {
 ///
 /// Uses the same AES-256-GCM wire format as the rest of the
 /// encryption layer (nonce || ciphertext || auth tag).
-pub fn wrap_key(
-    kek: &[u8; KEY_LEN],
-    dek: &[u8; KEY_LEN],
-) -> SyncResult<String> {
+pub fn wrap_key(kek: &[u8; KEY_LEN], dek: &[u8; KEY_LEN]) -> SyncResult<String> {
     let blob = encrypt(kek, dek)?;
     Ok(BASE64.encode(blob))
 }
@@ -252,13 +244,10 @@ pub fn wrap_key(
 /// passphrase decrypt) so the UI can present the unified
 /// "wrong passphrase" message without distinguishing wrap-
 /// unwrap failures from data-decrypt failures.
-pub fn unwrap_key(
-    kek: &[u8; KEY_LEN],
-    wrapped_b64: &str,
-) -> SyncResult<[u8; KEY_LEN]> {
-    let blob = BASE64.decode(wrapped_b64).map_err(|err| {
-        SyncError::protocol(format!("decode wrapped key: {err}"))
-    })?;
+pub fn unwrap_key(kek: &[u8; KEY_LEN], wrapped_b64: &str) -> SyncResult<[u8; KEY_LEN]> {
+    let blob = BASE64
+        .decode(wrapped_b64)
+        .map_err(|err| SyncError::protocol(format!("decode wrapped key: {err}")))?;
     let plain = decrypt(kek, &blob)?;
     if plain.len() != KEY_LEN {
         return Err(SyncError::protocol(format!(
@@ -285,10 +274,7 @@ pub fn unwrap_key(
 /// Wrong-passphrase failures collapse to [`SyncError::Auth`] so
 /// the UI gets a single error code regardless of which path
 /// failed.
-pub fn resolve_data_key(
-    passphrase: &str,
-    params: &EncryptionParams,
-) -> SyncResult<[u8; KEY_LEN]> {
+pub fn resolve_data_key(passphrase: &str, params: &EncryptionParams) -> SyncResult<[u8; KEY_LEN]> {
     let derived = derive_key(passphrase, params)?;
     match params.wrapped_data_key.as_deref() {
         Some(wrap) => unwrap_key(&derived, wrap),
@@ -306,9 +292,7 @@ pub fn resolve_data_key(
 /// state.
 pub fn decrypt(key: &[u8; KEY_LEN], blob: &[u8]) -> SyncResult<Vec<u8>> {
     if blob.len() < NONCE_LEN {
-        return Err(SyncError::protocol(
-            "encrypted blob shorter than nonce",
-        ));
+        return Err(SyncError::protocol("encrypted blob shorter than nonce"));
     }
     let (nonce_bytes, ciphertext) = blob.split_at(NONCE_LEN);
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key));
@@ -317,9 +301,7 @@ pub fn decrypt(key: &[u8; KEY_LEN], blob: &[u8]) -> SyncResult<Vec<u8>> {
         // Don't echo the underlying error — it might leak whether
         // the tag mismatch was at the start or end, which the
         // BSON-style attacks exploit.
-        SyncError::auth(
-            "decryption failed — wrong passphrase or corrupt blob",
-        )
+        SyncError::auth("decryption failed — wrong passphrase or corrupt blob")
     })
 }
 

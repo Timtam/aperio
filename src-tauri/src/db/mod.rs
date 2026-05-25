@@ -167,9 +167,7 @@ mod tests {
         // snapshot DB at v5 (apply 0001…0005 explicitly), seed the
         // legacy shape, then run 0006 and inspect the output.
         let legacy = Connection::open_in_memory().unwrap();
-        legacy
-            .execute_batch("PRAGMA foreign_keys = ON;")
-            .unwrap();
+        legacy.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
         legacy
             .execute_batch(include_str!("sql/0001_init.sql"))
             .unwrap();
@@ -243,7 +241,12 @@ mod tests {
             .execute_batch(include_str!("sql/0006_task_time_fields.sql"))
             .unwrap();
 
-        let read = |id: &str| -> (Option<String>, Option<String>, Option<String>, Option<String>) {
+        let read = |id: &str| -> (
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+        ) {
             legacy
                 .query_row(
                     "SELECT scheduled_date, scheduled_time, deadline_date, deadline_time

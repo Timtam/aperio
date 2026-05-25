@@ -93,8 +93,7 @@ use async_trait::async_trait;
 use rustls::{ClientConfig, RootCertStore};
 use serde::{Deserialize, Serialize};
 use sync_core::{
-    DeviceCursor, LogFile, LogFileName, MetaJson, Snapshot, SyncAdapter,
-    SyncError, SyncResult,
+    DeviceCursor, LogFile, LogFileName, MetaJson, Snapshot, SyncAdapter, SyncError, SyncResult,
 };
 use tracing::{debug, warn};
 
@@ -191,21 +190,14 @@ impl SessionStream {
         }
     }
 
-    fn retr_as_buffer(
-        &mut self,
-        path: &str,
-    ) -> FtpResult<std::io::Cursor<Vec<u8>>> {
+    fn retr_as_buffer(&mut self, path: &str) -> FtpResult<std::io::Cursor<Vec<u8>>> {
         match self {
             Self::Tls(s) => s.retr_as_buffer(path),
             Self::Plain(s) => s.retr_as_buffer(path),
         }
     }
 
-    fn put_file(
-        &mut self,
-        path: &str,
-        r: &mut std::io::Cursor<&[u8]>,
-    ) -> FtpResult<u64> {
+    fn put_file(&mut self, path: &str, r: &mut std::io::Cursor<&[u8]>) -> FtpResult<u64> {
         match self {
             Self::Tls(s) => s.put_file(path, r),
             Self::Plain(s) => s.put_file(path, r),
@@ -317,55 +309,39 @@ impl FtpsSyncAdapter {
             let mut stream = match mode {
                 FtpsMode::Explicit => {
                     let connector = RustlsConnector::from(tls);
-                    let plain = RustlsFtpStream::connect(&addr).map_err(
-                        |err| {
-                            SyncError::network(format!(
-                                "connect {addr}: {err}"
-                            ))
-                        },
-                    )?;
-                    let secured =
-                        plain.into_secure(connector, &host).map_err(|err| {
-                            SyncError::network(format!(
-                                "AUTH TLS to {host}: {err}"
-                            ))
-                        })?;
+                    let plain = RustlsFtpStream::connect(&addr)
+                        .map_err(|err| SyncError::network(format!("connect {addr}: {err}")))?;
+                    let secured = plain
+                        .into_secure(connector, &host)
+                        .map_err(|err| SyncError::network(format!("AUTH TLS to {host}: {err}")))?;
                     SessionStream::Tls(secured)
                 }
                 FtpsMode::Implicit => {
                     let connector = RustlsConnector::from(tls);
-                    let secured = RustlsFtpStream::connect_secure_implicit(
-                        &addr, connector, &host,
-                    )
-                    .map_err(|err| {
-                        SyncError::network(format!(
-                            "implicit TLS connect {addr}: {err}"
-                        ))
-                    })?;
+                    let secured = RustlsFtpStream::connect_secure_implicit(&addr, connector, &host)
+                        .map_err(|err| {
+                            SyncError::network(format!("implicit TLS connect {addr}: {err}"))
+                        })?;
                     SessionStream::Tls(secured)
                 }
                 FtpsMode::Plain => {
                     let plain = FtpStream::connect(&addr).map_err(|err| {
-                        SyncError::network(format!(
-                            "plain connect {addr}: {err}"
-                        ))
+                        SyncError::network(format!("plain connect {addr}: {err}"))
                     })?;
                     SessionStream::Plain(plain)
                 }
             };
 
             stream.login(&user, &password).map_err(ftp_to_sync_auth)?;
-            stream.transfer_type(FileType::Binary).map_err(|err| {
-                SyncError::protocol(format!("TYPE I: {err}"))
-            })?;
+            stream
+                .transfer_type(FileType::Binary)
+                .map_err(|err| SyncError::protocol(format!("TYPE I: {err}")))?;
             let result = work(&mut stream);
             let _ = stream.quit();
             result
         })
         .await
-        .map_err(|err| {
-            SyncError::internal(format!("blocking task join: {err}"))
-        })?
+        .map_err(|err| SyncError::internal(format!("blocking task join: {err}")))?
     }
 }
 
@@ -375,9 +351,9 @@ impl SyncAdapter for FtpsSyncAdapter {
         let base = self.base_path.clone();
         let base_for_paths = self.base_path.clone();
         self.with_session(move |stream| {
-            stream.noop().map_err(|err| {
-                SyncError::network(format!("NOOP: {err}"))
-            })?;
+            stream
+                .noop()
+                .map_err(|err| SyncError::network(format!("NOOP: {err}")))?;
             // Best-effort mkdir on the base + sub-collections so
             // first-push works on a fresh server. AlreadyExists
             // fast-paths to Ok.
@@ -386,10 +362,7 @@ impl SyncAdapter for FtpsSyncAdapter {
             }
             ensure_dir(stream, &remote_path_for(&base_for_paths, "log"))?;
             ensure_dir(stream, &remote_path_for(&base_for_paths, "assets"))?;
-            ensure_dir(
-                stream,
-                &remote_path_for(&base_for_paths, "assets/sounds"),
-            )?;
+            ensure_dir(stream, &remote_path_for(&base_for_paths, "assets/sounds"))?;
             Ok(())
         })
         .await
@@ -398,13 +371,10 @@ impl SyncAdapter for FtpsSyncAdapter {
     async fn fetch_meta(&self) -> SyncResult<Option<MetaJson>> {
         let path = self.remote_path("meta.json");
         let bytes = self
-            .with_session(move |stream| match stream.retr_as_buffer(&path)
-            {
+            .with_session(move |stream| match stream.retr_as_buffer(&path) {
                 Ok(buf) => Ok(Some(buf.into_inner())),
                 Err(err) if is_not_found(&err) => Ok(None),
-                Err(err) => Err(SyncError::network(format!(
-                    "RETR meta.json: {err}"
-                ))),
+                Err(err) => Err(SyncError::network(format!("RETR meta.json: {err}"))),
             })
             .await?;
         match bytes {
@@ -426,10 +396,7 @@ impl SyncAdapter for FtpsSyncAdapter {
         .await
     }
 
-    async fn fetch_new_logs(
-        &self,
-        since: &DeviceCursor,
-    ) -> SyncResult<Vec<LogFile>> {
+    async fn fetch_new_logs(&self, since: &DeviceCursor) -> SyncResult<Vec<LogFile>> {
         let log_dir = self.remote_path("log");
         let cursor_ts = since.last_seen_log;
         self.with_session(move |stream| {
@@ -441,9 +408,7 @@ impl SyncAdapter for FtpsSyncAdapter {
                 Ok(e) => e,
                 Err(err) if is_not_found(&err) => return Ok(Vec::new()),
                 Err(err) => {
-                    return Err(SyncError::network(format!(
-                        "NLST log/: {err}"
-                    )));
+                    return Err(SyncError::network(format!("NLST log/: {err}")));
                 }
             };
 
@@ -494,8 +459,7 @@ impl SyncAdapter for FtpsSyncAdapter {
 
     async fn push_log(&self, log: &LogFile) -> SyncResult<()> {
         let log_dir = self.remote_path("log");
-        let path = self
-            .remote_path(&format!("log/{}", log.name.to_filename()));
+        let path = self.remote_path(&format!("log/{}", log.name.to_filename()));
         let bytes = log.bytes.clone();
         self.with_session(move |stream| {
             ensure_dir(stream, &log_dir)?;
@@ -507,13 +471,10 @@ impl SyncAdapter for FtpsSyncAdapter {
     async fn fetch_snapshot(&self) -> SyncResult<Option<Snapshot>> {
         let path = self.remote_path("snapshot.json");
         let bytes = self
-            .with_session(move |stream| match stream.retr_as_buffer(&path)
-            {
+            .with_session(move |stream| match stream.retr_as_buffer(&path) {
                 Ok(buf) => Ok(Some(buf.into_inner())),
                 Err(err) if is_not_found(&err) => Ok(None),
-                Err(err) => Err(SyncError::network(format!(
-                    "RETR snapshot.json: {err}"
-                ))),
+                Err(err) => Err(SyncError::network(format!("RETR snapshot.json: {err}"))),
             })
             .await?;
         match bytes {
@@ -543,24 +504,16 @@ impl SyncAdapter for FtpsSyncAdapter {
                 // Not-found is success: the goal is "make sure
                 // it's gone", and absent already satisfies that.
                 Err(err) if is_not_found(&err) => Ok(()),
-                Err(err) => Err(SyncError::network(format!(
-                    "DELE {path}: {err}"
-                ))),
+                Err(err) => Err(SyncError::network(format!("DELE {path}: {err}"))),
             }
         })
         .await
     }
 
-    async fn push_sound_asset(
-        &self,
-        hash: &str,
-        extension: &str,
-        bytes: &[u8],
-    ) -> SyncResult<()> {
+    async fn push_sound_asset(&self, hash: &str, extension: &str, bytes: &[u8]) -> SyncResult<()> {
         let assets_dir = self.remote_path("assets");
         let sounds_dir = self.remote_path("assets/sounds");
-        let path = self
-            .remote_path(&format!("assets/sounds/{hash}.{extension}"));
+        let path = self.remote_path(&format!("assets/sounds/{hash}.{extension}"));
         let payload = bytes.to_vec();
         self.with_session(move |stream| {
             ensure_dir(stream, &assets_dir)?;
@@ -570,19 +523,12 @@ impl SyncAdapter for FtpsSyncAdapter {
         .await
     }
 
-    async fn fetch_sound_asset(
-        &self,
-        hash: &str,
-        extension: &str,
-    ) -> SyncResult<Option<Vec<u8>>> {
-        let path = self
-            .remote_path(&format!("assets/sounds/{hash}.{extension}"));
+    async fn fetch_sound_asset(&self, hash: &str, extension: &str) -> SyncResult<Option<Vec<u8>>> {
+        let path = self.remote_path(&format!("assets/sounds/{hash}.{extension}"));
         self.with_session(move |stream| match stream.retr_as_buffer(&path) {
             Ok(buf) => Ok(Some(buf.into_inner())),
             Err(err) if is_not_found(&err) => Ok(None),
-            Err(err) => Err(SyncError::network(format!(
-                "RETR sound asset: {err}"
-            ))),
+            Err(err) => Err(SyncError::network(format!("RETR sound asset: {err}"))),
         })
         .await
     }
@@ -604,15 +550,11 @@ fn ensure_dir(stream: &mut SessionStream, dir: &str) -> SyncResult<()> {
 }
 
 /// `STOR` the given bytes to `path`.
-fn write_file(
-    stream: &mut SessionStream,
-    path: &str,
-    bytes: &[u8],
-) -> SyncResult<()> {
+fn write_file(stream: &mut SessionStream, path: &str, bytes: &[u8]) -> SyncResult<()> {
     let mut cursor = std::io::Cursor::new(bytes);
-    stream.put_file(path, &mut cursor).map_err(|err| {
-        SyncError::network(format!("STOR {path}: {err}"))
-    })?;
+    stream
+        .put_file(path, &mut cursor)
+        .map_err(|err| SyncError::network(format!("STOR {path}: {err}")))?;
     Ok(())
 }
 
@@ -620,11 +562,7 @@ fn write_file(
 /// name. Most FTP servers implement RNTO as an atomic inode
 /// rename, which is the closest FTP gets to the local-FS
 /// atomic-replace pattern.
-fn atomic_write(
-    stream: &mut SessionStream,
-    path: &str,
-    bytes: &[u8],
-) -> SyncResult<()> {
+fn atomic_write(stream: &mut SessionStream, path: &str, bytes: &[u8]) -> SyncResult<()> {
     let tmp = format!("{path}.tmp");
     write_file(stream, &tmp, bytes)?;
     // Best-effort: drop a stale destination if it exists.
@@ -636,9 +574,9 @@ fn atomic_write(
     // sharing the same type parameter — pin both to `&str` so
     // the &String/&str mismatch doesn't bite us.
     let from: &str = &tmp;
-    stream.rename(from, path).map_err(|err| {
-        SyncError::network(format!("RNFR/RNTO {tmp}->{path}: {err}"))
-    })?;
+    stream
+        .rename(from, path)
+        .map_err(|err| SyncError::network(format!("RNFR/RNTO {tmp}->{path}: {err}")))?;
     Ok(())
 }
 
@@ -764,15 +702,9 @@ mod tests {
     #[test]
     fn remote_path_joins_against_normalised_base() {
         assert_eq!(remote_path_for("/aperio", ""), "/aperio");
+        assert_eq!(remote_path_for("/aperio", "meta.json"), "/aperio/meta.json",);
         assert_eq!(
-            remote_path_for("/aperio", "meta.json"),
-            "/aperio/meta.json",
-        );
-        assert_eq!(
-            remote_path_for(
-                "/aperio",
-                "log/2026-01-01T00:00:00Z_dev-a.jsonl",
-            ),
+            remote_path_for("/aperio", "log/2026-01-01T00:00:00Z_dev-a.jsonl",),
             "/aperio/log/2026-01-01T00:00:00Z_dev-a.jsonl",
         );
 

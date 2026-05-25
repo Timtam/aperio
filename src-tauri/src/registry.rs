@@ -42,9 +42,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 
 use cal_core::{CalendarFeature, ContactsFeature, TasksFeature};
-use plugin_core::shim::{
-    FfiCalendarAdapter, FfiContactsAdapter, FfiTasksAdapter, FfiVcAdapter,
-};
+use plugin_core::shim::{FfiCalendarAdapter, FfiContactsAdapter, FfiTasksAdapter, FfiVcAdapter};
 use plugin_core::{LoadedInstance, LoadedPlugin, PluginManager};
 use serde_json::{json, Map, Value};
 use tracing::warn;
@@ -159,16 +157,9 @@ impl AdapterRegistry {
     /// (test path) or when directory creation fails — the
     /// adapter then falls back to in-memory state, exactly as
     /// before the persistence work landed.
-    fn plugin_state_dir(
-        &self,
-        plugin_id: &str,
-        account_id: &str,
-    ) -> Option<std::path::PathBuf> {
+    fn plugin_state_dir(&self, plugin_id: &str, account_id: &str) -> Option<std::path::PathBuf> {
         let root = self.data_dir.as_ref()?;
-        let dir = root
-            .join("plugin_state")
-            .join(plugin_id)
-            .join(account_id);
+        let dir = root.join("plugin_state").join(plugin_id).join(account_id);
         if let Err(err) = std::fs::create_dir_all(&dir) {
             tracing::warn!(
                 ?err,
@@ -282,9 +273,7 @@ impl AdapterRegistry {
     /// awaits anything on the adapters, so a slow adapter doesn't
     /// block concurrent `register` / `unregister` calls from
     /// `create_account` / `delete_account`.
-    pub fn snapshot_calendar_adapters(
-        &self,
-    ) -> Vec<(String, Arc<dyn CalendarFeature>)> {
+    pub fn snapshot_calendar_adapters(&self) -> Vec<(String, Arc<dyn CalendarFeature>)> {
         self.external_cal
             .read()
             .expect("registry cal poison")
@@ -293,9 +282,7 @@ impl AdapterRegistry {
             .collect()
     }
 
-    pub fn snapshot_task_adapters(
-        &self,
-    ) -> Vec<(String, Arc<dyn TasksFeature>)> {
+    pub fn snapshot_task_adapters(&self) -> Vec<(String, Arc<dyn TasksFeature>)> {
         self.external_tasks
             .read()
             .expect("registry tasks poison")
@@ -304,9 +291,7 @@ impl AdapterRegistry {
             .collect()
     }
 
-    pub fn snapshot_contact_adapters(
-        &self,
-    ) -> Vec<(String, Arc<dyn ContactsFeature>)> {
+    pub fn snapshot_contact_adapters(&self) -> Vec<(String, Arc<dyn ContactsFeature>)> {
         self.external_contacts
             .read()
             .expect("registry contacts poison")
@@ -397,10 +382,7 @@ impl AdapterRegistry {
         out
     }
 
-    pub async fn search_external_contacts(
-        &self,
-        query: &str,
-    ) -> Vec<cal_core::Contact> {
+    pub async fn search_external_contacts(&self, query: &str) -> Vec<cal_core::Contact> {
         let snapshot = self.snapshot_contact_adapters();
         let mut out = Vec::new();
         for (account_id, adapter) in snapshot {
@@ -418,10 +400,7 @@ impl AdapterRegistry {
         out
     }
 
-    pub fn calendar_adapter(
-        &self,
-        account_id: &str,
-    ) -> Option<Arc<dyn CalendarFeature>> {
+    pub fn calendar_adapter(&self, account_id: &str) -> Option<Arc<dyn CalendarFeature>> {
         self.external_cal
             .read()
             .expect("registry cal poison")
@@ -429,10 +408,7 @@ impl AdapterRegistry {
             .cloned()
     }
 
-    pub fn task_adapter(
-        &self,
-        account_id: &str,
-    ) -> Option<Arc<dyn TasksFeature>> {
+    pub fn task_adapter(&self, account_id: &str) -> Option<Arc<dyn TasksFeature>> {
         self.external_tasks
             .read()
             .expect("registry tasks poison")
@@ -440,10 +416,7 @@ impl AdapterRegistry {
             .cloned()
     }
 
-    pub fn contact_adapter(
-        &self,
-        account_id: &str,
-    ) -> Option<Arc<dyn ContactsFeature>> {
+    pub fn contact_adapter(&self, account_id: &str) -> Option<Arc<dyn ContactsFeature>> {
         self.external_contacts
             .read()
             .expect("registry contacts poison")
@@ -455,10 +428,7 @@ impl AdapterRegistry {
     /// `account_id`, or `None` when nothing is registered.
     /// Used by the `create_meeting` / `delete_meeting` Tauri
     /// commands.
-    pub fn vc_adapter(
-        &self,
-        account_id: &str,
-    ) -> Option<Arc<dyn VcAdapter>> {
+    pub fn vc_adapter(&self, account_id: &str) -> Option<Arc<dyn VcAdapter>> {
         self.external_vc
             .read()
             .expect("registry vc poison")
@@ -470,9 +440,7 @@ impl AdapterRegistry {
     /// AccountsDialog's "which providers do I have signed in?"
     /// rendering when the user picks "Generate meeting link"
     /// on a new event.
-    pub fn snapshot_vc_adapters(
-        &self,
-    ) -> Vec<(String, Arc<dyn VcAdapter>)> {
+    pub fn snapshot_vc_adapters(&self) -> Vec<(String, Arc<dyn VcAdapter>)> {
         self.external_vc
             .read()
             .expect("registry vc poison")
@@ -517,9 +485,9 @@ impl AdapterRegistry {
     /// error. The §20.8 "Plugin fehlt" UX hook is what surfaces
     /// these to the user.
     fn require_plugin(&self, plugin_id: &str) -> Result<Arc<LoadedPlugin>, RegistryError> {
-        self.plugin_manager.get(plugin_id).ok_or_else(|| {
-            RegistryError::PluginMissing(plugin_id.to_string())
-        })
+        self.plugin_manager
+            .get(plugin_id)
+            .ok_or_else(|| RegistryError::PluginMissing(plugin_id.to_string()))
     }
 
     /// Open an instance of the named plugin with the supplied JSON
@@ -546,9 +514,7 @@ impl AdapterRegistry {
         instance: Arc<LoadedInstance>,
     ) -> Result<(), RegistryError> {
         let adapter = FfiCalendarAdapter::new(instance).ok_or_else(|| {
-            RegistryError::Construct(
-                "plugin doesn't expose the CalendarFeature surface".into(),
-            )
+            RegistryError::Construct("plugin doesn't expose the CalendarFeature surface".into())
         })?;
         self.external_cal
             .write()
@@ -563,9 +529,7 @@ impl AdapterRegistry {
         instance: Arc<LoadedInstance>,
     ) -> Result<(), RegistryError> {
         let adapter = FfiTasksAdapter::new(instance).ok_or_else(|| {
-            RegistryError::Construct(
-                "plugin doesn't expose the TasksFeature surface".into(),
-            )
+            RegistryError::Construct("plugin doesn't expose the TasksFeature surface".into())
         })?;
         self.external_tasks
             .write()
@@ -580,9 +544,7 @@ impl AdapterRegistry {
         instance: Arc<LoadedInstance>,
     ) -> Result<(), RegistryError> {
         let adapter = FfiContactsAdapter::new(instance).ok_or_else(|| {
-            RegistryError::Construct(
-                "plugin doesn't expose the ContactsFeature surface".into(),
-            )
+            RegistryError::Construct("plugin doesn't expose the ContactsFeature surface".into())
         })?;
         self.external_contacts
             .write()
@@ -597,9 +559,7 @@ impl AdapterRegistry {
         instance: Arc<LoadedInstance>,
     ) -> Result<(), RegistryError> {
         let adapter = FfiVcAdapter::new(instance).ok_or_else(|| {
-            RegistryError::Construct(
-                "plugin doesn't expose the VcAdapter surface".into(),
-            )
+            RegistryError::Construct("plugin doesn't expose the VcAdapter surface".into())
         })?;
         self.external_vc
             .write()
@@ -628,10 +588,8 @@ impl AdapterRegistry {
     fn register_caldav(&self, account: &Account) -> Result<(), RegistryError> {
         let secret = secrets::retrieve(&account.id, SecretSlot::Password)
             .map_err(|e| RegistryError::Secret(format!("missing password: {e}")))?;
-        let plugin_config = merge_account_config(
-            &account.config_json,
-            &[("secret", Value::String(secret))],
-        )?;
+        let plugin_config =
+            merge_account_config(&account.config_json, &[("secret", Value::String(secret))])?;
         let instance = self.open_plugin_instance(PLUGIN_ID_CALDAV, plugin_config)?;
         // The same LoadedInstance Arc is cloned into all three
         // FfiAdapters — the underlying CaldavAdapter inside the
@@ -644,8 +602,7 @@ impl AdapterRegistry {
     }
 
     fn register_google(&self, account: &Account) -> Result<(), RegistryError> {
-        let plugin_config =
-            oauth_plugin_config(&account.id, &account.config_json)?;
+        let plugin_config = oauth_plugin_config(&account.id, &account.config_json)?;
         let instance = self.open_plugin_instance(PLUGIN_ID_GOOGLE, plugin_config)?;
         self.insert_calendar(&account.id, instance.clone())?;
         self.insert_tasks(&account.id, instance.clone())?;
@@ -654,8 +611,7 @@ impl AdapterRegistry {
     }
 
     fn register_microsoft_graph(&self, account: &Account) -> Result<(), RegistryError> {
-        let plugin_config =
-            oauth_plugin_config(&account.id, &account.config_json)?;
+        let plugin_config = oauth_plugin_config(&account.id, &account.config_json)?;
         let instance = self.open_plugin_instance(PLUGIN_ID_GRAPH, plugin_config)?;
         self.insert_calendar(&account.id, instance.clone())?;
         self.insert_tasks(&account.id, instance.clone())?;
@@ -671,8 +627,7 @@ impl AdapterRegistry {
         // sync cookie + item cache across restarts. EwsAccountConfig
         // reads `state_dir` via serde(default), so absence is fine
         // (test path / older registry builds without data_dir).
-        let mut extras: Vec<(&str, Value)> =
-            vec![("password", Value::String(password))];
+        let mut extras: Vec<(&str, Value)> = vec![("password", Value::String(password))];
         let state_dir = self.plugin_state_dir(PLUGIN_ID_EWS, &account.id);
         if let Some(dir) = state_dir.as_ref() {
             extras.push((
@@ -691,10 +646,8 @@ impl AdapterRegistry {
     fn register_vikunja(&self, account: &Account) -> Result<(), RegistryError> {
         let token = secrets::retrieve(&account.id, SecretSlot::ApiToken)
             .map_err(|e| RegistryError::Secret(format!("missing API token: {e}")))?;
-        let plugin_config = merge_account_config(
-            &account.config_json,
-            &[("token", Value::String(token))],
-        )?;
+        let plugin_config =
+            merge_account_config(&account.config_json, &[("token", Value::String(token))])?;
         let instance = self.open_plugin_instance(PLUGIN_ID_VIKUNJA, plugin_config)?;
         self.insert_tasks(&account.id, instance)?;
         Ok(())
@@ -721,12 +674,9 @@ impl AdapterRegistry {
         let password = secrets::retrieve(&account.id, SecretSlot::Password)
             .ok()
             .filter(|s| !s.is_empty());
-        let password_value =
-            password.map(Value::String).unwrap_or(Value::Null);
-        let plugin_config = merge_account_config(
-            &account.config_json,
-            &[("password", password_value)],
-        )?;
+        let password_value = password.map(Value::String).unwrap_or(Value::Null);
+        let plugin_config =
+            merge_account_config(&account.config_json, &[("password", password_value)])?;
         let instance = self.open_plugin_instance(PLUGIN_ID_ICAL, plugin_config)?;
         self.insert_calendar(&account.id, instance)?;
         Ok(())
@@ -737,8 +687,7 @@ impl AdapterRegistry {
     // ─────────────────────────────────────────────────────────────
 
     fn register_zoom(&self, account: &Account) -> Result<(), RegistryError> {
-        let plugin_config =
-            oauth_refresh_plugin_config(&account.id, &account.config_json)?;
+        let plugin_config = oauth_refresh_plugin_config(&account.id, &account.config_json)?;
         let instance = self.open_plugin_instance(PLUGIN_ID_ZOOM, plugin_config)?;
         self.insert_vc(&account.id, instance)?;
         Ok(())
@@ -777,8 +726,7 @@ impl AdapterRegistry {
     }
 
     fn register_webex(&self, account: &Account) -> Result<(), RegistryError> {
-        let plugin_config =
-            oauth_refresh_plugin_config(&account.id, &account.config_json)?;
+        let plugin_config = oauth_refresh_plugin_config(&account.id, &account.config_json)?;
         let instance = self.open_plugin_instance(PLUGIN_ID_WEBEX, plugin_config)?;
         self.insert_vc(&account.id, instance)?;
         Ok(())
@@ -808,9 +756,7 @@ fn merge_account_config(
     let mut parsed: Value = serde_json::from_str(account_config_json)
         .map_err(|e| RegistryError::Config(e.to_string()))?;
     let obj = parsed.as_object_mut().ok_or_else(|| {
-        RegistryError::Config(
-            "account config_json must be a JSON object".to_string(),
-        )
+        RegistryError::Config("account config_json must be a JSON object".to_string())
     })?;
     for (key, val) in secrets {
         obj.insert((*key).to_string(), val.clone());
@@ -835,8 +781,7 @@ fn oauth_plugin_config(
     let refresh = secrets::retrieve(account_id, SecretSlot::RefreshToken)
         .ok()
         .filter(|s| !s.is_empty());
-    let refresh_value =
-        refresh.map(Value::String).unwrap_or(Value::Null);
+    let refresh_value = refresh.map(Value::String).unwrap_or(Value::Null);
 
     let mut extras = Map::with_capacity(4);
     extras.insert("access_token".into(), Value::String(access));
@@ -850,9 +795,7 @@ fn oauth_plugin_config(
     let mut parsed: Value = serde_json::from_str(account_config_json)
         .map_err(|e| RegistryError::Config(e.to_string()))?;
     let obj = parsed.as_object_mut().ok_or_else(|| {
-        RegistryError::Config(
-            "account config_json must be a JSON object".to_string(),
-        )
+        RegistryError::Config("account config_json must be a JSON object".to_string())
     })?;
     obj.extend(extras);
     Ok(parsed.to_string())

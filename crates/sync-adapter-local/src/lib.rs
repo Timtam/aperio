@@ -44,8 +44,7 @@ use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 use sync_core::{
-    DeviceCursor, LogFile, LogFileName, MetaJson, Snapshot, SyncAdapter,
-    SyncError, SyncResult,
+    DeviceCursor, LogFile, LogFileName, MetaJson, Snapshot, SyncAdapter, SyncError, SyncResult,
 };
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
@@ -165,10 +164,7 @@ impl SyncAdapter for LocalFsSyncAdapter {
         Self::atomic_write(&self.meta_path(), &bytes).await
     }
 
-    async fn fetch_new_logs(
-        &self,
-        since: &DeviceCursor,
-    ) -> SyncResult<Vec<LogFile>> {
+    async fn fetch_new_logs(&self, since: &DeviceCursor) -> SyncResult<Vec<LogFile>> {
         let dir = self.log_dir();
         let mut entries = match fs::read_dir(&dir).await {
             Ok(rd) => rd,
@@ -225,9 +221,7 @@ impl SyncAdapter for LocalFsSyncAdapter {
             a.name
                 .timestamp
                 .cmp(&b.name.timestamp)
-                .then_with(|| {
-                    a.name.device_id.as_str().cmp(b.name.device_id.as_str())
-                })
+                .then_with(|| a.name.device_id.as_str().cmp(b.name.device_id.as_str()))
         });
         Ok(out)
     }
@@ -278,12 +272,7 @@ impl SyncAdapter for LocalFsSyncAdapter {
         }
     }
 
-    async fn push_sound_asset(
-        &self,
-        hash: &str,
-        extension: &str,
-        bytes: &[u8],
-    ) -> SyncResult<()> {
+    async fn push_sound_asset(&self, hash: &str, extension: &str, bytes: &[u8]) -> SyncResult<()> {
         self.ensure_dirs().await?;
         let path = self.sound_path(hash, extension);
         // Content-addressed paths are immutable once written. If
@@ -295,11 +284,7 @@ impl SyncAdapter for LocalFsSyncAdapter {
         Self::atomic_write(&path, bytes).await
     }
 
-    async fn fetch_sound_asset(
-        &self,
-        hash: &str,
-        extension: &str,
-    ) -> SyncResult<Option<Vec<u8>>> {
+    async fn fetch_sound_asset(&self, hash: &str, extension: &str) -> SyncResult<Option<Vec<u8>>> {
         let path = self.sound_path(hash, extension);
         match fs::read(&path).await {
             Ok(bytes) => Ok(Some(bytes)),
@@ -313,9 +298,7 @@ impl SyncAdapter for LocalFsSyncAdapter {
 mod tests {
     use super::*;
     use chrono::{TimeZone, Utc};
-    use sync_core::{
-        DeviceId, EventEnvelope, IdPayload, MetaJson, Snapshot, SyncEvent,
-    };
+    use sync_core::{DeviceId, EventEnvelope, IdPayload, MetaJson, Snapshot, SyncEvent};
     use tempfile::TempDir;
 
     fn fixture_envelope(device: DeviceId, ts_secs: i64, ev: SyncEvent) -> EventEnvelope {
@@ -327,17 +310,8 @@ mod tests {
         }
     }
 
-    fn fixture_log_file(
-        device: DeviceId,
-        ts_secs: i64,
-        envelopes: Vec<EventEnvelope>,
-    ) -> LogFile {
-        LogFile::from_envelopes(
-            device,
-            Utc.timestamp_opt(ts_secs, 0).unwrap(),
-            &envelopes,
-        )
-        .unwrap()
+    fn fixture_log_file(device: DeviceId, ts_secs: i64, envelopes: Vec<EventEnvelope>) -> LogFile {
+        LogFile::from_envelopes(device, Utc.timestamp_opt(ts_secs, 0).unwrap(), &envelopes).unwrap()
     }
 
     #[tokio::test]
@@ -444,11 +418,7 @@ mod tests {
 
         assert!(adapter.fetch_snapshot().await.unwrap().is_none());
 
-        let snap = Snapshot::new(
-            Utc::now(),
-            "1.0.0",
-            serde_json::json!({ "events": [] }),
-        );
+        let snap = Snapshot::new(Utc::now(), "1.0.0", serde_json::json!({ "events": [] }));
         adapter.push_snapshot(&snap).await.unwrap();
 
         let fetched = adapter.fetch_snapshot().await.unwrap().unwrap();
@@ -472,17 +442,11 @@ mod tests {
             .await
             .unwrap();
 
-        let fetched = adapter
-            .fetch_sound_asset("hash123", "mp3")
-            .await
-            .unwrap();
+        let fetched = adapter.fetch_sound_asset("hash123", "mp3").await.unwrap();
         assert_eq!(fetched.as_deref(), Some(bytes.as_slice()));
 
         // Missing hash → None.
-        let missing = adapter
-            .fetch_sound_asset("nope", "mp3")
-            .await
-            .unwrap();
+        let missing = adapter.fetch_sound_asset("nope", "mp3").await.unwrap();
         assert!(missing.is_none());
     }
 
@@ -554,14 +518,8 @@ mod tests {
             .await
             .unwrap();
 
-        let from_a = dev_a
-            .fetch_new_logs(&DeviceCursor::epoch())
-            .await
-            .unwrap();
-        let from_b = dev_b
-            .fetch_new_logs(&DeviceCursor::epoch())
-            .await
-            .unwrap();
+        let from_a = dev_a.fetch_new_logs(&DeviceCursor::epoch()).await.unwrap();
+        let from_b = dev_b.fetch_new_logs(&DeviceCursor::epoch()).await.unwrap();
         // Each device sees both — the orchestrator's job is to
         // filter out the originator's own logs.
         assert_eq!(from_a.len(), 2);

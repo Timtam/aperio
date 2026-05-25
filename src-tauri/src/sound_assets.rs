@@ -69,8 +69,7 @@ use crate::db::SharedConn;
 /// formats the average user might import; exotic formats
 /// (`.opus`, `.wma`) would need to be added when someone hits
 /// them in the wild.
-const FETCH_EXTENSION_CANDIDATES: &[&str] =
-    &["mp3", "ogg", "wav", "m4a", "aac", "flac"];
+const FETCH_EXTENSION_CANDIDATES: &[&str] = &["mp3", "ogg", "wav", "m4a", "aac", "flac"];
 
 /// Counts surfaced from one `sync_assets` invocation. The
 /// orchestrator folds these into nothing yet — the sync-log
@@ -120,23 +119,14 @@ pub async fn sync_assets(
                 let bytes = match std::fs::read(&path) {
                     Ok(b) => b,
                     Err(err) => {
-                        warn!(
-                            ?path,
-                            ?err,
-                            "couldn't read local sound for push",
-                        );
+                        warn!(?path, ?err, "couldn't read local sound for push",);
                         report.failed += 1;
                         continue;
                     }
                 };
-                match adapter
-                    .push_sound_asset(&hash, &extension, &bytes)
-                    .await
-                {
+                match adapter.push_sound_asset(&hash, &extension, &bytes).await {
                     Ok(()) => {
-                        if let Err(err) =
-                            mark_hash_pushed(db, &hash, &extension)
-                        {
+                        if let Err(err) = mark_hash_pushed(db, &hash, &extension) {
                             warn!(
                                 hash = %hash,
                                 ?err,
@@ -184,9 +174,7 @@ pub async fn sync_assets(
         for ext in FETCH_EXTENSION_CANDIDATES {
             match adapter.fetch_sound_asset(&hash, ext).await {
                 Ok(Some(bytes)) => {
-                    if let Err(err) =
-                        write_local_sound(sounds_dir, &hash, ext, &bytes)
-                    {
+                    if let Err(err) = write_local_sound(sounds_dir, &hash, ext, &bytes) {
                         warn!(
                             hash = %hash,
                             ?err,
@@ -201,9 +189,7 @@ pub async fn sync_assets(
                         // round's push half doesn't see the
                         // freshly-saved local file and try to
                         // re-upload identical bytes.
-                        if let Err(err) =
-                            mark_hash_pushed(db, &hash, ext)
-                        {
+                        if let Err(err) = mark_hash_pushed(db, &hash, ext) {
                             warn!(
                                 hash = %hash,
                                 ?err,
@@ -308,22 +294,17 @@ fn write_local_sound(
     bytes: &[u8],
 ) -> SyncResult<()> {
     if let Err(err) = std::fs::create_dir_all(sounds_dir) {
-        return Err(SyncError::io(format!(
-            "create sounds dir: {err}"
-        )));
+        return Err(SyncError::io(format!("create sounds dir: {err}")));
     }
     let path = sounds_dir.join(format!("{hash}.{extension}"));
-    std::fs::write(&path, bytes).map_err(|err| {
-        SyncError::io(format!("write sound {path:?}: {err}"))
-    })
+    std::fs::write(&path, bytes)
+        .map_err(|err| SyncError::io(format!("write sound {path:?}: {err}")))
 }
 
 /// Look up whether `hash` is already in `sync_assets_pushed`.
 fn hash_was_pushed(db: &SharedConn, hash: &str) -> bool {
     let conn = db.lock().expect("db mutex poisoned");
-    let mut stmt = match conn.prepare(
-        "SELECT 1 FROM sync_assets_pushed WHERE hash = ? LIMIT 1",
-    ) {
+    let mut stmt = match conn.prepare("SELECT 1 FROM sync_assets_pushed WHERE hash = ? LIMIT 1") {
         Ok(s) => s,
         Err(err) => {
             warn!(?err, "couldn't prepare sync_assets_pushed lookup");
@@ -334,11 +315,7 @@ fn hash_was_pushed(db: &SharedConn, hash: &str) -> bool {
 }
 
 /// Record a successful push so the next round skips it.
-fn mark_hash_pushed(
-    db: &SharedConn,
-    hash: &str,
-    extension: &str,
-) -> rusqlite::Result<()> {
+fn mark_hash_pushed(db: &SharedConn, hash: &str, extension: &str) -> rusqlite::Result<()> {
     let conn = db.lock().expect("db mutex poisoned");
     conn.execute(
         "INSERT OR REPLACE INTO sync_assets_pushed
@@ -417,18 +394,20 @@ mod tests {
         (dir, db)
     }
 
-    fn insert_calendar(
-        db: &SharedConn,
-        id: &str,
-        default_sound: Option<&str>,
-    ) {
+    fn insert_calendar(db: &SharedConn, id: &str, default_sound: Option<&str>) {
         let conn = db.lock().unwrap();
         conn.execute(
             "INSERT INTO calendars (
                 id, source, name, color_hex, color_source, read_only,
                 default_sound, created_at, updated_at
              ) VALUES (?, 'local', ?, NULL, NULL, 0, ?, ?, ?)",
-            params![id, id, default_sound, Utc::now().to_rfc3339(), Utc::now().to_rfc3339()],
+            params![
+                id,
+                id,
+                default_sound,
+                Utc::now().to_rfc3339(),
+                Utc::now().to_rfc3339()
+            ],
         )
         .unwrap();
     }
@@ -482,9 +461,8 @@ mod tests {
         let (_tmp, db) = fresh_db();
         let shared = db.shared();
         let hash = "a".repeat(64);
-        let sound_json = format!(
-            r#"{{"source":{{"type":"custom","sha256":"{hash}"}},"volume":80}}"#
-        );
+        let sound_json =
+            format!(r#"{{"source":{{"type":"custom","sha256":"{hash}"}},"volume":80}}"#);
         insert_calendar(&shared, "cal-1", Some(&sound_json));
         let set = referenced_hashes(&shared).unwrap();
         assert_eq!(set.len(), 1);
@@ -542,8 +520,7 @@ mod tests {
     fn list_local_sounds_skips_non_hex_filenames() {
         let tmp = TempDir::new().unwrap();
         let hash = "f".repeat(64);
-        std::fs::write(tmp.path().join(format!("{hash}.mp3")), b"audio")
-            .unwrap();
+        std::fs::write(tmp.path().join(format!("{hash}.mp3")), b"audio").unwrap();
         std::fs::write(tmp.path().join(".DS_Store"), b"junk").unwrap();
         std::fs::write(tmp.path().join("readme.txt"), b"docs").unwrap();
         let out = list_local_sounds(tmp.path()).unwrap();
@@ -562,8 +539,7 @@ mod tests {
     fn local_hash_present_walks_candidate_extensions() {
         let tmp = TempDir::new().unwrap();
         let hash = "a".repeat(64);
-        std::fs::write(tmp.path().join(format!("{hash}.ogg")), b"audio")
-            .unwrap();
+        std::fs::write(tmp.path().join(format!("{hash}.ogg")), b"audio").unwrap();
         assert_eq!(
             local_hash_present(tmp.path(), &hash),
             Some("ogg".to_string()),
@@ -620,21 +596,20 @@ mod tests {
             )),
         );
 
-        let report =
-            sync_assets(&shared, local_sounds.path(), &adapter).await.unwrap();
+        let report = sync_assets(&shared, local_sounds.path(), &adapter)
+            .await
+            .unwrap();
         assert_eq!(report.pushed, 1);
         assert_eq!(report.fetched, 1);
         assert_eq!(report.missing_on_remote, 0);
         assert_eq!(report.failed, 0);
 
         // Local file now exists on the remote.
-        let on_remote =
-            adapter.fetch_sound_asset(&local_hash, "mp3").await.unwrap();
+        let on_remote = adapter.fetch_sound_asset(&local_hash, "mp3").await.unwrap();
         assert_eq!(on_remote.as_deref(), Some(b"local-audio".as_slice()));
 
         // Remote file now exists locally.
-        let fetched_path =
-            local_sounds.path().join(format!("{remote_hash}.ogg"));
+        let fetched_path = local_sounds.path().join(format!("{remote_hash}.ogg"));
         assert!(fetched_path.exists());
         assert_eq!(
             std::fs::read(&fetched_path).unwrap(),
@@ -644,8 +619,9 @@ mod tests {
         // `sync_assets_pushed` recorded the local hash so a
         // second pass doesn't re-push.
         assert!(hash_was_pushed(&shared, &local_hash));
-        let second =
-            sync_assets(&shared, local_sounds.path(), &adapter).await.unwrap();
+        let second = sync_assets(&shared, local_sounds.path(), &adapter)
+            .await
+            .unwrap();
         assert_eq!(second.pushed, 0);
         assert_eq!(second.fetched, 0);
     }
@@ -671,8 +647,9 @@ mod tests {
             )),
         );
 
-        let report =
-            sync_assets(&shared, local_sounds.path(), &adapter).await.unwrap();
+        let report = sync_assets(&shared, local_sounds.path(), &adapter)
+            .await
+            .unwrap();
         assert_eq!(report.fetched, 0);
         assert_eq!(report.missing_on_remote, 1);
         assert_eq!(report.failed, 0);

@@ -68,9 +68,7 @@ impl LogFileName {
     /// doesn't match.
     pub fn from_filename(name: &str) -> SyncResult<Self> {
         let stem = name.strip_suffix(".jsonl").ok_or_else(|| {
-            SyncError::protocol(format!(
-                "log filename '{name}' missing .jsonl suffix",
-            ))
+            SyncError::protocol(format!("log filename '{name}' missing .jsonl suffix",))
         })?;
         // The timestamp portion never contains underscores (only
         // hyphens, digits, T, Z, and an optional dot for
@@ -194,14 +192,13 @@ impl LogFile {
             if trimmed.is_empty() {
                 continue;
             }
-            let env: EventEnvelope =
-                serde_json::from_str(trimmed).map_err(|err| {
-                    SyncError::protocol(format!(
-                        "log file '{}' line {}: {err}",
-                        self.name.to_filename(),
-                        idx + 1,
-                    ))
-                })?;
+            let env: EventEnvelope = serde_json::from_str(trimmed).map_err(|err| {
+                SyncError::protocol(format!(
+                    "log file '{}' line {}: {err}",
+                    self.name.to_filename(),
+                    idx + 1,
+                ))
+            })?;
             out.push(env);
         }
         Ok(out)
@@ -254,8 +251,7 @@ mod tests {
 
     #[test]
     fn filename_parser_rejects_missing_underscore() {
-        let err = LogFileName::from_filename("2025-05-12T09-14-22Z.jsonl")
-            .unwrap_err();
+        let err = LogFileName::from_filename("2025-05-12T09-14-22Z.jsonl").unwrap_err();
         assert!(matches!(err, SyncError::Protocol(_)));
     }
 
@@ -276,9 +272,7 @@ mod tests {
                 id: "evt_b".into(),
                 device_id: fixture_id(),
                 timestamp: stamp,
-                event: SyncEvent::EventDeleted(crate::event::IdPayload {
-                    id: "row-1".into(),
-                }),
+                event: SyncEvent::EventDeleted(crate::event::IdPayload { id: "row-1".into() }),
             },
         ];
         let file = LogFile::from_envelopes(fixture_id(), stamp, &envelopes).unwrap();

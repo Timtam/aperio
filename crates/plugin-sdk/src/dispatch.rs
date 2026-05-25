@@ -31,22 +31,16 @@ use std::os::raw::c_void;
 
 use plugin_core::ffi::{PluginCallResult, PLUGIN_CALL_ERR_INTERNAL};
 
-use crate::error_map::{
-    cal_error_to_response, sync_error_to_response, vc_error_to_response,
-};
+use crate::error_map::{cal_error_to_response, sync_error_to_response, vc_error_to_response};
 use crate::instance::PluginInstance;
 use crate::response::{error_response, ok_empty_response, ok_response};
 
 /// Borrow the per-instance handle, returning a typed
 /// [`PluginInstance`] reference or an internal error response
 /// when the handle is NULL.
-pub fn instance<'a, A>(
-    handle: *mut c_void,
-) -> Result<&'a PluginInstance<A>, PluginCallResult> {
+pub fn instance<'a, A>(handle: *mut c_void) -> Result<&'a PluginInstance<A>, PluginCallResult> {
     unsafe { PluginInstance::<A>::from_handle(handle) }
-        .ok_or_else(|| {
-            error_response(PLUGIN_CALL_ERR_INTERNAL, "null instance handle")
-        })
+        .ok_or_else(|| error_response(PLUGIN_CALL_ERR_INTERNAL, "null instance handle"))
 }
 
 /// Drive a calendar/tasks/contacts trait method through the
@@ -57,10 +51,7 @@ pub fn instance<'a, A>(
 /// futures that don't carry a borrow back into the macro
 /// expansion — the static lifetime is sound because the borrow
 /// exits before `block_on` returns.
-pub fn cal_dispatch<A, T, F, Fut>(
-    handle: *mut c_void,
-    call: F,
-) -> PluginCallResult
+pub fn cal_dispatch<A, T, F, Fut>(handle: *mut c_void, call: F) -> PluginCallResult
 where
     T: serde::Serialize,
     A: 'static,
@@ -71,8 +62,7 @@ where
         Ok(i) => i,
         Err(r) => return r,
     };
-    let p_static: &'static A =
-        unsafe { std::mem::transmute::<&A, &'static A>(inst.plugin()) };
+    let p_static: &'static A = unsafe { std::mem::transmute::<&A, &'static A>(inst.plugin()) };
     match inst.runtime().block_on(call(p_static)) {
         Ok(v) => ok_response(&v),
         Err(e) => cal_error_to_response(e),
@@ -80,10 +70,7 @@ where
 }
 
 /// Unit-returning sibling of [`cal_dispatch`].
-pub fn cal_dispatch_unit<A, F, Fut>(
-    handle: *mut c_void,
-    call: F,
-) -> PluginCallResult
+pub fn cal_dispatch_unit<A, F, Fut>(handle: *mut c_void, call: F) -> PluginCallResult
 where
     A: 'static,
     F: FnOnce(&'static A) -> Fut,
@@ -93,8 +80,7 @@ where
         Ok(i) => i,
         Err(r) => return r,
     };
-    let p_static: &'static A =
-        unsafe { std::mem::transmute::<&A, &'static A>(inst.plugin()) };
+    let p_static: &'static A = unsafe { std::mem::transmute::<&A, &'static A>(inst.plugin()) };
     match inst.runtime().block_on(call(p_static)) {
         Ok(()) => ok_empty_response(),
         Err(e) => cal_error_to_response(e),
@@ -104,10 +90,7 @@ where
 /// Sync-adapter counterpart to [`cal_dispatch`] — drives a
 /// `SyncResult<T>`-returning trait method through the plugin's
 /// runtime.
-pub fn sync_dispatch<A, T, F, Fut>(
-    handle: *mut c_void,
-    call: F,
-) -> PluginCallResult
+pub fn sync_dispatch<A, T, F, Fut>(handle: *mut c_void, call: F) -> PluginCallResult
 where
     T: serde::Serialize,
     A: 'static,
@@ -118,8 +101,7 @@ where
         Ok(i) => i,
         Err(r) => return r,
     };
-    let p_static: &'static A =
-        unsafe { std::mem::transmute::<&A, &'static A>(inst.plugin()) };
+    let p_static: &'static A = unsafe { std::mem::transmute::<&A, &'static A>(inst.plugin()) };
     match inst.runtime().block_on(call(p_static)) {
         Ok(v) => ok_response(&v),
         Err(e) => sync_error_to_response(e),
@@ -127,10 +109,7 @@ where
 }
 
 /// Unit-returning sibling of [`sync_dispatch`].
-pub fn sync_dispatch_unit<A, F, Fut>(
-    handle: *mut c_void,
-    call: F,
-) -> PluginCallResult
+pub fn sync_dispatch_unit<A, F, Fut>(handle: *mut c_void, call: F) -> PluginCallResult
 where
     A: 'static,
     F: FnOnce(&'static A) -> Fut,
@@ -140,8 +119,7 @@ where
         Ok(i) => i,
         Err(r) => return r,
     };
-    let p_static: &'static A =
-        unsafe { std::mem::transmute::<&A, &'static A>(inst.plugin()) };
+    let p_static: &'static A = unsafe { std::mem::transmute::<&A, &'static A>(inst.plugin()) };
     match inst.runtime().block_on(call(p_static)) {
         Ok(()) => ok_empty_response(),
         Err(e) => sync_error_to_response(e),
@@ -151,10 +129,7 @@ where
 /// VC-adapter counterpart to [`cal_dispatch`] — drives a
 /// `VcResult<T>`-returning trait method through the plugin's
 /// runtime.
-pub fn vc_dispatch<A, T, F, Fut>(
-    handle: *mut c_void,
-    call: F,
-) -> PluginCallResult
+pub fn vc_dispatch<A, T, F, Fut>(handle: *mut c_void, call: F) -> PluginCallResult
 where
     A: 'static,
     T: serde::Serialize,
@@ -165,8 +140,7 @@ where
         Ok(i) => i,
         Err(r) => return r,
     };
-    let p_static: &'static A =
-        unsafe { std::mem::transmute::<&A, &'static A>(inst.plugin()) };
+    let p_static: &'static A = unsafe { std::mem::transmute::<&A, &'static A>(inst.plugin()) };
     match inst.runtime().block_on(call(p_static)) {
         Ok(v) => ok_response(&v),
         Err(e) => vc_error_to_response(e),
@@ -174,10 +148,7 @@ where
 }
 
 /// Unit-returning sibling of [`vc_dispatch`].
-pub fn vc_dispatch_unit<A, F, Fut>(
-    handle: *mut c_void,
-    call: F,
-) -> PluginCallResult
+pub fn vc_dispatch_unit<A, F, Fut>(handle: *mut c_void, call: F) -> PluginCallResult
 where
     A: 'static,
     F: FnOnce(&'static A) -> Fut,
@@ -187,8 +158,7 @@ where
         Ok(i) => i,
         Err(r) => return r,
     };
-    let p_static: &'static A =
-        unsafe { std::mem::transmute::<&A, &'static A>(inst.plugin()) };
+    let p_static: &'static A = unsafe { std::mem::transmute::<&A, &'static A>(inst.plugin()) };
     match inst.runtime().block_on(call(p_static)) {
         Ok(()) => ok_empty_response(),
         Err(e) => vc_error_to_response(e),

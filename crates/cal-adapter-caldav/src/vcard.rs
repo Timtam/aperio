@@ -175,12 +175,9 @@ pub fn parse_vcard(
                     .or_else(|| {
                         // vCard 3.0 sometimes emits `20240519T120000Z`
                         // — try the compact form too.
-                        chrono::NaiveDateTime::parse_from_str(
-                            value,
-                            "%Y%m%dT%H%M%SZ",
-                        )
-                        .ok()
-                        .map(|n| Utc.from_utc_datetime(&n))
+                        chrono::NaiveDateTime::parse_from_str(value, "%Y%m%dT%H%M%SZ")
+                            .ok()
+                            .map(|n| Utc.from_utc_datetime(&n))
                     });
             }
             "UID" | "PRODID" => { /* discard — adapter owns the id mapping */ }
@@ -216,8 +213,7 @@ pub fn parse_vcard(
                 // on the user.
                 let parts = split_structured(value);
                 let pobox = parts.first().map(String::as_str).unwrap_or("");
-                let extended =
-                    parts.get(1).map(String::as_str).unwrap_or("");
+                let extended = parts.get(1).map(String::as_str).unwrap_or("");
                 let street = parts.get(2).map(String::as_str).unwrap_or("");
                 let combined_street = [pobox, extended, street]
                     .into_iter()
@@ -390,7 +386,10 @@ fn decode_inline_photo(head: &str, value: &str) -> Option<ContactPhoto> {
     // vCard 4.0 data URI: `PHOTO:data:image/jpeg;base64,<b64>` —
     // no parameters on the head, the encoding hint lives inside
     // the value itself.
-    if let Some(rest) = value.strip_prefix("data:").or_else(|| value.strip_prefix("DATA:")) {
+    if let Some(rest) = value
+        .strip_prefix("data:")
+        .or_else(|| value.strip_prefix("DATA:"))
+    {
         let mut split = rest.splitn(2, ',');
         let header = split.next()?;
         let body = split.next()?;
@@ -425,9 +424,9 @@ fn decode_inline_photo(head: &str, value: &str) -> Option<ContactPhoto> {
         .filter_map(|p| p.split_once('='))
         .map(|(k, v)| (k.trim(), v.trim()))
         .collect();
-    let encoded = params
-        .iter()
-        .any(|(k, v)| k.eq_ignore_ascii_case("ENCODING") && (*v == "b" || v.eq_ignore_ascii_case("BASE64")));
+    let encoded = params.iter().any(|(k, v)| {
+        k.eq_ignore_ascii_case("ENCODING") && (*v == "b" || v.eq_ignore_ascii_case("BASE64"))
+    });
     if !encoded {
         // PHOTO without ENCODING and not a data: URI ⇒ this is a
         // bare URL like `PHOTO:http://example.org/photo.jpg`. We
@@ -541,10 +540,7 @@ pub fn build_vcard(uid: &str, contact: &NewContact) -> String {
         if !email.is_empty() {
             // TYPE=INTERNET is the historical baseline; some
             // servers (older Radicale) reject EMAIL without a TYPE.
-            out.push_str(&format!(
-                "EMAIL;TYPE=INTERNET:{}\r\n",
-                escape(email)
-            ));
+            out.push_str(&format!("EMAIL;TYPE=INTERNET:{}\r\n", escape(email)));
         }
     }
     for phone in &contact.phone_numbers {
@@ -623,10 +619,7 @@ pub fn build_vcard(uid: &str, contact: &NewContact) -> String {
                 .filter(|s| !s.is_empty())
                 .map(|s| format!(";CN={}", escape_param(s)))
                 .unwrap_or_default();
-            out.push_str(&format!(
-                "MEMBER{cn}:mailto:{}\r\n",
-                escape(&m.email),
-            ));
+            out.push_str(&format!("MEMBER{cn}:mailto:{}\r\n", escape(&m.email),));
             out.push_str(&format!(
                 "X-ADDRESSBOOKSERVER-MEMBER{cn}:mailto:{}\r\n",
                 escape(&m.email),
@@ -886,10 +879,7 @@ mod tests {
             given_name: Some("Max".into()),
             family_name: Some("Mustermann".into()),
             organization: Some("Example GmbH".into()),
-            emails: vec![
-                "max@example.com".into(),
-                "m.muster@example.org".into(),
-            ],
+            emails: vec!["max@example.com".into(), "m.muster@example.org".into()],
             phone_numbers: vec!["+49 30 1234567".into()],
             birthday: Some(NaiveDate::from_ymd_opt(1985, 4, 17).unwrap()),
             notes: Some("Met at conf 2024".into()),
@@ -948,10 +938,7 @@ mod tests {
         // \, \; \n inside NOTE must come back as the literal chars.
         let body = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Max\r\nNOTE:Line A\\nLine B\\, comma\\; semi\r\nEND:VCARD\r\n";
         let parsed = parse(body);
-        assert_eq!(
-            parsed.notes.as_deref(),
-            Some("Line A\nLine B, comma; semi"),
-        );
+        assert_eq!(parsed.notes.as_deref(), Some("Line A\nLine B, comma; semi"),);
     }
 
     #[test]
@@ -1024,7 +1011,10 @@ mod tests {
         let parsed = parse(body);
         assert_eq!(
             parsed.emails,
-            vec!["work@example.com".to_string(), "home@example.com".to_string()],
+            vec![
+                "work@example.com".to_string(),
+                "home@example.com".to_string()
+            ],
         );
     }
 
@@ -1105,10 +1095,7 @@ mod tests {
         assert_eq!(reparsed.family_name.as_deref(), Some("Doe"));
         assert_eq!(reparsed.organization.as_deref(), Some("Beispiel AG"));
         assert_eq!(reparsed.emails, vec!["jane@example.com".to_string()]);
-        assert_eq!(
-            reparsed.phone_numbers,
-            vec!["+49 170 1234567".to_string()],
-        );
+        assert_eq!(reparsed.phone_numbers, vec!["+49 170 1234567".to_string()],);
         assert_eq!(reparsed.birthday, original.birthday);
     }
 
@@ -1116,11 +1103,11 @@ mod tests {
     /// (signature + IHDR + IDAT + IEND) so the round-trip exercises
     /// the same decoder path a server would feed us.
     const PNG_1X1: &[u8] = &[
-        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48,
-        0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00,
-        0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78,
-        0x9c, 0x63, 0xfa, 0xcf, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01, 0xe5, 0x27, 0xde, 0xfc,
-        0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f,
+        0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0xfa,
+        0xcf, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01, 0xe5, 0x27, 0xde, 0xfc, 0x00, 0x00, 0x00, 0x00,
+        0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
     ];
 
     #[test]
@@ -1179,8 +1166,7 @@ mod tests {
         // lines — confirm we actually produced one so this test
         // covers the fold-handling path through `unfold`.
         assert!(s.contains("\r\n "));
-        let body =
-            format!("BEGIN:VCARD\r\nVERSION:3.0\r\nFN:T\r\n{s}END:VCARD\r\n");
+        let body = format!("BEGIN:VCARD\r\nVERSION:3.0\r\nFN:T\r\n{s}END:VCARD\r\n");
         let extracted = parse_vcard_photo(&body).expect("folded photo decodes");
         assert_eq!(extracted.data, PNG_1X1.to_vec());
     }

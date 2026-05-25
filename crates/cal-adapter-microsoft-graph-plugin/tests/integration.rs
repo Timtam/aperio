@@ -3,7 +3,9 @@
 use std::sync::Arc;
 
 use plugin_core::{
-    abi::AperioPlugin, manager::PluginManager, manifest::PluginManifest,
+    abi::AperioPlugin,
+    manager::PluginManager,
+    manifest::PluginManifest,
     shim::{FfiCalendarAdapter, FfiContactsAdapter, FfiTasksAdapter},
     Capability, PluginType, ABI_VERSION,
 };
@@ -29,9 +31,7 @@ fn manifest() -> PluginManifest {
 
 fn register() -> PluginManager {
     let m = PluginManager::new("0.1.0");
-    let d: *mut AperioPlugin = unsafe {
-        cal_adapter_microsoft_graph_plugin::build_descriptor()
-    };
+    let d: *mut AperioPlugin = unsafe { cal_adapter_microsoft_graph_plugin::build_descriptor() };
     assert!(!d.is_null());
     let dx: unsafe extern "C" fn(*mut AperioPlugin) =
         cal_adapter_microsoft_graph_plugin::DESTROY_FN;
@@ -40,7 +40,9 @@ fn register() -> PluginManager {
 }
 
 fn open_one(manager: &PluginManager, access: &str) -> Arc<plugin_core::LoadedInstance> {
-    let loaded = manager.get("com.aperio.cal-adapter-microsoft-graph").unwrap();
+    let loaded = manager
+        .get("com.aperio.cal-adapter-microsoft-graph")
+        .unwrap();
     let cfg = serde_json::json!({
         "client_id": "test-client",
         "authority": "common",
@@ -49,22 +51,21 @@ fn open_one(manager: &PluginManager, access: &str) -> Arc<plugin_core::LoadedIns
         "expires_at": "2099-01-01T00:00:00Z",
         "scope": null,
     });
-    manager.open_instance(loaded, &cfg.to_string()).expect("open")
+    manager
+        .open_instance(loaded, &cfg.to_string())
+        .expect("open")
 }
 
 #[test]
 fn graph_plugin_exposes_all_three_surfaces() {
     let manager = register();
     let inst = open_one(&manager, "eyJ.first");
-    let _cal: Arc<FfiCalendarAdapter> = Arc::new(
-        FfiCalendarAdapter::new(inst.clone()).expect("calendar slot present"),
-    );
-    let _tasks: Arc<FfiTasksAdapter> = Arc::new(
-        FfiTasksAdapter::new(inst.clone()).expect("tasks slot present"),
-    );
-    let _contacts: Arc<FfiContactsAdapter> = Arc::new(
-        FfiContactsAdapter::new(inst).expect("contacts slot present"),
-    );
+    let _cal: Arc<FfiCalendarAdapter> =
+        Arc::new(FfiCalendarAdapter::new(inst.clone()).expect("calendar slot present"));
+    let _tasks: Arc<FfiTasksAdapter> =
+        Arc::new(FfiTasksAdapter::new(inst.clone()).expect("tasks slot present"));
+    let _contacts: Arc<FfiContactsAdapter> =
+        Arc::new(FfiContactsAdapter::new(inst).expect("contacts slot present"));
 }
 
 #[test]

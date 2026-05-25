@@ -47,9 +47,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex as _Mutex;
 
-use crate::api::{
-    delete_absolute, get_absolute, patch_absolute, post_absolute, ApiState,
-};
+use crate::api::{delete_absolute, get_absolute, patch_absolute, post_absolute, ApiState};
 use crate::error::GoogleResult;
 
 const TASKS_API_BASE: &str = "https://tasks.googleapis.com/tasks/v1";
@@ -116,11 +114,7 @@ pub async fn get_tasks(state: &ApiState, list_id: &str) -> GoogleResult<Vec<Task
 /// server-assigned id + etag come back in the response; we
 /// synthesise the returned `Task` from those plus the request
 /// payload, saving a follow-up GET.
-pub async fn create_task(
-    state: &ApiState,
-    list_id: &str,
-    task: NewTask,
-) -> GoogleResult<Task> {
+pub async fn create_task(state: &ApiState, list_id: &str, task: NewTask) -> GoogleResult<Task> {
     let list_enc = urlencoding(list_id);
     let mut url = format!("{TASKS_API_BASE}/lists/{list_enc}/tasks");
     // Google's `parent` query param sets the parent at insert time
@@ -163,11 +157,7 @@ pub async fn update_task(state: &ApiState, task: &Task) -> GoogleResult<Task> {
 }
 
 /// `DELETE /lists/{tasklistId}/tasks/{taskId}`.
-pub async fn delete_task(
-    state: &ApiState,
-    list_id: &str,
-    task_id: &str,
-) -> GoogleResult<()> {
+pub async fn delete_task(state: &ApiState, list_id: &str, task_id: &str) -> GoogleResult<()> {
     let list_enc = urlencoding(list_id);
     let task_enc = urlencoding(task_id);
     let url = format!("{TASKS_API_BASE}/lists/{list_enc}/tasks/{task_enc}");
@@ -175,11 +165,7 @@ pub async fn delete_task(
 }
 
 /// `PATCH /users/@me/lists/{tasklistId}` with `{ "title": "..." }`.
-pub async fn rename_task_list(
-    state: &ApiState,
-    list_id: &str,
-    new_name: &str,
-) -> GoogleResult<()> {
+pub async fn rename_task_list(state: &ApiState, list_id: &str, new_name: &str) -> GoogleResult<()> {
     let list_enc = urlencoding(list_id);
     let url = format!("{TASKS_API_BASE}/users/@me/lists/{list_enc}");
     let body = serde_json::json!({ "title": new_name });
@@ -306,9 +292,7 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
 }
 
 fn new_task_to_body(new: &NewTask) -> TaskEntry {
-    let due = combine_date_to_google(
-        new.scheduled_date.or(new.deadline_date),
-    );
+    let due = combine_date_to_google(new.scheduled_date.or(new.deadline_date));
     if new.recurrence.is_some() {
         tracing::warn!(
             "Google Tasks adapter dropping recurrence on write — Google Tasks API has no recurrence field",
@@ -336,9 +320,7 @@ fn new_task_to_body(new: &NewTask) -> TaskEntry {
 }
 
 fn task_to_body(task: &Task) -> TaskEntry {
-    let due = combine_date_to_google(
-        task.scheduled_date.or(task.deadline_date),
-    );
+    let due = combine_date_to_google(task.scheduled_date.or(task.deadline_date));
     if task.recurrence.is_some() {
         tracing::warn!(
             "Google Tasks adapter dropping recurrence on update — Google Tasks API has no recurrence field",
@@ -495,8 +477,14 @@ mod tests {
 
     #[test]
     fn status_round_trip_for_open_and_completed() {
-        assert_eq!(google_status_to_task_status("needsAction"), TaskStatus::Open);
-        assert_eq!(google_status_to_task_status("completed"), TaskStatus::Completed);
+        assert_eq!(
+            google_status_to_task_status("needsAction"),
+            TaskStatus::Open
+        );
+        assert_eq!(
+            google_status_to_task_status("completed"),
+            TaskStatus::Completed
+        );
         // Defaults to Open for safety against future enum additions.
         assert_eq!(google_status_to_task_status("flagged"), TaskStatus::Open);
 
@@ -674,12 +662,9 @@ mod tests {
             .create_async()
             .await;
         let state = fixture_state(&server.url());
-        let err = delete_absolute(
-            &state,
-            &format!("{}/lists/L/tasks/missing", server.url()),
-        )
-        .await
-        .unwrap_err();
+        let err = delete_absolute(&state, &format!("{}/lists/L/tasks/missing", server.url()))
+            .await
+            .unwrap_err();
         match err {
             GoogleError::Http { status, .. } => assert_eq!(status, 404),
             other => panic!("expected Http, got {other:?}"),
@@ -698,12 +683,9 @@ mod tests {
             .create_async()
             .await;
         let state = fixture_state(&server.url());
-        let resp: TasksResponse = get_absolute(
-            &state,
-            &format!("{}/lists/L/tasks", server.url()),
-        )
-        .await
-        .unwrap();
+        let resp: TasksResponse = get_absolute(&state, &format!("{}/lists/L/tasks", server.url()))
+            .await
+            .unwrap();
         assert_eq!(resp.items.len(), 2);
         assert_eq!(resp.items[0].id, "t1");
         assert_eq!(resp.items[1].status.as_deref(), Some("completed"));

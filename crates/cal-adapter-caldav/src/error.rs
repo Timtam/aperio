@@ -19,10 +19,7 @@ pub enum CaldavError {
     /// the status code so the UI can distinguish 401 (re-auth) from
     /// 404 (typo in the URL) from 5xx (server problem).
     #[error("unexpected HTTP status {status}: {message}")]
-    Http {
-        status: u16,
-        message: String,
-    },
+    Http { status: u16, message: String },
 
     /// We got a response but its body wasn't the CalDAV XML we
     /// needed — usually means the URL points at a generic web server

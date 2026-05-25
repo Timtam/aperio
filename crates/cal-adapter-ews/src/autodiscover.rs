@@ -70,9 +70,8 @@ pub async fn discover(
     password: &str,
     http: &reqwest::Client,
 ) -> EwsResult<DiscoveredEndpoints> {
-    let domain = email_domain(email).ok_or_else(|| {
-        EwsError::Config(format!("'{email}' is not a valid email address"))
-    })?;
+    let domain = email_domain(email)
+        .ok_or_else(|| EwsError::Config(format!("'{email}' is not a valid email address")))?;
     let creds = BasicCredentials {
         username: email.to_string(),
         password: password.to_string(),
@@ -114,9 +113,7 @@ pub async fn discover(
             // response. Surface the last error so the UI can say
             // "couldn't reach autodiscover.hs-anhalt.de" vs the
             // generic "no EWS endpoint found".
-            return Err(last_err.unwrap_or_else(|| {
-                EwsError::DiscoveryFailed(domain.to_string())
-            }));
+            return Err(last_err.unwrap_or_else(|| EwsError::DiscoveryFailed(domain.to_string())));
         };
         match outcome {
             Outcome::Settings(found) => {
@@ -140,9 +137,7 @@ pub async fn discover(
                 // Autodiscover spoke to us coherently but said "no".
                 // Surface as DiscoveryFailed so the AccountsDialog
                 // can suggest manual entry rather than retry.
-                return Err(EwsError::DiscoveryFailed(format!(
-                    "{domain}: {message}"
-                )));
+                return Err(EwsError::DiscoveryFailed(format!("{domain}: {message}")));
             }
         }
     }
@@ -198,13 +193,10 @@ async fn probe(
 ) -> EwsResult<Outcome> {
     let body = build_request_xml(email);
     let auth = basic_auth_header(creds)?;
-    let mut req = http
-        .post(url)
-        .body(body)
-        .header(
-            CONTENT_TYPE,
-            HeaderValue::from_static("text/xml; charset=utf-8"),
-        );
+    let mut req = http.post(url).body(body).header(
+        CONTENT_TYPE,
+        HeaderValue::from_static("text/xml; charset=utf-8"),
+    );
     for (k, v) in auth.iter() {
         req = req.header(k, v.clone());
     }
@@ -373,9 +365,7 @@ fn parse_response(body: &str) -> EwsResult<Outcome> {
             }
             Ok(XmlEvent::Eof) => break,
             Err(err) => {
-                return Err(EwsError::Protocol(format!(
-                    "autodiscover xml parse: {err}"
-                )));
+                return Err(EwsError::Protocol(format!("autodiscover xml parse: {err}")));
             }
             _ => {}
         }
@@ -545,10 +535,7 @@ mod tests {
     #[test]
     fn unparseable_response_is_protocol_error() {
         let body = "<html><body>404 Not Found</body></html>";
-        assert!(matches!(
-            parse_response(body),
-            Err(EwsError::Protocol(_))
-        ));
+        assert!(matches!(parse_response(body), Err(EwsError::Protocol(_))));
     }
 
     #[test]
