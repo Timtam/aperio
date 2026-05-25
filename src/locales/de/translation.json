@@ -255,6 +255,12 @@
           "uninstalling": "Deinstalliere…",
           "error": "Deinstallation fehlgeschlagen: {{error}}",
           "restartRequired": "Plugin konnte nicht entfernt werden: {{error}}. Starte Aperio neu und versuche es erneut."
+        },
+        "remote": {
+          "heading": "Benötigte Plugins",
+          "sectionAria": "Auf anderen Geräten angekündigte Plugins",
+          "hint": "Diese Plugins sind auf deinen anderen Geräten installiert, aber nicht auf diesem. Installiere das passende .aperio-Archiv über die Schaltfläche oben, damit sie hier verfügbar werden.",
+          "announcedBy": "Auf Gerät installiert: {{device}}"
         }
       },
       "contacts": {

@@ -19,6 +19,7 @@ import type {
   NewEvent,
   PluginArchivePreview,
   PluginInfo,
+  RemotePluginAnnouncement,
   SearchResults,
   Task,
   TaskList,
@@ -1235,3 +1236,10 @@ export interface UninstallPluginRequest {
  *  sync plugin (`active_sync_conflict`). */
 export const uninstallPlugin = (request: UninstallPluginRequest) =>
   invoke<void>('uninstall_plugin', { request });
+
+/** Plugins other devices have announced via the cross-device
+ *  Event Log (§20.8) but THIS device doesn't have installed
+ *  locally. Used to render the "Plugin benötigt" section in
+ *  the Settings → Plugins panel. */
+export const listRemotePlugins = () =>
+  invoke<RemotePluginAnnouncement[]>('list_remote_plugins');

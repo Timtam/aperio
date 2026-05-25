@@ -258,6 +258,12 @@
           "uninstalling": "Uninstalling…",
           "error": "Uninstall failed: {{error}}",
           "restartRequired": "Couldn't drop the plugin: {{error}}. Restart Aperio and try again."
+        },
+        "remote": {
+          "heading": "Plugins needed",
+          "sectionAria": "Plugins announced by other devices",
+          "hint": "These plugins are installed on your other devices but not on this one. Install the matching .aperio archive via the button above to make them available here.",
+          "announcedBy": "Used on device: {{device}}"
         }
       },
       "contacts": {

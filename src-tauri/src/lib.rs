@@ -16,6 +16,7 @@ mod paths;
 mod platform;
 pub mod registry;
 pub mod reminders;
+pub mod remote_plugins;
 pub mod secrets;
 pub mod sftp_host_keys;
 pub mod sound_assets;
@@ -410,6 +411,10 @@ pub fn run() {
             commands::inspect_plugin_archive,
             commands::install_plugin_archive,
             commands::uninstall_plugin,
+            // §20.8 — list plugins announced by other devices
+            // that aren't installed locally; drives the
+            // "Plugin benötigt" section in the Settings panel.
+            commands::list_remote_plugins,
         ])
         .setup(move |app| {
             // Spawn the reminder scheduler on the Tauri/tokio runtime

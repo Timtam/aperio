@@ -271,6 +271,13 @@ pub struct IdPayload {
 /// Payload for `plugin.installed` / `plugin.updated`. The binary
 /// itself is NOT shipped through sync; only the metadata, so
 /// other devices know to offer the matching install (§20.8).
+///
+/// The `name` and `plugin_type` fields are optional for
+/// backward compatibility — older Aperio devices emit payloads
+/// without them, and serde's `default` keeps the deserialise
+/// path tolerant. Newer devices fill them so the §20.8 "Plugin
+/// benötigt" dialog can show the user a recognisable name +
+/// type rather than just an opaque reverse-DNS id.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PluginPayload {
     /// Plugin identifier (matches the manifest's `id` field).
@@ -283,6 +290,15 @@ pub struct PluginPayload {
     /// schema (Phase 20.7).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    /// Human-readable plugin name from the manifest. Optional
+    /// for backward compat with older Aperio devices.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Plugin-type wire string (`calendar-adapter`,
+    /// `sync-adapter`, `videoconference-adapter`,
+    /// `notification`). Optional for backward compat.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin_type: Option<String>,
 }
 
 /// Payload for `shortcut.set` — the action key plus the new
@@ -483,11 +499,15 @@ mod tests {
                 id: "p".into(),
                 version: "1.0.0".into(),
                 source: Some("registry://x".into()),
+                name: None,
+                plugin_type: None,
             }),
             SyncEvent::PluginUpdated(PluginPayload {
                 id: "p".into(),
                 version: "1.0.1".into(),
                 source: None,
+                name: Some("Plugin name".into()),
+                plugin_type: Some("calendar-adapter".into()),
             }),
             SyncEvent::PluginUninstalled(IdPayload { id: "p".into() }),
             SyncEvent::ShortcutSet(ShortcutPayload {

@@ -24,13 +24,16 @@ use std::sync::Arc;
 
 use plugin_core::PluginManager;
 use serde::Serialize;
+use sync_core::{IdPayload, PluginPayload, SyncEvent};
 use tauri::State;
 use tracing::warn;
 
 use super::{CommandError, CommandResult};
 use crate::accounts::{AccountsRepo, AdapterKind};
 use crate::db::DbHandle;
+use crate::event_log::EventLogWriter;
 use crate::registry::AdapterRegistry;
+use crate::remote_plugins::RemotePluginsRepo;
 use crate::user_prefs::UserPrefsRepo;
 
 /// Newtype Tauri state carrying the resolved
@@ -448,6 +451,7 @@ pub async fn install_plugin_archive(
     registry: State<'_, Arc<AdapterRegistry>>,
     plugin_manager: State<'_, Arc<PluginManager>>,
     user_plugins_dir: State<'_, UserPluginsDir>,
+    event_log: State<'_, Arc<EventLogWriter>>,
     request: InstallPluginArchiveRequest,
 ) -> CommandResult<PluginInfo> {
     // Pre-flight: read the manifest WITHOUT extracting. Lets
@@ -552,6 +556,37 @@ pub async fn install_plugin_archive(
             ),
         })?;
     let m = &loaded.manifest;
+    // §20.8: announce the install to other devices via the
+    // event log. Only User-source plugins get announced —
+    // bundled plugins are guaranteed present on every install
+    // and would be noise. install_archive only ever lands
+    // under user_plugins_dir, so this is trivially always
+    // User; we name the variant for clarity rather than
+    // skip the check.
+    if matches!(PluginSource::User, PluginSource::User) {
+        event_log.append(SyncEvent::PluginInstalled(PluginPayload {
+            id: m.id.clone(),
+            version: m.version.clone(),
+            source: None,
+            name: Some(m.name.clone()),
+            plugin_type: Some(m.plugin_type.as_str().to_string()),
+        }));
+    }
+
+    // Local mirror: if the remote_plugins table carried an
+    // announcement for this id from another device, drop it
+    // — the announcement is no longer "pending" once we
+    // have the binary. Errors are non-fatal; the
+    // announcement just stays in the UI until next restart.
+    let prefs_db = db.shared();
+    if let Err(err) = RemotePluginsRepo::new(&prefs_db).delete(&plugin_id) {
+        warn!(
+            plugin_id = %plugin_id,
+            ?err,
+            "couldn't drop remote_plugins row after local install",
+        );
+    }
+
     Ok(PluginInfo {
         id: m.id.clone(),
         name: m.name.clone(),
@@ -697,6 +732,41 @@ async fn try_unload_for_upgrade(
 }
 
 // ─────────────────────────────────────────────────────────────
+// §20.8 — remote plugin announcements (other devices' plugins)
+// ─────────────────────────────────────────────────────────────
+
+/// List every plugin OTHER devices have installed that this
+/// device doesn't have loaded locally. The Settings → Plugins
+/// panel renders these as the "Plugin benötigt" section so the
+/// user can manually fetch the matching `.aperio` archive +
+/// install it via the existing flow.
+///
+/// Sorted by announced_at DESC (most recent first) — the
+/// remote_plugins table's index covers this so the read stays
+/// trivial. We exclude announcements for plugins that ARE
+/// loaded locally because they'd be noise; the install command
+/// also drops the row on success, but a race or a stale
+/// announcement from a prior install/uninstall cycle could
+/// leave one around.
+#[tauri::command]
+pub async fn list_remote_plugins(
+    db: State<'_, DbHandle>,
+    plugin_manager: State<'_, Arc<PluginManager>>,
+) -> CommandResult<Vec<crate::remote_plugins::RemotePluginAnnouncement>> {
+    let shared = db.shared();
+    let repo = crate::remote_plugins::RemotePluginsRepo::new(&shared);
+    let all = repo.list().map_err(|err| CommandError {
+        code: "internal",
+        message: format!("list remote_plugins: {err}"),
+    })?;
+    let out = all
+        .into_iter()
+        .filter(|row| plugin_manager.get_including_disabled(&row.id).is_none())
+        .collect();
+    Ok(out)
+}
+
+// ─────────────────────────────────────────────────────────────
 // §20.10 — uninstall verb (community plugins only)
 // ─────────────────────────────────────────────────────────────
 
@@ -724,6 +794,7 @@ pub async fn uninstall_plugin(
     registry: State<'_, Arc<AdapterRegistry>>,
     plugin_manager: State<'_, Arc<PluginManager>>,
     user_plugins_dir: State<'_, UserPluginsDir>,
+    event_log: State<'_, Arc<EventLogWriter>>,
     request: UninstallPluginRequest,
 ) -> CommandResult<()> {
     let plugin_id = request.plugin_id;
@@ -799,6 +870,26 @@ pub async fn uninstall_plugin(
             plugin_id = %plugin_id,
             ?err,
             "uninstall: couldn't drop plugin.disabled flag from user_prefs",
+        );
+    }
+
+    // 6) §20.8: announce the uninstall to other devices. Same
+    //    user-source-only contract as the install path —
+    //    bundled plugins are already filtered out above by
+    //    the source check; community plugins always emit.
+    event_log.append(SyncEvent::PluginUninstalled(IdPayload {
+        id: plugin_id.clone(),
+    }));
+
+    // 7) Drop the local remote_plugins mirror row if this
+    //    plugin was originally announced by another device.
+    //    Non-fatal — the UI shows it as "missing" until next
+    //    restart otherwise.
+    if let Err(err) = RemotePluginsRepo::new(&shared).delete(&plugin_id) {
+        warn!(
+            plugin_id = %plugin_id,
+            ?err,
+            "uninstall: couldn't drop remote_plugins row",
         );
     }
 

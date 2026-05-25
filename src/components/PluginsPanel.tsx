@@ -7,6 +7,7 @@ import {
   installPluginArchive,
   isCommandError,
   listPlugins,
+  listRemotePlugins,
   setPluginEnabled,
   uninstallPlugin,
 } from '../api/client';
@@ -15,6 +16,7 @@ import type {
   PluginArchivePreview,
   PluginInfo,
   PluginTypeWire,
+  RemotePluginAnnouncement,
 } from '../api/types';
 import { Modal } from './Modal';
 
@@ -92,6 +94,15 @@ export function PluginsPanel() {
     null,
   );
 
+  // §20.8 — plugins other devices have announced that we
+  // don't have installed locally. Initial fetch lives in a
+  // sibling effect to `listPlugins` so the two views stay
+  // independent (a failed remote-plugin fetch shouldn't tank
+  // the main list).
+  const [remotePlugins, setRemotePlugins] = useState<
+    RemotePluginAnnouncement[]
+  >([]);
+
   useEffect(() => {
     let cancelled = false;
     listPlugins()
@@ -109,6 +120,23 @@ export function PluginsPanel() {
             : String(err);
         setLoadError(msg);
         setPlugins([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    listRemotePlugins()
+      .then((list) => {
+        if (cancelled) return;
+        setRemotePlugins(list);
+      })
+      .catch(() => {
+        // Quiet failure — the section just doesn't render.
+        // The main plugin list still works, and the next
+        // sync round will repopulate.
       });
     return () => {
       cancelled = true;
@@ -213,6 +241,13 @@ export function PluginsPanel() {
           a.id.localeCompare(b.id),
         );
       });
+      // Drop the matching remote announcement (if any) so
+      // the "Plugin benötigt" section updates immediately —
+      // the backend also drops it from remote_plugins, but
+      // the frontend doesn't get an event for that.
+      setRemotePlugins((prev) =>
+        prev.filter((r) => r.id !== installed.id),
+      );
       setPendingInstall(null);
     } catch (err) {
       const entry: ToggleErrorEntry = isCommandError(err)
@@ -344,6 +379,46 @@ export function PluginsPanel() {
           </ul>
         </section>
       ))}
+
+      {remotePlugins.length > 0 && (
+        <section
+          className="plugins-panel__group plugins-panel__group--remote"
+          aria-label={t('dialogs.settings.plugins.remote.sectionAria')}
+        >
+          <h3 className="plugins-panel__type-heading">
+            {t('dialogs.settings.plugins.remote.heading')}
+          </h3>
+          <p className="form__hint">
+            {t('dialogs.settings.plugins.remote.hint')}
+          </p>
+          <ul className="plugins-panel__list" role="list">
+            {remotePlugins.map((r) => (
+              <li key={r.id} className="plugins-panel__row">
+                <div className="plugins-panel__row-header">
+                  <span className="plugins-panel__name">
+                    {r.name ?? r.id}
+                  </span>
+                  <span className="plugins-panel__version">
+                    {t('dialogs.settings.plugins.version', {
+                      version: r.version,
+                    })}
+                  </span>
+                </div>
+                {r.name && (
+                  <div className="plugins-panel__id" aria-hidden="true">
+                    {r.id}
+                  </div>
+                )}
+                <p className="form__hint">
+                  {t('dialogs.settings.plugins.remote.announcedBy', {
+                    device: r.announced_by_device,
+                  })}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {pendingInstall && (
         <ConfirmInstallModal

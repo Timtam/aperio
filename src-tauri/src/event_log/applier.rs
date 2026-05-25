@@ -54,8 +54,8 @@ use rusqlite::params;
 use serde::Serialize;
 use serde_json::Value;
 use sync_core::{
-    DeviceId, EventEnvelope, EventPayload, IdPayload, LogFile, SettingsPayload,
-    SyncError, SyncEvent, SyncResult,
+    DeviceId, EventEnvelope, EventPayload, IdPayload, LogFile, PluginPayload,
+    SettingsPayload, SyncError, SyncEvent, SyncResult,
 };
 use tracing::{debug, warn};
 
@@ -350,15 +350,21 @@ impl EventLogApplier {
                 self.apply_settings_updated(payload)?;
                 Ok(true)
             }
-            SyncEvent::PluginInstalled(_)
-            | SyncEvent::PluginUpdated(_)
-            | SyncEvent::PluginUninstalled(_)
-            | SyncEvent::ShortcutSet(_)
+            SyncEvent::PluginInstalled(payload)
+            | SyncEvent::PluginUpdated(payload) => {
+                self.apply_plugin_announcement(payload, env)?;
+                Ok(true)
+            }
+            SyncEvent::PluginUninstalled(payload) => {
+                self.apply_plugin_uninstall(payload)?;
+                Ok(true)
+            }
+            SyncEvent::ShortcutSet(_)
             | SyncEvent::ShortcutReset(_)
             | SyncEvent::ShortcutCleared(_) => {
                 // Forward-compat: variants without local handlers
-                // log + skip. Once the plugin manager / shortcut
-                // overrides land they'll grow handlers here.
+                // log + skip. Once the shortcut overrides land
+                // they'll grow handlers here.
                 debug!(
                     event_id = %env.id,
                     "skipping envelope: variant not handled yet",
@@ -806,6 +812,50 @@ impl EventLogApplier {
             })?;
         }
         Ok(())
+    }
+
+    /// Mirror a remote plugin announcement (`plugin.installed`
+    /// or `plugin.updated`) into the local `remote_plugins`
+    /// table. The Settings → Plugins panel reads from there to
+    /// render the "Plugin benötigt" section (DESIGN.md §20.8).
+    /// We unconditionally upsert; the panel decides whether to
+    /// show the row by cross-checking against the local
+    /// PluginManager's list.
+    fn apply_plugin_announcement(
+        &self,
+        payload: &PluginPayload,
+        env: &EventEnvelope,
+    ) -> SyncResult<()> {
+        let repo = crate::remote_plugins::RemotePluginsRepo::new(&self.db);
+        repo.upsert(
+            &payload.id,
+            payload.name.as_deref(),
+            &payload.version,
+            payload.plugin_type.as_deref(),
+            payload.source.as_deref(),
+            env.device_id.as_str(),
+        )
+        .map_err(|err| {
+            SyncError::internal(format!(
+                "remote_plugins upsert for {}: {err}",
+                payload.id,
+            ))
+        })
+    }
+
+    /// Drop a remote plugin announcement when the
+    /// corresponding `plugin.uninstalled` event arrives.
+    fn apply_plugin_uninstall(
+        &self,
+        payload: &IdPayload,
+    ) -> SyncResult<()> {
+        let repo = crate::remote_plugins::RemotePluginsRepo::new(&self.db);
+        repo.delete(&payload.id).map_err(|err| {
+            SyncError::internal(format!(
+                "remote_plugins delete for {}: {err}",
+                payload.id,
+            ))
+        })
     }
 
     fn is_already_applied(&self, event_id: &str) -> SyncResult<bool> {

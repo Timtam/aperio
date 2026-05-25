@@ -334,6 +334,25 @@ export interface PluginInfo {
   source: 'bundled' | 'user';
 }
 
+/** A plugin announcement another device has emitted into
+ *  the shared Event Log (DESIGN.md §20.8) that THIS device
+ *  doesn't have installed locally. Returned by
+ *  `list_remote_plugins` + rendered as the "Plugin benötigt"
+ *  section in the Settings → Plugins panel. */
+export interface RemotePluginAnnouncement {
+  id: string;
+  /** May be null when the announcement came from a
+   *  pre-iteration-21 Aperio (the optional `name` field
+   *  wasn't part of the payload back then). */
+  name: string | null;
+  version: string;
+  plugin_type: string | null;
+  source: string | null;
+  announced_by_device: string;
+  /** RFC 3339. */
+  announced_at: string;
+}
+
 /** Preview of a `.aperio` archive's manifest, returned by
  *  `inspect_plugin_archive`. Mirrors
  *  `src-tauri/src/commands/plugins.rs::PluginArchivePreview`. */
