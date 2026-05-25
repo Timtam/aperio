@@ -350,6 +350,14 @@ pub fn run() {
             // history, `clear_sync_log` scrubs it.
             commands::list_sync_log_entries,
             commands::clear_sync_log,
+            // §11 Videoconference adapters. Per-account CRUD over
+            // the registered VcAdapter; the per-provider adapters
+            // are still stubs that return "unsupported" until the
+            // REST layers land.
+            commands::test_vc_connection,
+            commands::create_meeting,
+            commands::get_meeting,
+            commands::delete_meeting,
         ])
         .setup(move |app| {
             // Spawn the reminder scheduler on the Tauri/tokio runtime

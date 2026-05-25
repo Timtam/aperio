@@ -42,6 +42,19 @@ pub enum AdapterKind {
     Ews,
     Vikunja,
     Todoist,
+    /// Zoom videoconference adapter (DESIGN.md §11). Currently
+    /// a stub — the trait impl returns `VcError::Unsupported`
+    /// until the REST layer lands.
+    Zoom,
+    /// Microsoft Teams videoconference adapter. Shares the
+    /// OAuth token of [`Self::MicrosoftGraph`].
+    Teams,
+    /// Google Meet videoconference adapter. Shares the OAuth
+    /// refresh token of [`Self::Google`].
+    Meet,
+    /// Cisco WebEx videoconference adapter (dedicated OAuth
+    /// flow).
+    Webex,
 }
 
 impl AdapterKind {
@@ -55,6 +68,10 @@ impl AdapterKind {
             AdapterKind::Ews => "ews",
             AdapterKind::Vikunja => "vikunja",
             AdapterKind::Todoist => "todoist",
+            AdapterKind::Zoom => "zoom",
+            AdapterKind::Teams => "teams",
+            AdapterKind::Meet => "meet",
+            AdapterKind::Webex => "webex",
         }
     }
 
@@ -68,8 +85,26 @@ impl AdapterKind {
             "ews" => AdapterKind::Ews,
             "vikunja" => AdapterKind::Vikunja,
             "todoist" => AdapterKind::Todoist,
+            "zoom" => AdapterKind::Zoom,
+            "teams" => AdapterKind::Teams,
+            "meet" => AdapterKind::Meet,
+            "webex" => AdapterKind::Webex,
             _ => return None,
         })
+    }
+
+    /// True iff this kind is a video-conference adapter
+    /// (DESIGN.md §11). Drives the registry's vc-routing path
+    /// + the AccountsDialog's "this kind doesn't manage
+    /// calendars" rendering.
+    pub fn is_videoconference(self) -> bool {
+        matches!(
+            self,
+            AdapterKind::Zoom
+                | AdapterKind::Teams
+                | AdapterKind::Meet
+                | AdapterKind::Webex,
+        )
     }
 }
 

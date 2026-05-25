@@ -22,6 +22,7 @@ use plugin_core::ffi::{
 };
 use plugin_core::PluginCallResult;
 use sync_core::error::SyncError;
+use vc_core::VcError;
 
 use crate::response::error_response;
 
@@ -77,6 +78,23 @@ pub fn sync_error_to_response(err: SyncError) -> PluginCallResult {
     error_response(status, &msg)
 }
 
+/// Map a `vc_core::VcError` into a [`PluginCallResult`]. One-to-
+/// one mapping — the VC trait error enum was modelled on the
+/// same variant set, so each maps cleanly to a status code.
+pub fn vc_error_to_response(err: VcError) -> PluginCallResult {
+    let (status, msg) = match err {
+        VcError::Authentication(m) => (PLUGIN_CALL_ERR_AUTH, m),
+        VcError::Forbidden(m) => (PLUGIN_CALL_ERR_FORBIDDEN, m),
+        VcError::NotFound(m) => (PLUGIN_CALL_ERR_NOT_FOUND, m),
+        VcError::Network(m) => (PLUGIN_CALL_ERR_NETWORK, m),
+        VcError::Protocol(m) => (PLUGIN_CALL_ERR_PROTOCOL, m),
+        VcError::InvalidInput(m) => (PLUGIN_CALL_ERR_INVALID, m),
+        VcError::Unsupported(m) => (PLUGIN_CALL_ERR_UNSUPPORTED, m),
+        VcError::Internal(m) => (PLUGIN_CALL_ERR_INTERNAL, m),
+    };
+    error_response(status, &msg)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -106,6 +124,26 @@ mod tests {
     fn sync_auth_maps_to_auth_status() {
         let r = sync_error_to_response(SyncError::Auth("nope".into()));
         assert_eq!(r.status, PLUGIN_CALL_ERR_AUTH);
+        let mut p = r.payload;
+        unsafe { p.free_in_place() };
+    }
+
+    #[test]
+    fn vc_authentication_maps_to_auth_status() {
+        let r = vc_error_to_response(VcError::Authentication(
+            "expired token".to_string(),
+        ));
+        assert_eq!(r.status, PLUGIN_CALL_ERR_AUTH);
+        let mut p = r.payload;
+        unsafe { p.free_in_place() };
+    }
+
+    #[test]
+    fn vc_unsupported_maps_to_unsupported_status() {
+        let r = vc_error_to_response(VcError::Unsupported(
+            "no recording on free tier".to_string(),
+        ));
+        assert_eq!(r.status, PLUGIN_CALL_ERR_UNSUPPORTED);
         let mut p = r.payload;
         unsafe { p.free_in_place() };
     }

@@ -1,0 +1,11 @@
+{
+  "id": "com.aperio.vc-adapter-meet",
+  "name": "Aperio Google Meet",
+  "version": "0.1.0",
+  "plugin_type": "videoconference-adapter",
+  "abi_version": 1,
+  "min_app_version": "0.1.0",
+  "author": "Aperio Contributors",
+  "description": "Generate Google Meet links via the Calendar API's conferenceData field. Shares the OAuth refresh token of the Aperio Google calendar adapter — no separate sign-in needed.",
+  "signed": false
+}

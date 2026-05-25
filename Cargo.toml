@@ -6,6 +6,7 @@ members = [
     "crates/plugin-core",
     "crates/plugin-sdk",
     "crates/sync-core",
+    "crates/vc-core",
 
     # Kalender- und Aufgaben-Adapter
     "crates/cal-adapter-google",
@@ -43,6 +44,10 @@ members = [
     "crates/vc-adapter-teams",
     "crates/vc-adapter-meet",
     "crates/vc-adapter-webex",
+    "crates/vc-adapter-zoom-plugin",
+    "crates/vc-adapter-teams-plugin",
+    "crates/vc-adapter-meet-plugin",
+    "crates/vc-adapter-webex-plugin",
 
     # Tauri-App
     "src-tauri",
@@ -63,6 +68,7 @@ cal-adapter-local = { path = "crates/cal-adapter-local" }
 plugin-core = { path = "crates/plugin-core" }
 plugin-sdk = { path = "crates/plugin-sdk" }
 sync-core = { path = "crates/sync-core" }
+vc-core = { path = "crates/vc-core" }
 
 # Async-Runtime
 tokio = { version = "1", features = ["full"] }

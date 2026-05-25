@@ -470,6 +470,51 @@ macro_rules! cal_dispatch_helpers {
     };
 }
 
+/// VC-adapter sibling of [`cal_dispatch_helpers!`]. Emits the
+/// `instance` / `dispatch` / `dispatch_unit` triplet wired to
+/// `vc_core::VcResult`.
+///
+/// At most one invocation per crate.
+#[macro_export]
+macro_rules! vc_dispatch_helpers {
+    ($adapter:ty) => {
+        #[allow(dead_code)]
+        fn instance<'a>(
+            handle: *mut ::std::os::raw::c_void,
+        ) -> ::std::result::Result<
+            &'a $crate::PluginInstance<$adapter>,
+            $crate::plugin_core::ffi::PluginCallResult,
+        > {
+            $crate::instance::<$adapter>(handle)
+        }
+
+        #[allow(dead_code)]
+        fn dispatch<T, F, Fut>(
+            handle: *mut ::std::os::raw::c_void,
+            call: F,
+        ) -> $crate::plugin_core::ffi::PluginCallResult
+        where
+            T: ::serde::Serialize,
+            F: ::std::ops::FnOnce(&'static $adapter) -> Fut,
+            Fut: ::std::future::Future<Output = ::vc_core::VcResult<T>>,
+        {
+            $crate::vc_dispatch::<$adapter, T, F, Fut>(handle, call)
+        }
+
+        #[allow(dead_code)]
+        fn dispatch_unit<F, Fut>(
+            handle: *mut ::std::os::raw::c_void,
+            call: F,
+        ) -> $crate::plugin_core::ffi::PluginCallResult
+        where
+            F: ::std::ops::FnOnce(&'static $adapter) -> Fut,
+            Fut: ::std::future::Future<Output = ::vc_core::VcResult<()>>,
+        {
+            $crate::vc_dispatch_unit::<$adapter, F, Fut>(handle, call)
+        }
+    };
+}
+
 /// Sync-adapter sibling of [`cal_dispatch_helpers!`]. Emits the
 /// `instance` / `dispatch` / `dispatch_unit` triplet wired to
 /// `sync_core::SyncResult` (sync adapters return a different

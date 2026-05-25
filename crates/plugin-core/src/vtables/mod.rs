@@ -59,11 +59,13 @@ pub mod calendar;
 pub mod contacts;
 pub mod sync;
 pub mod tasks;
+pub mod vc;
 
 pub use calendar::CalendarVtable;
 pub use contacts::ContactsVtable;
 pub use sync::SyncVtable;
 pub use tasks::TasksVtable;
+pub use vc::VcVtable;
 
 /// Multi-capability outer vtable for `plugin_type = "calendar-adapter"`.
 ///

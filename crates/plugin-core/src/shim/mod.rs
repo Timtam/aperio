@@ -24,11 +24,13 @@ mod call;
 pub mod contacts;
 pub mod sync;
 pub mod tasks;
+pub mod vc;
 
 pub use calendar::FfiCalendarAdapter;
 pub use contacts::FfiContactsAdapter;
 pub use sync::FfiSyncAdapter;
 pub use tasks::FfiTasksAdapter;
+pub use vc::FfiVcAdapter;
 
 /// Project plugin-core's capability tags onto cal-core's
 /// [`cal_core::Capability`] enum. Shared by the three calendar-

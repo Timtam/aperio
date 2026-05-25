@@ -1,0 +1,22 @@
+[package]
+name = "vc-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Aperio — shared types and traits for videoconference adapters (DESIGN.md §11)."
+
+[dependencies]
+# All trait methods are async — the providers' APIs are HTTP-bound.
+async-trait.workspace = true
+# Meeting + NewMeeting envelopes round-trip as JSON across the
+# plugin FFI boundary, mirroring the cal-core / sync-core shape.
+serde.workspace = true
+# Scheduled meetings carry start/end timestamps; same chrono the
+# rest of the workspace uses.
+chrono.workspace = true
+# Error variants implement std::error::Error via thiserror so the
+# command layer + per-provider adapters share a single error type.
+thiserror.workspace = true

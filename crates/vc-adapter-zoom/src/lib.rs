@@ -1,1 +1,81 @@
-//! vc-adapter-zoom — stub. Will be implemented in a later phase.
+//! Zoom Meeting API v2 adapter (DESIGN.md §11.3).
+//!
+//! The current implementation is a thin stub: every
+//! [`VcAdapter`] method returns
+//! [`VcError::Unsupported`] with an actionable message. The
+//! adapter type + account config shape are real so the rest of
+//! the plugin pipeline (vc-adapter-zoom-plugin, host registry,
+//! Tauri commands) can wire against them; the actual Zoom REST
+//! calls land in a follow-up iteration.
+//!
+//! ## Auth model
+//!
+//! Zoom uses its own OAuth 2.0 flow against
+//! `https://zoom.us/oauth/authorize` — distinct from the
+//! cal-adapter-google / cal-adapter-microsoft-graph tokens.
+//! The plugin will eventually own a separate
+//! `interactive_auth` entry point; the token storage will use
+//! the same keychain slot pattern as the other OAuth adapters.
+
+use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
+use vc_core::{Meeting, MeetingId, NewMeeting, VcAdapter, VcError, VcResult};
+
+/// Non-secret half of the account config — what the user types
+/// into the AccountsDialog. The refresh token lives in the OS
+/// keychain alongside the other OAuth adapters'.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ZoomAccountConfig {
+    /// OAuth client id from the user's Zoom Marketplace app
+    /// (Zoom calls it the "Client ID").
+    pub client_id: String,
+    /// OAuth client secret (Zoom Marketplace's "Client Secret").
+    /// Required for the token-exchange step.
+    pub client_secret: String,
+}
+
+/// Concrete adapter. Holds the configured credentials so a
+/// future `oauth.rs` module can mint access tokens on demand;
+/// the stub trait impl below doesn't reach for them.
+pub struct ZoomAdapter {
+    _config: ZoomAccountConfig,
+    _refresh_token: String,
+}
+
+impl ZoomAdapter {
+    /// Build an adapter from validated config + a refresh token
+    /// the host pulled from the keychain.
+    pub fn new(config: ZoomAccountConfig, refresh_token: String) -> Self {
+        Self {
+            _config: config,
+            _refresh_token: refresh_token,
+        }
+    }
+}
+
+#[async_trait]
+impl VcAdapter for ZoomAdapter {
+    async fn test_connection(&self) -> VcResult<()> {
+        Err(VcError::Unsupported(
+            "Zoom adapter stub — REST calls not yet implemented".to_string(),
+        ))
+    }
+
+    async fn create_meeting(&self, _spec: NewMeeting) -> VcResult<Meeting> {
+        Err(VcError::Unsupported(
+            "Zoom adapter stub — create_meeting not yet implemented".to_string(),
+        ))
+    }
+
+    async fn get_meeting(&self, _id: &MeetingId) -> VcResult<Option<Meeting>> {
+        Err(VcError::Unsupported(
+            "Zoom adapter stub — get_meeting not yet implemented".to_string(),
+        ))
+    }
+
+    async fn delete_meeting(&self, _id: &MeetingId) -> VcResult<()> {
+        Err(VcError::Unsupported(
+            "Zoom adapter stub — delete_meeting not yet implemented".to_string(),
+        ))
+    }
+}

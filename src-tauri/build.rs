@@ -61,6 +61,10 @@ const PLUGINS: &[(&str, &str)] = &[
         "sync-adapter-googledrive-plugin",
         "com.aperio.sync-adapter-googledrive",
     ),
+    ("vc-adapter-zoom-plugin", "com.aperio.vc-adapter-zoom"),
+    ("vc-adapter-teams-plugin", "com.aperio.vc-adapter-teams"),
+    ("vc-adapter-meet-plugin", "com.aperio.vc-adapter-meet"),
+    ("vc-adapter-webex-plugin", "com.aperio.vc-adapter-webex"),
 ];
 
 fn main() {

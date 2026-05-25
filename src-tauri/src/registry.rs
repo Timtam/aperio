@@ -42,10 +42,13 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 
 use cal_core::{CalendarFeature, ContactsFeature, TasksFeature};
-use plugin_core::shim::{FfiCalendarAdapter, FfiContactsAdapter, FfiTasksAdapter};
+use plugin_core::shim::{
+    FfiCalendarAdapter, FfiContactsAdapter, FfiTasksAdapter, FfiVcAdapter,
+};
 use plugin_core::{LoadedInstance, LoadedPlugin, PluginManager};
 use serde_json::{json, Map, Value};
 use tracing::warn;
+use vc_core::VcAdapter;
 
 use crate::accounts::{Account, AccountsRepo, AdapterKind, LOCAL_ACCOUNT_ID};
 use crate::secrets::{self, SecretSlot};
@@ -65,6 +68,10 @@ const PLUGIN_ID_GRAPH: &str = "com.aperio.cal-adapter-microsoft-graph";
 const PLUGIN_ID_EWS: &str = "com.aperio.cal-adapter-ews";
 const PLUGIN_ID_VIKUNJA: &str = "com.aperio.cal-adapter-vikunja";
 const PLUGIN_ID_TODOIST: &str = "com.aperio.cal-adapter-todoist";
+const PLUGIN_ID_ZOOM: &str = "com.aperio.vc-adapter-zoom";
+const PLUGIN_ID_TEAMS: &str = "com.aperio.vc-adapter-teams";
+const PLUGIN_ID_MEET: &str = "com.aperio.vc-adapter-meet";
+const PLUGIN_ID_WEBEX: &str = "com.aperio.vc-adapter-webex";
 
 /// Tracks which account a calendar / task-list came from so writes
 /// can find their way home. Filled lazily during the first
@@ -88,6 +95,14 @@ pub struct AdapterRegistry {
     external_tasks: RwLock<HashMap<String, Arc<dyn TasksFeature>>>,
     /// External adapters with ContactsFeature, keyed by account_id.
     external_contacts: RwLock<HashMap<String, Arc<dyn ContactsFeature>>>,
+    /// Videoconference adapters, keyed by account_id. Separate
+    /// map (rather than a slot on the cal/tasks/contacts shape)
+    /// because vc-adapters don't share their account row with
+    /// the calendar adapters they accompany — Teams + Meet
+    /// share OAuth tokens with their cal-adapter siblings but
+    /// each lives on its own `accounts` row with its own
+    /// adapter_kind.
+    external_vc: RwLock<HashMap<String, Arc<dyn VcAdapter>>>,
     /// Reverse lookup for routing writes back to the right adapter.
     routes: Mutex<Routes>,
     /// Loaded plugins keyed by their canonical id. Every
@@ -110,6 +125,7 @@ impl AdapterRegistry {
             external_cal: RwLock::new(HashMap::new()),
             external_tasks: RwLock::new(HashMap::new()),
             external_contacts: RwLock::new(HashMap::new()),
+            external_vc: RwLock::new(HashMap::new()),
             routes: Mutex::new(Routes::default()),
             plugin_manager,
         }
@@ -164,6 +180,10 @@ impl AdapterRegistry {
         self.external_contacts
             .write()
             .expect("registry contacts poison")
+            .remove(account_id);
+        self.external_vc
+            .write()
+            .expect("registry vc poison")
             .remove(account_id);
         let mut routes = self.routes.lock().expect("registry routes poison");
         routes
@@ -382,6 +402,36 @@ impl AdapterRegistry {
             .cloned()
     }
 
+    /// Borrow the registered videoconference adapter for
+    /// `account_id`, or `None` when nothing is registered.
+    /// Used by the `create_meeting` / `delete_meeting` Tauri
+    /// commands.
+    pub fn vc_adapter(
+        &self,
+        account_id: &str,
+    ) -> Option<Arc<dyn VcAdapter>> {
+        self.external_vc
+            .read()
+            .expect("registry vc poison")
+            .get(account_id)
+            .cloned()
+    }
+
+    /// Snapshot every registered VcAdapter. Drives the
+    /// AccountsDialog's "which providers do I have signed in?"
+    /// rendering when the user picks "Generate meeting link"
+    /// on a new event.
+    pub fn snapshot_vc_adapters(
+        &self,
+    ) -> Vec<(String, Arc<dyn VcAdapter>)> {
+        self.external_vc
+            .read()
+            .expect("registry vc poison")
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
+    }
+
     /// Record that a calendar id has been observed against
     /// `account_id`. Used by `list_calendars` to register the
     /// local adapter's rows so subsequent get_events calls can
@@ -492,6 +542,23 @@ impl AdapterRegistry {
         Ok(())
     }
 
+    fn insert_vc(
+        &self,
+        account_id: &str,
+        instance: Arc<LoadedInstance>,
+    ) -> Result<(), RegistryError> {
+        let adapter = FfiVcAdapter::new(instance).ok_or_else(|| {
+            RegistryError::Construct(
+                "plugin doesn't expose the VcAdapter surface".into(),
+            )
+        })?;
+        self.external_vc
+            .write()
+            .expect("registry vc poison")
+            .insert(account_id.to_string(), Arc::new(adapter));
+        Ok(())
+    }
+
     fn try_register(&self, account: &Account) -> Result<(), RegistryError> {
         match account.adapter_kind {
             AdapterKind::Local => Ok(()),
@@ -502,6 +569,10 @@ impl AdapterRegistry {
             AdapterKind::Ews => self.register_ews(account),
             AdapterKind::Vikunja => self.register_vikunja(account),
             AdapterKind::Todoist => self.register_todoist(account),
+            AdapterKind::Zoom => self.register_zoom(account),
+            AdapterKind::Teams => self.register_teams(account),
+            AdapterKind::Meet => self.register_meet(account),
+            AdapterKind::Webex => self.register_webex(account),
         }
     }
 
@@ -600,6 +671,58 @@ impl AdapterRegistry {
         self.insert_calendar(&account.id, instance)?;
         Ok(())
     }
+
+    // ─────────────────────────────────────────────────────────────
+    // VC-adapter registration (DESIGN.md §11)
+    // ─────────────────────────────────────────────────────────────
+
+    fn register_zoom(&self, account: &Account) -> Result<(), RegistryError> {
+        let plugin_config =
+            oauth_refresh_plugin_config(&account.id, &account.config_json)?;
+        let instance = self.open_plugin_instance(PLUGIN_ID_ZOOM, plugin_config)?;
+        self.insert_vc(&account.id, instance)?;
+        Ok(())
+    }
+
+    fn register_teams(&self, account: &Account) -> Result<(), RegistryError> {
+        // Teams shares the cal-adapter-microsoft-graph access
+        // token (same keychain slot it already has). The
+        // account row's `config_json` carries just `client_id`;
+        // we pull the access token from whichever Graph account
+        // is registered + thread it in as `access_token`.
+        let access_token = teams_shared_access_token(&account.id)?;
+        let plugin_config = merge_account_config(
+            &account.config_json,
+            &[("access_token", Value::String(access_token))],
+        )?;
+        let instance = self.open_plugin_instance(PLUGIN_ID_TEAMS, plugin_config)?;
+        self.insert_vc(&account.id, instance)?;
+        Ok(())
+    }
+
+    fn register_meet(&self, account: &Account) -> Result<(), RegistryError> {
+        // Meet shares the cal-adapter-google refresh token
+        // (same keychain slot). The account row's `config_json`
+        // carries `client_id` + `client_secret`; we pull the
+        // refresh token from the linked Google account.
+        let refresh_token = secrets::retrieve(&account.id, SecretSlot::RefreshToken)
+            .map_err(|e| RegistryError::Secret(format!("missing refresh token: {e}")))?;
+        let plugin_config = merge_account_config(
+            &account.config_json,
+            &[("refresh_token", Value::String(refresh_token))],
+        )?;
+        let instance = self.open_plugin_instance(PLUGIN_ID_MEET, plugin_config)?;
+        self.insert_vc(&account.id, instance)?;
+        Ok(())
+    }
+
+    fn register_webex(&self, account: &Account) -> Result<(), RegistryError> {
+        let plugin_config =
+            oauth_refresh_plugin_config(&account.id, &account.config_json)?;
+        let instance = self.open_plugin_instance(PLUGIN_ID_WEBEX, plugin_config)?;
+        self.insert_vc(&account.id, instance)?;
+        Ok(())
+    }
 }
 
 /// Merge keychain-sourced secret fields into the account's
@@ -673,6 +796,39 @@ fn oauth_plugin_config(
     })?;
     obj.extend(extras);
     Ok(parsed.to_string())
+}
+
+/// Build the plugin init config for a refresh-token-only OAuth
+/// videoconference adapter (Zoom, WebEx). The persisted
+/// `config_json` already carries `client_id` + `client_secret`;
+/// we just need to merge in the keychain-sourced
+/// `refresh_token`.
+fn oauth_refresh_plugin_config(
+    account_id: &str,
+    account_config_json: &str,
+) -> Result<String, RegistryError> {
+    let refresh = secrets::retrieve(account_id, SecretSlot::RefreshToken)
+        .map_err(|e| RegistryError::Secret(format!("missing refresh token: {e}")))?;
+    merge_account_config(
+        account_config_json,
+        &[("refresh_token", Value::String(refresh))],
+    )
+}
+
+/// Pull the cal-adapter-microsoft-graph access token that the
+/// Teams adapter piggybacks on. v1 reads it from the SAME
+/// account-id's `AccessToken` slot — the AccountsDialog wizard
+/// will create a Teams account whose id maps to its linked
+/// Graph calendar account. A later iteration can swap this for
+/// a "find the linked Graph account by config_json
+/// cross-reference" lookup once the wizard's data model is
+/// firm.
+fn teams_shared_access_token(account_id: &str) -> Result<String, RegistryError> {
+    secrets::retrieve(account_id, SecretSlot::AccessToken).map_err(|e| {
+        RegistryError::Secret(format!(
+            "missing Microsoft Graph access token (Teams shares it): {e}",
+        ))
+    })
 }
 
 #[derive(Debug, thiserror::Error)]

@@ -6,6 +6,9 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Aperio — stub for vc-adapter-webex (Phase 0; full implementation lands in a later phase)."
+description = "Aperio — Cisco WebEx Meetings REST API adapter (DESIGN.md §11). Stub VcAdapter impl pending the OAuth + API layer."
 
 [dependencies]
+vc-core.workspace = true
+async-trait.workspace = true
+serde.workspace = true

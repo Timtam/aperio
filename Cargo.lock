@@ -124,6 +124,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "vc-core",
  "windows 0.61.3",
  "winreg",
 ]
@@ -4092,6 +4093,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tracing",
+ "vc-core",
 ]
 
 [[package]]
@@ -4105,6 +4107,7 @@ dependencies = [
  "sync-core",
  "tokio",
  "tracing",
+ "vc-core",
 ]
 
 [[package]]
@@ -6778,18 +6781,108 @@ checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
 [[package]]
 name = "vc-adapter-meet"
 version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde",
+ "vc-core",
+]
+
+[[package]]
+name = "vc-adapter-meet-plugin"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "plugin-core",
+ "plugin-sdk",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "vc-adapter-meet",
+ "vc-core",
+]
 
 [[package]]
 name = "vc-adapter-teams"
 version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde",
+ "vc-core",
+]
+
+[[package]]
+name = "vc-adapter-teams-plugin"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "plugin-core",
+ "plugin-sdk",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "vc-adapter-teams",
+ "vc-core",
+]
 
 [[package]]
 name = "vc-adapter-webex"
 version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde",
+ "vc-core",
+]
+
+[[package]]
+name = "vc-adapter-webex-plugin"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "plugin-core",
+ "plugin-sdk",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "vc-adapter-webex",
+ "vc-core",
+]
 
 [[package]]
 name = "vc-adapter-zoom"
 version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde",
+ "vc-core",
+]
+
+[[package]]
+name = "vc-adapter-zoom-plugin"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "plugin-core",
+ "plugin-sdk",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "vc-adapter-zoom",
+ "vc-core",
+]
+
+[[package]]
+name = "vc-core"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "serde",
+ "thiserror 1.0.69",
+]
 
 [[package]]
 name = "vcpkg"

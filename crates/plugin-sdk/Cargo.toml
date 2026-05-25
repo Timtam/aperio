@@ -16,6 +16,7 @@ plugin-core.workspace = true
 # sync-core::SyncError onto the PLUGIN_CALL_ERR_* constants.
 cal-core.workspace = true
 sync-core.workspace = true
+vc-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 # A current-thread tokio runtime drives the plugin's async trait

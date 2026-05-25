@@ -1,0 +1,26 @@
+[package]
+name = "vc-adapter-teams-plugin"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Aperio — Microsoft Teams videoconference adapter packaged as a plugin (DESIGN.md §11 + §20)."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+plugin-sdk.workspace = true
+vc-adapter-teams = { path = "../vc-adapter-teams" }
+vc-core.workspace = true
+
+serde.workspace = true
+serde_json.workspace = true
+async-trait.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+plugin-core.workspace = true
+tokio = { workspace = true }

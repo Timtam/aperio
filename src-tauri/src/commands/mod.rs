@@ -19,6 +19,7 @@ mod search;
 mod sync;
 mod tasks;
 mod user_prefs;
+mod videoconference;
 
 use plugin_core::manager::{
     DiscoverError, InteractiveAuthError, ProbeHostKeyError,
@@ -40,6 +41,7 @@ pub use search::*;
 pub use sync::*;
 pub use tasks::*;
 pub use user_prefs::*;
+pub use videoconference::*;
 
 /// Frontend-friendly error envelope.
 ///
@@ -77,6 +79,23 @@ impl From<crate::DbError> for CommandError {
             code: "internal",
             message: err.to_string(),
         }
+    }
+}
+
+impl From<vc_core::VcError> for CommandError {
+    fn from(err: vc_core::VcError) -> Self {
+        use vc_core::VcError::*;
+        let (code, message) = match err {
+            Authentication(m) => ("auth", m),
+            Forbidden(m) => ("forbidden", m),
+            NotFound(m) => ("not_found", m),
+            Network(m) => ("network", m),
+            Protocol(m) => ("protocol", m),
+            InvalidInput(m) => ("invalid_input", m),
+            Unsupported(m) => ("unsupported", m),
+            Internal(m) => ("internal", m),
+        };
+        Self { code, message }
     }
 }
 

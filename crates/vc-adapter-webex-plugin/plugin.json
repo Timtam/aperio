@@ -1,0 +1,11 @@
+{
+  "id": "com.aperio.vc-adapter-webex",
+  "name": "Aperio Cisco WebEx",
+  "version": "0.1.0",
+  "plugin_type": "videoconference-adapter",
+  "abi_version": 1,
+  "min_app_version": "0.1.0",
+  "author": "Aperio Contributors",
+  "description": "Generate Cisco WebEx meeting links via the WebEx Meetings REST API. Uses a separate WebEx OAuth flow per account.",
+  "signed": false
+}

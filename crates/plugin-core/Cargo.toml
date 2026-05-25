@@ -22,6 +22,7 @@ libloading.workspace = true
 # same for sync-type plugins.
 cal-core.workspace = true
 sync-core.workspace = true
+vc-core.workspace = true
 async-trait.workspace = true
 # spawn_blocking ferries synchronous FFI calls off the async runtime
 # so a slow plugin can't stall the reactor.

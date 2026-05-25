@@ -31,7 +31,9 @@ use std::os::raw::c_void;
 
 use plugin_core::ffi::{PluginCallResult, PLUGIN_CALL_ERR_INTERNAL};
 
-use crate::error_map::{cal_error_to_response, sync_error_to_response};
+use crate::error_map::{
+    cal_error_to_response, sync_error_to_response, vc_error_to_response,
+};
 use crate::instance::PluginInstance;
 use crate::response::{error_response, ok_empty_response, ok_response};
 
@@ -143,5 +145,52 @@ where
     match inst.runtime().block_on(call(p_static)) {
         Ok(()) => ok_empty_response(),
         Err(e) => sync_error_to_response(e),
+    }
+}
+
+/// VC-adapter counterpart to [`cal_dispatch`] — drives a
+/// `VcResult<T>`-returning trait method through the plugin's
+/// runtime.
+pub fn vc_dispatch<A, T, F, Fut>(
+    handle: *mut c_void,
+    call: F,
+) -> PluginCallResult
+where
+    A: 'static,
+    T: serde::Serialize,
+    F: FnOnce(&'static A) -> Fut,
+    Fut: Future<Output = vc_core::VcResult<T>>,
+{
+    let inst = match instance::<A>(handle) {
+        Ok(i) => i,
+        Err(r) => return r,
+    };
+    let p_static: &'static A =
+        unsafe { std::mem::transmute::<&A, &'static A>(inst.plugin()) };
+    match inst.runtime().block_on(call(p_static)) {
+        Ok(v) => ok_response(&v),
+        Err(e) => vc_error_to_response(e),
+    }
+}
+
+/// Unit-returning sibling of [`vc_dispatch`].
+pub fn vc_dispatch_unit<A, F, Fut>(
+    handle: *mut c_void,
+    call: F,
+) -> PluginCallResult
+where
+    A: 'static,
+    F: FnOnce(&'static A) -> Fut,
+    Fut: Future<Output = vc_core::VcResult<()>>,
+{
+    let inst = match instance::<A>(handle) {
+        Ok(i) => i,
+        Err(r) => return r,
+    };
+    let p_static: &'static A =
+        unsafe { std::mem::transmute::<&A, &'static A>(inst.plugin()) };
+    match inst.runtime().block_on(call(p_static)) {
+        Ok(()) => ok_empty_response(),
+        Err(e) => vc_error_to_response(e),
     }
 }
