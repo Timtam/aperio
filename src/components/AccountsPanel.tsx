@@ -14,6 +14,7 @@ import {
   connectGoogleAccount,
   connectMicrosoftAccount,
   createAccount,
+  syncContactsNow,
   deleteAccount,
   discoverEwsEndpoint,
   getUserPref,
@@ -484,11 +485,24 @@ export function AccountsPanel() {
         // here are non-fatal — the account row was already
         // persisted; a stale sidebar fixes itself on the next normal
         // store refresh.
-        void Promise.allSettled([
+        //
+        // Contacts get a dedicated `syncContactsNow` kick instead
+        // of a "refresh" — the contacts catalog isn't fetched
+        // on-demand like calendars; it's mirrored locally by the
+        // contact-sync scheduler. Without this kick the sidebar
+        // would show no address-book entries for the new account
+        // until the periodic worker fires (default: 60 min) or
+        // the app restarts. The kick respects the user's
+        // persisted "include read-only directories" pref.
+        const refreshes: Promise<unknown>[] = [
           refreshAccounts(),
           refreshCalendars(),
           refreshTaskLists(),
-        ]);
+        ];
+        if (CONTACTS_CAPABLE_KINDS.has(kind)) {
+          refreshes.push(syncContactsNow());
+        }
+        void Promise.allSettled(refreshes);
       } catch (err) {
         if (isCommandError(err)) setError(`${err.code}: ${err.message}`);
         else setError(String(err));
