@@ -166,6 +166,14 @@ pub fn run() {
         Some(Arc::clone(&kick_notify)),
     );
 
+    // One-shot: existing accounts created before the Account.*
+    // sync events shipped don't otherwise propagate (they pre-
+    // date the event variants). Replay them through the writer
+    // once so the next sync round actually carries them to the
+    // remote. Idempotent — gated by a pref the function sets on
+    // success.
+    commands::backfill_account_events(&db, &event_log_writer);
+
     // Phase Sc + Sd: stand up the applier and orchestrator.
     //
     // The applier uses its own `LocalAdapter` instance — both

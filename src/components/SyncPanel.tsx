@@ -1283,24 +1283,52 @@ export function SyncPanel() {
           </p>
         )}
         <div className="sync-panel__actions">
-          <button
-            type="button"
-            disabled={!status?.configured || triggering || status?.in_flight}
-            onClick={() => void triggerSync()}
-          >
-            {status?.in_flight || triggering
-              ? t('dialogs.settings.sync.syncing')
-              : t('dialogs.settings.sync.syncNow')}
-          </button>
-          <button
-            type="button"
-            disabled={!status?.configured || busyCompact}
-            onClick={() => void onCompact()}
-          >
-            {busyCompact
-              ? t('dialogs.settings.sync.compacting')
-              : t('dialogs.settings.sync.compactNow')}
-          </button>
+          {(() => {
+            // Use `aria-disabled` + a no-op handler instead of the
+            // native `disabled` attribute. Browsers strip focus
+            // from a button the moment it becomes disabled, which
+            // would leave NVDA in focus mode with no anchor and
+            // (worse) silently kill the user's tab cursor while
+            // the sync runs. Keeping the button focusable + busy
+            // preserves the tab stop and lets the screen reader
+            // announce the state change via aria-busy on the
+            // section.
+            const busy =
+              !status?.configured || triggering || status?.in_flight;
+            return (
+              <button
+                type="button"
+                aria-disabled={busy}
+                aria-busy={triggering || status?.in_flight}
+                onClick={() => {
+                  if (!busy) void triggerSync();
+                }}
+              >
+                {status?.in_flight || triggering
+                  ? t('dialogs.settings.sync.syncing')
+                  : t('dialogs.settings.sync.syncNow')}
+              </button>
+            );
+          })()}
+          {(() => {
+            // Same aria-disabled pattern as Sync now — see the
+            // comment above for why we avoid the native disabled.
+            const busy = !status?.configured || busyCompact;
+            return (
+              <button
+                type="button"
+                aria-disabled={busy}
+                aria-busy={busyCompact}
+                onClick={() => {
+                  if (!busy) void onCompact();
+                }}
+              >
+                {busyCompact
+                  ? t('dialogs.settings.sync.compacting')
+                  : t('dialogs.settings.sync.compactNow')}
+              </button>
+            );
+          })()}
           {conflictCount > 0 && (
             <button type="button" onClick={openSyncConflicts}>
               {conflictCount === 1

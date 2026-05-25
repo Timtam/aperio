@@ -35,6 +35,68 @@ fn account_payload(acc: &Account) -> AccountPayload {
     }
 }
 
+/// One-shot pref marker recording that we've already replayed
+/// the existing local accounts as `AccountCreated` events. The
+/// Account.* event variants were added in a later iteration —
+/// users who created accounts before that ship would otherwise
+/// have rows in SQLite that never produce sync events. On the
+/// first boot after the upgrade we walk those rows once and
+/// emit catch-up events so the next sync round actually carries
+/// them to the remote.
+const PREF_ACCOUNTS_BACKFILLED: &str =
+    "sync.accounts.eventBackfillDone";
+
+/// Catch-up emit: idempotent. Walks every non-local account in
+/// the local accounts table and pushes an `AccountCreated`
+/// event through the writer for it, then sets the pref so the
+/// next boot is a no-op. Safe to call before the Tauri runtime
+/// is fully wired — only depends on the writer + the shared db.
+///
+/// Receivers deduplicate via `sync_applied_events` (the
+/// applier's idempotency table), so even if a peer somehow
+/// gets the same payload twice, the second one is a no-op.
+///
+/// Errors are best-effort: a failed db read or pref write
+/// surfaces as a `warn!` log and leaves the backfill
+/// un-flagged, so the next boot retries. We never want a
+/// backfill problem to block app startup.
+pub fn backfill_account_events(
+    db: &crate::db::DbHandle,
+    event_log: &EventLogWriter,
+) {
+    let shared = db.shared();
+    let prefs = crate::user_prefs::UserPrefsRepo::new(&shared);
+    match prefs.get(PREF_ACCOUNTS_BACKFILLED) {
+        Ok(Some(v)) if v == "true" => return,
+        Ok(_) => {}
+        Err(err) => {
+            tracing::warn!(?err, "account backfill: prefs read failed");
+            return;
+        }
+    }
+    let repo = AccountsRepo::new(&shared);
+    let accounts = match repo.list() {
+        Ok(a) => a,
+        Err(err) => {
+            tracing::warn!(?err, "account backfill: list failed");
+            return;
+        }
+    };
+    let mut emitted = 0usize;
+    for acc in accounts {
+        if acc.id == "local" || acc.adapter_kind == AdapterKind::Local {
+            continue;
+        }
+        event_log.append(SyncEvent::AccountCreated(account_payload(&acc)));
+        emitted += 1;
+    }
+    if let Err(err) = prefs.set(PREF_ACCOUNTS_BACKFILLED, "true") {
+        tracing::warn!(?err, "account backfill: pref write failed");
+        return;
+    }
+    tracing::info!(emitted, "account backfill: replayed existing accounts");
+}
+
 // ── Plugin-id constants ──────────────────────────────────────
 //
 // Centralised so onboarding's smoke-test fns route to the same

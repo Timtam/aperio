@@ -68,6 +68,17 @@ use crate::event_log::scheduler::read_interval_minutes;
 /// writes it back on success.
 pub const SYNC_CURSOR_PREF_KEY: &str = "sync.cursor.lastSeenLog";
 
+/// `user_prefs` key holding the RFC 3339 timestamp of the most
+/// recent successful sync round. Distinct from
+/// [`SYNC_CURSOR_PREF_KEY`]: that one only advances when foreign
+/// logs are actually fetched (because the fetch protocol needs
+/// it to skip already-seen files), so on a single-device setup
+/// or after a no-op round it never changes. This pref bumps to
+/// `Utc::now()` after every successful round so the status
+/// panel can show "Letzter Abgleich: vor 2 Min" even when there
+/// was nothing to fetch.
+pub const SYNC_LAST_ROUND_PREF_KEY: &str = "sync.lastSuccessfulRound";
+
 /// Result of one `sync_now()` invocation. Surfaced to the
 /// frontend via the `sync_now` Tauri command so the user
 /// dialogue can show "12 events applied" or "no new changes".
@@ -302,7 +313,13 @@ impl SyncOrchestrator {
             .is_some();
         let in_flight =
             *self.in_flight.lock().expect("in-flight mutex poison");
-        let last_synced_at = self.read_cursor();
+        let last_synced_at = UserPrefsRepo::new(&self.db)
+            .get(SYNC_LAST_ROUND_PREF_KEY)
+            .ok()
+            .flatten()
+            // Fall back to the fetch cursor on pre-upgrade
+            // datasets that don't have the new pref written yet.
+            .or_else(|| self.read_cursor());
         let interval_minutes = read_interval_minutes(&self.db);
         let e2e_enabled = UserPrefsRepo::new(&self.db)
             .get("sync.adapter.e2eEnabled")
@@ -600,6 +617,18 @@ impl SyncOrchestrator {
             }
             Ok(false) => {}
             Err(err) => warn!(?err, "couldn't evaluate compaction thresholds"),
+        }
+
+        // Record that the round finished successfully. The UI's
+        // "last synced at" reads this pref, not the fetch cursor
+        // — the cursor only advances when we actually fetch
+        // foreign logs, so on a single-device setup it would
+        // never move and the user would forever see "noch kein
+        // Abgleich" even after dozens of successful rounds.
+        if let Err(err) = UserPrefsRepo::new(&self.db)
+            .set(SYNC_LAST_ROUND_PREF_KEY, &Utc::now().to_rfc3339())
+        {
+            warn!(?err, "couldn't persist last-round timestamp");
         }
 
         info!(
