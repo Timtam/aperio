@@ -1,0 +1,12 @@
+{
+  "id": "com.aperio.cal-adapter-caldav",
+  "name": "Aperio CalDAV",
+  "version": "0.1.0",
+  "plugin_type": "calendar-adapter",
+  "capabilities": ["calendar", "tasks", "contacts"],
+  "abi_version": 1,
+  "min_app_version": "0.1.0",
+  "author": "Aperio Contributors",
+  "description": "Bundled CalDAV + CardDAV adapter — Nextcloud, iCloud, Fastmail, Radicale, Baikal and other generic CalDAV/CardDAV servers.",
+  "signed": false
+}

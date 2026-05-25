@@ -19,6 +19,10 @@ members = [
     "crates/cal-adapter-ical-plugin",
     "crates/cal-adapter-todoist-plugin",
     "crates/cal-adapter-vikunja-plugin",
+    "crates/cal-adapter-caldav-plugin",
+    "crates/cal-adapter-google-plugin",
+    "crates/cal-adapter-microsoft-graph-plugin",
+    "crates/cal-adapter-ews-plugin",
 
     # Sync-Adapter
     "crates/sync-adapter-webdav",

@@ -1,0 +1,12 @@
+{
+  "id": "com.aperio.cal-adapter-microsoft-graph",
+  "name": "Aperio Microsoft 365",
+  "version": "0.1.0",
+  "plugin_type": "calendar-adapter",
+  "capabilities": ["calendar", "tasks", "contacts"],
+  "abi_version": 1,
+  "min_app_version": "0.1.0",
+  "author": "Aperio Contributors",
+  "description": "Bundled Microsoft Graph adapter — Outlook calendars, Microsoft To Do tasks and Outlook contacts (Microsoft 365 / Exchange Online).",
+  "signed": false
+}

@@ -624,6 +624,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "cal-adapter-caldav-plugin"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "cal-adapter-caldav",
+ "cal-core",
+ "chrono",
+ "plugin-core",
+ "plugin-sdk",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "cal-adapter-ews"
 version = "0.1.0"
 dependencies = [
@@ -640,6 +656,22 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "cal-adapter-ews-plugin"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "cal-adapter-ews",
+ "cal-core",
+ "chrono",
+ "plugin-core",
+ "plugin-sdk",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -662,6 +694,22 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "cal-adapter-google-plugin"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "cal-adapter-google",
+ "cal-core",
+ "chrono",
+ "plugin-core",
+ "plugin-sdk",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -736,6 +784,22 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "cal-adapter-microsoft-graph-plugin"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "cal-adapter-microsoft-graph",
+ "cal-core",
+ "chrono",
+ "plugin-core",
+ "plugin-sdk",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
