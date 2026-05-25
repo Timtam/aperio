@@ -21,6 +21,11 @@ serde_json.workspace = true
 async-trait.workspace = true
 tracing.workspace = true
 base64 = "0.22"
+# `interactive_auth` runs the Dropbox OAuth dance which needs
+# an HTTP client for the token exchange. The adapter crate's
+# `oauth::run` takes one as parameter; the plugin builds a
+# fresh one per call.
+reqwest.workspace = true
 
 [dev-dependencies]
 plugin-core.workspace = true

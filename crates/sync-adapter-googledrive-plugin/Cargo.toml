@@ -21,6 +21,9 @@ serde_json.workspace = true
 async-trait.workspace = true
 tracing.workspace = true
 base64 = "0.22"
+# `interactive_auth` runs the Google Drive OAuth dance which
+# needs an HTTP client for the token exchange.
+reqwest.workspace = true
 
 [dev-dependencies]
 plugin-core.workspace = true

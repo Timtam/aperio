@@ -20,7 +20,10 @@ mod sync;
 mod tasks;
 mod user_prefs;
 
+use plugin_core::manager::InteractiveAuthError;
+use plugin_core::PluginManager;
 use serde::Serialize;
+use serde_json::Value;
 
 pub use accounts::*;
 pub use calendars::*;
@@ -76,3 +79,46 @@ impl From<crate::DbError> for CommandError {
 
 /// Shorthand used by every command implementation.
 pub type CommandResult<T> = std::result::Result<T, CommandError>;
+
+/// Run an OAuth-style interactive auth dance via the plugin
+/// manager and parse the resulting credential blob into a
+/// `serde_json::Value`. Each plugin returns its provider-
+/// specific TokenSet shape (Google has `access_token` +
+/// `refresh_token` + `expires_at` + `scope`, Dropbox just
+/// `refresh_token` + `access_token` + `expires_at`, …); callers
+/// extract the fields they need via `.get(...)`.
+pub async fn run_plugin_auth(
+    plugin_manager: &PluginManager,
+    plugin_id: &str,
+    args_json: Value,
+) -> Result<Value, CommandError> {
+    let bytes = plugin_manager
+        .interactive_auth(plugin_id, &args_json.to_string())
+        .await
+        .map_err(interactive_auth_error_to_command)?;
+    serde_json::from_slice(&bytes).map_err(|e| CommandError {
+        code: "protocol",
+        message: format!("plugin {plugin_id} returned non-JSON token blob: {e}"),
+    })
+}
+
+pub fn interactive_auth_error_to_command(err: InteractiveAuthError) -> CommandError {
+    match err {
+        InteractiveAuthError::PluginMissing(id) => CommandError {
+            code: "plugin_missing",
+            message: format!("plugin {id} is not loaded"),
+        },
+        InteractiveAuthError::Unsupported(id) => CommandError {
+            code: "unsupported",
+            message: format!("plugin {id} doesn't support interactive auth"),
+        },
+        // The plugin's own error message (Google's "invalid_grant",
+        // Microsoft's CSRF mismatch, browser-closed timeout, …)
+        // surfaces verbatim under the generic `auth` code so the
+        // frontend renders it next to the Sign-in button.
+        InteractiveAuthError::Plugin(msg) => CommandError {
+            code: "auth",
+            message: msg,
+        },
+    }
+}

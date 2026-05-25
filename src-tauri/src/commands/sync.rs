@@ -36,8 +36,6 @@ use base64::Engine;
 use plugin_core::shim::FfiSyncAdapter;
 use plugin_core::PluginManager;
 use serde::Deserialize;
-use sync_adapter_dropbox::oauth as dropbox_oauth;
-use sync_adapter_googledrive::oauth as gdrive_oauth;
 // SFTP's adapter type is still imported directly because
 // `preview_sftp_host_key` runs the §19.5 first-use trust dialog
 // flow that the plugin's static-fingerprint init config can't
@@ -54,7 +52,7 @@ use sync_core::{
 };
 use tauri::State;
 
-use super::{CommandError, CommandResult};
+use super::{run_plugin_auth, CommandError, CommandResult};
 use crate::db::{DbHandle, SharedConn};
 use crate::event_log::{
     CompactionReport, OnboardingReport, OnboardingService, SyncOrchestrator, SyncPreview,
@@ -1889,6 +1887,7 @@ pub fn build_adapter_from_prefs(
 /// the Dropbox developer console.
 #[tauri::command]
 pub async fn connect_dropbox_oauth(
+    plugin_manager: State<'_, Arc<PluginManager>>,
     client_id: String,
     client_secret: String,
 ) -> CommandResult<()> {
@@ -1899,25 +1898,29 @@ pub async fn connect_dropbox_oauth(
             message: "Dropbox client_id must not be empty".into(),
         });
     }
-    let http = reqwest::Client::new();
-    let tokens =
-        dropbox_oauth::run(trimmed_id, client_secret.trim(), &http)
-            .await
-            .map_err(|err| CommandError {
-                code: if err.is_auth() { "auth" } else { "network" },
-                message: format!("Dropbox OAuth: {err}"),
-            })?;
-    let refresh_token =
-        tokens.refresh_token.ok_or(CommandError {
+    let tokens = run_plugin_auth(
+        plugin_manager.inner(),
+        PLUGIN_ID_DROPBOX,
+        serde_json::json!({
+            "client_id": trimmed_id,
+            "client_secret": client_secret.trim(),
+        }),
+    )
+    .await?;
+    let refresh_token = tokens
+        .get("refresh_token")
+        .and_then(|v| v.as_str())
+        .ok_or(CommandError {
             code: "protocol",
             message:
                 "Dropbox returned no refresh token — the app config may \
-                 be missing offline access".into(),
+                 be missing offline access"
+                    .into(),
         })?;
     secrets::store(
         DROPBOX_SECRET_ACCOUNT,
         SecretSlot::RefreshToken,
-        &refresh_token,
+        refresh_token,
     )
     .map_err(|err| CommandError {
         code: "internal",
@@ -1957,6 +1960,7 @@ pub async fn has_dropbox_refresh_token() -> CommandResult<bool> {
 /// — it's still part of the token exchange).
 #[tauri::command]
 pub async fn connect_googledrive_oauth(
+    plugin_manager: State<'_, Arc<PluginManager>>,
     client_id: String,
     client_secret: String,
 ) -> CommandResult<()> {
@@ -1974,16 +1978,19 @@ pub async fn connect_googledrive_oauth(
             message: "Google Drive client_secret must not be empty".into(),
         });
     }
-    let http = reqwest::Client::new();
-    let tokens =
-        gdrive_oauth::run(trimmed_id, trimmed_secret, &http)
-            .await
-            .map_err(|err| CommandError {
-                code: if err.is_auth() { "auth" } else { "network" },
-                message: format!("Google Drive OAuth: {err}"),
-            })?;
-    let refresh_token =
-        tokens.refresh_token.ok_or(CommandError {
+    let tokens = run_plugin_auth(
+        plugin_manager.inner(),
+        PLUGIN_ID_GOOGLEDRIVE,
+        serde_json::json!({
+            "client_id": trimmed_id,
+            "client_secret": trimmed_secret,
+        }),
+    )
+    .await?;
+    let refresh_token = tokens
+        .get("refresh_token")
+        .and_then(|v| v.as_str())
+        .ok_or(CommandError {
             code: "protocol",
             message:
                 "Google returned no refresh token — make sure the \
@@ -1993,7 +2000,7 @@ pub async fn connect_googledrive_oauth(
     secrets::store(
         GOOGLEDRIVE_SECRET_ACCOUNT,
         SecretSlot::RefreshToken,
-        &refresh_token,
+        refresh_token,
     )
     .map_err(|err| CommandError {
         code: "internal",

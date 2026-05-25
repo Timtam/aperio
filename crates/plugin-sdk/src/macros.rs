@@ -230,6 +230,73 @@ macro_rules! declare_lifecycle {
     };
 }
 
+/// Emit the optional
+/// `aperio_plugin_interactive_auth` symbol — the OAuth-style
+/// setup entry point the host's
+/// [`plugin_core::PluginManager::interactive_auth`] looks up
+/// via libloading.
+///
+/// The plugin author writes a single typed handler:
+///
+/// ```ignore
+/// async fn run_oauth(json: &str) -> Result<Vec<u8>, String> {
+///     let cfg: MyAuthConfig = serde_json::from_str(json)
+///         .map_err(|e| e.to_string())?;
+///     let tokens = my_oauth_runner(&cfg.client_id, &cfg.client_secret)
+///         .await
+///         .map_err(|e| e.to_string())?;
+///     Ok(serde_json::to_vec(&tokens).unwrap())
+/// }
+///
+/// plugin_sdk::declare_interactive_auth! {
+///     handler: run_oauth,
+/// }
+/// ```
+///
+/// The macro generates the `#[no_mangle]` wrapper that adapts
+/// the raw FFI args + spins up the plugin's tokio runtime via
+/// [`crate::open_instance::open_instance_with`]'s sibling
+/// helper [`crate::interactive_auth::interactive_auth_with`].
+///
+/// At most one `declare_interactive_auth!` invocation per
+/// crate — emitting two copies of `aperio_plugin_interactive_auth`
+/// would collide at link time, same as
+/// `declare_lifecycle!`'s create/destroy exports.
+///
+/// ## Memory ownership
+///
+/// `args_ptr` + `args_len` is a host-owned byte buffer valid for
+/// the duration of the call. The returned payload bytes are
+/// plugin-allocated; the host drains them via the response's
+/// `free` fn-pointer right after copying — see
+/// [`crate::response::bytes_to_response`] for the contract.
+#[macro_export]
+macro_rules! declare_interactive_auth {
+    (handler: $handler:path $(,)?) => {
+        /// `aperio_plugin_interactive_auth` symbol — see
+        /// `aperio_plugin.h`. The host looks this up by name via
+        /// libloading; plugins that don't export it surface as
+        /// `InteractiveAuthError::Unsupported`.
+        ///
+        /// # Safety
+        ///
+        /// FFI export. `args_ptr` + `args_len` must describe a
+        /// valid byte buffer the host owns for the duration of
+        /// the call.
+        #[no_mangle]
+        pub unsafe extern "C" fn aperio_plugin_interactive_auth(
+            args_ptr: *const u8,
+            args_len: usize,
+        ) -> $crate::plugin_core::ffi::PluginCallResult {
+            $crate::interactive_auth::interactive_auth_with(
+                args_ptr,
+                args_len,
+                |json| async move { $handler(json).await },
+            )
+        }
+    };
+}
+
 #[cfg(test)]
 mod tests {
     //! The macro-expansion happens inside tests via a sub-module

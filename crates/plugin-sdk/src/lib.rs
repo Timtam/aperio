@@ -103,6 +103,7 @@
 pub mod args;
 pub mod error_map;
 pub mod instance;
+pub mod interactive_auth;
 pub mod macros;
 pub mod open_instance;
 pub mod response;
@@ -115,6 +116,7 @@ pub use plugin_core;
 pub use args::decode_args;
 pub use error_map::{cal_error_to_response, sync_error_to_response};
 pub use instance::{InitError, PluginInstance};
+pub use interactive_auth::interactive_auth_with;
 pub use open_instance::{error_result, open_instance_with};
 pub use response::{
     bytes_to_response, error_response, free_boxed_slice, ok_empty_response,

@@ -91,6 +91,24 @@ typedef enum AperioPluginType {
 } AperioPluginType;
 
 /*
+ * Plugin-call status codes. Mirrors the `PLUGIN_CALL_*`
+ * constants in `crates/plugin-core/src/ffi.rs`. Returned by
+ * vtable methods (per type-specific header) + by
+ * `aperio_plugin_interactive_auth`.
+ */
+#define APERIO_PLUGIN_CALL_OK             0
+#define APERIO_PLUGIN_CALL_ERR_UNSUPPORTED 1
+#define APERIO_PLUGIN_CALL_ERR_INVALID    2
+#define APERIO_PLUGIN_CALL_ERR_AUTH       3
+#define APERIO_PLUGIN_CALL_ERR_NETWORK    4
+#define APERIO_PLUGIN_CALL_ERR_NOT_FOUND  5
+#define APERIO_PLUGIN_CALL_ERR_PROTOCOL   6
+#define APERIO_PLUGIN_CALL_ERR_IO         7
+#define APERIO_PLUGIN_CALL_ERR_CONFLICT   8
+#define APERIO_PLUGIN_CALL_ERR_FORBIDDEN  9
+#define APERIO_PLUGIN_CALL_ERR_INTERNAL   10
+
+/*
  * Plugin-owned byte buffer crossing the FFI boundary. Used both
  * for `OpenInstanceResult.error` and as the payload field on
  * every vtable call result.
@@ -123,6 +141,20 @@ typedef struct AperioPluginBytes {
  * The plugin owns the bytes in `error` and the host releases
  * them via `error.free` after copying the message out.
  */
+/*
+ * Standard return type for every plugin call (vtable methods +
+ * `aperio_plugin_interactive_auth`).
+ *
+ * `status` is one of the `APERIO_PLUGIN_CALL_*` codes above.
+ * On `APERIO_PLUGIN_CALL_OK` the payload is the JSON-encoded
+ * response (empty for void-returning methods). On any non-zero
+ * status the payload is a UTF-8 error message.
+ */
+typedef struct PluginCallResult {
+    int32_t            status;
+    AperioPluginBytes  payload;
+} PluginCallResult;
+
 typedef struct OpenInstanceResult {
     /* Opaque per-instance handle. NULL on error. The host stores
        it and passes it back to every vtable method as the first
@@ -218,6 +250,42 @@ typedef struct AperioPlugin {
  */
 AperioPlugin *aperio_plugin_create(void);
 void          aperio_plugin_destroy(AperioPlugin *plugin);
+
+/*
+ * Optional: interactive authentication entry point.
+ *
+ * Plugins that need a setup step the user has to drive through
+ * (OAuth consent screen, SAML form, …) expose this symbol in
+ * addition to the lifecycle exports. Plugins that don't —
+ * CalDAV with Basic auth, an iCal feed, etc. — leave it
+ * unexported and the host's PluginManager surfaces
+ * `InteractiveAuthError::Unsupported` for any call against
+ * them.
+ *
+ * `args_json` carries whatever setup data the host has at the
+ * time it triggers the dance — for OAuth that's typically
+ * `{"client_id": "...", "client_secret": "..."}`. The plugin
+ * runs the dance to completion (opening a browser, listening
+ * on a loopback port, exchanging the code, …) and returns
+ * the resulting credential blob as the PluginCallResult's
+ * payload. The host stores the blob opaquely in its keychain
+ * and threads it back into `open_instance` later.
+ *
+ * Returning `APERIO_PLUGIN_CALL_ERR_AUTH` (or any other non-OK
+ * status) surfaces the plugin's payload bytes verbatim to the
+ * user as the error message, so OAuth-specific errors
+ * (revoked consent, timeout, network) keep their actionable
+ * text.
+ *
+ * The function blocks for the duration of the dance (up to
+ * several minutes — the user might walk away from the consent
+ * screen). The host invokes it inside its own
+ * `tokio::task::spawn_blocking` so the reactor stays free.
+ */
+PluginCallResult aperio_plugin_interactive_auth(
+    const uint8_t *args_ptr,
+    size_t         args_len
+);
 
 #ifdef __cplusplus
 } /* extern "C" */

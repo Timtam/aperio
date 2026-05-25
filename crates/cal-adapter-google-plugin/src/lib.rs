@@ -369,3 +369,40 @@ plugin_sdk::declare_lifecycle! {
     open_instance: plugin_open_instance,
     close_instance: plugin_close_instance,
 }
+
+// ─────────────────────────────────────────────────────────────
+// Interactive auth (OAuth 2.0 PKCE flow)
+// ─────────────────────────────────────────────────────────────
+//
+// The host's `connect_google_account` Tauri command calls
+// `PluginManager::interactive_auth` with the Cloud Console
+// credentials; this handler runs the loopback OAuth dance via
+// the adapter crate's existing runner + returns the resulting
+// `TokenSet` as JSON bytes the host can persist into the
+// keychain.
+
+#[derive(Debug, serde::Deserialize)]
+struct InteractiveAuthArgs {
+    client_id: String,
+    client_secret: String,
+}
+
+async fn plugin_interactive_auth(args_json: String) -> Result<Vec<u8>, String> {
+    let args: InteractiveAuthArgs = serde_json::from_str(&args_json)
+        .map_err(|e| format!("malformed interactive_auth args: {e}"))?;
+    if args.client_id.trim().is_empty() || args.client_secret.trim().is_empty() {
+        return Err("client_id and client_secret must not be empty".to_string());
+    }
+    let tokens = GoogleAdapter::authenticate_interactive(
+        args.client_id.trim(),
+        args.client_secret.trim(),
+    )
+    .await
+    .map_err(|e| format!("Google OAuth: {e}"))?;
+    serde_json::to_vec(&tokens)
+        .map_err(|e| format!("serialise TokenSet: {e}"))
+}
+
+plugin_sdk::declare_interactive_auth! {
+    handler: plugin_interactive_auth,
+}

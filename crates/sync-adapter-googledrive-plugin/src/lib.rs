@@ -211,3 +211,36 @@ plugin_sdk::declare_lifecycle! {
     open_instance: plugin_open_instance,
     close_instance: plugin_close_instance,
 }
+
+// ─────────────────────────────────────────────────────────────
+// Interactive auth (OAuth 2.0 PKCE against Google's installed-
+// app flow)
+// ─────────────────────────────────────────────────────────────
+
+#[derive(Debug, serde::Deserialize)]
+struct InteractiveAuthArgs {
+    client_id: String,
+    client_secret: String,
+}
+
+async fn plugin_interactive_auth(args_json: String) -> Result<Vec<u8>, String> {
+    let args: InteractiveAuthArgs = serde_json::from_str(&args_json)
+        .map_err(|e| format!("malformed interactive_auth args: {e}"))?;
+    if args.client_id.trim().is_empty() || args.client_secret.trim().is_empty() {
+        return Err("client_id and client_secret must not be empty".to_string());
+    }
+    let http = reqwest::Client::new();
+    let tokens = sync_adapter_googledrive::oauth::run(
+        args.client_id.trim(),
+        args.client_secret.trim(),
+        &http,
+    )
+    .await
+    .map_err(|e| format!("Google Drive OAuth: {e}"))?;
+    serde_json::to_vec(&tokens)
+        .map_err(|e| format!("serialise TokenSet: {e}"))
+}
+
+plugin_sdk::declare_interactive_auth! {
+    handler: plugin_interactive_auth,
+}

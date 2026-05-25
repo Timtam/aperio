@@ -55,9 +55,27 @@ use crate::abi::{
     PLUGIN_OK, SYMBOL_CREATE, SYMBOL_DESTROY,
 };
 use crate::error::{PluginError, PluginResult};
+use crate::ffi::{PluginCallResult, PLUGIN_CALL_OK};
 use crate::manifest::{PluginManifest, MANIFEST_FILENAME};
 use crate::plugin_type::PluginType;
 use crate::version::check_abi_version;
+
+/// Function-pointer type for the optional
+/// `aperio_plugin_interactive_auth` symbol. Plugins that need an
+/// OAuth dance (or any other interactive setup step) export this
+/// alongside the lifecycle exports; the host looks it up by name
+/// via `libloading` at plugin-load time and caches the result.
+///
+/// `args_ptr` / `args_len` carry a JSON document with whatever
+/// setup data the host has (e.g. `{"client_id": "..."}`); the
+/// returned [`PluginCallResult`]'s payload is the credential
+/// blob the host should store opaquely + thread back into
+/// `open_instance` later.
+pub type InteractiveAuthFn =
+    unsafe extern "C" fn(args_ptr: *const u8, args_len: usize) -> PluginCallResult;
+
+/// Canonical symbol name for the interactive-auth entry point.
+pub const SYMBOL_INTERACTIVE_AUTH: &[u8] = b"aperio_plugin_interactive_auth";
 
 /// One loaded plugin — manifest + library handle + descriptor
 /// pointer + the `destroy` symbol we need to call before unload.
@@ -79,6 +97,11 @@ pub struct LoadedPlugin {
     /// Cached `aperio_plugin_destroy` symbol. Looked up once at
     /// load time so the destructor path doesn't have to fail.
     destroy_fn: AperioPluginDestroyFn,
+
+    /// Cached `aperio_plugin_interactive_auth` fn-pointer. `None`
+    /// when the plugin doesn't export the symbol — most plugins
+    /// don't need an OAuth dance + leave it unexported.
+    interactive_auth_fn: Option<InteractiveAuthFn>,
 
     /// The dlopen'd library. Drop order:
     /// `aperio_plugin_destroy` → `library.drop()` (which calls
@@ -367,6 +390,19 @@ impl PluginManager {
             *sym
         };
 
+        // `aperio_plugin_interactive_auth` is optional — most
+        // plugins don't need an OAuth dance and leave the symbol
+        // unexported. Cache the resolved fn-pointer at load time
+        // so the per-call path doesn't have to re-walk the
+        // library's symbol table; a libloading::Error here just
+        // means the plugin doesn't expose the capability.
+        let interactive_auth_fn: Option<InteractiveAuthFn> = unsafe {
+            library
+                .get::<InteractiveAuthFn>(SYMBOL_INTERACTIVE_AUTH)
+                .ok()
+                .map(|sym| *sym)
+        };
+
         // ABI cross-check between the manifest's claim + the
         // descriptor's claim. They MUST match — a divergence
         // would mean either the plugin's build hooked up the
@@ -410,6 +446,7 @@ impl PluginManager {
             manifest,
             plugin_ptr,
             destroy_fn,
+            interactive_auth_fn,
             library: Some(library),
         };
         let id = loaded.manifest.id.clone();
@@ -421,6 +458,12 @@ impl PluginManager {
     /// the mobile build path). The descriptor + destroy fn
     /// come straight from the plugin crate that's part of the
     /// host binary — no `dlopen`, no [`Library`] to retain.
+    ///
+    /// Static-linked plugins don't get an `interactive_auth_fn`
+    /// — the named-symbol lookup mechanism the dlopen path uses
+    /// has no static-link analogue. Plugins that need
+    /// interactive_auth must therefore be dlopen-loaded
+    /// (relevant for any OAuth-style adapter).
     pub fn register_static(
         &self,
         manifest: PluginManifest,
@@ -438,6 +481,7 @@ impl PluginManager {
             manifest,
             plugin_ptr: descriptor,
             destroy_fn,
+            interactive_auth_fn: None,
             library: None,
         };
         let id = loaded.manifest.id.clone();
@@ -571,7 +615,96 @@ impl PluginManager {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    /// Run the given plugin's `interactive_auth` hook with the
+    /// supplied JSON args + return the resulting credential
+    /// blob (typically a TokenSet for OAuth flows). Async
+    /// because the OAuth dance can block on the user for up to
+    /// 5 minutes — the call runs on the host's blocking pool
+    /// via `tokio::task::spawn_blocking` so the reactor stays
+    /// free.
+    ///
+    /// Errors:
+    ///   - [`InteractiveAuthError::PluginMissing`] — no plugin
+    ///     loaded under the given id.
+    ///   - [`InteractiveAuthError::Unsupported`] — plugin
+    ///     exists but doesn't export the
+    ///     `aperio_plugin_interactive_auth` symbol (Basic-auth /
+    ///     token-only adapters that don't need an interactive
+    ///     setup step).
+    ///   - [`InteractiveAuthError::Plugin`] — the plugin
+    ///     returned a non-OK status; the message comes through
+    ///     verbatim so the user sees the OAuth error text
+    ///     (revoked grant, network problem, browser-closed
+    ///     timeout, …).
+    pub async fn interactive_auth(
+        &self,
+        plugin_id: &str,
+        args_json: &str,
+    ) -> Result<Vec<u8>, InteractiveAuthError> {
+        let plugin = self
+            .get(plugin_id)
+            .ok_or_else(|| InteractiveAuthError::PluginMissing(plugin_id.to_string()))?;
+        let interactive_fn = plugin
+            .interactive_auth_fn
+            .ok_or_else(|| InteractiveAuthError::Unsupported(plugin_id.to_string()))?;
+        // Keep the LoadedPlugin Arc alive across the
+        // spawn_blocking — `interactive_fn` is a function
+        // pointer into the plugin's still-loaded library.
+        let plugin_for_drop = plugin.clone();
+        let args = args_json.as_bytes().to_vec();
+        let join = tokio::task::spawn_blocking(move || {
+            // SAFETY: interactive_fn was looked up out of the
+            // same library that plugin_for_drop holds open;
+            // args is a Vec<u8> we own for the duration of the
+            // synchronous call.
+            let result = unsafe { interactive_fn(args.as_ptr(), args.len()) };
+            // SAFETY: result.payload is owned by the plugin; we
+            // copy bytes out + free in place before the buffer
+            // goes out of scope on the plugin's side.
+            let bytes = unsafe { result.payload.as_slice().to_vec() };
+            let status = result.status;
+            let mut payload = result.payload;
+            unsafe { payload.free_in_place() };
+            (status, bytes)
+        })
+        .await;
+        // Hold the plugin Arc until after spawn_blocking returns.
+        drop(plugin_for_drop);
+        let (status, bytes) = join.map_err(|err| {
+            InteractiveAuthError::Plugin(format!("plugin task: {err}"))
+        })?;
+        if status == PLUGIN_CALL_OK {
+            Ok(bytes)
+        } else {
+            let msg = String::from_utf8_lossy(&bytes).into_owned();
+            Err(InteractiveAuthError::Plugin(format!(
+                "plugin status {status}: {msg}",
+            )))
+        }
+    }
 }
+
+/// Reasons [`PluginManager::interactive_auth`] can fail.
+#[derive(Debug, thiserror::Error)]
+pub enum InteractiveAuthError {
+    /// No plugin loaded under this id. Surfaces the same UX as
+    /// the §20.8 "Plugin fehlt" affordance.
+    #[error("plugin not installed: {0}")]
+    PluginMissing(String),
+
+    /// Plugin is loaded but doesn't expose an
+    /// `aperio_plugin_interactive_auth` entry point — it's not
+    /// an OAuth-style adapter.
+    #[error("plugin {0} doesn't support interactive_auth")]
+    Unsupported(String),
+
+    /// Plugin returned a non-OK status. Carries the plugin's
+    /// own error message so the user sees actionable text.
+    #[error("{0}")]
+    Plugin(String),
+}
+
 
 /// Default subdir under the data dir / app dir where bundled
 /// plugins are staged. The release build pipeline copies each
@@ -676,6 +809,7 @@ pub mod test_support {
             manifest,
             plugin_ptr: descriptor,
             destroy_fn,
+            interactive_auth_fn: None,
             library: None,
         }
     }

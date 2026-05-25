@@ -7,13 +7,6 @@ use cal_adapter_ews::{
     discover as ews_discover, discover_client as ews_discover_client,
     DiscoveredEndpoints, EwsError,
 };
-// Google + Microsoft Graph keep direct imports for the OAuth
-// dance (`authenticate_interactive` opens a browser + binds a
-// loopback TCP listener for the redirect). Moving that into the
-// plugins themselves requires an `interactive_auth(config_json)`
-// ABI extension — separate iteration.
-use cal_adapter_google::{GoogleAccountConfig, GoogleAdapter};
-use cal_adapter_microsoft_graph::{GraphAccountConfig, MicrosoftGraphAdapter};
 use cal_core::{CalendarFeature, TasksFeature};
 use plugin_core::shim::{FfiCalendarAdapter, FfiTasksAdapter};
 use plugin_core::PluginManager;
@@ -21,7 +14,7 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use tauri::State;
 
-use super::{CommandError, CommandResult};
+use super::{run_plugin_auth, CommandError, CommandResult};
 use crate::accounts::{Account, AccountsError, AccountsRepo, AdapterKind};
 use crate::db::DbHandle;
 use crate::registry::AdapterRegistry;
@@ -36,6 +29,8 @@ const PLUGIN_ID_ICAL: &str = "com.aperio.cal-adapter-ical";
 const PLUGIN_ID_EWS: &str = "com.aperio.cal-adapter-ews";
 const PLUGIN_ID_VIKUNJA: &str = "com.aperio.cal-adapter-vikunja";
 const PLUGIN_ID_TODOIST: &str = "com.aperio.cal-adapter-todoist";
+const PLUGIN_ID_GOOGLE: &str = "com.aperio.cal-adapter-google";
+const PLUGIN_ID_GRAPH: &str = "com.aperio.cal-adapter-microsoft-graph";
 
 #[tauri::command]
 pub async fn list_accounts(
@@ -720,6 +715,7 @@ impl From<AccountsError> for CommandError {
 pub async fn connect_google_account(
     db: State<'_, DbHandle>,
     registry: State<'_, Arc<AdapterRegistry>>,
+    plugin_manager: State<'_, Arc<PluginManager>>,
     request: ConnectGoogleRequest,
 ) -> CommandResult<Account> {
     let name = request.display_name.trim();
@@ -744,47 +740,55 @@ pub async fn connect_google_account(
         });
     }
 
-    // 1) Run the OAuth dance. This opens the system browser and
-    //    blocks the command until the user completes consent (or
-    //    times out at 5 min, or the user denies). Errors here are
-    //    surfaced verbatim — we haven't touched anything persistent
-    //    yet.
-    let tokens =
-        GoogleAdapter::authenticate_interactive(client_id, client_secret)
-            .await
-            .map_err(google_error_to_command)?;
+    // 1) Run the OAuth dance via the plugin. This opens the
+    //    system browser and blocks the command until the user
+    //    completes consent (or times out at 5 min, or the user
+    //    denies). Errors here are surfaced verbatim — we
+    //    haven't touched anything persistent yet.
+    let tokens = run_plugin_auth(
+        plugin_manager.inner(),
+        PLUGIN_ID_GOOGLE,
+        json!({
+            "client_id": client_id,
+            "client_secret": client_secret,
+        }),
+    )
+    .await?;
 
-    // 2) Create the account row. Config carries client_id +
-    //    client_secret (the latter is what Google's docs themselves
-    //    say "is not treated as a secret" for installed apps — see
-    //    the GoogleAccountConfig type docs).
-    let config = GoogleAccountConfig {
-        client_id: client_id.to_string(),
-        client_secret: client_secret.to_string(),
-        account_label: None,
-    };
-    let config_json = serde_json::to_string(&config).map_err(|e| CommandError {
-        code: "internal",
-        message: format!("serialise config: {e}"),
-    })?;
+    // 2) Create the account row. Config_json carries
+    //    `client_id` + `client_secret` (the latter is what
+    //    Google's docs themselves say "is not treated as a
+    //    secret" for installed apps); the plugin's InitConfig
+    //    deserialiser reads them back at open_instance time.
+    let config_json = json!({
+        "client_id": client_id,
+        "client_secret": client_secret,
+    })
+    .to_string();
     let shared = db.shared();
     let repo = AccountsRepo::new(&shared);
     let created = repo.create(AdapterKind::Google, name, &config_json)?;
 
-    // 3) Persist tokens to the keychain. If either write fails we
-    //    delete the row and surface an error so the user can retry
-    //    with a clean slate.
-    if let Err(err) =
-        secrets::store(&created.id, SecretSlot::AccessToken, &tokens.access_token)
-    {
+    // 3) Persist tokens to the keychain. If either write fails
+    //    we delete the row and surface an error so the user can
+    //    retry with a clean slate.
+    let access = tokens
+        .get("access_token")
+        .and_then(Value::as_str)
+        .ok_or(CommandError {
+            code: "protocol",
+            message: "Google plugin returned no access_token".into(),
+        })?;
+    if let Err(err) = secrets::store(&created.id, SecretSlot::AccessToken, access) {
         let _ = repo.delete(&created.id);
         return Err(CommandError {
             code: "internal",
             message: format!("failed to store access token: {err}"),
         });
     }
-    if let Some(refresh) = tokens.refresh_token.as_deref() {
-        if let Err(err) = secrets::store(&created.id, SecretSlot::RefreshToken, refresh)
+    if let Some(refresh) = tokens.get("refresh_token").and_then(Value::as_str) {
+        if let Err(err) =
+            secrets::store(&created.id, SecretSlot::RefreshToken, refresh)
         {
             let _ = secrets::delete_all(&created.id);
             let _ = repo.delete(&created.id);
@@ -796,9 +800,9 @@ pub async fn connect_google_account(
     }
 
     // 4) Register the adapter so subsequent reads/writes route
-    //    through it. The registry reads tokens from keychain again
-    //    — round-trip is intentional so the read-path stays
-    //    identical to what happens at app boot.
+    //    through it. The registry reads tokens from keychain
+    //    again — round-trip is intentional so the read-path
+    //    stays identical to what happens at app boot.
     if let Err(err) = registry.register(&created) {
         let _ = secrets::delete_all(&created.id);
         let _ = repo.delete(&created.id);
@@ -825,6 +829,7 @@ pub struct ConnectGoogleRequest {
 pub async fn connect_microsoft_account(
     db: State<'_, DbHandle>,
     registry: State<'_, Arc<AdapterRegistry>>,
+    plugin_manager: State<'_, Arc<PluginManager>>,
     request: ConnectMicrosoftRequest,
 ) -> CommandResult<Account> {
     let name = request.display_name.trim();
@@ -848,35 +853,42 @@ pub async fn connect_microsoft_account(
         .filter(|s| !s.is_empty())
         .unwrap_or("common");
 
-    let tokens =
-        MicrosoftGraphAdapter::authenticate_interactive(client_id, authority)
-            .await
-            .map_err(graph_error_to_command)?;
+    let tokens = run_plugin_auth(
+        plugin_manager.inner(),
+        PLUGIN_ID_GRAPH,
+        json!({
+            "client_id": client_id,
+            "authority": authority,
+        }),
+    )
+    .await?;
 
-    let config = GraphAccountConfig {
-        client_id: client_id.to_string(),
-        authority: authority.to_string(),
-        account_label: None,
-    };
-    let config_json = serde_json::to_string(&config).map_err(|e| CommandError {
-        code: "internal",
-        message: format!("serialise config: {e}"),
-    })?;
+    let config_json = json!({
+        "client_id": client_id,
+        "authority": authority,
+    })
+    .to_string();
     let shared = db.shared();
     let repo = AccountsRepo::new(&shared);
     let created = repo.create(AdapterKind::MicrosoftGraph, name, &config_json)?;
 
-    if let Err(err) =
-        secrets::store(&created.id, SecretSlot::AccessToken, &tokens.access_token)
-    {
+    let access = tokens
+        .get("access_token")
+        .and_then(Value::as_str)
+        .ok_or(CommandError {
+            code: "protocol",
+            message: "Microsoft Graph plugin returned no access_token".into(),
+        })?;
+    if let Err(err) = secrets::store(&created.id, SecretSlot::AccessToken, access) {
         let _ = repo.delete(&created.id);
         return Err(CommandError {
             code: "internal",
             message: format!("failed to store access token: {err}"),
         });
     }
-    if let Some(refresh) = tokens.refresh_token.as_deref() {
-        if let Err(err) = secrets::store(&created.id, SecretSlot::RefreshToken, refresh)
+    if let Some(refresh) = tokens.get("refresh_token").and_then(Value::as_str) {
+        if let Err(err) =
+            secrets::store(&created.id, SecretSlot::RefreshToken, refresh)
         {
             let _ = secrets::delete_all(&created.id);
             let _ = repo.delete(&created.id);
@@ -906,53 +918,17 @@ pub struct ConnectMicrosoftRequest {
     pub display_name: String,
 }
 
-fn graph_error_to_command(err: cal_adapter_microsoft_graph::GraphError) -> CommandError {
-    use cal_adapter_microsoft_graph::GraphError::*;
-    let (code, message) = match err {
-        AuthDenied(m) => ("auth", format!("Verbindung abgelehnt: {m}")),
-        AuthTimeout => (
-            "auth",
-            "Anmeldung hat zu lange gedauert (5 min). Bitte erneut versuchen.".into(),
-        ),
-        Http { status: 401, message } | Http { status: 403, message } => {
-            ("auth", message)
-        }
-        Http { status, message } => (
-            "protocol",
-            format!("Microsoft HTTP {status}: {message}"),
-        ),
-        Network(m) => ("network", m),
-        Protocol(m) => ("protocol", m),
-        Csrf => ("protocol", "CSRF-Mismatch bei OAuth-Redirect".into()),
-        Io(m) => ("internal", m),
-        Config(m) => ("invalid_input", m),
-    };
-    CommandError { code, message }
-}
-
-fn google_error_to_command(err: cal_adapter_google::GoogleError) -> CommandError {
-    use cal_adapter_google::GoogleError::*;
-    let (code, message) = match err {
-        AuthDenied(m) => ("auth", format!("Verbindung abgelehnt: {m}")),
-        AuthTimeout => (
-            "auth",
-            "Anmeldung hat zu lange gedauert (5 min). Bitte erneut versuchen.".into(),
-        ),
-        Http { status: 401, message } | Http { status: 403, message } => {
-            ("auth", message)
-        }
-        Http { status, message } => (
-            "protocol",
-            format!("Google HTTP {status}: {message}"),
-        ),
-        Network(m) => ("network", m),
-        Protocol(m) => ("protocol", m),
-        Csrf => ("protocol", "CSRF-Mismatch bei OAuth-Redirect".into()),
-        Io(m) => ("internal", m),
-        Config(m) => ("invalid_input", m),
-    };
-    CommandError { code, message }
-}
+// google_error_to_command + graph_error_to_command moved into
+// the plugins themselves — the OAuth dance now runs plugin-side,
+// the typed adapter error enums never cross into the host. The
+// plugin's `Err(String)` from interactive_auth flows through
+// `interactive_auth_error_to_command` above as `code: "auth"`
+// with the message preserved verbatim. The localised German
+// "Verbindung abgelehnt" / "Anmeldung hat zu lange gedauert"
+// text is gone for now; a follow-up could either re-thread the
+// typed enum across the FFI boundary (extending the
+// InteractiveAuthError variants) or move the i18n layer onto
+// the frontend.
 
 // ---------------------------------------------------------------------------
 // §19.11.8 reconnect commands — re-attach credentials to existing
@@ -1034,50 +1010,28 @@ pub async fn set_account_secret(
 pub async fn reconnect_google_account(
     db: State<'_, DbHandle>,
     registry: State<'_, Arc<AdapterRegistry>>,
+    plugin_manager: State<'_, Arc<PluginManager>>,
     account_id: String,
 ) -> CommandResult<()> {
-    let shared = db.shared();
-    let repo = AccountsRepo::new(&shared);
-    let account = repo.get(&account_id)?.ok_or(CommandError {
-        code: "not_found",
-        message: format!("account {account_id} not found"),
-    })?;
-    if account.adapter_kind != AdapterKind::Google {
-        return Err(CommandError {
-            code: "invalid_input",
-            message: "account is not a Google account".into(),
-        });
-    }
-    let config: GoogleAccountConfig = serde_json::from_str(&account.config_json)
-        .map_err(|err| CommandError {
-            code: "internal",
-            message: format!("parse Google config: {err}"),
-        })?;
-    let tokens = GoogleAdapter::authenticate_interactive(
-        &config.client_id,
-        &config.client_secret,
+    reconnect_oauth_account(
+        db.inner(),
+        registry.inner(),
+        plugin_manager.inner(),
+        &account_id,
+        AdapterKind::Google,
+        PLUGIN_ID_GOOGLE,
+        "Google",
+        |config| {
+            json!({
+                "client_id": config.get("client_id").cloned().unwrap_or(Value::Null),
+                "client_secret": config
+                    .get("client_secret")
+                    .cloned()
+                    .unwrap_or(Value::Null),
+            })
+        },
     )
     .await
-    .map_err(google_error_to_command)?;
-    secrets::store(&account.id, SecretSlot::AccessToken, &tokens.access_token)
-        .map_err(|err| CommandError {
-            code: "internal",
-            message: format!("failed to store access token: {err}"),
-        })?;
-    if let Some(refresh) = tokens.refresh_token.as_deref() {
-        secrets::store(&account.id, SecretSlot::RefreshToken, refresh)
-            .map_err(|err| CommandError {
-                code: "internal",
-                message: format!("failed to store refresh token: {err}"),
-            })?;
-    }
-    if let Err(err) = registry.register(&account) {
-        return Err(CommandError {
-            code: "internal",
-            message: format!("adapter registration failed: {err}"),
-        });
-    }
-    Ok(())
 }
 
 /// Microsoft equivalent of [`reconnect_google_account`].
@@ -1088,42 +1042,91 @@ pub async fn reconnect_google_account(
 pub async fn reconnect_microsoft_account(
     db: State<'_, DbHandle>,
     registry: State<'_, Arc<AdapterRegistry>>,
+    plugin_manager: State<'_, Arc<PluginManager>>,
     account_id: String,
 ) -> CommandResult<()> {
+    reconnect_oauth_account(
+        db.inner(),
+        registry.inner(),
+        plugin_manager.inner(),
+        &account_id,
+        AdapterKind::MicrosoftGraph,
+        PLUGIN_ID_GRAPH,
+        "Microsoft Graph",
+        |config| {
+            json!({
+                "client_id": config.get("client_id").cloned().unwrap_or(Value::Null),
+                "authority": config
+                    .get("authority")
+                    .cloned()
+                    .unwrap_or(Value::String("common".into())),
+            })
+        },
+    )
+    .await
+}
+
+/// Shared re-OAuth flow for Google + Microsoft Graph accounts.
+/// Pulls the persisted config off the row, hands the plugin the
+/// just-the-OAuth-inputs subset (via `build_args`), persists
+/// the fresh tokens under the existing account id, and
+/// re-registers the adapter so subsequent reads route through
+/// the new credentials without an app restart.
+async fn reconnect_oauth_account<F>(
+    db: &DbHandle,
+    registry: &AdapterRegistry,
+    plugin_manager: &PluginManager,
+    account_id: &str,
+    expected_kind: AdapterKind,
+    plugin_id: &str,
+    plugin_label: &str,
+    build_args: F,
+) -> CommandResult<()>
+where
+    F: FnOnce(&Value) -> Value,
+{
     let shared = db.shared();
     let repo = AccountsRepo::new(&shared);
-    let account = repo.get(&account_id)?.ok_or(CommandError {
+    let account = repo.get(account_id)?.ok_or(CommandError {
         code: "not_found",
         message: format!("account {account_id} not found"),
     })?;
-    if account.adapter_kind != AdapterKind::MicrosoftGraph {
+    if account.adapter_kind != expected_kind {
         return Err(CommandError {
             code: "invalid_input",
-            message: "account is not a Microsoft Graph account".into(),
+            message: format!(
+                "account is not a {plugin_label} account",
+            ),
         });
     }
-    let config: GraphAccountConfig = serde_json::from_str(&account.config_json)
-        .map_err(|err| CommandError {
+    let config: Value =
+        serde_json::from_str(&account.config_json).map_err(|err| CommandError {
             code: "internal",
-            message: format!("parse Graph config: {err}"),
+            message: format!("parse {plugin_label} config: {err}"),
         })?;
-    let tokens = MicrosoftGraphAdapter::authenticate_interactive(
-        &config.client_id,
-        &config.authority,
-    )
-    .await
-    .map_err(graph_error_to_command)?;
-    secrets::store(&account.id, SecretSlot::AccessToken, &tokens.access_token)
-        .map_err(|err| CommandError {
+    let args = build_args(&config);
+    let tokens = run_plugin_auth(plugin_manager, plugin_id, args).await?;
+
+    let access = tokens
+        .get("access_token")
+        .and_then(Value::as_str)
+        .ok_or(CommandError {
+            code: "protocol",
+            message: format!("{plugin_label} plugin returned no access_token"),
+        })?;
+    secrets::store(&account.id, SecretSlot::AccessToken, access).map_err(
+        |err| CommandError {
             code: "internal",
             message: format!("failed to store access token: {err}"),
-        })?;
-    if let Some(refresh) = tokens.refresh_token.as_deref() {
-        secrets::store(&account.id, SecretSlot::RefreshToken, refresh)
-            .map_err(|err| CommandError {
+        },
+    )?;
+    if let Some(refresh) = tokens.get("refresh_token").and_then(Value::as_str) {
+        secrets::store(&account.id, SecretSlot::RefreshToken, refresh).map_err(
+            |err| CommandError {
                 code: "internal",
                 message: format!("failed to store refresh token: {err}"),
-            })?;
+            },
+        )?;
     }
     if let Err(err) = registry.register(&account) {
         return Err(CommandError {
