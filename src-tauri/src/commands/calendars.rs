@@ -186,16 +186,46 @@ pub async fn get_events(
     let account = registry
         .account_for_calendar(&request.calendar_id)
         .unwrap_or_else(|| LOCAL_ID.to_string());
+    tracing::info!(
+        target: "aperio::commands",
+        calendar_id = %request.calendar_id,
+        account_id = %account,
+        is_local = (account == LOCAL_ID),
+        range_start = %range.start.to_rfc3339(),
+        range_end = %range.end.to_rfc3339(),
+        "get_events command invoked",
+    );
     if account == LOCAL_ID {
         return Ok(adapter.get_events(&request.calendar_id, range).await?);
     }
     let Some(ext) = registry.calendar_adapter(&account) else {
+        tracing::warn!(
+            target: "aperio::commands",
+            calendar_id = %request.calendar_id,
+            account_id = %account,
+            "get_events: calendar mapped to account but no CalendarFeature adapter registered",
+        );
         return Err(CommandError {
             code: "not_found",
             message: format!("calendar '{}' is not routable", request.calendar_id),
         });
     };
-    Ok(ext.get_events(&request.calendar_id, range).await?)
+    let result = ext.get_events(&request.calendar_id, range).await;
+    match &result {
+        Ok(events) => tracing::info!(
+            target: "aperio::commands",
+            calendar_id = %request.calendar_id,
+            count = events.len(),
+            "get_events returned",
+        ),
+        Err(err) => tracing::warn!(
+            target: "aperio::commands",
+            calendar_id = %request.calendar_id,
+            ?err,
+            "get_events failed at adapter",
+        ),
+    }
+    Ok(result?)
 }
 
 #[derive(Debug, Deserialize)]
