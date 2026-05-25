@@ -50,6 +50,13 @@ pub struct RemotePluginAnnouncement {
     pub plugin_type: Option<String>,
     pub source: Option<String>,
     pub announced_by_device: String,
+    /// Human-readable name of the announcing device, resolved
+    /// from the `device_names` cache that the orchestrator
+    /// populates from meta.json. `None` when meta.json didn't
+    /// carry a name for that device id (or we haven't synced
+    /// yet). The UI falls back to `announced_by_device` in
+    /// that case.
+    pub announced_by_device_name: Option<String>,
     /// RFC 3339 timestamp.
     pub announced_at: String,
 }
@@ -117,13 +124,19 @@ impl<'a> RemotePluginsRepo<'a> {
     /// panel filters to "we don't have this id installed
     /// locally" on the host side before rendering — keeps
     /// the SQL trivial.
+    ///
+    /// LEFT JOINs `device_names` so each row carries the
+    /// announcing device's resolved name (or `None` when
+    /// we haven't seen meta.json from that device yet).
     pub fn list(&self) -> RemotePluginsResult<Vec<RemotePluginAnnouncement>> {
         let conn = self.db.lock().expect("db mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, name, version, plugin_type, source,
-                    announced_by_device, announced_at
-               FROM remote_plugins
-              ORDER BY announced_at DESC",
+            "SELECT rp.id, rp.name, rp.version, rp.plugin_type, rp.source,
+                    rp.announced_by_device, dn.name, rp.announced_at
+               FROM remote_plugins rp
+               LEFT JOIN device_names dn
+                      ON dn.device_id = rp.announced_by_device
+              ORDER BY rp.announced_at DESC",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok(RemotePluginAnnouncement {
@@ -133,7 +146,8 @@ impl<'a> RemotePluginsRepo<'a> {
                 plugin_type: row.get(3)?,
                 source: row.get(4)?,
                 announced_by_device: row.get(5)?,
-                announced_at: row.get(6)?,
+                announced_by_device_name: row.get(6)?,
+                announced_at: row.get(7)?,
             })
         })?;
         let mut out = Vec::new();

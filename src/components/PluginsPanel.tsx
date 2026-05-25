@@ -411,7 +411,8 @@ export function PluginsPanel() {
                 )}
                 <p className="form__hint">
                   {t('dialogs.settings.plugins.remote.announcedBy', {
-                    device: r.announced_by_device,
+                    device:
+                      r.announced_by_device_name ?? r.announced_by_device,
                   })}
                 </p>
               </li>

@@ -11,7 +11,7 @@
 
 use super::{DbError, DbHandle, DbResult};
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 16;
+pub const CURRENT_SCHEMA_VERSION: u32 = 17;
 
 struct Migration {
     target: u32,
@@ -82,6 +82,10 @@ const MIGRATIONS: &[Migration] = &[
     Migration {
         target: 16,
         sql: include_str!("sql/0016_remote_plugins.sql"),
+    },
+    Migration {
+        target: 17,
+        sql: include_str!("sql/0017_device_names.sql"),
     },
 ];
 

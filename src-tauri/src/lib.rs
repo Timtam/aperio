@@ -10,6 +10,7 @@ pub mod commands;
 pub mod conflicts;
 pub mod contact_sync;
 pub mod db;
+pub mod device_names;
 pub mod event_log;
 pub mod overrides;
 mod paths;

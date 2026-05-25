@@ -413,6 +413,25 @@ impl SyncOrchestrator {
                     return Err(err);
                 }
             }
+            // §20.8 helper: cache every announced device's
+            // name into the local device_names table so the
+            // Settings → Plugins panel can render "Used on:
+            // <Name>" without a separate round-trip. Errors
+            // here are non-fatal — the panel falls back to
+            // the raw id.
+            {
+                let repo = crate::device_names::DeviceNamesRepo::new(&self.db);
+                for (device_id, record) in &meta.devices {
+                    if let Err(err) = repo.upsert(device_id, record.name.as_deref()) {
+                        tracing::warn!(
+                            device_id = %device_id,
+                            ?err,
+                            "couldn't cache device name from meta.json",
+                        );
+                    }
+                }
+            }
+
             // §19.10 stale gate. The compactor marks devices
             // whose `last_seen_log` predates the snapshot
             // horizon; we surface that as `StaleDevice` so the

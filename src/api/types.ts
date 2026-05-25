@@ -349,6 +349,12 @@ export interface RemotePluginAnnouncement {
   plugin_type: string | null;
   source: string | null;
   announced_by_device: string;
+  /** Resolved name of the announcing device — populated by
+   *  the host from meta.json's DeviceRecord. May be `null`
+   *  when we haven't yet synced a meta.json that names the
+   *  device; the UI falls back to `announced_by_device` in
+   *  that case. */
+  announced_by_device_name: string | null;
   /** RFC 3339. */
   announced_at: string;
 }
