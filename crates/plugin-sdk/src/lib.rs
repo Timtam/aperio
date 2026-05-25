@@ -8,14 +8,14 @@
 //! a normal `impl CalendarFeature for MyAdapter { … }` block
 //! into a loadable plugin with minimal boilerplate.
 //!
-//! ## Anatomy of a plugin
+//! ## Anatomy of a plugin (ABI v2)
 //!
 //! A typical Rust plugin (single-feature calendar adapter):
 //!
 //! ```ignore
 //! use async_trait::async_trait;
 //! use cal_core::{Adapter, CalendarFeature, /* … */};
-//! use plugin_sdk::{declare_lifecycle, response, PluginSingleton};
+//! use plugin_sdk::{declare_lifecycle, response, PluginInstance};
 //!
 //! struct MyAdapter { /* state */ }
 //!
@@ -25,19 +25,41 @@
 //! #[async_trait]
 //! impl CalendarFeature for MyAdapter { /* … */ }
 //!
-//! static INSTANCE: PluginSingleton<MyAdapter> = PluginSingleton::new();
+//! /// Per-account open hook. The host calls this once per
+//! /// account it wants to wire up with this adapter.
+//! unsafe extern "C" fn plugin_open_instance(
+//!     config_json: *const std::os::raw::c_char,
+//! ) -> plugin_core::OpenInstanceResult {
+//!     plugin_sdk::open_instance_with(config_json, |json| {
+//!         let cfg: MyConfig = serde_json::from_str(json)
+//!             .map_err(|e| e.to_string())?;
+//!         Ok(MyAdapter::new(cfg))
+//!     })
+//! }
+//!
+//! /// Per-account close hook. Just reclaims the box the SDK
+//! /// produced in open_instance.
+//! unsafe extern "C" fn plugin_close_instance(
+//!     handle: *mut std::os::raw::c_void,
+//! ) {
+//!     PluginInstance::<MyAdapter>::drop_handle(handle);
+//! }
 //!
 //! // FFI fn for each trait method:
 //! unsafe extern "C" fn list_calendars(
-//!     _args: *const u8, _len: usize,
+//!     instance: *mut std::os::raw::c_void,
+//!     _args: *const u8,
+//!     _len: usize,
 //! ) -> plugin_core::PluginCallResult {
-//!     let Some((plugin, rt)) = INSTANCE.parts() else {
+//!     let Some(inst) =
+//!         (unsafe { PluginInstance::<MyAdapter>::from_handle(instance) })
+//!     else {
 //!         return response::error_response(
-//!             plugin_core::PLUGIN_CALL_ERR_INTERNAL,
-//!             "plugin not initialised",
+//!             plugin_core::PLUGIN_CALL_ERR_INTERNAL_FFI,
+//!             "null instance",
 //!         );
 //!     };
-//!     match rt.block_on(plugin.list_calendars()) {
+//!     match inst.runtime().block_on(inst.plugin().list_calendars()) {
 //!         Ok(cals) => response::ok_response(&cals),
 //!         Err(err) => plugin_sdk::cal_error_to_response(err),
 //!     }
@@ -48,21 +70,14 @@
 //!     ..plugin_core::CalendarVtable::empty()
 //! };
 //!
-//! unsafe extern "C" fn plugin_init(_: *const std::os::raw::c_char) -> std::os::raw::c_int {
-//!     match INSTANCE.init(MyAdapter::default()) {
-//!         Ok(()) => plugin_core::PLUGIN_OK,
-//!         Err(_) => plugin_core::PLUGIN_ERR_INIT,
-//!     }
-//! }
-//!
 //! declare_lifecycle! {
 //!     id: "com.example.mycal",
 //!     name: "My Calendar",
 //!     version: "1.0.0",
 //!     plugin_type: "calendar-adapter",
 //!     vtable: CALENDAR_VTABLE,
-//!     init: plugin_init,
-//!     destroy: none,
+//!     open_instance: plugin_open_instance,
+//!     close_instance: plugin_close_instance,
 //! }
 //! ```
 //!
@@ -71,8 +86,11 @@
 //! - [`runtime`] — current-thread tokio runtime the plugin uses
 //!   to `block_on` its async trait methods inside the
 //!   synchronous FFI fn bodies.
-//! - [`singleton`] — `OnceLock`-backed holder for the
-//!   process-singleton plugin instance + its runtime.
+//! - [`instance`] — `PluginInstance<T>` boxed handle the host
+//!   stores and threads back into every vtable method.
+//! - [`open_instance`] — helper that turns a typed open closure
+//!   into the [`plugin_core::OpenInstanceResult`] the C ABI
+//!   expects, including UTF-8 error messages on failure.
 //! - [`response`] — build [`plugin_core::PluginCallResult`]s
 //!   (ok / error / empty payloads) the host can decode.
 //! - [`error_map`] — translate `cal_core::Error` /
@@ -80,17 +98,15 @@
 //!   `PLUGIN_CALL_ERR_*` status codes.
 //! - [`args`] — decode the host's JSON-encoded args pointer pair
 //!   into a typed value.
-//! - [`macros`] — `declare_lifecycle!`, the only macro for
-//!   now. The bigger `aperio_plugin_export!` that would auto-
-//!   build the vtable from trait impls is deliberately deferred
-//!   (see [`macros`] module doc for the reasoning).
+//! - [`macros`] — `declare_lifecycle!`, the only macro for now.
 
 pub mod args;
 pub mod error_map;
+pub mod instance;
 pub mod macros;
+pub mod open_instance;
 pub mod response;
 pub mod runtime;
-pub mod singleton;
 
 // Plugin authors import everything they need from the SDK so
 // they don't have to add plugin-core to their own Cargo.toml.
@@ -98,9 +114,10 @@ pub use plugin_core;
 
 pub use args::decode_args;
 pub use error_map::{cal_error_to_response, sync_error_to_response};
+pub use instance::{InitError, PluginInstance};
+pub use open_instance::{error_result, open_instance_with};
 pub use response::{
     bytes_to_response, error_response, free_boxed_slice, ok_empty_response,
     ok_response,
 };
 pub use runtime::PluginRuntime;
-pub use singleton::{InitError, PluginSingleton};

@@ -1,36 +1,12 @@
-//! Smoke test for the Microsoft Graph plugin (P4 cal).
-//!
-//! Validates the full-3-capability vtable wiring with a fake
-//! TokenSet — the constructor never hits the network.
+//! Smoke test for the Microsoft Graph plugin (ABI v2).
 
-use std::ffi::CString;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use plugin_core::{
     abi::AperioPlugin, manager::PluginManager, manifest::PluginManifest,
     shim::{FfiCalendarAdapter, FfiContactsAdapter, FfiTasksAdapter},
     Capability, PluginType, ABI_VERSION,
 };
-
-fn shared_setup() {
-    static DONE: Mutex<bool> = Mutex::new(false);
-    let mut done = DONE.lock().unwrap();
-    if *done {
-        return;
-    }
-    let cfg = serde_json::json!({
-        "client_id": "test-client",
-        "authority": "common",
-        "access_token": "eyJ.test",
-        "refresh_token": "M.C5.test",
-        "expires_at": "2099-01-01T00:00:00Z",
-        "scope": null
-    });
-    let c = CString::new(cfg.to_string()).unwrap();
-    let rc = unsafe { cal_adapter_microsoft_graph_plugin::plugin_init(c.as_ptr()) };
-    assert_eq!(rc, plugin_core::PLUGIN_OK);
-    *done = true;
-}
 
 fn manifest() -> PluginManifest {
     PluginManifest {
@@ -63,20 +39,40 @@ fn register() -> PluginManager {
     m
 }
 
+fn open_one(manager: &PluginManager, access: &str) -> Arc<plugin_core::LoadedInstance> {
+    let loaded = manager.get("com.aperio.cal-adapter-microsoft-graph").unwrap();
+    let cfg = serde_json::json!({
+        "client_id": "test-client",
+        "authority": "common",
+        "access_token": access,
+        "refresh_token": "M.C5.test",
+        "expires_at": "2099-01-01T00:00:00Z",
+        "scope": null,
+    });
+    manager.open_instance(loaded, &cfg.to_string()).expect("open")
+}
+
 #[test]
 fn graph_plugin_exposes_all_three_surfaces() {
-    shared_setup();
     let manager = register();
-    let loaded = manager.get("com.aperio.cal-adapter-microsoft-graph").unwrap();
+    let inst = open_one(&manager, "eyJ.first");
     let _cal: Arc<FfiCalendarAdapter> = Arc::new(
-        FfiCalendarAdapter::new(loaded.clone()).expect("calendar slot present"),
+        FfiCalendarAdapter::new(inst.clone()).expect("calendar slot present"),
     );
     let _tasks: Arc<FfiTasksAdapter> = Arc::new(
-        FfiTasksAdapter::new(loaded.clone()).expect("tasks slot present"),
+        FfiTasksAdapter::new(inst.clone()).expect("tasks slot present"),
     );
     let _contacts: Arc<FfiContactsAdapter> = Arc::new(
-        FfiContactsAdapter::new(loaded).expect("contacts slot present"),
+        FfiContactsAdapter::new(inst).expect("contacts slot present"),
     );
+}
+
+#[test]
+fn multiple_outlook_accounts_get_distinct_handles() {
+    let manager = register();
+    let work = open_one(&manager, "eyJ.work");
+    let personal = open_one(&manager, "eyJ.personal");
+    assert_ne!(work.handle() as usize, personal.handle() as usize);
 }
 
 #[test]

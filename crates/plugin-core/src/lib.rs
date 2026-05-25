@@ -38,7 +38,7 @@ pub mod version;
 
 pub use abi::{
     AperioPlugin, AperioPluginCreateFn, AperioPluginDestroyFn,
-    AperioPluginType, PLUGIN_ERR_INIT, PLUGIN_ERR_INTERNAL,
+    AperioPluginType, OpenInstanceResult, PLUGIN_ERR_INIT, PLUGIN_ERR_INTERNAL,
     PLUGIN_ERR_INVALID_CONFIG, PLUGIN_OK, SYMBOL_CREATE, SYMBOL_DESTROY,
 };
 pub use capability::Capability;
@@ -52,7 +52,8 @@ pub use ffi::{
     PLUGIN_CALL_ERR_PROTOCOL, PLUGIN_CALL_ERR_UNSUPPORTED, PLUGIN_CALL_OK,
 };
 pub use manager::{
-    LoadedPlugin, PluginManager, BUNDLED_PLUGINS_DIR, USER_PLUGINS_DIR,
+    LoadedInstance, LoadedPlugin, PluginManager, BUNDLED_PLUGINS_DIR,
+    USER_PLUGINS_DIR,
 };
 pub use manifest::{PluginManifest, MANIFEST_FILENAME};
 pub use plugin_type::PluginType;

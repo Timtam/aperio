@@ -1,34 +1,12 @@
-//! Smoke test for the EWS plugin (P4 cal).
-//!
-//! Validates the full-3-capability vtable wiring with fake
-//! Basic-auth credentials — the constructor never hits the
-//! network.
+//! Smoke test for the EWS plugin (ABI v2).
 
-use std::ffi::CString;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use plugin_core::{
     abi::AperioPlugin, manager::PluginManager, manifest::PluginManifest,
     shim::{FfiCalendarAdapter, FfiContactsAdapter, FfiTasksAdapter},
     Capability, PluginType, ABI_VERSION,
 };
-
-fn shared_setup() {
-    static DONE: Mutex<bool> = Mutex::new(false);
-    let mut done = DONE.lock().unwrap();
-    if *done {
-        return;
-    }
-    let cfg = serde_json::json!({
-        "endpoint": "https://mail.example.invalid/EWS/Exchange.asmx",
-        "username": "alice@example.invalid",
-        "password": "hunter2"
-    });
-    let c = CString::new(cfg.to_string()).unwrap();
-    let rc = unsafe { cal_adapter_ews_plugin::plugin_init(c.as_ptr()) };
-    assert_eq!(rc, plugin_core::PLUGIN_OK);
-    *done = true;
-}
 
 fn manifest() -> PluginManifest {
     PluginManifest {
@@ -60,20 +38,37 @@ fn register() -> PluginManager {
     m
 }
 
+fn open_one(manager: &PluginManager, endpoint: &str) -> Arc<plugin_core::LoadedInstance> {
+    let loaded = manager.get("com.aperio.cal-adapter-ews").unwrap();
+    let cfg = serde_json::json!({
+        "endpoint": endpoint,
+        "username": "alice@example.invalid",
+        "password": "hunter2",
+    });
+    manager.open_instance(loaded, &cfg.to_string()).expect("open")
+}
+
 #[test]
 fn ews_plugin_exposes_all_three_surfaces() {
-    shared_setup();
     let manager = register();
-    let loaded = manager.get("com.aperio.cal-adapter-ews").unwrap();
+    let inst = open_one(&manager, "https://mail.example.invalid/EWS/Exchange.asmx");
     let _cal: Arc<FfiCalendarAdapter> = Arc::new(
-        FfiCalendarAdapter::new(loaded.clone()).expect("calendar slot present"),
+        FfiCalendarAdapter::new(inst.clone()).expect("calendar slot present"),
     );
     let _tasks: Arc<FfiTasksAdapter> = Arc::new(
-        FfiTasksAdapter::new(loaded.clone()).expect("tasks slot present"),
+        FfiTasksAdapter::new(inst.clone()).expect("tasks slot present"),
     );
     let _contacts: Arc<FfiContactsAdapter> = Arc::new(
-        FfiContactsAdapter::new(loaded).expect("contacts slot present"),
+        FfiContactsAdapter::new(inst).expect("contacts slot present"),
     );
+}
+
+#[test]
+fn multiple_ews_servers_get_distinct_handles() {
+    let manager = register();
+    let on_prem = open_one(&manager, "https://exchange.intern.invalid/EWS/Exchange.asmx");
+    let kerio = open_one(&manager, "https://kerio.intern.invalid/EWS/Exchange.asmx");
+    assert_ne!(on_prem.handle() as usize, kerio.handle() as usize);
 }
 
 #[test]

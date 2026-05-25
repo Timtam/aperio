@@ -11,27 +11,23 @@
 //!
 //! Todoist auth is a long-lived API token; the OAuth dance
 //! (when used) stays host-side + the host threads the token in
-//! via `config_json` — same pattern as the OAuth-based sync
-//! plugins from P4 (sync).
+//! via `config_json` per ABI v2's `open_instance` hook.
 
-use std::os::raw::{c_char, c_int};
+use std::os::raw::{c_char, c_void};
 
 use cal_adapter_todoist::TodoistAdapter;
 use cal_core::adapter::{AuthToken, Capability, Credentials as CalCredentials};
 use cal_core::error::Result as CalResult;
 use cal_core::types::NewTask;
 use cal_core::TasksFeature;
+use plugin_sdk::plugin_core::abi::OpenInstanceResult;
 use plugin_sdk::plugin_core::ffi::{PluginCallResult, PLUGIN_CALL_ERR_INTERNAL};
 use plugin_sdk::plugin_core::vtables::{CalendarAdapterVtable, TasksVtable};
 use plugin_sdk::{
     cal_error_to_response, decode_args, error_response, ok_empty_response,
-    ok_response, PluginSingleton,
+    ok_response, open_instance_with, PluginInstance,
 };
 use serde::Deserialize;
-use tracing::warn;
-
-pub static PLUGIN_INSTANCE: PluginSingleton<TodoistAdapter> =
-    PluginSingleton::new();
 
 #[derive(Debug, Deserialize)]
 struct InitConfig {
@@ -40,62 +36,65 @@ struct InitConfig {
 
 /// # Safety
 /// FFI export; `config_json` must be NUL-terminated UTF-8.
-pub unsafe extern "C" fn plugin_init(config_json: *const c_char) -> c_int {
-    if config_json.is_null() {
-        return plugin_sdk::plugin_core::PLUGIN_ERR_INVALID_CONFIG;
-    }
-    let json_str = match std::ffi::CStr::from_ptr(config_json).to_str() {
-        Ok(s) => s,
-        Err(_) => return plugin_sdk::plugin_core::PLUGIN_ERR_INVALID_CONFIG,
-    };
-    let cfg: InitConfig = match serde_json::from_str(json_str) {
-        Ok(c) => c,
-        Err(err) => {
-            warn!(?err, "cal-adapter-todoist-plugin: malformed init config");
-            return plugin_sdk::plugin_core::PLUGIN_ERR_INVALID_CONFIG;
+pub unsafe extern "C" fn plugin_open_instance(
+    config_json: *const c_char,
+) -> OpenInstanceResult {
+    open_instance_with(config_json, |json| {
+        let cfg: InitConfig = serde_json::from_str(json)
+            .map_err(|e| format!("malformed init config: {e}"))?;
+        if cfg.token.trim().is_empty() {
+            return Err("token must not be empty".to_string());
         }
-    };
-    if cfg.token.trim().is_empty() {
-        return plugin_sdk::plugin_core::PLUGIN_ERR_INVALID_CONFIG;
-    }
-    match PLUGIN_INSTANCE.init(TodoistAdapter::new(cfg.token)) {
-        Ok(()) => plugin_sdk::plugin_core::PLUGIN_OK,
-        Err(_) => plugin_sdk::plugin_core::PLUGIN_ERR_INIT,
-    }
+        Ok(TodoistAdapter::new(cfg.token))
+    })
 }
 
 /// # Safety
-/// FFI export; empty teardown.
-pub unsafe extern "C" fn plugin_destroy() {}
+/// FFI export; `handle` must be the pointer returned by
+/// [`plugin_open_instance`].
+pub unsafe extern "C" fn plugin_close_instance(handle: *mut c_void) {
+    PluginInstance::<TodoistAdapter>::drop_handle(handle);
+}
 
-fn dispatch<T, F, Fut>(call: F) -> PluginCallResult
+/// Borrow the instance back from the FFI handle. Returns an
+/// error response when the handle is NULL.
+fn instance<'a>(
+    handle: *mut c_void,
+) -> Result<&'a PluginInstance<TodoistAdapter>, PluginCallResult> {
+    unsafe { PluginInstance::<TodoistAdapter>::from_handle(handle) }
+        .ok_or_else(|| error_response(PLUGIN_CALL_ERR_INTERNAL, "null instance handle"))
+}
+
+fn dispatch<T, F, Fut>(handle: *mut c_void, call: F) -> PluginCallResult
 where
     T: serde::Serialize,
     F: FnOnce(&'static TodoistAdapter) -> Fut,
     Fut: std::future::Future<Output = CalResult<T>>,
 {
-    let Some((p, rt)) = PLUGIN_INSTANCE.parts() else {
-        return error_response(PLUGIN_CALL_ERR_INTERNAL, "plugin not initialised");
+    let inst = match instance(handle) {
+        Ok(i) => i,
+        Err(r) => return r,
     };
     let p_static: &'static TodoistAdapter =
-        unsafe { std::mem::transmute::<&TodoistAdapter, &'static TodoistAdapter>(p) };
-    match rt.block_on(call(p_static)) {
+        unsafe { std::mem::transmute::<&TodoistAdapter, &'static TodoistAdapter>(inst.plugin()) };
+    match inst.runtime().block_on(call(p_static)) {
         Ok(v) => ok_response(&v),
         Err(e) => cal_error_to_response(e),
     }
 }
 
-fn dispatch_unit<F, Fut>(call: F) -> PluginCallResult
+fn dispatch_unit<F, Fut>(handle: *mut c_void, call: F) -> PluginCallResult
 where
     F: FnOnce(&'static TodoistAdapter) -> Fut,
     Fut: std::future::Future<Output = CalResult<()>>,
 {
-    let Some((p, rt)) = PLUGIN_INSTANCE.parts() else {
-        return error_response(PLUGIN_CALL_ERR_INTERNAL, "plugin not initialised");
+    let inst = match instance(handle) {
+        Ok(i) => i,
+        Err(r) => return r,
     };
     let p_static: &'static TodoistAdapter =
-        unsafe { std::mem::transmute::<&TodoistAdapter, &'static TodoistAdapter>(p) };
-    match rt.block_on(call(p_static)) {
+        unsafe { std::mem::transmute::<&TodoistAdapter, &'static TodoistAdapter>(inst.plugin()) };
+    match inst.runtime().block_on(call(p_static)) {
         Ok(()) => ok_empty_response(),
         Err(e) => cal_error_to_response(e),
     }
@@ -103,16 +102,21 @@ where
 
 // ── Adapter base ───────────────────────────────────────────
 
-unsafe extern "C" fn ffi_authenticate(a: *const u8, l: usize) -> PluginCallResult {
+unsafe extern "C" fn ffi_authenticate(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
     let creds: CalCredentials = match decode_args(a, l) {
         Ok(v) => v, Err(r) => return r,
     };
-    let Some((p, rt)) = PLUGIN_INSTANCE.parts() else {
-        return error_response(PLUGIN_CALL_ERR_INTERNAL, "plugin not initialised");
+    let inst = match instance(h) {
+        Ok(i) => i,
+        Err(r) => return r,
     };
     let p_static: &'static TodoistAdapter =
-        unsafe { std::mem::transmute::<&TodoistAdapter, &'static TodoistAdapter>(p) };
-    let outcome: CalResult<AuthToken> = rt.block_on(async move {
+        unsafe { std::mem::transmute::<&TodoistAdapter, &'static TodoistAdapter>(inst.plugin()) };
+    let outcome: CalResult<AuthToken> = inst.runtime().block_on(async move {
         cal_core::Adapter::authenticate(p_static, creds).await
     });
     match outcome {
@@ -121,25 +125,38 @@ unsafe extern "C" fn ffi_authenticate(a: *const u8, l: usize) -> PluginCallResul
     }
 }
 
-unsafe extern "C" fn ffi_capabilities(_a: *const u8, _l: usize) -> PluginCallResult {
-    let Some(p) = PLUGIN_INSTANCE.get() else {
-        return error_response(PLUGIN_CALL_ERR_INTERNAL, "plugin not initialised");
+unsafe extern "C" fn ffi_capabilities(
+    h: *mut c_void,
+    _a: *const u8,
+    _l: usize,
+) -> PluginCallResult {
+    let inst = match instance(h) {
+        Ok(i) => i,
+        Err(r) => return r,
     };
-    let caps: Vec<Capability> = cal_core::Adapter::capabilities(p).to_vec();
+    let caps: Vec<Capability> = cal_core::Adapter::capabilities(inst.plugin()).to_vec();
     ok_response(&caps)
 }
 
 // ── TasksFeature ───────────────────────────────────────────
 
-unsafe extern "C" fn ffi_list_task_lists(_a: *const u8, _l: usize) -> PluginCallResult {
-    dispatch(|p| async move { p.list_task_lists().await })
+unsafe extern "C" fn ffi_list_task_lists(
+    h: *mut c_void,
+    _a: *const u8,
+    _l: usize,
+) -> PluginCallResult {
+    dispatch(h, |p| async move { p.list_task_lists().await })
 }
 
-unsafe extern "C" fn ffi_get_tasks(a: *const u8, l: usize) -> PluginCallResult {
+unsafe extern "C" fn ffi_get_tasks(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
     let list_id: String = match decode_args(a, l) {
         Ok(v) => v, Err(r) => return r,
     };
-    dispatch(move |p| async move { p.get_tasks(&list_id).await })
+    dispatch(h, move |p| async move { p.get_tasks(&list_id).await })
 }
 
 #[derive(Debug, Deserialize)]
@@ -148,25 +165,37 @@ struct CreateTaskArgs {
     task: NewTask,
 }
 
-unsafe extern "C" fn ffi_create_task(a: *const u8, l: usize) -> PluginCallResult {
+unsafe extern "C" fn ffi_create_task(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
     let args: CreateTaskArgs = match decode_args(a, l) {
         Ok(v) => v, Err(r) => return r,
     };
-    dispatch(move |p| async move { p.create_task(&args.list_id, args.task).await })
+    dispatch(h, move |p| async move { p.create_task(&args.list_id, args.task).await })
 }
 
-unsafe extern "C" fn ffi_update_task(a: *const u8, l: usize) -> PluginCallResult {
+unsafe extern "C" fn ffi_update_task(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
     let task: cal_core::Task = match decode_args(a, l) {
         Ok(v) => v, Err(r) => return r,
     };
-    dispatch(move |p| async move { p.update_task(task).await })
+    dispatch(h, move |p| async move { p.update_task(task).await })
 }
 
-unsafe extern "C" fn ffi_delete_task(a: *const u8, l: usize) -> PluginCallResult {
+unsafe extern "C" fn ffi_delete_task(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
     let task_id: String = match decode_args(a, l) {
         Ok(v) => v, Err(r) => return r,
     };
-    dispatch_unit(move |p| async move { p.delete_task(&task_id).await })
+    dispatch_unit(h, move |p| async move { p.delete_task(&task_id).await })
 }
 
 #[derive(Debug, Deserialize)]
@@ -175,11 +204,15 @@ struct RenameTaskListArgs {
     new_name: String,
 }
 
-unsafe extern "C" fn ffi_rename_task_list(a: *const u8, l: usize) -> PluginCallResult {
+unsafe extern "C" fn ffi_rename_task_list(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
     let args: RenameTaskListArgs = match decode_args(a, l) {
         Ok(v) => v, Err(r) => return r,
     };
-    dispatch_unit(move |p| async move {
+    dispatch_unit(h, move |p| async move {
         p.rename_task_list(&args.list_id, &args.new_name).await
     })
 }
@@ -211,6 +244,6 @@ plugin_sdk::declare_lifecycle! {
     version: "0.1.0",
     plugin_type: "calendar-adapter",
     vtable: ADAPTER_VTABLE,
-    init: plugin_init,
-    destroy: plugin_destroy,
+    open_instance: plugin_open_instance,
+    close_instance: plugin_close_instance,
 }

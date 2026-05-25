@@ -12,6 +12,8 @@
 //! etc.) so this module stays type-agnostic + reusable by all 4
 //! shim families.
 
+use std::os::raw::c_void;
+
 use serde::Serialize;
 use tracing::warn;
 
@@ -55,13 +57,18 @@ pub(crate) fn encode_args<T: Serialize>(args: &T) -> Result<Vec<u8>, String> {
 /// up the async reactor; the caller still awaits the resulting
 /// future like any other async method.
 ///
-/// `method` is the `Option<VtableMethodFn>` slot from the
-/// relevant vtable struct. A `None` slot returns a synthetic
+/// `instance_addr` is the opaque per-account handle the host got
+/// from the plugin's `open_instance` hook, passed as `usize` so
+/// it crosses the await boundary cleanly (raw pointers are not
+/// `Send`). May be `0` for process-global plugins. `method` is
+/// the `Option<VtableMethodFn>` slot from the relevant vtable
+/// struct — a `None` slot returns a synthetic
 /// `PLUGIN_CALL_ERR_UNSUPPORTED` outcome so the shim's status-
 /// to-error mapping does the right thing without bespoke
 /// branching at each call site.
 pub(crate) async fn call_method(
     method: Option<VtableMethodFn>,
+    instance_addr: usize,
     args: Vec<u8>,
 ) -> CallOutcome {
     let Some(method) = method else {
@@ -79,13 +86,15 @@ pub(crate) async fn call_method(
     // boundary is a plain (i32, Vec<u8>) — `PluginCallResult`
     // itself isn't `Send` because of its raw-pointer field.
     let join: Result<(i32, Vec<u8>), _> = tokio::task::spawn_blocking(move || {
+        let instance = instance_addr as *mut c_void;
         // SAFETY: vtable method pointer is valid for the lifetime
         // of the LoadedPlugin we got it from; the caller keeps an
-        // Arc<LoadedPlugin> alive across this await (see the
+        // Arc<LoadedInstance> alive across this await (see the
         // FfiCalendarAdapter struct field for the canonical
-        // pattern). args is a Vec<u8> we own; the pointer is
+        // pattern), which in turn keeps the LoadedPlugin Arc + the
+        // library alive. args is a Vec<u8> we own; the pointer is
         // valid for the duration of the synchronous call.
-        let result = unsafe { method(args.as_ptr(), args.len()) };
+        let result = unsafe { method(instance, args.as_ptr(), args.len()) };
         // SAFETY: result.payload is owned by the plugin; we copy
         // the bytes BEFORE returning the buffer to the plugin's
         // allocator. After free_in_place runs the original
@@ -109,6 +118,34 @@ pub(crate) async fn call_method(
             }
         }
     }
+}
+
+/// Synchronous variant of [`call_method`] for trait methods that
+/// don't go through async (e.g. `CalendarFeature::calendar_color`).
+/// Same instance-handle threading, no `spawn_blocking` —
+/// implementations are expected to answer from in-memory state
+/// without IO.
+pub(crate) fn call_method_sync(
+    method: Option<VtableMethodFn>,
+    instance_addr: usize,
+    args: Vec<u8>,
+) -> CallOutcome {
+    let Some(method) = method else {
+        return CallOutcome {
+            status: crate::ffi::PLUGIN_CALL_ERR_UNSUPPORTED,
+            bytes: b"method not implemented by plugin".to_vec(),
+        };
+    };
+    // SAFETY: same contract as call_method's blocking branch —
+    // args is a Vec<u8> we own; pointer is valid for the
+    // duration of the call.
+    let instance = instance_addr as *mut c_void;
+    let result = unsafe { method(instance, args.as_ptr(), args.len()) };
+    let bytes = unsafe { result.payload.as_slice().to_vec() };
+    let status = result.status;
+    let mut payload = result.payload;
+    unsafe { payload.free_in_place() };
+    CallOutcome { status, bytes }
 }
 
 /// Decode the OK payload into a typed value. Empty payload is

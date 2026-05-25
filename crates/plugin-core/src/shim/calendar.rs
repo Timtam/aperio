@@ -3,9 +3,9 @@
 //! plugin's [`crate::vtables::CalendarVtable`].
 //!
 //! Canonical pattern for the other three shims (Tasks /
-//! Contacts / Sync) that P1b will add — they follow this file
-//! one-to-one: hold the [`LoadedPlugin`] Arc, hold the vtable
-//! pointer, implement the trait by going through
+//! Contacts / Sync): hold the [`LoadedInstance`] Arc (which in
+//! turn keeps the loaded plugin alive), cache the per-account
+//! handle, and implement the trait by going through
 //! `encode_args` → `call_method` → `decode_payload`.
 
 use std::sync::Arc;
@@ -19,24 +19,33 @@ use serde::Serialize;
 use tracing::warn;
 
 use crate::ffi::*;
-use crate::manager::LoadedPlugin;
+use crate::manager::LoadedInstance;
 use crate::vtables::{CalendarAdapterVtable, CalendarVtable};
 
-use super::call::{call_method, decode_payload, encode_args, CallOutcome};
+use super::call::{
+    call_method, call_method_sync, decode_payload, encode_args, CallOutcome,
+};
 
-/// Holds a loaded calendar-adapter plugin + a snapshot of the
-/// methods we expect on its vtable. The vtable pointer is
+/// Holds a loaded calendar-adapter plugin instance + a snapshot
+/// of the methods we expect on its vtable. The vtable pointer is
 /// resolved once (in [`Self::new`]) so every method call avoids
 /// the type-cast each time.
 ///
-/// `Arc<LoadedPlugin>` keeps the plugin's shared library alive
-/// across every `spawn_blocking` we issue; once the shim itself
-/// drops + every consumer Arc goes away, the manager can unload
-/// the library safely.
+/// `Arc<LoadedInstance>` keeps both the per-account state in the
+/// plugin AND the shared library alive across every
+/// `spawn_blocking` we issue; once the shim itself drops + every
+/// consumer Arc goes away, the instance's `close_instance`
+/// fires and (when no more instances of the same plugin exist)
+/// the manager can unload the library safely.
 pub struct FfiCalendarAdapter {
-    /// Keeps the library alive. Don't dereference directly —
-    /// `vtable` already has cached pointers into it.
-    _plugin: Arc<LoadedPlugin>,
+    /// Keeps the loaded instance — and the loaded plugin Arc it
+    /// transitively holds — alive. Don't dereference directly
+    /// for vtable calls; use `instance_handle()` instead.
+    _instance: Arc<LoadedInstance>,
+    /// Cached opaque per-account handle. `*mut c_void` itself
+    /// isn't `Send`/`Sync`, so we store the address as `usize`
+    /// and cast at the call site (see `instance_handle`).
+    handle_addr: usize,
     /// Cached copy of each method-pointer slot from the plugin's
     /// vtable. Copies (rather than holding a `&CalendarVtable`)
     /// because we hand individual fn pointers to `spawn_blocking`
@@ -44,8 +53,7 @@ pub struct FfiCalendarAdapter {
     /// disappear before the closure runs.
     vtable: VtableSnapshot,
     /// Statically-cached capability list, derived once at
-    /// construction time from the plugin's `capabilities()`
-    /// method or — failing that — the manifest. Used by the
+    /// construction time from the plugin's manifest. Used by the
     /// `Adapter::capabilities()` trait method, which is sync
     /// and can't go through the FFI itself.
     capabilities: Vec<Capability>,
@@ -70,17 +78,19 @@ struct VtableSnapshot {
 }
 
 impl FfiCalendarAdapter {
-    /// Wrap a loaded calendar-adapter plugin so it can be
-    /// handed to the rest of the host as
+    /// Wrap a loaded calendar-adapter plugin instance so it can
+    /// be handed to the rest of the host as
     /// `Arc<dyn CalendarFeature>`. Returns `None` when the
     /// plugin doesn't actually provide the calendar capability
     /// (its [`CalendarAdapterVtable::calendar`] slot is null) or
     /// fails the minimum-surface check.
     ///
     /// Multi-capability plugins (e.g. CalDAV providing
-    /// calendar + tasks + contacts) wrap the same loaded plugin
-    /// once per capability via the three FfiAdapter shims.
-    pub fn new(plugin: Arc<LoadedPlugin>) -> Option<Self> {
+    /// calendar + tasks + contacts) wrap the same loaded
+    /// instance once per capability via the three FfiAdapter
+    /// shims — they all share the same per-account handle.
+    pub fn new(instance: Arc<LoadedInstance>) -> Option<Self> {
+        let plugin = instance.plugin().clone();
         let raw = plugin.vtable_ptr();
         if raw.is_null() {
             warn!(
@@ -102,7 +112,7 @@ impl FfiCalendarAdapter {
         }
         // SAFETY: outer.calendar is non-null and points at a
         // CalendarVtable static in the plugin library; the
-        // LoadedPlugin Arc keeps it alive.
+        // LoadedPlugin Arc inside the instance keeps it alive.
         let vtable_ref: &CalendarVtable = unsafe { &*outer.calendar };
         if !vtable_ref.has_minimum_surface() {
             warn!(
@@ -125,9 +135,11 @@ impl FfiCalendarAdapter {
         };
 
         let capabilities = super::manifest_capabilities(&plugin.manifest.capabilities);
+        let handle_addr = instance.handle() as usize;
 
         Some(Self {
-            _plugin: plugin,
+            _instance: instance,
+            handle_addr,
             vtable: snapshot,
             capabilities,
         })
@@ -138,6 +150,7 @@ impl FfiCalendarAdapter {
 /// (via `decode_payload`) or the matching `cal_core::Error`.
 async fn call_then_decode<T, A>(
     method: Option<crate::vtables::VtableMethodFn>,
+    instance_addr: usize,
     args: &A,
 ) -> Result<T>
 where
@@ -147,7 +160,7 @@ where
     let bytes = encode_args(args).map_err(|e| Error::Internal(format!(
         "encode args: {e}"
     )))?;
-    let outcome = call_method(method, bytes).await;
+    let outcome = call_method(method, instance_addr, bytes).await;
     if outcome.is_ok() {
         decode_payload(&outcome.bytes).map_err(|e| Error::Protocol(format!(
             "decode plugin response: {e}"
@@ -162,12 +175,13 @@ where
 /// payload is fine.
 async fn call_for_unit<A: Serialize>(
     method: Option<crate::vtables::VtableMethodFn>,
+    instance_addr: usize,
     args: &A,
 ) -> Result<()> {
     let bytes = encode_args(args).map_err(|e| Error::Internal(format!(
         "encode args: {e}"
     )))?;
-    let outcome = call_method(method, bytes).await;
+    let outcome = call_method(method, instance_addr, bytes).await;
     if outcome.is_ok() {
         Ok(())
     } else {
@@ -188,14 +202,8 @@ fn status_to_cal_error(outcome: CallOutcome) -> Error {
         PLUGIN_CALL_ERR_PROTOCOL => Error::Protocol(msg),
         PLUGIN_CALL_ERR_CONFLICT => Error::Conflict(msg),
         PLUGIN_CALL_ERR_FORBIDDEN => Error::Forbidden(msg),
-        // cal-core has no IO variant; we already log + retry-loop
-        // around plugin calls at the orchestrator level, so an
-        // IO failure folds into Internal here.
         PLUGIN_CALL_ERR_IO => Error::Internal(format!("plugin IO: {msg}")),
         PLUGIN_CALL_ERR_INTERNAL => Error::Internal(msg),
-        // Any non-zero status we don't recognise gets surfaced
-        // verbatim — better than silently swallowing an
-        // unfamiliar code that some forward-rolled plugin returned.
         other => Error::Internal(format!("plugin status {other}: {msg}")),
     }
 }
@@ -203,7 +211,7 @@ fn status_to_cal_error(outcome: CallOutcome) -> Error {
 #[async_trait]
 impl Adapter for FfiCalendarAdapter {
     async fn authenticate(&self, credentials: Credentials) -> Result<AuthToken> {
-        call_then_decode(self.vtable.authenticate, &credentials).await
+        call_then_decode(self.vtable.authenticate, self.handle_addr, &credentials).await
     }
 
     fn capabilities(&self) -> &[Capability] {
@@ -213,10 +221,6 @@ impl Adapter for FfiCalendarAdapter {
 
 // JSON-shape helpers — one struct per method that carries multiple
 // arguments. Single-arg methods reuse the typed arg directly.
-//
-// Each shape's keys match the trait method's parameter names so a
-// plugin author can read the wire protocol off the trait
-// definition without consulting a separate spec.
 
 #[derive(Serialize)]
 struct GetEventsArgs<'a> {
@@ -251,7 +255,7 @@ struct RenameCalendarArgs<'a> {
 #[async_trait]
 impl CalendarFeature for FfiCalendarAdapter {
     async fn list_calendars(&self) -> Result<Vec<Calendar>> {
-        call_then_decode(self.vtable.list_calendars, &()).await
+        call_then_decode(self.vtable.list_calendars, self.handle_addr, &()).await
     }
 
     async fn get_events(
@@ -260,7 +264,7 @@ impl CalendarFeature for FfiCalendarAdapter {
         range: DateRange,
     ) -> Result<Vec<Event>> {
         let args = GetEventsArgs { calendar_id, range };
-        call_then_decode(self.vtable.get_events, &args).await
+        call_then_decode(self.vtable.get_events, self.handle_addr, &args).await
     }
 
     async fn create_event(
@@ -269,15 +273,15 @@ impl CalendarFeature for FfiCalendarAdapter {
         event: NewEvent,
     ) -> Result<Event> {
         let args = CreateEventArgs { calendar_id, event };
-        call_then_decode(self.vtable.create_event, &args).await
+        call_then_decode(self.vtable.create_event, self.handle_addr, &args).await
     }
 
     async fn update_event(&self, event: Event) -> Result<Event> {
-        call_then_decode(self.vtable.update_event, &event).await
+        call_then_decode(self.vtable.update_event, self.handle_addr, &event).await
     }
 
     async fn delete_event(&self, event_id: &str) -> Result<()> {
-        call_for_unit(self.vtable.delete_event, &event_id).await
+        call_for_unit(self.vtable.delete_event, self.handle_addr, &event_id).await
     }
 
     async fn get_free_busy(
@@ -289,13 +293,14 @@ impl CalendarFeature for FfiCalendarAdapter {
             emails: emails.to_vec(),
             range,
         };
-        call_then_decode(self.vtable.get_free_busy, &args).await
+        call_then_decode(self.vtable.get_free_busy, self.handle_addr, &args).await
     }
 
     /// Synchronous slot in the trait. We dispatch to the plugin
-    /// via `block_in_place` rather than `spawn_blocking` because
-    /// we're already off the runtime here (the trait method is
-    /// non-async).
+    /// directly (no `spawn_blocking`) because we're already off
+    /// the runtime here — the trait method is non-async and the
+    /// plugin's implementation is expected to answer from
+    /// in-memory state without IO.
     fn calendar_color(&self, calendar_id: &str) -> Option<ContainerColor> {
         let method = self.vtable.calendar_color?;
         let args = match encode_args(&calendar_id) {
@@ -305,17 +310,7 @@ impl CalendarFeature for FfiCalendarAdapter {
                 return None;
             }
         };
-        // SAFETY: same contract as call_method's blocking branch —
-        // args is a Vec<u8> we own; pointer is valid for the
-        // duration of the call.
-        let result = unsafe { method(args.as_ptr(), args.len()) };
-        let outcome = {
-            let bytes = unsafe { result.payload.as_slice().to_vec() };
-            let status = result.status;
-            let mut payload = result.payload;
-            unsafe { payload.free_in_place() };
-            CallOutcome { status, bytes }
-        };
+        let outcome = call_method_sync(Some(method), self.handle_addr, args);
         if !outcome.is_ok() {
             warn!(
                 status = outcome.status,
@@ -338,7 +333,7 @@ impl CalendarFeature for FfiCalendarAdapter {
         occurrence: chrono::DateTime<chrono::Utc>,
     ) -> Result<()> {
         let args = AddExdateArgs { event_id, occurrence };
-        call_for_unit(self.vtable.add_event_exdate, &args).await
+        call_for_unit(self.vtable.add_event_exdate, self.handle_addr, &args).await
     }
 
     async fn rename_calendar(
@@ -347,7 +342,7 @@ impl CalendarFeature for FfiCalendarAdapter {
         new_name: &str,
     ) -> Result<()> {
         let args = RenameCalendarArgs { calendar_id, new_name };
-        call_for_unit(self.vtable.rename_calendar, &args).await
+        call_for_unit(self.vtable.rename_calendar, self.handle_addr, &args).await
     }
 }
 
@@ -356,24 +351,15 @@ mod tests {
     use super::*;
     use crate::manifest::PluginManifest;
     use crate::vtables::CalendarVtable;
+    use std::os::raw::c_void;
     use std::sync::Mutex;
-
-    // ─────────────────────────────────────────────────────────────
-    // Fake plugin scaffolding. We don't actually dlopen anything
-    // in unit tests — we build a CalendarVtable from C-ABI fn
-    // pointers in this module and wrap it in a synthetic
-    // LoadedPlugin via a test-only ctor.
-    //
-    // The fake state lives in `static`s because extern "C" fns
-    // can't capture environment. Each test case sets up the
-    // static state before calling into the shim.
-    // ─────────────────────────────────────────────────────────────
 
     // For `list_calendars` we'll return a fixed 2-cal JSON. The
     // test reads them back through the shim + asserts.
     static LIST_CALENDARS_CALLED: Mutex<usize> = Mutex::new(0);
 
     extern "C" fn fake_list_calendars(
+        _instance: *mut c_void,
         _args_ptr: *const u8,
         _args_len: usize,
     ) -> PluginCallResult {
@@ -420,6 +406,7 @@ mod tests {
     // For an error-path test: returns auth-error with a custom
     // message that the shim translates into Error::Authentication.
     extern "C" fn fake_authenticate(
+        _instance: *mut c_void,
         _args_ptr: *const u8,
         _args_len: usize,
     ) -> PluginCallResult {
@@ -443,17 +430,11 @@ mod tests {
         }
     }
 
-    // Synthetic LoadedPlugin + FfiCalendarAdapter for tests.
-    // The library handle is None (we're not dlopening anything)
-    // and the descriptor + vtable point at heap-allocated
-    // statics that live for the test duration.
+    // Synthetic LoadedInstance + FfiCalendarAdapter for tests.
     fn make_fake_adapter(
         list_calendars: Option<crate::vtables::VtableMethodFn>,
         authenticate: Option<crate::vtables::VtableMethodFn>,
     ) -> FfiCalendarAdapter {
-        // Build a CalendarVtable with our fake methods, then wrap
-        // it in a CalendarAdapterVtable so the test exercises the
-        // same multi-capability cast path the real shim uses.
         let cal_vtable = Box::new(CalendarVtable {
             list_calendars,
             authenticate,
@@ -466,12 +447,8 @@ mod tests {
             tasks: std::ptr::null(),
             contacts: std::ptr::null(),
         });
-        let vtable_ptr = Box::into_raw(outer) as *mut std::os::raw::c_void;
+        let vtable_ptr = Box::into_raw(outer) as *mut c_void;
 
-        // Build a minimal C-ABI AperioPlugin descriptor that
-        // points at our fake vtable. We leak the descriptor + the
-        // backing strings so the static lifetime story holds —
-        // unit tests don't care about leaks.
         let id_cstr = std::ffi::CString::new("test.calendar").unwrap();
         let name_cstr = std::ffi::CString::new("Test Calendar").unwrap();
         let version_cstr = std::ffi::CString::new("0.1.0").unwrap();
@@ -482,19 +459,13 @@ mod tests {
             name: name_cstr.into_raw(),
             version: version_cstr.into_raw(),
             plugin_type: type_cstr.into_raw(),
-            init: None,
-            destroy: None,
+            open_instance: None,
+            close_instance: None,
             vtable: vtable_ptr,
         });
         let descriptor_ptr = Box::into_raw(descriptor);
 
-        // We bypass the Drop impl on LoadedPlugin (which would
-        // call our missing destroy_fn through random memory) by
-        // setting destroy_fn to a no-op that ignores its input.
-        unsafe extern "C" fn noop_destroy(
-            _: *mut crate::abi::AperioPlugin,
-        ) {
-        }
+        unsafe extern "C" fn noop_destroy(_: *mut crate::abi::AperioPlugin) {}
         let loaded = crate::manager::test_support::loaded_plugin_for_tests(
             PluginManifest {
                 id: "test.calendar".to_string(),
@@ -511,7 +482,12 @@ mod tests {
             descriptor_ptr,
             noop_destroy,
         );
-        FfiCalendarAdapter::new(Arc::new(loaded))
+        let plugin = Arc::new(loaded);
+        let instance = crate::manager::test_support::loaded_instance_for_tests(
+            plugin,
+            std::ptr::null_mut(),
+        );
+        FfiCalendarAdapter::new(instance)
             .expect("vtable has minimum surface")
     }
 
@@ -541,8 +517,6 @@ mod tests {
 
     #[tokio::test]
     async fn missing_method_yields_unsupported() {
-        // `delete_event` isn't on our fake vtable → shim's
-        // None-handling kicks in and surfaces Unsupported.
         let adapter = make_fake_adapter(Some(fake_list_calendars), None);
         let err = adapter.delete_event("ignored").await.unwrap_err();
         assert!(matches!(err, Error::Unsupported(_)));

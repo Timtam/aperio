@@ -33,9 +33,16 @@
 
 use crate::ffi::PluginCallResult;
 
-/// Method-pointer type used by every vtable slot. Takes JSON
+/// Method-pointer type used by every vtable slot. Takes the
+/// opaque per-instance handle the host got from
+/// [`crate::abi::AperioPlugin::open_instance`], followed by JSON
 /// args (pointer + length; may be `(NULL, 0)` for void-arg
-/// methods) and returns a [`PluginCallResult`].
+/// methods), and returns a [`PluginCallResult`].
+///
+/// `instance` is the handle the descriptor's `open_instance`
+/// returned for this account. May be NULL for instance-less
+/// plugins (e.g. process-global notification channels) whose
+/// descriptor left `open_instance` itself at None.
 ///
 /// The shim wrappers wrap each call in `tokio::task::spawn_blocking`
 /// so a slow plugin can't stall the async runtime. Sync-shape
@@ -43,6 +50,7 @@ use crate::ffi::PluginCallResult;
 /// these directly — the plugin's implementation is expected to
 /// answer from in-memory state without IO.
 pub type VtableMethodFn = unsafe extern "C" fn(
+    instance: *mut std::os::raw::c_void,
     args_ptr: *const u8,
     args_len: usize,
 ) -> PluginCallResult;

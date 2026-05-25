@@ -11,15 +11,17 @@
 //!      running build, and (when both gates pass) `dlopen`s the
 //!      platform-appropriate shared library next to the manifest.
 //!   4. The library's `aperio_plugin_create` entry point is
-//!      called to produce the [`AperioPlugin`] descriptor.
-//!   5. Plugin's optional `init` lifecycle hook is fired with the
-//!      caller-supplied per-plugin config JSON (host pulls these
-//!      from user_prefs by plugin id; the resolver hooks in P6
-//!      do that wiring).
-//!   6. The plugin lives in the manager until the process exits.
-//!      [`PluginManager::drop`] fires `destroy` on each plugin
-//!      then `aperio_plugin_destroy`, then drops the loaded
-//!      library.
+//!      called to produce the [`AperioPlugin`] descriptor. The
+//!      descriptor lives until the [`LoadedPlugin`] is dropped.
+//!   5. Per-account work happens via [`PluginManager::open_instance`]:
+//!      the host hands the descriptor a JSON config and gets back
+//!      a [`LoadedInstance`]. A single loaded library can back N
+//!      independent instances (DESIGN.md §6.4).
+//!   6. When an account is removed (or the app shuts down) the
+//!      [`LoadedInstance`] is dropped — its `Drop` calls the
+//!      descriptor's `close_instance` hook. When the last
+//!      reference to a [`LoadedPlugin`] goes away the manager
+//!      runs `aperio_plugin_destroy` + `dlclose`.
 //!
 //! ## Thread safety
 //!
@@ -28,21 +30,20 @@
 //! ([`PluginManager::get`], [`PluginManager::all`]) take an
 //! `RwLock` read guard; loads + unloads take a write guard.
 //! Plugin vtable invocations themselves don't need to touch the
-//! manager's lock — the host snapshots the [`LoadedPlugin`] Arc
+//! manager's lock — the host snapshots the [`LoadedInstance`] Arc
 //! once and calls into the vtable directly.
 //!
 //! ## Static-plugins build
 //!
-//! The `static-plugins` feature flag (DESIGN.md §20.6, P5 of this
-//! phase plan) flips the manager into a path where bundled
-//! adapters are registered via a compile-time list instead of
-//! `dlopen`. P1 lays the API surface for that ([`PluginManager::register_static`])
-//! but the actual feature gate + the static-list ingestion fly in
-//! during P5 when the mobile build comes online.
+//! The `static-plugins` feature flag (DESIGN.md §20.6) flips the
+//! manager into a path where bundled adapters are registered via
+//! a compile-time list instead of `dlopen`. The
+//! [`PluginManager::register_static`] entry point is what that
+//! flag eventually calls.
 
 use std::collections::HashMap;
-use std::ffi::CStr;
-use std::os::raw::c_char;
+use std::ffi::{CStr, CString};
+use std::os::raw::{c_char, c_void};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
@@ -50,8 +51,8 @@ use libloading::Library;
 use tracing::{info, warn};
 
 use crate::abi::{
-    AperioPlugin, AperioPluginCreateFn, AperioPluginDestroyFn, SYMBOL_CREATE,
-    SYMBOL_DESTROY,
+    AperioPlugin, AperioPluginCreateFn, AperioPluginDestroyFn, OpenInstanceResult,
+    PLUGIN_OK, SYMBOL_CREATE, SYMBOL_DESTROY,
 };
 use crate::error::{PluginError, PluginResult};
 use crate::manifest::{PluginManifest, MANIFEST_FILENAME};
@@ -79,11 +80,10 @@ pub struct LoadedPlugin {
     /// load time so the destructor path doesn't have to fail.
     destroy_fn: AperioPluginDestroyFn,
 
-    /// The dlopen'd library. Drop order: `destroy` (fired in
-    /// the manager's destructor) → `aperio_plugin_destroy` →
-    /// `library.drop()` (which calls `dlclose`). Static-plugin
-    /// builds (P5) set this to `None` so dropping doesn't try
-    /// to unload anything.
+    /// The dlopen'd library. Drop order:
+    /// `aperio_plugin_destroy` → `library.drop()` (which calls
+    /// `dlclose`). Static-plugin builds set this to `None` so
+    /// dropping doesn't try to unload anything.
     #[allow(dead_code)] // kept alive purely so dlclose runs at drop time
     library: Option<Library>,
 }
@@ -115,7 +115,7 @@ impl LoadedPlugin {
     /// Read the descriptor's `vtable` pointer for downstream
     /// casting in the shim wrappers (e.g.
     /// `as *const CalendarVtable`).
-    pub fn vtable_ptr(&self) -> *mut std::os::raw::c_void {
+    pub fn vtable_ptr(&self) -> *mut c_void {
         self.descriptor().vtable
     }
 
@@ -135,22 +135,89 @@ impl LoadedPlugin {
 
 impl Drop for LoadedPlugin {
     fn drop(&mut self) {
-        // Tear-down sequence per the C header: AperioPlugin.destroy
-        // (if set), then aperio_plugin_destroy. The library handle
-        // is dropped last via the auto-drop of `self.library`.
-        let descriptor = self.descriptor();
-        if let Some(d) = descriptor.destroy {
-            // SAFETY: pointer was returned by the plugin's create()
-            // and we've not yet destroyed it. The plugin contract
-            // says destroy() must tolerate being called even if
-            // init() was never invoked.
-            unsafe { d() };
-        }
-        // SAFETY: same — the destroy_fn was looked up at load time,
-        // is part of the still-loaded library, and we're handing it
-        // back its own `*mut AperioPlugin`.
+        // SAFETY: the destroy_fn was looked up at load time, is
+        // part of the still-loaded library, and we're handing it
+        // back its own `*mut AperioPlugin`. ABI v2 no longer has
+        // a descriptor-level destroy hook to call first — every
+        // instance's close_instance already ran when its
+        // [`LoadedInstance`] was dropped, and the descriptor
+        // itself is teardown-only.
         unsafe { (self.destroy_fn)(self.plugin_ptr) };
         // self.library drops here -> Library::drop() -> dlclose.
+    }
+}
+
+/// A live instance of a loaded plugin (DESIGN.md §6.4).
+///
+/// One [`LoadedPlugin`] can back N instances at the same time —
+/// e.g. three CalDAV accounts share the same `cal-adapter-caldav`
+/// library but each gets its own [`LoadedInstance`] with its own
+/// handle. Vtable methods take the handle as their first
+/// argument so the plugin can route work to the right per-
+/// account state.
+///
+/// Always wrapped in `Arc` so the shim adapters
+/// ([`crate::shim::FfiCalendarAdapter`] etc.) can keep a cheap
+/// reference. When the last `Arc` is dropped, the descriptor's
+/// `close_instance` hook fires (when present) and the plugin
+/// releases its per-account state.
+pub struct LoadedInstance {
+    /// Keeps the library + descriptor alive while the instance
+    /// is open. Drop order: [`Self`] drops first, fires
+    /// `close_instance`, then the plugin Arc may go away.
+    plugin: Arc<LoadedPlugin>,
+    /// Opaque per-account handle from
+    /// [`AperioPlugin::open_instance`]. Passed as the first
+    /// argument to every vtable method on this instance. May be
+    /// NULL for instance-less plugins (open_instance was None).
+    handle: *mut c_void,
+    /// Cached close hook. None when the descriptor didn't
+    /// provide one — in that case [`Drop`] is a no-op.
+    close_fn: Option<unsafe extern "C" fn(*mut c_void)>,
+}
+
+impl std::fmt::Debug for LoadedInstance {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LoadedInstance")
+            .field("plugin_id", &self.plugin.manifest.id)
+            .field("handle_addr", &(self.handle as usize))
+            .field("has_close_fn", &self.close_fn.is_some())
+            .finish()
+    }
+}
+
+// SAFETY: same story as LoadedPlugin — handle is an opaque
+// pointer the plugin promises is thread-safe to use across
+// concurrent vtable calls. We never write through it.
+unsafe impl Send for LoadedInstance {}
+unsafe impl Sync for LoadedInstance {}
+
+impl LoadedInstance {
+    /// Opaque handle the plugin's vtable methods expect as their
+    /// first argument. The shim wrappers cache this once at
+    /// construction time and pass it through every FFI call.
+    pub fn handle(&self) -> *mut c_void {
+        self.handle
+    }
+
+    /// The plugin this instance was opened against. Shim
+    /// wrappers go through this to reach the vtable.
+    pub fn plugin(&self) -> &Arc<LoadedPlugin> {
+        &self.plugin
+    }
+}
+
+impl Drop for LoadedInstance {
+    fn drop(&mut self) {
+        if let Some(close) = self.close_fn {
+            if !self.handle.is_null() {
+                // SAFETY: handle is exactly what open_instance
+                // returned to us, the corresponding library is
+                // still loaded (we hold an Arc<LoadedPlugin>),
+                // and we only close it once per Drop.
+                unsafe { close(self.handle) };
+            }
+        }
     }
 }
 
@@ -236,7 +303,7 @@ impl PluginManager {
     /// library at the canonical filename
     /// (`<id-or-name>.{dll,dylib,so}`).
     ///
-    /// Marked `pub` so the Phase P8 community-plugin installer
+    /// Marked `pub` so the §20.7 community-plugin installer
     /// (drag-and-drop) can drive a single-plugin load directly,
     /// without going through a full `scan_dir` of the user
     /// directory.
@@ -318,14 +385,12 @@ impl PluginManager {
         // first call.
         let runtime_id = unsafe { cstr_to_string(descriptor.id) };
         if runtime_id != manifest.id {
-            // SAFETY: we own the descriptor right now and haven't
-            // called destroy yet; bail out by calling it manually
-            // before returning the error so the plugin can clean
-            // up.
+            // SAFETY: we own the descriptor right now; the
+            // descriptor has no per-process state to release
+            // (open/close are per-instance in v2). We just call
+            // aperio_plugin_destroy to release the descriptor
+            // itself before propagating the load failure.
             unsafe {
-                if let Some(d) = descriptor.destroy {
-                    d();
-                }
                 let destroy_sym: libloading::Symbol<AperioPluginDestroyFn> =
                     library.get(SYMBOL_DESTROY).expect("looked up above");
                 destroy_sym(plugin_ptr);
@@ -336,34 +401,10 @@ impl PluginManager {
             )));
         }
 
-        // Fire the optional init hook. We pass an empty string
-        // for now; the per-plugin config-json plumbing lives
-        // outside this crate (in src-tauri's user_prefs lookup
-        // by plugin id) and lands as part of P6 / the registry
-        // cutover.
-        if let Some(init) = descriptor.init {
-            let empty: &[u8] = b"\0";
-            // SAFETY: init's signature accepts a `*const c_char`
-            // that points at a NUL-terminated string. An empty
-            // C-string "\0" is the most conservative no-config
-            // call we can make.
-            let rc = unsafe { init(empty.as_ptr() as *const c_char) };
-            if rc != crate::abi::PLUGIN_OK {
-                // Tear back down before returning.
-                unsafe {
-                    if let Some(d) = descriptor.destroy {
-                        d();
-                    }
-                    let destroy_sym: libloading::Symbol<AperioPluginDestroyFn> =
-                        library.get(SYMBOL_DESTROY).expect("looked up above");
-                    destroy_sym(plugin_ptr);
-                }
-                return Err(PluginError::Manifest(format!(
-                    "{} init returned status {}",
-                    manifest.id, rc
-                )));
-            }
-        }
+        // Note: ABI v2 no longer fires a per-load `init` here.
+        // Per-account state belongs in `open_instance`, which
+        // the host calls once per registered account from the
+        // registry layer.
 
         let loaded = LoadedPlugin {
             manifest,
@@ -380,10 +421,6 @@ impl PluginManager {
     /// the mobile build path). The descriptor + destroy fn
     /// come straight from the plugin crate that's part of the
     /// host binary — no `dlopen`, no [`Library`] to retain.
-    ///
-    /// API surface lands now so the static-plugins feature
-    /// flag in P5 has a target to call into; the gate itself
-    /// flips in that phase.
     pub fn register_static(
         &self,
         manifest: PluginManifest,
@@ -406,6 +443,77 @@ impl PluginManager {
         let id = loaded.manifest.id.clone();
         info!(plugin_id = %id, "static plugin registered");
         self.insert(id, Arc::new(loaded))
+    }
+
+    /// Open a per-account instance of `plugin` with the supplied
+    /// JSON config. Calls the descriptor's `open_instance` hook
+    /// and wraps the returned handle in a [`LoadedInstance`].
+    ///
+    /// When the descriptor doesn't expose `open_instance` (rare —
+    /// process-global plugins like notification channels), a
+    /// NULL-handle instance is returned so the host can still
+    /// call vtable methods uniformly.
+    pub fn open_instance(
+        &self,
+        plugin: Arc<LoadedPlugin>,
+        config_json: &str,
+    ) -> PluginResult<Arc<LoadedInstance>> {
+        // Snapshot the hooks up-front so we can release the
+        // borrow on `plugin` before the eventual `move` into
+        // LoadedInstance below.
+        let (open_hook, close_fn) = {
+            let descriptor = plugin.descriptor();
+            (descriptor.open_instance, descriptor.close_instance)
+        };
+        let Some(open) = open_hook else {
+            // Process-global plugin — no per-instance handle.
+            return Ok(Arc::new(LoadedInstance {
+                plugin,
+                handle: std::ptr::null_mut(),
+                close_fn: None,
+            }));
+        };
+        let c_config = CString::new(config_json)
+            .map_err(|e| PluginError::Manifest(format!(
+                "config_json contains NUL byte: {e}"
+            )))?;
+        // SAFETY: the plugin contract says open_instance accepts a
+        // NUL-terminated UTF-8 pointer. We own the CString for the
+        // duration of the call.
+        let mut result: OpenInstanceResult = unsafe { open(c_config.as_ptr()) };
+        // Always drain the error buffer (even on success — a
+        // misbehaving plugin might write to it) so we don't leak.
+        let error_message = if !result.error.is_empty() {
+            // SAFETY: error.data + error.len describe a plugin-owned
+            // byte buffer valid until free_in_place runs.
+            let bytes = unsafe { result.error.as_slice() };
+            String::from_utf8_lossy(bytes).into_owned()
+        } else {
+            String::new()
+        };
+        unsafe { result.error.free_in_place() };
+        if result.status != PLUGIN_OK {
+            return Err(PluginError::InstanceOpen {
+                status: result.status,
+                message: if error_message.is_empty() {
+                    format!("plugin returned status {}", result.status)
+                } else {
+                    error_message
+                },
+            });
+        }
+        if result.instance.is_null() {
+            return Err(PluginError::InstanceOpen {
+                status: result.status,
+                message: "open_instance returned NULL handle with OK status"
+                    .to_string(),
+            });
+        }
+        Ok(Arc::new(LoadedInstance {
+            plugin,
+            handle: result.instance,
+            close_fn,
+        }))
     }
 
     fn insert(&self, id: String, loaded: Arc<LoadedPlugin>) -> PluginResult<()> {
@@ -444,9 +552,8 @@ impl PluginManager {
             .collect()
     }
 
-    /// All plugins of a given type. The src-tauri registry
-    /// cutover (P6) calls this once per call to build its
-    /// per-type collections.
+    /// All plugins of a given type. The host registry cutover
+    /// calls this once per call to build its per-type collections.
     pub fn by_type(&self, plugin_type: &PluginType) -> Vec<Arc<LoadedPlugin>> {
         self.all()
             .into_iter()
@@ -467,11 +574,11 @@ impl PluginManager {
 }
 
 /// Default subdir under the data dir / app dir where bundled
-/// plugins are staged. The P5 build pipeline copies each
+/// plugins are staged. The release build pipeline copies each
 /// adapter's shared library here.
 pub const BUNDLED_PLUGINS_DIR: &str = "plugins/bundled";
 
-/// Default subdir for community plugins. The Phase P8 installer
+/// Default subdir for community plugins. The §20.7 installer
 /// drops `.aperio` archive contents here.
 pub const USER_PLUGINS_DIR: &str = "plugins/user";
 
@@ -495,11 +602,6 @@ fn locate_library(
     } else {
         &["so"]
     };
-    // Try the canonical filename. Try the id (e.g.
-    // "com.aperio.cal-adapter-local") first; some build systems
-    // produce that verbatim. If that doesn't exist, also try the
-    // suffix after the last `.` (so "com.aperio.local" would also
-    // match "local.so").
     let id = manifest.id.as_str();
     let last_segment = id.rsplit('.').next().unwrap_or(id);
     for candidate in [id, last_segment] {
@@ -510,8 +612,6 @@ fn locate_library(
             }
         }
     }
-    // Last-ditch: any file with the right extension in the
-    // directory. Sorted for deterministic behaviour across runs.
     let mut hits: Vec<PathBuf> = std::fs::read_dir(plugin_dir)
         .map_err(|err| PluginError::Io(format!(
             "scan {}: {err}",
@@ -554,13 +654,13 @@ unsafe fn cstr_to_string(ptr: *const c_char) -> String {
 }
 
 /// Test-only constructors used by the shim crates' unit tests.
-/// Hidden behind `#[doc(hidden)]` and `cfg(test)` so it never
-/// shows up in release builds or in the rustdoc surface.
 #[doc(hidden)]
 #[cfg(test)]
 pub mod test_support {
-    use super::{LoadedPlugin, PluginManifest};
+    use super::{LoadedInstance, LoadedPlugin, PluginManifest};
     use crate::abi::{AperioPlugin, AperioPluginDestroyFn};
+    use std::os::raw::c_void;
+    use std::sync::Arc;
 
     /// Build a LoadedPlugin from a manually-constructed
     /// descriptor + destructor pair. Used by the shim tests to
@@ -578,6 +678,20 @@ pub mod test_support {
             destroy_fn,
             library: None,
         }
+    }
+
+    /// Stand up a LoadedInstance with the given handle (often
+    /// NULL for tests that don't exercise per-instance state).
+    /// No close_fn is wired so Drop is a no-op.
+    pub fn loaded_instance_for_tests(
+        plugin: Arc<LoadedPlugin>,
+        handle: *mut c_void,
+    ) -> Arc<LoadedInstance> {
+        Arc::new(LoadedInstance {
+            plugin,
+            handle,
+            close_fn: None,
+        })
     }
 }
 
@@ -617,12 +731,8 @@ mod tests {
         std::fs::create_dir(tmp.path().join("bogus")).expect("mkdir");
         let errors = mgr.scan_dir(tmp.path());
         assert_eq!(errors.len(), 1, "one bad subdir, one error");
-        // The error is the manifest IO failure from
-        // PluginManifest::read_from — message contains "plugin.json".
         match &errors[0] {
             PluginError::Io(msg) | PluginError::Manifest(msg) => {
-                // Either Io (file not found) or Manifest (json) is fine —
-                // we just want to confirm it surfaced as a load error.
                 assert!(!msg.is_empty());
             }
             other => panic!("unexpected error variant: {other:?}"),

@@ -1,30 +1,12 @@
-//! Smoke test for the Vikunja plugin (P4 cal). Tasks-only —
-//! same null-slot pattern as Todoist.
+//! Smoke test for the Vikunja plugin (ABI v2).
 
-use std::ffi::CString;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use plugin_core::{
     abi::AperioPlugin, manager::PluginManager, manifest::PluginManifest,
     shim::{FfiCalendarAdapter, FfiContactsAdapter, FfiTasksAdapter},
     Capability, PluginType, ABI_VERSION,
 };
-
-fn shared_setup() {
-    static DONE: Mutex<bool> = Mutex::new(false);
-    let mut done = DONE.lock().unwrap();
-    if *done {
-        return;
-    }
-    let cfg = serde_json::json!({
-        "server_url": "https://vikunja.example.invalid",
-        "token": "test-token"
-    });
-    let c = CString::new(cfg.to_string()).unwrap();
-    let rc = unsafe { cal_adapter_vikunja_plugin::plugin_init(c.as_ptr()) };
-    assert_eq!(rc, plugin_core::PLUGIN_OK);
-    *done = true;
-}
 
 fn manifest() -> PluginManifest {
     PluginManifest {
@@ -52,21 +34,33 @@ fn register() -> PluginManager {
     m
 }
 
+fn open_one(manager: &PluginManager, server_url: &str, token: &str) -> Arc<plugin_core::LoadedInstance> {
+    let loaded = manager.get("com.aperio.cal-adapter-vikunja").unwrap();
+    let cfg = serde_json::json!({ "server_url": server_url, "token": token });
+    manager.open_instance(loaded, &cfg.to_string()).expect("open")
+}
+
 #[test]
 fn vikunja_plugin_wraps_through_ffi_tasks_adapter() {
-    shared_setup();
     let manager = register();
-    let loaded = manager.get("com.aperio.cal-adapter-vikunja").unwrap();
+    let inst = open_one(&manager, "https://a.example.invalid", "tok-a");
     let _adapter: Arc<FfiTasksAdapter> = Arc::new(
-        FfiTasksAdapter::new(loaded).expect("tasks slot present"),
+        FfiTasksAdapter::new(inst).expect("tasks slot present"),
     );
 }
 
 #[test]
 fn vikunja_plugin_has_no_calendar_or_contacts_slots() {
-    shared_setup();
     let manager = register();
-    let loaded = manager.get("com.aperio.cal-adapter-vikunja").unwrap();
-    assert!(FfiCalendarAdapter::new(loaded.clone()).is_none());
-    assert!(FfiContactsAdapter::new(loaded).is_none());
+    let inst = open_one(&manager, "https://b.example.invalid", "tok-b");
+    assert!(FfiCalendarAdapter::new(inst.clone()).is_none());
+    assert!(FfiContactsAdapter::new(inst).is_none());
+}
+
+#[test]
+fn multiple_vikunja_instances_get_distinct_handles() {
+    let manager = register();
+    let a = open_one(&manager, "https://server-a.example.invalid", "tok-a");
+    let b = open_one(&manager, "https://server-b.example.invalid", "tok-b");
+    assert_ne!(a.handle() as usize, b.handle() as usize);
 }

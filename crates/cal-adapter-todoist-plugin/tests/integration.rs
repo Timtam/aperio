@@ -1,31 +1,20 @@
-//! Smoke test for the Todoist plugin (P4 cal).
+//! Smoke test for the Todoist plugin (ABI v2).
 //!
-//! Validates the tasks-only / null-calendar / null-contacts
-//! slot pattern: FfiCalendarAdapter::new + FfiContactsAdapter::new
-//! must return None silently while FfiTasksAdapter::new
-//! produces a working wrapper.
+//! Validates:
+//!   - Single-capability tasks adapter wires through
+//!     FfiTasksAdapter; FfiCalendarAdapter + FfiContactsAdapter
+//!     return None silently for the null slots.
+//!   - The new instance-handle ABI: two independent open_instance
+//!     calls on the same loaded library yield two distinct
+//!     handles + can be closed independently (DESIGN.md §6.4).
 
-use std::ffi::CString;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use plugin_core::{
     abi::AperioPlugin, manager::PluginManager, manifest::PluginManifest,
     shim::{FfiCalendarAdapter, FfiContactsAdapter, FfiTasksAdapter},
     Capability, PluginType, ABI_VERSION,
 };
-
-fn shared_setup() {
-    static DONE: Mutex<bool> = Mutex::new(false);
-    let mut done = DONE.lock().unwrap();
-    if *done {
-        return;
-    }
-    let cfg = serde_json::json!({ "token": "test-token" });
-    let c = CString::new(cfg.to_string()).unwrap();
-    let rc = unsafe { cal_adapter_todoist_plugin::plugin_init(c.as_ptr()) };
-    assert_eq!(rc, plugin_core::PLUGIN_OK);
-    *done = true;
-}
 
 fn manifest() -> PluginManifest {
     PluginManifest {
@@ -53,21 +42,66 @@ fn register() -> PluginManager {
     m
 }
 
+fn open_one(manager: &PluginManager, token: &str) -> Arc<plugin_core::LoadedInstance> {
+    let loaded = manager.get("com.aperio.cal-adapter-todoist").unwrap();
+    let cfg = serde_json::json!({ "token": token });
+    manager.open_instance(loaded, &cfg.to_string()).expect("open")
+}
+
 #[test]
 fn todoist_plugin_wraps_through_ffi_tasks_adapter() {
-    shared_setup();
     let manager = register();
-    let loaded = manager.get("com.aperio.cal-adapter-todoist").unwrap();
+    let inst = open_one(&manager, "test-token-a");
     let _adapter: Arc<FfiTasksAdapter> = Arc::new(
-        FfiTasksAdapter::new(loaded).expect("tasks slot present"),
+        FfiTasksAdapter::new(inst).expect("tasks slot present"),
     );
 }
 
 #[test]
 fn todoist_plugin_has_no_calendar_or_contacts_slots() {
-    shared_setup();
+    let manager = register();
+    let inst = open_one(&manager, "test-token-b");
+    assert!(FfiCalendarAdapter::new(inst.clone()).is_none());
+    assert!(FfiContactsAdapter::new(inst).is_none());
+}
+
+#[test]
+fn multiple_instances_per_library_get_distinct_handles() {
+    // Two opens against the same loaded library must produce two
+    // distinct handles — that's the v2 ABI promise. If the
+    // singleton legacy regressed, both opens would return the
+    // same pointer (or the second would fail outright).
+    let manager = register();
+    let a = open_one(&manager, "token-account-a");
+    let b = open_one(&manager, "token-account-b");
+    assert_ne!(
+        a.handle() as usize,
+        b.handle() as usize,
+        "v2 must hand out one handle per open_instance call",
+    );
+    // Both should wrap independently.
+    let _wrap_a: Arc<FfiTasksAdapter> = Arc::new(
+        FfiTasksAdapter::new(a).expect("a"),
+    );
+    let _wrap_b: Arc<FfiTasksAdapter> = Arc::new(
+        FfiTasksAdapter::new(b).expect("b"),
+    );
+}
+
+#[test]
+fn open_instance_rejects_empty_token() {
     let manager = register();
     let loaded = manager.get("com.aperio.cal-adapter-todoist").unwrap();
-    assert!(FfiCalendarAdapter::new(loaded.clone()).is_none());
-    assert!(FfiContactsAdapter::new(loaded).is_none());
+    let bad_cfg = serde_json::json!({ "token": "   " });
+    let err = manager.open_instance(loaded, &bad_cfg.to_string()).unwrap_err();
+    match err {
+        plugin_core::error::PluginError::InstanceOpen { status, .. } => {
+            assert_eq!(
+                status,
+                plugin_core::PLUGIN_ERR_INVALID_CONFIG,
+                "empty token should surface as invalid_config",
+            );
+        }
+        other => panic!("expected InstanceOpen, got {other:?}"),
+    }
 }

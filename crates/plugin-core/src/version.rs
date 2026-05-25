@@ -23,7 +23,20 @@ use crate::error::{PluginError, PluginResult};
 /// Bump rules: any breaking change to the C-ABI surface (struct
 /// layout, vtable contracts) increments this by 1 and ships with
 /// release notes.
-pub const ABI_VERSION: u32 = 1;
+///
+/// ## History
+///
+/// - **v1** — initial. One process-singleton instance per loaded
+///   library; lifecycle was `init(config_json) -> int` +
+///   `destroy()` on the descriptor.
+/// - **v2** — instance handles. The descriptor's `init`/`destroy`
+///   were dropped in favour of `open_instance(config_json) ->
+///   OpenInstanceResult` + `close_instance(handle)`; every
+///   vtable method takes the opaque handle as its first argument.
+///   The change unblocks DESIGN.md §6.4 (multiple accounts per
+///   adapter type) — a single loaded library can now back N
+///   independent adapter instances.
+pub const ABI_VERSION: u32 = 2;
 
 /// Three-component semantic version. Only the (major, minor, patch)
 /// tuple is preserved — pre-release / build metadata gets dropped

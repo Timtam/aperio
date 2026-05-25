@@ -1,30 +1,11 @@
-//! Smoke test for the Google Drive sync plugin (P4).
+//! Smoke test for the Google Drive sync plugin (ABI v2).
 
-use std::ffi::CString;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use plugin_core::{
     abi::AperioPlugin, manager::PluginManager, manifest::PluginManifest,
     shim::FfiSyncAdapter, PluginType, ABI_VERSION,
 };
-
-fn shared_setup() {
-    static DONE: Mutex<bool> = Mutex::new(false);
-    let mut done = DONE.lock().unwrap();
-    if *done {
-        return;
-    }
-    let cfg = serde_json::json!({
-        "client_id": "test-client-id",
-        "client_secret": "test-client-secret",
-        "folder_name": "Aperio",
-        "refresh_token": "test-refresh-token"
-    });
-    let c = CString::new(cfg.to_string()).unwrap();
-    let rc = unsafe { sync_adapter_googledrive_plugin::plugin_init(c.as_ptr()) };
-    assert_eq!(rc, plugin_core::PLUGIN_OK);
-    *done = true;
-}
 
 fn manifest() -> PluginManifest {
     PluginManifest {
@@ -41,17 +22,41 @@ fn manifest() -> PluginManifest {
     }
 }
 
-#[test]
-fn plugin_loads_and_wraps_through_ffi_sync_adapter() {
-    shared_setup();
+fn make_manager() -> PluginManager {
     let m = PluginManager::new("0.1.0");
     let d: *mut AperioPlugin =
         unsafe { sync_adapter_googledrive_plugin::aperio_plugin_create() };
     assert!(!d.is_null());
     let dx: unsafe extern "C" fn(*mut AperioPlugin) =
         sync_adapter_googledrive_plugin::aperio_plugin_destroy;
-    m.register_static(manifest(), d, dx).unwrap();
-    let l = m.get("com.aperio.sync-adapter-googledrive").unwrap();
-    let _adapter: Arc<FfiSyncAdapter> =
-        Arc::new(FfiSyncAdapter::new(l).expect("vtable surface"));
+    m.register_static(manifest(), d, dx).expect("register");
+    m
+}
+
+fn open_one(manager: &PluginManager, refresh_token: &str) -> Arc<plugin_core::LoadedInstance> {
+    let loaded = manager.get("com.aperio.sync-adapter-googledrive").expect("registered");
+    let cfg = serde_json::json!({
+        "client_id": "test-client-id",
+        "client_secret": "test-client-secret",
+        "folder_name": "Aperio",
+        "refresh_token": refresh_token,
+    });
+    manager.open_instance(loaded, &cfg.to_string()).expect("open")
+}
+
+#[test]
+fn plugin_loads_and_wraps_through_ffi_sync_adapter() {
+    let manager = make_manager();
+    let inst = open_one(&manager, "test-refresh-token");
+    let _adapter: Arc<FfiSyncAdapter> = Arc::new(
+        FfiSyncAdapter::new(inst).expect("vtable surface"),
+    );
+}
+
+#[test]
+fn multiple_drive_accounts_get_distinct_handles() {
+    let manager = make_manager();
+    let a = open_one(&manager, "refresh-account-a");
+    let b = open_one(&manager, "refresh-account-b");
+    assert_ne!(a.handle() as usize, b.handle() as usize);
 }

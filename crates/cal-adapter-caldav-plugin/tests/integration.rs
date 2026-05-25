@@ -1,35 +1,12 @@
-//! Smoke test for the CalDAV plugin (P4 cal).
-//!
-//! Validates the full-3-capability vtable pattern: every one of
-//! `FfiCalendarAdapter::new`, `FfiTasksAdapter::new` and
-//! `FfiContactsAdapter::new` must produce a working wrapper.
+//! Smoke test for the CalDAV plugin (ABI v2).
 
-use std::ffi::CString;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use plugin_core::{
     abi::AperioPlugin, manager::PluginManager, manifest::PluginManifest,
     shim::{FfiCalendarAdapter, FfiContactsAdapter, FfiTasksAdapter},
     Capability, PluginType, ABI_VERSION,
 };
-
-fn shared_setup() {
-    static DONE: Mutex<bool> = Mutex::new(false);
-    let mut done = DONE.lock().unwrap();
-    if *done {
-        return;
-    }
-    let cfg = serde_json::json!({
-        "server_url": "https://caldav.example.invalid/",
-        "username": "alice",
-        "auth_kind": "basic",
-        "secret": "hunter2"
-    });
-    let c = CString::new(cfg.to_string()).unwrap();
-    let rc = unsafe { cal_adapter_caldav_plugin::plugin_init(c.as_ptr()) };
-    assert_eq!(rc, plugin_core::PLUGIN_OK);
-    *done = true;
-}
 
 fn manifest() -> PluginManifest {
     PluginManifest {
@@ -61,20 +38,38 @@ fn register() -> PluginManager {
     m
 }
 
+fn open_one(manager: &PluginManager, server: &str, user: &str) -> Arc<plugin_core::LoadedInstance> {
+    let loaded = manager.get("com.aperio.cal-adapter-caldav").unwrap();
+    let cfg = serde_json::json!({
+        "server_url": server,
+        "username": user,
+        "auth_kind": "basic",
+        "secret": "hunter2",
+    });
+    manager.open_instance(loaded, &cfg.to_string()).expect("open")
+}
+
 #[test]
 fn caldav_plugin_exposes_all_three_surfaces() {
-    shared_setup();
     let manager = register();
-    let loaded = manager.get("com.aperio.cal-adapter-caldav").unwrap();
+    let inst = open_one(&manager, "https://caldav.example.invalid/", "alice");
     let _cal: Arc<FfiCalendarAdapter> = Arc::new(
-        FfiCalendarAdapter::new(loaded.clone()).expect("calendar slot present"),
+        FfiCalendarAdapter::new(inst.clone()).expect("calendar slot present"),
     );
     let _tasks: Arc<FfiTasksAdapter> = Arc::new(
-        FfiTasksAdapter::new(loaded.clone()).expect("tasks slot present"),
+        FfiTasksAdapter::new(inst.clone()).expect("tasks slot present"),
     );
     let _contacts: Arc<FfiContactsAdapter> = Arc::new(
-        FfiContactsAdapter::new(loaded).expect("contacts slot present"),
+        FfiContactsAdapter::new(inst).expect("contacts slot present"),
     );
+}
+
+#[test]
+fn multiple_caldav_accounts_get_distinct_handles() {
+    let manager = register();
+    let icloud = open_one(&manager, "https://caldav.icloud.com/", "user@icloud.com");
+    let nextcloud = open_one(&manager, "https://cloud.example.org/", "alice");
+    assert_ne!(icloud.handle() as usize, nextcloud.handle() as usize);
 }
 
 #[test]

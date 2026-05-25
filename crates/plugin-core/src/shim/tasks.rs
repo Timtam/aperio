@@ -15,13 +15,14 @@ use serde::Serialize;
 use tracing::warn;
 
 use crate::ffi::*;
-use crate::manager::LoadedPlugin;
+use crate::manager::LoadedInstance;
 use crate::vtables::{CalendarAdapterVtable, TasksVtable};
 
 use super::call::{call_method, decode_payload, encode_args, CallOutcome};
 
 pub struct FfiTasksAdapter {
-    _plugin: Arc<LoadedPlugin>,
+    _instance: Arc<LoadedInstance>,
+    handle_addr: usize,
     vtable: VtableSnapshot,
     capabilities: Vec<Capability>,
 }
@@ -38,11 +39,12 @@ struct VtableSnapshot {
 }
 
 impl FfiTasksAdapter {
-    /// Wrap a loaded plugin's tasks surface. Returns `None` if
-    /// the plugin doesn't declare the tasks capability (the
-    /// [`CalendarAdapterVtable::tasks`] slot is null) or the
-    /// sub-vtable fails the minimum-surface check.
-    pub fn new(plugin: Arc<LoadedPlugin>) -> Option<Self> {
+    /// Wrap a loaded plugin instance's tasks surface. Returns
+    /// `None` if the plugin doesn't declare the tasks capability
+    /// (the [`CalendarAdapterVtable::tasks`] slot is null) or
+    /// the sub-vtable fails the minimum-surface check.
+    pub fn new(instance: Arc<LoadedInstance>) -> Option<Self> {
+        let plugin = instance.plugin().clone();
         let raw = plugin.vtable_ptr();
         if raw.is_null() {
             warn!(
@@ -61,7 +63,7 @@ impl FfiTasksAdapter {
         }
         // SAFETY: outer.tasks is non-null per the check above +
         // points at a static in the plugin's library; the
-        // LoadedPlugin Arc keeps it alive.
+        // LoadedPlugin Arc inside the instance keeps it alive.
         let vtable_ref: &TasksVtable = unsafe { &*outer.tasks };
         if !vtable_ref.has_minimum_surface() {
             warn!(
@@ -80,8 +82,10 @@ impl FfiTasksAdapter {
             rename_task_list: vtable_ref.rename_task_list,
         };
         let capabilities = super::manifest_capabilities(&plugin.manifest.capabilities);
+        let handle_addr = instance.handle() as usize;
         Some(Self {
-            _plugin: plugin,
+            _instance: instance,
+            handle_addr,
             vtable: snapshot,
             capabilities,
         })
@@ -111,6 +115,7 @@ fn status_to_cal_error(outcome: CallOutcome) -> Error {
 
 async fn call_then_decode<T, A>(
     method: Option<crate::vtables::VtableMethodFn>,
+    instance_addr: usize,
     args: &A,
 ) -> Result<T>
 where
@@ -120,7 +125,7 @@ where
     let bytes = encode_args(args).map_err(|e| Error::Internal(format!(
         "encode args: {e}"
     )))?;
-    let outcome = call_method(method, bytes).await;
+    let outcome = call_method(method, instance_addr, bytes).await;
     if outcome.is_ok() {
         decode_payload(&outcome.bytes).map_err(|e| Error::Protocol(format!(
             "decode plugin response: {e}"
@@ -132,12 +137,13 @@ where
 
 async fn call_for_unit<A: Serialize>(
     method: Option<crate::vtables::VtableMethodFn>,
+    instance_addr: usize,
     args: &A,
 ) -> Result<()> {
     let bytes = encode_args(args).map_err(|e| Error::Internal(format!(
         "encode args: {e}"
     )))?;
-    let outcome = call_method(method, bytes).await;
+    let outcome = call_method(method, instance_addr, bytes).await;
     if outcome.is_ok() {
         Ok(())
     } else {
@@ -160,7 +166,7 @@ struct RenameTaskListArgs<'a> {
 #[async_trait]
 impl Adapter for FfiTasksAdapter {
     async fn authenticate(&self, credentials: Credentials) -> Result<AuthToken> {
-        call_then_decode(self.vtable.authenticate, &credentials).await
+        call_then_decode(self.vtable.authenticate, self.handle_addr, &credentials).await
     }
 
     fn capabilities(&self) -> &[Capability] {
@@ -171,24 +177,24 @@ impl Adapter for FfiTasksAdapter {
 #[async_trait]
 impl TasksFeature for FfiTasksAdapter {
     async fn list_task_lists(&self) -> Result<Vec<TaskList>> {
-        call_then_decode(self.vtable.list_task_lists, &()).await
+        call_then_decode(self.vtable.list_task_lists, self.handle_addr, &()).await
     }
 
     async fn get_tasks(&self, list_id: &str) -> Result<Vec<Task>> {
-        call_then_decode(self.vtable.get_tasks, &list_id).await
+        call_then_decode(self.vtable.get_tasks, self.handle_addr, &list_id).await
     }
 
     async fn create_task(&self, list_id: &str, task: NewTask) -> Result<Task> {
         let args = CreateTaskArgs { list_id, task };
-        call_then_decode(self.vtable.create_task, &args).await
+        call_then_decode(self.vtable.create_task, self.handle_addr, &args).await
     }
 
     async fn update_task(&self, task: Task) -> Result<Task> {
-        call_then_decode(self.vtable.update_task, &task).await
+        call_then_decode(self.vtable.update_task, self.handle_addr, &task).await
     }
 
     async fn delete_task(&self, task_id: &str) -> Result<()> {
-        call_for_unit(self.vtable.delete_task, &task_id).await
+        call_for_unit(self.vtable.delete_task, self.handle_addr, &task_id).await
     }
 
     async fn rename_task_list(
@@ -197,6 +203,6 @@ impl TasksFeature for FfiTasksAdapter {
         new_name: &str,
     ) -> Result<()> {
         let args = RenameTaskListArgs { list_id, new_name };
-        call_for_unit(self.vtable.rename_task_list, &args).await
+        call_for_unit(self.vtable.rename_task_list, self.handle_addr, &args).await
     }
 }

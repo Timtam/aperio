@@ -19,13 +19,14 @@ use serde::Serialize;
 use tracing::warn;
 
 use crate::ffi::*;
-use crate::manager::LoadedPlugin;
+use crate::manager::LoadedInstance;
 use crate::vtables::{CalendarAdapterVtable, ContactsVtable};
 
 use super::call::{call_method, decode_payload, encode_args, CallOutcome};
 
 pub struct FfiContactsAdapter {
-    _plugin: Arc<LoadedPlugin>,
+    _instance: Arc<LoadedInstance>,
+    handle_addr: usize,
     vtable: VtableSnapshot,
     capabilities: Vec<Capability>,
 }
@@ -47,11 +48,13 @@ struct VtableSnapshot {
 }
 
 impl FfiContactsAdapter {
-    /// Wrap a loaded plugin's contacts surface. Returns `None`
-    /// if the plugin doesn't declare the contacts capability
-    /// (the [`CalendarAdapterVtable::contacts`] slot is null) or
-    /// the sub-vtable fails the minimum-surface check.
-    pub fn new(plugin: Arc<LoadedPlugin>) -> Option<Self> {
+    /// Wrap a loaded plugin instance's contacts surface. Returns
+    /// `None` if the plugin doesn't declare the contacts
+    /// capability (the [`CalendarAdapterVtable::contacts`] slot
+    /// is null) or the sub-vtable fails the minimum-surface
+    /// check.
+    pub fn new(instance: Arc<LoadedInstance>) -> Option<Self> {
+        let plugin = instance.plugin().clone();
         let raw = plugin.vtable_ptr();
         if raw.is_null() {
             warn!(
@@ -68,8 +71,8 @@ impl FfiContactsAdapter {
             return None;
         }
         // SAFETY: outer.contacts is non-null + points at a static
-        // in the plugin's library; the LoadedPlugin Arc keeps it
-        // alive.
+        // in the plugin's library; the LoadedPlugin Arc inside
+        // the instance keeps it alive.
         let vtable_ref: &ContactsVtable = unsafe { &*outer.contacts };
         if !vtable_ref.has_minimum_surface() {
             warn!(
@@ -93,8 +96,10 @@ impl FfiContactsAdapter {
             invalidate_contacts_cache: vtable_ref.invalidate_contacts_cache,
         };
         let capabilities = super::manifest_capabilities(&plugin.manifest.capabilities);
+        let handle_addr = instance.handle() as usize;
         Some(Self {
-            _plugin: plugin,
+            _instance: instance,
+            handle_addr,
             vtable: snapshot,
             capabilities,
         })
@@ -120,6 +125,7 @@ fn status_to_cal_error(outcome: CallOutcome) -> Error {
 
 async fn call_then_decode<T, A>(
     method: Option<crate::vtables::VtableMethodFn>,
+    instance_addr: usize,
     args: &A,
 ) -> Result<T>
 where
@@ -129,7 +135,7 @@ where
     let bytes = encode_args(args).map_err(|e| Error::Internal(format!(
         "encode args: {e}"
     )))?;
-    let outcome = call_method(method, bytes).await;
+    let outcome = call_method(method, instance_addr, bytes).await;
     if outcome.is_ok() {
         decode_payload(&outcome.bytes).map_err(|e| Error::Protocol(format!(
             "decode plugin response: {e}"
@@ -141,12 +147,13 @@ where
 
 async fn call_for_unit<A: Serialize>(
     method: Option<crate::vtables::VtableMethodFn>,
+    instance_addr: usize,
     args: &A,
 ) -> Result<()> {
     let bytes = encode_args(args).map_err(|e| Error::Internal(format!(
         "encode args: {e}"
     )))?;
-    let outcome = call_method(method, bytes).await;
+    let outcome = call_method(method, instance_addr, bytes).await;
     if outcome.is_ok() {
         Ok(())
     } else {
@@ -175,7 +182,7 @@ struct SetContactPhotoArgs<'a> {
 #[async_trait]
 impl Adapter for FfiContactsAdapter {
     async fn authenticate(&self, credentials: Credentials) -> Result<AuthToken> {
-        call_then_decode(self.vtable.authenticate, &credentials).await
+        call_then_decode(self.vtable.authenticate, self.handle_addr, &credentials).await
     }
 
     fn capabilities(&self) -> &[Capability] {
@@ -186,15 +193,15 @@ impl Adapter for FfiContactsAdapter {
 #[async_trait]
 impl ContactsFeature for FfiContactsAdapter {
     async fn list_contact_lists(&self) -> Result<Vec<ContactList>> {
-        call_then_decode(self.vtable.list_contact_lists, &()).await
+        call_then_decode(self.vtable.list_contact_lists, self.handle_addr, &()).await
     }
 
     async fn get_contacts(&self, list_id: &str) -> Result<Vec<Contact>> {
-        call_then_decode(self.vtable.get_contacts, &list_id).await
+        call_then_decode(self.vtable.get_contacts, self.handle_addr, &list_id).await
     }
 
     async fn search_contacts(&self, query: &str) -> Result<Vec<Contact>> {
-        call_then_decode(self.vtable.search_contacts, &query).await
+        call_then_decode(self.vtable.search_contacts, self.handle_addr, &query).await
     }
 
     async fn create_contact(
@@ -203,15 +210,15 @@ impl ContactsFeature for FfiContactsAdapter {
         contact: NewContact,
     ) -> Result<Contact> {
         let args = CreateContactArgs { list_id, contact };
-        call_then_decode(self.vtable.create_contact, &args).await
+        call_then_decode(self.vtable.create_contact, self.handle_addr, &args).await
     }
 
     async fn update_contact(&self, contact: Contact) -> Result<Contact> {
-        call_then_decode(self.vtable.update_contact, &contact).await
+        call_then_decode(self.vtable.update_contact, self.handle_addr, &contact).await
     }
 
     async fn delete_contact(&self, contact_id: &str) -> Result<()> {
-        call_for_unit(self.vtable.delete_contact, &contact_id).await
+        call_for_unit(self.vtable.delete_contact, self.handle_addr, &contact_id).await
     }
 
     async fn rename_contact_list(
@@ -220,14 +227,14 @@ impl ContactsFeature for FfiContactsAdapter {
         new_name: &str,
     ) -> Result<()> {
         let args = RenameContactListArgs { list_id, new_name };
-        call_for_unit(self.vtable.rename_contact_list, &args).await
+        call_for_unit(self.vtable.rename_contact_list, self.handle_addr, &args).await
     }
 
     async fn get_contact_photo(
         &self,
         contact_id: &str,
     ) -> Result<Option<ContactPhoto>> {
-        call_then_decode(self.vtable.get_contact_photo, &contact_id).await
+        call_then_decode(self.vtable.get_contact_photo, self.handle_addr, &contact_id).await
     }
 
     async fn set_contact_photo(
@@ -236,14 +243,14 @@ impl ContactsFeature for FfiContactsAdapter {
         photo: ContactPhoto,
     ) -> Result<()> {
         let args = SetContactPhotoArgs { contact_id, photo };
-        call_for_unit(self.vtable.set_contact_photo, &args).await
+        call_for_unit(self.vtable.set_contact_photo, self.handle_addr, &args).await
     }
 
     async fn delete_contact_photo(&self, contact_id: &str) -> Result<()> {
-        call_for_unit(self.vtable.delete_contact_photo, &contact_id).await
+        call_for_unit(self.vtable.delete_contact_photo, self.handle_addr, &contact_id).await
     }
 
     async fn invalidate_contacts_cache(&self) -> Result<()> {
-        call_for_unit(self.vtable.invalidate_contacts_cache, &()).await
+        call_for_unit(self.vtable.invalidate_contacts_cache, self.handle_addr, &()).await
     }
 }

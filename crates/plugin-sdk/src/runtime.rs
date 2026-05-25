@@ -24,36 +24,45 @@
 //!      in parallel — each gets its own thread + its own
 //!      `block_on` invocation against the shared runtime.
 //!
-//! Constructed once in [`super::PluginSingleton::init`] and
-//! shared by every FFI fn the SDK generates.
+//! Constructed once in [`super::PluginInstance::new`] and shared
+//! by every FFI fn the SDK generates for that instance.
+//!
+//! ## Drop discipline
+//!
+//! Dropping a `tokio::runtime::Runtime` synchronously blocks the
+//! current thread waiting for in-flight tasks to wind down — and
+//! panics outright when the current thread is already serving
+//! another tokio runtime (the "Cannot drop a runtime in a context
+//! where blocking is not allowed" error). [`PluginRuntime`] sits
+//! inside [`super::PluginInstance`], which the host drops from
+//! its own async context (a Tauri command handler, a sync round
+//! background task, …), so we MUST tear the runtime down via
+//! [`tokio::runtime::Runtime::shutdown_background`] instead. The
+//! shutdown happens off the current thread + doesn't block; any
+//! in-flight task gets cancelled, which is the right shape since
+//! by the time the instance is dropping the host has stopped
+//! routing new calls to it.
 
 use std::future::Future;
 
 use tokio::runtime::{Builder, Runtime};
 
-/// Owned tokio runtime configured for plugin use. Wraps the
-/// inner [`Runtime`] in a tiny struct so callers don't have to
-/// pick the right `block_on` flavour themselves + so swapping
-/// the flavour later (current-thread → multi-thread) only
-/// touches this file.
+/// Owned tokio runtime configured for plugin use.
 pub struct PluginRuntime {
-    inner: Runtime,
+    /// Wrapped in `Option` so [`Drop`] can take ownership +
+    /// hand the runtime off to `shutdown_background`. Always
+    /// `Some` for a live [`PluginRuntime`]; the `take()` only
+    /// runs from [`Drop::drop`].
+    inner: Option<Runtime>,
 }
 
 impl PluginRuntime {
     /// Build a fresh runtime. Plugin authors don't usually call
-    /// this directly — [`super::PluginSingleton::init`] does it
-    /// once at plugin-create time.
-    ///
-    /// `enable_all` turns on the tokio IO + time drivers so
-    /// plugins that need `tokio::time::sleep` or
-    /// `reqwest`-style HTTP calls work out of the box. The
-    /// runtime is lightweight enough that always-on doesn't
-    /// cost meaningful resources even for plugins that don't
-    /// use them.
+    /// this directly — [`super::PluginInstance::new`] does it
+    /// once at instance-open time.
     pub fn new() -> std::io::Result<Self> {
         let inner = Builder::new_current_thread().enable_all().build()?;
-        Ok(Self { inner })
+        Ok(Self { inner: Some(inner) })
     }
 
     /// Drive `fut` to completion on this runtime. The shared
@@ -62,7 +71,24 @@ impl PluginRuntime {
     /// invokes the FFI fn from inside `spawn_blocking` so the
     /// host's reactor stays free.
     pub fn block_on<F: Future>(&self, fut: F) -> F::Output {
-        self.inner.block_on(fut)
+        self.inner
+            .as_ref()
+            .expect("PluginRuntime accessed after drop")
+            .block_on(fut)
+    }
+}
+
+impl Drop for PluginRuntime {
+    fn drop(&mut self) {
+        if let Some(rt) = self.inner.take() {
+            // `shutdown_background` consumes the runtime + spins
+            // teardown off onto its own thread. The current
+            // thread keeps moving immediately — critical because
+            // the LoadedInstance Arc dropping us can be sitting
+            // inside the host's async context where blocking on
+            // a runtime drop would panic.
+            rt.shutdown_background();
+        }
     }
 }
 
@@ -85,5 +111,23 @@ mod tests {
             "ok"
         });
         assert_eq!(answer, "ok");
+    }
+
+    /// Dropping a PluginRuntime from inside a `#[tokio::test]`
+    /// (i.e. an async context) MUST NOT panic. v1's PluginRuntime
+    /// would have panicked here with "Cannot drop a runtime in a
+    /// context where blocking is not allowed" — `shutdown_background`
+    /// is the fix.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn drop_from_within_async_context_does_not_panic() {
+        // Construct + drop inside the multi-thread test runtime.
+        // Calling block_on here would panic (you can't enter a
+        // runtime from inside another one), so the test only
+        // exercises the constructor + Drop — which is exactly
+        // the symptom v1 displayed: dropping the runtime from
+        // inside the host's async context aborted the whole
+        // test binary.
+        let rt = PluginRuntime::new().expect("new");
+        drop(rt);
     }
 }

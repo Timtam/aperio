@@ -9,50 +9,30 @@
 //!   "user": "alice",
 //!   "path": "/home/alice/aperio",
 //!   "auth_method": "password",
-//!   "password": "…",                // when auth_method == "password"
-//!   "key_path": "/home/alice/.ssh/id_ed25519",  // when auth_method == "key"
-//!   "key_passphrase": "",                       // optional
-//!   "pinned_fingerprint": "SHA256:…"            // optional pre-pinned fingerprint
+//!   "password": "…",
+//!   "key_path": "/home/alice/.ssh/id_ed25519",
+//!   "key_passphrase": "",
+//!   "pinned_fingerprint": "SHA256:…"
 //! }
 //! ```
-//!
-//! ## Host-key handling
-//!
-//! The TOFU dialog flow (§19.5) stays host-side because it
-//! needs user_prefs storage + an interactive UI. The host
-//! resolves the trust dialog BEFORE starting the plugin and
-//! passes the pinned SHA256 fingerprint via
-//! `pinned_fingerprint`. The plugin's in-memory verifier
-//! accepts only that exact fingerprint — anything else
-//! (mismatch or first-use with no pre-pin) rejects, and the
-//! host falls back to its `preview_sftp_host_key` flow.
-//!
-//! When `pinned_fingerprint` is omitted the verifier accepts
-//! the first fingerprint it sees (silent TOFU) — only safe for
-//! dev/test setups; the host doesn't pass empty fingerprints in
-//! production.
 
-use std::os::raw::{c_char, c_int};
+use std::os::raw::{c_char, c_void};
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use base64::Engine as _;
+use plugin_sdk::plugin_core::abi::OpenInstanceResult;
 use plugin_sdk::plugin_core::ffi::{PluginCallResult, PLUGIN_CALL_ERR_INTERNAL};
 use plugin_sdk::plugin_core::vtables::SyncVtable;
 use plugin_sdk::{
     decode_args, error_response, ok_empty_response, ok_response,
-    sync_error_to_response, PluginSingleton,
+    open_instance_with, sync_error_to_response, PluginInstance,
 };
 use serde::Deserialize;
 use sync_adapter_sftp::{
     HostKeyVerifier, InMemoryHostKeyVerifier, SftpAuth, SftpSyncAdapter,
 };
-use sync_core::{
-    DeviceCursor, LogFile, LogFileName, MetaJson, Snapshot, SyncAdapter,
-};
-use tracing::warn;
-
-pub static PLUGIN_INSTANCE: PluginSingleton<SftpSyncAdapter> =
-    PluginSingleton::new();
+use sync_core::{DeviceCursor, LogFile, LogFileName, MetaJson, Snapshot, SyncAdapter};
 
 #[derive(Debug, Deserialize)]
 struct InitConfig {
@@ -69,191 +49,182 @@ struct InitConfig {
     key_path: String,
     #[serde(default)]
     key_passphrase: String,
-    /// Pre-pinned SHA256 fingerprint for this host:port.
-    /// Empty / absent → silent TOFU on first contact.
     #[serde(default)]
     pinned_fingerprint: String,
 }
 
-fn default_port() -> u16 {
-    22
-}
-fn default_auth_method() -> String {
-    "password".to_string()
-}
+fn default_port() -> u16 { 22 }
+fn default_auth_method() -> String { "password".to_string() }
 
 /// # Safety
-/// FFI export; config_json must be NUL-terminated UTF-8.
-pub unsafe extern "C" fn plugin_init(config_json: *const c_char) -> c_int {
-    if config_json.is_null() {
-        return plugin_sdk::plugin_core::PLUGIN_ERR_INVALID_CONFIG;
-    }
-    let json_str = match std::ffi::CStr::from_ptr(config_json).to_str() {
-        Ok(s) => s,
-        Err(_) => return plugin_sdk::plugin_core::PLUGIN_ERR_INVALID_CONFIG,
-    };
-    let cfg: InitConfig = match serde_json::from_str(json_str) {
-        Ok(c) => c,
-        Err(err) => {
-            warn!(?err, "sync-adapter-sftp-plugin: malformed init config");
-            return plugin_sdk::plugin_core::PLUGIN_ERR_INVALID_CONFIG;
+/// FFI export; `config_json` must be NUL-terminated UTF-8.
+pub unsafe extern "C" fn plugin_open_instance(
+    config_json: *const c_char,
+) -> OpenInstanceResult {
+    open_instance_with(config_json, |json| {
+        let cfg: InitConfig = serde_json::from_str(json)
+            .map_err(|e| format!("malformed init config: {e}"))?;
+        if cfg.host.trim().is_empty() || cfg.user.trim().is_empty() || cfg.path.trim().is_empty() {
+            return Err("host, user and path must not be empty".to_string());
         }
-    };
-    if cfg.host.trim().is_empty()
-        || cfg.user.trim().is_empty()
-        || cfg.path.trim().is_empty()
-    {
-        return plugin_sdk::plugin_core::PLUGIN_ERR_INVALID_CONFIG;
-    }
-    let auth = match cfg.auth_method.as_str() {
-        "password" => {
-            if cfg.password.is_empty() {
-                return plugin_sdk::plugin_core::PLUGIN_ERR_INVALID_CONFIG;
+        let auth = match cfg.auth_method.as_str() {
+            "password" => {
+                if cfg.password.is_empty() {
+                    return Err("password auth requires non-empty password".to_string());
+                }
+                SftpAuth::Password { password: cfg.password }
             }
-            SftpAuth::Password { password: cfg.password }
-        }
-        "key" => {
-            if cfg.key_path.trim().is_empty() {
-                return plugin_sdk::plugin_core::PLUGIN_ERR_INVALID_CONFIG;
+            "key" => {
+                if cfg.key_path.trim().is_empty() {
+                    return Err("key auth requires key_path".to_string());
+                }
+                let passphrase = if cfg.key_passphrase.is_empty() { None } else { Some(cfg.key_passphrase) };
+                SftpAuth::PrivateKey {
+                    path: PathBuf::from(cfg.key_path.trim()),
+                    passphrase,
+                }
             }
-            let passphrase = if cfg.key_passphrase.is_empty() {
-                None
-            } else {
-                Some(cfg.key_passphrase)
-            };
-            SftpAuth::PrivateKey {
-                path: PathBuf::from(cfg.key_path.trim()),
-                passphrase,
-            }
-        }
-        _ => return plugin_sdk::plugin_core::PLUGIN_ERR_INVALID_CONFIG,
-    };
-    // Build the host-key verifier. The host resolves the §19.5
-    // trust dialog before calling init() + passes the pinned
-    // fingerprint here; we seed the in-memory verifier with it
-    // so anything else gets rejected mid-handshake.
-    let verifier: Arc<dyn HostKeyVerifier> = if cfg.pinned_fingerprint.trim().is_empty() {
-        Arc::new(InMemoryHostKeyVerifier::new())
-    } else {
-        let host_port = format!("{}:{}", cfg.host.trim(), cfg.port);
-        Arc::new(InMemoryHostKeyVerifier::with_known(
-            &host_port,
-            cfg.pinned_fingerprint.trim(),
+            other => return Err(format!("unknown auth_method: {other}")),
+        };
+        let verifier: Arc<dyn HostKeyVerifier> = if cfg.pinned_fingerprint.trim().is_empty() {
+            Arc::new(InMemoryHostKeyVerifier::new())
+        } else {
+            let host_port = format!("{}:{}", cfg.host.trim(), cfg.port);
+            Arc::new(InMemoryHostKeyVerifier::with_known(
+                &host_port,
+                cfg.pinned_fingerprint.trim(),
+            ))
+        };
+        Ok(SftpSyncAdapter::new(
+            cfg.host.trim(),
+            cfg.port,
+            cfg.user.trim(),
+            auth,
+            PathBuf::from(cfg.path.trim()),
+            verifier,
         ))
-    };
-    let adapter = SftpSyncAdapter::new(
-        cfg.host.trim(),
-        cfg.port,
-        cfg.user.trim(),
-        auth,
-        PathBuf::from(cfg.path.trim()),
-        verifier,
-    );
-    match PLUGIN_INSTANCE.init(adapter) {
-        Ok(()) => plugin_sdk::plugin_core::PLUGIN_OK,
-        Err(_) => plugin_sdk::plugin_core::PLUGIN_ERR_INIT,
-    }
+    })
 }
 
 /// # Safety
-/// FFI export; empty teardown.
-pub unsafe extern "C" fn plugin_destroy() {}
+/// FFI export.
+pub unsafe extern "C" fn plugin_close_instance(handle: *mut c_void) {
+    PluginInstance::<SftpSyncAdapter>::drop_handle(handle);
+}
 
-fn dispatch<T, F, Fut>(call: F) -> PluginCallResult
+fn instance<'a>(
+    handle: *mut c_void,
+) -> Result<&'a PluginInstance<SftpSyncAdapter>, PluginCallResult> {
+    unsafe { PluginInstance::<SftpSyncAdapter>::from_handle(handle) }
+        .ok_or_else(|| error_response(PLUGIN_CALL_ERR_INTERNAL, "null instance handle"))
+}
+
+fn dispatch<T, F, Fut>(handle: *mut c_void, call: F) -> PluginCallResult
 where
     T: serde::Serialize,
     F: FnOnce(&'static SftpSyncAdapter) -> Fut,
     Fut: std::future::Future<Output = sync_core::SyncResult<T>>,
 {
-    let Some((p, rt)) = PLUGIN_INSTANCE.parts() else {
-        return error_response(PLUGIN_CALL_ERR_INTERNAL, "plugin not initialised");
+    let inst = match instance(handle) { Ok(i) => i, Err(r) => return r };
+    let p: &'static SftpSyncAdapter = unsafe {
+        std::mem::transmute::<&SftpSyncAdapter, &'static SftpSyncAdapter>(inst.plugin())
     };
-    let p_static: &'static SftpSyncAdapter =
-        unsafe { std::mem::transmute::<&SftpSyncAdapter, &'static SftpSyncAdapter>(p) };
-    match rt.block_on(call(p_static)) {
+    match inst.runtime().block_on(call(p)) {
         Ok(v) => ok_response(&v),
         Err(e) => sync_error_to_response(e),
     }
 }
 
-fn dispatch_unit<F, Fut>(call: F) -> PluginCallResult
+fn dispatch_unit<F, Fut>(handle: *mut c_void, call: F) -> PluginCallResult
 where
     F: FnOnce(&'static SftpSyncAdapter) -> Fut,
     Fut: std::future::Future<Output = sync_core::SyncResult<()>>,
 {
-    let Some((p, rt)) = PLUGIN_INSTANCE.parts() else {
-        return error_response(PLUGIN_CALL_ERR_INTERNAL, "plugin not initialised");
+    let inst = match instance(handle) { Ok(i) => i, Err(r) => return r };
+    let p: &'static SftpSyncAdapter = unsafe {
+        std::mem::transmute::<&SftpSyncAdapter, &'static SftpSyncAdapter>(inst.plugin())
     };
-    let p_static: &'static SftpSyncAdapter =
-        unsafe { std::mem::transmute::<&SftpSyncAdapter, &'static SftpSyncAdapter>(p) };
-    match rt.block_on(call(p_static)) {
+    match inst.runtime().block_on(call(p)) {
         Ok(()) => ok_empty_response(),
         Err(e) => sync_error_to_response(e),
     }
 }
 
-unsafe extern "C" fn ffi_test_connection(_: *const u8, _: usize) -> PluginCallResult {
-    dispatch_unit(|p| async move { p.test_connection().await })
+unsafe extern "C" fn ffi_test_connection(h: *mut c_void, _a: *const u8, _l: usize) -> PluginCallResult {
+    dispatch_unit(h, |p| async move { p.test_connection().await })
 }
-unsafe extern "C" fn ffi_fetch_meta(_: *const u8, _: usize) -> PluginCallResult {
-    dispatch(|p| async move { p.fetch_meta().await })
+
+unsafe extern "C" fn ffi_fetch_meta(h: *mut c_void, _a: *const u8, _l: usize) -> PluginCallResult {
+    dispatch(h, |p| async move { p.fetch_meta().await })
 }
-unsafe extern "C" fn ffi_push_meta(a: *const u8, l: usize) -> PluginCallResult {
-    let m: MetaJson = match decode_args(a, l) { Ok(v) => v, Err(r) => return r };
-    dispatch_unit(|p| async move { p.push_meta(&m).await })
+
+unsafe extern "C" fn ffi_push_meta(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
+    let meta: MetaJson = match decode_args(a, l) { Ok(m) => m, Err(r) => return r };
+    dispatch_unit(h, |p| async move { p.push_meta(&meta).await })
 }
-unsafe extern "C" fn ffi_fetch_new_logs(a: *const u8, l: usize) -> PluginCallResult {
-    let c: DeviceCursor = match decode_args(a, l) { Ok(v) => v, Err(r) => return r };
-    dispatch(|p| async move { p.fetch_new_logs(&c).await })
+
+unsafe extern "C" fn ffi_fetch_new_logs(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
+    let cursor: DeviceCursor = match decode_args(a, l) { Ok(c) => c, Err(r) => return r };
+    dispatch(h, |p| async move { p.fetch_new_logs(&cursor).await })
 }
-unsafe extern "C" fn ffi_push_log(a: *const u8, l: usize) -> PluginCallResult {
-    let log: LogFile = match decode_args(a, l) { Ok(v) => v, Err(r) => return r };
-    dispatch_unit(|p| async move { p.push_log(&log).await })
+
+unsafe extern "C" fn ffi_push_log(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
+    let log: LogFile = match decode_args(a, l) { Ok(l) => l, Err(r) => return r };
+    dispatch_unit(h, |p| async move { p.push_log(&log).await })
 }
-unsafe extern "C" fn ffi_fetch_snapshot(_: *const u8, _: usize) -> PluginCallResult {
-    dispatch(|p| async move { p.fetch_snapshot().await })
+
+unsafe extern "C" fn ffi_fetch_snapshot(h: *mut c_void, _a: *const u8, _l: usize) -> PluginCallResult {
+    dispatch(h, |p| async move { p.fetch_snapshot().await })
 }
-unsafe extern "C" fn ffi_push_snapshot(a: *const u8, l: usize) -> PluginCallResult {
-    let s: Snapshot = match decode_args(a, l) { Ok(v) => v, Err(r) => return r };
-    dispatch_unit(|p| async move { p.push_snapshot(&s).await })
+
+unsafe extern "C" fn ffi_push_snapshot(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
+    let snap: Snapshot = match decode_args(a, l) { Ok(s) => s, Err(r) => return r };
+    dispatch_unit(h, |p| async move { p.push_snapshot(&snap).await })
 }
-unsafe extern "C" fn ffi_delete_log(a: *const u8, l: usize) -> PluginCallResult {
-    let n: LogFileName = match decode_args(a, l) { Ok(v) => v, Err(r) => return r };
-    dispatch_unit(|p| async move { p.delete_log(&n).await })
+
+unsafe extern "C" fn ffi_delete_log(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
+    let name: LogFileName = match decode_args(a, l) { Ok(n) => n, Err(r) => return r };
+    dispatch_unit(h, |p| async move { p.delete_log(&name).await })
 }
 
 #[derive(Debug, Deserialize)]
 struct PushSoundAssetArgs { hash: String, extension: String, bytes_base64: String }
 
-unsafe extern "C" fn ffi_push_sound_asset(a: *const u8, l: usize) -> PluginCallResult {
-    use base64::Engine as _;
-    let args: PushSoundAssetArgs = match decode_args(a, l) { Ok(v) => v, Err(r) => return r };
+unsafe extern "C" fn ffi_push_sound_asset(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
+    let args: PushSoundAssetArgs = match decode_args(a, l) { Ok(a) => a, Err(r) => return r };
     let bytes = match base64::engine::general_purpose::STANDARD.decode(args.bytes_base64.as_bytes()) {
         Ok(b) => b,
-        Err(err) => return error_response(plugin_sdk::plugin_core::PLUGIN_CALL_ERR_INVALID, &format!("bad base64: {err}")),
+        Err(err) => return error_response(
+            plugin_sdk::plugin_core::ffi::PLUGIN_CALL_ERR_INVALID,
+            &format!("bad base64: {err}"),
+        ),
     };
-    dispatch_unit(move |p| {
-        let h = args.hash;
-        let e = args.extension;
-        async move { p.push_sound_asset(&h, &e, &bytes).await }
+    dispatch_unit(h, move |p| {
+        let hash = args.hash;
+        let extension = args.extension;
+        async move { p.push_sound_asset(&hash, &extension, &bytes).await }
     })
 }
 
 #[derive(Debug, Deserialize)]
 struct FetchSoundAssetArgs { hash: String, extension: String }
 
-unsafe extern "C" fn ffi_fetch_sound_asset(a: *const u8, l: usize) -> PluginCallResult {
-    use base64::Engine as _;
-    let args: FetchSoundAssetArgs = match decode_args(a, l) { Ok(v) => v, Err(r) => return r };
-    let Some((p, rt)) = PLUGIN_INSTANCE.parts() else {
-        return error_response(PLUGIN_CALL_ERR_INTERNAL, "plugin not initialised");
+unsafe extern "C" fn ffi_fetch_sound_asset(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
+    let args: FetchSoundAssetArgs = match decode_args(a, l) { Ok(a) => a, Err(r) => return r };
+    let inst = match instance(h) { Ok(i) => i, Err(r) => return r };
+    let p: &'static SftpSyncAdapter = unsafe {
+        std::mem::transmute::<&SftpSyncAdapter, &'static SftpSyncAdapter>(inst.plugin())
     };
-    let p_static: &'static SftpSyncAdapter =
-        unsafe { std::mem::transmute::<&SftpSyncAdapter, &'static SftpSyncAdapter>(p) };
-    match rt.block_on(async move { p_static.fetch_sound_asset(&args.hash, &args.extension).await }) {
+    let outcome = inst.runtime().block_on(async move {
+        p.fetch_sound_asset(&args.hash, &args.extension).await
+    });
+    match outcome {
         Ok(None) => ok_response(&Option::<String>::None),
-        Ok(Some(b)) => ok_response(&Some(base64::engine::general_purpose::STANDARD.encode(b))),
-        Err(e) => sync_error_to_response(e),
+        Ok(Some(bytes)) => {
+            let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
+            ok_response(&Some(b64))
+        }
+        Err(err) => sync_error_to_response(err),
     }
 }
 
@@ -278,6 +249,6 @@ plugin_sdk::declare_lifecycle! {
     version: "0.1.0",
     plugin_type: "sync-adapter",
     vtable: SYNC_VTABLE,
-    init: plugin_init,
-    destroy: plugin_destroy,
+    open_instance: plugin_open_instance,
+    close_instance: plugin_close_instance,
 }

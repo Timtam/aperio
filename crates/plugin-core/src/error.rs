@@ -46,6 +46,13 @@ pub enum PluginError {
     /// IO error while reading `plugin.json` from disk.
     #[error("plugin manifest IO error: {0}")]
     Io(String),
+
+    /// The plugin's `open_instance` hook reported a non-OK status
+    /// or returned a NULL handle. The host surfaces this as
+    /// "Konto konnte nicht eingerichtet werden" with the plugin's
+    /// own message in the detail line.
+    #[error("open_instance failed (status {status}): {message}")]
+    InstanceOpen { status: i32, message: String },
 }
 
 impl From<std::io::Error> for PluginError {

@@ -6,7 +6,7 @@
 //! - [`declare_lifecycle!`] — emits the two required exports
 //!   (`aperio_plugin_create` / `aperio_plugin_destroy`) plus a
 //!   `static AperioPlugin` descriptor pointing at the user-
-//!   supplied metadata + vtable.
+//!   supplied metadata + vtable + open/close hooks.
 //!
 //! ## What's NOT here
 //!
@@ -14,23 +14,24 @@
 //! straight from a struct's trait impls. That requires either a
 //! proc-macro (separate crate + `syn`/`quote`/`proc-macro2`) or
 //! a 400-line `macro_rules!` arm per trait — both add maintenance
-//! burden out of proportion with the workspace size. P3 + P4
-//! plugin authors hand-roll the vtable using
+//! burden out of proportion with the workspace size. The
+//! existing bundled plugins hand-roll the vtable using
 //! [`crate::response`] + [`crate::decode_args`]; if that
 //! boilerplate ever gets painful we add a dedicated proc-macro
 //! crate in its own phase.
 //!
 //! The vtable is parameter-typed: any of
 //! [`plugin_core::CalendarVtable`], [`plugin_core::TasksVtable`],
-//! [`plugin_core::ContactsVtable`] or [`plugin_core::SyncVtable`]
+//! [`plugin_core::ContactsVtable`], [`plugin_core::SyncVtable`],
+//! or the outer [`plugin_core::CalendarAdapterVtable`] wrapper
 //! works as long as the `&'static` reference outlives the
 //! plugin (which is trivially true when it's a `static` in the
 //! plugin crate).
 
 /// Emit the two required FFI exports (`aperio_plugin_create`,
 /// `aperio_plugin_destroy`) plus a `static AperioPlugin`
-/// descriptor that the host's [`plugin_core::manager::PluginManager`]
-/// reads at load time.
+/// descriptor that the host's
+/// [`plugin_core::manager::PluginManager`] reads at load time.
 ///
 /// Arguments (named-call shape — order doesn't matter):
 ///   - `id` — UTF-8 + NUL-terminated reverse-DNS id. Must match
@@ -39,15 +40,19 @@
 ///     this verbatim.
 ///   - `version` — SemVer string matching `plugin.json`.
 ///   - `plugin_type` — the kebab-case tag from §20.2.
-///   - `vtable` — path to a `static` of one of the four vtable
+///   - `vtable` — path to a `static` of one of the vtable
 ///     structs from [`plugin_core::vtables`]. The macro casts
 ///     it to `*mut c_void` so the host can pull the typed
 ///     pointer back out via its `plugin_type` discriminator.
-///   - `init` — path to a `unsafe extern "C" fn(*const c_char) -> c_int`
-///     the host fires once before any vtable method runs. Use
-///     [`None`]-shaped path (the literal token `none`) to skip.
-///   - `destroy` — same shape for the teardown hook; `none` to
-///     skip.
+///   - `open_instance` — path to a
+///     `unsafe extern "C" fn(*const c_char) -> OpenInstanceResult`
+///     the host fires once per account / connection. Use the
+///     literal token `none` for process-global plugins that
+///     don't carry per-instance state — the host then dispatches
+///     vtable methods with a NULL instance handle.
+///   - `close_instance` — counterpart for the teardown side,
+///     `unsafe extern "C" fn(*mut c_void)`. `none` to skip
+///     (only valid when `open_instance` is also `none`).
 ///
 /// ## Memory ownership
 ///
@@ -70,8 +75,8 @@
 ///     version: "0.1.0",
 ///     plugin_type: "calendar-adapter",
 ///     vtable: CALENDAR_VTABLE,
-///     init: plugin_init,
-///     destroy: plugin_destroy,
+///     open_instance: plugin_open_instance,
+///     close_instance: plugin_close_instance,
 /// }
 /// ```
 #[macro_export]
@@ -82,12 +87,12 @@ macro_rules! declare_lifecycle {
         version: $version:literal,
         plugin_type: $plugin_type:literal,
         vtable: $vtable:path,
-        init: $init:tt,
-        destroy: $destroy:tt $(,)?
+        open_instance: $open:tt,
+        close_instance: $close:tt $(,)?
     ) => {
-        // C-string literals (Rust 1.77+) give us &'static CStr,
-        // which `.as_ptr()` turns into a stable `*const c_char`
-        // that satisfies the ABI's "lives until aperio_plugin_destroy
+        // C-string literals give us &'static CStr, which
+        // `.as_ptr()` turns into a stable `*const c_char` that
+        // satisfies the ABI's "lives until aperio_plugin_destroy
         // returns" contract — the literal's storage is part of
         // the binary's .rodata.
         const __APERIO_PLUGIN_ID: &::std::ffi::CStr =
@@ -113,11 +118,6 @@ macro_rules! declare_lifecycle {
 
         /// `aperio_plugin_create` per DESIGN.md §20.3.
         ///
-        /// Returns a pointer to a thread-local `Mutex<Option<AperioPlugin>>`-
-        /// equivalent: actually a leaked `Box<AperioPlugin>` so the
-        /// pointer stays valid for the lifetime of the loaded library.
-        /// `aperio_plugin_destroy` reconstructs the box + drops it.
-        ///
         /// # Safety
         ///
         /// FFI export. Called once by the host immediately after
@@ -130,8 +130,8 @@ macro_rules! declare_lifecycle {
                 name: __APERIO_PLUGIN_NAME.as_ptr(),
                 version: __APERIO_PLUGIN_VERSION.as_ptr(),
                 plugin_type: __APERIO_PLUGIN_TYPE.as_ptr(),
-                init: $crate::declare_lifecycle!(@hook $init),
-                destroy: $crate::declare_lifecycle!(@hook_no_arg $destroy),
+                open_instance: $crate::declare_lifecycle!(@open $open),
+                close_instance: $crate::declare_lifecycle!(@close $close),
                 vtable: &$vtable
                     as *const _
                     as *mut ::std::os::raw::c_void,
@@ -160,14 +160,23 @@ macro_rules! declare_lifecycle {
 
     // ── Internal helper arms ─────────────────────────────────
     //
-    // `init` / `destroy` accept either a fn name or the literal
-    // token `none`. We turn `none` into None and a fn name into
-    // Some(fn_name). The differing signatures (init has an arg,
-    // destroy doesn't) need two helper arms.
-    (@hook none) => { None };
-    (@hook $fn:path) => { Some($fn as unsafe extern "C" fn(*const ::std::os::raw::c_char) -> ::std::os::raw::c_int) };
-    (@hook_no_arg none) => { None };
-    (@hook_no_arg $fn:path) => { Some($fn as unsafe extern "C" fn()) };
+    // `open_instance` / `close_instance` accept either a fn path
+    // or the literal token `none`. We turn `none` into None and
+    // a fn name into Some(fn_name). The differing signatures
+    // (open takes config_json + returns OpenInstanceResult,
+    // close takes the opaque handle) need two helper arms.
+    (@open none) => { None };
+    (@open $fn:path) => {
+        Some(
+            $fn as unsafe extern "C" fn(
+                *const ::std::os::raw::c_char,
+            ) -> $crate::plugin_core::OpenInstanceResult,
+        )
+    };
+    (@close none) => { None };
+    (@close $fn:path) => {
+        Some($fn as unsafe extern "C" fn(*mut ::std::os::raw::c_void))
+    };
 }
 
 #[cfg(test)]
@@ -195,8 +204,8 @@ mod tests {
         version: "0.1.0",
         plugin_type: "calendar-adapter",
         vtable: TEST_VTABLE,
-        init: none,
-        destroy: none,
+        open_instance: none,
+        close_instance: none,
     }
 
     #[test]
@@ -226,8 +235,8 @@ mod tests {
             .to_str()
             .expect("utf8");
         assert_eq!(ptype, "calendar-adapter");
-        assert!(descriptor.init.is_none());
-        assert!(descriptor.destroy.is_none());
+        assert!(descriptor.open_instance.is_none());
+        assert!(descriptor.close_instance.is_none());
         assert!(!descriptor.vtable.is_null());
         // SAFETY: vtable points at our TEST_VTABLE static
         // (CalendarVtable::empty()).

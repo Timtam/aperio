@@ -1,34 +1,11 @@
-//! Smoke test for the FTPS sync plugin (P4). Same shape as
-//! sync-adapter-webdav-plugin's smoke test — just confirms the
-//! FTPS-specific InitConfig + constructor + manifest line up.
+//! Smoke test for the FTPS sync plugin (ABI v2).
 
-use std::ffi::CString;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use plugin_core::{
     abi::AperioPlugin, manager::PluginManager, manifest::PluginManifest,
     shim::FfiSyncAdapter, PluginType, ABI_VERSION,
 };
-
-fn shared_setup() {
-    static DONE: Mutex<bool> = Mutex::new(false);
-    let mut done = DONE.lock().unwrap();
-    if *done {
-        return;
-    }
-    let cfg = serde_json::json!({
-        "host": "ftp.example.invalid",
-        "port": 21,
-        "user": "tester",
-        "password": "swordfish",
-        "path": "/aperio",
-        "mode": "explicit"
-    });
-    let c = CString::new(cfg.to_string()).unwrap();
-    let rc = unsafe { sync_adapter_ftp_plugin::plugin_init(c.as_ptr()) };
-    assert_eq!(rc, plugin_core::PLUGIN_OK);
-    *done = true;
-}
 
 fn manifest() -> PluginManifest {
     PluginManifest {
@@ -45,20 +22,43 @@ fn manifest() -> PluginManifest {
     }
 }
 
-fn make_adapter() -> (PluginManager, Arc<FfiSyncAdapter>) {
+fn make_manager() -> PluginManager {
     let m = PluginManager::new("0.1.0");
     let d: *mut AperioPlugin =
         unsafe { sync_adapter_ftp_plugin::aperio_plugin_create() };
     assert!(!d.is_null());
     let dx: unsafe extern "C" fn(*mut AperioPlugin) =
         sync_adapter_ftp_plugin::aperio_plugin_destroy;
-    m.register_static(manifest(), d, dx).unwrap();
-    let l = m.get("com.aperio.sync-adapter-ftp").unwrap();
-    (m, Arc::new(FfiSyncAdapter::new(l).unwrap()))
+    m.register_static(manifest(), d, dx).expect("register");
+    m
+}
+
+fn open_one(manager: &PluginManager, host: &str) -> Arc<plugin_core::LoadedInstance> {
+    let loaded = manager.get("com.aperio.sync-adapter-ftp").expect("registered");
+    let cfg = serde_json::json!({
+        "host": host,
+        "port": 21,
+        "user": "tester",
+        "password": "swordfish",
+        "path": "/aperio",
+        "mode": "explicit",
+    });
+    manager.open_instance(loaded, &cfg.to_string()).expect("open")
 }
 
 #[test]
 fn plugin_loads_and_wraps_through_ffi_sync_adapter() {
-    shared_setup();
-    let (_m, _a) = make_adapter();
+    let manager = make_manager();
+    let inst = open_one(&manager, "ftp.example.invalid");
+    let _adapter: Arc<FfiSyncAdapter> = Arc::new(
+        FfiSyncAdapter::new(inst).expect("vtable surface"),
+    );
+}
+
+#[test]
+fn multiple_ftp_servers_get_distinct_handles() {
+    let manager = make_manager();
+    let a = open_one(&manager, "ftp1.example.invalid");
+    let b = open_one(&manager, "ftp2.example.invalid");
+    assert_ne!(a.handle() as usize, b.handle() as usize);
 }

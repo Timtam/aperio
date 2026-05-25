@@ -21,13 +21,14 @@ use sync_core::{DeviceCursor, SyncAdapter};
 use tracing::warn;
 
 use crate::ffi::*;
-use crate::manager::LoadedPlugin;
+use crate::manager::LoadedInstance;
 use crate::vtables::SyncVtable;
 
 use super::call::{call_method, decode_payload, encode_args, CallOutcome};
 
 pub struct FfiSyncAdapter {
-    _plugin: Arc<LoadedPlugin>,
+    _instance: Arc<LoadedInstance>,
+    handle_addr: usize,
     vtable: VtableSnapshot,
 }
 
@@ -46,13 +47,14 @@ struct VtableSnapshot {
 }
 
 impl FfiSyncAdapter {
-    /// Wrap a loaded sync-adapter plugin so it can be handed to
-    /// the orchestrator as `Arc<dyn SyncAdapter>`. Returns `None`
-    /// if the vtable pointer is NULL or the minimum-surface
-    /// check fails (the sync trait needs at least fetch_meta /
-    /// push_meta / fetch_new_logs / push_log to do anything
-    /// useful).
-    pub fn new(plugin: Arc<LoadedPlugin>) -> Option<Self> {
+    /// Wrap a loaded sync-adapter plugin instance so it can be
+    /// handed to the orchestrator as `Arc<dyn SyncAdapter>`.
+    /// Returns `None` if the vtable pointer is NULL or the
+    /// minimum-surface check fails (the sync trait needs at
+    /// least fetch_meta / push_meta / fetch_new_logs / push_log
+    /// to do anything useful).
+    pub fn new(instance: Arc<LoadedInstance>) -> Option<Self> {
+        let plugin = instance.plugin().clone();
         let raw = plugin.vtable_ptr();
         if raw.is_null() {
             warn!(
@@ -84,8 +86,10 @@ impl FfiSyncAdapter {
             push_sound_asset: vtable_ref.push_sound_asset,
             fetch_sound_asset: vtable_ref.fetch_sound_asset,
         };
+        let handle_addr = instance.handle() as usize;
         Some(Self {
-            _plugin: plugin,
+            _instance: instance,
+            handle_addr,
             vtable: snapshot,
         })
     }
@@ -101,9 +105,6 @@ impl FfiSyncAdapter {
 fn status_to_sync_error(outcome: CallOutcome) -> SyncError {
     let msg = outcome.message();
     match outcome.status {
-        // No direct mapping — surface as Protocol so the caller
-        // sees "the plugin doesn't speak our protocol" rather
-        // than "a generic internal error".
         PLUGIN_CALL_ERR_UNSUPPORTED => {
             SyncError::Protocol(format!("plugin missing method: {msg}"))
         }
@@ -125,6 +126,7 @@ fn status_to_sync_error(outcome: CallOutcome) -> SyncError {
 
 async fn call_then_decode<T, A>(
     method: Option<crate::vtables::VtableMethodFn>,
+    instance_addr: usize,
     args: &A,
 ) -> SyncResult<T>
 where
@@ -134,7 +136,7 @@ where
     let bytes = encode_args(args).map_err(|e| SyncError::Internal(format!(
         "encode args: {e}"
     )))?;
-    let outcome = call_method(method, bytes).await;
+    let outcome = call_method(method, instance_addr, bytes).await;
     if outcome.is_ok() {
         decode_payload(&outcome.bytes).map_err(|e| SyncError::Protocol(format!(
             "decode plugin response: {e}"
@@ -146,12 +148,13 @@ where
 
 async fn call_for_unit<A: Serialize>(
     method: Option<crate::vtables::VtableMethodFn>,
+    instance_addr: usize,
     args: &A,
 ) -> SyncResult<()> {
     let bytes = encode_args(args).map_err(|e| SyncError::Internal(format!(
         "encode args: {e}"
     )))?;
-    let outcome = call_method(method, bytes).await;
+    let outcome = call_method(method, instance_addr, bytes).await;
     if outcome.is_ok() {
         Ok(())
     } else {
@@ -159,22 +162,10 @@ async fn call_for_unit<A: Serialize>(
     }
 }
 
-// JSON-shape helpers. Each struct's keys mirror the trait
-// method's parameter names so a plugin author can read the wire
-// protocol straight off the trait definition.
-//
-// push_sound_asset's `bytes` is encoded as a base64 string rather
-// than a JSON array of u8 — same convention sync-core already
-// uses for the assets in its event log. The plugin decodes the
-// base64 before writing to whichever blob store it talks to.
-
 #[derive(Serialize)]
 struct PushSoundAssetArgs<'a> {
     hash: &'a str,
     extension: &'a str,
-    /// Base64-encoded bytes. We could send the raw bytes as a
-    /// JSON array, but base64 is ~25% smaller and the existing
-    /// sync-core sound-asset path already uses it on disk.
     bytes_base64: String,
     _phantom: std::marker::PhantomData<&'a ()>,
 }
@@ -188,38 +179,38 @@ struct FetchSoundAssetArgs<'a> {
 #[async_trait]
 impl SyncAdapter for FfiSyncAdapter {
     async fn test_connection(&self) -> SyncResult<()> {
-        call_for_unit(self.vtable.test_connection, &()).await
+        call_for_unit(self.vtable.test_connection, self.handle_addr, &()).await
     }
 
     async fn fetch_meta(&self) -> SyncResult<Option<MetaJson>> {
-        call_then_decode(self.vtable.fetch_meta, &()).await
+        call_then_decode(self.vtable.fetch_meta, self.handle_addr, &()).await
     }
 
     async fn push_meta(&self, meta: &MetaJson) -> SyncResult<()> {
-        call_for_unit(self.vtable.push_meta, meta).await
+        call_for_unit(self.vtable.push_meta, self.handle_addr, meta).await
     }
 
     async fn fetch_new_logs(
         &self,
         since: &DeviceCursor,
     ) -> SyncResult<Vec<LogFile>> {
-        call_then_decode(self.vtable.fetch_new_logs, since).await
+        call_then_decode(self.vtable.fetch_new_logs, self.handle_addr, since).await
     }
 
     async fn push_log(&self, log: &LogFile) -> SyncResult<()> {
-        call_for_unit(self.vtable.push_log, log).await
+        call_for_unit(self.vtable.push_log, self.handle_addr, log).await
     }
 
     async fn fetch_snapshot(&self) -> SyncResult<Option<Snapshot>> {
-        call_then_decode(self.vtable.fetch_snapshot, &()).await
+        call_then_decode(self.vtable.fetch_snapshot, self.handle_addr, &()).await
     }
 
     async fn push_snapshot(&self, snapshot: &Snapshot) -> SyncResult<()> {
-        call_for_unit(self.vtable.push_snapshot, snapshot).await
+        call_for_unit(self.vtable.push_snapshot, self.handle_addr, snapshot).await
     }
 
     async fn delete_log(&self, name: &LogFileName) -> SyncResult<()> {
-        call_for_unit(self.vtable.delete_log, name).await
+        call_for_unit(self.vtable.delete_log, self.handle_addr, name).await
     }
 
     async fn push_sound_asset(
@@ -235,7 +226,7 @@ impl SyncAdapter for FfiSyncAdapter {
             bytes_base64: base64::engine::general_purpose::STANDARD.encode(bytes),
             _phantom: std::marker::PhantomData,
         };
-        call_for_unit(self.vtable.push_sound_asset, &args).await
+        call_for_unit(self.vtable.push_sound_asset, self.handle_addr, &args).await
     }
 
     async fn fetch_sound_asset(
@@ -245,11 +236,8 @@ impl SyncAdapter for FfiSyncAdapter {
     ) -> SyncResult<Option<Vec<u8>>> {
         use base64::Engine as _;
         let args = FetchSoundAssetArgs { hash, extension };
-        // Plugin responds with `Option<String>` where the inner
-        // string is base64. We decode it here so the trait
-        // contract (Vec<u8>) is honoured.
         let maybe_b64: Option<String> =
-            call_then_decode(self.vtable.fetch_sound_asset, &args).await?;
+            call_then_decode(self.vtable.fetch_sound_asset, self.handle_addr, &args).await?;
         match maybe_b64 {
             None => Ok(None),
             Some(s) => base64::engine::general_purpose::STANDARD

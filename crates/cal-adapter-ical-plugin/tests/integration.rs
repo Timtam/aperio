@@ -1,40 +1,12 @@
-//! Smoke test for the iCal-feed cal-adapter plugin (P4 cal PoC).
-//!
-//! Validates:
-//!   - The CalendarAdapterVtable wrapper is read correctly by
-//!     `FfiCalendarAdapter` (this is the first calendar plugin
-//!     to exercise that path).
-//!   - The CalendarVtable inside it has the expected method
-//!     pointers.
-//!   - Pure-calendar adapters (with null tasks + contacts slots)
-//!     wrap successfully + downstream FfiTasksAdapter /
-//!     FfiContactsAdapter::new return None for them.
+//! Smoke test for the iCal-feed plugin (ABI v2).
 
-use std::ffi::CString;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use plugin_core::{
     abi::AperioPlugin, manager::PluginManager, manifest::PluginManifest,
     shim::{FfiCalendarAdapter, FfiContactsAdapter, FfiTasksAdapter},
     Capability, PluginType, ABI_VERSION,
 };
-
-fn shared_setup() {
-    static DONE: Mutex<bool> = Mutex::new(false);
-    let mut done = DONE.lock().unwrap();
-    if *done {
-        return;
-    }
-    let cfg = serde_json::json!({
-        "feed_url": "https://example.invalid/holidays.ics",
-        "username": null,
-        "password": null
-    });
-    let c = CString::new(cfg.to_string()).unwrap();
-    let rc = unsafe { cal_adapter_ical_plugin::plugin_init(c.as_ptr()) };
-    assert_eq!(rc, plugin_core::PLUGIN_OK);
-    *done = true;
-}
 
 fn manifest() -> PluginManifest {
     PluginManifest {
@@ -62,31 +34,41 @@ fn register() -> PluginManager {
     m
 }
 
+fn open_one(manager: &PluginManager, feed_url: &str) -> Arc<plugin_core::LoadedInstance> {
+    let loaded = manager.get("com.aperio.cal-adapter-ical").unwrap();
+    let cfg = serde_json::json!({
+        "feed_url": feed_url,
+        "username": null,
+        "password": null,
+    });
+    manager.open_instance(loaded, &cfg.to_string()).expect("open")
+}
+
 #[test]
 fn ical_plugin_wraps_through_ffi_calendar_adapter() {
-    shared_setup();
     let manager = register();
-    let loaded = manager.get("com.aperio.cal-adapter-ical").unwrap();
+    let inst = open_one(&manager, "https://example.invalid/holidays.ics");
     let _adapter: Arc<FfiCalendarAdapter> = Arc::new(
-        FfiCalendarAdapter::new(loaded).expect("calendar slot present"),
+        FfiCalendarAdapter::new(inst).expect("calendar slot present"),
     );
 }
 
-/// The same plugin's tasks + contacts slots are null — the
-/// FfiTasksAdapter / FfiContactsAdapter constructors must
-/// return None silently rather than panicking on the null
-/// dereference.
 #[test]
 fn ical_plugin_has_no_tasks_or_contacts_slots() {
-    shared_setup();
     let manager = register();
-    let loaded = manager.get("com.aperio.cal-adapter-ical").unwrap();
-    assert!(FfiTasksAdapter::new(loaded.clone()).is_none());
-    assert!(FfiContactsAdapter::new(loaded).is_none());
+    let inst = open_one(&manager, "https://example.invalid/feed.ics");
+    assert!(FfiTasksAdapter::new(inst.clone()).is_none());
+    assert!(FfiContactsAdapter::new(inst).is_none());
 }
 
-/// Sanity check: the manifest declares a single capability —
-/// "calendar" — matching the populated sub-vtable slot.
+#[test]
+fn multiple_ical_feeds_get_distinct_handles() {
+    let manager = register();
+    let a = open_one(&manager, "https://a.invalid/feed.ics");
+    let b = open_one(&manager, "https://b.invalid/feed.ics");
+    assert_ne!(a.handle() as usize, b.handle() as usize);
+}
+
 #[test]
 fn manifest_capabilities_match_vtable() {
     let m = manifest();
