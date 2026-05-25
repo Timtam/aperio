@@ -5,6 +5,7 @@
 //! manager, sync engine, and external adapters arrive in later phases.
 
 pub mod accounts;
+pub mod bundled_plugins;
 pub mod commands;
 pub mod conflicts;
 pub mod contact_sync;
@@ -72,7 +73,19 @@ pub fn run() {
     // reminder scheduler's background task. Both call the same
     // adapters; sharing the same instance keeps the in-adapter
     // listing caches coherent across read paths.
-    let registry = Arc::new(AdapterRegistry::new());
+    // Plugin manager — every external calendar/tasks/contacts
+    // adapter is registered as a static plugin before the
+    // registry's bootstrap walk so the per-account `open_instance`
+    // calls have a populated PluginManager to look up against.
+    // The eventual dlopen pipeline (DESIGN.md §22.2) replaces
+    // this with a `scan_dir("plugins/bundled/")` round.
+    let plugin_manager = bundled_plugins::build_manager(env!("CARGO_PKG_VERSION"));
+    info!(
+        plugin_count = plugin_manager.len(),
+        "registered bundled cal-adapter plugins",
+    );
+
+    let registry = Arc::new(AdapterRegistry::new(Arc::clone(&plugin_manager)));
     {
         let shared = db.shared();
         let repo = accounts::AccountsRepo::new(&shared);

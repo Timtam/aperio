@@ -34,10 +34,10 @@ fn manifest() -> PluginManifest {
 fn register() -> PluginManager {
     let m = PluginManager::new("0.1.0");
     let d: *mut AperioPlugin =
-        unsafe { cal_adapter_todoist_plugin::aperio_plugin_create() };
+        unsafe { cal_adapter_todoist_plugin::build_descriptor() };
     assert!(!d.is_null());
     let dx: unsafe extern "C" fn(*mut AperioPlugin) =
-        cal_adapter_todoist_plugin::aperio_plugin_destroy;
+        cal_adapter_todoist_plugin::DESTROY_FN;
     m.register_static(manifest(), d, dx).unwrap();
     m
 }

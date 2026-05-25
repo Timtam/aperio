@@ -246,7 +246,6 @@ unsafe extern "C" fn ffi_fetch_sound_asset(
     }
 }
 
-#[no_mangle]
 pub static SYNC_VTABLE: SyncVtable = SyncVtable {
     test_connection: Some(ffi_test_connection),
     fetch_meta: Some(ffi_fetch_meta),

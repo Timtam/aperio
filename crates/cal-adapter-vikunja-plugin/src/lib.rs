@@ -217,7 +217,6 @@ unsafe extern "C" fn ffi_rename_task_list(
     })
 }
 
-#[no_mangle]
 pub static TASKS_VTABLE: TasksVtable = TasksVtable {
     authenticate: Some(ffi_authenticate),
     capabilities: Some(ffi_capabilities),
@@ -230,7 +229,6 @@ pub static TASKS_VTABLE: TasksVtable = TasksVtable {
     ..TasksVtable::empty()
 };
 
-#[no_mangle]
 pub static ADAPTER_VTABLE: CalendarAdapterVtable = CalendarAdapterVtable {
     vtable_version: plugin_sdk::plugin_core::ABI_VERSION,
     calendar: std::ptr::null(),

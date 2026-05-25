@@ -116,14 +116,13 @@ macro_rules! declare_lifecycle {
                 Err(_) => panic!("plugin_type must not contain interior NUL"),
             };
 
-        /// `aperio_plugin_create` per DESIGN.md §20.3.
-        ///
-        /// # Safety
-        ///
-        /// FFI export. Called once by the host immediately after
-        /// `dlopen`. No precondition on host state.
-        #[no_mangle]
-        pub unsafe extern "C" fn aperio_plugin_create() -> *mut $crate::plugin_core::AperioPlugin {
+        /// Internal: shared body of `aperio_plugin_create`. Spelled
+        /// out as a non-mangled fn so both the C-ABI export (for
+        /// dlopen) and the typed Rust accessor (for static-link
+        /// hosts that can't tolerate duplicate `#[no_mangle]`
+        /// symbols across N linked plugin crates) share the same
+        /// implementation.
+        unsafe fn __aperio_build_descriptor() -> *mut $crate::plugin_core::AperioPlugin {
             let descriptor = $crate::plugin_core::AperioPlugin {
                 abi_version: $crate::plugin_core::ABI_VERSION,
                 id: __APERIO_PLUGIN_ID.as_ptr(),
@@ -139,16 +138,8 @@ macro_rules! declare_lifecycle {
             Box::into_raw(Box::new(descriptor))
         }
 
-        /// `aperio_plugin_destroy` per DESIGN.md §20.3.
-        ///
-        /// # Safety
-        ///
-        /// `plugin` must be the exact pointer returned by the
-        /// preceding `aperio_plugin_create` call, not yet freed.
-        /// The host's [`plugin_core::manager::LoadedPlugin::drop`]
-        /// guarantees this.
-        #[no_mangle]
-        pub unsafe extern "C" fn aperio_plugin_destroy(
+        /// Internal: shared body of `aperio_plugin_destroy`.
+        unsafe extern "C" fn __aperio_destroy_descriptor(
             plugin: *mut $crate::plugin_core::AperioPlugin,
         ) {
             if plugin.is_null() {
@@ -156,6 +147,33 @@ macro_rules! declare_lifecycle {
             }
             let _ = Box::from_raw(plugin);
         }
+
+        /// Typed Rust accessor for the plugin's descriptor.
+        /// Equivalent to the C-ABI `aperio_plugin_create` from
+        /// DESIGN.md §20.3, just without the `#[no_mangle]`
+        /// export — host code that statically links many plugin
+        /// crates into one binary can't tolerate duplicate
+        /// `#[no_mangle]` symbols, and the eventual dlopen
+        /// pipeline (§22.2) will reintroduce the C-ABI exports
+        /// from a separate per-plugin exports crate.
+        ///
+        /// # Safety
+        ///
+        /// Same contract as `aperio_plugin_create` in the C
+        /// header. The returned pointer must eventually be
+        /// passed back to [`DESTROY_FN`].
+        pub unsafe fn build_descriptor() -> *mut $crate::plugin_core::AperioPlugin {
+            __aperio_build_descriptor()
+        }
+
+        /// Destroy fn-pointer that pairs with
+        /// [`build_descriptor`]. The host hands this to
+        /// [`plugin_core::PluginManager::register_static`] so
+        /// the manager can release the descriptor when the
+        /// loaded plugin drops.
+        pub const DESTROY_FN: unsafe extern "C" fn(
+            *mut $crate::plugin_core::AperioPlugin,
+        ) = __aperio_destroy_descriptor;
     };
 
     // ── Internal helper arms ─────────────────────────────────
@@ -210,9 +228,15 @@ mod tests {
 
     #[test]
     fn descriptor_carries_expected_metadata() {
+        // Use the typed accessor (ungated) rather than the
+        // `aperio_plugin_create` C-ABI export. The export is
+        // behind the `cdylib-exports` feature gate, which
+        // plugin-sdk's own test crate doesn't enable — but the
+        // typed accessor is always emitted, so the macro
+        // expansion + descriptor shape can still be verified.
         // SAFETY: the create + destroy contract — call once,
         // free at the end of the test.
-        let plugin_ptr = unsafe { aperio_plugin_create() };
+        let plugin_ptr = unsafe { build_descriptor() };
         assert!(!plugin_ptr.is_null());
         let descriptor = unsafe { &*plugin_ptr };
         assert_eq!(
@@ -245,14 +269,14 @@ mod tests {
         };
         assert!(vtable.list_calendars.is_none());
 
-        unsafe { aperio_plugin_destroy(plugin_ptr) };
+        unsafe { DESTROY_FN(plugin_ptr) };
     }
 
     #[test]
-    fn aperio_plugin_destroy_tolerates_null() {
+    fn destroy_fn_tolerates_null() {
         // The host's manager always passes a non-null ptr, but
         // defensive null-check belongs in the destructor anyway
         // — no UB if a buggy caller passes null.
-        unsafe { aperio_plugin_destroy(std::ptr::null_mut()) };
+        unsafe { DESTROY_FN(std::ptr::null_mut()) };
     }
 }

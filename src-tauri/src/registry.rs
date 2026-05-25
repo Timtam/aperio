@@ -22,25 +22,37 @@
 //! behind `Arc<dyn CalendarFeature>` / `Arc<dyn TasksFeature>` so
 //! the registry can grow new adapter kinds without changing the
 //! routing code.
+//!
+//! ## Plugin routing (ABI v2)
+//!
+//! Every `register_*` fn loads the matching plugin via
+//! [`plugin_core::PluginManager`] and opens a fresh per-account
+//! instance with the account's JSON config + the secrets pulled
+//! from the platform keychain. The host wraps that instance in
+//! [`plugin_core::shim::FfiCalendarAdapter`] / `FfiTasksAdapter` /
+//! `FfiContactsAdapter` so the rest of the host sees the same
+//! `Arc<dyn CalendarFeature>` trait surface as before.
+//!
+//! Single-binary plugin registration uses
+//! [`plugin_core::PluginManager::register_static`] so we avoid
+//! the dlopen pipeline for now — DESIGN.md §22.2's `plugins/
+//! bundled/` build step lands in a later phase.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 
 use cal_adapter_caldav::{
-    config::{CaldavAccountConfig, Credentials as CaldavCredentials},
-    CaldavAdapter,
+    config::{CaldavAccountConfig, AuthKind as CaldavAuthKind},
 };
-use cal_adapter_ews::{BasicCredentials as EwsCredentials, EwsAccountConfig, EwsAdapter};
-use cal_adapter_google::{GoogleAccountConfig, GoogleAdapter, TokenSet as GoogleTokenSet};
-use cal_adapter_todoist::{TodoistAccountConfig, TodoistAdapter};
-use cal_adapter_vikunja::{VikunjaAccountConfig, VikunjaAdapter};
-use cal_adapter_ical::{
-    Credentials as IcalCredentials, IcalAccountConfig, IcalAdapter,
-};
-use cal_adapter_microsoft_graph::{
-    GraphAccountConfig, MicrosoftGraphAdapter, TokenSet as GraphTokenSet,
-};
+use cal_adapter_ews::EwsAccountConfig;
+use cal_adapter_google::GoogleAccountConfig;
+use cal_adapter_todoist::TodoistAccountConfig;
+use cal_adapter_vikunja::VikunjaAccountConfig;
+use cal_adapter_ical::IcalAccountConfig;
+use cal_adapter_microsoft_graph::GraphAccountConfig;
 use cal_core::{CalendarFeature, ContactsFeature, TasksFeature};
+use plugin_core::shim::{FfiCalendarAdapter, FfiContactsAdapter, FfiTasksAdapter};
+use plugin_core::{LoadedInstance, LoadedPlugin, PluginManager};
 use tracing::warn;
 
 use crate::accounts::{Account, AccountsRepo, AdapterKind, LOCAL_ACCOUNT_ID};
@@ -49,6 +61,18 @@ use crate::secrets::{self, SecretSlot};
 /// Account-id used for the implicit local adapter. Mirrors the value
 /// the `accounts` table seeds during migration 0003.
 pub const LOCAL_ID: &str = LOCAL_ACCOUNT_ID;
+
+/// Plugin-id constants — the strings the bundled plugins advertise
+/// in their `aperio_plugin_create` descriptor + their `plugin.json`
+/// manifests. Centralised here so the per-adapter routing matches
+/// each plugin verbatim.
+const PLUGIN_ID_CALDAV: &str = "com.aperio.cal-adapter-caldav";
+const PLUGIN_ID_ICAL: &str = "com.aperio.cal-adapter-ical";
+const PLUGIN_ID_GOOGLE: &str = "com.aperio.cal-adapter-google";
+const PLUGIN_ID_GRAPH: &str = "com.aperio.cal-adapter-microsoft-graph";
+const PLUGIN_ID_EWS: &str = "com.aperio.cal-adapter-ews";
+const PLUGIN_ID_VIKUNJA: &str = "com.aperio.cal-adapter-vikunja";
+const PLUGIN_ID_TODOIST: &str = "com.aperio.cal-adapter-todoist";
 
 /// Tracks which account a calendar / task-list came from so writes
 /// can find their way home. Filled lazily during the first
@@ -71,23 +95,31 @@ pub struct AdapterRegistry {
     /// External adapters with TasksFeature, keyed by account_id.
     external_tasks: RwLock<HashMap<String, Arc<dyn TasksFeature>>>,
     /// External adapters with ContactsFeature, keyed by account_id.
-    /// Empty in Phase 10a — Aperio's three CardDAV-capable adapters
-    /// (CalDAV/CardDAV, Google People, MS Graph Contacts) grow the
-    /// feature in 10b. The slot exists now so the registry surface
-    /// and the routing helpers don't have to be redesigned when
-    /// they land.
     external_contacts: RwLock<HashMap<String, Arc<dyn ContactsFeature>>>,
     /// Reverse lookup for routing writes back to the right adapter.
     routes: Mutex<Routes>,
+    /// Loaded plugins keyed by their canonical id. Every
+    /// `register_*` fn pulls the matching plugin out of here +
+    /// opens a fresh per-account instance against it. Empty on
+    /// the test path (in which case `register_*` calls fail
+    /// cleanly with `RegistryError::PluginMissing`).
+    plugin_manager: Arc<PluginManager>,
 }
 
 impl AdapterRegistry {
-    pub fn new() -> Self {
+    /// Construct a registry against the host's plugin manager.
+    /// Production callers pass the `Arc<PluginManager>` built at
+    /// app startup (after `register_static` ran for every
+    /// bundled plugin); tests can pass an empty
+    /// `PluginManager::new("0.1.0")` when they don't exercise the
+    /// register / bootstrap path.
+    pub fn new(plugin_manager: Arc<PluginManager>) -> Self {
         Self {
             external_cal: RwLock::new(HashMap::new()),
             external_tasks: RwLock::new(HashMap::new()),
             external_contacts: RwLock::new(HashMap::new()),
             routes: Mutex::new(Routes::default()),
+            plugin_manager,
         }
     }
 
@@ -200,7 +232,6 @@ impl AdapterRegistry {
             .collect()
     }
 
-    /// Counterpart of `snapshot_calendar_adapters` for the tasks side.
     pub fn snapshot_task_adapters(
         &self,
     ) -> Vec<(String, Arc<dyn TasksFeature>)> {
@@ -212,12 +243,6 @@ impl AdapterRegistry {
             .collect()
     }
 
-    /// Counterpart of `snapshot_calendar_adapters` for the contacts
-    /// side. Currently always empty until Phase 10b lights up the
-    /// CardDAV adapter; the method exists so the aggregation
-    /// helpers (`list_external_contact_lists`,
-    /// `search_external_contacts`) compile without conditional
-    /// guards.
     pub fn snapshot_contact_adapters(
         &self,
     ) -> Vec<(String, Arc<dyn ContactsFeature>)> {
@@ -285,10 +310,6 @@ impl AdapterRegistry {
         out
     }
 
-    /// Aggregate `list_contact_lists` across every external
-    /// adapter that declares `ContactsFeature`. Errors per account
-    /// are logged and skipped — same shape as the calendar / tasks
-    /// equivalents.
     pub async fn list_external_contact_lists(&self) -> Vec<cal_core::ContactList> {
         let snapshot = self.snapshot_contact_adapters();
         let mut out = Vec::new();
@@ -315,11 +336,6 @@ impl AdapterRegistry {
         out
     }
 
-    /// Fan `search_contacts` out across every external adapter and
-    /// concatenate the hits. The local adapter is searched
-    /// separately by the command layer because it isn't part of
-    /// this registry. Adapters that fail are logged; their
-    /// absence shouldn't block hits from the rest.
     pub async fn search_external_contacts(
         &self,
         query: &str,
@@ -341,10 +357,6 @@ impl AdapterRegistry {
         out
     }
 
-    /// After the registry routes a write back to a specific
-    /// account, this returns the adapter handle. Returns `None`
-    /// when the account is unknown — the caller maps that to a
-    /// `not_found` error so the frontend can show a clear message.
     pub fn calendar_adapter(
         &self,
         account_id: &str,
@@ -406,6 +418,88 @@ impl AdapterRegistry {
             .insert(list_id.to_string(), account_id.to_string());
     }
 
+    // ─────────────────────────────────────────────────────────────
+    // Plugin-routing helpers
+    // ─────────────────────────────────────────────────────────────
+
+    /// Resolve a plugin by id or surface a clear `PluginMissing`
+    /// error. The §20.8 "Plugin fehlt" UX hook is what surfaces
+    /// these to the user.
+    fn require_plugin(&self, plugin_id: &str) -> Result<Arc<LoadedPlugin>, RegistryError> {
+        self.plugin_manager.get(plugin_id).ok_or_else(|| {
+            RegistryError::PluginMissing(plugin_id.to_string())
+        })
+    }
+
+    /// Open an instance of the named plugin with the supplied JSON
+    /// config. Maps plugin-side errors into the registry error
+    /// type so callers can handle them uniformly.
+    fn open_plugin_instance(
+        &self,
+        plugin_id: &str,
+        config_json: String,
+    ) -> Result<Arc<LoadedInstance>, RegistryError> {
+        let plugin = self.require_plugin(plugin_id)?;
+        self.plugin_manager
+            .open_instance(plugin, &config_json)
+            .map_err(|err| RegistryError::Construct(err.to_string()))
+    }
+
+    /// Insert the calendar slot for `account_id`. Wraps the
+    /// FfiAdapter::new failure mode into a clear error so
+    /// downstream callers (the AccountsDialog "this account
+    /// can't be loaded" hint) see why.
+    fn insert_calendar(
+        &self,
+        account_id: &str,
+        instance: Arc<LoadedInstance>,
+    ) -> Result<(), RegistryError> {
+        let adapter = FfiCalendarAdapter::new(instance).ok_or_else(|| {
+            RegistryError::Construct(
+                "plugin doesn't expose the CalendarFeature surface".into(),
+            )
+        })?;
+        self.external_cal
+            .write()
+            .expect("registry cal poison")
+            .insert(account_id.to_string(), Arc::new(adapter));
+        Ok(())
+    }
+
+    fn insert_tasks(
+        &self,
+        account_id: &str,
+        instance: Arc<LoadedInstance>,
+    ) -> Result<(), RegistryError> {
+        let adapter = FfiTasksAdapter::new(instance).ok_or_else(|| {
+            RegistryError::Construct(
+                "plugin doesn't expose the TasksFeature surface".into(),
+            )
+        })?;
+        self.external_tasks
+            .write()
+            .expect("registry tasks poison")
+            .insert(account_id.to_string(), Arc::new(adapter));
+        Ok(())
+    }
+
+    fn insert_contacts(
+        &self,
+        account_id: &str,
+        instance: Arc<LoadedInstance>,
+    ) -> Result<(), RegistryError> {
+        let adapter = FfiContactsAdapter::new(instance).ok_or_else(|| {
+            RegistryError::Construct(
+                "plugin doesn't expose the ContactsFeature surface".into(),
+            )
+        })?;
+        self.external_contacts
+            .write()
+            .expect("registry contacts poison")
+            .insert(account_id.to_string(), Arc::new(adapter));
+        Ok(())
+    }
+
     fn try_register(&self, account: &Account) -> Result<(), RegistryError> {
         match account.adapter_kind {
             AdapterKind::Local => Ok(()),
@@ -424,40 +518,31 @@ impl AdapterRegistry {
             .map_err(|e| RegistryError::Config(e.to_string()))?;
         let secret = secrets::retrieve(&account.id, SecretSlot::Password)
             .map_err(|e| RegistryError::Secret(format!("missing password: {e}")))?;
-        let credentials = CaldavCredentials::new(config, secret);
-        let adapter = CaldavAdapter::new(credentials, None)
-            .map_err(|e| RegistryError::Construct(e.to_string()))?;
-        let arc = Arc::new(adapter);
-        // CalDAV adapters speak three feature traits now (Phase 10b
-        // light up the contacts side). All three slots route to the
-        // same `Arc<CaldavAdapter>` — discovery, listing caches and
-        // the HTTP client are shared. Servers without CardDAV
-        // surface a no-op `list_contact_lists` and the registry's
-        // aggregation skips them.
-        self.external_cal
-            .write()
-            .expect("registry cal poison")
-            .insert(
-                account.id.clone(),
-                arc.clone() as Arc<dyn CalendarFeature>,
-            );
-        self.external_tasks
-            .write()
-            .expect("registry tasks poison")
-            .insert(account.id.clone(), arc.clone() as Arc<dyn TasksFeature>);
-        self.external_contacts
-            .write()
-            .expect("registry contacts poison")
-            .insert(account.id.clone(), arc as Arc<dyn ContactsFeature>);
+        // CalDAV's auth_kind is the snake-case-serialising AuthKind enum;
+        // the plugin's InitConfig deserialises it back through the same
+        // serde shape, so we just round-trip via json! { "auth_kind": ... }.
+        let auth_kind = match config.auth_kind {
+            CaldavAuthKind::Basic => "basic",
+            CaldavAuthKind::Bearer => "bearer",
+        };
+        let plugin_config = serde_json::json!({
+            "server_url": config.server_url,
+            "username": config.username,
+            "auth_kind": auth_kind,
+            "secret": secret,
+        })
+        .to_string();
+        let instance = self.open_plugin_instance(PLUGIN_ID_CALDAV, plugin_config)?;
+        // The same LoadedInstance Arc is cloned into all three
+        // FfiAdapters — the underlying CaldavAdapter inside the
+        // plugin is shared so discovery + listing caches stay
+        // coherent across the three feature surfaces.
+        self.insert_calendar(&account.id, instance.clone())?;
+        self.insert_tasks(&account.id, instance.clone())?;
+        self.insert_contacts(&account.id, instance)?;
         Ok(())
     }
 
-    /// Wire up a Google Calendar account. Tokens come out of the
-    /// platform keychain (stored after the OAuth dance by the
-    /// `connect_google_account` command). `expires_at` is left at
-    /// epoch — the adapter's API layer refreshes lazily on the
-    /// first 401, so the persisted access token doesn't need to be
-    /// fresh across app restarts.
     fn register_google(&self, account: &Account) -> Result<(), RegistryError> {
         let config: GoogleAccountConfig = serde_json::from_str(&account.config_json)
             .map_err(|e| RegistryError::Config(e.to_string()))?;
@@ -466,43 +551,25 @@ impl AdapterRegistry {
         let refresh = secrets::retrieve(&account.id, SecretSlot::RefreshToken)
             .ok()
             .filter(|s| !s.is_empty());
-        let tokens = GoogleTokenSet {
-            access_token: access,
-            refresh_token: refresh,
-            expires_at: chrono::DateTime::<chrono::Utc>::from_timestamp(0, 0)
-                .unwrap_or_else(chrono::Utc::now),
-            scope: None,
-        };
-        let adapter = GoogleAdapter::new(config.client_id, config.client_secret, tokens);
-        let arc = Arc::new(adapter);
-        // Phase 6d.3 + 10h: the same adapter instance serves all
-        // three feature traits. The combined OAuth scope (see
-        // auth::SCOPES) gives a single access token rights over
-        // Calendar + Tasks + Contacts, so the shared
-        // `Arc<GoogleAdapter>` keeps the in-memory token + listing
-        // caches coherent across every read path.
-        self.external_cal
-            .write()
-            .expect("registry cal poison")
-            .insert(
-                account.id.clone(),
-                arc.clone() as Arc<dyn CalendarFeature>,
-            );
-        self.external_tasks
-            .write()
-            .expect("registry tasks poison")
-            .insert(account.id.clone(), arc.clone() as Arc<dyn TasksFeature>);
-        self.external_contacts
-            .write()
-            .expect("registry contacts poison")
-            .insert(account.id.clone(), arc as Arc<dyn ContactsFeature>);
+        // expires_at is left at epoch — the plugin's API client
+        // refreshes lazily on 401 so the persisted access token
+        // doesn't need to be fresh across app restarts.
+        let plugin_config = serde_json::json!({
+            "client_id": config.client_id,
+            "client_secret": config.client_secret,
+            "access_token": access,
+            "refresh_token": refresh,
+            "expires_at": "1970-01-01T00:00:00Z",
+            "scope": null,
+        })
+        .to_string();
+        let instance = self.open_plugin_instance(PLUGIN_ID_GOOGLE, plugin_config)?;
+        self.insert_calendar(&account.id, instance.clone())?;
+        self.insert_tasks(&account.id, instance.clone())?;
+        self.insert_contacts(&account.id, instance)?;
         Ok(())
     }
 
-    /// Wire up a Microsoft Graph (Outlook) account. Mirrors the
-    /// Google flow: tokens come out of the keychain, the API
-    /// layer's lazy 401-refresh restores a fresh access token if
-    /// the stored one expired between sessions.
     fn register_microsoft_graph(&self, account: &Account) -> Result<(), RegistryError> {
         let config: GraphAccountConfig = serde_json::from_str(&account.config_json)
             .map_err(|e| RegistryError::Config(e.to_string()))?;
@@ -511,150 +578,87 @@ impl AdapterRegistry {
         let refresh = secrets::retrieve(&account.id, SecretSlot::RefreshToken)
             .ok()
             .filter(|s| !s.is_empty());
-        let tokens = GraphTokenSet {
-            access_token: access,
-            refresh_token: refresh,
-            expires_at: chrono::DateTime::<chrono::Utc>::from_timestamp(0, 0)
-                .unwrap_or_else(chrono::Utc::now),
-            scope: None,
-        };
-        let adapter = MicrosoftGraphAdapter::new(
-            config.client_id,
-            config.authority,
-            tokens,
-        );
-        let arc = Arc::new(adapter);
-        // Phase 6e.1 + 6e.2 + 10i: the Graph adapter declares
-        // Calendar + Tasks + Contacts. Same
-        // `Arc<MicrosoftGraphAdapter>` instance is reused across
-        // every feature trait so the shared OAuth token state +
-        // listing caches stay coherent across reads.
-        self.external_cal
-            .write()
-            .expect("registry cal poison")
-            .insert(
-                account.id.clone(),
-                arc.clone() as Arc<dyn CalendarFeature>,
-            );
-        self.external_tasks
-            .write()
-            .expect("registry tasks poison")
-            .insert(account.id.clone(), arc.clone() as Arc<dyn TasksFeature>);
-        self.external_contacts
-            .write()
-            .expect("registry contacts poison")
-            .insert(account.id.clone(), arc as Arc<dyn ContactsFeature>);
+        let plugin_config = serde_json::json!({
+            "client_id": config.client_id,
+            "authority": config.authority,
+            "access_token": access,
+            "refresh_token": refresh,
+            "expires_at": "1970-01-01T00:00:00Z",
+            "scope": null,
+        })
+        .to_string();
+        let instance = self.open_plugin_instance(PLUGIN_ID_GRAPH, plugin_config)?;
+        self.insert_calendar(&account.id, instance.clone())?;
+        self.insert_tasks(&account.id, instance.clone())?;
+        self.insert_contacts(&account.id, instance)?;
         Ok(())
     }
 
-    /// Wire up an EWS (Exchange Web Services) account. Basic-auth-
-    /// only for the first cut — the keychain holds the password,
-    /// the JSON config holds the endpoint URL + username. All three
-    /// feature surfaces are registered against the same EwsAdapter
-    /// instance so the per-account listing caches stay coherent:
-    /// Phase 6f.1 wired up calendars, 6f.2 added tasks, 10e added
-    /// contacts (`IPF.Contact` folders + `<t:Contact>` items).
     fn register_ews(&self, account: &Account) -> Result<(), RegistryError> {
         let config: EwsAccountConfig = serde_json::from_str(&account.config_json)
             .map_err(|e| RegistryError::Config(e.to_string()))?;
         let password = secrets::retrieve(&account.id, SecretSlot::Password)
             .map_err(|e| RegistryError::Secret(format!("missing password: {e}")))?;
-        let credentials = EwsCredentials {
-            username: config.username,
-            password,
-        };
-        let adapter = EwsAdapter::new(config.endpoint, credentials);
-        let arc = Arc::new(adapter);
-        self.external_cal
-            .write()
-            .expect("registry cal poison")
-            .insert(
-                account.id.clone(),
-                arc.clone() as Arc<dyn CalendarFeature>,
-            );
-        self.external_tasks
-            .write()
-            .expect("registry tasks poison")
-            .insert(
-                account.id.clone(),
-                arc.clone() as Arc<dyn TasksFeature>,
-            );
-        // Phase 10e: the same EwsAdapter also serves ContactsFeature
-        // against the user's `IPF.Contact` folders. The per-account
-        // listing caches stay coherent across all three feature
-        // traits because they share the same Arc.
-        self.external_contacts
-            .write()
-            .expect("registry contacts poison")
-            .insert(account.id.clone(), arc as Arc<dyn ContactsFeature>);
+        let plugin_config = serde_json::json!({
+            "endpoint": config.endpoint,
+            "username": config.username,
+            "password": password,
+        })
+        .to_string();
+        let instance = self.open_plugin_instance(PLUGIN_ID_EWS, plugin_config)?;
+        self.insert_calendar(&account.id, instance.clone())?;
+        self.insert_tasks(&account.id, instance.clone())?;
+        self.insert_contacts(&account.id, instance)?;
         Ok(())
     }
 
-    /// Wire up a Vikunja account. Vikunja is tasks-only — we register
-    /// the adapter under `external_tasks` and skip `external_cal`.
-    /// The API token comes out of the platform keychain under
-    /// `SecretSlot::ApiToken` (the slot is named for exactly this
-    /// use case — long-lived third-party-client tokens).
     fn register_vikunja(&self, account: &Account) -> Result<(), RegistryError> {
         let config: VikunjaAccountConfig = serde_json::from_str(&account.config_json)
             .map_err(|e| RegistryError::Config(e.to_string()))?;
         let token = secrets::retrieve(&account.id, SecretSlot::ApiToken)
             .map_err(|e| RegistryError::Secret(format!("missing API token: {e}")))?;
-        let adapter = VikunjaAdapter::new(&config.server_url, token)
-            .map_err(|e| RegistryError::Construct(e.to_string()))?;
-        let arc = Arc::new(adapter);
-        self.external_tasks
-            .write()
-            .expect("registry tasks poison")
-            .insert(account.id.clone(), arc as Arc<dyn TasksFeature>);
+        let plugin_config = serde_json::json!({
+            "server_url": config.server_url,
+            "token": token,
+        })
+        .to_string();
+        let instance = self.open_plugin_instance(PLUGIN_ID_VIKUNJA, plugin_config)?;
+        self.insert_tasks(&account.id, instance)?;
         Ok(())
     }
 
-    /// Wire up a Todoist account. Same shape as Vikunja: tasks-only,
-    /// API token in the keychain under `SecretSlot::ApiToken`. The
-    /// config carries no server URL — Todoist is hosted and the
-    /// base URL is hard-coded in the adapter.
     fn register_todoist(&self, account: &Account) -> Result<(), RegistryError> {
-        // Empty `config_json` is allowed — the `TodoistAccountConfig`
+        // Empty `config_json` is allowed — the TodoistAccountConfig
         // only holds an optional account label and Todoist itself
-        // doesn't need anything but the token. Parse with defaults so
-        // older accounts written as `{}` still work.
+        // doesn't need anything but the token. Parse with defaults
+        // so older accounts written as `{}` still work.
         let _config: TodoistAccountConfig =
-            serde_json::from_str(&account.config_json)
-                .unwrap_or_default();
+            serde_json::from_str(&account.config_json).unwrap_or_default();
         let token = secrets::retrieve(&account.id, SecretSlot::ApiToken)
             .map_err(|e| RegistryError::Secret(format!("missing API token: {e}")))?;
-        let adapter = TodoistAdapter::new(token);
-        let arc = Arc::new(adapter);
-        self.external_tasks
-            .write()
-            .expect("registry tasks poison")
-            .insert(account.id.clone(), arc as Arc<dyn TasksFeature>);
+        let plugin_config = serde_json::json!({ "token": token }).to_string();
+        let instance = self.open_plugin_instance(PLUGIN_ID_TODOIST, plugin_config)?;
+        self.insert_tasks(&account.id, instance)?;
         Ok(())
     }
 
-    /// Wire up an iCal feed account. Only the calendar side is
-    /// registered; iCal feeds don't carry VTODOs in a queryable way,
-    /// so we skip the TasksFeature slot rather than expose a row that
-    /// would always be empty.
     fn register_ical(&self, account: &Account) -> Result<(), RegistryError> {
         let config: IcalAccountConfig = serde_json::from_str(&account.config_json)
             .map_err(|e| RegistryError::Config(e.to_string()))?;
-        // Basic-auth password is optional for iCal — most public feeds
-        // are anonymous. A missing keychain entry is therefore not an
-        // error; an explicit empty string from the secrets store
-        // collapses to None too.
+        // Basic-auth password is optional for iCal — most public
+        // feeds are anonymous. A missing keychain entry is
+        // therefore not an error.
         let password = secrets::retrieve(&account.id, SecretSlot::Password)
             .ok()
             .filter(|s| !s.is_empty());
-        let credentials = IcalCredentials::new(config, password);
-        let adapter = IcalAdapter::new(credentials)
-            .map_err(|e| RegistryError::Construct(e.to_string()))?;
-        let arc = Arc::new(adapter);
-        self.external_cal
-            .write()
-            .expect("registry cal poison")
-            .insert(account.id.clone(), arc as Arc<dyn CalendarFeature>);
+        let plugin_config = serde_json::json!({
+            "feed_url": config.feed_url,
+            "username": config.username,
+            "password": password,
+        })
+        .to_string();
+        let instance = self.open_plugin_instance(PLUGIN_ID_ICAL, plugin_config)?;
+        self.insert_calendar(&account.id, instance)?;
         Ok(())
     }
 }
@@ -669,4 +673,11 @@ pub enum RegistryError {
     Secret(String),
     #[error("adapter construction failed: {0}")]
     Construct(String),
+    /// The plugin id referenced by the account isn't loaded into
+    /// the host's [`PluginManager`] — typically because the user's
+    /// other device installed a community plugin Aperio doesn't
+    /// have a copy of yet (DESIGN.md §20.8). The UI surfaces this
+    /// as a "Plugin fehlt" affordance.
+    #[error("plugin not installed: {0}")]
+    PluginMissing(String),
 }

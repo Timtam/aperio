@@ -26,10 +26,10 @@ fn manifest() -> PluginManifest {
 fn make_manager() -> PluginManager {
     let manager = PluginManager::new("0.1.0");
     let desc: *mut AperioPlugin =
-        unsafe { sync_adapter_webdav_plugin::aperio_plugin_create() };
+        unsafe { sync_adapter_webdav_plugin::build_descriptor() };
     assert!(!desc.is_null());
     let destroy: unsafe extern "C" fn(*mut AperioPlugin) =
-        sync_adapter_webdav_plugin::aperio_plugin_destroy;
+        sync_adapter_webdav_plugin::DESTROY_FN;
     manager.register_static(manifest(), desc, destroy).expect("register");
     manager
 }

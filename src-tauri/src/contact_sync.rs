@@ -366,11 +366,20 @@ mod tests {
         (dir, db)
     }
 
+    /// Empty registry for the contact-sync scheduler tests. None
+    /// of these tests exercise the per-account adapter routing,
+    /// so an empty plugin manager is sufficient — the registry
+    /// just needs to be constructible.
+    fn empty_registry() -> Arc<AdapterRegistry> {
+        let mgr = Arc::new(plugin_core::PluginManager::new("0.1.0"));
+        Arc::new(AdapterRegistry::new(mgr))
+    }
+
     #[test]
     fn read_interval_minutes_defaults_to_sixty() {
         let (_tmp, db) = fresh_db();
         let scheduler = ContactSyncScheduler {
-            registry: Arc::new(AdapterRegistry::new()),
+            registry: empty_registry(),
             db: db.shared(),
             last_synced_at: Arc::new(Mutex::new(None)),
             in_flight: Arc::new(Mutex::new(false)),
@@ -387,7 +396,7 @@ mod tests {
             .set(PREF_SYNC_INTERVAL_MINUTES, "15")
             .unwrap();
         let scheduler = ContactSyncScheduler {
-            registry: Arc::new(AdapterRegistry::new()),
+            registry: empty_registry(),
             db: db.shared(),
             last_synced_at: Arc::new(Mutex::new(None)),
             in_flight: Arc::new(Mutex::new(false)),
@@ -407,7 +416,7 @@ mod tests {
             .set(PREF_SYNC_INTERVAL_MINUTES, "0")
             .unwrap();
         let scheduler = ContactSyncScheduler {
-            registry: Arc::new(AdapterRegistry::new()),
+            registry: empty_registry(),
             db: db.shared(),
             last_synced_at: Arc::new(Mutex::new(None)),
             in_flight: Arc::new(Mutex::new(false)),
@@ -420,7 +429,7 @@ mod tests {
     fn status_returns_empty_when_nothing_synced_yet() {
         let (_tmp, db) = fresh_db();
         let scheduler = ContactSyncScheduler {
-            registry: Arc::new(AdapterRegistry::new()),
+            registry: empty_registry(),
             db: db.shared(),
             last_synced_at: Arc::new(Mutex::new(None)),
             in_flight: Arc::new(Mutex::new(false)),
@@ -439,7 +448,7 @@ mod tests {
     fn read_include_read_only_on_sync_defaults_to_false() {
         let (_tmp, db) = fresh_db();
         let scheduler = ContactSyncScheduler {
-            registry: Arc::new(AdapterRegistry::new()),
+            registry: empty_registry(),
             db: db.shared(),
             last_synced_at: Arc::new(Mutex::new(None)),
             in_flight: Arc::new(Mutex::new(false)),
@@ -456,7 +465,7 @@ mod tests {
             .set(PREF_INCLUDE_READ_ONLY_ON_SYNC, "true")
             .unwrap();
         let scheduler = ContactSyncScheduler {
-            registry: Arc::new(AdapterRegistry::new()),
+            registry: empty_registry(),
             db: db.shared(),
             last_synced_at: Arc::new(Mutex::new(None)),
             in_flight: Arc::new(Mutex::new(false)),
@@ -476,7 +485,7 @@ mod tests {
             .set(PREF_INCLUDE_READ_ONLY_ON_SYNC, "yes")
             .unwrap();
         let scheduler = ContactSyncScheduler {
-            registry: Arc::new(AdapterRegistry::new()),
+            registry: empty_registry(),
             db: db.shared(),
             last_synced_at: Arc::new(Mutex::new(None)),
             in_flight: Arc::new(Mutex::new(false)),

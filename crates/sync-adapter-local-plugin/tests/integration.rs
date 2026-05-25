@@ -3,7 +3,7 @@
 //!
 //! Exercises the full FFI pipeline without dlopen:
 //!
-//!   1. Call the plugin's `aperio_plugin_create` directly.
+//!   1. Call the plugin's `build_descriptor` directly.
 //!   2. Register the descriptor with plugin-core's
 //!      `PluginManager` via `register_static`.
 //!   3. `open_instance` against a temp-dir remote_root, get
@@ -45,10 +45,10 @@ fn plugin_manifest() -> PluginManifest {
 fn make_manager() -> PluginManager {
     let manager = PluginManager::new("0.1.0");
     let descriptor: *mut AperioPlugin =
-        unsafe { sync_adapter_local_plugin::aperio_plugin_create() };
+        unsafe { sync_adapter_local_plugin::build_descriptor() };
     assert!(!descriptor.is_null(), "create returned NULL");
     let destroy_fn: unsafe extern "C" fn(*mut AperioPlugin) =
-        sync_adapter_local_plugin::aperio_plugin_destroy;
+        sync_adapter_local_plugin::DESTROY_FN;
     manager
         .register_static(plugin_manifest(), descriptor, destroy_fn)
         .expect("register_static");

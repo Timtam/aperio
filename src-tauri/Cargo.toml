@@ -41,6 +41,7 @@ reqwest.workspace = true
 cal-core.workspace = true
 cal-adapter-local.workspace = true
 sync-core.workspace = true
+plugin-core.workspace = true
 sync-adapter-local = { path = "../crates/sync-adapter-local" }
 sync-adapter-webdav = { path = "../crates/sync-adapter-webdav" }
 sync-adapter-sftp = { path = "../crates/sync-adapter-sftp" }
@@ -54,6 +55,27 @@ cal-adapter-microsoft-graph = { path = "../crates/cal-adapter-microsoft-graph" }
 cal-adapter-ews = { path = "../crates/cal-adapter-ews" }
 cal-adapter-vikunja = { path = "../crates/cal-adapter-vikunja" }
 cal-adapter-todoist = { path = "../crates/cal-adapter-todoist" }
+
+# Plugin builds of every external calendar/tasks/contacts adapter
+# (DESIGN.md §20). The host registers each via PluginManager::
+# register_static at startup so the runtime calendar/tasks/contacts
+# routing goes through the FFI bridge. The crates above stay in the
+# deps tree because the new-account flow in commands/accounts.rs
+# still uses their typed OAuth + error types directly.
+# The host reaches into each plugin via its always-emitted typed
+# `build_descriptor()` + `DESTROY_FN` accessors — see
+# bundled_plugins.rs. The C-ABI `aperio_plugin_create` / `_destroy`
+# `#[no_mangle]` exports are deferred to a separate per-plugin
+# exports crate that the dlopen pipeline (DESIGN.md §22.2) will
+# introduce; until then the static-link path here doesn't need
+# them.
+cal-adapter-caldav-plugin = { path = "../crates/cal-adapter-caldav-plugin" }
+cal-adapter-ical-plugin = { path = "../crates/cal-adapter-ical-plugin" }
+cal-adapter-google-plugin = { path = "../crates/cal-adapter-google-plugin" }
+cal-adapter-microsoft-graph-plugin = { path = "../crates/cal-adapter-microsoft-graph-plugin" }
+cal-adapter-ews-plugin = { path = "../crates/cal-adapter-ews-plugin" }
+cal-adapter-vikunja-plugin = { path = "../crates/cal-adapter-vikunja-plugin" }
+cal-adapter-todoist-plugin = { path = "../crates/cal-adapter-todoist-plugin" }
 
 base64 = "0.22"
 

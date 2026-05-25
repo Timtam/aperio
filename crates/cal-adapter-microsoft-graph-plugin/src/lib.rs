@@ -307,7 +307,6 @@ unsafe extern "C" fn ffi_invalidate_contacts_cache(h: *mut c_void, _a: *const u8
 
 // ── Vtables ────────────────────────────────────────────────
 
-#[no_mangle]
 pub static CALENDAR_VTABLE: CalendarVtable = CalendarVtable {
     authenticate: Some(ffi_authenticate),
     capabilities: Some(ffi_capabilities),
@@ -323,7 +322,6 @@ pub static CALENDAR_VTABLE: CalendarVtable = CalendarVtable {
     ..CalendarVtable::empty()
 };
 
-#[no_mangle]
 pub static TASKS_VTABLE: TasksVtable = TasksVtable {
     authenticate: Some(ffi_authenticate),
     capabilities: Some(ffi_capabilities),
@@ -336,7 +334,6 @@ pub static TASKS_VTABLE: TasksVtable = TasksVtable {
     ..TasksVtable::empty()
 };
 
-#[no_mangle]
 pub static CONTACTS_VTABLE: ContactsVtable = ContactsVtable {
     authenticate: Some(ffi_authenticate),
     capabilities: Some(ffi_capabilities),
@@ -354,7 +351,6 @@ pub static CONTACTS_VTABLE: ContactsVtable = ContactsVtable {
     ..ContactsVtable::empty()
 };
 
-#[no_mangle]
 pub static ADAPTER_VTABLE: CalendarAdapterVtable = CalendarAdapterVtable {
     vtable_version: plugin_sdk::plugin_core::ABI_VERSION,
     calendar: &CALENDAR_VTABLE,

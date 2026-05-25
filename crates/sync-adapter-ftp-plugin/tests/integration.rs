@@ -25,10 +25,10 @@ fn manifest() -> PluginManifest {
 fn make_manager() -> PluginManager {
     let m = PluginManager::new("0.1.0");
     let d: *mut AperioPlugin =
-        unsafe { sync_adapter_ftp_plugin::aperio_plugin_create() };
+        unsafe { sync_adapter_ftp_plugin::build_descriptor() };
     assert!(!d.is_null());
     let dx: unsafe extern "C" fn(*mut AperioPlugin) =
-        sync_adapter_ftp_plugin::aperio_plugin_destroy;
+        sync_adapter_ftp_plugin::DESTROY_FN;
     m.register_static(manifest(), d, dx).expect("register");
     m
 }
