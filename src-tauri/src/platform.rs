@@ -26,11 +26,17 @@
 /// Microsoft's convention; we keep it short since there's no parent
 /// suite. Same value goes into the registry and the process pin so the
 /// two sides agree.
+///
+/// Gated on `cfg(windows)` because the only consumer
+/// (`windows_impl::setup`) is too — leaving it unconditional makes
+/// clippy on Linux / macOS flag it as dead code.
+#[cfg(windows)]
 pub const APP_USER_MODEL_ID: &str = "Aperio.Calendar";
 
 /// Display name surfaced in the toast banner. Plain — Windows shows
 /// this verbatim and does no further localisation, so we keep it
-/// neutral.
+/// neutral. Same `cfg(windows)` reasoning as `APP_USER_MODEL_ID`.
+#[cfg(windows)]
 pub const APP_DISPLAY_NAME: &str = "Aperio";
 
 /// Run platform-specific startup. Errors are logged but never
