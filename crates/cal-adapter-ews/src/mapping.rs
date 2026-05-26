@@ -1673,6 +1673,26 @@ pub enum EwsRecurrencePattern {
         day_of_month: u8,
         month: EwsMonth,
     },
+    /// "Third Wednesday of every month", "last Friday of every
+    /// other month", etc. EWS's RelativeMonthlyRecurrence
+    /// element. `days_of_week` is *already* expanded if the wire
+    /// carried one of the composite tokens (`Day`, `Weekday`,
+    /// `WeekendDay`) — single-day rules end up with one entry,
+    /// composites with the set they stand for. The RRULE
+    /// translation branches on the length to emit `BYDAY=Nxx`
+    /// (single) or `BYDAY=xx,yy,…+BYSETPOS=N` (multi).
+    RelativeMonthly {
+        interval: u32,
+        days_of_week: Vec<EwsDay>,
+        day_of_week_index: EwsDayOfWeekIndex,
+    },
+    /// "Third Wednesday of March every year", etc. Yearly twin of
+    /// `RelativeMonthly` — adds the `Month` element.
+    RelativeYearly {
+        days_of_week: Vec<EwsDay>,
+        day_of_week_index: EwsDayOfWeekIndex,
+        month: EwsMonth,
+    },
 }
 
 /// Range half (the "when does it stop" part).
@@ -1718,6 +1738,76 @@ impl EwsDay {
             Self::Friday => "FR",
             Self::Saturday => "SA",
             Self::Sunday => "SU",
+        }
+    }
+}
+
+/// Parse a `<t:DaysOfWeek>` token list into a vector of concrete
+/// weekdays. EWS allows three composite shortcuts in addition to
+/// the seven specific days:
+///
+///   - `Day` — any day of the week (all 7)
+///   - `Weekday` — Mon-Fri
+///   - `WeekendDay` — Sat+Sun
+///
+/// We expand them in-place so downstream RRULE generation only
+/// ever sees a flat list of concrete days. Unknown tokens are
+/// dropped silently (no crash on a future composite we haven't
+/// seen — the worst case is a less-specific recurrence than the
+/// server intended).
+fn parse_days_of_week(s: &str) -> Vec<EwsDay> {
+    use EwsDay::*;
+    let mut out: Vec<EwsDay> = Vec::new();
+    for tok in s.split_whitespace() {
+        match tok {
+            "Day" => out.extend([
+                Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday,
+            ]),
+            "Weekday" => out.extend([Monday, Tuesday, Wednesday, Thursday, Friday]),
+            "WeekendDay" => out.extend([Saturday, Sunday]),
+            other => {
+                if let Some(d) = EwsDay::from_wire(other) {
+                    out.push(d);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Position-within-month for relative recurrences. EWS spells
+/// these out as words on the wire; the RRULE translation maps
+/// to BYSETPOS / the BYDAY ordinal prefix:
+///
+///   - First → 1, Second → 2, Third → 3, Fourth → 4
+///   - Last → -1 (RRULE convention for "from the end")
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EwsDayOfWeekIndex {
+    First,
+    Second,
+    Third,
+    Fourth,
+    Last,
+}
+
+impl EwsDayOfWeekIndex {
+    fn from_wire(s: &str) -> Option<Self> {
+        Some(match s {
+            "First" => Self::First,
+            "Second" => Self::Second,
+            "Third" => Self::Third,
+            "Fourth" => Self::Fourth,
+            "Last" => Self::Last,
+            _ => return None,
+        })
+    }
+    fn to_rrule_pos(self) -> i32 {
+        match self {
+            Self::First => 1,
+            Self::Second => 2,
+            Self::Third => 3,
+            Self::Fourth => 4,
+            Self::Last => -1,
         }
     }
 }
@@ -1822,6 +1912,26 @@ impl EwsRecurrence {
                 parts.push(format!("BYMONTH={}", month.to_rrule_number()));
                 parts.push(format!("BYMONTHDAY={day_of_month}"));
             }
+            EwsRecurrencePattern::RelativeMonthly {
+                interval,
+                days_of_week,
+                day_of_week_index,
+            } => {
+                parts.push("FREQ=MONTHLY".into());
+                if *interval > 1 {
+                    parts.push(format!("INTERVAL={interval}"));
+                }
+                push_relative_byday(&mut parts, days_of_week, *day_of_week_index);
+            }
+            EwsRecurrencePattern::RelativeYearly {
+                days_of_week,
+                day_of_week_index,
+                month,
+            } => {
+                parts.push("FREQ=YEARLY".into());
+                parts.push(format!("BYMONTH={}", month.to_rrule_number()));
+                push_relative_byday(&mut parts, days_of_week, *day_of_week_index);
+            }
         }
         match &self.range {
             EwsRecurrenceRange::NoEnd => {}
@@ -1839,12 +1949,48 @@ impl EwsRecurrence {
     }
 }
 
+/// Emit the BYDAY (+ optional BYSETPOS) parts for a relative
+/// monthly / yearly recurrence. Branches on the day-list size:
+///
+///   - **Single day** (e.g. Wednesday + Third) → `BYDAY=3WE`.
+///     The ordinal prefix is RRULE's compact form and rrule.js
+///     handles it identically to BYDAY=WE + BYSETPOS=3 but with
+///     fewer parts.
+///   - **Multiple days** (e.g. Weekday-composite + First → all
+///     five workdays) → `BYDAY=MO,TU,WE,TH,FR;BYSETPOS=1`. The
+///     BYSETPOS modifier picks the chosen ordinal among the
+///     candidates the month yields; that's the only way to
+///     express "first weekday of the month" in RRULE.
+///   - **Empty** (parser saw an unknown DaysOfWeek token) →
+///     nothing pushed. The recurrence won't actually expand on
+///     the frontend; better that than a malformed RRULE.
+fn push_relative_byday(parts: &mut Vec<String>, days_of_week: &[EwsDay], index: EwsDayOfWeekIndex) {
+    let pos = index.to_rrule_pos();
+    if days_of_week.len() == 1 {
+        parts.push(format!("BYDAY={pos}{}", days_of_week[0].to_rrule()));
+        return;
+    }
+    if days_of_week.is_empty() {
+        return;
+    }
+    let csv = days_of_week
+        .iter()
+        .map(|d| d.to_rrule())
+        .collect::<Vec<_>>()
+        .join(",");
+    parts.push(format!("BYDAY={csv}"));
+    parts.push(format!("BYSETPOS={pos}"));
+}
+
 /// Parse a `<t:Recurrence>...</t:Recurrence>` block (the full XML
 /// fragment including the wrapping element) into a structured
-/// [`EwsRecurrence`]. Returns `Err(Protocol)` on shapes we don't
-/// support yet (`RelativeMonthlyRecurrence`, `RelativeYearlyRecurrence`,
-/// missing pattern or range, …) so the caller can decide whether to
-/// drop the master entirely or surface a user-visible warning.
+/// [`EwsRecurrence`]. Returns `Err(Protocol)` only on shapes that
+/// genuinely can't be represented (e.g. the response is missing
+/// the pattern or range half, or carries an incomplete pattern
+/// like `RelativeMonthly` without a `DayOfWeekIndex`). All six
+/// EWS recurrence-pattern variants — Daily, Weekly,
+/// AbsoluteMonthly, AbsoluteYearly, RelativeMonthly, RelativeYearly
+/// — translate to valid RRULE on the read side.
 ///
 /// Shares its actual walking logic with [`RecurrenceWalker`] so the
 /// `SyncFolderItems` parser can re-use it inline (no XML-slicing
@@ -1905,11 +2051,13 @@ pub(crate) struct RecurrenceWalker {
     pattern: Option<PatternBuilder>,
     range: Option<RangeBuilder>,
     text_target: Option<&'static str>,
-    /// Set when we encounter a recurrence shape Aperio doesn't yet
-    /// support (currently the two Relative* variants). The walker
-    /// keeps consuming the rest of the subtree quietly and surfaces
-    /// the error from [`Self::finish`] instead — so the caller can
-    /// drop just this one row's recurrence rather than aborting the
+    /// Set when we encounter a recurrence shape Aperio can't
+    /// translate (currently nothing — all six EWS pattern variants
+    /// are supported on the read path). Kept as a hook so future
+    /// EWS extensions can flag themselves here without changing
+    /// the walker's signature: the walker keeps consuming the
+    /// rest of the subtree quietly and surfaces the error from
+    /// [`Self::finish`] instead, so one bad row doesn't abort the
     /// whole batch parse.
     unsupported: Option<&'static str>,
 }
@@ -1950,10 +2098,18 @@ impl RecurrenceWalker {
                 });
             }
             b"relativemonthlyrecurrence" => {
-                self.unsupported = Some("RelativeMonthlyRecurrence");
+                self.pattern = Some(PatternBuilder::RelativeMonthly {
+                    interval: 1,
+                    days_of_week: Vec::new(),
+                    day_of_week_index: None,
+                });
             }
             b"relativeyearlyrecurrence" => {
-                self.unsupported = Some("RelativeYearlyRecurrence");
+                self.pattern = Some(PatternBuilder::RelativeYearly {
+                    days_of_week: Vec::new(),
+                    day_of_week_index: None,
+                    month: None,
+                });
             }
             b"noendrecurrence" => self.range = Some(RangeBuilder::NoEnd),
             b"numberedrecurrence" => {
@@ -1964,6 +2120,7 @@ impl RecurrenceWalker {
             }
             b"interval" => self.text_target = Some("interval"),
             b"daysofweek" => self.text_target = Some("days_of_week"),
+            b"dayofweekindex" => self.text_target = Some("day_of_week_index"),
             b"dayofmonth" => self.text_target = Some("day_of_month"),
             b"month" => self.text_target = Some("month"),
             b"numberofoccurrences" => {
@@ -1983,19 +2140,41 @@ impl RecurrenceWalker {
                 match self.pattern.as_mut() {
                     Some(PatternBuilder::Daily { interval })
                     | Some(PatternBuilder::Weekly { interval, .. })
-                    | Some(PatternBuilder::AbsoluteMonthly { interval, .. }) => {
+                    | Some(PatternBuilder::AbsoluteMonthly { interval, .. })
+                    | Some(PatternBuilder::RelativeMonthly { interval, .. }) => {
                         *interval = v;
                     }
                     _ => {}
                 }
             }
             Some("days_of_week") => {
-                if let Some(PatternBuilder::Weekly { days_of_week, .. }) = self.pattern.as_mut() {
-                    for tok in s.split_whitespace() {
-                        if let Some(day) = EwsDay::from_wire(tok) {
-                            days_of_week.push(day);
-                        }
+                // `parse_days_of_week` honours the composite tokens
+                // ("Day"/"Weekday"/"WeekendDay") and expands them
+                // to the matching list of concrete weekdays — used
+                // by Relative* recurrences and (in principle) by
+                // any future Weekly composite shape too.
+                let expanded = parse_days_of_week(s);
+                match self.pattern.as_mut() {
+                    Some(PatternBuilder::Weekly { days_of_week, .. })
+                    | Some(PatternBuilder::RelativeMonthly { days_of_week, .. })
+                    | Some(PatternBuilder::RelativeYearly { days_of_week, .. }) => {
+                        days_of_week.extend(expanded);
                     }
+                    _ => {}
+                }
+            }
+            Some("day_of_week_index") => {
+                let idx = EwsDayOfWeekIndex::from_wire(s);
+                match self.pattern.as_mut() {
+                    Some(PatternBuilder::RelativeMonthly {
+                        day_of_week_index, ..
+                    })
+                    | Some(PatternBuilder::RelativeYearly {
+                        day_of_week_index, ..
+                    }) => {
+                        *day_of_week_index = idx;
+                    }
+                    _ => {}
                 }
             }
             Some("day_of_month") => {
@@ -2008,11 +2187,13 @@ impl RecurrenceWalker {
                     _ => {}
                 }
             }
-            Some("month") => {
-                if let Some(PatternBuilder::AbsoluteYearly { month, .. }) = self.pattern.as_mut() {
+            Some("month") => match self.pattern.as_mut() {
+                Some(PatternBuilder::AbsoluteYearly { month, .. })
+                | Some(PatternBuilder::RelativeYearly { month, .. }) => {
                     *month = EwsMonth::from_wire(s);
                 }
-            }
+                _ => {}
+            },
             Some("number_of_occurrences") => {
                 if let Some(RangeBuilder::Numbered { occurrences }) = self.range.as_mut() {
                     *occurrences = s.parse::<u32>().unwrap_or(0);
@@ -2077,6 +2258,16 @@ enum PatternBuilder {
         day_of_month: u8,
         month: Option<EwsMonth>,
     },
+    RelativeMonthly {
+        interval: u32,
+        days_of_week: Vec<EwsDay>,
+        day_of_week_index: Option<EwsDayOfWeekIndex>,
+    },
+    RelativeYearly {
+        days_of_week: Vec<EwsDay>,
+        day_of_week_index: Option<EwsDayOfWeekIndex>,
+        month: Option<EwsMonth>,
+    },
 }
 
 impl PatternBuilder {
@@ -2106,6 +2297,47 @@ impl PatternBuilder {
                 })?;
                 Ok(EwsRecurrencePattern::AbsoluteYearly {
                     day_of_month,
+                    month,
+                })
+            }
+            Self::RelativeMonthly {
+                interval,
+                days_of_week,
+                day_of_week_index,
+            } => {
+                let day_of_week_index = day_of_week_index.ok_or_else(|| {
+                    EwsError::Protocol("RelativeMonthlyRecurrence missing DayOfWeekIndex".into())
+                })?;
+                if days_of_week.is_empty() {
+                    return Err(EwsError::Protocol(
+                        "RelativeMonthlyRecurrence missing DaysOfWeek".into(),
+                    ));
+                }
+                Ok(EwsRecurrencePattern::RelativeMonthly {
+                    interval,
+                    days_of_week,
+                    day_of_week_index,
+                })
+            }
+            Self::RelativeYearly {
+                days_of_week,
+                day_of_week_index,
+                month,
+            } => {
+                let day_of_week_index = day_of_week_index.ok_or_else(|| {
+                    EwsError::Protocol("RelativeYearlyRecurrence missing DayOfWeekIndex".into())
+                })?;
+                let month = month.ok_or_else(|| {
+                    EwsError::Protocol("RelativeYearlyRecurrence missing Month".into())
+                })?;
+                if days_of_week.is_empty() {
+                    return Err(EwsError::Protocol(
+                        "RelativeYearlyRecurrence missing DaysOfWeek".into(),
+                    ));
+                }
+                Ok(EwsRecurrencePattern::RelativeYearly {
+                    days_of_week,
+                    day_of_week_index,
                     month,
                 })
             }
@@ -2771,16 +3003,113 @@ mod tests {
     }
 
     #[test]
-    fn parse_recurrence_rejects_relative_monthly() {
-        // We don't author RelativeMonthlyRecurrence today, but
-        // legacy series on the server might use it. Surface as
-        // Protocol so the caller can drop the master (and the
-        // user sees a recognisable error in logs).
+    fn parse_recurrence_relative_monthly_single_day() {
+        // "Third Wednesday of every month" — single-day Relative
+        // shape. The RRULE form folds the index prefix into the
+        // BYDAY token (`BYDAY=3WE`) rather than emitting a
+        // separate BYSETPOS; rrule.js handles both forms
+        // identically but the single-token form is what
+        // we ship.
+        let xml = r#"<t:Recurrence>
+            <t:RelativeMonthlyRecurrence>
+              <t:Interval>1</t:Interval>
+              <t:DaysOfWeek>Wednesday</t:DaysOfWeek>
+              <t:DayOfWeekIndex>Third</t:DayOfWeekIndex>
+            </t:RelativeMonthlyRecurrence>
+            <t:NoEndRecurrence>
+              <t:StartDate>2024-05-15</t:StartDate>
+            </t:NoEndRecurrence>
+          </t:Recurrence>"#;
+        let rec = parse_ews_recurrence(xml).unwrap();
+        assert_eq!(
+            rec.pattern,
+            EwsRecurrencePattern::RelativeMonthly {
+                interval: 1,
+                days_of_week: vec![EwsDay::Wednesday],
+                day_of_week_index: EwsDayOfWeekIndex::Third,
+            },
+        );
+        assert_rrule_equivalent(&rec.to_rrule(), "FREQ=MONTHLY;BYDAY=3WE");
+    }
+
+    #[test]
+    fn parse_recurrence_relative_monthly_last_weekday_composite() {
+        // "Last weekday of every other month" — composite DaysOfWeek
+        // token (`Weekday`) + Last index. Expansion: Weekday → MO-FR,
+        // multi-day branch → BYDAY=MO,TU,WE,TH,FR + BYSETPOS=-1.
+        let xml = r#"<t:Recurrence>
+            <t:RelativeMonthlyRecurrence>
+              <t:Interval>2</t:Interval>
+              <t:DaysOfWeek>Weekday</t:DaysOfWeek>
+              <t:DayOfWeekIndex>Last</t:DayOfWeekIndex>
+            </t:RelativeMonthlyRecurrence>
+            <t:NoEndRecurrence>
+              <t:StartDate>2026-01-30</t:StartDate>
+            </t:NoEndRecurrence>
+          </t:Recurrence>"#;
+        let rec = parse_ews_recurrence(xml).unwrap();
+        match &rec.pattern {
+            EwsRecurrencePattern::RelativeMonthly {
+                interval,
+                days_of_week,
+                day_of_week_index,
+            } => {
+                assert_eq!(*interval, 2);
+                assert_eq!(
+                    days_of_week,
+                    &vec![
+                        EwsDay::Monday,
+                        EwsDay::Tuesday,
+                        EwsDay::Wednesday,
+                        EwsDay::Thursday,
+                        EwsDay::Friday,
+                    ],
+                );
+                assert_eq!(*day_of_week_index, EwsDayOfWeekIndex::Last);
+            }
+            other => panic!("expected RelativeMonthly, got {other:?}"),
+        }
+        assert_rrule_equivalent(
+            &rec.to_rrule(),
+            "FREQ=MONTHLY;INTERVAL=2;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1",
+        );
+    }
+
+    #[test]
+    fn parse_recurrence_relative_yearly() {
+        // "First Friday of March every year".
+        let xml = r#"<t:Recurrence>
+            <t:RelativeYearlyRecurrence>
+              <t:DaysOfWeek>Friday</t:DaysOfWeek>
+              <t:DayOfWeekIndex>First</t:DayOfWeekIndex>
+              <t:Month>March</t:Month>
+            </t:RelativeYearlyRecurrence>
+            <t:NoEndRecurrence>
+              <t:StartDate>2026-03-06</t:StartDate>
+            </t:NoEndRecurrence>
+          </t:Recurrence>"#;
+        let rec = parse_ews_recurrence(xml).unwrap();
+        assert_eq!(
+            rec.pattern,
+            EwsRecurrencePattern::RelativeYearly {
+                days_of_week: vec![EwsDay::Friday],
+                day_of_week_index: EwsDayOfWeekIndex::First,
+                month: EwsMonth::March,
+            },
+        );
+        assert_rrule_equivalent(&rec.to_rrule(), "FREQ=YEARLY;BYMONTH=3;BYDAY=1FR");
+    }
+
+    #[test]
+    fn parse_recurrence_relative_monthly_requires_day_of_week_index() {
+        // Server returns RelativeMonthly without the required
+        // DayOfWeekIndex element — surface as Protocol so the
+        // caller drops just this row's recurrence (consistent with
+        // the AbsoluteYearly + missing-Month case).
         let xml = r#"<t:Recurrence>
             <t:RelativeMonthlyRecurrence>
               <t:Interval>1</t:Interval>
               <t:DaysOfWeek>Monday</t:DaysOfWeek>
-              <t:DayOfWeekIndex>First</t:DayOfWeekIndex>
             </t:RelativeMonthlyRecurrence>
             <t:NoEndRecurrence>
               <t:StartDate>2026-01-01</t:StartDate>
@@ -2788,9 +3117,7 @@ mod tests {
           </t:Recurrence>"#;
         let err = parse_ews_recurrence(xml).unwrap_err();
         match err {
-            EwsError::Protocol(m) => {
-                assert!(m.contains("RelativeMonthlyRecurrence"), "got {m}");
-            }
+            EwsError::Protocol(m) => assert!(m.contains("DayOfWeekIndex"), "got {m}"),
             other => panic!("expected Protocol, got {other:?}"),
         }
     }
@@ -3342,15 +3669,23 @@ mod tests {
     }
 
     #[test]
-    fn parse_get_items_response_keeps_other_rows_when_one_master_uses_unsupported_recurrence() {
+    fn parse_get_items_response_keeps_other_rows_when_one_master_has_malformed_recurrence() {
         // Regression for the production bug where ONE master with
-        // a RelativeMonthlyRecurrence ("Abgesagt: Themenoffener
-        // Austausch", repeating every third Wednesday) poisoned
-        // the whole GetItem fan-out and caused zero events from
-        // the EWS calendar to render — including singles in the
-        // same drain (which depend on a successful sync state
-        // commit). The walker must tolerate the bad row, leave
-        // its recurrence empty, and continue parsing the rest.
+        // a broken recurrence poisoned the whole GetItem fan-out
+        // and caused zero events from the EWS calendar to render
+        // — including singles in the same drain (which depend on
+        // a successful sync state commit). The walker must
+        // tolerate the bad row, leave its recurrence empty, and
+        // continue parsing the rest.
+        //
+        // After EWS-H landed Relative*Recurrence is fully
+        // supported, so the original repro (RelativeMonthly +
+        // Third Wednesday) now parses fine. To keep the resilience
+        // invariant under test we use a different broken shape:
+        // a RelativeMonthlyRecurrence with no DayOfWeekIndex —
+        // server response is incomplete and the PatternBuilder's
+        // finish() surfaces a Protocol error, which the parser
+        // must swallow for this single row.
         let xml = r#"<?xml version="1.0" encoding="utf-8"?>
 <soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
                xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types"
@@ -3363,7 +3698,7 @@ mod tests {
           <m:Items>
             <t:CalendarItem>
               <t:ItemId Id="MASTER-BAD" ChangeKey="CK-B"/>
-              <t:Subject>Third Wednesday meeting</t:Subject>
+              <t:Subject>Broken master</t:Subject>
               <t:Start>2024-05-15T10:30:00Z</t:Start>
               <t:End>2024-05-15T12:00:00Z</t:End>
               <t:CalendarItemType>RecurringMaster</t:CalendarItemType>
@@ -3371,7 +3706,6 @@ mod tests {
                 <t:RelativeMonthlyRecurrence>
                   <t:Interval>1</t:Interval>
                   <t:DaysOfWeek>Wednesday</t:DaysOfWeek>
-                  <t:DayOfWeekIndex>Third</t:DayOfWeekIndex>
                 </t:RelativeMonthlyRecurrence>
                 <t:NoEndRecurrence>
                   <t:StartDate>2024-05-15</t:StartDate>
@@ -3414,9 +3748,9 @@ mod tests {
         let bad = parsed.iter().find(|i| i.item_id == "MASTER-BAD").unwrap();
         assert!(
             bad.recurrence.is_none(),
-            "unsupported Relative* must drop the recurrence",
+            "malformed recurrence must drop the recurrence",
         );
-        assert_eq!(bad.subject, "Third Wednesday meeting");
+        assert_eq!(bad.subject, "Broken master");
 
         // Good row survived with its weekly RRULE intact.
         let good = parsed.iter().find(|i| i.item_id == "MASTER-OK").unwrap();
