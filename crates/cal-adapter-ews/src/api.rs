@@ -213,19 +213,54 @@ pub async fn sync_events_to_completion(
             SYNC_BATCH_SIZE,
         );
         let xml = client.post_soap(body).await?;
-        let result = parse_sync_folder_items_response(&xml)?;
+        // DEBUG-only stderr dump of the raw SOAP response. The
+        // plugin's tracing dispatcher is cdylib-isolated, so
+        // tracing-based debug logs disappear; eprintln! reaches
+        // the process stderr unconditionally. Wrapped in an env
+        // toggle so it only fires when the user explicitly opts
+        // in.
+        if std::env::var("APERIO_EWS_DUMP_SOAP").is_ok() {
+            eprintln!(
+                "[EWS] === SyncFolderItems response (page {}) ===\n{xml}\n[EWS] === end ===",
+                page,
+            );
+        }
+        let result = parse_sync_folder_items_response(&xml).inspect_err(|err| {
+            eprintln!(
+                "[EWS] parse_sync_folder_items_response FAILED on page {page}: {err}",
+            );
+        })?;
         let (mut c, mut u, mut d) = (0usize, 0usize, 0usize);
         for change in result.changes {
             match change {
                 SyncChange::Create(item) => {
+                    eprintln!(
+                        "[EWS] Create item_id={} subject={:?} item_type={:?} is_recurring={} has_recurrence={} mods={} dels={}",
+                        item.item_id,
+                        item.subject,
+                        item.item_type,
+                        item.is_recurring,
+                        item.recurrence.is_some(),
+                        item.modified_occurrences.len(),
+                        item.deleted_occurrence_starts.len(),
+                    );
                     c += 1;
                     state.items.insert(item.item_id.clone(), item);
                 }
                 SyncChange::Update(item) => {
+                    eprintln!(
+                        "[EWS] Update item_id={} subject={:?} item_type={:?} is_recurring={} has_recurrence={}",
+                        item.item_id,
+                        item.subject,
+                        item.item_type,
+                        item.is_recurring,
+                        item.recurrence.is_some(),
+                    );
                     u += 1;
                     state.items.insert(item.item_id.clone(), item);
                 }
                 SyncChange::Delete(id) => {
+                    eprintln!("[EWS] Delete item_id={}", id);
                     d += 1;
                     state.items.remove(&id);
                 }
