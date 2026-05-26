@@ -143,4 +143,97 @@ describe('CalendarStoreProvider', () => {
       expect(screen.getByTestId('cal-selected').textContent).toBe('a'),
     );
   });
+
+  it('auto-selects a newly-added calendar on the next refresh', async () => {
+    // Seeded with one calendar already known + selected. A second
+    // calendar appearing on a later refresh must auto-tick — that's
+    // the "I added a new account and nothing showed up in the
+    // sidebar" bug the known-tracking solves.
+    localStorage.setItem(
+      'aperio.selection.v1',
+      JSON.stringify({
+        calendars: ['a'],
+        taskLists: [],
+        knownCalendarIds: ['a'],
+      }),
+    );
+    setupInvoke({
+      list_calendars: [
+        { id: 'a', name: 'A', color: null, read_only: false, default_sound: null },
+        { id: 'b', name: 'B', color: null, read_only: false, default_sound: null },
+      ],
+    });
+
+    render(
+      <CalendarStoreProvider>
+        <Probe />
+      </CalendarStoreProvider>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId('cal-selected').textContent).toBe('a,b'),
+    );
+  });
+
+  it('respects an explicit untick: previously-known and unticked stays unticked', async () => {
+    // The flip side of the previous test: 'b' is in known (the user
+    // has seen it before) but NOT in calendars (user unticked it).
+    // It must stay unticked on the next refresh even though it's
+    // still present in the list — otherwise every refresh would
+    // overrule the user's explicit choice.
+    localStorage.setItem(
+      'aperio.selection.v1',
+      JSON.stringify({
+        calendars: ['a'],
+        taskLists: [],
+        knownCalendarIds: ['a', 'b'],
+      }),
+    );
+    setupInvoke({
+      list_calendars: [
+        { id: 'a', name: 'A', color: null, read_only: false, default_sound: null },
+        { id: 'b', name: 'B', color: null, read_only: false, default_sound: null },
+      ],
+    });
+
+    render(
+      <CalendarStoreProvider>
+        <Probe />
+      </CalendarStoreProvider>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId('cal-selected').textContent).toBe('a'),
+    );
+  });
+
+  it('migrates pre-known-tracking localStorage without surprise-selecting', async () => {
+    // Persisted blob is shaped the way the old reconciler wrote it:
+    // a `calendars` selection list, but no `knownCalendarIds` field.
+    // The upgrade path must freeze known to (selection ∪ list-ids)
+    // so any currently-visible-but-unselected calendar stays
+    // unselected — would otherwise look like a regression to
+    // long-time users who had silently unticked some calendars
+    // under the old "empty means select-everything" behaviour.
+    localStorage.setItem(
+      'aperio.selection.v1',
+      JSON.stringify({ calendars: ['a'], taskLists: [] }),
+    );
+    setupInvoke({
+      list_calendars: [
+        { id: 'a', name: 'A', color: null, read_only: false, default_sound: null },
+        { id: 'b', name: 'B', color: null, read_only: false, default_sound: null },
+      ],
+    });
+
+    render(
+      <CalendarStoreProvider>
+        <Probe />
+      </CalendarStoreProvider>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId('cal-selected').textContent).toBe('a'),
+    );
+  });
 });
