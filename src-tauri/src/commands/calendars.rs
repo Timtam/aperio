@@ -212,12 +212,33 @@ pub async fn get_events(
     };
     let result = ext.get_events(&request.calendar_id, range).await;
     match &result {
-        Ok(events) => tracing::info!(
-            target: "aperio::commands",
-            calendar_id = %request.calendar_id,
-            count = events.len(),
-            "get_events returned",
-        ),
+        Ok(events) => {
+            tracing::info!(
+                target: "aperio::commands",
+                calendar_id = %request.calendar_id,
+                count = events.len(),
+                "get_events returned",
+            );
+            // Per-event INFO dump so we can see WHAT each event
+            // looks like — title, time slot, whether it's a
+            // recurring master (frontend expander handles the
+            // window) or a one-shot. Bounded at 20 entries so a
+            // huge calendar doesn't flood the log.
+            for ev in events.iter().take(20) {
+                tracing::info!(
+                    target: "aperio::commands",
+                    calendar_id = %request.calendar_id,
+                    event_id = %ev.id,
+                    title = %ev.title,
+                    start = %ev.start.to_rfc3339(),
+                    end = %ev.end.to_rfc3339(),
+                    all_day = ev.all_day,
+                    rrule = ev.recurrence.as_ref().map(|r| r.rrule.as_str()).unwrap_or(""),
+                    exceptions = ev.recurrence.as_ref().map(|r| r.exceptions.len()).unwrap_or(0),
+                    "  event",
+                );
+            }
+        }
         Err(err) => tracing::warn!(
             target: "aperio::commands",
             calendar_id = %request.calendar_id,
