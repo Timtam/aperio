@@ -226,9 +226,7 @@ pub async fn sync_events_to_completion(
             );
         }
         let result = parse_sync_folder_items_response(&xml).inspect_err(|err| {
-            eprintln!(
-                "[EWS] parse_sync_folder_items_response FAILED on page {page}: {err}",
-            );
+            eprintln!("[EWS] parse_sync_folder_items_response FAILED on page {page}: {err}",);
         })?;
         let (mut c, mut u, mut d) = (0usize, 0usize, 0usize);
         for change in result.changes {
@@ -356,9 +354,7 @@ async fn enrich_recurring_masters(
         let body = crate::soap::get_calendar_items_with_recurrence(batch);
         let xml = client.post_soap(body).await?;
         if std::env::var("APERIO_EWS_DUMP_SOAP").is_ok() {
-            eprintln!(
-                "[EWS] === GetItem (recurrence) response ===\n{xml}\n[EWS] === end ===",
-            );
+            eprintln!("[EWS] === GetItem (recurrence) response ===\n{xml}\n[EWS] === end ===",);
         }
         let parsed = crate::mapping::parse_get_calendar_items_response(&xml)?;
         for fresh in parsed {
