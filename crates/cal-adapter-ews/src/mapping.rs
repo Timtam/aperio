@@ -567,7 +567,7 @@ pub fn parse_sync_folder_items_response(xml: &str) -> EwsResult<SyncFolderItemsR
                 // pattern/range elements don't collide with
                 // CalendarItem's `<t:Start>` / `<t:End>` text fields.
                 if let Some(walker) = recurrence_walker.as_mut() {
-                    walker.observe_start(local.as_slice())?;
+                    walker.observe_start(local.as_slice());
                     continue;
                 }
                 match local.as_slice() {
@@ -705,10 +705,16 @@ pub fn parse_sync_folder_items_response(xml: &str) -> EwsResult<SyncFolderItemsR
                 // we already routed in the bottom branch.
                 if local.as_slice() == b"recurrence" {
                     if let Some(walker) = recurrence_walker.take() {
-                        // `finish` may legitimately error (e.g. on
-                        // RelativeMonthly) — propagate so the caller
-                        // can decide whether to skip the row.
-                        current.recurrence = Some(walker.finish()?);
+                        // Swallow `finish()` errors deliberately —
+                        // unsupported shapes (Relative*) or malformed
+                        // subtrees should only nuke THIS row's
+                        // recurrence, not the whole sync drain.
+                        // The row stays in the cache as a single
+                        // event at its master start; the user can
+                        // still see / dismiss it.
+                        if let Ok(rec) = walker.finish() {
+                            current.recurrence = Some(rec);
+                        }
                     }
                     text_target = None;
                     continue;
@@ -858,6 +864,221 @@ pub fn parse_sync_folder_items_response(xml: &str) -> EwsResult<SyncFolderItemsR
         new_sync_state,
         includes_last,
     })
+}
+
+// ── GetItem (recurrence enrichment) ──────────────────────────────────────
+//
+// `SyncFolderItems` honours most of `AdditionalProperties` but *drops*
+// the complex calendar properties (`Recurrence`, `ModifiedOccurrences`,
+// `DeletedOccurrences`) from the response regardless of what we ask
+// for — a well-known EWS quirk. To pick those up we follow Outlook's
+// own playbook: after each sync drain, do a batched `GetItem` against
+// every RecurringMaster id and merge the recurrence shape back into
+// the cached state.
+//
+// The walker below mirrors `parse_sync_folder_items_response`'s
+// inner-item state machine (recurrence subtree + modified/deleted
+// occurrence collection) but skips the Create/Update/Delete framing
+// since GetItem just streams `<m:Items>/<t:CalendarItem>` blocks
+// directly under each `<m:GetItemResponseMessage>`.
+
+/// Walk a `GetItemResponse` body and yield one `ParsedItem` per
+/// `<t:CalendarItem>` block. Designed for the recurrence-enrichment
+/// fan-out — populates `recurrence`, `modified_occurrences`, and
+/// `deleted_occurrence_starts` on every master in the batch.
+///
+/// The base CalendarItem fields (subject, start, end, …) come back
+/// populated too because we always re-request the small set in
+/// `get_calendar_items_with_recurrence`'s ItemShape; the caller
+/// typically discards them and only keeps the recurrence fields.
+pub fn parse_get_calendar_items_response(xml: &str) -> EwsResult<Vec<ParsedItem>> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+
+    let mut items: Vec<ParsedItem> = Vec::new();
+    let mut inside_item = false;
+    let mut current = ParsedItem::default();
+    let mut text_target: Option<&'static str> = None;
+    let mut recurrence_walker: Option<RecurrenceWalker> = None;
+    let mut inside_deleted_occurrences = false;
+    let mut inside_deleted_occurrence = false;
+    let mut inside_modified_occurrences = false;
+    let mut inside_modified_occurrence = false;
+    let mut current_override = ModifiedOccurrenceBuilder::default();
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(XmlEvent::Start(e)) | Ok(XmlEvent::Empty(e)) => {
+                let local = e.local_name().as_ref().to_ascii_lowercase();
+                // Recurrence subtree gets routed to the shared walker
+                // — same logic as in `parse_sync_folder_items_response`.
+                if let Some(walker) = recurrence_walker.as_mut() {
+                    walker.observe_start(local.as_slice());
+                    continue;
+                }
+                match local.as_slice() {
+                    b"calendaritem" => {
+                        inside_item = true;
+                        current = ParsedItem::default();
+                    }
+                    // Master's ItemId. The `!inside_modified_occurrence`
+                    // guard mirrors the SyncFolderItems parser — the
+                    // override's nested ItemId must not clobber it.
+                    b"itemid" if inside_item && !inside_modified_occurrence => {
+                        for a in e.attributes().flatten() {
+                            let key = a.key.as_ref();
+                            if key.eq_ignore_ascii_case(b"Id") {
+                                current.item_id = String::from_utf8_lossy(&a.value).into_owned();
+                            } else if key.eq_ignore_ascii_case(b"ChangeKey") {
+                                current.change_key =
+                                    Some(String::from_utf8_lossy(&a.value).into_owned());
+                            }
+                        }
+                    }
+                    b"recurrence" if inside_item => {
+                        recurrence_walker = Some(RecurrenceWalker::default());
+                    }
+                    b"deletedoccurrences" if inside_item => {
+                        inside_deleted_occurrences = true;
+                    }
+                    b"deletedoccurrence" if inside_deleted_occurrences => {
+                        inside_deleted_occurrence = true;
+                    }
+                    b"modifiedoccurrences" if inside_item => {
+                        inside_modified_occurrences = true;
+                    }
+                    b"occurrence" if inside_modified_occurrences => {
+                        inside_modified_occurrence = true;
+                        current_override = ModifiedOccurrenceBuilder::default();
+                    }
+                    b"itemid" if inside_modified_occurrence => {
+                        for a in e.attributes().flatten() {
+                            let key = a.key.as_ref();
+                            if key.eq_ignore_ascii_case(b"Id") {
+                                current_override.item_id =
+                                    String::from_utf8_lossy(&a.value).into_owned();
+                            } else if key.eq_ignore_ascii_case(b"ChangeKey") {
+                                current_override.change_key =
+                                    Some(String::from_utf8_lossy(&a.value).into_owned());
+                            }
+                        }
+                    }
+                    b"subject" if inside_item => text_target = Some("subject"),
+                    b"start" if inside_deleted_occurrence => {
+                        text_target = Some("deleted_occurrence_start");
+                    }
+                    b"start" if inside_modified_occurrence => {
+                        text_target = Some("override_start");
+                    }
+                    b"end" if inside_modified_occurrence => {
+                        text_target = Some("override_end");
+                    }
+                    b"originalstart" if inside_modified_occurrence => {
+                        text_target = Some("override_original_start");
+                    }
+                    b"start" if inside_item => text_target = Some("start"),
+                    b"end" if inside_item => text_target = Some("end"),
+                    b"isrecurring" if inside_item => text_target = Some("recurring"),
+                    b"calendaritemtype" if inside_item => text_target = Some("item_type"),
+                    _ => {}
+                }
+            }
+            Ok(XmlEvent::End(e)) => {
+                let local = e.local_name().as_ref().to_ascii_lowercase();
+                if local.as_slice() == b"recurrence" {
+                    if let Some(walker) = recurrence_walker.take() {
+                        // Server occasionally hands back a malformed
+                        // recurrence (e.g. an unsupported Relative*
+                        // shape). Swallow the error so one bad master
+                        // doesn't blow up the whole batch — the
+                        // caller will just see `recurrence=None` for
+                        // that row and render it as a single event.
+                        if let Ok(rec) = walker.finish() {
+                            current.recurrence = Some(rec);
+                        }
+                    }
+                    text_target = None;
+                    continue;
+                }
+                if let Some(walker) = recurrence_walker.as_mut() {
+                    walker.observe_end_generic();
+                    continue;
+                }
+                match local.as_slice() {
+                    b"deletedoccurrences" => inside_deleted_occurrences = false,
+                    b"deletedoccurrence" => inside_deleted_occurrence = false,
+                    b"modifiedoccurrences" => inside_modified_occurrences = false,
+                    b"occurrence" if inside_modified_occurrence => {
+                        inside_modified_occurrence = false;
+                        if let Some(o) = std::mem::take(&mut current_override).finish() {
+                            current.modified_occurrences.push(o);
+                        }
+                    }
+                    b"calendaritem" => {
+                        if !current.item_id.is_empty() {
+                            items.push(std::mem::take(&mut current));
+                        }
+                        inside_item = false;
+                    }
+                    _ => {}
+                }
+                text_target = None;
+            }
+            Ok(XmlEvent::Text(t)) => {
+                let raw = match t.unescape() {
+                    Ok(c) => c.to_string(),
+                    Err(_) => continue,
+                };
+                let s = raw.trim();
+                if s.is_empty() {
+                    continue;
+                }
+                if let Some(walker) = recurrence_walker.as_mut() {
+                    walker.observe_text(s);
+                    continue;
+                }
+                if text_target.is_none() {
+                    continue;
+                }
+                match text_target {
+                    Some("subject") => current.subject.push_str(s),
+                    Some("start") => current.start = parse_ews_datetime(s),
+                    Some("end") => current.end = parse_ews_datetime(s),
+                    Some("deleted_occurrence_start") => {
+                        if let Some(dt) = parse_ews_datetime(s) {
+                            current.deleted_occurrence_starts.push(dt);
+                        }
+                    }
+                    Some("override_start") => {
+                        current_override.start = parse_ews_datetime(s);
+                    }
+                    Some("override_end") => {
+                        current_override.end = parse_ews_datetime(s);
+                    }
+                    Some("override_original_start") => {
+                        current_override.original_start = parse_ews_datetime(s);
+                    }
+                    Some("recurring") => {
+                        current.is_recurring = s.eq_ignore_ascii_case("true");
+                    }
+                    Some("item_type") => {
+                        let acc = current.item_type.get_or_insert_with(String::new);
+                        acc.push_str(s);
+                    }
+                    _ => {}
+                }
+            }
+            Ok(XmlEvent::Eof) => break,
+            Err(err) => {
+                return Err(EwsError::Protocol(format!("GetItem xml parse: {err}")));
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(items)
 }
 
 /// EWS serialises timestamps as `YYYY-MM-DDTHH:MM:SSZ` (or
@@ -1637,7 +1858,7 @@ pub fn parse_ews_recurrence(xml: &str) -> EwsResult<EwsRecurrence> {
         match reader.read_event_into(&mut buf) {
             Ok(XmlEvent::Start(e)) | Ok(XmlEvent::Empty(e)) => {
                 let local = e.local_name().as_ref().to_ascii_lowercase();
-                walker.observe_start(local.as_slice())?;
+                walker.observe_start(local.as_slice());
             }
             Ok(XmlEvent::Text(t)) => {
                 let raw = match t.unescape() {
@@ -1684,12 +1905,28 @@ pub(crate) struct RecurrenceWalker {
     pattern: Option<PatternBuilder>,
     range: Option<RangeBuilder>,
     text_target: Option<&'static str>,
+    /// Set when we encounter a recurrence shape Aperio doesn't yet
+    /// support (currently the two Relative* variants). The walker
+    /// keeps consuming the rest of the subtree quietly and surfaces
+    /// the error from [`Self::finish`] instead — so the caller can
+    /// drop just this one row's recurrence rather than aborting the
+    /// whole batch parse.
+    unsupported: Option<&'static str>,
 }
 
 impl RecurrenceWalker {
-    /// Handle a Start (or Empty) event's local-name. Errors only
-    /// on shapes we explicitly refuse (Relative* recurrences).
-    pub(crate) fn observe_start(&mut self, local: &[u8]) -> EwsResult<()> {
+    /// Handle a Start (or Empty) event's local-name. Infallible:
+    /// unsupported recurrence shapes are recorded internally and
+    /// surfaced at [`Self::finish`] time.
+    ///
+    /// **Why infallible matters**: a GetItem batch can carry dozens
+    /// of masters and one Relative*Recurrence (e.g. "every third
+    /// Wednesday") would otherwise propagate out of the parser and
+    /// nuke the entire response — including all the singles and
+    /// every other series in the same payload. Letting `finish`
+    /// surface the error lets the caller localise the failure to
+    /// the single offending row.
+    pub(crate) fn observe_start(&mut self, local: &[u8]) {
         match local {
             b"dailyrecurrence" => {
                 self.pattern = Some(PatternBuilder::Daily { interval: 1 });
@@ -1713,14 +1950,10 @@ impl RecurrenceWalker {
                 });
             }
             b"relativemonthlyrecurrence" => {
-                return Err(EwsError::Protocol(
-                    "RelativeMonthlyRecurrence is not supported by Aperio yet".into(),
-                ));
+                self.unsupported = Some("RelativeMonthlyRecurrence");
             }
             b"relativeyearlyrecurrence" => {
-                return Err(EwsError::Protocol(
-                    "RelativeYearlyRecurrence is not supported by Aperio yet".into(),
-                ));
+                self.unsupported = Some("RelativeYearlyRecurrence");
             }
             b"noendrecurrence" => self.range = Some(RangeBuilder::NoEnd),
             b"numberedrecurrence" => {
@@ -1739,7 +1972,6 @@ impl RecurrenceWalker {
             b"enddate" => self.text_target = Some("end_date"),
             _ => {}
         }
-        Ok(())
     }
 
     /// Feed text content (already trimmed + non-empty). Routed to
@@ -1805,9 +2037,18 @@ impl RecurrenceWalker {
         self.text_target = None;
     }
 
-    /// Assemble the parsed recurrence. Errors on missing or
-    /// incomplete pattern/range elements.
+    /// Assemble the parsed recurrence. Errors on:
+    ///   - unsupported shapes recorded during the walk
+    ///     (Relative* recurrences),
+    ///   - missing pattern element (server didn't include one,
+    ///     or only included an unsupported one),
+    ///   - missing / incomplete range element.
     pub(crate) fn finish(self) -> EwsResult<EwsRecurrence> {
+        if let Some(name) = self.unsupported {
+            return Err(EwsError::Protocol(format!(
+                "{name} is not supported by Aperio yet",
+            )));
+        }
         let pattern = self
             .pattern
             .ok_or_else(|| EwsError::Protocol("Recurrence missing pattern element".into()))?
@@ -2987,5 +3228,223 @@ mod tests {
         assert!(!body.contains("<m:SyncState>"));
         // FolderId without ChangeKey.
         assert!(body.contains(r#"<t:FolderId Id="FOLDER-ID"/>"#));
+    }
+
+    #[test]
+    fn parse_get_items_response_extracts_recurrence_and_overrides() {
+        // Shape of a real `GetItemResponse` body that the recurrence
+        // enrichment fan-out parses: two CalendarItem rows side by
+        // side, each a RecurringMaster with its own recurrence shape
+        // — one weekly with a deleted occurrence, one daily-numbered
+        // with a modified occurrence. The parser must surface both
+        // rows independently with their full recurrence + overrides.
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+               xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types"
+               xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages">
+  <soap:Body>
+    <m:GetItemResponse>
+      <m:ResponseMessages>
+        <m:GetItemResponseMessage ResponseClass="Success">
+          <m:ResponseCode>NoError</m:ResponseCode>
+          <m:Items>
+            <t:CalendarItem>
+              <t:ItemId Id="MASTER-W" ChangeKey="CK-W"/>
+              <t:Subject>Weekly</t:Subject>
+              <t:Start>2026-05-04T09:00:00Z</t:Start>
+              <t:End>2026-05-04T09:30:00Z</t:End>
+              <t:IsRecurring>true</t:IsRecurring>
+              <t:CalendarItemType>RecurringMaster</t:CalendarItemType>
+              <t:Recurrence>
+                <t:WeeklyRecurrence>
+                  <t:Interval>1</t:Interval>
+                  <t:DaysOfWeek>Monday</t:DaysOfWeek>
+                </t:WeeklyRecurrence>
+                <t:NoEndRecurrence>
+                  <t:StartDate>2026-05-04</t:StartDate>
+                </t:NoEndRecurrence>
+              </t:Recurrence>
+              <t:DeletedOccurrences>
+                <t:DeletedOccurrence>
+                  <t:Start>2026-05-18T09:00:00Z</t:Start>
+                </t:DeletedOccurrence>
+              </t:DeletedOccurrences>
+            </t:CalendarItem>
+          </m:Items>
+        </m:GetItemResponseMessage>
+        <m:GetItemResponseMessage ResponseClass="Success">
+          <m:ResponseCode>NoError</m:ResponseCode>
+          <m:Items>
+            <t:CalendarItem>
+              <t:ItemId Id="MASTER-D" ChangeKey="CK-D"/>
+              <t:Subject>Daily</t:Subject>
+              <t:Start>2026-06-01T09:00:00Z</t:Start>
+              <t:End>2026-06-01T09:30:00Z</t:End>
+              <t:IsRecurring>true</t:IsRecurring>
+              <t:CalendarItemType>RecurringMaster</t:CalendarItemType>
+              <t:Recurrence>
+                <t:DailyRecurrence><t:Interval>1</t:Interval></t:DailyRecurrence>
+                <t:NumberedRecurrence>
+                  <t:StartDate>2026-06-01</t:StartDate>
+                  <t:NumberOfOccurrences>10</t:NumberOfOccurrences>
+                </t:NumberedRecurrence>
+              </t:Recurrence>
+              <t:ModifiedOccurrences>
+                <t:Occurrence>
+                  <t:ItemId Id="OCC-MOVED" ChangeKey="CK-OM"/>
+                  <t:Start>2026-06-03T14:00:00Z</t:Start>
+                  <t:End>2026-06-03T14:30:00Z</t:End>
+                  <t:OriginalStart>2026-06-03T09:00:00Z</t:OriginalStart>
+                </t:Occurrence>
+              </t:ModifiedOccurrences>
+            </t:CalendarItem>
+          </m:Items>
+        </m:GetItemResponseMessage>
+      </m:ResponseMessages>
+    </m:GetItemResponse>
+  </soap:Body>
+</soap:Envelope>"#;
+        let parsed = parse_get_calendar_items_response(xml).unwrap();
+        assert_eq!(parsed.len(), 2);
+
+        // First master: weekly + one EXDATE.
+        let weekly = parsed.iter().find(|i| i.item_id == "MASTER-W").unwrap();
+        assert_eq!(weekly.change_key.as_deref(), Some("CK-W"));
+        let rec = weekly.recurrence.as_ref().expect("weekly recurrence");
+        assert_eq!(
+            rec.pattern,
+            EwsRecurrencePattern::Weekly {
+                interval: 1,
+                days_of_week: vec![EwsDay::Monday],
+            },
+        );
+        assert_eq!(weekly.deleted_occurrence_starts.len(), 1);
+        assert_eq!(
+            weekly.deleted_occurrence_starts[0].to_rfc3339(),
+            "2026-05-18T09:00:00+00:00",
+        );
+
+        // Second master: daily-numbered + one moved override. The
+        // override's nested ItemId must NOT have overwritten the
+        // master's id (same regression guard as the SyncFolderItems
+        // parser).
+        let daily = parsed.iter().find(|i| i.item_id == "MASTER-D").unwrap();
+        assert_eq!(daily.change_key.as_deref(), Some("CK-D"));
+        assert!(matches!(
+            daily.recurrence.as_ref().unwrap().range,
+            EwsRecurrenceRange::Numbered { occurrences: 10 },
+        ));
+        assert_eq!(daily.modified_occurrences.len(), 1);
+        let ov = &daily.modified_occurrences[0];
+        assert_eq!(ov.item_id, "OCC-MOVED");
+        assert_eq!(ov.start.to_rfc3339(), "2026-06-03T14:00:00+00:00");
+        assert_eq!(ov.original_start.to_rfc3339(), "2026-06-03T09:00:00+00:00");
+    }
+
+    #[test]
+    fn parse_get_items_response_keeps_other_rows_when_one_master_uses_unsupported_recurrence() {
+        // Regression for the production bug where ONE master with
+        // a RelativeMonthlyRecurrence ("Abgesagt: Themenoffener
+        // Austausch", repeating every third Wednesday) poisoned
+        // the whole GetItem fan-out and caused zero events from
+        // the EWS calendar to render — including singles in the
+        // same drain (which depend on a successful sync state
+        // commit). The walker must tolerate the bad row, leave
+        // its recurrence empty, and continue parsing the rest.
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+               xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types"
+               xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages">
+  <soap:Body>
+    <m:GetItemResponse>
+      <m:ResponseMessages>
+        <m:GetItemResponseMessage ResponseClass="Success">
+          <m:ResponseCode>NoError</m:ResponseCode>
+          <m:Items>
+            <t:CalendarItem>
+              <t:ItemId Id="MASTER-BAD" ChangeKey="CK-B"/>
+              <t:Subject>Third Wednesday meeting</t:Subject>
+              <t:Start>2024-05-15T10:30:00Z</t:Start>
+              <t:End>2024-05-15T12:00:00Z</t:End>
+              <t:CalendarItemType>RecurringMaster</t:CalendarItemType>
+              <t:Recurrence>
+                <t:RelativeMonthlyRecurrence>
+                  <t:Interval>1</t:Interval>
+                  <t:DaysOfWeek>Wednesday</t:DaysOfWeek>
+                  <t:DayOfWeekIndex>Third</t:DayOfWeekIndex>
+                </t:RelativeMonthlyRecurrence>
+                <t:NoEndRecurrence>
+                  <t:StartDate>2024-05-15</t:StartDate>
+                </t:NoEndRecurrence>
+              </t:Recurrence>
+            </t:CalendarItem>
+          </m:Items>
+        </m:GetItemResponseMessage>
+        <m:GetItemResponseMessage ResponseClass="Success">
+          <m:ResponseCode>NoError</m:ResponseCode>
+          <m:Items>
+            <t:CalendarItem>
+              <t:ItemId Id="MASTER-OK" ChangeKey="CK-OK"/>
+              <t:Subject>Weekly OK</t:Subject>
+              <t:Start>2026-05-04T09:00:00Z</t:Start>
+              <t:End>2026-05-04T09:30:00Z</t:End>
+              <t:CalendarItemType>RecurringMaster</t:CalendarItemType>
+              <t:Recurrence>
+                <t:WeeklyRecurrence>
+                  <t:Interval>1</t:Interval>
+                  <t:DaysOfWeek>Monday</t:DaysOfWeek>
+                </t:WeeklyRecurrence>
+                <t:NoEndRecurrence>
+                  <t:StartDate>2026-05-04</t:StartDate>
+                </t:NoEndRecurrence>
+              </t:Recurrence>
+            </t:CalendarItem>
+          </m:Items>
+        </m:GetItemResponseMessage>
+      </m:ResponseMessages>
+    </m:GetItemResponse>
+  </soap:Body>
+</soap:Envelope>"#;
+        // The whole batch must parse cleanly — no propagated Err.
+        let parsed = parse_get_calendar_items_response(xml).unwrap();
+        assert_eq!(parsed.len(), 2, "both rows must survive");
+
+        // Bad row is present but recurrence-less (so it'll render
+        // as a single event rather than expanding wrong).
+        let bad = parsed.iter().find(|i| i.item_id == "MASTER-BAD").unwrap();
+        assert!(
+            bad.recurrence.is_none(),
+            "unsupported Relative* must drop the recurrence",
+        );
+        assert_eq!(bad.subject, "Third Wednesday meeting");
+
+        // Good row survived with its weekly RRULE intact.
+        let good = parsed.iter().find(|i| i.item_id == "MASTER-OK").unwrap();
+        let rec = good.recurrence.as_ref().expect("good row keeps recurrence");
+        assert_eq!(
+            rec.pattern,
+            EwsRecurrencePattern::Weekly {
+                interval: 1,
+                days_of_week: vec![EwsDay::Monday],
+            },
+        );
+    }
+
+    #[test]
+    fn get_calendar_items_envelope_lists_all_ids_and_requests_recurrence() {
+        let ids = vec![
+            ("ID-1".to_string(), Some("CK-1".to_string())),
+            ("ID-2".to_string(), None),
+        ];
+        let body = crate::soap::get_calendar_items_with_recurrence(&ids);
+        // Both ids should be present in the request, with ChangeKey
+        // attached only for the first.
+        assert!(body.contains(r#"<t:ItemId Id="ID-1" ChangeKey="CK-1"/>"#));
+        assert!(body.contains(r#"<t:ItemId Id="ID-2"/>"#));
+        // The whole point of this envelope is to ask for the complex
+        // recurrence properties that SyncFolderItems silently drops.
+        assert!(body.contains(r#"<t:FieldURI FieldURI="calendar:Recurrence"/>"#));
+        assert!(body.contains(r#"<t:FieldURI FieldURI="calendar:ModifiedOccurrences"/>"#));
+        assert!(body.contains(r#"<t:FieldURI FieldURI="calendar:DeletedOccurrences"/>"#));
     }
 }

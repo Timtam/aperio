@@ -400,6 +400,62 @@ pub fn get_recurring_master(occurrence_id: &str, change_key: Option<&str>) -> St
     wrap(&body)
 }
 
+/// SOAP body for `GetItem` against a batch of CalendarItem ids,
+/// requesting the **full** recurrence shape (the `<t:Recurrence>`
+/// element plus its `<t:ModifiedOccurrences>` / `<t:DeletedOccurrences>`
+/// siblings).
+///
+/// Why this exists: `SyncFolderItems` silently strips
+/// `calendar:Recurrence`, `calendar:ModifiedOccurrences`, and
+/// `calendar:DeletedOccurrences` from its response **regardless** of
+/// what we list in `AdditionalProperties` — a well-known EWS quirk.
+/// Outlook's own client works around it the same way: do
+/// `SyncFolderItems` for change notifications + the cheap shape, then
+/// fan out a `GetItem` batch for the RecurringMaster ids to pick up
+/// the actual recurrence rules. Without this step every series in
+/// Aperio would render as a single ghost event at the master's first
+/// occurrence.
+///
+/// `ids` is a flat list of `(item_id, change_key)` pairs; the
+/// caller groups them into batches that fit inside Exchange's
+/// per-request throttling cap (we use 100 ids/batch — well under
+/// the documented 1000 limit and conservative on body size).
+pub fn get_calendar_items_with_recurrence(ids: &[(String, Option<String>)]) -> String {
+    let mut item_ids_xml = String::new();
+    for (id, ck) in ids {
+        let attr = match ck {
+            Some(ck) => format!(
+                r#"        <t:ItemId Id="{}" ChangeKey="{}"/>"#,
+                escape_xml(id),
+                escape_xml(ck),
+            ),
+            None => format!(r#"        <t:ItemId Id="{}"/>"#, escape_xml(id)),
+        };
+        item_ids_xml.push_str(&attr);
+        item_ids_xml.push('\n');
+    }
+    let body = format!(
+        r#"    <m:GetItem>
+      <m:ItemShape>
+        <t:BaseShape>IdOnly</t:BaseShape>
+        <t:AdditionalProperties>
+          <t:FieldURI FieldURI="item:Subject"/>
+          <t:FieldURI FieldURI="calendar:Start"/>
+          <t:FieldURI FieldURI="calendar:End"/>
+          <t:FieldURI FieldURI="calendar:IsRecurring"/>
+          <t:FieldURI FieldURI="calendar:CalendarItemType"/>
+          <t:FieldURI FieldURI="calendar:Recurrence"/>
+          <t:FieldURI FieldURI="calendar:ModifiedOccurrences"/>
+          <t:FieldURI FieldURI="calendar:DeletedOccurrences"/>
+        </t:AdditionalProperties>
+      </m:ItemShape>
+      <m:ItemIds>
+{item_ids_xml}      </m:ItemIds>
+    </m:GetItem>"#,
+    );
+    wrap(&body)
+}
+
 /// SOAP body for `CreateItem` into a calendar folder. The
 /// `calendar_item_xml` slice is the pre-rendered `<t:CalendarItem>`
 /// payload (built by `mapping::calendar_item_create_body`); we wrap

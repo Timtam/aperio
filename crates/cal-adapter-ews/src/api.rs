@@ -293,12 +293,104 @@ pub async fn sync_events_to_completion(
                 duration_ms = started.elapsed().as_millis() as u64,
                 "SyncFolderItems drain complete",
             );
+            // SyncFolderItems silently strips the complex calendar
+            // properties from its response — recurrence shapes only
+            // come back via GetItem. Fan out before returning so the
+            // caller sees a fully-populated state (and persists it
+            // with recurrence already filled in, sparing the next
+            // boot the same round-trip).
+            enrich_recurring_masters(client, &mut state).await?;
             return Ok(state);
         }
     }
     Err(EwsError::Protocol(
         "SyncFolderItems didn't terminate after 64 pages".into(),
     ))
+}
+
+/// Per-request cap for the GetItem fan-out. Microsoft documents a
+/// throttling limit around 1000 ids but anything past ~200 starts
+/// producing unwieldy request bodies; 100 keeps each round-trip
+/// comfortably under 100 KiB and gives the server room under its
+/// per-call CPU quota.
+const GET_ITEM_BATCH_SIZE: usize = 100;
+
+/// For every cached RecurringMaster that doesn't yet carry a
+/// `recurrence` shape, batch-GetItem the missing details and merge
+/// them back into `state.items`. No-op if nothing needs enriching
+/// (warm reads where the previous run already populated everything).
+///
+/// We deliberately drive enrichment off the **cached state**, not
+/// off the latest sync batch's deltas: that handles three flows
+/// uniformly — cold start (every master is new), Update for a
+/// master (the Update overwrites the cached row, clearing
+/// `recurrence`, so it re-qualifies), and resumed sync after a
+/// crash before persistence (still picks them up on the next run).
+async fn enrich_recurring_masters(
+    client: &EwsClient,
+    state: &mut SyncedFolderState,
+) -> EwsResult<()> {
+    let to_enrich: Vec<(String, Option<String>)> = state
+        .items
+        .values()
+        .filter(|it| it.item_type.as_deref() == Some("RecurringMaster"))
+        .filter(|it| it.recurrence.is_none())
+        .map(|it| (it.item_id.clone(), it.change_key.clone()))
+        .collect();
+
+    if to_enrich.is_empty() {
+        return Ok(());
+    }
+
+    tracing::info!(
+        target: "cal_adapter_ews::sync",
+        masters = to_enrich.len(),
+        "GetItem fan-out for recurrence enrichment",
+    );
+    eprintln!(
+        "[EWS] enrich_recurring_masters: {} master(s) need recurrence",
+        to_enrich.len()
+    );
+
+    for batch in to_enrich.chunks(GET_ITEM_BATCH_SIZE) {
+        let body = crate::soap::get_calendar_items_with_recurrence(batch);
+        let xml = client.post_soap(body).await?;
+        if std::env::var("APERIO_EWS_DUMP_SOAP").is_ok() {
+            eprintln!(
+                "[EWS] === GetItem (recurrence) response ===\n{xml}\n[EWS] === end ===",
+            );
+        }
+        let parsed = crate::mapping::parse_get_calendar_items_response(&xml)?;
+        for fresh in parsed {
+            let Some(cached) = state.items.get_mut(&fresh.item_id) else {
+                continue;
+            };
+            // Only the recurrence-related fields are meaningful — the
+            // base shape we requested is minimal (Subject/Start/End/…)
+            // and we already have the authoritative values from the
+            // SyncFolderItems drain. Don't clobber them with the
+            // GetItem copy.
+            cached.recurrence = fresh.recurrence;
+            cached.modified_occurrences = fresh.modified_occurrences;
+            cached.deleted_occurrence_starts = fresh.deleted_occurrence_starts;
+            // Refresh the ChangeKey if GetItem returned a newer one
+            // — recurrence reads don't bump it server-side typically,
+            // but it costs nothing to keep in sync.
+            if fresh.change_key.is_some() {
+                cached.change_key = fresh.change_key;
+            }
+            eprintln!(
+                "[EWS] enrich item_id={} subject={:?} has_recurrence={} mods={} dels={}",
+                cached.item_id,
+                cached.subject,
+                cached.recurrence.is_some(),
+                cached.modified_occurrences.len(),
+                cached.deleted_occurrence_starts.len(),
+            );
+        }
+    }
+
+    Ok(())
 }
 
 /// Create a new calendar item in `calendar_id`. Returns the
