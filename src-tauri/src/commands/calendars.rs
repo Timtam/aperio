@@ -8,10 +8,14 @@ use std::sync::Arc;
 use sync_core::{EventPayload, IdPayload, SyncEvent};
 use tauri::State;
 
+use plugin_core::{PluginManager, RecurrenceCapabilities};
+
 use super::birthdays::{
     is_birthday_calendar_id, list_birthday_calendars, synthesise_birthday_events,
 };
+use super::plugins::plugin_id_for_adapter_kind;
 use super::{CommandError, CommandResult};
+use crate::accounts::{AccountsRepo, AdapterKind};
 use crate::db::DbHandle;
 use crate::event_log::EventLogWriter;
 use crate::overrides::{apply_to_calendars, OverridesRepo};
@@ -30,6 +34,36 @@ pub struct CalendarRow {
     #[serde(flatten)]
     pub inner: Calendar,
     pub account_id: String,
+    /// Recurrence shapes the owning adapter can store, resolved
+    /// from the account's plugin manifest. The EventDialog greys
+    /// out options this source can't round-trip (e.g. EWS has no
+    /// yearly interval). Local + unknown sources report full
+    /// RFC-5545 support via [`RecurrenceCapabilities::default`].
+    pub recurrence_capabilities: RecurrenceCapabilities,
+}
+
+/// Resolve an account's recurrence capabilities from its plugin
+/// manifest. Local calendars (`account_id == LOCAL_ID`) and any
+/// account whose plugin we can't resolve fall back to full
+/// RFC-5545 support — the host's own SQLite store has no
+/// restrictions, and a missing manifest shouldn't silently strip
+/// options the source might actually support.
+fn recurrence_caps_for_account(
+    account_id: &str,
+    account_kinds: &std::collections::HashMap<String, AdapterKind>,
+    plugin_manager: &PluginManager,
+) -> RecurrenceCapabilities {
+    let Some(kind) = account_kinds.get(account_id) else {
+        return RecurrenceCapabilities::default();
+    };
+    let Some(plugin_id) = plugin_id_for_adapter_kind(*kind) else {
+        // Local has no plugin — full support.
+        return RecurrenceCapabilities::default();
+    };
+    plugin_manager
+        .get_including_disabled(plugin_id)
+        .map(|p| p.manifest.recurrence.clone())
+        .unwrap_or_default()
 }
 
 /// Frontend-supplied payload for creating a local calendar.
@@ -43,6 +77,7 @@ pub struct CreateCalendarRequest {
 pub async fn list_calendars(
     adapter: State<'_, LocalAdapter>,
     registry: State<'_, Arc<AdapterRegistry>>,
+    plugin_manager: State<'_, Arc<PluginManager>>,
     db: State<'_, DbHandle>,
 ) -> CommandResult<Vec<CalendarRow>> {
     tracing::info!(
@@ -88,27 +123,52 @@ pub async fn list_calendars(
         registry.note_calendar_route(&cal.id, account_id);
     }
 
+    // Snapshot account_id → adapter_kind once so the per-row caps
+    // lookup is a cheap map hit rather than a SQL round-trip each.
+    // A read failure degrades to "every account looks local" → full
+    // RFC-5545 support, which is the safe permissive default.
+    let account_kinds: std::collections::HashMap<String, AdapterKind> = AccountsRepo::new(&shared)
+        .list()
+        .map(|accounts| {
+            accounts
+                .into_iter()
+                .map(|a| (a.id, a.adapter_kind))
+                .collect()
+        })
+        .unwrap_or_default();
+
     // Decorate each row with its owning account id (from the
-    // registry's route map). Local rows fall back to LOCAL_ID;
-    // external rows look themselves up in the routes. The frontend
-    // uses this for the account-grouped sidebar — without it,
-    // grouping would need a second round-trip.
+    // registry's route map) + the source's recurrence capabilities.
+    // Local rows fall back to LOCAL_ID; external rows look themselves
+    // up in the routes. The frontend uses account_id for the
+    // account-grouped sidebar and recurrence_capabilities to grey out
+    // unsupported options in the EventDialog — both stamped here so
+    // neither needs a second round-trip.
     let mut decorated: Vec<CalendarRow> = out
         .into_iter()
         .map(|cal| {
             let account_id = registry
                 .account_for_calendar(&cal.id)
                 .unwrap_or_else(|| LOCAL_ID.to_string());
+            let recurrence_capabilities =
+                recurrence_caps_for_account(&account_id, &account_kinds, &plugin_manager);
             CalendarRow {
                 inner: cal,
                 account_id,
+                recurrence_capabilities,
             }
         })
         .collect();
     for (cal, account_id) in birthday_rows {
+        // Birthday calendars are read-only synthetics — recurrence
+        // editing never targets them, so the default (full) is moot
+        // but kept consistent.
+        let recurrence_capabilities =
+            recurrence_caps_for_account(&account_id, &account_kinds, &plugin_manager);
         decorated.push(CalendarRow {
             inner: cal,
             account_id,
+            recurrence_capabilities,
         });
     }
     Ok(decorated)
@@ -136,6 +196,9 @@ pub async fn create_calendar(
     Ok(CalendarRow {
         inner: cal,
         account_id: LOCAL_ID.to_string(),
+        // Local calendars live in the host's own SQLite store, which
+        // has no recurrence restrictions — full RFC-5545.
+        recurrence_capabilities: RecurrenceCapabilities::default(),
     })
 }
 
