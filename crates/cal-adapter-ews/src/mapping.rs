@@ -3025,12 +3025,19 @@ mod tests {
         };
         let (set, del) = event_to_update_field_xml(&ev).unwrap();
         assert!(set.contains("<t:Subject>Updated</t:Subject>"));
-        assert!(set.contains("ReminderIsSet"));
-        // Optional fields without values become DeleteItemField blocks.
+        // No reminder → ReminderIsSet=false (NOT a delete of the
+        // minutes field, which EWS rejects with
+        // ErrorInvalidPropertyDelete).
+        assert!(set.contains("<t:ReminderIsSet>false</t:ReminderIsSet>"));
+        assert!(
+            !del.contains("FieldURI=\"item:ReminderMinutesBeforeStart\""),
+            "ReminderMinutesBeforeStart must not be deleted: {del}",
+        );
+        // The genuinely-deletable optional fields still become
+        // DeleteItemField blocks when cleared.
         assert!(del.contains("FieldURI=\"item:Body\""));
         assert!(del.contains("FieldURI=\"calendar:Location\""));
         assert!(del.contains("FieldURI=\"calendar:Recurrence\""));
-        assert!(del.contains("FieldURI=\"item:ReminderMinutesBeforeStart\""));
     }
 
     #[test]
