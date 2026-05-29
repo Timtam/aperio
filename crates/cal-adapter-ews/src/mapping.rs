@@ -1324,9 +1324,16 @@ pub fn event_to_update_field_xml(event: &Event) -> EwsResult<(String, String)> {
             "ReminderMinutesBeforeStart",
             &minutes.to_string(),
         );
-    } else {
-        del.push_str(delete_item_field_xml("item:ReminderMinutesBeforeStart").as_str());
     }
+    // NB: when there's no reminder we DON'T `DeleteItemField`
+    // ReminderMinutesBeforeStart. EWS refuses that delete with
+    // `ErrorInvalidPropertyDelete` — the property always carries a
+    // value server-side (a default), so it isn't deletable. Setting
+    // `ReminderIsSet=false` above is the canonical way to turn a
+    // reminder off; the stale minutes value is then ignored by the
+    // server and by Outlook. (Deleting it was the cause of the
+    // "Die Löschaktion wird für diese Eigenschaft nicht unterstützt"
+    // failure when editing a recurring series.)
 
     if let Some(rec) = &event.recurrence {
         let rec_xml = rrule_to_ews_recurrence(&rec.rrule, event.start)?;
@@ -3973,6 +3980,38 @@ mod tests {
                 interval: 1,
                 days_of_week: vec![EwsDay::Monday],
             },
+        );
+    }
+
+    #[test]
+    fn update_field_xml_clears_reminder_without_deleting_minutes() {
+        // Regression: editing an event (incl. a recurring master)
+        // down to "no reminder" must NOT emit a DeleteItemField for
+        // ReminderMinutesBeforeStart — EWS rejects that with
+        // ErrorInvalidPropertyDelete ("Die Löschaktion wird für
+        // diese Eigenschaft nicht unterstützt"). The reminder is
+        // turned off via ReminderIsSet=false instead.
+        let item = ParsedItem {
+            item_id: "M".into(),
+            subject: "Series".into(),
+            start: Some("2026-06-05T08:00:00Z".parse().unwrap()),
+            end: Some("2026-06-05T08:30:00Z".parse().unwrap()),
+            item_type: Some("RecurringMaster".into()),
+            ..ParsedItem::default()
+        };
+        let mut ev = to_event(item, "cal").unwrap();
+        ev.reminders = Vec::new(); // user cleared / never had a reminder
+
+        let (set, del) = event_to_update_field_xml(&ev).unwrap();
+        // Reminder turned off by setting the flag, not by deleting
+        // the minutes field.
+        assert!(
+            set.contains("<t:ReminderIsSet>false</t:ReminderIsSet>"),
+            "expected ReminderIsSet=false in set fields: {set}",
+        );
+        assert!(
+            !del.contains("ReminderMinutesBeforeStart"),
+            "must NOT DeleteItemField ReminderMinutesBeforeStart: {del}",
         );
     }
 
