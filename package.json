@@ -15,12 +15,14 @@
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2",
     "@tauri-apps/plugin-notification": "^2",
-    "react": "^18.3.0",
-    "react-dom": "^18.3.0",
-    "i18next": "^23",
-    "react-i18next": "^14",
+    "@types/linkify-it": "^5.0.0",
     "date-fns": "^3",
     "date-fns-tz": "^3",
+    "i18next": "^23",
+    "linkify-it": "^5.0.1",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "react-i18next": "^14",
     "rrule": "^2.8"
   },
   "devDependencies": {

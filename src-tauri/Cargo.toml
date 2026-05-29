@@ -24,6 +24,12 @@ tauri-plugin-notification = "2"
 # also matches the platform's "select a file" idiom (NSOpenPanel
 # on macOS, common-item-dialog on Windows, the portal on Linux).
 tauri-plugin-dialog = "2"
+# Opens validated http/https/mailto links in the OS default handler
+# (browser / mail client) from the `open_external_url` command. Used
+# instead of the Tauri opener plugin so the scheme allowlist lives in
+# our own trusted command rather than a broad webview-facing
+# capability — descriptions come from untrusted EWS invitations.
+opener = "0.7"
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

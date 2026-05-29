@@ -36,6 +36,14 @@ export function isCommandError(value: unknown): value is CommandError {
   );
 }
 
+/** Open a URL in the OS default browser / mail client. The backend
+ *  re-validates the scheme (only http/https/mailto) before handing it
+ *  to the OS — descriptions come from untrusted sources, so this is
+ *  never a raw shell open. Rejected URLs surface as a CommandError. */
+export async function openExternalUrl(url: string): Promise<void> {
+  await invoke('open_external_url', { url });
+}
+
 // ── Calendars ──────────────────────────────────────────────────────────────
 
 export const listCalendars = () => invoke<Calendar[]>('list_calendars');

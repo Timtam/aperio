@@ -4,6 +4,11 @@
       "invalidHex": "Please enter a valid hex value, e.g. #e53935."
     }
   },
+  "descriptionLinks": {
+    "label": "Links in this description",
+    "open": "Open link: {{url}}",
+    "openFailed": "Could not open the link: {{message}}"
+  },
   "actions": {
     "duplicated": "\"{{title}}\" duplicated."
   },

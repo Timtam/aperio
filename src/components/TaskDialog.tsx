@@ -9,6 +9,8 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { DescriptionLinks } from './DescriptionLinks';
+
 import { useAnnouncer } from '../a11y/Announcer';
 import {
   createTask as apiCreateTask,
@@ -726,6 +728,7 @@ export function TaskDialog({
             rows={4}
           />
         </label>
+        <DescriptionLinks text={form.description} />
 
         <TaskRecurrenceSelector
           value={form.recurrence}

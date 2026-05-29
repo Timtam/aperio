@@ -9,6 +9,7 @@ import {
 import { useTranslation } from 'react-i18next';
 
 import { useAnnouncer } from '../a11y/Announcer';
+import { DescriptionLinks } from './DescriptionLinks';
 import {
   addEventExdate,
   createEvent as apiCreateEvent,
@@ -545,6 +546,7 @@ export function EventDialog({
             rows={4}
           />
         </label>
+        <DescriptionLinks text={form.description} />
 
         <div className="form__field">
           <span className="form__label" id={attendeesLabelId}>

@@ -267,6 +267,7 @@ pub fn run() {
         .manage(commands::UserPluginsDir(user_plugins_dir))
         .invoke_handler(tauri::generate_handler![
             app_info,
+            commands::open_external_url,
             commands::list_calendars,
             commands::create_calendar,
             commands::delete_calendar,
