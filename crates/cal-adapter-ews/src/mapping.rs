@@ -338,6 +338,17 @@ pub struct ParsedItem {
     /// also edited the content fields.
     #[serde(default)]
     pub modified_occurrences: Vec<ModifiedOccurrence>,
+    /// True once the per-item detail GetItem fan-out has populated
+    /// this row's `body` (and, for masters, `recurrence`). The
+    /// `SyncFolderItems` shape never carries `<t:Body>` or
+    /// `<t:Recurrence>`, so a freshly Created/Updated row starts
+    /// `false` and gets enriched once; the flag stops every
+    /// subsequent sync from re-fetching the (often empty) body of
+    /// every item. `#[serde(default)]` → persisted state files
+    /// written before this field existed load as `false` and
+    /// re-enrich once on the next launch.
+    #[serde(default)]
+    pub detail_fetched: bool,
 }
 
 /// One entry from a master row's `<t:ModifiedOccurrences>` list.
@@ -965,6 +976,9 @@ pub fn parse_get_calendar_items_response(xml: &str) -> EwsResult<Vec<ParsedItem>
                         }
                     }
                     b"subject" if inside_item => text_target = Some("subject"),
+                    b"body" if inside_item && !inside_modified_occurrence => {
+                        text_target = Some("body");
+                    }
                     b"start" if inside_deleted_occurrence => {
                         text_target = Some("deleted_occurrence_start");
                     }
@@ -1043,6 +1057,10 @@ pub fn parse_get_calendar_items_response(xml: &str) -> EwsResult<Vec<ParsedItem>
                 }
                 match text_target {
                     Some("subject") => current.subject.push_str(s),
+                    Some("body") => {
+                        let acc = current.body.get_or_insert_with(String::new);
+                        acc.push_str(s);
+                    }
                     Some("start") => current.start = parse_ews_datetime(s),
                     Some("end") => current.end = parse_ews_datetime(s),
                     Some("deleted_occurrence_start") => {
@@ -1284,13 +1302,18 @@ pub fn event_to_update_field_xml(event: &Event) -> EwsResult<(String, String)> {
     let mut del = String::new();
 
     push_set_string(&mut set, "item:Subject", "Subject", &event.title);
-    match event.description.as_deref().filter(|s| !s.is_empty()) {
-        Some(desc) => {
-            push_set_body(&mut set, desc);
-        }
-        None => {
-            del.push_str(delete_item_field_xml("item:Body").as_str());
-        }
+    // Body is SET when present, but NEVER deleted. `SyncFolderItems`
+    // doesn't return `<t:Body>`, so the description is loaded lazily
+    // via the GetItem enrichment fan-out — and the grid drag-move
+    // path edits the cached row directly. If enrichment hasn't run
+    // (or the server genuinely has no body), `description` is None,
+    // and emitting `DeleteItemField item:Body` would wipe the real
+    // server-side description on every such edit. Only push a Set
+    // when we actually have a body to write; a deliberate "clear the
+    // description" therefore doesn't propagate to EWS (acceptable —
+    // far better than silent data loss).
+    if let Some(desc) = event.description.as_deref().filter(|s| !s.is_empty()) {
+        push_set_body(&mut set, desc);
     }
     match event.location.as_deref().filter(|s| !s.is_empty()) {
         Some(loc) => {
@@ -2796,6 +2819,7 @@ mod tests {
             recurrence: None,
             deleted_occurrence_starts: Vec::new(),
             modified_occurrences: Vec::new(),
+            detail_fetched: false,
         };
         let ev = to_event(item, "FID|CK").unwrap();
         // No `<t:CalendarItemType>` element → defaults to Single,
@@ -3033,9 +3057,14 @@ mod tests {
             !del.contains("FieldURI=\"item:ReminderMinutesBeforeStart\""),
             "ReminderMinutesBeforeStart must not be deleted: {del}",
         );
-        // The genuinely-deletable optional fields still become
-        // DeleteItemField blocks when cleared.
-        assert!(del.contains("FieldURI=\"item:Body\""));
+        // Body is never deleted on EWS — it's loaded lazily and would
+        // otherwise be wiped when absent from our cached read model.
+        assert!(
+            !del.contains("FieldURI=\"item:Body\""),
+            "Body must not be deleted (lazy-loaded, would cause data loss): {del}",
+        );
+        // Location + Recurrence ARE genuinely deletable and still
+        // become DeleteItemField blocks when cleared.
         assert!(del.contains("FieldURI=\"calendar:Location\""));
         assert!(del.contains("FieldURI=\"calendar:Recurrence\""));
     }
@@ -3096,6 +3125,7 @@ mod tests {
             recurrence: None,
             deleted_occurrence_starts: Vec::new(),
             modified_occurrences: Vec::new(),
+            detail_fetched: false,
         };
         assert_eq!(to_event(mk(Some("Single")), "FID").unwrap().id, "S:IID|ICK");
         assert_eq!(
@@ -4023,6 +4053,46 @@ mod tests {
     }
 
     #[test]
+    fn parse_get_items_response_captures_body() {
+        // SyncFolderItems never carries <t:Body>; the detail GetItem
+        // fan-out is what pulls the description. The parser must
+        // capture it into ParsedItem.body so to_event maps it to
+        // Event.description (and the edit path round-trips it instead
+        // of wiping it).
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+               xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types"
+               xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages">
+  <soap:Body>
+    <m:GetItemResponse>
+      <m:ResponseMessages>
+        <m:GetItemResponseMessage ResponseClass="Success">
+          <m:ResponseCode>NoError</m:ResponseCode>
+          <m:Items>
+            <t:CalendarItem>
+              <t:ItemId Id="WITH-BODY" ChangeKey="CK"/>
+              <t:Subject>Has a description</t:Subject>
+              <t:Body BodyType="Text">Bring the quarterly figures.</t:Body>
+              <t:Start>2026-06-05T08:00:00Z</t:Start>
+              <t:End>2026-06-05T08:30:00Z</t:End>
+              <t:CalendarItemType>Single</t:CalendarItemType>
+            </t:CalendarItem>
+          </m:Items>
+        </m:GetItemResponseMessage>
+      </m:ResponseMessages>
+    </m:GetItemResponse>
+  </soap:Body>
+</soap:Envelope>"#;
+        let parsed = parse_get_calendar_items_response(xml).unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].item_id, "WITH-BODY");
+        assert_eq!(
+            parsed[0].body.as_deref(),
+            Some("Bring the quarterly figures."),
+        );
+    }
+
+    #[test]
     fn get_calendar_items_envelope_lists_all_ids_and_requests_recurrence() {
         let ids = vec![
             ("ID-1".to_string(), Some("CK-1".to_string())),
@@ -4034,9 +4104,12 @@ mod tests {
         assert!(body.contains(r#"<t:ItemId Id="ID-1" ChangeKey="CK-1"/>"#));
         assert!(body.contains(r#"<t:ItemId Id="ID-2"/>"#));
         // The whole point of this envelope is to ask for the complex
-        // recurrence properties that SyncFolderItems silently drops.
+        // properties that SyncFolderItems silently drops: the
+        // recurrence shape AND the plain-text body (description).
         assert!(body.contains(r#"<t:FieldURI FieldURI="calendar:Recurrence"/>"#));
         assert!(body.contains(r#"<t:FieldURI FieldURI="calendar:ModifiedOccurrences"/>"#));
         assert!(body.contains(r#"<t:FieldURI FieldURI="calendar:DeletedOccurrences"/>"#));
+        assert!(body.contains(r#"<t:FieldURI FieldURI="item:Body"/>"#));
+        assert!(body.contains("<t:BodyType>Text</t:BodyType>"));
     }
 }

@@ -401,20 +401,25 @@ pub fn get_recurring_master(occurrence_id: &str, change_key: Option<&str>) -> St
 }
 
 /// SOAP body for `GetItem` against a batch of CalendarItem ids,
-/// requesting the **full** recurrence shape (the `<t:Recurrence>`
-/// element plus its `<t:ModifiedOccurrences>` / `<t:DeletedOccurrences>`
-/// siblings).
+/// requesting the **full** detail shape: the `<t:Recurrence>` element
+/// (plus its `<t:ModifiedOccurrences>` / `<t:DeletedOccurrences>`
+/// siblings) AND the plain-text `<t:Body>` (description).
 ///
 /// Why this exists: `SyncFolderItems` silently strips
-/// `calendar:Recurrence`, `calendar:ModifiedOccurrences`, and
-/// `calendar:DeletedOccurrences` from its response **regardless** of
-/// what we list in `AdditionalProperties` — a well-known EWS quirk.
+/// `calendar:Recurrence`, `calendar:ModifiedOccurrences`,
+/// `calendar:DeletedOccurrences` **and** `item:Body` from its
+/// response **regardless** of what we list in `AdditionalProperties`
+/// — a well-known EWS quirk.
 /// Outlook's own client works around it the same way: do
 /// `SyncFolderItems` for change notifications + the cheap shape, then
-/// fan out a `GetItem` batch for the RecurringMaster ids to pick up
-/// the actual recurrence rules. Without this step every series in
-/// Aperio would render as a single ghost event at the master's first
-/// occurrence.
+/// fan out a `GetItem` batch to pick up the recurrence rules and the
+/// description. Without this step every series would render as a
+/// single ghost event at the master's first occurrence, and every
+/// event's description would come back empty (and get wiped on the
+/// next edit).
+///
+/// `<t:BodyType>Text</t:BodyType>` asks the server to down-convert
+/// HTML bodies to plain text, keeping the cached payload small.
 ///
 /// `ids` is a flat list of `(item_id, change_key)` pairs; the
 /// caller groups them into batches that fit inside Exchange's
@@ -438,8 +443,10 @@ pub fn get_calendar_items_with_recurrence(ids: &[(String, Option<String>)]) -> S
         r#"    <m:GetItem>
       <m:ItemShape>
         <t:BaseShape>IdOnly</t:BaseShape>
+        <t:BodyType>Text</t:BodyType>
         <t:AdditionalProperties>
           <t:FieldURI FieldURI="item:Subject"/>
+          <t:FieldURI FieldURI="item:Body"/>
           <t:FieldURI FieldURI="calendar:Start"/>
           <t:FieldURI FieldURI="calendar:End"/>
           <t:FieldURI FieldURI="calendar:IsRecurring"/>

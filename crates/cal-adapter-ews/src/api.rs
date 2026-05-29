@@ -292,12 +292,12 @@ pub async fn sync_events_to_completion(
                 "SyncFolderItems drain complete",
             );
             // SyncFolderItems silently strips the complex calendar
-            // properties from its response — recurrence shapes only
-            // come back via GetItem. Fan out before returning so the
-            // caller sees a fully-populated state (and persists it
-            // with recurrence already filled in, sparing the next
-            // boot the same round-trip).
-            enrich_recurring_masters(client, &mut state).await?;
+            // properties from its response — recurrence shapes AND
+            // the description (`<t:Body>`) only come back via GetItem.
+            // Fan out before returning so the caller sees a fully-
+            // populated state (and persists it with recurrence + body
+            // already filled in, sparing the next boot the round-trip).
+            enrich_item_details(client, &mut state).await?;
             return Ok(state);
         }
     }
@@ -313,26 +313,29 @@ pub async fn sync_events_to_completion(
 /// per-call CPU quota.
 const GET_ITEM_BATCH_SIZE: usize = 100;
 
-/// For every cached RecurringMaster that doesn't yet carry a
-/// `recurrence` shape, batch-GetItem the missing details and merge
-/// them back into `state.items`. No-op if nothing needs enriching
-/// (warm reads where the previous run already populated everything).
+/// For every cached item whose detail hasn't been fetched yet,
+/// batch-GetItem the missing fields (the description `<t:Body>` for
+/// all items, plus the `<t:Recurrence>` shape + occurrence overrides
+/// for masters) and merge them back into `state.items`. No-op if
+/// nothing needs enriching (warm reads where the previous run
+/// already populated everything).
 ///
 /// We deliberately drive enrichment off the **cached state**, not
 /// off the latest sync batch's deltas: that handles three flows
-/// uniformly — cold start (every master is new), Update for a
-/// master (the Update overwrites the cached row, clearing
-/// `recurrence`, so it re-qualifies), and resumed sync after a
-/// crash before persistence (still picks them up on the next run).
-async fn enrich_recurring_masters(
-    client: &EwsClient,
-    state: &mut SyncedFolderState,
-) -> EwsResult<()> {
+/// uniformly — cold start (every item is new), Update for an item
+/// (the Update overwrites the cached row with `detail_fetched=false`,
+/// so it re-qualifies and a changed body/recurrence is re-pulled),
+/// and resumed sync after a crash before persistence (still picks
+/// them up on the next run).
+///
+/// The `detail_fetched` flag — not "body is None" — gates the work,
+/// so the (very common) bodyless item isn't re-fetched on every
+/// single sync.
+async fn enrich_item_details(client: &EwsClient, state: &mut SyncedFolderState) -> EwsResult<()> {
     let to_enrich: Vec<(String, Option<String>)> = state
         .items
         .values()
-        .filter(|it| it.item_type.as_deref() == Some("RecurringMaster"))
-        .filter(|it| it.recurrence.is_none())
+        .filter(|it| !it.detail_fetched)
         .map(|it| (it.item_id.clone(), it.change_key.clone()))
         .collect();
 
@@ -342,11 +345,11 @@ async fn enrich_recurring_masters(
 
     tracing::info!(
         target: "cal_adapter_ews::sync",
-        masters = to_enrich.len(),
-        "GetItem fan-out for recurrence enrichment",
+        items = to_enrich.len(),
+        "GetItem fan-out for body + recurrence enrichment",
     );
     eprintln!(
-        "[EWS] enrich_recurring_masters: {} master(s) need recurrence",
+        "[EWS] enrich_item_details: {} item(s) need detail",
         to_enrich.len()
     );
 
@@ -361,24 +364,29 @@ async fn enrich_recurring_masters(
             let Some(cached) = state.items.get_mut(&fresh.item_id) else {
                 continue;
             };
-            // Only the recurrence-related fields are meaningful — the
-            // base shape we requested is minimal (Subject/Start/End/…)
-            // and we already have the authoritative values from the
-            // SyncFolderItems drain. Don't clobber them with the
-            // GetItem copy.
+            // Merge the detail-only fields the SyncFolderItems shape
+            // couldn't carry: the description (`body`) for every item
+            // and the recurrence shape + occurrence overrides for
+            // masters. The base fields (subject/start/end/…) keep the
+            // authoritative values from the sync drain — don't clobber
+            // them with the GetItem copy. `detail_fetched` flips true
+            // so this row isn't re-pulled on the next sync.
+            cached.body = fresh.body;
             cached.recurrence = fresh.recurrence;
             cached.modified_occurrences = fresh.modified_occurrences;
             cached.deleted_occurrence_starts = fresh.deleted_occurrence_starts;
+            cached.detail_fetched = true;
             // Refresh the ChangeKey if GetItem returned a newer one
-            // — recurrence reads don't bump it server-side typically,
+            // — detail reads don't bump it server-side typically,
             // but it costs nothing to keep in sync.
             if fresh.change_key.is_some() {
                 cached.change_key = fresh.change_key;
             }
             eprintln!(
-                "[EWS] enrich item_id={} subject={:?} has_recurrence={} mods={} dels={}",
+                "[EWS] enrich item_id={} subject={:?} has_body={} has_recurrence={} mods={} dels={}",
                 cached.item_id,
                 cached.subject,
+                cached.body.is_some(),
                 cached.recurrence.is_some(),
                 cached.modified_occurrences.len(),
                 cached.deleted_occurrence_starts.len(),
