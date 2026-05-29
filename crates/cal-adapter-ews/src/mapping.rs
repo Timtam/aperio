@@ -1401,7 +1401,9 @@ fn delete_item_field_xml(field_uri: &str) -> String {
 //   - DAILY                       → DailyRecurrence
 //   - WEEKLY [+ BYDAY=…]          → WeeklyRecurrence
 //   - MONTHLY + BYMONTHDAY=15     → AbsoluteMonthlyRecurrence
+//   - MONTHLY + BYDAY=3WE         → RelativeMonthlyRecurrence
 //   - YEARLY  + BYMONTH=3 BYMONTHDAY=15 → AbsoluteYearlyRecurrence
+//   - YEARLY  + BYMONTH=3 BYDAY=1FR      → RelativeYearlyRecurrence
 //
 // And the three ranges:
 //
@@ -1409,10 +1411,13 @@ fn delete_item_field_xml(field_uri: &str) -> String {
 //   - COUNT=N                     → NumberedRecurrence
 //   - UNTIL=YYYYMMDD[THHMMSSZ]    → EndDateRecurrence
 //
-// Relative monthly / yearly ("last Wednesday of the month") is not
-// covered yet — the EventDialog can't author them today and emitting
-// a wrong rule would lose data on server-side rebuild. We bail with
-// Protocol so the user sees "this rule isn't supported".
+// Relative monthly / yearly ("third Wednesday of the month",
+// "last weekday of the month") are covered too: a single ordinal
+// BYDAY token (`3WE`, `-1FR`) maps straight to DayOfWeekIndex +
+// DaysOfWeek, and a multi-day BYDAY + BYSETPOS collapses into one
+// of EWS's composite tokens (Day / Weekday / WeekendDay). This is
+// the exact inverse of the read path's `push_relative_byday`, so a
+// series round-trips EWS → RRULE → EWS without drift.
 
 /// Translate an RFC-5545 RRULE into an EWS `<t:Recurrence>` block.
 /// `start` is the master event's start date, used as the
@@ -1445,37 +1450,31 @@ pub fn rrule_to_ews_recurrence(rrule: &str, start: DateTime<Utc>) -> EwsResult<S
             )
         }
         "MONTHLY" => {
-            // Absolute-monthly (BYMONTHDAY) is the only branch we
-            // emit; if the user picked a relative shape (BYDAY=2WE
-            // for "second Wednesday") we surface Protocol so the
-            // dialog can flag it.
-            if parts.contains_key("BYDAY") {
-                return Err(EwsError::Protocol(
-                    "relative monthly recurrence (BYDAY) is not supported by Aperio's EWS writer yet".into(),
-                ));
+            // Two monthly shapes:
+            //   - BYDAY present → relative ("third Wednesday")
+            //   - else          → absolute ("the 15th")
+            if let Some(byday) = parts.get("BYDAY") {
+                let (days_token, index_word) =
+                    rrule_relative_byday_to_ews(byday, parts.get("BYSETPOS").map(|s| s.as_str()))?;
+                // EWS schema order: Interval, DaysOfWeek, DayOfWeekIndex.
+                format!(
+                    "<t:RelativeMonthlyRecurrence><t:Interval>{interval}</t:Interval><t:DaysOfWeek>{days_token}</t:DaysOfWeek><t:DayOfWeekIndex>{index_word}</t:DayOfWeekIndex></t:RelativeMonthlyRecurrence>",
+                )
+            } else {
+                let day = parts
+                    .get("BYMONTHDAY")
+                    .and_then(|v| v.parse::<u8>().ok())
+                    .unwrap_or_else(|| {
+                        use chrono::Datelike;
+                        start.day() as u8
+                    });
+                format!(
+                    "<t:AbsoluteMonthlyRecurrence><t:Interval>{interval}</t:Interval><t:DayOfMonth>{day}</t:DayOfMonth></t:AbsoluteMonthlyRecurrence>",
+                )
             }
-            let day = parts
-                .get("BYMONTHDAY")
-                .and_then(|v| v.parse::<u8>().ok())
-                .unwrap_or_else(|| {
-                    use chrono::Datelike;
-                    start.day() as u8
-                });
-            format!(
-                "<t:AbsoluteMonthlyRecurrence><t:Interval>{interval}</t:Interval><t:DayOfMonth>{day}</t:DayOfMonth></t:AbsoluteMonthlyRecurrence>",
-            )
         }
         "YEARLY" => {
-            if parts.contains_key("BYDAY") {
-                return Err(EwsError::Protocol(
-                    "relative yearly recurrence (BYDAY) is not supported by Aperio's EWS writer yet".into(),
-                ));
-            }
             use chrono::Datelike;
-            let day = parts
-                .get("BYMONTHDAY")
-                .and_then(|v| v.parse::<u8>().ok())
-                .unwrap_or_else(|| start.day() as u8);
             let month_num = parts
                 .get("BYMONTH")
                 .and_then(|v| v.parse::<u32>().ok())
@@ -1483,9 +1482,22 @@ pub fn rrule_to_ews_recurrence(rrule: &str, start: DateTime<Utc>) -> EwsResult<S
             let month_name = month_number_to_name(month_num).ok_or_else(|| {
                 EwsError::Protocol(format!("RRULE BYMONTH out of range: {month_num}"))
             })?;
-            format!(
-                "<t:AbsoluteYearlyRecurrence><t:DayOfMonth>{day}</t:DayOfMonth><t:Month>{month_name}</t:Month></t:AbsoluteYearlyRecurrence>",
-            )
+            if let Some(byday) = parts.get("BYDAY") {
+                let (days_token, index_word) =
+                    rrule_relative_byday_to_ews(byday, parts.get("BYSETPOS").map(|s| s.as_str()))?;
+                // EWS schema order: DaysOfWeek, DayOfWeekIndex, Month.
+                format!(
+                    "<t:RelativeYearlyRecurrence><t:DaysOfWeek>{days_token}</t:DaysOfWeek><t:DayOfWeekIndex>{index_word}</t:DayOfWeekIndex><t:Month>{month_name}</t:Month></t:RelativeYearlyRecurrence>",
+                )
+            } else {
+                let day = parts
+                    .get("BYMONTHDAY")
+                    .and_then(|v| v.parse::<u8>().ok())
+                    .unwrap_or_else(|| start.day() as u8);
+                format!(
+                    "<t:AbsoluteYearlyRecurrence><t:DayOfMonth>{day}</t:DayOfMonth><t:Month>{month_name}</t:Month></t:AbsoluteYearlyRecurrence>",
+                )
+            }
         }
         other => {
             return Err(EwsError::Protocol(format!(
@@ -1569,6 +1581,160 @@ fn rrule_byday_to_ews_days(byday: &str) -> EwsResult<String> {
     Ok(out.join(" "))
 }
 
+/// Translate the BYDAY (+ optional BYSETPOS) of a *relative*
+/// monthly/yearly RRULE into EWS's `(DaysOfWeek, DayOfWeekIndex)`
+/// pair. Inverse of the read path's `push_relative_byday`.
+///
+/// Two input shapes, matching exactly what the read path emits:
+///   - **Single ordinal token** (`3WE`, `-1FR`): the ordinal
+///     prefix carries the position; DaysOfWeek is the single day.
+///   - **Multi-day list + BYSETPOS** (`MO,TU,WE,TH,FR` +
+///     `BYSETPOS=-1`): the day-set is collapsed back into a
+///     composite token (`Weekday` / `WeekendDay` / `Day`) — EWS's
+///     relative recurrence takes ONE `DaysOfWeekType` value, not a
+///     list, so a multi-day set is only representable when it
+///     matches a known composite. A non-composite multi-day set
+///     (rare; not something Aperio's UI authors) surfaces Protocol.
+///
+/// Position mapping: 1→First … 4→Fourth; anything ≥5 or negative
+/// (RRULE's `-1` "from the end") → Last, since EWS has no "Fifth".
+fn rrule_relative_byday_to_ews(byday: &str, bysetpos: Option<&str>) -> EwsResult<(String, String)> {
+    let tokens: Vec<&str> = byday
+        .split(',')
+        .map(|t| t.trim())
+        .filter(|t| !t.is_empty())
+        .collect();
+    if tokens.is_empty() {
+        return Err(EwsError::Protocol("RRULE BYDAY is empty".into()));
+    }
+
+    // Single-token case: ordinal prefix lives on the token itself.
+    if tokens.len() == 1 {
+        let (ordinal, weekday2) = split_byday_ordinal(tokens[0]);
+        let pos = ordinal
+            .or_else(|| bysetpos.and_then(|s| s.parse::<i32>().ok()))
+            .ok_or_else(|| {
+                EwsError::Protocol(format!(
+                    "relative recurrence BYDAY '{}' has no ordinal and no BYSETPOS",
+                    tokens[0]
+                ))
+            })?;
+        let day_name = byday_weekday_to_ews_name(weekday2)?;
+        return Ok((day_name.to_string(), ordinal_to_index_word(pos).to_string()));
+    }
+
+    // Multi-token case: every token is a bare weekday; the position
+    // comes from BYSETPOS. Collapse the day-set into a composite.
+    let pos = bysetpos
+        .and_then(|s| s.parse::<i32>().ok())
+        .ok_or_else(|| {
+            EwsError::Protocol("relative recurrence with a multi-day BYDAY needs BYSETPOS".into())
+        })?;
+    let mut days: Vec<EwsDay> = Vec::with_capacity(tokens.len());
+    for tok in &tokens {
+        let (_, weekday2) = split_byday_ordinal(tok);
+        let name = byday_weekday_to_ews_name(weekday2)?;
+        days.push(EwsDay::from_wire(name).expect("name came from the fixed lookup"));
+    }
+    let composite = ews_days_to_composite(&days).ok_or_else(|| {
+        EwsError::Protocol(
+            "relative recurrence day-set doesn't match an EWS composite (Day/Weekday/WeekendDay)"
+                .into(),
+        )
+    })?;
+    Ok((
+        composite.to_string(),
+        ordinal_to_index_word(pos).to_string(),
+    ))
+}
+
+/// Split a BYDAY token into its optional leading ordinal and the
+/// two-letter weekday. `"3WE"` → `(Some(3), "WE")`, `"-1FR"` →
+/// `(Some(-1), "FR")`, `"WE"` → `(None, "WE")`.
+fn split_byday_ordinal(tok: &str) -> (Option<i32>, &str) {
+    let split_at = tok
+        .char_indices()
+        .find(|(_, c)| c.is_ascii_alphabetic())
+        .map(|(i, _)| i)
+        .unwrap_or(0);
+    let (prefix, weekday) = tok.split_at(split_at);
+    let ordinal = if prefix.is_empty() {
+        None
+    } else {
+        prefix.parse::<i32>().ok()
+    };
+    (ordinal, weekday)
+}
+
+fn byday_weekday_to_ews_name(weekday2: &str) -> EwsResult<&'static str> {
+    Ok(match weekday2 {
+        "MO" => "Monday",
+        "TU" => "Tuesday",
+        "WE" => "Wednesday",
+        "TH" => "Thursday",
+        "FR" => "Friday",
+        "SA" => "Saturday",
+        "SU" => "Sunday",
+        other => {
+            return Err(EwsError::Protocol(format!(
+                "RRULE BYDAY weekday not recognised: {other}"
+            )));
+        }
+    })
+}
+
+/// EWS DayOfWeekIndex word for an RRULE ordinal. EWS tops out at
+/// "Fourth" + "Last", so a fifth occurrence (`5`) or any negative
+/// (`-1` = "from the end") maps to "Last".
+fn ordinal_to_index_word(pos: i32) -> &'static str {
+    match pos {
+        1 => "First",
+        2 => "Second",
+        3 => "Third",
+        4 => "Fourth",
+        _ => "Last",
+    }
+}
+
+/// Collapse a weekday set into an EWS composite token, or `None`
+/// if it doesn't match one of the three EWS recognises. A single
+/// day returns its own name so the caller can use one code path.
+fn ews_days_to_composite(days: &[EwsDay]) -> Option<&'static str> {
+    use EwsDay::*;
+    // Dedup + sort into a discriminant bitmask so order/repeats in the
+    // input don't matter. EwsDay is a fieldless enum (discriminants
+    // 0..=6), so `1 << (d as u8)` gives a stable per-day bit.
+    let mask: u8 = days.iter().fold(0u8, |acc, d| acc | (1u8 << (*d as u8)));
+    let bit = |d: EwsDay| 1u8 << (d as u8);
+    let weekday = bit(Monday) | bit(Tuesday) | bit(Wednesday) | bit(Thursday) | bit(Friday);
+    let weekend = bit(Saturday) | bit(Sunday);
+    if days.len() == 1 {
+        return Some(ews_day_name(days[0]));
+    }
+    if mask == weekday {
+        return Some("Weekday");
+    }
+    if mask == weekend {
+        return Some("WeekendDay");
+    }
+    if mask == weekday | weekend {
+        return Some("Day");
+    }
+    None
+}
+
+fn ews_day_name(d: EwsDay) -> &'static str {
+    match d {
+        EwsDay::Monday => "Monday",
+        EwsDay::Tuesday => "Tuesday",
+        EwsDay::Wednesday => "Wednesday",
+        EwsDay::Thursday => "Thursday",
+        EwsDay::Friday => "Friday",
+        EwsDay::Saturday => "Saturday",
+        EwsDay::Sunday => "Sunday",
+    }
+}
+
 fn weekday_for(ts: DateTime<Utc>) -> String {
     use chrono::Datelike;
     match ts.weekday() {
@@ -1636,15 +1802,16 @@ fn parse_until_date(until: &str) -> Option<String> {
 //   - DailyRecurrence            ↔  FREQ=DAILY[;INTERVAL=n]
 //   - WeeklyRecurrence           ↔  FREQ=WEEKLY[;INTERVAL=n][;BYDAY=...]
 //   - AbsoluteMonthlyRecurrence  ↔  FREQ=MONTHLY[;INTERVAL=n];BYMONTHDAY=n
+//   - RelativeMonthlyRecurrence  ↔  FREQ=MONTHLY[;INTERVAL=n];BYDAY=Nxx
 //   - AbsoluteYearlyRecurrence   ↔  FREQ=YEARLY;BYMONTH=n;BYMONTHDAY=n
+//   - RelativeYearlyRecurrence   ↔  FREQ=YEARLY;BYMONTH=n;BYDAY=Nxx
 //   - NoEndRecurrence            ↔  (no UNTIL / COUNT)
 //   - NumberedRecurrence         ↔  COUNT=n
 //   - EndDateRecurrence          ↔  UNTIL=YYYYMMDD
 //
-// Relative monthly/yearly ("first Monday") still falls under "not
-// yet supported by Aperio's EWS writer" — we surface those as a
-// Protocol error so they don't silently turn into the wrong rule on
-// the read side either.
+// Relative monthly/yearly ("first Monday", "last weekday") round-trip
+// in both directions now — single-day rules via the BYDAY ordinal
+// prefix, composites (Day/Weekday/WeekendDay) via BYDAY + BYSETPOS.
 
 /// Structured `<t:Recurrence>` parsed straight out of EWS XML. Each
 /// pattern + range variant carries only the fields RFC 5545 needs;
@@ -2765,13 +2932,58 @@ mod tests {
     }
 
     #[test]
-    fn rrule_with_relative_monthly_rejected() {
+    fn rrule_relative_monthly_single_day_translates_to_relative_monthly() {
+        // "Second Wednesday of every month" → RelativeMonthly with
+        // a single DaysOfWeek + DayOfWeekIndex=Second.
         let start: DateTime<Utc> = "2026-05-20T08:00:00Z".parse().unwrap();
-        let err = rrule_to_ews_recurrence("FREQ=MONTHLY;BYDAY=2WE", start).unwrap_err();
-        match err {
-            EwsError::Protocol(m) => assert!(m.contains("relative monthly")),
-            other => panic!("expected Protocol, got {other:?}"),
-        }
+        let xml = rrule_to_ews_recurrence("FREQ=MONTHLY;BYDAY=2WE", start).unwrap();
+        assert!(xml.contains("<t:RelativeMonthlyRecurrence>"));
+        assert!(xml.contains("<t:DaysOfWeek>Wednesday</t:DaysOfWeek>"));
+        assert!(xml.contains("<t:DayOfWeekIndex>Second</t:DayOfWeekIndex>"));
+    }
+
+    #[test]
+    fn rrule_relative_monthly_last_maps_negative_ordinal() {
+        // BYDAY=-1FR ("last Friday") → DayOfWeekIndex=Last.
+        let start: DateTime<Utc> = "2026-05-29T08:00:00Z".parse().unwrap();
+        let xml = rrule_to_ews_recurrence("FREQ=MONTHLY;BYDAY=-1FR", start).unwrap();
+        assert!(xml.contains("<t:RelativeMonthlyRecurrence>"));
+        assert!(xml.contains("<t:DaysOfWeek>Friday</t:DaysOfWeek>"));
+        assert!(xml.contains("<t:DayOfWeekIndex>Last</t:DayOfWeekIndex>"));
+    }
+
+    #[test]
+    fn rrule_relative_monthly_weekday_composite_via_bysetpos() {
+        // "Last weekday of the month": multi-day BYDAY + BYSETPOS=-1
+        // collapses back into the EWS composite token `Weekday`.
+        let start: DateTime<Utc> = "2026-05-29T08:00:00Z".parse().unwrap();
+        let xml = rrule_to_ews_recurrence("FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1", start)
+            .unwrap();
+        assert!(xml.contains("<t:RelativeMonthlyRecurrence>"));
+        assert!(xml.contains("<t:DaysOfWeek>Weekday</t:DaysOfWeek>"));
+        assert!(xml.contains("<t:DayOfWeekIndex>Last</t:DayOfWeekIndex>"));
+    }
+
+    #[test]
+    fn rrule_relative_yearly_translates_to_relative_yearly() {
+        // "First Friday of March every year".
+        let start: DateTime<Utc> = "2026-03-06T08:00:00Z".parse().unwrap();
+        let xml = rrule_to_ews_recurrence("FREQ=YEARLY;BYMONTH=3;BYDAY=1FR", start).unwrap();
+        assert!(xml.contains("<t:RelativeYearlyRecurrence>"));
+        assert!(xml.contains("<t:DaysOfWeek>Friday</t:DaysOfWeek>"));
+        assert!(xml.contains("<t:DayOfWeekIndex>First</t:DayOfWeekIndex>"));
+        assert!(xml.contains("<t:Month>March</t:Month>"));
+    }
+
+    #[test]
+    fn rrule_relative_recurrence_round_trips_through_read_path() {
+        // Writer → reader → writer must be stable. Author "third
+        // Wednesday monthly", parse the emitted XML back, and the
+        // re-derived RRULE must equal the input.
+        let start: DateTime<Utc> = "2024-05-15T10:30:00Z".parse().unwrap();
+        let xml = rrule_to_ews_recurrence("FREQ=MONTHLY;BYDAY=3WE", start).unwrap();
+        let reparsed = parse_ews_recurrence(&xml).unwrap();
+        assert_rrule_equivalent(&reparsed.to_rrule(), "FREQ=MONTHLY;BYDAY=3WE");
     }
 
     #[test]
