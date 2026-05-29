@@ -479,6 +479,7 @@ mod tests {
                 description: None,
                 signed: false,
                 recurrence: Default::default(),
+                tasks: Default::default(),
             },
             descriptor_ptr,
             noop_destroy,

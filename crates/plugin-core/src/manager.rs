@@ -1540,6 +1540,7 @@ mod tests {
             description: None,
             signed: false,
             recurrence: Default::default(),
+            tasks: Default::default(),
         }
     }
 

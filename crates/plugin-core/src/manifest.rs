@@ -124,6 +124,65 @@ impl Default for RecurrenceCapabilities {
     }
 }
 
+/// Which task-organisation features a `tasks`-capable adapter can
+/// faithfully round-trip. Declared (optionally) in `plugin.json` so
+/// the task UI can show / grey-out the right affordances — e.g.
+/// Vikunja and Todoist nest their projects, Microsoft To Do and
+/// Google Tasks keep flat lists; Todoist groups tasks into sections,
+/// the others don't.
+///
+/// Defaults track what cal-core models *natively* rather than the
+/// richest backend: a backend that omits the block (or a field) is
+/// assumed flat-but-with-subtasks — the shape the local store and
+/// most simple adapters have. Each backend then widens (Vikunja:
+/// `nested_projects` + `sections`) or narrows (a step-only backend:
+/// `subtasks` with `max_subtask_depth = 1`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskCapabilities {
+    /// Task lists (projects) nest into a tree. Flat backends leave
+    /// this `false`; the UI then renders a depth-0 forest.
+    #[serde(default)]
+    pub nested_projects: bool,
+    /// Tasks can carry subtasks (`Task.parent_id`). cal-core models
+    /// this natively, so it defaults to `true`.
+    #[serde(default = "yes")]
+    pub subtasks: bool,
+    /// Maximum subtask nesting depth. `None` = unlimited. Backends
+    /// that only do one level (Google Tasks, Microsoft "steps") set
+    /// `Some(1)`.
+    #[serde(default)]
+    pub max_subtask_depth: Option<u32>,
+    /// Tasks can be grouped into sections within a container
+    /// (Todoist sections, Vikunja buckets).
+    #[serde(default)]
+    pub sections: bool,
+    /// More than one label per task, beyond cal-core's single
+    /// `color_label` slot.
+    #[serde(default)]
+    pub multiple_labels: bool,
+    /// Tasks support a recurrence rule.
+    #[serde(default = "yes")]
+    pub task_recurrence: bool,
+    /// A task can be moved to a different container. Todoist defers
+    /// cross-project moves, so it sets this `false`.
+    #[serde(default = "yes")]
+    pub move_between_projects: bool,
+}
+
+impl Default for TaskCapabilities {
+    fn default() -> Self {
+        Self {
+            nested_projects: false,
+            subtasks: true,
+            max_subtask_depth: None,
+            sections: false,
+            multiple_labels: false,
+            task_recurrence: true,
+            move_between_projects: true,
+        }
+    }
+}
+
 /// Parsed `plugin.json`. All fields are owned strings so the
 /// manifest survives the file handle being dropped.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -180,6 +239,14 @@ pub struct PluginManifest {
     /// so existing manifests and non-calendar plugins need no change.
     #[serde(default)]
     pub recurrence: RecurrenceCapabilities,
+
+    /// Which task-organisation features this adapter supports
+    /// (nested projects, sections, subtasks, …), surfaced to the
+    /// task UI. Absent → [`TaskCapabilities::default`] (flat lists
+    /// with subtasks), so existing manifests and non-task plugins
+    /// need no change.
+    #[serde(default)]
+    pub tasks: TaskCapabilities,
 }
 
 impl PluginManifest {
@@ -425,6 +492,49 @@ mod tests {
         assert!(r.weekly_byday);
         assert!(r.count);
         assert!(r.until);
+    }
+
+    #[test]
+    fn tasks_absent_defaults_to_flat_with_subtasks() {
+        let m = PluginManifest::from_bytes(sample_manifest_json().as_bytes()).expect("parses");
+        let tk = &m.tasks;
+        assert!(!tk.nested_projects);
+        assert!(tk.subtasks);
+        assert_eq!(tk.max_subtask_depth, None);
+        assert!(!tk.sections);
+        assert!(!tk.multiple_labels);
+        assert!(tk.task_recurrence);
+        assert!(tk.move_between_projects);
+    }
+
+    #[test]
+    fn tasks_partial_override_keeps_other_axes_default() {
+        // Vikunja-style declaration: nested projects + sections on,
+        // everything else stays at the cal-core-native default.
+        let json = format!(
+            r#"{{
+                "id": "x.y",
+                "name": "X",
+                "version": "1.0.0",
+                "plugin_type": "calendar-adapter",
+                "abi_version": {ABI_VERSION},
+                "min_app_version": "1.0.0",
+                "tasks": {{
+                    "nested_projects": true,
+                    "sections": true,
+                    "move_between_projects": false
+                }}
+            }}"#
+        );
+        let m = PluginManifest::from_bytes(json.as_bytes()).expect("parses");
+        let tk = &m.tasks;
+        assert!(tk.nested_projects);
+        assert!(tk.sections);
+        assert!(!tk.move_between_projects);
+        // Untouched axes keep their defaults.
+        assert!(tk.subtasks);
+        assert!(tk.task_recurrence);
+        assert!(!tk.multiple_labels);
     }
 
     #[test]
