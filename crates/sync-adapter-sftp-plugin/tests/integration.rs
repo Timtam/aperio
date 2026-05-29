@@ -19,6 +19,7 @@ fn manifest() -> PluginManifest {
         author: Some("Aperio Contributors".into()),
         description: Some("Bundled".into()),
         signed: false,
+        recurrence: Default::default(),
     }
 }
 

@@ -48,6 +48,82 @@ use crate::version::{check_abi_version, check_min_app_version};
 /// Filename the manager looks for next to a plugin's shared library.
 pub const MANIFEST_FILENAME: &str = "plugin.json";
 
+/// One of the four RFC-5545 frequencies a calendar adapter can
+/// claim support for. Mirrors the frontend's `Freq` (minus `NONE`,
+/// which isn't a recurrence at all).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RecurrenceFreq {
+    Daily,
+    Weekly,
+    Monthly,
+    Yearly,
+}
+
+fn all_frequencies() -> Vec<RecurrenceFreq> {
+    use RecurrenceFreq::*;
+    vec![Daily, Weekly, Monthly, Yearly]
+}
+
+fn yes() -> bool {
+    true
+}
+
+/// Which recurrence shapes a calendar adapter can faithfully
+/// round-trip. Declared (optionally) in `plugin.json` so the
+/// EventDialog can grey out options the source can't store — e.g.
+/// EWS has no yearly interval, so it omits `yearly` from
+/// `interval_frequencies`.
+///
+/// **Permissive by default**: every field defaults to "fully
+/// supported", and the whole struct defaults to "everything" when
+/// the manifest omits the `recurrence` block entirely. A plugin
+/// author therefore only spells out what they *restrict* — a one-
+/// line override like `{"interval_frequencies": ["daily","weekly",
+/// "monthly"]}` keeps all the other axes at full support. That
+/// keeps the common case (full RFC-5545) zero-config and existing
+/// manifests working unchanged.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecurrenceCapabilities {
+    /// Frequencies offered in the "Repeat" dropdown.
+    #[serde(default = "all_frequencies")]
+    pub frequencies: Vec<RecurrenceFreq>,
+    /// Frequencies whose INTERVAL (>1) the source can store. EWS
+    /// drops `yearly` here — its AbsoluteYearly/RelativeYearly
+    /// patterns carry no Interval element.
+    #[serde(default = "all_frequencies")]
+    pub interval_frequencies: Vec<RecurrenceFreq>,
+    /// Relative monthly ("third Wednesday") — BYDAY=Nxx on MONTHLY.
+    #[serde(default = "yes")]
+    pub relative_monthly: bool,
+    /// Relative yearly ("first Friday of March").
+    #[serde(default = "yes")]
+    pub relative_yearly: bool,
+    /// Weekly weekday picker (BYDAY on WEEKLY).
+    #[serde(default = "yes")]
+    pub weekly_byday: bool,
+    /// COUNT end mode ("after N occurrences").
+    #[serde(default = "yes")]
+    pub count: bool,
+    /// UNTIL end mode ("until a date").
+    #[serde(default = "yes")]
+    pub until: bool,
+}
+
+impl Default for RecurrenceCapabilities {
+    fn default() -> Self {
+        Self {
+            frequencies: all_frequencies(),
+            interval_frequencies: all_frequencies(),
+            relative_monthly: true,
+            relative_yearly: true,
+            weekly_byday: true,
+            count: true,
+            until: true,
+        }
+    }
+}
+
 /// Parsed `plugin.json`. All fields are owned strings so the
 /// manifest survives the file handle being dropped.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -97,6 +173,13 @@ pub struct PluginManifest {
     /// docs for the "no signing in this phase" policy.
     #[serde(default)]
     pub signed: bool,
+
+    /// Which recurrence shapes this adapter can store, surfaced to
+    /// the EventDialog so it can grey out unsupported options.
+    /// Absent → [`RecurrenceCapabilities::default`] (full RFC-5545),
+    /// so existing manifests and non-calendar plugins need no change.
+    #[serde(default)]
+    pub recurrence: RecurrenceCapabilities,
 }
 
 impl PluginManifest {
@@ -327,6 +410,58 @@ mod tests {
         assert!(m.has_capability(&Capability::Tasks));
         assert!(m.has_capability(&Capability::Contacts));
         assert!(!m.has_capability(&Capability::Unknown("nope".into())));
+    }
+
+    #[test]
+    fn recurrence_absent_defaults_to_full_support() {
+        // The sample manifest has no `recurrence` block — every axis
+        // must come back fully supported.
+        let m = PluginManifest::from_bytes(sample_manifest_json().as_bytes()).expect("parses");
+        let r = &m.recurrence;
+        assert_eq!(r.frequencies.len(), 4);
+        assert_eq!(r.interval_frequencies.len(), 4);
+        assert!(r.relative_monthly);
+        assert!(r.relative_yearly);
+        assert!(r.weekly_byday);
+        assert!(r.count);
+        assert!(r.until);
+    }
+
+    #[test]
+    fn recurrence_partial_override_keeps_other_axes_full() {
+        // EWS-style declaration: only `interval_frequencies` is
+        // restricted (no yearly); everything else must stay full.
+        let json = format!(
+            r#"{{
+                "id": "x.y",
+                "name": "X",
+                "version": "1.0.0",
+                "plugin_type": "calendar-adapter",
+                "abi_version": {ABI_VERSION},
+                "min_app_version": "1.0.0",
+                "recurrence": {{
+                    "interval_frequencies": ["daily", "weekly", "monthly"]
+                }}
+            }}"#
+        );
+        let m = PluginManifest::from_bytes(json.as_bytes()).expect("parses");
+        let r = &m.recurrence;
+        // The restricted axis took the override.
+        assert_eq!(
+            r.interval_frequencies,
+            vec![
+                RecurrenceFreq::Daily,
+                RecurrenceFreq::Weekly,
+                RecurrenceFreq::Monthly,
+            ],
+        );
+        // Every other axis stayed at the permissive default.
+        assert_eq!(r.frequencies.len(), 4);
+        assert!(r.relative_monthly);
+        assert!(r.relative_yearly);
+        assert!(r.weekly_byday);
+        assert!(r.count);
+        assert!(r.until);
     }
 
     #[test]

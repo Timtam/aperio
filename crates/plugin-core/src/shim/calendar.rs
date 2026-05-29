@@ -478,6 +478,7 @@ mod tests {
                 author: None,
                 description: None,
                 signed: false,
+                recurrence: Default::default(),
             },
             descriptor_ptr,
             noop_destroy,
