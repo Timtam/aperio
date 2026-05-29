@@ -1837,7 +1837,8 @@ fn parse_until_date(until: &str) -> Option<String> {
 //   - RelativeYearlyRecurrence   ↔  FREQ=YEARLY;BYMONTH=n;BYDAY=Nxx
 //   - NoEndRecurrence            ↔  (no UNTIL / COUNT)
 //   - NumberedRecurrence         ↔  COUNT=n
-//   - EndDateRecurrence          ↔  UNTIL=YYYYMMDD
+//   - EndDateRecurrence          ↔  UNTIL=YYYYMMDDT235959Z (UTC, to
+//                                    match the UTC DTSTART)
 //
 // Relative monthly/yearly ("first Monday", "last weekday") round-trip
 // in both directions now — single-day rules via the BYDAY ordinal
@@ -2136,10 +2137,19 @@ impl EwsRecurrence {
                 parts.push(format!("COUNT={occurrences}"));
             }
             EwsRecurrenceRange::EndDate { end } => {
-                // EWS sends EndDate as YYYY-MM-DD; RRULE UNTIL wants
-                // YYYYMMDD (date-only form is legal per RFC 5545).
+                // EWS sends EndDate as YYYY-MM-DD. The series' DTSTART
+                // is a UTC date-time, and RFC 5545 requires UNTIL to
+                // share that value type — i.e. a UTC date-time too. A
+                // bare date-only UNTIL is read as floating/local, and
+                // the strict `rrule` crate used by the reminder
+                // expander rejects the whole rule with
+                // `DtStartUntilMismatchTimezone`, degrading the series
+                // to just its master start. Emit an end-of-day UTC
+                // instant so the rule validates AND the final day's
+                // occurrences stay included (UNTIL is inclusive).
+                // Matches the frontend's `buildRRule` (`…T235959Z`).
                 let compact: String = end.chars().filter(|c| *c != '-').collect();
-                parts.push(format!("UNTIL={compact}"));
+                parts.push(format!("UNTIL={compact}T235959Z"));
             }
         }
         parts.join(";")
@@ -3237,9 +3247,13 @@ mod tests {
                 end: "2027-12-31".into(),
             },
         );
-        // Writer drops the time portion in EndDate → reader's
-        // UNTIL is date-only. Both are RFC 5545 legal.
-        assert_rrule_equivalent(&rec.to_rrule(), "FREQ=MONTHLY;BYMONTHDAY=15;UNTIL=20271231");
+        // Reader re-emits UNTIL as an end-of-day UTC instant so the
+        // rule validates against a UTC DTSTART (the strict `rrule`
+        // crate rejects a date-only UNTIL there).
+        assert_rrule_equivalent(
+            &rec.to_rrule(),
+            "FREQ=MONTHLY;BYMONTHDAY=15;UNTIL=20271231T235959Z",
+        );
     }
 
     #[test]
