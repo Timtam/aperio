@@ -580,6 +580,10 @@ export function EventDialog({
           value={form.rrule}
           onChange={(rrule) => update('rrule', rrule)}
           start={recurrenceStartDate(form.startDate)}
+          capabilities={
+            calendars.find((c) => c.id === form.calendarId)
+              ?.recurrence_capabilities
+          }
         />
 
         <RemindersEditor

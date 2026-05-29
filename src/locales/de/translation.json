@@ -802,6 +802,8 @@
           "3": "dritten",
           "4": "vierten"
         },
+        "unsupportedHint": "Vom Konto dieses Kalenders nicht unterstützt.",
+        "relativeUnsupportedHint": "Dieses Konto kann nur an einem festen Tag im Monat wiederholen.",
         "editsSeries": "Bearbeitungen wirken sich auf die gesamte Serie aus."
       }
     },

@@ -802,6 +802,8 @@
           "3": "third",
           "4": "fourth"
         },
+        "unsupportedHint": "Not supported by this calendar's account.",
+        "relativeUnsupportedHint": "This account can only repeat on a fixed day of the month.",
         "editsSeries": "Changes apply to the entire series."
       }
     },

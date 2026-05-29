@@ -1,6 +1,8 @@
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import type { RecurrenceCapabilities, RecurrenceFreq } from '../api/types';
+
 /**
  * Recurrence editor for the event dialog.
  *
@@ -38,6 +40,42 @@ export interface RecurrenceSelectorProps {
    *  back to "today" when omitted (only matters for the derived
    *  defaults, never for an explicit rule). */
   start?: Date;
+  /** Recurrence shapes the target calendar's adapter can store.
+   *  Unsupported options are rendered disabled with a hint rather
+   *  than hidden, so the user can see the option exists but isn't
+   *  available for this source (e.g. EWS has no yearly interval).
+   *  Absent → full RFC-5545 support (the local store + most
+   *  adapters). */
+  capabilities?: RecurrenceCapabilities;
+}
+
+/** Permissive fallback when no `capabilities` prop is supplied —
+ *  every axis fully supported. Mirrors
+ *  `plugin_core::RecurrenceCapabilities::default`. */
+const FULL_CAPS: RecurrenceCapabilities = {
+  frequencies: ['daily', 'weekly', 'monthly', 'yearly'],
+  interval_frequencies: ['daily', 'weekly', 'monthly', 'yearly'],
+  relative_monthly: true,
+  relative_yearly: true,
+  weekly_byday: true,
+  count: true,
+  until: true,
+};
+
+/** Lowercase the selector's `Freq` to the wire `RecurrenceFreq`.
+ *  `NONE` has no capability axis and returns null. */
+function freqKey(freq: Freq): RecurrenceFreq | null {
+  return freq === 'NONE' ? null : (freq.toLowerCase() as RecurrenceFreq);
+}
+
+function freqSupported(freq: Freq, caps: RecurrenceCapabilities): boolean {
+  const k = freqKey(freq);
+  return k === null || caps.frequencies.includes(k);
+}
+
+function intervalSupported(freq: Freq, caps: RecurrenceCapabilities): boolean {
+  const k = freqKey(freq);
+  return k === null || caps.interval_frequencies.includes(k);
 }
 
 const WEEKDAYS: { iso: number; rrule: string; key: string }[] = [
@@ -57,8 +95,10 @@ export function RecurrenceSelector({
   value,
   onChange,
   start,
+  capabilities,
 }: RecurrenceSelectorProps) {
   const { t, i18n } = useTranslation();
+  const caps = capabilities ?? FULL_CAPS;
   // Stabilise the fallback Date so the memos below don't re-run every
   // render when `start` is omitted (a fresh `new Date()` each render
   // would otherwise bust their dependency arrays). Keyed on the start
@@ -69,20 +109,37 @@ export function RecurrenceSelector({
   const parsed = useMemo(() => parseRRule(value), [value]);
   // Resolve start-derived defaults so the monthly/yearly controls
   // always have concrete values to show even for a legacy
-  // `FREQ=MONTHLY` rule that carried no day specifier.
-  const rule = useMemo(
-    () => resolveAgainstStart(parsed, startDate),
-    [parsed, startDate],
-  );
+  // `FREQ=MONTHLY` rule that carried no day specifier. Then clamp
+  // the interval to 1 when the target source can't store one for
+  // this frequency (EWS yearly) — keeps the emitted RRULE honest
+  // and the disabled input showing the value that'll actually
+  // round-trip.
+  const rule = useMemo(() => {
+    const resolved = resolveAgainstStart(parsed, startDate);
+    if (
+      resolved.freq !== 'NONE' &&
+      !intervalSupported(resolved.freq, caps) &&
+      resolved.interval !== 1
+    ) {
+      return { ...resolved, interval: 1 };
+    }
+    return resolved;
+  }, [parsed, startDate, caps]);
 
   const update = (next: ParsedRule) => onChange(buildRRule(next));
 
   const isMonthlyish = rule.freq === 'MONTHLY' || rule.freq === 'YEARLY';
+  // Relative ("third Wednesday") options are gated per-frequency:
+  // a source may store relative-monthly but not relative-yearly.
+  const relativeAllowed =
+    rule.freq === 'YEARLY' ? caps.relative_yearly : caps.relative_monthly;
   const monthlyOptions = useMemo(
-    () => (isMonthlyish ? deriveMonthlyOptions(startDate) : []),
-    [isMonthlyish, startDate],
+    () =>
+      isMonthlyish ? deriveMonthlyOptions(startDate, relativeAllowed) : [],
+    [isMonthlyish, startDate, relativeAllowed],
   );
   const selectedOptionKey = monthlyOptionKey(rule);
+  const intervalEnabled = intervalSupported(rule.freq, caps);
 
   // Locale-aware weekday / month names for the option labels — reuse
   // the browser's Intl rather than carrying a full weekday/month
@@ -145,12 +202,18 @@ export function RecurrenceSelector({
           }}
         >
           <option value="NONE">{t('dialogs.event.recurrence.none')}</option>
-          <option value="DAILY">{t('dialogs.event.recurrence.daily')}</option>
-          <option value="WEEKLY">{t('dialogs.event.recurrence.weekly')}</option>
-          <option value="MONTHLY">
+          <option value="DAILY" disabled={!freqSupported('DAILY', caps)}>
+            {t('dialogs.event.recurrence.daily')}
+          </option>
+          <option value="WEEKLY" disabled={!freqSupported('WEEKLY', caps)}>
+            {t('dialogs.event.recurrence.weekly')}
+          </option>
+          <option value="MONTHLY" disabled={!freqSupported('MONTHLY', caps)}>
             {t('dialogs.event.recurrence.monthly')}
           </option>
-          <option value="YEARLY">{t('dialogs.event.recurrence.yearly')}</option>
+          <option value="YEARLY" disabled={!freqSupported('YEARLY', caps)}>
+            {t('dialogs.event.recurrence.yearly')}
+          </option>
         </select>
       </label>
 
@@ -167,6 +230,7 @@ export function RecurrenceSelector({
               min={1}
               max={365}
               value={rule.interval}
+              disabled={!intervalEnabled}
               onChange={(e) =>
                 update({
                   ...rule,
@@ -174,6 +238,11 @@ export function RecurrenceSelector({
                 })
               }
             />
+            {!intervalEnabled && (
+              <span className="form__hint recurrence__unsupported">
+                {t('dialogs.event.recurrence.unsupportedHint')}
+              </span>
+            )}
           </label>
 
           {rule.freq === 'WEEKLY' && (
@@ -189,6 +258,7 @@ export function RecurrenceSelector({
                       <input
                         type="checkbox"
                         checked={checked}
+                        disabled={!caps.weekly_byday}
                         onChange={(e) => {
                           const next = e.target.checked
                             ? [...rule.byDay, d.rrule]
@@ -201,6 +271,11 @@ export function RecurrenceSelector({
                   );
                 })}
               </div>
+              {!caps.weekly_byday && (
+                <span className="form__hint recurrence__unsupported">
+                  {t('dialogs.event.recurrence.unsupportedHint')}
+                </span>
+              )}
             </fieldset>
           )}
 
@@ -220,11 +295,16 @@ export function RecurrenceSelector({
                 }}
               >
                 {monthlyOptions.map((opt) => (
-                  <option key={opt.key} value={opt.key}>
+                  <option key={opt.key} value={opt.key} disabled={opt.disabled}>
                     {optionLabel(opt)}
                   </option>
                 ))}
               </select>
+              {!relativeAllowed && (
+                <span className="form__hint recurrence__unsupported">
+                  {t('dialogs.event.recurrence.relativeUnsupportedHint')}
+                </span>
+              )}
             </label>
           )}
 
@@ -241,10 +321,10 @@ export function RecurrenceSelector({
               <option value="NEVER">
                 {t('dialogs.event.recurrence.end.never')}
               </option>
-              <option value="COUNT">
+              <option value="COUNT" disabled={!caps.count}>
                 {t('dialogs.event.recurrence.end.count')}
               </option>
-              <option value="UNTIL">
+              <option value="UNTIL" disabled={!caps.until}>
                 {t('dialogs.event.recurrence.end.until')}
               </option>
             </select>
@@ -330,6 +410,10 @@ interface MonthlyOption {
   /** WEEKDAY only */
   ordinal: number;
   weekday: string;
+  /** Rendered disabled when the target source can't store this
+   *  shape (relative weekday options on a source that doesn't
+   *  support relative recurrence). */
+  disabled?: boolean;
 }
 
 /** How many days in the month containing `d`. */
@@ -349,20 +433,40 @@ function isInLastWeek(d: Date): boolean {
   return d.getDate() > daysInMonth(d) - 7;
 }
 
-/** Compute the 2-3 monthly/yearly options for a given start date. */
-export function deriveMonthlyOptions(start: Date): MonthlyOption[] {
+/** Compute the 2-3 monthly/yearly options for a given start date.
+ *  `relativeAllowed` (default true) marks the relative weekday
+ *  options disabled when the target source can't store them — they
+ *  stay visible (greyed) so the user can see the option exists. */
+export function deriveMonthlyOptions(
+  start: Date,
+  relativeAllowed = true,
+): MonthlyOption[] {
   const day = start.getDate();
   const weekday = JS_DAY_TO_RRULE[start.getDay()];
   const ordinal = nthWeekdayOfMonth(start);
   const opts: MonthlyOption[] = [
     { key: 'dom', mode: 'DAY_OF_MONTH', day, ordinal: 0, weekday: '' },
-    { key: 'nth', mode: 'WEEKDAY', day: 0, ordinal, weekday },
+    {
+      key: 'nth',
+      mode: 'WEEKDAY',
+      day: 0,
+      ordinal,
+      weekday,
+      disabled: !relativeAllowed,
+    },
   ];
   // Only offer "last <weekday>" when the start lands in the final
   // week — otherwise "fourth" and "last" would usually coincide and
   // the extra option is just noise.
   if (isInLastWeek(start)) {
-    opts.push({ key: 'last', mode: 'WEEKDAY', day: 0, ordinal: -1, weekday });
+    opts.push({
+      key: 'last',
+      mode: 'WEEKDAY',
+      day: 0,
+      ordinal: -1,
+      weekday,
+      disabled: !relativeAllowed,
+    });
   }
   return opts;
 }

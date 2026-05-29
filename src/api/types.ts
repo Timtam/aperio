@@ -10,6 +10,25 @@ export interface ContainerColor {
   source: 'native' | 'custom';
 }
 
+/** Which recurrence shapes the owning adapter can store. Mirrors
+ *  `plugin_core::RecurrenceCapabilities`; stamped onto every
+ *  Calendar by the backend (resolved from the account's plugin
+ *  manifest). The EventDialog greys out options the source can't
+ *  round-trip — e.g. EWS omits `"yearly"` from `interval_frequencies`
+ *  because Exchange has no yearly interval. Local + unknown sources
+ *  report full RFC-5545 support. */
+export interface RecurrenceCapabilities {
+  frequencies: RecurrenceFreq[];
+  interval_frequencies: RecurrenceFreq[];
+  relative_monthly: boolean;
+  relative_yearly: boolean;
+  weekly_byday: boolean;
+  count: boolean;
+  until: boolean;
+}
+
+export type RecurrenceFreq = 'daily' | 'weekly' | 'monthly' | 'yearly';
+
 export interface Calendar {
   id: string;
   name: string;
@@ -22,6 +41,11 @@ export interface Calendar {
    *  route map so the frontend can group containers by source
    *  without a second round-trip. */
   account_id: string;
+  /** Recurrence shapes the owning adapter can store. Backend-
+   *  stamped alongside `account_id`; optional in the wire shape so
+   *  any consumer reading a Calendar from a pre-capabilities
+   *  snapshot still parses. Absent → treat as full support. */
+  recurrence_capabilities?: RecurrenceCapabilities;
 }
 
 export interface SoundConfig {

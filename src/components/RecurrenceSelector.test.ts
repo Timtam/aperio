@@ -189,4 +189,22 @@ describe('deriveMonthlyOptions', () => {
     const last = opts.find((o) => o.key === 'last');
     expect(last).toMatchObject({ mode: 'WEEKDAY', ordinal: -1, weekday: 'FR' });
   });
+
+  it('marks relative options disabled when relativeAllowed is false', () => {
+    // A source that can't store relative recurrence (BYDAY=Nxx):
+    // the day-of-month option stays enabled, the weekday options
+    // are greyed (still visible) rather than removed.
+    const opts = deriveMonthlyOptions(new Date(2026, 4, 29), false);
+    const dom = opts.find((o) => o.key === 'dom');
+    const nth = opts.find((o) => o.key === 'nth');
+    const last = opts.find((o) => o.key === 'last');
+    expect(dom?.disabled).toBeFalsy();
+    expect(nth?.disabled).toBe(true);
+    expect(last?.disabled).toBe(true);
+  });
+
+  it('leaves relative options enabled by default (full support)', () => {
+    const opts = deriveMonthlyOptions(new Date(2024, 4, 15));
+    expect(opts.every((o) => !o.disabled)).toBe(true);
+  });
 });
