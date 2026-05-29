@@ -787,6 +787,21 @@
         },
         "countLabel": "Anzahl Vorkommen",
         "untilLabel": "Ende-Datum",
+        "by": {
+          "label": "Wiederholen am",
+          "monthlyOnDay": "am {{day}}.",
+          "monthlyOnWeekday": "am {{position}} {{weekday}}",
+          "monthlyOnLastWeekday": "am letzten {{weekday}}",
+          "yearlyOnDay": "am {{day}}. {{month}}",
+          "yearlyOnWeekday": "am {{position}} {{weekday}} im {{month}}",
+          "yearlyOnLastWeekday": "am letzten {{weekday}} im {{month}}"
+        },
+        "ordinal": {
+          "1": "ersten",
+          "2": "zweiten",
+          "3": "dritten",
+          "4": "vierten"
+        },
         "editsSeries": "Bearbeitungen wirken sich auf die gesamte Serie aus."
       }
     },

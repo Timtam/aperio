@@ -787,6 +787,21 @@
         },
         "countLabel": "Number of occurrences",
         "untilLabel": "End date",
+        "by": {
+          "label": "Repeat on",
+          "monthlyOnDay": "on day {{day}}",
+          "monthlyOnWeekday": "on the {{position}} {{weekday}}",
+          "monthlyOnLastWeekday": "on the last {{weekday}}",
+          "yearlyOnDay": "on {{month}} {{day}}",
+          "yearlyOnWeekday": "on the {{position}} {{weekday}} of {{month}}",
+          "yearlyOnLastWeekday": "on the last {{weekday}} of {{month}}"
+        },
+        "ordinal": {
+          "1": "first",
+          "2": "second",
+          "3": "third",
+          "4": "fourth"
+        },
         "editsSeries": "Changes apply to the entire series."
       }
     },

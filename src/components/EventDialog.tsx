@@ -579,6 +579,7 @@ export function EventDialog({
         <RecurrenceSelector
           value={form.rrule}
           onChange={(rrule) => update('rrule', rrule)}
+          start={recurrenceStartDate(form.startDate)}
         />
 
         <RemindersEditor
@@ -820,4 +821,15 @@ function toIso(
     [hours, minutes] = parts;
   }
   return new Date(y, m - 1, d, hours, minutes, 0).toISOString();
+}
+
+/** Parse the form's `YYYY-MM-DD` start string into a local-midnight
+ *  Date for the recurrence picker to derive its monthly/yearly
+ *  options from. Constructed component-wise (not `new Date(str)`,
+ *  which would parse as UTC and could shift the day in negative-
+ *  offset zones). Falls back to today on an empty/garbled value. */
+function recurrenceStartDate(date: string): Date {
+  const [y, m, d] = date.split('-').map(Number);
+  if (!y || !m || !d) return new Date();
+  return new Date(y, m - 1, d);
 }
