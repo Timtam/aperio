@@ -1,0 +1,310 @@
+name: Build artifacts
+
+# Reusable build pipeline shared by CI (commit / PR builds)
+# and Release (tag / manual builds). For every target it
+# produces a launch-ready zip — the raw aperio binary plus
+# every bundled plugin cdylib under plugins/bundled/<id>/ —
+# and uploads it as a build artifact. The caller decides when
+# to run it; the Release workflow additionally publishes the
+# resulting zips to a GitHub release.
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: >-
+          Version label embedded in artifact names
+          (Aperio-<version>-<target>.zip). A leading `v` is
+          stripped. Empty → the short commit SHA, which is the
+          right default for CI / PR builds.
+        required: false
+        type: string
+        default: ''
+
+env:
+  CARGO_TERM_COLOR: always
+  # Don't fail the artifact build on lint warnings — CI's
+  # dedicated `rust` job already gates merges on `-D warnings`;
+  # this path just needs to compile to a runnable binary.
+  RUSTFLAGS: ""
+
+jobs:
+  # ── Native single-arch builds ────────────────────────────
+  # Each target builds on a runner whose host arch matches the
+  # artefact arch, so `cargo build --workspace` produces the
+  # aperio binary AND all 17 plugin cdylibs for that arch in
+  # one pass, and src-tauri/build.rs stages them under
+  # target/release/plugins/bundled/. macOS is handled by the
+  # separate `build-macos` job below (universal = two arches
+  # lipo'd together, which this uniform flow can't express).
+  build:
+    name: Build (${{ matrix.label }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: linux-x86_64
+            binary: aperio
+          - os: windows-latest
+            label: windows-x86_64
+            binary: aperio.exe
+          # GitHub-hosted ARM64 Windows runner (GA 2025). The
+          # host is aarch64, so the standard flow builds the
+          # ARM64 binary + all 17 plugin cdylibs natively — no
+          # cross-compile. macOS is the separate universal job.
+          - os: windows-11-arm
+            label: windows-arm64
+            binary: aperio.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux system dependencies (for Tauri)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libgtk-3-dev \
+            libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - run: npm ci
+
+      # `cargo tauri build` with bundle.active = false produces
+      # just the raw release binary. src-tauri is a workspace
+      # member, so cargo writes to the WORKSPACE target dir
+      # (repo-root `target/`, not `src-tauri/target/`). The
+      # beforeBuildCommand chains `cargo build --workspace
+      # --release` so all 17 plugin cdylibs land in
+      # target/release/ + src-tauri/build.rs stages them under
+      # target/release/plugins/bundled/<id>/.
+      - name: tauri build
+        run: npm run tauri -- build
+
+      # Sanity-check the staging step worked: the release zip is
+      # useless without the plugin cdylibs. Counts immediate
+      # subdirectories of plugins/bundled/ and asserts == 17 (the
+      # canonical set from build.rs's PLUGINS table). `shell:
+      # bash` keeps the find-based count portable across Windows.
+      - name: Verify 17 bundled plugins staged
+        shell: bash
+        run: |
+          set -euo pipefail
+          STAGED_DIR="target/release/plugins/bundled"
+          if [ ! -d "$STAGED_DIR" ]; then
+            echo "::error::Staged plugins dir missing: $STAGED_DIR"
+            exit 1
+          fi
+          count=$(find "$STAGED_DIR" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
+          echo "Staged plugin count: $count"
+          if [ "$count" -ne 17 ]; then
+            echo "::error::Expected 17 staged plugins, found $count"
+            echo "Contents of $STAGED_DIR:"
+            ls -la "$STAGED_DIR" || true
+            exit 1
+          fi
+
+      # Tag builds pass the tag (minus `v`); CI / PR builds pass
+      # nothing and fall back to the short commit SHA.
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ inputs.version }}"
+          VERSION="${VERSION#v}"
+          if [ -z "$VERSION" ]; then
+            VERSION="$(git rev-parse --short HEAD)"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      # Stage the portable layout next to the binary:
+      #   Aperio-<version>-<label>/
+      #     aperio[.exe]
+      #     plugins/bundled/<id>/{plugin.json,*.{dll,dylib,so}}
+      # The directory shape matches what
+      # bundled_plugins::bundled_dir() resolves at runtime via
+      # current_exe().parent().join("plugins/bundled"), so the
+      # zip is launch-ready after extraction.
+      - name: Stage portable layout
+        id: stage
+        shell: bash
+        run: |
+          set -euo pipefail
+          NAME="Aperio-${{ steps.version.outputs.version }}-${{ matrix.label }}"
+          STAGE_DIR="dist-stage/$NAME"
+          mkdir -p "$STAGE_DIR"
+          cp "target/release/${{ matrix.binary }}" "$STAGE_DIR/"
+          cp -R "target/release/plugins" "$STAGE_DIR/"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+
+      # Zip the staged layout. Unix runners have `zip`; Windows
+      # runners fall back to the bundled 7z.
+      - name: Pack zip
+        id: pack
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARCHIVE="${{ steps.stage.outputs.name }}.zip"
+          cd dist-stage
+          if command -v zip >/dev/null 2>&1; then
+            zip -r "../$ARCHIVE" "${{ steps.stage.outputs.name }}"
+          else
+            7z a "../$ARCHIVE" "${{ steps.stage.outputs.name }}"
+          fi
+          cd ..
+          echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.stage.outputs.name }}
+          path: ${{ steps.pack.outputs.archive }}
+          if-no-files-found: error
+
+  # ── macOS universal (x86_64 + arm64) ─────────────────────
+  # A universal artefact needs a fat binary AND fat copies of
+  # every plugin cdylib. tauri's `--target universal-apple-
+  # darwin` only lipo's the app binary, not the 17 separate
+  # plugin crates — so we build the whole workspace for each
+  # arch and lipo the binary plus every plugin ourselves.
+  build-macos:
+    name: Build (macos-universal)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - run: npm ci
+
+      # Build the embedded frontend once up front (it's arch-
+      # independent). The per-arch `cargo build` below compiles
+      # the aperio binary, which embeds ../dist at compile time
+      # via tauri-build — so dist/ must already exist. (We call
+      # cargo directly instead of `tauri build` because the
+      # universal artefact needs both arches of every plugin
+      # cdylib, which `tauri build` doesn't produce.)
+      - name: Build frontend
+        run: npm run build
+
+      # Build aperio + all 17 plugin cdylibs for both arches.
+      # src-tauri/build.rs stages each arch's plugins under
+      # target/<triple>/release/plugins/bundled/<id>/.
+      - name: Build workspace for both macOS arches
+        run: |
+          cargo build --workspace --release --target x86_64-apple-darwin
+          cargo build --workspace --release --target aarch64-apple-darwin
+
+      - name: Verify 17 plugins staged per arch
+        shell: bash
+        run: |
+          set -euo pipefail
+          for triple in x86_64-apple-darwin aarch64-apple-darwin; do
+            d="target/$triple/release/plugins/bundled"
+            count=$(find "$d" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
+            echo "$triple: $count plugins staged"
+            if [ "$count" -ne 17 ]; then
+              echo "::error::$triple staged $count plugins, expected 17"
+              exit 1
+            fi
+          done
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ inputs.version }}"
+          VERSION="${VERSION#v}"
+          if [ -z "$VERSION" ]; then
+            VERSION="$(git rev-parse --short HEAD)"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      # Fuse both arches: one universal binary + one universal
+      # copy of every plugin cdylib via `lipo`. The plugin.json
+      # manifests are arch-independent and copied as-is. The
+      # resulting tree matches what bundled_plugins::bundled_dir()
+      # resolves at runtime, so the zip is launch-ready.
+      - name: Stage universal layout (lipo)
+        id: stage
+        shell: bash
+        run: |
+          set -euo pipefail
+          X64="target/x86_64-apple-darwin/release"
+          ARM="target/aarch64-apple-darwin/release"
+          NAME="Aperio-${{ steps.version.outputs.version }}-macos-universal"
+          STAGE_DIR="dist-stage/$NAME"
+          mkdir -p "$STAGE_DIR/plugins/bundled"
+
+          lipo -create "$X64/aperio" "$ARM/aperio" -output "$STAGE_DIR/aperio"
+          chmod +x "$STAGE_DIR/aperio"
+
+          for dir in "$ARM/plugins/bundled"/*/; do
+            id="$(basename "$dir")"
+            out="$STAGE_DIR/plugins/bundled/$id"
+            mkdir -p "$out"
+            lipo -create \
+              "$X64/plugins/bundled/$id/$id.dylib" \
+              "$ARM/plugins/bundled/$id/$id.dylib" \
+              -output "$out/$id.dylib"
+            cp "$ARM/plugins/bundled/$id/plugin.json" "$out/plugin.json"
+          done
+
+          count=$(find "$STAGE_DIR/plugins/bundled" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
+          if [ "$count" -ne 17 ]; then
+            echo "::error::universal layout has $count plugins, expected 17"
+            exit 1
+          fi
+
+          archs="$(lipo -archs "$STAGE_DIR/aperio")"
+          echo "universal binary archs: $archs"
+          case " $archs " in
+            *" x86_64 "*) ;;
+            *) echo "::error::universal binary missing x86_64 slice ($archs)"; exit 1 ;;
+          esac
+          case " $archs " in
+            *" arm64 "*) ;;
+            *) echo "::error::universal binary missing arm64 slice ($archs)"; exit 1 ;;
+          esac
+
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Pack zip
+        id: pack
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARCHIVE="${{ steps.stage.outputs.name }}.zip"
+          cd dist-stage
+          zip -r "../$ARCHIVE" "${{ steps.stage.outputs.name }}"
+          cd ..
+          echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.stage.outputs.name }}
+          path: ${{ steps.pack.outputs.archive }}
+          if-no-files-found: error
