@@ -604,7 +604,10 @@
       "deleteEventTitle": "Termin löschen",
       "deleteEventMessage": "„{{title}}\" wirklich löschen? Das kann nicht rückgängig gemacht werden.",
       "deleteTaskTitle": "Aufgabe löschen",
-      "deleteTaskMessage": "„{{title}}\" wirklich löschen? Das kann nicht rückgängig gemacht werden."
+      "deleteTaskMessage": "„{{title}}\" wirklich löschen? Das kann nicht rückgängig gemacht werden.",
+      "deleteTaskListTitle": "Liste löschen",
+      "deleteTaskListMessage": "„{{name}}\" und alle enthaltenen Aufgaben wirklich löschen? Das kann nicht rückgängig gemacht werden.",
+      "deleteTaskListMessageExternal": "„{{name}}\" und alle enthaltenen Aufgaben aus {{account}} löschen? Die Liste wird an der Quelle für alle Geräte entfernt und kann nicht wiederhergestellt werden."
     },
     "plan": {
       "title": "„{{title}}\" einplanen",

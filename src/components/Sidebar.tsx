@@ -10,6 +10,7 @@ import {
 import { useTranslation } from 'react-i18next';
 
 import { useAnnouncer } from '../a11y/Announcer';
+import { ConfirmDialog } from './ConfirmDialog';
 import {
   clearContainerNameOverride,
   createCalendar,
@@ -391,6 +392,14 @@ export function Sidebar() {
   // (the backend command is local-store only); `canDropOn` enforces
   // the same capability / cycle / account rules the menu uses.
   const [draggingListId, setDraggingListId] = useState<string | null>(null);
+  // Pending task-list deletion awaiting confirmation. Deleting a list
+  // removes it + all its tasks; for external accounts that's an
+  // irreversible server-side delete, so the dialog spells that out.
+  const [pendingListDelete, setPendingListDelete] = useState<{
+    id: string;
+    name: string;
+    accountName: string | null;
+  } | null>(null);
   const reparentDrag = useMemo<ReparentDrag>(
     () => ({
       draggingListId,
@@ -654,15 +663,31 @@ export function Sidebar() {
               }),
         );
       } else if (selected === 'delete') {
-        // After delete the row vanishes; tree-focus is the right place
-        // for keyboard navigation to land.
-        setRestoreFocusToTree(true);
-        if (leaf.kind === 'calendars') {
-          void onDeleteCalendar(leaf.containerId, leaf.name);
-        } else if (leaf.kind === 'tasks') {
-          void onDeleteTaskListAction(leaf.containerId, leaf.name);
+        if (leaf.kind === 'tasks') {
+          // Confirm first — deleting a list takes all its tasks with it,
+          // and for external accounts that's irreversible at the source.
+          // The dialog grabs focus, so don't restore tree-focus here.
+          let accountName: string | null = null;
+          if (!accountIsLocal) {
+            const list = taskLists.find((l) => l.id === leaf.containerId);
+            accountName =
+              accounts.find((a) => a.id === list?.account_id)?.display_name ??
+              null;
+          }
+          setPendingListDelete({
+            id: leaf.containerId,
+            name: leaf.name,
+            accountName,
+          });
         } else {
-          void onDeleteContactListAction(leaf.containerId, leaf.name);
+          // Calendars / contacts: existing direct delete. The row
+          // vanishes, so tree-focus is where keyboard nav should land.
+          setRestoreFocusToTree(true);
+          if (leaf.kind === 'calendars') {
+            void onDeleteCalendar(leaf.containerId, leaf.name);
+          } else {
+            void onDeleteContactListAction(leaf.containerId, leaf.name);
+          }
         }
       } else if (selected?.startsWith('reparent:')) {
         setRestoreFocusToTree(true);
@@ -677,9 +702,9 @@ export function Sidebar() {
     [
       startEdit,
       onDeleteCalendar,
-      onDeleteTaskListAction,
       onDeleteContactListAction,
       taskLists,
+      accounts,
       reparentList,
       t,
       focusedCalendarId,
@@ -1094,6 +1119,35 @@ export function Sidebar() {
           {t('sidebar.openSettings')}
         </button>
       </section>
+
+      <ConfirmDialog
+        isOpen={pendingListDelete !== null}
+        onClose={() => {
+          setPendingListDelete(null);
+          setRestoreFocusToTree(true);
+        }}
+        onConfirm={() => {
+          if (pendingListDelete) {
+            void onDeleteTaskListAction(
+              pendingListDelete.id,
+              pendingListDelete.name,
+            );
+          }
+          setPendingListDelete(null);
+          setRestoreFocusToTree(true);
+        }}
+        title={t('dialogs.confirm.deleteTaskListTitle')}
+        message={
+          pendingListDelete?.accountName
+            ? t('dialogs.confirm.deleteTaskListMessageExternal', {
+                name: pendingListDelete.name,
+                account: pendingListDelete.accountName,
+              })
+            : t('dialogs.confirm.deleteTaskListMessage', {
+                name: pendingListDelete?.name ?? '',
+              })
+        }
+      />
     </aside>
   );
 }
