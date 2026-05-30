@@ -1430,8 +1430,7 @@ mod delta_read_tests {
             .await;
 
         // ── Warm drain: update A (new ChangeKey), delete B, enrich A. ──
-        let warm_changes = format!(
-            r#"<t:Update><t:CalendarItem>
+        let warm_changes = r#"<t:Update><t:CalendarItem>
                  <t:ItemId Id="A" ChangeKey="CKA2"/>
                  <t:Subject>Alpha v2</t:Subject>
                  <t:Start>2026-05-20T08:30:00Z</t:Start>
@@ -1439,7 +1438,7 @@ mod delta_read_tests {
                  <t:CalendarItemType>Single</t:CalendarItemType>
                </t:CalendarItem></t:Update>
                <t:Delete><t:ItemId Id="B"/></t:Delete>"#
-        );
+            .to_string();
         let _warm_sync = server
             .mock("POST", "/")
             .with_status(200)
