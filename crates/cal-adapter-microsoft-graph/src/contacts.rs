@@ -152,6 +152,80 @@ async fn list_folder_contacts(state: &ApiState, folder_id: &str) -> GraphResult<
     Ok(out)
 }
 
+/// Outcome of one `contacts/delta` round: created/updated contacts, the
+/// ids of removed contacts, and the `@odata.deltaLink` to pass back next
+/// time (stored opaquely by the host as the sync token).
+#[derive(Debug, Default)]
+pub struct ContactDelta {
+    pub changes: Vec<Contact>,
+    pub deletions: Vec<String>,
+    pub new_token: Option<String>,
+}
+
+/// Bootstrap a folder delta: a full `contactFolders/{id}/contacts/delta`
+/// that also yields the initial `@odata.deltaLink`. Used for the no-token
+/// and expired-token (410) paths. The synthetic Suggested People list has
+/// no delta endpoint — callers must route it elsewhere (full read).
+pub async fn initial_contacts_delta(
+    state: &ApiState,
+    folder_id: &str,
+) -> GraphResult<ContactDelta> {
+    let folder_enc = urlencoding(folder_id);
+    let select_enc = urlencoding(CONTACT_SELECT);
+    let first = format!("/me/contactFolders/{folder_enc}/contacts/delta?$select={select_enc}");
+    drain_contacts_delta(state, first, folder_id).await
+}
+
+/// Resume a folder delta from a stored `@odata.deltaLink` (an absolute
+/// Graph URL carrying the `$deltatoken`). A `410 Gone` surfaces as
+/// `GraphError::Http { status: 410, .. }`; the caller re-bootstraps.
+pub async fn follow_contacts_delta(
+    state: &ApiState,
+    delta_link: &str,
+    folder_id: &str,
+) -> GraphResult<ContactDelta> {
+    drain_contacts_delta(state, delta_link.to_string(), folder_id).await
+}
+
+/// Drain every page of a contacts delta from `first_url`, following
+/// `@odata.nextLink` until the final page hands back `@odata.deltaLink`.
+///
+/// Live contacts map normally. Tombstones (`@removed`) become deletions
+/// by their bare id — a Graph contact's cal-core id IS the raw resource
+/// id, so it equals its `native_id` host-side.
+async fn drain_contacts_delta(
+    state: &ApiState,
+    first_url: String,
+    folder_id: &str,
+) -> GraphResult<ContactDelta> {
+    let mut delta = ContactDelta::default();
+    let mut next: Option<String> = Some(first_url);
+    while let Some(p) = next {
+        let resp: ContactDeltaResponse = state.get_json(&p).await?;
+        for raw in resp.value {
+            if raw.get("@removed").is_some() {
+                if let Some(id) = raw.get("id").and_then(|v| v.as_str()) {
+                    delta.deletions.push(id.to_string());
+                }
+                continue;
+            }
+            let entry: ContactEntry = match serde_json::from_value(raw) {
+                Ok(e) => e,
+                Err(err) => {
+                    tracing::warn!(?err, "skipping undecodable delta contact row");
+                    continue;
+                }
+            };
+            delta.changes.push(map_contact(entry, folder_id));
+        }
+        if resp.delta_link.is_some() {
+            delta.new_token = resp.delta_link;
+        }
+        next = resp.next_link;
+    }
+    Ok(delta)
+}
+
 /// Pull the relevance-ranked Suggested People stream from
 /// `/me/people`. The endpoint caps the response at 1000 items and
 /// doesn't paginate the way contactFolders/{id}/contacts does —
@@ -771,6 +845,20 @@ struct ContactListResponse {
     value: Vec<ContactEntry>,
     #[serde(default, rename = "@odata.nextLink")]
     next_link: Option<String>,
+}
+
+/// One page of a `contacts/delta` response. `value` is kept as raw JSON
+/// so a tombstone (`{ "id": "…", "@removed": { … } }`) can be told apart
+/// from a live contact before deserialising. Intermediate pages carry
+/// `@odata.nextLink`; the final page carries `@odata.deltaLink`.
+#[derive(Debug, Deserialize)]
+struct ContactDeltaResponse {
+    #[serde(default)]
+    value: Vec<serde_json::Value>,
+    #[serde(default, rename = "@odata.nextLink")]
+    next_link: Option<String>,
+    #[serde(default, rename = "@odata.deltaLink")]
+    delta_link: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
