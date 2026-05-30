@@ -11,7 +11,7 @@
 
 use super::{DbError, DbHandle, DbResult};
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 19;
+pub const CURRENT_SCHEMA_VERSION: u32 = 20;
 
 struct Migration {
     target: u32,
@@ -94,6 +94,10 @@ const MIGRATIONS: &[Migration] = &[
     Migration {
         target: 19,
         sql: include_str!("sql/0019_external_cache.sql"),
+    },
+    Migration {
+        target: 20,
+        sql: include_str!("sql/0020_cache_native_id.sql"),
     },
 ];
 

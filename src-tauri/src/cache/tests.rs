@@ -483,6 +483,44 @@ fn invalidate_forces_next_read_cold() {
 }
 
 #[test]
+fn native_id_strips_kind_prefix_and_change_key() {
+    use super::native_id;
+    // EWS: `{kind}:{item_id}|{change_key}` → item_id.
+    assert_eq!(native_id("S:AAA|CK"), "AAA");
+    assert_eq!(native_id("M:item-1|ck-v2"), "item-1");
+    assert_eq!(native_id("S:noCK"), "noCK");
+    // CalDAV: `{href}|{uid}` → href (no `X:` prefix to strip).
+    assert_eq!(native_id("https://h/p/e.ics|uid@h"), "https://h/p/e.ics");
+    // Already-native (Google / Graph / Vikunja / local) → unchanged.
+    assert_eq!(native_id("plain-id-123"), "plain-id-123");
+}
+
+#[test]
+fn delta_deletes_by_native_id() {
+    let store = setup();
+    // An EWS-style event: composite cal-core id, native id "item-1".
+    let ev = event("S:item-1|ck-v1", 8, 9);
+    store
+        .replace_calendar_events(ACC, CAL, range(8, 18), &[ev])
+        .unwrap();
+    assert_eq!(store.read_events(ACC, CAL, wide()).unwrap().len(), 1);
+
+    // The delta deletion carries ONLY the native id (no change key).
+    store
+        .apply_events_delta(
+            ACC,
+            CAL,
+            &Delta {
+                changes: Vec::new(),
+                deletions: vec!["item-1".into()],
+                new_token: Some("c2".into()),
+            },
+        )
+        .unwrap();
+    assert!(store.read_events(ACC, CAL, wide()).unwrap().is_empty());
+}
+
+#[test]
 fn change_set_wire_defaults_and_roundtrip() {
     use cal_core::ChangeSet;
 

@@ -213,11 +213,16 @@ impl CacheStore {
             for ev in &delta.changes {
                 insert_event(tx, account, calendar, ev, &now)?;
             }
-            for id in &delta.deletions {
+            for native in &delta.deletions {
+                // A delta deletion carries the provider-native id, not
+                // the composite cal-core id — match on `native_id`. This
+                // also fans out correctly when several cached rows share
+                // one native resource (e.g. a recurring master's
+                // occurrences).
                 tx.execute(
                     "DELETE FROM cache_events
-                     WHERE account_id = ?1 AND calendar_id = ?2 AND id = ?3",
-                    params![account, calendar, id],
+                     WHERE account_id = ?1 AND calendar_id = ?2 AND native_id = ?3",
+                    params![account, calendar, native],
                 )?;
             }
             tx.execute(
@@ -428,13 +433,14 @@ impl CacheStore {
         let now = now_ts();
         let json = to_json(item, table)?;
         let sql = format!(
-            "INSERT INTO {table} (account_id, list_id, id, payload, cached_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)
+            "INSERT INTO {table} (account_id, list_id, id, native_id, payload, cached_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT(account_id, list_id, id) DO UPDATE SET
+               native_id = excluded.native_id,
                payload = excluded.payload, cached_at = excluded.cached_at"
         );
         self.db.with_conn(|c| {
-            c.execute(&sql, params![account, list, id, json, now])?;
+            c.execute(&sql, params![account, list, id, native_id(id), json, now])?;
             Ok(())
         })
     }
@@ -712,14 +718,15 @@ impl CacheStore {
         let now = now_ts();
         let del = format!("DELETE FROM {table} WHERE account_id = ?1 AND list_id = ?2");
         let ins = format!(
-            "INSERT INTO {table} (account_id, list_id, id, payload, cached_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)"
+            "INSERT INTO {table} (account_id, list_id, id, native_id, payload, cached_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)"
         );
         self.db.with_tx(|tx| {
             tx.execute(&del, params![account, list])?;
             for item in items {
+                let id = id_of(item);
                 let json = to_json(item, table)?;
-                tx.execute(&ins, params![account, list, id_of(item), json, now])?;
+                tx.execute(&ins, params![account, list, id, native_id(id), json, now])?;
             }
             mark_refreshed(tx, account, scope, list, &now)?;
             Ok(())
@@ -737,19 +744,27 @@ impl CacheStore {
     ) -> DbResult<()> {
         let now = now_ts();
         let upsert = format!(
-            "INSERT INTO {table} (account_id, list_id, id, payload, cached_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)
+            "INSERT INTO {table} (account_id, list_id, id, native_id, payload, cached_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT(account_id, list_id, id) DO UPDATE SET
+               native_id = excluded.native_id,
                payload = excluded.payload, cached_at = excluded.cached_at"
         );
-        let del = format!("DELETE FROM {table} WHERE account_id = ?1 AND list_id = ?2 AND id = ?3");
+        // Delta deletions carry the provider-native id (see `native_id`).
+        let del = format!(
+            "DELETE FROM {table} WHERE account_id = ?1 AND list_id = ?2 AND native_id = ?3"
+        );
         self.db.with_tx(|tx| {
             for item in &delta.changes {
+                let id = id_of(item);
                 let json = to_json(item, table)?;
-                tx.execute(&upsert, params![account, list, id_of(item), json, now])?;
+                tx.execute(
+                    &upsert,
+                    params![account, list, id, native_id(id), json, now],
+                )?;
             }
-            for id in &delta.deletions {
-                tx.execute(&del, params![account, list, id])?;
+            for native in &delta.deletions {
+                tx.execute(&del, params![account, list, native])?;
             }
             tx.execute(
                 "INSERT INTO cache_sync_state
@@ -789,9 +804,10 @@ fn insert_event(
     let json = to_json(ev, "cache_events")?;
     tx.execute(
         "INSERT INTO cache_events
-           (account_id, calendar_id, id, start_utc, end_utc, etag, payload, cached_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+           (account_id, calendar_id, id, native_id, start_utc, end_utc, etag, payload, cached_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
          ON CONFLICT(account_id, calendar_id, id) DO UPDATE SET
+           native_id = excluded.native_id,
            start_utc = excluded.start_utc,
            end_utc = excluded.end_utc,
            etag = excluded.etag,
@@ -801,6 +817,7 @@ fn insert_event(
             account,
             calendar,
             ev.id,
+            native_id(&ev.id),
             ts(&ev.start),
             ts(&ev.end),
             ev.etag,
@@ -809,6 +826,27 @@ fn insert_event(
         ],
     )?;
     Ok(())
+}
+
+/// Derive the provider-native resource id from a cal-core id, so a delta
+/// sync's deletions (which only carry the native id) can be applied.
+///
+/// Universal rule: strip a leading one-char `X:` kind prefix (EWS
+/// `S:`/`O:`/`E:`/`M:`), then take the substring before the first `|`
+/// (CalDAV `href|uid`, EWS `item_id|change_key`). Adapters whose id is
+/// already the native resource id (Google, Graph, Vikunja, local) have
+/// neither marker, so the id passes through unchanged.
+fn native_id(id: &str) -> &str {
+    let bytes = id.as_bytes();
+    let stripped = if bytes.len() >= 2 && bytes[1] == b':' {
+        &id[2..]
+    } else {
+        id
+    };
+    match stripped.split_once('|') {
+        Some((native, _)) => native,
+        None => stripped,
+    }
 }
 
 /// Stamp last_refreshed + clear last_error for a listing/by-list scope
