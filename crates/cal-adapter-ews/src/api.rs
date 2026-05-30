@@ -25,13 +25,13 @@ use crate::error::{EwsError, EwsResult};
 use crate::mapping::{
     decode_event_id, encode_event_id, event_to_update_field_xml, new_event_to_calendar_item_xml,
     parse_find_folder_response, parse_find_item_response, parse_first_item_id,
-    parse_sync_folder_items_response, split_calendar_id, to_calendar, to_event, DecodedEventId,
-    EventIdKind, ParsedItem, SyncChange,
+    parse_sync_folder_items_counts, parse_sync_folder_items_response, split_calendar_id,
+    to_calendar, to_event, DecodedEventId, EventIdKind, ParsedItem, SyncChange,
 };
 use crate::soap::{
     check_for_fault, create_calendar_item, delete_calendar_item, find_calendar_folders,
-    find_items_in_range, get_recurring_master, sync_folder_items, update_calendar_item,
-    update_folder_displayname,
+    find_items_in_range, get_recurring_master, sync_folder_items, sync_folder_items_idonly,
+    update_calendar_item, update_folder_displayname,
 };
 
 /// State carried by the adapter — endpoint + credentials + reqwest
@@ -348,6 +348,56 @@ pub async fn sync_events_delta(
     }
     Err(EwsError::Protocol(
         "SyncFolderItems didn't terminate after 64 pages".into(),
+    ))
+}
+
+/// Outcome of an IdOnly `SyncFolderItems` probe drain: whether the folder
+/// changed since the supplied cookie, and the fresh cookie to store.
+#[derive(Debug, Clone)]
+pub struct ProbeOutcome {
+    pub changed: bool,
+    pub sync_state: String,
+}
+
+/// Drain an IdOnly `SyncFolderItems` probe against `list_id` to
+/// completion, reporting whether ANY item changed since `sync_state` plus
+/// the freshest cookie. Cheap — IdOnly responses carry just ids, no item
+/// bodies — so the Tasks/Contacts delta path can gate a full re-read on
+/// it (the CalDAV CTag pattern, EWS-style).
+///
+/// `ErrorInvalidSyncStateData` (the cookie aged out) surfaces verbatim,
+/// same as [`sync_events_delta`]; the caller drops the cookie and
+/// re-probes from `None`.
+pub async fn probe_folder_sync(
+    client: &EwsClient,
+    list_id: &str,
+    sync_state: Option<&str>,
+) -> EwsResult<ProbeOutcome> {
+    let (folder_id, change_key) = split_calendar_id(list_id);
+    let mut cookie = sync_state.map(|s| s.to_string());
+    let mut changed = false;
+    for _ in 0..64 {
+        let body = sync_folder_items_idonly(
+            &folder_id,
+            change_key.as_deref(),
+            cookie.as_deref(),
+            SYNC_BATCH_SIZE,
+        );
+        let xml = client.post_soap(body).await?;
+        let probe = parse_sync_folder_items_counts(&xml)?;
+        if probe.change_count > 0 {
+            changed = true;
+        }
+        cookie = Some(probe.new_sync_state);
+        if probe.includes_last {
+            return Ok(ProbeOutcome {
+                changed,
+                sync_state: cookie.unwrap_or_default(),
+            });
+        }
+    }
+    Err(EwsError::Protocol(
+        "SyncFolderItems probe didn't terminate after 64 pages".into(),
     ))
 }
 
@@ -814,6 +864,68 @@ mod tests {
         assert!(updated.items.contains_key("B"));
         // Cookie advanced to the last page's cookie.
         assert_eq!(updated.sync_state.as_deref(), Some("COOKIE-2"));
+    }
+
+    #[tokio::test]
+    async fn probe_folder_sync_flags_changes_and_advances_cookie() {
+        // A Task Create on an IdOnly probe → changed=true, fresh cookie.
+        let mut server = Server::new_async().await;
+        let body = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:SyncFolderItemsResponse><m:ResponseMessages>
+    <m:SyncFolderItemsResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:SyncState>PC1</m:SyncState>
+      <m:IncludesLastItemInRange>true</m:IncludesLastItemInRange>
+      <m:Changes>
+        <t:Create><t:Task><t:ItemId Id="T1" ChangeKey="K1"/></t:Task></t:Create>
+      </m:Changes>
+    </m:SyncFolderItemsResponseMessage>
+  </m:ResponseMessages></m:SyncFolderItemsResponse></s:Body>
+</s:Envelope>"#;
+        let _m = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body(body)
+            .create_async()
+            .await;
+        let probe = probe_folder_sync(&client_for(&server), "TF|TCK", None)
+            .await
+            .unwrap();
+        assert!(probe.changed);
+        assert_eq!(probe.sync_state, "PC1");
+    }
+
+    #[tokio::test]
+    async fn probe_folder_sync_reports_no_change_on_empty_page() {
+        // Empty Changes on the probe → changed=false (host no-ops).
+        let mut server = Server::new_async().await;
+        let body = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:SyncFolderItemsResponse><m:ResponseMessages>
+    <m:SyncFolderItemsResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:SyncState>PC2</m:SyncState>
+      <m:IncludesLastItemInRange>true</m:IncludesLastItemInRange>
+      <m:Changes/>
+    </m:SyncFolderItemsResponseMessage>
+  </m:ResponseMessages></m:SyncFolderItemsResponse></s:Body>
+</s:Envelope>"#;
+        let _m = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body(body)
+            .create_async()
+            .await;
+        let probe = probe_folder_sync(&client_for(&server), "TF|TCK", Some("PC1"))
+            .await
+            .unwrap();
+        assert!(!probe.changed);
+        assert_eq!(probe.sync_state, "PC2");
     }
 
     #[tokio::test]

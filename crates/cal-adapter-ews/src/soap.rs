@@ -137,6 +137,53 @@ pub fn sync_folder_items(
     wrap(&body)
 }
 
+/// SOAP body for an **IdOnly** `SyncFolderItems` — a cheap change probe
+/// usable on ANY folder class (Task, Contact, …), not just calendars.
+///
+/// The calendar [`sync_folder_items`] above requests `calendar:*` fields
+/// that only exist on `CalendarItem`s; asking for them against a Task or
+/// Contact folder is wrong. This variant requests nothing but the
+/// ItemShape `IdOnly`, so the response carries just the changed ids plus
+/// the fresh sync cookie. The Tasks/Contacts delta read uses it to detect
+/// "did this folder change since the cookie?" and then re-reads the whole
+/// folder via `FindItem` only when something actually moved — the same
+/// CTag-gated shape the CalDAV adapter uses.
+pub fn sync_folder_items_idonly(
+    folder_id: &str,
+    change_key: Option<&str>,
+    sync_state: Option<&str>,
+    max_changes: u32,
+) -> String {
+    let folder_id_attr = match change_key {
+        Some(ck) => format!(
+            r#"<t:FolderId Id="{}" ChangeKey="{}"/>"#,
+            escape_xml(folder_id),
+            escape_xml(ck)
+        ),
+        None => format!(r#"<t:FolderId Id="{}"/>"#, escape_xml(folder_id)),
+    };
+    let sync_state_xml = match sync_state {
+        Some(s) if !s.is_empty() => {
+            format!("<m:SyncState>{}</m:SyncState>", escape_xml(s))
+        }
+        _ => String::new(),
+    };
+    let body = format!(
+        r#"    <m:SyncFolderItems>
+      <m:ItemShape>
+        <t:BaseShape>IdOnly</t:BaseShape>
+      </m:ItemShape>
+      <m:SyncFolderId>
+        {folder_id_attr}
+      </m:SyncFolderId>
+      {sync_state_xml}
+      <m:MaxChangesReturned>{max_changes}</m:MaxChangesReturned>
+      <m:SyncScope>NormalItems</m:SyncScope>
+    </m:SyncFolderItems>"#,
+    );
+    wrap(&body)
+}
+
 /// SOAP body for `FindItem` with a `CalendarView` window: get every
 /// event (recurring instances *expanded* by the server) in
 /// `[start, end)`. Pulls extra fields beyond the default shape so

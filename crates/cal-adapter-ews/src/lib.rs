@@ -110,6 +110,18 @@ pub struct EwsAdapter {
     /// resumes from a delta-sync against the persisted cookie
     /// instead of doing a full re-sync of every folder.
     events_sync: Mutex<HashMap<String, SyncedFolderState>>,
+    /// Per-folder `SyncFolderItems` cookie for the Tasks delta read,
+    /// keyed by the Aperio list id. Unlike `events_sync` this holds only
+    /// the cookie (not the item set): the Tasks/Contacts delta is
+    /// CTag-style — a cheap IdOnly probe advances the cookie and gates a
+    /// full `FindItem` re-read on whether anything changed, so the full
+    /// item set never has to live here. In-memory only; a process restart
+    /// re-seeds from the host's stored token (see `probe_list_changes`).
+    tasks_sync: Mutex<HashMap<String, String>>,
+    /// Same as `tasks_sync` for the Contacts delta read (IPF.Contact
+    /// folders). The synthetic GAL list has no folder to sync and is
+    /// handled separately (returns `Unsupported`).
+    contacts_sync: Mutex<HashMap<String, String>>,
     /// Host-supplied directory for persistent state. `None`
     /// disables persistence entirely (test path, smoke-test
     /// ephemeral instances).
@@ -142,6 +154,8 @@ impl EwsAdapter {
             listing_ttl: chrono::Duration::minutes(5),
             gal_ttl: chrono::Duration::minutes(30),
             events_sync: Mutex::new(HashMap::new()),
+            tasks_sync: Mutex::new(HashMap::new()),
+            contacts_sync: Mutex::new(HashMap::new()),
             state_dir: None,
         }
     }
@@ -570,6 +584,54 @@ impl EwsAdapter {
         );
         Ok(change_set)
     }
+
+    /// Shared probe logic for the Tasks/Contacts delta read. Runs the
+    /// cheap IdOnly `SyncFolderItems` probe against `list_id`, stores the
+    /// fresh cookie in `sync_map`, and reports whether the caller must do
+    /// a full `FindItem` re-read.
+    ///
+    /// The probe is seeded from our in-memory cookie when we have one,
+    /// else from the host's `since_token` — so a process restart (empty
+    /// map) resumes from the host's stored cookie and skips the full read
+    /// when nothing changed. A full read is forced when the folder changed,
+    /// the cookie aged out, or `since_token` is `None` (the host then
+    /// replaces wholesale and `changes` must be the complete set).
+    async fn probe_list_changes(
+        &self,
+        sync_map: &Mutex<HashMap<String, String>>,
+        list_id: &str,
+        since_token: Option<&str>,
+    ) -> EwsResult<(bool, String)> {
+        let seed = {
+            let guard = sync_map.lock().await;
+            guard
+                .get(list_id)
+                .cloned()
+                .or_else(|| since_token.map(String::from))
+        };
+        let outcome = match api::probe_folder_sync(&self.client, list_id, seed.as_deref()).await {
+            Ok(o) => o,
+            Err(err) if is_sync_state_invalid(&err) => {
+                tracing::warn!(
+                    target: "cal_adapter_ews::sync",
+                    list = %list_id,
+                    "SyncFolderItems probe cookie invalid; re-probing from scratch",
+                );
+                // Cold re-probe; a stale cookie means the cached snapshot
+                // may be wrong, so force the full re-read.
+                let mut o = api::probe_folder_sync(&self.client, list_id, None).await?;
+                o.changed = true;
+                o
+            }
+            Err(err) => return Err(err),
+        };
+        sync_map
+            .lock()
+            .await
+            .insert(list_id.to_string(), outcome.sync_state.clone());
+        let need_full = outcome.changed || since_token.is_none();
+        Ok((need_full, outcome.sync_state))
+    }
 }
 
 /// Outcome of translating one cached item, reported back so the full
@@ -867,6 +929,42 @@ impl TasksFeature for EwsAdapter {
             .map_err(to_core_error)
     }
 
+    /// Host-driven incremental task read (CACHE-8). EWS has no per-item
+    /// task delta we can merge cleanly (the cal-core id embeds the
+    /// rotating ChangeKey), so this is CTag-style instead: a cheap IdOnly
+    /// `SyncFolderItems` probe gates a full `FindItem` re-read. Unchanged
+    /// folders return an empty no-op ChangeSet; a changed folder (or the
+    /// bootstrap / a token-less call) returns the full task set as a
+    /// `full_resync` so the host replaces wholesale.
+    async fn get_tasks_delta(
+        &self,
+        list_id: &str,
+        since_token: Option<&str>,
+    ) -> CoreResult<ChangeSet<Task>> {
+        let (need_full, cookie) = self
+            .probe_list_changes(&self.tasks_sync, list_id, since_token)
+            .await
+            .map_err(to_core_error)?;
+        if need_full {
+            let tasks = tasks::get_tasks(&self.client, list_id)
+                .await
+                .map_err(to_core_error)?;
+            Ok(ChangeSet {
+                changes: tasks,
+                deletions: Vec::new(),
+                new_token: Some(cookie),
+                full_resync: true,
+            })
+        } else {
+            Ok(ChangeSet {
+                changes: Vec::new(),
+                deletions: Vec::new(),
+                new_token: Some(cookie),
+                full_resync: false,
+            })
+        }
+    }
+
     async fn create_task(&self, list_id: &str, task: NewTask) -> CoreResult<Task> {
         tasks::create_task(&self.client, list_id, task)
             .await
@@ -935,6 +1033,44 @@ impl ContactsFeature for EwsAdapter {
         contacts::get_contacts(&self.client, list_id)
             .await
             .map_err(to_core_error)
+    }
+
+    /// Host-driven incremental contact read (CACHE-8). Same CTag-style
+    /// probe-gated full re-read as `get_tasks_delta`. The synthetic GAL
+    /// list is a ResolveNames walk with no folder to sync, so it returns
+    /// `Unsupported` and the host falls back to a full read.
+    async fn get_contacts_delta(
+        &self,
+        list_id: &str,
+        since_token: Option<&str>,
+    ) -> CoreResult<ChangeSet<Contact>> {
+        if list_id == contacts::GAL_LIST_ID {
+            return Err(CoreError::Unsupported(
+                "the EWS GAL (ResolveNames) has no per-folder delta sync".into(),
+            ));
+        }
+        let (need_full, cookie) = self
+            .probe_list_changes(&self.contacts_sync, list_id, since_token)
+            .await
+            .map_err(to_core_error)?;
+        if need_full {
+            let contacts = contacts::get_contacts(&self.client, list_id)
+                .await
+                .map_err(to_core_error)?;
+            Ok(ChangeSet {
+                changes: contacts,
+                deletions: Vec::new(),
+                new_token: Some(cookie),
+                full_resync: true,
+            })
+        } else {
+            Ok(ChangeSet {
+                changes: Vec::new(),
+                deletions: Vec::new(),
+                new_token: Some(cookie),
+                full_resync: false,
+            })
+        }
     }
 
     async fn search_contacts(&self, query: &str) -> CoreResult<Vec<Contact>> {
@@ -1350,5 +1486,122 @@ mod delta_read_tests {
         // native_id host-side.
         assert_eq!(warm.deletions, vec!["B".to_string()]);
         assert_eq!(warm.new_token.as_deref(), Some("COOKIE-2"));
+    }
+}
+
+#[cfg(test)]
+mod tasks_contacts_delta_tests {
+    //! `get_tasks_delta` / `get_contacts_delta` — the CTag-style probe
+    //! that gates a full `FindItem` re-read. EWS posts everything to one
+    //! endpoint, so the request sequence is laid out as ordered `.expect(1)`
+    //! mocks (FIFO), like the existing event-drain test.
+    use super::*;
+    use mockito::Server;
+
+    fn creds() -> BasicCredentials {
+        BasicCredentials {
+            username: "alice".into(),
+            password: "pw".into(),
+        }
+    }
+
+    /// An IdOnly SyncFolderItems probe page that terminates the drain.
+    fn probe_page(cookie: &str, changes_inner: &str) -> String {
+        format!(
+            r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:SyncFolderItemsResponse><m:ResponseMessages>
+    <m:SyncFolderItemsResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:SyncState>{cookie}</m:SyncState>
+      <m:IncludesLastItemInRange>true</m:IncludesLastItemInRange>
+      <m:Changes>{changes_inner}</m:Changes>
+    </m:SyncFolderItemsResponseMessage>
+  </m:ResponseMessages></m:SyncFolderItemsResponse></s:Body>
+</s:Envelope>"#
+        )
+    }
+
+    const ONE_TASK_FIND: &str = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:FindItemResponse><m:ResponseMessages>
+    <m:FindItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:RootFolder TotalItemsInView="1"><t:Items>
+        <t:Task>
+          <t:ItemId Id="T1" ChangeKey="K1"/>
+          <t:Subject>Buy milk</t:Subject>
+          <t:Status>NotStarted</t:Status>
+        </t:Task>
+      </t:Items></m:RootFolder>
+    </m:FindItemResponseMessage>
+  </m:ResponseMessages></m:FindItemResponse></s:Body>
+</s:Envelope>"#;
+
+    #[tokio::test]
+    async fn tasks_delta_probe_gates_full_read() {
+        let mut server = Server::new_async().await;
+        // POST 1 — cold probe with a Create → changed.
+        let _probe1 = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body(probe_page(
+                "TC1",
+                r#"<t:Create><t:Task><t:ItemId Id="T1" ChangeKey="K1"/></t:Task></t:Create>"#,
+            ))
+            .expect(1)
+            .create_async()
+            .await;
+        // POST 2 — the gated full FindItem read.
+        let _find = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body(ONE_TASK_FIND)
+            .expect(1)
+            .create_async()
+            .await;
+        // POST 3 — warm probe, no changes → no-op.
+        let _probe2 = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body(probe_page("TC2", ""))
+            .expect(1)
+            .create_async()
+            .await;
+
+        let adapter = EwsAdapter::new(server.url(), creds());
+
+        // Cold (no token): probe sees a change → full read → full_resync.
+        let cold = adapter.get_tasks_delta("TF|TCK", None).await.unwrap();
+        assert!(cold.full_resync);
+        assert_eq!(cold.changes.len(), 1);
+        assert_eq!(cold.changes[0].title, "Buy milk");
+        assert_eq!(cold.new_token.as_deref(), Some("TC1"));
+
+        // Warm (prior cookie): probe sees nothing → empty no-op, fresh cookie.
+        let warm = adapter
+            .get_tasks_delta("TF|TCK", Some("TC1"))
+            .await
+            .unwrap();
+        assert!(!warm.full_resync);
+        assert!(warm.changes.is_empty());
+        assert_eq!(warm.new_token.as_deref(), Some("TC2"));
+    }
+
+    #[tokio::test]
+    async fn contacts_delta_gal_is_unsupported() {
+        // The GAL is a ResolveNames walk with no folder cookie — it must
+        // surface Unsupported so the host falls back to a full read.
+        let server = Server::new_async().await;
+        let adapter = EwsAdapter::new(server.url(), creds());
+        let err = adapter
+            .get_contacts_delta(crate::contacts::GAL_LIST_ID, None)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CoreError::Unsupported(_)));
     }
 }

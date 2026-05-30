@@ -278,6 +278,27 @@ unsafe extern "C" fn ffi_get_tasks(h: *mut c_void, a: *const u8, l: usize) -> Pl
 }
 
 #[derive(Debug, Deserialize)]
+struct GetTasksDeltaArgs {
+    list_id: String,
+    since_token: Option<String>,
+}
+
+unsafe extern "C" fn ffi_get_tasks_delta(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let args: GetTasksDeltaArgs = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch(h, move |p| async move {
+        p.get_tasks_delta(&args.list_id, args.since_token.as_deref())
+            .await
+    })
+}
+
+#[derive(Debug, Deserialize)]
 struct CreateTaskArgs {
     list_id: String,
     task: NewTask,
@@ -381,6 +402,27 @@ unsafe extern "C" fn ffi_get_contacts(h: *mut c_void, a: *const u8, l: usize) ->
         Err(r) => return r,
     };
     dispatch(h, move |p| async move { p.get_contacts(&list_id).await })
+}
+
+#[derive(Debug, Deserialize)]
+struct GetContactsDeltaArgs {
+    list_id: String,
+    since_token: Option<String>,
+}
+
+unsafe extern "C" fn ffi_get_contacts_delta(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let args: GetContactsDeltaArgs = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch(h, move |p| async move {
+        p.get_contacts_delta(&args.list_id, args.since_token.as_deref())
+            .await
+    })
 }
 
 unsafe extern "C" fn ffi_search_contacts(
@@ -548,6 +590,7 @@ pub static TASKS_VTABLE: TasksVtable = TasksVtable {
     rename_task_list: Some(ffi_rename_task_list),
     create_task_list: Some(ffi_create_task_list),
     delete_task_list: Some(ffi_delete_task_list),
+    get_tasks_delta: Some(ffi_get_tasks_delta),
     ..TasksVtable::empty()
 };
 
@@ -565,6 +608,7 @@ pub static CONTACTS_VTABLE: ContactsVtable = ContactsVtable {
     set_contact_photo: Some(ffi_set_contact_photo),
     delete_contact_photo: Some(ffi_delete_contact_photo),
     invalidate_contacts_cache: Some(ffi_invalidate_contacts_cache),
+    get_contacts_delta: Some(ffi_get_contacts_delta),
     ..ContactsVtable::empty()
 };
 

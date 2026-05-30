@@ -877,6 +877,87 @@ pub fn parse_sync_folder_items_response(xml: &str) -> EwsResult<SyncFolderItemsR
     })
 }
 
+/// Result of one IdOnly `SyncFolderItems` probe page. The Tasks/Contacts
+/// delta read only needs to know "did anything change?" and the fresh
+/// cookie — not the item details — so this skips per-item parsing and
+/// just counts the Create/Update/Delete wrappers.
+#[derive(Debug, Clone)]
+pub struct SyncProbe {
+    /// Number of Create/Update/Delete changes on this page (ReadFlagChange
+    /// — mail-only — is deliberately not counted).
+    pub change_count: usize,
+    pub new_sync_state: String,
+    pub includes_last: bool,
+}
+
+/// Walk an IdOnly `SyncFolderItemsResponse` and report only the change
+/// count + cookie + last-page flag. Item-type agnostic: it counts the
+/// `<t:Create>` / `<t:Update>` / `<t:Delete>` wrappers without caring
+/// whether they hold a Task, Contact or anything else, so the same probe
+/// drives both the Tasks and Contacts delta paths.
+pub fn parse_sync_folder_items_counts(xml: &str) -> EwsResult<SyncProbe> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+
+    let mut change_count = 0usize;
+    let mut new_sync_state = String::new();
+    let mut includes_last = false;
+    let mut text_target: Option<&'static str> = None;
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(XmlEvent::Start(e)) | Ok(XmlEvent::Empty(e)) => {
+                let local = e.local_name().as_ref().to_ascii_lowercase();
+                match local.as_slice() {
+                    b"create" | b"update" | b"delete" => change_count += 1,
+                    b"syncstate" => text_target = Some("sync_state"),
+                    b"includeslastiteminrange" => text_target = Some("includes_last"),
+                    _ => {}
+                }
+            }
+            Ok(XmlEvent::End(_)) => text_target = None,
+            Ok(XmlEvent::Text(t)) if text_target.is_some() => {
+                let raw = match t.unescape() {
+                    Ok(c) => c.to_string(),
+                    Err(_) => continue,
+                };
+                let s = raw.trim();
+                if s.is_empty() {
+                    continue;
+                }
+                match text_target {
+                    Some("sync_state") => new_sync_state.push_str(s),
+                    Some("includes_last") => {
+                        includes_last = s.eq_ignore_ascii_case("true");
+                    }
+                    _ => {}
+                }
+            }
+            Ok(XmlEvent::Eof) => break,
+            Err(err) => {
+                return Err(EwsError::Protocol(format!(
+                    "SyncFolderItems probe xml parse: {err}"
+                )));
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    if new_sync_state.is_empty() {
+        return Err(EwsError::Protocol(
+            "SyncFolderItems probe response missing SyncState".into(),
+        ));
+    }
+
+    Ok(SyncProbe {
+        change_count,
+        new_sync_state,
+        includes_last,
+    })
+}
+
 // ── GetItem (recurrence enrichment) ──────────────────────────────────────
 //
 // `SyncFolderItems` honours most of `AdditionalProperties` but *drops*
