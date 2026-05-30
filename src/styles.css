@@ -2030,6 +2030,46 @@ button[aria-disabled='true'] {
   margin-left: var(--space-2);
 }
 
+/* ── External-cache refresh indicator (CACHE-3) ─────────────────────────── */
+
+.cache-refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-1);
+  color: var(--color-fg-muted);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.cache-refresh:hover:not(:disabled) {
+  color: var(--color-fg);
+}
+
+.cache-refresh:disabled {
+  cursor: default;
+}
+
+.cache-refresh__glyph {
+  display: inline-block;
+  font-size: var(--font-size-md);
+}
+
+.cache-refresh--spinning .cache-refresh__glyph {
+  animation: cache-refresh-spin 1s linear infinite;
+}
+
+@keyframes cache-refresh-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .toolbar__anchor {
   margin-left: auto;
   color: var(--color-fg-muted);

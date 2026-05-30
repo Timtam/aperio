@@ -7,6 +7,7 @@
 pub mod accounts;
 pub mod bundled_plugins;
 pub mod cache;
+pub mod cache_refresh;
 pub mod commands;
 pub mod conflicts;
 pub mod contact_sync;
@@ -135,6 +136,12 @@ pub fn run() {
     // deduplicated refresh.
     let cache_store = Arc::new(cache::CacheStore::new(db.clone()));
     let refresh_coordinator = Arc::new(cache::RefreshCoordinator::new());
+    // CACHE-3: clones for the background warm/periodic refresher spawned
+    // in `setup()` (the originals are moved into Tauri State below).
+    let registry_for_cache_refresh = Arc::clone(&registry);
+    let cache_for_refresh = Arc::clone(&cache_store);
+    let coord_for_refresh = Arc::clone(&refresh_coordinator);
+    let db_for_cache_refresh = db.shared();
 
     // The scheduler holds its own Arc so its background scan can
     // fan out to external adapters even while a command is awaiting
@@ -448,6 +455,10 @@ pub fn run() {
             // section so stale community plugins after an
             // Aperio update don't silently disappear.
             commands::list_failed_plugins,
+            // CACHE-3 — manual external-cache refresh + status for the
+            // toolbar indicator.
+            commands::refresh_external_cache,
+            commands::get_cache_refresh_status,
         ])
         .setup(move |app| {
             // Spawn the reminder scheduler on the Tauri/tokio runtime
@@ -472,6 +483,20 @@ pub fn run() {
                 app.handle().clone(),
             );
             app.manage(contact_sync);
+
+            // CACHE-3: external-cache warm/periodic refresher. Runs a
+            // wide-window warm pass shortly after boot and on a
+            // prefs-driven interval, deduplicated against the per-read
+            // SWR path. Stored in State so `refresh_external_cache` can
+            // drive a manual pass.
+            let cache_refresher = cache_refresh::CacheRefresher::spawn(
+                Arc::clone(&registry_for_cache_refresh),
+                Arc::clone(&cache_for_refresh),
+                Arc::clone(&coord_for_refresh),
+                db_for_cache_refresh.clone(),
+                app.handle().clone(),
+            );
+            app.manage(cache_refresher);
 
             // Phase Se: sync scheduler. Spawns the periodic worker
             // + listens on the kick `Notify` shared with the event-

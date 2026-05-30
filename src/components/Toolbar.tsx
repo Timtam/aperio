@@ -4,6 +4,7 @@ import { useDateFormat } from '../intl/dateFormat';
 import { useDialogState } from '../state/DialogState';
 import { useViewState } from '../state/ViewState';
 import { VIEWS, type ViewId } from '../state/viewMath';
+import { CacheRefreshIndicator } from './CacheRefreshIndicator';
 import { SyncStatusIndicator } from './SyncStatusIndicator';
 
 const VIEW_SHORTCUT: Record<ViewId, string> = {
@@ -135,6 +136,7 @@ export function Toolbar() {
           in the status bar"; the toolbar IS the status bar in
           Aperio's layout. */}
       <div className="toolbar__group toolbar__group--status">
+        <CacheRefreshIndicator />
         <SyncStatusIndicator />
       </div>
     </div>

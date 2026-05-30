@@ -726,6 +726,29 @@ export const clearContactsCache = () =>
 export const setContactsSyncInterval = (minutes: number) =>
   invoke<number>('set_contacts_sync_interval', { minutes });
 
+// ── External snapshot cache (CACHE-3) ─────────────────────────────────
+
+/** Status of the background external-cache refresher. `refreshing`
+ *  is true while a warm pass runs; `last_refreshed_at` is RFC 3339
+ *  (or null before the first pass) and survives restarts. */
+export interface CacheRefreshStatus {
+  refreshing: boolean;
+  last_refreshed_at: string | null;
+}
+
+/** Payload of the `cache-refresh-status` Tauri event, emitted at the
+ *  start and end of every warm pass. Same shape as the status query. */
+export type CacheRefreshStatusPayload = CacheRefreshStatus;
+
+/** Kick an immediate background warm pass (manual "refresh now").
+ *  Returns as soon as the pass is queued. */
+export const refreshExternalCache = () =>
+  invoke<void>('refresh_external_cache');
+
+/** Current refresher status — seeds the toolbar indicator on mount. */
+export const getCacheRefreshStatus = () =>
+  invoke<CacheRefreshStatus>('get_cache_refresh_status');
+
 // ── Cross-device sync (Phase Sd–Si, DESIGN.md §19) ───────────────────
 
 /** Adapter family the user picked. `none` is the explicit
