@@ -167,6 +167,16 @@ pub struct TaskCapabilities {
     /// cross-project moves, so it sets this `false`.
     #[serde(default = "yes")]
     pub move_between_projects: bool,
+    /// The adapter can create new task lists (projects) at the source.
+    /// Defaults `false` — an adapter opts in once it implements
+    /// `TasksFeature::create_task_list`; the UI gates its "new list in
+    /// this account" affordance on it.
+    #[serde(default)]
+    pub create_lists: bool,
+    /// The adapter can delete task lists at the source. Same opt-in
+    /// shape as `create_lists`.
+    #[serde(default)]
+    pub delete_lists: bool,
 }
 
 impl Default for TaskCapabilities {
@@ -179,6 +189,8 @@ impl Default for TaskCapabilities {
             multiple_labels: false,
             task_recurrence: true,
             move_between_projects: true,
+            create_lists: false,
+            delete_lists: false,
         }
     }
 }

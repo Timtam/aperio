@@ -140,6 +140,26 @@ pub trait TasksFeature: Adapter {
             "rename_task_list is not supported on this adapter".into(),
         ))
     }
+
+    /// Create a new task list (project) at the source and return the
+    /// created row. `parent_id` nests it under another list on backends
+    /// with nested projects (Vikunja, Todoist); flat backends ignore
+    /// it. Default `Unsupported` — adapters that can create lists
+    /// override it. The host only routes here for accounts whose
+    /// manifest declares the `create_lists` capability.
+    async fn create_task_list(&self, _name: &str, _parent_id: Option<&str>) -> Result<TaskList> {
+        Err(Error::Unsupported(
+            "create_task_list is not supported on this adapter".into(),
+        ))
+    }
+
+    /// Delete a task list (project) at the source. Default
+    /// `Unsupported`; gated on the `delete_lists` capability host-side.
+    async fn delete_task_list(&self, _list_id: &str) -> Result<()> {
+        Err(Error::Unsupported(
+            "delete_task_list is not supported on this adapter".into(),
+        ))
+    }
 }
 
 /// Implemented by adapters that declare `Capability::Contacts`.

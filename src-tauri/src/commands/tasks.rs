@@ -47,6 +47,8 @@ fn local_task_capabilities() -> TaskCapabilities {
     TaskCapabilities {
         nested_projects: true,
         sections: true,
+        create_lists: true,
+        delete_lists: true,
         ..TaskCapabilities::default()
     }
 }
@@ -79,6 +81,16 @@ fn task_caps_for_account(
 #[derive(Debug, Deserialize)]
 pub struct CreateTaskListRequest {
     pub name: String,
+    /// Which account to create the list in. `None` / `"local"` ⇒ the
+    /// local SQLite store; otherwise routed to that account's adapter
+    /// (gated UI-side on its `create_lists` capability).
+    #[serde(default)]
+    pub account_id: Option<String>,
+    /// Optional parent list for nesting (Vikunja / Todoist). Ignored by
+    /// flat backends and the local create path.
+    #[serde(default)]
+    pub parent_id: Option<String>,
+    /// Local-only: embed the list in a calendar (CalDAV-VTODO style).
     pub embedded_in_calendar: Option<String>,
 }
 
@@ -132,33 +144,92 @@ pub async fn list_task_lists(
 #[tauri::command]
 pub async fn create_task_list(
     adapter: State<'_, LocalAdapter>,
+    registry: State<'_, Arc<AdapterRegistry>>,
+    plugin_manager: State<'_, Arc<PluginManager>>,
+    db: State<'_, DbHandle>,
     event_log: State<'_, Arc<EventLogWriter>>,
     request: CreateTaskListRequest,
 ) -> CommandResult<TaskListRow> {
-    let list = adapter.create_task_list(&request.name, None, None, request.embedded_in_calendar)?;
-    if let Ok(fields) = serde_json::to_value(&list) {
-        event_log.append(SyncEvent::TaskListCreated(EventPayload {
-            id: list.id.clone(),
-            fields,
-        }));
+    let account = request
+        .account_id
+        .clone()
+        .unwrap_or_else(|| LOCAL_ID.to_string());
+
+    // Local SQLite store — the typed adapter handle keeps the richer
+    // create signature (embedded_in_calendar) and emits a sync event.
+    if account == LOCAL_ID {
+        let list =
+            adapter.create_task_list(&request.name, None, None, request.embedded_in_calendar)?;
+        if let Ok(fields) = serde_json::to_value(&list) {
+            event_log.append(SyncEvent::TaskListCreated(EventPayload {
+                id: list.id.clone(),
+                fields,
+            }));
+        }
+        return Ok(TaskListRow {
+            inner: list,
+            account_id: LOCAL_ID.to_string(),
+            task_capabilities: local_task_capabilities(),
+        });
     }
+
+    // External provider — route through the registry like the read /
+    // rename paths. The provider owns its own sync, so no event-log
+    // entry. We stamp the new route immediately so a follow-up op
+    // reaches the right adapter before the next full refresh.
+    let Some(ext) = registry.task_adapter(&account) else {
+        return Err(CommandError {
+            code: "not_found",
+            message: format!("account '{account}' is not routable"),
+        });
+    };
+    let list = ext
+        .create_task_list(&request.name, request.parent_id.as_deref())
+        .await?;
+    registry.note_task_list_route(&list.id, &account);
+
+    let shared = db.shared();
+    let account_kinds: std::collections::HashMap<String, AdapterKind> = AccountsRepo::new(&shared)
+        .list()
+        .map(|accounts| {
+            accounts
+                .into_iter()
+                .map(|a| (a.id, a.adapter_kind))
+                .collect()
+        })
+        .unwrap_or_default();
+    let task_capabilities = task_caps_for_account(&account, &account_kinds, &plugin_manager);
     Ok(TaskListRow {
         inner: list,
-        account_id: LOCAL_ID.to_string(),
-        // Freshly-created lists are always local — report the local
-        // store's capabilities (nested projects + sections).
-        task_capabilities: local_task_capabilities(),
+        account_id: account,
+        task_capabilities,
     })
 }
 
 #[tauri::command]
 pub async fn delete_task_list(
     adapter: State<'_, LocalAdapter>,
+    registry: State<'_, Arc<AdapterRegistry>>,
     event_log: State<'_, Arc<EventLogWriter>>,
     id: String,
 ) -> CommandResult<()> {
-    adapter.delete_task_list(&id)?;
-    event_log.append(SyncEvent::TaskListDeleted(IdPayload { id: id.clone() }));
+    let account = registry
+        .account_for_task_list(&id)
+        .unwrap_or_else(|| LOCAL_ID.to_string());
+
+    if account == LOCAL_ID {
+        adapter.delete_task_list(&id)?;
+        event_log.append(SyncEvent::TaskListDeleted(IdPayload { id: id.clone() }));
+        return Ok(());
+    }
+
+    let Some(ext) = registry.task_adapter(&account) else {
+        return Err(CommandError {
+            code: "not_found",
+            message: format!("account '{account}' is not routable"),
+        });
+    };
+    ext.delete_task_list(&id).await?;
     Ok(())
 }
 
