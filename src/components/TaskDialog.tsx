@@ -122,6 +122,17 @@ export function TaskDialog({
     return tasks.filter((row) => row.parent_id === task.id);
   }, [tasks, task]);
 
+  // Does the edited task's list support subtasks? Gates the
+  // add-subtask affordance. Absent capabilities default to the
+  // cal-core-native "subtasks: true", so local + simple backends keep
+  // the feature; an adapter that declares `subtasks: false` (e.g. EWS)
+  // hides it. Existing children stay visible regardless.
+  const supportsSubtasks = useMemo(() => {
+    if (!task) return true;
+    const list = taskLists.find((l) => l.id === task.list_id);
+    return list?.task_capabilities?.subtasks ?? true;
+  }, [task, taskLists]);
+
   const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
   const [subtaskBusy, setSubtaskBusy] = useState(false);
   // Listbox focus: aria-activedescendant index into `subtasks`. The
@@ -764,7 +775,7 @@ export function TaskDialog({
           </select>
         </label>
 
-        {isEdit && task && (
+        {isEdit && task && (supportsSubtasks || subtasks.length > 0) && (
           <fieldset className="form__field form__field--subtasks">
             <legend className="form__label">
               {t('dialogs.task.subtasks.heading')}
@@ -847,33 +858,35 @@ export function TaskDialog({
                 })}
               </ul>
             )}
-            <div className="subtasks__add">
-              <input
-                type="text"
-                value={newSubtaskTitle}
-                onChange={(e) => setNewSubtaskTitle(e.target.value)}
-                onKeyDown={(e) => {
-                  // Enter inside this input adds the subtask without
-                  // submitting the parent form — preventDefault
-                  // stops the form-submit fallthrough.
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    void addSubtask();
-                  }
-                }}
-                placeholder={t('dialogs.task.subtasks.placeholder')}
-                aria-label={t('dialogs.task.subtasks.newAria')}
-                disabled={subtaskBusy}
-              />
-              <button
-                type="button"
-                onClick={() => void addSubtask()}
-                disabled={subtaskBusy || !newSubtaskTitle.trim()}
-                className="subtasks__add-button"
-              >
-                {t('dialogs.task.subtasks.addButton')}
-              </button>
-            </div>
+            {supportsSubtasks && (
+              <div className="subtasks__add">
+                <input
+                  type="text"
+                  value={newSubtaskTitle}
+                  onChange={(e) => setNewSubtaskTitle(e.target.value)}
+                  onKeyDown={(e) => {
+                    // Enter inside this input adds the subtask without
+                    // submitting the parent form — preventDefault
+                    // stops the form-submit fallthrough.
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      void addSubtask();
+                    }
+                  }}
+                  placeholder={t('dialogs.task.subtasks.placeholder')}
+                  aria-label={t('dialogs.task.subtasks.newAria')}
+                  disabled={subtaskBusy}
+                />
+                <button
+                  type="button"
+                  onClick={() => void addSubtask()}
+                  disabled={subtaskBusy || !newSubtaskTitle.trim()}
+                  className="subtasks__add-button"
+                >
+                  {t('dialogs.task.subtasks.addButton')}
+                </button>
+              </div>
+            )}
           </fieldset>
         )}
 

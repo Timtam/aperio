@@ -2698,6 +2698,19 @@ button[aria-disabled='true'] {
   margin-top: 0;
 }
 
+/* Section sub-header within a list group (Vikunja bucket / Todoist
+   section). Indented + lighter than the list head so it reads as a
+   child grouping rather than a peer. */
+.task-list__group--section {
+  margin-top: var(--space-2);
+  padding-left: var(--space-3);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: var(--font-size-xs, 0.75rem);
+  border-bottom-style: dashed;
+}
+
 .task-list__item {
   /* Five columns: twisty (or spacer) / check / title / progress
    * badge / due. The twisty column is fixed-width so rows with and

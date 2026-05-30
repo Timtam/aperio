@@ -25,7 +25,7 @@ import { useChipContextMenu } from '../../state/useChipContextMenu';
 import { useDialogState } from '../../state/DialogState';
 import { useTaskStatusToggle } from '../../state/useTaskStatusToggle';
 import { useTasks } from '../../state/useTasks';
-import type { Task } from '../../api/types';
+import type { Section, Task } from '../../api/types';
 import { duplicateTask } from '../MoveCopyDialog';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { isCommandError } from '../../api/client';
@@ -53,8 +53,22 @@ export function TaskView() {
   const fmt = useDateFormat();
   const announce = useAnnouncer();
   const { tasks, taskListById, loading } = useTasks();
-  const { colorLabels } = useCalendarStore();
+  const { colorLabels, sectionsByList, loadSections } = useCalendarStore();
   const labelById = useMemo(() => labelsLookup(colorLabels), [colorLabels]);
+
+  // Pull sections for every list that currently has tasks. The fetch
+  // is cached + cheap (section-less backends return [] via the trait
+  // default), so we don't gate on the list's `sections` capability —
+  // an empty result is the same "render flat" path.
+  const listIdsWithTasks = useMemo(
+    () => Array.from(new Set(tasks.map((task) => task.list_id))),
+    [tasks],
+  );
+  useEffect(() => {
+    for (const listId of listIdsWithTasks) {
+      if (!(listId in sectionsByList)) void loadSections(listId);
+    }
+  }, [listIdsWithTasks, sectionsByList, loadSections]);
   const { openTaskDialog, openMoveCopy, openPlanTask, invalidateData } =
     useDialogState();
 
@@ -80,8 +94,8 @@ export function TaskView() {
   // depth-first under their parent; the `hidden` flag on each entry
   // tells the renderer when the parent above is collapsed.
   const { entries, flatTasks } = useMemo(
-    () => buildEntries(tasks, taskListById, t, collapsed),
-    [tasks, taskListById, t, collapsed],
+    () => buildEntries(tasks, taskListById, t, collapsed, sectionsByList),
+    [tasks, taskListById, t, collapsed, sectionsByList],
   );
 
   const [focusIndex, setFocusIndex] = useState(0);
@@ -335,14 +349,21 @@ export function TaskView() {
             {t('views.tasks.empty')}
           </li>
         )}
-        {entries.map((entry) => {
+        {entries.map((entry, i) => {
           if (entry.kind === 'separator') {
+            // level 1 = a section sub-header within a list; styled
+            // smaller + indented to read as a child of the list head.
+            const isSection = entry.level === 1;
             return (
               <li
-                key={`sep-${entry.label}`}
+                key={`sep-${i}-${entry.label}`}
                 role="presentation"
                 aria-hidden="true"
-                className="task-list__group"
+                className={
+                  isSection
+                    ? 'task-list__group task-list__group--section'
+                    : 'task-list__group'
+                }
               >
                 {entry.label}
               </li>
@@ -387,7 +408,7 @@ export function TaskView() {
 }
 
 type Entry =
-  | { kind: 'separator'; label: string }
+  | { kind: 'separator'; label: string; level?: number }
   | {
       kind: 'task';
       task: Task;
@@ -403,11 +424,12 @@ type Entry =
       hidden: boolean;
     };
 
-function buildEntries(
+export function buildEntries(
   tasks: Task[],
   taskListById: Map<string, { name: string }>,
   t: (key: string, vars?: Record<string, unknown>) => string,
   collapsed: Set<string>,
+  sectionsByList: Record<string, Section[]>,
 ): { entries: Entry[]; flatTasks: Task[] } {
   // Bucket children under their parent so the depth-first walk
   // below has O(1) lookup. Tasks whose parent_id points at a
@@ -479,7 +501,42 @@ function buildEntries(
   sortedLists.forEach(([listId, items]) => {
     const name = taskListById.get(listId)?.name ?? listId;
     entries.push({ kind: 'separator', label: name });
-    items.forEach((task) => visit(task, 0, false));
+
+    const sections = sectionsByList[listId] ?? [];
+    if (sections.length === 0) {
+      // Section-less backend (or not yet loaded) → flat under the list,
+      // exactly the pre-sections shape.
+      items.forEach((task) => visit(task, 0, false));
+      return;
+    }
+
+    // Group the list's top-level tasks by section. Subtasks follow
+    // their parent via `visit`, so only top-level placement matters.
+    const sectionIds = new Set(sections.map((s) => s.id));
+    const bySection = new Map<string, Task[]>();
+    const ungrouped: Task[] = [];
+    items.forEach((task) => {
+      if (task.section_id && sectionIds.has(task.section_id)) {
+        const arr = bySection.get(task.section_id) ?? [];
+        arr.push(task);
+        bySection.set(task.section_id, arr);
+      } else {
+        ungrouped.push(task);
+      }
+    });
+
+    // Ungrouped tasks lead, with no sub-header (the fallback bucket).
+    ungrouped.forEach((task) => visit(task, 0, false));
+    // Then each non-empty section in its declared order, under a
+    // level-1 sub-header.
+    [...sections]
+      .sort((a, b) => a.order - b.order)
+      .forEach((section) => {
+        const secTasks = bySection.get(section.id);
+        if (!secTasks || secTasks.length === 0) return;
+        entries.push({ kind: 'separator', label: section.name, level: 1 });
+        secTasks.forEach((task) => visit(task, 0, false));
+      });
   });
 
   return { entries, flatTasks };
