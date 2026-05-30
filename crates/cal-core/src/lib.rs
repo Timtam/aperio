@@ -10,8 +10,8 @@ pub mod reminder;
 pub mod types;
 
 pub use adapter::{
-    Adapter, AdapterSource, AuthToken, CalendarFeature, Capability, ContactsFeature, Container,
-    Credentials, Reminderable, TasksFeature,
+    Adapter, AdapterSource, AuthToken, CalendarFeature, Capability, ChangeSet, ContactsFeature,
+    Container, Credentials, Reminderable, TasksFeature,
 };
 pub use color::{ColorLabel, ColorLabelId, ColorSource, ContainerColor};
 pub use error::{Error, Result};

@@ -18,6 +18,7 @@ import { YearView } from './components/views/YearView';
 import { useDialogShortcuts } from './hooks/useDialogShortcuts';
 import { useRegionFocus } from './hooks/useRegionFocus';
 import { useSuppressBrowserDefaults } from './hooks/useSuppressBrowserDefaults';
+import { CacheSyncListener } from './state/CacheSyncListener';
 import { CalendarStoreProvider } from './state/CalendarStore';
 import { DialogStateProvider, useDialogState } from './state/DialogState';
 import { TaskCascadeProvider } from './state/TaskCascadeProvider';
@@ -81,6 +82,10 @@ export function App() {
                           moment earlier. */}
                   <DayStartReviewChecker />
                   <DeadlinePinChecker />
+                  {/* Bridges backend `cache-updated` pushes to data
+                      invalidation so external views refresh when a
+                      background snapshot refresh lands. Renders nothing. */}
+                  <CacheSyncListener />
                 </ToastProvider>
               </TaskCascadeProvider>
             </DialogStateProvider>

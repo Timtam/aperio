@@ -24,10 +24,10 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use cal_core::{
-    Adapter, AuthToken, Calendar, CalendarFeature, Capability, Contact, ContactList, ContactPhoto,
-    ContactsFeature, ContainerColor, Credentials as CoreCredentials, DateRange, Error as CoreError,
-    Event, FreeBusy, NewContact, NewEvent, NewTask, Result as CoreResult, Task, TaskList,
-    TasksFeature,
+    Adapter, AuthToken, Calendar, CalendarFeature, Capability, ChangeSet, Contact, ContactList,
+    ContactPhoto, ContactsFeature, ContainerColor, Credentials as CoreCredentials, DateRange,
+    Error as CoreError, Event, FreeBusy, NewContact, NewEvent, NewTask, Result as CoreResult, Task,
+    TaskList, TasksFeature,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -169,6 +169,55 @@ impl MicrosoftGraphAdapter {
             None
         }
     }
+
+    /// Bootstrap delta as a `full_resync` ChangeSet: every live event in
+    /// `range` plus the initial `@odata.deltaLink`. Used on the no-token
+    /// and 410-expired recovery paths.
+    async fn full_events_changeset(
+        &self,
+        calendar_id: &str,
+        range: DateRange,
+    ) -> CoreResult<ChangeSet<Event>> {
+        let delta = api::initial_events_delta(&self.state, calendar_id, range.start, range.end)
+            .await
+            .map_err(to_core_error)?;
+        Ok(ChangeSet {
+            changes: delta.changes,
+            deletions: Vec::new(),
+            new_token: delta.new_token,
+            full_resync: true,
+        })
+    }
+
+    /// Bootstrap To Do delta as a `full_resync` ChangeSet: every task in
+    /// the list plus the initial `@odata.deltaLink`. Used on the no-token
+    /// and 410-expired recovery paths.
+    async fn full_tasks_changeset(&self, list_id: &str) -> CoreResult<ChangeSet<Task>> {
+        let delta = api::initial_tasks_delta(&self.state, list_id)
+            .await
+            .map_err(to_core_error)?;
+        Ok(ChangeSet {
+            changes: delta.changes,
+            deletions: Vec::new(),
+            new_token: delta.new_token,
+            full_resync: true,
+        })
+    }
+
+    /// Bootstrap a contact-folder delta as a `full_resync` ChangeSet:
+    /// every contact in the folder plus the initial `@odata.deltaLink`.
+    /// Used on the no-token and 410-expired recovery paths.
+    async fn full_contacts_changeset(&self, folder_id: &str) -> CoreResult<ChangeSet<Contact>> {
+        let delta = contacts::initial_contacts_delta(&self.state, folder_id)
+            .await
+            .map_err(to_core_error)?;
+        Ok(ChangeSet {
+            changes: delta.changes,
+            deletions: Vec::new(),
+            new_token: delta.new_token,
+            full_resync: true,
+        })
+    }
 }
 
 #[async_trait]
@@ -199,6 +248,46 @@ impl CalendarFeature for MicrosoftGraphAdapter {
         api::get_events(&self.state, calendar_id, range.start, range.end)
             .await
             .map_err(to_core_error)
+    }
+
+    /// Host-driven incremental read (CACHE-8) via Graph's
+    /// `calendarView/delta`.
+    ///
+    /// No prior token → a full window delta that also yields the initial
+    /// `@odata.deltaLink` (the host stores it and replaces wholesale).
+    /// With a token (a stored delta link) → an incremental round: changed
+    /// occurrences in `changes` (range-filtered), removed/cancelled ids
+    /// in `deletions`, and the refreshed delta link. A `410 Gone` means
+    /// Graph expired the link — we transparently re-bootstrap a full sync.
+    async fn get_events_delta(
+        &self,
+        calendar_id: &str,
+        range: DateRange,
+        since_token: Option<&str>,
+    ) -> CoreResult<ChangeSet<Event>> {
+        let Some(delta_link) = since_token else {
+            return self.full_events_changeset(calendar_id, range).await;
+        };
+        match api::follow_events_delta(&self.state, delta_link, calendar_id, range.start, range.end)
+            .await
+        {
+            Ok(delta) => Ok(ChangeSet {
+                changes: delta.changes,
+                deletions: delta.deletions,
+                new_token: delta.new_token,
+                full_resync: false,
+            }),
+            // Delta link expired / invalidated by Graph — re-bootstrap.
+            Err(GraphError::Http { status: 410, .. }) => {
+                tracing::warn!(
+                    target: "cal_adapter_microsoft_graph",
+                    calendar = %calendar_id,
+                    "Graph delta link expired (410); doing a full re-sync",
+                );
+                self.full_events_changeset(calendar_id, range).await
+            }
+            Err(err) => Err(to_core_error(err)),
+        }
     }
 
     async fn create_event(&self, calendar_id: &str, event: NewEvent) -> CoreResult<Event> {
@@ -282,6 +371,38 @@ impl TasksFeature for MicrosoftGraphAdapter {
             .map_err(to_core_error)
     }
 
+    /// Host-driven incremental task read (CACHE-8) via Microsoft To Do's
+    /// `tasks/delta`. Same delta-link contract as `get_events_delta`, but
+    /// tasks aren't windowed so there's no range. Removed tasks come back
+    /// as `@removed` tombstones, emitted as their full `{list}|{task}`
+    /// cal-core id. A `410 Gone` re-bootstraps a full sync.
+    async fn get_tasks_delta(
+        &self,
+        list_id: &str,
+        since_token: Option<&str>,
+    ) -> CoreResult<ChangeSet<Task>> {
+        let Some(delta_link) = since_token else {
+            return self.full_tasks_changeset(list_id).await;
+        };
+        match api::follow_tasks_delta(&self.state, delta_link, list_id).await {
+            Ok(delta) => Ok(ChangeSet {
+                changes: delta.changes,
+                deletions: delta.deletions,
+                new_token: delta.new_token,
+                full_resync: false,
+            }),
+            Err(GraphError::Http { status: 410, .. }) => {
+                tracing::warn!(
+                    target: "cal_adapter_microsoft_graph",
+                    list = %list_id,
+                    "Graph To Do delta link expired (410); doing a full re-sync",
+                );
+                self.full_tasks_changeset(list_id).await
+            }
+            Err(err) => Err(to_core_error(err)),
+        }
+    }
+
     async fn create_task(&self, list_id: &str, task: NewTask) -> CoreResult<Task> {
         api::create_task(&self.state, list_id, task)
             .await
@@ -350,6 +471,45 @@ impl ContactsFeature for MicrosoftGraphAdapter {
             .await
             .insert(list_id.to_string(), (fresh.clone(), chrono::Utc::now()));
         Ok(fresh)
+    }
+
+    /// Host-driven incremental contact read (CACHE-8) via Graph's
+    /// `contactFolders/{id}/contacts/delta`. Same delta-link contract as
+    /// the other surfaces. The synthetic "Suggested People" list is backed
+    /// by `/me/people`, which has no delta endpoint — it returns
+    /// `Unsupported` so the host falls back to a full read. Removed
+    /// contacts come back as `@removed` tombstones; a contact's id is
+    /// already its native resource id. A `410 Gone` re-bootstraps.
+    async fn get_contacts_delta(
+        &self,
+        list_id: &str,
+        since_token: Option<&str>,
+    ) -> CoreResult<ChangeSet<Contact>> {
+        if list_id == contacts::GRAPH_SUGGESTED_PEOPLE_LIST_ID {
+            return Err(CoreError::Unsupported(
+                "Suggested People (/me/people) has no delta sync".into(),
+            ));
+        }
+        let Some(delta_link) = since_token else {
+            return self.full_contacts_changeset(list_id).await;
+        };
+        match contacts::follow_contacts_delta(&self.state, delta_link, list_id).await {
+            Ok(delta) => Ok(ChangeSet {
+                changes: delta.changes,
+                deletions: delta.deletions,
+                new_token: delta.new_token,
+                full_resync: false,
+            }),
+            Err(GraphError::Http { status: 410, .. }) => {
+                tracing::warn!(
+                    target: "cal_adapter_microsoft_graph",
+                    list = %list_id,
+                    "Graph contacts delta link expired (410); doing a full re-sync",
+                );
+                self.full_contacts_changeset(list_id).await
+            }
+            Err(err) => Err(to_core_error(err)),
+        }
     }
 
     async fn search_contacts(&self, query: &str) -> CoreResult<Vec<Contact>> {
@@ -488,5 +648,403 @@ fn to_core_error(err: GraphError) -> CoreError {
         Csrf => CoreError::Protocol("CSRF state mismatch on OAuth callback".into()),
         Io(m) => CoreError::Internal(m),
         Config(m) => CoreError::InvalidInput(m),
+    }
+}
+
+#[cfg(test)]
+mod delta_tests {
+    //! `get_events_delta` against a mocked Graph `calendarView/delta`.
+    use super::*;
+    use chrono::TimeZone;
+    use mockito::{Matcher, Server};
+
+    fn adapter_for(server: &Server) -> MicrosoftGraphAdapter {
+        let mut adapter = MicrosoftGraphAdapter::new(
+            "client".into(),
+            "common".into(),
+            TokenSet {
+                access_token: "tok".into(),
+                refresh_token: Some("refresh".into()),
+                expires_at: chrono::Utc::now() + chrono::Duration::hours(1),
+                scope: None,
+            },
+        );
+        adapter.state.api_base = server.url();
+        adapter.state.token_url = format!("{}/token", server.url());
+        adapter
+    }
+
+    fn range() -> DateRange {
+        DateRange::new(
+            chrono::Utc.with_ymd_and_hms(2026, 5, 1, 0, 0, 0).unwrap(),
+            chrono::Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap(),
+        )
+    }
+
+    fn one_event_with_delta_link(link: &str) -> String {
+        r##"{
+          "value": [
+            {"id":"e1","subject":"One","isAllDay":false,"isReminderOn":false,
+             "start":{"dateTime":"2026-05-10T08:00:00","timeZone":"UTC"},
+             "end":{"dateTime":"2026-05-10T09:00:00","timeZone":"UTC"}}
+          ],
+          "@odata.deltaLink": "DELTA_LINK"
+        }"##
+        .replace("DELTA_LINK", link)
+    }
+
+    #[tokio::test]
+    async fn no_token_does_full_resync_and_returns_delta_link() {
+        let mut server = Server::new_async().await;
+        let link = format!(
+            "{}/me/calendars/cal-1/calendarView/delta?$deltatoken=DT1",
+            server.url()
+        );
+        server
+            .mock(
+                "GET",
+                Matcher::Regex(
+                    r"^/me/calendars/cal-1/calendarView/delta\?startDateTime=".to_string(),
+                ),
+            )
+            .with_status(200)
+            .with_body(one_event_with_delta_link(&link))
+            .create_async()
+            .await;
+
+        let cs = adapter_for(&server)
+            .get_events_delta("cal-1", range(), None)
+            .await
+            .unwrap();
+        assert!(cs.full_resync);
+        assert_eq!(cs.changes.len(), 1);
+        assert!(cs.deletions.is_empty());
+        assert_eq!(cs.new_token.as_deref(), Some(link.as_str()));
+    }
+
+    #[tokio::test]
+    async fn token_does_incremental_with_changes_and_removals() {
+        let mut server = Server::new_async().await;
+        let prev = format!(
+            "{}/me/calendars/cal-1/calendarView/delta?$deltatoken=DT1",
+            server.url()
+        );
+        let next = format!(
+            "{}/me/calendars/cal-1/calendarView/delta?$deltatoken=DT2",
+            server.url()
+        );
+        let body = r##"{
+          "value": [
+            {"id":"e1","subject":"Updated","isAllDay":false,"isReminderOn":false,
+             "start":{"dateTime":"2026-05-10T08:00:00","timeZone":"UTC"},
+             "end":{"dateTime":"2026-05-10T09:00:00","timeZone":"UTC"}},
+            {"id":"e2","@removed":{"reason":"deleted"}}
+          ],
+          "@odata.deltaLink": "NEXT_LINK"
+        }"##
+        .replace("NEXT_LINK", &next);
+        server
+            .mock("GET", Matcher::Regex(r"deltatoken=DT1".to_string()))
+            .with_status(200)
+            .with_body(body)
+            .create_async()
+            .await;
+
+        let cs = adapter_for(&server)
+            .get_events_delta("cal-1", range(), Some(&prev))
+            .await
+            .unwrap();
+        assert!(!cs.full_resync);
+        assert_eq!(
+            cs.changes.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
+            ["e1"]
+        );
+        assert_eq!(cs.deletions, vec!["e2".to_string()]);
+        assert_eq!(cs.new_token.as_deref(), Some(next.as_str()));
+    }
+
+    #[tokio::test]
+    async fn expired_link_410_falls_back_to_full_resync() {
+        let mut server = Server::new_async().await;
+        let stale = format!(
+            "{}/me/calendars/cal-1/calendarView/delta?$deltatoken=STALE",
+            server.url()
+        );
+        let fresh = format!(
+            "{}/me/calendars/cal-1/calendarView/delta?$deltatoken=DT3",
+            server.url()
+        );
+        // Incremental call with the stale link → 410.
+        server
+            .mock("GET", Matcher::Regex(r"deltatoken=STALE".to_string()))
+            .with_status(410)
+            .with_body(r#"{"error":{"code":"syncStateNotFound"}}"#)
+            .create_async()
+            .await;
+        // Recovery: a fresh full window delta with a new link.
+        server
+            .mock(
+                "GET",
+                Matcher::Regex(
+                    r"^/me/calendars/cal-1/calendarView/delta\?startDateTime=".to_string(),
+                ),
+            )
+            .with_status(200)
+            .with_body(one_event_with_delta_link(&fresh))
+            .create_async()
+            .await;
+
+        let cs = adapter_for(&server)
+            .get_events_delta("cal-1", range(), Some(&stale))
+            .await
+            .unwrap();
+        assert!(cs.full_resync);
+        assert_eq!(cs.changes.len(), 1);
+        assert_eq!(cs.new_token.as_deref(), Some(fresh.as_str()));
+    }
+
+    fn one_task_with_delta_link(link: &str) -> String {
+        r##"{
+          "value": [
+            {"id":"T1","title":"Buy milk","importance":"normal","status":"notStarted"}
+          ],
+          "@odata.deltaLink": "DELTA_LINK"
+        }"##
+        .replace("DELTA_LINK", link)
+    }
+
+    #[tokio::test]
+    async fn no_token_does_full_tasks_resync() {
+        let mut server = Server::new_async().await;
+        let link = format!(
+            "{}/me/todo/lists/LIST/tasks/delta?$deltatoken=DT1",
+            server.url()
+        );
+        server
+            .mock(
+                "GET",
+                Matcher::Regex(r"^/me/todo/lists/LIST/tasks/delta".to_string()),
+            )
+            .with_status(200)
+            .with_body(one_task_with_delta_link(&link))
+            .create_async()
+            .await;
+
+        let cs = adapter_for(&server)
+            .get_tasks_delta("LIST", None)
+            .await
+            .unwrap();
+        assert!(cs.full_resync);
+        assert_eq!(
+            cs.changes.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
+            ["LIST|T1"]
+        );
+        assert!(cs.deletions.is_empty());
+        assert_eq!(cs.new_token.as_deref(), Some(link.as_str()));
+    }
+
+    #[tokio::test]
+    async fn token_does_incremental_tasks_with_changes_and_removals() {
+        let mut server = Server::new_async().await;
+        let prev = format!(
+            "{}/me/todo/lists/LIST/tasks/delta?$deltatoken=DT1",
+            server.url()
+        );
+        let next = format!(
+            "{}/me/todo/lists/LIST/tasks/delta?$deltatoken=DT2",
+            server.url()
+        );
+        let body = r##"{
+          "value": [
+            {"id":"T1","title":"Buy oat milk","importance":"normal","status":"notStarted"},
+            {"id":"T2","@removed":{"reason":"deleted"}}
+          ],
+          "@odata.deltaLink": "NEXT_LINK"
+        }"##
+        .replace("NEXT_LINK", &next);
+        server
+            .mock("GET", Matcher::Regex(r"deltatoken=DT1".to_string()))
+            .with_status(200)
+            .with_body(body)
+            .create_async()
+            .await;
+
+        let cs = adapter_for(&server)
+            .get_tasks_delta("LIST", Some(&prev))
+            .await
+            .unwrap();
+        assert!(!cs.full_resync);
+        assert_eq!(
+            cs.changes.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
+            ["LIST|T1"]
+        );
+        assert_eq!(cs.deletions, vec!["LIST|T2".to_string()]);
+        assert_eq!(cs.new_token.as_deref(), Some(next.as_str()));
+    }
+
+    #[tokio::test]
+    async fn expired_tasks_link_410_falls_back_to_full_resync() {
+        let mut server = Server::new_async().await;
+        let stale = format!(
+            "{}/me/todo/lists/LIST/tasks/delta?$deltatoken=STALE",
+            server.url()
+        );
+        let fresh = format!(
+            "{}/me/todo/lists/LIST/tasks/delta?$deltatoken=DT3",
+            server.url()
+        );
+        // Incremental call with the stale link → 410.
+        server
+            .mock("GET", Matcher::Regex(r"deltatoken=STALE".to_string()))
+            .with_status(410)
+            .with_body(r#"{"error":{"code":"syncStateNotFound"}}"#)
+            .create_async()
+            .await;
+        // Recovery: a fresh full tasks delta (no $deltatoken on the URL).
+        server
+            .mock(
+                "GET",
+                Matcher::Regex(r"^/me/todo/lists/LIST/tasks/delta$".to_string()),
+            )
+            .with_status(200)
+            .with_body(one_task_with_delta_link(&fresh))
+            .create_async()
+            .await;
+
+        let cs = adapter_for(&server)
+            .get_tasks_delta("LIST", Some(&stale))
+            .await
+            .unwrap();
+        assert!(cs.full_resync);
+        assert_eq!(cs.changes.len(), 1);
+        assert_eq!(cs.new_token.as_deref(), Some(fresh.as_str()));
+    }
+
+    fn one_contact_with_delta_link(link: &str) -> String {
+        r##"{
+          "value": [ {"id":"c1","displayName":"Alice"} ],
+          "@odata.deltaLink": "DELTA_LINK"
+        }"##
+        .replace("DELTA_LINK", link)
+    }
+
+    #[tokio::test]
+    async fn no_token_does_full_contacts_resync() {
+        let mut server = Server::new_async().await;
+        let link = format!(
+            "{}/me/contactFolders/folder-1/contacts/delta?$deltatoken=DC1",
+            server.url()
+        );
+        server
+            .mock(
+                "GET",
+                Matcher::Regex(r"^/me/contactFolders/folder-1/contacts/delta".to_string()),
+            )
+            .with_status(200)
+            .with_body(one_contact_with_delta_link(&link))
+            .create_async()
+            .await;
+
+        let cs = adapter_for(&server)
+            .get_contacts_delta("folder-1", None)
+            .await
+            .unwrap();
+        assert!(cs.full_resync);
+        assert_eq!(
+            cs.changes.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(),
+            ["c1"]
+        );
+        assert!(cs.deletions.is_empty());
+        assert_eq!(cs.new_token.as_deref(), Some(link.as_str()));
+    }
+
+    #[tokio::test]
+    async fn token_does_incremental_contacts_with_changes_and_removals() {
+        let mut server = Server::new_async().await;
+        let prev = format!(
+            "{}/me/contactFolders/folder-1/contacts/delta?$deltatoken=DC1",
+            server.url()
+        );
+        let next = format!(
+            "{}/me/contactFolders/folder-1/contacts/delta?$deltatoken=DC2",
+            server.url()
+        );
+        let body = r##"{
+          "value": [
+            {"id":"c1","displayName":"Alice Cooper"},
+            {"id":"c2","@removed":{"reason":"deleted"}}
+          ],
+          "@odata.deltaLink": "NEXT_LINK"
+        }"##
+        .replace("NEXT_LINK", &next);
+        server
+            .mock("GET", Matcher::Regex(r"deltatoken=DC1".to_string()))
+            .with_status(200)
+            .with_body(body)
+            .create_async()
+            .await;
+
+        let cs = adapter_for(&server)
+            .get_contacts_delta("folder-1", Some(&prev))
+            .await
+            .unwrap();
+        assert!(!cs.full_resync);
+        assert_eq!(
+            cs.changes.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(),
+            ["c1"]
+        );
+        // A contact's id is already its native id — emit it bare.
+        assert_eq!(cs.deletions, vec!["c2".to_string()]);
+        assert_eq!(cs.new_token.as_deref(), Some(next.as_str()));
+    }
+
+    #[tokio::test]
+    async fn expired_contacts_link_410_falls_back_to_full_resync() {
+        let mut server = Server::new_async().await;
+        let stale = format!(
+            "{}/me/contactFolders/folder-1/contacts/delta?$deltatoken=STALE",
+            server.url()
+        );
+        let fresh = format!(
+            "{}/me/contactFolders/folder-1/contacts/delta?$deltatoken=DC3",
+            server.url()
+        );
+        // Incremental call with the stale link → 410.
+        server
+            .mock("GET", Matcher::Regex(r"deltatoken=STALE".to_string()))
+            .with_status(410)
+            .with_body(r#"{"error":{"code":"syncStateNotFound"}}"#)
+            .create_async()
+            .await;
+        // Recovery: a fresh full folder delta (carries $select, no token).
+        server
+            .mock(
+                "GET",
+                Matcher::Regex(r"contacts/delta.*select=".to_string()),
+            )
+            .with_status(200)
+            .with_body(one_contact_with_delta_link(&fresh))
+            .create_async()
+            .await;
+
+        let cs = adapter_for(&server)
+            .get_contacts_delta("folder-1", Some(&stale))
+            .await
+            .unwrap();
+        assert!(cs.full_resync);
+        assert_eq!(cs.changes.len(), 1);
+        assert_eq!(cs.new_token.as_deref(), Some(fresh.as_str()));
+    }
+
+    #[tokio::test]
+    async fn suggested_people_list_has_no_delta() {
+        let server = Server::new_async().await;
+        // The synthetic /me/people-backed list can't delta — it must
+        // surface Unsupported so the host falls back to a full read.
+        let err = adapter_for(&server)
+            .get_contacts_delta(crate::contacts::GRAPH_SUGGESTED_PEOPLE_LIST_ID, None)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CoreError::Unsupported(_)));
     }
 }

@@ -5,13 +5,15 @@ use cal_core::{NewTask, Section, Task, TaskList, TasksFeature};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use sync_core::{EventPayload, IdPayload, SyncEvent};
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use plugin_core::{PluginManager, TaskCapabilities};
 
+use super::cache_swr;
 use super::plugins::plugin_id_for_adapter_kind;
 use super::{CommandError, CommandResult};
 use crate::accounts::{AccountsRepo, AdapterKind};
+use crate::cache::{CacheStore, RefreshCoordinator, SyncScope};
 use crate::db::DbHandle;
 use crate::event_log::EventLogWriter;
 use crate::overrides::{apply_to_task_lists, OverridesRepo};
@@ -96,16 +98,25 @@ pub struct CreateTaskListRequest {
 
 #[tauri::command]
 pub async fn list_task_lists(
+    app: AppHandle,
     adapter: State<'_, LocalAdapter>,
     registry: State<'_, Arc<AdapterRegistry>>,
+    cache: State<'_, Arc<CacheStore>>,
+    coord: State<'_, Arc<RefreshCoordinator>>,
     plugin_manager: State<'_, Arc<PluginManager>>,
     db: State<'_, DbHandle>,
 ) -> CommandResult<Vec<TaskListRow>> {
+    let registry = Arc::clone(&registry);
+    let cache = Arc::clone(&cache);
+    let coord = Arc::clone(&coord);
     let local = adapter.list_task_lists().await?;
     for l in &local {
         registry.note_task_list_route(&l.id, LOCAL_ID);
     }
-    let mut external = registry.list_external_task_lists().await;
+    // External task lists: serve from the snapshot cache, refresh in the
+    // background (stale-while-revalidate) so the sidebar isn't gated on
+    // the slowest provider at startup.
+    let mut external = external_task_lists_swr(&app, &registry, &cache, &coord).await;
     let mut out = local;
     out.append(&mut external);
     let shared = db.shared();
@@ -141,10 +152,77 @@ pub async fn list_task_lists(
         .collect())
 }
 
+/// Cache-first aggregation of every external account's task lists. Serves
+/// the snapshot instantly (registering routes so `get_tasks` can resolve
+/// them), refreshing past the freshness window. On a cold miss it fetches
+/// synchronously and writes through; on a network error it falls back to
+/// any stale snapshot.
+async fn external_task_lists_swr(
+    app: &AppHandle,
+    registry: &Arc<AdapterRegistry>,
+    cache: &Arc<CacheStore>,
+    coord: &Arc<RefreshCoordinator>,
+) -> Vec<TaskList> {
+    let mut out = Vec::new();
+    for (account, adapter) in registry.snapshot_task_adapters() {
+        let state = cache
+            .get_sync_state(&account, SyncScope::TaskLists, "")
+            .ok()
+            .flatten();
+        if cache_swr::has_snapshot(&state) {
+            let cached = cache.read_task_lists(&account).unwrap_or_default();
+            for l in &cached {
+                registry.note_task_list_route(&l.id, &account);
+            }
+            if cache_swr::is_stale(&state, cache_swr::SWR_TTL_SECS) {
+                let adapter_bg = Arc::clone(&adapter);
+                let reg = Arc::clone(registry);
+                let acc = account.clone();
+                cache_swr::spawn_refresh(
+                    app.clone(),
+                    Arc::clone(cache),
+                    Arc::clone(coord),
+                    SyncScope::TaskLists,
+                    account.clone(),
+                    String::new(),
+                    move || async move { adapter_bg.list_task_lists().await },
+                    move |c, lists: &[TaskList]| {
+                        for l in lists {
+                            reg.note_task_list_route(&l.id, &acc);
+                        }
+                        c.replace_task_lists(&acc, lists)
+                    },
+                );
+            }
+            out.extend(cached);
+        } else {
+            match adapter.list_task_lists().await {
+                Ok(lists) => {
+                    for l in &lists {
+                        registry.note_task_list_route(&l.id, &account);
+                    }
+                    let _ = cache.replace_task_lists(&account, &lists);
+                    out.extend(lists);
+                }
+                Err(err) => {
+                    let _ = cache.mark_error(&account, SyncScope::TaskLists, "", &err.to_string());
+                    let cached = cache.read_task_lists(&account).unwrap_or_default();
+                    for l in &cached {
+                        registry.note_task_list_route(&l.id, &account);
+                    }
+                    out.extend(cached);
+                }
+            }
+        }
+    }
+    out
+}
+
 #[tauri::command]
 pub async fn create_task_list(
     adapter: State<'_, LocalAdapter>,
     registry: State<'_, Arc<AdapterRegistry>>,
+    cache: State<'_, Arc<CacheStore>>,
     plugin_manager: State<'_, Arc<PluginManager>>,
     db: State<'_, DbHandle>,
     event_log: State<'_, Arc<EventLogWriter>>,
@@ -187,6 +265,9 @@ pub async fn create_task_list(
         .create_task_list(&request.name, request.parent_id.as_deref())
         .await?;
     registry.note_task_list_route(&list.id, &account);
+    // Write-through: drop the listing snapshot so the sidebar's refresh
+    // re-fetches and shows the new list.
+    let _ = cache.invalidate(&account, SyncScope::TaskLists, "");
 
     let shared = db.shared();
     let account_kinds: std::collections::HashMap<String, AdapterKind> = AccountsRepo::new(&shared)
@@ -210,6 +291,7 @@ pub async fn create_task_list(
 pub async fn delete_task_list(
     adapter: State<'_, LocalAdapter>,
     registry: State<'_, Arc<AdapterRegistry>>,
+    cache: State<'_, Arc<CacheStore>>,
     event_log: State<'_, Arc<EventLogWriter>>,
     id: String,
 ) -> CommandResult<()> {
@@ -230,6 +312,10 @@ pub async fn delete_task_list(
         });
     };
     ext.delete_task_list(&id).await?;
+    // Write-through: the list is gone — drop the snapshot so the next
+    // listing re-fetches without it, plus its cached task rows.
+    let _ = cache.invalidate(&account, SyncScope::TaskLists, "");
+    let _ = cache.invalidate(&account, SyncScope::Tasks, &id);
     Ok(())
 }
 
@@ -289,8 +375,11 @@ pub async fn reparent_task_list(
 
 #[tauri::command]
 pub async fn get_tasks(
+    app: AppHandle,
     adapter: State<'_, LocalAdapter>,
     registry: State<'_, Arc<AdapterRegistry>>,
+    cache: State<'_, Arc<CacheStore>>,
+    coord: State<'_, Arc<RefreshCoordinator>>,
     list_id: String,
 ) -> CommandResult<Vec<Task>> {
     let account = registry
@@ -305,7 +394,49 @@ pub async fn get_tasks(
             message: format!("task list '{list_id}' is not routable"),
         });
     };
-    Ok(ext.get_tasks(&list_id).await?)
+
+    // Stale-while-revalidate: serve the snapshot instantly when we have
+    // one, refreshing in the background past the freshness window.
+    let state = cache
+        .get_sync_state(&account, SyncScope::Tasks, &list_id)
+        .ok()
+        .flatten();
+    if cache_swr::has_snapshot(&state) {
+        let cached = cache.read_tasks(&account, &list_id).unwrap_or_default();
+        if cache_swr::is_stale(&state, cache_swr::SWR_TTL_SECS) {
+            let ext_bg = Arc::clone(&ext);
+            let cache_bg = Arc::clone(&cache);
+            let acc = account.clone();
+            let list = list_id.clone();
+            cache_swr::spawn_item_refresh(
+                app.clone(),
+                Arc::clone(&cache),
+                Arc::clone(&coord),
+                SyncScope::Tasks,
+                account.clone(),
+                list_id.clone(),
+                move || async move {
+                    cache_swr::refresh_tasks(&cache_bg, ext_bg.as_ref(), &acc, &list).await
+                },
+            );
+        }
+        return Ok(cached);
+    }
+
+    // Cold path: no snapshot yet. Refresh (delta-or-full) synchronously,
+    // then serve from cache; fall back to any stale rows on failure.
+    match cache_swr::refresh_tasks(&cache, ext.as_ref(), &account, &list_id).await {
+        Ok(()) => Ok(cache.read_tasks(&account, &list_id).unwrap_or_default()),
+        Err(err) => {
+            let _ = cache.mark_error(&account, SyncScope::Tasks, &list_id, &err.to_string());
+            let stale = cache.read_tasks(&account, &list_id).unwrap_or_default();
+            if stale.is_empty() {
+                Err(err.into())
+            } else {
+                Ok(stale)
+            }
+        }
+    }
 }
 
 /// List the sections (Vikunja buckets / Todoist sections) of one
@@ -353,6 +484,7 @@ pub async fn get_task_by_id(
 pub async fn create_task(
     adapter: State<'_, LocalAdapter>,
     registry: State<'_, Arc<AdapterRegistry>>,
+    cache: State<'_, Arc<CacheStore>>,
     scheduler: State<'_, SchedulerHandle>,
     event_log: State<'_, Arc<EventLogWriter>>,
     request: CreateTaskRequest,
@@ -379,6 +511,10 @@ pub async fn create_task(
                 fields,
             }));
         }
+    } else {
+        // Write-through: force the next read of this list to re-fetch so
+        // the new task shows up rather than the pre-create snapshot.
+        let _ = cache.invalidate(&account, SyncScope::Tasks, &request.list_id);
     }
     scheduler.invalidate();
     Ok(task)
@@ -388,6 +524,7 @@ pub async fn create_task(
 pub async fn update_task(
     adapter: State<'_, LocalAdapter>,
     registry: State<'_, Arc<AdapterRegistry>>,
+    cache: State<'_, Arc<CacheStore>>,
     scheduler: State<'_, SchedulerHandle>,
     event_log: State<'_, Arc<EventLogWriter>>,
     task: Task,
@@ -513,6 +650,14 @@ pub async fn update_task(
             }));
         }
 
+        // Write-through: re-fetch both ends of an external move.
+        if target_account != LOCAL_ID {
+            let _ = cache.invalidate(&target_account, SyncScope::Tasks, &task.list_id);
+        }
+        if source_account != LOCAL_ID {
+            let _ = cache.invalidate(&source_account, SyncScope::Tasks, &previous);
+        }
+
         scheduler.invalidate();
         return Ok(created);
     }
@@ -537,6 +682,8 @@ pub async fn update_task(
                 fields,
             }));
         }
+    } else {
+        let _ = cache.invalidate(&target_account, SyncScope::Tasks, &updated.list_id);
     }
     scheduler.invalidate();
     Ok(updated)
@@ -546,6 +693,7 @@ pub async fn update_task(
 pub async fn delete_task(
     adapter: State<'_, LocalAdapter>,
     registry: State<'_, Arc<AdapterRegistry>>,
+    cache: State<'_, Arc<CacheStore>>,
     scheduler: State<'_, SchedulerHandle>,
     event_log: State<'_, Arc<EventLogWriter>>,
     id: String,
@@ -569,6 +717,8 @@ pub async fn delete_task(
     }
     if is_local {
         event_log.append(SyncEvent::TaskDeleted(IdPayload { id: id.clone() }));
+    } else if let Some(lid) = &list_id {
+        let _ = cache.invalidate(&account, SyncScope::Tasks, lid);
     }
     scheduler.invalidate();
     Ok(())

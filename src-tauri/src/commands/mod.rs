@@ -8,6 +8,8 @@
 
 mod accounts;
 mod birthdays;
+mod cache;
+pub(crate) mod cache_swr;
 mod calendars;
 mod color_labels;
 mod conflicts;
@@ -30,6 +32,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 pub use accounts::*;
+pub use cache::*;
 pub use calendars::*;
 pub use color_labels::*;
 pub use conflicts::*;

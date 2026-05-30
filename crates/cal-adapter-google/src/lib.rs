@@ -23,10 +23,10 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use cal_core::{
-    Adapter, AuthToken, Calendar, CalendarFeature, Capability, Contact, ContactList, ContactPhoto,
-    ContactsFeature, ContainerColor, Credentials as CoreCredentials, DateRange, Error as CoreError,
-    Event, FreeBusy, NewContact, NewEvent, NewTask, Result as CoreResult, Task, TaskList,
-    TasksFeature,
+    Adapter, AuthToken, Calendar, CalendarFeature, Capability, ChangeSet, Contact, ContactList,
+    ContactPhoto, ContactsFeature, ContainerColor, Credentials as CoreCredentials, DateRange,
+    Error as CoreError, Event, FreeBusy, NewContact, NewEvent, NewTask, Result as CoreResult, Task,
+    TaskList, TasksFeature,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -183,6 +183,41 @@ impl GoogleAdapter {
             None
         }
     }
+
+    /// Full window sync wrapped as a `full_resync` ChangeSet: every live
+    /// event in `range` plus the fresh `nextSyncToken`. Used on the
+    /// bootstrap (no token) and the 410-token-expired recovery paths.
+    async fn full_events_changeset(
+        &self,
+        calendar_id: &str,
+        range: DateRange,
+    ) -> CoreResult<ChangeSet<Event>> {
+        let (changes, new_token) =
+            api::list_events_full(&self.state, calendar_id, range.start, range.end)
+                .await
+                .map_err(to_core_error)?;
+        Ok(ChangeSet {
+            changes,
+            deletions: Vec::new(),
+            new_token,
+            full_resync: true,
+        })
+    }
+
+    /// Full Other-Contacts sync wrapped as a `full_resync` ChangeSet: the
+    /// complete set plus the fresh syncToken. Used on the no-token and
+    /// 400-expired recovery paths.
+    async fn other_contacts_full_changeset(&self) -> CoreResult<ChangeSet<Contact>> {
+        let (changes, new_token) = contacts::other_contacts_full(&self.state)
+            .await
+            .map_err(to_core_error)?;
+        Ok(ChangeSet {
+            changes,
+            deletions: Vec::new(),
+            new_token,
+            full_resync: true,
+        })
+    }
 }
 
 #[async_trait]
@@ -218,6 +253,47 @@ impl CalendarFeature for GoogleAdapter {
         api::get_events(&self.state, calendar_id, range.start, range.end)
             .await
             .map_err(to_core_error)
+    }
+
+    /// Host-driven incremental read (CACHE-8) via Google's
+    /// `events.list` sync tokens.
+    ///
+    /// No prior token → a full window sync that also returns the
+    /// `nextSyncToken` (the host stores it and replaces wholesale).
+    /// With a token → an incremental sync: changed/created events in
+    /// `changes` (singles range-filtered, masters kept), cancelled rows
+    /// in `deletions` (their ids are already native), and the refreshed
+    /// token. A `410 Gone` means Google expired the token — we transparently
+    /// fall back to a full resync so the next round starts clean.
+    async fn get_events_delta(
+        &self,
+        calendar_id: &str,
+        range: DateRange,
+        since_token: Option<&str>,
+    ) -> CoreResult<ChangeSet<Event>> {
+        let Some(token) = since_token else {
+            return self.full_events_changeset(calendar_id, range).await;
+        };
+        match api::list_events_incremental(&self.state, calendar_id, token, range.start, range.end)
+            .await
+        {
+            Ok(delta) => Ok(ChangeSet {
+                changes: delta.changes,
+                deletions: delta.deletions,
+                new_token: delta.new_token,
+                full_resync: false,
+            }),
+            // Token expired / invalidated by Google — drop it and resync.
+            Err(GoogleError::Http { status: 410, .. }) => {
+                tracing::warn!(
+                    target: "cal_adapter_google",
+                    calendar = %calendar_id,
+                    "Google sync token expired (410); doing a full re-sync",
+                );
+                self.full_events_changeset(calendar_id, range).await
+            }
+            Err(err) => Err(to_core_error(err)),
+        }
     }
 
     async fn create_event(&self, calendar_id: &str, event: NewEvent) -> CoreResult<Event> {
@@ -413,6 +489,51 @@ impl ContactsFeature for GoogleAdapter {
         Ok(fresh)
     }
 
+    /// Host-driven incremental contact read (CACHE-8) via the People API
+    /// `syncToken`.
+    ///
+    /// Only the **Other Contacts** list (`otherContacts.list`) deltas
+    /// here: it's pure people (so resourceName = native id, tombstones via
+    /// `metadata.deleted`) and is the large auto-collected list where
+    /// per-resource sync matters most. The personal list couples each
+    /// contact-group's member list to the FULL people set (a delta can't
+    /// recompute it), and the Directory is read-only org data — both
+    /// return `Unsupported` so the host keeps doing a correct full read.
+    ///
+    /// No token (or a 400-expired token) → a full sync that also captures
+    /// the initial syncToken; otherwise an incremental round.
+    async fn get_contacts_delta(
+        &self,
+        list_id: &str,
+        since_token: Option<&str>,
+    ) -> CoreResult<ChangeSet<Contact>> {
+        if list_id != contacts::GOOGLE_OTHER_CONTACTS_LIST_ID {
+            return Err(CoreError::Unsupported(
+                "only the Google Other Contacts list supports delta sync".into(),
+            ));
+        }
+        let Some(token) = since_token else {
+            return self.other_contacts_full_changeset().await;
+        };
+        match contacts::other_contacts_delta(&self.state, token).await {
+            Ok(delta) => Ok(ChangeSet {
+                changes: delta.changes,
+                deletions: delta.deletions,
+                new_token: delta.new_token,
+                full_resync: false,
+            }),
+            // The People API expires sync tokens with a 400 — re-sync.
+            Err(GoogleError::Http { status: 400, .. }) => {
+                tracing::warn!(
+                    target: "cal_adapter_google::contacts",
+                    "Other Contacts sync token expired (400); doing a full re-sync",
+                );
+                self.other_contacts_full_changeset().await
+            }
+            Err(err) => Err(to_core_error(err)),
+        }
+    }
+
     async fn search_contacts(&self, query: &str) -> CoreResult<Vec<Contact>> {
         contacts::search_contacts(&self.state, query)
             .await
@@ -524,5 +645,170 @@ fn to_core_error(err: GoogleError) -> CoreError {
         Csrf => CoreError::Protocol("CSRF state mismatch on OAuth callback".into()),
         Io(m) => CoreError::Internal(m),
         Config(m) => CoreError::InvalidInput(m),
+    }
+}
+
+#[cfg(test)]
+mod delta_tests {
+    //! `get_events_delta` against a mocked Google `events.list`.
+    use super::*;
+    use chrono::TimeZone;
+    use mockito::{Matcher, Server};
+
+    /// Build an adapter whose API + token endpoints point at the mock
+    /// server. The access token is valid for an hour so no refresh fires.
+    fn adapter_for(server: &Server) -> GoogleAdapter {
+        let mut adapter = GoogleAdapter::new(
+            "client".into(),
+            "secret".into(),
+            TokenSet {
+                access_token: "tok".into(),
+                refresh_token: Some("refresh".into()),
+                expires_at: chrono::Utc::now() + chrono::Duration::hours(1),
+                scope: None,
+            },
+        );
+        adapter.state.api_base = server.url();
+        adapter.state.token_url = format!("{}/token", server.url());
+        adapter
+    }
+
+    fn range() -> DateRange {
+        DateRange::new(
+            chrono::Utc.with_ymd_and_hms(2026, 5, 1, 0, 0, 0).unwrap(),
+            chrono::Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap(),
+        )
+    }
+
+    #[tokio::test]
+    async fn no_token_does_full_resync_and_returns_sync_token() {
+        let mut server = Server::new_async().await;
+        server
+            .mock(
+                "GET",
+                Matcher::Regex(r"^/calendars/primary/events\?.*timeMin=".to_string()),
+            )
+            .with_status(200)
+            .with_body(
+                r##"{
+                  "items": [
+                    {"id":"e1","summary":"One",
+                     "start":{"dateTime":"2026-05-10T08:00:00Z"},
+                     "end":{"dateTime":"2026-05-10T09:00:00Z"}}
+                  ],
+                  "nextSyncToken":"TOK-1"
+                }"##,
+            )
+            .create_async()
+            .await;
+
+        let cs = adapter_for(&server)
+            .get_events_delta("primary", range(), None)
+            .await
+            .unwrap();
+        assert!(cs.full_resync);
+        assert_eq!(cs.changes.len(), 1);
+        assert!(cs.deletions.is_empty());
+        assert_eq!(cs.new_token.as_deref(), Some("TOK-1"));
+    }
+
+    #[tokio::test]
+    async fn token_does_incremental_with_changes_and_deletions() {
+        let mut server = Server::new_async().await;
+        server
+            .mock(
+                "GET",
+                Matcher::Regex(r"^/calendars/primary/events\?.*syncToken=TOK-1".to_string()),
+            )
+            .with_status(200)
+            .with_body(
+                r##"{
+                  "items": [
+                    {"id":"e1","summary":"Updated",
+                     "start":{"dateTime":"2026-05-10T08:00:00Z"},
+                     "end":{"dateTime":"2026-05-10T09:00:00Z"}},
+                    {"id":"e2","status":"cancelled",
+                     "start":{"dateTime":"2026-05-11T08:00:00Z"},
+                     "end":{"dateTime":"2026-05-11T09:00:00Z"}}
+                  ],
+                  "nextSyncToken":"TOK-2"
+                }"##,
+            )
+            .create_async()
+            .await;
+
+        let cs = adapter_for(&server)
+            .get_events_delta("primary", range(), Some("TOK-1"))
+            .await
+            .unwrap();
+        assert!(!cs.full_resync);
+        assert_eq!(
+            cs.changes.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
+            ["e1"]
+        );
+        assert_eq!(cs.deletions, vec!["e2".to_string()]);
+        assert_eq!(cs.new_token.as_deref(), Some("TOK-2"));
+    }
+
+    #[tokio::test]
+    async fn expired_token_410_falls_back_to_full_resync() {
+        let mut server = Server::new_async().await;
+        // Incremental request with the stale token → 410.
+        server
+            .mock(
+                "GET",
+                Matcher::Regex(r"^/calendars/primary/events\?.*syncToken=STALE".to_string()),
+            )
+            .with_status(410)
+            .with_body("Sync token is no longer valid")
+            .create_async()
+            .await;
+        // Recovery: a full window sync with a fresh token.
+        server
+            .mock(
+                "GET",
+                Matcher::Regex(r"^/calendars/primary/events\?.*timeMin=".to_string()),
+            )
+            .with_status(200)
+            .with_body(
+                r##"{
+                  "items": [
+                    {"id":"e1","summary":"One",
+                     "start":{"dateTime":"2026-05-10T08:00:00Z"},
+                     "end":{"dateTime":"2026-05-10T09:00:00Z"}}
+                  ],
+                  "nextSyncToken":"TOK-3"
+                }"##,
+            )
+            .create_async()
+            .await;
+
+        let cs = adapter_for(&server)
+            .get_events_delta("primary", range(), Some("STALE"))
+            .await
+            .unwrap();
+        // Transparent recovery: the caller sees a clean full resync.
+        assert!(cs.full_resync);
+        assert_eq!(cs.changes.len(), 1);
+        assert_eq!(cs.new_token.as_deref(), Some("TOK-3"));
+    }
+
+    #[tokio::test]
+    async fn contacts_delta_only_other_contacts_is_supported() {
+        // The personal list couples contacts to group member lists and the
+        // Directory is read-only — both must surface Unsupported (no network
+        // call) so the host falls back to a full read.
+        let server = Server::new_async().await;
+        let adapter = adapter_for(&server);
+        for list in [
+            crate::contacts::GOOGLE_CONTACT_LIST_ID,
+            crate::contacts::GOOGLE_DIRECTORY_LIST_ID,
+        ] {
+            let err = adapter.get_contacts_delta(list, None).await.unwrap_err();
+            assert!(
+                matches!(err, CoreError::Unsupported(_)),
+                "{list} should be Unsupported",
+            );
+        }
     }
 }

@@ -24,7 +24,9 @@ use std::sync::Arc;
 use tauri::{AppHandle, Runtime, State};
 use tracing::warn;
 
+use super::cache_swr;
 use super::{CommandError, CommandResult};
+use crate::cache::{CacheStore, RefreshCoordinator, SyncScope};
 use crate::contact_sync::{
     ContactSyncScheduler, ContactsSyncStatus, PREF_INCLUDE_READ_ONLY_ON_SYNC, PREF_LAST_SYNCED_AT,
     PREF_SYNC_INTERVAL_MINUTES,
@@ -46,14 +48,20 @@ pub struct ContactListRow {
 
 #[tauri::command]
 pub async fn list_contact_lists(
+    app: AppHandle,
     adapter: State<'_, LocalAdapter>,
     registry: State<'_, Arc<AdapterRegistry>>,
+    cache: State<'_, Arc<CacheStore>>,
+    coord: State<'_, Arc<RefreshCoordinator>>,
 ) -> CommandResult<Vec<ContactListRow>> {
+    let registry = Arc::clone(&registry);
+    let cache = Arc::clone(&cache);
+    let coord = Arc::clone(&coord);
     let local = adapter.list_contact_lists().await?;
     for l in &local {
         registry.note_contact_list_route(&l.id, LOCAL_ID);
     }
-    let mut external = registry.list_external_contact_lists().await;
+    let mut external = external_contact_lists_swr(&app, &registry, &cache, &coord).await;
     let mut out = local;
     out.append(&mut external);
     Ok(out
@@ -70,10 +78,77 @@ pub async fn list_contact_lists(
         .collect())
 }
 
+/// Cache-first aggregation of every external account's contact lists.
+/// Same stale-while-revalidate shape as `external_task_lists_swr`.
+async fn external_contact_lists_swr(
+    app: &AppHandle,
+    registry: &Arc<AdapterRegistry>,
+    cache: &Arc<CacheStore>,
+    coord: &Arc<RefreshCoordinator>,
+) -> Vec<ContactList> {
+    let mut out = Vec::new();
+    for (account, adapter) in registry.snapshot_contact_adapters() {
+        let state = cache
+            .get_sync_state(&account, SyncScope::ContactLists, "")
+            .ok()
+            .flatten();
+        if cache_swr::has_snapshot(&state) {
+            let cached = cache.read_contact_lists(&account).unwrap_or_default();
+            for l in &cached {
+                registry.note_contact_list_route(&l.id, &account);
+            }
+            if cache_swr::is_stale(&state, cache_swr::SWR_TTL_SECS) {
+                let adapter_bg = Arc::clone(&adapter);
+                let reg = Arc::clone(registry);
+                let acc = account.clone();
+                cache_swr::spawn_refresh(
+                    app.clone(),
+                    Arc::clone(cache),
+                    Arc::clone(coord),
+                    SyncScope::ContactLists,
+                    account.clone(),
+                    String::new(),
+                    move || async move { adapter_bg.list_contact_lists().await },
+                    move |c, lists: &[ContactList]| {
+                        for l in lists {
+                            reg.note_contact_list_route(&l.id, &acc);
+                        }
+                        c.replace_contact_lists(&acc, lists)
+                    },
+                );
+            }
+            out.extend(cached);
+        } else {
+            match adapter.list_contact_lists().await {
+                Ok(lists) => {
+                    for l in &lists {
+                        registry.note_contact_list_route(&l.id, &account);
+                    }
+                    let _ = cache.replace_contact_lists(&account, &lists);
+                    out.extend(lists);
+                }
+                Err(err) => {
+                    let _ =
+                        cache.mark_error(&account, SyncScope::ContactLists, "", &err.to_string());
+                    let cached = cache.read_contact_lists(&account).unwrap_or_default();
+                    for l in &cached {
+                        registry.note_contact_list_route(&l.id, &account);
+                    }
+                    out.extend(cached);
+                }
+            }
+        }
+    }
+    out
+}
+
 #[tauri::command]
 pub async fn get_contacts(
+    app: AppHandle,
     adapter: State<'_, LocalAdapter>,
     registry: State<'_, Arc<AdapterRegistry>>,
+    cache: State<'_, Arc<CacheStore>>,
+    coord: State<'_, Arc<RefreshCoordinator>>,
     list_id: String,
 ) -> CommandResult<Vec<Contact>> {
     let account = registry
@@ -88,7 +163,48 @@ pub async fn get_contacts(
             message: format!("contact list '{list_id}' is not routable"),
         });
     };
-    Ok(ext.get_contacts(&list_id).await?)
+
+    // Stale-while-revalidate (see get_tasks for the shape).
+    let state = cache
+        .get_sync_state(&account, SyncScope::Contacts, &list_id)
+        .ok()
+        .flatten();
+    if cache_swr::has_snapshot(&state) {
+        let cached = cache.read_contacts(&account, &list_id).unwrap_or_default();
+        if cache_swr::is_stale(&state, cache_swr::SWR_TTL_SECS) {
+            let ext_bg = Arc::clone(&ext);
+            let cache_bg = Arc::clone(&cache);
+            let acc = account.clone();
+            let list = list_id.clone();
+            cache_swr::spawn_item_refresh(
+                app.clone(),
+                Arc::clone(&cache),
+                Arc::clone(&coord),
+                SyncScope::Contacts,
+                account.clone(),
+                list_id.clone(),
+                move || async move {
+                    cache_swr::refresh_contacts(&cache_bg, ext_bg.as_ref(), &acc, &list).await
+                },
+            );
+        }
+        return Ok(cached);
+    }
+
+    // Cold path: refresh (delta-or-full), then serve from cache; fall
+    // back to any stale rows on failure.
+    match cache_swr::refresh_contacts(&cache, ext.as_ref(), &account, &list_id).await {
+        Ok(()) => Ok(cache.read_contacts(&account, &list_id).unwrap_or_default()),
+        Err(err) => {
+            let _ = cache.mark_error(&account, SyncScope::Contacts, &list_id, &err.to_string());
+            let stale = cache.read_contacts(&account, &list_id).unwrap_or_default();
+            if stale.is_empty() {
+                Err(err.into())
+            } else {
+                Ok(stale)
+            }
+        }
+    }
 }
 
 /// Cross-account contacts search. Local hits land first, external
@@ -121,6 +237,7 @@ pub struct CreateContactRequest {
 pub async fn create_contact(
     adapter: State<'_, LocalAdapter>,
     registry: State<'_, Arc<AdapterRegistry>>,
+    cache: State<'_, Arc<CacheStore>>,
     request: CreateContactRequest,
 ) -> CommandResult<Contact> {
     let account = registry
@@ -137,15 +254,18 @@ pub async fn create_contact(
             message: format!("contact list '{}' is not routable", request.list_id),
         });
     };
-    Ok(ext
+    let created = ext
         .create_contact(&request.list_id, request.contact)
-        .await?)
+        .await?;
+    let _ = cache.invalidate(&account, SyncScope::Contacts, &request.list_id);
+    Ok(created)
 }
 
 #[tauri::command]
 pub async fn update_contact(
     adapter: State<'_, LocalAdapter>,
     registry: State<'_, Arc<AdapterRegistry>>,
+    cache: State<'_, Arc<CacheStore>>,
     contact: Contact,
 ) -> CommandResult<Contact> {
     let account = registry
@@ -160,7 +280,10 @@ pub async fn update_contact(
             message: format!("contact list '{}' is not routable", contact.list_id),
         });
     };
-    Ok(ext.update_contact(contact).await?)
+    let list_id = contact.list_id.clone();
+    let updated = ext.update_contact(contact).await?;
+    let _ = cache.invalidate(&account, SyncScope::Contacts, &list_id);
+    Ok(updated)
 }
 
 /// Delete a contact by id.
@@ -175,6 +298,7 @@ pub async fn update_contact(
 pub async fn delete_contact(
     adapter: State<'_, LocalAdapter>,
     registry: State<'_, Arc<AdapterRegistry>>,
+    cache: State<'_, Arc<CacheStore>>,
     id: String,
     list_id: Option<String>,
 ) -> CommandResult<()> {
@@ -192,6 +316,9 @@ pub async fn delete_contact(
             });
         };
         ext.delete_contact(&id).await?;
+        if let Some(lid) = &list_id {
+            let _ = cache.invalidate(&account, SyncScope::Contacts, lid);
+        }
     }
     Ok(())
 }
@@ -232,6 +359,7 @@ pub async fn delete_contact_list(
 pub async fn rename_contact_list(
     adapter: State<'_, LocalAdapter>,
     registry: State<'_, Arc<AdapterRegistry>>,
+    cache: State<'_, Arc<CacheStore>>,
     id: String,
     new_name: String,
 ) -> CommandResult<()> {
@@ -248,6 +376,7 @@ pub async fn rename_contact_list(
             });
         };
         ext.rename_contact_list(&id, &new_name).await?;
+        let _ = cache.invalidate(&account, SyncScope::ContactLists, "");
     }
     Ok(())
 }

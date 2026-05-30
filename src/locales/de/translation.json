@@ -88,6 +88,12 @@
       "contacts": "Kontakte"
     }
   },
+  "cacheRefresh": {
+    "label": "Externe Daten",
+    "refreshing": "Externe Daten werden aktualisiert …",
+    "lastUpdated": "Externe Daten aktualisiert: {{time}}",
+    "never": "Externe Daten noch nicht aktualisiert"
+  },
   "syncStatus": {
     "label": "Sync-Status",
     "synced": "Synchronisiert",

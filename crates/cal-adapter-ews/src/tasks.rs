@@ -134,6 +134,37 @@ pub async fn rename_task_list(client: &EwsClient, list_id: &str, new_name: &str)
     Ok(())
 }
 
+/// Create a new task folder (`IPF.Task`) under the mailbox root via
+/// `CreateFolder`. The server-assigned FolderId + ChangeKey come back
+/// in the response and get packed into the cal-core `TaskList.id` the
+/// same way the listing path does, so the next round-trip can address
+/// the new folder unchanged. `parent_id` is ignored — Aperio models
+/// EWS task folders as a flat list (no nested task projects).
+pub async fn create_task_list(client: &EwsClient, name: &str) -> EwsResult<TaskList> {
+    let envelope = create_tasks_folder(name);
+    let xml = client.post_soap(envelope).await?;
+    let folder = parse_find_task_folder_response(&xml)?
+        .into_iter()
+        .next()
+        .ok_or_else(|| EwsError::Protocol("CreateFolder response carried no FolderId".into()))?;
+    // A CreateFolder response is IdOnly — the server doesn't echo the
+    // DisplayName — so stamp the requested name back onto the result.
+    let mut list = to_task_list(folder);
+    list.name = name.to_string();
+    Ok(list)
+}
+
+/// Delete a task folder via `DeleteFolder`. We move it to Deleted
+/// Items (`MoveToDeletedItems`) rather than hard-deleting it, so a
+/// mis-click stays recoverable from the user's mailbox; either way the
+/// folder disappears from Aperio's task-list view.
+pub async fn delete_task_list(client: &EwsClient, list_id: &str) -> EwsResult<()> {
+    let (folder_id, change_key) = split_calendar_id(list_id);
+    let envelope = delete_folder(&folder_id, change_key.as_deref());
+    client.post_soap(envelope).await?;
+    Ok(())
+}
+
 // ── SOAP envelope helpers (task-specific) ──────────────────────────────
 
 const ENVELOPE_PRELUDE: &str = r#"<?xml version="1.0" encoding="utf-8"?>
@@ -306,6 +337,50 @@ fn update_tasks_folder_displayname(
         </t:FolderChange>
       </m:FolderChanges>
     </m:UpdateFolder>"#,
+    );
+    wrap(&body)
+}
+
+/// SOAP body for `CreateFolder`: create a single `<t:TasksFolder>`
+/// with the supplied display name directly under the distinguished
+/// `msgfolderroot`. The `<t:TasksFolder>` wrapper (vs `<t:Folder>`)
+/// makes EWS stamp the folder class as `IPF.Task`, so it shows up
+/// under the `list_task_lists` restriction on the next sync.
+fn create_tasks_folder(name: &str) -> String {
+    let name = escape_xml(name);
+    let body = format!(
+        r#"    <m:CreateFolder>
+      <m:ParentFolderId>
+        <t:DistinguishedFolderId Id="msgfolderroot"/>
+      </m:ParentFolderId>
+      <m:Folders>
+        <t:TasksFolder>
+          <t:DisplayName>{name}</t:DisplayName>
+        </t:TasksFolder>
+      </m:Folders>
+    </m:CreateFolder>"#,
+    );
+    wrap(&body)
+}
+
+/// SOAP body for `DeleteFolder` with `DeleteType="MoveToDeletedItems"`
+/// — the recoverable delete. EWS moves the whole folder (and the tasks
+/// inside it) into Deleted Items.
+fn delete_folder(folder_id: &str, change_key: Option<&str>) -> String {
+    let id_attr = match change_key {
+        Some(ck) => format!(
+            r#"<t:FolderId Id="{}" ChangeKey="{}"/>"#,
+            escape_xml(folder_id),
+            escape_xml(ck),
+        ),
+        None => format!(r#"<t:FolderId Id="{}"/>"#, escape_xml(folder_id)),
+    };
+    let body = format!(
+        r#"    <m:DeleteFolder DeleteType="MoveToDeletedItems">
+      <m:FolderIds>
+        {id_attr}
+      </m:FolderIds>
+    </m:DeleteFolder>"#,
     );
     wrap(&body)
 }
@@ -1449,5 +1524,127 @@ mod tests {
             .create_async()
             .await;
         delete_task(&client_for(&server), "TID|TCK").await.unwrap();
+    }
+
+    #[test]
+    fn create_tasks_folder_body_wraps_in_tasksfolder_under_root() {
+        let body = create_tasks_folder("Errands & Co");
+        assert!(body.contains("CreateFolder"));
+        assert!(body.contains("<t:TasksFolder>"));
+        // Filed under the mailbox root so it lands as a top-level
+        // task list, and stamped IPF.Task by the TasksFolder wrapper.
+        assert!(body.contains(r#"<t:DistinguishedFolderId Id="msgfolderroot"/>"#));
+        // XML special chars in the name must be escaped.
+        assert!(body.contains("Errands &amp; Co"));
+        // Must NOT use CalendarFolder — that would create a calendar.
+        assert!(!body.contains("<t:CalendarFolder>"));
+    }
+
+    #[test]
+    fn delete_folder_body_moves_to_deleted_items() {
+        let body = delete_folder("FID", Some("FCK"));
+        assert!(body.contains("DeleteFolder"));
+        assert!(body.contains(r#"DeleteType="MoveToDeletedItems""#));
+        assert!(body.contains(r#"Id="FID""#));
+        assert!(body.contains(r#"ChangeKey="FCK""#));
+    }
+
+    #[tokio::test]
+    async fn create_task_list_returns_server_assigned_id() {
+        let mut server = Server::new_async().await;
+        let body = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body>
+    <m:CreateFolderResponse>
+      <m:ResponseMessages>
+        <m:CreateFolderResponseMessage ResponseClass="Success">
+          <m:ResponseCode>NoError</m:ResponseCode>
+          <m:Folders>
+            <t:TasksFolder>
+              <t:FolderId Id="NEW-FID" ChangeKey="NEW-FCK"/>
+            </t:TasksFolder>
+          </m:Folders>
+        </m:CreateFolderResponseMessage>
+      </m:ResponseMessages>
+    </m:CreateFolderResponse>
+  </s:Body>
+</s:Envelope>"#;
+        let _m = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::Regex("CreateFolder".into()))
+            .with_status(200)
+            .with_body(body)
+            .create_async()
+            .await;
+        let list = create_task_list(&client_for(&server), "Groceries")
+            .await
+            .unwrap();
+        // id packs folder id + change key the same way the listing does.
+        assert_eq!(list.id, "NEW-FID|NEW-FCK");
+        // Name is stamped from the request (the create response is IdOnly).
+        assert_eq!(list.name, "Groceries");
+        assert!(list.parent_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn create_task_list_surfaces_error_response() {
+        let mut server = Server::new_async().await;
+        let body = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages">
+  <s:Body>
+    <m:CreateFolderResponse>
+      <m:ResponseMessages>
+        <m:CreateFolderResponseMessage ResponseClass="Error">
+          <m:MessageText>Access is denied.</m:MessageText>
+          <m:ResponseCode>ErrorAccessDenied</m:ResponseCode>
+        </m:CreateFolderResponseMessage>
+      </m:ResponseMessages>
+    </m:CreateFolderResponse>
+  </s:Body>
+</s:Envelope>"#;
+        let _m = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body(body)
+            .create_async()
+            .await;
+        let err = create_task_list(&client_for(&server), "Nope")
+            .await
+            .unwrap_err();
+        assert!(matches!(err, EwsError::Soap { .. }));
+    }
+
+    #[tokio::test]
+    async fn delete_task_list_round_trips() {
+        let mut server = Server::new_async().await;
+        let body = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages">
+  <s:Body>
+    <m:DeleteFolderResponse>
+      <m:ResponseMessages>
+        <m:DeleteFolderResponseMessage ResponseClass="Success">
+          <m:ResponseCode>NoError</m:ResponseCode>
+        </m:DeleteFolderResponseMessage>
+      </m:ResponseMessages>
+    </m:DeleteFolderResponse>
+  </s:Body>
+</s:Envelope>"#;
+        let _m = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::Regex("DeleteFolder".into()),
+                mockito::Matcher::Regex(r#"Id="FID""#.into()),
+            ]))
+            .with_status(200)
+            .with_body(body)
+            .create_async()
+            .await;
+        delete_task_list(&client_for(&server), "FID|FCK")
+            .await
+            .unwrap();
     }
 }

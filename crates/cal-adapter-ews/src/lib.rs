@@ -43,7 +43,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use cal_core::{
-    Adapter, AuthToken, Calendar, CalendarFeature, Capability, Contact, ContactList,
+    Adapter, AuthToken, Calendar, CalendarFeature, Capability, ChangeSet, Contact, ContactList,
     ContactsFeature, ContainerColor, Credentials as CoreCredentials, DateRange, Error as CoreError,
     Event, FreeBusy, NewContact, NewEvent, NewTask, Result as CoreResult, Task, TaskList,
     TasksFeature,
@@ -52,7 +52,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
 use crate::api::SyncedFolderState;
-use crate::mapping::to_event;
+use crate::mapping::{to_event, ParsedItem};
 
 pub use auth::BasicCredentials;
 pub use autodiscover::{discover, discover_client, DiscoveredEndpoints};
@@ -110,6 +110,18 @@ pub struct EwsAdapter {
     /// resumes from a delta-sync against the persisted cookie
     /// instead of doing a full re-sync of every folder.
     events_sync: Mutex<HashMap<String, SyncedFolderState>>,
+    /// Per-folder `SyncFolderItems` cookie for the Tasks delta read,
+    /// keyed by the Aperio list id. Unlike `events_sync` this holds only
+    /// the cookie (not the item set): the Tasks/Contacts delta is
+    /// CTag-style — a cheap IdOnly probe advances the cookie and gates a
+    /// full `FindItem` re-read on whether anything changed, so the full
+    /// item set never has to live here. In-memory only; a process restart
+    /// re-seeds from the host's stored token (see `probe_list_changes`).
+    tasks_sync: Mutex<HashMap<String, String>>,
+    /// Same as `tasks_sync` for the Contacts delta read (IPF.Contact
+    /// folders). The synthetic GAL list has no folder to sync and is
+    /// handled separately (returns `Unsupported`).
+    contacts_sync: Mutex<HashMap<String, String>>,
     /// Host-supplied directory for persistent state. `None`
     /// disables persistence entirely (test path, smoke-test
     /// ephemeral instances).
@@ -142,6 +154,8 @@ impl EwsAdapter {
             listing_ttl: chrono::Duration::minutes(5),
             gal_ttl: chrono::Duration::minutes(30),
             events_sync: Mutex::new(HashMap::new()),
+            tasks_sync: Mutex::new(HashMap::new()),
+            contacts_sync: Mutex::new(HashMap::new()),
             state_dir: None,
         }
     }
@@ -418,26 +432,25 @@ impl EwsAdapter {
         let mut masters_emitted = 0usize;
         let mut singles_emitted = 0usize;
         let mut out: Vec<Event> = Vec::with_capacity(updated.items.len());
-        for (_, item) in updated.items.iter() {
-            // Skip Occurrence rows that might have leaked in via
-            // older protocol responses — `SyncFolderItems` on a
-            // calendar folder shouldn't emit them, but a defensive
-            // filter keeps the read path honest.
-            if item
-                .item_type
-                .as_deref()
-                .map(|t| t.eq_ignore_ascii_case("Occurrence"))
-                .unwrap_or(false)
-            {
-                skipped_occurrence += 1;
-                continue;
-            }
-            // Translate. On the rare per-item failure
-            // (RelativeMonthly etc.) log and drop the row rather
-            // than failing the whole refresh.
-            let ev = match to_event(item.clone(), calendar_id) {
-                Ok(ev) => ev,
+        for item in updated.items.values() {
+            let before = out.len();
+            match emit_item_events(item, calendar_id, range, &mut out) {
+                // `out.len() - before - 1` is the count of synthetic
+                // override events pushed ahead of the base event.
+                Ok(ItemEmit::Master) => {
+                    masters_emitted += 1;
+                    overrides_emitted += out.len() - before - 1;
+                }
+                Ok(ItemEmit::Single) => {
+                    singles_emitted += 1;
+                    overrides_emitted += out.len() - before - 1;
+                }
+                Ok(ItemEmit::SkippedOccurrence) => skipped_occurrence += 1,
+                Ok(ItemEmit::SkippedOutOfRange) => filtered_out_of_range += 1,
                 Err(err) => {
+                    // Per-item failure (an unsupported recurrence shape, a
+                    // missing Start/End): log and drop the row rather than
+                    // failing the whole refresh.
                     translate_failures += 1;
                     tracing::warn!(
                         target: "cal_adapter_ews::sync",
@@ -445,50 +458,8 @@ impl EwsAdapter {
                         ?err,
                         "skipping item: could not translate to cal-core Event",
                     );
-                    continue;
-                }
-            };
-            // Range filter applies to singles only. Masters carry
-            // a recurrence and the frontend expander handles the
-            // window.
-            if ev.recurrence.is_none() && (ev.end < range.start || ev.start >= range.end) {
-                filtered_out_of_range += 1;
-                continue;
-            }
-            // For each modified occurrence on a master, emit a
-            // synthetic standalone event at the moved time. The
-            // master's EXDATE list (built in `to_event`) already
-            // skips the original slot — without this emit the
-            // user would see the override-time slot empty.
-            //
-            // Content (title, body, location, reminders) inherits
-            // from the master. Outlook lets the user edit those
-            // fields per-occurrence; capturing them would require
-            // a per-override GetItem fan-out, deferred. Time
-            // changes (the most common kind of override) render
-            // correctly with the inherited content.
-            if !item.modified_occurrences.is_empty() {
-                for ov in &item.modified_occurrences {
-                    if ov.end < range.start || ov.start >= range.end {
-                        continue;
-                    }
-                    let mut override_ev = ev.clone();
-                    override_ev.id =
-                        format!("{}#override:{}", ev.id, ov.original_start.to_rfc3339(),);
-                    override_ev.recurrence = None;
-                    override_ev.start = ov.start;
-                    override_ev.end = ov.end;
-                    override_ev.etag = ov.change_key.clone();
-                    overrides_emitted += 1;
-                    out.push(override_ev);
                 }
             }
-            if ev.recurrence.is_some() {
-                masters_emitted += 1;
-            } else {
-                singles_emitted += 1;
-            }
-            out.push(ev);
         }
 
         tracing::info!(
@@ -517,6 +488,237 @@ impl EwsAdapter {
         };
         self.persist_events_sync(&snapshot).await;
         Ok(out)
+    }
+
+    /// Incremental sibling of [`refresh_and_read_events`] backing
+    /// [`CalendarFeature::get_events_delta`]. Drives one `SyncFolderItems`
+    /// delta, persists the merged per-folder state, and hands the host a
+    /// `ChangeSet` to fold into its snapshot cache.
+    ///
+    /// The host replaces wholesale whenever it has no prior token OR we
+    /// flag `full_resync`; in both cases `changes` must be the COMPLETE
+    /// in-range set. We declare a full resync when our own per-folder
+    /// state had no cookie (cold), when the host passed no `since_token`,
+    /// or when the server invalidated the cookie and we re-drained from
+    /// scratch. Otherwise the result is purely incremental: changed items
+    /// translated (masters keep their RRULE plus synthetic in-range
+    /// overrides) and the deleted EWS ItemIds verbatim — those are the
+    /// provider-native ids the host removes by `native_id`, which fans a
+    /// master's deletion out to its cached occurrence overrides.
+    async fn refresh_events_delta(
+        &self,
+        calendar_id: &str,
+        range: DateRange,
+        since_token: Option<&str>,
+    ) -> EwsResult<ChangeSet<Event>> {
+        let prior = {
+            let mut guard = self.events_sync.lock().await;
+            guard.remove(calendar_id).unwrap_or_default()
+        };
+        // A cold per-folder state can't produce a real delta — and the
+        // host treats a token-less round as a wholesale replace — so both
+        // force the full in-range set into `changes`.
+        let mut force_full = prior.sync_state.is_none() || since_token.is_none();
+        let (updated, changed_ids, deleted_ids) =
+            match api::sync_events_delta(&self.client, calendar_id, prior).await {
+                Ok(t) => t,
+                Err(err) if is_sync_state_invalid(&err) => {
+                    tracing::warn!(
+                        target: "cal_adapter_ews::sync",
+                        calendar = %calendar_id,
+                        "SyncFolderItems cookie invalid; doing a full re-sync",
+                    );
+                    // A from-scratch re-drain returns the whole folder;
+                    // flag a full resync so the host wipes rows that
+                    // vanished while the cookie was stale instead of
+                    // merging a partial set.
+                    force_full = true;
+                    api::sync_events_delta(&self.client, calendar_id, SyncedFolderState::default())
+                        .await?
+                }
+                Err(err) => return Err(err),
+            };
+
+        let change_set = if force_full {
+            let mut changes = Vec::with_capacity(updated.items.len());
+            for item in updated.items.values() {
+                emit_into(item, calendar_id, range, &mut changes);
+            }
+            ChangeSet {
+                changes,
+                deletions: Vec::new(),
+                new_token: updated.sync_state.clone(),
+                full_resync: true,
+            }
+        } else {
+            let mut changes = Vec::new();
+            for id in &changed_ids {
+                if let Some(item) = updated.items.get(id) {
+                    emit_into(item, calendar_id, range, &mut changes);
+                }
+            }
+            ChangeSet {
+                changes,
+                deletions: deleted_ids,
+                new_token: updated.sync_state.clone(),
+                full_resync: false,
+            }
+        };
+
+        // Persist the merged state for the next round (mirrors
+        // refresh_and_read_events: clone the map, then write off-lock).
+        let snapshot = {
+            let mut guard = self.events_sync.lock().await;
+            guard.insert(calendar_id.to_string(), updated);
+            guard.clone()
+        };
+        self.persist_events_sync(&snapshot).await;
+
+        tracing::info!(
+            target: "cal_adapter_ews::sync",
+            calendar = %calendar_id,
+            full_resync = change_set.full_resync,
+            changes = change_set.changes.len(),
+            deletions = change_set.deletions.len(),
+            "EWS get_events_delta: drain → ChangeSet",
+        );
+        Ok(change_set)
+    }
+
+    /// Shared probe logic for the Tasks/Contacts delta read. Runs the
+    /// cheap IdOnly `SyncFolderItems` probe against `list_id`, stores the
+    /// fresh cookie in `sync_map`, and reports whether the caller must do
+    /// a full `FindItem` re-read.
+    ///
+    /// The probe is seeded from our in-memory cookie when we have one,
+    /// else from the host's `since_token` — so a process restart (empty
+    /// map) resumes from the host's stored cookie and skips the full read
+    /// when nothing changed. A full read is forced when the folder changed,
+    /// the cookie aged out, or `since_token` is `None` (the host then
+    /// replaces wholesale and `changes` must be the complete set).
+    async fn probe_list_changes(
+        &self,
+        sync_map: &Mutex<HashMap<String, String>>,
+        list_id: &str,
+        since_token: Option<&str>,
+    ) -> EwsResult<(bool, String)> {
+        let seed = {
+            let guard = sync_map.lock().await;
+            guard
+                .get(list_id)
+                .cloned()
+                .or_else(|| since_token.map(String::from))
+        };
+        let outcome = match api::probe_folder_sync(&self.client, list_id, seed.as_deref()).await {
+            Ok(o) => o,
+            Err(err) if is_sync_state_invalid(&err) => {
+                tracing::warn!(
+                    target: "cal_adapter_ews::sync",
+                    list = %list_id,
+                    "SyncFolderItems probe cookie invalid; re-probing from scratch",
+                );
+                // Cold re-probe; a stale cookie means the cached snapshot
+                // may be wrong, so force the full re-read.
+                let mut o = api::probe_folder_sync(&self.client, list_id, None).await?;
+                o.changed = true;
+                o
+            }
+            Err(err) => return Err(err),
+        };
+        sync_map
+            .lock()
+            .await
+            .insert(list_id.to_string(), outcome.sync_state.clone());
+        let need_full = outcome.changed || since_token.is_none();
+        Ok((need_full, outcome.sync_state))
+    }
+}
+
+/// Outcome of translating one cached item, reported back so the full
+/// read path can keep its diagnostic counters.
+enum ItemEmit {
+    /// A recurring master was emitted (plus any in-range overrides).
+    Master,
+    /// A single event was emitted.
+    Single,
+    /// A defensive-filtered `Occurrence` row — nothing emitted.
+    SkippedOccurrence,
+    /// A single event whose slot fell entirely outside `range`.
+    SkippedOutOfRange,
+}
+
+/// Translate one cached [`ParsedItem`] into cal-core events, pushing them
+/// onto `out`, and report what happened.
+///
+/// Shared by the full read ([`EwsAdapter::refresh_and_read_events`]) and
+/// the incremental delta ([`EwsAdapter::refresh_events_delta`]) so both
+/// surface series identically. Emission rules:
+///   - `Occurrence`-typed rows are dropped defensively — `SyncFolderItems`
+///     on a calendar folder shouldn't surface them.
+///   - Recurring masters always pass (the frontend expander handles the
+///     visible window), and each in-range [`ModifiedOccurrence`] is emitted
+///     as a synthetic standalone event at the moved time, inheriting the
+///     master's content. The master's EXDATE list (built in `to_event`)
+///     already vacates the original slot, so the expander doesn't double-
+///     render. The synthetic id is derived from the master's, so it shares
+///     the master's `native_id` host-side and is purged together with it.
+///   - Single events pass only when they overlap `range`.
+///
+/// [`ModifiedOccurrence`]: crate::mapping::ModifiedOccurrence
+fn emit_item_events(
+    item: &ParsedItem,
+    calendar_id: &str,
+    range: DateRange,
+    out: &mut Vec<Event>,
+) -> EwsResult<ItemEmit> {
+    if item
+        .item_type
+        .as_deref()
+        .map(|t| t.eq_ignore_ascii_case("Occurrence"))
+        .unwrap_or(false)
+    {
+        return Ok(ItemEmit::SkippedOccurrence);
+    }
+    let ev = to_event(item.clone(), calendar_id)?;
+    // Range filter applies to singles only; masters carry a recurrence and
+    // the frontend expander handles the window.
+    if ev.recurrence.is_none() && (ev.end < range.start || ev.start >= range.end) {
+        return Ok(ItemEmit::SkippedOutOfRange);
+    }
+    if !item.modified_occurrences.is_empty() {
+        for ov in &item.modified_occurrences {
+            if ov.end < range.start || ov.start >= range.end {
+                continue;
+            }
+            let mut override_ev = ev.clone();
+            override_ev.id = format!("{}#override:{}", ev.id, ov.original_start.to_rfc3339());
+            override_ev.recurrence = None;
+            override_ev.start = ov.start;
+            override_ev.end = ov.end;
+            override_ev.etag = ov.change_key.clone();
+            out.push(override_ev);
+        }
+    }
+    let outcome = if ev.recurrence.is_some() {
+        ItemEmit::Master
+    } else {
+        ItemEmit::Single
+    };
+    out.push(ev);
+    Ok(outcome)
+}
+
+/// `emit_item_events` for callers that don't track counters: a per-item
+/// translation failure is logged and the row dropped, never fatal to the
+/// surrounding drain.
+fn emit_into(item: &ParsedItem, calendar_id: &str, range: DateRange, out: &mut Vec<Event>) {
+    if let Err(err) = emit_item_events(item, calendar_id, range, out) {
+        tracing::warn!(
+            target: "cal_adapter_ews::sync",
+            item_id = %item.item_id,
+            ?err,
+            "delta: skipping item that could not translate to cal-core Event",
+        );
     }
 }
 
@@ -603,6 +805,38 @@ impl CalendarFeature for EwsAdapter {
                 calendar = %calendar_id,
                 ?err,
                 "EwsAdapter::get_events failed",
+            );
+        }
+        result.map_err(to_core_error)
+    }
+
+    /// Host-driven incremental read (CACHE-8). Backs the snapshot cache's
+    /// per-calendar delta refresh via the same `SyncFolderItems` cookie
+    /// the full read uses, so the host only re-pulls the rows Exchange
+    /// reports as touched. See [`EwsAdapter::refresh_events_delta`] for
+    /// the full-resync vs. incremental decision and the deletion/native-id
+    /// contract.
+    async fn get_events_delta(
+        &self,
+        calendar_id: &str,
+        range: DateRange,
+        since_token: Option<&str>,
+    ) -> CoreResult<ChangeSet<Event>> {
+        tracing::info!(
+            target: "cal_adapter_ews::sync",
+            calendar = %calendar_id,
+            has_token = since_token.is_some(),
+            "EwsAdapter::get_events_delta called",
+        );
+        let result = self
+            .refresh_events_delta(calendar_id, range, since_token)
+            .await;
+        if let Err(ref err) = result {
+            tracing::warn!(
+                target: "cal_adapter_ews::sync",
+                calendar = %calendar_id,
+                ?err,
+                "EwsAdapter::get_events_delta failed",
             );
         }
         result.map_err(to_core_error)
@@ -695,6 +929,42 @@ impl TasksFeature for EwsAdapter {
             .map_err(to_core_error)
     }
 
+    /// Host-driven incremental task read (CACHE-8). EWS has no per-item
+    /// task delta we can merge cleanly (the cal-core id embeds the
+    /// rotating ChangeKey), so this is CTag-style instead: a cheap IdOnly
+    /// `SyncFolderItems` probe gates a full `FindItem` re-read. Unchanged
+    /// folders return an empty no-op ChangeSet; a changed folder (or the
+    /// bootstrap / a token-less call) returns the full task set as a
+    /// `full_resync` so the host replaces wholesale.
+    async fn get_tasks_delta(
+        &self,
+        list_id: &str,
+        since_token: Option<&str>,
+    ) -> CoreResult<ChangeSet<Task>> {
+        let (need_full, cookie) = self
+            .probe_list_changes(&self.tasks_sync, list_id, since_token)
+            .await
+            .map_err(to_core_error)?;
+        if need_full {
+            let tasks = tasks::get_tasks(&self.client, list_id)
+                .await
+                .map_err(to_core_error)?;
+            Ok(ChangeSet {
+                changes: tasks,
+                deletions: Vec::new(),
+                new_token: Some(cookie),
+                full_resync: true,
+            })
+        } else {
+            Ok(ChangeSet {
+                changes: Vec::new(),
+                deletions: Vec::new(),
+                new_token: Some(cookie),
+                full_resync: false,
+            })
+        }
+    }
+
     async fn create_task(&self, list_id: &str, task: NewTask) -> CoreResult<Task> {
         tasks::create_task(&self.client, list_id, task)
             .await
@@ -723,6 +993,24 @@ impl TasksFeature for EwsAdapter {
         *self.task_lists_cache.lock().await = None;
         Ok(())
     }
+
+    async fn create_task_list(&self, name: &str, _parent_id: Option<&str>) -> CoreResult<TaskList> {
+        let created = tasks::create_task_list(&self.client, name)
+            .await
+            .map_err(to_core_error)?;
+        // Drop the cache so the freshly-created folder shows up on the
+        // next listing round-trip.
+        *self.task_lists_cache.lock().await = None;
+        Ok(created)
+    }
+
+    async fn delete_task_list(&self, list_id: &str) -> CoreResult<()> {
+        tasks::delete_task_list(&self.client, list_id)
+            .await
+            .map_err(to_core_error)?;
+        *self.task_lists_cache.lock().await = None;
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -745,6 +1033,44 @@ impl ContactsFeature for EwsAdapter {
         contacts::get_contacts(&self.client, list_id)
             .await
             .map_err(to_core_error)
+    }
+
+    /// Host-driven incremental contact read (CACHE-8). Same CTag-style
+    /// probe-gated full re-read as `get_tasks_delta`. The synthetic GAL
+    /// list is a ResolveNames walk with no folder to sync, so it returns
+    /// `Unsupported` and the host falls back to a full read.
+    async fn get_contacts_delta(
+        &self,
+        list_id: &str,
+        since_token: Option<&str>,
+    ) -> CoreResult<ChangeSet<Contact>> {
+        if list_id == contacts::GAL_LIST_ID {
+            return Err(CoreError::Unsupported(
+                "the EWS GAL (ResolveNames) has no per-folder delta sync".into(),
+            ));
+        }
+        let (need_full, cookie) = self
+            .probe_list_changes(&self.contacts_sync, list_id, since_token)
+            .await
+            .map_err(to_core_error)?;
+        if need_full {
+            let contacts = contacts::get_contacts(&self.client, list_id)
+                .await
+                .map_err(to_core_error)?;
+            Ok(ChangeSet {
+                changes: contacts,
+                deletions: Vec::new(),
+                new_token: Some(cookie),
+                full_resync: true,
+            })
+        } else {
+            Ok(ChangeSet {
+                changes: Vec::new(),
+                deletions: Vec::new(),
+                new_token: Some(cookie),
+                full_resync: false,
+            })
+        }
     }
 
     async fn search_contacts(&self, query: &str) -> CoreResult<Vec<Contact>> {
@@ -985,5 +1311,297 @@ mod state_persistence_tests {
         );
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod delta_read_tests {
+    //! `get_events_delta` against a mocked `SyncFolderItems` server.
+    //!
+    //! Each drain is two POSTs — the SyncFolderItems page, then the
+    //! GetItem body/recurrence enrichment fan-out — and mockito serves
+    //! `.expect(1)` mocks in FIFO creation order, so we lay the four
+    //! POSTs of a cold-then-warm sequence out as four ordered mocks.
+    use super::*;
+    use mockito::Server;
+
+    fn creds() -> BasicCredentials {
+        BasicCredentials {
+            username: "alice".into(),
+            password: "pw".into(),
+        }
+    }
+
+    fn range() -> DateRange {
+        DateRange::new(
+            "2026-05-20T00:00:00Z".parse().unwrap(),
+            "2026-05-21T00:00:00Z".parse().unwrap(),
+        )
+    }
+
+    /// A SyncFolderItems page wrapping the supplied `<m:Changes>` body,
+    /// terminating the drain (`IncludesLastItemInRange=true`).
+    fn sync_page(cookie: &str, changes: &str) -> String {
+        format!(
+            r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:SyncFolderItemsResponse><m:ResponseMessages>
+    <m:SyncFolderItemsResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:SyncState>{cookie}</m:SyncState>
+      <m:IncludesLastItemInRange>true</m:IncludesLastItemInRange>
+      <m:Changes>{changes}</m:Changes>
+    </m:SyncFolderItemsResponseMessage>
+  </m:ResponseMessages></m:SyncFolderItemsResponse></s:Body>
+</s:Envelope>"#
+        )
+    }
+
+    /// A minimal GetItem enrichment response carrying just the ItemIds —
+    /// enough to flip `detail_fetched` without changing the base fields.
+    fn getitem_body(items: &str) -> String {
+        format!(
+            r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items>{items}</m:Items>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse></s:Body>
+</s:Envelope>"#
+        )
+    }
+
+    fn single_create(id: &str, ck: &str, subject: &str, start: &str, end: &str) -> String {
+        format!(
+            r#"<t:Create><t:CalendarItem>
+                 <t:ItemId Id="{id}" ChangeKey="{ck}"/>
+                 <t:Subject>{subject}</t:Subject>
+                 <t:Start>{start}</t:Start>
+                 <t:End>{end}</t:End>
+                 <t:CalendarItemType>Single</t:CalendarItemType>
+               </t:CalendarItem></t:Create>"#
+        )
+    }
+
+    #[tokio::test]
+    async fn cold_call_is_full_resync_then_warm_call_is_incremental() {
+        let mut server = Server::new_async().await;
+
+        // ── Cold drain: two creates, then enrichment of both. ──
+        let cold_changes = format!(
+            "{}{}",
+            single_create(
+                "A",
+                "CKA1",
+                "Alpha",
+                "2026-05-20T08:00:00Z",
+                "2026-05-20T09:00:00Z"
+            ),
+            single_create(
+                "B",
+                "CKB1",
+                "Bravo",
+                "2026-05-20T10:00:00Z",
+                "2026-05-20T11:00:00Z"
+            ),
+        );
+        let _cold_sync = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body(sync_page("COOKIE-1", &cold_changes))
+            .expect(1)
+            .create_async()
+            .await;
+        let _cold_enrich = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body(getitem_body(
+                r#"<t:CalendarItem><t:ItemId Id="A" ChangeKey="CKA1"/></t:CalendarItem>
+                   <t:CalendarItem><t:ItemId Id="B" ChangeKey="CKB1"/></t:CalendarItem>"#,
+            ))
+            .expect(1)
+            .create_async()
+            .await;
+
+        // ── Warm drain: update A (new ChangeKey), delete B, enrich A. ──
+        let warm_changes = format!(
+            r#"<t:Update><t:CalendarItem>
+                 <t:ItemId Id="A" ChangeKey="CKA2"/>
+                 <t:Subject>Alpha v2</t:Subject>
+                 <t:Start>2026-05-20T08:30:00Z</t:Start>
+                 <t:End>2026-05-20T09:30:00Z</t:End>
+                 <t:CalendarItemType>Single</t:CalendarItemType>
+               </t:CalendarItem></t:Update>
+               <t:Delete><t:ItemId Id="B"/></t:Delete>"#
+        );
+        let _warm_sync = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body(sync_page("COOKIE-2", &warm_changes))
+            .expect(1)
+            .create_async()
+            .await;
+        let _warm_enrich = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body(getitem_body(
+                r#"<t:CalendarItem><t:ItemId Id="A" ChangeKey="CKA2"/></t:CalendarItem>"#,
+            ))
+            .expect(1)
+            .create_async()
+            .await;
+
+        let adapter = EwsAdapter::new(server.url(), creds());
+
+        // Cold call: no token → full resync with the complete in-range set.
+        let cold = adapter
+            .get_events_delta("FA|FCK", range(), None)
+            .await
+            .unwrap();
+        assert!(cold.full_resync, "first (token-less) call is a full resync");
+        assert_eq!(cold.changes.len(), 2);
+        assert!(cold.deletions.is_empty());
+        assert_eq!(cold.new_token.as_deref(), Some("COOKIE-1"));
+        let mut ids: Vec<&str> = cold.changes.iter().map(|e| e.id.as_str()).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, ["S:A|CKA1", "S:B|CKB1"]);
+
+        // Warm call: prior cookie → incremental. Only A changed; B is a
+        // deletion carrying the raw native ItemId.
+        let warm = adapter
+            .get_events_delta("FA|FCK", range(), Some("COOKIE-1"))
+            .await
+            .unwrap();
+        assert!(!warm.full_resync, "warm call with a token is incremental");
+        assert_eq!(warm.changes.len(), 1);
+        assert_eq!(warm.changes[0].id, "S:A|CKA2");
+        assert_eq!(warm.changes[0].title, "Alpha v2");
+        // Deletion is the bare EWS ItemId — matches the cached row's
+        // native_id host-side.
+        assert_eq!(warm.deletions, vec!["B".to_string()]);
+        assert_eq!(warm.new_token.as_deref(), Some("COOKIE-2"));
+    }
+}
+
+#[cfg(test)]
+mod tasks_contacts_delta_tests {
+    //! `get_tasks_delta` / `get_contacts_delta` — the CTag-style probe
+    //! that gates a full `FindItem` re-read. EWS posts everything to one
+    //! endpoint, so the request sequence is laid out as ordered `.expect(1)`
+    //! mocks (FIFO), like the existing event-drain test.
+    use super::*;
+    use mockito::Server;
+
+    fn creds() -> BasicCredentials {
+        BasicCredentials {
+            username: "alice".into(),
+            password: "pw".into(),
+        }
+    }
+
+    /// An IdOnly SyncFolderItems probe page that terminates the drain.
+    fn probe_page(cookie: &str, changes_inner: &str) -> String {
+        format!(
+            r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:SyncFolderItemsResponse><m:ResponseMessages>
+    <m:SyncFolderItemsResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:SyncState>{cookie}</m:SyncState>
+      <m:IncludesLastItemInRange>true</m:IncludesLastItemInRange>
+      <m:Changes>{changes_inner}</m:Changes>
+    </m:SyncFolderItemsResponseMessage>
+  </m:ResponseMessages></m:SyncFolderItemsResponse></s:Body>
+</s:Envelope>"#
+        )
+    }
+
+    const ONE_TASK_FIND: &str = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:FindItemResponse><m:ResponseMessages>
+    <m:FindItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:RootFolder TotalItemsInView="1"><t:Items>
+        <t:Task>
+          <t:ItemId Id="T1" ChangeKey="K1"/>
+          <t:Subject>Buy milk</t:Subject>
+          <t:Status>NotStarted</t:Status>
+        </t:Task>
+      </t:Items></m:RootFolder>
+    </m:FindItemResponseMessage>
+  </m:ResponseMessages></m:FindItemResponse></s:Body>
+</s:Envelope>"#;
+
+    #[tokio::test]
+    async fn tasks_delta_probe_gates_full_read() {
+        let mut server = Server::new_async().await;
+        // POST 1 — cold probe with a Create → changed.
+        let _probe1 = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body(probe_page(
+                "TC1",
+                r#"<t:Create><t:Task><t:ItemId Id="T1" ChangeKey="K1"/></t:Task></t:Create>"#,
+            ))
+            .expect(1)
+            .create_async()
+            .await;
+        // POST 2 — the gated full FindItem read.
+        let _find = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body(ONE_TASK_FIND)
+            .expect(1)
+            .create_async()
+            .await;
+        // POST 3 — warm probe, no changes → no-op.
+        let _probe2 = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body(probe_page("TC2", ""))
+            .expect(1)
+            .create_async()
+            .await;
+
+        let adapter = EwsAdapter::new(server.url(), creds());
+
+        // Cold (no token): probe sees a change → full read → full_resync.
+        let cold = adapter.get_tasks_delta("TF|TCK", None).await.unwrap();
+        assert!(cold.full_resync);
+        assert_eq!(cold.changes.len(), 1);
+        assert_eq!(cold.changes[0].title, "Buy milk");
+        assert_eq!(cold.new_token.as_deref(), Some("TC1"));
+
+        // Warm (prior cookie): probe sees nothing → empty no-op, fresh cookie.
+        let warm = adapter
+            .get_tasks_delta("TF|TCK", Some("TC1"))
+            .await
+            .unwrap();
+        assert!(!warm.full_resync);
+        assert!(warm.changes.is_empty());
+        assert_eq!(warm.new_token.as_deref(), Some("TC2"));
+    }
+
+    #[tokio::test]
+    async fn contacts_delta_gal_is_unsupported() {
+        // The GAL is a ResolveNames walk with no folder cookie — it must
+        // surface Unsupported so the host falls back to a full read.
+        let server = Server::new_async().await;
+        let adapter = EwsAdapter::new(server.url(), creds());
+        let err = adapter
+            .get_contacts_delta(crate::contacts::GAL_LIST_ID, None)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CoreError::Unsupported(_)));
     }
 }

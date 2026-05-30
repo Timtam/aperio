@@ -249,6 +249,113 @@ async fn list_other_contacts(state: &ApiState) -> GoogleResult<Vec<Contact>> {
     Ok(out)
 }
 
+/// readMask for Other-Contacts reads. The full sync and every incremental
+/// sync MUST use the SAME mask — the People API rejects a `syncToken`
+/// request whose mask differs from the one that minted it. `metadata` is
+/// required so the delta can detect `deleted` tombstones.
+const OTHER_CONTACTS_READ_MASK: &str = "names,emailAddresses,phoneNumbers,metadata";
+
+/// Outcome of one Other-Contacts delta round: created/updated rows, the
+/// resourceNames of removed rows, and the fresh syncToken.
+#[derive(Debug, Default)]
+pub struct OtherContactsDelta {
+    pub changes: Vec<Contact>,
+    pub deletions: Vec<String>,
+    pub new_token: Option<String>,
+}
+
+/// Full Other-Contacts sync that ALSO requests a `syncToken`
+/// (`requestSyncToken=true`) for the next incremental round. The token
+/// lands on the final page. A 403 (scope/feature off) degrades to an
+/// empty set with no token — the host then just keeps doing full reads.
+pub async fn other_contacts_full(state: &ApiState) -> GoogleResult<(Vec<Contact>, Option<String>)> {
+    let read_mask = urlencoding(OTHER_CONTACTS_READ_MASK);
+    let mut out = Vec::new();
+    let mut page_token: Option<String> = None;
+    let mut sync_token: Option<String> = None;
+    loop {
+        let mut url = format!(
+            "{PEOPLE_API_BASE}/otherContacts\
+             ?pageSize=1000&requestSyncToken=true&readMask={read_mask}",
+        );
+        if let Some(t) = &page_token {
+            url.push_str("&pageToken=");
+            url.push_str(&urlencoding(t));
+        }
+        let response: ListOtherContactsResponse = match get_absolute(state, &url).await {
+            Ok(r) => r,
+            Err(GoogleError::Http { status: 403, .. }) => {
+                tracing::debug!(
+                    target: "cal_adapter_google::contacts",
+                    "Other Contacts unavailable (scope not granted or feature off)",
+                );
+                return Ok((Vec::new(), None));
+            }
+            Err(e) => return Err(e),
+        };
+        if let Some(rows) = response.other_contacts {
+            for person in rows {
+                if person_deleted(&person) {
+                    continue;
+                }
+                out.push(person_to_contact(person, GOOGLE_OTHER_CONTACTS_LIST_ID));
+            }
+        }
+        if response.next_sync_token.is_some() {
+            sync_token = response.next_sync_token;
+        }
+        match response.next_page_token {
+            Some(t) if !t.is_empty() => page_token = Some(t),
+            _ => break,
+        }
+    }
+    Ok((out, sync_token))
+}
+
+/// Incremental Other-Contacts sync from a stored `syncToken`. Created /
+/// updated rows land in `changes`; tombstones (`metadata.deleted`) land
+/// in `deletions` by resourceName (already the cal-core id, so it equals
+/// the cached row's native_id). An expired token surfaces as
+/// `GoogleError::Http { status: 400, .. }` so the caller can re-sync.
+pub async fn other_contacts_delta(
+    state: &ApiState,
+    sync_token: &str,
+) -> GoogleResult<OtherContactsDelta> {
+    let read_mask = urlencoding(OTHER_CONTACTS_READ_MASK);
+    let mut delta = OtherContactsDelta::default();
+    let mut page_token: Option<String> = None;
+    loop {
+        let mut url = format!(
+            "{PEOPLE_API_BASE}/otherContacts?pageSize=1000&syncToken={st}&readMask={read_mask}",
+            st = urlencoding(sync_token),
+        );
+        if let Some(t) = &page_token {
+            url.push_str("&pageToken=");
+            url.push_str(&urlencoding(t));
+        }
+        let response: ListOtherContactsResponse = get_absolute(state, &url).await?;
+        if let Some(rows) = response.other_contacts {
+            for person in rows {
+                if person_deleted(&person) {
+                    delta.deletions.push(person.resource_name);
+                } else {
+                    delta
+                        .changes
+                        .push(person_to_contact(person, GOOGLE_OTHER_CONTACTS_LIST_ID));
+                }
+            }
+        }
+        if response.next_sync_token.is_some() {
+            delta.new_token = response.next_sync_token;
+        }
+        match response.next_page_token {
+            Some(t) if !t.is_empty() => page_token = Some(t),
+            _ => break,
+        }
+    }
+    Ok(delta)
+}
+
 /// Page `/v1/people:listDirectoryPeople` and return the company
 /// directory. Two sources combine into one logical list:
 ///   - `DOMAIN_CONTACT` — shared contacts the admin maintains
@@ -1073,6 +1180,10 @@ struct ListConnectionsResponse {
 struct ListOtherContactsResponse {
     other_contacts: Option<Vec<Person>>,
     next_page_token: Option<String>,
+    /// Present on the final page when `requestSyncToken=true` or a
+    /// `syncToken` was supplied — the cursor for the next delta round.
+    #[serde(default)]
+    next_sync_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1127,6 +1238,22 @@ struct Person {
     /// country. We round-trip the `type` string verbatim onto our
     /// `ContactAddress.label`.
     addresses: Option<Vec<PersonAddress>>,
+    /// Present on sync responses — `metadata.deleted = true` marks a row
+    /// the People API delta is telling us was removed.
+    #[serde(default)]
+    metadata: Option<PersonMetadata>,
+}
+
+#[derive(Debug, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+struct PersonMetadata {
+    #[serde(default)]
+    deleted: bool,
+}
+
+/// `true` when a delta row is a tombstone (`metadata.deleted`).
+fn person_deleted(person: &Person) -> bool {
+    person.metadata.as_ref().map(|m| m.deleted).unwrap_or(false)
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -1289,6 +1416,7 @@ mod tests {
                 postal_code: Some("10115".into()),
                 country: Some("Deutschland".into()),
             }]),
+            metadata: None,
         }
     }
 
@@ -1338,11 +1466,37 @@ mod tests {
             memberships: None,
             photos: None,
             addresses: None,
+            metadata: None,
         };
         assert_eq!(
             person_to_contact(p, GOOGLE_CONTACT_LIST_ID).display_name,
             "(unnamed)",
         );
+    }
+
+    #[test]
+    fn other_contacts_response_parses_sync_token_and_deleted_tombstone() {
+        let json = r#"{
+          "otherContacts": [
+            {"resourceName":"otherContacts/c1",
+             "names":[{"displayName":"Alice"}],
+             "emailAddresses":[{"value":"alice@example.com"}]},
+            {"resourceName":"otherContacts/c2","metadata":{"deleted":true}}
+          ],
+          "nextSyncToken": "TOK-2"
+        }"#;
+        let resp: ListOtherContactsResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.next_sync_token.as_deref(), Some("TOK-2"));
+        let rows = resp.other_contacts.unwrap();
+        assert_eq!(rows.len(), 2);
+        // c1 is live; c2 is a delete tombstone.
+        assert!(!person_deleted(&rows[0]));
+        assert!(person_deleted(&rows[1]));
+        // The live row maps to a contact whose id IS the resourceName
+        // (= the cache native_id a deletion matches against).
+        let c = person_to_contact(rows[0].clone(), GOOGLE_OTHER_CONTACTS_LIST_ID);
+        assert_eq!(c.id, "otherContacts/c1");
+        assert_eq!(c.display_name, "Alice");
     }
 
     #[test]

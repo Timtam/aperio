@@ -56,6 +56,10 @@ pub struct TasksVtable {
     pub create_task_list: Option<VtableMethodFn>,
     /// `delete_task_list(list_id)`.
     pub delete_task_list: Option<VtableMethodFn>,
+    /// `get_tasks_delta(list_id, since_token) -> ChangeSet<Task>`
+    /// (CACHE-4). `None` ⇒ the shim inherits the trait default
+    /// (`Unsupported`) and the host falls back to a full `get_tasks`.
+    pub get_tasks_delta: Option<VtableMethodFn>,
 }
 
 impl TasksVtable {
@@ -73,6 +77,7 @@ impl TasksVtable {
             list_sections: None,
             create_task_list: None,
             delete_task_list: None,
+            get_tasks_delta: None,
         }
     }
 
@@ -94,6 +99,7 @@ mod tests {
         assert!(v.authenticate.is_none());
         assert!(v.list_task_lists.is_none());
         assert!(v.get_tasks.is_none());
+        assert!(v.get_tasks_delta.is_none());
         assert!(!v.has_minimum_surface());
         assert_eq!(v.vtable_version, crate::ABI_VERSION);
     }

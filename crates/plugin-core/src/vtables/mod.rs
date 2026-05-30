@@ -171,4 +171,31 @@ mod tests {
         };
         assert!(v.has_any_surface());
     }
+
+    /// ABI sync tripwire (64-bit).
+    ///
+    /// Each `#[repr(C)]` vtable is `u32 vtable_version` + N
+    /// pointer-sized method slots, so its size pins the slot count:
+    /// `8 + N*8`. The C mirror `include/aperio_plugin_vtables.h` MUST
+    /// list the same slots in the same order. If one of these
+    /// assertions fails you added or removed an FFI slot — update the
+    /// header to match (and bump the expected size here). This keeps
+    /// the hand-maintained header from silently drifting from the Rust
+    /// source of truth.
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn vtable_sizes_match_c_header() {
+        use std::mem::size_of;
+        // 12 method slots each.
+        assert_eq!(size_of::<CalendarVtable>(), 8 + 12 * 8);
+        assert_eq!(size_of::<TasksVtable>(), 8 + 12 * 8);
+        // 14 method slots.
+        assert_eq!(size_of::<ContactsVtable>(), 8 + 14 * 8);
+        // 10 method slots.
+        assert_eq!(size_of::<SyncVtable>(), 8 + 10 * 8);
+        // 4 method slots.
+        assert_eq!(size_of::<VcVtable>(), 8 + 4 * 8);
+        // u32 + 3 sub-vtable pointers.
+        assert_eq!(size_of::<CalendarAdapterVtable>(), 8 + 3 * 8);
+    }
 }

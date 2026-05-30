@@ -36,13 +36,28 @@ use crate::error::{CaldavError, CaldavResult};
 /// carry multiple VEVENTs (RFC 5545 allows it); we emit one
 /// `cal_core::Event` per top-level VEVENT.
 pub fn parse_calendar_data(body: &str, calendar_id: &str) -> CaldavResult<Vec<Event>> {
+    parse_calendar_data_with_href(body, calendar_id, None)
+}
+
+/// Like [`parse_calendar_data`], but encodes the server's resource `href`
+/// into each event id as `{href}|{uid}` (the same shape `tasks`/`contacts`
+/// use). This gives the cache a `native_id` (= href) that an RFC 6578
+/// sync-collection deletion — reported by href — can match directly, so
+/// the events delta does per-resource removals instead of a full re-list.
+/// `href = None` falls back to the bare-UID id (back-compat for callers
+/// that don't have the href, e.g. unit tests).
+pub fn parse_calendar_data_with_href(
+    body: &str,
+    calendar_id: &str,
+    href: Option<&str>,
+) -> CaldavResult<Vec<Event>> {
     let parsed: ICalendar = body
         .parse()
         .map_err(|err: String| CaldavError::Protocol(format!("ical: {err}")))?;
     let mut out = Vec::new();
     for comp in parsed.components {
         if let icalendar::CalendarComponent::Event(ev) = comp {
-            match map_event(&ev, calendar_id) {
+            match map_event(&ev, calendar_id, href) {
                 Ok(event) => out.push(event),
                 Err(err) => {
                     tracing::warn!(?err, "skipping unmapped VEVENT");
@@ -53,7 +68,18 @@ pub fn parse_calendar_data(body: &str, calendar_id: &str) -> CaldavResult<Vec<Ev
     Ok(out)
 }
 
-fn map_event(ev: &icalendar::Event, calendar_id: &str) -> CaldavResult<Event> {
+/// Split an event id into `(Some(href), uid)` for the composite
+/// `{href}|{uid}` shape, or `(None, id)` for a bare UID (freshly created
+/// events before refetch, plus rows persisted by older Aperio versions).
+/// Mirrors `tasks::decode_id`.
+pub fn decode_event_id(event_id: &str) -> (Option<&str>, &str) {
+    match event_id.split_once('|') {
+        Some((href, uid)) if !href.is_empty() => (Some(href), uid),
+        _ => (None, event_id),
+    }
+}
+
+fn map_event(ev: &icalendar::Event, calendar_id: &str, href: Option<&str>) -> CaldavResult<Event> {
     let uid = ev
         .get_uid()
         .ok_or_else(|| CaldavError::Protocol("VEVENT without UID".to_string()))?;
@@ -82,8 +108,16 @@ fn map_event(ev: &icalendar::Event, calendar_id: &str) -> CaldavResult<Event> {
 
     let reminders = parse_valarms(ev);
 
+    // Encode the server href into the id (`{href}|{uid}`) when we have
+    // it, so removed hrefs from a sync-collection delta map onto the
+    // cache's native_id; without it, fall back to the bare UID.
+    let id = match href {
+        Some(h) if !h.is_empty() => format!("{h}|{uid}"),
+        _ => uid.to_string(),
+    };
+
     Ok(Event {
-        id: uid.to_string(),
+        id,
         calendar_id: calendar_id.to_string(),
         title: summary,
         description,

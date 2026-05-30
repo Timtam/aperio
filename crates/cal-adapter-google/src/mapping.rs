@@ -100,6 +100,11 @@ pub struct EventListResponse {
     pub items: Vec<EventEntry>,
     #[serde(default, rename = "nextPageToken")]
     pub next_page_token: Option<String>,
+    /// Present only on the LAST page of a list response — the opaque
+    /// cursor for the next incremental (`syncToken`) sync. Google omits
+    /// it on intermediate pages (those carry `nextPageToken` instead).
+    #[serde(default, rename = "nextSyncToken")]
+    pub next_sync_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

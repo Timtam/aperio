@@ -25,13 +25,13 @@ use crate::error::{EwsError, EwsResult};
 use crate::mapping::{
     decode_event_id, encode_event_id, event_to_update_field_xml, new_event_to_calendar_item_xml,
     parse_find_folder_response, parse_find_item_response, parse_first_item_id,
-    parse_sync_folder_items_response, split_calendar_id, to_calendar, to_event, DecodedEventId,
-    EventIdKind, ParsedItem, SyncChange,
+    parse_sync_folder_items_counts, parse_sync_folder_items_response, split_calendar_id,
+    to_calendar, to_event, DecodedEventId, EventIdKind, ParsedItem, SyncChange,
 };
 use crate::soap::{
     check_for_fault, create_calendar_item, delete_calendar_item, find_calendar_folders,
-    find_items_in_range, get_recurring_master, sync_folder_items, update_calendar_item,
-    update_folder_displayname,
+    find_items_in_range, get_recurring_master, sync_folder_items, sync_folder_items_idonly,
+    update_calendar_item, update_folder_displayname,
 };
 
 /// State carried by the adapter — endpoint + credentials + reqwest
@@ -186,8 +186,31 @@ const SYNC_BATCH_SIZE: u32 = 512;
 pub async fn sync_events_to_completion(
     client: &EwsClient,
     calendar_id: &str,
-    mut state: SyncedFolderState,
+    state: SyncedFolderState,
 ) -> EwsResult<SyncedFolderState> {
+    // Thin wrapper over `sync_events_delta`: the full-snapshot read path
+    // (`refresh_and_read_events`) only needs the merged state, not which
+    // ids moved. The delta read path calls `sync_events_delta` directly.
+    let (state, _changed, _deleted) = sync_events_delta(client, calendar_id, state).await?;
+    Ok(state)
+}
+
+/// Like [`sync_events_to_completion`], but additionally reports which
+/// item ids the drain touched: `changed` (Create/Update, still present
+/// once the drain settles) and `deleted` (Delete, confirmed gone). These
+/// drive the incremental cache merge in `EwsAdapter::get_events_delta` —
+/// `changed` ids translate into the `ChangeSet`'s events, `deleted` ids
+/// are the raw EWS ItemIds the host removes by native id.
+///
+/// Touched ids are reconciled across pages and against the final merged
+/// state: a Create/Update cancels a prior Delete of the same id (and
+/// vice-versa), so a server that recreates an id mid-drain reports it
+/// once, on the correct side.
+pub async fn sync_events_delta(
+    client: &EwsClient,
+    calendar_id: &str,
+    mut state: SyncedFolderState,
+) -> EwsResult<(SyncedFolderState, Vec<String>, Vec<String>)> {
     let (folder_id, change_key) = split_calendar_id(calendar_id);
     let cold_start = state.sync_state.is_none();
     let items_before = state.items.len();
@@ -204,6 +227,11 @@ pub async fn sync_events_to_completion(
                                                // Bound the loop in case a buggy server keeps reporting
                                                // includes_last=false. 64 pages × 512 items = 32 768 items per
                                                // refresh, well past any plausible calendar size.
+                                               // Ids touched this drain. A later Delete moves an id out of
+                                               // `changed` and into `deleted`; a later Create/Update moves it
+                                               // back. Final membership is reconciled against `state.items`.
+    let mut changed: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut deleted: std::collections::HashSet<String> = std::collections::HashSet::new();
     for _ in 0..64 {
         page += 1;
         let body = sync_folder_items(
@@ -243,6 +271,8 @@ pub async fn sync_events_to_completion(
                         item.deleted_occurrence_starts.len(),
                     );
                     c += 1;
+                    deleted.remove(&item.item_id);
+                    changed.insert(item.item_id.clone());
                     state.items.insert(item.item_id.clone(), item);
                 }
                 SyncChange::Update(item) => {
@@ -255,11 +285,15 @@ pub async fn sync_events_to_completion(
                         item.recurrence.is_some(),
                     );
                     u += 1;
+                    deleted.remove(&item.item_id);
+                    changed.insert(item.item_id.clone());
                     state.items.insert(item.item_id.clone(), item);
                 }
                 SyncChange::Delete(id) => {
                     eprintln!("[EWS] Delete item_id={}", id);
                     d += 1;
+                    changed.remove(&id);
+                    deleted.insert(id.clone());
                     state.items.remove(&id);
                 }
             }
@@ -298,11 +332,72 @@ pub async fn sync_events_to_completion(
             // populated state (and persists it with recurrence + body
             // already filled in, sparing the next boot the round-trip).
             enrich_item_details(client, &mut state).await?;
-            return Ok(state);
+            // Reconcile the touched-id sets against the merged truth:
+            // drop any changed id the state no longer holds, and any
+            // deleted id it somehow still does.
+            let changed_ids: Vec<String> = changed
+                .into_iter()
+                .filter(|id| state.items.contains_key(id))
+                .collect();
+            let deleted_ids: Vec<String> = deleted
+                .into_iter()
+                .filter(|id| !state.items.contains_key(id))
+                .collect();
+            return Ok((state, changed_ids, deleted_ids));
         }
     }
     Err(EwsError::Protocol(
         "SyncFolderItems didn't terminate after 64 pages".into(),
+    ))
+}
+
+/// Outcome of an IdOnly `SyncFolderItems` probe drain: whether the folder
+/// changed since the supplied cookie, and the fresh cookie to store.
+#[derive(Debug, Clone)]
+pub struct ProbeOutcome {
+    pub changed: bool,
+    pub sync_state: String,
+}
+
+/// Drain an IdOnly `SyncFolderItems` probe against `list_id` to
+/// completion, reporting whether ANY item changed since `sync_state` plus
+/// the freshest cookie. Cheap — IdOnly responses carry just ids, no item
+/// bodies — so the Tasks/Contacts delta path can gate a full re-read on
+/// it (the CalDAV CTag pattern, EWS-style).
+///
+/// `ErrorInvalidSyncStateData` (the cookie aged out) surfaces verbatim,
+/// same as [`sync_events_delta`]; the caller drops the cookie and
+/// re-probes from `None`.
+pub async fn probe_folder_sync(
+    client: &EwsClient,
+    list_id: &str,
+    sync_state: Option<&str>,
+) -> EwsResult<ProbeOutcome> {
+    let (folder_id, change_key) = split_calendar_id(list_id);
+    let mut cookie = sync_state.map(|s| s.to_string());
+    let mut changed = false;
+    for _ in 0..64 {
+        let body = sync_folder_items_idonly(
+            &folder_id,
+            change_key.as_deref(),
+            cookie.as_deref(),
+            SYNC_BATCH_SIZE,
+        );
+        let xml = client.post_soap(body).await?;
+        let probe = parse_sync_folder_items_counts(&xml)?;
+        if probe.change_count > 0 {
+            changed = true;
+        }
+        cookie = Some(probe.new_sync_state);
+        if probe.includes_last {
+            return Ok(ProbeOutcome {
+                changed,
+                sync_state: cookie.unwrap_or_default(),
+            });
+        }
+    }
+    Err(EwsError::Protocol(
+        "SyncFolderItems probe didn't terminate after 64 pages".into(),
     ))
 }
 
@@ -769,6 +864,68 @@ mod tests {
         assert!(updated.items.contains_key("B"));
         // Cookie advanced to the last page's cookie.
         assert_eq!(updated.sync_state.as_deref(), Some("COOKIE-2"));
+    }
+
+    #[tokio::test]
+    async fn probe_folder_sync_flags_changes_and_advances_cookie() {
+        // A Task Create on an IdOnly probe → changed=true, fresh cookie.
+        let mut server = Server::new_async().await;
+        let body = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:SyncFolderItemsResponse><m:ResponseMessages>
+    <m:SyncFolderItemsResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:SyncState>PC1</m:SyncState>
+      <m:IncludesLastItemInRange>true</m:IncludesLastItemInRange>
+      <m:Changes>
+        <t:Create><t:Task><t:ItemId Id="T1" ChangeKey="K1"/></t:Task></t:Create>
+      </m:Changes>
+    </m:SyncFolderItemsResponseMessage>
+  </m:ResponseMessages></m:SyncFolderItemsResponse></s:Body>
+</s:Envelope>"#;
+        let _m = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body(body)
+            .create_async()
+            .await;
+        let probe = probe_folder_sync(&client_for(&server), "TF|TCK", None)
+            .await
+            .unwrap();
+        assert!(probe.changed);
+        assert_eq!(probe.sync_state, "PC1");
+    }
+
+    #[tokio::test]
+    async fn probe_folder_sync_reports_no_change_on_empty_page() {
+        // Empty Changes on the probe → changed=false (host no-ops).
+        let mut server = Server::new_async().await;
+        let body = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:SyncFolderItemsResponse><m:ResponseMessages>
+    <m:SyncFolderItemsResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:SyncState>PC2</m:SyncState>
+      <m:IncludesLastItemInRange>true</m:IncludesLastItemInRange>
+      <m:Changes/>
+    </m:SyncFolderItemsResponseMessage>
+  </m:ResponseMessages></m:SyncFolderItemsResponse></s:Body>
+</s:Envelope>"#;
+        let _m = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body(body)
+            .create_async()
+            .await;
+        let probe = probe_folder_sync(&client_for(&server), "TF|TCK", Some("PC1"))
+            .await
+            .unwrap();
+        assert!(!probe.changed);
+        assert_eq!(probe.sync_state, "PC2");
     }
 
     #[tokio::test]

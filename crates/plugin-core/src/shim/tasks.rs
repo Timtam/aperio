@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use cal_core::adapter::{Adapter, AuthToken, Capability, Credentials, TasksFeature};
+use cal_core::adapter::{Adapter, AuthToken, Capability, ChangeSet, Credentials, TasksFeature};
 use cal_core::error::{Error, Result};
 use cal_core::types::{NewTask, Section, Task, TaskList};
 use serde::Serialize;
@@ -45,6 +45,7 @@ struct VtableSnapshot {
     list_sections: Option<crate::vtables::VtableMethodFn>,
     create_task_list: Option<crate::vtables::VtableMethodFn>,
     delete_task_list: Option<crate::vtables::VtableMethodFn>,
+    get_tasks_delta: Option<crate::vtables::VtableMethodFn>,
 }
 
 impl FfiTasksAdapter {
@@ -90,6 +91,7 @@ impl FfiTasksAdapter {
             rename_task_list: vtable_ref.rename_task_list,
             list_sections: vtable_ref.list_sections,
             create_task_list: vtable_ref.create_task_list,
+            get_tasks_delta: vtable_ref.get_tasks_delta,
             delete_task_list: vtable_ref.delete_task_list,
         };
         let capabilities = super::manifest_capabilities(&plugin.manifest.capabilities);
@@ -177,6 +179,12 @@ struct CreateTaskListArgs<'a> {
     parent_id: Option<&'a str>,
 }
 
+#[derive(Serialize)]
+struct GetTasksDeltaArgs<'a> {
+    list_id: &'a str,
+    since_token: Option<&'a str>,
+}
+
 #[async_trait]
 impl Adapter for FfiTasksAdapter {
     async fn authenticate(&self, credentials: Credentials) -> Result<AuthToken> {
@@ -244,5 +252,21 @@ impl TasksFeature for FfiTasksAdapter {
     async fn delete_task_list(&self, list_id: &str) -> Result<()> {
         let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         call_for_unit(self.vtable.delete_task_list, self.handle_addr, &list_id).await
+    }
+
+    async fn get_tasks_delta(
+        &self,
+        list_id: &str,
+        since_token: Option<&str>,
+    ) -> Result<ChangeSet<Task>> {
+        // A null slot dispatches to Unsupported via `call_method`,
+        // matching the trait default — the host then falls back to a
+        // full `get_tasks`.
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
+        let args = GetTasksDeltaArgs {
+            list_id,
+            since_token,
+        };
+        call_then_decode(self.vtable.get_tasks_delta, self.handle_addr, &args).await
     }
 }

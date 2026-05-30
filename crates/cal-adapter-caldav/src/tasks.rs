@@ -118,6 +118,101 @@ fn to_task_list(home_url: &Url, entry: ResponseEntry) -> TaskList {
     }
 }
 
+/// `MKCALENDAR` a new VTODO collection under the calendar-home set
+/// (RFC 4791 §5.3.1). The new collection lives at `home_url + {uuid}/`
+/// and is created with the VTODO component set so the server lists it
+/// as a task collection. CalDAV task lists are flat — `parent_id` is
+/// ignored. Returns the created list (its URL becomes the list id).
+pub async fn create_task_list(
+    client: &Client,
+    home_url: &Url,
+    name: &str,
+    credentials: &Credentials,
+) -> CaldavResult<TaskList> {
+    let segment = format!("{}/", Uuid::new_v4());
+    let collection_url = home_url
+        .join(&segment)
+        .map_err(|e| CaldavError::Config(format!("building collection url: {e}")))?;
+
+    let method = Method::from_bytes(b"MKCALENDAR").expect("MKCALENDAR");
+    let mut headers = auth_header(credentials)?;
+    headers.insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static("application/xml; charset=utf-8"),
+    );
+    let escaped = calendars::escape_xml(name);
+    let body = format!(
+        r#"<?xml version="1.0" encoding="utf-8"?>
+<C:mkcalendar xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+  <D:set>
+    <D:prop>
+      <D:displayname>{escaped}</D:displayname>
+      <C:supported-calendar-component-set>
+        <C:comp name="VTODO"/>
+      </C:supported-calendar-component-set>
+    </D:prop>
+  </D:set>
+</C:mkcalendar>"#
+    );
+
+    let response = client
+        .request(method, collection_url.clone())
+        .headers(headers)
+        .body(body)
+        .send()
+        .await?;
+    let status = response.status();
+    if !status.is_success() {
+        let text = response.text().await.unwrap_or_default();
+        return Err(CaldavError::Http {
+            status: status.as_u16(),
+            message: if text.is_empty() {
+                status.canonical_reason().unwrap_or("").to_string()
+            } else {
+                text.chars().take(200).collect()
+            },
+        });
+    }
+
+    Ok(TaskList {
+        id: collection_url.to_string(),
+        name: name.to_string(),
+        color: None,
+        default_sound: None,
+        embedded_in_calendar: None,
+        parent_id: None,
+        read_only: false,
+    })
+}
+
+/// `DELETE` a task collection at `list_url` (RFC 4918 §9.6). The
+/// server removes the collection and every VTODO inside it.
+pub async fn delete_task_list(
+    client: &Client,
+    list_url: &Url,
+    credentials: &Credentials,
+) -> CaldavResult<()> {
+    let headers = auth_header(credentials)?;
+    let response = client
+        .delete(list_url.clone())
+        .headers(headers)
+        .send()
+        .await?;
+    let status = response.status();
+    if !status.is_success() {
+        let text = response.text().await.unwrap_or_default();
+        return Err(CaldavError::Http {
+            status: status.as_u16(),
+            message: if text.is_empty() {
+                status.canonical_reason().unwrap_or("").to_string()
+            } else {
+                text.chars().take(200).collect()
+            },
+        });
+    }
+    Ok(())
+}
+
 /// REPORT calendar-query for VTODO and map each task into the
 /// `cal_core::Task` shape. ETag from the server is preserved on
 /// every task so the write paths can use If-Match.
@@ -181,6 +276,35 @@ pub async fn get_tasks(
         }
     }
     Ok(out)
+}
+
+/// Map multistatus entries carrying `calendar-data` (from `get_tasks`'s
+/// VTODO query or a sync-collection `calendar-multiget`) into tasks.
+/// Tolerant — a single unparseable resource is skipped, not fatal — so
+/// the delta read can't be sunk by one bad VTODO. The `{href}|{uid}` id
+/// shape matches `get_tasks` exactly so the cache stays consistent across
+/// the full and incremental read paths.
+pub fn parse_task_entries(entries: &[ResponseEntry], list_id: &str) -> Vec<Task> {
+    let mut out = Vec::new();
+    for entry in entries {
+        let Some(ical) = entry.calendar_data.as_deref() else {
+            continue;
+        };
+        let Ok(parsed) = ical.parse::<ICalendar>() else {
+            continue;
+        };
+        for comp in parsed.components {
+            if let icalendar::CalendarComponent::Todo(todo) = comp {
+                if let Some(mut task) = map_todo(&todo, list_id, Some(&entry.href)) {
+                    if let Some(etag) = &entry.etag {
+                        task.etag = Some(etag.clone());
+                    }
+                    out.push(task);
+                }
+            }
+        }
+    }
+    out
 }
 
 pub async fn create_task(
@@ -945,5 +1069,81 @@ END:VCALENDAR</c:calendar-data>
             tasks[0].id,
             "/calendars/alice/tasks/8B0F-EE.ics|todo-1@aperio",
         );
+    }
+
+    #[tokio::test]
+    async fn create_task_list_mkcalendars_a_vtodo_collection() {
+        let mut server = Server::new_async().await;
+        // The collection path is a fresh UUID, so match on method +
+        // any path under the home set and assert the body carries the
+        // VTODO component and the escaped display name.
+        let create_mock = server
+            .mock("MKCALENDAR", mockito::Matcher::Any)
+            .match_body(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::Regex("<C:comp name=\"VTODO\"/>".into()),
+                mockito::Matcher::Regex("<D:displayname>Errands &amp; Co</D:displayname>".into()),
+            ]))
+            .with_status(201)
+            .expect(1)
+            .create_async()
+            .await;
+        let home = Url::parse(&format!("{}/calendars/alice/", server.url())).unwrap();
+        let created = create_task_list(&client(), &home, "Errands & Co", &creds(&server.url()))
+            .await
+            .unwrap();
+        create_mock.assert_async().await;
+        assert!(created
+            .id
+            .starts_with(&format!("{}/calendars/alice/", server.url())));
+        assert_eq!(created.name, "Errands & Co");
+        assert!(created.parent_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn create_task_list_surfaces_http_failure() {
+        let mut server = Server::new_async().await;
+        let _m = server
+            .mock("MKCALENDAR", mockito::Matcher::Any)
+            .with_status(507)
+            .with_body("Insufficient Storage")
+            .create_async()
+            .await;
+        let home = Url::parse(&format!("{}/calendars/alice/", server.url())).unwrap();
+        let err = create_task_list(&client(), &home, "Whatever", &creds(&server.url()))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CaldavError::Http { status: 507, .. }));
+    }
+
+    #[tokio::test]
+    async fn delete_task_list_deletes_the_collection() {
+        let mut server = Server::new_async().await;
+        let delete_mock = server
+            .mock("DELETE", "/calendars/alice/work/")
+            .with_status(204)
+            .expect(1)
+            .create_async()
+            .await;
+        let url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        delete_task_list(&client(), &url, &creds(&server.url()))
+            .await
+            .unwrap();
+        delete_mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn delete_task_list_surfaces_http_failure() {
+        let mut server = Server::new_async().await;
+        let _m = server
+            .mock("DELETE", "/calendars/alice/work/")
+            .with_status(403)
+            .with_body("Forbidden")
+            .create_async()
+            .await;
+        let url = Url::parse(&format!("{}/calendars/alice/work/", server.url())).unwrap();
+        let err = delete_task_list(&client(), &url, &creds(&server.url()))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CaldavError::Http { status: 403, .. }));
     }
 }
