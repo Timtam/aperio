@@ -94,3 +94,23 @@ export function canReparentList(
   }
   return true;
 }
+
+/**
+ * The lists `listId` can be reparented under — every valid target for a
+ * "move under…" menu / drop. Excludes itself, its current parent (a
+ * no-op) and anything `canReparentList` rejects (cross-account, cycle,
+ * non-nesting adapter). Returns [] when the adapter doesn't nest.
+ */
+export function reparentCandidates(
+  listId: string,
+  allLists: TaskList[],
+): TaskList[] {
+  const self = allLists.find((l) => l.id === listId);
+  if (!self || !supportsNestedProjects(self)) return [];
+  return allLists.filter(
+    (l) =>
+      l.id !== listId &&
+      l.id !== self.parent_id &&
+      canReparentList(listId, l.id, allLists),
+  );
+}

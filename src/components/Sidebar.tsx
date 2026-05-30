@@ -21,6 +21,7 @@ import {
   isCommandError,
   renameContactList,
   renameContainer,
+  reparentTaskList,
   showContextMenu,
   type ContainerKind,
   type ContextMenuItemRequest,
@@ -32,15 +33,30 @@ import {
   accountTriState,
   buildSidebarTree,
   flattenLeaves,
+  LOCAL_ACCOUNT_ID,
   parentTriState,
   type AccountNode,
   type LeafNode,
   type SectionNode,
   type TriState,
 } from '../state/sidebarTree';
+import { canReparentList, reparentCandidates } from '../state/taskMoves';
 import { useSidebarExpansion } from '../state/useSidebarExpansion';
 import { useTaskListShowCompleted } from '../state/useTaskListShowCompleted';
 import { useViewState } from '../state/ViewState';
+
+/** Pointer drag-and-drop reparent state, threaded to the task-list
+ *  leaf rows. Keyboard users get the same outcome via the
+ *  "Move under …" context-menu submenu — this is the mouse path. */
+interface ReparentDrag {
+  draggingListId: string | null;
+  begin: (id: string) => void;
+  end: () => void;
+  /** Whether the dragged list may drop onto `targetId` as its parent. */
+  canDropOn: (targetId: string) => boolean;
+  /** Commit the drop. `null` target ⇒ promote to top level. */
+  drop: (targetId: string | null) => void;
+}
 
 /**
  * Sidebar-local extension of `ContainerKind` to include contact
@@ -330,6 +346,69 @@ export function Sidebar() {
     [refreshTaskLists, announce, t],
   );
 
+  // Reparent a local task list under another (or to the top level when
+  // `newParentId` is null). The context-menu submenu and drag-and-drop
+  // both funnel here; a final `canReparentList` guard catches a stale
+  // tree (a concurrent sync could move a candidate out from under us).
+  const reparentList = useCallback(
+    async (childId: string, newParentId: string | null) => {
+      if (
+        newParentId !== null &&
+        !canReparentList(childId, newParentId, taskLists)
+      ) {
+        return;
+      }
+      const child = taskLists.find((l) => l.id === childId);
+      const parent = newParentId
+        ? taskLists.find((l) => l.id === newParentId)
+        : null;
+      try {
+        await reparentTaskList(childId, newParentId);
+        await refreshTaskLists();
+        announce(
+          newParentId
+            ? t('sidebar.menu.reparentedAnnouncement', {
+                name: child?.name ?? childId,
+                parent: parent?.name ?? newParentId,
+              })
+            : t('sidebar.menu.reparentedTopAnnouncement', {
+                name: child?.name ?? childId,
+              }),
+        );
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('reparent_task_list failed', err);
+      }
+    },
+    [taskLists, refreshTaskLists, announce, t],
+  );
+
+  // Pointer drag-and-drop reparent. Only local task lists participate
+  // (the backend command is local-store only); `canDropOn` enforces
+  // the same capability / cycle / account rules the menu uses.
+  const [draggingListId, setDraggingListId] = useState<string | null>(null);
+  const reparentDrag = useMemo<ReparentDrag>(
+    () => ({
+      draggingListId,
+      begin: (id) => setDraggingListId(id),
+      end: () => setDraggingListId(null),
+      canDropOn: (targetId) => {
+        if (draggingListId === null || draggingListId === targetId) {
+          return false;
+        }
+        const dragged = taskLists.find((l) => l.id === draggingListId);
+        if (dragged?.account_id !== LOCAL_ACCOUNT_ID) return false;
+        return canReparentList(draggingListId, targetId, taskLists);
+      },
+      drop: (targetId) => {
+        const dragged = draggingListId;
+        setDraggingListId(null);
+        if (dragged) void reparentList(dragged, targetId);
+      },
+    }),
+    [draggingListId, taskLists, reparentList],
+  );
+
   const onCreateTaskList = useCallback(async () => {
     try {
       const list = await createTaskList({
@@ -446,6 +525,31 @@ export function Sidebar() {
           label: t('sidebar.menu.showCompletedInCalendar'),
           checked: showCompleted.shouldShow(leaf.containerId),
         });
+        // "Move under …" — reparent a local project. Local-only:
+        // external-provider projects are nested in their own UI.
+        // The submenu lists every valid target (reparentCandidates
+        // already drops self / current-parent / descendants / other
+        // accounts) plus a "top level" entry when the list is nested.
+        if (accountIsLocal) {
+          const currentList = taskLists.find((l) => l.id === leaf.containerId);
+          const subItems: ContextMenuItemRequest[] = [];
+          if (currentList?.parent_id) {
+            subItems.push({
+              id: 'reparent:__top__',
+              label: t('sidebar.menu.moveToTopLevel'),
+            });
+          }
+          for (const cand of reparentCandidates(leaf.containerId, taskLists)) {
+            subItems.push({ id: `reparent:${cand.id}`, label: cand.name });
+          }
+          if (subItems.length > 0) {
+            items.push({
+              id: 'reparent',
+              label: t('sidebar.menu.moveUnder'),
+              items: subItems,
+            });
+          }
+        }
       }
       // Delete is local-only: external sources have their own
       // life-cycle (CalDAV's MKCOL/DELETE, Graph's PATCH, …) which
@@ -509,6 +613,10 @@ export function Sidebar() {
         } else {
           void onDeleteContactListAction(leaf.containerId, leaf.name);
         }
+      } else if (selected?.startsWith('reparent:')) {
+        setRestoreFocusToTree(true);
+        const target = selected.slice('reparent:'.length);
+        void reparentList(leaf.containerId, target === '__top__' ? null : target);
       } else {
         // Menu dismissed (Escape, click-away) — no action; just hand
         // keyboard control back to the tree.
@@ -520,6 +628,8 @@ export function Sidebar() {
       onDeleteCalendar,
       onDeleteTaskListAction,
       onDeleteContactListAction,
+      taskLists,
+      reparentList,
       t,
       focusedCalendarId,
       enterFocus,
@@ -895,6 +1005,7 @@ export function Sidebar() {
               if (clIds.length) setManyContactLists(clIds, next);
             }}
             focusedContainerId={focusedCalendarId}
+            reparentDrag={reparentDrag}
           />
         ))}
       </div>
@@ -1051,6 +1162,7 @@ interface AccountSubtreeProps {
   onToggleSection: (section: SectionNode) => void;
   onToggleAccount: (account: AccountNode) => void;
   focusedContainerId: string | null;
+  reparentDrag: ReparentDrag;
 }
 
 function AccountSubtree({
@@ -1069,10 +1181,14 @@ function AccountSubtree({
   onToggleSection,
   onToggleAccount,
   focusedContainerId,
+  reparentDrag,
 }: AccountSubtreeProps) {
   const { t } = useTranslation();
   const isOpen = expansion.isExpanded(account.key);
   const state = accountTriState(account);
+  // Reparent is a local-store gesture — only local accounts' task
+  // lists are draggable / droppable.
+  const accountIsLocal = account.accountId === LOCAL_ACCOUNT_ID;
 
   return (
     <div role="group" className="sidebar__account-group">
@@ -1124,6 +1240,8 @@ function AccountSubtree({
             onToggleLeaf={onToggleLeaf}
             onToggleSection={onToggleSection}
             focusedContainerId={focusedContainerId}
+            reparentDrag={reparentDrag}
+            accountIsLocal={accountIsLocal}
           />
         ))}
     </div>
@@ -1145,6 +1263,8 @@ interface SectionSubtreeProps {
   onToggleLeaf: (leaf: LeafNode) => void;
   onToggleSection: (section: SectionNode) => void;
   focusedContainerId: string | null;
+  reparentDrag: ReparentDrag;
+  accountIsLocal: boolean;
 }
 
 function SectionSubtree({
@@ -1162,6 +1282,8 @@ function SectionSubtree({
   onToggleLeaf,
   onToggleSection,
   focusedContainerId,
+  reparentDrag,
+  accountIsLocal,
 }: SectionSubtreeProps) {
   const { t } = useTranslation();
   const isOpen = expansion.isExpanded(section.key);
@@ -1212,6 +1334,8 @@ function SectionSubtree({
             onEditKey={onEditKey}
             onToggleLeaf={onToggleLeaf}
             focusedContainerId={focusedContainerId}
+            reparentDrag={reparentDrag}
+            accountIsLocal={accountIsLocal}
           />
         ))}
     </div>
@@ -1238,6 +1362,8 @@ interface LeafRowProps {
    *  no focus is active). Used to mark the focused leaf visually so
    *  the user can see at a glance which row drives the main view. */
   focusedContainerId: string | null;
+  reparentDrag: ReparentDrag;
+  accountIsLocal: boolean;
 }
 
 function LeafRow({
@@ -1255,8 +1381,13 @@ function LeafRow({
   onEditKey,
   onToggleLeaf,
   focusedContainerId,
+  reparentDrag,
+  accountIsLocal,
 }: LeafRowProps) {
   const { t } = useTranslation();
+  const [dropActive, setDropActive] = useState(false);
+  // Only local task-list rows take part in reparent drag-and-drop.
+  const dndEnabled = accountIsLocal && leaf.kind === 'tasks';
   // LeafEditKind discriminates the three leaf types so the rename
   // commit path can branch on the appropriate write API. Contact
   // leaves don't participate in the override system; the
@@ -1287,6 +1418,38 @@ function LeafRow({
   const hasChildren = leaf.children.length > 0;
   const isOpen = expansion.isExpanded(leaf.key);
 
+  const dnd = dndEnabled
+    ? {
+        draggable: true,
+        onDragStart: (e: React.DragEvent) => {
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', leaf.containerId);
+          reparentDrag.begin(leaf.containerId);
+        },
+        onDragEnd: () => {
+          reparentDrag.end();
+          setDropActive(false);
+        },
+        onDragOver: (e: React.DragEvent) => {
+          if (!reparentDrag.canDropOn(leaf.containerId)) return;
+          // preventDefault marks this row a valid drop target.
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          if (!dropActive) setDropActive(true);
+        },
+        onDragLeave: () => {
+          if (dropActive) setDropActive(false);
+        },
+        onDrop: (e: React.DragEvent) => {
+          e.preventDefault();
+          setDropActive(false);
+          if (reparentDrag.canDropOn(leaf.containerId)) {
+            reparentDrag.drop(leaf.containerId);
+          }
+        },
+      }
+    : undefined;
+
   return (
     <>
       <TreeRow
@@ -1302,6 +1465,8 @@ function LeafRow({
             ? () => expansion.setExpanded(leaf.key, !isOpen)
             : undefined
         }
+        dnd={dnd}
+        dropActive={dropActive}
         className={
           'sidebar__row sidebar__row--leaf' +
           (isFocusTarget ? ' sidebar__row--focus-target' : '')
@@ -1354,6 +1519,8 @@ function LeafRow({
             onEditKey={onEditKey}
             onToggleLeaf={onToggleLeaf}
             focusedContainerId={focusedContainerId}
+            reparentDrag={reparentDrag}
+            accountIsLocal={accountIsLocal}
           />
         ))}
     </>
@@ -1374,6 +1541,19 @@ interface TreeRowProps {
   ariaLabel?: string;
   className?: string;
   style?: React.CSSProperties;
+  /** Reparent drag-and-drop handlers, spread onto the row. Present
+   *  only on draggable rows (local task lists). */
+  dnd?: Pick<
+    React.HTMLAttributes<HTMLDivElement>,
+    | 'draggable'
+    | 'onDragStart'
+    | 'onDragEnd'
+    | 'onDragOver'
+    | 'onDragLeave'
+    | 'onDrop'
+  >;
+  /** True while a valid drag hovers this row — draws the drop ring. */
+  dropActive?: boolean;
   children: React.ReactNode;
 }
 
@@ -1403,6 +1583,8 @@ function TreeRow({
   ariaLabel,
   className,
   style,
+  dnd,
+  dropActive,
   children,
 }: TreeRowProps) {
   return (
@@ -1414,8 +1596,11 @@ function TreeRow({
       aria-checked={ariaChecked}
       aria-label={ariaLabel}
       data-focused={focused || undefined}
-      className={className}
+      className={
+        (className ?? '') + (dropActive ? ' sidebar__row--drop-target' : '')
+      }
       style={style}
+      {...dnd}
       onClick={(e) => {
         // Buttons inside the row handle their own clicks (rename /
         // delete / chevron-area). The fall-through reaches a generic

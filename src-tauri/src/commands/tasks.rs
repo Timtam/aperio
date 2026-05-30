@@ -162,6 +162,60 @@ pub async fn delete_task_list(
     Ok(())
 }
 
+#[derive(Debug, Deserialize)]
+pub struct ReparentTaskListRequest {
+    pub id: String,
+    /// New parent list id, or `None` to promote to top level.
+    pub parent_id: Option<String>,
+}
+
+/// Reparent a local task list under another (or to the top level).
+/// Local-store only — external-provider projects are reparented in
+/// their own UI; the frontend gates the gesture to local lists. The
+/// backend independently enforces the no-self / no-cycle invariant so a
+/// buggy caller can't corrupt the tree, then emits a `task_list.updated`
+/// event so the move propagates cross-device.
+#[tauri::command]
+pub async fn reparent_task_list(
+    adapter: State<'_, LocalAdapter>,
+    event_log: State<'_, Arc<EventLogWriter>>,
+    request: ReparentTaskListRequest,
+) -> CommandResult<TaskList> {
+    if let Some(parent) = &request.parent_id {
+        if parent == &request.id {
+            return Err(CommandError {
+                code: "invalid",
+                message: "a task list cannot be its own parent".into(),
+            });
+        }
+        // Walk up the prospective parent's ancestor chain; reaching the
+        // moved list means the move would form a cycle.
+        let mut seen = std::collections::HashSet::new();
+        let mut cursor = Some(parent.clone());
+        while let Some(cur) = cursor {
+            if cur == request.id {
+                return Err(CommandError {
+                    code: "invalid",
+                    message: "reparenting would create a cycle".into(),
+                });
+            }
+            if !seen.insert(cur.clone()) {
+                break;
+            }
+            cursor = adapter.get_task_list_by_id(&cur)?.and_then(|l| l.parent_id);
+        }
+    }
+
+    let updated = adapter.reparent_task_list(&request.id, request.parent_id.as_deref())?;
+    if let Ok(fields) = serde_json::to_value(&updated) {
+        event_log.append(SyncEvent::TaskListUpdated(EventPayload {
+            id: updated.id.clone(),
+            fields,
+        }));
+    }
+    Ok(updated)
+}
+
 #[tauri::command]
 pub async fn get_tasks(
     adapter: State<'_, LocalAdapter>,

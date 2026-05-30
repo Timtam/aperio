@@ -5,6 +5,7 @@ import {
   canAssignSection,
   canMoveTaskBetweenLists,
   canReparentList,
+  reparentCandidates,
   supportsNestedProjects,
 } from './taskMoves';
 
@@ -92,5 +93,30 @@ describe('canReparentList', () => {
     expect(canReparentList('a', 'c', lists)).toBe(false);
     // The reverse (c under a) is fine — a is not a descendant of c.
     expect(canReparentList('c', 'a', lists)).toBe(true);
+  });
+});
+
+describe('reparentCandidates', () => {
+  const nest = (id: string, account = 'acc', parent: string | null = null) =>
+    list(id, account, parent, { nested_projects: true });
+
+  it('is empty for a flat (non-nesting) adapter', () => {
+    expect(reparentCandidates('a', [list('a', 'acc'), list('b', 'acc')])).toEqual(
+      [],
+    );
+  });
+
+  it('excludes self, the current parent, descendants and other accounts', () => {
+    // a → b → c, plus a sibling d, plus e on another account.
+    const lists = [
+      nest('a'),
+      nest('b', 'acc', 'a'),
+      nest('c', 'acc', 'b'),
+      nest('d'),
+      nest('e', 'other'),
+    ];
+    // Candidates for b: NOT itself, NOT its current parent (a), NOT its
+    // descendant (c → cycle), NOT cross-account (e). Only d remains.
+    expect(reparentCandidates('b', lists).map((l) => l.id)).toEqual(['d']);
   });
 });

@@ -1130,7 +1130,11 @@
       "focusExit": "Fokus verlassen",
       "showCompletedInCalendar": "Erledigte Aufgaben in Kalenderansicht anzeigen",
       "showCompletedAnnouncement": "Erledigte Aufgaben von „{{name}}\" werden jetzt im Kalender angezeigt.",
-      "hideCompletedAnnouncement": "Erledigte Aufgaben von „{{name}}\" werden jetzt im Kalender ausgeblendet."
+      "hideCompletedAnnouncement": "Erledigte Aufgaben von „{{name}}\" werden jetzt im Kalender ausgeblendet.",
+      "moveUnder": "Verschieben unter …",
+      "moveToTopLevel": "Oberste Ebene",
+      "reparentedAnnouncement": "„{{name}}\" wurde unter „{{parent}}\" verschoben.",
+      "reparentedTopAnnouncement": "„{{name}}\" wurde auf die oberste Ebene verschoben."
     },
     "focus": {
       "banner": "Fokus: {{name}}",

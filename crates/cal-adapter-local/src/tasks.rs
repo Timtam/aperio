@@ -99,6 +99,35 @@ impl LocalAdapter {
         Ok(list)
     }
 
+    /// Set (or clear) a task list's parent — the local-store backing for
+    /// the sidebar's project-reparent gesture. `parent_id = None`
+    /// promotes the list to top level. Focused `UPDATE` so it doesn't
+    /// disturb the list's other fields. Cycle/self guards live in the
+    /// host command; the FK only checks the parent exists.
+    pub fn reparent_task_list(
+        &self,
+        id: &str,
+        parent_id: Option<&str>,
+    ) -> cal_core::Result<TaskList> {
+        let now_s = fmt_utc(&Utc::now());
+        let changed = self
+            .db()
+            .lock()
+            .expect("db mutex poisoned")
+            .execute(
+                "UPDATE task_lists SET parent_id = ?, updated_at = ? WHERE id = ?",
+                params![parent_id, now_s, id],
+            )
+            .map_err(map_sql_err)?;
+        if changed == 0 {
+            return Err(cal_core::Error::NotFound(format!(
+                "task list '{id}' not found"
+            )));
+        }
+        self.get_task_list_by_id(id)?
+            .ok_or_else(|| cal_core::Error::NotFound(format!("task list '{id}' not found")))
+    }
+
     /// Read just the current status of a task by id. Used by
     /// `update_task` to detect the open→completed transition that
     /// triggers recurrence spawning.
@@ -1217,5 +1246,33 @@ mod tests {
         a.delete_task_list(&parent.id).unwrap();
         let orphan = a.get_task_list_by_id(&child.id).unwrap().unwrap();
         assert!(orphan.parent_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn reparent_task_list_sets_and_clears_parent() {
+        let a = LocalAdapter::new(open_test_db());
+        let parent = a.create_task_list("Parent", None, None, None).unwrap();
+        let child = a.create_task_list("Child", None, None, None).unwrap();
+
+        let moved = a.reparent_task_list(&child.id, Some(&parent.id)).unwrap();
+        assert_eq!(moved.parent_id.as_deref(), Some(parent.id.as_str()));
+        assert_eq!(
+            a.get_task_list_by_id(&child.id)
+                .unwrap()
+                .unwrap()
+                .parent_id
+                .as_deref(),
+            Some(parent.id.as_str()),
+        );
+
+        // Clearing the parent promotes the list back to top level.
+        let promoted = a.reparent_task_list(&child.id, None).unwrap();
+        assert!(promoted.parent_id.is_none());
+
+        // Unknown id surfaces NotFound.
+        assert!(matches!(
+            a.reparent_task_list("nope", None).unwrap_err(),
+            cal_core::Error::NotFound(_),
+        ));
     }
 }
