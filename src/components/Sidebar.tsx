@@ -40,7 +40,11 @@ import {
   type SectionNode,
   type TriState,
 } from '../state/sidebarTree';
-import { canReparentList, reparentCandidates } from '../state/taskMoves';
+import {
+  canReparentList,
+  createCapableAccounts,
+  reparentCandidates,
+} from '../state/taskMoves';
 import { useSidebarExpansion } from '../state/useSidebarExpansion';
 import { useTaskListShowCompleted } from '../state/useTaskListShowCompleted';
 import { useViewState } from '../state/ViewState';
@@ -409,19 +413,61 @@ export function Sidebar() {
     [draggingListId, taskLists, reparentList],
   );
 
+  // Accounts a new list can be created in: the local store (always) +
+  // every external account whose lists declare `create_lists`. Caps are
+  // uniform per account, so any one of its lists answers for it.
+  const capableAccounts = useMemo(
+    () =>
+      createCapableAccounts(
+        taskLists,
+        accounts,
+        LOCAL_ACCOUNT_ID,
+        t('sidebar.localAccount'),
+      ),
+    [taskLists, accounts, t],
+  );
+
+  const createTaskListIn = useCallback(
+    async (accountId: string) => {
+      try {
+        const list = await createTaskList({
+          name: t('sidebar.newTaskListName', { n: taskLists.length + 1 }),
+          account_id: accountId === LOCAL_ACCOUNT_ID ? null : accountId,
+          parent_id: null,
+          embedded_in_calendar: null,
+        });
+        await refreshTaskLists();
+        announce(t('sidebar.taskListCreated', { name: list.name }));
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('create_task_list failed', err);
+      }
+    },
+    [taskLists.length, refreshTaskLists, announce, t],
+  );
+
   const onCreateTaskList = useCallback(async () => {
+    // One capable account (just local) → create straight away. Several
+    // → a native picker (keyboard + mouse) for "which account?".
+    if (capableAccounts.length <= 1) {
+      void createTaskListIn(LOCAL_ACCOUNT_ID);
+      return;
+    }
+    const items: ContextMenuItemRequest[] = capableAccounts.map((a) => ({
+      id: `acct:${a.id}`,
+      label: a.name,
+    }));
+    let selected: string | null = null;
     try {
-      const list = await createTaskList({
-        name: t('sidebar.newTaskListName', { n: taskLists.length + 1 }),
-        embedded_in_calendar: null,
-      });
-      await refreshTaskLists();
-      announce(t('sidebar.taskListCreated', { name: list.name }));
+      selected = await showContextMenu(items);
     } catch (err) {
       // eslint-disable-next-line no-console
-      console.warn('create_task_list failed', err);
+      console.warn('show_context_menu failed', err);
     }
-  }, [taskLists.length, refreshTaskLists, announce, t]);
+    if (selected?.startsWith('acct:')) {
+      void createTaskListIn(selected.slice('acct:'.length));
+    }
+  }, [capableAccounts, createTaskListIn]);
 
   const onCreateContactList = useCallback(async () => {
     try {
@@ -551,12 +597,17 @@ export function Sidebar() {
           }
         }
       }
-      // Delete is local-only: external sources have their own
-      // life-cycle (CalDAV's MKCOL/DELETE, Graph's PATCH, …) which
-      // we haven't wired into a one-click sidebar affordance yet.
-      // For external sources the user can still rename — the more
-      // common case anyway.
-      if (accountIsLocal) {
+      // Delete: always for local containers; for external task lists
+      // only when the adapter declares `delete_lists` (Vikunja etc.).
+      // Other external sources (calendars, contacts) still have no
+      // one-click delete affordance — rename is the common case there.
+      const externalListDeletable =
+        leaf.kind === 'tasks' &&
+        !accountIsLocal &&
+        (taskLists.find((l) => l.id === leaf.containerId)?.task_capabilities
+          ?.delete_lists ??
+          false);
+      if (accountIsLocal || externalListDeletable) {
         items.push({ id: 'delete', label: t('sidebar.menu.delete') });
       }
 

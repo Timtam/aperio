@@ -22,6 +22,8 @@ const DEFAULT_CAPS: TaskCapabilities = {
   multiple_labels: false,
   task_recurrence: true,
   move_between_projects: true,
+  create_lists: false,
+  delete_lists: false,
 };
 
 export function capabilitiesOf(list: TaskList | undefined): TaskCapabilities {
@@ -113,4 +115,37 @@ export function reparentCandidates(
       l.id !== self.parent_id &&
       canReparentList(listId, l.id, allLists),
   );
+}
+
+/**
+ * Accounts a new task list can be created in: the local store (always,
+ * first) plus every external account whose lists declare `create_lists`.
+ * Task capabilities are uniform per account, so any one of its lists
+ * answers for the whole account. The local row's name comes from the
+ * accounts table when present, else the supplied fallback.
+ */
+export function createCapableAccounts(
+  taskLists: TaskList[],
+  accounts: { id: string; display_name: string }[],
+  localId: string,
+  localFallbackName: string,
+): { id: string; name: string }[] {
+  const capable = new Set<string>();
+  for (const list of taskLists) {
+    if (list.task_capabilities?.create_lists) capable.add(list.account_id);
+  }
+  const out: { id: string; name: string }[] = [
+    {
+      id: localId,
+      name:
+        accounts.find((a) => a.id === localId)?.display_name ??
+        localFallbackName,
+    },
+  ];
+  for (const acc of accounts) {
+    if (acc.id !== localId && capable.has(acc.id)) {
+      out.push({ id: acc.id, name: acc.display_name });
+    }
+  }
+  return out;
 }

@@ -1112,6 +1112,7 @@
     "newCalendarName": "Calendar {{n}}",
     "newTaskListName": "List {{n}}",
     "newContactListName": "Address book {{n}}",
+    "localAccount": "On this device",
     "calendarCreated": "Calendar \"{{name}}\" created.",
     "calendarDeleted": "Calendar \"{{name}}\" deleted.",
     "taskListCreated": "Task list \"{{name}}\" created.",

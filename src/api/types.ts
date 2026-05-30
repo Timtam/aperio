@@ -46,6 +46,11 @@ export interface TaskCapabilities {
   multiple_labels: boolean;
   task_recurrence: boolean;
   move_between_projects: boolean;
+  /** The adapter can create new task lists (projects) at the source.
+   *  The sidebar offers "new list in this account" only where true. */
+  create_lists: boolean;
+  /** The adapter can delete task lists at the source. */
+  delete_lists: boolean;
 }
 
 /** A sub-grouping of tasks within one list — a Vikunja bucket or a

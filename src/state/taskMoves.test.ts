@@ -5,6 +5,7 @@ import {
   canAssignSection,
   canMoveTaskBetweenLists,
   canReparentList,
+  createCapableAccounts,
   reparentCandidates,
   supportsNestedProjects,
 } from './taskMoves';
@@ -93,6 +94,31 @@ describe('canReparentList', () => {
     expect(canReparentList('a', 'c', lists)).toBe(false);
     // The reverse (c under a) is fine — a is not a descendant of c.
     expect(canReparentList('c', 'a', lists)).toBe(true);
+  });
+});
+
+describe('createCapableAccounts', () => {
+  const acct = (id: string, display_name: string) => ({ id, display_name });
+
+  it('always offers local first, then create-capable external accounts', () => {
+    const lists = [
+      list('v1', 'vik', null, { create_lists: true }),
+      list('t1', 'todo', null, { create_lists: false }),
+    ];
+    const accounts = [
+      acct('local', 'On this device'),
+      acct('vik', 'Vikunja'),
+      acct('todo', 'Todoist'),
+    ];
+    const result = createCapableAccounts(lists, accounts, 'local', 'Local');
+    // Local first; Vikunja included (create_lists), Todoist excluded.
+    expect(result.map((a) => a.id)).toEqual(['local', 'vik']);
+    expect(result[0].name).toBe('On this device');
+  });
+
+  it('falls back to the supplied local name when absent from accounts', () => {
+    const result = createCapableAccounts([], [], 'local', 'Local');
+    expect(result).toEqual([{ id: 'local', name: 'Local' }]);
   });
 });
 

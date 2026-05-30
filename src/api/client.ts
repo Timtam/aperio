@@ -144,6 +144,11 @@ export const listTaskLists = () => invoke<TaskList[]>('list_task_lists');
 
 export interface CreateTaskListRequest {
   name: string;
+  /** Account to create the list in. `null`/`"local"` ⇒ local store;
+   *  otherwise routed to that account's adapter (needs create_lists). */
+  account_id?: string | null;
+  /** Parent list id for nesting (Vikunja/Todoist); `null` ⇒ top level. */
+  parent_id?: string | null;
   embedded_in_calendar: string | null;
 }
 
