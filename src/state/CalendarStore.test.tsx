@@ -8,7 +8,12 @@ vi.mock('@tauri-apps/api/core', () => ({
 }));
 
 import { invoke } from '@tauri-apps/api/core';
-import { CalendarStoreProvider, useCalendarStore } from './CalendarStore';
+import {
+  buildTaskListForest,
+  CalendarStoreProvider,
+  useCalendarStore,
+} from './CalendarStore';
+import type { TaskList } from '../api/types';
 
 const invokeMock = invoke as unknown as ReturnType<typeof vi.fn>;
 
@@ -235,5 +240,56 @@ describe('CalendarStoreProvider', () => {
     await waitFor(() =>
       expect(screen.getByTestId('cal-selected').textContent).toBe('a'),
     );
+  });
+});
+
+describe('buildTaskListForest', () => {
+  const mk = (id: string, parent_id: string | null): TaskList => ({
+    id,
+    name: id,
+    color: null,
+    default_sound: null,
+    embedded_in_calendar: null,
+    read_only: false,
+    account_id: 'acc',
+    parent_id,
+  });
+
+  it('flat lists produce a depth-0 forest', () => {
+    const forest = buildTaskListForest([mk('a', null), mk('b', null)]);
+    expect(forest.map((n) => n.list.id)).toEqual(['a', 'b']);
+    expect(forest.every((n) => n.depth === 0 && n.children.length === 0)).toBe(
+      true,
+    );
+  });
+
+  it('nests children under their parent with increasing depth', () => {
+    const forest = buildTaskListForest([
+      mk('root', null),
+      mk('child', 'root'),
+      mk('grandchild', 'child'),
+    ]);
+    expect(forest).toHaveLength(1);
+    expect(forest[0].list.id).toBe('root');
+    expect(forest[0].children[0].list.id).toBe('child');
+    expect(forest[0].children[0].depth).toBe(1);
+    expect(forest[0].children[0].children[0].list.id).toBe('grandchild');
+    expect(forest[0].children[0].children[0].depth).toBe(2);
+  });
+
+  it('promotes a list whose parent is absent to a root', () => {
+    const forest = buildTaskListForest([mk('orphan', 'missing')]);
+    expect(forest.map((n) => n.list.id)).toEqual(['orphan']);
+    expect(forest[0].depth).toBe(0);
+  });
+
+  it('does not drop lists trapped in a parent cycle', () => {
+    const forest = buildTaskListForest([mk('a', 'b'), mk('b', 'a')]);
+    const ids = forest.flatMap((n) => [
+      n.list.id,
+      ...n.children.map((c) => c.list.id),
+    ]);
+    expect(ids).toContain('a');
+    expect(ids).toContain('b');
   });
 });

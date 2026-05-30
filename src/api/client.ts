@@ -22,6 +22,7 @@ import type {
   PluginInfo,
   RemotePluginAnnouncement,
   SearchResults,
+  Section,
   Task,
   TaskList,
 } from './types';
@@ -155,6 +156,28 @@ export const deleteTaskList = (id: string) =>
 export const getTasks = (list_id: string) =>
   invoke<Task[]>('get_tasks', { listId: list_id });
 
+/** List the sections (Vikunja buckets / Todoist sections) of a list.
+ *  Section-less backends return an empty array. */
+export const getSections = (list_id: string) =>
+  invoke<Section[]>('get_sections', { listId: list_id });
+
+export interface CreateSectionRequest {
+  list_id: string;
+  name: string;
+  position: number;
+}
+
+/** Create a section in a local list. Sections on external providers are
+ *  read-only here, so this targets the local store only. */
+export const createSection = (request: CreateSectionRequest) =>
+  invoke<Section>('create_section', { request });
+
+export const updateSection = (section: Section) =>
+  invoke<Section>('update_section', { section });
+
+export const deleteSection = (id: string) =>
+  invoke<void>('delete_section', { id });
+
 export interface CreateTaskRequest {
   list_id: string;
   title: string;
@@ -167,6 +190,7 @@ export interface CreateTaskRequest {
   deadline_time: string | null;
   recurrence: unknown;
   parent_id: string | null;
+  section_id: string | null;
   color_label: string | null;
   reminders: Task['reminders'];
   sound: Task['sound'];

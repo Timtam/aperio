@@ -366,6 +366,8 @@ async function moveOrCopyTask(
     deadline_time: task.deadline_time,
     recurrence: task.recurrence,
     parent_id: null,
+    // Copy lands in another list whose sections differ — start ungrouped.
+    section_id: null,
     color_label: task.color_label,
     reminders: task.reminders,
     sound: task.sound,
@@ -383,6 +385,7 @@ async function moveOrCopyTask(
       deadline_time: child.deadline_time,
       recurrence: child.recurrence,
       parent_id: newParent.id,
+      section_id: null,
       color_label: child.color_label,
       reminders: child.reminders,
       sound: child.sound,
@@ -424,6 +427,8 @@ export async function duplicateTask(task: Task): Promise<void> {
     deadline_time: task.deadline_time,
     recurrence: task.recurrence,
     parent_id: null,
+    // Duplicate stays in the same list, so keep its section grouping.
+    section_id: task.section_id,
     color_label: task.color_label,
     reminders: task.reminders,
     sound: task.sound,

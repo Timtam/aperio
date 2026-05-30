@@ -185,6 +185,8 @@ export function TaskDialog({
         deadline_time: null,
         recurrence: null,
         parent_id: task.id,
+        // Keep the subtask in its parent's section so it groups with it.
+        section_id: task.section_id,
         color_label: null,
         reminders: [],
         sound: null,
@@ -490,6 +492,8 @@ export function TaskDialog({
             deadline_time,
             recurrence: recurrenceToBackend(form.recurrence),
             parent_id: null,
+            // Section assignment UI lands in TASKS-10; create ungrouped.
+            section_id: null,
             color_label: form.colorLabel,
             reminders: form.reminders,
             sound: null,

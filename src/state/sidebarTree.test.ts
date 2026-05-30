@@ -43,6 +43,7 @@ const makeTaskList = (
   embedded_in_calendar: null,
   read_only: false,
   account_id: accountId,
+  parent_id: null,
 });
 
 describe('buildSidebarTree', () => {

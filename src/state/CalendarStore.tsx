@@ -9,6 +9,7 @@ import {
 } from 'react';
 
 import {
+  getSections,
   listAccounts,
   listCalendars,
   listColorLabels,
@@ -20,6 +21,7 @@ import type {
   Calendar,
   ColorLabel,
   ContactList,
+  Section,
   TaskList,
 } from '../api/types';
 
@@ -76,6 +78,15 @@ interface CalendarStoreState {
   toggleTaskList: (id: string) => void;
   refreshTaskLists: () => Promise<void>;
 
+  /** Cached sections per list id (Vikunja buckets / Todoist sections /
+   *  local sections). Populated lazily by `loadSections` — the task
+   *  panel calls it for the list it's showing. Section-less lists cache
+   *  an empty array, so a present-but-empty entry means "fetched, none".*/
+  sectionsByList: Record<string, Section[]>;
+  /** Fetch (and cache) the sections of one list. Returns them so a
+   *  caller can use the result without waiting for the state update. */
+  loadSections: (listId: string) => Promise<Section[]>;
+
   /** Address books (DESIGN.md §10). Each list has its own
    *  selection toggle so users can exclude e.g. the big read-only
    *  Global Address List from the contacts panel listing without
@@ -123,6 +134,9 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
   const [contactLists, setContactLists] = useState<ContactList[]>([]);
   const [colorLabels, setColorLabels] = useState<ColorLabel[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [sectionsByList, setSectionsByList] = useState<
+    Record<string, Section[]>
+  >({});
   const [calendarSel, setCalendarSel] = useState<SelectionSlice>(() => {
     const persisted = readPersisted();
     return {
@@ -189,6 +203,12 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
   const refreshAccounts = useCallback(async () => {
     const list = await listAccounts();
     setAccounts(list);
+  }, []);
+
+  const loadSections = useCallback(async (listId: string) => {
+    const secs = await getSections(listId);
+    setSectionsByList((prev) => ({ ...prev, [listId]: secs }));
+    return secs;
   }, []);
 
   // Initial load: pull both lists in parallel, then drop the loading
@@ -270,6 +290,8 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
       selectedTaskListIds: taskListSel.selected,
       toggleTaskList,
       refreshTaskLists,
+      sectionsByList,
+      loadSections,
       contactLists,
       selectedContactListIds: contactListSel.selected,
       toggleContactList,
@@ -289,6 +311,8 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
       taskListSel.selected,
       toggleTaskList,
       refreshTaskLists,
+      sectionsByList,
+      loadSections,
       contactLists,
       contactListSel.selected,
       toggleContactList,
@@ -407,4 +431,53 @@ function toggleSet(prev: Set<string>, id: string): Set<string> {
     next.add(id);
   }
   return next;
+}
+
+/** One node of the task-list project tree. */
+export interface TaskListNode {
+  list: TaskList;
+  children: TaskListNode[];
+  /** 0 for roots, +1 per level — the sidebar uses it for indentation. */
+  depth: number;
+}
+
+/**
+ * Build a parent→children forest from a flat task-list array using
+ * `parent_id`. A list whose `parent_id` isn't present in `lists`
+ * (different account, or a parent the user can't see) is promoted to a
+ * root so nothing is dropped. Children preserve input order; flat
+ * backends — where every `parent_id` is `null` — produce a depth-0
+ * forest, exactly the pre-nesting shape.
+ *
+ * Callers pass an account-scoped subset (parent_id only ever refers to
+ * a same-account list), so the forest never crosses account boundaries.
+ */
+export function buildTaskListForest(lists: TaskList[]): TaskListNode[] {
+  const byId = new Map(lists.map((l) => [l.id, l]));
+  const childrenOf = new Map<string, TaskList[]>();
+  const roots: TaskList[] = [];
+  for (const list of lists) {
+    const parent = list.parent_id;
+    if (parent && parent !== list.id && byId.has(parent)) {
+      const arr = childrenOf.get(parent);
+      if (arr) arr.push(list);
+      else childrenOf.set(parent, [list]);
+    } else {
+      roots.push(list);
+    }
+  }
+  const seen = new Set<string>();
+  const build = (list: TaskList, depth: number): TaskListNode => {
+    seen.add(list.id);
+    const kids = (childrenOf.get(list.id) ?? []).filter((c) => !seen.has(c.id));
+    return { list, depth, children: kids.map((c) => build(c, depth + 1)) };
+  };
+  const forest = roots.map((r) => build(r, 0));
+  // Safety net: a list trapped in a parent cycle (corrupt data) is
+  // never reached from a root — surface it as a depth-0 node rather
+  // than dropping it silently.
+  for (const list of lists) {
+    if (!seen.has(list.id)) forest.push(build(list, 0));
+  }
+  return forest;
 }

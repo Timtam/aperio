@@ -20,6 +20,7 @@ const baseTask: Task = {
   deadline_time: null,
   recurrence: null,
   parent_id: null,
+  section_id: null,
   color_label: null,
   reminders: [],
   sound: null,

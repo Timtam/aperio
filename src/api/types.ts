@@ -29,6 +29,35 @@ export interface RecurrenceCapabilities {
 
 export type RecurrenceFreq = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
+/** Which task-organisation features the owning adapter supports.
+ *  Mirrors `plugin_core::TaskCapabilities`; stamped onto every
+ *  `TaskList` by the backend (resolved from the account's plugin
+ *  manifest, or the local store's hard-coded set). The task UI gates
+ *  affordances on these — e.g. only offering "add section" where
+ *  `sections` is true, or cross-project drag where
+ *  `move_between_projects` is true. Absent → treat as the cal-core-
+ *  native default (flat lists, single-level subtasks, cross-list move).*/
+export interface TaskCapabilities {
+  nested_projects: boolean;
+  subtasks: boolean;
+  /** `null` ⇒ unlimited nesting depth. */
+  max_subtask_depth: number | null;
+  sections: boolean;
+  multiple_labels: boolean;
+  task_recurrence: boolean;
+  move_between_projects: boolean;
+}
+
+/** A sub-grouping of tasks within one list — a Vikunja bucket or a
+ *  Todoist section. Mirrors `cal_core::Section`. */
+export interface Section {
+  id: string;
+  list_id: string;
+  name: string;
+  /** Display order within the list; lower sorts first. */
+  order: number;
+}
+
 export interface Calendar {
   id: string;
   name: string;
@@ -113,6 +142,16 @@ export interface TaskList {
   /** Account that owns this task list. Same semantics as
    *  `Calendar.account_id` — populated by the backend's route map. */
   account_id: string;
+  /** Parent project id for backends with nested projects (Vikunja,
+   *  Todoist). `null` for top-level lists and flat backends. Refers to
+   *  another `TaskList.id` owned by the same account. The sidebar
+   *  builds its project tree from this. */
+  parent_id: string | null;
+  /** Task-organisation capabilities of the owning adapter. Backend-
+   *  stamped alongside `account_id`; optional in the wire shape so a
+   *  consumer reading a list from a pre-capabilities snapshot still
+   *  parses. Absent → cal-core-native default. */
+  task_capabilities?: TaskCapabilities;
 }
 
 export type TaskStatus = 'open' | 'in_progress' | 'completed' | 'cancelled';
@@ -150,6 +189,10 @@ export interface Task {
   deadline_time: string | null;
   recurrence: unknown;
   parent_id: string | null;
+  /** Section (Vikunja bucket / Todoist section) this task is filed
+   *  under within its list. `null` ⇒ ungrouped, or a backend with no
+   *  sections. Refers to a `Section.id` whose `list_id == this.list_id`. */
+  section_id: string | null;
   color_label: string | null;
   reminders: Reminder[];
   sound: SoundConfig | null;
