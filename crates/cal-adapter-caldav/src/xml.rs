@@ -133,6 +133,11 @@ pub struct ResponseEntry {
     pub href: String,
     pub displayname: Option<String>,
     pub etag: Option<String>,
+    /// `<CS:getctag>` (Calendar Server extension,
+    /// `http://calendarserver.org/ns/`) — a collection-level change
+    /// tag that bumps whenever ANY resource in the collection changes.
+    /// Read by the CACHE-7 delta gate via a cheap PROPFIND depth 0.
+    pub getctag: Option<String>,
     /// `true` when the `<resourcetype>` block contains a
     /// `<C:calendar/>` element from the CalDAV namespace.
     pub is_calendar: bool,
@@ -225,6 +230,8 @@ pub fn parse_multistatus(body: &str) -> CaldavResult<Vec<ResponseEntry>> {
                     text_target = TextTarget::Displayname;
                 } else if local_name_eq(name, b"getetag") {
                     text_target = TextTarget::Etag;
+                } else if local_name_eq(name, b"getctag") {
+                    text_target = TextTarget::Ctag;
                 } else if local_name_eq(name, b"calendar-color") {
                     text_target = TextTarget::Color;
                 } else if local_name_eq(name, b"calendar-data") {
@@ -288,6 +295,7 @@ enum TextTarget {
     Href,
     Displayname,
     Etag,
+    Ctag,
     Color,
     CalendarData,
     AddressData,
@@ -317,6 +325,12 @@ fn capture_text(current: &mut Option<ResponseEntry>, target: TextTarget, text: &
             let trimmed = text.trim();
             if !trimmed.is_empty() {
                 entry.etag = Some(trimmed.to_string());
+            }
+        }
+        TextTarget::Ctag => {
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                entry.getctag = Some(trimmed.to_string());
             }
         }
         TextTarget::Color => {

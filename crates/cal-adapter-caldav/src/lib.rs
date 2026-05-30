@@ -21,6 +21,7 @@ mod auth;
 pub mod calendars;
 pub mod config;
 pub mod contacts;
+pub mod ctag;
 pub mod discovery;
 pub mod error;
 pub mod events;
@@ -34,7 +35,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use cal_core::{
-    Adapter, AuthToken, Calendar, CalendarFeature, Capability, Contact, ContactList,
+    Adapter, AuthToken, Calendar, CalendarFeature, Capability, ChangeSet, Contact, ContactList,
     ContactsFeature, ContainerColor, Credentials as CoreCredentials, DateRange, Error as CoreError,
     Event, FreeBusy, NewContact, NewEvent, NewTask, Result as CoreResult, Task, TaskList,
     TasksFeature,
@@ -323,6 +324,42 @@ impl CalendarFeature for CaldavAdapter {
             .map_err(to_core_error)
     }
 
+    async fn get_events_delta(
+        &self,
+        calendar_id: &str,
+        range: DateRange,
+        since_token: Option<&str>,
+    ) -> CoreResult<ChangeSet<Event>> {
+        let cal_url =
+            Url::parse(calendar_id).map_err(|err| CoreError::InvalidInput(err.to_string()))?;
+        // Cheap gate: a PROPFIND-depth-0 CTag read. Unchanged ⇒ nothing
+        // to do.
+        let ctag = ctag::read_ctag(&self.http, &cal_url, &self.credentials)
+            .await
+            .map_err(to_core_error)?;
+        if let (Some(current), Some(prev)) = (ctag.as_deref(), since_token) {
+            if current == prev {
+                return Ok(ChangeSet {
+                    changes: Vec::new(),
+                    deletions: Vec::new(),
+                    new_token: ctag,
+                    full_resync: false,
+                });
+            }
+        }
+        // Changed (or no CTag advertised): full re-list, hand back the
+        // new CTag so the next round can gate again.
+        let events = events::get_events(&self.http, &cal_url, range, &self.credentials)
+            .await
+            .map_err(to_core_error)?;
+        Ok(ChangeSet {
+            changes: events,
+            deletions: Vec::new(),
+            new_token: ctag,
+            full_resync: true,
+        })
+    }
+
     async fn create_event(&self, calendar_id: &str, event: NewEvent) -> CoreResult<Event> {
         let cal_url =
             Url::parse(calendar_id).map_err(|err| CoreError::InvalidInput(err.to_string()))?;
@@ -499,6 +536,37 @@ impl TasksFeature for CaldavAdapter {
             .map_err(to_core_error)
     }
 
+    async fn get_tasks_delta(
+        &self,
+        list_id: &str,
+        since_token: Option<&str>,
+    ) -> CoreResult<ChangeSet<Task>> {
+        let list_url =
+            Url::parse(list_id).map_err(|err| CoreError::InvalidInput(err.to_string()))?;
+        let ctag = ctag::read_ctag(&self.http, &list_url, &self.credentials)
+            .await
+            .map_err(to_core_error)?;
+        if let (Some(current), Some(prev)) = (ctag.as_deref(), since_token) {
+            if current == prev {
+                return Ok(ChangeSet {
+                    changes: Vec::new(),
+                    deletions: Vec::new(),
+                    new_token: ctag,
+                    full_resync: false,
+                });
+            }
+        }
+        let tasks = tasks::get_tasks(&self.http, &list_url, &self.credentials)
+            .await
+            .map_err(to_core_error)?;
+        Ok(ChangeSet {
+            changes: tasks,
+            deletions: Vec::new(),
+            new_token: ctag,
+            full_resync: true,
+        })
+    }
+
     async fn create_task(&self, list_id: &str, task: NewTask) -> CoreResult<Task> {
         let list_url =
             Url::parse(list_id).map_err(|err| CoreError::InvalidInput(err.to_string()))?;
@@ -615,6 +683,37 @@ impl ContactsFeature for CaldavAdapter {
         contacts::get_contacts(&self.http, &list_url, &self.credentials)
             .await
             .map_err(to_core_error)
+    }
+
+    async fn get_contacts_delta(
+        &self,
+        list_id: &str,
+        since_token: Option<&str>,
+    ) -> CoreResult<ChangeSet<Contact>> {
+        let list_url =
+            Url::parse(list_id).map_err(|err| CoreError::InvalidInput(err.to_string()))?;
+        let ctag = ctag::read_ctag(&self.http, &list_url, &self.credentials)
+            .await
+            .map_err(to_core_error)?;
+        if let (Some(current), Some(prev)) = (ctag.as_deref(), since_token) {
+            if current == prev {
+                return Ok(ChangeSet {
+                    changes: Vec::new(),
+                    deletions: Vec::new(),
+                    new_token: ctag,
+                    full_resync: false,
+                });
+            }
+        }
+        let contacts = contacts::get_contacts(&self.http, &list_url, &self.credentials)
+            .await
+            .map_err(to_core_error)?;
+        Ok(ChangeSet {
+            changes: contacts,
+            deletions: Vec::new(),
+            new_token: ctag,
+            full_resync: true,
+        })
     }
 
     async fn search_contacts(&self, query: &str) -> CoreResult<Vec<Contact>> {
@@ -971,5 +1070,84 @@ mod tests {
         adapter.list_calendars().await.unwrap();
         adapter.list_calendars().await.unwrap();
         m.assert_async().await;
+    }
+
+    const CTAG_RESPONSE: &str = r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:cs="http://calendarserver.org/ns/">
+  <d:response>
+    <d:href>/calendars/alice/work/</d:href>
+    <d:propstat><d:prop><cs:getctag>v1</cs:getctag></d:prop>
+    <d:status>HTTP/1.1 200 OK</d:status></d:propstat>
+  </d:response>
+</d:multistatus>"#;
+
+    const DELTA_REPORT_RESPONSE: &str = r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+  <d:response>
+    <d:href>/calendars/alice/work/e1.ics</d:href>
+    <d:propstat><d:prop>
+      <d:getetag>"e1"</d:getetag>
+      <c:calendar-data>BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:evt-1
+SUMMARY:Standup
+DTSTART:20260520T080000Z
+DTEND:20260520T083000Z
+END:VEVENT
+END:VCALENDAR</c:calendar-data>
+    </d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat>
+  </d:response>
+</d:multistatus>"#;
+
+    #[tokio::test]
+    async fn get_events_delta_gates_on_ctag() {
+        let mut server = Server::new_async().await;
+        // CTag read (PROPFIND depth 0) always reports "v1".
+        let ctag_mock = server
+            .mock("PROPFIND", "/calendars/alice/work/")
+            .with_status(207)
+            .with_body(CTAG_RESPONSE)
+            .create_async()
+            .await;
+        // Full re-list (REPORT) must run EXACTLY ONCE — only on the
+        // first (token-less) call; the gated second call skips it.
+        let report_mock = server
+            .mock("REPORT", "/calendars/alice/work/")
+            .with_status(207)
+            .with_body(DELTA_REPORT_RESPONSE)
+            .expect(1)
+            .create_async()
+            .await;
+
+        use chrono::TimeZone;
+        let adapter = build_adapter(&server);
+        let cal_url = format!("{}/calendars/alice/work/", server.url());
+        let range = DateRange::new(
+            chrono::Utc.with_ymd_and_hms(2026, 5, 20, 0, 0, 0).unwrap(),
+            chrono::Utc.with_ymd_and_hms(2026, 5, 21, 0, 0, 0).unwrap(),
+        );
+
+        // First call, no token → full resync with the events + the CTag.
+        let first = adapter
+            .get_events_delta(&cal_url, range, None)
+            .await
+            .unwrap();
+        assert!(first.full_resync);
+        assert_eq!(first.changes.len(), 1);
+        assert_eq!(first.new_token.as_deref(), Some("v1"));
+
+        // Second call with the same token → CTag matches → empty, no
+        // REPORT.
+        let second = adapter
+            .get_events_delta(&cal_url, range, Some("v1"))
+            .await
+            .unwrap();
+        assert!(!second.full_resync);
+        assert!(second.changes.is_empty());
+        assert_eq!(second.new_token.as_deref(), Some("v1"));
+
+        report_mock.assert_async().await;
+        let _ = ctag_mock;
     }
 }
