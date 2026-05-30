@@ -4,6 +4,7 @@ import type { Account, Calendar, TaskList } from '../api/types';
 import {
   accountTriState,
   buildSidebarTree,
+  flattenLeaves,
   LOCAL_ACCOUNT_ID,
   parentTriState,
 } from './sidebarTree';
@@ -35,6 +36,7 @@ const makeTaskList = (
   id: string,
   name: string,
   accountId: string,
+  parentId: string | null = null,
 ): TaskList => ({
   id,
   name,
@@ -43,7 +45,7 @@ const makeTaskList = (
   embedded_in_calendar: null,
   read_only: false,
   account_id: accountId,
-  parent_id: null,
+  parent_id: parentId,
 });
 
 describe('buildSidebarTree', () => {
@@ -149,6 +151,66 @@ describe('buildSidebarTree', () => {
   });
 });
 
+describe('nested task-list tree', () => {
+  it('nests child task lists under their parent in the Tasks section', () => {
+    const tree = buildSidebarTree({
+      accounts: [makeAccount('vik', 'Vikunja', 'vikunja')],
+      calendars: [],
+      taskLists: [
+        makeTaskList('p', 'Parent', 'vik'),
+        makeTaskList('c', 'Child', 'vik', 'p'),
+        makeTaskList('top', 'Top-level', 'vik'),
+      ],
+      selectedCalendarIds: new Set(),
+      selectedTaskListIds: new Set(),
+    });
+    const vik = tree.find((a) => a.accountId === 'vik')!;
+    const tasks = vik.children.find((s) => s.kind === 'tasks');
+    expect(tasks).toBeDefined();
+    // Two roots (Parent, Top-level), name-sorted.
+    expect(tasks!.children.map((l) => l.name)).toEqual(['Parent', 'Top-level']);
+    const parent = tasks!.children.find((l) => l.containerId === 'p');
+    expect(parent!.children.map((l) => l.containerId)).toEqual(['c']);
+  });
+
+  it('flat backends produce a depth-0 forest (no children)', () => {
+    const tree = buildSidebarTree({
+      accounts: [makeAccount(LOCAL_ACCOUNT_ID, 'Local')],
+      calendars: [],
+      taskLists: [
+        makeTaskList('a', 'A', LOCAL_ACCOUNT_ID),
+        makeTaskList('b', 'B', LOCAL_ACCOUNT_ID),
+      ],
+      selectedCalendarIds: new Set(),
+      selectedTaskListIds: new Set(),
+    });
+    const tasks = tree[0].children.find((s) => s.kind === 'tasks');
+    expect(tasks!.children.every((l) => l.children.length === 0)).toBe(true);
+  });
+
+  it('flattenLeaves walks the whole subtree; tri-state counts descendants', () => {
+    const tree = buildSidebarTree({
+      accounts: [makeAccount('vik', 'Vikunja', 'vikunja')],
+      calendars: [],
+      taskLists: [
+        makeTaskList('p', 'Parent', 'vik'),
+        makeTaskList('c', 'Child', 'vik', 'p'),
+      ],
+      selectedCalendarIds: new Set(),
+      // Only the nested child is selected → the section is "mixed",
+      // which requires tri-state to look past the root leaves.
+      selectedTaskListIds: new Set(['c']),
+    });
+    const vik = tree.find((a) => a.accountId === 'vik')!;
+    const tasks = vik.children.find((s) => s.kind === 'tasks')!;
+    expect(flattenLeaves(tasks.children).map((l) => l.containerId)).toEqual([
+      'p',
+      'c',
+    ]);
+    expect(parentTriState(tasks.children)).toBe('mixed');
+  });
+});
+
 describe('parentTriState / accountTriState', () => {
   it('returns unchecked when no leaf is selected', () => {
     expect(
@@ -161,6 +223,7 @@ describe('parentTriState / accountTriState', () => {
           colorHex: null,
           readOnly: false,
           selected: false,
+          children: [],
         },
       ]),
     ).toBe('unchecked');
@@ -177,6 +240,7 @@ describe('parentTriState / accountTriState', () => {
           colorHex: null,
           readOnly: false,
           selected: true,
+          children: [],
         },
       ]),
     ).toBe('checked');
@@ -193,6 +257,7 @@ describe('parentTriState / accountTriState', () => {
           colorHex: null,
           readOnly: false,
           selected: true,
+          children: [],
         },
         {
           key: 'b',
@@ -202,6 +267,7 @@ describe('parentTriState / accountTriState', () => {
           colorHex: null,
           readOnly: false,
           selected: false,
+          children: [],
         },
       ]),
     ).toBe('mixed');

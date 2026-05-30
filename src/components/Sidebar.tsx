@@ -31,6 +31,7 @@ import { useDialogState } from '../state/DialogState';
 import {
   accountTriState,
   buildSidebarTree,
+  flattenLeaves,
   parentTriState,
   type AccountNode,
   type LeafNode,
@@ -615,9 +616,11 @@ export function Sidebar() {
           e.preventDefault();
           focusByIndex(visible.length - 1);
           return;
-        case 'ArrowRight':
+        case 'ArrowRight': {
           e.preventDefault();
-          if (item.kind === 'leaf') return;
+          // Leaves are expandable too when they nest child projects.
+          const expandable = item.kind !== 'leaf' || item.hasChildren;
+          if (!expandable) return;
           if (expansion.isExpanded(item.key)) {
             // Already open → move to first child if any.
             const first = visible.find(
@@ -628,14 +631,17 @@ export function Sidebar() {
             expansion.setExpanded(item.key, true);
           }
           return;
-        case 'ArrowLeft':
+        }
+        case 'ArrowLeft': {
           e.preventDefault();
-          if (item.kind !== 'leaf' && expansion.isExpanded(item.key)) {
+          const expandable = item.kind !== 'leaf' || item.hasChildren;
+          if (expandable && expansion.isExpanded(item.key)) {
             expansion.setExpanded(item.key, false);
           } else if (item.parentKey) {
             setFocusedKey(item.parentKey);
           }
           return;
+        }
         case ' ':
         case 'Spacebar':
         case 'Enter':
@@ -857,7 +863,7 @@ export function Sidebar() {
               }
             }}
             onToggleSection={(section) => {
-              const leaves = section.children;
+              const leaves = flattenLeaves(section.children);
               const state = parentTriState(leaves);
               const next = state === 'unchecked';
               const ids = leaves.map((l) => l.containerId);
@@ -870,7 +876,9 @@ export function Sidebar() {
               }
             }}
             onToggleAccount={(node) => {
-              const leaves = node.children.flatMap((s) => s.children);
+              const leaves = flattenLeaves(
+                node.children.flatMap((s) => s.children),
+              );
               const state = accountTriState(node);
               const next = state === 'unchecked';
               const calIds = leaves
@@ -947,9 +955,13 @@ type VisibleItem =
       key: string;
       label: string;
       parentKey: string;
-      level: 3;
+      /** 3 for a section's direct child; +1 per nesting level. */
+      level: number;
       sectionKind: 'calendars' | 'tasks' | 'contacts';
       containerId: string;
+      /** True when this leaf nests child projects (Vikunja / Todoist) —
+       *  drives the twisty + ArrowLeft/Right expand semantics. */
+      hasChildren: boolean;
     };
 
 function flattenTree(
@@ -957,6 +969,21 @@ function flattenTree(
   isExpanded: (key: string) => boolean,
 ): VisibleItem[] {
   const out: VisibleItem[] = [];
+  const pushLeaf = (leaf: LeafNode, parentKey: string, level: number) => {
+    out.push({
+      kind: 'leaf',
+      key: leaf.key,
+      label: leaf.name,
+      parentKey,
+      level,
+      sectionKind: leaf.kind,
+      containerId: leaf.containerId,
+      hasChildren: leaf.children.length > 0,
+    });
+    if (leaf.children.length > 0 && isExpanded(leaf.key)) {
+      for (const child of leaf.children) pushLeaf(child, leaf.key, level + 1);
+    }
+  };
   for (const account of tree) {
     out.push({
       kind: 'account',
@@ -977,17 +1004,7 @@ function flattenTree(
         level: 2,
       });
       if (!isExpanded(section.key)) continue;
-      for (const leaf of section.children) {
-        out.push({
-          kind: 'leaf',
-          key: leaf.key,
-          label: leaf.name,
-          parentKey: section.key,
-          level: 3,
-          sectionKind: leaf.kind,
-          containerId: leaf.containerId,
-        });
-      }
+      for (const leaf of section.children) pushLeaf(leaf, section.key, 3);
     }
   }
   return out;
@@ -999,13 +1016,15 @@ function collectLeaves(
 ): LeafNode[] {
   if (parent.kind === 'leaf') return [];
   // Locate the originating account / section node in the tree by key.
+  // `flattenLeaves` pulls in nested task-list descendants so a section
+  // or account toggle cascades through the whole project subtree.
   for (const account of tree) {
     if (account.key === parent.key) {
-      return account.children.flatMap((s) => s.children);
+      return flattenLeaves(account.children.flatMap((s) => s.children));
     }
     for (const section of account.children) {
       if (section.key === parent.key) {
-        return section.children;
+        return flattenLeaves(section.children);
       }
     }
   }
@@ -1180,6 +1199,8 @@ function SectionSubtree({
           <LeafRow
             key={leaf.key}
             leaf={leaf}
+            depth={0}
+            expansion={expansion}
             focusedKey={focusedKey}
             onFocusKey={onFocusKey}
             itemId={itemId}
@@ -1199,6 +1220,10 @@ function SectionSubtree({
 
 interface LeafRowProps {
   leaf: LeafNode;
+  /** Nesting depth within the section: 0 for a direct child, +1 per
+   *  level. Drives ARIA level (3 + depth) and the indentation. */
+  depth: number;
+  expansion: ReturnType<typeof useSidebarExpansion>;
   focusedKey: string | null;
   onFocusKey: (key: string) => void;
   itemId: (key: string) => string;
@@ -1217,6 +1242,8 @@ interface LeafRowProps {
 
 function LeafRow({
   leaf,
+  depth,
+  expansion,
   focusedKey,
   onFocusKey,
   itemId,
@@ -1254,48 +1281,89 @@ function LeafRow({
   const isEditing = editing?.kind === kind && editing.id === leaf.containerId;
   const isFocusTarget =
     leaf.kind === 'calendars' && leaf.containerId === focusedContainerId;
+  // Nested task-list projects (Vikunja / Todoist) are both selectable
+  // (own checkbox) and expandable (twisty). Flat lists have no children
+  // and render exactly as before.
+  const hasChildren = leaf.children.length > 0;
+  const isOpen = expansion.isExpanded(leaf.key);
 
   return (
-    <TreeRow
-      id={itemId(leaf.key)}
-      level={3}
-      ariaChecked={leaf.selected ? 'true' : 'false'}
-      focused={focusedKey === leaf.key}
-      onPointerSelect={() => onFocusKey(leaf.key)}
-      onToggleSelect={() => onToggleLeaf(leaf)}
-      className={
-        'sidebar__row sidebar__row--leaf' +
-        (isFocusTarget ? ' sidebar__row--focus-target' : '')
-      }
-      style={
-        leaf.colorHex
-          ? ({ '--container-color': leaf.colorHex } as React.CSSProperties)
-          : undefined
-      }
-    >
-      {isEditing ? (
-        <RenameField
-          value={draft}
-          onChange={onDraftChange}
-          onCommit={onCommitEdit}
-          onCancel={onCancelEdit}
-          onKeyDown={onEditKey}
-          ariaLabel={t('sidebar.renameInputLabel', { name: displayName })}
-          hint={t('sidebar.renameHint')}
-        />
-      ) : (
-        <>
-          <span className="sidebar__swatch" aria-hidden="true" />
-          <span className="sidebar__name">{displayName}</span>
-        </>
-      )}
-    </TreeRow>
+    <>
+      <TreeRow
+        id={itemId(leaf.key)}
+        level={3 + depth}
+        expanded={hasChildren ? isOpen : undefined}
+        ariaChecked={leaf.selected ? 'true' : 'false'}
+        focused={focusedKey === leaf.key}
+        onPointerSelect={() => onFocusKey(leaf.key)}
+        onToggleSelect={() => onToggleLeaf(leaf)}
+        onToggleExpand={
+          hasChildren
+            ? () => expansion.setExpanded(leaf.key, !isOpen)
+            : undefined
+        }
+        className={
+          'sidebar__row sidebar__row--leaf' +
+          (isFocusTarget ? ' sidebar__row--focus-target' : '')
+        }
+        style={
+          {
+            ...(leaf.colorHex ? { '--container-color': leaf.colorHex } : {}),
+            '--tree-depth': depth,
+          } as React.CSSProperties
+        }
+      >
+        {isEditing ? (
+          <RenameField
+            value={draft}
+            onChange={onDraftChange}
+            onCommit={onCommitEdit}
+            onCancel={onCancelEdit}
+            onKeyDown={onEditKey}
+            ariaLabel={t('sidebar.renameInputLabel', { name: displayName })}
+            hint={t('sidebar.renameHint')}
+          />
+        ) : (
+          <>
+            {hasChildren && (
+              <span className="sidebar__chevron" aria-hidden="true">
+                {isOpen ? '▾' : '▸'}
+              </span>
+            )}
+            <span className="sidebar__swatch" aria-hidden="true" />
+            <span className="sidebar__name">{displayName}</span>
+          </>
+        )}
+      </TreeRow>
+      {hasChildren &&
+        isOpen &&
+        leaf.children.map((child) => (
+          <LeafRow
+            key={child.key}
+            leaf={child}
+            depth={depth + 1}
+            expansion={expansion}
+            focusedKey={focusedKey}
+            onFocusKey={onFocusKey}
+            itemId={itemId}
+            editing={editing}
+            draft={draft}
+            onDraftChange={onDraftChange}
+            onCancelEdit={onCancelEdit}
+            onCommitEdit={onCommitEdit}
+            onEditKey={onEditKey}
+            onToggleLeaf={onToggleLeaf}
+            focusedContainerId={focusedContainerId}
+          />
+        ))}
+    </>
   );
 }
 
 interface TreeRowProps {
   id: string;
-  level: 1 | 2 | 3;
+  /** ARIA level: 1 account, 2 section, 3 leaf, 4+ nested task list. */
+  level: number;
   /** Undefined ⇒ no twisty; row has no expand/collapse semantic. */
   expanded?: boolean;
   ariaChecked: 'true' | 'false' | 'mixed';

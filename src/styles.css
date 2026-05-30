@@ -1525,7 +1525,10 @@ button[aria-disabled='true'] {
   letter-spacing: 0.04em;
 }
 .sidebar__row--leaf {
-  padding-left: calc(var(--space-2) + 2rem);
+  /* Base leaf indent + one extra step per nesting level so a project's
+     child task lists (Vikunja / Todoist) sit visibly under their
+     parent. `--tree-depth` is 0 for flat lists ⇒ unchanged. */
+  padding-left: calc(var(--space-2) + 2rem + var(--tree-depth, 0) * 1rem);
 }
 
 .sidebar__chevron {

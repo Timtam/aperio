@@ -58,6 +58,12 @@ export interface LeafNode {
    *  describe one and the autocomplete picker (§10.4) reads
    *  everywhere anyway. */
   selected: boolean;
+  /** Child leaves, for backends that nest task lists (Vikunja,
+   *  Todoist) — built from `TaskList.parent_id`. Always empty for
+   *  calendars and contacts (flat) and for flat task backends, which
+   *  keeps the sidebar's depth-0 forest identical to the pre-nesting
+   *  shape. */
+  children: LeafNode[];
 }
 
 export interface SectionNode {
@@ -83,6 +89,57 @@ export interface AccountNode {
    *  still loading), `children` is empty and `isEmpty` is true. */
   isEmpty: boolean;
   children: SectionNode[];
+}
+
+/**
+ * Build the leaf forest for a Tasks section from a flat, already
+ * name-sorted task-list array. Nesting follows `TaskList.parent_id`
+ * (Vikunja / Todoist); a list whose parent isn't in the set is
+ * promoted to a root so nothing is dropped, and a cycle can't trap a
+ * list out of the tree. Children inherit the input's name order.
+ */
+function buildTaskLeaves(
+  lists: TaskList[],
+  selected: Set<string>,
+  accountKey: string,
+): LeafNode[] {
+  const byId = new Map(lists.map((l) => [l.id, l]));
+  const childrenOf = new Map<string, TaskList[]>();
+  const roots: TaskList[] = [];
+  for (const l of lists) {
+    const parent = l.parent_id;
+    if (parent && parent !== l.id && byId.has(parent)) {
+      const arr = childrenOf.get(parent);
+      if (arr) arr.push(l);
+      else childrenOf.set(parent, [l]);
+    } else {
+      roots.push(l);
+    }
+  }
+  const seen = new Set<string>();
+  const toLeaf = (l: TaskList): LeafNode => {
+    seen.add(l.id);
+    const kids = (childrenOf.get(l.id) ?? []).filter((c) => !seen.has(c.id));
+    return {
+      key: `${accountKey}#tasks#${l.id}`,
+      kind: 'tasks',
+      containerId: l.id,
+      name: l.name,
+      colorHex: l.color?.hex ?? null,
+      readOnly: l.read_only,
+      selected: selected.has(l.id),
+      children: kids.map(toLeaf),
+    };
+  };
+  const forest = roots.map(toLeaf);
+  for (const l of lists) if (!seen.has(l.id)) forest.push(toLeaf(l));
+  return forest;
+}
+
+/** Flatten a leaf forest into a single list of every node (parents +
+ *  all descendants), for selection cascades and tri-state maths. */
+export function flattenLeaves(leaves: LeafNode[]): LeafNode[] {
+  return leaves.flatMap((l) => [l, ...flattenLeaves(l.children)]);
 }
 
 /**
@@ -196,6 +253,7 @@ export function buildSidebarTree(input: {
           colorHex: c.color?.hex ?? null,
           readOnly: c.read_only,
           selected: selectedCalendarIds.has(c.id),
+          children: [],
         })),
       });
     }
@@ -204,15 +262,9 @@ export function buildSidebarTree(input: {
         key: `${accountKey}#tasks`,
         kind: 'tasks',
         labelKey: 'tasks',
-        children: tls.map((l) => ({
-          key: `${accountKey}#tasks#${l.id}`,
-          kind: 'tasks',
-          containerId: l.id,
-          name: l.name,
-          colorHex: l.color?.hex ?? null,
-          readOnly: l.read_only,
-          selected: selectedTaskListIds.has(l.id),
-        })),
+        // Nested: backends with `parent_id` (Vikunja, Todoist) build a
+        // project tree; flat backends produce a depth-0 forest.
+        children: buildTaskLeaves(tls, selectedTaskListIds, accountKey),
       });
     }
     if (cbs.length > 0) {
@@ -228,6 +280,7 @@ export function buildSidebarTree(input: {
           colorHex: cb.color?.hex ?? null,
           readOnly: cb.read_only,
           selected: selectedContactListIds?.has(cb.id) ?? false,
+          children: [],
         })),
       });
     }
@@ -258,10 +311,13 @@ export function buildSidebarTree(input: {
 export type TriState = 'checked' | 'mixed' | 'unchecked';
 
 export function parentTriState(leaves: LeafNode[]): TriState {
-  if (leaves.length === 0) return 'unchecked';
-  const selected = leaves.filter((l) => l.selected).length;
+  // Count descendants too — a collapsed parent project's selection
+  // state still reflects every list nested under it.
+  const all = flattenLeaves(leaves);
+  if (all.length === 0) return 'unchecked';
+  const selected = all.filter((l) => l.selected).length;
   if (selected === 0) return 'unchecked';
-  if (selected === leaves.length) return 'checked';
+  if (selected === all.length) return 'checked';
   return 'mixed';
 }
 
