@@ -394,8 +394,30 @@ pub async fn get_events(
     start: chrono::DateTime<chrono::Utc>,
     end: chrono::DateTime<chrono::Utc>,
 ) -> GoogleResult<Vec<Event>> {
+    // The non-delta read path discards the sync token; the delta path
+    // (`list_events_full`) keeps it.
+    Ok(list_events_full(state, calendar_id, start, end).await?.0)
+}
+
+/// Full window sync: page every live event in `[start, end)` AND capture
+/// the `nextSyncToken` Google returns on the last page. The token seeds
+/// the incremental [`list_events_incremental`] path so subsequent
+/// refreshes only pull the delta.
+///
+/// `showDeleted` is left at its default (false) — a full sync wants the
+/// current live set, not tombstones. The window bounds (`timeMin` /
+/// `timeMax`) are baked into the returned token by Google, so the
+/// incremental leg stays scoped to the same window without re-sending
+/// them (they're incompatible with `syncToken`).
+pub async fn list_events_full(
+    state: &ApiState,
+    calendar_id: &str,
+    start: chrono::DateTime<chrono::Utc>,
+    end: chrono::DateTime<chrono::Utc>,
+) -> GoogleResult<(Vec<Event>, Option<String>)> {
     let mut out = Vec::new();
     let mut page_token: Option<String> = None;
+    let mut sync_token: Option<String> = None;
     let cal_enc = urlencoding(calendar_id);
     loop {
         let mut path = format!(
@@ -414,12 +436,97 @@ pub async fn get_events(
                 out.push(ev);
             }
         }
+        // The token only appears on the final page.
+        if resp.next_sync_token.is_some() {
+            sync_token = resp.next_sync_token;
+        }
         match resp.next_page_token {
             Some(t) => page_token = Some(t),
             None => break,
         }
     }
-    Ok(out)
+    Ok((out, sync_token))
+}
+
+/// Outcome of one incremental sync round: upserted/created rows, the
+/// native ids of removed rows, and the refreshed token for the next call.
+#[derive(Debug, Default)]
+pub struct EventDelta {
+    pub changes: Vec<Event>,
+    pub deletions: Vec<String>,
+    pub new_token: Option<String>,
+}
+
+/// Incremental sync via `syncToken`. Returns only what changed since the
+/// token was issued: created/updated events in `changes`, the ids of
+/// deleted (Google `status: "cancelled"`) events in `deletions`, and the
+/// fresh `nextSyncToken`.
+///
+/// A `410 Gone` surfaces as `GoogleError::Http { status: 410, .. }` — the
+/// caller drops the token and re-runs a full sync.
+///
+/// `singleEvents=false` MUST match the full sync that issued the token.
+/// `timeMin`/`timeMax` are deliberately omitted — they're incompatible
+/// with `syncToken`, and the window is already baked into it. Created /
+/// updated singles are range-filtered to the cache's window (`[start,
+/// end)`); recurring masters always pass, matching the full read and the
+/// EWS adapter. Deletions are NOT range-filtered — a cancelled row often
+/// carries no usable start/end, and removing an id that isn't cached is a
+/// harmless no-op host-side.
+pub async fn list_events_incremental(
+    state: &ApiState,
+    calendar_id: &str,
+    sync_token: &str,
+    start: chrono::DateTime<chrono::Utc>,
+    end: chrono::DateTime<chrono::Utc>,
+) -> GoogleResult<EventDelta> {
+    let mut delta = EventDelta::default();
+    let mut page_token: Option<String> = None;
+    let cal_enc = urlencoding(calendar_id);
+    loop {
+        let mut path = format!(
+            "/calendars/{cal_enc}/events?singleEvents=false&maxResults=2500\
+             &syncToken={st}",
+            st = urlencoding(sync_token),
+        );
+        if let Some(t) = &page_token {
+            path.push_str("&pageToken=");
+            path.push_str(&urlencoding(t));
+        }
+        let resp: EventListResponse = state.get_json(&path).await?;
+        for entry in resp.items {
+            // A cancelled row is a deletion — its id is already the
+            // native id (Google ids carry no kind/etag adornment).
+            if entry.status.as_deref() == Some("cancelled") {
+                delta.deletions.push(entry.id);
+                continue;
+            }
+            if let Some(ev) = map_event(entry, calendar_id)? {
+                if event_in_window(&ev, start, end) {
+                    delta.changes.push(ev);
+                }
+            }
+        }
+        if resp.next_sync_token.is_some() {
+            delta.new_token = resp.next_sync_token;
+        }
+        match resp.next_page_token {
+            Some(t) => page_token = Some(t),
+            None => break,
+        }
+    }
+    Ok(delta)
+}
+
+/// Window predicate shared by the incremental sync: recurring masters
+/// always pass (the frontend expander handles the visible window);
+/// singles must overlap `[start, end)`.
+fn event_in_window(
+    ev: &Event,
+    start: chrono::DateTime<chrono::Utc>,
+    end: chrono::DateTime<chrono::Utc>,
+) -> bool {
+    ev.recurrence.is_some() || (ev.end >= start && ev.start < end)
 }
 
 /// `POST /calendars/{id}/events` — create a new event.
@@ -594,6 +701,108 @@ mod tests {
         let evs = get_events(&state, "primary", from, to).await.unwrap();
         assert!(evs.is_empty());
         m.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn list_events_full_captures_sync_token() {
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock(
+                "GET",
+                mockito::Matcher::Regex(r"^/calendars/primary/events\?.*timeMin=".to_string()),
+            )
+            .with_status(200)
+            .with_body(
+                r##"{
+                  "items": [
+                    {"id":"e1","summary":"One",
+                     "start":{"dateTime":"2026-05-10T08:00:00Z"},
+                     "end":{"dateTime":"2026-05-10T09:00:00Z"}}
+                  ],
+                  "nextSyncToken":"TOK-1"
+                }"##,
+            )
+            .create_async()
+            .await;
+        let state = fixture_state(&server.url());
+        let from = chrono::Utc.with_ymd_and_hms(2026, 5, 1, 0, 0, 0).unwrap();
+        let to = chrono::Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
+        let (evs, tok) = list_events_full(&state, "primary", from, to).await.unwrap();
+        assert_eq!(evs.len(), 1);
+        assert_eq!(tok.as_deref(), Some("TOK-1"));
+    }
+
+    #[tokio::test]
+    async fn list_events_incremental_splits_changes_and_deletions() {
+        let mut server = mockito::Server::new_async().await;
+        // The incremental request must carry syncToken and must NOT send
+        // timeMin/timeMax (incompatible with a sync token).
+        let m = server
+            .mock(
+                "GET",
+                mockito::Matcher::Regex(
+                    r"^/calendars/primary/events\?.*syncToken=TOK-1".to_string(),
+                ),
+            )
+            .with_status(200)
+            .with_body(
+                r##"{
+                  "items": [
+                    {"id":"e1","summary":"Updated",
+                     "start":{"dateTime":"2026-05-10T08:00:00Z"},
+                     "end":{"dateTime":"2026-05-10T09:00:00Z"}},
+                    {"id":"e2","status":"cancelled",
+                     "start":{"dateTime":"2026-05-11T08:00:00Z"},
+                     "end":{"dateTime":"2026-05-11T09:00:00Z"}},
+                    {"id":"e3","summary":"OutOfWindow",
+                     "start":{"dateTime":"2030-01-01T08:00:00Z"},
+                     "end":{"dateTime":"2030-01-01T09:00:00Z"}}
+                  ],
+                  "nextSyncToken":"TOK-2"
+                }"##,
+            )
+            .create_async()
+            .await;
+        let state = fixture_state(&server.url());
+        let from = chrono::Utc.with_ymd_and_hms(2026, 5, 1, 0, 0, 0).unwrap();
+        let to = chrono::Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
+        let delta = list_events_incremental(&state, "primary", "TOK-1", from, to)
+            .await
+            .unwrap();
+        // e1 in window → change; e3 out-of-window single → filtered;
+        // e2 cancelled → deletion (its bare id).
+        assert_eq!(
+            delta
+                .changes
+                .iter()
+                .map(|e| e.id.as_str())
+                .collect::<Vec<_>>(),
+            ["e1"]
+        );
+        assert_eq!(delta.deletions, vec!["e2".to_string()]);
+        assert_eq!(delta.new_token.as_deref(), Some("TOK-2"));
+        m.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn list_events_incremental_410_bubbles_as_http() {
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock(
+                "GET",
+                mockito::Matcher::Regex(r"^/calendars/primary/events\?.*syncToken=".to_string()),
+            )
+            .with_status(410)
+            .with_body("Sync token is no longer valid")
+            .create_async()
+            .await;
+        let state = fixture_state(&server.url());
+        let from = chrono::Utc.with_ymd_and_hms(2026, 5, 1, 0, 0, 0).unwrap();
+        let to = chrono::Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
+        let err = list_events_incremental(&state, "primary", "STALE", from, to)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, GoogleError::Http { status: 410, .. }));
     }
 
     #[tokio::test]
