@@ -1524,6 +1524,40 @@ button[aria-disabled='true'] {
   background: color-mix(in srgb, var(--color-accent) 12%, transparent);
 }
 
+/* TaskDialog section manager: the picker + inline create/rename/delete
+   controls sit on one wrapping row; the name editor drops below. */
+.section-field,
+.section-field__edit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+.section-field > select {
+  flex: 1 1 12rem;
+}
+.section-field__edit {
+  margin-top: var(--space-1);
+}
+.section-field__edit > input {
+  flex: 1 1 12rem;
+}
+.section-field__button {
+  flex: 0 0 auto;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-subtle, transparent);
+  cursor: pointer;
+}
+.section-field__button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.section-field__button--danger {
+  color: var(--color-danger, #c0392b);
+}
+
 /* Indentation per level. Level 1 = account, 2 = section, 3 = leaf. */
 .sidebar__row--account {
   padding-left: var(--space-2);

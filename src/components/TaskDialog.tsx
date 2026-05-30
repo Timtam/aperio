@@ -13,9 +13,12 @@ import { DescriptionLinks } from './DescriptionLinks';
 
 import { useAnnouncer } from '../a11y/Announcer';
 import {
+  createSection,
   createTask as apiCreateTask,
+  deleteSection,
   isCommandError,
   showContextMenu,
+  updateSection,
   type ContextMenuItemRequest,
 } from '../api/client';
 import { invoke } from '@tauri-apps/api/core';
@@ -189,6 +192,11 @@ export function TaskDialog({
   // always pick the list for a brand-new task.
   const moveLocked = isEdit && !canMoveLists;
   const sectionsForList = sectionsByList[form.listId] ?? [];
+  // Sections are user-managed (create / rename / delete) only on local
+  // lists; external-provider sections are read-only here (managed in
+  // the provider's own UI), so we just offer the picker for those.
+  const sectionsManageable =
+    sectionsEnabled && listForSections?.account_id === 'local';
 
   // Pull the target list's sections when the picker is relevant.
   useEffect(() => {
@@ -208,6 +216,100 @@ export function TaskDialog({
       setForm((prev) => ({ ...prev, sectionId: '' }));
     }
   }, [form.sectionId, form.listId, sectionsByList, sectionsForList]);
+
+  // ── Section management (local lists only) ───────────────────────────
+  // `sectionMode` reveals an inline name input for create / rename; the
+  // commands persist immediately (like subtasks) and reload the list's
+  // sections so the picker reflects the change.
+  const [sectionMode, setSectionMode] = useState<'create' | 'rename' | null>(
+    null,
+  );
+  const [sectionDraft, setSectionDraft] = useState('');
+  const [sectionBusy, setSectionBusy] = useState(false);
+
+  // Reset the inline editor whenever the dialog re-opens or the target
+  // list changes (its sections — and thus what's manageable — differ).
+  useEffect(() => {
+    setSectionMode(null);
+    setSectionDraft('');
+  }, [isOpen, form.listId]);
+
+  const submitSection = useCallback(async () => {
+    const name = sectionDraft.trim();
+    if (!name || sectionBusy) return;
+    setSectionBusy(true);
+    try {
+      if (sectionMode === 'rename' && form.sectionId) {
+        const current = sectionsForList.find((s) => s.id === form.sectionId);
+        if (current) {
+          await updateSection({ ...current, name });
+          announce(t('dialogs.task.section.renamed', { name }));
+        }
+      } else {
+        const created = await createSection({
+          list_id: form.listId,
+          name,
+          position: sectionsForList.length,
+        });
+        // Reload BEFORE selecting the new section so the
+        // "section gone from list" reset effect sees it as valid and
+        // doesn't race-clear the fresh selection.
+        await loadSections(form.listId);
+        setForm((prev) => ({ ...prev, sectionId: created.id }));
+        announce(t('dialogs.task.section.created', { name }));
+        setSectionMode(null);
+        setSectionDraft('');
+        return;
+      }
+      await loadSections(form.listId);
+      setSectionMode(null);
+      setSectionDraft('');
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('section mutation failed', err);
+    } finally {
+      setSectionBusy(false);
+    }
+  }, [
+    sectionDraft,
+    sectionBusy,
+    sectionMode,
+    form.sectionId,
+    form.listId,
+    sectionsForList,
+    loadSections,
+    announce,
+    t,
+  ]);
+
+  const deleteCurrentSection = useCallback(async () => {
+    if (!form.sectionId || sectionBusy) return;
+    const current = sectionsForList.find((s) => s.id === form.sectionId);
+    setSectionBusy(true);
+    try {
+      // Deleting a section only ungroups its tasks (ON DELETE SET NULL),
+      // so there's no destructive-confirm — the tasks survive.
+      await deleteSection(form.sectionId);
+      setForm((prev) => ({ ...prev, sectionId: '' }));
+      await loadSections(form.listId);
+      announce(
+        t('dialogs.task.section.deleted', { name: current?.name ?? '' }),
+      );
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('delete_section failed', err);
+    } finally {
+      setSectionBusy(false);
+    }
+  }, [
+    form.sectionId,
+    form.listId,
+    sectionBusy,
+    sectionsForList,
+    loadSections,
+    announce,
+    t,
+  ]);
 
   const update = useCallback(
     <K extends keyof FormState>(key: K, value: FormState[K]) => {
@@ -676,23 +778,114 @@ export function TaskDialog({
         </label>
 
         {sectionsEnabled && (
-          <label className="form__field" htmlFor={sectionFieldId}>
-            <span className="form__label">
+          <div className="form__field">
+            <label className="form__label" htmlFor={sectionFieldId}>
               {t('dialogs.task.fields.section')}
-            </span>
-            <select
-              id={sectionFieldId}
-              value={form.sectionId}
-              onChange={(e) => update('sectionId', e.target.value)}
-            >
-              <option value="">{t('dialogs.task.noSection')}</option>
-              {sectionsForList.map((section) => (
-                <option key={section.id} value={section.id}>
-                  {section.name}
-                </option>
-              ))}
-            </select>
-          </label>
+            </label>
+            <div className="section-field">
+              <select
+                id={sectionFieldId}
+                value={form.sectionId}
+                onChange={(e) => update('sectionId', e.target.value)}
+                disabled={sectionMode !== null}
+              >
+                <option value="">{t('dialogs.task.noSection')}</option>
+                {sectionsForList.map((section) => (
+                  <option key={section.id} value={section.id}>
+                    {section.name}
+                  </option>
+                ))}
+              </select>
+              {/* Manage buttons — local lists only. Hidden while the
+                  inline name editor is open. */}
+              {sectionsManageable && sectionMode === null && (
+                <>
+                  <button
+                    type="button"
+                    className="section-field__button"
+                    onClick={() => {
+                      setSectionDraft('');
+                      setSectionMode('create');
+                    }}
+                  >
+                    {t('dialogs.task.section.add')}
+                  </button>
+                  {form.sectionId && (
+                    <>
+                      <button
+                        type="button"
+                        className="section-field__button"
+                        onClick={() => {
+                          const cur = sectionsForList.find(
+                            (s) => s.id === form.sectionId,
+                          );
+                          setSectionDraft(cur?.name ?? '');
+                          setSectionMode('rename');
+                        }}
+                      >
+                        {t('dialogs.task.section.rename')}
+                      </button>
+                      <button
+                        type="button"
+                        className="section-field__button section-field__button--danger"
+                        onClick={() => void deleteCurrentSection()}
+                        disabled={sectionBusy}
+                      >
+                        {t('dialogs.task.section.delete')}
+                      </button>
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+            {sectionMode !== null && (
+              <div className="section-field__edit">
+                <input
+                  type="text"
+                  value={sectionDraft}
+                  onChange={(e) => setSectionDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      void submitSection();
+                    } else if (e.key === 'Escape') {
+                      e.preventDefault();
+                      setSectionMode(null);
+                      setSectionDraft('');
+                    }
+                  }}
+                  placeholder={t('dialogs.task.section.namePlaceholder')}
+                  aria-label={
+                    sectionMode === 'rename'
+                      ? t('dialogs.task.section.renameLabel')
+                      : t('dialogs.task.section.newLabel')
+                  }
+                  autoFocus
+                  disabled={sectionBusy}
+                />
+                <button
+                  type="button"
+                  className="section-field__button"
+                  onClick={() => void submitSection()}
+                  disabled={sectionBusy || !sectionDraft.trim()}
+                >
+                  {sectionMode === 'rename'
+                    ? t('dialogs.task.section.save')
+                    : t('dialogs.task.section.create')}
+                </button>
+                <button
+                  type="button"
+                  className="section-field__button"
+                  onClick={() => {
+                    setSectionMode(null);
+                    setSectionDraft('');
+                  }}
+                >
+                  {t('dialogs.task.section.cancel')}
+                </button>
+              </div>
+            )}
+          </div>
         )}
 
         <div className="form__row">
