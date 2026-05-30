@@ -304,6 +304,7 @@ mod tests {
             deadline_time: None,
             recurrence: None,
             parent_id: None,
+            section_id: None,
             color_label: None,
             reminders: vec![],
             sound: None,

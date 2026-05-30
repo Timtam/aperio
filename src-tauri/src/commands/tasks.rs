@@ -229,6 +229,7 @@ pub async fn update_task(
             deadline_time: task.deadline_time,
             recurrence: task.recurrence.clone(),
             parent_id: task.parent_id.clone(),
+            section_id: None,
             color_label: task.color_label.clone(),
             reminders: task.reminders.clone(),
             sound: task.sound.clone(),

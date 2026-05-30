@@ -185,6 +185,7 @@ impl LocalAdapter {
                 color: color?,
                 default_sound: sound?,
                 embedded_in_calendar: embedded?,
+                parent_id: None,
                 read_only: read_only?,
             });
         }
@@ -354,6 +355,7 @@ mod tests {
             deadline_time: None,
             recurrence: None,
             parent_id: None,
+            section_id: None,
             color_label: None,
             reminders: vec![],
             sound: None,
@@ -381,6 +383,7 @@ mod tests {
             color: Some(container("#445566")),
             default_sound: None,
             embedded_in_calendar: None,
+            parent_id: None,
             read_only: false,
         }
     }

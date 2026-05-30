@@ -110,7 +110,36 @@ pub struct TaskList {
     /// For task-capable calendars (CalDAV/VTODO, local): the calendar ID.
     /// For standalone task lists: `None`.
     pub embedded_in_calendar: Option<String>,
+    /// Parent project id for backends with nested projects (Vikunja,
+    /// Todoist). `None` ⇒ a top-level list, or a flat backend with no
+    /// nesting at all (Google Tasks, CalDAV-per-calendar, …). The id
+    /// refers to another `TaskList.id` from the same adapter.
+    ///
+    /// `#[serde(default)]` so wire payloads written before nested
+    /// projects existed deserialise into a flat (parentless) list.
+    #[serde(default)]
+    pub parent_id: Option<String>,
     pub read_only: bool,
+}
+
+/// A sub-grouping of tasks *within* a single task list — a Vikunja
+/// bucket or a Todoist section. Distinct from a nested project
+/// (`TaskList.parent_id`): sections never contain other sections and
+/// never contain sub-lists, they only group the tasks of one list.
+///
+/// Backends without the concept (Google Tasks, CalDAV VTODO, EWS,
+/// local) simply return no sections from `TasksFeature::list_sections`
+/// and leave every task's `section_id` at `None`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Section {
+    pub id: String,
+    /// The `TaskList.id` this section belongs to.
+    pub list_id: String,
+    pub name: String,
+    /// Display order within the list; lower sorts first. Mirrors the
+    /// `position` Vikunja attaches to buckets and the order Todoist
+    /// gives its sections.
+    pub order: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -144,6 +173,11 @@ pub struct Task {
 
     pub recurrence: Option<TaskRecurrence>,
     pub parent_id: Option<String>,
+    /// Section (Vikunja bucket / Todoist section) this task is filed
+    /// under within its list. `None` ⇒ ungrouped, or a backend with no
+    /// sections. Refers to a `Section.id` whose `list_id == self.list_id`.
+    #[serde(default)]
+    pub section_id: Option<String>,
     pub color_label: Option<ColorLabelId>,
     pub reminders: Vec<Reminder>,
     pub sound: Option<SoundConfig>,
@@ -166,6 +200,9 @@ pub struct NewTask {
     pub deadline_time: Option<NaiveTime>,
     pub recurrence: Option<TaskRecurrence>,
     pub parent_id: Option<String>,
+    /// Section to file the new task under; see `Task::section_id`.
+    #[serde(default)]
+    pub section_id: Option<String>,
     pub color_label: Option<ColorLabelId>,
     pub reminders: Vec<Reminder>,
     pub sound: Option<SoundConfig>,

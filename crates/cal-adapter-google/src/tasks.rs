@@ -236,6 +236,7 @@ fn map_task_list(entry: TaskListEntry) -> TaskList {
         color: None,
         default_sound: None,
         embedded_in_calendar: None,
+        parent_id: None,
         // Aperio model: read-only means "the adapter can't write at
         // all" — Google Tasks lets us PATCH titles, so the list is
         // writable. Per-task read-only would be a sharing
@@ -278,6 +279,7 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
         deadline_time: None,
         recurrence: None,
         parent_id: entry.parent,
+        section_id: None,
         color_label: None,
         reminders: Vec::new(),
         sound: None,
@@ -532,6 +534,7 @@ mod tests {
             deadline_time: None,
             recurrence: None,
             parent_id: None,
+            section_id: None,
             color_label: None,
             reminders: Vec::new(),
             sound: None,

@@ -1294,6 +1294,7 @@ mod tests {
             deadline_time,
             recurrence: None,
             parent_id: None,
+            section_id: None,
             color_label: None,
             reminders,
             sound: None,

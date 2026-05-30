@@ -57,6 +57,7 @@ impl LocalAdapter {
             color,
             default_sound,
             embedded_in_calendar,
+            parent_id: None,
             read_only: false,
         })
     }
@@ -170,6 +171,7 @@ impl LocalAdapter {
             deadline_time: template.deadline_time,
             recurrence: Some(recurrence.clone()),
             parent_id: None,
+            section_id: None,
             color_label: template.color_label.clone(),
             reminders: template.reminders.clone(),
             sound: template.sound.clone(),
@@ -238,6 +240,7 @@ impl LocalAdapter {
             deadline_time: task.deadline_time,
             recurrence: task.recurrence,
             parent_id: task.parent_id,
+            section_id: None,
             color_label: task.color_label,
             reminders: task.reminders,
             sound: task.sound,
@@ -298,6 +301,7 @@ impl LocalAdapter {
             color: color?,
             default_sound: sound?,
             embedded_in_calendar: embedded?,
+            parent_id: None,
             read_only: read_only?,
         }))
     }
@@ -360,6 +364,7 @@ impl TasksFeature for LocalAdapter {
                 color: color?,
                 default_sound: sound?,
                 embedded_in_calendar: embedded?,
+                parent_id: None,
                 read_only: read_only?,
             });
         }
@@ -434,6 +439,7 @@ impl TasksFeature for LocalAdapter {
             deadline_time: task.deadline_time,
             recurrence: task.recurrence,
             parent_id: task.parent_id,
+            section_id: None,
             color_label: task.color_label,
             reminders: task.reminders,
             sound: task.sound,
@@ -737,6 +743,7 @@ pub(crate) fn row_to_task(row: &rusqlite::Row<'_>) -> cal_core::Result<Task> {
         deadline_time,
         recurrence,
         parent_id,
+        section_id: None,
         color_label,
         reminders,
         sound,
@@ -772,6 +779,7 @@ mod tests {
             deadline_time: None,
             recurrence: None,
             parent_id: None,
+            section_id: None,
             color_label: None,
             reminders: vec![],
             sound: None,

@@ -250,6 +250,7 @@ fn map_project(entry: ProjectEntry) -> TaskList {
             }),
         default_sound: None,
         embedded_in_calendar: None,
+        parent_id: None,
         read_only: false,
     }
 }
@@ -290,6 +291,7 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
         // dropped on read; documented in the module preamble.
         recurrence: None,
         parent_id: None,
+        section_id: None,
         color_label: None,
         reminders: Vec::new(),
         sound: None,
@@ -637,6 +639,7 @@ mod tests {
             deadline_time: None,
             recurrence: None,
             parent_id: None,
+            section_id: None,
             color_label: None,
             reminders: Vec::new(),
             sound: None,

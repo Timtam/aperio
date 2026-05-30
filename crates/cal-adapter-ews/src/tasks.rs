@@ -544,6 +544,7 @@ pub fn to_task_list(folder: ParsedTaskFolder) -> TaskList {
         color: None,
         default_sound: None,
         embedded_in_calendar: None,
+        parent_id: None,
         read_only: false,
     }
 }
@@ -608,6 +609,7 @@ pub fn to_task(item: ParsedTask, list_id: &str) -> EwsResult<Task> {
         deadline_time,
         recurrence: None,
         parent_id: None,
+        section_id: None,
         color_label: None,
         reminders,
         sound: None,
@@ -904,6 +906,7 @@ fn build_task_from_new(
         deadline_time: new.deadline_time,
         recurrence: new.recurrence.clone(),
         parent_id: new.parent_id.clone(),
+        section_id: None,
         color_label: new.color_label.clone(),
         reminders: new.reminders.clone(),
         sound: new.sound.clone(),
@@ -1223,6 +1226,7 @@ mod tests {
             deadline_time: Some(NaiveTime::from_hms_opt(17, 0, 0).unwrap()),
             recurrence: None,
             parent_id: None,
+            section_id: None,
             color_label: None,
             reminders: vec![Reminder {
                 kind: ReminderKind::Absolute {
@@ -1266,6 +1270,7 @@ mod tests {
             deadline_time: None,
             recurrence: None,
             parent_id: None,
+            section_id: None,
             color_label: None,
             reminders: Vec::new(),
             sound: None,
@@ -1406,6 +1411,7 @@ mod tests {
             deadline_time: None,
             recurrence: None,
             parent_id: None,
+            section_id: None,
             color_label: None,
             reminders: Vec::new(),
             sound: None,

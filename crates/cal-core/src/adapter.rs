@@ -14,7 +14,7 @@ use crate::error::{Error, Result};
 use crate::reminder::SoundConfig;
 use crate::types::{
     Calendar, Contact, ContactList, ContactPhoto, DateRange, Event, FreeBusy, NewContact, NewEvent,
-    NewTask, Task, TaskList,
+    NewTask, Section, Task, TaskList,
 };
 
 /// Stable identifier for the adapter source (e.g. "google", "caldav",
@@ -120,6 +120,15 @@ pub trait TasksFeature: Adapter {
     async fn create_task(&self, list_id: &str, task: NewTask) -> Result<Task>;
     async fn update_task(&self, task: Task) -> Result<Task>;
     async fn delete_task(&self, task_id: &str) -> Result<()>;
+
+    /// Enumerate the sections (Vikunja buckets / Todoist sections) of a
+    /// single list. Backends without the concept inherit the default
+    /// empty list; adapters that model sections (Vikunja, Todoist)
+    /// override it. Mirrors the default-`Ok(empty)` shape of the other
+    /// optional feature methods.
+    async fn list_sections(&self, _list_id: &str) -> Result<Vec<Section>> {
+        Ok(vec![])
+    }
 
     /// Rename a task list at the source — same semantics as
     /// `CalendarFeature::rename_calendar`: writable adapters override

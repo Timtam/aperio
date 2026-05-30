@@ -649,6 +649,7 @@ pub fn map_task_list(entry: TodoListEntry) -> TaskList {
         // To Do task lists are independent — no embedded-in-calendar
         // semantics like CalDAV's VTODO-in-VCALENDAR pattern.
         embedded_in_calendar: None,
+        parent_id: None,
         read_only: !entry.is_owner.unwrap_or(true),
     }
 }
@@ -797,6 +798,7 @@ pub fn map_task(entry: TodoTaskEntry, list_id: &str) -> GraphResult<Task> {
         deadline_time,
         recurrence,
         parent_id: None,
+        section_id: None,
         color_label: None,
         reminders,
         sound: None,
@@ -1490,6 +1492,7 @@ mod tests {
             deadline_time: None,
             recurrence: None,
             parent_id: None,
+            section_id: None,
             color_label: None,
             reminders: Vec::new(),
             sound: None,
@@ -1530,6 +1533,7 @@ mod tests {
                 end: Some(RecurrenceEnd::After { occurrences: 6 }),
             }),
             parent_id: None,
+            section_id: None,
             color_label: None,
             reminders: Vec::new(),
             sound: None,
