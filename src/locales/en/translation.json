@@ -819,6 +819,8 @@
       "listRequired": "Please pick a list.",
       "pickList": "Pick a list …",
       "subtaskListLocked": "Subtasks live in the same list as their parent. Move the parent task to relocate the whole family.",
+      "listMoveLocked": "This source can't move tasks between lists. Use Move / Copy to put a copy in another list instead.",
+      "noSection": "No section",
       "delete": "Delete",
       "created": "Task \"{{title}}\" created.",
       "updated": "Task \"{{title}}\" updated.",
@@ -826,6 +828,7 @@
       "fields": {
         "title": "Title",
         "list": "List",
+        "section": "Section",
         "status": "Status",
         "priority": "Priority",
         "scheduled": {

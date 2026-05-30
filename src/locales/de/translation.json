@@ -819,6 +819,8 @@
       "listRequired": "Bitte wähle eine Liste.",
       "pickList": "Liste wählen …",
       "subtaskListLocked": "Unteraufgaben leben in derselben Liste wie ihre Elternaufgabe. Verschiebe die Elternaufgabe, um die ganze Familie umzuziehen.",
+      "listMoveLocked": "Diese Quelle kann Aufgaben nicht zwischen Listen verschieben. Lege stattdessen über Verschieben / Kopieren eine Kopie in einer anderen Liste an.",
+      "noSection": "Kein Abschnitt",
       "delete": "Löschen",
       "created": "Aufgabe „{{title}}\" wurde angelegt.",
       "updated": "Aufgabe „{{title}}\" wurde aktualisiert.",
@@ -826,6 +828,7 @@
       "fields": {
         "title": "Titel",
         "list": "Liste",
+        "section": "Abschnitt",
         "status": "Status",
         "priority": "Priorität",
         "scheduled": {

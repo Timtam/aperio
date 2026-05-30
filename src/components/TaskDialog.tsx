@@ -23,6 +23,7 @@ import { todayIsoKey } from '../intl/taskDay';
 import { statusI18nKey, statusMarker } from '../intl/taskStatus';
 import type { Reminder, Task, TaskPriority, TaskStatus } from '../api/types';
 import { useCalendarStore } from '../state/CalendarStore';
+import { canAssignSection, canMoveTaskBetweenLists } from '../state/taskMoves';
 import { useDialogState } from '../state/DialogState';
 import {
   planAncestorRecompute,
@@ -64,6 +65,9 @@ export interface TaskDialogProps {
 interface FormState {
   title: string;
   listId: string;
+  /** Section id within `listId`, or '' for ungrouped. Only meaningful
+   *  when the list's adapter declares the `sections` capability. */
+  sectionId: string;
   status: TaskStatus;
   priority: TaskPriority;
   // Two independent date+time slots — replacing the old `deadlineMode`
@@ -91,7 +95,8 @@ export function TaskDialog({
 }: TaskDialogProps) {
   const { t } = useTranslation();
   const announce = useAnnouncer();
-  const { taskLists, colorLabels } = useCalendarStore();
+  const { taskLists, colorLabels, sectionsByList, loadSections } =
+    useCalendarStore();
   const { tasks } = useTasks();
   const { invalidateData } = useDialogState();
   // Shared status actions — they own the parent/subtask cascade
@@ -111,6 +116,8 @@ export function TaskDialog({
   // also drives the cascade decision on save below.
   const isSubtask = task !== null && task.parent_id !== null;
   const subtaskHintId = useId();
+  const moveLockHintId = useId();
+  const sectionFieldId = useId();
 
   // Subtasks: children of the task currently being edited. Only
   // meaningful in edit mode — a brand-new task has no id yet, so
@@ -166,6 +173,41 @@ export function TaskDialog({
       setError(null);
     }
   }, [isOpen, initialState]);
+
+  // Section assignment (TASKS-11): the list the form currently targets
+  // drives which sections are offered and whether the picker shows at
+  // all. Cross-list moves are gated on the *source* list's
+  // move_between_projects (Todoist locks it).
+  const listForSections = taskLists.find((l) => l.id === form.listId);
+  const sourceList = task
+    ? taskLists.find((l) => l.id === task.list_id)
+    : undefined;
+  const sectionsEnabled = canAssignSection(listForSections);
+  const canMoveLists = canMoveTaskBetweenLists(sourceList);
+  // Lock the list picker when editing a task whose source adapter
+  // can't reparent tasks (Todoist). Creation is unaffected — you can
+  // always pick the list for a brand-new task.
+  const moveLocked = isEdit && !canMoveLists;
+  const sectionsForList = sectionsByList[form.listId] ?? [];
+
+  // Pull the target list's sections when the picker is relevant.
+  useEffect(() => {
+    if (isOpen && sectionsEnabled && !(form.listId in sectionsByList)) {
+      void loadSections(form.listId);
+    }
+  }, [isOpen, sectionsEnabled, form.listId, sectionsByList, loadSections]);
+
+  // If the chosen section no longer belongs to the selected list (the
+  // user switched lists), drop it back to ungrouped.
+  useEffect(() => {
+    if (
+      form.sectionId &&
+      form.listId in sectionsByList &&
+      !sectionsForList.some((s) => s.id === form.sectionId)
+    ) {
+      setForm((prev) => ({ ...prev, sectionId: '' }));
+    }
+  }, [form.sectionId, form.listId, sectionsByList, sectionsForList]);
 
   const update = useCallback(
     <K extends keyof FormState>(key: K, value: FormState[K]) => {
@@ -419,6 +461,10 @@ export function TaskDialog({
             ...task,
             title: trimmedTitle,
             list_id: form.listId,
+            // A cross-list move can't keep the old list's section, so
+            // clear it; an in-place edit takes the picker's value.
+            section_id:
+              form.listId !== task.list_id ? null : form.sectionId || null,
             status: form.status,
             priority: form.priority,
             scheduled_date,
@@ -503,8 +549,7 @@ export function TaskDialog({
             deadline_time,
             recurrence: recurrenceToBackend(form.recurrence),
             parent_id: null,
-            // Section assignment UI lands in TASKS-10; create ungrouped.
-            section_id: null,
+            section_id: form.sectionId || null,
             color_label: form.colorLabel,
             reminders: form.reminders,
             sound: null,
@@ -597,8 +642,17 @@ export function TaskDialog({
             // unit. The "move/copy with parent" path is the only
             // way to relocate a subtask; the disabled dropdown is
             // accompanied by a hint below so the rule is visible.
-            disabled={isSubtask}
-            aria-describedby={isSubtask ? subtaskHintId : undefined}
+            // The picker is also locked when editing a task whose
+            // source adapter can't move tasks between projects
+            // (Todoist) — see canMoveTaskBetweenLists.
+            disabled={isSubtask || moveLocked}
+            aria-describedby={
+              isSubtask
+                ? subtaskHintId
+                : moveLocked
+                  ? moveLockHintId
+                  : undefined
+            }
           >
             <option value="" disabled>
               {t('dialogs.task.pickList')}
@@ -614,7 +668,32 @@ export function TaskDialog({
               {t('dialogs.task.subtaskListLocked')}
             </p>
           )}
+          {!isSubtask && moveLocked && (
+            <p id={moveLockHintId} className="form__hint">
+              {t('dialogs.task.listMoveLocked')}
+            </p>
+          )}
         </label>
+
+        {sectionsEnabled && (
+          <label className="form__field" htmlFor={sectionFieldId}>
+            <span className="form__label">
+              {t('dialogs.task.fields.section')}
+            </span>
+            <select
+              id={sectionFieldId}
+              value={form.sectionId}
+              onChange={(e) => update('sectionId', e.target.value)}
+            >
+              <option value="">{t('dialogs.task.noSection')}</option>
+              {sectionsForList.map((section) => (
+                <option key={section.id} value={section.id}>
+                  {section.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
 
         <div className="form__row">
           <label className="form__field">
@@ -962,6 +1041,7 @@ function buildInitialState(
     return {
       title: task.title,
       listId: task.list_id,
+      sectionId: task.section_id ?? '',
       status: task.status,
       priority: task.priority,
       scheduledDate: task.scheduled_date ?? '',
@@ -995,6 +1075,7 @@ function buildInitialState(
   return {
     title: '',
     listId: fallbackList,
+    sectionId: '',
     status: 'open',
     priority: 'medium',
     scheduledDate: anchored,
