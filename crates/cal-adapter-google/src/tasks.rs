@@ -173,6 +173,26 @@ pub async fn rename_task_list(state: &ApiState, list_id: &str, new_name: &str) -
     Ok(())
 }
 
+/// `POST /users/@me/lists` with `{ "title": "..." }` — create a task
+/// list. Google Tasks lists are flat, so `parent_id` is ignored.
+pub async fn create_task_list(
+    state: &ApiState,
+    name: &str,
+    _parent_id: Option<&str>,
+) -> GoogleResult<TaskList> {
+    let url = format!("{TASKS_API_BASE}/users/@me/lists");
+    let body = serde_json::json!({ "title": name });
+    let entry: TaskListEntry = post_absolute(state, &url, &body).await?;
+    Ok(map_task_list(entry))
+}
+
+/// `DELETE /users/@me/lists/{tasklistId}`.
+pub async fn delete_task_list(state: &ApiState, list_id: &str) -> GoogleResult<()> {
+    let list_enc = urlencoding(list_id);
+    let url = format!("{TASKS_API_BASE}/users/@me/lists/{list_enc}");
+    delete_absolute(state, &url).await
+}
+
 // (HTTP helpers moved to api.rs — `get_absolute` / `post_absolute`
 // / `patch_absolute` / `delete_absolute` are shared with the
 // People API client in `contacts.rs`.)

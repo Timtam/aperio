@@ -18,7 +18,7 @@ use crate::error::{GraphError, GraphResult};
 use crate::mapping::{
     event_to_body, map_calendar, map_event, map_task, map_task_list, new_event_to_body,
     new_task_to_body, split_task_id, task_to_body, CalendarListResponse, EventEntry,
-    EventListResponse, TodoListResponse, TodoTaskEntry, TodoTaskResponse,
+    EventListResponse, TodoListEntry, TodoListResponse, TodoTaskEntry, TodoTaskResponse,
 };
 
 pub const API_BASE: &str = "https://graph.microsoft.com/v1.0";
@@ -404,6 +404,25 @@ pub async fn rename_task_list(state: &ApiState, list_id: &str, new_name: &str) -
     Ok(())
 }
 
+/// `POST /me/todo/lists` with `{ "displayName": "..." }` — create a To
+/// Do list. To Do lists are flat, so `parent_id` is ignored.
+pub async fn create_task_list(
+    state: &ApiState,
+    name: &str,
+    _parent_id: Option<&str>,
+) -> GraphResult<TaskList> {
+    let body = serde_json::json!({ "displayName": name });
+    let entry: TodoListEntry = state.post_json("/me/todo/lists", &body).await?;
+    Ok(map_task_list(entry))
+}
+
+/// `DELETE /me/todo/lists/{id}`.
+pub async fn delete_task_list(state: &ApiState, list_id: &str) -> GraphResult<()> {
+    let list_enc = urlencoding(list_id);
+    let path = format!("/me/todo/lists/{list_enc}");
+    state.delete_request(&path).await
+}
+
 fn urlencoding(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
@@ -678,5 +697,36 @@ mod tests {
             .await;
         let state = fixture_state(&server.url());
         rename_task_list(&state, "LIST-A", "Renamed").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn create_task_list_posts_display_name_and_maps_it() {
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock("POST", "/me/todo/lists")
+            .match_body(mockito::Matcher::PartialJson(serde_json::json!({
+                "displayName": "Groceries"
+            })))
+            .with_status(201)
+            .with_body(r#"{"id":"LIST-NEW","displayName":"Groceries"}"#)
+            .create_async()
+            .await;
+        let state = fixture_state(&server.url());
+        let list = create_task_list(&state, "Groceries", None).await.unwrap();
+        assert_eq!(list.id, "LIST-NEW");
+        assert_eq!(list.name, "Groceries");
+    }
+
+    #[tokio::test]
+    async fn delete_task_list_hits_delete_endpoint() {
+        let mut server = mockito::Server::new_async().await;
+        let m = server
+            .mock("DELETE", "/me/todo/lists/LIST-A")
+            .with_status(204)
+            .create_async()
+            .await;
+        let state = fixture_state(&server.url());
+        delete_task_list(&state, "LIST-A").await.unwrap();
+        m.assert_async().await;
     }
 }

@@ -305,6 +305,42 @@ unsafe extern "C" fn ffi_rename_task_list(
     })
 }
 
+#[derive(Debug, Deserialize)]
+struct CreateTaskListArgs {
+    name: String,
+    parent_id: Option<String>,
+}
+
+unsafe extern "C" fn ffi_create_task_list(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let args: CreateTaskListArgs = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch(h, move |p| async move {
+        p.create_task_list(&args.name, args.parent_id.as_deref())
+            .await
+    })
+}
+
+unsafe extern "C" fn ffi_delete_task_list(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let list_id: String = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch_unit(
+        h,
+        move |p| async move { p.delete_task_list(&list_id).await },
+    )
+}
+
 // ── ContactsFeature ────────────────────────────────────────
 
 unsafe extern "C" fn ffi_list_contact_lists(
@@ -485,6 +521,8 @@ pub static TASKS_VTABLE: TasksVtable = TasksVtable {
     update_task: Some(ffi_update_task),
     delete_task: Some(ffi_delete_task),
     rename_task_list: Some(ffi_rename_task_list),
+    create_task_list: Some(ffi_create_task_list),
+    delete_task_list: Some(ffi_delete_task_list),
     ..TasksVtable::empty()
 };
 

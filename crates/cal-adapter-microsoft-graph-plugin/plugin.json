@@ -11,6 +11,8 @@
   "signed": false,
   "tasks": {
     "subtasks": true,
-    "max_subtask_depth": 1
+    "max_subtask_depth": 1,
+    "create_lists": true,
+    "delete_lists": true
   }
 }

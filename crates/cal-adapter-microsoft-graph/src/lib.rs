@@ -307,6 +307,22 @@ impl TasksFeature for MicrosoftGraphAdapter {
         *self.task_lists_cache.lock().await = None;
         Ok(())
     }
+
+    async fn create_task_list(&self, name: &str, parent_id: Option<&str>) -> CoreResult<TaskList> {
+        let created = api::create_task_list(&self.state, name, parent_id)
+            .await
+            .map_err(to_core_error)?;
+        *self.task_lists_cache.lock().await = None;
+        Ok(created)
+    }
+
+    async fn delete_task_list(&self, list_id: &str) -> CoreResult<()> {
+        api::delete_task_list(&self.state, list_id)
+            .await
+            .map_err(to_core_error)?;
+        *self.task_lists_cache.lock().await = None;
+        Ok(())
+    }
 }
 
 #[async_trait]
