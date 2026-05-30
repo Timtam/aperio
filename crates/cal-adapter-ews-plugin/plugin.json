@@ -13,6 +13,8 @@
     "interval_frequencies": ["daily", "weekly", "monthly"]
   },
   "tasks": {
-    "subtasks": false
+    "subtasks": false,
+    "create_lists": true,
+    "delete_lists": true
   }
 }

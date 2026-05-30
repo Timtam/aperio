@@ -554,6 +554,30 @@ impl TasksFeature for CaldavAdapter {
         self.invalidate_listing_caches();
         Ok(())
     }
+
+    async fn create_task_list(&self, name: &str, _parent_id: Option<&str>) -> CoreResult<TaskList> {
+        let discovery = self.discover().await.map_err(to_core_error)?;
+        let created = tasks::create_task_list(
+            &self.http,
+            &discovery.calendar_home_url,
+            name,
+            &self.credentials,
+        )
+        .await
+        .map_err(to_core_error)?;
+        self.invalidate_listing_caches();
+        Ok(created)
+    }
+
+    async fn delete_task_list(&self, list_id: &str) -> CoreResult<()> {
+        let url = Url::parse(list_id)
+            .map_err(|e| CoreError::InvalidInput(format!("task list id is not a URL: {e}")))?;
+        tasks::delete_task_list(&self.http, &url, &self.credentials)
+            .await
+            .map_err(to_core_error)?;
+        self.invalidate_listing_caches();
+        Ok(())
+    }
 }
 
 #[async_trait]

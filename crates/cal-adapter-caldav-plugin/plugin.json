@@ -10,6 +10,8 @@
   "description": "Bundled CalDAV + CardDAV adapter — Nextcloud, iCloud, Fastmail, Radicale, Baikal and other generic CalDAV/CardDAV servers.",
   "signed": false,
   "tasks": {
-    "subtasks": true
+    "subtasks": true,
+    "create_lists": true,
+    "delete_lists": true
   }
 }
