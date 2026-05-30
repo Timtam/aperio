@@ -132,6 +132,28 @@ unsafe extern "C" fn ffi_get_events(h: *mut c_void, a: *const u8, l: usize) -> P
 }
 
 #[derive(Debug, Deserialize)]
+struct GetEventsDeltaArgs {
+    calendar_id: String,
+    range: DateRange,
+    since_token: Option<String>,
+}
+
+unsafe extern "C" fn ffi_get_events_delta(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let args: GetEventsDeltaArgs = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch(h, move |p| async move {
+        p.get_events_delta(&args.calendar_id, args.range, args.since_token.as_deref())
+            .await
+    })
+}
+
+#[derive(Debug, Deserialize)]
 struct CreateEventArgs {
     calendar_id: String,
     event: NewEvent,
@@ -511,6 +533,7 @@ pub static CALENDAR_VTABLE: CalendarVtable = CalendarVtable {
     calendar_color: Some(ffi_calendar_color),
     add_event_exdate: Some(ffi_add_event_exdate),
     rename_calendar: Some(ffi_rename_calendar),
+    get_events_delta: Some(ffi_get_events_delta),
     ..CalendarVtable::empty()
 };
 

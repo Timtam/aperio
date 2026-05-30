@@ -210,6 +210,27 @@ impl CacheStore {
     ) -> DbResult<()> {
         let now = now_ts();
         self.db.with_tx(|tx| {
+            // Clear the native group of every incoming change BEFORE
+            // upserting. An updated provider resource keeps its native id
+            // but can mint a different composite cal-core id — EWS rotates
+            // the ChangeKey embedded in the id on every edit — so a plain
+            // upsert-by-id would leave the stale pre-update row behind as a
+            // duplicate. Purging the whole native group first also drops
+            // occurrence overrides a recurring master no longer carries
+            // (their cal-core id is derived from the master's native id, so
+            // they share the group). The fresh `changes` for that resource
+            // — master plus its current overrides — are re-inserted below.
+            let mut purged: std::collections::HashSet<&str> = std::collections::HashSet::new();
+            for ev in &delta.changes {
+                let native = native_id(&ev.id);
+                if purged.insert(native) {
+                    tx.execute(
+                        "DELETE FROM cache_events
+                         WHERE account_id = ?1 AND calendar_id = ?2 AND native_id = ?3",
+                        params![account, calendar, native],
+                    )?;
+                }
+            }
             for ev in &delta.changes {
                 insert_event(tx, account, calendar, ev, &now)?;
             }

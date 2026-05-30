@@ -43,7 +43,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use cal_core::{
-    Adapter, AuthToken, Calendar, CalendarFeature, Capability, Contact, ContactList,
+    Adapter, AuthToken, Calendar, CalendarFeature, Capability, ChangeSet, Contact, ContactList,
     ContactsFeature, ContainerColor, Credentials as CoreCredentials, DateRange, Error as CoreError,
     Event, FreeBusy, NewContact, NewEvent, NewTask, Result as CoreResult, Task, TaskList,
     TasksFeature,
@@ -52,7 +52,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
 use crate::api::SyncedFolderState;
-use crate::mapping::to_event;
+use crate::mapping::{to_event, ParsedItem};
 
 pub use auth::BasicCredentials;
 pub use autodiscover::{discover, discover_client, DiscoveredEndpoints};
@@ -418,26 +418,25 @@ impl EwsAdapter {
         let mut masters_emitted = 0usize;
         let mut singles_emitted = 0usize;
         let mut out: Vec<Event> = Vec::with_capacity(updated.items.len());
-        for (_, item) in updated.items.iter() {
-            // Skip Occurrence rows that might have leaked in via
-            // older protocol responses — `SyncFolderItems` on a
-            // calendar folder shouldn't emit them, but a defensive
-            // filter keeps the read path honest.
-            if item
-                .item_type
-                .as_deref()
-                .map(|t| t.eq_ignore_ascii_case("Occurrence"))
-                .unwrap_or(false)
-            {
-                skipped_occurrence += 1;
-                continue;
-            }
-            // Translate. On the rare per-item failure
-            // (RelativeMonthly etc.) log and drop the row rather
-            // than failing the whole refresh.
-            let ev = match to_event(item.clone(), calendar_id) {
-                Ok(ev) => ev,
+        for item in updated.items.values() {
+            let before = out.len();
+            match emit_item_events(item, calendar_id, range, &mut out) {
+                // `out.len() - before - 1` is the count of synthetic
+                // override events pushed ahead of the base event.
+                Ok(ItemEmit::Master) => {
+                    masters_emitted += 1;
+                    overrides_emitted += out.len() - before - 1;
+                }
+                Ok(ItemEmit::Single) => {
+                    singles_emitted += 1;
+                    overrides_emitted += out.len() - before - 1;
+                }
+                Ok(ItemEmit::SkippedOccurrence) => skipped_occurrence += 1,
+                Ok(ItemEmit::SkippedOutOfRange) => filtered_out_of_range += 1,
                 Err(err) => {
+                    // Per-item failure (an unsupported recurrence shape, a
+                    // missing Start/End): log and drop the row rather than
+                    // failing the whole refresh.
                     translate_failures += 1;
                     tracing::warn!(
                         target: "cal_adapter_ews::sync",
@@ -445,50 +444,8 @@ impl EwsAdapter {
                         ?err,
                         "skipping item: could not translate to cal-core Event",
                     );
-                    continue;
-                }
-            };
-            // Range filter applies to singles only. Masters carry
-            // a recurrence and the frontend expander handles the
-            // window.
-            if ev.recurrence.is_none() && (ev.end < range.start || ev.start >= range.end) {
-                filtered_out_of_range += 1;
-                continue;
-            }
-            // For each modified occurrence on a master, emit a
-            // synthetic standalone event at the moved time. The
-            // master's EXDATE list (built in `to_event`) already
-            // skips the original slot — without this emit the
-            // user would see the override-time slot empty.
-            //
-            // Content (title, body, location, reminders) inherits
-            // from the master. Outlook lets the user edit those
-            // fields per-occurrence; capturing them would require
-            // a per-override GetItem fan-out, deferred. Time
-            // changes (the most common kind of override) render
-            // correctly with the inherited content.
-            if !item.modified_occurrences.is_empty() {
-                for ov in &item.modified_occurrences {
-                    if ov.end < range.start || ov.start >= range.end {
-                        continue;
-                    }
-                    let mut override_ev = ev.clone();
-                    override_ev.id =
-                        format!("{}#override:{}", ev.id, ov.original_start.to_rfc3339(),);
-                    override_ev.recurrence = None;
-                    override_ev.start = ov.start;
-                    override_ev.end = ov.end;
-                    override_ev.etag = ov.change_key.clone();
-                    overrides_emitted += 1;
-                    out.push(override_ev);
                 }
             }
-            if ev.recurrence.is_some() {
-                masters_emitted += 1;
-            } else {
-                singles_emitted += 1;
-            }
-            out.push(ev);
         }
 
         tracing::info!(
@@ -517,6 +474,189 @@ impl EwsAdapter {
         };
         self.persist_events_sync(&snapshot).await;
         Ok(out)
+    }
+
+    /// Incremental sibling of [`refresh_and_read_events`] backing
+    /// [`CalendarFeature::get_events_delta`]. Drives one `SyncFolderItems`
+    /// delta, persists the merged per-folder state, and hands the host a
+    /// `ChangeSet` to fold into its snapshot cache.
+    ///
+    /// The host replaces wholesale whenever it has no prior token OR we
+    /// flag `full_resync`; in both cases `changes` must be the COMPLETE
+    /// in-range set. We declare a full resync when our own per-folder
+    /// state had no cookie (cold), when the host passed no `since_token`,
+    /// or when the server invalidated the cookie and we re-drained from
+    /// scratch. Otherwise the result is purely incremental: changed items
+    /// translated (masters keep their RRULE plus synthetic in-range
+    /// overrides) and the deleted EWS ItemIds verbatim — those are the
+    /// provider-native ids the host removes by `native_id`, which fans a
+    /// master's deletion out to its cached occurrence overrides.
+    async fn refresh_events_delta(
+        &self,
+        calendar_id: &str,
+        range: DateRange,
+        since_token: Option<&str>,
+    ) -> EwsResult<ChangeSet<Event>> {
+        let prior = {
+            let mut guard = self.events_sync.lock().await;
+            guard.remove(calendar_id).unwrap_or_default()
+        };
+        // A cold per-folder state can't produce a real delta — and the
+        // host treats a token-less round as a wholesale replace — so both
+        // force the full in-range set into `changes`.
+        let mut force_full = prior.sync_state.is_none() || since_token.is_none();
+        let (updated, changed_ids, deleted_ids) =
+            match api::sync_events_delta(&self.client, calendar_id, prior).await {
+                Ok(t) => t,
+                Err(err) if is_sync_state_invalid(&err) => {
+                    tracing::warn!(
+                        target: "cal_adapter_ews::sync",
+                        calendar = %calendar_id,
+                        "SyncFolderItems cookie invalid; doing a full re-sync",
+                    );
+                    // A from-scratch re-drain returns the whole folder;
+                    // flag a full resync so the host wipes rows that
+                    // vanished while the cookie was stale instead of
+                    // merging a partial set.
+                    force_full = true;
+                    api::sync_events_delta(&self.client, calendar_id, SyncedFolderState::default())
+                        .await?
+                }
+                Err(err) => return Err(err),
+            };
+
+        let change_set = if force_full {
+            let mut changes = Vec::with_capacity(updated.items.len());
+            for item in updated.items.values() {
+                emit_into(item, calendar_id, range, &mut changes);
+            }
+            ChangeSet {
+                changes,
+                deletions: Vec::new(),
+                new_token: updated.sync_state.clone(),
+                full_resync: true,
+            }
+        } else {
+            let mut changes = Vec::new();
+            for id in &changed_ids {
+                if let Some(item) = updated.items.get(id) {
+                    emit_into(item, calendar_id, range, &mut changes);
+                }
+            }
+            ChangeSet {
+                changes,
+                deletions: deleted_ids,
+                new_token: updated.sync_state.clone(),
+                full_resync: false,
+            }
+        };
+
+        // Persist the merged state for the next round (mirrors
+        // refresh_and_read_events: clone the map, then write off-lock).
+        let snapshot = {
+            let mut guard = self.events_sync.lock().await;
+            guard.insert(calendar_id.to_string(), updated);
+            guard.clone()
+        };
+        self.persist_events_sync(&snapshot).await;
+
+        tracing::info!(
+            target: "cal_adapter_ews::sync",
+            calendar = %calendar_id,
+            full_resync = change_set.full_resync,
+            changes = change_set.changes.len(),
+            deletions = change_set.deletions.len(),
+            "EWS get_events_delta: drain → ChangeSet",
+        );
+        Ok(change_set)
+    }
+}
+
+/// Outcome of translating one cached item, reported back so the full
+/// read path can keep its diagnostic counters.
+enum ItemEmit {
+    /// A recurring master was emitted (plus any in-range overrides).
+    Master,
+    /// A single event was emitted.
+    Single,
+    /// A defensive-filtered `Occurrence` row — nothing emitted.
+    SkippedOccurrence,
+    /// A single event whose slot fell entirely outside `range`.
+    SkippedOutOfRange,
+}
+
+/// Translate one cached [`ParsedItem`] into cal-core events, pushing them
+/// onto `out`, and report what happened.
+///
+/// Shared by the full read ([`EwsAdapter::refresh_and_read_events`]) and
+/// the incremental delta ([`EwsAdapter::refresh_events_delta`]) so both
+/// surface series identically. Emission rules:
+///   - `Occurrence`-typed rows are dropped defensively — `SyncFolderItems`
+///     on a calendar folder shouldn't surface them.
+///   - Recurring masters always pass (the frontend expander handles the
+///     visible window), and each in-range [`ModifiedOccurrence`] is emitted
+///     as a synthetic standalone event at the moved time, inheriting the
+///     master's content. The master's EXDATE list (built in `to_event`)
+///     already vacates the original slot, so the expander doesn't double-
+///     render. The synthetic id is derived from the master's, so it shares
+///     the master's `native_id` host-side and is purged together with it.
+///   - Single events pass only when they overlap `range`.
+///
+/// [`ModifiedOccurrence`]: crate::mapping::ModifiedOccurrence
+fn emit_item_events(
+    item: &ParsedItem,
+    calendar_id: &str,
+    range: DateRange,
+    out: &mut Vec<Event>,
+) -> EwsResult<ItemEmit> {
+    if item
+        .item_type
+        .as_deref()
+        .map(|t| t.eq_ignore_ascii_case("Occurrence"))
+        .unwrap_or(false)
+    {
+        return Ok(ItemEmit::SkippedOccurrence);
+    }
+    let ev = to_event(item.clone(), calendar_id)?;
+    // Range filter applies to singles only; masters carry a recurrence and
+    // the frontend expander handles the window.
+    if ev.recurrence.is_none() && (ev.end < range.start || ev.start >= range.end) {
+        return Ok(ItemEmit::SkippedOutOfRange);
+    }
+    if !item.modified_occurrences.is_empty() {
+        for ov in &item.modified_occurrences {
+            if ov.end < range.start || ov.start >= range.end {
+                continue;
+            }
+            let mut override_ev = ev.clone();
+            override_ev.id = format!("{}#override:{}", ev.id, ov.original_start.to_rfc3339());
+            override_ev.recurrence = None;
+            override_ev.start = ov.start;
+            override_ev.end = ov.end;
+            override_ev.etag = ov.change_key.clone();
+            out.push(override_ev);
+        }
+    }
+    let outcome = if ev.recurrence.is_some() {
+        ItemEmit::Master
+    } else {
+        ItemEmit::Single
+    };
+    out.push(ev);
+    Ok(outcome)
+}
+
+/// `emit_item_events` for callers that don't track counters: a per-item
+/// translation failure is logged and the row dropped, never fatal to the
+/// surrounding drain.
+fn emit_into(item: &ParsedItem, calendar_id: &str, range: DateRange, out: &mut Vec<Event>) {
+    if let Err(err) = emit_item_events(item, calendar_id, range, out) {
+        tracing::warn!(
+            target: "cal_adapter_ews::sync",
+            item_id = %item.item_id,
+            ?err,
+            "delta: skipping item that could not translate to cal-core Event",
+        );
     }
 }
 
@@ -603,6 +743,38 @@ impl CalendarFeature for EwsAdapter {
                 calendar = %calendar_id,
                 ?err,
                 "EwsAdapter::get_events failed",
+            );
+        }
+        result.map_err(to_core_error)
+    }
+
+    /// Host-driven incremental read (CACHE-8). Backs the snapshot cache's
+    /// per-calendar delta refresh via the same `SyncFolderItems` cookie
+    /// the full read uses, so the host only re-pulls the rows Exchange
+    /// reports as touched. See [`EwsAdapter::refresh_events_delta`] for
+    /// the full-resync vs. incremental decision and the deletion/native-id
+    /// contract.
+    async fn get_events_delta(
+        &self,
+        calendar_id: &str,
+        range: DateRange,
+        since_token: Option<&str>,
+    ) -> CoreResult<ChangeSet<Event>> {
+        tracing::info!(
+            target: "cal_adapter_ews::sync",
+            calendar = %calendar_id,
+            has_token = since_token.is_some(),
+            "EwsAdapter::get_events_delta called",
+        );
+        let result = self
+            .refresh_events_delta(calendar_id, range, since_token)
+            .await;
+        if let Err(ref err) = result {
+            tracing::warn!(
+                target: "cal_adapter_ews::sync",
+                calendar = %calendar_id,
+                ?err,
+                "EwsAdapter::get_events_delta failed",
             );
         }
         result.map_err(to_core_error)
@@ -1003,5 +1175,180 @@ mod state_persistence_tests {
         );
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod delta_read_tests {
+    //! `get_events_delta` against a mocked `SyncFolderItems` server.
+    //!
+    //! Each drain is two POSTs — the SyncFolderItems page, then the
+    //! GetItem body/recurrence enrichment fan-out — and mockito serves
+    //! `.expect(1)` mocks in FIFO creation order, so we lay the four
+    //! POSTs of a cold-then-warm sequence out as four ordered mocks.
+    use super::*;
+    use mockito::Server;
+
+    fn creds() -> BasicCredentials {
+        BasicCredentials {
+            username: "alice".into(),
+            password: "pw".into(),
+        }
+    }
+
+    fn range() -> DateRange {
+        DateRange::new(
+            "2026-05-20T00:00:00Z".parse().unwrap(),
+            "2026-05-21T00:00:00Z".parse().unwrap(),
+        )
+    }
+
+    /// A SyncFolderItems page wrapping the supplied `<m:Changes>` body,
+    /// terminating the drain (`IncludesLastItemInRange=true`).
+    fn sync_page(cookie: &str, changes: &str) -> String {
+        format!(
+            r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:SyncFolderItemsResponse><m:ResponseMessages>
+    <m:SyncFolderItemsResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:SyncState>{cookie}</m:SyncState>
+      <m:IncludesLastItemInRange>true</m:IncludesLastItemInRange>
+      <m:Changes>{changes}</m:Changes>
+    </m:SyncFolderItemsResponseMessage>
+  </m:ResponseMessages></m:SyncFolderItemsResponse></s:Body>
+</s:Envelope>"#
+        )
+    }
+
+    /// A minimal GetItem enrichment response carrying just the ItemIds —
+    /// enough to flip `detail_fetched` without changing the base fields.
+    fn getitem_body(items: &str) -> String {
+        format!(
+            r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:Items>{items}</m:Items>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse></s:Body>
+</s:Envelope>"#
+        )
+    }
+
+    fn single_create(id: &str, ck: &str, subject: &str, start: &str, end: &str) -> String {
+        format!(
+            r#"<t:Create><t:CalendarItem>
+                 <t:ItemId Id="{id}" ChangeKey="{ck}"/>
+                 <t:Subject>{subject}</t:Subject>
+                 <t:Start>{start}</t:Start>
+                 <t:End>{end}</t:End>
+                 <t:CalendarItemType>Single</t:CalendarItemType>
+               </t:CalendarItem></t:Create>"#
+        )
+    }
+
+    #[tokio::test]
+    async fn cold_call_is_full_resync_then_warm_call_is_incremental() {
+        let mut server = Server::new_async().await;
+
+        // ── Cold drain: two creates, then enrichment of both. ──
+        let cold_changes = format!(
+            "{}{}",
+            single_create(
+                "A",
+                "CKA1",
+                "Alpha",
+                "2026-05-20T08:00:00Z",
+                "2026-05-20T09:00:00Z"
+            ),
+            single_create(
+                "B",
+                "CKB1",
+                "Bravo",
+                "2026-05-20T10:00:00Z",
+                "2026-05-20T11:00:00Z"
+            ),
+        );
+        let _cold_sync = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body(sync_page("COOKIE-1", &cold_changes))
+            .expect(1)
+            .create_async()
+            .await;
+        let _cold_enrich = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body(getitem_body(
+                r#"<t:CalendarItem><t:ItemId Id="A" ChangeKey="CKA1"/></t:CalendarItem>
+                   <t:CalendarItem><t:ItemId Id="B" ChangeKey="CKB1"/></t:CalendarItem>"#,
+            ))
+            .expect(1)
+            .create_async()
+            .await;
+
+        // ── Warm drain: update A (new ChangeKey), delete B, enrich A. ──
+        let warm_changes = format!(
+            r#"<t:Update><t:CalendarItem>
+                 <t:ItemId Id="A" ChangeKey="CKA2"/>
+                 <t:Subject>Alpha v2</t:Subject>
+                 <t:Start>2026-05-20T08:30:00Z</t:Start>
+                 <t:End>2026-05-20T09:30:00Z</t:End>
+                 <t:CalendarItemType>Single</t:CalendarItemType>
+               </t:CalendarItem></t:Update>
+               <t:Delete><t:ItemId Id="B"/></t:Delete>"#
+        );
+        let _warm_sync = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body(sync_page("COOKIE-2", &warm_changes))
+            .expect(1)
+            .create_async()
+            .await;
+        let _warm_enrich = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body(getitem_body(
+                r#"<t:CalendarItem><t:ItemId Id="A" ChangeKey="CKA2"/></t:CalendarItem>"#,
+            ))
+            .expect(1)
+            .create_async()
+            .await;
+
+        let adapter = EwsAdapter::new(server.url(), creds());
+
+        // Cold call: no token → full resync with the complete in-range set.
+        let cold = adapter
+            .get_events_delta("FA|FCK", range(), None)
+            .await
+            .unwrap();
+        assert!(cold.full_resync, "first (token-less) call is a full resync");
+        assert_eq!(cold.changes.len(), 2);
+        assert!(cold.deletions.is_empty());
+        assert_eq!(cold.new_token.as_deref(), Some("COOKIE-1"));
+        let mut ids: Vec<&str> = cold.changes.iter().map(|e| e.id.as_str()).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, ["S:A|CKA1", "S:B|CKB1"]);
+
+        // Warm call: prior cookie → incremental. Only A changed; B is a
+        // deletion carrying the raw native ItemId.
+        let warm = adapter
+            .get_events_delta("FA|FCK", range(), Some("COOKIE-1"))
+            .await
+            .unwrap();
+        assert!(!warm.full_resync, "warm call with a token is incremental");
+        assert_eq!(warm.changes.len(), 1);
+        assert_eq!(warm.changes[0].id, "S:A|CKA2");
+        assert_eq!(warm.changes[0].title, "Alpha v2");
+        // Deletion is the bare EWS ItemId — matches the cached row's
+        // native_id host-side.
+        assert_eq!(warm.deletions, vec!["B".to_string()]);
+        assert_eq!(warm.new_token.as_deref(), Some("COOKIE-2"));
     }
 }

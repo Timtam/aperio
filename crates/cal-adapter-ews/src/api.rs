@@ -186,8 +186,31 @@ const SYNC_BATCH_SIZE: u32 = 512;
 pub async fn sync_events_to_completion(
     client: &EwsClient,
     calendar_id: &str,
-    mut state: SyncedFolderState,
+    state: SyncedFolderState,
 ) -> EwsResult<SyncedFolderState> {
+    // Thin wrapper over `sync_events_delta`: the full-snapshot read path
+    // (`refresh_and_read_events`) only needs the merged state, not which
+    // ids moved. The delta read path calls `sync_events_delta` directly.
+    let (state, _changed, _deleted) = sync_events_delta(client, calendar_id, state).await?;
+    Ok(state)
+}
+
+/// Like [`sync_events_to_completion`], but additionally reports which
+/// item ids the drain touched: `changed` (Create/Update, still present
+/// once the drain settles) and `deleted` (Delete, confirmed gone). These
+/// drive the incremental cache merge in `EwsAdapter::get_events_delta` —
+/// `changed` ids translate into the `ChangeSet`'s events, `deleted` ids
+/// are the raw EWS ItemIds the host removes by native id.
+///
+/// Touched ids are reconciled across pages and against the final merged
+/// state: a Create/Update cancels a prior Delete of the same id (and
+/// vice-versa), so a server that recreates an id mid-drain reports it
+/// once, on the correct side.
+pub async fn sync_events_delta(
+    client: &EwsClient,
+    calendar_id: &str,
+    mut state: SyncedFolderState,
+) -> EwsResult<(SyncedFolderState, Vec<String>, Vec<String>)> {
     let (folder_id, change_key) = split_calendar_id(calendar_id);
     let cold_start = state.sync_state.is_none();
     let items_before = state.items.len();
@@ -204,6 +227,11 @@ pub async fn sync_events_to_completion(
                                                // Bound the loop in case a buggy server keeps reporting
                                                // includes_last=false. 64 pages × 512 items = 32 768 items per
                                                // refresh, well past any plausible calendar size.
+                                               // Ids touched this drain. A later Delete moves an id out of
+                                               // `changed` and into `deleted`; a later Create/Update moves it
+                                               // back. Final membership is reconciled against `state.items`.
+    let mut changed: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut deleted: std::collections::HashSet<String> = std::collections::HashSet::new();
     for _ in 0..64 {
         page += 1;
         let body = sync_folder_items(
@@ -243,6 +271,8 @@ pub async fn sync_events_to_completion(
                         item.deleted_occurrence_starts.len(),
                     );
                     c += 1;
+                    deleted.remove(&item.item_id);
+                    changed.insert(item.item_id.clone());
                     state.items.insert(item.item_id.clone(), item);
                 }
                 SyncChange::Update(item) => {
@@ -255,11 +285,15 @@ pub async fn sync_events_to_completion(
                         item.recurrence.is_some(),
                     );
                     u += 1;
+                    deleted.remove(&item.item_id);
+                    changed.insert(item.item_id.clone());
                     state.items.insert(item.item_id.clone(), item);
                 }
                 SyncChange::Delete(id) => {
                     eprintln!("[EWS] Delete item_id={}", id);
                     d += 1;
+                    changed.remove(&id);
+                    deleted.insert(id.clone());
                     state.items.remove(&id);
                 }
             }
@@ -298,7 +332,18 @@ pub async fn sync_events_to_completion(
             // populated state (and persists it with recurrence + body
             // already filled in, sparing the next boot the round-trip).
             enrich_item_details(client, &mut state).await?;
-            return Ok(state);
+            // Reconcile the touched-id sets against the merged truth:
+            // drop any changed id the state no longer holds, and any
+            // deleted id it somehow still does.
+            let changed_ids: Vec<String> = changed
+                .into_iter()
+                .filter(|id| state.items.contains_key(id))
+                .collect();
+            let deleted_ids: Vec<String> = deleted
+                .into_iter()
+                .filter(|id| !state.items.contains_key(id))
+                .collect();
+            return Ok((state, changed_ids, deleted_ids));
         }
     }
     Err(EwsError::Protocol(

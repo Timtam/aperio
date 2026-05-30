@@ -521,6 +521,92 @@ fn delta_deletes_by_native_id() {
 }
 
 #[test]
+fn delta_update_replaces_stale_change_key_row() {
+    let store = setup();
+    // An EWS-style single: native id "item-1", composite id carries ck-v1.
+    store
+        .replace_calendar_events(ACC, CAL, wide(), &[event("S:item-1|ck-v1", 8, 9)])
+        .unwrap();
+    assert_eq!(store.read_events(ACC, CAL, wide()).unwrap().len(), 1);
+
+    // The item is edited: same native ItemId, rotated ChangeKey ⇒ a NEW
+    // composite cal-core id arrives as a delta change (with no matching
+    // deletion, the way SyncFolderItems reports an Update).
+    store
+        .apply_events_delta(
+            ACC,
+            CAL,
+            &Delta {
+                changes: vec![event("S:item-1|ck-v2", 8, 10)],
+                deletions: Vec::new(),
+                new_token: Some("c2".into()),
+            },
+        )
+        .unwrap();
+
+    // Exactly one row survives — the pre-update ck-v1 copy was purged via
+    // its native id, not left behind as a duplicate.
+    let rows = store.read_events(ACC, CAL, wide()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, "S:item-1|ck-v2");
+    assert_eq!(
+        rows[0].end,
+        Utc.with_ymd_and_hms(2026, 5, 30, 10, 0, 0).unwrap()
+    );
+}
+
+#[test]
+fn delta_update_replaces_master_and_its_overrides() {
+    let store = setup();
+    // A recurring master plus a synthetic occurrence override. Both share
+    // native id "master-1" — the override's cal-core id is derived from
+    // the master's ItemId, so it strips down to the same native id.
+    store
+        .replace_calendar_events(
+            ACC,
+            CAL,
+            wide(),
+            &[
+                event("M:master-1|ck-v1", 8, 9),
+                event(
+                    "M:master-1|ck-v1#override:2026-05-30T08:00:00+00:00",
+                    10,
+                    11,
+                ),
+            ],
+        )
+        .unwrap();
+    assert_eq!(store.read_events(ACC, CAL, wide()).unwrap().len(), 2);
+
+    // The master is edited: ChangeKey rotates and its single override moves
+    // to a new slot. The delta carries the fresh master + its one current
+    // override (both ck-v2). The whole native group must be replaced — no
+    // ck-v1 leftovers from either row.
+    store
+        .apply_events_delta(
+            ACC,
+            CAL,
+            &Delta {
+                changes: vec![
+                    event("M:master-1|ck-v2", 8, 9),
+                    event(
+                        "M:master-1|ck-v2#override:2026-05-30T08:00:00+00:00",
+                        12,
+                        13,
+                    ),
+                ],
+                deletions: Vec::new(),
+                new_token: Some("c2".into()),
+            },
+        )
+        .unwrap();
+
+    let rows = store.read_events(ACC, CAL, wide()).unwrap();
+    assert_eq!(rows.len(), 2);
+    assert!(rows.iter().all(|e| e.id.contains("ck-v2")));
+}
+
+#[test]
 fn change_set_wire_defaults_and_roundtrip() {
     use cal_core::ChangeSet;
 
