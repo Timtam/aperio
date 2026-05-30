@@ -1,13 +1,17 @@
 //! Task list and task commands.
 
 use cal_adapter_local::LocalAdapter;
-use cal_core::{NewTask, Task, TaskList, TasksFeature};
+use cal_core::{NewTask, Section, Task, TaskList, TasksFeature};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use sync_core::{EventPayload, IdPayload, SyncEvent};
 use tauri::State;
 
+use plugin_core::{PluginManager, TaskCapabilities};
+
+use super::plugins::plugin_id_for_adapter_kind;
 use super::{CommandError, CommandResult};
+use crate::accounts::{AccountsRepo, AdapterKind};
 use crate::db::DbHandle;
 use crate::event_log::EventLogWriter;
 use crate::overrides::{apply_to_task_lists, OverridesRepo};
@@ -17,11 +21,43 @@ use crate::reminders::SchedulerHandle;
 /// Wire-format TaskList enriched with the owning account id. Same
 /// shape + rationale as `CalendarRow` — the frontend uses it to
 /// group containers by source for the account-aware sidebar.
+///
+/// `inner` is `serde(flatten)`ed, so `TaskList.parent_id` rides along
+/// at the top level for free — the nested-project tree in the sidebar
+/// reads it without a second round-trip.
 #[derive(Debug, Serialize)]
 pub struct TaskListRow {
     #[serde(flatten)]
     pub inner: TaskList,
     pub account_id: String,
+    /// Task-organisation shapes the owning adapter supports (nested
+    /// projects, sections, subtask depth, …), resolved from the
+    /// account's plugin manifest. The frontend gates affordances on
+    /// these — e.g. only shows "add section" where `sections` is true.
+    /// Local + unknown sources report [`TaskCapabilities::default`].
+    pub task_capabilities: TaskCapabilities,
+}
+
+/// Resolve an account's task capabilities from its plugin manifest.
+/// Mirrors `recurrence_caps_for_account` in `calendars.rs`: local
+/// lists (`account_id == LOCAL_ID`) and accounts whose plugin we
+/// can't resolve fall back to the permissive cal-core-native default.
+fn task_caps_for_account(
+    account_id: &str,
+    account_kinds: &std::collections::HashMap<String, AdapterKind>,
+    plugin_manager: &PluginManager,
+) -> TaskCapabilities {
+    let Some(kind) = account_kinds.get(account_id) else {
+        return TaskCapabilities::default();
+    };
+    let Some(plugin_id) = plugin_id_for_adapter_kind(*kind) else {
+        // Local has no plugin — default capabilities.
+        return TaskCapabilities::default();
+    };
+    plugin_manager
+        .get_including_disabled(plugin_id)
+        .map(|p| p.manifest.tasks.clone())
+        .unwrap_or_default()
 }
 
 #[derive(Debug, Deserialize)]
@@ -34,6 +70,7 @@ pub struct CreateTaskListRequest {
 pub async fn list_task_lists(
     adapter: State<'_, LocalAdapter>,
     registry: State<'_, Arc<AdapterRegistry>>,
+    plugin_manager: State<'_, Arc<PluginManager>>,
     db: State<'_, DbHandle>,
 ) -> CommandResult<Vec<TaskListRow>> {
     let local = adapter.list_task_lists().await?;
@@ -46,15 +83,31 @@ pub async fn list_task_lists(
     let shared = db.shared();
     let repo = OverridesRepo::new(&shared);
     apply_to_task_lists(&repo, &mut out);
+    // Snapshot account_id → adapter_kind once so the per-row caps
+    // lookup is a cheap map hit. Same permissive-on-failure default
+    // as the calendar path: a read failure degrades to "every account
+    // looks local" → full cal-core-native capabilities.
+    let account_kinds: std::collections::HashMap<String, AdapterKind> = AccountsRepo::new(&shared)
+        .list()
+        .map(|accounts| {
+            accounts
+                .into_iter()
+                .map(|a| (a.id, a.adapter_kind))
+                .collect()
+        })
+        .unwrap_or_default();
     Ok(out
         .into_iter()
         .map(|list| {
             let account_id = registry
                 .account_for_task_list(&list.id)
                 .unwrap_or_else(|| LOCAL_ID.to_string());
+            let task_capabilities =
+                task_caps_for_account(&account_id, &account_kinds, &plugin_manager);
             TaskListRow {
                 inner: list,
                 account_id,
+                task_capabilities,
             }
         })
         .collect())
@@ -76,6 +129,9 @@ pub async fn create_task_list(
     Ok(TaskListRow {
         inner: list,
         account_id: LOCAL_ID.to_string(),
+        // Freshly-created lists are always local, which has no plugin
+        // manifest — the cal-core-native default applies.
+        task_capabilities: TaskCapabilities::default(),
     })
 }
 
@@ -109,6 +165,32 @@ pub async fn get_tasks(
         });
     };
     Ok(ext.get_tasks(&list_id).await?)
+}
+
+/// List the sections (Vikunja buckets / Todoist sections) of one
+/// list. Routes by the list's owning account exactly like
+/// `get_tasks`: local lists hit the SQLite store, external lists hit
+/// the provider adapter. Section-less backends return an empty list
+/// via the `TasksFeature::list_sections` default.
+#[tauri::command]
+pub async fn get_sections(
+    adapter: State<'_, LocalAdapter>,
+    registry: State<'_, Arc<AdapterRegistry>>,
+    list_id: String,
+) -> CommandResult<Vec<Section>> {
+    let account = registry
+        .account_for_task_list(&list_id)
+        .unwrap_or_else(|| LOCAL_ID.to_string());
+    if account == LOCAL_ID {
+        return Ok(adapter.list_sections(&list_id).await?);
+    }
+    let Some(ext) = registry.task_adapter(&account) else {
+        return Err(CommandError {
+            code: "not_found",
+            message: format!("task list '{list_id}' is not routable"),
+        });
+    };
+    Ok(ext.list_sections(&list_id).await?)
 }
 
 #[derive(Debug, Deserialize)]
@@ -348,5 +430,67 @@ pub async fn delete_task(
         event_log.append(SyncEvent::TaskDeleted(IdPayload { id: id.clone() }));
     }
     scheduler.invalidate();
+    Ok(())
+}
+
+// ── Section commands ────────────────────────────────────────────────
+//
+// Sections are currently a local-store concept: the user creates and
+// reorders them on local lists, and they propagate cross-device via the
+// `section.*` event log. External-provider sections (Vikunja buckets,
+// Todoist sections) are read-only here — they surface through
+// `get_sections` but are managed in the provider's own UI, so these
+// mutation commands always target the local adapter.
+
+#[derive(Debug, Deserialize)]
+pub struct CreateSectionRequest {
+    pub list_id: String,
+    pub name: String,
+    /// Display order; defaults to 0 (the frontend appends with the
+    /// current section count to keep new sections at the bottom).
+    #[serde(default)]
+    pub position: u32,
+}
+
+#[tauri::command]
+pub async fn create_section(
+    adapter: State<'_, LocalAdapter>,
+    event_log: State<'_, Arc<EventLogWriter>>,
+    request: CreateSectionRequest,
+) -> CommandResult<Section> {
+    let section = adapter.create_section(&request.list_id, &request.name, request.position)?;
+    if let Ok(fields) = serde_json::to_value(&section) {
+        event_log.append(SyncEvent::SectionCreated(EventPayload {
+            id: section.id.clone(),
+            fields,
+        }));
+    }
+    Ok(section)
+}
+
+#[tauri::command]
+pub async fn update_section(
+    adapter: State<'_, LocalAdapter>,
+    event_log: State<'_, Arc<EventLogWriter>>,
+    section: Section,
+) -> CommandResult<Section> {
+    let updated = adapter.update_section(section)?;
+    if let Ok(fields) = serde_json::to_value(&updated) {
+        event_log.append(SyncEvent::SectionUpdated(EventPayload {
+            id: updated.id.clone(),
+            fields,
+        }));
+    }
+    Ok(updated)
+}
+
+#[tauri::command]
+pub async fn delete_section(
+    adapter: State<'_, LocalAdapter>,
+    event_log: State<'_, Arc<EventLogWriter>>,
+    id: String,
+) -> CommandResult<()> {
+    adapter.delete_section(&id)?;
+    event_log.append(SyncEvent::SectionDeleted(IdPayload { id: id.clone() }));
     Ok(())
 }
