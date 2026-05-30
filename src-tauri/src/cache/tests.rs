@@ -281,6 +281,37 @@ fn tasks_roundtrip_and_delta() {
 }
 
 #[test]
+fn delta_deletes_list_task_by_full_composite_id() {
+    let store = setup();
+    // Graph To Do-style ids: `{list}|{task}`. `native_id` derives to the
+    // list (everything before `|`), which is shared across the list's
+    // tasks — so a per-resource deletion can't match by native id and
+    // must carry the full composite id instead.
+    store
+        .replace_list_tasks(ACC, LIST, &[task("list-1|t1"), task("list-1|t2")])
+        .unwrap();
+    assert_eq!(store.read_tasks(ACC, LIST).unwrap().len(), 2);
+
+    store
+        .apply_tasks_delta(
+            ACC,
+            LIST,
+            &Delta {
+                changes: Vec::new(),
+                deletions: vec!["list-1|t1".into()],
+                new_token: Some("d2".into()),
+            },
+        )
+        .unwrap();
+
+    // Only t1 is gone — the shared native_id ("list-1") must NOT have
+    // taken t2 down with it.
+    let rows = store.read_tasks(ACC, LIST).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, "list-1|t2");
+}
+
+#[test]
 fn contacts_roundtrip_and_delta() {
     let store = setup();
     store

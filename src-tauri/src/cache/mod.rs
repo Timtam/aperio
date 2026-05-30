@@ -771,9 +771,16 @@ impl CacheStore {
                native_id = excluded.native_id,
                payload = excluded.payload, cached_at = excluded.cached_at"
         );
-        // Delta deletions carry the provider-native id (see `native_id`).
+        // A delta deletion matches either the provider-native id (CalDAV
+        // href, EWS ItemId — `native_id`) OR the full cal-core id. The
+        // latter covers composite ids whose `native_id` derives to the
+        // *container* rather than the resource: Graph To Do tasks are
+        // `{list}|{task}`, so `native_id` is the list and can't single out
+        // one task — the adapter emits the full `{list}|{task}` id, which
+        // matches the `id` column directly.
         let del = format!(
-            "DELETE FROM {table} WHERE account_id = ?1 AND list_id = ?2 AND native_id = ?3"
+            "DELETE FROM {table}
+             WHERE account_id = ?1 AND list_id = ?2 AND (native_id = ?3 OR id = ?3)"
         );
         self.db.with_tx(|tx| {
             for item in &delta.changes {

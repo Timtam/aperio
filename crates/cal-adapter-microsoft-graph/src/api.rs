@@ -18,8 +18,8 @@ use crate::error::{GraphError, GraphResult};
 use crate::mapping::{
     event_to_body, map_calendar, map_event, map_task, map_task_list, new_event_to_body,
     new_task_to_body, split_task_id, task_to_body, CalendarListResponse, EventDeltaResponse,
-    EventEntry, EventListResponse, TodoListEntry, TodoListResponse, TodoTaskEntry,
-    TodoTaskResponse,
+    EventEntry, EventListResponse, TodoListEntry, TodoListResponse, TodoTaskDeltaResponse,
+    TodoTaskEntry, TodoTaskResponse,
 };
 
 pub const API_BASE: &str = "https://graph.microsoft.com/v1.0";
@@ -472,6 +472,78 @@ pub async fn get_tasks(state: &ApiState, list_id: &str) -> GraphResult<Vec<Task>
     Ok(out)
 }
 
+/// Outcome of one `tasks/delta` round: created/updated tasks, the
+/// (composite) ids of removed tasks, and the `@odata.deltaLink` to pass
+/// back next time (stored opaquely by the host as the sync token).
+#[derive(Debug, Default)]
+pub struct TaskDelta {
+    pub changes: Vec<Task>,
+    pub deletions: Vec<String>,
+    pub new_token: Option<String>,
+}
+
+/// Bootstrap a To Do delta: a full `tasks/delta` over the list that also
+/// yields the initial `@odata.deltaLink`. Tasks aren't windowed, so —
+/// unlike the calendar delta — there's no date range. Used for the
+/// no-token and expired-token (410) paths.
+pub async fn initial_tasks_delta(state: &ApiState, list_id: &str) -> GraphResult<TaskDelta> {
+    let list_enc = urlencoding(list_id);
+    let first = format!("/me/todo/lists/{list_enc}/tasks/delta");
+    drain_tasks_delta(state, first, list_id).await
+}
+
+/// Resume a To Do delta from a stored `@odata.deltaLink` (an absolute
+/// Graph URL carrying the `$deltatoken`). A `410 Gone` surfaces as
+/// `GraphError::Http { status: 410, .. }`; the caller re-bootstraps.
+pub async fn follow_tasks_delta(
+    state: &ApiState,
+    delta_link: &str,
+    list_id: &str,
+) -> GraphResult<TaskDelta> {
+    drain_tasks_delta(state, delta_link.to_string(), list_id).await
+}
+
+/// Drain every page of a To Do delta from `first_url`, following
+/// `@odata.nextLink` until the final page hands back `@odata.deltaLink`.
+///
+/// Live tasks map normally. Tombstones (`@removed`) become deletions —
+/// emitted as the **full** `{list}|{task}` composite id (the same id
+/// `map_task` mints), because a To Do task's `native_id` derives to the
+/// list and can't single one out; the host matches the composite against
+/// the cached row's `id`.
+async fn drain_tasks_delta(
+    state: &ApiState,
+    first_url: String,
+    list_id: &str,
+) -> GraphResult<TaskDelta> {
+    let mut delta = TaskDelta::default();
+    let mut next: Option<String> = Some(first_url);
+    while let Some(p) = next {
+        let resp: TodoTaskDeltaResponse = state.get_json(&p).await?;
+        for raw in resp.value {
+            if raw.get("@removed").is_some() {
+                if let Some(id) = raw.get("id").and_then(|v| v.as_str()) {
+                    delta.deletions.push(format!("{list_id}|{id}"));
+                }
+                continue;
+            }
+            let entry: TodoTaskEntry = match serde_json::from_value(raw) {
+                Ok(e) => e,
+                Err(err) => {
+                    warn!(?err, "skipping undecodable delta task row");
+                    continue;
+                }
+            };
+            delta.changes.push(map_task(entry, list_id)?);
+        }
+        if resp.delta_link.is_some() {
+            delta.new_token = resp.delta_link;
+        }
+        next = resp.next_link;
+    }
+    Ok(delta)
+}
+
 pub async fn create_task(state: &ApiState, list_id: &str, new: NewTask) -> GraphResult<Task> {
     let list_enc = urlencoding(list_id);
     let path = format!("/me/todo/lists/{list_enc}/tasks");
@@ -744,6 +816,111 @@ mod tests {
         let state = fixture_state(&server.url());
         let (from, to) = delta_window();
         let err = follow_events_delta(&state, &stale, "cal-1", from, to)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, GraphError::Http { status: 410, .. }));
+    }
+
+    #[tokio::test]
+    async fn initial_tasks_delta_collects_tasks_and_delta_link() {
+        let mut server = mockito::Server::new_async().await;
+        let delta_link = format!(
+            "{}/me/todo/lists/LIST/tasks/delta?$deltatoken=DT1",
+            server.url()
+        );
+        let body = r##"{
+          "value": [
+            {"id":"T1","title":"Buy milk","importance":"normal","status":"notStarted"}
+          ],
+          "@odata.deltaLink": "DELTA_LINK"
+        }"##
+        .replace("DELTA_LINK", &delta_link);
+        server
+            .mock(
+                "GET",
+                mockito::Matcher::Regex(r"^/me/todo/lists/LIST/tasks/delta".to_string()),
+            )
+            .with_status(200)
+            .with_body(body)
+            .create_async()
+            .await;
+
+        let state = fixture_state(&server.url());
+        let delta = initial_tasks_delta(&state, "LIST").await.unwrap();
+        assert_eq!(
+            delta
+                .changes
+                .iter()
+                .map(|t| t.id.as_str())
+                .collect::<Vec<_>>(),
+            ["LIST|T1"]
+        );
+        assert!(delta.deletions.is_empty());
+        assert_eq!(delta.new_token.as_deref(), Some(delta_link.as_str()));
+    }
+
+    #[tokio::test]
+    async fn follow_tasks_delta_splits_changes_and_removals() {
+        let mut server = mockito::Server::new_async().await;
+        let prev = format!(
+            "{}/me/todo/lists/LIST/tasks/delta?$deltatoken=DT1",
+            server.url()
+        );
+        let next = format!(
+            "{}/me/todo/lists/LIST/tasks/delta?$deltatoken=DT2",
+            server.url()
+        );
+        let body = r##"{
+          "value": [
+            {"id":"T1","title":"Buy oat milk","importance":"normal","status":"notStarted"},
+            {"id":"T2","@removed":{"reason":"deleted"}}
+          ],
+          "@odata.deltaLink": "NEXT_LINK"
+        }"##
+        .replace("NEXT_LINK", &next);
+        server
+            .mock(
+                "GET",
+                mockito::Matcher::Regex(r"deltatoken=DT1".to_string()),
+            )
+            .with_status(200)
+            .with_body(body)
+            .create_async()
+            .await;
+
+        let state = fixture_state(&server.url());
+        let delta = follow_tasks_delta(&state, &prev, "LIST").await.unwrap();
+        assert_eq!(
+            delta
+                .changes
+                .iter()
+                .map(|t| t.id.as_str())
+                .collect::<Vec<_>>(),
+            ["LIST|T1"]
+        );
+        // Tombstone emitted as the full composite id, matching map_task.
+        assert_eq!(delta.deletions, vec!["LIST|T2".to_string()]);
+        assert_eq!(delta.new_token.as_deref(), Some(next.as_str()));
+    }
+
+    #[tokio::test]
+    async fn follow_tasks_delta_410_bubbles_as_http() {
+        let mut server = mockito::Server::new_async().await;
+        let stale = format!(
+            "{}/me/todo/lists/LIST/tasks/delta?$deltatoken=STALE",
+            server.url()
+        );
+        server
+            .mock(
+                "GET",
+                mockito::Matcher::Regex(r"deltatoken=STALE".to_string()),
+            )
+            .with_status(410)
+            .with_body(r#"{"error":{"code":"syncStateNotFound"}}"#)
+            .create_async()
+            .await;
+        let state = fixture_state(&server.url());
+        let err = follow_tasks_delta(&state, &stale, "LIST")
             .await
             .unwrap_err();
         assert!(matches!(err, GraphError::Http { status: 410, .. }));

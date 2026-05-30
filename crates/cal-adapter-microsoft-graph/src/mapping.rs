@@ -681,6 +681,21 @@ pub struct TodoTaskResponse {
     pub next_link: Option<String>,
 }
 
+/// One page of a `todo/lists/{id}/tasks/delta` response. Like the event
+/// delta, `value` is kept as raw JSON so a tombstone
+/// (`{ "id": "…", "@removed": { … } }`) can be told apart from a live
+/// task before deserialising. Intermediate pages carry `@odata.nextLink`;
+/// the final page carries `@odata.deltaLink`, the cursor for next round.
+#[derive(Debug, Deserialize)]
+pub struct TodoTaskDeltaResponse {
+    #[serde(default)]
+    pub value: Vec<serde_json::Value>,
+    #[serde(default, rename = "@odata.nextLink")]
+    pub next_link: Option<String>,
+    #[serde(default, rename = "@odata.deltaLink")]
+    pub delta_link: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct TodoTaskEntry {
     pub id: String,

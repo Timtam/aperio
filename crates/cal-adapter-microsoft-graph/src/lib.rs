@@ -188,6 +188,21 @@ impl MicrosoftGraphAdapter {
             full_resync: true,
         })
     }
+
+    /// Bootstrap To Do delta as a `full_resync` ChangeSet: every task in
+    /// the list plus the initial `@odata.deltaLink`. Used on the no-token
+    /// and 410-expired recovery paths.
+    async fn full_tasks_changeset(&self, list_id: &str) -> CoreResult<ChangeSet<Task>> {
+        let delta = api::initial_tasks_delta(&self.state, list_id)
+            .await
+            .map_err(to_core_error)?;
+        Ok(ChangeSet {
+            changes: delta.changes,
+            deletions: Vec::new(),
+            new_token: delta.new_token,
+            full_resync: true,
+        })
+    }
 }
 
 #[async_trait]
@@ -339,6 +354,38 @@ impl TasksFeature for MicrosoftGraphAdapter {
         api::get_tasks(&self.state, list_id)
             .await
             .map_err(to_core_error)
+    }
+
+    /// Host-driven incremental task read (CACHE-8) via Microsoft To Do's
+    /// `tasks/delta`. Same delta-link contract as `get_events_delta`, but
+    /// tasks aren't windowed so there's no range. Removed tasks come back
+    /// as `@removed` tombstones, emitted as their full `{list}|{task}`
+    /// cal-core id. A `410 Gone` re-bootstraps a full sync.
+    async fn get_tasks_delta(
+        &self,
+        list_id: &str,
+        since_token: Option<&str>,
+    ) -> CoreResult<ChangeSet<Task>> {
+        let Some(delta_link) = since_token else {
+            return self.full_tasks_changeset(list_id).await;
+        };
+        match api::follow_tasks_delta(&self.state, delta_link, list_id).await {
+            Ok(delta) => Ok(ChangeSet {
+                changes: delta.changes,
+                deletions: delta.deletions,
+                new_token: delta.new_token,
+                full_resync: false,
+            }),
+            Err(GraphError::Http { status: 410, .. }) => {
+                tracing::warn!(
+                    target: "cal_adapter_microsoft_graph",
+                    list = %list_id,
+                    "Graph To Do delta link expired (410); doing a full re-sync",
+                );
+                self.full_tasks_changeset(list_id).await
+            }
+            Err(err) => Err(to_core_error(err)),
+        }
     }
 
     async fn create_task(&self, list_id: &str, task: NewTask) -> CoreResult<Task> {
@@ -695,6 +742,123 @@ mod delta_tests {
 
         let cs = adapter_for(&server)
             .get_events_delta("cal-1", range(), Some(&stale))
+            .await
+            .unwrap();
+        assert!(cs.full_resync);
+        assert_eq!(cs.changes.len(), 1);
+        assert_eq!(cs.new_token.as_deref(), Some(fresh.as_str()));
+    }
+
+    fn one_task_with_delta_link(link: &str) -> String {
+        r##"{
+          "value": [
+            {"id":"T1","title":"Buy milk","importance":"normal","status":"notStarted"}
+          ],
+          "@odata.deltaLink": "DELTA_LINK"
+        }"##
+        .replace("DELTA_LINK", link)
+    }
+
+    #[tokio::test]
+    async fn no_token_does_full_tasks_resync() {
+        let mut server = Server::new_async().await;
+        let link = format!(
+            "{}/me/todo/lists/LIST/tasks/delta?$deltatoken=DT1",
+            server.url()
+        );
+        server
+            .mock(
+                "GET",
+                Matcher::Regex(r"^/me/todo/lists/LIST/tasks/delta".to_string()),
+            )
+            .with_status(200)
+            .with_body(one_task_with_delta_link(&link))
+            .create_async()
+            .await;
+
+        let cs = adapter_for(&server)
+            .get_tasks_delta("LIST", None)
+            .await
+            .unwrap();
+        assert!(cs.full_resync);
+        assert_eq!(
+            cs.changes.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
+            ["LIST|T1"]
+        );
+        assert!(cs.deletions.is_empty());
+        assert_eq!(cs.new_token.as_deref(), Some(link.as_str()));
+    }
+
+    #[tokio::test]
+    async fn token_does_incremental_tasks_with_changes_and_removals() {
+        let mut server = Server::new_async().await;
+        let prev = format!(
+            "{}/me/todo/lists/LIST/tasks/delta?$deltatoken=DT1",
+            server.url()
+        );
+        let next = format!(
+            "{}/me/todo/lists/LIST/tasks/delta?$deltatoken=DT2",
+            server.url()
+        );
+        let body = r##"{
+          "value": [
+            {"id":"T1","title":"Buy oat milk","importance":"normal","status":"notStarted"},
+            {"id":"T2","@removed":{"reason":"deleted"}}
+          ],
+          "@odata.deltaLink": "NEXT_LINK"
+        }"##
+        .replace("NEXT_LINK", &next);
+        server
+            .mock("GET", Matcher::Regex(r"deltatoken=DT1".to_string()))
+            .with_status(200)
+            .with_body(body)
+            .create_async()
+            .await;
+
+        let cs = adapter_for(&server)
+            .get_tasks_delta("LIST", Some(&prev))
+            .await
+            .unwrap();
+        assert!(!cs.full_resync);
+        assert_eq!(
+            cs.changes.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
+            ["LIST|T1"]
+        );
+        assert_eq!(cs.deletions, vec!["LIST|T2".to_string()]);
+        assert_eq!(cs.new_token.as_deref(), Some(next.as_str()));
+    }
+
+    #[tokio::test]
+    async fn expired_tasks_link_410_falls_back_to_full_resync() {
+        let mut server = Server::new_async().await;
+        let stale = format!(
+            "{}/me/todo/lists/LIST/tasks/delta?$deltatoken=STALE",
+            server.url()
+        );
+        let fresh = format!(
+            "{}/me/todo/lists/LIST/tasks/delta?$deltatoken=DT3",
+            server.url()
+        );
+        // Incremental call with the stale link → 410.
+        server
+            .mock("GET", Matcher::Regex(r"deltatoken=STALE".to_string()))
+            .with_status(410)
+            .with_body(r#"{"error":{"code":"syncStateNotFound"}}"#)
+            .create_async()
+            .await;
+        // Recovery: a fresh full tasks delta (no $deltatoken on the URL).
+        server
+            .mock(
+                "GET",
+                Matcher::Regex(r"^/me/todo/lists/LIST/tasks/delta$".to_string()),
+            )
+            .with_status(200)
+            .with_body(one_task_with_delta_link(&fresh))
+            .create_async()
+            .await;
+
+        let cs = adapter_for(&server)
+            .get_tasks_delta("LIST", Some(&stale))
             .await
             .unwrap();
         assert!(cs.full_resync);
