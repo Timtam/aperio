@@ -81,6 +81,23 @@ pub struct EventListResponse {
     pub next_link: Option<String>,
 }
 
+/// One page of a `calendarView/delta` response. Each `value` element is
+/// kept as raw JSON because the page mixes two shapes: a normal event
+/// object, and a tombstone `{ "id": "…", "@removed": { "reason": "…" } }`
+/// that lacks the `start`/`end` a full [`EventEntry`] requires. The
+/// caller branches on the `@removed` marker before deserialising the
+/// rest. Intermediate pages carry `@odata.nextLink`; the final page
+/// carries `@odata.deltaLink` — the opaque cursor for the next round.
+#[derive(Debug, Deserialize)]
+pub struct EventDeltaResponse {
+    #[serde(default)]
+    pub value: Vec<serde_json::Value>,
+    #[serde(default, rename = "@odata.nextLink")]
+    pub next_link: Option<String>,
+    #[serde(default, rename = "@odata.deltaLink")]
+    pub delta_link: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct EventEntry {
     pub id: String,

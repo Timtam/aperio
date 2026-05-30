@@ -17,8 +17,9 @@ use crate::auth::{self, TokenSet};
 use crate::error::{GraphError, GraphResult};
 use crate::mapping::{
     event_to_body, map_calendar, map_event, map_task, map_task_list, new_event_to_body,
-    new_task_to_body, split_task_id, task_to_body, CalendarListResponse, EventEntry,
-    EventListResponse, TodoListEntry, TodoListResponse, TodoTaskEntry, TodoTaskResponse,
+    new_task_to_body, split_task_id, task_to_body, CalendarListResponse, EventDeltaResponse,
+    EventEntry, EventListResponse, TodoListEntry, TodoListResponse, TodoTaskEntry,
+    TodoTaskResponse,
 };
 
 pub const API_BASE: &str = "https://graph.microsoft.com/v1.0";
@@ -280,6 +281,118 @@ pub async fn get_events(
     Ok(out)
 }
 
+/// Outcome of one `calendarView/delta` round: upserted/created rows,
+/// the ids of removed rows, and the `@odata.deltaLink` to pass back next
+/// time (stored opaquely by the host as the sync token).
+#[derive(Debug, Default)]
+pub struct EventDelta {
+    pub changes: Vec<Event>,
+    pub deletions: Vec<String>,
+    pub new_token: Option<String>,
+}
+
+/// Bootstrap a delta sync: a full `calendarView/delta` over `[start,
+/// end)` that also yields the initial `@odata.deltaLink`. The window is
+/// baked into the returned link, so [`follow_events_delta`] doesn't
+/// re-send it. Equivalent live set to [`get_events`]; used for the
+/// no-token and expired-token (410) paths.
+pub async fn initial_events_delta(
+    state: &ApiState,
+    calendar_id: &str,
+    start: chrono::DateTime<chrono::Utc>,
+    end: chrono::DateTime<chrono::Utc>,
+) -> GraphResult<EventDelta> {
+    let cal_enc = urlencoding(calendar_id);
+    let first = format!(
+        "/me/calendars/{cal_enc}/calendarView/delta?startDateTime={tm}&endDateTime={tx}",
+        tm = urlencoding(&start.to_rfc3339()),
+        tx = urlencoding(&end.to_rfc3339()),
+    );
+    drain_events_delta(state, first, calendar_id, start, end).await
+}
+
+/// Resume a delta sync from a stored `@odata.deltaLink`. The link is an
+/// absolute Graph URL carrying the `$deltatoken` and the original window,
+/// so we follow it as-is. A `410 Gone` (token aged out) surfaces as
+/// `GraphError::Http { status: 410, .. }`; the caller re-bootstraps.
+pub async fn follow_events_delta(
+    state: &ApiState,
+    delta_link: &str,
+    calendar_id: &str,
+    start: chrono::DateTime<chrono::Utc>,
+    end: chrono::DateTime<chrono::Utc>,
+) -> GraphResult<EventDelta> {
+    drain_events_delta(state, delta_link.to_string(), calendar_id, start, end).await
+}
+
+/// Drain every page of a delta query starting at `first_url`, following
+/// `@odata.nextLink` until the final page hands back `@odata.deltaLink`.
+///
+/// Each `value` element is either a live event or a tombstone
+/// (`@removed`). Tombstones — and events that turned `isCancelled` — go
+/// into `deletions` by id (already native). Live events map normally;
+/// singles are range-filtered to `[start, end)`, recurring masters pass
+/// (matching the full read and the other delta adapters). `calendarView`
+/// already expands series server-side, so in practice every row is a
+/// single — the master branch is just defensive.
+async fn drain_events_delta(
+    state: &ApiState,
+    first_url: String,
+    calendar_id: &str,
+    start: chrono::DateTime<chrono::Utc>,
+    end: chrono::DateTime<chrono::Utc>,
+) -> GraphResult<EventDelta> {
+    let mut delta = EventDelta::default();
+    let mut next: Option<String> = Some(first_url);
+    while let Some(p) = next {
+        let resp: EventDeltaResponse = state.get_json(&p).await?;
+        for raw in resp.value {
+            // Tombstone: `{ "id": "…", "@removed": { "reason": "…" } }`.
+            if raw.get("@removed").is_some() {
+                if let Some(id) = raw.get("id").and_then(|v| v.as_str()) {
+                    delta.deletions.push(id.to_string());
+                }
+                continue;
+            }
+            let entry: EventEntry = match serde_json::from_value(raw) {
+                Ok(e) => e,
+                Err(err) => {
+                    // A row we can't parse shouldn't abort the whole drain
+                    // — log and skip, same tolerance as the EWS read path.
+                    warn!(?err, "skipping undecodable delta event row");
+                    continue;
+                }
+            };
+            // A cancellation arrives as a normal row with isCancelled=true
+            // — `map_event` returns None for it. Treat that as a deletion
+            // so the cached copy is removed (a full read would drop it).
+            let id = entry.id.clone();
+            match map_event(entry, calendar_id)? {
+                Some(ev) if event_in_window(&ev, start, end) => delta.changes.push(ev),
+                Some(_) => {} // live but outside the window — skip
+                None => delta.deletions.push(id),
+            }
+        }
+        // `@odata.deltaLink` only appears on the final page.
+        if resp.delta_link.is_some() {
+            delta.new_token = resp.delta_link;
+        }
+        next = resp.next_link;
+    }
+    Ok(delta)
+}
+
+/// Window predicate shared by the delta drain: recurring masters always
+/// pass (the frontend expander handles the visible window); singles must
+/// overlap `[start, end)`.
+fn event_in_window(
+    ev: &Event,
+    start: chrono::DateTime<chrono::Utc>,
+    end: chrono::DateTime<chrono::Utc>,
+) -> bool {
+    ev.recurrence.is_some() || (ev.end >= start && ev.start < end)
+}
+
 // ── Writes ──────────────────────────────────────────────────────────────
 
 pub async fn create_event(
@@ -500,6 +613,140 @@ mod tests {
         let evs = get_events(&state, "cal-1", from, to).await.unwrap();
         assert!(evs.is_empty());
         m.assert_async().await;
+    }
+
+    fn delta_window() -> (chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>) {
+        (
+            chrono::Utc.with_ymd_and_hms(2026, 5, 1, 0, 0, 0).unwrap(),
+            chrono::Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap(),
+        )
+    }
+
+    #[tokio::test]
+    async fn initial_events_delta_collects_events_and_delta_link() {
+        let mut server = mockito::Server::new_async().await;
+        let delta_link = format!(
+            "{}/me/calendars/cal-1/calendarView/delta?$deltatoken=DT1",
+            server.url()
+        );
+        let body = r##"{
+          "value": [
+            {"id":"e1","subject":"One","isAllDay":false,"isReminderOn":false,
+             "start":{"dateTime":"2026-05-10T08:00:00","timeZone":"UTC"},
+             "end":{"dateTime":"2026-05-10T09:00:00","timeZone":"UTC"}}
+          ],
+          "@odata.deltaLink": "DELTA_LINK"
+        }"##
+        .replace("DELTA_LINK", &delta_link);
+        server
+            .mock(
+                "GET",
+                mockito::Matcher::Regex(
+                    r"^/me/calendars/cal-1/calendarView/delta\?startDateTime=".to_string(),
+                ),
+            )
+            .with_status(200)
+            .with_body(body)
+            .create_async()
+            .await;
+
+        let state = fixture_state(&server.url());
+        let (from, to) = delta_window();
+        let delta = initial_events_delta(&state, "cal-1", from, to)
+            .await
+            .unwrap();
+        assert_eq!(
+            delta
+                .changes
+                .iter()
+                .map(|e| e.id.as_str())
+                .collect::<Vec<_>>(),
+            ["e1"]
+        );
+        assert!(delta.deletions.is_empty());
+        assert_eq!(delta.new_token.as_deref(), Some(delta_link.as_str()));
+    }
+
+    #[tokio::test]
+    async fn follow_events_delta_splits_changes_and_removals() {
+        let mut server = mockito::Server::new_async().await;
+        let prev_link = format!(
+            "{}/me/calendars/cal-1/calendarView/delta?$deltatoken=DT1",
+            server.url()
+        );
+        let next_link = format!(
+            "{}/me/calendars/cal-1/calendarView/delta?$deltatoken=DT2",
+            server.url()
+        );
+        // e1 updated (in window) → change; e2 tombstone → deletion;
+        // e3 isCancelled → deletion; e4 out of window → skipped.
+        let body = r##"{
+          "value": [
+            {"id":"e1","subject":"Updated","isAllDay":false,"isReminderOn":false,
+             "start":{"dateTime":"2026-05-10T08:00:00","timeZone":"UTC"},
+             "end":{"dateTime":"2026-05-10T09:00:00","timeZone":"UTC"}},
+            {"id":"e2","@removed":{"reason":"deleted"}},
+            {"id":"e3","subject":"Gone","isCancelled":true,"isAllDay":false,"isReminderOn":false,
+             "start":{"dateTime":"2026-05-12T08:00:00","timeZone":"UTC"},
+             "end":{"dateTime":"2026-05-12T09:00:00","timeZone":"UTC"}},
+            {"id":"e4","subject":"Far","isAllDay":false,"isReminderOn":false,
+             "start":{"dateTime":"2030-01-01T08:00:00","timeZone":"UTC"},
+             "end":{"dateTime":"2030-01-01T09:00:00","timeZone":"UTC"}}
+          ],
+          "@odata.deltaLink": "NEXT_LINK"
+        }"##
+        .replace("NEXT_LINK", &next_link);
+        server
+            .mock(
+                "GET",
+                mockito::Matcher::Regex(r"deltatoken=DT1".to_string()),
+            )
+            .with_status(200)
+            .with_body(body)
+            .create_async()
+            .await;
+
+        let state = fixture_state(&server.url());
+        let (from, to) = delta_window();
+        let delta = follow_events_delta(&state, &prev_link, "cal-1", from, to)
+            .await
+            .unwrap();
+        assert_eq!(
+            delta
+                .changes
+                .iter()
+                .map(|e| e.id.as_str())
+                .collect::<Vec<_>>(),
+            ["e1"]
+        );
+        let mut dels = delta.deletions.clone();
+        dels.sort();
+        assert_eq!(dels, vec!["e2".to_string(), "e3".to_string()]);
+        assert_eq!(delta.new_token.as_deref(), Some(next_link.as_str()));
+    }
+
+    #[tokio::test]
+    async fn follow_events_delta_410_bubbles_as_http() {
+        let mut server = mockito::Server::new_async().await;
+        let stale = format!(
+            "{}/me/calendars/cal-1/calendarView/delta?$deltatoken=STALE",
+            server.url()
+        );
+        server
+            .mock(
+                "GET",
+                mockito::Matcher::Regex(r"deltatoken=STALE".to_string()),
+            )
+            .with_status(410)
+            .with_body(r#"{"error":{"code":"syncStateNotFound"}}"#)
+            .create_async()
+            .await;
+        let state = fixture_state(&server.url());
+        let (from, to) = delta_window();
+        let err = follow_events_delta(&state, &stale, "cal-1", from, to)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, GraphError::Http { status: 410, .. }));
     }
 
     #[tokio::test]
