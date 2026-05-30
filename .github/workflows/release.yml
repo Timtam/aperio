@@ -1,9 +1,9 @@
 name: Release
 
-# Triggered when a tag matching `v*` is pushed (the
-# canonical release path), AND from the Actions UI for
-# manually re-running against an existing tag (the `tag`
-# input becomes the release name).
+# Triggered when a tag matching `v*` is pushed (the canonical
+# release path), AND from the Actions UI for manually
+# re-running against an existing tag (the `tag` input becomes
+# the release name).
 on:
   push:
     tags: ['v*']
@@ -13,169 +13,24 @@ on:
         description: 'Release tag (e.g. v0.1.0). Re-uses the tag if it already exists; otherwise the upload step will fail.'
         required: true
 
-env:
-  CARGO_TERM_COLOR: always
-  # Don't fail the release build on lint warnings — the CI
-  # workflow already gates merges on `-D warnings`; the
-  # release artefact path should produce a binary as long as
-  # everything compiles.
-  RUSTFLAGS: ""
-
 jobs:
-  build:
-    name: Build (${{ matrix.label }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            label: linux-x86_64
-            binary: aperio
-          - os: windows-latest
-            label: windows-x86_64
-            binary: aperio.exe
-          - os: macos-latest
-            label: macos-aarch64
-            binary: aperio
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Linux system dependencies (for Tauri)
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            libssl-dev \
-            libgtk-3-dev \
-            libsoup-3.0-dev \
-            libjavascriptcoregtk-4.1-dev
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: "npm"
-
-      - run: npm ci
-
-      # `cargo tauri build` invokes the bundle pipeline.
-      # tauri.conf.json sets `bundle.active = false` so we
-      # get just the raw release binary in
-      # src-tauri/target/release/<binary>; the
-      # beforeBuildCommand chains `cargo build --workspace
-      # --release` so all 17 plugin cdylibs land in
-      # target/release/ + src-tauri/build.rs stages them
-      # under target/release/plugins/bundled/<id>/.
-      - name: tauri build
-        run: npm run tauri -- build
-
-      # Sanity-check the staging step worked: the release
-      # zip is useless without the plugin cdylibs. Counts
-      # immediate subdirectories of plugins/bundled/ and
-      # asserts == 17 (the canonical set from build.rs's
-      # PLUGINS table). The bash shell is installed on every
-      # GH runner — explicit `shell: bash` keeps the
-      # `find`-based count portable across Windows.
-      - name: Verify 17 bundled plugins staged
-        shell: bash
-        run: |
-          set -euo pipefail
-          STAGED_DIR="src-tauri/target/release/plugins/bundled"
-          if [ ! -d "$STAGED_DIR" ]; then
-            echo "::error::Staged plugins dir missing: $STAGED_DIR"
-            exit 1
-          fi
-          count=$(find "$STAGED_DIR" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
-          echo "Staged plugin count: $count"
-          if [ "$count" -ne 17 ]; then
-            echo "::error::Expected 17 staged plugins, found $count"
-            echo "Contents of $STAGED_DIR:"
-            ls -la "$STAGED_DIR" || true
-            exit 1
-          fi
-
-      # Compute the version string. On tag push it's the tag
-      # minus the leading `v`; on workflow_dispatch it's the
-      # input. Either way it becomes part of the artifact
-      # name + the GH release name.
-      - name: Compute version
-        id: version
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TAG="${{ github.event.inputs.tag }}"
-          else
-            TAG="${GITHUB_REF#refs/tags/}"
-          fi
-          VERSION="${TAG#v}"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
-      # Stage the portable layout next to the binary:
-      #   Aperio-<version>-<label>/
-      #     aperio[.exe]
-      #     plugins/bundled/<id>/{plugin.json,*.{dll,dylib,so}}
-      # The directory shape matches what
-      # bundled_plugins::bundled_dir() resolves at runtime via
-      # current_exe().parent().join("plugins/bundled"), so the
-      # zip is launch-ready after extraction.
-      - name: Stage portable layout
-        id: stage
-        shell: bash
-        run: |
-          set -euo pipefail
-          STAGE_DIR="dist-stage/Aperio-${{ steps.version.outputs.version }}-${{ matrix.label }}"
-          mkdir -p "$STAGE_DIR"
-          cp "src-tauri/target/release/${{ matrix.binary }}" "$STAGE_DIR/"
-          cp -R "src-tauri/target/release/plugins" "$STAGE_DIR/"
-          echo "dir=$STAGE_DIR" >> "$GITHUB_OUTPUT"
-          echo "name=Aperio-${{ steps.version.outputs.version }}-${{ matrix.label }}" >> "$GITHUB_OUTPUT"
-
-      # Zip up the staged layout. Different runners have
-      # different zip tools — `tar` with the `a` format on
-      # Windows produces a `.zip`; on Unix we use the
-      # standard `zip` command.
-      - name: Pack zip
-        id: pack
-        shell: bash
-        run: |
-          set -euo pipefail
-          ARCHIVE="${{ steps.stage.outputs.name }}.zip"
-          cd dist-stage
-          if command -v zip >/dev/null 2>&1; then
-            zip -r "../$ARCHIVE" "${{ steps.stage.outputs.name }}"
-          else
-            # Windows runners include 7z by default.
-            7z a "../$ARCHIVE" "${{ steps.stage.outputs.name }}"
-          fi
-          cd ..
-          echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
-
-      # Always upload as a build artifact (visible in the
-      # Actions UI). Useful for both tag-triggered builds
-      # (cross-check before publishing the GH release) and
-      # workflow_dispatch runs.
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ steps.stage.outputs.name }}
-          path: ${{ steps.pack.outputs.archive }}
-          if-no-files-found: error
+  # Build every OS artefact via the shared reusable workflow
+  # (also used by CI for commit / PR builds). On a tag push the
+  # version label is the tag (minus `v`); on manual dispatch
+  # it's the `tag` input.
+  artifacts:
+    uses: ./.github/workflows/build-artifacts.yml
+    with:
+      version: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
 
   publish:
     name: Publish GitHub Release
-    needs: build
+    needs: [artifacts]
     runs-on: ubuntu-latest
     # Only attach to a release when we have a real tag —
-    # workflow_dispatch runs land the zip as an artifact but
-    # don't auto-publish (the user can re-run with a tag for
-    # the actual release).
+    # workflow_dispatch runs land the zips as artifacts but
+    # don't auto-publish (re-run with a tag for the actual
+    # release).
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     permissions:
       # softprops/action-gh-release needs contents: write to
@@ -185,8 +40,8 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: dist
-          # Each per-OS upload step above uses a unique
-          # artifact name; flatten them all under `dist/`
+          # The reusable workflow uploads one uniquely-named
+          # artifact per target; flatten them all under `dist/`
           # without nesting per-artifact dirs.
           merge-multiple: true
 
@@ -208,9 +63,8 @@ jobs:
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: Aperio ${{ steps.tag.outputs.tag }}
-          # Draft so a human reviews + adds release notes
-          # before publishing. Flip to false once the
-          # release-notes generator is wired (separate
-          # iteration).
+          # Draft so a human reviews + adds release notes before
+          # publishing. Flip to false once the release-notes
+          # generator is wired (separate iteration).
           draft: true
           files: dist/*.zip

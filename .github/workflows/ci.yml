@@ -6,6 +6,14 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Cancel superseded runs on the same ref — but let main /
+# master finish (those builds feed the artifact history). PR
+# and feature pushes that get amended cancel their in-flight
+# run so the now-heavier artifact matrix doesn't stack up.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master' }}
+
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
@@ -92,3 +100,16 @@ jobs:
 
       - name: Vitest
         run: npm test
+
+  # Build the per-OS release zips (Linux x64, Windows x64,
+  # Windows ARM64, macOS universal) on every commit / PR build,
+  # not just on tagged releases — each lands as a downloadable
+  # build artifact in the Actions run. Gated on the cheap
+  # `rust` + `frontend` checks so the heavy 4-platform matrix
+  # (incl. the double-arch macOS build) only runs once a commit
+  # is actually green. No `version` input → artifact names use
+  # the short commit SHA.
+  artifacts:
+    name: Build artifacts
+    needs: [rust, frontend]
+    uses: ./.github/workflows/build-artifacts.yml
