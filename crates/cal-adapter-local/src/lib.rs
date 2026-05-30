@@ -141,6 +141,11 @@ pub mod test_support {
         conn.execute_batch(SCHEMA_V11).expect("apply v11 schema");
         conn.execute_batch(SCHEMA_V12).expect("apply v12 schema");
         conn.execute_batch(SCHEMA_V13).expect("apply v13 schema");
+        // 0014–0017 (sync log / assets / remote plugins / device names)
+        // touch tables the local adapter never reads, so the test DB
+        // skips straight to 0018, which only depends on the task tables
+        // from 0001/0006.
+        conn.execute_batch(SCHEMA_V18).expect("apply v18 schema");
         Arc::new(Mutex::new(conn))
     }
 
@@ -160,4 +165,5 @@ pub mod test_support {
     const SCHEMA_V12: &str =
         include_str!("../../../src-tauri/src/db/sql/0012_sync_applied_events.sql");
     const SCHEMA_V13: &str = include_str!("../../../src-tauri/src/db/sql/0013_sync_conflicts.sql");
+    const SCHEMA_V18: &str = include_str!("../../../src-tauri/src/db/sql/0018_task_sections.sql");
 }

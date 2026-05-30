@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 use cal_core::{
-    ColorLabelId, ContainerColor, NewTask, RecurrenceEnd, RecurrenceFrequency, Reminder,
+    ColorLabelId, ContainerColor, NewTask, RecurrenceEnd, RecurrenceFrequency, Reminder, Section,
     SoundConfig, Task, TaskList, TaskPriority, TaskRecurrence, TaskStatus, TasksFeature, Weekday,
 };
 use chrono::{Datelike, Days, Months, NaiveDate, Utc};
@@ -75,7 +75,7 @@ impl LocalAdapter {
                 "UPDATE task_lists
                     SET name = ?, color_hex = ?, color_source = ?,
                         default_sound = ?, embedded_in_calendar = ?,
-                        updated_at = ?
+                        parent_id = ?, updated_at = ?
                   WHERE id = ?",
                 params![
                     list.name,
@@ -83,6 +83,7 @@ impl LocalAdapter {
                     color_source,
                     default_sound_json,
                     list.embedded_in_calendar,
+                    list.parent_id,
                     now_s,
                     list.id,
                 ],
@@ -171,7 +172,8 @@ impl LocalAdapter {
             deadline_time: template.deadline_time,
             recurrence: Some(recurrence.clone()),
             parent_id: None,
-            section_id: None,
+            // Keep the next occurrence in the same section as its template.
+            section_id: template.section_id.clone(),
             color_label: template.color_label.clone(),
             reminders: template.reminders.clone(),
             sound: template.sound.clone(),
@@ -200,15 +202,16 @@ impl LocalAdapter {
             .expect("db mutex poisoned")
             .execute(
                 "INSERT INTO tasks (
-                    id, list_id, parent_id, title, description, status, priority,
+                    id, list_id, parent_id, section_id, title, description, status, priority,
                     scheduled_date, scheduled_time, deadline_date, deadline_time,
                     recurrence, color_label_id, reminders, sound,
                     created_at, updated_at, completed_at, etag
-                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)",
+                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)",
                 params![
                     id,
                     list_id,
                     task.parent_id,
+                    task.section_id,
                     task.title,
                     task.description,
                     status,
@@ -240,7 +243,7 @@ impl LocalAdapter {
             deadline_time: task.deadline_time,
             recurrence: task.recurrence,
             parent_id: task.parent_id,
-            section_id: None,
+            section_id: task.section_id,
             color_label: task.color_label,
             reminders: task.reminders,
             sound: task.sound,
@@ -274,7 +277,7 @@ impl LocalAdapter {
         let mut stmt = conn
             .prepare(
                 "SELECT id, name, color_hex, color_source, default_sound,
-                        embedded_in_calendar, read_only
+                        embedded_in_calendar, read_only, parent_id
                    FROM task_lists WHERE id = ?",
             )
             .map_err(map_sql_err)?;
@@ -287,6 +290,7 @@ impl LocalAdapter {
                     read_sound(r, 4),
                     opt_text(r, 5),
                     read_bool(r, 6),
+                    opt_text(r, 7),
                 ))
             })
             .optional()
@@ -294,14 +298,14 @@ impl LocalAdapter {
         let Some(parts) = row else {
             return Ok(None);
         };
-        let (id, name, color, sound, embedded, read_only) = parts;
+        let (id, name, color, sound, embedded, read_only, parent_id) = parts;
         Ok(Some(TaskList {
             id: id?,
             name: name?,
             color: color?,
             default_sound: sound?,
             embedded_in_calendar: embedded?,
-            parent_id: None,
+            parent_id: parent_id?,
             read_only: read_only?,
         }))
     }
@@ -315,12 +319,101 @@ impl LocalAdapter {
                 "SELECT id, list_id, parent_id, title, description, status,
                         priority, scheduled_date, scheduled_time, deadline_date,
                         deadline_time, recurrence, color_label_id, reminders, sound,
-                        created_at, updated_at, completed_at, etag
+                        created_at, updated_at, completed_at, etag, section_id
                    FROM tasks WHERE id = ?",
             )
             .map_err(map_sql_err)?;
         let row = stmt
             .query_row(params![id], |r| Ok(row_to_task(r)))
+            .optional()
+            .map_err(map_sql_err)?;
+        match row {
+            None => Ok(None),
+            Some(res) => res.map(Some),
+        }
+    }
+
+    // ── Sections (Vikunja-bucket / Todoist-section equivalent) ──────────
+    //
+    // The local backend is flat at the project level (no nested_projects)
+    // but DOES let the user group a list's tasks into ordered sections.
+    // These inherent methods back the host's section commands; sync
+    // emission + the applier ride the `section.*` SyncEvent variants.
+
+    /// Create a section in a list. `position` drives display order.
+    pub fn create_section(
+        &self,
+        list_id: &str,
+        name: &str,
+        position: u32,
+    ) -> cal_core::Result<Section> {
+        let id = Uuid::new_v4().to_string();
+        let now_s = fmt_utc(&Utc::now());
+        self.db()
+            .lock()
+            .expect("db mutex poisoned")
+            .execute(
+                "INSERT INTO sections (id, list_id, name, position, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?)",
+                params![id, list_id, name, position as i64, now_s, now_s],
+            )
+            .map_err(map_sql_err)?;
+        Ok(Section {
+            id,
+            list_id: list_id.to_string(),
+            name: name.to_string(),
+            order: position,
+        })
+    }
+
+    /// Rename / reorder a section. Returns the same row echoed back,
+    /// matching the `update_task_list` shape.
+    pub fn update_section(&self, section: Section) -> cal_core::Result<Section> {
+        let now_s = fmt_utc(&Utc::now());
+        let changed = self
+            .db()
+            .lock()
+            .expect("db mutex poisoned")
+            .execute(
+                "UPDATE sections SET name = ?, position = ?, updated_at = ? WHERE id = ?",
+                params![section.name, section.order as i64, now_s, section.id],
+            )
+            .map_err(map_sql_err)?;
+        if changed == 0 {
+            return Err(cal_core::Error::NotFound(format!(
+                "section '{}' not found",
+                section.id
+            )));
+        }
+        Ok(section)
+    }
+
+    /// Delete a section. Its tasks survive — `tasks.section_id` is
+    /// `ON DELETE SET NULL`, so they fall back to the ungrouped bucket.
+    pub fn delete_section(&self, id: &str) -> cal_core::Result<()> {
+        let changed = self
+            .db()
+            .lock()
+            .expect("db mutex poisoned")
+            .execute("DELETE FROM sections WHERE id = ?", params![id])
+            .map_err(map_sql_err)?;
+        if changed == 0 {
+            return Err(cal_core::Error::NotFound(format!(
+                "section '{id}' not found"
+            )));
+        }
+        Ok(())
+    }
+
+    /// Fetch one section by id. `None` when missing. Used by the
+    /// snapshot/merge paths and the host's section commands.
+    pub fn get_section_by_id(&self, id: &str) -> cal_core::Result<Option<Section>> {
+        let conn = self.db().lock().expect("db mutex poisoned");
+        let mut stmt = conn
+            .prepare("SELECT id, list_id, name, position FROM sections WHERE id = ?")
+            .map_err(map_sql_err)?;
+        let row = stmt
+            .query_row(params![id], |r| Ok(row_to_section(r)))
             .optional()
             .map_err(map_sql_err)?;
         match row {
@@ -337,7 +430,7 @@ impl TasksFeature for LocalAdapter {
         let mut stmt = conn
             .prepare(
                 "SELECT id, name, color_hex, color_source, default_sound,
-                        embedded_in_calendar, read_only
+                        embedded_in_calendar, read_only, parent_id
                    FROM task_lists
                   ORDER BY name COLLATE NOCASE",
             )
@@ -351,20 +444,22 @@ impl TasksFeature for LocalAdapter {
                     read_sound(row, 4),
                     opt_text(row, 5),
                     read_bool(row, 6),
+                    opt_text(row, 7),
                 ))
             })
             .map_err(map_sql_err)?;
 
         let mut out = Vec::new();
         for r in rows {
-            let (id, name, color, sound, embedded, read_only) = r.map_err(map_sql_err)?;
+            let (id, name, color, sound, embedded, read_only, parent_id) =
+                r.map_err(map_sql_err)?;
             out.push(TaskList {
                 id: id?,
                 name: name?,
                 color: color?,
                 default_sound: sound?,
                 embedded_in_calendar: embedded?,
-                parent_id: None,
+                parent_id: parent_id?,
                 read_only: read_only?,
             });
         }
@@ -399,15 +494,16 @@ impl TasksFeature for LocalAdapter {
             .expect("db mutex poisoned")
             .execute(
                 "INSERT INTO tasks (
-                    id, list_id, parent_id, title, description, status, priority,
+                    id, list_id, parent_id, section_id, title, description, status, priority,
                     scheduled_date, scheduled_time, deadline_date, deadline_time,
                     recurrence, color_label_id, reminders, sound,
                     created_at, updated_at, completed_at, etag
-                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)",
+                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)",
                 params![
                     id,
                     list_id,
                     task.parent_id,
+                    task.section_id,
                     task.title,
                     task.description,
                     status,
@@ -439,7 +535,7 @@ impl TasksFeature for LocalAdapter {
             deadline_time: task.deadline_time,
             recurrence: task.recurrence,
             parent_id: task.parent_id,
-            section_id: None,
+            section_id: task.section_id,
             color_label: task.color_label,
             reminders: task.reminders,
             sound: task.sound,
@@ -471,7 +567,7 @@ impl TasksFeature for LocalAdapter {
             .expect("db mutex poisoned")
             .execute(
                 "UPDATE tasks
-                    SET list_id = ?, parent_id = ?, title = ?, description = ?,
+                    SET list_id = ?, parent_id = ?, section_id = ?, title = ?, description = ?,
                         status = ?, priority = ?, scheduled_date = ?, scheduled_time = ?,
                         deadline_date = ?, deadline_time = ?,
                         recurrence = ?, color_label_id = ?, reminders = ?, sound = ?,
@@ -480,6 +576,7 @@ impl TasksFeature for LocalAdapter {
                 params![
                     task.list_id,
                     task.parent_id,
+                    task.section_id,
                     task.title,
                     task.description,
                     status,
@@ -563,12 +660,47 @@ impl TasksFeature for LocalAdapter {
         }
         Ok(())
     }
+
+    async fn list_sections(&self, list_id: &str) -> cal_core::Result<Vec<Section>> {
+        let conn = self.db().lock().expect("db mutex poisoned");
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, list_id, name, position
+                   FROM sections
+                  WHERE list_id = ?
+                  ORDER BY position, name COLLATE NOCASE",
+            )
+            .map_err(map_sql_err)?;
+        let rows = stmt
+            .query_map(params![list_id], |row| Ok(row_to_section(row)))
+            .map_err(map_sql_err)?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r.map_err(map_sql_err)??);
+        }
+        Ok(out)
+    }
+}
+
+pub(crate) fn row_to_section(row: &rusqlite::Row<'_>) -> cal_core::Result<Section> {
+    let id = req_text(row, 0)?;
+    let list_id = req_text(row, 1)?;
+    let name = req_text(row, 2)?;
+    let position: i64 = row.get(3).map_err(map_sql_err)?;
+    Ok(Section {
+        id,
+        list_id,
+        name,
+        // `position` is a non-negative INTEGER in the schema; clamp
+        // defensively before the unsigned cast.
+        order: position.max(0) as u32,
+    })
 }
 
 const TASK_SELECT: &str = "SELECT id, list_id, parent_id, title, description, status,
             priority, scheduled_date, scheduled_time, deadline_date,
             deadline_time, recurrence, color_label_id, reminders, sound,
-            created_at, updated_at, completed_at, etag
+            created_at, updated_at, completed_at, etag, section_id
        FROM tasks
       WHERE list_id = ?
       ORDER BY COALESCE(scheduled_date, deadline_date, ''), created_at";
@@ -729,6 +861,7 @@ pub(crate) fn row_to_task(row: &rusqlite::Row<'_>) -> cal_core::Result<Task> {
         None => None,
     };
     let etag = opt_text(row, 18)?;
+    let section_id = opt_text(row, 19)?;
 
     Ok(Task {
         id,
@@ -743,7 +876,7 @@ pub(crate) fn row_to_task(row: &rusqlite::Row<'_>) -> cal_core::Result<Task> {
         deadline_time,
         recurrence,
         parent_id,
-        section_id: None,
+        section_id,
         color_label,
         reminders,
         sound,
@@ -1008,5 +1141,81 @@ mod tests {
         let (a, _list) = adapter_with_list();
         let err = a.rename_task_list("does-not-exist", "X").await.unwrap_err();
         assert!(matches!(err, cal_core::Error::NotFound(_)));
+    }
+
+    #[tokio::test]
+    async fn section_crud_and_listing() {
+        let (a, list) = adapter_with_list();
+        assert!(a.list_sections(&list.id).await.unwrap().is_empty());
+
+        let s1 = a.create_section(&list.id, "Doing", 0).unwrap();
+        let s2 = a.create_section(&list.id, "Done", 1).unwrap();
+        assert_eq!(s1.list_id, list.id);
+
+        let listed = a.list_sections(&list.id).await.unwrap();
+        assert_eq!(listed.len(), 2);
+        // Ordered by `position`.
+        assert_eq!(listed[0].name, "Doing");
+        assert_eq!(listed[1].name, "Done");
+
+        // Rename + reorder.
+        let renamed = a
+            .update_section(Section {
+                name: "Shipped".into(),
+                order: 5,
+                ..s2.clone()
+            })
+            .unwrap();
+        assert_eq!(renamed.name, "Shipped");
+        assert_eq!(
+            a.get_section_by_id(&s2.id).unwrap().unwrap().name,
+            "Shipped"
+        );
+
+        // Delete ungroups but keeps the list intact.
+        a.delete_section(&s1.id).unwrap();
+        assert_eq!(a.list_sections(&list.id).await.unwrap().len(), 1);
+        assert!(a.get_section_by_id(&s1.id).unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn task_section_id_roundtrips_and_survives_delete() {
+        let (a, list) = adapter_with_list();
+        let section = a.create_section(&list.id, "Sprint", 0).unwrap();
+
+        let mut new = mk_task("Ship it");
+        new.section_id = Some(section.id.clone());
+        let created = a.create_task(&list.id, new).await.unwrap();
+        assert_eq!(created.section_id.as_deref(), Some(section.id.as_str()));
+
+        // Read-back path carries it too.
+        let fetched = a.get_task_by_id(&created.id).unwrap().unwrap();
+        assert_eq!(fetched.section_id.as_deref(), Some(section.id.as_str()));
+
+        // Deleting the section ungroups the task (ON DELETE SET NULL),
+        // it does not delete the task.
+        a.delete_section(&section.id).unwrap();
+        let after = a.get_task_by_id(&created.id).unwrap().unwrap();
+        assert!(after.section_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn task_list_parent_id_roundtrips() {
+        let a = LocalAdapter::new(open_test_db());
+        let parent = a.create_task_list("Parent", None, None, None).unwrap();
+        let mut child = a.create_task_list("Child", None, None, None).unwrap();
+        assert!(child.parent_id.is_none());
+
+        child.parent_id = Some(parent.id.clone());
+        a.update_task_list(child.clone()).unwrap();
+
+        let reloaded = a.get_task_list_by_id(&child.id).unwrap().unwrap();
+        assert_eq!(reloaded.parent_id.as_deref(), Some(parent.id.as_str()));
+
+        // Deleting the parent promotes the child to top-level
+        // (ON DELETE SET NULL) rather than cascading it away.
+        a.delete_task_list(&parent.id).unwrap();
+        let orphan = a.get_task_list_by_id(&child.id).unwrap().unwrap();
+        assert!(orphan.parent_id.is_none());
     }
 }

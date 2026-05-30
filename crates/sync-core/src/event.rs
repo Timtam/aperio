@@ -172,6 +172,21 @@ pub enum SyncEvent {
     #[serde(rename = "task_list.deleted")]
     TaskListDeleted(IdPayload),
 
+    /// Section (Vikunja bucket / Todoist section) created in a local
+    /// list. Payload is the full `Section` row.
+    #[serde(rename = "section.created")]
+    SectionCreated(EventPayload),
+
+    /// Section renamed / reordered. Sections are simple metadata, so
+    /// the applier takes the full row last-write-wins rather than
+    /// running the field-level conflict merge the richer rows use.
+    #[serde(rename = "section.updated")]
+    SectionUpdated(PartialPayload),
+
+    /// Section deleted — its tasks fall back to ungrouped.
+    #[serde(rename = "section.deleted")]
+    SectionDeleted(IdPayload),
+
     /// Local calendar added.
     #[serde(rename = "calendar.created")]
     CalendarCreated(EventPayload),
@@ -530,6 +545,15 @@ mod tests {
                 fields: serde_json::json!({}),
             }),
             SyncEvent::TaskListDeleted(IdPayload { id: "3".into() }),
+            SyncEvent::SectionCreated(EventPayload {
+                id: "s1".into(),
+                fields: serde_json::json!({}),
+            }),
+            SyncEvent::SectionUpdated(EventPayload {
+                id: "s1".into(),
+                fields: serde_json::json!({}),
+            }),
+            SyncEvent::SectionDeleted(IdPayload { id: "s1".into() }),
             SyncEvent::CalendarCreated(EventPayload {
                 id: "4".into(),
                 fields: serde_json::json!({}),

@@ -311,6 +311,16 @@ impl EventLogApplier {
                 self.apply_task_list_delete(payload)?;
                 Ok(true)
             }
+            // Sections are simple metadata: both create and update take
+            // the full row last-write-wins (no field-level merge path).
+            SyncEvent::SectionCreated(payload) | SyncEvent::SectionUpdated(payload) => {
+                self.apply_section_upsert(payload)?;
+                Ok(true)
+            }
+            SyncEvent::SectionDeleted(payload) => {
+                self.apply_section_delete(payload)?;
+                Ok(true)
+            }
             SyncEvent::CalendarCreated(payload) => {
                 self.apply_calendar_upsert(payload)?;
                 Ok(true)
@@ -426,6 +436,24 @@ impl EventLogApplier {
     fn apply_task_list_delete(&self, payload: &IdPayload) -> SyncResult<()> {
         self.adapter
             .delete_task_list_from_sync(&payload.id)
+            .map_err(core_to_sync)
+    }
+
+    fn apply_section_upsert(&self, payload: &EventPayload) -> SyncResult<()> {
+        let section: cal_core::Section =
+            serde_json::from_value(payload.fields.clone()).map_err(|err| {
+                SyncError::protocol(format!("section upsert payload not a valid Section: {err}",))
+            })?;
+        let mut section = section;
+        section.id = payload.id.clone();
+        self.adapter
+            .upsert_section_from_sync(&section)
+            .map_err(core_to_sync)
+    }
+
+    fn apply_section_delete(&self, payload: &IdPayload) -> SyncResult<()> {
+        self.adapter
+            .delete_section_from_sync(&payload.id)
             .map_err(core_to_sync)
     }
 
@@ -1279,6 +1307,56 @@ mod tests {
         assert_eq!(report.applied, 0);
         assert_eq!(report.skipped_unsupported, 1);
         assert_eq!(report.failed, 0);
+    }
+
+    #[test]
+    fn apply_section_created_then_deleted() {
+        let (adapter, db) = fixture();
+        let other = DeviceId::from_string("dev-other".into());
+        let me = DeviceId::from_string("dev-me".into());
+        let applier = EventLogApplier::new(db, adapter.clone(), me);
+
+        // Seed the owning list so the section's FK is satisfied.
+        let list = cal_core::TaskList {
+            id: "list-1".into(),
+            name: "Inbox".into(),
+            color: None,
+            default_sound: None,
+            embedded_in_calendar: None,
+            parent_id: None,
+            read_only: false,
+        };
+        adapter.upsert_task_list_from_sync(&list).unwrap();
+
+        let section = cal_core::Section {
+            id: "sec-1".into(),
+            list_id: "list-1".into(),
+            name: "Doing".into(),
+            order: 0,
+        };
+        let create = fixture_envelope(
+            other.clone(),
+            SyncEvent::SectionCreated(EventPayload {
+                id: "sec-1".into(),
+                fields: serde_json::to_value(&section).unwrap(),
+            }),
+            1000,
+        );
+        let report = applier.apply_envelopes(vec![create]).unwrap();
+        assert_eq!(report.applied, 1);
+        assert_eq!(
+            adapter.get_section_by_id("sec-1").unwrap().unwrap().name,
+            "Doing",
+        );
+
+        let delete = fixture_envelope(
+            other,
+            SyncEvent::SectionDeleted(IdPayload { id: "sec-1".into() }),
+            2000,
+        );
+        let report = applier.apply_envelopes(vec![delete]).unwrap();
+        assert_eq!(report.applied, 1);
+        assert!(adapter.get_section_by_id("sec-1").unwrap().is_none());
     }
 
     // -----------------------------------------------------------------

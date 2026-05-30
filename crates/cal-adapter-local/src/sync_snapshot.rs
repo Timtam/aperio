@@ -49,12 +49,12 @@
 //!   pulls them in.
 //! - Account configs / credentials. §19.2.1 always-local.
 
-use cal_core::{Calendar, ColorLabel, ColorLabelId, Event, Task, TaskList};
+use cal_core::{Calendar, ColorLabel, ColorLabelId, Event, Section, Task, TaskList};
 use serde::{Deserialize, Serialize};
 
 use crate::calendars::row_to_event;
 use crate::mapping::{opt_text, read_bool, read_container_color, read_sound, req_text};
-use crate::tasks::row_to_task;
+use crate::tasks::{row_to_section, row_to_task};
 use crate::{map_sql_err, LocalAdapter};
 
 /// Aggregated dump returned by [`LocalAdapter::dump_for_snapshot`].
@@ -72,6 +72,12 @@ pub struct SnapshotDump {
     pub events: Vec<Event>,
     #[serde(default)]
     pub task_lists: Vec<TaskList>,
+    /// Sections (Vikunja buckets / Todoist sections) of the local
+    /// lists. `default` so snapshots written before sections existed
+    /// deserialise into an empty list. Restored after `task_lists`
+    /// (FK target) and before `tasks` (which reference them).
+    #[serde(default)]
+    pub sections: Vec<Section>,
     #[serde(default)]
     pub tasks: Vec<Task>,
     #[serde(default)]
@@ -90,6 +96,7 @@ impl LocalAdapter {
             calendars: self.dump_calendars_for_snapshot()?,
             events: self.dump_events_for_snapshot()?,
             task_lists: self.dump_task_lists_for_snapshot()?,
+            sections: self.dump_sections_for_snapshot()?,
             tasks: self.dump_tasks_for_snapshot()?,
             color_labels: self.dump_color_labels_for_snapshot()?,
         })
@@ -160,7 +167,7 @@ impl LocalAdapter {
         let mut stmt = conn
             .prepare(
                 "SELECT id, name, color_hex, color_source, default_sound,
-                        embedded_in_calendar, read_only
+                        embedded_in_calendar, read_only, parent_id
                    FROM task_lists",
             )
             .map_err(map_sql_err)?;
@@ -173,21 +180,39 @@ impl LocalAdapter {
                     read_sound(row, 4),
                     opt_text(row, 5),
                     read_bool(row, 6),
+                    opt_text(row, 7),
                 ))
             })
             .map_err(map_sql_err)?;
         let mut out = Vec::new();
         for r in rows {
-            let (id, name, color, sound, embedded, read_only) = r.map_err(map_sql_err)?;
+            let (id, name, color, sound, embedded, read_only, parent_id) =
+                r.map_err(map_sql_err)?;
             out.push(TaskList {
                 id: id?,
                 name: name?,
                 color: color?,
                 default_sound: sound?,
                 embedded_in_calendar: embedded?,
-                parent_id: None,
+                parent_id: parent_id?,
                 read_only: read_only?,
             });
+        }
+        Ok(out)
+    }
+
+    /// Read every section row across every list.
+    pub fn dump_sections_for_snapshot(&self) -> cal_core::Result<Vec<Section>> {
+        let conn = self.db().lock().expect("db mutex poisoned");
+        let mut stmt = conn
+            .prepare("SELECT id, list_id, name, position FROM sections")
+            .map_err(map_sql_err)?;
+        let rows = stmt
+            .query_map([], |row| Ok(row_to_section(row)))
+            .map_err(map_sql_err)?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r.map_err(map_sql_err)??);
         }
         Ok(out)
     }
@@ -200,7 +225,7 @@ impl LocalAdapter {
                 "SELECT id, list_id, parent_id, title, description, status,
                         priority, scheduled_date, scheduled_time, deadline_date,
                         deadline_time, recurrence, color_label_id, reminders, sound,
-                        created_at, updated_at, completed_at, etag
+                        created_at, updated_at, completed_at, etag, section_id
                    FROM tasks",
             )
             .map_err(map_sql_err)?;
@@ -262,6 +287,14 @@ impl LocalAdapter {
         }
         for list in &dump.task_lists {
             match self.upsert_task_list_from_sync(list) {
+                Ok(()) => report.applied += 1,
+                Err(_) => report.failed += 1,
+            }
+        }
+        // Sections reference task_lists and are referenced by tasks, so
+        // they slot between the two in the FK-safe insertion order.
+        for section in &dump.sections {
+            match self.upsert_section_from_sync(section) {
                 Ok(()) => report.applied += 1,
                 Err(_) => report.failed += 1,
             }
@@ -456,6 +489,7 @@ mod tests {
             calendars: vec![fake_calendar("cal-1", "Once")],
             events: vec![fake_event("ev-1", "cal-1")],
             task_lists: vec![],
+            sections: vec![],
             tasks: vec![],
             color_labels: vec![],
         };

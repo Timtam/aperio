@@ -29,7 +29,7 @@
 //! create / update paths makes a schema change a single-file
 //! diff.
 
-use cal_core::{Calendar, ColorLabel, Event, Task, TaskList};
+use cal_core::{Calendar, ColorLabel, Event, Section, Task, TaskList};
 use chrono::Utc;
 use rusqlite::params;
 
@@ -175,14 +175,15 @@ impl LocalAdapter {
         let conn = self.db().lock().expect("db mutex poisoned");
         conn.execute(
             "INSERT INTO tasks (
-                id, list_id, parent_id, title, description, status, priority,
+                id, list_id, parent_id, section_id, title, description, status, priority,
                 scheduled_date, scheduled_time, deadline_date, deadline_time,
                 recurrence, color_label_id, reminders, sound,
                 created_at, updated_at, completed_at, etag
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET
                  list_id        = excluded.list_id,
                  parent_id      = excluded.parent_id,
+                 section_id     = excluded.section_id,
                  title          = excluded.title,
                  description    = excluded.description,
                  status         = excluded.status,
@@ -202,6 +203,7 @@ impl LocalAdapter {
                 task.id,
                 task.list_id,
                 task.parent_id,
+                task.section_id,
                 task.title,
                 task.description,
                 task_status_to_text(task.status),
@@ -248,8 +250,8 @@ impl LocalAdapter {
         conn.execute(
             "INSERT INTO task_lists (
                 id, source, name, color_hex, color_source, default_sound,
-                embedded_in_calendar, read_only, created_at, updated_at
-             ) VALUES (?, 'local', ?, ?, ?, ?, ?, ?, ?, ?)
+                embedded_in_calendar, read_only, parent_id, created_at, updated_at
+             ) VALUES (?, 'local', ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET
                  name                 = excluded.name,
                  color_hex            = excluded.color_hex,
@@ -257,6 +259,7 @@ impl LocalAdapter {
                  default_sound        = excluded.default_sound,
                  embedded_in_calendar = excluded.embedded_in_calendar,
                  read_only            = excluded.read_only,
+                 parent_id            = excluded.parent_id,
                  updated_at           = excluded.updated_at",
             params![
                 list.id,
@@ -266,6 +269,7 @@ impl LocalAdapter {
                 sound_json,
                 list.embedded_in_calendar,
                 list.read_only as i64,
+                list.parent_id,
                 now_s,
                 now_s,
             ],
@@ -277,6 +281,41 @@ impl LocalAdapter {
     pub fn delete_task_list_from_sync(&self, list_id: &str) -> cal_core::Result<()> {
         let conn = self.db().lock().expect("db mutex poisoned");
         conn.execute("DELETE FROM task_lists WHERE id = ?", params![list_id])
+            .map_err(map_sql_err)?;
+        Ok(())
+    }
+
+    /// Insert or update a section row from another device. Sections
+    /// carry no timestamps in the cal-core model, so — like the task
+    /// list helper — we stamp `created_at`/`updated_at` with the local
+    /// apply time. The id is the wire id the originator emitted.
+    pub fn upsert_section_from_sync(&self, section: &Section) -> cal_core::Result<()> {
+        let now_s = fmt_utc(&Utc::now());
+        let conn = self.db().lock().expect("db mutex poisoned");
+        conn.execute(
+            "INSERT INTO sections (id, list_id, name, position, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET
+                 list_id    = excluded.list_id,
+                 name       = excluded.name,
+                 position   = excluded.position,
+                 updated_at = excluded.updated_at",
+            params![
+                section.id,
+                section.list_id,
+                section.name,
+                section.order as i64,
+                now_s,
+                now_s,
+            ],
+        )
+        .map_err(map_sql_err)?;
+        Ok(())
+    }
+
+    pub fn delete_section_from_sync(&self, section_id: &str) -> cal_core::Result<()> {
+        let conn = self.db().lock().expect("db mutex poisoned");
+        conn.execute("DELETE FROM sections WHERE id = ?", params![section_id])
             .map_err(map_sql_err)?;
         Ok(())
     }
