@@ -406,6 +406,12 @@ button[aria-disabled='true'] {
   max-width: 420px;
 }
 
+/* The name-prompt dialog (new calendar / task list / address book) is
+   a single short text field — keep it as compact as the confirm dialog. */
+.modal--prompt {
+  max-width: 420px;
+}
+
 /* The recurring-event delete dialog carries three buttons instead
    of two, so it needs a bit more horizontal room to keep the
    labels readable. */
