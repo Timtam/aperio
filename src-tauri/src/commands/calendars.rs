@@ -6,7 +6,10 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use sync_core::{EventPayload, IdPayload, SyncEvent};
-use tauri::State;
+use tauri::{AppHandle, State};
+
+use super::cache_swr;
+use crate::cache::{CacheStore, RefreshCoordinator, SyncScope};
 
 use plugin_core::{PluginManager, RecurrenceCapabilities};
 
@@ -75,8 +78,11 @@ pub struct CreateCalendarRequest {
 
 #[tauri::command]
 pub async fn list_calendars(
+    app: AppHandle,
     adapter: State<'_, LocalAdapter>,
     registry: State<'_, Arc<AdapterRegistry>>,
+    cache: State<'_, Arc<CacheStore>>,
+    coord: State<'_, Arc<RefreshCoordinator>>,
     plugin_manager: State<'_, Arc<PluginManager>>,
     db: State<'_, DbHandle>,
 ) -> CommandResult<Vec<CalendarRow>> {
@@ -84,6 +90,9 @@ pub async fn list_calendars(
         target: "aperio::commands",
         "list_calendars command invoked",
     );
+    let registry = Arc::clone(&registry);
+    let cache = Arc::clone(&cache);
+    let coord = Arc::clone(&coord);
     // Local first so the implicit "local" account stays at the top
     // of the user's calendar list. Each local calendar id is
     // pre-registered in the route map so the write-path commands
@@ -93,7 +102,9 @@ pub async fn list_calendars(
     for c in &local {
         registry.note_calendar_route(&c.id, LOCAL_ID);
     }
-    let mut external = registry.list_external_calendars().await;
+    // External calendars: cache-first, background-refreshed (SWR) so the
+    // sidebar isn't gated on the slowest provider at startup.
+    let mut external = external_calendars_swr(&app, &registry, &cache, &coord).await;
     tracing::info!(
         target: "aperio::commands",
         local_count = local.len(),
@@ -174,6 +185,71 @@ pub async fn list_calendars(
     Ok(decorated)
 }
 
+/// Cache-first aggregation of every external account's calendars. Serves
+/// the snapshot instantly (registering routes so `get_events` can resolve
+/// them), refreshing past the freshness window. Same stale-while-
+/// revalidate shape as `external_task_lists_swr`.
+async fn external_calendars_swr(
+    app: &AppHandle,
+    registry: &Arc<AdapterRegistry>,
+    cache: &Arc<CacheStore>,
+    coord: &Arc<RefreshCoordinator>,
+) -> Vec<Calendar> {
+    let mut out = Vec::new();
+    for (account, adapter) in registry.snapshot_calendar_adapters() {
+        let state = cache
+            .get_sync_state(&account, SyncScope::Calendars, "")
+            .ok()
+            .flatten();
+        if cache_swr::has_snapshot(&state) {
+            let cached = cache.read_calendars(&account).unwrap_or_default();
+            for c in &cached {
+                registry.note_calendar_route(&c.id, &account);
+            }
+            if cache_swr::is_stale(&state, cache_swr::SWR_TTL_SECS) {
+                let adapter_bg = Arc::clone(&adapter);
+                let reg = Arc::clone(registry);
+                let acc = account.clone();
+                cache_swr::spawn_refresh(
+                    app.clone(),
+                    Arc::clone(cache),
+                    Arc::clone(coord),
+                    SyncScope::Calendars,
+                    account.clone(),
+                    String::new(),
+                    move || async move { adapter_bg.list_calendars().await },
+                    move |c, cals: &[Calendar]| {
+                        for cal in cals {
+                            reg.note_calendar_route(&cal.id, &acc);
+                        }
+                        c.replace_calendars(&acc, cals)
+                    },
+                );
+            }
+            out.extend(cached);
+        } else {
+            match adapter.list_calendars().await {
+                Ok(cals) => {
+                    for c in &cals {
+                        registry.note_calendar_route(&c.id, &account);
+                    }
+                    let _ = cache.replace_calendars(&account, &cals);
+                    out.extend(cals);
+                }
+                Err(err) => {
+                    let _ = cache.mark_error(&account, SyncScope::Calendars, "", &err.to_string());
+                    let cached = cache.read_calendars(&account).unwrap_or_default();
+                    for c in &cached {
+                        registry.note_calendar_route(&c.id, &account);
+                    }
+                    out.extend(cached);
+                }
+            }
+        }
+    }
+    out
+}
+
 #[tauri::command]
 pub async fn create_calendar(
     adapter: State<'_, LocalAdapter>,
@@ -222,8 +298,11 @@ pub struct EventRangeRequest {
 
 #[tauri::command]
 pub async fn get_events(
+    app: AppHandle,
     adapter: State<'_, LocalAdapter>,
     registry: State<'_, Arc<AdapterRegistry>>,
+    cache: State<'_, Arc<CacheStore>>,
+    coord: State<'_, Arc<RefreshCoordinator>>,
     request: EventRangeRequest,
 ) -> CommandResult<Vec<Event>> {
     let range = DateRange::new(request.start, request.end);
@@ -273,43 +352,95 @@ pub async fn get_events(
             message: format!("calendar '{}' is not routable", request.calendar_id),
         });
     };
-    let result = ext.get_events(&request.calendar_id, range).await;
-    match &result {
-        Ok(events) => {
+
+    // Stale-while-revalidate: if the snapshot cache already covers this
+    // range, serve it INSTANTLY. A background refresh is queued only when
+    // the snapshot is older than `CACHE_REFRESH_TTL` — the freshness gate
+    // both spares the network on every view render and breaks the
+    // refresh → `cache-updated` → invalidate → re-read → refresh loop.
+    if let Ok(Some(state)) = cache.get_sync_state(&account, SyncScope::Events, &request.calendar_id)
+    {
+        let covers = matches!(
+            (state.window_start, state.window_end),
+            (Some(ws), Some(we)) if ws <= range.start && we >= range.end
+        );
+        if covers {
+            let cached = cache
+                .read_events(&account, &request.calendar_id, range)
+                .unwrap_or_default();
+            let state_opt = Some(state);
+            let stale = cache_swr::is_stale(&state_opt, cache_swr::SWR_TTL_SECS);
             tracing::info!(
-                target: "aperio::commands",
+                target: "aperio::cache",
                 calendar_id = %request.calendar_id,
-                count = events.len(),
-                "get_events returned",
+                count = cached.len(),
+                stale,
+                "get_events served from cache",
             );
-            // Per-event INFO dump so we can see WHAT each event
-            // looks like — title, time slot, whether it's a
-            // recurring master (frontend expander handles the
-            // window) or a one-shot. Bounded at 20 entries so a
-            // huge calendar doesn't flood the log.
-            for ev in events.iter().take(20) {
-                tracing::info!(
-                    target: "aperio::commands",
-                    calendar_id = %request.calendar_id,
-                    event_id = %ev.id,
-                    title = %ev.title,
-                    start = %ev.start.to_rfc3339(),
-                    end = %ev.end.to_rfc3339(),
-                    all_day = ev.all_day,
-                    rrule = ev.recurrence.as_ref().map(|r| r.rrule.as_str()).unwrap_or(""),
-                    exceptions = ev.recurrence.as_ref().map(|r| r.exceptions.len()).unwrap_or(0),
-                    "  event",
+            if stale {
+                let cal = request.calendar_id.clone();
+                let cal_for_write = cal.clone();
+                let acc = account.clone();
+                cache_swr::spawn_refresh(
+                    app.clone(),
+                    Arc::clone(&cache),
+                    Arc::clone(&coord),
+                    SyncScope::Events,
+                    account.clone(),
+                    request.calendar_id.clone(),
+                    move || async move { ext.get_events(&cal, range).await },
+                    move |c, events: &[Event]| {
+                        c.replace_calendar_events(&acc, &cal_for_write, range, events)
+                    },
                 );
             }
+            return Ok(cached);
         }
-        Err(err) => tracing::warn!(
-            target: "aperio::commands",
-            calendar_id = %request.calendar_id,
-            ?err,
-            "get_events failed at adapter",
-        ),
     }
-    Ok(result?)
+
+    // Cold path: the requested range isn't cached yet (first run, or a
+    // navigation outside the covered window). Fetch synchronously, write
+    // through, and — on a network failure — fall back to whatever stale
+    // snapshot we have so an offline start still shows something.
+    match ext.get_events(&request.calendar_id, range).await {
+        Ok(events) => {
+            if let Err(err) =
+                cache.replace_calendar_events(&account, &request.calendar_id, range, &events)
+            {
+                tracing::warn!(target: "aperio::cache", ?err, "failed to write event cache");
+            }
+            Ok(events)
+        }
+        Err(err) => {
+            let _ = cache.mark_error(
+                &account,
+                SyncScope::Events,
+                &request.calendar_id,
+                &err.to_string(),
+            );
+            let stale = cache
+                .read_events(&account, &request.calendar_id, range)
+                .unwrap_or_default();
+            if stale.is_empty() {
+                tracing::warn!(
+                    target: "aperio::commands",
+                    calendar_id = %request.calendar_id,
+                    ?err,
+                    "get_events failed at adapter, no cache fallback",
+                );
+                Err(err.into())
+            } else {
+                tracing::warn!(
+                    target: "aperio::commands",
+                    calendar_id = %request.calendar_id,
+                    count = stale.len(),
+                    ?err,
+                    "get_events failed at adapter, serving stale cache",
+                );
+                Ok(stale)
+            }
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -323,6 +454,7 @@ pub struct CreateEventRequest {
 pub async fn create_event(
     adapter: State<'_, LocalAdapter>,
     registry: State<'_, Arc<AdapterRegistry>>,
+    cache: State<'_, Arc<CacheStore>>,
     scheduler: State<'_, SchedulerHandle>,
     event_log: State<'_, Arc<EventLogWriter>>,
     request: CreateEventRequest,
@@ -357,6 +489,8 @@ pub async fn create_event(
                 fields,
             }));
         }
+    } else {
+        let _ = cache.invalidate(&account, SyncScope::Events, &request.calendar_id);
     }
     scheduler.invalidate();
     Ok(event)
@@ -366,6 +500,7 @@ pub async fn create_event(
 pub async fn update_event(
     adapter: State<'_, LocalAdapter>,
     registry: State<'_, Arc<AdapterRegistry>>,
+    cache: State<'_, Arc<CacheStore>>,
     scheduler: State<'_, SchedulerHandle>,
     event_log: State<'_, Arc<EventLogWriter>>,
     event: Event,
@@ -506,6 +641,14 @@ pub async fn update_event(
             }));
         }
 
+        // Write-through: re-fetch both ends of an external move.
+        if target_account != LOCAL_ID {
+            let _ = cache.invalidate(&target_account, SyncScope::Events, &event.calendar_id);
+        }
+        if source_account != LOCAL_ID {
+            let _ = cache.invalidate(&source_account, SyncScope::Events, &previous);
+        }
+
         scheduler.invalidate();
         return Ok(created);
     }
@@ -531,6 +674,8 @@ pub async fn update_event(
                 fields,
             }));
         }
+    } else {
+        let _ = cache.invalidate(&target_account, SyncScope::Events, &updated.calendar_id);
     }
     scheduler.invalidate();
     Ok(updated)
@@ -540,6 +685,7 @@ pub async fn update_event(
 pub async fn delete_event(
     adapter: State<'_, LocalAdapter>,
     registry: State<'_, Arc<AdapterRegistry>>,
+    cache: State<'_, Arc<CacheStore>>,
     scheduler: State<'_, SchedulerHandle>,
     event_log: State<'_, Arc<EventLogWriter>>,
     id: String,
@@ -564,6 +710,9 @@ pub async fn delete_event(
             });
         };
         ext.delete_event(&id).await?;
+        if let Some(cid) = &calendar_id {
+            let _ = cache.invalidate(&account, SyncScope::Events, cid);
+        }
     }
     if is_local {
         event_log.append(SyncEvent::EventDeleted(IdPayload { id: id.clone() }));
@@ -584,6 +733,7 @@ pub async fn get_event_by_id(
 pub async fn add_event_exdate(
     adapter: State<'_, LocalAdapter>,
     registry: State<'_, Arc<AdapterRegistry>>,
+    cache: State<'_, Arc<CacheStore>>,
     scheduler: State<'_, SchedulerHandle>,
     event_log: State<'_, Arc<EventLogWriter>>,
     id: String,
@@ -609,6 +759,9 @@ pub async fn add_event_exdate(
             });
         };
         ext.add_event_exdate(&id, occurrence).await?;
+        if let Some(cid) = &calendar_id {
+            let _ = cache.invalidate(&account, SyncScope::Events, cid);
+        }
     }
     // For local events the exdate mutation rewrote the master
     // event's recurrence.exceptions list. Re-read the row so the

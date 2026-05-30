@@ -6,6 +6,7 @@
 
 pub mod accounts;
 pub mod bundled_plugins;
+pub mod cache;
 pub mod commands;
 pub mod conflicts;
 pub mod contact_sync;
@@ -127,6 +128,13 @@ pub fn run() {
         let repo = accounts::AccountsRepo::new(&shared);
         registry.bootstrap(&repo);
     }
+
+    // CACHE-1: host-owned snapshot cache for external adapters + the
+    // background-refresh dedup guard. Both live in Tauri State so the
+    // read commands can serve cached data instantly and kick a
+    // deduplicated refresh.
+    let cache_store = Arc::new(cache::CacheStore::new(db.clone()));
+    let refresh_coordinator = Arc::new(cache::RefreshCoordinator::new());
 
     // The scheduler holds its own Arc so its background scan can
     // fan out to external adapters even while a command is awaiting
@@ -256,6 +264,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(local_adapter)
         .manage(registry)
+        .manage(cache_store)
+        .manage(refresh_coordinator)
         .manage(db)
         .manage(event_log_writer)
         .manage(sync_orchestrator)

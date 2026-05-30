@@ -8,6 +8,7 @@
 
 mod accounts;
 mod birthdays;
+mod cache_swr;
 mod calendars;
 mod color_labels;
 mod conflicts;
