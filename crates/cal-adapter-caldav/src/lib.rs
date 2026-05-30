@@ -26,6 +26,7 @@ pub mod discovery;
 pub mod error;
 pub mod events;
 pub mod mapping;
+pub mod sync;
 pub mod tasks;
 pub mod vcard;
 mod xml;
@@ -210,6 +211,133 @@ impl CaldavAdapter {
         }
     }
 
+    // ── sync-collection delta helpers (CACHE-9) ────────────────────────
+
+    /// Bootstrap the events delta: a full windowed read plus a fresh
+    /// token. Prefers a sync-collection token; falls back to the CTag
+    /// when the server doesn't advertise `DAV:sync-token`.
+    async fn events_bootstrap(
+        &self,
+        cal_url: &Url,
+        range: DateRange,
+    ) -> CoreResult<ChangeSet<Event>> {
+        let events = events::get_events(&self.http, cal_url, range, &self.credentials)
+            .await
+            .map_err(to_core_error)?;
+        let new_token = match sync::read_sync_token(&self.http, cal_url, &self.credentials).await {
+            Ok(Some(st)) => Some(format!("sync:{st}")),
+            _ => ctag::read_ctag(&self.http, cal_url, &self.credentials)
+                .await
+                .ok()
+                .flatten()
+                .map(|c| format!("ctag:{c}")),
+        };
+        Ok(ChangeSet {
+            changes: events,
+            deletions: Vec::new(),
+            new_token,
+            full_resync: true,
+        })
+    }
+
+    /// CTag-gated path for servers without sync-collection. Unchanged ⇒
+    /// empty no-op; changed ⇒ full windowed re-list.
+    async fn events_ctag_gated(
+        &self,
+        cal_url: &Url,
+        range: DateRange,
+        prev_ctag: Option<&str>,
+    ) -> CoreResult<ChangeSet<Event>> {
+        let ctag = ctag::read_ctag(&self.http, cal_url, &self.credentials)
+            .await
+            .map_err(to_core_error)?;
+        if let (Some(current), Some(prev)) = (ctag.as_deref(), prev_ctag) {
+            if current == prev {
+                return Ok(ChangeSet {
+                    changes: Vec::new(),
+                    deletions: Vec::new(),
+                    new_token: Some(format!("ctag:{current}")),
+                    full_resync: false,
+                });
+            }
+        }
+        let events = events::get_events(&self.http, cal_url, range, &self.credentials)
+            .await
+            .map_err(to_core_error)?;
+        Ok(ChangeSet {
+            changes: events,
+            deletions: Vec::new(),
+            new_token: ctag.map(|c| format!("ctag:{c}")),
+            full_resync: true,
+        })
+    }
+
+    /// Per-resource sync-collection path. A pure create/modify batch
+    /// multigets only the changed resources; a batch with ANY deletion
+    /// falls back to a windowed full re-list (a removed href can't be
+    /// mapped to a cache UID — see the `sync` module docs). Any
+    /// sync-collection failure (expired token, server hiccup) recovers
+    /// via a clean bootstrap.
+    async fn events_sync_incremental(
+        &self,
+        cal_url: &Url,
+        range: DateRange,
+        sync_token: &str,
+    ) -> CoreResult<ChangeSet<Event>> {
+        let result =
+            match sync::sync_collection(&self.http, cal_url, sync_token, &self.credentials).await {
+                Ok(r) => r,
+                Err(_) => return self.events_bootstrap(cal_url, range).await,
+            };
+        let next_token = result
+            .sync_token
+            .clone()
+            .unwrap_or_else(|| sync_token.to_string());
+
+        if !result.deleted.is_empty() {
+            let events = events::get_events(&self.http, cal_url, range, &self.credentials)
+                .await
+                .map_err(to_core_error)?;
+            return Ok(ChangeSet {
+                changes: events,
+                deletions: Vec::new(),
+                new_token: Some(format!("sync:{next_token}")),
+                full_resync: true,
+            });
+        }
+
+        let entries =
+            sync::calendar_multiget(&self.http, cal_url, &result.changed, &self.credentials)
+                .await
+                .map_err(to_core_error)?;
+        let calendar_id = cal_url.as_str();
+        let mut changes = Vec::new();
+        for entry in entries {
+            let Some(ical) = entry.calendar_data else {
+                continue;
+            };
+            let Ok(mut evs) = mapping::parse_calendar_data(&ical, calendar_id) else {
+                continue;
+            };
+            for ev in &mut evs {
+                if let Some(etag) = entry.etag.clone() {
+                    ev.etag = Some(etag);
+                }
+                // Singles outside the cached window are dropped; recurring
+                // masters always pass (the frontend expands them).
+                if event_in_window(ev, range) {
+                    changes.push(ev.clone());
+                }
+            }
+        }
+        Ok(ChangeSet {
+            changes,
+            deletions: Vec::new(),
+            new_token: Some(format!("sync:{next_token}")),
+            full_resync: false,
+        })
+    }
+
     /// Pick a URL on the contact server that the photo-CRUD
     /// helpers can join contact resource paths against. The
     /// `ContactsFeature` photo methods take only `contact_id`
@@ -277,6 +405,15 @@ fn to_core_error(err: CaldavError) -> CoreError {
     }
 }
 
+/// Window predicate for the sync-collection incremental read: recurring
+/// masters always pass (the frontend expander handles the visible
+/// window); singles must overlap `[range.start, range.end)`. Mirrors the
+/// EWS/Google/Graph delta adapters so the cache stays windowed even
+/// though `sync-collection` reports across the whole collection.
+fn event_in_window(ev: &Event, range: DateRange) -> bool {
+    ev.recurrence.is_some() || (ev.end >= range.start && ev.start < range.end)
+}
+
 #[async_trait]
 impl Adapter for CaldavAdapter {
     async fn authenticate(&self, _credentials: CoreCredentials) -> CoreResult<AuthToken> {
@@ -332,32 +469,24 @@ impl CalendarFeature for CaldavAdapter {
     ) -> CoreResult<ChangeSet<Event>> {
         let cal_url =
             Url::parse(calendar_id).map_err(|err| CoreError::InvalidInput(err.to_string()))?;
-        // Cheap gate: a PROPFIND-depth-0 CTag read. Unchanged ⇒ nothing
-        // to do.
-        let ctag = ctag::read_ctag(&self.http, &cal_url, &self.credentials)
-            .await
-            .map_err(to_core_error)?;
-        if let (Some(current), Some(prev)) = (ctag.as_deref(), since_token) {
-            if current == prev {
-                return Ok(ChangeSet {
-                    changes: Vec::new(),
-                    deletions: Vec::new(),
-                    new_token: ctag,
-                    full_resync: false,
-                });
+        // The token is tagged so we know which mechanism minted it:
+        //   `sync:<token>` → RFC 6578 per-resource sync-collection,
+        //   `ctag:<ctag>`  → the CTag gate (server lacks sync-collection),
+        //   None / bare    → bootstrap (legacy CTag tokens land here too,
+        //                     and upgrade to `sync:` if the server supports it).
+        match since_token {
+            Some(t) => {
+                if let Some(sync_token) = t.strip_prefix("sync:") {
+                    self.events_sync_incremental(&cal_url, range, sync_token)
+                        .await
+                } else if let Some(ctag) = t.strip_prefix("ctag:") {
+                    self.events_ctag_gated(&cal_url, range, Some(ctag)).await
+                } else {
+                    self.events_bootstrap(&cal_url, range).await
+                }
             }
+            None => self.events_bootstrap(&cal_url, range).await,
         }
-        // Changed (or no CTag advertised): full re-list, hand back the
-        // new CTag so the next round can gate again.
-        let events = events::get_events(&self.http, &cal_url, range, &self.credentials)
-            .await
-            .map_err(to_core_error)?;
-        Ok(ChangeSet {
-            changes: events,
-            deletions: Vec::new(),
-            new_token: ctag,
-            full_resync: true,
-        })
     }
 
     async fn create_event(&self, calendar_id: &str, event: NewEvent) -> CoreResult<Event> {
@@ -1100,18 +1229,39 @@ END:VCALENDAR</c:calendar-data>
   </d:response>
 </d:multistatus>"#;
 
+    /// PROPFIND `DAV:sync-token` response advertising a token — marks the
+    /// server as sync-collection capable.
+    const SYNC_TOKEN_PROPFIND: &str = r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/calendars/alice/work/</d:href>
+    <d:propstat><d:prop><d:sync-token>ST1</d:sync-token></d:prop>
+    <d:status>HTTP/1.1 200 OK</d:status></d:propstat>
+  </d:response>
+</d:multistatus>"#;
+
+    use chrono::TimeZone;
+
+    fn delta_range() -> DateRange {
+        DateRange::new(
+            chrono::Utc.with_ymd_and_hms(2026, 5, 20, 0, 0, 0).unwrap(),
+            chrono::Utc.with_ymd_and_hms(2026, 5, 21, 0, 0, 0).unwrap(),
+        )
+    }
+
     #[tokio::test]
-    async fn get_events_delta_gates_on_ctag() {
+    async fn get_events_delta_falls_back_to_ctag_gate() {
+        // No sync-token advertised (PROPFIND returns the CTag body, no
+        // <d:sync-token>) → the adapter degrades to the CTag gate and
+        // tags the token `ctag:`.
         let mut server = Server::new_async().await;
-        // CTag read (PROPFIND depth 0) always reports "v1".
-        let ctag_mock = server
+        let _ctag_mock = server
             .mock("PROPFIND", "/calendars/alice/work/")
             .with_status(207)
             .with_body(CTAG_RESPONSE)
             .create_async()
             .await;
-        // Full re-list (REPORT) must run EXACTLY ONCE — only on the
-        // first (token-less) call; the gated second call skips it.
+        // The full re-list runs once (bootstrap); the gated second call skips it.
         let report_mock = server
             .mock("REPORT", "/calendars/alice/work/")
             .with_status(207)
@@ -1120,34 +1270,137 @@ END:VCALENDAR</c:calendar-data>
             .create_async()
             .await;
 
-        use chrono::TimeZone;
         let adapter = build_adapter(&server);
         let cal_url = format!("{}/calendars/alice/work/", server.url());
-        let range = DateRange::new(
-            chrono::Utc.with_ymd_and_hms(2026, 5, 20, 0, 0, 0).unwrap(),
-            chrono::Utc.with_ymd_and_hms(2026, 5, 21, 0, 0, 0).unwrap(),
-        );
 
-        // First call, no token → full resync with the events + the CTag.
         let first = adapter
-            .get_events_delta(&cal_url, range, None)
+            .get_events_delta(&cal_url, delta_range(), None)
             .await
             .unwrap();
         assert!(first.full_resync);
         assert_eq!(first.changes.len(), 1);
-        assert_eq!(first.new_token.as_deref(), Some("v1"));
+        assert_eq!(first.new_token.as_deref(), Some("ctag:v1"));
 
-        // Second call with the same token → CTag matches → empty, no
-        // REPORT.
+        // Tagged ctag token, unchanged CTag → empty no-op, no REPORT.
         let second = adapter
-            .get_events_delta(&cal_url, range, Some("v1"))
+            .get_events_delta(&cal_url, delta_range(), Some("ctag:v1"))
             .await
             .unwrap();
         assert!(!second.full_resync);
         assert!(second.changes.is_empty());
-        assert_eq!(second.new_token.as_deref(), Some("v1"));
+        assert_eq!(second.new_token.as_deref(), Some("ctag:v1"));
 
         report_mock.assert_async().await;
-        let _ = ctag_mock;
+    }
+
+    #[tokio::test]
+    async fn get_events_delta_bootstrap_prefers_sync_token() {
+        let mut server = Server::new_async().await;
+        // PROPFIND advertises a sync-token → sync-collection capable.
+        let _propfind = server
+            .mock("PROPFIND", "/calendars/alice/work/")
+            .with_status(207)
+            .with_body(SYNC_TOKEN_PROPFIND)
+            .create_async()
+            .await;
+        // Bootstrap data comes from the windowed calendar-query REPORT.
+        let _query = server
+            .mock("REPORT", "/calendars/alice/work/")
+            .match_body(mockito::Matcher::Regex("calendar-query".into()))
+            .with_status(207)
+            .with_body(DELTA_REPORT_RESPONSE)
+            .create_async()
+            .await;
+
+        let adapter = build_adapter(&server);
+        let cal_url = format!("{}/calendars/alice/work/", server.url());
+        let first = adapter
+            .get_events_delta(&cal_url, delta_range(), None)
+            .await
+            .unwrap();
+        assert!(first.full_resync);
+        assert_eq!(first.changes.len(), 1);
+        assert_eq!(first.new_token.as_deref(), Some("sync:ST1"));
+    }
+
+    #[tokio::test]
+    async fn get_events_delta_sync_incremental_multigets_only_changed() {
+        let mut server = Server::new_async().await;
+        // sync-collection REPORT → one changed href, fresh token, no deletes.
+        let _sync = server
+            .mock("REPORT", "/calendars/alice/work/")
+            .match_body(mockito::Matcher::Regex("sync-collection".into()))
+            .with_status(207)
+            .with_body(
+                r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/calendars/alice/work/e1.ics</d:href>
+    <d:propstat><d:prop><d:getetag>"v2"</d:getetag></d:prop>
+    <d:status>HTTP/1.1 200 OK</d:status></d:propstat>
+  </d:response>
+  <d:sync-token>ST2</d:sync-token>
+</d:multistatus>"#,
+            )
+            .create_async()
+            .await;
+        // multiget REPORT → the changed resource's body.
+        let _multiget = server
+            .mock("REPORT", "/calendars/alice/work/")
+            .match_body(mockito::Matcher::Regex("calendar-multiget".into()))
+            .with_status(207)
+            .with_body(DELTA_REPORT_RESPONSE)
+            .create_async()
+            .await;
+
+        let adapter = build_adapter(&server);
+        let cal_url = format!("{}/calendars/alice/work/", server.url());
+        let cs = adapter
+            .get_events_delta(&cal_url, delta_range(), Some("sync:ST1"))
+            .await
+            .unwrap();
+        assert!(!cs.full_resync);
+        assert_eq!(cs.changes.len(), 1);
+        assert_eq!(cs.new_token.as_deref(), Some("sync:ST2"));
+    }
+
+    #[tokio::test]
+    async fn get_events_delta_sync_deletion_triggers_full_relist() {
+        let mut server = Server::new_async().await;
+        // sync-collection REPORT → a removed href (404, no getetag).
+        let _sync = server
+            .mock("REPORT", "/calendars/alice/work/")
+            .match_body(mockito::Matcher::Regex("sync-collection".into()))
+            .with_status(207)
+            .with_body(
+                r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/calendars/alice/work/gone.ics</d:href>
+    <d:status>HTTP/1.1 404 Not Found</d:status>
+  </d:response>
+  <d:sync-token>ST3</d:sync-token>
+</d:multistatus>"#,
+            )
+            .create_async()
+            .await;
+        // A deletion forces a windowed full re-list (calendar-query).
+        let _query = server
+            .mock("REPORT", "/calendars/alice/work/")
+            .match_body(mockito::Matcher::Regex("calendar-query".into()))
+            .with_status(207)
+            .with_body(DELTA_REPORT_RESPONSE)
+            .create_async()
+            .await;
+
+        let adapter = build_adapter(&server);
+        let cal_url = format!("{}/calendars/alice/work/", server.url());
+        let cs = adapter
+            .get_events_delta(&cal_url, delta_range(), Some("sync:ST1"))
+            .await
+            .unwrap();
+        assert!(cs.full_resync);
+        assert_eq!(cs.changes.len(), 1);
+        assert_eq!(cs.new_token.as_deref(), Some("sync:ST3"));
     }
 }
