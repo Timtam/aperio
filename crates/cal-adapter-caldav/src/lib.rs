@@ -439,12 +439,12 @@ impl CaldavAdapter {
         })
     }
 
-    /// Per-resource sync-collection path. A pure create/modify batch
-    /// multigets only the changed resources; a batch with ANY deletion
-    /// falls back to a windowed full re-list (a removed href can't be
-    /// mapped to a cache UID — see the `sync` module docs). Any
-    /// sync-collection failure (expired token, server hiccup) recovers
-    /// via a clean bootstrap.
+    /// Per-resource sync-collection events path. Multigets only the
+    /// changed resources (range-filtering singles) and emits removed
+    /// hrefs as per-resource deletions — the `{href}|{uid}` event id
+    /// means a removed href maps onto the cache row's `native_id`
+    /// directly. Any sync-collection failure (expired token, server
+    /// hiccup) recovers via a clean bootstrap.
     async fn events_sync_incremental(
         &self,
         cal_url: &Url,
@@ -461,18 +461,6 @@ impl CaldavAdapter {
             .clone()
             .unwrap_or_else(|| sync_token.to_string());
 
-        if !result.deleted.is_empty() {
-            let events = events::get_events(&self.http, cal_url, range, &self.credentials)
-                .await
-                .map_err(to_core_error)?;
-            return Ok(ChangeSet {
-                changes: events,
-                deletions: Vec::new(),
-                new_token: Some(format!("sync:{next_token}")),
-                full_resync: true,
-            });
-        }
-
         let entries =
             sync::calendar_multiget(&self.http, cal_url, &result.changed, &self.credentials)
                 .await
@@ -483,7 +471,9 @@ impl CaldavAdapter {
             let Some(ical) = entry.calendar_data else {
                 continue;
             };
-            let Ok(mut evs) = mapping::parse_calendar_data(&ical, calendar_id) else {
+            let Ok(mut evs) =
+                mapping::parse_calendar_data_with_href(&ical, calendar_id, Some(&entry.href))
+            else {
                 continue;
             };
             for ev in &mut evs {
@@ -499,7 +489,7 @@ impl CaldavAdapter {
         }
         Ok(ChangeSet {
             changes,
-            deletions: Vec::new(),
+            deletions: result.deleted,
             new_token: Some(format!("sync:{next_token}")),
             full_resync: false,
         })
@@ -1512,9 +1502,11 @@ END:VCALENDAR</c:calendar-data>
     }
 
     #[tokio::test]
-    async fn get_events_delta_sync_deletion_triggers_full_relist() {
+    async fn get_events_delta_sync_emits_per_resource_changes_and_deletions() {
+        // With `{href}|{uid}` event ids, a removed href maps to the cache
+        // native_id — so a deletion is a per-resource removal, not a full
+        // re-list.
         let mut server = Server::new_async().await;
-        // sync-collection REPORT → a removed href (404, no getetag).
         let _sync = server
             .mock("REPORT", "/calendars/alice/work/")
             .match_body(mockito::Matcher::Regex("sync-collection".into()))
@@ -1522,6 +1514,11 @@ END:VCALENDAR</c:calendar-data>
             .with_body(
                 r#"<?xml version="1.0"?>
 <d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/calendars/alice/work/e1.ics</d:href>
+    <d:propstat><d:prop><d:getetag>"v2"</d:getetag></d:prop>
+    <d:status>HTTP/1.1 200 OK</d:status></d:propstat>
+  </d:response>
   <d:response>
     <d:href>/calendars/alice/work/gone.ics</d:href>
     <d:status>HTTP/1.1 404 Not Found</d:status>
@@ -1531,10 +1528,9 @@ END:VCALENDAR</c:calendar-data>
             )
             .create_async()
             .await;
-        // A deletion forces a windowed full re-list (calendar-query).
-        let _query = server
+        let _multiget = server
             .mock("REPORT", "/calendars/alice/work/")
-            .match_body(mockito::Matcher::Regex("calendar-query".into()))
+            .match_body(mockito::Matcher::Regex("calendar-multiget".into()))
             .with_status(207)
             .with_body(DELTA_REPORT_RESPONSE)
             .create_async()
@@ -1546,8 +1542,14 @@ END:VCALENDAR</c:calendar-data>
             .get_events_delta(&cal_url, delta_range(), Some("sync:ST1"))
             .await
             .unwrap();
-        assert!(cs.full_resync);
+        assert!(!cs.full_resync);
         assert_eq!(cs.changes.len(), 1);
+        // The changed event id now carries the href (native_id = href).
+        assert!(cs.changes[0].id.ends_with("|evt-1"));
+        assert_eq!(
+            cs.deletions,
+            vec!["/calendars/alice/work/gone.ics".to_string()]
+        );
         assert_eq!(cs.new_token.as_deref(), Some("sync:ST3"));
     }
 

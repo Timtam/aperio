@@ -24,7 +24,10 @@ use uuid::Uuid;
 use crate::auth::auth_header;
 use crate::config::Credentials;
 use crate::error::{CaldavError, CaldavResult};
-use crate::mapping::{event_to_ical, new_event_to_ical, parse_calendar_data};
+use crate::mapping::{
+    decode_event_id, event_to_ical, new_event_to_ical, parse_calendar_data,
+    parse_calendar_data_with_href,
+};
 use crate::xml::parse_multistatus;
 
 /// Read every event in `range` from the calendar collection at
@@ -76,7 +79,7 @@ pub async fn get_events(
         let Some(ical) = entry.calendar_data else {
             continue;
         };
-        let mut events = parse_calendar_data(&ical, calendar_id)?;
+        let mut events = parse_calendar_data_with_href(&ical, calendar_id, Some(&entry.href))?;
         // Stamp the ETag the server gave us so the write layer (6b.3)
         // can use If-Match for safe updates.
         if let Some(etag) = entry.etag {
@@ -181,7 +184,7 @@ pub async fn update_event(
 ) -> CaldavResult<Event> {
     let cal_url = Url::parse(&event.calendar_id)
         .map_err(|e| CaldavError::Config(format!("event.calendar_id is not a URL: {e}")))?;
-    let resource = resource_url(&cal_url, &event.id)?;
+    let resource = resource_url_for_event(&cal_url, &event.id)?;
     let body = event_to_ical(&event);
 
     let mut headers = auth_header(credentials)?;
@@ -246,7 +249,7 @@ pub async fn delete_event(
     etag: Option<&str>,
     credentials: &Credentials,
 ) -> CaldavResult<DeleteOutcome> {
-    let resource = resource_url(calendar_url, event_id)?;
+    let resource = resource_url_for_event(calendar_url, event_id)?;
     let mut headers = auth_header(credentials)?;
     if let Some(etag) = etag {
         let value = HeaderValue::from_str(etag).map_err(|e| CaldavError::Config(e.to_string()))?;
@@ -293,7 +296,7 @@ pub async fn add_event_exdate(
     occurrence: DateTime<Utc>,
     credentials: &Credentials,
 ) -> CaldavResult<()> {
-    let resource = resource_url(calendar_url, event_id)?;
+    let resource = resource_url_for_event(calendar_url, event_id)?;
 
     // Step 1: fetch the master body + its ETag.
     let mut get_headers = auth_header(credentials)?;
@@ -326,9 +329,12 @@ pub async fn add_event_exdate(
 
     // Step 2: parse, locate the master VEVENT, append EXDATE.
     let mut events = parse_calendar_data(&body, calendar_url.as_str())?;
+    // Match on the UID component — `event_id` may be the composite
+    // `{href}|{uid}` while the freshly-parsed bodies carry bare UIDs.
+    let (_, want_uid) = decode_event_id(event_id);
     let master = events
         .iter_mut()
-        .find(|e| e.id == event_id)
+        .find(|e| decode_event_id(&e.id).1 == want_uid)
         .ok_or_else(|| {
             CaldavError::Discovery(format!("event '{event_id}' missing from its own resource"))
         })?;
@@ -381,6 +387,21 @@ fn resource_url(calendar_url: &Url, uid: &str) -> CaldavResult<Url> {
     // We percent-encode the slug to keep characters like `@` safe.
     let slug = format!("{}.ics", urlencoding(uid));
     calendar_url.join(&slug).map_err(Into::into)
+}
+
+/// Resolve the absolute URL of an event resource. Prefers the
+/// server-provided href encoded into the id by `map_event`
+/// (`{href}|{uid}`); falls back to the legacy `{collection}/{uid}.ics`
+/// shape for freshly-created or older bare-UID ids. Mirrors
+/// `tasks::resource_url_for_task`.
+fn resource_url_for_event(calendar_url: &Url, event_id: &str) -> CaldavResult<Url> {
+    let (href, uid) = decode_event_id(event_id);
+    if let Some(href) = href {
+        // `Url::join` resolves both absolute-path ("/calendars/…") and
+        // absolute-URL hrefs against the collection base.
+        return calendar_url.join(href).map_err(Into::into);
+    }
+    resource_url(calendar_url, uid)
 }
 
 /// Tiny percent-encoder for slug characters. We avoid pulling in
