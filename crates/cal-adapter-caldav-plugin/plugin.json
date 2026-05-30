@@ -8,5 +8,8 @@
   "min_app_version": "0.1.0",
   "author": "Aperio Contributors",
   "description": "Bundled CalDAV + CardDAV adapter — Nextcloud, iCloud, Fastmail, Radicale, Baikal and other generic CalDAV/CardDAV servers.",
-  "signed": false
+  "signed": false,
+  "tasks": {
+    "subtasks": true
+  }
 }

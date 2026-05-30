@@ -11,5 +11,8 @@
   "signed": false,
   "recurrence": {
     "interval_frequencies": ["daily", "weekly", "monthly"]
+  },
+  "tasks": {
+    "subtasks": false
   }
 }

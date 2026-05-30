@@ -38,20 +38,36 @@ pub struct TaskListRow {
     pub task_capabilities: TaskCapabilities,
 }
 
+/// The local SQLite store's task capabilities. Unlike a plugin-backed
+/// account it has no manifest, so we hard-code what the store actually
+/// supports: it nests projects (`task_lists.parent_id`) and groups
+/// tasks into sections, on top of the cal-core-native subtasks /
+/// recurrence / cross-list-move support the default already carries.
+fn local_task_capabilities() -> TaskCapabilities {
+    TaskCapabilities {
+        nested_projects: true,
+        sections: true,
+        ..TaskCapabilities::default()
+    }
+}
+
 /// Resolve an account's task capabilities from its plugin manifest.
-/// Mirrors `recurrence_caps_for_account` in `calendars.rs`: local
-/// lists (`account_id == LOCAL_ID`) and accounts whose plugin we
-/// can't resolve fall back to the permissive cal-core-native default.
+/// Mirrors `recurrence_caps_for_account` in `calendars.rs`: the local
+/// store reports its own capabilities; accounts whose plugin we can't
+/// resolve fall back to the permissive cal-core-native default.
 fn task_caps_for_account(
     account_id: &str,
     account_kinds: &std::collections::HashMap<String, AdapterKind>,
     plugin_manager: &PluginManager,
 ) -> TaskCapabilities {
+    if account_id == LOCAL_ID {
+        return local_task_capabilities();
+    }
     let Some(kind) = account_kinds.get(account_id) else {
         return TaskCapabilities::default();
     };
     let Some(plugin_id) = plugin_id_for_adapter_kind(*kind) else {
-        // Local has no plugin — default capabilities.
+        // No plugin for this kind — default capabilities.
         return TaskCapabilities::default();
     };
     plugin_manager
@@ -129,9 +145,9 @@ pub async fn create_task_list(
     Ok(TaskListRow {
         inner: list,
         account_id: LOCAL_ID.to_string(),
-        // Freshly-created lists are always local, which has no plugin
-        // manifest — the cal-core-native default applies.
-        task_capabilities: TaskCapabilities::default(),
+        // Freshly-created lists are always local — report the local
+        // store's capabilities (nested projects + sections).
+        task_capabilities: local_task_capabilities(),
     })
 }
 
