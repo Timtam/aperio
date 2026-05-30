@@ -203,6 +203,21 @@ impl GoogleAdapter {
             full_resync: true,
         })
     }
+
+    /// Full Other-Contacts sync wrapped as a `full_resync` ChangeSet: the
+    /// complete set plus the fresh syncToken. Used on the no-token and
+    /// 400-expired recovery paths.
+    async fn other_contacts_full_changeset(&self) -> CoreResult<ChangeSet<Contact>> {
+        let (changes, new_token) = contacts::other_contacts_full(&self.state)
+            .await
+            .map_err(to_core_error)?;
+        Ok(ChangeSet {
+            changes,
+            deletions: Vec::new(),
+            new_token,
+            full_resync: true,
+        })
+    }
 }
 
 #[async_trait]
@@ -474,6 +489,51 @@ impl ContactsFeature for GoogleAdapter {
         Ok(fresh)
     }
 
+    /// Host-driven incremental contact read (CACHE-8) via the People API
+    /// `syncToken`.
+    ///
+    /// Only the **Other Contacts** list (`otherContacts.list`) deltas
+    /// here: it's pure people (so resourceName = native id, tombstones via
+    /// `metadata.deleted`) and is the large auto-collected list where
+    /// per-resource sync matters most. The personal list couples each
+    /// contact-group's member list to the FULL people set (a delta can't
+    /// recompute it), and the Directory is read-only org data — both
+    /// return `Unsupported` so the host keeps doing a correct full read.
+    ///
+    /// No token (or a 400-expired token) → a full sync that also captures
+    /// the initial syncToken; otherwise an incremental round.
+    async fn get_contacts_delta(
+        &self,
+        list_id: &str,
+        since_token: Option<&str>,
+    ) -> CoreResult<ChangeSet<Contact>> {
+        if list_id != contacts::GOOGLE_OTHER_CONTACTS_LIST_ID {
+            return Err(CoreError::Unsupported(
+                "only the Google Other Contacts list supports delta sync".into(),
+            ));
+        }
+        let Some(token) = since_token else {
+            return self.other_contacts_full_changeset().await;
+        };
+        match contacts::other_contacts_delta(&self.state, token).await {
+            Ok(delta) => Ok(ChangeSet {
+                changes: delta.changes,
+                deletions: delta.deletions,
+                new_token: delta.new_token,
+                full_resync: false,
+            }),
+            // The People API expires sync tokens with a 400 — re-sync.
+            Err(GoogleError::Http { status: 400, .. }) => {
+                tracing::warn!(
+                    target: "cal_adapter_google::contacts",
+                    "Other Contacts sync token expired (400); doing a full re-sync",
+                );
+                self.other_contacts_full_changeset().await
+            }
+            Err(err) => Err(to_core_error(err)),
+        }
+    }
+
     async fn search_contacts(&self, query: &str) -> CoreResult<Vec<Contact>> {
         contacts::search_contacts(&self.state, query)
             .await
@@ -731,5 +791,24 @@ mod delta_tests {
         assert!(cs.full_resync);
         assert_eq!(cs.changes.len(), 1);
         assert_eq!(cs.new_token.as_deref(), Some("TOK-3"));
+    }
+
+    #[tokio::test]
+    async fn contacts_delta_only_other_contacts_is_supported() {
+        // The personal list couples contacts to group member lists and the
+        // Directory is read-only — both must surface Unsupported (no network
+        // call) so the host falls back to a full read.
+        let server = Server::new_async().await;
+        let adapter = adapter_for(&server);
+        for list in [
+            crate::contacts::GOOGLE_CONTACT_LIST_ID,
+            crate::contacts::GOOGLE_DIRECTORY_LIST_ID,
+        ] {
+            let err = adapter.get_contacts_delta(list, None).await.unwrap_err();
+            assert!(
+                matches!(err, CoreError::Unsupported(_)),
+                "{list} should be Unsupported",
+            );
+        }
     }
 }
