@@ -278,6 +278,35 @@ pub async fn get_tasks(
     Ok(out)
 }
 
+/// Map multistatus entries carrying `calendar-data` (from `get_tasks`'s
+/// VTODO query or a sync-collection `calendar-multiget`) into tasks.
+/// Tolerant — a single unparseable resource is skipped, not fatal — so
+/// the delta read can't be sunk by one bad VTODO. The `{href}|{uid}` id
+/// shape matches `get_tasks` exactly so the cache stays consistent across
+/// the full and incremental read paths.
+pub fn parse_task_entries(entries: &[ResponseEntry], list_id: &str) -> Vec<Task> {
+    let mut out = Vec::new();
+    for entry in entries {
+        let Some(ical) = entry.calendar_data.as_deref() else {
+            continue;
+        };
+        let Ok(parsed) = ical.parse::<ICalendar>() else {
+            continue;
+        };
+        for comp in parsed.components {
+            if let icalendar::CalendarComponent::Todo(todo) = comp {
+                if let Some(mut task) = map_todo(&todo, list_id, Some(&entry.href)) {
+                    if let Some(etag) = &entry.etag {
+                        task.etag = Some(etag.clone());
+                    }
+                    out.push(task);
+                }
+            }
+        }
+    }
+    out
+}
+
 pub async fn create_task(
     client: &Client,
     list_url: &Url,

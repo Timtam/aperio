@@ -168,6 +168,29 @@ pub async fn get_contacts(
     Ok(out)
 }
 
+/// Map multistatus entries carrying `address-data` (from `get_contacts`'s
+/// addressbook query or a sync-collection `addressbook-multiget`) into
+/// contacts. Tolerant — a single malformed vCard is skipped. The
+/// `{href}|{uid}` id shape matches `get_contacts` so the cache stays
+/// consistent across the full and incremental read paths.
+pub fn parse_contact_entries(entries: &[ResponseEntry], list_id: &str) -> Vec<Contact> {
+    let mut out = Vec::new();
+    for entry in entries {
+        let Some(body) = entry.address_data.as_deref() else {
+            continue;
+        };
+        if body.trim().is_empty() {
+            continue;
+        }
+        let uid = extract_vcard_uid(body).unwrap_or_else(|| entry.href.clone());
+        let id = format!("{}|{}", entry.href, uid);
+        if let Ok(contact) = parse_vcard(body, list_id, id, entry.etag.clone()) {
+            out.push(contact);
+        }
+    }
+    out
+}
+
 pub async fn create_contact(
     client: &Client,
     addressbook_url: &Url,
