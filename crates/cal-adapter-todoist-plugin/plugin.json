@@ -13,6 +13,8 @@
     "nested_projects": true,
     "sections": true,
     "subtasks": true,
-    "move_between_projects": false
+    "move_between_projects": false,
+    "create_lists": true,
+    "delete_lists": true
   }
 }

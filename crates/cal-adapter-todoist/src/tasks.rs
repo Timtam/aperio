@@ -168,6 +168,29 @@ pub async fn rename_task_list(
     Ok(())
 }
 
+/// `POST /projects` — create a project. `parent_id` nests it under
+/// another project (Todoist's `parent_id`); `None` ⇒ top level.
+/// Returns the created project mapped to a `TaskList`.
+pub async fn create_task_list(
+    client: &TodoistClient,
+    name: &str,
+    parent_id: Option<&str>,
+) -> TodoistResult<TaskList> {
+    let mut body = serde_json::json!({ "name": name });
+    if let Some(parent) = parent_id.filter(|s| !s.is_empty()) {
+        body["parent_id"] = serde_json::json!(parent);
+    }
+    let created: ProjectEntry = client.post_json("/projects", &body).await?;
+    Ok(map_project(created))
+}
+
+/// `DELETE /projects/{id}` — remove a project (with its tasks) at the
+/// source.
+pub async fn delete_task_list(client: &TodoistClient, list_id: &str) -> TodoistResult<()> {
+    let encoded = urlencoding(list_id);
+    client.delete(&format!("/projects/{encoded}")).await
+}
+
 // ── JSON wire shapes ───────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
@@ -1123,5 +1146,36 @@ mod tests {
         assert_eq!(sections[0].name, "To Do");
         assert_eq!(sections[0].list_id, "P1");
         assert_eq!(sections[1].order, 2);
+    }
+
+    #[tokio::test]
+    async fn create_task_list_posts_project_and_maps_it() {
+        let mut server = Server::new_async().await;
+        let _m = server
+            .mock("POST", "/projects")
+            .with_status(200)
+            .with_body(r#"{"id":"P9","name":"New Project","parent_id":"P1"}"#)
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        let list = create_task_list(&client, "New Project", Some("P1"))
+            .await
+            .unwrap();
+        assert_eq!(list.id, "P9");
+        assert_eq!(list.name, "New Project");
+        assert_eq!(list.parent_id.as_deref(), Some("P1"));
+    }
+
+    #[tokio::test]
+    async fn delete_task_list_hits_delete_endpoint() {
+        let mut server = Server::new_async().await;
+        let m = server
+            .mock("DELETE", "/projects/P7")
+            .with_status(204)
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        delete_task_list(&client, "P7").await.unwrap();
+        m.assert_async().await;
     }
 }

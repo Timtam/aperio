@@ -198,6 +198,22 @@ impl TasksFeature for TodoistAdapter {
         *self.task_lists_cache.lock().await = None;
         Ok(())
     }
+
+    async fn create_task_list(&self, name: &str, parent_id: Option<&str>) -> CoreResult<TaskList> {
+        let created = tasks::create_task_list(&self.client, name, parent_id)
+            .await
+            .map_err(to_core_error)?;
+        *self.task_lists_cache.lock().await = None;
+        Ok(created)
+    }
+
+    async fn delete_task_list(&self, list_id: &str) -> CoreResult<()> {
+        tasks::delete_task_list(&self.client, list_id)
+            .await
+            .map_err(to_core_error)?;
+        *self.task_lists_cache.lock().await = None;
+        Ok(())
+    }
 }
 
 fn to_core_error(err: TodoistError) -> CoreError {
