@@ -3,9 +3,16 @@
 //! Vikunja's data model (since the 2023 schema cleanup):
 //!
 //!   - **Projects** play the role of Aperio's `TaskList`. Every task
-//!     belongs to exactly one project; projects are flat (the older
-//!     namespace concept is gone). Projects carry a `hex_color`
-//!     which we expose via `TaskList.color`.
+//!     belongs to exactly one project. Projects nest via
+//!     `parent_project_id` (the old namespace concept is gone, but
+//!     project-under-project nesting replaced it) — we surface that as
+//!     `TaskList.parent_id` so the sidebar renders the tree. Projects
+//!     carry a `hex_color` which we expose via `TaskList.color`.
+//!   - **Buckets** are a project's kanban columns. We map them to
+//!     Aperio `Section`s (`list_sections`) and a task's `bucket_id` to
+//!     `Task.section_id`. Buckets live on a per-project kanban *view*
+//!     in current Vikunja; the lookup degrades to "no sections" on
+//!     servers that don't expose the view/bucket endpoints.
 //!   - **Tasks** are the data items. Two independent date slots —
 //!     `start_date` and `due_date` — map cleanly onto Aperio's
 //!     `scheduled_*` / `deadline_*` pair (DESIGN.md §9.7 documents
@@ -49,7 +56,7 @@
 //!   - Labels (the field is there in `Task`, but Aperio's
 //!     ColorLabel system is local-only at the moment).
 
-use cal_core::{NewTask, Task, TaskList, TaskPriority, TaskStatus};
+use cal_core::{NewTask, Section, Task, TaskList, TaskPriority, TaskStatus};
 use chrono::{DateTime, Datelike, NaiveDate, NaiveTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -134,6 +141,41 @@ pub async fn get_tasks(client: &VikunjaClient, list_id: &str) -> VikunjaResult<V
     Ok(out)
 }
 
+/// List a project's kanban buckets as Aperio sections.
+///
+/// Current Vikunja (≥ 0.22) hangs buckets off a per-project *view* of
+/// kind `kanban`, so we resolve that view first, then pull its
+/// buckets. The lookup degrades gracefully: a project with no kanban
+/// view — or a server that doesn't expose either endpoint — yields no
+/// sections rather than an error, matching the `list_sections` default
+/// for section-less backends.
+pub async fn list_sections(client: &VikunjaClient, list_id: &str) -> VikunjaResult<Vec<Section>> {
+    let project_id = parse_id(list_id, "task list id")?;
+    let views: Vec<ViewEntry> = match client
+        .get_json(&format!("/projects/{project_id}/views"))
+        .await
+    {
+        Ok(v) => v,
+        // No view endpoint (older server) → no sections to surface.
+        Err(_) => return Ok(Vec::new()),
+    };
+    let Some(kanban) = views
+        .into_iter()
+        .find(|v| v.view_kind.as_deref() == Some("kanban"))
+    else {
+        return Ok(Vec::new());
+    };
+    let path = format!("/projects/{project_id}/views/{}/buckets", kanban.id);
+    let buckets: Vec<BucketEntry> = match client.get_json(&path).await {
+        Ok(b) => b,
+        Err(_) => return Ok(Vec::new()),
+    };
+    Ok(buckets
+        .into_iter()
+        .map(|b| map_bucket(b, list_id))
+        .collect())
+}
+
 /// `PUT /projects/{id}/tasks`. Vikunja returns the freshly-created
 /// task in the response, so we can map it back into Aperio's `Task`
 /// directly without a follow-up GET.
@@ -192,6 +234,32 @@ struct ProjectEntry {
     title: Option<String>,
     #[serde(default)]
     hex_color: Option<String>,
+    /// Parent project id for Vikunja's nested-project tree. `0` is
+    /// Vikunja's "no parent" sentinel (top-level project).
+    #[serde(default)]
+    parent_project_id: i64,
+}
+
+/// One entry of `GET /projects/{id}/views`. We only need the kanban
+/// view's id; other kinds (`list`, `gantt`, `table`) are ignored.
+#[derive(Debug, Deserialize)]
+struct ViewEntry {
+    id: i64,
+    #[serde(default)]
+    view_kind: Option<String>,
+}
+
+/// A kanban bucket → Aperio section.
+#[derive(Debug, Deserialize)]
+struct BucketEntry {
+    id: i64,
+    #[serde(default)]
+    title: Option<String>,
+    /// Vikunja orders buckets by a float `position`; we collapse it to
+    /// the unsigned section order (display order only, exact value is
+    /// immaterial).
+    #[serde(default)]
+    position: f64,
 }
 
 /// Vikunja Task. Fields we don't surface yet (labels, attachments,
@@ -222,6 +290,14 @@ struct TaskEntry {
     priority: i32,
     #[serde(default)]
     project_id: i64,
+    /// Kanban bucket the task sits in, mapped to Aperio's section.
+    /// `0` ⇒ ungrouped (Vikunja's "no bucket" sentinel). Vikunja
+    /// versions that moved buckets fully per-view may omit this on the
+    /// task; serde's default keeps such tasks ungrouped. Read-only for
+    /// now — skipped on write so an update never disturbs bucket
+    /// placement (section write-back isn't wired yet).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    bucket_id: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     hex_color: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -250,8 +326,19 @@ fn map_project(entry: ProjectEntry) -> TaskList {
             }),
         default_sound: None,
         embedded_in_calendar: None,
-        parent_id: None,
+        // Vikunja nests projects; surface the parent so the sidebar can
+        // build the tree. `0` is the "top-level" sentinel.
+        parent_id: (entry.parent_project_id != 0).then(|| entry.parent_project_id.to_string()),
         read_only: false,
+    }
+}
+
+fn map_bucket(entry: BucketEntry, list_id: &str) -> Section {
+    Section {
+        id: entry.id.to_string(),
+        list_id: list_id.to_string(),
+        name: entry.title.unwrap_or_else(|| "Bucket".into()),
+        order: entry.position.max(0.0) as u32,
     }
 }
 
@@ -291,7 +378,8 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
         // dropped on read; documented in the module preamble.
         recurrence: None,
         parent_id: None,
-        section_id: None,
+        // Kanban bucket → section. `0` is Vikunja's "no bucket".
+        section_id: (entry.bucket_id != 0).then(|| entry.bucket_id.to_string()),
         color_label: None,
         reminders: Vec::new(),
         sound: None,
@@ -330,6 +418,7 @@ fn new_task_to_body(new: &NewTask) -> TaskEntry {
         start_date: combine_date_time(new.scheduled_date, new.scheduled_time),
         priority: aperio_priority_to_vikunja(new.priority),
         project_id: 0,
+        bucket_id: 0,
         hex_color: None,
         created: None,
         updated: None,
@@ -364,6 +453,7 @@ fn task_to_body(task: &Task) -> TaskEntry {
         start_date: combine_date_time(task.scheduled_date, task.scheduled_time),
         priority: aperio_priority_to_vikunja(task.priority),
         project_id: parse_id(&task.list_id, "task list id").unwrap_or(0),
+        bucket_id: 0,
         hex_color: None,
         created: None,
         updated: None,
@@ -422,6 +512,11 @@ fn combine_date_time(date: Option<NaiveDate>, time: Option<NaiveTime>) -> Option
 
 fn non_midnight(t: &NaiveTime) -> bool {
     *t != NaiveTime::from_hms_opt(0, 0, 0).unwrap()
+}
+
+/// `skip_serializing_if` predicate for the read-only `bucket_id` slot.
+fn is_zero(n: &i64) -> bool {
+    *n == 0
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────
@@ -511,6 +606,7 @@ mod tests {
             id: 42,
             title: Some("Work".into()),
             hex_color: Some("ff8800".into()),
+            parent_project_id: 0,
         });
         assert_eq!(list.id, "42");
         assert_eq!(list.name, "Work");
@@ -523,6 +619,7 @@ mod tests {
             id: 1,
             title: None,
             hex_color: None,
+            parent_project_id: 0,
         });
         assert_eq!(list.name, "Project");
         assert!(list.color.is_none());
@@ -534,6 +631,7 @@ mod tests {
             id: 1,
             title: Some("Stuff".into()),
             hex_color: Some("#abcdef".into()),
+            parent_project_id: 0,
         });
         assert_eq!(list.color.unwrap().hex, "#abcdef");
     }
@@ -552,6 +650,7 @@ mod tests {
             start_date: Some("2026-05-22T00:00:00Z".into()),
             priority: 4,
             project_id: 7,
+            bucket_id: 0,
             hex_color: None,
             created: Some("2026-05-01T10:00:00Z".into()),
             updated: Some("2026-05-02T11:00:00Z".into()),
@@ -592,6 +691,7 @@ mod tests {
             start_date: None,
             priority: 0,
             project_id: 1,
+            bucket_id: 0,
             hex_color: None,
             created: Some("2026-05-20T10:00:00Z".into()),
             updated: Some("2026-05-22T15:00:00Z".into()),
@@ -616,6 +716,7 @@ mod tests {
             start_date: Some("0001-01-01T00:00:00Z".into()),
             priority: 0,
             project_id: 1,
+            bucket_id: 0,
             hex_color: None,
             created: None,
             updated: None,
@@ -768,5 +869,84 @@ mod tests {
             VikunjaError::Config(msg) => assert!(msg.contains("task id")),
             other => panic!("expected Config, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn list_task_lists_surfaces_parent_project_id() {
+        let mut server = Server::new_async().await;
+        let _m = server
+            .mock("GET", "/api/v1/projects?page=1&per_page=50")
+            .with_status(200)
+            .with_body(
+                r#"[{"id":1,"title":"Parent","parent_project_id":0},{"id":2,"title":"Child","parent_project_id":1}]"#,
+            )
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        let lists = list_task_lists(&client).await.unwrap();
+        // Top-level project → no parent.
+        assert_eq!(lists[0].id, "1");
+        assert!(lists[0].parent_id.is_none());
+        // Nested project → parent surfaced as the parent project id.
+        assert_eq!(lists[1].id, "2");
+        assert_eq!(lists[1].parent_id.as_deref(), Some("1"));
+    }
+
+    #[tokio::test]
+    async fn get_tasks_maps_bucket_to_section() {
+        let mut server = Server::new_async().await;
+        let _m = server
+            .mock("GET", "/api/v1/projects/3/tasks?page=1&per_page=50")
+            .with_status(200)
+            .with_body(
+                r#"[{"id":7,"title":"Grouped","project_id":3,"bucket_id":9},{"id":8,"title":"Loose","project_id":3,"bucket_id":0}]"#,
+            )
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        let tasks = get_tasks(&client, "3").await.unwrap();
+        assert_eq!(tasks[0].section_id.as_deref(), Some("9"));
+        // bucket_id 0 (or absent) ⇒ ungrouped.
+        assert!(tasks[1].section_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn list_sections_maps_kanban_buckets() {
+        let mut server = Server::new_async().await;
+        let _views = server
+            .mock("GET", "/api/v1/projects/3/views")
+            .with_status(200)
+            .with_body(r#"[{"id":10,"view_kind":"list"},{"id":11,"view_kind":"kanban"}]"#)
+            .create_async()
+            .await;
+        let _buckets = server
+            .mock("GET", "/api/v1/projects/3/views/11/buckets")
+            .with_status(200)
+            .with_body(
+                r#"[{"id":21,"title":"To Do","position":1.0},{"id":22,"title":"Doing","position":2.0}]"#,
+            )
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        let sections = list_sections(&client, "3").await.unwrap();
+        assert_eq!(sections.len(), 2);
+        assert_eq!(sections[0].id, "21");
+        assert_eq!(sections[0].name, "To Do");
+        assert_eq!(sections[0].list_id, "3");
+        assert_eq!(sections[1].name, "Doing");
+    }
+
+    #[tokio::test]
+    async fn list_sections_empty_without_kanban_view() {
+        let mut server = Server::new_async().await;
+        let _views = server
+            .mock("GET", "/api/v1/projects/3/views")
+            .with_status(200)
+            .with_body(r#"[{"id":10,"view_kind":"list"}]"#)
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        // No kanban view → no sections, no error.
+        assert!(list_sections(&client, "3").await.unwrap().is_empty());
     }
 }

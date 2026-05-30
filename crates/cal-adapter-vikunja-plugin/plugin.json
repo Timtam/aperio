@@ -8,5 +8,10 @@
   "min_app_version": "0.1.0",
   "author": "Aperio Contributors",
   "description": "Bundled tasks adapter for Vikunja (self-hosted or hosted instance, REST API).",
-  "signed": false
+  "signed": false,
+  "tasks": {
+    "nested_projects": true,
+    "sections": true,
+    "subtasks": true
+  }
 }
