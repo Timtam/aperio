@@ -1121,6 +1121,10 @@
     "newCalendarName": "Kalender {{n}}",
     "newTaskListName": "Liste {{n}}",
     "newContactListName": "Kontaktbuch {{n}}",
+    "createPrompt": {
+      "nameLabel": "Name",
+      "submit": "Erstellen"
+    },
     "localAccount": "Auf diesem Gerät",
     "calendarCreated": "Kalender „{{name}}\" wurde angelegt.",
     "calendarDeleted": "Kalender „{{name}}\" wurde gelöscht.",

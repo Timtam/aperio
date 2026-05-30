@@ -11,6 +11,7 @@ import { useTranslation } from 'react-i18next';
 
 import { useAnnouncer } from '../a11y/Announcer';
 import { ConfirmDialog } from './ConfirmDialog';
+import { PromptDialog } from './PromptDialog';
 import {
   clearContainerNameOverride,
   createCalendar,
@@ -309,19 +310,21 @@ export function Sidebar() {
   );
 
   // ── Create / delete actions ──────────────────────────────────────
-  const onCreateCalendar = useCallback(async () => {
-    try {
-      const cal = await createCalendar({
-        name: t('sidebar.newCalendarName', { n: calendars.length + 1 }),
-        color_hex: '#1e88e5',
-      });
-      await refreshCalendars();
-      announce(t('sidebar.calendarCreated', { name: cal.name }));
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.warn('create_calendar failed', err);
-    }
-  }, [calendars.length, refreshCalendars, announce, t]);
+  // A pending "name your new list" prompt. The three create buttons no
+  // longer mint an auto-name and create immediately — they open this
+  // prompt (pre-filled with the old auto-name as a suggestion), and the
+  // actual create runs on submit with whatever the user typed. For task
+  // lists the account is resolved first (when more than one is capable).
+  const [createPrompt, setCreatePrompt] = useState<
+    | { kind: 'calendar' }
+    | { kind: 'taskList'; accountId: string }
+    | { kind: 'contactList' }
+    | null
+  >(null);
+
+  const onCreateCalendar = useCallback(() => {
+    setCreatePrompt({ kind: 'calendar' });
+  }, []);
 
   const onDeleteCalendar = useCallback(
     async (id: string, name: string) => {
@@ -436,30 +439,12 @@ export function Sidebar() {
     [taskLists, accounts, t],
   );
 
-  const createTaskListIn = useCallback(
-    async (accountId: string) => {
-      try {
-        const list = await createTaskList({
-          name: t('sidebar.newTaskListName', { n: taskLists.length + 1 }),
-          account_id: accountId === LOCAL_ACCOUNT_ID ? null : accountId,
-          parent_id: null,
-          embedded_in_calendar: null,
-        });
-        await refreshTaskLists();
-        announce(t('sidebar.taskListCreated', { name: list.name }));
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn('create_task_list failed', err);
-      }
-    },
-    [taskLists.length, refreshTaskLists, announce, t],
-  );
-
   const onCreateTaskList = useCallback(async () => {
-    // One capable account (just local) → create straight away. Several
-    // → a native picker (keyboard + mouse) for "which account?".
+    // One capable account (just local) → prompt straight away. Several →
+    // a native picker (keyboard + mouse) for "which account?" first, then
+    // the name prompt.
     if (capableAccounts.length <= 1) {
-      void createTaskListIn(LOCAL_ACCOUNT_ID);
+      setCreatePrompt({ kind: 'taskList', accountId: LOCAL_ACCOUNT_ID });
       return;
     }
     const items: ContextMenuItemRequest[] = capableAccounts.map((a) => ({
@@ -474,25 +459,56 @@ export function Sidebar() {
       console.warn('show_context_menu failed', err);
     }
     if (selected?.startsWith('acct:')) {
-      void createTaskListIn(selected.slice('acct:'.length));
-    }
-  }, [capableAccounts, createTaskListIn]);
-
-  const onCreateContactList = useCallback(async () => {
-    try {
-      const list = await createContactList({
-        name: t('sidebar.newContactListName', {
-          n: contactLists.length + 1,
-        }),
-        color_hex: null,
+      setCreatePrompt({
+        kind: 'taskList',
+        accountId: selected.slice('acct:'.length),
       });
-      await refreshContactLists();
-      announce(t('sidebar.contactListCreated', { name: list.name }));
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.warn('create_contact_list failed', err);
     }
-  }, [contactLists.length, refreshContactLists, announce, t]);
+  }, [capableAccounts]);
+
+  const onCreateContactList = useCallback(() => {
+    setCreatePrompt({ kind: 'contactList' });
+  }, []);
+
+  // Run the actual create once the user has named the list in the prompt.
+  const submitCreatePrompt = useCallback(
+    async (name: string) => {
+      const prompt = createPrompt;
+      if (!prompt) return;
+      try {
+        if (prompt.kind === 'calendar') {
+          const cal = await createCalendar({ name, color_hex: '#1e88e5' });
+          await refreshCalendars();
+          announce(t('sidebar.calendarCreated', { name: cal.name }));
+        } else if (prompt.kind === 'taskList') {
+          const list = await createTaskList({
+            name,
+            account_id:
+              prompt.accountId === LOCAL_ACCOUNT_ID ? null : prompt.accountId,
+            parent_id: null,
+            embedded_in_calendar: null,
+          });
+          await refreshTaskLists();
+          announce(t('sidebar.taskListCreated', { name: list.name }));
+        } else {
+          const list = await createContactList({ name, color_hex: null });
+          await refreshContactLists();
+          announce(t('sidebar.contactListCreated', { name: list.name }));
+        }
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('create list failed', err);
+      }
+    },
+    [
+      createPrompt,
+      refreshCalendars,
+      refreshTaskLists,
+      refreshContactLists,
+      announce,
+      t,
+    ],
+  );
 
   const onDeleteContactListAction = useCallback(
     async (id: string, name: string) => {
@@ -1147,6 +1163,27 @@ export function Sidebar() {
                 name: pendingListDelete?.name ?? '',
               })
         }
+      />
+      <PromptDialog
+        isOpen={createPrompt !== null}
+        onClose={() => setCreatePrompt(null)}
+        onSubmit={submitCreatePrompt}
+        title={
+          createPrompt?.kind === 'taskList'
+            ? t('sidebar.newTaskList')
+            : createPrompt?.kind === 'contactList'
+              ? t('sidebar.newContactList')
+              : t('sidebar.newCalendar')
+        }
+        label={t('sidebar.createPrompt.nameLabel')}
+        defaultValue={
+          createPrompt?.kind === 'taskList'
+            ? t('sidebar.newTaskListName', { n: taskLists.length + 1 })
+            : createPrompt?.kind === 'contactList'
+              ? t('sidebar.newContactListName', { n: contactLists.length + 1 })
+              : t('sidebar.newCalendarName', { n: calendars.length + 1 })
+        }
+        submitLabel={t('sidebar.createPrompt.submit')}
       />
     </aside>
   );
