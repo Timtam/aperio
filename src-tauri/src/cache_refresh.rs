@@ -32,6 +32,7 @@ use tracing::{debug, info};
 use cal_core::DateRange;
 
 use crate::cache::{CacheStore, CacheUpdatedPayload, RefreshCoordinator, SyncScope};
+use crate::commands::cache_swr;
 use crate::db::SharedConn;
 use crate::registry::AdapterRegistry;
 use crate::user_prefs::UserPrefsRepo;
@@ -214,13 +215,16 @@ impl CacheRefresher {
                 if !self.coord.try_claim(&key) {
                     continue; // a per-read refresh is already handling it
                 }
-                match adapter.get_events(&cal.id, window).await {
-                    Ok(events) => {
-                        let _ = self
-                            .cache
-                            .replace_calendar_events(&account, &cal.id, window, &events);
-                        emit_updated(app, SyncScope::Events, &account, &cal.id);
-                    }
+                match cache_swr::refresh_events(
+                    &self.cache,
+                    adapter.as_ref(),
+                    &account,
+                    &cal.id,
+                    window,
+                )
+                .await
+                {
+                    Ok(()) => emit_updated(app, SyncScope::Events, &account, &cal.id),
                     Err(err) => {
                         let _ = self.cache.mark_error(
                             &account,
@@ -258,11 +262,10 @@ impl CacheRefresher {
                 if !self.coord.try_claim(&key) {
                     continue;
                 }
-                match adapter.get_tasks(&list.id).await {
-                    Ok(tasks) => {
-                        let _ = self.cache.replace_list_tasks(&account, &list.id, &tasks);
-                        emit_updated(app, SyncScope::Tasks, &account, &list.id);
-                    }
+                match cache_swr::refresh_tasks(&self.cache, adapter.as_ref(), &account, &list.id)
+                    .await
+                {
+                    Ok(()) => emit_updated(app, SyncScope::Tasks, &account, &list.id),
                     Err(err) => {
                         let _ = self.cache.mark_error(
                             &account,
@@ -303,13 +306,10 @@ impl CacheRefresher {
                 if !self.coord.try_claim(&key) {
                     continue;
                 }
-                match adapter.get_contacts(&list.id).await {
-                    Ok(contacts) => {
-                        let _ = self
-                            .cache
-                            .replace_list_contacts(&account, &list.id, &contacts);
-                        emit_updated(app, SyncScope::Contacts, &account, &list.id);
-                    }
+                match cache_swr::refresh_contacts(&self.cache, adapter.as_ref(), &account, &list.id)
+                    .await
+                {
+                    Ok(()) => emit_updated(app, SyncScope::Contacts, &account, &list.id),
                     Err(err) => {
                         let _ = self.cache.mark_error(
                             &account,

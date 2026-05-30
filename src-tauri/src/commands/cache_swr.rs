@@ -8,7 +8,11 @@ use std::sync::Arc;
 use chrono::Utc;
 use tauri::{AppHandle, Emitter};
 
-use crate::cache::{CacheStore, CacheUpdatedPayload, RefreshCoordinator, SyncScope, SyncState};
+use cal_core::{CalendarFeature, ContactsFeature, DateRange, TasksFeature};
+
+use crate::cache::{
+    CacheStore, CacheUpdatedPayload, Delta, RefreshCoordinator, SyncScope, SyncState,
+};
 
 /// Freshness window before a cached snapshot triggers a background
 /// refresh. Short enough to keep an open session current, long enough to
@@ -90,4 +94,178 @@ pub fn spawn_refresh<T, Fut, Fetch, Write>(
         }
         coord.release(&key);
     });
+}
+
+/// Spawn a deduplicated background refresh whose body already writes the
+/// cache (the delta-aware `refresh_*` helpers below). On success emits
+/// `cache-updated`; on a genuine provider failure records `mark_error`.
+pub fn spawn_item_refresh<F, Fut>(
+    app: AppHandle,
+    cache: Arc<CacheStore>,
+    coord: Arc<RefreshCoordinator>,
+    scope: SyncScope,
+    account: String,
+    container: String,
+    refresh: F,
+) where
+    F: FnOnce() -> Fut + Send + 'static,
+    Fut: Future<Output = cal_core::Result<()>> + Send + 'static,
+{
+    let key = format!("{}:{}:{}", scope.as_str(), account, container);
+    if !coord.try_claim(&key) {
+        return;
+    }
+    tokio::spawn(async move {
+        match refresh().await {
+            Ok(()) => emit_cache_updated(&app, scope, &account, &container),
+            Err(err) => {
+                let _ = cache.mark_error(&account, scope, &container, &err.to_string());
+                tracing::warn!(
+                    target: "aperio::cache",
+                    scope = scope.as_str(),
+                    account = %account,
+                    container = %container,
+                    ?err,
+                    "background item refresh failed",
+                );
+            }
+        }
+        coord.release(&key);
+    });
+}
+
+// ── Delta-or-full refresh (CACHE-4) ───────────────────────────────────
+//
+// The single refresh path for item containers: try the adapter's
+// incremental `get_*_delta`, fall back to a full fetch when the adapter
+// returns `Unsupported` (the all-default state today, so behaviour is
+// unchanged). Cache-write errors are best-effort (logged via the `_`);
+// only a genuine provider/network error propagates so the caller can
+// serve a stale snapshot.
+
+/// Refresh one external calendar's events into the snapshot cache.
+pub async fn refresh_events(
+    cache: &CacheStore,
+    ext: &dyn CalendarFeature,
+    account: &str,
+    calendar: &str,
+    range: DateRange,
+) -> cal_core::Result<()> {
+    let token = cache
+        .get_sync_state(account, SyncScope::Events, calendar)
+        .ok()
+        .flatten()
+        .and_then(|s| s.sync_token);
+    match ext
+        .get_events_delta(calendar, range, token.as_deref())
+        .await
+    {
+        Ok(cs) => {
+            if cs.full_resync || token.is_none() {
+                let _ = cache.replace_calendar_events(account, calendar, range, &cs.changes);
+                let _ = cache.set_token(
+                    account,
+                    SyncScope::Events,
+                    calendar,
+                    cs.new_token.as_deref(),
+                );
+            } else {
+                let _ = cache.apply_events_delta(
+                    account,
+                    calendar,
+                    &Delta {
+                        changes: cs.changes,
+                        deletions: cs.deletions,
+                        new_token: cs.new_token,
+                    },
+                );
+            }
+            Ok(())
+        }
+        Err(cal_core::Error::Unsupported(_)) => {
+            let events = ext.get_events(calendar, range).await?;
+            let _ = cache.replace_calendar_events(account, calendar, range, &events);
+            Ok(())
+        }
+        Err(err) => Err(err),
+    }
+}
+
+/// Refresh one external task list into the snapshot cache.
+pub async fn refresh_tasks(
+    cache: &CacheStore,
+    ext: &dyn TasksFeature,
+    account: &str,
+    list: &str,
+) -> cal_core::Result<()> {
+    let token = cache
+        .get_sync_state(account, SyncScope::Tasks, list)
+        .ok()
+        .flatten()
+        .and_then(|s| s.sync_token);
+    match ext.get_tasks_delta(list, token.as_deref()).await {
+        Ok(cs) => {
+            if cs.full_resync || token.is_none() {
+                let _ = cache.replace_list_tasks(account, list, &cs.changes);
+                let _ = cache.set_token(account, SyncScope::Tasks, list, cs.new_token.as_deref());
+            } else {
+                let _ = cache.apply_tasks_delta(
+                    account,
+                    list,
+                    &Delta {
+                        changes: cs.changes,
+                        deletions: cs.deletions,
+                        new_token: cs.new_token,
+                    },
+                );
+            }
+            Ok(())
+        }
+        Err(cal_core::Error::Unsupported(_)) => {
+            let tasks = ext.get_tasks(list).await?;
+            let _ = cache.replace_list_tasks(account, list, &tasks);
+            Ok(())
+        }
+        Err(err) => Err(err),
+    }
+}
+
+/// Refresh one external contact list into the snapshot cache.
+pub async fn refresh_contacts(
+    cache: &CacheStore,
+    ext: &dyn ContactsFeature,
+    account: &str,
+    list: &str,
+) -> cal_core::Result<()> {
+    let token = cache
+        .get_sync_state(account, SyncScope::Contacts, list)
+        .ok()
+        .flatten()
+        .and_then(|s| s.sync_token);
+    match ext.get_contacts_delta(list, token.as_deref()).await {
+        Ok(cs) => {
+            if cs.full_resync || token.is_none() {
+                let _ = cache.replace_list_contacts(account, list, &cs.changes);
+                let _ =
+                    cache.set_token(account, SyncScope::Contacts, list, cs.new_token.as_deref());
+            } else {
+                let _ = cache.apply_contacts_delta(
+                    account,
+                    list,
+                    &Delta {
+                        changes: cs.changes,
+                        deletions: cs.deletions,
+                        new_token: cs.new_token,
+                    },
+                );
+            }
+            Ok(())
+        }
+        Err(cal_core::Error::Unsupported(_)) => {
+            let contacts = ext.get_contacts(list).await?;
+            let _ = cache.replace_list_contacts(account, list, &contacts);
+            Ok(())
+        }
+        Err(err) => Err(err),
+    }
 }

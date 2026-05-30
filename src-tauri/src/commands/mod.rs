@@ -9,7 +9,7 @@
 mod accounts;
 mod birthdays;
 mod cache;
-mod cache_swr;
+pub(crate) mod cache_swr;
 mod calendars;
 mod color_labels;
 mod conflicts;

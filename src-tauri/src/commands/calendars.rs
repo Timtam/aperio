@@ -378,19 +378,20 @@ pub async fn get_events(
                 "get_events served from cache",
             );
             if stale {
-                let cal = request.calendar_id.clone();
-                let cal_for_write = cal.clone();
+                let ext_bg = Arc::clone(&ext);
+                let cache_bg = Arc::clone(&cache);
                 let acc = account.clone();
-                cache_swr::spawn_refresh(
+                let cal = request.calendar_id.clone();
+                cache_swr::spawn_item_refresh(
                     app.clone(),
                     Arc::clone(&cache),
                     Arc::clone(&coord),
                     SyncScope::Events,
                     account.clone(),
                     request.calendar_id.clone(),
-                    move || async move { ext.get_events(&cal, range).await },
-                    move |c, events: &[Event]| {
-                        c.replace_calendar_events(&acc, &cal_for_write, range, events)
+                    move || async move {
+                        cache_swr::refresh_events(&cache_bg, ext_bg.as_ref(), &acc, &cal, range)
+                            .await
                     },
                 );
             }
@@ -399,18 +400,16 @@ pub async fn get_events(
     }
 
     // Cold path: the requested range isn't cached yet (first run, or a
-    // navigation outside the covered window). Fetch synchronously, write
-    // through, and — on a network failure — fall back to whatever stale
-    // snapshot we have so an offline start still shows something.
-    match ext.get_events(&request.calendar_id, range).await {
-        Ok(events) => {
-            if let Err(err) =
-                cache.replace_calendar_events(&account, &request.calendar_id, range, &events)
-            {
-                tracing::warn!(target: "aperio::cache", ?err, "failed to write event cache");
-            }
-            Ok(events)
-        }
+    // navigation outside the covered window). Refresh synchronously
+    // (delta-or-full), then serve from the cache. On a network failure
+    // fall back to whatever stale snapshot we have so an offline start
+    // still shows something.
+    match cache_swr::refresh_events(&cache, ext.as_ref(), &account, &request.calendar_id, range)
+        .await
+    {
+        Ok(()) => Ok(cache
+            .read_events(&account, &request.calendar_id, range)
+            .unwrap_or_default()),
         Err(err) => {
             let _ = cache.mark_error(
                 &account,

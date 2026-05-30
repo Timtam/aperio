@@ -47,6 +47,10 @@ pub struct ContactsVtable {
     /// trait (the local adapter inherits the no-op); external
     /// plugins override to clear in-memory listing caches.
     pub invalidate_contacts_cache: Option<VtableMethodFn>,
+    /// `get_contacts_delta(list_id, since_token) -> ChangeSet<Contact>`
+    /// (CACHE-4). `None` ⇒ the shim inherits the trait default
+    /// (`Unsupported`); the host falls back to a full `get_contacts`.
+    pub get_contacts_delta: Option<VtableMethodFn>,
 }
 
 impl ContactsVtable {
@@ -66,6 +70,7 @@ impl ContactsVtable {
             set_contact_photo: None,
             delete_contact_photo: None,
             invalidate_contacts_cache: None,
+            get_contacts_delta: None,
         }
     }
 
@@ -86,6 +91,7 @@ mod tests {
         assert!(v.search_contacts.is_none());
         assert!(v.get_contact_photo.is_none());
         assert!(v.invalidate_contacts_cache.is_none());
+        assert!(v.get_contacts_delta.is_none());
         assert!(!v.has_minimum_surface());
         assert_eq!(v.vtable_version, crate::ABI_VERSION);
     }

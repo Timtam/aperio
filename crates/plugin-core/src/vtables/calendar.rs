@@ -87,6 +87,11 @@ pub struct CalendarVtable {
     /// `rename_calendar(calendar_id, new_name)`. Same default-
     /// `Unsupported` story.
     pub rename_calendar: Option<VtableMethodFn>,
+    /// `get_events_delta(calendar_id, range, since_token) ->
+    /// ChangeSet<Event>` (CACHE-4). `None` ⇒ the shim inherits the
+    /// trait default (`Unsupported`); the host falls back to a full
+    /// `get_events`.
+    pub get_events_delta: Option<VtableMethodFn>,
 }
 
 impl CalendarVtable {
@@ -109,6 +114,7 @@ impl CalendarVtable {
             calendar_color: None,
             add_event_exdate: None,
             rename_calendar: None,
+            get_events_delta: None,
         }
     }
 
@@ -156,6 +162,7 @@ mod tests {
         assert!(v.calendar_color.is_none());
         assert!(v.add_event_exdate.is_none());
         assert!(v.rename_calendar.is_none());
+        assert!(v.get_events_delta.is_none());
         assert_eq!(v.vtable_version, crate::ABI_VERSION);
     }
 

@@ -405,30 +405,28 @@ pub async fn get_tasks(
         let cached = cache.read_tasks(&account, &list_id).unwrap_or_default();
         if cache_swr::is_stale(&state, cache_swr::SWR_TTL_SECS) {
             let ext_bg = Arc::clone(&ext);
+            let cache_bg = Arc::clone(&cache);
             let acc = account.clone();
             let list = list_id.clone();
-            let list_w = list_id.clone();
-            cache_swr::spawn_refresh(
+            cache_swr::spawn_item_refresh(
                 app.clone(),
                 Arc::clone(&cache),
                 Arc::clone(&coord),
                 SyncScope::Tasks,
                 account.clone(),
                 list_id.clone(),
-                move || async move { ext_bg.get_tasks(&list).await },
-                move |c, items: &[Task]| c.replace_list_tasks(&acc, &list_w, items),
+                move || async move {
+                    cache_swr::refresh_tasks(&cache_bg, ext_bg.as_ref(), &acc, &list).await
+                },
             );
         }
         return Ok(cached);
     }
 
-    // Cold path: no snapshot yet. Fetch, write through, fall back to any
-    // stale rows on a network failure.
-    match ext.get_tasks(&list_id).await {
-        Ok(tasks) => {
-            let _ = cache.replace_list_tasks(&account, &list_id, &tasks);
-            Ok(tasks)
-        }
+    // Cold path: no snapshot yet. Refresh (delta-or-full) synchronously,
+    // then serve from cache; fall back to any stale rows on failure.
+    match cache_swr::refresh_tasks(&cache, ext.as_ref(), &account, &list_id).await {
+        Ok(()) => Ok(cache.read_tasks(&account, &list_id).unwrap_or_default()),
         Err(err) => {
             let _ = cache.mark_error(&account, SyncScope::Tasks, &list_id, &err.to_string());
             let stale = cache.read_tasks(&account, &list_id).unwrap_or_default();

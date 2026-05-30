@@ -11,7 +11,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use cal_core::adapter::{Adapter, AuthToken, CalendarFeature, Capability, Credentials};
+use cal_core::adapter::{Adapter, AuthToken, CalendarFeature, Capability, ChangeSet, Credentials};
 use cal_core::color::ContainerColor;
 use cal_core::error::{Error, Result};
 use cal_core::types::{Calendar, DateRange, Event, FreeBusy, NewEvent};
@@ -79,6 +79,7 @@ struct VtableSnapshot {
     calendar_color: Option<crate::vtables::VtableMethodFn>,
     add_event_exdate: Option<crate::vtables::VtableMethodFn>,
     rename_calendar: Option<crate::vtables::VtableMethodFn>,
+    get_events_delta: Option<crate::vtables::VtableMethodFn>,
 }
 
 impl FfiCalendarAdapter {
@@ -135,6 +136,7 @@ impl FfiCalendarAdapter {
             calendar_color: vtable_ref.calendar_color,
             add_event_exdate: vtable_ref.add_event_exdate,
             rename_calendar: vtable_ref.rename_calendar,
+            get_events_delta: vtable_ref.get_events_delta,
         };
 
         let capabilities = super::manifest_capabilities(&plugin.manifest.capabilities);
@@ -227,6 +229,13 @@ impl Adapter for FfiCalendarAdapter {
 struct GetEventsArgs<'a> {
     calendar_id: &'a str,
     range: DateRange,
+}
+
+#[derive(Serialize)]
+struct GetEventsDeltaArgs<'a> {
+    calendar_id: &'a str,
+    range: DateRange,
+    since_token: Option<&'a str>,
 }
 
 #[derive(Serialize)]
@@ -343,6 +352,23 @@ impl CalendarFeature for FfiCalendarAdapter {
             new_name,
         };
         call_for_unit(self.vtable.rename_calendar, self.handle_addr, &args).await
+    }
+
+    async fn get_events_delta(
+        &self,
+        calendar_id: &str,
+        range: DateRange,
+        since_token: Option<&str>,
+    ) -> Result<ChangeSet<Event>> {
+        // Null slot → Unsupported via `call_method`; the host falls
+        // back to a full `get_events`.
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
+        let args = GetEventsDeltaArgs {
+            calendar_id,
+            range,
+            since_token,
+        };
+        call_then_decode(self.vtable.get_events_delta, self.handle_addr, &args).await
     }
 }
 

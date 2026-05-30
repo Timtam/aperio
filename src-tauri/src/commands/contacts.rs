@@ -173,28 +173,28 @@ pub async fn get_contacts(
         let cached = cache.read_contacts(&account, &list_id).unwrap_or_default();
         if cache_swr::is_stale(&state, cache_swr::SWR_TTL_SECS) {
             let ext_bg = Arc::clone(&ext);
+            let cache_bg = Arc::clone(&cache);
             let acc = account.clone();
             let list = list_id.clone();
-            let list_w = list_id.clone();
-            cache_swr::spawn_refresh(
+            cache_swr::spawn_item_refresh(
                 app.clone(),
                 Arc::clone(&cache),
                 Arc::clone(&coord),
                 SyncScope::Contacts,
                 account.clone(),
                 list_id.clone(),
-                move || async move { ext_bg.get_contacts(&list).await },
-                move |c, items: &[Contact]| c.replace_list_contacts(&acc, &list_w, items),
+                move || async move {
+                    cache_swr::refresh_contacts(&cache_bg, ext_bg.as_ref(), &acc, &list).await
+                },
             );
         }
         return Ok(cached);
     }
 
-    match ext.get_contacts(&list_id).await {
-        Ok(contacts) => {
-            let _ = cache.replace_list_contacts(&account, &list_id, &contacts);
-            Ok(contacts)
-        }
+    // Cold path: refresh (delta-or-full), then serve from cache; fall
+    // back to any stale rows on failure.
+    match cache_swr::refresh_contacts(&cache, ext.as_ref(), &account, &list_id).await {
+        Ok(()) => Ok(cache.read_contacts(&account, &list_id).unwrap_or_default()),
         Err(err) => {
             let _ = cache.mark_error(&account, SyncScope::Contacts, &list_id, &err.to_string());
             let stale = cache.read_contacts(&account, &list_id).unwrap_or_default();

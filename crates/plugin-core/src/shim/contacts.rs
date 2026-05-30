@@ -12,7 +12,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use cal_core::adapter::{Adapter, AuthToken, Capability, ContactsFeature, Credentials};
+use cal_core::adapter::{Adapter, AuthToken, Capability, ChangeSet, ContactsFeature, Credentials};
 use cal_core::error::{Error, Result};
 use cal_core::types::{Contact, ContactList, ContactPhoto, NewContact};
 use serde::Serialize;
@@ -51,6 +51,7 @@ struct VtableSnapshot {
     set_contact_photo: Option<crate::vtables::VtableMethodFn>,
     delete_contact_photo: Option<crate::vtables::VtableMethodFn>,
     invalidate_contacts_cache: Option<crate::vtables::VtableMethodFn>,
+    get_contacts_delta: Option<crate::vtables::VtableMethodFn>,
 }
 
 impl FfiContactsAdapter {
@@ -99,6 +100,7 @@ impl FfiContactsAdapter {
             set_contact_photo: vtable_ref.set_contact_photo,
             delete_contact_photo: vtable_ref.delete_contact_photo,
             invalidate_contacts_cache: vtable_ref.invalidate_contacts_cache,
+            get_contacts_delta: vtable_ref.get_contacts_delta,
         };
         let capabilities = super::manifest_capabilities(&plugin.manifest.capabilities);
         let handle_addr = instance.handle() as usize;
@@ -257,4 +259,25 @@ impl ContactsFeature for FfiContactsAdapter {
         let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         call_for_unit(self.vtable.invalidate_contacts_cache, self.handle_addr, &()).await
     }
+
+    async fn get_contacts_delta(
+        &self,
+        list_id: &str,
+        since_token: Option<&str>,
+    ) -> Result<ChangeSet<Contact>> {
+        // Null slot → Unsupported via `call_method`; the host falls
+        // back to a full `get_contacts`.
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
+        let args = GetContactsDeltaArgs {
+            list_id,
+            since_token,
+        };
+        call_then_decode(self.vtable.get_contacts_delta, self.handle_addr, &args).await
+    }
+}
+
+#[derive(Serialize)]
+struct GetContactsDeltaArgs<'a> {
+    list_id: &'a str,
+    since_token: Option<&'a str>,
 }

@@ -483,6 +483,29 @@ fn invalidate_forces_next_read_cold() {
 }
 
 #[test]
+fn change_set_wire_defaults_and_roundtrip() {
+    use cal_core::ChangeSet;
+
+    // Minimal payload: only `changes`; the rest default (deletions
+    // empty, no token, not a full resync).
+    let cs: ChangeSet<String> = serde_json::from_str(r#"{"changes":["a","b"]}"#).unwrap();
+    assert_eq!(cs.changes, ["a", "b"]);
+    assert!(cs.deletions.is_empty());
+    assert!(cs.new_token.is_none());
+    assert!(!cs.full_resync);
+
+    let full = ChangeSet {
+        changes: vec![1, 2, 3],
+        deletions: vec!["x".into()],
+        new_token: Some("tok".into()),
+        full_resync: true,
+    };
+    let encoded = serde_json::to_string(&full).unwrap();
+    let back: ChangeSet<i32> = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(back, full);
+}
+
+#[test]
 fn refresh_coordinator_dedups_until_released() {
     let coord = RefreshCoordinator::new();
     let key = "events:acc-1:cal-1";

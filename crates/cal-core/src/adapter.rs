@@ -110,6 +110,50 @@ pub trait CalendarFeature: Adapter {
             "rename_calendar is not supported on this adapter".into(),
         ))
     }
+
+    /// Incremental events fetch (CACHE-4). `since_token` is the opaque
+    /// cursor returned by a prior call (`None` on the first/bootstrap
+    /// call, which should return the full window as a `full_resync`).
+    /// Default `Unsupported` — the host falls back to a full
+    /// [`CalendarFeature::get_events`]. Delta-capable adapters
+    /// (Google syncToken, Graph deltaLink, CalDAV sync-collection,
+    /// EWS SyncFolderItems) override it.
+    async fn get_events_delta(
+        &self,
+        _calendar_id: &str,
+        _range: DateRange,
+        _since_token: Option<&str>,
+    ) -> Result<ChangeSet<Event>> {
+        Err(Error::Unsupported(
+            "get_events_delta is not supported on this adapter".into(),
+        ))
+    }
+}
+
+/// Result of an incremental ("delta") fetch.
+///
+/// Returned by the optional `get_*_delta` feature methods. The host
+/// applies it to its snapshot cache: upsert `changes`, drop `deletions`,
+/// then persist `new_token` for the next round. `full_resync` tells the
+/// host the server invalidated the prior token (or this was a first
+/// bootstrap with `since_token == None`) and `changes` is the COMPLETE
+/// set for the queried scope — the host replaces wholesale rather than
+/// merging.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ChangeSet<T> {
+    /// Created or updated rows since the token.
+    pub changes: Vec<T>,
+    /// Native ids removed since the token.
+    #[serde(default)]
+    pub deletions: Vec<String>,
+    /// Opaque token to pass back next time (sync token / deltaLink /
+    /// CTag-derived cursor). `None` ⇒ the adapter can't continue
+    /// incrementally and the host should treat the next round as cold.
+    #[serde(default)]
+    pub new_token: Option<String>,
+    /// `true` ⇒ `changes` is the full set; replace, don't merge.
+    #[serde(default)]
+    pub full_resync: bool,
 }
 
 /// Implemented by adapters that declare `Capability::Tasks`.
@@ -160,6 +204,18 @@ pub trait TasksFeature: Adapter {
             "delete_task_list is not supported on this adapter".into(),
         ))
     }
+
+    /// Incremental tasks fetch (CACHE-4). Same shape as
+    /// [`CalendarFeature::get_events_delta`]; default `Unsupported`.
+    async fn get_tasks_delta(
+        &self,
+        _list_id: &str,
+        _since_token: Option<&str>,
+    ) -> Result<ChangeSet<Task>> {
+        Err(Error::Unsupported(
+            "get_tasks_delta is not supported on this adapter".into(),
+        ))
+    }
 }
 
 /// Implemented by adapters that declare `Capability::Contacts`.
@@ -191,6 +247,18 @@ pub trait ContactsFeature: Adapter {
     async fn rename_contact_list(&self, _list_id: &str, _new_name: &str) -> Result<()> {
         Err(Error::Unsupported(
             "rename_contact_list is not supported on this adapter".into(),
+        ))
+    }
+
+    /// Incremental contacts fetch (CACHE-4). Same shape as
+    /// [`CalendarFeature::get_events_delta`]; default `Unsupported`.
+    async fn get_contacts_delta(
+        &self,
+        _list_id: &str,
+        _since_token: Option<&str>,
+    ) -> Result<ChangeSet<Contact>> {
+        Err(Error::Unsupported(
+            "get_contacts_delta is not supported on this adapter".into(),
         ))
     }
 

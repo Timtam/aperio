@@ -543,6 +543,33 @@ impl CacheStore {
         })
     }
 
+    /// Persist a delta token + freshness for a container without touching
+    /// its cached rows or event window. Used by the full-resync branch of
+    /// a delta refresh (the rows were just replaced; this records the
+    /// fresh token to continue incrementally next round).
+    pub fn set_token(
+        &self,
+        account: &str,
+        scope: SyncScope,
+        container: &str,
+        token: Option<&str>,
+    ) -> DbResult<()> {
+        let now = now_ts();
+        self.db.with_conn(|c| {
+            c.execute(
+                "INSERT INTO cache_sync_state
+                   (account_id, scope, container_id, sync_token, last_refreshed_at, last_error)
+                 VALUES (?1, ?2, ?3, ?4, ?5, NULL)
+                 ON CONFLICT(account_id, scope, container_id) DO UPDATE SET
+                   sync_token = excluded.sync_token,
+                   last_refreshed_at = excluded.last_refreshed_at,
+                   last_error = NULL",
+                params![account, scope.as_str(), container, token, now],
+            )?;
+            Ok(())
+        })
+    }
+
     /// Force the next read of a container to go cold (re-fetch from the
     /// provider) by clearing the freshness markers: `last_refreshed_at`
     /// (gates tasks/contacts/listings) and the event window (gates
