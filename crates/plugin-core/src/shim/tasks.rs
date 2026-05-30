@@ -10,7 +10,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use cal_core::adapter::{Adapter, AuthToken, Capability, Credentials, TasksFeature};
 use cal_core::error::{Error, Result};
-use cal_core::types::{NewTask, Task, TaskList};
+use cal_core::types::{NewTask, Section, Task, TaskList};
 use serde::Serialize;
 use tracing::warn;
 
@@ -42,6 +42,9 @@ struct VtableSnapshot {
     update_task: Option<crate::vtables::VtableMethodFn>,
     delete_task: Option<crate::vtables::VtableMethodFn>,
     rename_task_list: Option<crate::vtables::VtableMethodFn>,
+    list_sections: Option<crate::vtables::VtableMethodFn>,
+    create_task_list: Option<crate::vtables::VtableMethodFn>,
+    delete_task_list: Option<crate::vtables::VtableMethodFn>,
 }
 
 impl FfiTasksAdapter {
@@ -85,6 +88,9 @@ impl FfiTasksAdapter {
             update_task: vtable_ref.update_task,
             delete_task: vtable_ref.delete_task,
             rename_task_list: vtable_ref.rename_task_list,
+            list_sections: vtable_ref.list_sections,
+            create_task_list: vtable_ref.create_task_list,
+            delete_task_list: vtable_ref.delete_task_list,
         };
         let capabilities = super::manifest_capabilities(&plugin.manifest.capabilities);
         let handle_addr = instance.handle() as usize;
@@ -165,6 +171,12 @@ struct RenameTaskListArgs<'a> {
     new_name: &'a str,
 }
 
+#[derive(Serialize)]
+struct CreateTaskListArgs<'a> {
+    name: &'a str,
+    parent_id: Option<&'a str>,
+}
+
 #[async_trait]
 impl Adapter for FfiTasksAdapter {
     async fn authenticate(&self, credentials: Credentials) -> Result<AuthToken> {
@@ -209,5 +221,28 @@ impl TasksFeature for FfiTasksAdapter {
         let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         let args = RenameTaskListArgs { list_id, new_name };
         call_for_unit(self.vtable.rename_task_list, self.handle_addr, &args).await
+    }
+
+    async fn list_sections(&self, list_id: &str) -> Result<Vec<Section>> {
+        // Honour the trait's "no sections" default when the plugin
+        // doesn't fill the slot, rather than surfacing Unsupported.
+        if self.vtable.list_sections.is_none() {
+            return Ok(Vec::new());
+        }
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
+        call_then_decode(self.vtable.list_sections, self.handle_addr, &list_id).await
+    }
+
+    async fn create_task_list(&self, name: &str, parent_id: Option<&str>) -> Result<TaskList> {
+        // A null slot dispatches to Unsupported via `call_method`,
+        // which matches the trait default — no special-casing needed.
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
+        let args = CreateTaskListArgs { name, parent_id };
+        call_then_decode(self.vtable.create_task_list, self.handle_addr, &args).await
+    }
+
+    async fn delete_task_list(&self, list_id: &str) -> Result<()> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
+        call_for_unit(self.vtable.delete_task_list, self.handle_addr, &list_id).await
     }
 }

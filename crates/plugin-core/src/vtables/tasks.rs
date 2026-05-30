@@ -41,6 +41,21 @@ pub struct TasksVtable {
     /// on read-only adapters; leave `None` to inherit that
     /// behaviour at the shim level.
     pub rename_task_list: Option<VtableMethodFn>,
+    /// `list_sections(list_id) -> Vec<Section>`. `None` ⇒ the shim
+    /// inherits the trait default (no sections). Backends with
+    /// buckets/sections (Vikunja, Todoist) fill it.
+    ///
+    /// NOTE: these three slots were appended after the initial 0.x
+    /// shape. Appending `Option<fn>` slots at the end keeps every
+    /// *bundled* plugin binary-compatible (host + plugins are built
+    /// together against the same struct). A future third-party plugin
+    /// ABI freeze should bump `ABI_VERSION` to make the load-time
+    /// check reject mismatched layouts.
+    pub list_sections: Option<VtableMethodFn>,
+    /// `create_task_list(name, parent_id) -> TaskList`.
+    pub create_task_list: Option<VtableMethodFn>,
+    /// `delete_task_list(list_id)`.
+    pub delete_task_list: Option<VtableMethodFn>,
 }
 
 impl TasksVtable {
@@ -55,6 +70,9 @@ impl TasksVtable {
             update_task: None,
             delete_task: None,
             rename_task_list: None,
+            list_sections: None,
+            create_task_list: None,
+            delete_task_list: None,
         }
     }
 

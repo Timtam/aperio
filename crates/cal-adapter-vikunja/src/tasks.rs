@@ -225,6 +225,31 @@ pub async fn rename_task_list(
     Ok(())
 }
 
+/// `PUT /projects` — create a project. `parent_id` nests it under
+/// another project (Vikunja's `parent_project_id`); `None` ⇒ top
+/// level. Returns the created project mapped to a `TaskList`.
+pub async fn create_task_list(
+    client: &VikunjaClient,
+    name: &str,
+    parent_id: Option<&str>,
+) -> VikunjaResult<TaskList> {
+    let mut body = serde_json::json!({ "title": name });
+    if let Some(parent) = parent_id {
+        let pid = parse_id(parent, "parent project id")?;
+        body["parent_project_id"] = serde_json::json!(pid);
+    }
+    let created: ProjectEntry = client.put_json("/projects", &body).await?;
+    Ok(map_project(created))
+}
+
+/// `DELETE /projects/{id}` — remove a project (with its tasks) at the
+/// source.
+pub async fn delete_task_list(client: &VikunjaClient, list_id: &str) -> VikunjaResult<()> {
+    let project_id = parse_id(list_id, "task list id")?;
+    let path = format!("/projects/{project_id}");
+    client.delete(&path).await
+}
+
 // ── JSON wire shapes ───────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
@@ -948,5 +973,37 @@ mod tests {
         let client = fixture_client(&server.url());
         // No kanban view → no sections, no error.
         assert!(list_sections(&client, "3").await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn create_task_list_puts_project_and_maps_it() {
+        let mut server = Server::new_async().await;
+        let _m = server
+            .mock("PUT", "/api/v1/projects")
+            .with_status(200)
+            .with_body(r#"{"id":12,"title":"New Project","parent_project_id":3}"#)
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        let list = create_task_list(&client, "New Project", Some("3"))
+            .await
+            .unwrap();
+        assert_eq!(list.id, "12");
+        assert_eq!(list.name, "New Project");
+        assert_eq!(list.parent_id.as_deref(), Some("3"));
+    }
+
+    #[tokio::test]
+    async fn delete_task_list_hits_delete_endpoint() {
+        let mut server = Server::new_async().await;
+        let m = server
+            .mock("DELETE", "/api/v1/projects/7")
+            .with_status(200)
+            .with_body(r#"{"message":"Successfully deleted."}"#)
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        delete_task_list(&client, "7").await.unwrap();
+        m.assert_async().await;
     }
 }
