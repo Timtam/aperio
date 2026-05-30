@@ -8,5 +8,11 @@
   "min_app_version": "0.1.0",
   "author": "Aperio Contributors",
   "description": "Bundled tasks adapter for Todoist (REST API v2).",
-  "signed": false
+  "signed": false,
+  "tasks": {
+    "nested_projects": true,
+    "sections": true,
+    "subtasks": true,
+    "move_between_projects": false
+  }
 }

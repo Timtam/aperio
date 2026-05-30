@@ -3,13 +3,18 @@
 //! Todoist's data model:
 //!
 //!   - **Projects** play the role of Aperio's `TaskList`. Projects
-//!     are flat in the API surface (`parent_id` exists for nested
-//!     projects but Aperio surfaces them as a flat list with the
-//!     full name).
+//!     nest via `parent_id`, which we surface as `TaskList.parent_id`
+//!     so the sidebar renders the tree.
+//!   - **Sections** group a project's tasks. They're a first-class
+//!     resource (`GET /sections?project_id=…`); we map them to Aperio
+//!     `Section`s (`list_sections`) and a task's `section_id` to
+//!     `Task.section_id`. A task can be filed into a section on create;
+//!     moving it between sections later needs the Sync API (same
+//!     limitation as cross-project moves), so the update body omits it.
 //!   - **Tasks** carry `content` (title), `description`, `due`,
 //!     `deadline` (added to the API in late 2024), `priority` (1-4,
 //!     INVERTED from the UI labelling — see priority mapper),
-//!     `labels`, `parent_id` (for subtasks).
+//!     `labels`, `parent_id` (for subtasks), `section_id`.
 //!   - **Status** is the boolean `is_completed`. To flip it via the
 //!     REST v2 API you MUST use the dedicated `/close` and
 //!     `/reopen` endpoints — the regular `POST /tasks/{id}` update
@@ -46,7 +51,7 @@
 //!   - Moving a task between projects (Todoist REST v2's PUT doesn't
 //!     accept `project_id` either — would need the Sync API)
 
-use cal_core::{NewTask, Task, TaskList, TaskPriority, TaskStatus};
+use cal_core::{NewTask, Section, Task, TaskList, TaskPriority, TaskStatus};
 use chrono::{DateTime, NaiveDate, NaiveTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -73,6 +78,19 @@ pub async fn get_tasks(client: &TodoistClient, list_id: &str) -> TodoistResult<V
     let path = format!("/tasks?project_id={encoded}");
     let entries: Vec<TaskEntry> = client.get_json(&path).await?;
     Ok(entries.into_iter().map(|e| map_task(e, list_id)).collect())
+}
+
+/// `GET /sections?project_id={id}`. Todoist sections are a first-class
+/// resource, so unlike Vikunja there's no view indirection — one call
+/// returns every section of the project in display order.
+pub async fn list_sections(client: &TodoistClient, list_id: &str) -> TodoistResult<Vec<Section>> {
+    let encoded = urlencoding(list_id);
+    let path = format!("/sections?project_id={encoded}");
+    let entries: Vec<SectionEntry> = client.get_json(&path).await?;
+    Ok(entries
+        .into_iter()
+        .map(|e| map_section(e, list_id))
+        .collect())
 }
 
 /// `POST /tasks`. Returns the freshly-created task. When the input
@@ -159,6 +177,22 @@ struct ProjectEntry {
     name: Option<String>,
     #[serde(default)]
     color: Option<String>,
+    /// Parent project id for Todoist's nested-project tree. Absent /
+    /// empty ⇒ a top-level project.
+    #[serde(default)]
+    parent_id: Option<String>,
+}
+
+/// `GET /sections?project_id={id}`. A Todoist section groups tasks
+/// inside one project.
+#[derive(Debug, Deserialize)]
+struct SectionEntry {
+    id: String,
+    #[serde(default)]
+    name: Option<String>,
+    /// Todoist's display order within the project (1-based).
+    #[serde(default)]
+    order: i64,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -189,6 +223,10 @@ struct TaskEntry {
     deadline: Option<DeadlineEntry>,
     #[serde(default)]
     parent_id: Option<String>,
+    /// Section the task is filed under, mapped to Aperio's section.
+    /// Absent / empty ⇒ ungrouped.
+    #[serde(default)]
+    section_id: Option<String>,
     #[serde(default)]
     created_at: Option<String>,
     /// Set when the task was completed via `/close`. The REST API
@@ -221,6 +259,12 @@ struct CreateTaskBody {
     priority: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     parent_id: Option<String>,
+    /// Section to file the new task under. Todoist accepts this on
+    /// create; moving a task between sections afterwards needs the
+    /// Sync API (same limitation as cross-project moves), so the
+    /// update body omits it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    section_id: Option<String>,
     /// `due_date` and `due_datetime` are mutually exclusive on the
     /// Todoist side. We send at most one.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -267,8 +311,19 @@ fn map_project(entry: ProjectEntry) -> TaskList {
             .map(|hex| cal_core::ContainerColor::native(hex.to_string())),
         default_sound: None,
         embedded_in_calendar: None,
-        parent_id: None,
+        // Todoist nests projects; surface the parent so the sidebar
+        // builds the tree. Empty string ⇒ top-level.
+        parent_id: entry.parent_id.filter(|s| !s.is_empty()),
         read_only: false,
+    }
+}
+
+fn map_section(entry: SectionEntry, list_id: &str) -> Section {
+    Section {
+        id: entry.id,
+        list_id: list_id.to_string(),
+        name: entry.name.unwrap_or_default(),
+        order: entry.order.max(0) as u32,
     }
 }
 
@@ -308,7 +363,7 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
         deadline_time: None,
         recurrence: None,
         parent_id: entry.parent_id.filter(|s| !s.is_empty()),
-        section_id: None,
+        section_id: entry.section_id.filter(|s| !s.is_empty()),
         color_label: None,
         reminders: Vec::new(),
         sound: None,
@@ -335,6 +390,7 @@ fn new_task_to_create_body(list_id: &str, new: &NewTask) -> CreateTaskBody {
         description: new.description.clone().filter(|s| !s.is_empty()),
         priority: Some(aperio_priority_to_todoist(new.priority)),
         parent_id: new.parent_id.clone().filter(|s| !s.is_empty()),
+        section_id: new.section_id.clone().filter(|s| !s.is_empty()),
         due_date,
         due_datetime,
         deadline_date: new.deadline_date.map(format_date),
@@ -618,6 +674,7 @@ mod tests {
             id: "1234".into(),
             name: Some("Work".into()),
             color: Some("sky_blue".into()),
+            parent_id: None,
         });
         assert_eq!(list.id, "1234");
         assert_eq!(list.name, "Work");
@@ -630,6 +687,7 @@ mod tests {
             id: "1".into(),
             name: Some("Stuff".into()),
             color: Some("not_in_palette".into()),
+            parent_id: None,
         });
         assert!(list.color.is_none());
     }
@@ -640,6 +698,7 @@ mod tests {
             id: "1".into(),
             name: None,
             color: None,
+            parent_id: None,
         });
         assert_eq!(list.name, "Inbox");
     }
@@ -663,6 +722,7 @@ mod tests {
                 date: Some("2026-05-25".into()),
             }),
             parent_id: None,
+            section_id: None,
             created_at: Some("2026-05-01T10:00:00Z".into()),
             completed_at: None,
         };
@@ -697,6 +757,7 @@ mod tests {
             due: None,
             deadline: None,
             parent_id: None,
+            section_id: None,
             created_at: Some("2026-05-01T10:00:00Z".into()),
             completed_at: Some("2026-05-22T15:00:00Z".into()),
         };
@@ -722,6 +783,7 @@ mod tests {
             }),
             deadline: None,
             parent_id: None,
+            section_id: None,
             created_at: None,
             completed_at: None,
         };
@@ -989,5 +1051,77 @@ mod tests {
         post.assert_async().await;
         reopen.assert_async().await;
         assert_eq!(result.status, TaskStatus::Open);
+    }
+
+    // ── Nested projects + sections ─────────────────────────────
+
+    #[test]
+    fn map_project_surfaces_parent_id() {
+        let top = map_project(ProjectEntry {
+            id: "1".into(),
+            name: Some("Parent".into()),
+            color: None,
+            parent_id: None,
+        });
+        assert!(top.parent_id.is_none());
+        let child = map_project(ProjectEntry {
+            id: "2".into(),
+            name: Some("Child".into()),
+            color: None,
+            parent_id: Some("1".into()),
+        });
+        assert_eq!(child.parent_id.as_deref(), Some("1"));
+    }
+
+    #[test]
+    fn map_task_carries_section_id() {
+        let entry = TaskEntry {
+            id: "T1".into(),
+            project_id: "P1".into(),
+            content: Some("Grouped".into()),
+            parent_id: None,
+            section_id: Some("S9".into()),
+            ..Default::default()
+        };
+        assert_eq!(map_task(entry, "P1").section_id.as_deref(), Some("S9"));
+        // Empty string ⇒ ungrouped.
+        let loose = TaskEntry {
+            id: "T2".into(),
+            section_id: Some(String::new()),
+            ..Default::default()
+        };
+        assert!(map_task(loose, "P1").section_id.is_none());
+    }
+
+    #[test]
+    fn create_body_carries_section_id() {
+        let mut nt = sample_new_task();
+        nt.section_id = Some("S9".into());
+        let body = new_task_to_create_body("P1", &nt);
+        assert_eq!(body.section_id.as_deref(), Some("S9"));
+        // Absent section ⇒ field omitted from the wire body.
+        let plain = new_task_to_create_body("P1", &sample_new_task());
+        let json = serde_json::to_value(&plain).unwrap();
+        assert!(json.get("section_id").is_none());
+    }
+
+    #[tokio::test]
+    async fn list_sections_decodes_project_sections() {
+        let mut server = Server::new_async().await;
+        let _m = server
+            .mock("GET", "/sections?project_id=P1")
+            .with_status(200)
+            .with_body(
+                r#"[{"id":"S1","project_id":"P1","order":1,"name":"To Do"},{"id":"S2","project_id":"P1","order":2,"name":"Doing"}]"#,
+            )
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        let sections = list_sections(&client, "P1").await.unwrap();
+        assert_eq!(sections.len(), 2);
+        assert_eq!(sections[0].id, "S1");
+        assert_eq!(sections[0].name, "To Do");
+        assert_eq!(sections[0].list_id, "P1");
+        assert_eq!(sections[1].order, 2);
     }
 }
