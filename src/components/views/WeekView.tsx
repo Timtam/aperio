@@ -198,8 +198,11 @@ export function WeekView() {
   // one on screen (e.g. a future side-by-side comparison).
   const idPrefix = useId();
   const cellId = (i: number) => `${idPrefix}-cell-${i}`;
-  const eventOptionId = (dayIdx: number, evIdx: number) =>
-    `${idPrefix}-cell-${dayIdx}-ev-${evIdx}`;
+  const eventOptionId = useCallback(
+    (dayIdx: number, evIdx: number) =>
+      `${idPrefix}-cell-${dayIdx}-ev-${evIdx}`,
+    [idPrefix],
+  );
 
   // Two-level focus: `null` means the day cell itself is focused (arrow
   // keys move the day). A number means the user has tabbed into the
@@ -236,7 +239,10 @@ export function WeekView() {
       }),
     [days, dayItemsByDay],
   );
-  const focusedDayItems = buckets[focusIndex]?.items ?? [];
+  const focusedDayItems = useMemo(
+    () => buckets[focusIndex]?.items ?? [],
+    [buckets, focusIndex],
+  );
 
   const dayChangeAnnouncer = useCallback(
     (newDayIdx: number, item: DayItem) => {

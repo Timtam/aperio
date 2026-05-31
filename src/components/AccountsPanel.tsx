@@ -696,7 +696,7 @@ export function AccountsPanel() {
         else setError(String(err));
       }
     },
-    [announce, refresh, refreshCalendars, refreshTaskLists, t],
+    [announce, refresh, refreshAccounts, refreshCalendars, refreshTaskLists, t],
   );
 
   const headingId = useId();

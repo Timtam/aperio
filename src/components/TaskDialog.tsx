@@ -191,7 +191,10 @@ export function TaskDialog({
   // can't reparent tasks (Todoist). Creation is unaffected — you can
   // always pick the list for a brand-new task.
   const moveLocked = isEdit && !canMoveLists;
-  const sectionsForList = sectionsByList[form.listId] ?? [];
+  const sectionsForList = useMemo(
+    () => sectionsByList[form.listId] ?? [],
+    [sectionsByList, form.listId],
+  );
   // Sections are user-managed (create / rename / delete) only on local
   // lists; external-provider sections are read-only here (managed in
   // the provider's own UI), so we just offer the picker for those.

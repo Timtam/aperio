@@ -142,7 +142,10 @@ export function DayView() {
   }, [showLoading, announce, t]);
 
   const idPrefix = useId();
-  const itemId = (i: number) => `${idPrefix}-item-${i}`;
+  const itemId = useCallback(
+    (i: number) => `${idPrefix}-item-${i}`,
+    [idPrefix],
+  );
   const listRef = useAutoFocus<HTMLUListElement>(!loading);
 
   const [confirmTarget, setConfirmTarget] = useState<CalendarEvent | null>(

@@ -135,7 +135,7 @@ export function SyncStatusIndicator() {
       announce(t('syncStatus.announceSynced'));
     }
     // `off` is the no-adapter steady state; no announcement.
-  }, [tone, conflictCount, lastError, announce, t]);
+  }, [tone, conflictCount, lastError, isAuthError, announce, t]);
 
   // Clicking the badge routes by tone: schema_too_old → update
   // modal, conflicts → conflicts dialog, anything else → Sync

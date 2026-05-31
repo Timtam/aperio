@@ -209,8 +209,10 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     setStack((s) => [...s, next]);
   }, []);
 
-  const mode: DialogMode =
-    stack.length === 0 ? { kind: 'none' } : stack[stack.length - 1];
+  const mode: DialogMode = useMemo(
+    () => (stack.length === 0 ? { kind: 'none' } : stack[stack.length - 1]),
+    [stack],
+  );
 
   const openEventDialog = useCallback(
     (event: CalendarEvent | null = null, options?: OpenEventOptions) => {

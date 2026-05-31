@@ -86,8 +86,11 @@ export function MonthView() {
 
   const idPrefix = useId();
   const cellId = (i: number) => `${idPrefix}-cell-${i}`;
-  const eventOptionId = (cellIdx: number, evIdx: number) =>
-    `${idPrefix}-cell-${cellIdx}-ev-${evIdx}`;
+  const eventOptionId = useCallback(
+    (cellIdx: number, evIdx: number) =>
+      `${idPrefix}-cell-${cellIdx}-ev-${evIdx}`,
+    [idPrefix],
+  );
 
   // Two-level focus mirrors WeekView; the tab hook below handles
   // chronological cycling across cells.
@@ -95,7 +98,10 @@ export function MonthView() {
     () => cells.map((d) => ({ items: eventsByDay.get(keyOf(d)) ?? [] })),
     [cells, eventsByDay],
   );
-  const focusedDayEvents = buckets[focusIndex]?.items ?? [];
+  const focusedDayEvents = useMemo(
+    () => buckets[focusIndex]?.items ?? [],
+    [buckets, focusIndex],
+  );
 
   const dayChangeAnnouncer = useCallback(
     (newDayIdx: number, ev: CalendarEvent) => {
@@ -289,6 +295,7 @@ export function MonthView() {
       clearEventIndex,
       requestDelete,
       openEventMenu,
+      eventOptionId,
     ],
   );
 
