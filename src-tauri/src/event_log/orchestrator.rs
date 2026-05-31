@@ -47,7 +47,7 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Timelike, Utc};
 use serde::Serialize;
 use sync_core::{DeviceCursor, DeviceId, LogFile, SyncAdapter, SyncResult};
 use tracing::{debug, info, warn};
@@ -259,14 +259,18 @@ pub struct SyncOrchestrator {
 
 /// Whether an *empty* pending file is a deletable leftover from a
 /// prior run rather than the current session's live (still-empty)
-/// file. The writer names the live file with exactly `boot_at`, so
-/// the strict `<` keeps it (`==`) while still reaping older stubs.
-/// Extracted as a free fn so the invariant is unit-testable without
-/// standing up a full orchestrator. See `SyncOrchestrator::boot_at`
-/// and `EventLogWriter::spawn_with_kick` for why the two timestamps
-/// must be identical.
+/// file. The writer names the live file with `boot_at` — but at
+/// SECOND precision (`LogFileName::to_filename` uses
+/// `SecondsFormat::Secs`), so the live file always parses back to
+/// `boot_at` truncated to the second. We therefore compare at second
+/// granularity: a real, sub-second `boot_at` would otherwise make the
+/// live file sort `< boot_at` and get reaped — unlinking the writer's
+/// open handle on Windows (`FILE_SHARE_DELETE`) and losing the whole
+/// session's events. Extracted as a free fn so the invariant is
+/// unit-testable without standing up a full orchestrator.
 fn is_stale_empty_stub(file_session: DateTime<Utc>, boot_at: DateTime<Utc>) -> bool {
-    file_session < boot_at
+    file_session.with_nanosecond(0).unwrap_or(file_session)
+        < boot_at.with_nanosecond(0).unwrap_or(boot_at)
 }
 
 impl SyncOrchestrator {
@@ -873,7 +877,7 @@ impl Drop for InFlightGuard<'_> {
 #[cfg(test)]
 mod tests {
     use super::is_stale_empty_stub;
-    use chrono::{Duration, TimeZone, Utc};
+    use chrono::{Duration, TimeZone, Timelike, Utc};
 
     #[test]
     fn empty_stub_cleanup_keeps_live_session_file_and_reaps_older() {
@@ -897,5 +901,29 @@ mod tests {
 
         // Defensive: a (clock-skew) later timestamp is also kept.
         assert!(!is_stale_empty_stub(boot + Duration::seconds(1), boot));
+    }
+
+    #[test]
+    fn sub_second_boot_at_keeps_the_second_granular_live_file() {
+        // Real boot_at carries sub-seconds, but the writer's filename is
+        // second-granular (`LogFileName::to_filename`), so the live file
+        // parses back to boot_at truncated to the whole second. The
+        // cleanup must compare at second granularity — otherwise the
+        // live file (boot_at truncated to .000) sorts `< boot_at`
+        // (…00.523) and gets reaped: the Windows ghost-file event-loss
+        // bug. This case is what the whole-second test above missed.
+        let boot = Utc
+            .with_ymd_and_hms(2026, 5, 31, 7, 0, 0)
+            .unwrap()
+            .with_nanosecond(523_000_000)
+            .unwrap(); // 07:00:00.523
+        let live = Utc.with_ymd_and_hms(2026, 5, 31, 7, 0, 0).unwrap(); // filename → .000
+        assert!(
+            !is_stale_empty_stub(live, boot),
+            "the live session file must survive a sub-second boot_at",
+        );
+        // A genuinely older session (a prior whole second) is still reaped.
+        let older = Utc.with_ymd_and_hms(2026, 5, 31, 6, 59, 59).unwrap();
+        assert!(is_stale_empty_stub(older, boot));
     }
 }
