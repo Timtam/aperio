@@ -1,13 +1,13 @@
 import {
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
 } from 'react';
+
+import { AnnouncerContext, type Urgency } from './announcerContext';
 
 /**
  * Global announcer for screen readers.
@@ -29,14 +29,6 @@ import {
  * the same string (e.g. tapping "Today" twice), we clear the region first
  * and only then write the new text — see [`announce`] below.
  */
-export type Urgency = 'polite' | 'assertive';
-
-type AnnouncerContextValue = {
-  announce: (message: string, urgency?: Urgency) => void;
-};
-
-const AnnouncerContext = createContext<AnnouncerContextValue | null>(null);
-
 export function AnnouncerProvider({ children }: { children: ReactNode }) {
   const [polite, setPolite] = useState('');
   const [assertive, setAssertive] = useState('');
@@ -96,16 +88,3 @@ export function AnnouncerProvider({ children }: { children: ReactNode }) {
   );
 }
 
-/**
- * Returns the `announce` function from the nearest [`AnnouncerProvider`].
- *
- * Throws if no provider is mounted — that always indicates a wiring bug,
- * never a runtime condition we can recover from.
- */
-export function useAnnouncer(): AnnouncerContextValue['announce'] {
-  const ctx = useContext(AnnouncerContext);
-  if (!ctx) {
-    throw new Error('useAnnouncer must be used inside <AnnouncerProvider>');
-  }
-  return ctx.announce;
-}

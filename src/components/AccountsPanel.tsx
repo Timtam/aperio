@@ -8,7 +8,7 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { useAnnouncer } from '../a11y/Announcer';
+import { useAnnouncer } from '../a11y/announcerContext';
 import { FocusableNote } from '../a11y/FocusableNote';
 import {
   connectGoogleAccount,
@@ -29,8 +29,8 @@ import {
   testVikunjaConnection,
 } from '../api/client';
 import type { Account, AdapterKind } from '../api/types';
-import { useCalendarStore } from '../state/CalendarStore';
-import { useDialogState } from '../state/DialogState';
+import { useCalendarStore } from '../state/calendarStoreContext';
+import { useDialogState } from '../state/dialogStateContext';
 import { ConfirmDialog } from './ConfirmDialog';
 import { ContactsPrivacyNoticeModal } from './ContactsPrivacyNoticeModal';
 
@@ -696,7 +696,7 @@ export function AccountsPanel() {
         else setError(String(err));
       }
     },
-    [announce, refresh, refreshCalendars, refreshTaskLists, t],
+    [announce, refresh, refreshAccounts, refreshCalendars, refreshTaskLists, t],
   );
 
   const headingId = useId();

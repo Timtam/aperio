@@ -1,10 +1,10 @@
 import { useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { useAnnouncer } from '../a11y/Announcer';
-import { useCalendarStore } from '../state/CalendarStore';
-import { useDialogState } from '../state/DialogState';
-import { useViewState } from '../state/ViewState';
+import { useAnnouncer } from '../a11y/announcerContext';
+import { useCalendarStore } from '../state/calendarStoreContext';
+import { useDialogState } from '../state/dialogStateContext';
+import { useViewState } from '../state/viewStateContext';
 
 /**
  * Top-of-main banner shown while the user is "focused" on a single

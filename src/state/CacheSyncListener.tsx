@@ -1,8 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { listen } from '@tauri-apps/api/event';
 
-import { useCalendarStore } from './CalendarStore';
-import { useDialogState } from './DialogState';
+import { useCalendarStore } from './calendarStoreContext';
+import { useDialogState } from './dialogStateContext';
 
 /**
  * Bridges the backend `cache-updated` push (CACHE-1/2 stale-while-

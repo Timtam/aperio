@@ -8,7 +8,7 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { useAnnouncer } from '../a11y/Announcer';
+import { useAnnouncer } from '../a11y/announcerContext';
 import {
   createColorLabel,
   deleteColorLabel,
@@ -17,7 +17,7 @@ import {
 } from '../api/client';
 import type { ColorLabel } from '../api/types';
 import { useAutoFocus } from '../hooks/useAutoFocus';
-import { useCalendarStore } from '../state/CalendarStore';
+import { useCalendarStore } from '../state/calendarStoreContext';
 import { ColorComposer } from './ColorComposer';
 
 /**

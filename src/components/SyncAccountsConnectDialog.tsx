@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { useAnnouncer } from '../a11y/Announcer';
+import { useAnnouncer } from '../a11y/announcerContext';
 import { FocusableNote } from '../a11y/FocusableNote';
 import {
   isCommandError,
-  listAccountsMissingCredentials,
   reconnectGoogleAccount,
   reconnectMicrosoftAccount,
   setAccountSecret,
@@ -350,19 +349,4 @@ function SyncAccountsConnectRow({
       )}
     </li>
   );
-}
-
-/** Caller-side helper: fetch the missing-credentials list and,
- *  if non-empty, hand it back so the caller can mount the dialog
- *  via DialogState. Returns `null` when there's nothing to do so
- *  the caller can skip opening the wizard altogether. */
-export async function fetchAccountsNeedingConnect(): Promise<Account[] | null> {
-  try {
-    const accounts = await listAccountsMissingCredentials();
-    return accounts.length === 0 ? null : accounts;
-  } catch (err) {
-    // eslint-disable-next-line no-console
-    console.warn('list_accounts_missing_credentials failed', err);
-    return null;
-  }
 }

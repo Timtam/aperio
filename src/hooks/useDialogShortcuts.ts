@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 
-import { useDialogState } from '../state/DialogState';
+import { useDialogState } from '../state/dialogStateContext';
 
 /**
  * Wire the global dialog-open shortcuts.

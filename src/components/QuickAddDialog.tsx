@@ -7,11 +7,11 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { useAnnouncer } from '../a11y/Announcer';
+import { useAnnouncer } from '../a11y/announcerContext';
 import { createEvent as apiCreateEvent, isCommandError } from '../api/client';
-import { useCalendarStore } from '../state/CalendarStore';
-import { useDialogState } from '../state/DialogState';
-import { useViewState } from '../state/ViewState';
+import { useCalendarStore } from '../state/calendarStoreContext';
+import { useDialogState } from '../state/dialogStateContext';
+import { useViewState } from '../state/viewStateContext';
 import { Modal } from './Modal';
 
 /**

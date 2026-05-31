@@ -3,9 +3,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { getEvents } from '../api/client';
 import type { CalendarEvent } from '../api/types';
 import { expandAll } from '../intl/recurrence';
-import { useCalendarStore } from './CalendarStore';
-import { useDialogState } from './DialogState';
-import { useViewState } from './ViewState';
+import { useCalendarStore } from './calendarStoreContext';
+import { useDialogState } from './dialogStateContext';
+import { useViewState } from './viewStateContext';
 
 /**
  * Pull events from every selected calendar in a given UTC range and

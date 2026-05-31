@@ -15,7 +15,7 @@ import {
 
 import { useAutoFocus } from '../../hooks/useAutoFocus';
 import { useDateFormat } from '../../intl/dateFormat';
-import { useViewState } from '../../state/ViewState';
+import { useViewState } from '../../state/viewStateContext';
 
 /**
  * Year view — 12 mini-month grids as a listbox.

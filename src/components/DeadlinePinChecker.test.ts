@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Task } from '../api/types';
-import { filterDeadlinePinTargets } from './DeadlinePinChecker';
+import { filterDeadlinePinTargets } from './deadlinePinTargets';
 
 const baseTask: Task = {
   id: 't1',

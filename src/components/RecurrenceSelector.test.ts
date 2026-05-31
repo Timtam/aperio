@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  buildRRule,
-  deriveMonthlyOptions,
-  parseRRule,
-} from './RecurrenceSelector';
+import { buildRRule, deriveMonthlyOptions, parseRRule } from './rrule';
 
 // Shared base so each test only spells out the fields it cares about.
 const base = {

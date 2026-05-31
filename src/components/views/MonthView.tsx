@@ -17,7 +17,7 @@ import {
   startOfWeek,
 } from 'date-fns';
 
-import { useAnnouncer } from '../../a11y/Announcer';
+import { useAnnouncer } from '../../a11y/announcerContext';
 import { useAutoFocus } from '../../hooks/useAutoFocus';
 import { useDeferredLoading } from '../../hooks/useDeferredLoading';
 import { useEventTabNavigation } from '../../hooks/useEventTabNavigation';
@@ -34,11 +34,11 @@ import {
   daysCoveredKeys,
   multiDayInfo,
 } from '../../intl/multiDay';
-import { useCalendarStore } from '../../state/CalendarStore';
+import { useCalendarStore } from '../../state/calendarStoreContext';
 import { useChipContextMenu } from '../../state/useChipContextMenu';
-import { useDialogState } from '../../state/DialogState';
+import { useDialogState } from '../../state/dialogStateContext';
 import { useEvents } from '../../state/useEvents';
-import { useViewState } from '../../state/ViewState';
+import { useViewState } from '../../state/viewStateContext';
 import { visibleRange } from '../../state/viewMath';
 import type { CalendarEvent } from '../../api/types';
 import { ConfirmDialog } from '../ConfirmDialog';
@@ -86,8 +86,11 @@ export function MonthView() {
 
   const idPrefix = useId();
   const cellId = (i: number) => `${idPrefix}-cell-${i}`;
-  const eventOptionId = (cellIdx: number, evIdx: number) =>
-    `${idPrefix}-cell-${cellIdx}-ev-${evIdx}`;
+  const eventOptionId = useCallback(
+    (cellIdx: number, evIdx: number) =>
+      `${idPrefix}-cell-${cellIdx}-ev-${evIdx}`,
+    [idPrefix],
+  );
 
   // Two-level focus mirrors WeekView; the tab hook below handles
   // chronological cycling across cells.
@@ -95,7 +98,10 @@ export function MonthView() {
     () => cells.map((d) => ({ items: eventsByDay.get(keyOf(d)) ?? [] })),
     [cells, eventsByDay],
   );
-  const focusedDayEvents = buckets[focusIndex]?.items ?? [];
+  const focusedDayEvents = useMemo(
+    () => buckets[focusIndex]?.items ?? [],
+    [buckets, focusIndex],
+  );
 
   const dayChangeAnnouncer = useCallback(
     (newDayIdx: number, ev: CalendarEvent) => {
@@ -289,6 +295,7 @@ export function MonthView() {
       clearEventIndex,
       requestDelete,
       openEventMenu,
+      eventOptionId,
     ],
   );
 

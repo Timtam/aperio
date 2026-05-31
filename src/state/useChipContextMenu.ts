@@ -2,7 +2,7 @@ import { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 
-import { useAnnouncer } from '../a11y/Announcer';
+import { useAnnouncer } from '../a11y/announcerContext';
 import {
   deleteEventById,
   isCommandError,
@@ -11,7 +11,7 @@ import {
 } from '../api/client';
 import type { CalendarEvent, Task, TaskStatus } from '../api/types';
 import { seriesIdOf } from '../intl/recurrence';
-import { useDialogState } from './DialogState';
+import { useDialogState } from './dialogStateContext';
 import { useTaskStatusActions } from './useTaskStatusToggle';
 
 /**

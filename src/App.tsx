@@ -20,10 +20,12 @@ import { useRegionFocus } from './hooks/useRegionFocus';
 import { useSuppressBrowserDefaults } from './hooks/useSuppressBrowserDefaults';
 import { CacheSyncListener } from './state/CacheSyncListener';
 import { CalendarStoreProvider } from './state/CalendarStore';
-import { DialogStateProvider, useDialogState } from './state/DialogState';
+import { DialogStateProvider } from './state/DialogState';
+import { useDialogState } from './state/dialogStateContext';
 import { TaskCascadeProvider } from './state/TaskCascadeProvider';
 import { ToastProvider } from './state/ToastProvider';
-import { ViewStateProvider, useViewShortcuts, useViewState } from './state/ViewState';
+import { ViewStateProvider } from './state/ViewState';
+import { useViewShortcuts, useViewState } from './state/viewStateContext';
 
 /**
  * Root component.

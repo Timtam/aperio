@@ -16,7 +16,7 @@ import {
   type UpcomingReminder,
 } from '../api/client';
 import { useDateFormat } from '../intl/dateFormat';
-import { useDialogState } from '../state/DialogState';
+import { useDialogState } from '../state/dialogStateContext';
 import { Modal } from './Modal';
 
 /**

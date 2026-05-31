@@ -8,11 +8,9 @@ vi.mock('@tauri-apps/api/core', () => ({
 }));
 
 import { invoke } from '@tauri-apps/api/core';
-import {
-  buildTaskListForest,
-  CalendarStoreProvider,
-  useCalendarStore,
-} from './CalendarStore';
+import { CalendarStoreProvider } from './CalendarStore';
+import { useCalendarStore } from './calendarStoreContext';
+import { buildTaskListForest } from './taskListForest';
 import type { TaskList } from '../api/types';
 
 const invokeMock = invoke as unknown as ReturnType<typeof vi.fn>;

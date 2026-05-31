@@ -8,7 +8,7 @@ import {
   type ContactsSyncStatus,
   type ContactsSyncedPayload,
 } from '../api/client';
-import { useDialogState } from './DialogState';
+import { useDialogState } from './dialogStateContext';
 
 /**
  * Frontend bridge to the backend contact sync scheduler

@@ -16,7 +16,7 @@ import {
   type SyncStatusPayload,
   type SyncRoundReport,
 } from '../api/client';
-import { useDialogState } from './DialogState';
+import { useDialogState } from './dialogStateContext';
 
 /**
  * Fire an OS-level notification announcing new sync conflicts

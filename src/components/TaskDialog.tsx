@@ -11,7 +11,7 @@ import { useTranslation } from 'react-i18next';
 
 import { DescriptionLinks } from './DescriptionLinks';
 
-import { useAnnouncer } from '../a11y/Announcer';
+import { useAnnouncer } from '../a11y/announcerContext';
 import {
   createSection,
   createTask as apiCreateTask,
@@ -25,26 +25,27 @@ import { invoke } from '@tauri-apps/api/core';
 import { todayIsoKey } from '../intl/taskDay';
 import { statusI18nKey, statusMarker } from '../intl/taskStatus';
 import type { Reminder, Task, TaskPriority, TaskStatus } from '../api/types';
-import { useCalendarStore } from '../state/CalendarStore';
+import { useCalendarStore } from '../state/calendarStoreContext';
 import { canAssignSection, canMoveTaskBetweenLists } from '../state/taskMoves';
-import { useDialogState } from '../state/DialogState';
+import { useDialogState } from '../state/dialogStateContext';
 import {
   planAncestorRecompute,
   planStatusCascade,
   type StatusWrite,
 } from '../state/taskCascade';
-import { useTaskCascadeEnabled } from '../state/TaskCascadeProvider';
+import { useTaskCascadeEnabled } from '../state/taskCascadeContext';
 import { useTasks } from '../state/useTasks';
 import { useTaskStatusActions } from '../state/useTaskStatusToggle';
+import { readLastUsedTaskList, writeLastUsedTaskList } from './lastUsedTaskList';
 import { Modal } from './Modal';
 import { RemindersEditor } from './RemindersEditor';
+import { TaskRecurrenceSelector } from './TaskRecurrenceSelector';
 import {
   fromBackend as recurrenceFromBackend,
   toBackend as recurrenceToBackend,
-  TaskRecurrenceSelector,
   TASK_RECURRENCE_DEFAULT,
   type TaskRecurrenceValue,
-} from './TaskRecurrenceSelector';
+} from './taskRecurrence';
 
 /**
  * Task create / edit dialog (DESIGN.md section 9.9).
@@ -191,7 +192,10 @@ export function TaskDialog({
   // can't reparent tasks (Todoist). Creation is unaffected — you can
   // always pick the list for a brand-new task.
   const moveLocked = isEdit && !canMoveLists;
-  const sectionsForList = sectionsByList[form.listId] ?? [];
+  const sectionsForList = useMemo(
+    () => sectionsByList[form.listId] ?? [],
+    [sectionsByList, form.listId],
+  );
   // Sections are user-managed (create / rename / delete) only on local
   // lists; external-provider sections are read-only here (managed in
   // the provider's own UI), so we just offer the picker for those.
@@ -1198,27 +1202,6 @@ export function TaskDialog({
       </form>
     </Modal>
   );
-}
-
-/** Mirrors EventDialog's last-used-calendar memo. The task-list
- *  picker on a new task remembers the user's previous pick so a
- *  multi-list setup doesn't reset to `taskLists[0]` on every open. */
-const LAST_USED_TASK_LIST_KEY = 'aperio.lastUsedTaskList.v1';
-
-export function readLastUsedTaskList(): string | null {
-  try {
-    return localStorage.getItem(LAST_USED_TASK_LIST_KEY);
-  } catch {
-    return null;
-  }
-}
-
-export function writeLastUsedTaskList(id: string): void {
-  try {
-    localStorage.setItem(LAST_USED_TASK_LIST_KEY, id);
-  } catch {
-    // Best effort.
-  }
 }
 
 function buildInitialState(
