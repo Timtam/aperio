@@ -17,6 +17,11 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
+  # clippy/build/test don't need full debuginfo — line-tables keep
+  # panic backtraces readable while trimming a big chunk of the debug
+  # compile + link time.
+  CARGO_PROFILE_DEV_DEBUG: "line-tables-only"
+  CARGO_PROFILE_TEST_DEBUG: "line-tables-only"
 
 jobs:
   rust:
@@ -47,6 +52,10 @@ jobs:
           components: clippy, rustfmt
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          # Keep the dep cache even on a failed run, so retries on a
+          # red build don't recompile every dependency cold.
+          cache-on-failure: true
 
       - name: rustfmt
         run: cargo fmt --all -- --check

@@ -22,6 +22,9 @@ jobs:
     uses: ./.github/workflows/build-artifacts.yml
     with:
       version: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
+      # Real releases get the fully-optimised ship profile (fat LTO,
+      # single codegen unit); CI/PR builds default to the fast profile.
+      release_profile: true
 
   publish:
     name: Publish GitHub Release
