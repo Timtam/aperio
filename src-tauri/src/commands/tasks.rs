@@ -28,7 +28,15 @@ use crate::reminders::SchedulerHandle;
 /// so those emits never reached `pending/` (and thus never the
 /// remote). On the first boot after the fix we walk the local store
 /// once and re-emit so they finally propagate.
-const PREF_LOCAL_TASKS_BACKFILLED: &str = "sync.localTasks.eventBackfillDone";
+///
+/// `.v2`: the first fix (sharing one `boot_at`) was incomplete — the
+/// session filename is second-granular while `boot_at` carried
+/// sub-seconds, so the stub-cleanup still reaped the live file and ate
+/// events created AFTER the v1 backfill ran. Bumping the key forces one
+/// more replay now that the comparison is second-granular, recovering
+/// those lost tasks. Idempotent (receivers dedupe via
+/// `sync_applied_events`).
+const PREF_LOCAL_TASKS_BACKFILLED: &str = "sync.localTasks.eventBackfillDone.v2";
 
 /// Catch-up emit for local task lists + their tasks. Idempotent:
 /// gated by [`PREF_LOCAL_TASKS_BACKFILLED`], and receivers dedupe
