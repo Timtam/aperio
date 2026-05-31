@@ -128,10 +128,26 @@ pub async fn delete_task(client: &EwsClient, task_id: &str) -> EwsResult<()> {
 /// wrapper inside `SetFolderField` so the server applies the change
 /// to the right folder kind.
 pub async fn rename_task_list(client: &EwsClient, list_id: &str, new_name: &str) -> EwsResult<()> {
-    let (folder_id, change_key) = split_calendar_id(list_id);
+    let (folder_id, _) = split_calendar_id(list_id);
+    // Stable list id carries no ChangeKey; UpdateFolder needs one, so
+    // harvest a fresh one via FindFolder right before the write.
+    let change_key = task_folder_change_key(client, &folder_id).await?;
     let envelope = update_tasks_folder_displayname(&folder_id, change_key.as_deref(), new_name);
     client.post_soap(envelope).await?;
     Ok(())
+}
+
+/// Resolve the current ChangeKey for a tasks `folder_id` via
+/// FindFolder. The stable task-list id carries only the folder
+/// EntryID (the ChangeKey is volatile), so writes that need a
+/// ChangeKey harvest a fresh one here.
+async fn task_folder_change_key(client: &EwsClient, folder_id: &str) -> EwsResult<Option<String>> {
+    let xml = client.post_soap(find_task_folders()).await?;
+    let folders = parse_find_task_folder_response(&xml)?;
+    Ok(folders
+        .into_iter()
+        .find(|f| f.folder_id == folder_id)
+        .and_then(|f| f.change_key))
 }
 
 /// Create a new task folder (`IPF.Task`) under the mailbox root via
@@ -605,12 +621,12 @@ pub fn parse_find_task_item_response(xml: &str) -> EwsResult<Vec<ParsedTask>> {
 /// same format CalDAV / calendar folders use) so the command layer
 /// can pass it back to `get_tasks` unchanged.
 pub fn to_task_list(folder: ParsedTaskFolder) -> TaskList {
-    let id = match &folder.change_key {
-        Some(ck) => format!("{}|{}", folder.folder_id, ck),
-        None => folder.folder_id.clone(),
-    };
+    // Stable id = folder EntryID only. The folder's ChangeKey is
+    // volatile, so embedding it would rotate the id on every folder
+    // change and orphan the host cache (see `mapping::to_calendar`).
+    // Rename harvests a fresh ChangeKey at write time instead.
     TaskList {
-        id,
+        id: folder.folder_id,
         name: if folder.display_name.is_empty() {
             "Tasks".into()
         } else {
@@ -1405,7 +1421,9 @@ mod tests {
             .await;
         let lists = list_task_lists(&client_for(&server)).await.unwrap();
         assert_eq!(lists.len(), 1);
-        assert_eq!(lists[0].id, "TFA|K1");
+        // Stable id = folder EntryID only; the ChangeKey (K1) is kept
+        // out of the identity.
+        assert_eq!(lists[0].id, "TFA");
         assert_eq!(lists[0].name, "Tasks");
     }
 
@@ -1581,8 +1599,8 @@ mod tests {
         let list = create_task_list(&client_for(&server), "Groceries")
             .await
             .unwrap();
-        // id packs folder id + change key the same way the listing does.
-        assert_eq!(list.id, "NEW-FID|NEW-FCK");
+        // id is the stable folder EntryID, same as the listing path.
+        assert_eq!(list.id, "NEW-FID");
         // Name is stamped from the request (the create response is IdOnly).
         assert_eq!(list.name, "Groceries");
         assert!(list.parent_id.is_none());

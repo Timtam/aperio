@@ -536,10 +536,29 @@ pub async fn rename_contact_list(
     list_id: &str,
     new_name: &str,
 ) -> EwsResult<()> {
-    let (folder_id, change_key) = split_calendar_id(list_id);
+    let (folder_id, _) = split_calendar_id(list_id);
+    // Stable list id carries no ChangeKey; UpdateFolder needs one, so
+    // harvest a fresh one via FindFolder right before the write.
+    let change_key = contact_folder_change_key(client, &folder_id).await?;
     let envelope = update_contacts_folder_displayname(&folder_id, change_key.as_deref(), new_name);
     client.post_soap(envelope).await?;
     Ok(())
+}
+
+/// Resolve the current ChangeKey for a contacts `folder_id` via
+/// FindFolder. The stable contact-list id carries only the folder
+/// EntryID (the ChangeKey is volatile), so writes that need a
+/// ChangeKey harvest a fresh one here.
+async fn contact_folder_change_key(
+    client: &EwsClient,
+    folder_id: &str,
+) -> EwsResult<Option<String>> {
+    let xml = client.post_soap(find_contact_folders()).await?;
+    let folders = parse_find_contact_folder_response(&xml)?;
+    Ok(folders
+        .into_iter()
+        .find(|f| f.folder_id == folder_id)
+        .and_then(|f| f.change_key))
 }
 
 // ── SOAP envelope helpers ──────────────────────────────────────────────
@@ -1083,12 +1102,12 @@ pub fn parse_find_contact_item_response(xml: &str) -> EwsResult<Vec<ParsedContac
 /// encoding as `to_task_list` / `to_calendar` so the command layer
 /// can pass it back unchanged.
 pub fn to_contact_list(folder: ParsedContactFolder) -> ContactList {
-    let id = match &folder.change_key {
-        Some(ck) => format!("{}|{}", folder.folder_id, ck),
-        None => folder.folder_id.clone(),
-    };
+    // Stable id = folder EntryID only. The folder's ChangeKey is
+    // volatile, so embedding it would rotate the id on every folder
+    // change and orphan the host cache (see `mapping::to_calendar`).
+    // Rename harvests a fresh ChangeKey at write time instead.
     ContactList {
-        id,
+        id: folder.folder_id,
         name: if folder.display_name.is_empty() {
             "Contacts".into()
         } else {
