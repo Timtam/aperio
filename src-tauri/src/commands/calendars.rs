@@ -306,10 +306,6 @@ pub async fn get_events(
     request: EventRangeRequest,
 ) -> CommandResult<Vec<Event>> {
     let range = DateRange::new(request.start, request.end);
-    // Timing probe for the cache-vs-cold-path diagnosis: stamped here,
-    // reported on whichever external path we take below (cache hit vs
-    // synchronous cold fetch).
-    let started = std::time::Instant::now();
     // Synthesised birthday calendars short-circuit the adapter
     // routing — they aren't backed by any provider and have no
     // events of their own. The `synthesise_birthday_events`
@@ -379,8 +375,6 @@ pub async fn get_events(
                 calendar_id = %request.calendar_id,
                 count = cached.len(),
                 stale,
-                elapsed_ms = started.elapsed().as_millis() as u64,
-                path = "cache",
                 "get_events served from cache",
             );
             if stale {
@@ -413,21 +407,9 @@ pub async fn get_events(
     match cache_swr::refresh_events(&cache, ext.as_ref(), &account, &request.calendar_id, range)
         .await
     {
-        Ok(()) => {
-            let events = cache
-                .read_events(&account, &request.calendar_id, range)
-                .unwrap_or_default();
-            tracing::info!(
-                target: "aperio::cache",
-                calendar_id = %request.calendar_id,
-                account_id = %account,
-                count = events.len(),
-                elapsed_ms = started.elapsed().as_millis() as u64,
-                path = "cold-fetch",
-                "get_events cold-path refresh complete (no cached window covered the range)",
-            );
-            Ok(events)
-        }
+        Ok(()) => Ok(cache
+            .read_events(&account, &request.calendar_id, range)
+            .unwrap_or_default()),
         Err(err) => {
             let _ = cache.mark_error(
                 &account,
