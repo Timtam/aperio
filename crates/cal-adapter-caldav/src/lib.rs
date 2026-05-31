@@ -228,23 +228,155 @@ impl CaldavAdapter {
         }
     }
 
-    /// Bootstrap the events delta: a full windowed read plus a fresh
-    /// token (sync-collection preferred, CTag fallback).
+    /// Bootstrap the events delta (no prior token).
+    ///
+    /// Enumerates every resource via a Depth-1 PROPFIND, then batched
+    /// multiget fetches the bodies. This is the only approach that holds
+    /// up on large iCloud calendars: a windowed `calendar-query` REPORT
+    /// makes iCloud scan the whole collection to apply the time-range
+    /// filter and times out (>30s); an empty-token `sync-collection`
+    /// answers with only a partial set (so most of the calendar would be
+    /// missing). The fresh sync-token comes from `bootstrap_token`, so
+    /// every subsequent refresh is a fast per-resource delta.
+    ///
+    /// Servers that don't answer the PROPFIND fall back to the windowed
+    /// time-range read + CTag/legacy token (small/legacy CalDAV servers).
     async fn events_bootstrap(
         &self,
         cal_url: &Url,
         range: DateRange,
     ) -> CoreResult<ChangeSet<Event>> {
-        let events = events::get_events(&self.http, cal_url, range, &self.credentials)
+        match sync::list_resource_hrefs(&self.http, cal_url, &self.credentials).await {
+            Ok(hrefs) => {
+                let changes = self
+                    .multiget_events_windowed(cal_url, &hrefs, range)
+                    .await?;
+                let new_token = self.bootstrap_token(cal_url).await;
+                Ok(ChangeSet {
+                    changes,
+                    deletions: Vec::new(),
+                    new_token,
+                    full_resync: true,
+                })
+            }
+            Err(_) => {
+                let events = events::get_events(&self.http, cal_url, range, &self.credentials)
+                    .await
+                    .map_err(to_core_error)?;
+                let new_token = self.bootstrap_token(cal_url).await;
+                Ok(ChangeSet {
+                    changes: events,
+                    deletions: Vec::new(),
+                    new_token,
+                    full_resync: true,
+                })
+            }
+        }
+    }
+
+    /// `calendar-multiget` the bodies of `hrefs` in bounded batches and
+    /// map them into in-window events.
+    ///
+    /// Batching keeps each REPORT well under the request timeout when the
+    /// initial sync enumerates a large calendar's resource set. On a batch
+    /// failure we retry the batch ONE resource at a time and skip any that
+    /// still fail: iCloud can hang indefinitely serving `calendar-data`
+    /// for the odd corrupt resource, and a single unreadable event must
+    /// not sink the whole calendar. An error is only surfaced when EVERY
+    /// resource failed (a real outage) — so a healthy snapshot, minus the
+    /// bad resource, is cached and the sync-token persists.
+    async fn multiget_events_windowed(
+        &self,
+        cal_url: &Url,
+        hrefs: &[String],
+        range: DateRange,
+    ) -> CoreResult<Vec<Event>> {
+        // 50 resources per REPORT: small enough that even a body-heavy
+        // batch lands well inside the 30s client timeout, large enough to
+        // keep the round-trip count sane on big calendars.
+        const MULTIGET_BATCH: usize = 50;
+        let mut changes = Vec::new();
+        let mut fetched = 0usize;
+        let mut failed = 0usize;
+        let mut last_err: Option<CoreError> = None;
+        for batch in hrefs.chunks(MULTIGET_BATCH) {
+            match self.multiget_batch(cal_url, batch, range).await {
+                Ok((mut evs, n)) => {
+                    changes.append(&mut evs);
+                    fetched += n;
+                }
+                // Batch failed and there's more than one resource in it —
+                // isolate the offender by fetching each on its own.
+                Err(_) if batch.len() > 1 => {
+                    for href in batch {
+                        match self
+                            .multiget_batch(cal_url, std::slice::from_ref(href), range)
+                            .await
+                        {
+                            Ok((mut evs, n)) => {
+                                changes.append(&mut evs);
+                                fetched += n;
+                            }
+                            Err(e) => {
+                                failed += 1;
+                                last_err = Some(e);
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    failed += 1;
+                    last_err = Some(e);
+                }
+            }
+        }
+        // Nothing came back AND something failed → a real outage, not a
+        // single poison resource. Propagate so the caller serves stale and
+        // retries, rather than caching an empty snapshot + persisting the
+        // token (which would mask the calendar until the token resets).
+        if fetched == 0 && failed > 0 {
+            return Err(last_err.expect("failed > 0 implies a recorded error"));
+        }
+        Ok(changes)
+    }
+
+    /// One `calendar-multiget` REPORT for `hrefs`. Returns the in-window
+    /// events plus the count of resources the server actually returned —
+    /// the count lets the caller tell "fetched but filtered out of the
+    /// window" apart from "the fetch itself failed".
+    async fn multiget_batch(
+        &self,
+        cal_url: &Url,
+        hrefs: &[String],
+        range: DateRange,
+    ) -> CoreResult<(Vec<Event>, usize)> {
+        let calendar_id = cal_url.as_str();
+        let entries = sync::calendar_multiget(&self.http, cal_url, hrefs, &self.credentials)
             .await
             .map_err(to_core_error)?;
-        let new_token = self.bootstrap_token(cal_url).await;
-        Ok(ChangeSet {
-            changes: events,
-            deletions: Vec::new(),
-            new_token,
-            full_resync: true,
-        })
+        let fetched = entries.len();
+        let mut out = Vec::new();
+        for entry in entries {
+            let Some(ical) = entry.calendar_data else {
+                continue;
+            };
+            let Ok(mut evs) =
+                mapping::parse_calendar_data_with_href(&ical, calendar_id, Some(&entry.href))
+            else {
+                continue;
+            };
+            for ev in &mut evs {
+                if let Some(etag) = entry.etag.clone() {
+                    ev.etag = Some(etag);
+                }
+                // Singles outside the cached window are dropped; recurring
+                // masters always pass (the frontend expands them).
+                if event_in_window(ev, range) {
+                    out.push(ev.clone());
+                }
+            }
+        }
+        Ok((out, fetched))
     }
 
     /// Bootstrap the tasks delta: a full VTODO read plus a fresh token.
@@ -461,32 +593,9 @@ impl CaldavAdapter {
             .clone()
             .unwrap_or_else(|| sync_token.to_string());
 
-        let entries =
-            sync::calendar_multiget(&self.http, cal_url, &result.changed, &self.credentials)
-                .await
-                .map_err(to_core_error)?;
-        let calendar_id = cal_url.as_str();
-        let mut changes = Vec::new();
-        for entry in entries {
-            let Some(ical) = entry.calendar_data else {
-                continue;
-            };
-            let Ok(mut evs) =
-                mapping::parse_calendar_data_with_href(&ical, calendar_id, Some(&entry.href))
-            else {
-                continue;
-            };
-            for ev in &mut evs {
-                if let Some(etag) = entry.etag.clone() {
-                    ev.etag = Some(etag);
-                }
-                // Singles outside the cached window are dropped; recurring
-                // masters always pass (the frontend expands them).
-                if event_in_window(ev, range) {
-                    changes.push(ev.clone());
-                }
-            }
-        }
+        let changes = self
+            .multiget_events_windowed(cal_url, &result.changed, range)
+            .await?;
         Ok(ChangeSet {
             changes,
             deletions: result.deleted,
@@ -1338,11 +1447,20 @@ mod tests {
         m.assert_async().await;
     }
 
+    // A CTag-only server's PROPFIND body: the collection carries the
+    // CTag (for the gate + token), and a member resource carries a
+    // getetag (for the Depth-1 bootstrap enumeration). The collection's
+    // own trailing-slash href is filtered out of the resource list.
     const CTAG_RESPONSE: &str = r#"<?xml version="1.0"?>
 <d:multistatus xmlns:d="DAV:" xmlns:cs="http://calendarserver.org/ns/">
   <d:response>
     <d:href>/calendars/alice/work/</d:href>
     <d:propstat><d:prop><cs:getctag>v1</cs:getctag></d:prop>
+    <d:status>HTTP/1.1 200 OK</d:status></d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/calendars/alice/work/e1.ics</d:href>
+    <d:propstat><d:prop><d:getetag>"e1"</d:getetag></d:prop>
     <d:status>HTTP/1.1 200 OK</d:status></d:propstat>
   </d:response>
 </d:multistatus>"#;
@@ -1368,15 +1486,6 @@ END:VCALENDAR</c:calendar-data>
 
     /// PROPFIND `DAV:sync-token` response advertising a token — marks the
     /// server as sync-collection capable.
-    const SYNC_TOKEN_PROPFIND: &str = r#"<?xml version="1.0"?>
-<d:multistatus xmlns:d="DAV:">
-  <d:response>
-    <d:href>/calendars/alice/work/</d:href>
-    <d:propstat><d:prop><d:sync-token>ST1</d:sync-token></d:prop>
-    <d:status>HTTP/1.1 200 OK</d:status></d:propstat>
-  </d:response>
-</d:multistatus>"#;
-
     use chrono::TimeZone;
 
     fn delta_range() -> DateRange {
@@ -1398,7 +1507,9 @@ END:VCALENDAR</c:calendar-data>
             .with_body(CTAG_RESPONSE)
             .create_async()
             .await;
-        // The full re-list runs once (bootstrap); the gated second call skips it.
+        // Bootstrap enumerates via the PROPFIND above, then makes exactly
+        // one multiget REPORT for the enumerated resource. The gated second
+        // call (unchanged CTag) skips the REPORT entirely.
         let report_mock = server
             .mock("REPORT", "/calendars/alice/work/")
             .with_status(207)
@@ -1431,21 +1542,68 @@ END:VCALENDAR</c:calendar-data>
     }
 
     #[tokio::test]
-    async fn get_events_delta_bootstrap_prefers_sync_token() {
+    async fn get_events_delta_bootstrap_enumerates_via_propfind() {
+        // Bootstrap enumerates resources with a Depth-1 PROPFIND (NOT a
+        // windowed calendar-query, which times out on large iCloud
+        // calendars), batch-multigets the bodies, and tags the fresh
+        // sync-token. The collection's own trailing-slash href is dropped
+        // from the resource list — multi-getting it would ask the server
+        // for the whole calendar and hang.
         let mut server = Server::new_async().await;
-        // PROPFIND advertises a sync-token → sync-collection capable.
-        let _propfind = server
+        // PROPFIND #1 (getetag): resource enumeration → the collection
+        // self-ref (filtered) + one member resource.
+        let _enumerate = server
             .mock("PROPFIND", "/calendars/alice/work/")
+            .match_body(mockito::Matcher::Regex("getetag".into()))
             .with_status(207)
-            .with_body(SYNC_TOKEN_PROPFIND)
+            .with_body(
+                r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/calendars/alice/work/</d:href>
+    <d:propstat><d:prop></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/calendars/alice/work/e1.ics</d:href>
+    <d:propstat><d:prop><d:getetag>"e1"</d:getetag></d:prop>
+    <d:status>HTTP/1.1 200 OK</d:status></d:propstat>
+  </d:response>
+</d:multistatus>"#,
+            )
             .create_async()
             .await;
-        // Bootstrap data comes from the windowed calendar-query REPORT.
-        let _query = server
+        // Batched multiget fetches the enumerated body.
+        let _multiget = server
             .mock("REPORT", "/calendars/alice/work/")
-            .match_body(mockito::Matcher::Regex("calendar-query".into()))
+            .match_body(mockito::Matcher::Regex("calendar-multiget".into()))
             .with_status(207)
             .with_body(DELTA_REPORT_RESPONSE)
+            .create_async()
+            .await;
+        // PROPFIND #2 (sync-token): the server advertises a token → tagged
+        // `sync:`.
+        let _token = server
+            .mock("PROPFIND", "/calendars/alice/work/")
+            .match_body(mockito::Matcher::Regex("sync-token".into()))
+            .with_status(207)
+            .with_body(
+                r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/calendars/alice/work/</d:href>
+    <d:propstat><d:prop><d:sync-token>ST1</d:sync-token></d:prop>
+    <d:status>HTTP/1.1 200 OK</d:status></d:propstat>
+  </d:response>
+</d:multistatus>"#,
+            )
+            .create_async()
+            .await;
+        // No time-range calendar-query is allowed on the bootstrap path.
+        let no_query = server
+            .mock("REPORT", "/calendars/alice/work/")
+            .match_body(mockito::Matcher::Regex("calendar-query".into()))
+            .with_status(500)
+            .expect(0)
             .create_async()
             .await;
 
@@ -1458,6 +1616,7 @@ END:VCALENDAR</c:calendar-data>
         assert!(first.full_resync);
         assert_eq!(first.changes.len(), 1);
         assert_eq!(first.new_token.as_deref(), Some("sync:ST1"));
+        no_query.assert_async().await;
     }
 
     #[tokio::test]

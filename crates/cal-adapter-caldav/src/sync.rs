@@ -100,6 +100,53 @@ pub async fn read_sync_token(
     Ok(parse_sync_collection(&xml)?.sync_token)
 }
 
+/// Enumerate every member resource of `collection_url` via a PROPFIND
+/// Depth 1 (href + getetag), returning the resource hrefs only — the
+/// collection's own (trailing-slash) href is dropped by
+/// [`parse_sync_collection`].
+///
+/// This is the bootstrap enumeration. Two reasons it beats the
+/// alternatives on iCloud: an empty-token `sync-collection` answers with
+/// only a partial set (so the initial sync would miss most of a large
+/// calendar), and a windowed `calendar-query` REPORT makes the server
+/// scan the whole collection to apply the time-range filter, which times
+/// out on large calendars. A Depth-1 PROPFIND returns the COMPLETE list
+/// and, being metadata-only (no bodies, no filter), stays fast.
+pub async fn list_resource_hrefs(
+    client: &Client,
+    collection_url: &Url,
+    credentials: &Credentials,
+) -> CaldavResult<Vec<String>> {
+    const BODY: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<d:propfind xmlns:d="DAV:"><d:prop><d:getetag/></d:prop></d:propfind>"#;
+    let method = Method::from_bytes(b"PROPFIND").expect("PROPFIND");
+    let mut headers = base_headers(credentials)?;
+    headers.insert(
+        HeaderName::from_static("depth"),
+        HeaderValue::from_static("1"),
+    );
+    let response = client
+        .request(method, collection_url.clone())
+        .headers(headers)
+        .body(BODY)
+        .send()
+        .await?;
+    let status = response.status();
+    if status != StatusCode::from_u16(207).unwrap() && !status.is_success() {
+        let text = response.text().await.unwrap_or_default();
+        return Err(CaldavError::Http {
+            status: status.as_u16(),
+            message: if text.is_empty() {
+                status.canonical_reason().unwrap_or("").to_string()
+            } else {
+                text.chars().take(200).collect()
+            },
+        });
+    }
+    let xml = response.text().await?;
+    Ok(parse_sync_collection(&xml)?.changed)
+}
+
 /// `calendar-multiget` the bodies of `hrefs` (VEVENT or VTODO). Returns
 /// the raw response entries — the caller maps `calendar_data` into
 /// events/tasks. Empty `hrefs` short-circuits to an empty Vec.
@@ -238,12 +285,20 @@ pub fn parse_sync_collection(body: &str) -> CaldavResult<SyncCollection> {
             Ok(XmlEvent::End(e)) => {
                 let local = e.local_name().as_ref().to_ascii_lowercase();
                 if local.as_slice() == b"response" {
-                    if !cur_href.is_empty() {
+                    // A trailing-slash href is the collection itself (or a
+                    // sub-collection), which servers echo back in a Depth-1
+                    // listing / sync-collection report. It is never a
+                    // syncable resource — and multi-getting it asks the
+                    // server for the WHOLE collection's calendar-data, which
+                    // times out on large calendars. Drop it.
+                    if !cur_href.is_empty() && !cur_href.ends_with('/') {
                         if cur_has_etag {
                             out.changed.push(std::mem::take(&mut cur_href));
                         } else {
                             out.deleted.push(std::mem::take(&mut cur_href));
                         }
+                    } else {
+                        cur_href.clear();
                     }
                     in_response = false;
                 }
@@ -309,6 +364,38 @@ mod tests {
         assert_eq!(r.changed, vec!["/cal/e1.ics".to_string()]);
         assert_eq!(r.deleted, vec!["/cal/gone.ics".to_string()]);
         assert_eq!(r.sync_token.as_deref(), Some("http://sabre.io/ns/sync/42"));
+    }
+
+    #[test]
+    fn parse_sync_collection_drops_the_collection_self_href() {
+        // iCloud (and a Depth-1 PROPFIND) echo the collection's own
+        // trailing-slash href back. It is NOT a syncable resource —
+        // multi-getting it asks for the whole calendar and times out — so
+        // it must never land in `changed`/`deleted`. Only the real
+        // resource survives.
+        let body = r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/calendars/home/</d:href>
+    <d:propstat>
+      <d:prop><d:getetag>"collection-ctag"</d:getetag></d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/calendars/home/evt%40aperio.ics</d:href>
+    <d:propstat>
+      <d:prop><d:getetag>"v1"</d:getetag></d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+</d:multistatus>"#;
+        let r = parse_sync_collection(body).unwrap();
+        assert_eq!(
+            r.changed,
+            vec!["/calendars/home/evt%40aperio.ics".to_string()]
+        );
+        assert!(r.deleted.is_empty());
     }
 
     #[test]
