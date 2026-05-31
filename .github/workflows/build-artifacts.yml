@@ -19,6 +19,15 @@ on:
         required: false
         type: string
         default: ''
+      release_profile:
+        description: >-
+          Build with the full ship profile (fat LTO + single codegen
+          unit) from Cargo.toml. Default false → LTO off + parallel
+          codegen, for fast CI / PR test builds. release.yml passes
+          true so real release artifacts stay fully optimised.
+        required: false
+        type: boolean
+        default: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -38,6 +47,13 @@ jobs:
   # lipo'd together, which this uniform flow can't express).
   build:
     name: Build (${{ matrix.label }})
+    # CI / PR builds skip the ship profile's fat LTO + single codegen
+    # unit (the dominant compile/link cost); release.yml passes
+    # release_profile=true to restore the fully-optimised profile.
+    # Cargo applies these overrides to `tauri build`'s release build.
+    env:
+      CARGO_PROFILE_RELEASE_LTO: ${{ inputs.release_profile }}
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${{ inputs.release_profile && '1' || '16' }}
     strategy:
       fail-fast: false
       matrix:
@@ -75,6 +91,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          # Keep the dep cache even when a job fails, so iterating on
+          # a red build doesn't recompile every dependency cold.
+          cache-on-failure: true
 
       - uses: actions/setup-node@v4
         with:
@@ -182,6 +202,11 @@ jobs:
   # arch and lipo the binary plus every plugin ourselves.
   build-macos:
     name: Build (macos-universal)
+    # Same profile override as the native `build` job — this is the
+    # heaviest job (two full release arches), so LTO-off matters most.
+    env:
+      CARGO_PROFILE_RELEASE_LTO: ${{ inputs.release_profile }}
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${{ inputs.release_profile && '1' || '16' }}
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -191,6 +216,10 @@ jobs:
           targets: x86_64-apple-darwin,aarch64-apple-darwin
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          # Keep the dep cache even when a job fails, so iterating on
+          # a red build doesn't recompile every dependency cold.
+          cache-on-failure: true
 
       - uses: actions/setup-node@v4
         with:
