@@ -515,53 +515,87 @@ impl PluginManager {
     /// behaviour is that `plugins/user/` doesn't exist yet.
     pub fn scan_dir(&self, dir: impl AsRef<Path>) -> Vec<PluginError> {
         let dir = dir.as_ref();
-        let mut errors: Vec<PluginError> = Vec::new();
 
         let entries = match std::fs::read_dir(dir) {
             Ok(e) => e,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
                 // Common case on first run. Not an error.
-                return errors;
+                return Vec::new();
             }
             Err(err) => {
-                errors.push(PluginError::Io(format!(
+                return vec![PluginError::Io(format!(
                     "scan_dir({}): {err}",
                     dir.display()
-                )));
-                return errors;
+                ))];
             }
         };
 
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
-            }
-            // Parse the manifest separately so we can attach
-            // it to the failure record even if a later step
-            // (dlopen, descriptor checks) is what actually
-            // failed. The Settings panel needs the name +
-            // version to render a useful row.
-            let manifest_path = path.join(MANIFEST_FILENAME);
-            let parsed = PluginManifest::read_from(&manifest_path).ok();
-            if let Err(err) = self.load_from_dir(&path) {
-                warn!(plugin_dir = %path.display(), ?err, "plugin load failed");
-                let reason = FailedLoadReason::from_error(&err);
-                let error_message = err.to_string();
-                self.inner
-                    .write()
-                    .expect("manager poisoned")
-                    .failed_loads
-                    .push(FailedPluginLoad {
-                        plugin_dir: path.clone(),
-                        manifest: parsed,
-                        reason,
-                        error_message,
-                    });
-                errors.push(err);
-            }
+        // Every immediate child directory is a candidate plugin.
+        let plugin_dirs: Vec<PathBuf> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.is_dir())
+            .collect();
+        if plugin_dirs.is_empty() {
+            return Vec::new();
         }
-        errors
+
+        // Load in parallel. Each plugin's manifest parse + `dlopen` +
+        // `create()` + symbol resolution is independent work; only the
+        // final register (`insert`) and the failed-loads push take the
+        // manager's `RwLock`, which serialises them. On a cold launch
+        // this overlaps the per-library page-in instead of paying it for
+        // all ~17 bundled plugins strictly back-to-back. A bounded pool
+        // of scoped threads (≤ CPU count) pulls dirs off a shared index,
+        // so we don't oversubscribe the disk with one thread per plugin.
+        let next = AtomicUsize::new(0);
+        let workers = std::cmp::min(
+            plugin_dirs.len(),
+            std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(4),
+        );
+        std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..workers)
+                .map(|_| {
+                    scope.spawn(|| {
+                        let mut errs: Vec<PluginError> = Vec::new();
+                        loop {
+                            let i = next.fetch_add(1, Ordering::Relaxed);
+                            let Some(path) = plugin_dirs.get(i) else {
+                                break;
+                            };
+                            // Parse the manifest separately so the failure
+                            // record carries the name + version even when a
+                            // later step (dlopen, descriptor checks) failed.
+                            let manifest_path = path.join(MANIFEST_FILENAME);
+                            let parsed = PluginManifest::read_from(&manifest_path).ok();
+                            if let Err(err) = self.load_from_dir(path) {
+                                warn!(plugin_dir = %path.display(), ?err, "plugin load failed");
+                                let reason = FailedLoadReason::from_error(&err);
+                                let error_message = err.to_string();
+                                self.inner
+                                    .write()
+                                    .expect("manager poisoned")
+                                    .failed_loads
+                                    .push(FailedPluginLoad {
+                                        plugin_dir: path.clone(),
+                                        manifest: parsed,
+                                        reason,
+                                        error_message,
+                                    });
+                                errs.push(err);
+                            }
+                        }
+                        errs
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .flat_map(|h| h.join().unwrap_or_default())
+                .collect()
+        })
     }
 
     /// Snapshot of every plugin directory the manager

@@ -136,12 +136,18 @@ pub fn parse_find_folder_response(xml: &str) -> EwsResult<Vec<ParsedFolder>> {
 /// downstream commands can pass it back to us as a flat string. The
 /// separator `|` is illegal in EWS-emitted base64 ids.
 pub fn to_calendar(folder: ParsedFolder, read_only: bool) -> Calendar {
-    let id = match &folder.change_key {
-        Some(ck) => format!("{}|{}", folder.folder_id, ck),
-        None => folder.folder_id.clone(),
-    };
+    // The calendar id is the STABLE folder EntryID only — NOT
+    // `folder_id|change_key`. A folder's ChangeKey is volatile:
+    // Exchange bumps it whenever the folder changes (including on item
+    // add/remove, via properties like ItemCount). Embedding it would
+    // rotate the calendar id on every change, orphaning the host
+    // snapshot cache (and any per-calendar settings) keyed by that id
+    // and forcing a synchronous cold EWS fetch on every app open.
+    // Writes that genuinely need a ChangeKey (UpdateFolder, i.e.
+    // rename) harvest a fresh one at write time instead — see
+    // `api::rename_calendar`.
     Calendar {
-        id,
+        id: folder.folder_id,
         name: if folder.display_name.is_empty() {
             "Calendar".into()
         } else {
@@ -2795,14 +2801,17 @@ mod tests {
     }
 
     #[test]
-    fn to_calendar_encodes_change_key_into_id() {
+    fn to_calendar_uses_stable_folder_id_ignoring_change_key() {
+        // Even when the folder reports a ChangeKey, the calendar id is
+        // the bare folder EntryID — the volatile ChangeKey is kept out
+        // of the identity so the id stays stable across sessions.
         let folder = ParsedFolder {
             folder_id: "FID".into(),
             change_key: Some("CK".into()),
             display_name: "Work".into(),
         };
         let cal = to_calendar(folder, false);
-        assert_eq!(cal.id, "FID|CK");
+        assert_eq!(cal.id, "FID");
         assert_eq!(cal.name, "Work");
         assert!(!cal.read_only);
     }

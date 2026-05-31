@@ -151,7 +151,7 @@ impl CacheStore {
     ) -> DbResult<Vec<Event>> {
         let start = ts(&range.start);
         let end = ts(&range.end);
-        self.db.with_conn(|c| {
+        self.db.with_read_conn(|c| {
             let mut stmt = c.prepare(
                 "SELECT payload FROM cache_events
                  WHERE account_id = ?1 AND calendar_id = ?2
@@ -511,7 +511,7 @@ impl CacheStore {
         scope: SyncScope,
         container: &str,
     ) -> DbResult<Option<SyncState>> {
-        self.db.with_conn(|c| {
+        self.db.with_read_conn(|c| {
             c.query_row(
                 "SELECT sync_token, ctag, window_start, window_end, last_refreshed_at, last_error
                    FROM cache_sync_state
@@ -720,7 +720,7 @@ impl CacheStore {
         let sql = format!(
             "SELECT payload FROM {table} WHERE account_id = ?1 AND list_id = ?2 ORDER BY id"
         );
-        self.db.with_conn(|c| {
+        self.db.with_read_conn(|c| {
             let mut stmt = c.prepare(&sql)?;
             let rows = stmt.query_map(params![account, list], |r| r.get::<_, String>(0))?;
             rows_to_structs(rows, table)

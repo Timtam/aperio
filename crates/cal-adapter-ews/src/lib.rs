@@ -865,10 +865,9 @@ impl CalendarFeature for EwsAdapter {
             .await
             .map_err(to_core_error)?;
         // Drop the cached calendar list so the next list_calendars
-        // round-trip picks up the new display name. The ChangeKey
-        // advances server-side too — we don't bother to harvest the
-        // new one here because subsequent reads will get the fresh
-        // pair via FindFolder anyway.
+        // round-trip picks up the new display name. The calendar id
+        // itself is stable (just the folder EntryID), so the rename's
+        // server-side ChangeKey bump doesn't affect it.
         *self.calendars_cache.lock().await = None;
         Ok(())
     }

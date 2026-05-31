@@ -124,6 +124,7 @@ export function useEvents(range: { start: Date; end: Date }) {
     // batch (cache hit, loading stays / flips false) or arms a real
     // fetch (cache miss).
     const cached = cacheGet(key, dataVersion);
+    const hadCache = cached !== undefined;
     if (cached) {
       setEvents(cached);
       setLoading(false);
@@ -145,47 +146,66 @@ export function useEvents(range: { start: Date; end: Date }) {
       return;
     }
 
-    // Fetch always runs, even on cache hits — that's the
-    // "revalidate" half of SWR. The user sees the cached batch
-    // immediately; if anything has actually changed on the server
-    // we replace state at the bottom of the .then().
-    Promise.all(
-      ids.map((id) =>
-        getEvents({
-          calendar_id: id,
-          start: startIso,
-          end: endIso,
-        }).catch((err) => {
-          // Keep the other calendars' data when one fails — better to
-          // show a partial view than a blank screen.
-          // eslint-disable-next-line no-console
-          console.warn('get_events failed for calendar', id, err);
-          return [] as CalendarEvent[];
-        }),
-      ),
-    )
-      .then((batches) => {
-        if (cancelled) return;
-        const flat = batches.flat();
-        // Expand recurring events into individual occurrences inside the
-        // requested range. The backend stores a single master row per
-        // recurring event (plus its RRULE string); rrule.js does the
-        // expansion in the browser. Each occurrence keeps its own start
-        // and end, and carries a `series_id` so the edit-dialog can
-        // find the underlying row.
-        const expanded = expandAll(flat, {
-          start: new Date(startIso),
-          end: new Date(endIso),
-        });
-        cacheSet(key, dataVersion, expanded);
-        setEvents(expanded);
-        setLoading(false);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setError(err);
-        setLoading(false);
+    // Incremental SWR fan-out. We still fetch every calendar in
+    // parallel (the "revalidate" half of SWR), but we fold each
+    // calendar's result in AS IT LANDS instead of awaiting the whole
+    // batch. A slow external calendar — e.g. an EWS cold-path fetch
+    // that takes seconds — therefore no longer blocks the fast local /
+    // iCal calendars from painting.
+    //
+    // Progressive painting only happens on a COLD start (nothing
+    // cached). On a cache hit the cached batch stays on screen until
+    // the final authoritative swap below, so the view never briefly
+    // shrinks to a partial set while calendars trickle in.
+    const rangeStart = new Date(startIso);
+    const rangeEnd = new Date(endIso);
+    const perCalendar = new Map<string, CalendarEvent[]>();
+    let remaining = ids.length;
+
+    // Expand recurring masters into individual occurrences in-range.
+    // The backend stores one master row per recurring event (+ its
+    // RRULE); rrule.js expands in the browser. Re-run on each arrival
+    // over the accumulated set — cheap for the handful of calendars in
+    // play.
+    const aggregate = (): CalendarEvent[] =>
+      expandAll(Array.from(perCalendar.values()).flat(), {
+        start: rangeStart,
+        end: rangeEnd,
       });
+
+    ids.forEach((id) => {
+      getEvents({ calendar_id: id, start: startIso, end: endIso })
+        .then(
+          (batch) => batch,
+          (err) => {
+            // Keep the other calendars' data when one fails — better a
+            // partial view than a blank screen.
+            // eslint-disable-next-line no-console
+            console.warn('get_events failed for calendar', id, err);
+            return [] as CalendarEvent[];
+          },
+        )
+        .then((batch) => {
+          if (cancelled) return;
+          perCalendar.set(id, batch);
+          remaining -= 1;
+          if (remaining === 0) {
+            // Last calendar in: authoritative swap + cache write.
+            const expanded = aggregate();
+            cacheSet(key, dataVersion, expanded);
+            setEvents(expanded);
+            setLoading(false);
+          } else if (!hadCache) {
+            // Cold start: paint what we have so far.
+            setEvents(aggregate());
+          }
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          setError(err);
+          setLoading(false);
+        });
+    });
 
     return () => {
       cancelled = true;

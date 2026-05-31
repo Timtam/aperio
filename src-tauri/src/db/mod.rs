@@ -1,8 +1,11 @@
 //! Local SQLite layer.
 //!
-//! A single connection guarded by a [`Mutex`] is sufficient for a desktop
-//! app: SQLite serialises writes anyway, the connection is shared across
-//! all Tauri commands, and the simplicity beats a connection pool here.
+//! Writes go through a single connection guarded by a [`Mutex`] (SQLite
+//! serialises writes anyway). Hot cache reads (`get_events` etc.) instead
+//! use a small pool of read-only connections via
+//! [`DbHandle::with_read_conn`] — with WAL those read concurrently with the
+//! writer, so a view never stalls behind a background write such as the
+//! startup cache warm pass.
 //!
 //! Migrations are tracked via the SQLite `user_version` pragma and run on
 //! every [`DbHandle::open`] call (idempotent).
@@ -10,6 +13,7 @@
 mod migrations;
 
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use rusqlite::Connection;
@@ -49,22 +53,75 @@ impl From<rusqlite::Error> for DbError {
 
 pub type DbResult<T> = std::result::Result<T, DbError>;
 
+/// Number of read-only connections in the pool (see [`ReadPool`]).
+const READ_POOL_SIZE: usize = 4;
+
+/// A small pool of read-only SQLite connections to the same WAL database
+/// file, handed out round-robin. Each is guarded by its own mutex; with
+/// WAL, reads run concurrently with each other and with the single writer,
+/// so cache reads never serialise behind a write.
+struct ReadPool {
+    conns: Vec<Mutex<Connection>>,
+    next: AtomicUsize,
+}
+
+impl ReadPool {
+    /// Open `size` read-only connections to `path`. Must run AFTER the
+    /// writer has set WAL + applied migrations (so the schema and the
+    /// `-wal`/`-shm` files exist).
+    fn open(path: &Path, size: usize) -> DbResult<Self> {
+        let mut conns = Vec::with_capacity(size);
+        for _ in 0..size {
+            let conn = Connection::open(path)?;
+            // `query_only` rejects writes (a stray write routed here fails
+            // loudly instead of racing the writer); `busy_timeout` waits
+            // out the rare WAL checkpoint instead of erroring.
+            conn.execute_batch(
+                "PRAGMA busy_timeout = 5000;
+                 PRAGMA query_only = ON;",
+            )?;
+            conns.push(Mutex::new(conn));
+        }
+        Ok(Self {
+            conns,
+            next: AtomicUsize::new(0),
+        })
+    }
+
+    fn with<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&Connection) -> R,
+    {
+        let idx = self.next.fetch_add(1, Ordering::Relaxed) % self.conns.len();
+        let guard = self.conns[idx].lock().expect("read conn poisoned");
+        f(&guard)
+    }
+}
+
 /// Owned handle to the local database.
 ///
-/// Wraps a [`SharedConn`] and adds convenience methods for borrowing the
-/// connection and running write transactions. Migrations run once on
+/// Wraps the writer [`SharedConn`] plus a read-only [`ReadPool`], and adds
+/// convenience methods for borrowing them. Migrations run once on
 /// construction.
 #[derive(Clone)]
 pub struct DbHandle {
     conn: SharedConn,
+    /// Read-only pool for concurrent cache reads. `None` for in-memory
+    /// databases (tests): `:memory:` can't be reopened as a second
+    /// connection, so reads fall back to the writer connection.
+    read_pool: Option<Arc<ReadPool>>,
 }
 
 impl DbHandle {
     /// Open a database file. Creates the file if it does not exist, applies
     /// PRAGMAs, and runs any pending migrations.
     pub fn open(path: impl AsRef<Path>) -> DbResult<Self> {
-        let conn = Connection::open(path.as_ref())?;
-        Self::from_connection(conn)
+        let path = path.as_ref();
+        let conn = Connection::open(path)?;
+        let mut handle = Self::from_connection(conn)?;
+        // WAL + migrations are in place now, so the read pool can attach.
+        handle.read_pool = Some(Arc::new(ReadPool::open(path, READ_POOL_SIZE)?));
+        Ok(handle)
     }
 
     /// In-memory connection. Used by tests and ephemeral scenarios.
@@ -88,6 +145,7 @@ impl DbHandle {
 
         let handle = Self {
             conn: Arc::new(Mutex::new(conn)),
+            read_pool: None,
         };
         migrations::run(&handle)?;
         Ok(handle)
@@ -121,6 +179,22 @@ impl DbHandle {
         let result = f(&tx)?;
         tx.commit()?;
         Ok(result)
+    }
+
+    /// Run a closure with a borrowed READ-ONLY connection.
+    ///
+    /// Routes through the [`ReadPool`] (concurrent with the writer and
+    /// other readers under WAL) when present, falling back to the writer
+    /// connection for in-memory databases. SELECT-only — writes must use
+    /// [`Self::with_conn`] / [`Self::with_tx`].
+    pub fn with_read_conn<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&Connection) -> R,
+    {
+        match &self.read_pool {
+            Some(pool) => pool.with(f),
+            None => self.with_conn(f),
+        }
     }
 }
 
@@ -287,5 +361,47 @@ mod tests {
                 Some("17:00:00".to_string())
             )
         );
+    }
+
+    #[test]
+    fn read_pool_serves_committed_writes_on_a_file_db() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = DbHandle::open(tmp.path().join("pool.sqlite")).unwrap();
+        // A file-based DB gets a real read pool (in-memory does not).
+        assert!(db.read_pool.is_some());
+        db.with_tx(|tx| {
+            tx.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)", [])?;
+            tx.execute("INSERT INTO t (v) VALUES ('hello')", [])?;
+            Ok(())
+        })
+        .unwrap();
+        // The read pool sees the committed write.
+        let v: String = db.with_read_conn(|c| {
+            c.query_row("SELECT v FROM t WHERE id = 1", [], |r| r.get(0))
+                .unwrap()
+        });
+        assert_eq!(v, "hello");
+    }
+
+    #[test]
+    fn read_pool_rejects_writes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = DbHandle::open(tmp.path().join("ro.sqlite")).unwrap();
+        db.with_tx(|tx| {
+            tx.execute("CREATE TABLE t (id INTEGER)", [])?;
+            Ok(())
+        })
+        .unwrap();
+        // query_only=ON → a write routed to a read connection errors out.
+        let res = db.with_read_conn(|c| c.execute("INSERT INTO t (id) VALUES (1)", []));
+        assert!(res.is_err(), "read pool must reject writes (query_only)");
+    }
+
+    #[test]
+    fn in_memory_falls_back_to_writer_for_reads() {
+        let db = DbHandle::open_in_memory().unwrap();
+        assert!(db.read_pool.is_none());
+        let one: i64 = db.with_read_conn(|c| c.query_row("SELECT 1", [], |r| r.get(0)).unwrap());
+        assert_eq!(one, 1);
     }
 }

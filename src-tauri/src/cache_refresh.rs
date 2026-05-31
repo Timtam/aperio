@@ -41,8 +41,12 @@ use crate::user_prefs::UserPrefsRepo;
 const WINDOW_PAST_DAYS: i64 = 92; // ~3 months back
 const WINDOW_FUTURE_DAYS: i64 = 366; // ~12 months ahead
 
-/// Let the UI settle before the first (network-heavy) warm pass.
-const APP_START_DELAY: StdDuration = StdDuration::from_secs(4);
+/// Let the UI settle before the first (network-heavy, write-heavy) warm
+/// pass. The first view already serves from the persisted cache, so there
+/// is no rush — and the read pool means a view never blocks on the warm
+/// pass's writes anyway. Delaying past the plugin-load + sync-adapter
+/// restore burst keeps the user's first interactions on a clear runway.
+const APP_START_DELAY: StdDuration = StdDuration::from_secs(8);
 
 const DEFAULT_INTERVAL_MINUTES: u32 = 30;
 

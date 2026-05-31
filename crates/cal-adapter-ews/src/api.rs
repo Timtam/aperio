@@ -647,10 +647,28 @@ pub async fn rename_calendar(
     calendar_id: &str,
     new_name: &str,
 ) -> EwsResult<()> {
-    let (folder_id, change_key) = split_calendar_id(calendar_id);
+    let (folder_id, _) = split_calendar_id(calendar_id);
+    // The stable calendar id no longer carries a ChangeKey, but
+    // UpdateFolder requires one for optimistic concurrency. Harvest a
+    // fresh one via FindFolder right before the write.
+    let change_key = folder_change_key(client, &folder_id).await?;
     let envelope = update_folder_displayname(&folder_id, change_key.as_deref(), new_name);
     client.post_soap(envelope).await?;
     Ok(())
+}
+
+/// Resolve the current ChangeKey for `folder_id` via FindFolder. The
+/// stable calendar id carries only the folder EntryID (the ChangeKey
+/// is volatile — see `mapping::to_calendar`), so writes that need a
+/// ChangeKey harvest a fresh one here rather than trusting a stale one
+/// baked into the id.
+async fn folder_change_key(client: &EwsClient, folder_id: &str) -> EwsResult<Option<String>> {
+    let xml = client.post_soap(find_calendar_folders()).await?;
+    let folders = parse_find_folder_response(&xml)?;
+    Ok(folders
+        .into_iter()
+        .find(|f| f.folder_id == folder_id)
+        .and_then(|f| f.change_key))
 }
 
 /// Glue: combine a request-side `NewEvent` with the server-assigned
@@ -771,7 +789,9 @@ mod tests {
         let client = client_for(&server);
         let cals = list_calendars(&client).await.unwrap();
         assert_eq!(cals.len(), 2);
-        assert_eq!(cals[0].id, "FA|K1");
+        // Stable id = folder EntryID only; the folder's ChangeKey (K1)
+        // is deliberately NOT baked into the id (it's volatile).
+        assert_eq!(cals[0].id, "FA");
         assert_eq!(cals[0].name, "Calendar");
         assert!(!cals[0].read_only); // 6f.1b made EWS calendars writable
         assert_eq!(cals[1].id, "FB");
@@ -1423,6 +1443,37 @@ mod tests {
     #[tokio::test]
     async fn rename_calendar_round_trips_against_server() {
         let mut server = Server::new_async().await;
+        // The stable calendar id carries no ChangeKey, so rename first
+        // does a FindFolder to harvest a fresh one, then UpdateFolder.
+        let find_body = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body>
+    <m:FindFolderResponse>
+      <m:ResponseMessages>
+        <m:FindFolderResponseMessage ResponseClass="Success">
+          <m:ResponseCode>NoError</m:ResponseCode>
+          <m:RootFolder>
+            <t:Folders>
+              <t:CalendarFolder>
+                <t:FolderId Id="FOLDER-ID" ChangeKey="FCK-V1"/>
+                <t:DisplayName>Calendar</t:DisplayName>
+              </t:CalendarFolder>
+            </t:Folders>
+          </m:RootFolder>
+        </m:FindFolderResponseMessage>
+      </m:ResponseMessages>
+    </m:FindFolderResponse>
+  </s:Body>
+</s:Envelope>"#;
+        let _find = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::Regex("FindFolder".to_string()))
+            .with_status(200)
+            .with_body(find_body)
+            .create_async()
+            .await;
         let body = r#"<?xml version="1.0"?>
 <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
             xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
@@ -1449,7 +1500,8 @@ mod tests {
             .with_body(body)
             .create_async()
             .await;
-        rename_calendar(&client_for(&server), "FOLDER-ID|FCK-V1", "Renamed")
+        // Pass the new stable id form (folder EntryID only).
+        rename_calendar(&client_for(&server), "FOLDER-ID", "Renamed")
             .await
             .unwrap();
     }
