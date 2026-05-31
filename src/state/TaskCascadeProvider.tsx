@@ -1,7 +1,5 @@
 import {
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -10,6 +8,7 @@ import {
 } from 'react';
 
 import { getUserPref, setUserPref } from '../api/client';
+import { TaskCascadeContext } from './taskCascadeContext';
 
 /**
  * Global task-behaviour preferences. Owns three independent knobs the
@@ -135,7 +134,7 @@ export interface EffectiveListSettings {
   carryOverDefault: CarryOverDefault;
 }
 
-interface TaskCascadeContextValue {
+export interface TaskCascadeContextValue {
   /** True when parent/subtask status coupling is active. */
   enabled: boolean;
   /** Set the cascade-coupling preference. Debounced-persisted. */
@@ -169,8 +168,6 @@ interface TaskCascadeContextValue {
   /** True until the initial hydration round-trip returns. */
   hydrating: boolean;
 }
-
-const TaskCascadeContext = createContext<TaskCascadeContextValue | null>(null);
 
 export function TaskCascadeProvider({ children }: { children: ReactNode }) {
   // Defaults are the "do what we've always done" behaviour so first
@@ -445,18 +442,3 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
   );
 }
 
-/**
- * Read every task preference plus the hydration flag. Existing
- * consumers that destructure `{ enabled }` continue to work; new
- * consumers can pull `autoDate` and `carryOverDefault` from the same
- * call.
- */
-export function useTaskCascadeEnabled(): TaskCascadeContextValue {
-  const ctx = useContext(TaskCascadeContext);
-  if (!ctx) {
-    throw new Error(
-      'useTaskCascadeEnabled must be used inside <TaskCascadeProvider>',
-    );
-  }
-  return ctx;
-}

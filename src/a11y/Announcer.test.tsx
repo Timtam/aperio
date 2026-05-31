@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { AnnouncerProvider, useAnnouncer } from './Announcer';
+import { AnnouncerProvider } from './Announcer';
+import { useAnnouncer } from './announcerContext';
 
 function Trigger({
   urgency,

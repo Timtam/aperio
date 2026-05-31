@@ -1,4 +1,4 @@
-import { useDialogState } from '../state/DialogState';
+import { useDialogState } from '../state/dialogStateContext';
 import { ContactDialog } from './ContactDialog';
 import { DayStartReviewDialog } from './DayStartReviewDialog';
 import { EventDialog } from './EventDialog';

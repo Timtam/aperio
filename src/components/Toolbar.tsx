@@ -1,8 +1,8 @@
 import { useTranslation } from 'react-i18next';
 
 import { useDateFormat } from '../intl/dateFormat';
-import { useDialogState } from '../state/DialogState';
-import { useViewState } from '../state/ViewState';
+import { useDialogState } from '../state/dialogStateContext';
+import { useViewState } from '../state/viewStateContext';
 import { VIEWS, type ViewId } from '../state/viewMath';
 import { CacheRefreshIndicator } from './CacheRefreshIndicator';
 import { SyncStatusIndicator } from './SyncStatusIndicator';

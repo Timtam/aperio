@@ -13,10 +13,10 @@ import { useAutoFocus } from '../../hooks/useAutoFocus';
 import { useDeferredLoading } from '../../hooks/useDeferredLoading';
 import type { Contact, ContactList } from '../../api/types';
 import { getContactListDisplayName } from '../../intl/contactList';
-import { useCalendarStore } from '../../state/CalendarStore';
+import { useCalendarStore } from '../../state/calendarStoreContext';
 import { useContacts } from '../../state/useContacts';
 import { useContactSync } from '../../state/useContactSync';
-import { useDialogState } from '../../state/DialogState';
+import { useDialogState } from '../../state/dialogStateContext';
 
 /**
  * Contacts view (DESIGN.md §10).

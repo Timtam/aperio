@@ -2,7 +2,8 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useEffect, useRef } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { ToastProvider, useToast, type ToastInput } from './ToastProvider';
+import { ToastProvider } from './ToastProvider';
+import { useToast, type ToastInput } from './toastContext';
 
 // Minimal i18n shim — the provider reaches for translated strings via
 // react-i18next's `useTranslation`. Vitest's jsdom environment doesn't

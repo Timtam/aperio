@@ -9,7 +9,7 @@ import { useTranslation } from 'react-i18next';
 
 import { invoke } from '@tauri-apps/api/core';
 
-import { useAnnouncer } from '../../a11y/Announcer';
+import { useAnnouncer } from '../../a11y/announcerContext';
 import { useAutoFocus } from '../../hooks/useAutoFocus';
 import { useDeferredLoading } from '../../hooks/useDeferredLoading';
 import { useDateFormat } from '../../intl/dateFormat';
@@ -20,9 +20,9 @@ import {
   subtaskProgress,
   subtaskProgressSuffix,
 } from '../../intl/taskStatus';
-import { useCalendarStore } from '../../state/CalendarStore';
+import { useCalendarStore } from '../../state/calendarStoreContext';
 import { useChipContextMenu } from '../../state/useChipContextMenu';
-import { useDialogState } from '../../state/DialogState';
+import { useDialogState } from '../../state/dialogStateContext';
 import { useTaskStatusToggle } from '../../state/useTaskStatusToggle';
 import { useTasks } from '../../state/useTasks';
 import type { Task } from '../../api/types';

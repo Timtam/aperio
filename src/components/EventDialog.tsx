@@ -8,7 +8,7 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { useAnnouncer } from '../a11y/Announcer';
+import { useAnnouncer } from '../a11y/announcerContext';
 import { DescriptionLinks } from './DescriptionLinks';
 import {
   addEventExdate,
@@ -23,7 +23,7 @@ import {
   occurrenceIsoOf,
   seriesIdOf,
 } from '../intl/recurrence';
-import { useCalendarStore } from '../state/CalendarStore';
+import { useCalendarStore } from '../state/calendarStoreContext';
 import { useCalendarDefaultReminders } from '../state/useCalendarDefaultReminders';
 import { AttendeePicker } from './AttendeePicker';
 import { readLastUsedCalendar, writeLastUsedCalendar } from './lastUsedCalendar';

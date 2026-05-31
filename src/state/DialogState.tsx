@@ -1,7 +1,5 @@
 import {
-  createContext,
   useCallback,
-  useContext,
   useMemo,
   useRef,
   useState,
@@ -9,6 +7,7 @@ import {
 } from 'react';
 
 import type { Account, CalendarEvent, Contact, Task } from '../api/types';
+import { DialogStateContext } from './dialogStateContext';
 import type { SettingsTabId } from '../components/SettingsDialog';
 
 /**
@@ -85,7 +84,7 @@ export interface OpenContactOptions {
   listId?: string;
 }
 
-interface DialogStateValue {
+export interface DialogStateValue {
   mode: DialogMode;
   openEventDialog: (
     event?: CalendarEvent | null,
@@ -157,8 +156,6 @@ interface DialogStateValue {
   dataVersion: number;
   invalidateData: () => void;
 }
-
-const DialogStateContext = createContext<DialogStateValue | null>(null);
 
 /**
  * Dialog navigation is a *stack*, not a single slot.
@@ -384,10 +381,3 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
   );
 }
 
-export function useDialogState(): DialogStateValue {
-  const ctx = useContext(DialogStateContext);
-  if (!ctx) {
-    throw new Error('useDialogState must be used inside <DialogStateProvider>');
-  }
-  return ctx;
-}

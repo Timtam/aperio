@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { useAnnouncer } from '../a11y/Announcer';
+import { useAnnouncer } from '../a11y/announcerContext';
 import { FocusableNote } from '../a11y/FocusableNote';
 import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
 
@@ -33,7 +33,7 @@ import {
   type SyncPreview,
 } from '../api/client';
 import { useDateFormat } from '../intl/dateFormat';
-import { useDialogState } from '../state/DialogState';
+import { useDialogState } from '../state/dialogStateContext';
 import { useSync } from '../state/useSync';
 import { fetchAccountsNeedingConnect } from './accountsNeedingConnect';
 import { SyncProtocolSection } from './SyncProtocolSection';

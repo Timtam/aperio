@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 
-import { useAnnouncer } from '../a11y/Announcer';
+import { useAnnouncer } from '../a11y/announcerContext';
 import type { Task } from '../api/types';
 import {
   readFiredDayKey,
@@ -12,8 +12,8 @@ import {
 } from '../hooks/useCurrentDayKey';
 import { todayIsoKey } from '../intl/taskDay';
 import { filterDeadlinePinTargets } from './deadlinePinTargets';
-import { useDialogState } from '../state/DialogState';
-import { useTaskCascadeEnabled } from '../state/TaskCascadeProvider';
+import { useDialogState } from '../state/dialogStateContext';
+import { useTaskCascadeEnabled } from '../state/taskCascadeContext';
 import { useTasks } from '../state/useTasks';
 
 /**

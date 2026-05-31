@@ -1,7 +1,8 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { act, render, screen } from '@testing-library/react';
 
-import { ViewStateProvider, useViewShortcuts, useViewState } from './ViewState';
+import { ViewStateProvider } from './ViewState';
+import { useViewShortcuts, useViewState } from './viewStateContext';
 
 function Probe() {
   useViewShortcuts();

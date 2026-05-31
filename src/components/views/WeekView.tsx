@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { addDays, isSameDay, startOfWeek } from 'date-fns';
 import { invoke } from '@tauri-apps/api/core';
 
-import { useAnnouncer } from '../../a11y/Announcer';
+import { useAnnouncer } from '../../a11y/announcerContext';
 import { useAutoFocus } from '../../hooks/useAutoFocus';
 import { useDeferredLoading } from '../../hooks/useDeferredLoading';
 import { useEventTabNavigation } from '../../hooks/useEventTabNavigation';
@@ -19,14 +19,14 @@ import {
   daysCoveredKeys,
   multiDayInfo,
 } from '../../intl/multiDay';
-import { useCalendarStore } from '../../state/CalendarStore';
-import { useDialogState } from '../../state/DialogState';
+import { useCalendarStore } from '../../state/calendarStoreContext';
+import { useDialogState } from '../../state/dialogStateContext';
 import { useEvents } from '../../state/useEvents';
 import { useTaskListShowCompleted } from '../../state/useTaskListShowCompleted';
 import { useChipContextMenu } from '../../state/useChipContextMenu';
 import { useTaskStatusToggle } from '../../state/useTaskStatusToggle';
 import { useTasks } from '../../state/useTasks';
-import { useViewState } from '../../state/ViewState';
+import { useViewState } from '../../state/viewStateContext';
 import { visibleRange } from '../../state/viewMath';
 import {
   buildDeadlineBars,

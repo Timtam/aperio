@@ -16,9 +16,9 @@ import {
   type SearchKind,
 } from '../api/client';
 import type { CalendarEvent, Task, TaskStatus } from '../api/types';
-import { useCalendarStore } from '../state/CalendarStore';
+import { useCalendarStore } from '../state/calendarStoreContext';
 import { useDateFormat } from '../intl/dateFormat';
-import { useDialogState } from '../state/DialogState';
+import { useDialogState } from '../state/dialogStateContext';
 import { Modal } from './Modal';
 
 /**

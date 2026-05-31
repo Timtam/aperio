@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 
-import { useAnnouncer } from '../a11y/Announcer';
+import { useAnnouncer } from '../a11y/announcerContext';
 import { isCommandError } from '../api/client';
 import type { Task } from '../api/types';
 import {

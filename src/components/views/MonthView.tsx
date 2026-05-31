@@ -17,7 +17,7 @@ import {
   startOfWeek,
 } from 'date-fns';
 
-import { useAnnouncer } from '../../a11y/Announcer';
+import { useAnnouncer } from '../../a11y/announcerContext';
 import { useAutoFocus } from '../../hooks/useAutoFocus';
 import { useDeferredLoading } from '../../hooks/useDeferredLoading';
 import { useEventTabNavigation } from '../../hooks/useEventTabNavigation';
@@ -34,11 +34,11 @@ import {
   daysCoveredKeys,
   multiDayInfo,
 } from '../../intl/multiDay';
-import { useCalendarStore } from '../../state/CalendarStore';
+import { useCalendarStore } from '../../state/calendarStoreContext';
 import { useChipContextMenu } from '../../state/useChipContextMenu';
-import { useDialogState } from '../../state/DialogState';
+import { useDialogState } from '../../state/dialogStateContext';
 import { useEvents } from '../../state/useEvents';
-import { useViewState } from '../../state/ViewState';
+import { useViewState } from '../../state/viewStateContext';
 import { visibleRange } from '../../state/viewMath';
 import type { CalendarEvent } from '../../api/types';
 import { ConfirmDialog } from '../ConfirmDialog';

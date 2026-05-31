@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { FocusableNote } from '../a11y/FocusableNote';
 import { useTranslation } from 'react-i18next';
 
-import { useCalendarStore } from '../state/CalendarStore';
+import { useCalendarStore } from '../state/calendarStoreContext';
 import { useCalendarDefaultReminders } from '../state/useCalendarDefaultReminders';
 import { RemindersEditor } from './RemindersEditor';
 

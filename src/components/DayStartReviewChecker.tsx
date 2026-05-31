@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 
-import { useAnnouncer } from '../a11y/Announcer';
+import { useAnnouncer } from '../a11y/announcerContext';
 import type { Task } from '../api/types';
 import {
   readFiredDayKey,
@@ -11,13 +11,13 @@ import {
   writeFiredDayKey,
 } from '../hooks/useCurrentDayKey';
 import { todayIsoKey } from '../intl/taskDay';
-import { useDialogState } from '../state/DialogState';
-import {
-  useTaskCascadeEnabled,
-  type CarryOverDefault,
-  type EffectiveListSettings,
+import { useDialogState } from '../state/dialogStateContext';
+import { useTaskCascadeEnabled } from '../state/taskCascadeContext';
+import type {
+  CarryOverDefault,
+  EffectiveListSettings,
 } from '../state/TaskCascadeProvider';
-import { useToast } from '../state/ToastProvider';
+import { useToast } from '../state/toastContext';
 import { useTasks } from '../state/useTasks';
 import {
   actionableDescendants,

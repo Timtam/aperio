@@ -2,11 +2,11 @@ import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 
-import { useAnnouncer } from '../a11y/Announcer';
+import { useAnnouncer } from '../a11y/announcerContext';
 import { todayIsoKey } from '../intl/taskDay';
-import { useDialogState } from './DialogState';
+import { useDialogState } from './dialogStateContext';
 import { planStatusCascade, type StatusWrite } from './taskCascade';
-import { useTaskCascadeEnabled } from './TaskCascadeProvider';
+import { useTaskCascadeEnabled } from './taskCascadeContext';
 import { useTasks } from './useTasks';
 import type { Task, TaskStatus } from '../api/types';
 

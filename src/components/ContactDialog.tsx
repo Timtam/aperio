@@ -10,7 +10,7 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { useAnnouncer } from '../a11y/Announcer';
+import { useAnnouncer } from '../a11y/announcerContext';
 import {
   createContact as apiCreateContact,
   deleteContact as apiDeleteContact,
@@ -22,8 +22,8 @@ import {
 } from '../api/client';
 import type { Contact, ContactAddress, ContactPhoto } from '../api/types';
 import { getContactListDisplayName } from '../intl/contactList';
-import { useCalendarStore } from '../state/CalendarStore';
-import { useDialogState } from '../state/DialogState';
+import { useCalendarStore } from '../state/calendarStoreContext';
+import { useDialogState } from '../state/dialogStateContext';
 import { ConfirmDialog } from './ConfirmDialog';
 import { Modal } from './Modal';
 

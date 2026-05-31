@@ -6,7 +6,7 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { useAnnouncer } from '../a11y/Announcer';
+import { useAnnouncer } from '../a11y/announcerContext';
 import {
   createEvent as apiCreateEvent,
   createTask as apiCreateTask,
@@ -16,7 +16,7 @@ import {
 import { invoke } from '@tauri-apps/api/core';
 import type { CalendarEvent, Task } from '../api/types';
 import { seriesIdOf } from '../intl/recurrence';
-import { useCalendarStore } from '../state/CalendarStore';
+import { useCalendarStore } from '../state/calendarStoreContext';
 import type { MoveCopyTarget } from '../state/DialogState';
 import { useTasks } from '../state/useTasks';
 import { Modal } from './Modal';

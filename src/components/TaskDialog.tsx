@@ -11,7 +11,7 @@ import { useTranslation } from 'react-i18next';
 
 import { DescriptionLinks } from './DescriptionLinks';
 
-import { useAnnouncer } from '../a11y/Announcer';
+import { useAnnouncer } from '../a11y/announcerContext';
 import {
   createSection,
   createTask as apiCreateTask,
@@ -25,15 +25,15 @@ import { invoke } from '@tauri-apps/api/core';
 import { todayIsoKey } from '../intl/taskDay';
 import { statusI18nKey, statusMarker } from '../intl/taskStatus';
 import type { Reminder, Task, TaskPriority, TaskStatus } from '../api/types';
-import { useCalendarStore } from '../state/CalendarStore';
+import { useCalendarStore } from '../state/calendarStoreContext';
 import { canAssignSection, canMoveTaskBetweenLists } from '../state/taskMoves';
-import { useDialogState } from '../state/DialogState';
+import { useDialogState } from '../state/dialogStateContext';
 import {
   planAncestorRecompute,
   planStatusCascade,
   type StatusWrite,
 } from '../state/taskCascade';
-import { useTaskCascadeEnabled } from '../state/TaskCascadeProvider';
+import { useTaskCascadeEnabled } from '../state/taskCascadeContext';
 import { useTasks } from '../state/useTasks';
 import { useTaskStatusActions } from '../state/useTaskStatusToggle';
 import { readLastUsedTaskList, writeLastUsedTaskList } from './lastUsedTaskList';

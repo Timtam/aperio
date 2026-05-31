@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { getTasks } from '../api/client';
 import type { Task } from '../api/types';
-import { useCalendarStore } from './CalendarStore';
-import { useDialogState } from './DialogState';
+import { useCalendarStore } from './calendarStoreContext';
+import { useDialogState } from './dialogStateContext';
 
 /**
  * Pull tasks from every selected task list and return the aggregated list.

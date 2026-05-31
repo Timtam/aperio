@@ -9,7 +9,7 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { useAnnouncer } from '../a11y/Announcer';
+import { useAnnouncer } from '../a11y/announcerContext';
 import { searchContacts } from '../api/client';
 import type { Contact } from '../api/types';
 import { formatAttendee } from './formatAttendee';

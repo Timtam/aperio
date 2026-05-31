@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { getContacts } from '../api/client';
 import type { Contact } from '../api/types';
-import { useCalendarStore } from './CalendarStore';
-import { useDialogState } from './DialogState';
+import { useCalendarStore } from './calendarStoreContext';
+import { useDialogState } from './dialogStateContext';
 
 /**
  * Pull contacts from every selected list and return the aggregated,

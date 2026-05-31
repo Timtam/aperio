@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { CalendarEvent } from '../../api/types';
-import { useAnnouncer } from '../../a11y/Announcer';
+import { useAnnouncer } from '../../a11y/announcerContext';
 import { useAutoFocus } from '../../hooks/useAutoFocus';
 import { useDeferredLoading } from '../../hooks/useDeferredLoading';
 import { localDateKey } from '../../intl/dateKey';
@@ -17,11 +17,11 @@ import {
   expandToDayOccurrences,
   type DayOccurrence,
 } from '../../intl/multiDay';
-import { useCalendarStore } from '../../state/CalendarStore';
+import { useCalendarStore } from '../../state/calendarStoreContext';
 import { useChipContextMenu } from '../../state/useChipContextMenu';
-import { useDialogState } from '../../state/DialogState';
+import { useDialogState } from '../../state/dialogStateContext';
 import { useEvents } from '../../state/useEvents';
-import { useViewState } from '../../state/ViewState';
+import { useViewState } from '../../state/viewStateContext';
 import { visibleRange } from '../../state/viewMath';
 import { duplicateEvent } from '../duplicateActions';
 import { ConfirmDialog } from '../ConfirmDialog';

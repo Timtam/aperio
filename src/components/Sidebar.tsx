@@ -9,7 +9,7 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { useAnnouncer } from '../a11y/Announcer';
+import { useAnnouncer } from '../a11y/announcerContext';
 import { ConfirmDialog } from './ConfirmDialog';
 import { PromptDialog } from './PromptDialog';
 import {
@@ -29,8 +29,8 @@ import {
   type ContextMenuItemRequest,
 } from '../api/client';
 import { getContactListDisplayName } from '../intl/contactList';
-import { useCalendarStore } from '../state/CalendarStore';
-import { useDialogState } from '../state/DialogState';
+import { useCalendarStore } from '../state/calendarStoreContext';
+import { useDialogState } from '../state/dialogStateContext';
 import {
   accountTriState,
   buildSidebarTree,
@@ -49,7 +49,7 @@ import {
 } from '../state/taskMoves';
 import { useSidebarExpansion } from '../state/useSidebarExpansion';
 import { useTaskListShowCompleted } from '../state/useTaskListShowCompleted';
-import { useViewState } from '../state/ViewState';
+import { useViewState } from '../state/viewStateContext';
 
 /** Pointer drag-and-drop reparent state, threaded to the task-list
  *  leaf rows. Keyboard users get the same outcome via the

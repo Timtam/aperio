@@ -2,12 +2,12 @@ import { useId, useMemo } from 'react';
 import { FocusableNote } from '../a11y/FocusableNote';
 import { useTranslation } from 'react-i18next';
 
-import { useCalendarStore } from '../state/CalendarStore';
-import {
-  useTaskCascadeEnabled,
-  type CarryOverDefault,
-  type DayStartTrigger,
-  type ListOverrides,
+import { useCalendarStore } from '../state/calendarStoreContext';
+import { useTaskCascadeEnabled } from '../state/taskCascadeContext';
+import type {
+  CarryOverDefault,
+  DayStartTrigger,
+  ListOverrides,
 } from '../state/TaskCascadeProvider';
 
 /**

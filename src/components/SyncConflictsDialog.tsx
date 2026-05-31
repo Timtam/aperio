@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 
 import { listen } from '@tauri-apps/api/event';
 
-import { useAnnouncer } from '../a11y/Announcer';
+import { useAnnouncer } from '../a11y/announcerContext';
 import { FocusableNote } from '../a11y/FocusableNote';
 import {
   listSyncConflicts,
