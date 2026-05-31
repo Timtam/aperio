@@ -210,12 +210,19 @@ jobs:
         run: npm run build
 
       # Build aperio + all 17 plugin cdylibs for both arches.
-      # src-tauri/build.rs stages each arch's plugins under
-      # target/<triple>/release/plugins/bundled/<id>/.
+      # TWO passes per arch (mirrors the CI `rust` job + tauri's
+      # beforeBuildCommand): the first builds aperio and the cdylibs
+      # in parallel, but aperio's build.rs runs before the cdylibs
+      # land (there's no dep edge, by design) so nothing is staged
+      # yet; the second `-p aperio` pass re-triggers build.rs via
+      # `cargo:rerun-if-changed=<cdylib>` so the now-present cdylibs
+      # get staged into target/<triple>/release/plugins/bundled/<id>/.
       - name: Build workspace for both macOS arches
         run: |
           cargo build --workspace --release --target x86_64-apple-darwin
+          cargo build -p aperio --release --target x86_64-apple-darwin
           cargo build --workspace --release --target aarch64-apple-darwin
+          cargo build -p aperio --release --target aarch64-apple-darwin
 
       - name: Verify 17 plugins staged per arch
         shell: bash
