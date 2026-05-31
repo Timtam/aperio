@@ -36,15 +36,16 @@ import {
 import { useTaskCascadeEnabled } from '../state/TaskCascadeProvider';
 import { useTasks } from '../state/useTasks';
 import { useTaskStatusActions } from '../state/useTaskStatusToggle';
+import { readLastUsedTaskList, writeLastUsedTaskList } from './lastUsedTaskList';
 import { Modal } from './Modal';
 import { RemindersEditor } from './RemindersEditor';
+import { TaskRecurrenceSelector } from './TaskRecurrenceSelector';
 import {
   fromBackend as recurrenceFromBackend,
   toBackend as recurrenceToBackend,
-  TaskRecurrenceSelector,
   TASK_RECURRENCE_DEFAULT,
   type TaskRecurrenceValue,
-} from './TaskRecurrenceSelector';
+} from './taskRecurrence';
 
 /**
  * Task create / edit dialog (DESIGN.md section 9.9).
@@ -1201,27 +1202,6 @@ export function TaskDialog({
       </form>
     </Modal>
   );
-}
-
-/** Mirrors EventDialog's last-used-calendar memo. The task-list
- *  picker on a new task remembers the user's previous pick so a
- *  multi-list setup doesn't reset to `taskLists[0]` on every open. */
-const LAST_USED_TASK_LIST_KEY = 'aperio.lastUsedTaskList.v1';
-
-export function readLastUsedTaskList(): string | null {
-  try {
-    return localStorage.getItem(LAST_USED_TASK_LIST_KEY);
-  } catch {
-    return null;
-  }
-}
-
-export function writeLastUsedTaskList(id: string): void {
-  try {
-    localStorage.setItem(LAST_USED_TASK_LIST_KEY, id);
-  } catch {
-    // Best effort.
-  }
 }
 
 function buildInitialState(

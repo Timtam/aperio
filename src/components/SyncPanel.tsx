@@ -35,7 +35,7 @@ import {
 import { useDateFormat } from '../intl/dateFormat';
 import { useDialogState } from '../state/DialogState';
 import { useSync } from '../state/useSync';
-import { fetchAccountsNeedingConnect } from './SyncAccountsConnectDialog';
+import { fetchAccountsNeedingConnect } from './accountsNeedingConnect';
 import { SyncProtocolSection } from './SyncProtocolSection';
 import { SyncSftpTrustDialog } from './SyncSftpTrustDialog';
 

@@ -12,6 +12,7 @@ import { useTranslation } from 'react-i18next';
 import { useAnnouncer } from '../a11y/Announcer';
 import { searchContacts } from '../api/client';
 import type { Contact } from '../api/types';
+import { formatAttendee } from './formatAttendee';
 
 /**
  * Attendees picker for the EventDialog (DESIGN.md §10.4).
@@ -60,19 +61,6 @@ export interface AttendeePickerProps {
    *  EventDialog wraps the picker inside a labelled fieldset, so
    *  this is normally enough. */
   labelledBy?: string;
-}
-
-/** Display format for an attendee picked from a `Contact`:
- *  `"Display Name <email>"` when an email is available,
- *  display name alone when not (Aperio shows the contact name in
- *  the chip either way; the email is what the calendar sync layer
- *  later reaches for). */
-export function formatAttendee(contact: Contact): string {
-  const email = contact.emails[0]?.trim();
-  if (email) {
-    return `${contact.display_name} <${email}>`;
-  }
-  return contact.display_name;
 }
 
 export function AttendeePicker({

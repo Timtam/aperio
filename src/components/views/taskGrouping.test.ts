@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Section, Task } from '../../api/types';
-import { buildEntries } from './TaskView';
+import { buildEntries } from './taskGrouping';
 
 const t = (key: string) => key;
 

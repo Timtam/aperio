@@ -7,12 +7,8 @@ import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 // (off-by-one bugs around midnight, DST transitions, Sunday→Monday
 // edge case in "next Monday").
 
-// Re-export the helpers as part of the component file's public-ish
-// surface — we treat them as module-scoped utilities and call them
-// directly through a `__test` re-export.
-import {
-  __test as planTaskHelpers,
-} from './PlanTaskDialog';
+// The helpers are pure module-scoped utilities — call them directly.
+import * as planTaskHelpers from './planTaskDates';
 
 describe('PlanTaskDialog date helpers', () => {
   beforeEach(() => {

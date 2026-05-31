@@ -11,6 +11,7 @@ import {
   writeFiredDayKey,
 } from '../hooks/useCurrentDayKey';
 import { todayIsoKey } from '../intl/taskDay';
+import { filterDeadlinePinTargets } from './deadlinePinTargets';
 import { useDialogState } from '../state/DialogState';
 import { useTaskCascadeEnabled } from '../state/TaskCascadeProvider';
 import { useTasks } from '../state/useTasks';
@@ -86,25 +87,6 @@ export function DeadlinePinChecker() {
   ]);
 
   return null;
-}
-
-/**
- * Open / in_progress tasks whose deadline lands on today AND aren't
- * already pinned to today. The double check on `scheduled_date !==
- * today` keeps the batch idempotent across re-launches inside the
- * same calendar day.
- */
-export function filterDeadlinePinTargets(tasks: Task[]): Task[] {
-  const today = todayIsoKey();
-  return tasks.filter((task) => {
-    if (!task.deadline_date) return false;
-    if (task.deadline_date !== today) return false;
-    if (task.status === 'completed' || task.status === 'cancelled') {
-      return false;
-    }
-    if (task.scheduled_date === today) return false;
-    return true;
-  });
 }
 
 async function pinToToday(

@@ -38,7 +38,7 @@ import {
   statusMarker,
   subtaskProgressSuffix,
 } from '../../intl/taskStatus';
-import { duplicateEvent } from '../MoveCopyDialog';
+import { duplicateEvent } from '../duplicateActions';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { DeleteEventScopeDialog } from '../DeleteEventScopeDialog';
 import {
