@@ -173,10 +173,20 @@ pub fn run() {
     // here so both halves see the same Arc — the writer pings via
     // `notify_one`, the scheduler awaits via `notified`.
     let kick_notify = Arc::new(Notify::new());
+    // One boot instant, shared by the writer (which names its
+    // session JSONL file with it) and the orchestrator (which stores
+    // it as `boot_at`). Captured BEFORE the writer spawns so the
+    // live session file's timestamp equals `boot_at` exactly — the
+    // orchestrator's empty-stub cleanup then never mistakes it for a
+    // stale leftover and deletes it mid-session (which on Windows
+    // silently unlinks the open file → lost events). See
+    // `EventLogWriter::spawn_with_kick`.
+    let boot_at = chrono::Utc::now();
     let event_log_writer = EventLogWriter::spawn_with_kick(
         data_dir.path.clone(),
         device_id.clone(),
         Some(Arc::clone(&kick_notify)),
+        boot_at,
     );
 
     // One-shot: existing accounts created before the Account.*
@@ -186,6 +196,14 @@ pub fn run() {
     // remote. Idempotent — gated by a pref the function sets on
     // success.
     commands::backfill_account_events(&db, &event_log_writer);
+
+    // One-shot: existing LOCAL task lists + tasks created while the
+    // `boot_at` writer race was live never reached the event log
+    // (their session file was deleted out from under the writer
+    // mid-session). Replay them once now that the writer persists
+    // reliably, so they finally sync to the remote / other devices.
+    // Idempotent — gated by a pref the fn sets on success.
+    commands::backfill_local_task_events(&db, &event_log_writer);
 
     // Phase Sc + Sd: stand up the applier and orchestrator.
     //
@@ -247,6 +265,7 @@ pub fn run() {
         applier,
         Arc::clone(&onboarding),
         Arc::clone(&compactor),
+        boot_at,
     ));
     // If the user had previously configured a sync adapter,
     // reconstruct it now so `sync_now` works without a

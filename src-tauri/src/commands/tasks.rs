@@ -20,6 +20,93 @@ use crate::overrides::{apply_to_task_lists, OverridesRepo};
 use crate::registry::{AdapterRegistry, LOCAL_ID};
 use crate::reminders::SchedulerHandle;
 
+/// One-shot pref marker recording that we've replayed the existing
+/// LOCAL task lists + tasks as `TaskListCreated`/`TaskCreated`
+/// events. Needed because of the `boot_at` writer bug: local
+/// lists/tasks created while it was live DID emit events, but the
+/// writer's session file was deleted out from under it mid-session,
+/// so those emits never reached `pending/` (and thus never the
+/// remote). On the first boot after the fix we walk the local store
+/// once and re-emit so they finally propagate.
+const PREF_LOCAL_TASKS_BACKFILLED: &str = "sync.localTasks.eventBackfillDone";
+
+/// Catch-up emit for local task lists + their tasks. Idempotent:
+/// gated by [`PREF_LOCAL_TASKS_BACKFILLED`], and receivers dedupe
+/// via the applier's `sync_applied_events` table, so a list/task
+/// that already made it across is a no-op on the peer. Best-effort —
+/// any read failure logs a `warn!` and leaves the pref unset so the
+/// next boot retries; a backfill hiccup never blocks startup.
+///
+/// Emits the exact same `EventPayload` shape (`serde_json::to_value`
+/// of the row) that the live `create_task_list` / `create_task`
+/// command paths produce, so the applier upserts identically.
+pub fn backfill_local_task_events(db: &DbHandle, event_log: &EventLogWriter) {
+    let shared = db.shared();
+    let prefs = crate::user_prefs::UserPrefsRepo::new(&shared);
+    match prefs.get(PREF_LOCAL_TASKS_BACKFILLED) {
+        Ok(Some(v)) if v == "true" => return,
+        Ok(_) => {}
+        Err(err) => {
+            tracing::warn!(?err, "local-task backfill: prefs read failed");
+            return;
+        }
+    }
+
+    // `list_task_lists` / `get_tasks` are async trait methods backed
+    // by synchronous SQLite. `run()` isn't itself inside an async
+    // context, so driving them with block_on on the calling thread is
+    // safe (same pattern as the app-exit push hook).
+    let adapter = LocalAdapter::new(db.shared());
+    let collected: cal_core::Result<Vec<SyncEvent>> = tauri::async_runtime::block_on(async move {
+        let lists = adapter.list_task_lists().await?;
+        let mut out: Vec<SyncEvent> = Vec::new();
+        for list in &lists {
+            if let Ok(fields) = serde_json::to_value(list) {
+                out.push(SyncEvent::TaskListCreated(EventPayload {
+                    id: list.id.clone(),
+                    fields,
+                }));
+            }
+            let tasks = adapter.get_tasks(&list.id).await?;
+            for task in &tasks {
+                if let Ok(fields) = serde_json::to_value(task) {
+                    out.push(SyncEvent::TaskCreated(EventPayload {
+                        id: task.id.clone(),
+                        fields,
+                    }));
+                }
+            }
+        }
+        Ok(out)
+    });
+
+    let events = match collected {
+        Ok(e) => e,
+        Err(err) => {
+            tracing::warn!(?err, "local-task backfill: enumeration failed");
+            return;
+        }
+    };
+
+    let lists_n = events
+        .iter()
+        .filter(|e| matches!(e, SyncEvent::TaskListCreated(_)))
+        .count();
+    let tasks_n = events.len() - lists_n;
+    for ev in events {
+        event_log.append(ev);
+    }
+    if let Err(err) = prefs.set(PREF_LOCAL_TASKS_BACKFILLED, "true") {
+        tracing::warn!(?err, "local-task backfill: pref write failed");
+        return;
+    }
+    tracing::info!(
+        lists = lists_n,
+        tasks = tasks_n,
+        "local-task backfill: replayed existing local lists + tasks",
+    );
+}
+
 /// Wire-format TaskList enriched with the owning account id. Same
 /// shape + rationale as `CalendarRow` — the frontend uses it to
 /// group containers by source for the account-aware sidebar.

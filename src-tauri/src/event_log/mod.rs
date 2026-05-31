@@ -62,7 +62,7 @@ pub use snapshot::{AperioSnapshotBody, SnapshotApplyOutcome, SnapshotBuilder};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use sync_core::{DeviceId, EventEnvelope, LogFileName, SyncEvent, DEVICE_ID_PREF_KEY};
 use tokio::fs::{File, OpenOptions};
 use tokio::io::AsyncWriteExt;
@@ -105,16 +105,32 @@ impl EventLogWriter {
     /// the process lifetime; on `drop` of the last `Arc` the
     /// sender side closes and the loop exits cleanly.
     pub fn spawn(data_dir: PathBuf, device_id: DeviceId) -> Arc<Self> {
-        Self::spawn_with_kick(data_dir, device_id, None)
+        Self::spawn_with_kick(data_dir, device_id, None, Utc::now())
     }
 
     /// Variant that wires the writer into a [`SyncScheduler`] kick
     /// channel. `lib.rs` uses this so every local mutation triggers
     /// a debounced sync push; tests use [`Self::spawn`] without one.
+    ///
+    /// `session_at` is THIS launch's boot timestamp and names the
+    /// session's JSONL file (`LogFileName::new(session_at, …)`). It
+    /// MUST be the same instant the [`SyncOrchestrator`] stores as
+    /// its `boot_at`: the orchestrator's empty-stub cleanup deletes
+    /// pending files whose session timestamp is `< boot_at`, so if
+    /// the writer minted a *later* `Utc::now()` here the orchestrator
+    /// would still keep the current file — but if it minted an
+    /// *earlier* one (the writer spawns before the orchestrator is
+    /// built), the still-empty live file would be classed as a stale
+    /// leftover and deleted out from under the open handle. On
+    /// Windows (`FILE_SHARE_DELETE`) that unlinks the file while the
+    /// writer keeps appending to a now-invisible handle → silent loss
+    /// of every event this session. Sharing one instant makes the
+    /// comparison `session_at == boot_at` (never `<`), killing the race.
     pub fn spawn_with_kick(
         data_dir: PathBuf,
         device_id: DeviceId,
         kick: Option<Arc<Notify>>,
+        session_at: DateTime<Utc>,
     ) -> Arc<Self> {
         let (sender, receiver) = mpsc::unbounded_channel();
         let writer = Arc::new(Self {
@@ -123,7 +139,7 @@ impl EventLogWriter {
             kick,
         });
         let pending_dir = data_dir.join("sync").join("log").join("pending");
-        tauri::async_runtime::spawn(drain_loop(pending_dir, device_id, receiver));
+        tauri::async_runtime::spawn(drain_loop(pending_dir, device_id, session_at, receiver));
         writer
     }
 
@@ -190,6 +206,7 @@ impl EventLogWriter {
 async fn drain_loop(
     pending_dir: PathBuf,
     device_id: DeviceId,
+    session_at: DateTime<Utc>,
     mut receiver: mpsc::UnboundedReceiver<EventEnvelope>,
 ) {
     if let Err(err) = tokio::fs::create_dir_all(&pending_dir).await {
@@ -204,7 +221,7 @@ async fn drain_loop(
     // One file per app session. Naming follows
     // `sync_core::LogFileName` exactly so a sync adapter can pick
     // it up later without reformatting.
-    let session_name = LogFileName::new(Utc::now(), device_id.clone());
+    let session_name = LogFileName::new(session_at, device_id.clone());
     let path = pending_dir.join(session_name.to_filename());
     debug!(
         path = %path.display(),
@@ -337,6 +354,44 @@ mod tests {
                     // implicit because the parser is the contract.
                     let parsed = LogFileName::from_filename(&name_str).expect("filename parseable");
                     assert_eq!(parsed.device_id.as_str(), "dev-format");
+                    return;
+                }
+            }
+        }
+        panic!("no log file created");
+    }
+
+    #[tokio::test]
+    async fn session_file_is_named_with_the_injected_boot_instant() {
+        use chrono::{TimeZone, Utc};
+        // Whole-second instant so the second-granularity filename
+        // round-trips exactly.
+        let boot = Utc.with_ymd_and_hms(2026, 5, 31, 7, 0, 0).unwrap();
+        let tmp = TempDir::new().unwrap();
+        let writer = EventLogWriter::spawn_with_kick(
+            tmp.path().to_path_buf(),
+            DeviceId::from_string("dev-boot".into()),
+            None,
+            boot,
+        );
+        writer.append(SyncEvent::EventDeleted(IdPayload { id: "x".into() }));
+        drop(writer);
+
+        for _ in 0..50 {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            let pending = tmp.path().join("sync").join("log").join("pending");
+            if let Ok(mut entries) = tokio::fs::read_dir(&pending).await {
+                if let Ok(Some(entry)) = entries.next_entry().await {
+                    let name = entry.file_name();
+                    let parsed = LogFileName::from_filename(&name.to_string_lossy())
+                        .expect("filename parseable");
+                    // The session file MUST carry the injected boot
+                    // instant verbatim, not a fresh `Utc::now()`. This
+                    // equality is exactly what keeps the orchestrator's
+                    // `timestamp < boot_at` empty-stub cleanup from
+                    // deleting the live session file mid-run (the
+                    // boot_at race / Windows silent-event-loss bug).
+                    assert_eq!(parsed.timestamp, boot);
                     return;
                 }
             }

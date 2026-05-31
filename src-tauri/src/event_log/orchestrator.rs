@@ -244,7 +244,29 @@ pub struct SyncOrchestrator {
     /// run" (safe to delete) and "current writer's session file
     /// that just happens to be empty so far" (must keep —
     /// future events in this session would land in it).
+    ///
+    /// MUST be the exact same instant passed to the
+    /// [`EventLogWriter`](crate::event_log::EventLogWriter) as its
+    /// `session_at` (both are wired from one value in `lib.rs`).
+    /// The writer names the live session file with this instant, so
+    /// the cleanup's strict `<` keeps it (`==`) while still reaping
+    /// genuinely older stubs. If this were minted independently
+    /// *after* the writer spawned, the live file's timestamp could
+    /// be `< boot_at` and get deleted out from under the open
+    /// handle — silent event loss (see `spawn_with_kick`).
     boot_at: DateTime<Utc>,
+}
+
+/// Whether an *empty* pending file is a deletable leftover from a
+/// prior run rather than the current session's live (still-empty)
+/// file. The writer names the live file with exactly `boot_at`, so
+/// the strict `<` keeps it (`==`) while still reaping older stubs.
+/// Extracted as a free fn so the invariant is unit-testable without
+/// standing up a full orchestrator. See `SyncOrchestrator::boot_at`
+/// and `EventLogWriter::spawn_with_kick` for why the two timestamps
+/// must be identical.
+fn is_stale_empty_stub(file_session: DateTime<Utc>, boot_at: DateTime<Utc>) -> bool {
+    file_session < boot_at
 }
 
 impl SyncOrchestrator {
@@ -256,6 +278,7 @@ impl SyncOrchestrator {
         applier: Arc<EventLogApplier>,
         onboarding: Arc<OnboardingService>,
         compactor: Arc<Compactor>,
+        boot_at: DateTime<Utc>,
     ) -> Self {
         Self {
             db,
@@ -269,7 +292,7 @@ impl SyncOrchestrator {
             schema_too_old: Mutex::new(None),
             stale_device_since: Mutex::new(None),
             in_flight: Mutex::new(false),
-            boot_at: Utc::now(),
+            boot_at,
         }
     }
 
@@ -698,7 +721,7 @@ impl SyncOrchestrator {
             // session so this never races with the active
             // session file.
             if bytes.is_empty() {
-                if parsed.timestamp < self.boot_at {
+                if is_stale_empty_stub(parsed.timestamp, self.boot_at) {
                     if let Err(err) = tokio::fs::remove_file(&path).await {
                         debug!(name = name, ?err, "couldn't remove empty pending log",);
                     } else {
@@ -844,5 +867,35 @@ impl Drop for InFlightGuard<'_> {
         // progress". That's the right behaviour given we can't
         // reason about whether the previous round corrupted
         // anything; the user restarts the app.
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_stale_empty_stub;
+    use chrono::{Duration, TimeZone, Utc};
+
+    #[test]
+    fn empty_stub_cleanup_keeps_live_session_file_and_reaps_older() {
+        let boot = Utc.with_ymd_and_hms(2026, 5, 31, 7, 0, 0).unwrap();
+
+        // The writer names the CURRENT session's file with exactly
+        // `boot_at`. It must NOT be classed as a deletable stub —
+        // otherwise the still-empty live file gets unlinked out from
+        // under the open handle (silent event loss on Windows).
+        assert!(
+            !is_stale_empty_stub(boot, boot),
+            "live session file (timestamp == boot_at) must be kept",
+        );
+
+        // A genuinely older empty file (a prior run that produced no
+        // events) is a reapable leftover stub.
+        assert!(
+            is_stale_empty_stub(boot - Duration::seconds(1), boot),
+            "an empty file from before this launch must be deletable",
+        );
+
+        // Defensive: a (clock-skew) later timestamp is also kept.
+        assert!(!is_stale_empty_stub(boot + Duration::seconds(1), boot));
     }
 }
