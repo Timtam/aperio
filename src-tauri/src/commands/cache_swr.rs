@@ -170,10 +170,7 @@ pub async fn refresh_events(
         Some((Some(ws), Some(we))) if ws <= range.start && we >= range.end
     );
     let effective_token = if covered { token.as_deref() } else { None };
-    match ext
-        .get_events_delta(calendar, range, effective_token)
-        .await
-    {
+    match ext.get_events_delta(calendar, range, effective_token).await {
         Ok(cs) => {
             if cs.full_resync || effective_token.is_none() {
                 // Folder-complete adapters (EWS/CalDAV) return the WHOLE
