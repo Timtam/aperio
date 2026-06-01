@@ -3,7 +3,8 @@
 use super::{CacheStore, Delta, RefreshCoordinator, SyncScope, SyncState};
 use crate::db::DbHandle;
 use cal_core::{
-    Calendar, Contact, ContactList, DateRange, Event, Task, TaskList, TaskPriority, TaskStatus,
+    Calendar, Contact, ContactList, DateRange, Event, EventRecurrence, Task, TaskList,
+    TaskPriority, TaskStatus,
 };
 use chrono::{TimeZone, Utc};
 use rusqlite::params;
@@ -177,6 +178,107 @@ fn events_roundtrip_and_window_coverage() {
         store.event_window(ACC, CAL).unwrap(),
         Some((range(8, 18).start, range(8, 18).end))
     );
+}
+
+// ── Recurring masters with a past start (iCloud/CalDAV) ──────────────
+//
+// A weekly meeting that began long ago has its `start`/`end` in the past,
+// but recurs into the current view. The cache must still return the
+// master for a future range so the frontend can expand its occurrences —
+// the row's `end_utc` column reflects the recurrence reach, not the first
+// occurrence's end.
+
+/// Build a recurring master whose first occurrence is `start_h..end_h` on
+/// 2025-01-06 (well before the 2026 read ranges below).
+fn recurring_master(id: &str, rrule: &str) -> Event {
+    let mut ev = event(id, 0, 0);
+    ev.start = Utc.with_ymd_and_hms(2025, 1, 6, 10, 0, 0).unwrap();
+    ev.end = Utc.with_ymd_and_hms(2025, 1, 6, 11, 0, 0).unwrap();
+    ev.recurrence = Some(EventRecurrence {
+        rrule: rrule.into(),
+        exceptions: Vec::new(),
+    });
+    ev
+}
+
+/// June 2026 — a month a year and a half after the master's first run.
+fn june_2026() -> DateRange {
+    DateRange::new(
+        Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap(),
+        Utc.with_ymd_and_hms(2026, 7, 1, 0, 0, 0).unwrap(),
+    )
+}
+
+#[test]
+fn open_ended_recurring_master_survives_a_future_range_read() {
+    let store = setup();
+    store
+        .replace_calendar_events(
+            ACC,
+            CAL,
+            june_2026(),
+            &[recurring_master("weekly", "FREQ=WEEKLY")],
+        )
+        .unwrap();
+    // The regression: an interval-overlap query on the first occurrence
+    // (Jan 2025) would drop this master; the recurrence-aware end_utc
+    // keeps it so the frontend can expand June's occurrences.
+    let rows = store.read_events(ACC, CAL, june_2026()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, "weekly");
+    // The payload round-trips the TRUE (past) start — only row selection
+    // changed, not the event the frontend expands.
+    assert_eq!(
+        rows[0].start,
+        Utc.with_ymd_and_hms(2025, 1, 6, 10, 0, 0).unwrap()
+    );
+}
+
+#[test]
+fn recurring_master_with_until_in_the_past_is_excluded() {
+    let store = setup();
+    store
+        .replace_calendar_events(
+            ACC,
+            CAL,
+            june_2026(),
+            &[recurring_master(
+                "expired",
+                "FREQ=WEEKLY;UNTIL=20250201T100000Z",
+            )],
+        )
+        .unwrap();
+    // A series that ended Feb 2025 has no occurrences in June 2026.
+    assert!(store.read_events(ACC, CAL, june_2026()).unwrap().is_empty());
+}
+
+#[test]
+fn non_recurring_past_event_is_not_widened() {
+    let store = setup();
+    let mut once = event("once", 0, 0);
+    once.start = Utc.with_ymd_and_hms(2025, 1, 6, 10, 0, 0).unwrap();
+    once.end = Utc.with_ymd_and_hms(2025, 1, 6, 11, 0, 0).unwrap();
+    store
+        .replace_calendar_events(ACC, CAL, june_2026(), &[once])
+        .unwrap();
+    // The fix must not leak one-off events into unrelated ranges.
+    assert!(store.read_events(ACC, CAL, june_2026()).unwrap().is_empty());
+}
+
+#[test]
+fn recurrence_until_parses_ical_forms() {
+    assert_eq!(
+        super::recurrence_until("FREQ=WEEKLY;UNTIL=20270101T100000Z"),
+        Some(Utc.with_ymd_and_hms(2027, 1, 1, 10, 0, 0).unwrap()),
+    );
+    // Date-only UNTIL covers the whole day.
+    assert_eq!(
+        super::recurrence_until("FREQ=DAILY;UNTIL=20270101"),
+        Some(Utc.with_ymd_and_hms(2027, 1, 1, 23, 59, 59).unwrap()),
+    );
+    // COUNT-based / open-ended → no UNTIL.
+    assert!(super::recurrence_until("FREQ=WEEKLY;COUNT=10").is_none());
+    assert!(super::recurrence_until("FREQ=WEEKLY").is_none());
 }
 
 #[test]

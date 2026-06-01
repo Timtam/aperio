@@ -20,7 +20,7 @@
 //! CACHE-0 ships the store + primitives only; wiring into the command
 //! read path is CACHE-1.
 
-use chrono::{DateTime, SecondsFormat, Utc};
+use chrono::{DateTime, NaiveDate, NaiveDateTime, SecondsFormat, TimeZone, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -847,13 +847,69 @@ fn insert_event(
             ev.id,
             native_id(&ev.id),
             ts(&ev.start),
-            ts(&ev.end),
+            ts(&range_end_utc(ev)),
             ev.etag,
             json,
             now
         ],
     )?;
     Ok(())
+}
+
+/// The "latest time this event matters for a range query" — what goes in
+/// the `end_utc` column the half-open overlap query in [`read_events`]
+/// (and the window prune) test against.
+///
+/// For a one-off event that's simply its end. For a RECURRING master it's
+/// the recurrence's *reach*: the parsed `UNTIL`, or a far-future sentinel
+/// for open-ended / `COUNT`-based series. Without this, the column would
+/// hold the master's FIRST occurrence end, so a weekly meeting that began
+/// last year (`start`/`end` in the past) would be filtered out of this
+/// month's view even though it recurs into it — the occurrences are
+/// expanded on the frontend, which never sees the master. The `payload`
+/// still stores the true event, so display is unaffected; only row
+/// selection changes.
+fn range_end_utc(ev: &Event) -> DateTime<Utc> {
+    let Some(recurrence) = &ev.recurrence else {
+        return ev.end;
+    };
+    recurrence_until(&recurrence.rrule)
+        .unwrap_or_else(far_future_utc)
+        // Guard against a degenerate `UNTIL` before the first occurrence.
+        .max(ev.end)
+}
+
+/// Parse the `UNTIL=…` bound out of an RRULE string, if present. RRULE is
+/// a `;`-separated list of `KEY=VALUE`; the value is an iCalendar date or
+/// date-time (`YYYYMMDD`, `YYYYMMDDTHHMMSS`, or the UTC `…Z` form).
+/// Returns `None` when there's no `UNTIL` (open-ended / `COUNT`-based) or
+/// the value can't be parsed — the caller then keeps the series alive
+/// with the far-future sentinel.
+fn recurrence_until(rrule: &str) -> Option<DateTime<Utc>> {
+    let value = rrule.split(';').find_map(|part| {
+        let (key, val) = part.split_once('=')?;
+        key.trim().eq_ignore_ascii_case("UNTIL").then(|| val.trim())
+    })?;
+    // UTC date-time (the common form): 20270101T100000Z
+    if let Ok(dt) = NaiveDateTime::parse_from_str(value, "%Y%m%dT%H%M%SZ") {
+        return Some(Utc.from_utc_datetime(&dt));
+    }
+    // Floating date-time without a zone — treat as UTC.
+    if let Ok(dt) = NaiveDateTime::parse_from_str(value, "%Y%m%dT%H%M%S") {
+        return Some(Utc.from_utc_datetime(&dt));
+    }
+    // Date-only UNTIL — include the whole day.
+    if let Ok(d) = NaiveDate::parse_from_str(value, "%Y%m%d") {
+        return Some(Utc.from_utc_datetime(&d.and_hms_opt(23, 59, 59)?));
+    }
+    None
+}
+
+/// Sentinel "end" for open-ended recurrences. Year 9999 keeps the stored
+/// timestamp 4-digit so it stays lexicographically ordered against real
+/// dates — the cache compares the RFC-3339 strings directly in SQL.
+fn far_future_utc() -> DateTime<Utc> {
+    Utc.with_ymd_and_hms(9999, 12, 31, 23, 59, 59).unwrap()
 }
 
 /// Derive the provider-native resource id from a cal-core id, so a delta
