@@ -60,6 +60,15 @@ pub struct TasksVtable {
     /// (CACHE-4). `None` ⇒ the shim inherits the trait default
     /// (`Unsupported`) and the host falls back to a full `get_tasks`.
     pub get_tasks_delta: Option<VtableMethodFn>,
+    /// `list_task_list_members(list_id) -> Vec<TaskUser>` — the
+    /// assignee pool of a list (DESIGN §9.7). `None` ⇒ the shim
+    /// inherits the trait default (empty: no one to assign to).
+    /// Appended at the end to keep bundled plugins binary-compatible.
+    pub list_task_list_members: Option<VtableMethodFn>,
+    /// `current_user() -> Option<TaskUser>` — the connected account's
+    /// own identity ("me"). `None` ⇒ the shim inherits the default
+    /// (`None`).
+    pub current_user: Option<VtableMethodFn>,
 }
 
 impl TasksVtable {
@@ -78,6 +87,8 @@ impl TasksVtable {
             create_task_list: None,
             delete_task_list: None,
             get_tasks_delta: None,
+            list_task_list_members: None,
+            current_user: None,
         }
     }
 

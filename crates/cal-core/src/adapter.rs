@@ -14,7 +14,7 @@ use crate::error::{Error, Result};
 use crate::reminder::SoundConfig;
 use crate::types::{
     Calendar, Contact, ContactList, ContactPhoto, DateRange, Event, FreeBusy, NewContact, NewEvent,
-    NewTask, Section, Task, TaskList,
+    NewTask, Section, Task, TaskList, TaskUser,
 };
 
 /// Stable identifier for the adapter source (e.g. "google", "caldav",
@@ -225,6 +225,24 @@ pub trait TasksFeature: Adapter {
         Err(Error::Unsupported(
             "get_tasks_delta is not supported on this adapter".into(),
         ))
+    }
+
+    /// Enumerate the users who can be ASSIGNED a task in `list_id` — the
+    /// list/project's collaborator pool (Vikunja `projectusers`, Todoist
+    /// `collaborators`), NOT the global contacts. Feeds the assignee
+    /// picker (§9.7). Default empty: backends without shared lists /
+    /// assignment inherit "no one to assign to".
+    async fn list_task_list_members(&self, _list_id: &str) -> Result<Vec<TaskUser>> {
+        Ok(vec![])
+    }
+
+    /// The identity of the connected account itself ("me"), used to tell
+    /// "assigned to me" from "assigned to someone else". Fetched once at
+    /// connect time and stored on the account. Default `None`: the local
+    /// adapter and any provider without a user concept have no remote
+    /// identity.
+    async fn current_user(&self) -> Result<Option<TaskUser>> {
+        Ok(None)
     }
 }
 

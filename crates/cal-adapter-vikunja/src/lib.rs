@@ -33,7 +33,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use cal_core::{
     Adapter, AuthToken, Capability, Credentials as CoreCredentials, Error as CoreError, NewTask,
-    Result as CoreResult, Section, Task, TaskList, TasksFeature,
+    Result as CoreResult, Section, Task, TaskList, TaskUser, TasksFeature,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -218,6 +218,18 @@ impl TasksFeature for VikunjaAdapter {
             .map_err(to_core_error)?;
         *self.task_lists_cache.lock().await = None;
         Ok(())
+    }
+
+    async fn list_task_list_members(&self, list_id: &str) -> CoreResult<Vec<TaskUser>> {
+        tasks::list_task_list_members(&self.client, list_id)
+            .await
+            .map_err(to_core_error)
+    }
+
+    async fn current_user(&self) -> CoreResult<Option<TaskUser>> {
+        tasks::current_user(&self.client)
+            .await
+            .map_err(to_core_error)
     }
 }
 

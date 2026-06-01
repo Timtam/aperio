@@ -67,6 +67,7 @@ fn event(id: &str, start_h: u32, end_h: u32) -> Event {
 
 fn task(id: &str) -> Task {
     Task {
+        assignees: Vec::new(),
         id: id.into(),
         list_id: LIST.into(),
         title: format!("Task {id}"),

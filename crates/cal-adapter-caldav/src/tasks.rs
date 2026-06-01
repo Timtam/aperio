@@ -331,6 +331,7 @@ pub async fn create_task(
     let etag = expect_write(&response)?;
     let now = Utc::now();
     Ok(Task {
+        assignees: Vec::new(),
         id: uid,
         list_id: list_url.to_string(),
         title: new.title,
@@ -457,6 +458,7 @@ fn build_vtodo_body(uid: &str, task: &NewTask, completed_at: Option<DateTime<Utc
 
 fn build_vtodo_from_task(task: &Task) -> String {
     let new = NewTask {
+        assignees: Vec::new(),
         title: task.title.clone(),
         description: task.description.clone(),
         status: task.status,
@@ -593,6 +595,7 @@ fn map_todo(todo: &Todo, list_id: &str, href: Option<&str>) -> Option<Task> {
         .unwrap_or(created_at);
 
     Some(Task {
+        assignees: Vec::new(),
         id: uid,
         list_id: list_id.to_string(),
         title,
@@ -779,6 +782,7 @@ mod tests {
 
     fn sample_new_task() -> NewTask {
         NewTask {
+            assignees: Vec::new(),
             title: "Buy milk".into(),
             description: None,
             status: TaskStatus::Open,
@@ -889,6 +893,7 @@ END:VCALENDAR</c:calendar-data>
         // DATE-TIME and Apple's CalDAV server silently drops the
         // property when it persists the VTODO.
         let new = NewTask {
+            assignees: Vec::new(),
             title: "Pay bill".into(),
             description: None,
             status: TaskStatus::Open,
@@ -921,6 +926,7 @@ END:VCALENDAR</c:calendar-data>
         // specific time of day, DUE is a regular UTC DATE-TIME (no
         // VALUE parameter, RFC 5545 default).
         let new = NewTask {
+            assignees: Vec::new(),
             title: "Status call".into(),
             description: None,
             status: TaskStatus::Open,

@@ -20,5 +20,5 @@ pub use types::{
     Calendar, Contact, ContactAddress, ContactList, ContactPhoto, DateRange, Event,
     EventRecurrence, FreeBusy, FreeBusySlot, GroupMember, NewContact, NewEvent, NewTask,
     RecurrenceEnd, RecurrenceFrequency, Section, Task, TaskList, TaskPriority, TaskRecurrence,
-    TaskStatus, Weekday,
+    TaskStatus, TaskUser, Weekday,
 };

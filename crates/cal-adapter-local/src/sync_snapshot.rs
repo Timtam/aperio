@@ -376,6 +376,7 @@ mod tests {
     fn fake_task(id: &str, list_id: &str) -> Task {
         let now = Utc.with_ymd_and_hms(2026, 6, 1, 12, 0, 0).unwrap();
         Task {
+            assignees: Vec::new(),
             id: id.into(),
             list_id: list_id.into(),
             title: "test task".into(),

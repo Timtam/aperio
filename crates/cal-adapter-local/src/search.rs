@@ -294,6 +294,7 @@ mod tests {
 
     fn make_task(title: &str) -> NewTask {
         NewTask {
+            assignees: Vec::new(),
             title: title.into(),
             description: None,
             status: TaskStatus::Open,

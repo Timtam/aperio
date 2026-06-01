@@ -191,6 +191,7 @@ impl LocalAdapter {
         }
 
         let new = NewTask {
+            assignees: Vec::new(),
             title: template.title.clone(),
             description: template.description.clone(),
             status: TaskStatus::Open,
@@ -260,6 +261,7 @@ impl LocalAdapter {
             .map_err(map_sql_err)?;
 
         Ok(Task {
+            assignees: Vec::new(),
             id,
             list_id: list_id.to_string(),
             title: task.title,
@@ -552,6 +554,7 @@ impl TasksFeature for LocalAdapter {
             .map_err(map_sql_err)?;
 
         Ok(Task {
+            assignees: Vec::new(),
             id,
             list_id: list_id.to_string(),
             title: task.title,
@@ -893,6 +896,7 @@ pub(crate) fn row_to_task(row: &rusqlite::Row<'_>) -> cal_core::Result<Task> {
     let section_id = opt_text(row, 19)?;
 
     Ok(Task {
+        assignees: Vec::new(),
         id,
         list_id,
         title,
@@ -931,6 +935,7 @@ mod tests {
 
     fn mk_task(title: &str) -> NewTask {
         NewTask {
+            assignees: Vec::new(),
             title: title.into(),
             description: None,
             status: TaskStatus::Open,

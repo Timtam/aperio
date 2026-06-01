@@ -674,6 +674,7 @@ pub async fn update_task(
         // BEFORE delete so a half-failed move never leaves the
         // user with nothing.
         let new_payload = NewTask {
+            assignees: Vec::new(),
             title: task.title.clone(),
             description: task.description.clone(),
             status: task.status,

@@ -688,6 +688,7 @@ pub fn to_task(item: ParsedTask, list_id: &str) -> EwsResult<Task> {
     };
 
     Ok(Task {
+        assignees: Vec::new(),
         id,
         list_id: list_id.to_string(),
         title: item.subject,
@@ -985,6 +986,7 @@ fn build_task_from_new(
 ) -> Task {
     let now = Utc::now();
     Task {
+        assignees: Vec::new(),
         id: encode_task_id(item_id, change_key.as_deref()),
         list_id: list_id.to_string(),
         title: new.title.clone(),
@@ -1307,6 +1309,7 @@ mod tests {
 
     fn sample_new_task() -> NewTask {
         NewTask {
+            assignees: Vec::new(),
             title: "Submit invoice".into(),
             description: Some("Q2 client work".into()),
             status: TaskStatus::Open,
@@ -1349,6 +1352,7 @@ mod tests {
     #[test]
     fn update_task_xml_deletes_cleared_fields() {
         let task = Task {
+            assignees: Vec::new(),
             id: "TID|TCK".into(),
             list_id: "LIST|LCK".into(),
             title: "Title only".into(),
@@ -1492,6 +1496,7 @@ mod tests {
             .create_async()
             .await;
         let starting = Task {
+            assignees: Vec::new(),
             id: "TID|TCK-V1".into(),
             list_id: "LIST|LCK".into(),
             title: "Updated".into(),

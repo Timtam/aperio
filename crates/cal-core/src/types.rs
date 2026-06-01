@@ -142,6 +142,20 @@ pub struct Section {
     pub order: u32,
 }
 
+/// A user in the task domain — used as a task assignee, as a member of a
+/// task list's collaborator pool, and as the connected account's own
+/// identity ("me"). `id` is the provider-native user id (Vikunja numeric
+/// id stringified, Todoist user id, …); `name` is a display label;
+/// `email` is best-effort (some providers omit it from the user listing).
+/// See DESIGN §9.7 "Aufgaben-Zuweisung an andere Nutzer".
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskUser {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub email: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Task {
     pub id: String,
@@ -181,6 +195,12 @@ pub struct Task {
     pub color_label: Option<ColorLabelId>,
     pub reminders: Vec<Reminder>,
     pub sound: Option<SoundConfig>,
+    /// Users this task is assigned to. Empty ⇒ unassigned. Multi-valued;
+    /// single-assignee backends (Todoist) take the first and warn on the
+    /// rest. Read/written through the adapter's normal task get/create/
+    /// update — rides serde, no separate FFI surface. See DESIGN §9.7.
+    #[serde(default)]
+    pub assignees: Vec<TaskUser>,
 
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -206,6 +226,10 @@ pub struct NewTask {
     pub color_label: Option<ColorLabelId>,
     pub reminders: Vec<Reminder>,
     pub sound: Option<SoundConfig>,
+    /// Assignees to set on the new task (see `Task::assignees`). Empty ⇒
+    /// unassigned. Adapters clamp to their capability.
+    #[serde(default)]
+    pub assignees: Vec<TaskUser>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

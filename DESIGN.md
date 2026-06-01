@@ -1035,6 +1035,35 @@ Aperio hält zwei unabhängige Datums-Slots pro Aufgabe: `scheduled_date` (+ opt
 | **Vikunja / Todoist** | jeweiliges Schema | TBD beim Implementierungs-Commit; vermutlich analog Google (ein einziges Datums-Feld → `scheduled_date`). |
 | **Lokal** | direkt aus / in DB | Spalten 1:1; keine Übersetzung nötig. |
 
+#### Aufgaben-Zuweisung an andere Nutzer (Assignees)
+
+Über die reine „für mich einplanen"-Sicht hinaus sollen Aufgaben **anderen Nutzern derselben Provider-Instanz zugewiesen** werden können (zuweisen, für andere einplanen). Was die Anbieter dabei können, ist sehr unterschiedlich:
+
+| Provider | Zuweisen an andere | Feld / Endpoint | Pool (zuweisbar) | Mehrere? |
+|---|---|---|---|---|
+| **Vikunja** | ✅ Ja | `…/tasks/{id}/assignees` (PUT / `bulk` / DELETE / GET), Schlüssel `user_id` | `GET /projects/{id}/projectusers?s=` | Ja |
+| **Todoist** | ✅ Begrenzt | `assignee_id` (nur geteilte Projekte) | `GET /projects/{id}/collaborators` | **Nein, nur 1** |
+| **MS To Do** | ❌ Nein | — (Graph-`todoTask` hat kein Zuweisungsfeld) | — | — |
+| **MS Planner** | ✅ Ja (eigener Adapter) | `assignments` (AAD-GUID), Consent `Group.ReadWrite.All` | `GET /groups/{id}/members` | Ja |
+
+**Wichtig:** Microsoft **To Do** kann Zuweisung über die API nicht — das kollaborative Microsoft-Pendant ist **Planner** (eigener, schwergewichtiger Adapter; hier zunächst _out of scope_).
+
+**Datenmodell.** Ein einheitlicher, mehrwertiger Typ:
+
+- `TaskUser { id, name, email: Option }` — `id` ist die provider-native User-ID, `name` der Anzeigename. Wird für `assignees`, den Mitglieder-Pool **und** die Eigen-Identität verwendet.
+- `assignees: Vec<TaskUser>` an `Task` **und** `NewTask`, mit `#[serde(default)]` → reist über die bestehende serde-Grenze der Plugin-FFI mit, ohne vtable-Änderung fürs Lesen/Schreiben.
+- **Adapter clampt:** Mehrwert-Provider (Vikunja) setzen die ganze Liste; Einzelwert-Provider (Todoist) nehmen `assignees[0]` und **warnen** bei >1.
+
+**Mitglieder-Pool.** Zuweisbar sind die Mitglieder der jeweiligen **Liste / des Projekts** (Vikunja `projectusers`, Todoist `collaborators`) — _nicht_ die globalen Kontakte. Dafür eine neue, optionale `TasksFeature`-Methode `list_task_list_members(list_id) -> Vec<TaskUser>` (default leer). Sie speist den Personen-Picker, auf Anfrage geladen und pro Liste gecacht.
+
+**Eigen-Identität („ich").** Um „mir / anderen / niemandem zugewiesen" zu unterscheiden, liefert jeder Adapter `current_user() -> Option<TaskUser>` (Vikunja `GET /user`); die Identität wird beim Verbinden einmal geholt und am Account abgelegt.
+
+**Capability.** Pro Adapter im Plugin-Manifest deklariert (`task_assignment: none | single | multiple`); das UI blendet den Picker aus, wo nicht unterstützt (lokal, MS To Do), und schaltet bei Todoist auf Einfach-Auswahl.
+
+**UI.** Im Aufgaben-Dialog ein „Zugewiesen an"-Picker (Suche über die Listen-Mitglieder, Multi-Chips, capability-gated). „Für andere einplanen" ist damit Datum **+** Assignee im selben Dialog — beides sind Aufgaben-Felder. In der Aufgaben-Ansicht ein Assignee-Badge je Zeile plus Filter „mir / anderen / niemandem".
+
+**Phasen.** (0) Fundament: Modell + Trait-Methoden + FFI-vtable für `list_task_list_members`/`current_user` + Account-Identität. (1) Vikunja end-to-end. (2) UI (Picker + Badge). (3) Todoist (single, geteilte Projekte). _Out of scope:_ MS To Do/Planner; Cross-Account-Zuweisung (Task in Konto A an Nutzer aus Konto B).
+
 ### 9.8 Separate Aufgaben-Ansicht (`Ctrl+6`)
 
 - Gruppierung nach: Fälligkeitsdatum / Priorität / Status / Aufgabenliste

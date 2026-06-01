@@ -10,7 +10,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use cal_core::adapter::{Adapter, AuthToken, Capability, ChangeSet, Credentials, TasksFeature};
 use cal_core::error::{Error, Result};
-use cal_core::types::{NewTask, Section, Task, TaskList};
+use cal_core::types::{NewTask, Section, Task, TaskList, TaskUser};
 use serde::Serialize;
 use tracing::warn;
 
@@ -46,6 +46,8 @@ struct VtableSnapshot {
     create_task_list: Option<crate::vtables::VtableMethodFn>,
     delete_task_list: Option<crate::vtables::VtableMethodFn>,
     get_tasks_delta: Option<crate::vtables::VtableMethodFn>,
+    list_task_list_members: Option<crate::vtables::VtableMethodFn>,
+    current_user: Option<crate::vtables::VtableMethodFn>,
 }
 
 impl FfiTasksAdapter {
@@ -93,6 +95,8 @@ impl FfiTasksAdapter {
             create_task_list: vtable_ref.create_task_list,
             get_tasks_delta: vtable_ref.get_tasks_delta,
             delete_task_list: vtable_ref.delete_task_list,
+            list_task_list_members: vtable_ref.list_task_list_members,
+            current_user: vtable_ref.current_user,
         };
         let capabilities = super::manifest_capabilities(&plugin.manifest.capabilities);
         let handle_addr = instance.handle() as usize;
@@ -268,5 +272,29 @@ impl TasksFeature for FfiTasksAdapter {
             since_token,
         };
         call_then_decode(self.vtable.get_tasks_delta, self.handle_addr, &args).await
+    }
+
+    async fn list_task_list_members(&self, list_id: &str) -> Result<Vec<TaskUser>> {
+        // Honour the trait's "no members" default when the plugin
+        // doesn't fill the slot, rather than surfacing Unsupported.
+        if self.vtable.list_task_list_members.is_none() {
+            return Ok(Vec::new());
+        }
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
+        call_then_decode(
+            self.vtable.list_task_list_members,
+            self.handle_addr,
+            &list_id,
+        )
+        .await
+    }
+
+    async fn current_user(&self) -> Result<Option<TaskUser>> {
+        // Null slot ⇒ the trait default (`None`): no remote identity.
+        if self.vtable.current_user.is_none() {
+            return Ok(None);
+        }
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
+        call_then_decode(self.vtable.current_user, self.handle_addr, &()).await
     }
 }

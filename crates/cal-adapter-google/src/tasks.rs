@@ -280,6 +280,7 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
         .unwrap_or_else(Utc::now);
 
     Task {
+        assignees: Vec::new(),
         id: entry.id,
         list_id: list_id.to_string(),
         title: entry.title.unwrap_or_default(),
@@ -544,6 +545,7 @@ mod tests {
 
     fn sample_new_task() -> NewTask {
         NewTask {
+            assignees: Vec::new(),
             title: "Submit invoice".into(),
             description: Some("Q2 client".into()),
             status: TaskStatus::Open,

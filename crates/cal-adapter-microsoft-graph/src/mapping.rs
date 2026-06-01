@@ -818,6 +818,7 @@ pub fn map_task(entry: TodoTaskEntry, list_id: &str) -> GraphResult<Task> {
     let composite_id = format!("{}|{}", list_id, entry.id);
 
     Ok(Task {
+        assignees: Vec::new(),
         id: composite_id,
         list_id: list_id.to_string(),
         title: entry.title,
@@ -1514,6 +1515,7 @@ mod tests {
     #[test]
     fn new_task_to_body_serialises_required_fields() {
         let new = NewTask {
+            assignees: Vec::new(),
             title: "Inbox zero".into(),
             description: Some("clear out".into()),
             status: TaskStatus::Open,
@@ -1547,6 +1549,7 @@ mod tests {
     fn task_to_body_emits_due_date_and_recurrence() {
         use cal_core::{RecurrenceEnd, RecurrenceFrequency, TaskRecurrence, Weekday};
         let task = Task {
+            assignees: Vec::new(),
             id: "L|T".into(),
             list_id: "L".into(),
             title: "Standup".into(),

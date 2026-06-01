@@ -371,6 +371,7 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
     let completed_at = entry.completed_at.as_deref().and_then(parse_rfc3339);
 
     Task {
+        assignees: Vec::new(),
         id: entry.id,
         list_id: list_id.to_string(),
         title: entry.content.unwrap_or_default(),
@@ -821,6 +822,7 @@ mod tests {
 
     fn sample_new_task() -> NewTask {
         NewTask {
+            assignees: Vec::new(),
             title: "Buy bread".into(),
             description: Some("Bakery".into()),
             status: TaskStatus::Open,
@@ -1004,6 +1006,7 @@ mod tests {
             .await;
         let client = fixture_client(&server.url());
         let task = Task {
+            assignees: Vec::new(),
             id: "T1".into(),
             list_id: "P1".into(),
             title: "Buy bread".into(),
@@ -1049,6 +1052,7 @@ mod tests {
             .await;
         let client = fixture_client(&server.url());
         let task = Task {
+            assignees: Vec::new(),
             id: "T1".into(),
             list_id: "P1".into(),
             title: "Buy bread".into(),

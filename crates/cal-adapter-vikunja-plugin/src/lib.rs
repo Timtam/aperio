@@ -193,6 +193,28 @@ unsafe extern "C" fn ffi_delete_task_list(
     )
 }
 
+unsafe extern "C" fn ffi_list_task_list_members(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let list_id: String = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch(h, move |p| async move {
+        p.list_task_list_members(&list_id).await
+    })
+}
+
+unsafe extern "C" fn ffi_current_user(
+    h: *mut c_void,
+    _a: *const u8,
+    _l: usize,
+) -> PluginCallResult {
+    dispatch(h, move |p| async move { p.current_user().await })
+}
+
 pub static TASKS_VTABLE: TasksVtable = TasksVtable {
     authenticate: Some(ffi_authenticate),
     capabilities: Some(ffi_capabilities),
@@ -205,6 +227,8 @@ pub static TASKS_VTABLE: TasksVtable = TasksVtable {
     list_sections: Some(ffi_list_sections),
     create_task_list: Some(ffi_create_task_list),
     delete_task_list: Some(ffi_delete_task_list),
+    list_task_list_members: Some(ffi_list_task_list_members),
+    current_user: Some(ffi_current_user),
     ..TasksVtable::empty()
 };
 

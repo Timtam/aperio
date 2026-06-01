@@ -1282,6 +1282,7 @@ mod tests {
         reminders: Vec<Reminder>,
     ) -> Task {
         Task {
+            assignees: Vec::new(),
             id: "task-1".into(),
             list_id: "list-1".into(),
             title: "Write report".into(),

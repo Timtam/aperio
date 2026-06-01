@@ -56,7 +56,7 @@
 //!   - Labels (the field is there in `Task`, but Aperio's
 //!     ColorLabel system is local-only at the moment).
 
-use cal_core::{NewTask, Section, Task, TaskList, TaskPriority, TaskStatus};
+use cal_core::{NewTask, Section, Task, TaskList, TaskPriority, TaskStatus, TaskUser};
 use chrono::{DateTime, Datelike, NaiveDate, NaiveTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -176,9 +176,32 @@ pub async fn list_sections(client: &VikunjaClient, list_id: &str) -> VikunjaResu
         .collect())
 }
 
+/// Replace a task's assignee set via `POST /tasks/{id}/assignees/bulk`.
+/// Vikunja's bulk endpoint takes the FULL desired list and syncs to it
+/// (adds missing, drops extras), so an empty list clears all assignees.
+/// `TaskUser.id` is the stringified Vikunja numeric user id; entries
+/// that don't parse are skipped.
+async fn set_assignees(
+    client: &VikunjaClient,
+    task_id: i64,
+    assignees: &[TaskUser],
+) -> VikunjaResult<()> {
+    let ids: Vec<serde_json::Value> = assignees
+        .iter()
+        .filter_map(|a| a.id.parse::<i64>().ok())
+        .map(|id| serde_json::json!({ "id": id }))
+        .collect();
+    let body = serde_json::json!({ "assignees": ids });
+    let _: serde_json::Value = client
+        .post_json(&format!("/tasks/{task_id}/assignees/bulk"), &body)
+        .await?;
+    Ok(())
+}
+
 /// `PUT /projects/{id}/tasks`. Vikunja returns the freshly-created
 /// task in the response, so we can map it back into Aperio's `Task`
-/// directly without a follow-up GET.
+/// directly without a follow-up GET. Assignees are applied afterwards
+/// (separate endpoint) since the create body doesn't carry them.
 pub async fn create_task(
     client: &VikunjaClient,
     list_id: &str,
@@ -188,7 +211,15 @@ pub async fn create_task(
     let path = format!("/projects/{project_id}/tasks");
     let body = new_task_to_body(&task);
     let entry: TaskEntry = client.put_json(&path, &body).await?;
-    Ok(map_task(entry, list_id))
+    let new_id = entry.id;
+    let mut mapped = map_task(entry, list_id);
+    // A fresh task has no assignees, so skip the round-trip unless the
+    // caller asked for some.
+    if !task.assignees.is_empty() {
+        set_assignees(client, new_id, &task.assignees).await?;
+        mapped.assignees = task.assignees;
+    }
+    Ok(mapped)
 }
 
 /// `POST /tasks/{id}`. Vikunja accepts a partial body and returns
@@ -199,7 +230,12 @@ pub async fn update_task(client: &VikunjaClient, task: &Task) -> VikunjaResult<T
     let path = format!("/tasks/{task_id}");
     let body = task_to_body(task);
     let entry: TaskEntry = client.post_json(&path, &body).await?;
-    Ok(map_task(entry, &task.list_id))
+    // Sync the assignee set on every update so the picker can both add
+    // and clear assignees (the bulk endpoint takes the full list).
+    set_assignees(client, task_id, &task.assignees).await?;
+    let mut mapped = map_task(entry, &task.list_id);
+    mapped.assignees = task.assignees.clone();
+    Ok(mapped)
 }
 
 /// `DELETE /tasks/{id}`.
@@ -250,6 +286,32 @@ pub async fn delete_task_list(client: &VikunjaClient, list_id: &str) -> VikunjaR
     client.delete(&path).await
 }
 
+/// `GET /projects/{id}/projectusers` — the users with access to the
+/// project, i.e. the valid assignee pool (DESIGN §9.7). Degrades to an
+/// empty list on servers that don't expose the endpoint (older Vikunja)
+/// so the picker shows no candidates rather than erroring.
+pub async fn list_task_list_members(
+    client: &VikunjaClient,
+    list_id: &str,
+) -> VikunjaResult<Vec<TaskUser>> {
+    let project_id = parse_id(list_id, "task list id")?;
+    let users: Vec<VikunjaUser> = match client
+        .get_json(&format!("/projects/{project_id}/projectusers"))
+        .await
+    {
+        Ok(u) => u,
+        Err(_) => return Ok(Vec::new()),
+    };
+    Ok(users.into_iter().map(map_user).collect())
+}
+
+/// `GET /user` — the authenticated account's own identity ("me"),
+/// used to tell "assigned to me" from "assigned to someone else".
+pub async fn current_user(client: &VikunjaClient) -> VikunjaResult<Option<TaskUser>> {
+    let u: VikunjaUser = client.get_json("/user").await?;
+    Ok(Some(map_user(u)))
+}
+
 // ── JSON wire shapes ───────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
@@ -272,6 +334,35 @@ struct ViewEntry {
     id: i64,
     #[serde(default)]
     view_kind: Option<String>,
+}
+
+/// A Vikunja user, as returned inline on a task's `assignees`, by
+/// `GET /projects/{id}/projectusers`, and by `GET /user`.
+#[derive(Debug, Deserialize)]
+struct VikunjaUser {
+    id: i64,
+    #[serde(default)]
+    username: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    email: Option<String>,
+}
+
+/// Map a Vikunja user to Aperio's `TaskUser`. `name` is Vikunja's
+/// optional full name; fall back to the username, then a synthetic
+/// label, so the picker always shows something readable.
+fn map_user(u: VikunjaUser) -> TaskUser {
+    let name = u
+        .name
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| u.username.filter(|s| !s.trim().is_empty()))
+        .unwrap_or_else(|| format!("User {}", u.id));
+    TaskUser {
+        id: u.id.to_string(),
+        name,
+        email: u.email.filter(|s| !s.trim().is_empty()),
+    }
 }
 
 /// A kanban bucket → Aperio section.
@@ -329,6 +420,11 @@ struct TaskEntry {
     created: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     updated: Option<String>,
+    /// Assignees of the task. Read-only on this struct: Vikunja sets
+    /// them via the dedicated `…/assignees` endpoints, so we never send
+    /// them in the create/update body (`skip_serializing`).
+    #[serde(default, skip_serializing)]
+    assignees: Option<Vec<VikunjaUser>>,
 }
 
 // ── Mappers ────────────────────────────────────────────────────────────
@@ -389,6 +485,12 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
         .unwrap_or(created_at);
 
     Task {
+        assignees: entry
+            .assignees
+            .unwrap_or_default()
+            .into_iter()
+            .map(map_user)
+            .collect(),
         id: entry.id.to_string(),
         list_id: list_id.to_string(),
         title: entry.title.unwrap_or_default(),
@@ -447,6 +549,7 @@ fn new_task_to_body(new: &NewTask) -> TaskEntry {
         hex_color: None,
         created: None,
         updated: None,
+        assignees: None,
     }
 }
 
@@ -482,6 +585,7 @@ fn task_to_body(task: &Task) -> TaskEntry {
         hex_color: None,
         created: None,
         updated: None,
+        assignees: None,
     }
 }
 
@@ -666,6 +770,7 @@ mod tests {
     #[test]
     fn map_task_pulls_dates_into_separate_slots() {
         let entry = TaskEntry {
+            assignees: None,
             id: 99,
             title: Some("Submit invoice".into()),
             description: Some("Q2".into()),
@@ -707,6 +812,7 @@ mod tests {
     #[test]
     fn map_task_marks_completed_when_done() {
         let entry = TaskEntry {
+            assignees: None,
             id: 1,
             title: Some("Done".into()),
             description: None,
@@ -732,6 +838,7 @@ mod tests {
     #[test]
     fn map_task_drops_sentinel_dates() {
         let entry = TaskEntry {
+            assignees: None,
             id: 1,
             title: Some("No dates".into()),
             description: None,
@@ -755,6 +862,7 @@ mod tests {
 
     fn sample_new_task() -> NewTask {
         NewTask {
+            assignees: Vec::new(),
             title: "Buy bread".into(),
             description: Some("Bakery".into()),
             status: TaskStatus::Open,

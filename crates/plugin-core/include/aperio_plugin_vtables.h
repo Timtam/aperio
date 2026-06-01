@@ -127,6 +127,12 @@ typedef struct AperioTasksVtable {
     /* get_tasks_delta(list_id, since_token) -> ChangeSet<Task>
        (CACHE-4). NULL ⇒ host falls back to a full get_tasks. */
     AperioVtableMethodFn get_tasks_delta;
+    /* list_task_list_members(list_id) -> Vec<TaskUser> — assignee pool
+       of a list (DESIGN §9.7). NULL ⇒ empty (no one to assign to). */
+    AperioVtableMethodFn list_task_list_members;
+    /* current_user() -> Option<TaskUser> — the account's own identity.
+       NULL ⇒ None (no remote identity, e.g. local adapter). */
+    AperioVtableMethodFn current_user;
 } AperioTasksVtable;
 
 /*
