@@ -50,13 +50,14 @@
 
 use std::sync::Arc;
 
-use chrono::{DateTime, Duration as ChronoDuration, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, Timelike, Utc};
 use serde::Serialize;
 use sync_core::{DeviceCursor, DeviceId, DeviceRecord, MetaJson, SyncAdapter, SyncResult};
 use tracing::{debug, info, warn};
 
 use crate::db::SharedConn;
 use crate::event_log::snapshot::{SnapshotApplyOutcome, SnapshotBuilder};
+use crate::event_log::EventLogWriter;
 use crate::user_prefs::UserPrefsRepo;
 
 /// `user_prefs` keys the compactor reads + writes.
@@ -108,6 +109,11 @@ pub struct Compactor {
     builder: Arc<SnapshotBuilder>,
     local_device_id: DeviceId,
     app_version: String,
+    /// Writer handle, used to roll the local session file over before
+    /// snapshotting (see `compact_now`). `None` in tests / headless
+    /// paths without a writer — compaction then runs as before, just
+    /// without the redundant-push optimisation.
+    writer: Option<Arc<EventLogWriter>>,
 }
 
 impl Compactor {
@@ -116,12 +122,14 @@ impl Compactor {
         builder: Arc<SnapshotBuilder>,
         local_device_id: DeviceId,
         app_version: impl Into<String>,
+        writer: Option<Arc<EventLogWriter>>,
     ) -> Self {
         Self {
             db,
             builder,
             local_device_id,
             app_version: app_version.into(),
+            writer,
         }
     }
 
@@ -176,10 +184,42 @@ impl Compactor {
     /// algorithm. Returns a [`CompactionReport`] with the
     /// observable side-effects.
     pub async fn compact_now(&self, adapter: &dyn SyncAdapter) -> SyncResult<CompactionReport> {
-        // 1. Build + push the snapshot.
-        let snapshot = self.builder.build()?;
-        let snapshot_ts = snapshot.metadata.snapshot_timestamp;
+        // Roll the writer over to a fresh session file BEFORE building the
+        // snapshot. Two payoffs:
+        //   - the snapshot (built from SQLite right after the old file
+        //     closes) captures every event that file holds, so the file is
+        //     redundant and we delete it locally instead of re-uploading
+        //     already-snapshotted events on the next push;
+        //   - post-compaction edits land in the NEW file, stamped `cut`,
+        //     which is one second NEWER than the snapshot (`cut - 1s`). A
+        //     device that consumes the snapshot advances its cursor to the
+        //     snapshot timestamp and only fetches newer logs — so it still
+        //     picks up the new file instead of skipping it as
+        //     "older than the snapshot".
+        // `cut` is whole-second because log filenames are second-granular.
+        let cut = Utc::now().with_nanosecond(0).unwrap_or_else(Utc::now);
+        let snapshot_ts = cut - ChronoDuration::seconds(1);
+        let rotated_old_file = match &self.writer {
+            Some(writer) => writer.rotate(cut).await,
+            None => None,
+        };
+
+        // 1. Build + push the snapshot, stamped just before the new file.
+        let snapshot = self.builder.build_at(snapshot_ts)?;
         adapter.push_snapshot(&snapshot).await?;
+
+        // The snapshot that covers it is now durable on the remote, so
+        // drop the rotated-away pre-compaction file locally — it must not
+        // be re-uploaded on the next push.
+        if let Some(old) = &rotated_old_file {
+            if let Err(err) = tokio::fs::remove_file(old).await {
+                debug!(
+                    path = %old.display(),
+                    ?err,
+                    "couldn't remove rotated pre-compaction log",
+                );
+            }
+        }
 
         let mut report = CompactionReport::default();
         // Surface the snapshot row counters via a fake "apply" of
@@ -421,6 +461,7 @@ mod tests {
             builder,
             DeviceId::from_string("dev-this".into()),
             "1.0.0-test",
+            None,
         );
         (dir, db, compactor)
     }
@@ -529,6 +570,84 @@ mod tests {
         assert_eq!(
             prefs.get(PREF_BYTES_SINCE_SNAPSHOT).unwrap().as_deref(),
             Some("0"),
+        );
+    }
+
+    #[tokio::test]
+    async fn compact_now_rotates_writer_and_drops_the_pre_compaction_log() {
+        let dir = TempDir::new().unwrap();
+        let db = DbHandle::open(dir.path().join("test.sqlite")).unwrap();
+        let local = Arc::new(LocalAdapter::new(db.shared()));
+        let builder = Arc::new(SnapshotBuilder::new(db.shared(), local, "1.0.0-test"));
+        let device = DeviceId::from_string("dev-rot".into());
+
+        // A writer staging into <dir>/sync/log/pending/. Its session
+        // started a minute ago, so its file is clearly "pre-compaction".
+        let session_at = Utc::now() - ChronoDuration::seconds(60);
+        let writer = EventLogWriter::spawn_with_kick(
+            dir.path().to_path_buf(),
+            device.clone(),
+            None,
+            session_at,
+        );
+        writer.append(sync_core::SyncEvent::EventDeleted(sync_core::IdPayload {
+            id: "x".into(),
+        }));
+
+        let pending = dir.path().join("sync").join("log").join("pending");
+        let pre_path = pending.join(LogFileName::new(session_at, device.clone()).to_filename());
+        for _ in 0..50 {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            if pre_path.exists() {
+                break;
+            }
+        }
+        assert!(
+            pre_path.exists(),
+            "pre-compaction session file should exist"
+        );
+
+        let compactor = Compactor::new(
+            db.shared(),
+            builder,
+            device.clone(),
+            "1.0.0-test",
+            Some(Arc::clone(&writer)),
+        );
+        let adapter = FakeAdapter::new();
+        compactor.compact_now(&adapter).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        // The pre-compaction log is gone — its mutations are in the
+        // snapshot, so re-uploading them would be redundant.
+        assert!(
+            !pre_path.exists(),
+            "pre-compaction log should be deleted after compaction",
+        );
+
+        // The fresh session file sorts strictly AFTER the snapshot, so a
+        // device that consumes the snapshot (cursor → snapshot ts) still
+        // fetches it instead of skipping it as "older than the snapshot".
+        let snap_ts = adapter
+            .snapshot
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .metadata
+            .snapshot_timestamp;
+        let new_file = std::fs::read_dir(&pending)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .find(|e| e.path() != pre_path)
+            .expect("a fresh post-compaction session file");
+        let parsed = LogFileName::from_filename(&new_file.file_name().to_string_lossy())
+            .expect("filename parseable");
+        assert!(
+            parsed.timestamp > snap_ts,
+            "new session file ({}) must sort after the snapshot ({})",
+            parsed.timestamp,
+            snap_ts,
         );
     }
 }

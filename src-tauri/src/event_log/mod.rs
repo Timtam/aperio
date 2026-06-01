@@ -59,18 +59,37 @@ pub use scheduler::{
 };
 pub use snapshot::{AperioSnapshotBody, SnapshotApplyOutcome, SnapshotBuilder};
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use sync_core::{DeviceId, EventEnvelope, LogFileName, SyncEvent, DEVICE_ID_PREF_KEY};
 use tokio::fs::{File, OpenOptions};
 use tokio::io::AsyncWriteExt;
-use tokio::sync::{mpsc, Notify};
+use tokio::sync::{mpsc, oneshot, Notify};
 use tracing::{debug, warn};
 
 use crate::db::SharedConn;
 use crate::user_prefs::UserPrefsRepo;
+
+/// A message on the drain queue. Either an event to append or a
+/// request to roll over to a new session file. Routing the rotation
+/// through the same ordered queue as the events guarantees a clean
+/// cut: every event enqueued before a `Rotate` lands in the old file,
+/// everything after in the new one — no event straddles the boundary.
+enum DrainMsg {
+    /// Boxed because `EventEnvelope` dwarfs the `Rotate` variant; an
+    /// unboxed enum would pad every queued event to the larger size.
+    Event(Box<EventEnvelope>),
+    Rotate {
+        new_session_at: DateTime<Utc>,
+        /// Replies with the path of the now-closed pre-rotation file
+        /// so the caller can delete it once the snapshot covering it
+        /// has been pushed. `None` when no rotation happened (drain
+        /// task gone / new file couldn't open) → caller deletes nothing.
+        ack: oneshot::Sender<Option<PathBuf>>,
+    },
+}
 
 /// Handle to the per-process event-log writer.
 ///
@@ -83,7 +102,7 @@ pub struct EventLogWriter {
     /// Sender half of the drain queue. `UnboundedSender::send` is
     /// effectively allocation-only — appending a mutation event
     /// is constant time and never awaits.
-    sender: mpsc::UnboundedSender<EventEnvelope>,
+    sender: mpsc::UnboundedSender<DrainMsg>,
     /// Optional kick handle the [`SyncScheduler`] hands us so we can
     /// ping it after every append. `Option<_>` because tests + the
     /// fallback "no scheduler yet" startup path skip it; in
@@ -188,7 +207,7 @@ impl EventLogWriter {
     /// we don't surface the error to the user.
     pub fn append(&self, event: SyncEvent) {
         let envelope = EventEnvelope::new(self.device_id.clone(), event);
-        if let Err(err) = self.sender.send(envelope) {
+        if let Err(err) = self.sender.send(DrainMsg::Event(Box::new(envelope))) {
             warn!(?err, "event-log writer channel closed; event lost");
         }
         // Tell the scheduler something happened. Notify is a one-shot
@@ -197,6 +216,42 @@ impl EventLogWriter {
         if let Some(kick) = &self.kick {
             kick.notify_one();
         }
+    }
+
+    /// Roll over to a fresh session file stamped `new_session_at`.
+    ///
+    /// Flushes + closes the current session file and opens a new one,
+    /// then returns the path of the now-closed file so the caller can
+    /// delete it. The compactor calls this so a compaction's snapshot
+    /// (which already captures every event in the closed file) makes
+    /// that file redundant — deleting it avoids re-uploading already-
+    /// snapshotted events, and post-compaction edits land in the new
+    /// file whose timestamp is newer than the snapshot (so a device
+    /// that consumed the snapshot still fetches them).
+    ///
+    /// Ordered through the same queue as [`append`](Self::append):
+    /// every event enqueued before this call lands in the OLD file,
+    /// everything after in the new one — nothing straddles the cut.
+    ///
+    /// Returns `None` when no rotation happened (the drain task has
+    /// exited, or the new file couldn't be opened so the writer kept
+    /// the current one) — the caller must then delete nothing.
+    pub async fn rotate(&self, new_session_at: DateTime<Utc>) -> Option<PathBuf> {
+        let (ack, rx) = oneshot::channel();
+        if self
+            .sender
+            .send(DrainMsg::Rotate {
+                new_session_at,
+                ack,
+            })
+            .is_err()
+        {
+            warn!("event-log writer channel closed; rotation skipped");
+            return None;
+        }
+        // `Err` here means the drain task dropped the ack without
+        // replying (it exited mid-rotation) — treat as "no rotation".
+        rx.await.ok().flatten()
     }
 }
 
@@ -207,7 +262,7 @@ async fn drain_loop(
     pending_dir: PathBuf,
     device_id: DeviceId,
     session_at: DateTime<Utc>,
-    mut receiver: mpsc::UnboundedReceiver<EventEnvelope>,
+    mut receiver: mpsc::UnboundedReceiver<DrainMsg>,
 ) {
     if let Err(err) = tokio::fs::create_dir_all(&pending_dir).await {
         warn!(
@@ -218,40 +273,56 @@ async fn drain_loop(
         return;
     }
 
-    // One file per app session. Naming follows
-    // `sync_core::LogFileName` exactly so a sync adapter can pick
-    // it up later without reformatting.
-    let session_name = LogFileName::new(session_at, device_id.clone());
-    let path = pending_dir.join(session_name.to_filename());
-    debug!(
-        path = %path.display(),
-        "event-log writer opening session file",
-    );
-
-    let mut file = match OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .await
-    {
-        Ok(f) => f,
-        Err(err) => {
-            warn!(
-                path = %path.display(),
-                ?err,
-                "failed to open event-log file; sync writes will be lost",
-            );
-            return;
-        }
+    // One open file at a time. Starts as this session's file; a
+    // `Rotate` swaps it for a fresh one (the compactor's redundant-push
+    // fix). Naming follows `sync_core::LogFileName` exactly so a sync
+    // adapter can pick it up without reformatting.
+    let mut path = session_file_path(&pending_dir, &device_id, session_at);
+    debug!(path = %path.display(), "event-log writer opening session file");
+    let Some(mut file) = open_append(&path).await else {
+        return;
     };
 
-    while let Some(envelope) = receiver.recv().await {
-        if let Err(err) = write_one(&mut file, &envelope).await {
-            warn!(
-                event_id = %envelope.id,
-                ?err,
-                "failed to write event to log; dropping it",
-            );
+    while let Some(msg) = receiver.recv().await {
+        match msg {
+            DrainMsg::Event(envelope) => {
+                if let Err(err) = write_one(&mut file, &envelope).await {
+                    warn!(
+                        event_id = %envelope.id,
+                        ?err,
+                        "failed to write event to log; dropping it",
+                    );
+                }
+            }
+            DrainMsg::Rotate {
+                new_session_at,
+                ack,
+            } => {
+                // Flush the closing file so its bytes are durable
+                // before the caller (the compactor) deletes it.
+                if let Err(err) = file.flush().await {
+                    warn!(?err, "flush before session rotation failed");
+                }
+                let new_path = session_file_path(&pending_dir, &device_id, new_session_at);
+                match open_append(&new_path).await {
+                    Some(new_file) => {
+                        let old_path = std::mem::replace(&mut path, new_path);
+                        file = new_file;
+                        debug!(
+                            old = %old_path.display(),
+                            new = %path.display(),
+                            "event-log writer rotated session file",
+                        );
+                        let _ = ack.send(Some(old_path));
+                    }
+                    None => {
+                        // Couldn't open the new file — keep the current
+                        // one so events aren't lost; signal "no rotation"
+                        // so the caller deletes nothing.
+                        let _ = ack.send(None);
+                    }
+                }
+            }
         }
     }
 
@@ -259,6 +330,39 @@ async fn drain_loop(
     // sure the last batch hit disk before we exit.
     if let Err(err) = file.flush().await {
         warn!(?err, "flush on event-log shutdown failed");
+    }
+}
+
+/// `<pending_dir>/<session-ts>_<device>.jsonl` — formatted exactly
+/// like `sync_core::LogFileName` so a sync adapter can pick it up
+/// without reformatting.
+fn session_file_path(
+    pending_dir: &Path,
+    device_id: &DeviceId,
+    session_at: DateTime<Utc>,
+) -> PathBuf {
+    let name = LogFileName::new(session_at, device_id.clone());
+    pending_dir.join(name.to_filename())
+}
+
+/// Open a session file for append, creating it if absent. `None` on
+/// error (logged) — the caller treats that as "writer can't persist".
+async fn open_append(path: &Path) -> Option<File> {
+    match OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .await
+    {
+        Ok(f) => Some(f),
+        Err(err) => {
+            warn!(
+                path = %path.display(),
+                ?err,
+                "failed to open event-log file; sync writes will be lost",
+            );
+            None
+        }
     }
 }
 
@@ -359,6 +463,62 @@ mod tests {
             }
         }
         panic!("no log file created");
+    }
+
+    #[tokio::test]
+    async fn rotate_closes_old_file_opens_new_and_routes_events_cleanly() {
+        use chrono::{TimeZone, Utc};
+        let boot = Utc.with_ymd_and_hms(2026, 6, 1, 8, 0, 0).unwrap();
+        let cut = Utc.with_ymd_and_hms(2026, 6, 1, 9, 0, 0).unwrap();
+        let tmp = TempDir::new().unwrap();
+        let device = DeviceId::from_string("dev-rot".into());
+        let writer =
+            EventLogWriter::spawn_with_kick(tmp.path().to_path_buf(), device.clone(), None, boot);
+
+        // One event before the rotation, one after.
+        writer.append(SyncEvent::EventDeleted(IdPayload {
+            id: "evt-pre-rotation".into(),
+        }));
+        let old_path = writer
+            .rotate(cut)
+            .await
+            .expect("rotation returns the closed file's path");
+        writer.append(SyncEvent::EventDeleted(IdPayload {
+            id: "evt-post-rotation".into(),
+        }));
+        drop(writer);
+
+        let pending = tmp.path().join("sync").join("log").join("pending");
+        let new_path = pending.join(LogFileName::new(cut, device.clone()).to_filename());
+
+        // Poll until both files have their (per-event-flushed) content.
+        for _ in 0..50 {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            let (Ok(old_bytes), Ok(new_bytes)) = (
+                tokio::fs::read(&old_path).await,
+                tokio::fs::read(&new_path).await,
+            ) else {
+                continue;
+            };
+            let old = String::from_utf8_lossy(&old_bytes);
+            let new = String::from_utf8_lossy(&new_bytes);
+            if old.contains("evt-pre-rotation") && new.contains("evt-post-rotation") {
+                // The cut is clean: neither event leaks into the other file.
+                assert!(
+                    !old.contains("evt-post-rotation"),
+                    "old file leaked the post-rotation event: {old}",
+                );
+                assert!(
+                    !new.contains("evt-pre-rotation"),
+                    "new file leaked the pre-rotation event: {new}",
+                );
+                // The old file is named with the original boot instant,
+                // the new one with the cut instant.
+                assert_ne!(old_path, new_path);
+                return;
+            }
+        }
+        panic!("rotation didn't split the events across the two files within 1 s");
     }
 
     #[tokio::test]

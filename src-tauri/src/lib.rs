@@ -233,6 +233,10 @@ pub fn run() {
         Arc::clone(&snapshot_builder),
         device_id.clone(),
         env!("CARGO_PKG_VERSION"),
+        // The compactor rolls the writer's session file over before
+        // snapshotting so already-snapshotted events aren't re-uploaded
+        // and post-compaction edits get a post-snapshot timestamp.
+        Some(Arc::clone(&event_log_writer)),
     ));
     // Phase Sf: onboarding service. Shared between the orchestrator
     // (which uses it for `meta.json` heartbeats after each round) and
