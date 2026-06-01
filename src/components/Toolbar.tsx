@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next';
 
+import { localDateKey } from '../intl/dateKey';
 import { useDateFormat } from '../intl/dateFormat';
 import { useDialogState } from '../state/dialogStateContext';
 import { useViewState } from '../state/viewStateContext';
@@ -116,7 +117,9 @@ export function Toolbar() {
         </button>
         <button
           type="button"
-          onClick={() => openEventDialog(null)}
+          onClick={() =>
+            openEventDialog(null, { defaultDate: localDateKey(anchor) })
+          }
           title={t('toolbar.newEvent') + ' (Ctrl+N)'}
         >
           {t('toolbar.newEvent')}

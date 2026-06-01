@@ -26,6 +26,14 @@ import {
 import { useCalendarStore } from '../state/calendarStoreContext';
 import { useCalendarDefaultReminders } from '../state/useCalendarDefaultReminders';
 import { AttendeePicker } from './AttendeePicker';
+import {
+  applyDateTimeChange,
+  dateInput,
+  defaultNewEventTimes,
+  recurrenceStartDate,
+  timeInput,
+  toIso,
+} from './eventDateTime';
 import { readLastUsedCalendar, writeLastUsedCalendar } from './lastUsedCalendar';
 import { Modal } from './Modal';
 import { RecurrenceSelector } from './RecurrenceSelector';
@@ -192,7 +200,24 @@ export function EventDialog({
 
   const update = useCallback(
     <K extends keyof FormState>(key: K, value: FormState[K]) => {
-      setForm((prev) => ({ ...prev, [key]: value }));
+      setForm((prev) => {
+        // The four date/time fields are coupled: editing the start
+        // slides the end along (preserving duration), editing the end
+        // is clamped so it can't precede the start. Outlook/Google
+        // behaviour, delegated to a pure, unit-tested helper.
+        if (
+          key === 'startDate' ||
+          key === 'startTime' ||
+          key === 'endDate' ||
+          key === 'endTime'
+        ) {
+          return {
+            ...prev,
+            ...applyDateTimeChange(prev, key, value as string),
+          };
+        }
+        return { ...prev, [key]: value };
+      });
     },
     [],
   );
@@ -697,24 +722,13 @@ function buildInitialState(
     };
   }
 
-  // New event: 1-hour slot.
-  //  - When the caller anchored us on a specific day (Enter on a week
-  //    cell), we use 09:00–10:00 on that day so the form reflects the
-  //    day the user is looking at rather than "today" o'clock.
-  //  - Otherwise (toolbar / Ctrl+N) we default to the next full hour
-  //    from now, which lines up with the user's day-of-work rhythm.
-  const anchoredDay = parseDefaultDate(defaultDate);
-  let start: Date;
-  if (anchoredDay) {
-    start = new Date(anchoredDay);
-    start.setHours(9, 0, 0, 0);
-  } else {
-    start = new Date();
-    start.setMinutes(0, 0, 0);
-    start.setHours(start.getHours() + 1);
-  }
-  const end = new Date(start);
-  end.setHours(end.getHours() + 1);
+  // New event: a 1-hour slot whose time-of-day adapts to context:
+  //  - anchored on today       → next :00/:30 slot (just ahead of now)
+  //  - anchored on another day → 09:00 (start of the workday)
+  //  - no anchor at all        → next full hour from now
+  // The anchor is normally the day the active view is focused on,
+  // threaded in by the caller as `defaultDate`.
+  const { start, end } = defaultNewEventTimes(defaultDate, new Date());
 
   // Fallback chain for the calendar dropdown on a *new* event:
   //   1. explicit `defaultCalendarId` from the caller (e.g. when the
@@ -754,64 +768,4 @@ function buildInitialState(
     reminders: [],
     attendees: [],
   };
-}
-
-/** Parse a YYYY-MM-DD or full ISO string into a Date at the start of
- *  the local day. Returns null when the input is undefined / invalid. */
-function parseDefaultDate(input: string | undefined): Date | null {
-  if (!input) return null;
-  // Accept both "YYYY-MM-DD" and full ISO. We strip the time so the
-  // base sits at midnight local time; the caller's "next full hour"
-  // logic then lands on 01:00 of that day, which is reasonable for a
-  // form the user will customise anyway.
-  const isoDay = input.length >= 10 ? input.slice(0, 10) : input;
-  const [y, m, d] = isoDay.split('-').map(Number);
-  if (!y || !m || !d) return null;
-  const date = new Date(y, m - 1, d, 0, 0, 0);
-  return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function dateInput(d: Date): string {
-  // `<input type="date">` expects ISO 8601 YYYY-MM-DD, always in local
-  // time. Build it from the local components rather than `toISOString()`
-  // which uses UTC and can shift the day on timezones east of GMT.
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
-
-function timeInput(d: Date): string {
-  const h = String(d.getHours()).padStart(2, '0');
-  const m = String(d.getMinutes()).padStart(2, '0');
-  return `${h}:${m}`;
-}
-
-function toIso(
-  date: string,
-  time: string,
-  allDay: boolean,
-): string | null {
-  if (!date) return null;
-  const [y, m, d] = date.split('-').map(Number);
-  if (!y || !m || !d) return null;
-  let hours = 0;
-  let minutes = 0;
-  if (!allDay) {
-    const parts = time.split(':').map(Number);
-    if (parts.length < 2 || parts.some(Number.isNaN)) return null;
-    [hours, minutes] = parts;
-  }
-  return new Date(y, m - 1, d, hours, minutes, 0).toISOString();
-}
-
-/** Parse the form's `YYYY-MM-DD` start string into a local-midnight
- *  Date for the recurrence picker to derive its monthly/yearly
- *  options from. Constructed component-wise (not `new Date(str)`,
- *  which would parse as UTC and could shift the day in negative-
- *  offset zones). Falls back to today on an empty/garbled value. */
-function recurrenceStartDate(date: string): Date {
-  const [y, m, d] = date.split('-').map(Number);
-  if (!y || !m || !d) return new Date();
-  return new Date(y, m - 1, d);
 }

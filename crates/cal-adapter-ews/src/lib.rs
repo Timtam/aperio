@@ -539,22 +539,36 @@ impl EwsAdapter {
                 Err(err) => return Err(err),
             };
 
+        // Folder-complete emit: the host caches the whole folder and
+        // serves every view range from that single snapshot, so we emit
+        // every item regardless of the caller's `range`. An unbounded
+        // range disables the single/override range filter inside
+        // `emit_item_events` without duplicating its recurrence logic.
+        // (Masters always pass anyway; the frontend expander windows them.)
+        let full = DateRange::new(
+            chrono::DateTime::<chrono::Utc>::MIN_UTC,
+            chrono::DateTime::<chrono::Utc>::MAX_UTC,
+        );
         let change_set = if force_full {
             let mut changes = Vec::with_capacity(updated.items.len());
             for item in updated.items.values() {
-                emit_into(item, calendar_id, range, &mut changes);
+                emit_into(item, calendar_id, full, &mut changes);
             }
             ChangeSet {
                 changes,
                 deletions: Vec::new(),
                 new_token: updated.sync_state.clone(),
                 full_resync: true,
+                // EWS SyncFolderItems keeps the whole folder in `items`,
+                // and we emit it unfiltered above — the host may treat
+                // this snapshot as covering any range (unbounded window).
+                complete: true,
             }
         } else {
             let mut changes = Vec::new();
             for id in &changed_ids {
                 if let Some(item) = updated.items.get(id) {
-                    emit_into(item, calendar_id, range, &mut changes);
+                    emit_into(item, calendar_id, full, &mut changes);
                 }
             }
             ChangeSet {
@@ -562,6 +576,10 @@ impl EwsAdapter {
                 deletions: deleted_ids,
                 new_token: updated.sync_state.clone(),
                 full_resync: false,
+                // Incremental, but still folder-complete: the cache holds
+                // the whole folder from the prior full sync and this merge
+                // keeps it current.
+                complete: true,
             }
         };
 
@@ -580,7 +598,9 @@ impl EwsAdapter {
             full_resync = change_set.full_resync,
             changes = change_set.changes.len(),
             deletions = change_set.deletions.len(),
-            "EWS get_events_delta: drain → ChangeSet",
+            range_start = %range.start.to_rfc3339(),
+            range_end = %range.end.to_rfc3339(),
+            "EWS get_events_delta: drain → ChangeSet (folder-complete)",
         );
         Ok(change_set)
     }
@@ -953,6 +973,7 @@ impl TasksFeature for EwsAdapter {
                 deletions: Vec::new(),
                 new_token: Some(cookie),
                 full_resync: true,
+                complete: false,
             })
         } else {
             Ok(ChangeSet {
@@ -960,6 +981,7 @@ impl TasksFeature for EwsAdapter {
                 deletions: Vec::new(),
                 new_token: Some(cookie),
                 full_resync: false,
+                complete: false,
             })
         }
     }
@@ -1061,6 +1083,7 @@ impl ContactsFeature for EwsAdapter {
                 deletions: Vec::new(),
                 new_token: Some(cookie),
                 full_resync: true,
+                complete: false,
             })
         } else {
             Ok(ChangeSet {
@@ -1068,6 +1091,7 @@ impl ContactsFeature for EwsAdapter {
                 deletions: Vec::new(),
                 new_token: Some(cookie),
                 full_resync: false,
+                complete: false,
             })
         }
     }

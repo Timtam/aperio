@@ -154,6 +154,16 @@ pub struct ChangeSet<T> {
     /// `true` ⇒ `changes` is the full set; replace, don't merge.
     #[serde(default)]
     pub full_resync: bool,
+    /// `true` ⇒ `changes` covers the adapter's ENTIRE collection
+    /// (folder-complete), not merely the queried `range`. Folder-complete
+    /// adapters (EWS `SyncFolderItems`, CalDAV `sync-collection`) keep the
+    /// whole folder current via delta, so the host may record an unbounded
+    /// cache window and serve any range from the snapshot. Range-scoped
+    /// adapters (Google/Graph, which window with `timeMin`/`timeMax`) leave
+    /// this `false`, so the host keeps a per-range window. Only consulted on
+    /// a full-resync write; ignored on incremental merges.
+    #[serde(default)]
+    pub complete: bool,
 }
 
 /// Implemented by adapters that declare `Capability::Tasks`.

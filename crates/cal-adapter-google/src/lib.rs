@@ -201,6 +201,7 @@ impl GoogleAdapter {
             deletions: Vec::new(),
             new_token,
             full_resync: true,
+            complete: false,
         })
     }
 
@@ -216,6 +217,7 @@ impl GoogleAdapter {
             deletions: Vec::new(),
             new_token,
             full_resync: true,
+            complete: false,
         })
     }
 }
@@ -282,6 +284,7 @@ impl CalendarFeature for GoogleAdapter {
                 deletions: delta.deletions,
                 new_token: delta.new_token,
                 full_resync: false,
+                complete: false,
             }),
             // Token expired / invalidated by Google — drop it and resync.
             Err(GoogleError::Http { status: 410, .. }) => {
@@ -521,6 +524,7 @@ impl ContactsFeature for GoogleAdapter {
                 deletions: delta.deletions,
                 new_token: delta.new_token,
                 full_resync: false,
+                complete: false,
             }),
             // The People API expires sync tokens with a 400 — re-sync.
             Err(GoogleError::Http { status: 400, .. }) => {

@@ -1,6 +1,8 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 
+import { localDateKey } from '../intl/dateKey';
 import { useDialogState } from '../state/dialogStateContext';
+import { useViewState } from '../state/viewStateContext';
 
 /**
  * Wire the global dialog-open shortcuts.
@@ -26,6 +28,11 @@ export function useDialogShortcuts(): void {
     openSettings,
     mode,
   } = useDialogState();
+  const { anchor } = useViewState();
+  // Read the view's focused day at keypress time via a ref, so the
+  // global listener doesn't re-subscribe on every day-navigation.
+  const anchorRef = useRef(anchor);
+  anchorRef.current = anchor;
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -52,7 +59,9 @@ export function useDialogShortcuts(): void {
       }
       if (cmd && !e.shiftKey && e.key.toLowerCase() === 'n') {
         e.preventDefault();
-        openEventDialog(null);
+        openEventDialog(null, {
+          defaultDate: localDateKey(anchorRef.current),
+        });
         return;
       }
       // `,` is a stable e.key across layouts; we don't compare e.code
