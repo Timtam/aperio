@@ -1062,7 +1062,7 @@ Aperio hält zwei unabhängige Datums-Slots pro Aufgabe: `scheduled_date` (+ opt
 
 **UI.** Im Aufgaben-Dialog ein „Zugewiesen an"-Picker (Suche über die Listen-Mitglieder, Multi-Chips, capability-gated). „Für andere einplanen" ist damit Datum **+** Assignee im selben Dialog — beides sind Aufgaben-Felder. In der Aufgaben-Ansicht ein Assignee-Badge je Zeile plus Filter „mir / anderen / niemandem".
 
-**Phasen.** (0) Fundament: Modell + Trait-Methoden + FFI-vtable für `list_task_list_members`/`current_user` + Account-Identität. (1) Vikunja end-to-end. (2) UI (Picker + Badge). (3) Todoist (single, geteilte Projekte). _Out of scope:_ MS To Do/Planner; Cross-Account-Zuweisung (Task in Konto A an Nutzer aus Konto B).
+**Phasen.** (0) Fundament: Modell + Trait-Methoden + FFI-vtable für `list_task_list_members`/`current_user` + Account-Identität. ✅ (1) Vikunja end-to-end. ✅ (2) UI (Picker + Badge). ✅ (3) Todoist (single, geteilte Projekte). ✅ — `assignee_id` lesen/schreiben (REST v2), `assignees[0]` mit Warnung bei >1, Update sendet `assignee_id: null` zum Entfernen; `collaborators` als Mitglieder-Pool und zum Auflösen des Anzeigenamens (nur geholt, wenn überhaupt zugewiesen). `current_user` bleibt `None` (Todoist REST hat kein `/user` — „mir zugewiesen"-Hervorhebung wäre ein Sync-API-Nachzug). _Out of scope:_ MS To Do/Planner; Cross-Account-Zuweisung (Task in Konto A an Nutzer aus Konto B).
 
 #### Mitglieder-/Freigabe-Verwaltung einer Liste
 

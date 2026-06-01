@@ -51,7 +51,9 @@
 //!   - Moving a task between projects (Todoist REST v2's PUT doesn't
 //!     accept `project_id` either — would need the Sync API)
 
-use cal_core::{NewTask, Section, Task, TaskList, TaskPriority, TaskStatus};
+use std::collections::HashMap;
+
+use cal_core::{NewTask, Section, Task, TaskList, TaskPriority, TaskStatus, TaskUser};
 use chrono::{DateTime, NaiveDate, NaiveTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -77,7 +79,34 @@ pub async fn get_tasks(client: &TodoistClient, list_id: &str) -> TodoistResult<V
     let encoded = urlencoding(list_id);
     let path = format!("/tasks?project_id={encoded}");
     let entries: Vec<TaskEntry> = client.get_json(&path).await?;
-    Ok(entries.into_iter().map(|e| map_task(e, list_id)).collect())
+    let mut tasks: Vec<Task> = entries.into_iter().map(|e| map_task(e, list_id)).collect();
+    resolve_assignee_names(client, list_id, &mut tasks).await;
+    Ok(tasks)
+}
+
+/// Todoist tasks carry only the assignee's numeric `assignee_id`, so
+/// `map_task` seeds each assignee with the id doubling as the display
+/// name. Fill in real names + emails from the project's collaborators —
+/// but only when at least one task is actually assigned, since most
+/// personal projects have none and the extra round-trip would be pure
+/// overhead. A failed collaborator fetch (non-shared project, older API)
+/// leaves the id-as-name placeholder in place rather than erroring.
+async fn resolve_assignee_names(client: &TodoistClient, list_id: &str, tasks: &mut [Task]) {
+    if !tasks.iter().any(|t| !t.assignees.is_empty()) {
+        return;
+    }
+    let Ok(members) = list_task_list_members(client, list_id).await else {
+        return;
+    };
+    let by_id: HashMap<&str, &TaskUser> = members.iter().map(|m| (m.id.as_str(), m)).collect();
+    for task in tasks.iter_mut() {
+        for assignee in &mut task.assignees {
+            if let Some(member) = by_id.get(assignee.id.as_str()) {
+                assignee.name = member.name.clone();
+                assignee.email = member.email.clone();
+            }
+        }
+    }
 }
 
 /// `GET /sections?project_id={id}`. Todoist sections are a first-class
@@ -191,7 +220,49 @@ pub async fn delete_task_list(client: &TodoistClient, list_id: &str) -> TodoistR
     client.delete(&format!("/projects/{encoded}")).await
 }
 
+/// `GET /projects/{id}/collaborators` — the users who share the project,
+/// i.e. the valid assignee pool (DESIGN §9.7). A personal (non-shared)
+/// project has no collaborators endpoint payload of interest; Todoist
+/// returns just the owner, and projects the user can't share yield an
+/// error which we soften to an empty list so the picker shows no
+/// candidates rather than failing the whole task load.
+pub async fn list_task_list_members(
+    client: &TodoistClient,
+    list_id: &str,
+) -> TodoistResult<Vec<TaskUser>> {
+    let encoded = urlencoding(list_id);
+    let entries: Vec<CollaboratorEntry> = match client
+        .get_json(&format!("/projects/{encoded}/collaborators"))
+        .await
+    {
+        Ok(e) => e,
+        Err(_) => return Ok(Vec::new()),
+    };
+    Ok(entries.into_iter().map(map_collaborator).collect())
+}
+
 // ── JSON wire shapes ───────────────────────────────────────────────────
+
+/// Todoist IDs are strings in REST v2, but the task object's
+/// `assignee_id` has historically been emitted as a bare integer (and
+/// the collaborator `id` as a string). Accept either shape and
+/// normalise to the string form Todoist uses for ids everywhere else,
+/// so the assignee id always matches a collaborator id for name lookup.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum WireId {
+    Str(String),
+    Int(i64),
+}
+
+impl WireId {
+    fn into_string(self) -> String {
+        match self {
+            WireId::Str(s) => s,
+            WireId::Int(i) => i.to_string(),
+        }
+    }
+}
 
 #[derive(Debug, Deserialize)]
 struct ProjectEntry {
@@ -238,6 +309,11 @@ struct TaskEntry {
     is_completed: bool,
     #[serde(default)]
     priority: i32,
+    /// The user assigned to the task. Only meaningful in shared
+    /// projects; `null` / absent ⇒ unassigned. Todoist supports a
+    /// single assignee per task, so this maps to 0 or 1 `TaskUser`s.
+    #[serde(default)]
+    assignee_id: Option<WireId>,
     #[serde(default)]
     due: Option<DueEntry>,
     /// Added to the Todoist REST API in late 2024. Missing on
@@ -256,6 +332,18 @@ struct TaskEntry {
     /// emits an ISO 8601 timestamp; absent for active tasks.
     #[serde(default)]
     completed_at: Option<String>,
+}
+
+/// A `GET /projects/{id}/collaborators` row: the people who share the
+/// project. Doubles as the assignee pool and the source for resolving a
+/// task's `assignee_id` to a display name.
+#[derive(Debug, Deserialize)]
+struct CollaboratorEntry {
+    id: WireId,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    email: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -280,6 +368,10 @@ struct CreateTaskBody {
     description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     priority: Option<i32>,
+    /// Assignee (single). Only honoured in shared projects; omitted from
+    /// the body when the new task is unassigned.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    assignee_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     parent_id: Option<String>,
     /// Section to file the new task under. Todoist accepts this on
@@ -308,6 +400,13 @@ struct UpdateTaskBody {
     description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     priority: Option<i32>,
+    /// Assignee (single). Sent on every update — including as `null` —
+    /// so the picker can both set and CLEAR the assignee: `None`
+    /// serialises to `null`, which unassigns the task (Todoist treats an
+    /// omitted field as "unchanged"). Because `task.assignees` faithfully
+    /// round-trips the server state on read, a plain edit re-sends the
+    /// existing assignee and only an explicit removal clears it.
+    assignee_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     due_date: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -350,6 +449,50 @@ fn map_section(entry: SectionEntry, list_id: &str) -> Section {
     }
 }
 
+fn map_collaborator(entry: CollaboratorEntry) -> TaskUser {
+    let id = entry.id.into_string();
+    let email = entry.email.filter(|s| !s.trim().is_empty());
+    let name = entry
+        .name
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| email.clone())
+        .unwrap_or_else(|| format!("User {id}"));
+    TaskUser { id, name, email }
+}
+
+/// Map a task's `assignee_id` to Aperio's assignee list. Todoist allows
+/// a single assignee, so the result is 0 or 1 `TaskUser`s. The name
+/// starts as the id (the task object carries no name); `get_tasks`
+/// resolves it from the project's collaborators afterwards.
+fn extract_assignees(assignee_id: Option<WireId>) -> Vec<TaskUser> {
+    match assignee_id.map(WireId::into_string) {
+        Some(id) if !id.trim().is_empty() => vec![TaskUser {
+            name: id.clone(),
+            id,
+            email: None,
+        }],
+        _ => Vec::new(),
+    }
+}
+
+/// The single Todoist `assignee_id` to write from Aperio's multi-assignee
+/// list. Todoist supports one assignee per task, so we keep the first
+/// non-empty id and warn when the caller supplied more (the model is
+/// "list multi-assignee, adapter clamps" — DESIGN §9.7).
+fn first_assignee_id(assignees: &[TaskUser]) -> Option<String> {
+    if assignees.len() > 1 {
+        tracing::warn!(
+            count = assignees.len(),
+            "Todoist supports a single assignee per task — keeping the first, dropping the rest",
+        );
+    }
+    assignees
+        .iter()
+        .map(|a| a.id.trim())
+        .find(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
 fn map_task(entry: TaskEntry, list_id: &str) -> Task {
     let status = if entry.is_completed {
         TaskStatus::Completed
@@ -371,7 +514,7 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
     let completed_at = entry.completed_at.as_deref().and_then(parse_rfc3339);
 
     Task {
-        assignees: Vec::new(),
+        assignees: extract_assignees(entry.assignee_id),
         id: entry.id,
         list_id: list_id.to_string(),
         title: entry.content.unwrap_or_default(),
@@ -413,6 +556,7 @@ fn new_task_to_create_body(list_id: &str, new: &NewTask) -> CreateTaskBody {
         content: Some(new.title.clone()),
         description: new.description.clone().filter(|s| !s.is_empty()),
         priority: Some(aperio_priority_to_todoist(new.priority)),
+        assignee_id: first_assignee_id(&new.assignees),
         parent_id: new.parent_id.clone().filter(|s| !s.is_empty()),
         section_id: new.section_id.clone().filter(|s| !s.is_empty()),
         due_date,
@@ -432,6 +576,7 @@ fn task_to_update_body(task: &Task) -> UpdateTaskBody {
         content: Some(task.title.clone()),
         description: task.description.clone().filter(|s| !s.is_empty()),
         priority: Some(aperio_priority_to_todoist(task.priority)),
+        assignee_id: first_assignee_id(&task.assignees),
         due_date,
         due_datetime,
         deadline_date: task.deadline_date.map(format_date),
@@ -738,6 +883,7 @@ mod tests {
             description: Some("Q2 client".into()),
             is_completed: false,
             priority: 4,
+            assignee_id: None,
             due: Some(DueEntry {
                 date: Some("2026-05-22".into()),
                 datetime: None,
@@ -778,6 +924,7 @@ mod tests {
             description: None,
             is_completed: true,
             priority: 1,
+            assignee_id: None,
             due: None,
             deadline: None,
             parent_id: None,
@@ -801,6 +948,7 @@ mod tests {
             description: None,
             is_completed: false,
             priority: 1,
+            assignee_id: None,
             due: Some(DueEntry {
                 date: Some("2026-05-22".into()),
                 datetime: Some("2026-05-22T09:30:00Z".into()),
@@ -1181,5 +1329,227 @@ mod tests {
         let client = fixture_client(&server.url());
         delete_task_list(&client, "P7").await.unwrap();
         m.assert_async().await;
+    }
+
+    // ── Assignees + collaborators ──────────────────────────────
+
+    #[test]
+    fn extract_assignees_accepts_string_and_int_ids() {
+        // Todoist v2 strings…
+        let from_str = extract_assignees(Some(WireId::Str("42".into())));
+        assert_eq!(from_str.len(), 1);
+        assert_eq!(from_str[0].id, "42");
+        // …and the legacy bare-integer shape both normalise to a
+        // string id (so it matches a collaborator id for name lookup).
+        let from_int = extract_assignees(Some(WireId::Int(42)));
+        assert_eq!(from_int[0].id, "42");
+        // The placeholder name is the id until get_tasks resolves it.
+        assert_eq!(from_int[0].name, "42");
+        assert!(from_int[0].email.is_none());
+    }
+
+    #[test]
+    fn extract_assignees_empty_when_unassigned() {
+        assert!(extract_assignees(None).is_empty());
+        // Defensive: an empty string is not a real assignee.
+        assert!(extract_assignees(Some(WireId::Str(String::new()))).is_empty());
+    }
+
+    #[test]
+    fn map_task_reads_assignee_id() {
+        let entry = TaskEntry {
+            id: "T1".into(),
+            content: Some("Shared".into()),
+            assignee_id: Some(WireId::Str("99".into())),
+            ..Default::default()
+        };
+        let task = map_task(entry, "P1");
+        assert_eq!(task.assignees.len(), 1);
+        assert_eq!(task.assignees[0].id, "99");
+    }
+
+    #[test]
+    fn first_assignee_id_clamps_to_first_non_empty() {
+        let one = vec![TaskUser {
+            id: "7".into(),
+            name: "A".into(),
+            email: None,
+        }];
+        assert_eq!(first_assignee_id(&one).as_deref(), Some("7"));
+        // Multiple → keep the first (Todoist is single-assignee).
+        let many = vec![
+            TaskUser {
+                id: "7".into(),
+                name: "A".into(),
+                email: None,
+            },
+            TaskUser {
+                id: "8".into(),
+                name: "B".into(),
+                email: None,
+            },
+        ];
+        assert_eq!(first_assignee_id(&many).as_deref(), Some("7"));
+        // None when unassigned.
+        assert_eq!(first_assignee_id(&[]), None);
+    }
+
+    #[test]
+    fn create_body_carries_assignee() {
+        let mut nt = sample_new_task();
+        nt.assignees = vec![TaskUser {
+            id: "42".into(),
+            name: "Alice".into(),
+            email: None,
+        }];
+        let body = new_task_to_create_body("P1", &nt);
+        assert_eq!(body.assignee_id.as_deref(), Some("42"));
+        // Unassigned ⇒ field omitted from the create body.
+        let plain = new_task_to_create_body("P1", &sample_new_task());
+        let json = serde_json::to_value(&plain).unwrap();
+        assert!(json.get("assignee_id").is_none());
+    }
+
+    #[test]
+    fn update_body_sends_null_to_clear_assignee() {
+        // Unassigned ⇒ assignee_id present as null so the update
+        // unassigns rather than leaving a stale assignee.
+        let task = Task {
+            assignees: Vec::new(),
+            id: "T1".into(),
+            list_id: "P1".into(),
+            title: "X".into(),
+            description: None,
+            status: TaskStatus::Open,
+            priority: TaskPriority::Low,
+            scheduled_date: None,
+            scheduled_time: None,
+            deadline_date: None,
+            deadline_time: None,
+            recurrence: None,
+            parent_id: None,
+            section_id: None,
+            color_label: None,
+            reminders: Vec::new(),
+            sound: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            completed_at: None,
+            etag: None,
+        };
+        let json = serde_json::to_value(task_to_update_body(&task)).unwrap();
+        assert!(json.get("assignee_id").is_some());
+        assert!(json["assignee_id"].is_null());
+        // Assigned ⇒ the id rides along.
+        let assigned = Task {
+            assignees: vec![TaskUser {
+                id: "42".into(),
+                name: "Alice".into(),
+                email: None,
+            }],
+            ..task
+        };
+        let json = serde_json::to_value(task_to_update_body(&assigned)).unwrap();
+        assert_eq!(json["assignee_id"], serde_json::json!("42"));
+    }
+
+    #[test]
+    fn map_collaborator_prefers_name_then_email() {
+        let named = map_collaborator(CollaboratorEntry {
+            id: WireId::Str("1".into()),
+            name: Some("Alice".into()),
+            email: Some("alice@example.com".into()),
+        });
+        assert_eq!(named.id, "1");
+        assert_eq!(named.name, "Alice");
+        assert_eq!(named.email.as_deref(), Some("alice@example.com"));
+        // No name ⇒ fall back to email.
+        let emailed = map_collaborator(CollaboratorEntry {
+            id: WireId::Int(2),
+            name: None,
+            email: Some("bob@example.com".into()),
+        });
+        assert_eq!(emailed.id, "2");
+        assert_eq!(emailed.name, "bob@example.com");
+    }
+
+    #[tokio::test]
+    async fn list_task_list_members_decodes_collaborators() {
+        let mut server = Server::new_async().await;
+        let _m = server
+            .mock("GET", "/projects/P1/collaborators")
+            .with_status(200)
+            .with_body(r#"[{"id":"42","name":"Alice","email":"alice@example.com"}]"#)
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        let members = list_task_list_members(&client, "P1").await.unwrap();
+        assert_eq!(members.len(), 1);
+        assert_eq!(members[0].id, "42");
+        assert_eq!(members[0].name, "Alice");
+    }
+
+    #[tokio::test]
+    async fn list_task_list_members_empty_on_error() {
+        let mut server = Server::new_async().await;
+        let _m = server
+            .mock("GET", "/projects/P1/collaborators")
+            .with_status(403)
+            .with_body(r#"{"error":"Forbidden"}"#)
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        // Non-shareable project ⇒ no candidates, not a hard error.
+        assert!(list_task_list_members(&client, "P1")
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_tasks_resolves_assignee_names_from_collaborators() {
+        let mut server = Server::new_async().await;
+        let _tasks = server
+            .mock("GET", "/tasks?project_id=P1")
+            .with_status(200)
+            .with_body(r#"[{"id":"T1","project_id":"P1","content":"Shared","assignee_id":"42"}]"#)
+            .create_async()
+            .await;
+        let _collab = server
+            .mock("GET", "/projects/P1/collaborators")
+            .with_status(200)
+            .with_body(r#"[{"id":"42","name":"Alice","email":"alice@example.com"}]"#)
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        let tasks = get_tasks(&client, "P1").await.unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].assignees.len(), 1);
+        assert_eq!(tasks[0].assignees[0].id, "42");
+        // The placeholder id was replaced with the collaborator's name.
+        assert_eq!(tasks[0].assignees[0].name, "Alice");
+        assert_eq!(
+            tasks[0].assignees[0].email.as_deref(),
+            Some("alice@example.com"),
+        );
+    }
+
+    #[tokio::test]
+    async fn get_tasks_skips_collaborator_fetch_when_unassigned() {
+        let mut server = Server::new_async().await;
+        let _tasks = server
+            .mock("GET", "/tasks?project_id=P1")
+            .with_status(200)
+            .with_body(r#"[{"id":"T1","project_id":"P1","content":"Solo"}]"#)
+            .create_async()
+            .await;
+        // No collaborators mock registered: if get_tasks tried to fetch
+        // them for an all-unassigned project, the request would 501 and
+        // the assertion below on a clean result still holds — but the
+        // intent is that the extra round-trip is skipped entirely.
+        let client = fixture_client(&server.url());
+        let tasks = get_tasks(&client, "P1").await.unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert!(tasks[0].assignees.is_empty());
     }
 }

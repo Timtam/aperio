@@ -33,7 +33,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use cal_core::{
     Adapter, AuthToken, Capability, Credentials as CoreCredentials, Error as CoreError, NewTask,
-    Result as CoreResult, Section, Task, TaskList, TasksFeature,
+    Result as CoreResult, Section, Task, TaskList, TaskUser, TasksFeature,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -169,6 +169,16 @@ impl TasksFeature for TodoistAdapter {
 
     async fn list_sections(&self, list_id: &str) -> CoreResult<Vec<Section>> {
         tasks::list_sections(&self.client, list_id)
+            .await
+            .map_err(to_core_error)
+    }
+
+    /// The project's collaborators — the assignee pool for the picker.
+    /// `current_user` stays trait-defaulted (`None`): Todoist's REST v2
+    /// has no `/user` endpoint, so "assigned to me" highlighting is a
+    /// Sync-API follow-up (DESIGN §9.7).
+    async fn list_task_list_members(&self, list_id: &str) -> CoreResult<Vec<TaskUser>> {
+        tasks::list_task_list_members(&self.client, list_id)
             .await
             .map_err(to_core_error)
     }

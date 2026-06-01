@@ -191,6 +191,26 @@ unsafe extern "C" fn ffi_delete_task_list(
     )
 }
 
+// ── Collaboration (DESIGN §9.7) ────────────────────────────
+//
+// Todoist's REST v2 exposes only the read side: the project's
+// collaborators (the assignee pool). `current_user` + membership
+// add/remove need the Sync API and stay null in this vtable.
+
+unsafe extern "C" fn ffi_list_task_list_members(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let list_id: String = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch(h, move |p| async move {
+        p.list_task_list_members(&list_id).await
+    })
+}
+
 pub static TASKS_VTABLE: TasksVtable = TasksVtable {
     authenticate: Some(ffi_authenticate),
     capabilities: Some(ffi_capabilities),
@@ -203,6 +223,7 @@ pub static TASKS_VTABLE: TasksVtable = TasksVtable {
     list_sections: Some(ffi_list_sections),
     create_task_list: Some(ffi_create_task_list),
     delete_task_list: Some(ffi_delete_task_list),
+    list_task_list_members: Some(ffi_list_task_list_members),
     ..TasksVtable::empty()
 };
 
