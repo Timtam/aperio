@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { ColorComposer } from './ColorComposer';
+import type { ColorLabel } from '../api/types';
+import { ColorLabelSelect } from './ColorLabelSelect';
 import { Modal } from './Modal';
 
 /**
@@ -20,9 +21,10 @@ export interface PromptDialogProps {
   isOpen: boolean;
   onClose: () => void;
   /** Called with the trimmed, non-empty name on submit. When a
-   *  `colorField` is configured the picked hex is passed as the second
-   *  argument; otherwise it is `undefined`. */
-  onSubmit: (name: string, color?: string) => void;
+   *  `colorField` is configured the chosen color-label id (or `null` for
+   *  "no color") is passed as the second argument; otherwise it is
+   *  `undefined`. */
+  onSubmit: (name: string, colorLabelId?: string | null) => void;
   title: string;
   /** Label shown above the text field. */
   label: string;
@@ -32,10 +34,17 @@ export interface PromptDialogProps {
    *  deliberately no default (the shared confirm label reads "Delete"). */
   submitLabel: string;
   cancelLabel?: string;
-  /** When set, also render a color picker (with a live swatch) under the
-   *  name field — used by the "new calendar / address book" flow so the
-   *  container's color is chosen, and seen, up front. */
-  colorField?: { label: string; defaultColor: string };
+  /** When set, also render a color-label picker (with a live swatch)
+   *  under the name field — used by the "new calendar / address book"
+   *  flow so the container's color is chosen from the SAME predefined
+   *  color-labels as everything else (unified palette), and seen up
+   *  front. The picked label's id is handed back on submit. */
+  colorField?: {
+    label: string;
+    labels: ColorLabel[];
+    noneLabel: string;
+    defaultLabelId: string | null;
+  };
 }
 
 export function PromptDialog({
@@ -52,15 +61,15 @@ export function PromptDialog({
   const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
   const [value, setValue] = useState(defaultValue);
-  const colorDefault = colorField?.defaultColor;
-  const [color, setColor] = useState(colorDefault ?? '#1e88e5');
+  const colorDefault = colorField?.defaultLabelId ?? null;
+  const [colorLabelId, setColorLabelId] = useState<string | null>(colorDefault);
 
   // Reset to the suggested default each time the dialog (re)opens, then
   // focus + select so Enter accepts the suggestion and typing replaces it.
   useEffect(() => {
     if (!isOpen) return;
     setValue(defaultValue);
-    if (colorDefault) setColor(colorDefault);
+    setColorLabelId(colorDefault);
     queueMicrotask(() => {
       inputRef.current?.focus();
       inputRef.current?.select();
@@ -72,7 +81,7 @@ export function PromptDialog({
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (!trimmed) return;
-    onSubmit(trimmed, colorField ? color : undefined);
+    onSubmit(trimmed, colorField ? colorLabelId : undefined);
     onClose();
   };
 
@@ -98,10 +107,11 @@ export function PromptDialog({
         {colorField && (
           <label className="form__field">
             <span className="form__label">{colorField.label}</span>
-            <ColorComposer
-              value={color}
-              onChange={setColor}
-              label={colorField.label}
+            <ColorLabelSelect
+              value={colorLabelId}
+              onChange={setColorLabelId}
+              labels={colorField.labels}
+              noneLabel={colorField.noneLabel}
             />
           </label>
         )}

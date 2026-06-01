@@ -1149,6 +1149,7 @@
     "createPrompt": {
       "nameLabel": "Name",
       "colorLabel": "Color",
+      "noColor": "No color",
       "submit": "Create"
     },
     "localAccount": "On this device",

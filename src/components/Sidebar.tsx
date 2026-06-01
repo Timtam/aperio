@@ -123,6 +123,7 @@ export function Sidebar() {
     selectedContactListIds,
     toggleContactList,
     refreshContactLists,
+    colorLabels,
   } = useCalendarStore();
   const { openSettings, openTaskMembers } = useDialogState();
   const expansion = useSidebarExpansion();
@@ -472,15 +473,18 @@ export function Sidebar() {
 
   // Run the actual create once the user has named the list in the prompt.
   const submitCreatePrompt = useCallback(
-    async (name: string, color?: string) => {
+    async (name: string, colorLabelId?: string | null) => {
       const prompt = createPrompt;
       if (!prompt) return;
+      // Container colors come from the SAME predefined color-labels as
+      // everything else: resolve the picked label to its hex (or null for
+      // "no color"). Keeps one palette across tasks, events + containers.
+      const colorHex = colorLabelId
+        ? (colorLabels.find((l) => l.id === colorLabelId)?.hex ?? null)
+        : null;
       try {
         if (prompt.kind === 'calendar') {
-          const cal = await createCalendar({
-            name,
-            color_hex: color ?? '#1e88e5',
-          });
+          const cal = await createCalendar({ name, color_hex: colorHex });
           await refreshCalendars();
           announce(t('sidebar.calendarCreated', { name: cal.name }));
         } else if (prompt.kind === 'taskList') {
@@ -494,10 +498,7 @@ export function Sidebar() {
           await refreshTaskLists();
           announce(t('sidebar.taskListCreated', { name: list.name }));
         } else {
-          const list = await createContactList({
-            name,
-            color_hex: color ?? null,
-          });
+          const list = await createContactList({ name, color_hex: colorHex });
           await refreshContactLists();
           announce(t('sidebar.contactListCreated', { name: list.name }));
         }
@@ -508,6 +509,7 @@ export function Sidebar() {
     },
     [
       createPrompt,
+      colorLabels,
       refreshCalendars,
       refreshTaskLists,
       refreshContactLists,
@@ -1210,12 +1212,15 @@ export function Sidebar() {
         colorField={
           // Task-list creation doesn't carry a color through the wire
           // yet; calendars + address books do, so only they get the
-          // color picker (with its live swatch preview).
+          // color picker. The color is chosen from the predefined
+          // color-labels (same palette as tasks/events), not a free hex.
           createPrompt?.kind === 'calendar' ||
           createPrompt?.kind === 'contactList'
             ? {
                 label: t('sidebar.createPrompt.colorLabel'),
-                defaultColor: '#1e88e5',
+                labels: colorLabels,
+                noneLabel: t('sidebar.createPrompt.noColor'),
+                defaultLabelId: null,
               }
             : undefined
         }
