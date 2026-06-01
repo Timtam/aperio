@@ -472,12 +472,15 @@ export function Sidebar() {
 
   // Run the actual create once the user has named the list in the prompt.
   const submitCreatePrompt = useCallback(
-    async (name: string) => {
+    async (name: string, color?: string) => {
       const prompt = createPrompt;
       if (!prompt) return;
       try {
         if (prompt.kind === 'calendar') {
-          const cal = await createCalendar({ name, color_hex: '#1e88e5' });
+          const cal = await createCalendar({
+            name,
+            color_hex: color ?? '#1e88e5',
+          });
           await refreshCalendars();
           announce(t('sidebar.calendarCreated', { name: cal.name }));
         } else if (prompt.kind === 'taskList') {
@@ -491,7 +494,10 @@ export function Sidebar() {
           await refreshTaskLists();
           announce(t('sidebar.taskListCreated', { name: list.name }));
         } else {
-          const list = await createContactList({ name, color_hex: null });
+          const list = await createContactList({
+            name,
+            color_hex: color ?? null,
+          });
           await refreshContactLists();
           announce(t('sidebar.contactListCreated', { name: list.name }));
         }
@@ -1201,6 +1207,18 @@ export function Sidebar() {
               : t('sidebar.newCalendarName', { n: calendars.length + 1 })
         }
         submitLabel={t('sidebar.createPrompt.submit')}
+        colorField={
+          // Task-list creation doesn't carry a color through the wire
+          // yet; calendars + address books do, so only they get the
+          // color picker (with its live swatch preview).
+          createPrompt?.kind === 'calendar' ||
+          createPrompt?.kind === 'contactList'
+            ? {
+                label: t('sidebar.createPrompt.colorLabel'),
+                defaultColor: '#1e88e5',
+              }
+            : undefined
+        }
       />
     </aside>
   );

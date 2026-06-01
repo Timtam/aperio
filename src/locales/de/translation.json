@@ -1148,6 +1148,7 @@
     "newContactListName": "Kontaktbuch {{n}}",
     "createPrompt": {
       "nameLabel": "Name",
+      "colorLabel": "Farbe",
       "submit": "Erstellen"
     },
     "localAccount": "Auf diesem Gerät",

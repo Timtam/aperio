@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { ColorComposer } from './ColorComposer';
 import { Modal } from './Modal';
 
 /**
@@ -18,8 +19,10 @@ import { Modal } from './Modal';
 export interface PromptDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  /** Called with the trimmed, non-empty name on submit. */
-  onSubmit: (name: string) => void;
+  /** Called with the trimmed, non-empty name on submit. When a
+   *  `colorField` is configured the picked hex is passed as the second
+   *  argument; otherwise it is `undefined`. */
+  onSubmit: (name: string, color?: string) => void;
   title: string;
   /** Label shown above the text field. */
   label: string;
@@ -29,6 +32,10 @@ export interface PromptDialogProps {
    *  deliberately no default (the shared confirm label reads "Delete"). */
   submitLabel: string;
   cancelLabel?: string;
+  /** When set, also render a color picker (with a live swatch) under the
+   *  name field — used by the "new calendar / address book" flow so the
+   *  container's color is chosen, and seen, up front. */
+  colorField?: { label: string; defaultColor: string };
 }
 
 export function PromptDialog({
@@ -40,28 +47,32 @@ export function PromptDialog({
   defaultValue = '',
   submitLabel,
   cancelLabel,
+  colorField,
 }: PromptDialogProps) {
   const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
   const [value, setValue] = useState(defaultValue);
+  const colorDefault = colorField?.defaultColor;
+  const [color, setColor] = useState(colorDefault ?? '#1e88e5');
 
   // Reset to the suggested default each time the dialog (re)opens, then
   // focus + select so Enter accepts the suggestion and typing replaces it.
   useEffect(() => {
     if (!isOpen) return;
     setValue(defaultValue);
+    if (colorDefault) setColor(colorDefault);
     queueMicrotask(() => {
       inputRef.current?.focus();
       inputRef.current?.select();
     });
-  }, [isOpen, defaultValue]);
+  }, [isOpen, defaultValue, colorDefault]);
 
   const trimmed = value.trim();
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (!trimmed) return;
-    onSubmit(trimmed);
+    onSubmit(trimmed, colorField ? color : undefined);
     onClose();
   };
 
@@ -84,6 +95,16 @@ export function PromptDialog({
             autoComplete="off"
           />
         </label>
+        {colorField && (
+          <label className="form__field">
+            <span className="form__label">{colorField.label}</span>
+            <ColorComposer
+              value={color}
+              onChange={setColor}
+              label={colorField.label}
+            />
+          </label>
+        )}
         <div className="form__actions">
           <button type="button" onClick={onClose} className="form__action">
             {cancelLabel ?? t('dialogs.confirm.cancel')}
