@@ -10,7 +10,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use cal_core::adapter::{Adapter, AuthToken, Capability, ChangeSet, Credentials, TasksFeature};
 use cal_core::error::{Error, Result};
-use cal_core::types::{NewTask, Section, Task, TaskList, TaskUser};
+use cal_core::types::{MemberRight, NewTask, Section, Task, TaskList, TaskListShare, TaskUser};
 use serde::Serialize;
 use tracing::warn;
 
@@ -48,6 +48,11 @@ struct VtableSnapshot {
     get_tasks_delta: Option<crate::vtables::VtableMethodFn>,
     list_task_list_members: Option<crate::vtables::VtableMethodFn>,
     current_user: Option<crate::vtables::VtableMethodFn>,
+    list_task_list_shares: Option<crate::vtables::VtableMethodFn>,
+    search_users: Option<crate::vtables::VtableMethodFn>,
+    add_task_list_member: Option<crate::vtables::VtableMethodFn>,
+    remove_task_list_member: Option<crate::vtables::VtableMethodFn>,
+    set_task_list_member_right: Option<crate::vtables::VtableMethodFn>,
 }
 
 impl FfiTasksAdapter {
@@ -97,6 +102,11 @@ impl FfiTasksAdapter {
             delete_task_list: vtable_ref.delete_task_list,
             list_task_list_members: vtable_ref.list_task_list_members,
             current_user: vtable_ref.current_user,
+            list_task_list_shares: vtable_ref.list_task_list_shares,
+            search_users: vtable_ref.search_users,
+            add_task_list_member: vtable_ref.add_task_list_member,
+            remove_task_list_member: vtable_ref.remove_task_list_member,
+            set_task_list_member_right: vtable_ref.set_task_list_member_right,
         };
         let capabilities = super::manifest_capabilities(&plugin.manifest.capabilities);
         let handle_addr = instance.handle() as usize;
@@ -187,6 +197,26 @@ struct CreateTaskListArgs<'a> {
 struct GetTasksDeltaArgs<'a> {
     list_id: &'a str,
     since_token: Option<&'a str>,
+}
+
+#[derive(Serialize)]
+struct AddMemberArgs<'a> {
+    list_id: &'a str,
+    member_ref: &'a str,
+    right: Option<MemberRight>,
+}
+
+#[derive(Serialize)]
+struct MemberRefArgs<'a> {
+    list_id: &'a str,
+    member_ref: &'a str,
+}
+
+#[derive(Serialize)]
+struct SetRightArgs<'a> {
+    list_id: &'a str,
+    member_ref: &'a str,
+    right: MemberRight,
 }
 
 #[async_trait]
@@ -296,5 +326,70 @@ impl TasksFeature for FfiTasksAdapter {
         }
         let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         call_then_decode(self.vtable.current_user, self.handle_addr, &()).await
+    }
+
+    async fn list_task_list_shares(&self, list_id: &str) -> Result<Vec<TaskListShare>> {
+        if self.vtable.list_task_list_shares.is_none() {
+            return Ok(Vec::new());
+        }
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
+        call_then_decode(
+            self.vtable.list_task_list_shares,
+            self.handle_addr,
+            &list_id,
+        )
+        .await
+    }
+
+    async fn search_users(&self, query: &str) -> Result<Vec<TaskUser>> {
+        if self.vtable.search_users.is_none() {
+            return Ok(Vec::new());
+        }
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
+        call_then_decode(self.vtable.search_users, self.handle_addr, &query).await
+    }
+
+    async fn add_task_list_member(
+        &self,
+        list_id: &str,
+        member_ref: &str,
+        right: Option<MemberRight>,
+    ) -> Result<()> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
+        let args = AddMemberArgs {
+            list_id,
+            member_ref,
+            right,
+        };
+        call_for_unit(self.vtable.add_task_list_member, self.handle_addr, &args).await
+    }
+
+    async fn remove_task_list_member(&self, list_id: &str, member_ref: &str) -> Result<()> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
+        let args = MemberRefArgs {
+            list_id,
+            member_ref,
+        };
+        call_for_unit(self.vtable.remove_task_list_member, self.handle_addr, &args).await
+    }
+
+    async fn set_task_list_member_right(
+        &self,
+        list_id: &str,
+        member_ref: &str,
+        right: MemberRight,
+    ) -> Result<()> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
+        let args = SetRightArgs {
+            list_id,
+            member_ref,
+            right,
+        };
+        call_for_unit(
+            self.vtable.set_task_list_member_right,
+            self.handle_addr,
+            &args,
+        )
+        .await
     }
 }

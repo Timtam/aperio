@@ -69,6 +69,21 @@ pub struct TasksVtable {
     /// own identity ("me"). `None` ⇒ the shim inherits the default
     /// (`None`).
     pub current_user: Option<VtableMethodFn>,
+    /// `list_task_list_shares(list_id) -> Vec<TaskListShare>` — the
+    /// editable membership of a list (DESIGN §9.7). `None` ⇒ empty.
+    pub list_task_list_shares: Option<VtableMethodFn>,
+    /// `search_users(query) -> Vec<TaskUser>` — directory search for
+    /// members to add. `None` ⇒ empty.
+    pub search_users: Option<VtableMethodFn>,
+    /// `add_task_list_member(list_id, member_ref, right)`. `None` ⇒
+    /// Unsupported.
+    pub add_task_list_member: Option<VtableMethodFn>,
+    /// `remove_task_list_member(list_id, member_ref)`. `None` ⇒
+    /// Unsupported.
+    pub remove_task_list_member: Option<VtableMethodFn>,
+    /// `set_task_list_member_right(list_id, member_ref, right)`. `None`
+    /// ⇒ Unsupported.
+    pub set_task_list_member_right: Option<VtableMethodFn>,
 }
 
 impl TasksVtable {
@@ -89,6 +104,11 @@ impl TasksVtable {
             get_tasks_delta: None,
             list_task_list_members: None,
             current_user: None,
+            list_task_list_shares: None,
+            search_users: None,
+            add_task_list_member: None,
+            remove_task_list_member: None,
+            set_task_list_member_right: None,
         }
     }
 

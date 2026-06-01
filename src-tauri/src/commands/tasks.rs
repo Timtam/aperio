@@ -1,7 +1,9 @@
 //! Task list and task commands.
 
 use cal_adapter_local::LocalAdapter;
-use cal_core::{NewTask, Section, Task, TaskList, TaskUser, TasksFeature};
+use cal_core::{
+    MemberRight, NewTask, Section, Task, TaskList, TaskListShare, TaskUser, TasksFeature,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use sync_core::{EventPayload, IdPayload, SyncEvent};
@@ -601,6 +603,97 @@ pub async fn task_current_user(
         return Ok(None);
     };
     Ok(ext.current_user().await?)
+}
+
+/// The editable membership/shares of `list_id` (DESIGN §9.7), driving
+/// the members dialog. Local / non-manageable backends return empty.
+#[tauri::command]
+pub async fn task_list_shares(
+    registry: State<'_, Arc<AdapterRegistry>>,
+    list_id: String,
+) -> CommandResult<Vec<TaskListShare>> {
+    let account = registry
+        .account_for_task_list(&list_id)
+        .unwrap_or_else(|| LOCAL_ID.to_string());
+    if account == LOCAL_ID {
+        return Ok(Vec::new());
+    }
+    let Some(ext) = registry.task_adapter(&account) else {
+        return Ok(Vec::new());
+    };
+    Ok(ext.list_task_list_shares(&list_id).await?)
+}
+
+/// Search the owning account's user directory for people to add to
+/// `list_id` (Vikunja). Empty for backends without a directory.
+#[tauri::command]
+pub async fn task_search_users(
+    registry: State<'_, Arc<AdapterRegistry>>,
+    list_id: String,
+    query: String,
+) -> CommandResult<Vec<TaskUser>> {
+    let account = registry
+        .account_for_task_list(&list_id)
+        .unwrap_or_else(|| LOCAL_ID.to_string());
+    if account == LOCAL_ID {
+        return Ok(Vec::new());
+    }
+    let Some(ext) = registry.task_adapter(&account) else {
+        return Ok(Vec::new());
+    };
+    Ok(ext.search_users(&query).await?)
+}
+
+fn route_task_list(
+    registry: &AdapterRegistry,
+    list_id: &str,
+) -> CommandResult<Arc<dyn TasksFeature>> {
+    let account = registry
+        .account_for_task_list(list_id)
+        .unwrap_or_else(|| LOCAL_ID.to_string());
+    registry.task_adapter(&account).ok_or_else(|| CommandError {
+        code: "not_found",
+        message: format!("task list '{list_id}' is not routable"),
+    })
+}
+
+/// Add/invite a member to `list_id` (Vikunja username; Todoist email).
+#[tauri::command]
+pub async fn task_add_member(
+    registry: State<'_, Arc<AdapterRegistry>>,
+    list_id: String,
+    member_ref: String,
+    right: Option<MemberRight>,
+) -> CommandResult<()> {
+    let ext = route_task_list(&registry, &list_id)?;
+    Ok(ext
+        .add_task_list_member(&list_id, &member_ref, right)
+        .await?)
+}
+
+/// Remove a member from `list_id`.
+#[tauri::command]
+pub async fn task_remove_member(
+    registry: State<'_, Arc<AdapterRegistry>>,
+    list_id: String,
+    member_ref: String,
+) -> CommandResult<()> {
+    let ext = route_task_list(&registry, &list_id)?;
+    Ok(ext.remove_task_list_member(&list_id, &member_ref).await?)
+}
+
+/// Change a member's right (Vikunja).
+#[tauri::command]
+pub async fn task_set_member_right(
+    registry: State<'_, Arc<AdapterRegistry>>,
+    list_id: String,
+    member_ref: String,
+    right: MemberRight,
+) -> CommandResult<()> {
+    let ext = route_task_list(&registry, &list_id)?;
+    Ok(ext
+        .set_task_list_member_right(&list_id, &member_ref, right)
+        .await?)
 }
 
 #[derive(Debug, Deserialize)]

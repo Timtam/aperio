@@ -1064,6 +1064,41 @@ Aperio hält zwei unabhängige Datums-Slots pro Aufgabe: `scheduled_date` (+ opt
 
 **Phasen.** (0) Fundament: Modell + Trait-Methoden + FFI-vtable für `list_task_list_members`/`current_user` + Account-Identität. (1) Vikunja end-to-end. (2) UI (Picker + Badge). (3) Todoist (single, geteilte Projekte). _Out of scope:_ MS To Do/Planner; Cross-Account-Zuweisung (Task in Konto A an Nutzer aus Konto B).
 
+#### Mitglieder-/Freigabe-Verwaltung einer Liste
+
+Ergänzend zur Zuweisung: Mitglieder einer Liste / eines Projekts direkt aus Aperio **auflisten, hinzufügen/einladen, entfernen** und (wo unterstützt) ihre **Rechte** setzen. Die Anbieter unterscheiden sich grundlegend:
+
+| Operation | Vikunja | Todoist |
+|---|---|---|
+| Auflisten | `GET /projects/{id}/users` (direkte Shares **mit Recht**) — anders als `projectusers` (effektiver Pool ohne editierbare Rechte) | `GET /projects/{id}/collaborators` (REST, read-only) |
+| Hinzufügen | `PUT /projects/{id}/users` `{user_id=Username, right}` — **sofort** | Sync-Command `share_project {email}` — **E-Mail-Einladung, Annahme nötig** (Status `invited`) |
+| Entfernen | `DELETE /projects/{id}/users/{userID}` | Sync-Command `delete_collaborator {email}` |
+| Recht setzen | `POST /projects/{id}/users/{userID}` `{right}` — **0/1/2 = Lesen/Schreiben/Admin** | ❌ keine per-Projekt-Rolle |
+| Person finden | `GET /users?s=` (existierendes Konto; add per **Username**) | keine Suche — Einladung per **roher E-Mail** |
+| Teams | ✅ `/projects/{id}/teams` (gleiche Verben) | — |
+
+**Kernunterschied:** Vikunja = sofortige Freigabe an **bestehende Nutzer** mit **Rechtestufen** (+ Teams); Todoist = **E-Mail-Einladung mit Annahme-Flow**, ohne Rollen. (Vikunja-Eigenheit: **PUT = anlegen, POST = ändern**.) MS Planner/To Do bleiben _out of scope_.
+
+**Datenmodell.**
+- `MemberRight`: `Read | Write | Admin` (Vikunja 0/1/2).
+- `TaskListShare { user: TaskUser, right: Option<MemberRight>, pending: bool }` — `right = None` bei Anbietern ohne Rollen (Todoist); `pending = true` für noch nicht angenommene Einladungen (Todoist).
+- Adapter-Capabilities (Manifest / Capability): `manageable`, `roles` (Rechte editierbar?), `add_by: user_search | email`, `invitations` (Pending-Zustand?).
+
+**Trait-Methoden** (`TasksFeature`, je FFI-vtable-Slot wie bei der Zuweisung):
+- `list_task_list_shares(list_id) -> Vec<TaskListShare>` (default leer)
+- `search_users(query) -> Vec<TaskUser>` (default leer) — Personensuche zum Hinzufügen (Vikunja)
+- `add_task_list_member(list_id, member_ref, right) -> ()` (default Unsupported) — `member_ref` = Username (Vikunja) bzw. E-Mail (Todoist)
+- `remove_task_list_member(list_id, member_ref) -> ()` (default Unsupported)
+- `set_task_list_member_right(list_id, member_ref, right) -> ()` (default Unsupported)
+
+**UI.** Ein „Mitglieder / Freigabe"-Dialog pro Liste (aus dem Sidebar-Kontextmenü), capability-gated:
+- Vikunja: Mitgliederliste mit Rechte-Dropdown + Entfernen; Hinzufügen via **User-Suche**.
+- Todoist: Kollaboratoren + **ausstehende Einladungen**; Hinzufügen via **E-Mail-Feld**; keine Rollen-Dropdowns.
+
+Sichtbar nur, wenn der Adapter der Liste Mitgliederverwaltung kann (lokale Listen / nicht verwaltbare Backends blenden ihn aus).
+
+**Phasen.** (1) Vikunja end-to-end: Modell + Trait/FFI + Adapter (Shares lesen, add/remove/set_right, User-Suche) + Mitglieder-Dialog mit Rechten. (1b) Teams. (2) Todoist: `collaborators` + `collaborator_states`, `share_project`/`delete_collaborator` (Sync-API), Pending-Zustand; UI auf E-Mail-Einladung ohne Rollen. _Out of scope:_ MS; instanzweite Nutzer-/Team-Administration (nur projekt-/listenbezogene Freigabe).
+
 ### 9.8 Separate Aufgaben-Ansicht (`Ctrl+6`)
 
 - Gruppierung nach: Fälligkeitsdatum / Priorität / Status / Aufgabenliste

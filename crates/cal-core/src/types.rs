@@ -156,6 +156,31 @@ pub struct TaskUser {
     pub email: Option<String>,
 }
 
+/// Permission level on a task-list share (Vikunja `0/1/2`). Adapters
+/// without per-share roles (Todoist) report `None` on the share.
+/// See DESIGN §9.7 "Mitglieder-/Freigabe-Verwaltung".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MemberRight {
+    Read,
+    Write,
+    Admin,
+}
+
+/// One membership/share row of a task list: who has access, at what
+/// right (if the backend models roles), and whether the invitation is
+/// still pending acceptance (Todoist email invites are `pending` until
+/// accepted). Distinct from `TaskUser` in the assignee pool — this is
+/// the *editable* share list, not the effective members.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskListShare {
+    pub user: TaskUser,
+    #[serde(default)]
+    pub right: Option<MemberRight>,
+    #[serde(default)]
+    pub pending: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Task {
     pub id: String,

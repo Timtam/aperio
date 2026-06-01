@@ -133,6 +133,14 @@ typedef struct AperioTasksVtable {
     /* current_user() -> Option<TaskUser> — the account's own identity.
        NULL ⇒ None (no remote identity, e.g. local adapter). */
     AperioVtableMethodFn current_user;
+    /* Membership management (DESIGN §9.7): list_task_list_shares ->
+       Vec<TaskListShare>; search_users -> Vec<TaskUser>; add / remove /
+       set_right -> unit. NULL ⇒ empty / Unsupported. */
+    AperioVtableMethodFn list_task_list_shares;
+    AperioVtableMethodFn search_users;
+    AperioVtableMethodFn add_task_list_member;
+    AperioVtableMethodFn remove_task_list_member;
+    AperioVtableMethodFn set_task_list_member_right;
 } AperioTasksVtable;
 
 /*

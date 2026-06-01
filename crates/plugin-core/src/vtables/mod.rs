@@ -188,9 +188,11 @@ mod tests {
         use std::mem::size_of;
         // 12 method slots each.
         assert_eq!(size_of::<CalendarVtable>(), 8 + 12 * 8);
-        // 14 slots: the 12 task methods + list_task_list_members +
-        // current_user (assignee support, DESIGN §9.7).
-        assert_eq!(size_of::<TasksVtable>(), 8 + 14 * 8);
+        // 19 slots: 12 task methods + assignee support (2:
+        // list_task_list_members, current_user) + membership management
+        // (5: list_task_list_shares, search_users, add/remove member,
+        // set_member_right) — DESIGN §9.7.
+        assert_eq!(size_of::<TasksVtable>(), 8 + 19 * 8);
         // 14 method slots.
         assert_eq!(size_of::<ContactsVtable>(), 8 + 14 * 8);
         // 10 method slots.

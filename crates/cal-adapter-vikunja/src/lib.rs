@@ -32,8 +32,9 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use cal_core::{
-    Adapter, AuthToken, Capability, Credentials as CoreCredentials, Error as CoreError, NewTask,
-    Result as CoreResult, Section, Task, TaskList, TaskUser, TasksFeature,
+    Adapter, AuthToken, Capability, Credentials as CoreCredentials, Error as CoreError,
+    MemberRight, NewTask, Result as CoreResult, Section, Task, TaskList, TaskListShare, TaskUser,
+    TasksFeature,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -228,6 +229,46 @@ impl TasksFeature for VikunjaAdapter {
 
     async fn current_user(&self) -> CoreResult<Option<TaskUser>> {
         tasks::current_user(&self.client)
+            .await
+            .map_err(to_core_error)
+    }
+
+    async fn list_task_list_shares(&self, list_id: &str) -> CoreResult<Vec<TaskListShare>> {
+        tasks::list_task_list_shares(&self.client, list_id)
+            .await
+            .map_err(to_core_error)
+    }
+
+    async fn search_users(&self, query: &str) -> CoreResult<Vec<TaskUser>> {
+        tasks::search_users(&self.client, query)
+            .await
+            .map_err(to_core_error)
+    }
+
+    async fn add_task_list_member(
+        &self,
+        list_id: &str,
+        member_ref: &str,
+        right: Option<MemberRight>,
+    ) -> CoreResult<()> {
+        tasks::add_task_list_member(&self.client, list_id, member_ref, right)
+            .await
+            .map_err(to_core_error)
+    }
+
+    async fn remove_task_list_member(&self, list_id: &str, member_ref: &str) -> CoreResult<()> {
+        tasks::remove_task_list_member(&self.client, list_id, member_ref)
+            .await
+            .map_err(to_core_error)
+    }
+
+    async fn set_task_list_member_right(
+        &self,
+        list_id: &str,
+        member_ref: &str,
+        right: MemberRight,
+    ) -> CoreResult<()> {
+        tasks::set_task_list_member_right(&self.client, list_id, member_ref, right)
             .await
             .map_err(to_core_error)
     }

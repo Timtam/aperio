@@ -56,7 +56,10 @@
 //!   - Labels (the field is there in `Task`, but Aperio's
 //!     ColorLabel system is local-only at the moment).
 
-use cal_core::{NewTask, Section, Task, TaskList, TaskPriority, TaskStatus, TaskUser};
+use cal_core::{
+    MemberRight, NewTask, Section, Task, TaskList, TaskListShare, TaskPriority, TaskStatus,
+    TaskUser,
+};
 use chrono::{DateTime, Datelike, NaiveDate, NaiveTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -310,6 +313,183 @@ pub async fn list_task_list_members(
 pub async fn current_user(client: &VikunjaClient) -> VikunjaResult<Option<TaskUser>> {
     let u: VikunjaUser = client.get_json("/user").await?;
     Ok(Some(map_user(u)))
+}
+
+// ── Membership / sharing (DESIGN §9.7) ──────────────────────────────────
+//
+// Vikunja keys *project shares* on the USERNAME (add body + remove/right
+// path all use it), so the membership `TaskUser.id` carries the username
+// — distinct from the assignee path, which keys on the numeric user id
+// (the bulk-assignee endpoint wants that). The two never mix: one feeds
+// the members dialog, the other the assignee picker.
+
+fn vikunja_right_to_member(raw: i32) -> MemberRight {
+    match raw {
+        2 => MemberRight::Admin,
+        1 => MemberRight::Write,
+        _ => MemberRight::Read,
+    }
+}
+
+fn member_right_to_vikunja(right: Option<MemberRight>) -> i32 {
+    match right {
+        Some(MemberRight::Admin) => 2,
+        Some(MemberRight::Write) => 1,
+        _ => 0,
+    }
+}
+
+/// The username Vikunja keys a share on, falling back to the numeric id
+/// when the username is absent from the response.
+fn member_ref_of(id: i64, username: &Option<String>) -> String {
+    username
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| id.to_string())
+}
+
+/// Minimal percent-encoder for a query/path segment (no extra dep).
+fn encode_query(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+/// `GET /projects/{id}/users` — the editable direct user shares (with
+/// rights), distinct from `projectusers` (the read-only effective pool).
+pub async fn list_task_list_shares(
+    client: &VikunjaClient,
+    list_id: &str,
+) -> VikunjaResult<Vec<TaskListShare>> {
+    let project_id = parse_id(list_id, "task list id")?;
+    let entries: Vec<ProjectUserEntry> = match client
+        .get_json(&format!("/projects/{project_id}/users"))
+        .await
+    {
+        Ok(e) => e,
+        Err(_) => return Ok(Vec::new()),
+    };
+    Ok(entries
+        .into_iter()
+        .map(|e| {
+            let display = e
+                .name
+                .clone()
+                .filter(|s| !s.trim().is_empty())
+                .or_else(|| e.username.clone().filter(|s| !s.trim().is_empty()))
+                .unwrap_or_else(|| format!("User {}", e.id));
+            TaskListShare {
+                user: TaskUser {
+                    id: member_ref_of(e.id, &e.username),
+                    name: display,
+                    email: e.email.filter(|s| !s.trim().is_empty()),
+                },
+                right: Some(vikunja_right_to_member(e.right)),
+                pending: false,
+            }
+        })
+        .collect())
+}
+
+/// `GET /users?s=` — directory search for users to add as members. The
+/// returned `TaskUser.id` carries the USERNAME (the membership add key).
+pub async fn search_users(client: &VikunjaClient, query: &str) -> VikunjaResult<Vec<TaskUser>> {
+    if query.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let users: Vec<VikunjaUser> = match client
+        .get_json(&format!("/users?s={}", encode_query(query)))
+        .await
+    {
+        Ok(u) => u,
+        Err(_) => return Ok(Vec::new()),
+    };
+    Ok(users
+        .into_iter()
+        .filter_map(|u| {
+            let username = u.username.clone();
+            let mut tu = map_user(u);
+            tu.id = member_ref_of(0, &username);
+            (tu.id != "0").then_some(tu)
+        })
+        .collect())
+}
+
+/// `PUT /projects/{id}/users` — share with a user (by username) at a
+/// right level. Immediate; no invitation flow.
+pub async fn add_task_list_member(
+    client: &VikunjaClient,
+    list_id: &str,
+    member_ref: &str,
+    right: Option<MemberRight>,
+) -> VikunjaResult<()> {
+    let project_id = parse_id(list_id, "task list id")?;
+    let body = serde_json::json!({
+        "user_id": member_ref,
+        "right": member_right_to_vikunja(right),
+    });
+    let _: serde_json::Value = client
+        .put_json(&format!("/projects/{project_id}/users"), &body)
+        .await?;
+    Ok(())
+}
+
+/// `DELETE /projects/{id}/users/{member}` — revoke a user's share.
+pub async fn remove_task_list_member(
+    client: &VikunjaClient,
+    list_id: &str,
+    member_ref: &str,
+) -> VikunjaResult<()> {
+    let project_id = parse_id(list_id, "task list id")?;
+    client
+        .delete(&format!(
+            "/projects/{project_id}/users/{}",
+            encode_query(member_ref)
+        ))
+        .await
+}
+
+/// `POST /projects/{id}/users/{member}` — change a user's right.
+pub async fn set_task_list_member_right(
+    client: &VikunjaClient,
+    list_id: &str,
+    member_ref: &str,
+    right: MemberRight,
+) -> VikunjaResult<()> {
+    let project_id = parse_id(list_id, "task list id")?;
+    let body = serde_json::json!({ "right": member_right_to_vikunja(Some(right)) });
+    let _: serde_json::Value = client
+        .post_json(
+            &format!("/projects/{project_id}/users/{}", encode_query(member_ref)),
+            &body,
+        )
+        .await?;
+    Ok(())
+}
+
+/// A `GET /projects/{id}/users` row: the embedded user fields + the
+/// share's `right` (0/1/2).
+#[derive(Debug, Deserialize)]
+struct ProjectUserEntry {
+    #[serde(default)]
+    id: i64,
+    #[serde(default)]
+    username: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    email: Option<String>,
+    #[serde(default)]
+    right: i32,
 }
 
 // ── JSON wire shapes ───────────────────────────────────────────────────

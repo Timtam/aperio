@@ -13,8 +13,8 @@ use crate::color::ContainerColor;
 use crate::error::{Error, Result};
 use crate::reminder::SoundConfig;
 use crate::types::{
-    Calendar, Contact, ContactList, ContactPhoto, DateRange, Event, FreeBusy, NewContact, NewEvent,
-    NewTask, Section, Task, TaskList, TaskUser,
+    Calendar, Contact, ContactList, ContactPhoto, DateRange, Event, FreeBusy, MemberRight,
+    NewContact, NewEvent, NewTask, Section, Task, TaskList, TaskListShare, TaskUser,
 };
 
 /// Stable identifier for the adapter source (e.g. "google", "caldav",
@@ -243,6 +243,58 @@ pub trait TasksFeature: Adapter {
     /// identity.
     async fn current_user(&self) -> Result<Option<TaskUser>> {
         Ok(None)
+    }
+
+    /// List the EDITABLE membership/shares of `list_id` (Vikunja
+    /// `/projects/{id}/users` with rights; Todoist collaborators +
+    /// pending invites). Distinct from `list_task_list_members`, which
+    /// returns the read-only effective assignee pool. Default empty.
+    async fn list_task_list_shares(&self, _list_id: &str) -> Result<Vec<TaskListShare>> {
+        Ok(vec![])
+    }
+
+    /// Search the instance/workspace for users to add as members
+    /// (Vikunja `/users?s=`). Default empty — backends that invite by
+    /// raw email (Todoist) have no user directory to search.
+    async fn search_users(&self, _query: &str) -> Result<Vec<TaskUser>> {
+        Ok(vec![])
+    }
+
+    /// Add a member to `list_id`. `member_ref` is the provider's add
+    /// key — a username (Vikunja) or an email (Todoist invite). `right`
+    /// applies on backends with roles; ignored where unsupported.
+    /// Default `Unsupported`.
+    async fn add_task_list_member(
+        &self,
+        _list_id: &str,
+        _member_ref: &str,
+        _right: Option<MemberRight>,
+    ) -> Result<()> {
+        Err(Error::Unsupported(
+            "add_task_list_member is not supported on this adapter".into(),
+        ))
+    }
+
+    /// Remove a member from `list_id`. `member_ref` is the provider's
+    /// remove key (Vikunja user id, Todoist email). Default
+    /// `Unsupported`.
+    async fn remove_task_list_member(&self, _list_id: &str, _member_ref: &str) -> Result<()> {
+        Err(Error::Unsupported(
+            "remove_task_list_member is not supported on this adapter".into(),
+        ))
+    }
+
+    /// Change an existing member's right (Vikunja). Default
+    /// `Unsupported` — backends without per-share roles (Todoist).
+    async fn set_task_list_member_right(
+        &self,
+        _list_id: &str,
+        _member_ref: &str,
+        _right: MemberRight,
+    ) -> Result<()> {
+        Err(Error::Unsupported(
+            "set_task_list_member_right is not supported on this adapter".into(),
+        ))
     }
 }
 
