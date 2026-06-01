@@ -12,6 +12,12 @@ import { createEvent as apiCreateEvent, isCommandError } from '../api/client';
 import { useCalendarStore } from '../state/calendarStoreContext';
 import { useDialogState } from '../state/dialogStateContext';
 import { useViewState } from '../state/viewStateContext';
+import {
+  dateInput,
+  defaultNewEventTimes,
+  timeInput,
+  toIso,
+} from './eventDateTime';
 import { Modal } from './Modal';
 
 /**
@@ -69,7 +75,7 @@ export function QuickAddDialog({
         setError(t('dialogs.event.calendarRequired'));
         return;
       }
-      const start = toIso(date, time);
+      const start = toIso(date, time, false);
       if (!start) {
         setError(t('dialogs.event.dateInvalid'));
         return;
@@ -229,46 +235,13 @@ function buildInitial(
   calendars: { id: string }[],
   anchor: Date,
 ): Initial {
-  const slot = new Date(anchor);
-  // Use the next full hour on the anchor day, unless the anchor itself
-  // is already a time (the view passes midnight by default).
-  const now = new Date();
-  if (
-    slot.getFullYear() === now.getFullYear() &&
-    slot.getMonth() === now.getMonth() &&
-    slot.getDate() === now.getDate()
-  ) {
-    slot.setHours(now.getHours() + 1, 0, 0, 0);
-  } else {
-    slot.setHours(9, 0, 0, 0);
-  }
+  // Same default-time policy as the full dialog: next :00/:30 slot when
+  // the focused day is today, 09:00 otherwise.
+  const { start } = defaultNewEventTimes(dateInput(anchor), new Date());
   return {
     title: '',
-    date: dateInput(slot),
-    time: timeInput(slot),
+    date: dateInput(start),
+    time: timeInput(start),
     calendarId: calendars[0]?.id ?? '',
   };
-}
-
-function dateInput(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
-
-function timeInput(d: Date): string {
-  const h = String(d.getHours()).padStart(2, '0');
-  const m = String(d.getMinutes()).padStart(2, '0');
-  return `${h}:${m}`;
-}
-
-function toIso(date: string, time: string): string | null {
-  if (!date) return null;
-  const [y, m, d] = date.split('-').map(Number);
-  if (!y || !m || !d) return null;
-  const parts = time.split(':').map(Number);
-  if (parts.length < 2 || parts.some(Number.isNaN)) return null;
-  const [h, mi] = parts;
-  return new Date(y, m - 1, d, h, mi, 0).toISOString();
 }
