@@ -31,51 +31,43 @@ import { useViewState } from './viewStateContext';
  *   to refresh the data — the cached entry is replaced when the new
  *   batch lands.
  *
- *   `dataVersion` is the global "data may have changed" counter
- *   (bumped after every dialog close and explicit `invalidateData()`).
- *   When the cache observes a newer version it clears wholesale —
- *   conservative but correct, mirrors what `dataVersion` was designed
- *   to do.
+ *   `dataVersion` is the global "data may have changed" counter (bumped
+ *   after every dialog close, explicit `invalidateData()`, and each
+ *   background `cache-updated`). It's an effect *dependency*, so a bump
+ *   triggers a revalidation — but the cached entry is KEPT and served as
+ *   stale meanwhile, so the view never blanks or shrinks to a partial
+ *   set while the refetch runs. The authoritative swap below overwrites
+ *   the entry when the fresh batch lands.
+ *
+ *   (Wiping the cache wholesale on every `dataVersion` bump — as an
+ *   earlier version did — turned each background-refresh-triggered
+ *   refetch into a COLD start: the progressive per-calendar paint would
+ *   shrink the list back to one calendar and grow it again, which both
+ *   flickered visually and made screen readers re-announce the day's
+ *   event count on every step. Keeping the entry is the actual SWR
+ *   contract and avoids that churn.)
  */
 
 /** Cache key: sorted calendar IDs joined with `,` + range ISO strings. */
 type CacheKey = string;
 
 const eventsCache = new Map<CacheKey, CalendarEvent[]>();
-let cachedDataVersion = -1;
 
 function cacheKey(idsKey: string, startIso: string, endIso: string): CacheKey {
   return `${idsKey}|${startIso}|${endIso}`;
 }
 
-function ensureCacheVersion(version: number): void {
-  if (version !== cachedDataVersion) {
-    eventsCache.clear();
-    cachedDataVersion = version;
-  }
-}
-
-function cacheGet(
-  key: CacheKey,
-  version: number,
-): CalendarEvent[] | undefined {
-  ensureCacheVersion(version);
+function cacheGet(key: CacheKey): CalendarEvent[] | undefined {
   return eventsCache.get(key);
 }
 
-function cacheSet(
-  key: CacheKey,
-  version: number,
-  events: CalendarEvent[],
-): void {
-  ensureCacheVersion(version);
+function cacheSet(key: CacheKey, events: CalendarEvent[]): void {
   eventsCache.set(key, events);
 }
 
 /** Test-only escape hatch — wipes the cache so each test starts clean. */
 export function __resetEventsCacheForTests(): void {
   eventsCache.clear();
-  cachedDataVersion = -1;
 }
 
 export function useEvents(range: { start: Date; end: Date }) {
@@ -108,10 +100,10 @@ export function useEvents(range: { start: Date; end: Date }) {
   // cache when the key has been seen before in this session. No
   // flicker between empty and cached state.
   const [events, setEvents] = useState<CalendarEvent[]>(
-    () => cacheGet(key, dataVersion) ?? [],
+    () => cacheGet(key) ?? [],
   );
   const [loading, setLoading] = useState<boolean>(
-    () => cacheGet(key, dataVersion) === undefined,
+    () => cacheGet(key) === undefined,
   );
   const [error, setError] = useState<unknown>(null);
 
@@ -123,7 +115,7 @@ export function useEvents(range: { start: Date; end: Date }) {
     // dataVersion ticked, this is where state snaps to the cached
     // batch (cache hit, loading stays / flips false) or arms a real
     // fetch (cache miss).
-    const cached = cacheGet(key, dataVersion);
+    const cached = cacheGet(key);
     const hadCache = cached !== undefined;
     if (cached) {
       setEvents(cached);
@@ -142,7 +134,7 @@ export function useEvents(range: { start: Date; end: Date }) {
     if (ids.length === 0) {
       setEvents([]);
       setLoading(false);
-      cacheSet(key, dataVersion, []);
+      cacheSet(key, []);
       return;
     }
 
@@ -192,7 +184,7 @@ export function useEvents(range: { start: Date; end: Date }) {
           if (remaining === 0) {
             // Last calendar in: authoritative swap + cache write.
             const expanded = aggregate();
-            cacheSet(key, dataVersion, expanded);
+            cacheSet(key, expanded);
             setEvents(expanded);
             setLoading(false);
           } else if (!hadCache) {
