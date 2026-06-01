@@ -18,13 +18,21 @@ import {
   deleteSection,
   isCommandError,
   showContextMenu,
+  taskCurrentUser,
+  taskListMembers,
   updateSection,
   type ContextMenuItemRequest,
 } from '../api/client';
 import { invoke } from '@tauri-apps/api/core';
 import { todayIsoKey } from '../intl/taskDay';
 import { statusI18nKey, statusMarker } from '../intl/taskStatus';
-import type { Reminder, Task, TaskPriority, TaskStatus } from '../api/types';
+import type {
+  Reminder,
+  Task,
+  TaskPriority,
+  TaskStatus,
+  TaskUser,
+} from '../api/types';
 import { useCalendarStore } from '../state/calendarStoreContext';
 import { canAssignSection, canMoveTaskBetweenLists } from '../state/taskMoves';
 import { useDialogState } from '../state/dialogStateContext';
@@ -37,6 +45,7 @@ import { useTaskCascadeEnabled } from '../state/taskCascadeContext';
 import { useTasks } from '../state/useTasks';
 import { useTaskStatusActions } from '../state/useTaskStatusToggle';
 import { readLastUsedTaskList, writeLastUsedTaskList } from './lastUsedTaskList';
+import { AssigneePicker } from './AssigneePicker';
 import { Modal } from './Modal';
 import { RemindersEditor } from './RemindersEditor';
 import { TaskRecurrenceSelector } from './TaskRecurrenceSelector';
@@ -88,6 +97,8 @@ interface FormState {
   colorLabel: string | null;
   recurrence: TaskRecurrenceValue;
   reminders: Reminder[];
+  /** Users this task is assigned to (DESIGN §9.7). */
+  assignees: TaskUser[];
 }
 
 export function TaskDialog({
@@ -170,6 +181,10 @@ export function TaskDialog({
   const [form, setForm] = useState<FormState>(initialState);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // Assignee picker data (DESIGN §9.7): the targeted list's member pool
+  // + the connected account's own id, loaded per list when open.
+  const [members, setMembers] = useState<TaskUser[]>([]);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -208,6 +223,34 @@ export function TaskDialog({
       void loadSections(form.listId);
     }
   }, [isOpen, sectionsEnabled, form.listId, sectionsByList, loadSections]);
+
+  // Load the assignee pool + "me" identity for the targeted list. Empty
+  // for local lists / providers without sharing, which hides the picker.
+  useEffect(() => {
+    if (!isOpen || !form.listId) {
+      setMembers([]);
+      setCurrentUserId(null);
+      return;
+    }
+    let cancelled = false;
+    void taskListMembers(form.listId)
+      .then((m) => {
+        if (!cancelled) setMembers(m);
+      })
+      .catch(() => {
+        if (!cancelled) setMembers([]);
+      });
+    void taskCurrentUser(form.listId)
+      .then((u) => {
+        if (!cancelled) setCurrentUserId(u?.id ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setCurrentUserId(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, form.listId]);
 
   // If the chosen section no longer belongs to the selected list (the
   // user switched lists), drop it back to ungrouped.
@@ -348,6 +391,7 @@ export function TaskDialog({
         section_id: task.section_id,
         color_label: null,
         reminders: [],
+        assignees: [],
         sound: null,
       });
       // Cascade-up: if the parent was completed before this new
@@ -581,6 +625,7 @@ export function TaskDialog({
             description: form.description.trim() || null,
             color_label: form.colorLabel,
             reminders: form.reminders,
+            assignees: form.assignees,
             completed_at:
               form.status === 'completed'
                 ? task.completed_at ?? new Date().toISOString()
@@ -658,6 +703,7 @@ export function TaskDialog({
             section_id: form.sectionId || null,
             color_label: form.colorLabel,
             reminders: form.reminders,
+            assignees: form.assignees,
             sound: null,
           });
           // Remember for next time — only on create, not edit.
@@ -780,6 +826,20 @@ export function TaskDialog({
             </p>
           )}
         </label>
+
+        {members.length > 0 && (
+          <div className="form__field">
+            <span className="form__label">
+              {t('dialogs.task.fields.assignees')}
+            </span>
+            <AssigneePicker
+              members={members}
+              value={form.assignees}
+              currentUserId={currentUserId}
+              onChange={(next) => update('assignees', next)}
+            />
+          </div>
+        )}
 
         {sectionsEnabled && (
           <div className="form__field">
@@ -1228,6 +1288,7 @@ function buildInitialState(
       colorLabel: task.color_label ?? null,
       recurrence: recurrenceFromBackend(task.recurrence),
       reminders: task.reminders ?? [],
+      assignees: task.assignees ?? [],
     };
   }
   // When the caller anchored us on a day, default to a scheduled
@@ -1262,6 +1323,7 @@ function buildInitialState(
     colorLabel: null,
     recurrence: { ...TASK_RECURRENCE_DEFAULT },
     reminders: [],
+    assignees: [],
   };
 }
 

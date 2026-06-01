@@ -369,6 +369,8 @@ async function moveOrCopyTask(
     section_id: null,
     color_label: task.color_label,
     reminders: task.reminders,
+    // Copy lands in another list whose members differ — start unassigned.
+    assignees: [],
     sound: task.sound,
   });
   for (const child of children) {
@@ -387,6 +389,7 @@ async function moveOrCopyTask(
       section_id: null,
       color_label: child.color_label,
       reminders: child.reminders,
+      assignees: [],
       sound: child.sound,
     });
   }

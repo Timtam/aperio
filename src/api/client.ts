@@ -25,6 +25,7 @@ import type {
   Section,
   Task,
   TaskList,
+  TaskUser,
 } from './types';
 
 /** Type guard — a backend error always carries `code` and `message`. */
@@ -171,6 +172,16 @@ export const getTasks = (list_id: string) =>
 export const getSections = (list_id: string) =>
   invoke<Section[]>('get_sections', { listId: list_id });
 
+/** Users assignable to a task in this list — its collaborator pool
+ *  (DESIGN §9.7). Empty for local lists / providers without sharing. */
+export const taskListMembers = (list_id: string) =>
+  invoke<TaskUser[]>('task_list_members', { listId: list_id });
+
+/** The connected account's own identity ("me") for the account that
+ *  owns this list. `null` for local lists / providers without users. */
+export const taskCurrentUser = (list_id: string) =>
+  invoke<TaskUser | null>('task_current_user', { listId: list_id });
+
 export interface CreateSectionRequest {
   list_id: string;
   name: string;
@@ -203,6 +214,7 @@ export interface CreateTaskRequest {
   section_id: string | null;
   color_label: string | null;
   reminders: Task['reminders'];
+  assignees: Task['assignees'];
   sound: Task['sound'];
 }
 

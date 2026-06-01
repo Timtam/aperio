@@ -844,6 +844,11 @@
         "renamed": "Abschnitt in „{{name}}\" umbenannt.",
         "deleted": "Abschnitt „{{name}}\" gelöscht; seine Aufgaben sind jetzt ohne Abschnitt."
       },
+      "assignees": {
+        "add": "Person hinzufügen …",
+        "remove": "{{name}} entfernen",
+        "you": "{{name}} (ich)"
+      },
       "delete": "Löschen",
       "created": "Aufgabe „{{title}}\" wurde angelegt.",
       "updated": "Aufgabe „{{title}}\" wurde aktualisiert.",
@@ -852,6 +857,7 @@
         "title": "Titel",
         "list": "Liste",
         "section": "Abschnitt",
+        "assignees": "Zugewiesen an",
         "status": "Status",
         "priority": "Priorität",
         "scheduled": {

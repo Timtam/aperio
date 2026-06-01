@@ -24,6 +24,7 @@ const baseTask: Task = {
   section_id: null,
   color_label: null,
   reminders: [],
+  assignees: [],
   sound: null,
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-01T00:00:00Z',

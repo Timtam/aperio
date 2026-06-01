@@ -327,6 +327,8 @@ pub fn run() {
             commands::update_task,
             commands::delete_task,
             commands::get_sections,
+            commands::task_list_members,
+            commands::task_current_user,
             commands::create_section,
             commands::update_section,
             commands::delete_section,

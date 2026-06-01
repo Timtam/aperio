@@ -63,6 +63,15 @@ export interface Section {
   order: number;
 }
 
+/** A user in the task domain — a task assignee, a member of a task
+ *  list's collaborator pool, or the connected account's own identity
+ *  ("me"). `id` is the provider-native user id. See DESIGN §9.7. */
+export interface TaskUser {
+  id: string;
+  name: string;
+  email: string | null;
+}
+
 export interface Calendar {
   id: string;
   name: string;
@@ -201,6 +210,9 @@ export interface Task {
   color_label: string | null;
   reminders: Reminder[];
   sound: SoundConfig | null;
+  /** Users this task is assigned to (DESIGN §9.7). Empty ⇒ unassigned.
+   *  Only adapters that support assignment populate/accept it. */
+  assignees: TaskUser[];
   created_at: string;
   updated_at: string;
   completed_at: string | null;

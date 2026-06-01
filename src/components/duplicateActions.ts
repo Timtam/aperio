@@ -42,6 +42,8 @@ export async function duplicateTask(task: Task): Promise<void> {
     section_id: task.section_id,
     color_label: task.color_label,
     reminders: task.reminders,
+    // Same list ⇒ the assignees stay valid members; copy for fidelity.
+    assignees: task.assignees,
     sound: task.sound,
   });
 }

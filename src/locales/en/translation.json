@@ -844,6 +844,11 @@
         "renamed": "Section renamed to \"{{name}}\".",
         "deleted": "Section \"{{name}}\" deleted; its tasks are now ungrouped."
       },
+      "assignees": {
+        "add": "Add person …",
+        "remove": "Remove {{name}}",
+        "you": "{{name}} (me)"
+      },
       "delete": "Delete",
       "created": "Task \"{{title}}\" created.",
       "updated": "Task \"{{title}}\" updated.",
@@ -852,6 +857,7 @@
         "title": "Title",
         "list": "List",
         "section": "Section",
+        "assignees": "Assigned to",
         "status": "Status",
         "priority": "Priority",
         "scheduled": {

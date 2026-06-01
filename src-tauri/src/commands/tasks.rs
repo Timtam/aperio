@@ -1,7 +1,7 @@
 //! Task list and task commands.
 
 use cal_adapter_local::LocalAdapter;
-use cal_core::{NewTask, Section, Task, TaskList, TasksFeature};
+use cal_core::{NewTask, Section, Task, TaskList, TaskUser, TasksFeature};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use sync_core::{EventPayload, IdPayload, SyncEvent};
@@ -558,6 +558,49 @@ pub async fn get_sections(
         });
     };
     Ok(ext.list_sections(&list_id).await?)
+}
+
+/// The users who can be ASSIGNED a task in `list_id` — the list's
+/// collaborator pool (DESIGN §9.7), feeding the assignee picker. Local
+/// lists have no members (returns empty); external lists hit the
+/// provider adapter (Vikunja `projectusers`, …). A non-routable or
+/// member-less backend yields an empty list, so the UI just shows no
+/// candidates rather than an error.
+#[tauri::command]
+pub async fn task_list_members(
+    registry: State<'_, Arc<AdapterRegistry>>,
+    list_id: String,
+) -> CommandResult<Vec<TaskUser>> {
+    let account = registry
+        .account_for_task_list(&list_id)
+        .unwrap_or_else(|| LOCAL_ID.to_string());
+    if account == LOCAL_ID {
+        return Ok(Vec::new());
+    }
+    let Some(ext) = registry.task_adapter(&account) else {
+        return Ok(Vec::new());
+    };
+    Ok(ext.list_task_list_members(&list_id).await?)
+}
+
+/// The connected account's own identity ("me") for the account that
+/// owns `list_id`, used to mark "assigned to me" in the UI. Local lists
+/// (and providers without a user concept) return `None`.
+#[tauri::command]
+pub async fn task_current_user(
+    registry: State<'_, Arc<AdapterRegistry>>,
+    list_id: String,
+) -> CommandResult<Option<TaskUser>> {
+    let account = registry
+        .account_for_task_list(&list_id)
+        .unwrap_or_else(|| LOCAL_ID.to_string());
+    if account == LOCAL_ID {
+        return Ok(None);
+    }
+    let Some(ext) = registry.task_adapter(&account) else {
+        return Ok(None);
+    };
+    Ok(ext.current_user().await?)
 }
 
 #[derive(Debug, Deserialize)]
