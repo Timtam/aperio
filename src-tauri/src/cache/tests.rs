@@ -115,6 +115,7 @@ fn contact(id: &str) -> Contact {
 
 fn calendar(id: &str) -> Calendar {
     Calendar {
+        color_label: None,
         id: id.into(),
         name: format!("Cal {id}"),
         color: None,
@@ -125,6 +126,7 @@ fn calendar(id: &str) -> Calendar {
 
 fn task_list(id: &str) -> TaskList {
     TaskList {
+        color_label: None,
         id: id.into(),
         name: format!("List {id}"),
         color: None,
@@ -137,6 +139,7 @@ fn task_list(id: &str) -> TaskList {
 
 fn contact_list(id: &str) -> ContactList {
     ContactList {
+        color_label: None,
         id: id.into(),
         name: format!("Book {id}"),
         color: None,

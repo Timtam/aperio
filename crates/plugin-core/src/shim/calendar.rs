@@ -392,6 +392,7 @@ mod tests {
         *LIST_CALENDARS_CALLED.lock().unwrap() += 1;
         let cals = vec![
             Calendar {
+                color_label: None,
                 id: "cal-1".into(),
                 name: "Calendar One".into(),
                 color: None,
@@ -399,6 +400,7 @@ mod tests {
                 default_sound: None,
             },
             Calendar {
+                color_label: None,
                 id: "cal-2".into(),
                 name: "Calendar Two".into(),
                 color: None,

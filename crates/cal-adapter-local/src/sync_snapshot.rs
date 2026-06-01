@@ -107,7 +107,8 @@ impl LocalAdapter {
         let conn = self.db().lock().expect("db mutex poisoned");
         let mut stmt = conn
             .prepare(
-                "SELECT id, name, color_hex, color_source, read_only, default_sound
+                "SELECT id, name, color_hex, color_source, read_only, default_sound,
+                        color_label_id
                    FROM calendars",
             )
             .map_err(map_sql_err)?;
@@ -119,13 +120,15 @@ impl LocalAdapter {
                     read_container_color(row, 2, 3),
                     read_bool(row, 4),
                     read_sound(row, 5),
+                    opt_text(row, 6),
                 ))
             })
             .map_err(map_sql_err)?;
         let mut out = Vec::new();
         for r in rows {
-            let (id, name, color, read_only, sound) = r.map_err(map_sql_err)?;
+            let (id, name, color, read_only, sound, color_label) = r.map_err(map_sql_err)?;
             out.push(Calendar {
+                color_label: color_label?.map(ColorLabelId),
                 id: id?,
                 name: name?,
                 color: color?,
@@ -167,7 +170,7 @@ impl LocalAdapter {
         let mut stmt = conn
             .prepare(
                 "SELECT id, name, color_hex, color_source, default_sound,
-                        embedded_in_calendar, read_only, parent_id
+                        embedded_in_calendar, read_only, parent_id, color_label_id
                    FROM task_lists",
             )
             .map_err(map_sql_err)?;
@@ -181,14 +184,16 @@ impl LocalAdapter {
                     opt_text(row, 5),
                     read_bool(row, 6),
                     opt_text(row, 7),
+                    opt_text(row, 8),
                 ))
             })
             .map_err(map_sql_err)?;
         let mut out = Vec::new();
         for r in rows {
-            let (id, name, color, sound, embedded, read_only, parent_id) =
+            let (id, name, color, sound, embedded, read_only, parent_id, color_label) =
                 r.map_err(map_sql_err)?;
             out.push(TaskList {
+                color_label: color_label?.map(ColorLabelId),
                 id: id?,
                 name: name?,
                 color: color?,
@@ -402,6 +407,7 @@ mod tests {
 
     fn fake_calendar(id: &str, name: &str) -> Calendar {
         Calendar {
+            color_label: None,
             id: id.into(),
             name: name.into(),
             color: Some(container("#112233")),
@@ -412,6 +418,7 @@ mod tests {
 
     fn fake_task_list(id: &str, name: &str) -> TaskList {
         TaskList {
+            color_label: None,
             id: id.into(),
             name: name.into(),
             color: Some(container("#445566")),

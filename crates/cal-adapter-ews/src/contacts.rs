@@ -187,6 +187,7 @@ pub async fn get_contacts(client: &EwsClient, list_id: &str) -> EwsResult<Vec<Co
 #[allow(clippy::missing_const_for_fn)]
 fn gal_contact_list() -> ContactList {
     ContactList {
+        color_label: None,
         id: GAL_LIST_ID.to_string(),
         name: "Global Address List".to_string(),
         color: None,
@@ -1107,6 +1108,7 @@ pub fn to_contact_list(folder: ParsedContactFolder) -> ContactList {
     // change and orphan the host cache (see `mapping::to_calendar`).
     // Rename harvests a fresh ChangeKey at write time instead.
     ContactList {
+        color_label: None,
         id: folder.folder_id,
         name: if folder.display_name.is_empty() {
             "Contacts".into()

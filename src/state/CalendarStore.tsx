@@ -21,9 +21,30 @@ import type {
   Calendar,
   ColorLabel,
   ContactList,
+  ContainerColor,
   Section,
   TaskList,
 } from '../api/types';
+
+/**
+ * Resolve each container's bound color-label to its *live* hex, so the
+ * whole app (sidebar, panels, views) sees a single derived `color`. When
+ * a container is bound (`color_label`), its display color becomes the
+ * label's current hex; recoloring the label re-derives here and every
+ * consumer re-renders. Unbound containers keep their native color.
+ *
+ * Module-private (not a component) so it stays out of react-refresh's way.
+ */
+function withResolvedColors<
+  T extends { color: ContainerColor | null; color_label: string | null },
+>(containers: T[], byId: Map<string, ColorLabel>): T[] {
+  return containers.map((c) => {
+    if (!c.color_label) return c;
+    const label = byId.get(c.color_label);
+    if (!label) return c;
+    return { ...c, color: { hex: label.hex, source: 'custom' as const } };
+  });
+}
 
 /**
  * Calendar and task-list store.
@@ -279,19 +300,40 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
+  // Containers carry a color-label BINDING (`color_label`); resolve it to
+  // the label's live hex once, here, so every consumer sees the bound
+  // color via the usual `container.color`. Recoloring a label re-derives.
+  const labelsById = useMemo(() => {
+    const m = new Map<string, ColorLabel>();
+    colorLabels.forEach((l) => m.set(l.id, l));
+    return m;
+  }, [colorLabels]);
+  const resolvedCalendars = useMemo(
+    () => withResolvedColors(calendars, labelsById),
+    [calendars, labelsById],
+  );
+  const resolvedTaskLists = useMemo(
+    () => withResolvedColors(taskLists, labelsById),
+    [taskLists, labelsById],
+  );
+  const resolvedContactLists = useMemo(
+    () => withResolvedColors(contactLists, labelsById),
+    [contactLists, labelsById],
+  );
+
   const value = useMemo<CalendarStoreState>(
     () => ({
-      calendars,
+      calendars: resolvedCalendars,
       selectedCalendarIds: calendarSel.selected,
       toggleCalendar,
       refreshCalendars,
-      taskLists,
+      taskLists: resolvedTaskLists,
       selectedTaskListIds: taskListSel.selected,
       toggleTaskList,
       refreshTaskLists,
       sectionsByList,
       loadSections,
-      contactLists,
+      contactLists: resolvedContactLists,
       selectedContactListIds: contactListSel.selected,
       toggleContactList,
       refreshContactLists,
@@ -302,17 +344,17 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
       loading,
     }),
     [
-      calendars,
+      resolvedCalendars,
       calendarSel.selected,
       toggleCalendar,
       refreshCalendars,
-      taskLists,
+      resolvedTaskLists,
       taskListSel.selected,
       toggleTaskList,
       refreshTaskLists,
       sectionsByList,
       loadSections,
-      contactLists,
+      resolvedContactLists,
       contactListSel.selected,
       toggleContactList,
       refreshContactLists,

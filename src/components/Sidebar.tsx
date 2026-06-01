@@ -24,6 +24,7 @@ import {
   renameContactList,
   renameContainer,
   reparentTaskList,
+  setContainerColorLabel,
   showContextMenu,
   type ContainerKind,
   type ContextMenuItemRequest,
@@ -476,15 +477,13 @@ export function Sidebar() {
     async (name: string, colorLabelId?: string | null) => {
       const prompt = createPrompt;
       if (!prompt) return;
-      // Container colors come from the SAME predefined color-labels as
-      // everything else: resolve the picked label to its hex (or null for
-      // "no color"). Keeps one palette across tasks, events + containers.
-      const colorHex = colorLabelId
-        ? (colorLabels.find((l) => l.id === colorLabelId)?.hex ?? null)
-        : null;
+      // Container colors are a BINDING to a color-label (not a frozen
+      // hex): we pass the label id and the renderer resolves its live
+      // hex, so recoloring the label recolors the container.
+      const color_label = colorLabelId ?? null;
       try {
         if (prompt.kind === 'calendar') {
-          const cal = await createCalendar({ name, color_hex: colorHex });
+          const cal = await createCalendar({ name, color_label });
           await refreshCalendars();
           announce(t('sidebar.calendarCreated', { name: cal.name }));
         } else if (prompt.kind === 'taskList') {
@@ -498,7 +497,7 @@ export function Sidebar() {
           await refreshTaskLists();
           announce(t('sidebar.taskListCreated', { name: list.name }));
         } else {
-          const list = await createContactList({ name, color_hex: colorHex });
+          const list = await createContactList({ name, color_label });
           await refreshContactLists();
           announce(t('sidebar.contactListCreated', { name: list.name }));
         }
@@ -509,7 +508,6 @@ export function Sidebar() {
     },
     [
       createPrompt,
-      colorLabels,
       refreshCalendars,
       refreshTaskLists,
       refreshContactLists,
@@ -640,6 +638,38 @@ export function Sidebar() {
           items.push({ id: 'members', label: t('sidebar.menu.members') });
         }
       }
+      // Color: bind the container's color to one of the predefined
+      // color-labels (DESIGN §8.2) — the same palette as events/tasks.
+      // The rendered color resolves to the label's live hex, so it
+      // follows recolors. Only offered once labels exist.
+      if (colorLabels.length > 0) {
+        const boundLabel =
+          leaf.kind === 'calendars'
+            ? calendars.find((c) => c.id === leaf.containerId)?.color_label
+            : leaf.kind === 'tasks'
+              ? taskLists.find((l) => l.id === leaf.containerId)?.color_label
+              : contactLists.find((l) => l.id === leaf.containerId)
+                  ?.color_label;
+        const colorItems: ContextMenuItemRequest[] = [
+          {
+            kind: 'check',
+            id: 'color:__none__',
+            label: t('sidebar.menu.colorNone'),
+            checked: !boundLabel,
+          },
+          ...colorLabels.map((cl) => ({
+            kind: 'check' as const,
+            id: `color:${cl.id}`,
+            label: cl.name,
+            checked: boundLabel === cl.id,
+          })),
+        ];
+        items.push({
+          id: 'color',
+          label: t('sidebar.menu.color'),
+          items: colorItems,
+        });
+      }
       // Delete: always for local containers; for external task lists
       // only when the adapter declares `delete_lists` (Vikunja etc.).
       // Other external sources (calendars, contacts) still have no
@@ -675,6 +705,25 @@ export function Sidebar() {
           (l) => l.id === leaf.containerId,
         )?.task_capabilities;
         openTaskMembers(leaf.containerId, leaf.name, caps);
+      } else if (selected?.startsWith('color:')) {
+        setRestoreFocusToTree(true);
+        const raw = selected.slice('color:'.length);
+        const labelId = raw === '__none__' ? null : raw;
+        const kind =
+          leaf.kind === 'calendars'
+            ? 'calendar'
+            : leaf.kind === 'tasks'
+              ? 'task_list'
+              : 'contact_list';
+        try {
+          await setContainerColorLabel(leaf.containerId, kind, labelId);
+          if (leaf.kind === 'calendars') await refreshCalendars();
+          else if (leaf.kind === 'tasks') await refreshTaskLists();
+          else await refreshContactLists();
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn('set container color failed', err);
+        }
       } else if (selected === 'focus-open') {
         setRestoreFocusToTree(true);
         enterFocus(leaf.containerId);
@@ -745,6 +794,12 @@ export function Sidebar() {
       onDeleteCalendar,
       onDeleteContactListAction,
       taskLists,
+      calendars,
+      contactLists,
+      colorLabels,
+      refreshCalendars,
+      refreshTaskLists,
+      refreshContactLists,
       accounts,
       reparentList,
       t,

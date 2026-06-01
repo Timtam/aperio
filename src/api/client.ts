@@ -54,7 +54,8 @@ export const listCalendars = () => invoke<Calendar[]>('list_calendars');
 
 export interface CreateCalendarRequest {
   name: string;
-  color_hex: string | null;
+  /** Bind the new calendar's color to this color-label id (or null). */
+  color_label?: string | null;
 }
 
 export const createCalendar = (request: CreateCalendarRequest) =>
@@ -153,6 +154,8 @@ export interface CreateTaskListRequest {
   /** Parent list id for nesting (Vikunja/Todoist); `null` ⇒ top level. */
   parent_id?: string | null;
   embedded_in_calendar: string | null;
+  /** Local-only: bind the new list's color to this color-label id. */
+  color_label?: string | null;
 }
 
 export const createTaskList = (request: CreateTaskListRequest) =>
@@ -514,7 +517,7 @@ export const connectMicrosoftAccount = (
 /** Which container namespace an override applies to. Calendars and
  *  task lists have disjoint ids today but the backend keeps them
  *  separately namespaced so a future code-path can enforce kind. */
-export type ContainerKind = 'calendar' | 'task_list';
+export type ContainerKind = 'calendar' | 'task_list' | 'contact_list';
 
 /** Persist a local rename override for a calendar / task list. The
  *  rename never reaches the source server — read-time projection
@@ -539,6 +542,20 @@ export const clearContainerNameOverride = (
   invoke<void>('clear_container_name_override', {
     containerId: container_id,
     kind,
+  });
+
+/** Bind (or, with `color_label_id = null`, unbind) a container's color to
+ *  a color-label (DESIGN §6.5/§8.2). Local calendars/lists store it on
+ *  the synced row; external containers via a host-local override. */
+export const setContainerColorLabel = (
+  container_id: string,
+  kind: ContainerKind,
+  color_label_id: string | null,
+) =>
+  invoke<void>('set_container_color_label', {
+    containerId: container_id,
+    kind,
+    colorLabelId: color_label_id,
   });
 
 /** Outcome of [`renameContainer`]. `synced_to_source = false` means
@@ -642,7 +659,8 @@ export const listContactLists = () =>
 
 export interface CreateContactListRequest {
   name: string;
-  color_hex: string | null;
+  /** Bind the new address book's color to this color-label id (or null). */
+  color_label?: string | null;
 }
 
 export const createContactList = (request: CreateContactListRequest) =>

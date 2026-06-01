@@ -1,4 +1,36 @@
-import type { Calendar, CalendarEvent, ColorLabel, Task, TaskList } from '../api/types';
+import type {
+  Calendar,
+  CalendarEvent,
+  ColorLabel,
+  ContactList,
+  ContainerColor,
+  Task,
+  TaskList,
+} from '../api/types';
+
+/** A container (calendar / task list / address book) for color purposes:
+ *  its own native color plus an optional bound color-label. */
+type ColoredContainer = {
+  color: ContainerColor | null;
+  color_label: string | null;
+};
+
+/**
+ * The effective hex of a CONTAINER: its bound color-label's *live* hex
+ * (so recoloring the label recolors the container), else its native
+ * provider color, else `null`. Used both as the fallback for an item's
+ * color and directly wherever a container's own swatch is drawn.
+ */
+export function resolveContainerColorHex(
+  container: ColoredContainer | undefined,
+  labelsById: Map<string, ColorLabel>,
+): string | null {
+  if (container?.color_label) {
+    const label = labelsById.get(container.color_label);
+    if (label) return label.hex;
+  }
+  return container?.color?.hex ?? null;
+}
 
 /**
  * Resolve the rendered color of an event or task per the priority rules
@@ -30,7 +62,7 @@ export function resolveEventColor(
     }
   }
   const calendar = calendarsById.get(event.calendar_id);
-  return { hex: calendar?.color?.hex ?? null, labelName: null };
+  return { hex: resolveContainerColorHex(calendar, labelsById), labelName: null };
 }
 
 export function resolveTaskColor(
@@ -45,8 +77,27 @@ export function resolveTaskColor(
     }
   }
   const list = listsById.get(task.list_id);
-  return { hex: list?.color?.hex ?? null, labelName: null };
+  return { hex: resolveContainerColorHex(list, labelsById), labelName: null };
 }
+
+/**
+ * Resolve a container's own displayed color (its bound label's live hex,
+ * else native color) plus the bound label's name for accessible labels.
+ * For the sidebar swatch / panel rows that render a container directly.
+ */
+export function resolveContainerColor(
+  container: (ColoredContainer & { color_label: string | null }) | undefined,
+  labelsById: Map<string, ColorLabel>,
+): ResolvedColor {
+  if (container?.color_label) {
+    const label = labelsById.get(container.color_label);
+    if (label) return { hex: label.hex, labelName: label.name };
+  }
+  return { hex: container?.color?.hex ?? null, labelName: null };
+}
+
+/** Narrowing alias so callers can pass any container type. */
+export type AnyContainer = Calendar | TaskList | ContactList;
 
 /**
  * Convenience: build a lookup table from a label list. Views call this

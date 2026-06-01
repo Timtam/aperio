@@ -129,21 +129,23 @@ impl LocalAdapter {
         let conn = self.db().lock().expect("db mutex poisoned");
         conn.execute(
             "INSERT INTO calendars (
-                id, source, name, color_hex, color_source, default_sound,
-                read_only, created_at, updated_at
-             ) VALUES (?, 'local', ?, ?, ?, ?, ?, ?, ?)
+                id, source, name, color_hex, color_source, color_label_id,
+                default_sound, read_only, created_at, updated_at
+             ) VALUES (?, 'local', ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET
-                 name          = excluded.name,
-                 color_hex     = excluded.color_hex,
-                 color_source  = excluded.color_source,
-                 default_sound = excluded.default_sound,
-                 read_only     = excluded.read_only,
-                 updated_at    = excluded.updated_at",
+                 name           = excluded.name,
+                 color_hex      = excluded.color_hex,
+                 color_source   = excluded.color_source,
+                 color_label_id = excluded.color_label_id,
+                 default_sound  = excluded.default_sound,
+                 read_only      = excluded.read_only,
+                 updated_at     = excluded.updated_at",
             params![
                 cal.id,
                 cal.name,
                 hex,
                 source,
+                cal.color_label.as_ref().map(|c| c.as_str()),
                 sound_json,
                 cal.read_only as i64,
                 now_s,
@@ -249,13 +251,15 @@ impl LocalAdapter {
         let conn = self.db().lock().expect("db mutex poisoned");
         conn.execute(
             "INSERT INTO task_lists (
-                id, source, name, color_hex, color_source, default_sound,
-                embedded_in_calendar, read_only, parent_id, created_at, updated_at
-             ) VALUES (?, 'local', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, source, name, color_hex, color_source, color_label_id,
+                default_sound, embedded_in_calendar, read_only, parent_id,
+                created_at, updated_at
+             ) VALUES (?, 'local', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET
                  name                 = excluded.name,
                  color_hex            = excluded.color_hex,
                  color_source         = excluded.color_source,
+                 color_label_id       = excluded.color_label_id,
                  default_sound        = excluded.default_sound,
                  embedded_in_calendar = excluded.embedded_in_calendar,
                  read_only            = excluded.read_only,
@@ -266,6 +270,7 @@ impl LocalAdapter {
                 list.name,
                 hex,
                 source,
+                list.color_label.as_ref().map(|c| c.as_str()),
                 sound_json,
                 list.embedded_in_calendar,
                 list.read_only as i64,

@@ -19,12 +19,14 @@
 //!     override. The next read uses the source name.
 
 use cal_adapter_local::LocalAdapter;
-use cal_core::{CalendarFeature, TasksFeature};
+use cal_core::{CalendarFeature, ColorLabelId, TasksFeature};
 use std::sync::Arc;
+use sync_core::{EventPayload, SyncEvent};
 use tauri::State;
 
 use super::{CommandError, CommandResult};
 use crate::db::DbHandle;
+use crate::event_log::EventLogWriter;
 use crate::overrides::{ContainerKind, OverridesError, OverridesRepo};
 use crate::registry::{AdapterRegistry, LOCAL_ID};
 
@@ -50,6 +52,70 @@ pub async fn clear_container_name_override(
     let shared = db.shared();
     let repo = OverridesRepo::new(&shared);
     repo.clear(&container_id, kind)?;
+    Ok(())
+}
+
+/// Bind (or, with `color_label_id = None`, unbind) a container's color to
+/// a global color-label (DESIGN §6.5 / §8.2).
+///
+/// Routing mirrors the rename story: a LOCAL calendar / task list carries
+/// the binding on its own (synced) row — we update it and emit a sync
+/// event so other devices follow. Everything else (external containers,
+/// plus local contact lists, which don't event-log-sync) stores the
+/// binding as a host-local override that the read path stamps on top.
+#[tauri::command]
+pub async fn set_container_color_label(
+    adapter: State<'_, LocalAdapter>,
+    registry: State<'_, Arc<AdapterRegistry>>,
+    event_log: State<'_, Arc<EventLogWriter>>,
+    db: State<'_, DbHandle>,
+    container_id: String,
+    kind: ContainerKind,
+    color_label_id: Option<String>,
+) -> CommandResult<()> {
+    let account = match kind {
+        ContainerKind::Calendar => registry.account_for_calendar(&container_id),
+        ContainerKind::TaskList => registry.account_for_task_list(&container_id),
+        ContainerKind::ContactList => registry.account_for_contact_list(&container_id),
+    }
+    .unwrap_or_else(|| LOCAL_ID.to_string());
+    let is_local = account == LOCAL_ID;
+    let label = color_label_id.clone().map(ColorLabelId);
+
+    if is_local && matches!(kind, ContainerKind::Calendar) {
+        if let Some(mut cal) = adapter.get_calendar_by_id(&container_id)? {
+            cal.color_label = label;
+            let updated = adapter.update_calendar(cal)?;
+            if let Ok(fields) = serde_json::to_value(&updated) {
+                event_log.append(SyncEvent::CalendarUpdated(EventPayload {
+                    id: updated.id.clone(),
+                    fields,
+                }));
+            }
+        }
+        return Ok(());
+    }
+    if is_local && matches!(kind, ContainerKind::TaskList) {
+        if let Some(mut list) = adapter.get_task_list_by_id(&container_id)? {
+            list.color_label = label;
+            let updated = adapter.update_task_list(list)?;
+            if let Ok(fields) = serde_json::to_value(&updated) {
+                event_log.append(SyncEvent::TaskListUpdated(EventPayload {
+                    id: updated.id.clone(),
+                    fields,
+                }));
+            }
+        }
+        return Ok(());
+    }
+
+    // External containers (and local contact lists) — host-local override.
+    let shared = db.shared();
+    let repo = OverridesRepo::new(&shared);
+    match color_label_id {
+        Some(id) => repo.set_color_label(&container_id, kind, &id)?,
+        None => repo.clear_color_label(&container_id, kind)?,
+    }
     Ok(())
 }
 
@@ -92,13 +158,22 @@ pub async fn rename_container(
         ContainerKind::TaskList => registry
             .account_for_task_list(&container_id)
             .unwrap_or_else(|| LOCAL_ID.to_string()),
+        ContainerKind::ContactList => registry
+            .account_for_contact_list(&container_id)
+            .unwrap_or_else(|| LOCAL_ID.to_string()),
     };
+
+    // Address books have no source-rename path here — only calendars and
+    // task lists round-trip a rename to their adapter.
+    let unsupported_contact_rename =
+        || cal_core::Error::Unsupported("renaming address books is not supported".into());
 
     let push_result: cal_core::Result<()> = if account == LOCAL_ID {
         // Local SQLite — typed adapter handle, not a trait object.
         match kind {
             ContainerKind::Calendar => local.rename_calendar(&container_id, trimmed).await,
             ContainerKind::TaskList => local.rename_task_list(&container_id, trimmed).await,
+            ContainerKind::ContactList => Err(unsupported_contact_rename()),
         }
     } else {
         match kind {
@@ -120,6 +195,7 @@ pub async fn rename_container(
                     )))
                 }
             }
+            ContainerKind::ContactList => Err(unsupported_contact_rename()),
         }
     };
 

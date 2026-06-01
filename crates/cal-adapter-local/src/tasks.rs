@@ -21,6 +21,7 @@ impl LocalAdapter {
         &self,
         name: &str,
         color: Option<ContainerColor>,
+        color_label: Option<ColorLabelId>,
         default_sound: Option<SoundConfig>,
         embedded_in_calendar: Option<String>,
     ) -> cal_core::Result<TaskList> {
@@ -34,15 +35,17 @@ impl LocalAdapter {
             .expect("db mutex poisoned")
             .execute(
                 "INSERT INTO task_lists (
-                    id, source, name, color_hex, color_source, default_sound,
-                    embedded_in_calendar, read_only, created_at, updated_at
-                 ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+                    id, source, name, color_hex, color_source, color_label_id,
+                    default_sound, embedded_in_calendar, read_only, created_at,
+                    updated_at
+                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
                 params![
                     id,
                     SOURCE_ID,
                     name,
                     color_hex,
                     color_source,
+                    color_label.as_ref().map(|c| c.as_str()),
                     default_sound_json,
                     embedded_in_calendar,
                     now_s,
@@ -55,6 +58,7 @@ impl LocalAdapter {
             id,
             name: name.to_string(),
             color,
+            color_label,
             default_sound,
             embedded_in_calendar,
             parent_id: None,
@@ -74,13 +78,14 @@ impl LocalAdapter {
             .execute(
                 "UPDATE task_lists
                     SET name = ?, color_hex = ?, color_source = ?,
-                        default_sound = ?, embedded_in_calendar = ?,
-                        parent_id = ?, updated_at = ?
+                        color_label_id = ?, default_sound = ?,
+                        embedded_in_calendar = ?, parent_id = ?, updated_at = ?
                   WHERE id = ?",
                 params![
                     list.name,
                     color_hex,
                     color_source,
+                    list.color_label.as_ref().map(|c| c.as_str()),
                     default_sound_json,
                     list.embedded_in_calendar,
                     list.parent_id,
@@ -308,7 +313,7 @@ impl LocalAdapter {
         let mut stmt = conn
             .prepare(
                 "SELECT id, name, color_hex, color_source, default_sound,
-                        embedded_in_calendar, read_only, parent_id
+                        embedded_in_calendar, read_only, parent_id, color_label_id
                    FROM task_lists WHERE id = ?",
             )
             .map_err(map_sql_err)?;
@@ -322,6 +327,7 @@ impl LocalAdapter {
                     opt_text(r, 5),
                     read_bool(r, 6),
                     opt_text(r, 7),
+                    opt_text(r, 8),
                 ))
             })
             .optional()
@@ -329,8 +335,9 @@ impl LocalAdapter {
         let Some(parts) = row else {
             return Ok(None);
         };
-        let (id, name, color, sound, embedded, read_only, parent_id) = parts;
+        let (id, name, color, sound, embedded, read_only, parent_id, color_label) = parts;
         Ok(Some(TaskList {
+            color_label: color_label?.map(ColorLabelId),
             id: id?,
             name: name?,
             color: color?,
@@ -461,7 +468,7 @@ impl TasksFeature for LocalAdapter {
         let mut stmt = conn
             .prepare(
                 "SELECT id, name, color_hex, color_source, default_sound,
-                        embedded_in_calendar, read_only, parent_id
+                        embedded_in_calendar, read_only, parent_id, color_label_id
                    FROM task_lists
                   ORDER BY name COLLATE NOCASE",
             )
@@ -476,15 +483,17 @@ impl TasksFeature for LocalAdapter {
                     opt_text(row, 5),
                     read_bool(row, 6),
                     opt_text(row, 7),
+                    opt_text(row, 8),
                 ))
             })
             .map_err(map_sql_err)?;
 
         let mut out = Vec::new();
         for r in rows {
-            let (id, name, color, sound, embedded, read_only, parent_id) =
+            let (id, name, color, sound, embedded, read_only, parent_id, color_label) =
                 r.map_err(map_sql_err)?;
             out.push(TaskList {
+                color_label: color_label?.map(ColorLabelId),
                 id: id?,
                 name: name?,
                 color: color?,
@@ -929,7 +938,7 @@ mod tests {
 
     fn adapter_with_list() -> (LocalAdapter, TaskList) {
         let a = LocalAdapter::new(open_test_db());
-        let list = a.create_task_list("Inbox", None, None, None).unwrap();
+        let list = a.create_task_list("Inbox", None, None, None, None).unwrap();
         (a, list)
     }
 
@@ -1236,8 +1245,10 @@ mod tests {
     #[tokio::test]
     async fn task_list_parent_id_roundtrips() {
         let a = LocalAdapter::new(open_test_db());
-        let parent = a.create_task_list("Parent", None, None, None).unwrap();
-        let mut child = a.create_task_list("Child", None, None, None).unwrap();
+        let parent = a
+            .create_task_list("Parent", None, None, None, None)
+            .unwrap();
+        let mut child = a.create_task_list("Child", None, None, None, None).unwrap();
         assert!(child.parent_id.is_none());
 
         child.parent_id = Some(parent.id.clone());
@@ -1256,8 +1267,10 @@ mod tests {
     #[tokio::test]
     async fn reparent_task_list_sets_and_clears_parent() {
         let a = LocalAdapter::new(open_test_db());
-        let parent = a.create_task_list("Parent", None, None, None).unwrap();
-        let child = a.create_task_list("Child", None, None, None).unwrap();
+        let parent = a
+            .create_task_list("Parent", None, None, None, None)
+            .unwrap();
+        let child = a.create_task_list("Child", None, None, None, None).unwrap();
 
         let moved = a.reparent_task_list(&child.id, Some(&parent.id)).unwrap();
         assert_eq!(moved.parent_id.as_deref(), Some(parent.id.as_str()));

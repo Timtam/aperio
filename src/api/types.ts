@@ -102,6 +102,9 @@ export interface Calendar {
   id: string;
   name: string;
   color: ContainerColor | null;
+  /** Bound color-label id. When set, the rendered color resolves to the
+   *  label's live hex (priority over `color`). See `resolveContainerColor`. */
+  color_label: string | null;
   read_only: boolean;
   default_sound: SoundConfig | null;
   /** Account that owns this calendar. `"local"` for the implicit
@@ -176,6 +179,8 @@ export interface TaskList {
   id: string;
   name: string;
   color: ContainerColor | null;
+  /** Bound color-label id — see `Calendar.color_label`. */
+  color_label: string | null;
   default_sound: SoundConfig | null;
   embedded_in_calendar: string | null;
   read_only: boolean;
@@ -257,6 +262,8 @@ export interface ContactList {
   id: string;
   name: string;
   color: ContainerColor | null;
+  /** Bound color-label id — see `Calendar.color_label`. */
+  color_label: string | null;
   read_only: boolean;
   account_id: string;
 }

@@ -49,6 +49,7 @@ pub struct CalendarListEntry {
 pub fn map_calendar(entry: CalendarListEntry) -> Calendar {
     let color = entry.hex_color.and_then(parse_hex_color);
     Calendar {
+        color_label: None,
         id: entry.id,
         name: entry.name,
         color,
@@ -659,6 +660,7 @@ pub struct TodoListEntry {
 
 pub fn map_task_list(entry: TodoListEntry) -> TaskList {
     TaskList {
+        color_label: None,
         id: entry.id,
         name: entry.display_name,
         color: None,

@@ -626,6 +626,7 @@ pub fn to_task_list(folder: ParsedTaskFolder) -> TaskList {
     // change and orphan the host cache (see `mapping::to_calendar`).
     // Rename harvests a fresh ChangeKey at write time instead.
     TaskList {
+        color_label: None,
         id: folder.folder_id,
         name: if folder.display_name.is_empty() {
             "Tasks".into()

@@ -18,8 +18,8 @@
 
 use async_trait::async_trait;
 use cal_core::{
-    Contact, ContactList, ContactPhoto, ContactsFeature, ContainerColor, Error as CoreError,
-    NewContact, Result as CoreResult,
+    ColorLabelId, Contact, ContactList, ContactPhoto, ContactsFeature, ContainerColor,
+    Error as CoreError, NewContact, Result as CoreResult,
 };
 use chrono::Utc;
 use rusqlite::{params, Row};
@@ -44,6 +44,7 @@ impl LocalAdapter {
         &self,
         name: &str,
         color: Option<ContainerColor>,
+        color_label: Option<ColorLabelId>,
     ) -> CoreResult<ContactList> {
         let id = Uuid::new_v4().to_string();
         let now_s = fmt_utc(&Utc::now());
@@ -54,15 +55,25 @@ impl LocalAdapter {
             .execute(
                 "INSERT INTO contact_lists (
                     id, account_id, source, name, color_hex, color_source,
-                    read_only, etag, created_at, updated_at
-                 ) VALUES (?, 'local', ?, ?, ?, ?, 0, NULL, ?, ?)",
-                params![id, SOURCE_ID, name, color_hex, color_source, now_s, now_s,],
+                    color_label_id, read_only, etag, created_at, updated_at
+                 ) VALUES (?, 'local', ?, ?, ?, ?, ?, 0, NULL, ?, ?)",
+                params![
+                    id,
+                    SOURCE_ID,
+                    name,
+                    color_hex,
+                    color_source,
+                    color_label.as_ref().map(|c| c.as_str()),
+                    now_s,
+                    now_s,
+                ],
             )
             .map_err(map_sql_err)?;
         Ok(ContactList {
             id,
             name: name.to_string(),
             color,
+            color_label,
             read_only: false,
         })
     }
@@ -101,7 +112,7 @@ impl ContactsFeature for LocalAdapter {
         let conn = self.db().lock().expect("db mutex poisoned");
         let mut stmt = conn
             .prepare(
-                "SELECT id, name, color_hex, color_source, read_only
+                "SELECT id, name, color_hex, color_source, read_only, color_label_id
                  FROM contact_lists
                  WHERE source = 'local'
                  ORDER BY name COLLATE NOCASE",
@@ -527,7 +538,9 @@ fn row_to_contact_list(row: &Row<'_>) -> rusqlite::Result<CoreResult<ContactList
         let name = req_text(row, 1)?;
         let color = read_container_color(row, 2, 3)?;
         let read_only = read_bool(row, 4)?;
+        let color_label = opt_text(row, 5)?.map(ColorLabelId);
         Ok(ContactList {
+            color_label,
             id,
             name,
             color,
@@ -801,7 +814,7 @@ mod tests {
     async fn create_contact_list_round_trips() {
         let adapter = fixture_adapter();
         let list = adapter
-            .create_contact_list("Friends", Some(ContainerColor::custom("#ff00ff")))
+            .create_contact_list("Friends", Some(ContainerColor::custom("#ff00ff")), None)
             .unwrap();
         let lists = adapter.list_contact_lists().await.unwrap();
         // Seed + new one = 2; ordered case-insensitively by name.
@@ -927,7 +940,9 @@ mod tests {
     #[tokio::test]
     async fn delete_list_cascades_to_contacts() {
         let adapter = fixture_adapter();
-        let list = adapter.create_contact_list("Burner list", None).unwrap();
+        let list = adapter
+            .create_contact_list("Burner list", None, None)
+            .unwrap();
         let _ = adapter
             .create_contact(&list.id, sample_new_contact())
             .await

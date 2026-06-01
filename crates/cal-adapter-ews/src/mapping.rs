@@ -147,6 +147,7 @@ pub fn to_calendar(folder: ParsedFolder, read_only: bool) -> Calendar {
     // rename) harvest a fresh one at write time instead — see
     // `api::rename_calendar`.
     Calendar {
+        color_label: None,
         id: folder.folder_id,
         name: if folder.display_name.is_empty() {
             "Calendar".into()

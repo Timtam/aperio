@@ -374,6 +374,7 @@ mod tests {
         // Seed the source: one calendar + two whitelisted settings.
         adapter
             .upsert_calendar_from_sync(&Calendar {
+                color_label: None,
                 id: "cal-x".into(),
                 name: "Test".into(),
                 color: Some(ContainerColor::custom("#abcdef")),

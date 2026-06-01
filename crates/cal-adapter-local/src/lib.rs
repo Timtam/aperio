@@ -146,6 +146,9 @@ pub mod test_support {
         // skips straight to 0018, which only depends on the task tables
         // from 0001/0006.
         conn.execute_batch(SCHEMA_V18).expect("apply v18 schema");
+        // 0019–0021 touch host-only cache tables; 0022 adds the
+        // container color-label binding columns the adapter now reads.
+        conn.execute_batch(SCHEMA_V22).expect("apply v22 schema");
         Arc::new(Mutex::new(conn))
     }
 
@@ -166,4 +169,6 @@ pub mod test_support {
         include_str!("../../../src-tauri/src/db/sql/0012_sync_applied_events.sql");
     const SCHEMA_V13: &str = include_str!("../../../src-tauri/src/db/sql/0013_sync_conflicts.sql");
     const SCHEMA_V18: &str = include_str!("../../../src-tauri/src/db/sql/0018_task_sections.sql");
+    const SCHEMA_V22: &str =
+        include_str!("../../../src-tauri/src/db/sql/0022_container_color_labels.sql");
 }

@@ -959,6 +959,7 @@ mod tests {
 
     fn fixture_calendar(id: &str) -> Calendar {
         Calendar {
+            color_label: None,
             id: id.into(),
             name: "From remote".into(),
             color: None,
@@ -1318,6 +1319,7 @@ mod tests {
 
         // Seed the owning list so the section's FK is satisfied.
         let list = cal_core::TaskList {
+            color_label: None,
             id: "list-1".into(),
             name: "Inbox".into(),
             color: None,

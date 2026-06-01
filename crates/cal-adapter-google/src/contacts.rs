@@ -104,18 +104,21 @@ const UPDATE_PERSON_FIELDS: &str = "names,emailAddresses,phoneNumbers,birthdays,
 pub fn list_contact_lists() -> Vec<ContactList> {
     vec![
         ContactList {
+            color_label: None,
             id: GOOGLE_CONTACT_LIST_ID.to_string(),
             name: "Google Contacts".to_string(),
             color: None,
             read_only: false,
         },
         ContactList {
+            color_label: None,
             id: GOOGLE_OTHER_CONTACTS_LIST_ID.to_string(),
             name: "Google Other Contacts".to_string(),
             color: None,
             read_only: true,
         },
         ContactList {
+            color_label: None,
             id: GOOGLE_DIRECTORY_LIST_ID.to_string(),
             name: "Google Directory".to_string(),
             color: None,

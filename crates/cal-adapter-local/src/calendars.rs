@@ -8,8 +8,8 @@
 
 use async_trait::async_trait;
 use cal_core::{
-    Calendar, CalendarFeature, ContainerColor, DateRange, Event, EventRecurrence, FreeBusy,
-    NewEvent, Reminder, SoundConfig,
+    Calendar, CalendarFeature, ColorLabelId, ContainerColor, DateRange, Event, EventRecurrence,
+    FreeBusy, NewEvent, Reminder, SoundConfig,
 };
 use chrono::{DateTime, Utc};
 use rusqlite::{params, OptionalExtension};
@@ -27,6 +27,7 @@ impl LocalAdapter {
         &self,
         name: &str,
         color: Option<ContainerColor>,
+        color_label: Option<ColorLabelId>,
         default_sound: Option<SoundConfig>,
     ) -> cal_core::Result<Calendar> {
         let id = Uuid::new_v4().to_string();
@@ -40,15 +41,16 @@ impl LocalAdapter {
             .expect("db mutex poisoned")
             .execute(
                 "INSERT INTO calendars (
-                    id, source, name, color_hex, color_source, read_only,
-                    default_sound, created_at, updated_at
-                 ) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)",
+                    id, source, name, color_hex, color_source, color_label_id,
+                    read_only, default_sound, created_at, updated_at
+                 ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)",
                 params![
                     id,
                     SOURCE_ID,
                     name,
                     color_hex,
                     color_source,
+                    color_label.as_ref().map(|c| c.as_str()),
                     default_sound_json,
                     now_s,
                     now_s,
@@ -60,6 +62,7 @@ impl LocalAdapter {
             id,
             name: name.to_string(),
             color,
+            color_label,
             read_only: false,
             default_sound,
         })
@@ -78,12 +81,13 @@ impl LocalAdapter {
             .execute(
                 "UPDATE calendars
                     SET name = ?, color_hex = ?, color_source = ?,
-                        default_sound = ?, updated_at = ?
+                        color_label_id = ?, default_sound = ?, updated_at = ?
                   WHERE id = ?",
                 params![
                     calendar.name,
                     color_hex,
                     color_source,
+                    calendar.color_label.as_ref().map(|c| c.as_str()),
                     default_sound_json,
                     now_s,
                     calendar.id,
@@ -148,7 +152,8 @@ impl LocalAdapter {
         let conn = self.db().lock().expect("db mutex poisoned");
         let mut stmt = conn
             .prepare(
-                "SELECT id, name, color_hex, color_source, read_only, default_sound
+                "SELECT id, name, color_hex, color_source, read_only, default_sound,
+                        color_label_id
                    FROM calendars WHERE id = ?",
             )
             .map_err(map_sql_err)?;
@@ -160,6 +165,7 @@ impl LocalAdapter {
                     read_container_color(r, 2, 3),
                     read_bool(r, 4),
                     read_sound(r, 5),
+                    opt_text(r, 6),
                 ))
             })
             .optional()
@@ -167,11 +173,12 @@ impl LocalAdapter {
         let Some(parts) = row else {
             return Ok(None);
         };
-        let (id, name, color, read_only, sound) = parts;
+        let (id, name, color, read_only, sound, color_label) = parts;
         Ok(Some(Calendar {
             id: id?,
             name: name?,
             color: color?,
+            color_label: color_label?.map(ColorLabelId),
             read_only: read_only?,
             default_sound: sound?,
         }))
@@ -240,7 +247,8 @@ impl CalendarFeature for LocalAdapter {
         let conn = self.db().lock().expect("db mutex poisoned");
         let mut stmt = conn
             .prepare(
-                "SELECT id, name, color_hex, color_source, read_only, default_sound
+                "SELECT id, name, color_hex, color_source, read_only, default_sound,
+                        color_label_id
                    FROM calendars
                   ORDER BY name COLLATE NOCASE",
             )
@@ -253,17 +261,19 @@ impl CalendarFeature for LocalAdapter {
                     read_container_color(row, 2, 3),
                     read_bool(row, 4),
                     read_sound(row, 5),
+                    opt_text(row, 6),
                 ))
             })
             .map_err(map_sql_err)?;
 
         let mut out = Vec::new();
         for r in rows {
-            let (id, name, color, read_only, sound) = r.map_err(map_sql_err)?;
+            let (id, name, color, read_only, sound, color_label) = r.map_err(map_sql_err)?;
             out.push(Calendar {
                 id: id?,
                 name: name?,
                 color: color?,
+                color_label: color_label?.map(ColorLabelId),
                 read_only: read_only?,
                 default_sound: sound?,
             });
@@ -607,6 +617,7 @@ mod tests {
                     source: ColorSource::Custom,
                 }),
                 None,
+                None,
             )
             .unwrap();
         let cals = a.list_calendars().await.unwrap();
@@ -622,7 +633,7 @@ mod tests {
     #[tokio::test]
     async fn rename_calendar() {
         let a = make_adapter();
-        let mut cal = a.create_calendar("Work", None, None).unwrap();
+        let mut cal = a.create_calendar("Work", None, None, None).unwrap();
         cal.name = "Office".into();
         a.update_calendar(cal.clone()).unwrap();
         let cals = a.list_calendars().await.unwrap();
@@ -632,7 +643,7 @@ mod tests {
     #[tokio::test]
     async fn delete_calendar_cascades_events() {
         let a = make_adapter();
-        let cal = a.create_calendar("Work", None, None).unwrap();
+        let cal = a.create_calendar("Work", None, None, None).unwrap();
         let start = Utc::now();
         a.create_event(
             &cal.id,
@@ -668,7 +679,7 @@ mod tests {
     #[tokio::test]
     async fn rename_calendar_updates_the_row() {
         let a = make_adapter();
-        let cal = a.create_calendar("Old", None, None).unwrap();
+        let cal = a.create_calendar("Old", None, None, None).unwrap();
         a.rename_calendar(&cal.id, "New").await.unwrap();
         let cals = a.list_calendars().await.unwrap();
         assert_eq!(cals.len(), 1);
@@ -678,7 +689,7 @@ mod tests {
     #[tokio::test]
     async fn rename_calendar_rejects_empty_name() {
         let a = make_adapter();
-        let cal = a.create_calendar("Old", None, None).unwrap();
+        let cal = a.create_calendar("Old", None, None, None).unwrap();
         let err = a.rename_calendar(&cal.id, "   ").await.unwrap_err();
         assert!(matches!(err, cal_core::Error::InvalidInput(_)));
         // Original name unchanged.
@@ -698,7 +709,7 @@ mod tests {
     #[tokio::test]
     async fn event_range_query_is_temporal_intersection() {
         let a = make_adapter();
-        let cal = a.create_calendar("Work", None, None).unwrap();
+        let cal = a.create_calendar("Work", None, None, None).unwrap();
         let base = "2026-05-19T10:00:00Z".parse::<DateTime<Utc>>().unwrap();
         let mk = |offset_h: i64| NewEvent {
             title: format!("E{offset_h}"),
@@ -731,7 +742,7 @@ mod tests {
     #[tokio::test]
     async fn recurring_master_with_past_start_survives_a_future_range() {
         let a = make_adapter();
-        let cal = a.create_calendar("Work", None, None).unwrap();
+        let cal = a.create_calendar("Work", None, None, None).unwrap();
         let past = "2025-01-06T10:00:00Z".parse::<DateTime<Utc>>().unwrap();
         // A weekly series that began over a year before the queried month.
         a.create_event(
@@ -794,7 +805,7 @@ mod tests {
     #[tokio::test]
     async fn update_event_persists_changes() {
         let a = make_adapter();
-        let cal = a.create_calendar("Work", None, None).unwrap();
+        let cal = a.create_calendar("Work", None, None, None).unwrap();
         let start = Utc::now();
         let mut ev = a
             .create_event(
@@ -837,7 +848,7 @@ mod tests {
     #[tokio::test]
     async fn add_event_exdate_appends_and_dedups() {
         let a = make_adapter();
-        let cal = a.create_calendar("Work", None, None).unwrap();
+        let cal = a.create_calendar("Work", None, None, None).unwrap();
         let start = Utc::now();
         let ev = a
             .create_event(
@@ -881,7 +892,7 @@ mod tests {
     #[tokio::test]
     async fn add_event_exdate_rejects_non_recurring() {
         let a = make_adapter();
-        let cal = a.create_calendar("Work", None, None).unwrap();
+        let cal = a.create_calendar("Work", None, None, None).unwrap();
         let start = Utc::now();
         let ev = a
             .create_event(

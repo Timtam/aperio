@@ -35,6 +35,7 @@ use crate::db::SharedConn;
 pub enum ContainerKind {
     Calendar,
     TaskList,
+    ContactList,
 }
 
 impl ContainerKind {
@@ -42,6 +43,7 @@ impl ContainerKind {
         match self {
             ContainerKind::Calendar => "calendar",
             ContainerKind::TaskList => "task_list",
+            ContainerKind::ContactList => "contact_list",
         }
     }
 
@@ -49,6 +51,7 @@ impl ContainerKind {
         Some(match s {
             "calendar" => ContainerKind::Calendar,
             "task_list" => ContainerKind::TaskList,
+            "contact_list" => ContainerKind::ContactList,
             _ => return None,
         })
     }
@@ -190,6 +193,145 @@ pub fn apply_to_task_lists(repo: &OverridesRepo<'_>, lists: &mut [cal_core::Task
     }
 }
 
+// ── Color-label overrides (DESIGN §6.5 / §8.2) ──────────────────────────
+//
+// Same shape as the name overrides, but binding a container's COLOR to a
+// global color-label. Local containers store their binding on the row
+// (and sync it); these host-local overrides are for EXTERNAL containers,
+// where the provider only knows a hex and the user's label binding has
+// nowhere else to live.
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ColorOverride {
+    pub container_id: String,
+    pub kind: ContainerKind,
+    pub color_label_id: String,
+    pub updated_at: String,
+}
+
+impl OverridesRepo<'_> {
+    /// All color-label overrides. Joined onto adapter output on every
+    /// `list_*` call, alongside the name overrides.
+    pub fn list_color_overrides(&self) -> Result<Vec<ColorOverride>, OverridesError> {
+        let conn = self.db.lock().expect("db mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT container_id, kind, color_label_id, updated_at
+               FROM container_color_overrides",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            let kind_str: String = row.get(1)?;
+            Ok(ColorOverride {
+                container_id: row.get(0)?,
+                kind: ContainerKind::parse(&kind_str).unwrap_or(ContainerKind::Calendar),
+                color_label_id: row.get(2)?,
+                updated_at: row.get(3)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// Upsert a container's color-label binding.
+    pub fn set_color_label(
+        &self,
+        container_id: &str,
+        kind: ContainerKind,
+        color_label_id: &str,
+    ) -> Result<(), OverridesError> {
+        let now = Utc::now().to_rfc3339();
+        let conn = self.db.lock().expect("db mutex poisoned");
+        conn.execute(
+            "INSERT INTO container_color_overrides
+                 (container_id, kind, color_label_id, updated_at)
+             VALUES (?, ?, ?, ?)
+             ON CONFLICT(container_id, kind) DO UPDATE SET
+                 color_label_id = excluded.color_label_id,
+                 updated_at = excluded.updated_at",
+            params![container_id, kind.as_str(), color_label_id, now],
+        )?;
+        Ok(())
+    }
+
+    /// Drop the color binding — the container reverts to its provider color.
+    pub fn clear_color_label(
+        &self,
+        container_id: &str,
+        kind: ContainerKind,
+    ) -> Result<(), OverridesError> {
+        let conn = self.db.lock().expect("db mutex poisoned");
+        conn.execute(
+            "DELETE FROM container_color_overrides
+              WHERE container_id = ? AND kind = ?",
+            params![container_id, kind.as_str()],
+        )?;
+        Ok(())
+    }
+}
+
+/// Build a `container_id → label_id` map for one kind, or `None` if the
+/// overrides can't be loaded (degrade to provider colors).
+fn color_override_map(
+    repo: &OverridesRepo<'_>,
+    kind: ContainerKind,
+) -> Option<std::collections::HashMap<String, String>> {
+    match repo.list_color_overrides() {
+        Ok(o) => Some(
+            o.into_iter()
+                .filter(|c| c.kind == kind)
+                .map(|c| (c.container_id, c.color_label_id))
+                .collect(),
+        ),
+        Err(err) => {
+            tracing::warn!(
+                ?err,
+                "failed to load color overrides; using provider colors"
+            );
+            None
+        }
+    }
+}
+
+/// Stamp color-label bindings onto external calendars in place. Local
+/// calendars carry their own (synced) binding and have no override row,
+/// so they're left untouched.
+pub fn apply_color_to_calendars(repo: &OverridesRepo<'_>, calendars: &mut [cal_core::Calendar]) {
+    let Some(map) = color_override_map(repo, ContainerKind::Calendar) else {
+        return;
+    };
+    for cal in calendars {
+        if let Some(label) = map.get(&cal.id) {
+            cal.color_label = Some(cal_core::ColorLabelId(label.clone()));
+        }
+    }
+}
+
+/// Stamp color-label bindings onto external task lists in place.
+pub fn apply_color_to_task_lists(repo: &OverridesRepo<'_>, lists: &mut [cal_core::TaskList]) {
+    let Some(map) = color_override_map(repo, ContainerKind::TaskList) else {
+        return;
+    };
+    for list in lists {
+        if let Some(label) = map.get(&list.id) {
+            list.color_label = Some(cal_core::ColorLabelId(label.clone()));
+        }
+    }
+}
+
+/// Stamp color-label bindings onto external contact lists in place.
+pub fn apply_color_to_contact_lists(repo: &OverridesRepo<'_>, lists: &mut [cal_core::ContactList]) {
+    let Some(map) = color_override_map(repo, ContainerKind::ContactList) else {
+        return;
+    };
+    for list in lists {
+        if let Some(label) = map.get(&list.id) {
+            list.color_label = Some(cal_core::ColorLabelId(label.clone()));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -272,6 +414,7 @@ mod tests {
 
         let mut cals = vec![
             cal_core::Calendar {
+                color_label: None,
                 id: "ical:42".into(),
                 name: "schulferien-sachsen-anhalt".into(),
                 color: None,
@@ -279,6 +422,7 @@ mod tests {
                 default_sound: None,
             },
             cal_core::Calendar {
+                color_label: None,
                 id: "local-1".into(),
                 name: "Persönlich".into(),
                 color: None,
@@ -290,5 +434,59 @@ mod tests {
         assert_eq!(cals[0].name, "Ferien");
         // Unchanged — no override registered.
         assert_eq!(cals[1].name, "Persönlich");
+    }
+
+    #[test]
+    fn color_override_roundtrips_and_applies() {
+        let (_tmp, db) = fresh_db();
+        let shared = db.shared();
+        // The override FKs onto color_labels — seed the label it binds to.
+        shared
+            .lock()
+            .expect("db mutex poisoned")
+            .execute(
+                "INSERT INTO color_labels (id, name, hex) VALUES ('label-1', 'Work', '#4285f4')",
+                [],
+            )
+            .unwrap();
+        let repo = OverridesRepo::new(&shared);
+        repo.set_color_label("google:work", ContainerKind::Calendar, "label-1")
+            .unwrap();
+        // Upsert + list.
+        let all = repo.list_color_overrides().unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].color_label_id, "label-1");
+
+        // Apply stamps the binding onto the matching external calendar.
+        let mut cals = vec![
+            cal_core::Calendar {
+                color_label: None,
+                id: "google:work".into(),
+                name: "Work".into(),
+                color: Some(cal_core::ContainerColor::native("#4285f4")),
+                read_only: false,
+                default_sound: None,
+            },
+            cal_core::Calendar {
+                color_label: None,
+                id: "google:other".into(),
+                name: "Other".into(),
+                color: None,
+                read_only: false,
+                default_sound: None,
+            },
+        ];
+        apply_color_to_calendars(&repo, &mut cals);
+        assert_eq!(
+            cals[0].color_label.as_ref().map(|c| c.as_str()),
+            Some("label-1"),
+        );
+        // Untouched — no override.
+        assert!(cals[1].color_label.is_none());
+
+        // Clear reverts.
+        repo.clear_color_label("google:work", ContainerKind::Calendar)
+            .unwrap();
+        assert!(repo.list_color_overrides().unwrap().is_empty());
     }
 }

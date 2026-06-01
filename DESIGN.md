@@ -655,6 +655,17 @@ Wo die API es erlaubt, wird eine in der App geänderte Container-Farbe auch zur�
 - **Vikunja:** `POST /projects/{id}` mit `hex_color`
 - **Todoist:** `POST /projects/{id}` mit `color`
 
+#### Container-Farbe als Farb-Label-Bindung
+
+Eine in der App gesetzte Container-Farbe ist **kein eingefrorener Hex-Wert**, sondern eine **Bindung an ein Farb-Label** (Abschnitt 8) — dasselbe vereinheitlichte Palette-System wie bei Terminen/Aufgaben. `Calendar`/`TaskList`/`ContactList` tragen dazu ein optionales `color_label: Option<ColorLabelId>`; der gerenderte Hex wird im Frontend live aus dem Label aufgelöst (zentral im `CalendarStore`), sodass das Umfärben eines Labels **alle gebundenen Container** mitfärbt.
+
+Zwei Speicherorte, an der Auflösungsschicht vereinheitlicht:
+
+- **Lokale Container:** die Bindung liegt auf der Zeile (`calendars`/`task_lists`/`contact_lists.color_label_id`, Migration 0022) und **synchronisiert** mit den übrigen Container-Feldern über das Event-Log.
+- **Externe Container** (Google/CalDAV/…): der Provider kennt nur Hex; die Bindung ist ein **host-lokales Override** in `container_color_overrides` (gleiche Form wie `container_name_overrides`), das der Lese-Pfad oben drauf stempelt. Die Provider-Farbe bleibt Fallback, solange der Nutzer nichts bindet.
+
+Gesetzt wird über den Command `set_container_color_label(container_id, kind, color_label_id)` (lokal → Zeile + Sync-Event; extern → Override) bzw. den Farb-Picker im „Neu"-Dialog. Ein gelöschtes Label räumt die Bindung per FK (`ON DELETE SET NULL` / `CASCADE`) ab; das Frontend fällt ohnehin sanft auf die Native-Farbe zurück. Das ältere Zurückschreiben zum Provider (oben) bleibt für reine Hex-Quellen bestehen, ist aber für die Label-Bindung nicht nötig.
+
 #### Barrierefreiheit & Farbe
 
 Da Farbe niemals das **einzige** Unterscheidungsmerkmal sein darf (WCAG 1.4.1), wird jeder Termin und jede Aufgabe zusätzlich zur Farbe mit dem Container-Namen als ARIA-Label versehen:

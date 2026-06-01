@@ -29,6 +29,13 @@ pub struct Calendar {
     pub id: String,
     pub name: String,
     pub color: Option<ContainerColor>,
+    /// Optional binding to a global color label. When set, the rendered
+    /// color resolves to the label's *current* hex (so recoloring the
+    /// label recolors the container), taking priority over `color`. The
+    /// id refers to a `ColorLabel`. `#[serde(default)]` keeps older wire
+    /// payloads (no binding) deserialising.
+    #[serde(default)]
+    pub color_label: Option<ColorLabelId>,
     /// Read-only calendars (e.g. birthdays, public holidays, subscribed iCal
     /// feeds) cannot be modified by the caller.
     pub read_only: bool,
@@ -106,6 +113,9 @@ pub struct TaskList {
     pub id: String,
     pub name: String,
     pub color: Option<ContainerColor>,
+    /// Optional binding to a global color label — see `Calendar.color_label`.
+    #[serde(default)]
+    pub color_label: Option<ColorLabelId>,
     pub default_sound: Option<SoundConfig>,
     /// For task-capable calendars (CalDAV/VTODO, local): the calendar ID.
     /// For standalone task lists: `None`.
@@ -329,6 +339,9 @@ pub struct ContactList {
     pub id: String,
     pub name: String,
     pub color: Option<ContainerColor>,
+    /// Optional binding to a global color label — see `Calendar.color_label`.
+    #[serde(default)]
+    pub color_label: Option<ColorLabelId>,
     /// Read-only address books (provider-curated lists like "Other
     /// contacts" on Google) can't be modified. Defaults to `false`
     /// for user-owned lists.

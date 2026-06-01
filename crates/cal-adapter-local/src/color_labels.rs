@@ -151,7 +151,7 @@ mod tests {
     fn delete_label_clears_reference_on_events() {
         let a = adapter();
         // Set up a calendar + event referring to the label.
-        let cal = a.create_calendar("Work", None, None).unwrap();
+        let cal = a.create_calendar("Work", None, None, None).unwrap();
         let label = a.create_color_label("Urgent", "#fb8c00").unwrap();
 
         // Create event referencing the label.

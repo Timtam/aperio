@@ -602,6 +602,7 @@ struct UpdateTaskBody {
 
 fn map_project(entry: ProjectEntry) -> TaskList {
     TaskList {
+        color_label: None,
         id: entry.id,
         name: entry.name.unwrap_or_else(|| "Inbox".into()),
         // Todoist's API surfaces project colour as a named enum

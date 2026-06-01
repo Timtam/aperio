@@ -19,6 +19,7 @@ const list = (
   id,
   name: id,
   color: null,
+  color_label: null,
   default_sound: null,
   embedded_in_calendar: null,
   read_only: false,

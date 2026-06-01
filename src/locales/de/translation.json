@@ -1189,6 +1189,8 @@
       "moveUnder": "Verschieben unter …",
       "moveToTopLevel": "Oberste Ebene",
       "members": "Mitglieder verwalten …",
+      "color": "Farbe",
+      "colorNone": "Keine Farbe",
       "reparentedAnnouncement": "„{{name}}\" wurde unter „{{parent}}\" verschoben.",
       "reparentedTopAnnouncement": "„{{name}}\" wurde auf die oberste Ebene verschoben."
     },

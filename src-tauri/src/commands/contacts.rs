@@ -53,6 +53,7 @@ pub async fn list_contact_lists(
     registry: State<'_, Arc<AdapterRegistry>>,
     cache: State<'_, Arc<CacheStore>>,
     coord: State<'_, Arc<RefreshCoordinator>>,
+    db: State<'_, DbHandle>,
 ) -> CommandResult<Vec<ContactListRow>> {
     let registry = Arc::clone(&registry);
     let cache = Arc::clone(&cache);
@@ -64,6 +65,11 @@ pub async fn list_contact_lists(
     let mut external = external_contact_lists_swr(&app, &registry, &cache, &coord).await;
     let mut out = local;
     out.append(&mut external);
+    // External address books get their user-chosen color-label binding
+    // from the override layer; local ones carry it on the row.
+    let shared = db.shared();
+    let repo = crate::overrides::OverridesRepo::new(&shared);
+    crate::overrides::apply_color_to_contact_lists(&repo, &mut out);
     Ok(out
         .into_iter()
         .map(|list| {
@@ -326,7 +332,10 @@ pub async fn delete_contact(
 #[derive(Debug, Deserialize)]
 pub struct CreateContactListRequest {
     pub name: String,
-    pub color_hex: Option<String>,
+    /// Bind the new address book's color to this color-label id (or
+    /// `None` for no color).
+    #[serde(default)]
+    pub color_label: Option<String>,
 }
 
 #[tauri::command]
@@ -334,12 +343,8 @@ pub async fn create_contact_list(
     adapter: State<'_, LocalAdapter>,
     request: CreateContactListRequest,
 ) -> CommandResult<ContactListRow> {
-    let color = request
-        .color_hex
-        .as_deref()
-        .filter(|s| !s.is_empty())
-        .map(|hex| cal_core::ContainerColor::custom(hex.to_string()));
-    let list = adapter.create_contact_list(&request.name, color)?;
+    let color_label = request.color_label.map(cal_core::ColorLabelId);
+    let list = adapter.create_contact_list(&request.name, None, color_label)?;
     Ok(ContactListRow {
         inner: list,
         account_id: LOCAL_ID.to_string(),

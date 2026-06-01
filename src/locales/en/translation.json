@@ -1189,6 +1189,8 @@
       "moveUnder": "Move under …",
       "moveToTopLevel": "Top level",
       "members": "Manage members …",
+      "color": "Color",
+      "colorNone": "No color",
       "reparentedAnnouncement": "Moved \"{{name}}\" under \"{{parent}}\".",
       "reparentedTopAnnouncement": "Moved \"{{name}}\" to the top level."
     },

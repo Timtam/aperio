@@ -358,6 +358,7 @@ impl CalendarFeature for IcalAdapter {
         let body = self.fetch_body().await.map_err(to_core_error)?;
         let name = self.derive_calendar_name(&body);
         Ok(vec![Calendar {
+            color_label: None,
             id: self.calendar_id(),
             name,
             color: None,

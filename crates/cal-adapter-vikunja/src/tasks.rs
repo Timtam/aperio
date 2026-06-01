@@ -611,6 +611,7 @@ struct TaskEntry {
 
 fn map_project(entry: ProjectEntry) -> TaskList {
     TaskList {
+        color_label: None,
         id: entry.id.to_string(),
         name: entry.title.unwrap_or_else(|| "Project".into()),
         // Vikunja's `hex_color` is a 6-char string without the `#`;

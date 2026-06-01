@@ -52,6 +52,7 @@ pub fn map_calendar(entry: CalendarListEntry) -> Calendar {
         Some("reader") | Some("freeBusyReader")
     );
     Calendar {
+        color_label: None,
         id: entry.id,
         name: entry.summary,
         color,

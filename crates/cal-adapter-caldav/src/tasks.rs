@@ -106,6 +106,7 @@ fn to_task_list(home_url: &Url, entry: ResponseEntry) -> TaskList {
     });
 
     TaskList {
+        color_label: None,
         id,
         name: entry
             .displayname
@@ -175,6 +176,7 @@ pub async fn create_task_list(
     }
 
     Ok(TaskList {
+        color_label: None,
         id: collection_url.to_string(),
         name: name.to_string(),
         color: None,

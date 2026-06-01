@@ -361,6 +361,7 @@ pub fn run() {
             commands::connect_microsoft_account,
             commands::set_container_name_override,
             commands::clear_container_name_override,
+            commands::set_container_color_label,
             commands::rename_container,
             commands::get_user_pref,
             commands::set_user_pref,

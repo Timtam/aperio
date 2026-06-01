@@ -267,8 +267,8 @@ mod tests {
 
     fn adapter_with_data() -> (LocalAdapter, String, String) {
         let a = LocalAdapter::new(open_test_db());
-        let cal = a.create_calendar("Work", None, None).unwrap();
-        let list = a.create_task_list("Inbox", None, None, None).unwrap();
+        let cal = a.create_calendar("Work", None, None, None).unwrap();
+        let list = a.create_task_list("Inbox", None, None, None, None).unwrap();
         (a, cal.id, list.id)
     }
 
@@ -361,7 +361,7 @@ mod tests {
     #[test]
     fn calendar_id_filter_restricts_events() {
         let (a, cal_a, _list) = adapter_with_data();
-        let cal_b = a.create_calendar("Other", None, None).unwrap();
+        let cal_b = a.create_calendar("Other", None, None, None).unwrap();
         block(a.create_event(&cal_a, make_event("Sync"))).unwrap();
         block(a.create_event(&cal_b.id, make_event("Sync"))).unwrap();
 
@@ -392,7 +392,7 @@ mod tests {
     #[test]
     fn list_id_filter_restricts_tasks() {
         let (a, _cal, list_a) = adapter_with_data();
-        let list_b = a.create_task_list("Other", None, None, None).unwrap();
+        let list_b = a.create_task_list("Other", None, None, None, None).unwrap();
         block(a.create_task(&list_a, make_task("Buy"))).unwrap();
         block(a.create_task(&list_b.id, make_task("Buy"))).unwrap();
 
@@ -442,7 +442,12 @@ mod tests {
     fn finds_event_by_calendar_name() {
         let (a, _cal, _list) = adapter_with_data();
         let other = a
-            .create_calendar("Birthdays", Some(ContainerColor::custom("#fb8c00")), None)
+            .create_calendar(
+                "Birthdays",
+                Some(ContainerColor::custom("#fb8c00")),
+                None,
+                None,
+            )
             .unwrap();
         block(a.create_event(&other.id, make_event("Cake"))).unwrap();
         let hits = a.search_default("birthday").unwrap();

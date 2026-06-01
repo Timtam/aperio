@@ -93,6 +93,7 @@ pub async fn list_contact_lists(state: &ApiState) -> GraphResult<Vec<ContactList
         let response: ContactFolderListResponse = state.get_json(&path).await?;
         for folder in response.value {
             out.push(ContactList {
+                color_label: None,
                 id: folder.id,
                 name: folder.display_name.unwrap_or_else(|| "Contacts".into()),
                 color: None,
@@ -106,6 +107,7 @@ pub async fn list_contact_lists(state: &ApiState) -> GraphResult<Vec<ContactList
     // contactList` sentinel map, so DE users see the translated
     // name.
     out.push(ContactList {
+        color_label: None,
         id: GRAPH_SUGGESTED_PEOPLE_LIST_ID.to_string(),
         name: "Suggested People".to_string(),
         color: None,

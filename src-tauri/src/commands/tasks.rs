@@ -18,7 +18,7 @@ use crate::accounts::{AccountsRepo, AdapterKind};
 use crate::cache::{CacheStore, RefreshCoordinator, SyncScope};
 use crate::db::DbHandle;
 use crate::event_log::EventLogWriter;
-use crate::overrides::{apply_to_task_lists, OverridesRepo};
+use crate::overrides::{apply_color_to_task_lists, apply_to_task_lists, OverridesRepo};
 use crate::registry::{AdapterRegistry, LOCAL_ID};
 use crate::reminders::SchedulerHandle;
 
@@ -191,6 +191,11 @@ pub struct CreateTaskListRequest {
     pub parent_id: Option<String>,
     /// Local-only: embed the list in a calendar (CalDAV-VTODO style).
     pub embedded_in_calendar: Option<String>,
+    /// Local-only: bind the new list's color to this color-label id.
+    /// External providers don't carry a color at create; their binding
+    /// is set afterwards via the color override.
+    #[serde(default)]
+    pub color_label: Option<String>,
 }
 
 #[tauri::command]
@@ -219,6 +224,7 @@ pub async fn list_task_lists(
     let shared = db.shared();
     let repo = OverridesRepo::new(&shared);
     apply_to_task_lists(&repo, &mut out);
+    apply_color_to_task_lists(&repo, &mut out);
     // Snapshot account_id → adapter_kind once so the per-row caps
     // lookup is a cheap map hit. Same permissive-on-failure default
     // as the calendar path: a read failure degrades to "every account
@@ -333,8 +339,14 @@ pub async fn create_task_list(
     // Local SQLite store — the typed adapter handle keeps the richer
     // create signature (embedded_in_calendar) and emits a sync event.
     if account == LOCAL_ID {
-        let list =
-            adapter.create_task_list(&request.name, None, None, request.embedded_in_calendar)?;
+        let color_label = request.color_label.clone().map(cal_core::ColorLabelId);
+        let list = adapter.create_task_list(
+            &request.name,
+            None,
+            color_label,
+            None,
+            request.embedded_in_calendar,
+        )?;
         if let Ok(fields) = serde_json::to_value(&list) {
             event_log.append(SyncEvent::TaskListCreated(EventPayload {
                 id: list.id.clone(),

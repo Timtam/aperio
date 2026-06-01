@@ -1,7 +1,7 @@
 //! Calendar and event commands.
 
 use cal_adapter_local::LocalAdapter;
-use cal_core::{Calendar, CalendarFeature, ContainerColor, DateRange, Event, NewEvent};
+use cal_core::{Calendar, CalendarFeature, DateRange, Event, NewEvent};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -21,7 +21,7 @@ use super::{CommandError, CommandResult};
 use crate::accounts::{AccountsRepo, AdapterKind};
 use crate::db::DbHandle;
 use crate::event_log::EventLogWriter;
-use crate::overrides::{apply_to_calendars, OverridesRepo};
+use crate::overrides::{apply_color_to_calendars, apply_to_calendars, OverridesRepo};
 use crate::registry::{AdapterRegistry, LOCAL_ID};
 use crate::reminders::SchedulerHandle;
 
@@ -73,7 +73,10 @@ fn recurrence_caps_for_account(
 #[derive(Debug, Deserialize)]
 pub struct CreateCalendarRequest {
     pub name: String,
-    pub color_hex: Option<String>,
+    /// Bind the new calendar's color to this color-label id (or `None`
+    /// for no color). The rendered hex resolves from the label live.
+    #[serde(default)]
+    pub color_label: Option<String>,
 }
 
 #[tauri::command]
@@ -121,6 +124,9 @@ pub async fn list_calendars(
     let shared = db.shared();
     let repo = OverridesRepo::new(&shared);
     apply_to_calendars(&repo, &mut out);
+    // External calendars get their user-chosen color-label binding from
+    // the override layer; local calendars already carry it on the row.
+    apply_color_to_calendars(&repo, &mut out);
     // Synthesised birthday calendars (DESIGN.md §10.3) — one per
     // contact list that has at least one contact with a `birthday`
     // set. Each carries `read_only = true` so the UI hides edit /
@@ -256,10 +262,8 @@ pub async fn create_calendar(
     event_log: State<'_, Arc<EventLogWriter>>,
     request: CreateCalendarRequest,
 ) -> CommandResult<CalendarRow> {
-    let color = request
-        .color_hex
-        .map(|hex| ContainerColor::custom(hex.trim().to_string()));
-    let cal = adapter.create_calendar(&request.name, color, None)?;
+    let color_label = request.color_label.map(cal_core::ColorLabelId);
+    let cal = adapter.create_calendar(&request.name, None, color_label, None)?;
     // Local creates always belong to the implicit local account.
     // Mint a CalendarCreated event so other devices in the sync
     // mesh learn about the new container.
@@ -789,24 +793,20 @@ pub async fn add_event_exdate(
 mod tests {
     use super::*;
     use crate::commands::CommandError;
-    use cal_adapter_local::{LocalAdapter, SharedConn};
+    use cal_adapter_local::LocalAdapter;
     use chrono::Duration;
-    use rusqlite::Connection;
-    use std::sync::{Arc, Mutex};
 
     fn fresh_adapter() -> LocalAdapter {
-        let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
-        conn.execute_batch(include_str!("../db/sql/0001_init.sql"))
-            .unwrap();
-        let db: SharedConn = Arc::new(Mutex::new(conn));
-        LocalAdapter::new(db)
+        // Use the shared test schema so it tracks later migrations (e.g.
+        // the container color-label columns from 0022) without each test
+        // helper having to re-list every CREATE/ALTER.
+        LocalAdapter::new(cal_adapter_local::test_support::open_test_db())
     }
 
     #[tokio::test]
     async fn create_calendar_then_event() {
         let a = fresh_adapter();
-        let cal = a.create_calendar("Work", None, None).unwrap();
+        let cal = a.create_calendar("Work", None, None, None).unwrap();
         let now = Utc::now();
         let ev = a
             .create_event(

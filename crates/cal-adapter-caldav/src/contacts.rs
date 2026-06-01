@@ -106,6 +106,7 @@ fn to_contact_list(home_url: &Url, entry: ResponseEntry) -> ContactList {
     });
 
     ContactList {
+        color_label: None,
         id,
         name: entry
             .displayname

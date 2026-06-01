@@ -251,6 +251,7 @@ struct TaskEntry {
 
 fn map_task_list(entry: TaskListEntry) -> TaskList {
     TaskList {
+        color_label: None,
         id: entry.id,
         name: entry.title.unwrap_or_else(|| "Tasks".into()),
         color: None,
