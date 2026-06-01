@@ -1442,6 +1442,40 @@ button[aria-disabled='true'] {
   border: 1px solid var(--color-border-strong);
 }
 
+/* Color-label picker with a live swatch (event + task dialogs). */
+.color-label-select {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.color-label-select__select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.color-label-select__swatch {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1px solid var(--color-border-strong);
+}
+
+/* "No color label" picked — an outlined, slashed placeholder so the
+   indicator stays visible instead of disappearing. */
+.color-label-select__swatch--empty {
+  background:
+    linear-gradient(
+      to top right,
+      transparent calc(50% - 1px),
+      var(--color-border-strong) calc(50% - 1px),
+      var(--color-border-strong) calc(50% + 1px),
+      transparent calc(50% + 1px)
+    ),
+    var(--color-bg-subtle, transparent);
+}
+
 .color-labels__delete {
   padding: var(--space-1);
 }

@@ -26,6 +26,7 @@ import {
 import { useCalendarStore } from '../state/calendarStoreContext';
 import { useCalendarDefaultReminders } from '../state/useCalendarDefaultReminders';
 import { AttendeePicker } from './AttendeePicker';
+import { ColorLabelSelect } from './ColorLabelSelect';
 import {
   applyDateTimeChange,
   dateInput,
@@ -589,19 +590,12 @@ export function EventDialog({
           <span className="form__label">
             {t('dialogs.event.fields.colorLabel')}
           </span>
-          <select
-            value={form.colorLabel ?? ''}
-            onChange={(e) =>
-              update('colorLabel', e.target.value ? e.target.value : null)
-            }
-          >
-            <option value="">{t('dialogs.event.noColorLabel')}</option>
-            {colorLabels.map((label) => (
-              <option key={label.id} value={label.id}>
-                {label.name}
-              </option>
-            ))}
-          </select>
+          <ColorLabelSelect
+            value={form.colorLabel}
+            onChange={(next) => update('colorLabel', next)}
+            labels={colorLabels}
+            noneLabel={t('dialogs.event.noColorLabel')}
+          />
         </label>
 
         <RecurrenceSelector

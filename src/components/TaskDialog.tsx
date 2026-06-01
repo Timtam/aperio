@@ -46,6 +46,7 @@ import { useTasks } from '../state/useTasks';
 import { useTaskStatusActions } from '../state/useTaskStatusToggle';
 import { readLastUsedTaskList, writeLastUsedTaskList } from './lastUsedTaskList';
 import { AssigneePicker } from './AssigneePicker';
+import { ColorLabelSelect } from './ColorLabelSelect';
 import { Modal } from './Modal';
 import { RemindersEditor } from './RemindersEditor';
 import { TaskRecurrenceSelector } from './TaskRecurrenceSelector';
@@ -1096,19 +1097,12 @@ export function TaskDialog({
           <span className="form__label">
             {t('dialogs.task.fields.colorLabel')}
           </span>
-          <select
-            value={form.colorLabel ?? ''}
-            onChange={(e) =>
-              update('colorLabel', e.target.value ? e.target.value : null)
-            }
-          >
-            <option value="">{t('dialogs.task.noColorLabel')}</option>
-            {colorLabels.map((label) => (
-              <option key={label.id} value={label.id}>
-                {label.name}
-              </option>
-            ))}
-          </select>
+          <ColorLabelSelect
+            value={form.colorLabel}
+            onChange={(next) => update('colorLabel', next)}
+            labels={colorLabels}
+            noneLabel={t('dialogs.task.noColorLabel')}
+          />
         </label>
 
         {isEdit && task && (supportsSubtasks || subtasks.length > 0) && (
