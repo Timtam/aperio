@@ -285,7 +285,12 @@ impl CalendarFeature for LocalAdapter {
         let start_s = fmt_utc(&range.start);
         let end_s = fmt_utc(&range.end);
         let rows = stmt
-            .query_map(params![calendar_id, end_s, start_s], row_to_event_result)
+            .query_map(
+                // calendar_id, range.end, range.start, range.end — the
+                // trailing end feeds the recurring-master clause.
+                params![calendar_id, end_s, start_s, end_s],
+                row_to_event_result,
+            )
             .map_err(map_sql_err)?;
         let mut out = Vec::new();
         for r in rows {
@@ -424,14 +429,24 @@ impl CalendarFeature for LocalAdapter {
     }
 }
 
+// Range read for the calendar views. The first clause is the plain
+// half-open interval overlap for one-off events. The second keeps every
+// RECURRING master whose series BEGINS before the range end, regardless
+// of where its first occurrence's `end_utc` falls — a weekly event
+// created a year ago has its stored `start_utc`/`end_utc` in the past but
+// still recurs into the current view, and the frontend (rrule.js) expands
+// the in-range occurrences. Without it the master fails the overlap test
+// and silently vanishes from future months (the same class of bug the
+// host snapshot cache had for external recurring events). Bind order:
+// calendar_id, range.end, range.start, range.end.
 const EVENT_SELECT_PREFIX: &str =
     "SELECT id, calendar_id, title, description, location, start_utc, end_utc,
             all_day, rrule, rrule_exceptions, color_label_id, reminders, sound,
             attendees, created_at, updated_at, etag
        FROM events
       WHERE calendar_id = ?
-        AND start_utc < ?
-        AND end_utc   > ?
+        AND ( (start_utc < ? AND end_utc > ?)
+              OR (rrule IS NOT NULL AND start_utc < ?) )
       ORDER BY start_utc";
 
 pub(crate) fn split_recurrence(
@@ -711,6 +726,69 @@ mod tests {
         assert_eq!(evs.len(), 2);
         assert_eq!(evs[0].title, "E0");
         assert_eq!(evs[1].title, "E5");
+    }
+
+    #[tokio::test]
+    async fn recurring_master_with_past_start_survives_a_future_range() {
+        let a = make_adapter();
+        let cal = a.create_calendar("Work", None, None).unwrap();
+        let past = "2025-01-06T10:00:00Z".parse::<DateTime<Utc>>().unwrap();
+        // A weekly series that began over a year before the queried month.
+        a.create_event(
+            &cal.id,
+            NewEvent {
+                title: "Weekly".into(),
+                description: None,
+                location: None,
+                start: past,
+                end: past + Duration::hours(1),
+                all_day: false,
+                recurrence: Some(EventRecurrence {
+                    rrule: "FREQ=WEEKLY".into(),
+                    exceptions: vec![],
+                }),
+                color_label: None,
+                reminders: vec![],
+                sound: None,
+                attendees: vec![],
+            },
+        )
+        .await
+        .unwrap();
+        // A one-off on the same past day — the control: a non-recurring
+        // event must NOT leak into an unrelated future range.
+        a.create_event(
+            &cal.id,
+            NewEvent {
+                title: "OneOff".into(),
+                description: None,
+                location: None,
+                start: past,
+                end: past + Duration::hours(1),
+                all_day: false,
+                recurrence: None,
+                color_label: None,
+                reminders: vec![],
+                sound: None,
+                attendees: vec![],
+            },
+        )
+        .await
+        .unwrap();
+
+        let june = DateRange {
+            start: "2026-06-01T00:00:00Z".parse::<DateTime<Utc>>().unwrap(),
+            end: "2026-07-01T00:00:00Z".parse::<DateTime<Utc>>().unwrap(),
+        };
+        let evs = a.get_events(&cal.id, june).await.unwrap();
+        // The recurring master survives so the frontend can expand June's
+        // occurrences; the past one-off does not.
+        assert_eq!(
+            evs.len(),
+            1,
+            "recurring master must survive, one-off must not"
+        );
+        assert_eq!(evs[0].title, "Weekly");
     }
 
     #[tokio::test]
