@@ -654,6 +654,9 @@ fn change_set_wire_defaults_and_roundtrip() {
         deletions: vec!["x".into()],
         new_token: Some("tok".into()),
         full_resync: true,
+        // Non-default so the round-trip also proves `complete` survives
+        // the serde boundary the FFI shim ships ChangeSets across.
+        complete: true,
     };
     let encoded = serde_json::to_string(&full).unwrap();
     let back: ChangeSet<i32> = serde_json::from_str(&encoded).unwrap();

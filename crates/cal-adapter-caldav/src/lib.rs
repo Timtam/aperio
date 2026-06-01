@@ -257,6 +257,7 @@ impl CaldavAdapter {
                     deletions: Vec::new(),
                     new_token,
                     full_resync: true,
+                    complete: false,
                 })
             }
             Err(_) => {
@@ -269,6 +270,7 @@ impl CaldavAdapter {
                     deletions: Vec::new(),
                     new_token,
                     full_resync: true,
+                    complete: false,
                 })
             }
         }
@@ -390,6 +392,7 @@ impl CaldavAdapter {
             deletions: Vec::new(),
             new_token,
             full_resync: true,
+            complete: false,
         })
     }
 
@@ -409,6 +412,7 @@ impl CaldavAdapter {
                     deletions: Vec::new(),
                     new_token: Some(format!("ctag:{current}")),
                     full_resync: false,
+                    complete: false,
                 });
             }
         }
@@ -420,6 +424,7 @@ impl CaldavAdapter {
             deletions: Vec::new(),
             new_token: ctag.map(|c| format!("ctag:{c}")),
             full_resync: true,
+            complete: false,
         })
     }
 
@@ -456,6 +461,7 @@ impl CaldavAdapter {
             deletions: result.deleted,
             new_token: Some(format!("sync:{next_token}")),
             full_resync: false,
+            complete: false,
         })
     }
 
@@ -470,6 +476,7 @@ impl CaldavAdapter {
             deletions: Vec::new(),
             new_token,
             full_resync: true,
+            complete: false,
         })
     }
 
@@ -489,6 +496,7 @@ impl CaldavAdapter {
                     deletions: Vec::new(),
                     new_token: Some(format!("ctag:{current}")),
                     full_resync: false,
+                    complete: false,
                 });
             }
         }
@@ -500,6 +508,7 @@ impl CaldavAdapter {
             deletions: Vec::new(),
             new_token: ctag.map(|c| format!("ctag:{c}")),
             full_resync: true,
+            complete: false,
         })
     }
 
@@ -536,6 +545,7 @@ impl CaldavAdapter {
             deletions: result.deleted,
             new_token: Some(format!("sync:{next_token}")),
             full_resync: false,
+            complete: false,
         })
     }
 
@@ -557,6 +567,7 @@ impl CaldavAdapter {
                     deletions: Vec::new(),
                     new_token: Some(format!("ctag:{current}")),
                     full_resync: false,
+                    complete: false,
                 });
             }
         }
@@ -568,6 +579,7 @@ impl CaldavAdapter {
             deletions: Vec::new(),
             new_token: ctag.map(|c| format!("ctag:{c}")),
             full_resync: true,
+            complete: false,
         })
     }
 
@@ -601,6 +613,7 @@ impl CaldavAdapter {
             deletions: result.deleted,
             new_token: Some(format!("sync:{next_token}")),
             full_resync: false,
+            complete: false,
         })
     }
 

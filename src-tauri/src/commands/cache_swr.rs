@@ -5,7 +5,7 @@
 use std::future::Future;
 use std::sync::Arc;
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use tauri::{AppHandle, Emitter};
 
 use cal_core::{CalendarFeature, ContactsFeature, DateRange, TasksFeature};
@@ -151,18 +151,43 @@ pub async fn refresh_events(
     calendar: &str,
     range: DateRange,
 ) -> cal_core::Result<()> {
-    let token = cache
+    let state = cache
         .get_sync_state(account, SyncScope::Events, calendar)
         .ok()
-        .flatten()
-        .and_then(|s| s.sync_token);
+        .flatten();
+    let token = state.as_ref().and_then(|s| s.sync_token.clone());
+    // Folder-complete cache: once a delta-capable calendar has been
+    // fully synced, its window is unbounded (set below) and every view
+    // range is served straight from the snapshot. We only force a
+    // token-less FULL sync when the cached window doesn't yet cover the
+    // requested range — i.e. the very first sync, or migrating an older
+    // range-scoped snapshot left over from before this change. In that
+    // case the adapter re-emits the whole folder and we widen the window
+    // to unbounded; an incremental delta against a partial window would
+    // silently miss everything that didn't change since the cookie.
+    let covered = matches!(
+        state.as_ref().map(|s| (s.window_start, s.window_end)),
+        Some((Some(ws), Some(we))) if ws <= range.start && we >= range.end
+    );
+    let effective_token = if covered { token.as_deref() } else { None };
     match ext
-        .get_events_delta(calendar, range, token.as_deref())
+        .get_events_delta(calendar, range, effective_token)
         .await
     {
         Ok(cs) => {
-            if cs.full_resync || token.is_none() {
-                let _ = cache.replace_calendar_events(account, calendar, range, &cs.changes);
+            if cs.full_resync || effective_token.is_none() {
+                // Folder-complete adapters (EWS/CalDAV) return the WHOLE
+                // collection, so the snapshot now covers any range —
+                // record an unbounded window. Range-scoped adapters
+                // (Google/Graph) only fetched `range`, so the window must
+                // stay bounded to that range or we'd serve empty for the
+                // months we never fetched.
+                let window = if cs.complete {
+                    DateRange::new(DateTime::<Utc>::MIN_UTC, DateTime::<Utc>::MAX_UTC)
+                } else {
+                    range
+                };
+                let _ = cache.replace_calendar_events(account, calendar, window, &cs.changes);
                 let _ = cache.set_token(
                     account,
                     SyncScope::Events,
