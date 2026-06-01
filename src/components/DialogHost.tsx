@@ -78,6 +78,7 @@ export function DialogHost() {
           onClose={close}
           listId={mode.listId}
           listName={mode.listName}
+          capabilities={mode.capabilities}
         />
       );
     case 'dayStartReview':

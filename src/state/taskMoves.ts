@@ -24,6 +24,8 @@ const DEFAULT_CAPS: TaskCapabilities = {
   move_between_projects: true,
   create_lists: false,
   delete_lists: false,
+  manageable: false,
+  member_add_by: 'search',
 };
 
 export function capabilitiesOf(list: TaskList | undefined): TaskCapabilities {

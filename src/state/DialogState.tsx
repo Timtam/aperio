@@ -6,7 +6,13 @@ import {
   type ReactNode,
 } from 'react';
 
-import type { Account, CalendarEvent, Contact, Task } from '../api/types';
+import type {
+  Account,
+  CalendarEvent,
+  Contact,
+  Task,
+  TaskCapabilities,
+} from '../api/types';
 import { DialogStateContext } from './dialogStateContext';
 import type { SettingsTabId } from '../components/SettingsDialog';
 
@@ -50,7 +56,14 @@ export type DialogMode =
   | { kind: 'reminders' }
   | { kind: 'moveCopy'; target: MoveCopyTarget }
   | { kind: 'planTask'; task: Task }
-  | { kind: 'taskMembers'; listId: string; listName: string }
+  | {
+      kind: 'taskMembers';
+      listId: string;
+      listName: string;
+      /** Drives the dialog's add control (search vs email) + role/pending
+       *  affordances. Absent ⇒ the dialog falls back to search + roles. */
+      capabilities?: TaskCapabilities;
+    }
   | { kind: 'dayStartReview' }
   | {
       kind: 'contact';
@@ -108,8 +121,14 @@ export interface DialogStateValue {
   openReminders: () => void;
   openMoveCopy: (target: MoveCopyTarget) => void;
   openPlanTask: (task: Task) => void;
-  /** Open the task-list membership/sharing dialog (DESIGN §9.7). */
-  openTaskMembers: (listId: string, listName: string) => void;
+  /** Open the task-list membership/sharing dialog (DESIGN §9.7). Pass the
+   *  list's `task_capabilities` so the dialog can switch between
+   *  search-add (Vikunja) and email-invite (Todoist). */
+  openTaskMembers: (
+    listId: string,
+    listName: string,
+    capabilities?: TaskCapabilities,
+  ) => void;
   /**
    * Open the unified day-start review (DESIGN.md § 9.5). One dialog
    * with two sections — deadline overruns + schedule slips — replaces
@@ -263,8 +282,8 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     [push],
   );
   const openTaskMembers = useCallback(
-    (listId: string, listName: string) =>
-      push({ kind: 'taskMembers', listId, listName }),
+    (listId: string, listName: string, capabilities?: TaskCapabilities) =>
+      push({ kind: 'taskMembers', listId, listName, capabilities }),
     [push],
   );
   const openDayStartReview = useCallback(

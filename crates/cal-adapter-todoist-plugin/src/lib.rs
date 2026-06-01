@@ -17,7 +17,7 @@ use std::os::raw::{c_char, c_void};
 
 use cal_adapter_todoist::TodoistAdapter;
 use cal_core::adapter::{Capability, Credentials as CalCredentials};
-use cal_core::types::NewTask;
+use cal_core::types::{MemberRight, NewTask};
 use cal_core::TasksFeature;
 use plugin_sdk::plugin_core::abi::OpenInstanceResult;
 use plugin_sdk::plugin_core::ffi::PluginCallResult;
@@ -211,6 +211,64 @@ unsafe extern "C" fn ffi_list_task_list_members(
     })
 }
 
+unsafe extern "C" fn ffi_list_task_list_shares(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let list_id: String = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch(h, move |p| async move {
+        p.list_task_list_shares(&list_id).await
+    })
+}
+
+#[derive(Debug, Deserialize)]
+struct AddMemberArgs {
+    list_id: String,
+    member_ref: String,
+    #[serde(default)]
+    right: Option<MemberRight>,
+}
+
+unsafe extern "C" fn ffi_add_task_list_member(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let args: AddMemberArgs = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch_unit(h, move |p| async move {
+        p.add_task_list_member(&args.list_id, &args.member_ref, args.right)
+            .await
+    })
+}
+
+#[derive(Debug, Deserialize)]
+struct MemberRefArgs {
+    list_id: String,
+    member_ref: String,
+}
+
+unsafe extern "C" fn ffi_remove_task_list_member(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let args: MemberRefArgs = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch_unit(h, move |p| async move {
+        p.remove_task_list_member(&args.list_id, &args.member_ref)
+            .await
+    })
+}
+
 pub static TASKS_VTABLE: TasksVtable = TasksVtable {
     authenticate: Some(ffi_authenticate),
     capabilities: Some(ffi_capabilities),
@@ -224,6 +282,9 @@ pub static TASKS_VTABLE: TasksVtable = TasksVtable {
     create_task_list: Some(ffi_create_task_list),
     delete_task_list: Some(ffi_delete_task_list),
     list_task_list_members: Some(ffi_list_task_list_members),
+    list_task_list_shares: Some(ffi_list_task_list_shares),
+    add_task_list_member: Some(ffi_add_task_list_member),
+    remove_task_list_member: Some(ffi_remove_task_list_member),
     ..TasksVtable::empty()
 };
 

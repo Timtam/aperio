@@ -51,7 +51,19 @@ export interface TaskCapabilities {
   create_lists: boolean;
   /** The adapter can delete task lists at the source. */
   delete_lists: boolean;
+  /** The adapter can manage a list's membership/sharing (the sidebar's
+   *  "manage members" entry + the members dialog). Vikunja + Todoist;
+   *  flat/personal backends leave it false. */
+  manageable: boolean;
+  /** How members are added when `manageable`: directory search (Vikunja)
+   *  or raw-email invite (Todoist). Drives the members dialog's add
+   *  control. */
+  member_add_by: MemberAddMethod;
 }
+
+/** How members are added to a task list (DESIGN §9.7): pick from a user
+ *  directory (Vikunja) or invite by raw email (Todoist). */
+export type MemberAddMethod = 'search' | 'email';
 
 /** A sub-grouping of tasks within one list — a Vikunja bucket or a
  *  Todoist section. Mirrors `cal_core::Section`. */

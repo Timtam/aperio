@@ -53,12 +53,15 @@
 
 use std::collections::HashMap;
 
-use cal_core::{NewTask, Section, Task, TaskList, TaskPriority, TaskStatus, TaskUser};
+use cal_core::{
+    NewTask, Section, Task, TaskList, TaskListShare, TaskPriority, TaskStatus, TaskUser,
+};
 use chrono::{DateTime, NaiveDate, NaiveTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::api::TodoistClient;
-use crate::error::TodoistResult;
+use crate::error::{TodoistError, TodoistResult};
 
 // ── Public adapter-side surface ────────────────────────────────────────
 
@@ -241,6 +244,134 @@ pub async fn list_task_list_members(
     Ok(entries.into_iter().map(map_collaborator).collect())
 }
 
+// ── Membership / sharing (DESIGN §9.7) ──────────────────────────────────
+//
+// Todoist gates project sharing behind the Sync API (REST v2 has no
+// share endpoint), so these go through `sync_form` rather than the REST
+// helpers. There are NO per-member roles, and adding is an EMAIL INVITE
+// with an acceptance step — so the membership `TaskUser.id` carries the
+// EMAIL (the key `delete_collaborator` wants), `right` is always `None`,
+// and a freshly invited, not-yet-accepted collaborator surfaces with
+// `pending = true`.
+
+/// `POST /sync` reading `collaborators` + `collaborator_states`, filtered
+/// to this project. Joins each state's `user_id` to the matching
+/// collaborator for a name/email and marks `state == "invited"` as
+/// pending. Soft-fails to an empty list (the dialog then shows "no
+/// members") rather than erroring, mirroring the Vikunja shares read.
+pub async fn list_task_list_shares(
+    client: &TodoistClient,
+    list_id: &str,
+) -> TodoistResult<Vec<TaskListShare>> {
+    let resp: SyncCollaboratorsResponse = match client
+        .sync_form(&[
+            ("sync_token", "*".to_string()),
+            (
+                "resource_types",
+                r#"["collaborators","collaborator_states"]"#.to_string(),
+            ),
+        ])
+        .await
+    {
+        Ok(r) => r,
+        Err(_) => return Ok(Vec::new()),
+    };
+    let by_id: HashMap<String, &SyncCollaborator> = resp
+        .collaborators
+        .iter()
+        .map(|c| (c.id.to_id_string(), c))
+        .collect();
+    let shares = resp
+        .collaborator_states
+        .iter()
+        .filter(|s| !s.is_deleted && s.project_id.to_id_string() == list_id)
+        .map(|s| {
+            let user_id = s.user_id.to_id_string();
+            let collaborator = by_id.get(&user_id);
+            let email = collaborator
+                .and_then(|c| c.email.clone())
+                .filter(|e| !e.trim().is_empty());
+            let name = collaborator
+                .and_then(|c| c.full_name.clone())
+                .filter(|n| !n.trim().is_empty())
+                .or_else(|| email.clone())
+                .unwrap_or_else(|| format!("User {user_id}"));
+            // `delete_collaborator` keys on the email; fall back to the
+            // user id when (rarely) the collaborator object is absent.
+            let member_ref = email.clone().unwrap_or(user_id);
+            TaskListShare {
+                user: TaskUser {
+                    id: member_ref,
+                    name,
+                    email,
+                },
+                // Todoist has no per-share roles.
+                right: None,
+                pending: s.state.as_deref() == Some("invited"),
+            }
+        })
+        .collect();
+    Ok(shares)
+}
+
+/// Sync command `share_project { project_id, email }` — invite someone to
+/// the project by email. Todoist has no roles, so the caller's `right` is
+/// ignored. The invite stays pending until the recipient accepts.
+pub async fn add_task_list_member(
+    client: &TodoistClient,
+    list_id: &str,
+    member_ref: &str,
+) -> TodoistResult<()> {
+    let args = serde_json::json!({ "project_id": list_id, "email": member_ref });
+    sync_command(client, "share_project", args).await
+}
+
+/// Sync command `delete_collaborator { project_id, email }` — revoke a
+/// member's access (or cancel a pending invite). `member_ref` is the
+/// email carried on the share's `TaskUser.id`.
+pub async fn remove_task_list_member(
+    client: &TodoistClient,
+    list_id: &str,
+    member_ref: &str,
+) -> TodoistResult<()> {
+    let args = serde_json::json!({ "project_id": list_id, "email": member_ref });
+    sync_command(client, "delete_collaborator", args).await
+}
+
+/// Issue one Sync API command and surface a per-command failure as a
+/// protocol error. The Sync API replies `200` with the outcome in
+/// `sync_status` keyed by the command's uuid: the string `"ok"` on
+/// success or an error object otherwise.
+async fn sync_command(
+    client: &TodoistClient,
+    command_type: &str,
+    args: serde_json::Value,
+) -> TodoistResult<()> {
+    let uuid = Uuid::new_v4().to_string();
+    let commands = serde_json::json!([{
+        "type": command_type,
+        "uuid": uuid,
+        "args": args,
+    }]);
+    let resp: SyncStatusResponse = client
+        .sync_form(&[("commands", commands.to_string())])
+        .await?;
+    // We send exactly one command, so the response carries at most one
+    // `sync_status` entry. Rather than look it up by our (runtime-random)
+    // uuid, require every entry to be the string `"ok"` — anything else
+    // is an error object. An empty map means the command was accepted
+    // without an explicit status.
+    for status in resp.sync_status.values() {
+        let ok = matches!(status, serde_json::Value::String(s) if s == "ok");
+        if !ok {
+            return Err(TodoistError::Protocol(format!(
+                "Todoist sync command '{command_type}' failed: {status}"
+            )));
+        }
+    }
+    Ok(())
+}
+
 // ── JSON wire shapes ───────────────────────────────────────────────────
 
 /// Todoist IDs are strings in REST v2, but the task object's
@@ -259,6 +390,15 @@ impl WireId {
     fn into_string(self) -> String {
         match self {
             WireId::Str(s) => s,
+            WireId::Int(i) => i.to_string(),
+        }
+    }
+
+    /// Borrowing variant for when the id is only needed transiently
+    /// (e.g. to key a map or compare against a project id).
+    fn to_id_string(&self) -> String {
+        match self {
+            WireId::Str(s) => s.clone(),
             WireId::Int(i) => i.to_string(),
         }
     }
@@ -344,6 +484,49 @@ struct CollaboratorEntry {
     name: Option<String>,
     #[serde(default)]
     email: Option<String>,
+}
+
+/// `POST /sync` response carrying the account-wide collaborator pool +
+/// the per-project membership states. We filter `collaborator_states` to
+/// the project of interest and join to `collaborators` for names/emails.
+#[derive(Debug, Default, Deserialize)]
+struct SyncCollaboratorsResponse {
+    #[serde(default)]
+    collaborators: Vec<SyncCollaborator>,
+    #[serde(default)]
+    collaborator_states: Vec<SyncCollaboratorState>,
+}
+
+/// A Sync-API `collaborators` row — an account-wide user record.
+#[derive(Debug, Deserialize)]
+struct SyncCollaborator {
+    id: WireId,
+    #[serde(default)]
+    email: Option<String>,
+    /// Todoist names this `full_name` in the Sync API (vs `name` in the
+    /// REST collaborators endpoint).
+    #[serde(default)]
+    full_name: Option<String>,
+}
+
+/// A Sync-API `collaborator_states` row — one user's membership of one
+/// project, including whether the invite is still `"invited"` (pending).
+#[derive(Debug, Deserialize)]
+struct SyncCollaboratorState {
+    project_id: WireId,
+    user_id: WireId,
+    #[serde(default)]
+    state: Option<String>,
+    #[serde(default)]
+    is_deleted: bool,
+}
+
+/// `POST /sync` response for a write: the per-command outcome keyed by
+/// the command uuid (`"ok"` or an error object).
+#[derive(Debug, Default, Deserialize)]
+struct SyncStatusResponse {
+    #[serde(default)]
+    sync_status: HashMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1551,5 +1734,108 @@ mod tests {
         let tasks = get_tasks(&client, "P1").await.unwrap();
         assert_eq!(tasks.len(), 1);
         assert!(tasks[0].assignees.is_empty());
+    }
+
+    // ── Membership / sharing (Sync API) ────────────────────────
+
+    #[tokio::test]
+    async fn list_task_list_shares_decodes_sync() {
+        let mut server = Server::new_async().await;
+        let _m = server
+            .mock("POST", "/sync")
+            .with_status(200)
+            .with_body(
+                r#"{
+                    "collaborators":[
+                        {"id":"10","email":"alice@example.com","full_name":"Alice"},
+                        {"id":"20","email":"bob@example.com","full_name":"Bob"}
+                    ],
+                    "collaborator_states":[
+                        {"project_id":"P1","user_id":"10","state":"active","is_deleted":false},
+                        {"project_id":"P1","user_id":"20","state":"invited","is_deleted":false},
+                        {"project_id":"P2","user_id":"10","state":"active","is_deleted":false},
+                        {"project_id":"P1","user_id":"99","state":"active","is_deleted":true}
+                    ]
+                }"#,
+            )
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        let shares = list_task_list_shares(&client, "P1").await.unwrap();
+        // Only P1 + non-deleted survive: Alice (active) and Bob (invited).
+        assert_eq!(shares.len(), 2);
+        let alice = shares.iter().find(|s| s.user.name == "Alice").unwrap();
+        // Membership keys on the email (delete_collaborator wants it).
+        assert_eq!(alice.user.id, "alice@example.com");
+        assert!(!alice.pending);
+        assert!(alice.right.is_none());
+        let bob = shares.iter().find(|s| s.user.name == "Bob").unwrap();
+        assert!(bob.pending);
+    }
+
+    #[tokio::test]
+    async fn list_task_list_shares_empty_on_error() {
+        let mut server = Server::new_async().await;
+        let _m = server
+            .mock("POST", "/sync")
+            .with_status(403)
+            .with_body(r#"{"error":"Forbidden"}"#)
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        assert!(list_task_list_shares(&client, "P1")
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn add_task_list_member_succeeds_on_ok() {
+        let mut server = Server::new_async().await;
+        let m = server
+            .mock("POST", "/sync")
+            .with_status(200)
+            .with_body(r#"{"sync_status":{"cmd":"ok"}}"#)
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        add_task_list_member(&client, "P1", "new@example.com")
+            .await
+            .unwrap();
+        m.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn add_task_list_member_surfaces_command_error() {
+        let mut server = Server::new_async().await;
+        let _m = server
+            .mock("POST", "/sync")
+            .with_status(200)
+            .with_body(r#"{"sync_status":{"cmd":{"error_code":35,"error":"already shared"}}}"#)
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        let err = add_task_list_member(&client, "P1", "x@example.com")
+            .await
+            .unwrap_err();
+        match err {
+            crate::error::TodoistError::Protocol(msg) => assert!(msg.contains("share_project")),
+            other => panic!("expected Protocol, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn remove_task_list_member_succeeds_on_ok() {
+        let mut server = Server::new_async().await;
+        let _m = server
+            .mock("POST", "/sync")
+            .with_status(200)
+            .with_body(r#"{"sync_status":{"cmd":"ok"}}"#)
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        remove_task_list_member(&client, "P1", "bye@example.com")
+            .await
+            .unwrap();
     }
 }

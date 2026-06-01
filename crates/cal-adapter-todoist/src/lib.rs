@@ -32,8 +32,9 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use cal_core::{
-    Adapter, AuthToken, Capability, Credentials as CoreCredentials, Error as CoreError, NewTask,
-    Result as CoreResult, Section, Task, TaskList, TaskUser, TasksFeature,
+    Adapter, AuthToken, Capability, Credentials as CoreCredentials, Error as CoreError,
+    MemberRight, NewTask, Result as CoreResult, Section, Task, TaskList, TaskListShare, TaskUser,
+    TasksFeature,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -179,6 +180,37 @@ impl TasksFeature for TodoistAdapter {
     /// Sync-API follow-up (DESIGN §9.7).
     async fn list_task_list_members(&self, list_id: &str) -> CoreResult<Vec<TaskUser>> {
         tasks::list_task_list_members(&self.client, list_id)
+            .await
+            .map_err(to_core_error)
+    }
+
+    /// Project shares incl. pending invites (Sync API). `search_users`
+    /// and `set_task_list_member_right` stay trait-defaulted: Todoist
+    /// has no user directory (members are invited by raw email) and no
+    /// per-share roles.
+    async fn list_task_list_shares(&self, list_id: &str) -> CoreResult<Vec<TaskListShare>> {
+        tasks::list_task_list_shares(&self.client, list_id)
+            .await
+            .map_err(to_core_error)
+    }
+
+    /// Invite a member by email (Sync `share_project`). `right` is
+    /// ignored — Todoist has no roles.
+    async fn add_task_list_member(
+        &self,
+        list_id: &str,
+        member_ref: &str,
+        _right: Option<MemberRight>,
+    ) -> CoreResult<()> {
+        tasks::add_task_list_member(&self.client, list_id, member_ref)
+            .await
+            .map_err(to_core_error)
+    }
+
+    /// Revoke a member / cancel a pending invite (Sync
+    /// `delete_collaborator`). `member_ref` is the member's email.
+    async fn remove_task_list_member(&self, list_id: &str, member_ref: &str) -> CoreResult<()> {
+        tasks::remove_task_list_member(&self.client, list_id, member_ref)
             .await
             .map_err(to_core_error)
     }

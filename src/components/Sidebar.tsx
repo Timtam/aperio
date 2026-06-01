@@ -621,9 +621,14 @@ export function Sidebar() {
             });
           }
         }
-        // External task lists (Vikunja): manage who the list is shared
-        // with. Local lists have no membership concept.
-        if (!accountIsLocal) {
+        // Manage who the list is shared with — only where the adapter
+        // declares membership management (Vikunja, Todoist). Local lists
+        // and flat backends (Google Tasks, MS To Do) have no membership
+        // concept, so they never offer the entry.
+        const membersCaps = taskLists.find(
+          (l) => l.id === leaf.containerId,
+        )?.task_capabilities;
+        if (membersCaps?.manageable) {
           items.push({ id: 'members', label: t('sidebar.menu.members') });
         }
       }
@@ -658,7 +663,10 @@ export function Sidebar() {
         startEdit(editKind, leaf.containerId, leaf.name);
       } else if (selected === 'members') {
         setRestoreFocusToTree(true);
-        openTaskMembers(leaf.containerId, leaf.name);
+        const caps = taskLists.find(
+          (l) => l.id === leaf.containerId,
+        )?.task_capabilities;
+        openTaskMembers(leaf.containerId, leaf.name, caps);
       } else if (selected === 'focus-open') {
         setRestoreFocusToTree(true);
         enterFocus(leaf.containerId);

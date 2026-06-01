@@ -1097,7 +1097,9 @@ Ergänzend zur Zuweisung: Mitglieder einer Liste / eines Projekts direkt aus Ape
 
 Sichtbar nur, wenn der Adapter der Liste Mitgliederverwaltung kann (lokale Listen / nicht verwaltbare Backends blenden ihn aus).
 
-**Phasen.** (1) Vikunja end-to-end: Modell + Trait/FFI + Adapter (Shares lesen, add/remove/set_right, User-Suche) + Mitglieder-Dialog mit Rechten. (1b) Teams. (2) Todoist: `collaborators` + `collaborator_states`, `share_project`/`delete_collaborator` (Sync-API), Pending-Zustand; UI auf E-Mail-Einladung ohne Rollen. _Out of scope:_ MS; instanzweite Nutzer-/Team-Administration (nur projekt-/listenbezogene Freigabe).
+**Capability.** Pro Adapter im Manifest (`tasks.manageable` + `tasks.member_add_by: search | email`). `manageable` gated das Sidebar-„Mitglieder"-Menü (Vikunja + Todoist = true; lokal/Google/MS To Do = false), `member_add_by` schaltet den Dialog zwischen User-Suche (Vikunja) und E-Mail-Einladung (Todoist). Rollen + Pending sind datengetrieben (`right = null` ⇒ kein Dropdown, `pending` ⇒ Badge).
+
+**Phasen.** ✅ (1) Vikunja end-to-end: Modell + Trait/FFI + Adapter (Shares lesen, add/remove/set_right, User-Suche) + Mitglieder-Dialog mit Rechten. (1b) Teams. ✅ (2) Todoist: `collaborators` + `collaborator_states`, `share_project`/`delete_collaborator` (Sync-API v9), Pending-Zustand; UI auf E-Mail-Einladung ohne Rollen. Mitgliedschaft schlüsselt auf der **E-Mail** (was `delete_collaborator` braucht), `right = None`. _Out of scope:_ MS; instanzweite Nutzer-/Team-Administration (nur projekt-/listenbezogene Freigabe).
 
 ### 9.8 Separate Aufgaben-Ansicht (`Ctrl+6`)
 

@@ -10,28 +10,41 @@ import {
   taskSearchUsers,
   taskSetMemberRight,
 } from '../api/client';
-import type { MemberRight, TaskListShare, TaskUser } from '../api/types';
+import type {
+  MemberRight,
+  TaskCapabilities,
+  TaskListShare,
+  TaskUser,
+} from '../api/types';
 import { Modal } from './Modal';
 
 const RIGHTS: MemberRight[] = ['read', 'write', 'admin'];
 
 /**
  * Manage the membership/sharing of one task list (DESIGN §9.7): list
- * the current shares with their right, add/invite people via a search,
- * remove them, and change roles. Capability-gated by the caller — only
- * opened for lists whose adapter supports membership management.
+ * the current shares with their right + pending state, add/invite
+ * people, remove them, and change roles. Capability-gated by the caller
+ * — only opened for lists whose adapter declares `manageable`.
+ *
+ * The add control follows the adapter's `member_add_by`:
+ *   - `search` (Vikunja): debounced user-directory search → pick a hit.
+ *   - `email` (Todoist): type an email and send an invite (pending until
+ *     accepted; Todoist has no directory + no roles).
  */
 export function TaskMembersDialog({
   isOpen,
   onClose,
   listId,
   listName,
+  capabilities,
 }: {
   isOpen: boolean;
   onClose: () => void;
   listId: string;
   listName: string;
+  capabilities?: TaskCapabilities;
 }) {
+  const addByEmail = capabilities?.member_add_by === 'email';
   const { t } = useTranslation();
   const announce = useAnnouncer();
   const [shares, setShares] = useState<TaskListShare[]>([]);
@@ -61,9 +74,10 @@ export function TaskMembersDialog({
     }
   }, [isOpen, reload]);
 
-  // Debounced directory search (≥ 2 chars).
+  // Debounced directory search (≥ 2 chars). Skipped entirely when the
+  // adapter invites by email — there's no directory to query.
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || addByEmail) return;
     const q = query.trim();
     if (q.length < 2) {
       setResults([]);
@@ -83,7 +97,7 @@ export function TaskMembersDialog({
       cancelled = true;
       clearTimeout(handle);
     };
-  }, [isOpen, listId, query]);
+  }, [isOpen, listId, query, addByEmail]);
 
   const run = useCallback(
     async (fn: () => Promise<void>) => {
@@ -107,6 +121,17 @@ export function TaskMembersDialog({
       announce(t('dialogs.taskMembers.added', { name: user.name }));
       setQuery('');
       setResults([]);
+    });
+
+  // Email-invite path (Todoist): the typed text IS the member ref; there
+  // are no roles, so `right` is null.
+  const invite = () =>
+    void run(async () => {
+      const email = query.trim();
+      if (!email) return;
+      await taskAddMember(listId, email, null);
+      announce(t('dialogs.taskMembers.added', { name: email }));
+      setQuery('');
     });
 
   const remove = (share: TaskListShare) =>
@@ -191,30 +216,55 @@ export function TaskMembersDialog({
               {t('dialogs.taskMembers.addLabel')}
             </span>
             <input
-              type="text"
+              type={addByEmail ? 'email' : 'text'}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder={t('dialogs.taskMembers.searchPlaceholder')}
+              placeholder={t(
+                addByEmail
+                  ? 'dialogs.taskMembers.emailPlaceholder'
+                  : 'dialogs.taskMembers.searchPlaceholder',
+              )}
               autoComplete="off"
+              onKeyDown={
+                addByEmail
+                  ? (e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        invite();
+                      }
+                    }
+                  : undefined
+              }
             />
           </label>
-          {results.length > 0 && (
-            <ul className="task-members__results">
-              {results
-                .filter((u) => !existingIds.has(u.id))
-                .map((u) => (
-                  <li key={u.id}>
-                    <button
-                      type="button"
-                      className="task-members__result"
-                      disabled={busy}
-                      onClick={() => add(u)}
-                    >
-                      {u.email ? `${u.name} · ${u.email}` : u.name}
-                    </button>
-                  </li>
-                ))}
-            </ul>
+          {addByEmail ? (
+            <button
+              type="button"
+              className="form__action"
+              disabled={busy || query.trim().length === 0}
+              onClick={invite}
+            >
+              {t('dialogs.taskMembers.invite')}
+            </button>
+          ) : (
+            results.length > 0 && (
+              <ul className="task-members__results">
+                {results
+                  .filter((u) => !existingIds.has(u.id))
+                  .map((u) => (
+                    <li key={u.id}>
+                      <button
+                        type="button"
+                        className="task-members__result"
+                        disabled={busy}
+                        onClick={() => add(u)}
+                      >
+                        {u.email ? `${u.name} · ${u.email}` : u.name}
+                      </button>
+                    </li>
+                  ))}
+              </ul>
+            )
           )}
         </div>
       </div>

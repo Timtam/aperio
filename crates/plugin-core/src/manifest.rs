@@ -137,6 +137,19 @@ impl Default for RecurrenceCapabilities {
 /// most simple adapters have. Each backend then widens (Vikunja:
 /// `nested_projects` + `sections`) or narrows (a step-only backend:
 /// `subtasks` with `max_subtask_depth = 1`).
+/// How a task adapter adds members to a list (DESIGN §9.7): by searching
+/// a user directory (Vikunja) or by inviting a raw email address
+/// (Todoist). Drives which control the members dialog renders.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum MemberAddMethod {
+    /// Search the instance/workspace directory and pick a user.
+    #[default]
+    Search,
+    /// Type a raw email address to invite (pending until accepted).
+    Email,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskCapabilities {
     /// Task lists (projects) nest into a tree. Flat backends leave
@@ -177,6 +190,18 @@ pub struct TaskCapabilities {
     /// shape as `create_lists`.
     #[serde(default)]
     pub delete_lists: bool,
+    /// The adapter can manage a list's membership/sharing (the sidebar's
+    /// "manage members" entry + the members dialog). Vikunja + Todoist
+    /// opt in; flat/personal backends (local, Google Tasks, MS To Do)
+    /// leave it `false` so the UI doesn't offer a control they can't
+    /// fulfil.
+    #[serde(default)]
+    pub manageable: bool,
+    /// How members are added when `manageable`: by user-directory search
+    /// (Vikunja) or by raw-email invite (Todoist). Drives the members
+    /// dialog's add control; ignored when `manageable` is `false`.
+    #[serde(default)]
+    pub member_add_by: MemberAddMethod,
 }
 
 impl Default for TaskCapabilities {
@@ -191,6 +216,8 @@ impl Default for TaskCapabilities {
             move_between_projects: true,
             create_lists: false,
             delete_lists: false,
+            manageable: false,
+            member_add_by: MemberAddMethod::Search,
         }
     }
 }

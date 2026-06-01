@@ -939,6 +939,8 @@
       "pending": "pending",
       "addLabel": "Add person",
       "searchPlaceholder": "Search by name …",
+      "emailPlaceholder": "Email address …",
+      "invite": "Invite",
       "remove": "Remove",
       "rightFor": "Permission for {{name}}",
       "right": {

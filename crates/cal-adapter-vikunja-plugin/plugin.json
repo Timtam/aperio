@@ -14,6 +14,8 @@
     "sections": true,
     "subtasks": true,
     "create_lists": true,
-    "delete_lists": true
+    "delete_lists": true,
+    "manageable": true,
+    "member_add_by": "search"
   }
 }
