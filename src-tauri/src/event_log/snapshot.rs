@@ -33,7 +33,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use cal_adapter_local::{LocalAdapter, SnapshotApplyReport, SnapshotDump};
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use sync_core::{Snapshot, SyncError, SyncResult};
@@ -130,11 +130,24 @@ impl SnapshotBuilder {
     }
 
     /// Build a [`Snapshot`] reflecting the current local SQLite
-    /// state + whitelisted user_prefs. `snapshot_timestamp` is set
-    /// to `Utc::now()`; the caller is responsible for atomically
-    /// updating `meta.json.snapshot_timestamp` to match after a
-    /// successful `push_snapshot`.
+    /// state + whitelisted user_prefs, stamped `Utc::now()`. The
+    /// caller is responsible for atomically updating
+    /// `meta.json.snapshot_timestamp` to match after a successful
+    /// `push_snapshot`.
     pub fn build(&self) -> SyncResult<Snapshot> {
+        self.build_at(Utc::now())
+    }
+
+    /// Like [`build`](Self::build) but stamps the snapshot with a
+    /// caller-supplied `snapshot_at`. The compactor uses this to make
+    /// the snapshot sort *just before* the writer's freshly-rotated
+    /// session file: the snapshot then covers every event written to
+    /// the now-closed pre-rotation file, while post-rotation events
+    /// land in a file whose timestamp is strictly newer than the
+    /// snapshot — so a device that consumes the snapshot (and advances
+    /// its cursor to `snapshot_at`) still fetches them instead of
+    /// skipping them as "older than the snapshot".
+    pub fn build_at(&self, snapshot_at: DateTime<Utc>) -> SyncResult<Snapshot> {
         let dump = self
             .adapter
             .dump_for_snapshot()
@@ -148,7 +161,7 @@ impl SnapshotBuilder {
         };
         let body_value = serde_json::to_value(&body)?;
         Ok(Snapshot::new(
-            Utc::now(),
+            snapshot_at,
             self.app_version.clone(),
             body_value,
         ))
