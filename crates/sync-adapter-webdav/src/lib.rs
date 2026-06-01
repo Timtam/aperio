@@ -58,7 +58,8 @@
 
 mod propfind;
 
-use std::sync::Arc;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use base64::Engine;
@@ -110,6 +111,11 @@ pub struct WebDavSyncAdapter {
     base_url: Url,
     credentials: WebDavCredentials,
     client: Arc<Client>,
+    /// Collections (`log/`, `assets/sounds/`, …) we've already MKCOL'd
+    /// this session. WebDAV collections persist server-side, so once a
+    /// directory is ensured we skip the redundant MKCOL on every later
+    /// push. Shared across clones so the cache survives `.clone()`.
+    ensured: Arc<Mutex<HashSet<String>>>,
 }
 
 impl WebDavSyncAdapter {
@@ -159,6 +165,7 @@ impl WebDavSyncAdapter {
             base_url: url,
             credentials,
             client: Arc::new(client),
+            ensured: Arc::new(Mutex::new(HashSet::new())),
         })
     }
 
@@ -309,6 +316,34 @@ impl WebDavSyncAdapter {
         let text = resp.text().await.map_err(network_err)?;
         parse_propfind_response(&text)
     }
+
+    /// `MKCOL` a collection at most once per adapter session.
+    ///
+    /// WebDAV collections persist server-side, so re-creating `log/`
+    /// before every single push (what the per-call `mkcol` did) just
+    /// burns one round-trip per pending file — on a high-latency
+    /// server that's seconds added to the first sync round, which on
+    /// startup (where `test_connection` never ran to pre-create the
+    /// dirs) pays the cost for *every* queued log. We remember the
+    /// collections ensured this session and skip the rest.
+    async fn ensure_collection(&self, rel: &str) {
+        if self
+            .ensured
+            .lock()
+            .expect("ensured mutex poison")
+            .contains(rel)
+        {
+            return;
+        }
+        // MKCOL is idempotent (405 on an existing collection, ignored).
+        // A concurrent first-touch racing here at worst issues a
+        // second harmless MKCOL.
+        let _ = self.mkcol(rel).await;
+        self.ensured
+            .lock()
+            .expect("ensured mutex poison")
+            .insert(rel.to_string());
+    }
 }
 
 #[async_trait]
@@ -328,10 +363,11 @@ impl SyncAdapter for WebDavSyncAdapter {
         if status.is_success() || status == StatusCode::NO_CONTENT {
             // Also lazily ensure the `log/` and `assets/sounds/`
             // collections exist — saves an extra round-trip on the
-            // first push.
-            let _ = self.mkcol("log/").await;
-            let _ = self.mkcol("assets/").await;
-            let _ = self.mkcol("assets/sounds/").await;
+            // first push, and seeds the session cache so later pushes
+            // skip their own MKCOLs.
+            self.ensure_collection("log/").await;
+            self.ensure_collection("assets/").await;
+            self.ensure_collection("assets/sounds/").await;
             return Ok(());
         }
         Err(http_err(status, &url))
@@ -404,9 +440,10 @@ impl SyncAdapter for WebDavSyncAdapter {
 
     async fn push_log(&self, log: &LogFile) -> SyncResult<()> {
         let relative = format!("log/{}", log.name.to_filename());
-        // Ensure the collection exists. Cheap on the happy path
-        // (test_connection already created it).
-        let _ = self.mkcol("log/").await;
+        // Ensure the collection exists — but only MKCOL it once per
+        // session (the cache skips the redundant round-trip every
+        // later push would otherwise pay).
+        self.ensure_collection("log/").await;
         self.put_bytes(&relative, log.bytes.clone(), "application/json")
             .await
     }
@@ -431,8 +468,8 @@ impl SyncAdapter for WebDavSyncAdapter {
 
     async fn push_sound_asset(&self, hash: &str, extension: &str, bytes: &[u8]) -> SyncResult<()> {
         let relative = format!("assets/sounds/{hash}.{extension}");
-        let _ = self.mkcol("assets/").await;
-        let _ = self.mkcol("assets/sounds/").await;
+        self.ensure_collection("assets/").await;
+        self.ensure_collection("assets/sounds/").await;
         self.put_bytes(&relative, bytes.to_vec(), "application/octet-stream")
             .await
     }
@@ -533,6 +570,46 @@ fn percent_decode(s: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn push_log_mkcols_the_collection_only_once_per_session() {
+        let mut server = mockito::Server::new_async().await;
+        // The `log/` collection must be MKCOL'd exactly ONCE across
+        // several pushes — the session cache skips the redundant
+        // round-trip every later push would otherwise pay (the startup
+        // pushed=N case that motivated this).
+        let mkcol = server
+            .mock("MKCOL", "/log/")
+            .with_status(201)
+            .expect(1)
+            .create_async()
+            .await;
+        // Every log PUT just succeeds; we don't constrain the count.
+        let _put = server
+            .mock("PUT", mockito::Matcher::Regex(r"^/log/".into()))
+            .with_status(201)
+            .create_async()
+            .await;
+
+        let adapter = WebDavSyncAdapter::new(
+            &format!("{}/", server.url()),
+            WebDavCredentials::basic("u", "p"),
+        )
+        .unwrap();
+
+        let ts = chrono::Utc::now();
+        for i in 0..3 {
+            let name = LogFileName::new(ts, sync_core::DeviceId::from_string(format!("dev-{i}")));
+            adapter
+                .push_log(&LogFile {
+                    name,
+                    bytes: b"{}".to_vec(),
+                })
+                .await
+                .expect("push_log succeeds against the mock");
+        }
+        mkcol.assert_async().await;
+    }
 
     #[test]
     fn basic_credentials_encodes_user_pass() {

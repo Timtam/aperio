@@ -71,9 +71,12 @@ pub const PREF_SYNC_INTERVAL_MINUTES: &str = "sync.intervalMinutes";
 pub const DEFAULT_SYNC_INTERVAL_MINUTES: u32 = 5;
 
 /// How long after app start the first sync round kicks off. Lets the
-/// Tauri main thread finish wiring everything up + lets the UI paint
-/// before we start consuming bandwidth.
-const APP_START_DELAY: Duration = Duration::from_secs(5);
+/// Tauri main thread finish wiring everything up + the UI paint before
+/// we start consuming bandwidth. Kept short: the round runs on a
+/// background task and never blocks the UI, so there's little reason to
+/// defer the user's local changes reaching the remote much past the
+/// initial paint.
+const APP_START_DELAY: Duration = Duration::from_secs(2);
 
 /// Coalescing window for mutation-triggered kicks. A burst of
 /// mutations (paste-many-events, bulk delete, drag-multiple) pings
