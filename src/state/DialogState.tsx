@@ -50,6 +50,7 @@ export type DialogMode =
   | { kind: 'reminders' }
   | { kind: 'moveCopy'; target: MoveCopyTarget }
   | { kind: 'planTask'; task: Task }
+  | { kind: 'taskMembers'; listId: string; listName: string }
   | { kind: 'dayStartReview' }
   | {
       kind: 'contact';
@@ -107,6 +108,8 @@ export interface DialogStateValue {
   openReminders: () => void;
   openMoveCopy: (target: MoveCopyTarget) => void;
   openPlanTask: (task: Task) => void;
+  /** Open the task-list membership/sharing dialog (DESIGN §9.7). */
+  openTaskMembers: (listId: string, listName: string) => void;
   /**
    * Open the unified day-start review (DESIGN.md § 9.5). One dialog
    * with two sections — deadline overruns + schedule slips — replaces
@@ -259,6 +262,11 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     (task: Task) => push({ kind: 'planTask', task }),
     [push],
   );
+  const openTaskMembers = useCallback(
+    (listId: string, listName: string) =>
+      push({ kind: 'taskMembers', listId, listName }),
+    [push],
+  );
   const openDayStartReview = useCallback(
     () => push({ kind: 'dayStartReview' }),
     [push],
@@ -340,6 +348,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openReminders,
       openMoveCopy,
       openPlanTask,
+      openTaskMembers,
       openDayStartReview,
       openContactDialog,
       openSyncConflicts,
@@ -362,6 +371,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openReminders,
       openMoveCopy,
       openPlanTask,
+      openTaskMembers,
       openDayStartReview,
       openContactDialog,
       openSyncConflicts,

@@ -124,7 +124,7 @@ export function Sidebar() {
     toggleContactList,
     refreshContactLists,
   } = useCalendarStore();
-  const { openSettings } = useDialogState();
+  const { openSettings, openTaskMembers } = useDialogState();
   const expansion = useSidebarExpansion();
   const showCompleted = useTaskListShowCompleted();
   const { focusedCalendarId, enterFocus, exitFocus } = useViewState();
@@ -621,6 +621,11 @@ export function Sidebar() {
             });
           }
         }
+        // External task lists (Vikunja): manage who the list is shared
+        // with. Local lists have no membership concept.
+        if (!accountIsLocal) {
+          items.push({ id: 'members', label: t('sidebar.menu.members') });
+        }
       }
       // Delete: always for local containers; for external task lists
       // only when the adapter declares `delete_lists` (Vikunja etc.).
@@ -651,6 +656,9 @@ export function Sidebar() {
         // effect, it would race the autoFocus and silently win, leaving
         // the user staring at a rename input they can't type into.
         startEdit(editKind, leaf.containerId, leaf.name);
+      } else if (selected === 'members') {
+        setRestoreFocusToTree(true);
+        openTaskMembers(leaf.containerId, leaf.name);
       } else if (selected === 'focus-open') {
         setRestoreFocusToTree(true);
         enterFocus(leaf.containerId);
@@ -717,6 +725,7 @@ export function Sidebar() {
     },
     [
       startEdit,
+      openTaskMembers,
       onDeleteCalendar,
       onDeleteContactListAction,
       taskLists,

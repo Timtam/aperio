@@ -16,6 +16,7 @@ import type {
   ContactList,
   ContactPhoto,
   FailedPluginInfo,
+  MemberRight,
   NewContact,
   NewEvent,
   PluginArchivePreview,
@@ -25,6 +26,7 @@ import type {
   Section,
   Task,
   TaskList,
+  TaskListShare,
   TaskUser,
 } from './types';
 
@@ -181,6 +183,47 @@ export const taskListMembers = (list_id: string) =>
  *  owns this list. `null` for local lists / providers without users. */
 export const taskCurrentUser = (list_id: string) =>
   invoke<TaskUser | null>('task_current_user', { listId: list_id });
+
+// ── Task-list membership (DESIGN §9.7) ───────────────────────────────────────
+
+/** Editable membership/shares of a list (with rights). Empty for local
+ *  lists / non-manageable backends. */
+export const taskListShares = (list_id: string) =>
+  invoke<TaskListShare[]>('task_list_shares', { listId: list_id });
+
+/** Directory search for users to add to a list (Vikunja). */
+export const taskSearchUsers = (list_id: string, query: string) =>
+  invoke<TaskUser[]>('task_search_users', { listId: list_id, query });
+
+/** Add/invite a member. `memberRef` is the provider's add key
+ *  (Vikunja username, Todoist email). */
+export const taskAddMember = (
+  list_id: string,
+  member_ref: string,
+  right: MemberRight | null,
+) =>
+  invoke<void>('task_add_member', {
+    listId: list_id,
+    memberRef: member_ref,
+    right,
+  });
+
+export const taskRemoveMember = (list_id: string, member_ref: string) =>
+  invoke<void>('task_remove_member', {
+    listId: list_id,
+    memberRef: member_ref,
+  });
+
+export const taskSetMemberRight = (
+  list_id: string,
+  member_ref: string,
+  right: MemberRight,
+) =>
+  invoke<void>('task_set_member_right', {
+    listId: list_id,
+    memberRef: member_ref,
+    right,
+  });
 
 export interface CreateSectionRequest {
   list_id: string;

@@ -13,6 +13,7 @@ import { SyncConflictsDialog } from './SyncConflictsDialog';
 import { SyncSchemaTooOldDialog } from './SyncSchemaTooOldDialog';
 import { SyncStaleResumeDialog } from './SyncStaleResumeDialog';
 import { TaskDialog } from './TaskDialog';
+import { TaskMembersDialog } from './TaskMembersDialog';
 
 /**
  * Single host component that renders whichever dialog is currently
@@ -68,6 +69,15 @@ export function DialogHost() {
           onClose={close}
           task={mode.task}
           onPlanned={invalidateData}
+        />
+      );
+    case 'taskMembers':
+      return (
+        <TaskMembersDialog
+          isOpen
+          onClose={close}
+          listId={mode.listId}
+          listName={mode.listName}
         />
       );
     case 'dayStartReview':

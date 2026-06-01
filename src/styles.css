@@ -2920,6 +2920,68 @@ button[aria-disabled='true'] {
   white-space: nowrap;
 }
 
+/* ── Task-list members dialog (DESIGN §9.7) ─────────────────────────────── */
+
+.task-members {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.task-members__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.task-members__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.task-members__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-members__pending {
+  color: var(--color-fg-muted);
+  font-size: var(--font-size-xs);
+}
+
+.task-members__results {
+  list-style: none;
+  margin: var(--space-1) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 12rem;
+  overflow-y: auto;
+}
+
+.task-members__result {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: inherit;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.task-members__result:hover {
+  background: color-mix(in srgb, var(--color-fg) 8%, transparent);
+}
+
 /* ── Contacts view (DESIGN.md §10) ──────────────────────────────────────── */
 
 /*

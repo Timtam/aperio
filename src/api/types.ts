@@ -72,6 +72,20 @@ export interface TaskUser {
   email: string | null;
 }
 
+/** Permission level on a task-list share (Vikunja). `null` on backends
+ *  without per-share roles (Todoist). */
+export type MemberRight = 'read' | 'write' | 'admin';
+
+/** One editable membership/share of a task list (DESIGN §9.7) — the
+ *  members dialog drives add/remove/role from these. Distinct from the
+ *  read-only assignee pool. */
+export interface TaskListShare {
+  user: TaskUser;
+  right: MemberRight | null;
+  /** Invitation not yet accepted (Todoist email invites). */
+  pending: boolean;
+}
+
 export interface Calendar {
   id: string;
   name: string;

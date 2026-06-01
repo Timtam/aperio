@@ -932,6 +932,23 @@
         "dayOfMonthHint": "Leave empty to use the completion day. Values past the end of a short month are clamped (e.g. 31 → February's last day)."
       }
     },
+    "taskMembers": {
+      "title": "Members of \"{{list}}\"",
+      "loading": "Loading members …",
+      "empty": "No members.",
+      "pending": "pending",
+      "addLabel": "Add person",
+      "searchPlaceholder": "Search by name …",
+      "remove": "Remove",
+      "rightFor": "Permission for {{name}}",
+      "right": {
+        "read": "Read",
+        "write": "Write",
+        "admin": "Admin"
+      },
+      "added": "Added {{name}}.",
+      "removed": "Removed {{name}}."
+    },
     "quickAdd": {
       "title": "Quick add event",
       "moreDetails": "More details …"
@@ -1167,6 +1184,7 @@
       "hideCompletedAnnouncement": "Completed tasks of \"{{name}}\" are now hidden from the calendar.",
       "moveUnder": "Move under …",
       "moveToTopLevel": "Top level",
+      "members": "Manage members …",
       "reparentedAnnouncement": "Moved \"{{name}}\" under \"{{parent}}\".",
       "reparentedTopAnnouncement": "Moved \"{{name}}\" to the top level."
     },

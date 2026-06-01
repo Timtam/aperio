@@ -932,6 +932,23 @@
         "dayOfMonthHint": "Leer = es wird der Erledigungstag verwendet. Werte über den Monatsende hinaus werden gekappt (z. B. 31 → Februar-Ende)."
       }
     },
+    "taskMembers": {
+      "title": "Mitglieder von „{{list}}\"",
+      "loading": "Mitglieder werden geladen …",
+      "empty": "Keine Mitglieder.",
+      "pending": "ausstehend",
+      "addLabel": "Person hinzufügen",
+      "searchPlaceholder": "Name suchen …",
+      "remove": "Entfernen",
+      "rightFor": "Recht für {{name}}",
+      "right": {
+        "read": "Lesen",
+        "write": "Schreiben",
+        "admin": "Admin"
+      },
+      "added": "{{name}} hinzugefügt.",
+      "removed": "{{name}} entfernt."
+    },
     "quickAdd": {
       "title": "Termin schnell anlegen",
       "moreDetails": "Weitere Details …"
@@ -1167,6 +1184,7 @@
       "hideCompletedAnnouncement": "Erledigte Aufgaben von „{{name}}\" werden jetzt im Kalender ausgeblendet.",
       "moveUnder": "Verschieben unter …",
       "moveToTopLevel": "Oberste Ebene",
+      "members": "Mitglieder verwalten …",
       "reparentedAnnouncement": "„{{name}}\" wurde unter „{{parent}}\" verschoben.",
       "reparentedTopAnnouncement": "„{{name}}\" wurde auf die oberste Ebene verschoben."
     },
