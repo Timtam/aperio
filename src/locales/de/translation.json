@@ -1310,6 +1310,7 @@
       "subtaskProgress": ", {{done}} von {{total}} Unteraufgaben erledigt",
       "subtaskProgressBadge": "{{done}}/{{total}}",
       "subtaskProgressBadgeAria": "{{done}} von {{total}} Unteraufgaben erledigt",
+      "assignedTo": "Zugewiesen an: {{names}}",
       "dueScheduled": "Geplant: {{date}}",
       "dueDeadline": "Fällig: {{date}}",
       "dueNone": "Ohne Datum",

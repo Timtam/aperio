@@ -548,6 +548,16 @@ function renderTreeItem(
         {marker}
       </span>
       <span className="task-list__title">{task.title}</span>
+      {task.assignees.length > 0 && (
+        <span
+          className="task-list__assignees"
+          aria-label={t('views.tasks.assignedTo', {
+            names: task.assignees.map((a) => a.name).join(', '),
+          })}
+        >
+          {task.assignees.map((a) => a.name).join(', ')}
+        </span>
+      )}
       {progress && (
         <span
           className="task-list__progress"

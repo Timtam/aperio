@@ -2905,6 +2905,21 @@ button[aria-disabled='true'] {
   font-size: var(--font-size-xs);
 }
 
+.task-list__assignees {
+  /* Muted assignee pill, same restraint as the subtask-progress badge —
+   * present at a glance without competing with the title. Clips long
+   * name lists so the row never wraps. */
+  font-size: var(--font-size-xs);
+  color: var(--color-fg-muted);
+  background: color-mix(in srgb, var(--color-fg) 6%, transparent);
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ── Contacts view (DESIGN.md §10) ──────────────────────────────────────── */
 
 /*
