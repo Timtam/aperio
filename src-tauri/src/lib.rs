@@ -307,6 +307,7 @@ pub fn run() {
         .manage(commands::UserPluginsDir(user_plugins_dir))
         .invoke_handler(tauri::generate_handler![
             app_info,
+            frontend_log,
             commands::open_external_url,
             commands::list_calendars,
             commands::create_calendar,
@@ -617,6 +618,21 @@ fn app_info() -> AppInfo {
     AppInfo {
         name: env!("CARGO_PKG_NAME").to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
+    }
+}
+
+/// Dev diagnostic: mirror a webview `console.*` call into the Rust tracing
+/// stream (target `aperio::webview`) so frontend logs land in the same dev
+/// terminal as backend logs. The frontend only forwards in dev builds.
+#[tauri::command]
+fn frontend_log(level: String, message: String) {
+    // Map to INFO and above so everything is visible under the default
+    // (INFO) log filter — the whole point is to surface webview output in
+    // the dev terminal without raising the global level.
+    match level.as_str() {
+        "error" => tracing::error!(target: "aperio::webview", "{message}"),
+        "warn" => tracing::warn!(target: "aperio::webview", "{message}"),
+        other => tracing::info!(target: "aperio::webview", level = %other, "{message}"),
     }
 }
 

@@ -206,10 +206,15 @@ export interface DialogStateValue {
 export function DialogStateProvider({ children }: { children: ReactNode }) {
   const [stack, setStack] = useState<DialogMode[]>([]);
   const [dataVersion, setDataVersion] = useState(0);
-  const invalidateData = useCallback(
-    () => setDataVersion((v) => v + 1),
-    [],
-  );
+  const invalidateData = useCallback(() => {
+    // TEMP DIAGNOSTIC (debug/frontend-loop): identify who bumps dataVersion.
+    // eslint-disable-next-line no-console
+    console.warn(
+      '[invalidateData] from',
+      (new Error().stack ?? '').split('\n').slice(2, 5).join(' <- '),
+    );
+    setDataVersion((v) => v + 1);
+  }, []);
 
   // One entry per stack frame: the element that was focused
   // immediately before the push. Lives in a ref so the captures stay
@@ -326,6 +331,8 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     // unconditionally so useEvents / useTasks refetch on the next
     // tick. Doing it here keeps every existing call site working
     // without remembering to call invalidateData() itself.
+    // eslint-disable-next-line no-console
+    console.warn('[DialogState.close] bumping dataVersion');
     setDataVersion((v) => v + 1);
     if (!target) return;
     // Restore focus on the next animation frame. queueMicrotask was
