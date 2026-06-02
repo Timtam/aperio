@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { getEvents } from '../api/client';
 import type { CalendarEvent } from '../api/types';
@@ -107,30 +107,7 @@ export function useEvents(range: { start: Date; end: Date }) {
   );
   const [error, setError] = useState<unknown>(null);
 
-  // TEMP DIAGNOSTIC (debug/frontend-loop): log which dependency re-triggered
-  // this fetch, to localise the edit-triggered re-read loop.
-  const prevDepsRef = useRef<{
-    storeLoading: boolean;
-    key: string;
-    dataVersion: number;
-  } | null>(null);
-
   useEffect(() => {
-    const prev = prevDepsRef.current;
-    const changed: string[] = [];
-    if (prev) {
-      if (prev.storeLoading !== storeLoading)
-        changed.push(`storeLoading ${prev.storeLoading}->${storeLoading}`);
-      if (prev.key !== key) changed.push('key');
-      if (prev.dataVersion !== dataVersion)
-        changed.push(`dataVersion ${prev.dataVersion}->${dataVersion}`);
-    }
-    prevDepsRef.current = { storeLoading, key, dataVersion };
-    // eslint-disable-next-line no-console
-    console.warn(
-      `[useEvents] fetch effect ran; changed=[${changed.join(', ') || (prev ? 'none?' : 'initial')}] ids=${key.split('|')[0]}`,
-    );
-
     let cancelled = false;
     setError(null);
 
