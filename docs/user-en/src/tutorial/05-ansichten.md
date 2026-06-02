@@ -33,9 +33,11 @@ to know them and switch between them.
 
 ## The month view
 
-In the month view, every day cell is **the same size**. If a day has more
-events than fit, the titles are truncated (with "…"). When you select an
-event, you always hear the **full** title – the truncation is purely
+In the month view, every day cell is **the same size**, and the grid fills
+the available window height: make the window taller and the cells grow,
+showing **more events per day**. If not all events fit, the titles are
+truncated (with "…") and the rest are summarized in a hint. When you select
+an event, you always hear the **full** title – the truncation is purely
 visual.
 
 > **Screen-reader note:** When you switch views, the new view and the

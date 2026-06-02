@@ -33,10 +33,12 @@ Kapitel lernst du sie kennen und wechselst zwischen ihnen.
 
 ## Die Monatsansicht
 
-In der Monatsansicht ist jede Tageszelle **gleich groß**. Hat ein Tag mehr
-Termine, als hineinpassen, werden die Titel gekürzt (mit „…"). Markierst du
-einen Termin, bekommst du immer den **vollständigen** Titel angesagt – die
-Kürzung ist nur optisch.
+In der Monatsansicht ist jede Tageszelle **gleich groß**, und das Raster
+füllt die verfügbare Fensterhöhe: Vergrößerst du das Fenster, werden die
+Zellen höher und zeigen entsprechend **mehr Termine pro Tag**. Passen nicht
+alle Termine hinein, werden die Titel gekürzt (mit „…") und die übrigen als
+Hinweis zusammengefasst. Markierst du einen Termin, bekommst du immer den
+**vollständigen** Titel angesagt – die Kürzung ist nur optisch.
 
 > **Screenreader-Hinweis:** Beim Ansichtswechsel wird die neue Ansicht und
 > der aktuell fokussierte Zeitpunkt angesagt (z. B. „Monatsansicht, Juni
