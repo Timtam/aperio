@@ -48,11 +48,14 @@
 //! reasonably often on its own without needing to walk every
 //! remote log to count events exactly.
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use chrono::{DateTime, Duration as ChronoDuration, Timelike, Utc};
 use serde::Serialize;
-use sync_core::{DeviceCursor, DeviceId, DeviceRecord, MetaJson, SyncAdapter, SyncResult};
+use sync_core::{
+    DeviceCursor, DeviceId, DeviceRecord, LogFileName, MetaJson, SyncAdapter, SyncResult,
+};
 use tracing::{debug, info, warn};
 
 use crate::db::SharedConn;
@@ -114,6 +117,13 @@ pub struct Compactor {
     /// paths without a writer — compaction then runs as before, just
     /// without the redundant-push optimisation.
     writer: Option<Arc<EventLogWriter>>,
+    /// `<data_dir>/sync/log/pending/` — the local staging dir the
+    /// orchestrator pushes from. After a snapshot is pushed, every file
+    /// here older than the cut is redundant, so the compactor sweeps them
+    /// out; otherwise old leftovers (e.g. from a prior crash) get
+    /// re-uploaded on every push and never disappear. `None` in tests /
+    /// headless paths that don't stage to disk.
+    pending_dir: Option<PathBuf>,
 }
 
 impl Compactor {
@@ -123,6 +133,7 @@ impl Compactor {
         local_device_id: DeviceId,
         app_version: impl Into<String>,
         writer: Option<Arc<EventLogWriter>>,
+        pending_dir: Option<PathBuf>,
     ) -> Self {
         Self {
             db,
@@ -130,6 +141,7 @@ impl Compactor {
             local_device_id,
             app_version: app_version.into(),
             writer,
+            pending_dir,
         }
     }
 
@@ -199,26 +211,26 @@ impl Compactor {
         // `cut` is whole-second because log filenames are second-granular.
         let cut = Utc::now().with_nanosecond(0).unwrap_or_else(Utc::now);
         let snapshot_ts = cut - ChronoDuration::seconds(1);
-        let rotated_old_file = match &self.writer {
-            Some(writer) => writer.rotate(cut).await,
-            None => None,
-        };
+        // Roll the live session file over to a fresh one stamped `cut`, so
+        // the snapshot below captures everything the old file holds and
+        // post-compaction edits land in a file NEWER than the snapshot.
+        if let Some(writer) = &self.writer {
+            let _ = writer.rotate(cut).await;
+        }
 
         // 1. Build + push the snapshot, stamped just before the new file.
         let snapshot = self.builder.build_at(snapshot_ts)?;
         adapter.push_snapshot(&snapshot).await?;
 
-        // The snapshot that covers it is now durable on the remote, so
-        // drop the rotated-away pre-compaction file locally — it must not
-        // be re-uploaded on the next push.
-        if let Some(old) = &rotated_old_file {
-            if let Err(err) = tokio::fs::remove_file(old).await {
-                debug!(
-                    path = %old.display(),
-                    ?err,
-                    "couldn't remove rotated pre-compaction log",
-                );
-            }
+        // The snapshot is now durable on the remote, so every LOCAL pending
+        // file stamped before `cut` is fully covered by it and must not be
+        // re-uploaded on the next push. Sweep ALL of them — not just the
+        // file we just rotated away: old leftovers (e.g. from a prior crash
+        // that left logs in `pending/`) would otherwise be re-pushed on
+        // every round and never disappear. The live post-rotation file is
+        // stamped `cut` itself, so the strict `< cut` check keeps it.
+        if let Some(pending) = &self.pending_dir {
+            sweep_redundant_pending(pending, cut).await;
         }
 
         let mut report = CompactionReport::default();
@@ -367,6 +379,45 @@ impl Compactor {
     }
 }
 
+/// Delete every LOCAL pending log file stamped before `cut`. After a
+/// snapshot has been pushed, those files are fully covered by it, so the
+/// orchestrator must not re-upload them. Leaving them was the bug: the
+/// compactor only ever dropped the single just-rotated file, so older
+/// leftovers (e.g. from a prior crash) were re-pushed on every round and
+/// never disappeared. The live post-rotation session file is stamped
+/// exactly `cut`, so the strict `< cut` comparison keeps it; non-log files
+/// in the dir are left alone.
+async fn sweep_redundant_pending(pending_dir: &Path, cut: DateTime<Utc>) {
+    let mut entries = match tokio::fs::read_dir(pending_dir).await {
+        Ok(rd) => rd,
+        // No staging dir yet → nothing to sweep.
+        Err(_) => return,
+    };
+    loop {
+        let entry = match entries.next_entry().await {
+            Ok(Some(e)) => e,
+            Ok(None) => break,
+            Err(err) => {
+                debug!(?err, "couldn't read pending dir during compaction sweep");
+                break;
+            }
+        };
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        let Ok(parsed) = LogFileName::from_filename(name) else {
+            continue; // not a session log file — leave it untouched
+        };
+        if parsed.timestamp < cut {
+            match tokio::fs::remove_file(&path).await {
+                Ok(()) => debug!(name = name, "swept pending log folded into snapshot"),
+                Err(err) => debug!(name = name, ?err, "couldn't sweep redundant pending log"),
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -461,6 +512,7 @@ mod tests {
             builder,
             DeviceId::from_string("dev-this".into()),
             "1.0.0-test",
+            None,
             None,
         );
         (dir, db, compactor)
@@ -613,6 +665,7 @@ mod tests {
             device.clone(),
             "1.0.0-test",
             Some(Arc::clone(&writer)),
+            Some(pending.clone()),
         );
         let adapter = FakeAdapter::new();
         compactor.compact_now(&adapter).await.unwrap();
@@ -646,6 +699,86 @@ mod tests {
         assert!(
             parsed.timestamp > snap_ts,
             "new session file ({}) must sort after the snapshot ({})",
+            parsed.timestamp,
+            snap_ts,
+        );
+    }
+
+    #[tokio::test]
+    async fn compact_now_sweeps_old_leftover_pending_logs() {
+        // The actual cross-device bug: OLD pending files (e.g. left behind
+        // by a prior crash) are NOT the current session's rotated file, so
+        // the previous single-file cleanup left them — and every push
+        // re-uploaded them forever. Compaction must sweep ALL pending files
+        // the snapshot covers, while keeping the live post-rotation file.
+        let dir = TempDir::new().unwrap();
+        let db = DbHandle::open(dir.path().join("test.sqlite")).unwrap();
+        let local = Arc::new(LocalAdapter::new(db.shared()));
+        let builder = Arc::new(SnapshotBuilder::new(db.shared(), local, "1.0.0-test"));
+        let device = DeviceId::from_string("dev-sweep".into());
+        let pending = dir.path().join("sync").join("log").join("pending");
+        tokio::fs::create_dir_all(&pending).await.unwrap();
+
+        // A non-empty leftover log from a long-gone session.
+        let old_ts: DateTime<Utc> = "2020-01-01T00:00:00Z".parse().unwrap();
+        let leftover = pending.join(LogFileName::new(old_ts, device.clone()).to_filename());
+        tokio::fs::write(&leftover, b"{\"x\":1}\n").await.unwrap();
+
+        // The current session's live file.
+        let session_at = Utc::now() - ChronoDuration::seconds(5);
+        let writer = EventLogWriter::spawn_with_kick(
+            dir.path().to_path_buf(),
+            device.clone(),
+            None,
+            session_at,
+        );
+        writer.append(sync_core::SyncEvent::EventDeleted(sync_core::IdPayload {
+            id: "y".into(),
+        }));
+        tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+
+        let compactor = Compactor::new(
+            db.shared(),
+            builder,
+            device.clone(),
+            "1.0.0-test",
+            Some(Arc::clone(&writer)),
+            Some(pending.clone()),
+        );
+        let adapter = FakeAdapter::new();
+        compactor.compact_now(&adapter).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        // The old leftover (covered by the snapshot) is swept.
+        assert!(
+            !leftover.exists(),
+            "old leftover pending log should be swept by compaction",
+        );
+
+        // Only the live post-compaction file remains, stamped after the
+        // snapshot so a device consuming the snapshot still fetches it.
+        let snap_ts = adapter
+            .snapshot
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .metadata
+            .snapshot_timestamp;
+        let remaining: Vec<_> = std::fs::read_dir(&pending)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .collect();
+        assert_eq!(
+            remaining.len(),
+            1,
+            "only the live post-compaction session file should remain",
+        );
+        let parsed =
+            LogFileName::from_filename(&remaining[0].file_name().to_string_lossy()).unwrap();
+        assert!(
+            parsed.timestamp > snap_ts,
+            "remaining file ({}) must sort after the snapshot ({})",
             parsed.timestamp,
             snap_ts,
         );

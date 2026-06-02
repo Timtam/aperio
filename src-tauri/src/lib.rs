@@ -228,6 +228,11 @@ pub fn run() {
         Arc::clone(&applier_adapter),
         env!("CARGO_PKG_VERSION"),
     ));
+    // `<data_dir>/sync/log/pending/` — the local staging dir the writer
+    // drops session files into and the orchestrator pushes from. Shared
+    // (cloned) by the compactor (which sweeps redundant files after a
+    // snapshot), the orchestrator, and the onboarding service.
+    let pending_dir = data_dir.path.join("sync").join("log").join("pending");
     let compactor = Arc::new(Compactor::new(
         db.shared(),
         Arc::clone(&snapshot_builder),
@@ -237,16 +242,14 @@ pub fn run() {
         // snapshotting so already-snapshotted events aren't re-uploaded
         // and post-compaction edits get a post-snapshot timestamp.
         Some(Arc::clone(&event_log_writer)),
+        // …and sweeps every pending file the snapshot covers, so old
+        // leftovers (e.g. from a prior crash) aren't re-pushed forever.
+        Some(pending_dir.clone()),
     ));
     // Phase Sf: onboarding service. Shared between the orchestrator
     // (which uses it for `meta.json` heartbeats after each round) and
     // the Tauri command layer (which exposes preview/accept/adopt as
     // user-facing commands).
-    // The pending dir is shared between the orchestrator (which
-    // pushes from it) and the onboarding service (which replays
-    // its contents during §19.10 stale-device resume). Build it
-    // once and hand both consumers a clone.
-    let pending_dir = data_dir.path.join("sync").join("log").join("pending");
     // Local custom-sound store. Same convention used by the
     // §19.10 / §19.11.7 sound-asset sync. Lives outside the
     // sync/ subtree because the audio files are user content,
