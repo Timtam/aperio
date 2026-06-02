@@ -413,7 +413,7 @@ pub async fn get_events(
     let snapshot = cache
         .read_events(&account, &request.calendar_id, range)
         .unwrap_or_default();
-    tracing::info!(
+    tracing::debug!(
         target: "aperio::cache",
         calendar_id = %request.calendar_id,
         count = snapshot.len(),

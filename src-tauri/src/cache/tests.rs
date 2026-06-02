@@ -770,6 +770,37 @@ fn change_set_wire_defaults_and_roundtrip() {
 }
 
 #[test]
+fn folder_complete_window_round_trips_and_covers_any_range() {
+    // Regression: the folder-complete "unbounded" snapshot window must
+    // survive the cache's text-timestamp round-trip. `DateTime::MIN_UTC`/
+    // `MAX_UTC` format to non-4-digit years (`-262143-…` / `+262142-…`) that
+    // `parse_from_rfc3339` rejects, so they'd be dropped on read —
+    // `event_window` would return None, `covers` would never hold, and an
+    // external read would spin forever in the cold path (refresh →
+    // cache-updated → re-read → refresh). Representable sentinels (year
+    // 1 … 9999) round-trip and cover every realistic range.
+    let store = setup();
+    let window = crate::commands::cache_swr::unbounded_window();
+    store
+        .replace_calendar_events(ACC, CAL, window, &[])
+        .unwrap();
+
+    let (ws, we) = store
+        .event_window(ACC, CAL)
+        .unwrap()
+        .expect("unbounded window must read back");
+    // Covers a present-day view range …
+    let view = range(8, 18);
+    assert!(ws <= view.start && we >= view.end);
+    // … and a far-future one, proving it is effectively unbounded.
+    let far = DateRange::new(
+        Utc.with_ymd_and_hms(2099, 1, 1, 0, 0, 0).unwrap(),
+        Utc.with_ymd_and_hms(2099, 12, 31, 0, 0, 0).unwrap(),
+    );
+    assert!(ws <= far.start && we >= far.end);
+}
+
+#[test]
 fn refresh_coordinator_dedups_until_released() {
     let coord = RefreshCoordinator::new();
     let key = "events:acc-1:cal-1";

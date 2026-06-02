@@ -5,7 +5,7 @@
 use std::future::Future;
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
+use chrono::{TimeZone, Utc};
 use tauri::{AppHandle, Emitter};
 
 use cal_core::{CalendarFeature, ContactsFeature, DateRange, TasksFeature};
@@ -13,6 +13,28 @@ use cal_core::{CalendarFeature, ContactsFeature, DateRange, TasksFeature};
 use crate::cache::{
     CacheStore, CacheUpdatedPayload, Delta, RefreshCoordinator, SyncScope, SyncState,
 };
+
+/// The "unbounded" snapshot window recorded for folder-complete containers
+/// (their cache holds the WHOLE collection, so any view range is covered).
+///
+/// It must NOT use `DateTime::<Utc>::MIN_UTC`/`MAX_UTC`: those years
+/// (−262143 / +262142) format to non-4-digit RFC 3339 strings
+/// (`-262143-…`, `+262142-…`) that `parse_from_rfc3339` rejects, so the
+/// window would fail to round-trip through the cache's text timestamps —
+/// `get_sync_state` would error, `covers` would never be true, and the read
+/// would fall into the cold path forever (a refresh → `cache-updated` →
+/// re-read → refresh loop). Year 1 … 9999 spans every realistic event and
+/// is valid RFC 3339.
+pub(crate) fn unbounded_window() -> DateRange {
+    DateRange::new(
+        Utc.with_ymd_and_hms(1, 1, 1, 0, 0, 0)
+            .single()
+            .expect("year 1"),
+        Utc.with_ymd_and_hms(9999, 12, 31, 23, 59, 59)
+            .single()
+            .expect("year 9999"),
+    )
+}
 
 /// Freshness window before a cached snapshot triggers a background
 /// refresh. Short enough to keep an open session current, long enough to
@@ -180,7 +202,7 @@ pub async fn refresh_events(
                 // stay bounded to that range or we'd serve empty for the
                 // months we never fetched.
                 let window = if cs.complete {
-                    DateRange::new(DateTime::<Utc>::MIN_UTC, DateTime::<Utc>::MAX_UTC)
+                    unbounded_window()
                 } else {
                     range
                 };
