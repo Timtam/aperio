@@ -37,8 +37,11 @@ jobs:
       - name: Build plugin developer docs
         run: mdbook build docs/plugin-dev --dest-dir ../../_site/plugin-dev
 
-      - name: Build user docs
+      - name: Build user docs (German)
         run: mdbook build docs/user --dest-dir ../../_site/user
+
+      - name: Build user docs (English)
+        run: mdbook build docs/user-en --dest-dir ../../_site/user-en
 
       - name: Copy landing page
         run: cp docs/index.html _site/index.html

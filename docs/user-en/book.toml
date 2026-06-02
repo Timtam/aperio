@@ -1,15 +1,15 @@
 [book]
-title = "Aperio – Benutzerhandbuch"
-language = "de"
+title = "Aperio – User Guide"
+language = "en"
 src = "src"
 authors = ["Aperio Contributors"]
 
 [output.html]
-site-url = "/aperio/user/"
+site-url = "/aperio/user-en/"
 default-theme = "light"
 preferred-dark-theme = "ayu"
 git-repository-url = "https://github.com/Timtam/aperio"
-edit-url-template = "https://github.com/Timtam/aperio/edit/main/docs/user/src/{path}"
+edit-url-template = "https://github.com/Timtam/aperio/edit/main/docs/user-en/src/{path}"
 additional-js = ["theme/lang-switcher.js"]
 
 [output.html.search]
