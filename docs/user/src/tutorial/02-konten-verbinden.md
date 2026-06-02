@@ -34,10 +34,11 @@ Du brauchst kein Konto, um loszulegen. Lokale Kalender und Aufgabenlisten
 liegen nur auf deinem Gerät (und werden – wenn eingerichtet – über deine
 eigene [Synchronisation](08-synchronisation.md) abgeglichen):
 
-1. In der **Seitenleiste** das Kontextmenü öffnen (Anwendungstaste oder
-   Rechtsklick).
-2. **Neuer Kalender** bzw. **Neue Aufgabenliste** wählen.
-3. Einen Namen und optional eine **Farbe** vergeben.
+1. Klicke unten in der **Seitenleiste** auf die passende
+   Anlege-Schaltfläche: **+ Neuer Kalender**, **+ Neue Aufgabenliste** oder
+   **+ Neues Kontaktbuch**.
+2. Gib im Dialog einen **Namen** und optional eine **Farbe** (Farb-Label)
+   ein und bestätige.
 
 > **Farben kommen aus den Farb-Labels:** Die Farbe eines Kalenders oder
 > einer Liste ist an ein Farb-Label gebunden. Färbst du ein Label später
@@ -55,7 +56,9 @@ ein- und ausblenden.
 > (Kalender / Aufgaben / Kontakte) und die einzelnen Listen als Baum
 > angeordnet. Mit den Pfeiltasten nach oben/unten bewegst du dich, mit
 > links/rechts klappst du Ebenen auf und zu. Das Kontextmenü (Umbenennen,
-> Farbe, Mitglieder, Löschen) erreichst du mit der Anwendungstaste.
+> Farbe, Mitglieder, Löschen) erreichst du mit der Anwendungstaste. Die
+> Anlege-Schaltflächen (**+ Neuer Kalender** usw.) liegen unterhalb des
+> Baums und sind mit `Tab` erreichbar.
 
 ## Zusammenfassung
 

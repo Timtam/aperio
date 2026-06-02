@@ -33,10 +33,10 @@ You don't need an account to get started. Local calendars and task lists
 live only on your device (and, if set up, are reconciled through your own
 [synchronization](08-synchronisation.md)):
 
-1. Open the context menu in the **sidebar** (Application key or
-   right-click).
-2. Choose **New calendar** or **New task list**.
-3. Give it a name and, optionally, a **color**.
+1. At the bottom of the **sidebar**, click the matching add button:
+   **+ New calendar**, **+ New task list** or **+ New address book**.
+2. In the dialog, enter a **name** and, optionally, a **color** (color
+   label), then confirm.
 
 > **Colors come from color labels:** The color of a calendar or list is
 > bound to a color label. If you later recolor a label, every calendar bound
@@ -53,7 +53,8 @@ hidden individually.
 > tasks / contacts) and the individual lists form a tree. Move up and down
 > with the arrow keys; expand and collapse levels with left and right. Reach
 > the context menu (Rename, Color, Members, Delete) with the Application
-> key.
+> key. The add buttons (**+ New calendar** etc.) sit below the tree and are
+> reachable with `Tab`.
 
 ## Summary
 
