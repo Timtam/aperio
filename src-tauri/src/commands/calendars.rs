@@ -357,84 +357,59 @@ pub async fn get_events(
         });
     };
 
-    // Stale-while-revalidate: if the snapshot cache already covers this
-    // range, serve it INSTANTLY. A background refresh is queued only when
-    // the snapshot is older than `CACHE_REFRESH_TTL` — the freshness gate
-    // both spares the network on every view render and breaks the
-    // refresh → `cache-updated` → invalidate → re-read → refresh loop.
-    if let Ok(Some(state)) = cache.get_sync_state(&account, SyncScope::Events, &request.calendar_id)
-    {
-        let covers = matches!(
-            (state.window_start, state.window_end),
-            (Some(ws), Some(we)) if ws <= range.start && we >= range.end
-        );
-        if covers {
-            let cached = cache
-                .read_events(&account, &request.calendar_id, range)
-                .unwrap_or_default();
-            let state_opt = Some(state);
-            let stale = cache_swr::is_stale(&state_opt, cache_swr::SWR_TTL_SECS);
-            tracing::info!(
-                target: "aperio::cache",
-                calendar_id = %request.calendar_id,
-                count = cached.len(),
-                stale,
-                "get_events served from cache",
-            );
-            if stale {
-                let ext_bg = Arc::clone(&ext);
-                let cache_bg = Arc::clone(&cache);
-                let acc = account.clone();
-                let cal = request.calendar_id.clone();
-                cache_swr::spawn_item_refresh(
-                    app.clone(),
-                    Arc::clone(&cache),
-                    Arc::clone(&coord),
-                    SyncScope::Events,
-                    account.clone(),
-                    request.calendar_id.clone(),
-                    move || async move {
-                        cache_swr::refresh_events(&cache_bg, ext_bg.as_ref(), &acc, &cal, range)
-                            .await
-                    },
-                );
-            }
-            return Ok(cached);
-        }
-    }
-
-    // Cold path: the requested range isn't fully covered yet (first run,
-    // or a navigation outside the covered window). Do NOT block the first
-    // paint on the network — serve whatever snapshot we have right now
-    // (possibly empty or only partially overlapping) and kick off the
-    // refresh in the background. When it lands, `cache-updated` triggers a
-    // re-read and the view fills in. A slow provider (e.g. a cold iCloud
-    // full sync) therefore no longer freezes startup for 20 s+.
-    let snapshot = cache
+    // Stale-while-revalidate. Read the sync state once, serve whatever the
+    // snapshot holds for `range` immediately (covered or only partially —
+    // `read_events` filters to the range either way, so the first paint
+    // never blocks on the network), and queue a background refresh ONLY when
+    // the snapshot is stale.
+    //
+    // Gating the refresh on staleness rather than on coverage is what keeps
+    // reads from looping. An *uncovered* calendar — e.g. right after an edit
+    // invalidates its window — would otherwise spawn a refresh on EVERY
+    // read, and each refresh's `cache-updated` push triggers another read
+    // (refresh → cache-updated → invalidate → re-read → refresh …, forever).
+    // A just-completed refresh stamps `last_refreshed_at`, so `is_stale` is
+    // false for the TTL and we don't re-spawn. A genuine cold start (no
+    // snapshot → `last_refreshed_at` is None) is stale, so it spawns exactly
+    // once and `cache-updated` then fills the view in.
+    let state = cache
+        .get_sync_state(&account, SyncScope::Events, &request.calendar_id)
+        .ok()
+        .flatten();
+    let covers = matches!(
+        state.as_ref().map(|s| (s.window_start, s.window_end)),
+        Some((Some(ws), Some(we))) if ws <= range.start && we >= range.end
+    );
+    let stale = cache_swr::is_stale(&state, cache_swr::SWR_TTL_SECS);
+    let cached = cache
         .read_events(&account, &request.calendar_id, range)
         .unwrap_or_default();
-    tracing::debug!(
+    tracing::info!(
         target: "aperio::cache",
         calendar_id = %request.calendar_id,
-        count = snapshot.len(),
-        "get_events cold path: serving snapshot, refreshing in background",
+        count = cached.len(),
+        covers,
+        stale,
+        "get_events served from cache",
     );
-    let ext_bg = Arc::clone(&ext);
-    let cache_bg = Arc::clone(&cache);
-    let acc = account.clone();
-    let cal = request.calendar_id.clone();
-    cache_swr::spawn_item_refresh(
-        app.clone(),
-        Arc::clone(&cache),
-        Arc::clone(&coord),
-        SyncScope::Events,
-        account.clone(),
-        request.calendar_id.clone(),
-        move || async move {
-            cache_swr::refresh_events(&cache_bg, ext_bg.as_ref(), &acc, &cal, range).await
-        },
-    );
-    Ok(snapshot)
+    if stale {
+        let ext_bg = Arc::clone(&ext);
+        let cache_bg = Arc::clone(&cache);
+        let acc = account.clone();
+        let cal = request.calendar_id.clone();
+        cache_swr::spawn_item_refresh(
+            app.clone(),
+            Arc::clone(&cache),
+            Arc::clone(&coord),
+            SyncScope::Events,
+            account.clone(),
+            request.calendar_id.clone(),
+            move || async move {
+                cache_swr::refresh_events(&cache_bg, ext_bg.as_ref(), &acc, &cal, range).await
+            },
+        );
+    }
+    Ok(cached)
 }
 
 #[derive(Debug, Deserialize)]
