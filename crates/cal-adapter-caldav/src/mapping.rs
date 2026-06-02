@@ -402,7 +402,14 @@ pub fn event_to_ical(event: &Event) -> String {
         sound: event.sound.clone(),
         attendees: event.attendees.clone(),
     };
-    new_event_to_ical(&event.id, &new)
+    // The iCalendar `UID` must be the bare provider UID — NOT our composite
+    // `{href}|{uid}` row id. Writing the composite changes the event's UID
+    // on the server: for an event whose resource name differs from its UID
+    // (e.g. anything created on an iPhone), iCloud then treats the PUT as a
+    // *different* event and spawns a duplicate. `decode_event_id` yields the
+    // bare uid for both composite and legacy bare ids.
+    let (_, uid) = decode_event_id(&event.id);
+    new_event_to_ical(uid, &new)
 }
 
 fn apply_common(ical_ev: &mut icalendar::Event, uid: &str, event: &NewEvent) {
@@ -513,6 +520,44 @@ END:VCALENDAR\r
         );
         assert_eq!(ev.end, Utc.with_ymd_and_hms(2026, 5, 20, 8, 30, 0).unwrap());
         assert!(!ev.all_day);
+    }
+
+    #[test]
+    fn event_to_ical_writes_bare_uid_not_the_composite_row_id() {
+        // A synced iCloud event whose resource href differs from its UID
+        // (the normal case for anything created on an iPhone): the row id is
+        // the composite `{href}|{uid}`. The update PUT body's UID must be the
+        // BARE uid — writing the composite changes the event's UID on the
+        // server, and iCloud then treats the PUT as a different event and
+        // spawns a duplicate.
+        let body = "BEGIN:VCALENDAR\r
+VERSION:2.0\r
+PRODID:-//test//EN\r
+BEGIN:VEVENT\r
+UID:REAL-UID-9876\r
+SUMMARY:Lunch\r
+DTSTART:20260520T080000Z\r
+DTEND:20260520T083000Z\r
+END:VEVENT\r
+END:VCALENDAR\r
+";
+        let href = "/calendars/home/ABCDEF12-3456.ics";
+        let events =
+            parse_calendar_data_with_href(body, "https://example.test/calendars/home/", Some(href))
+                .unwrap();
+        let ev = &events[0];
+        // Precondition: the row id is the composite, not the bare uid.
+        assert_eq!(ev.id, format!("{href}|REAL-UID-9876"));
+
+        let ical = event_to_ical(ev);
+        assert!(
+            ical.contains("UID:REAL-UID-9876"),
+            "expected the bare UID in the PUT body, got:\n{ical}"
+        );
+        assert!(
+            !ical.contains(&format!("UID:{href}")),
+            "the composite row id leaked into the iCalendar UID:\n{ical}"
+        );
     }
 
     #[test]
