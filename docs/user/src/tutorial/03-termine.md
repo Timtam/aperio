@@ -1,0 +1,61 @@
+# 03 – Termine
+
+In diesem Kapitel legst du Termine an, bearbeitest und verschiebst sie und
+richtest Wiederholungen ein.
+
+## Einen Termin anlegen
+
+1. Wechsle in eine Kalenderansicht (z. B. **Woche**, siehe
+   [Kapitel 05](05-ansichten.md)).
+2. Navigiere mit den Pfeiltasten zum gewünschten Tag bzw. zur Uhrzeit.
+3. Lege mit dem Befehl **Neuer Termin** ein Ereignis an (Standard:
+   `Strg+N`, oder über das Kontextmenü). Der gerade markierte Zeitpunkt
+   wird als Startzeit vorgeschlagen.
+4. Im Dialog gibst du mindestens einen **Titel** ein.
+
+Im Termin-Dialog kannst du außerdem festlegen:
+
+- **Beginn und Ende** (oder **Ganztägig**),
+- **Kalender**, in dem der Termin gespeichert wird,
+- **Ort** und **Beschreibung**,
+- **Farb-Label** (mit Farbpunkt in der Auswahl),
+- **Erinnerung** (siehe [Kapitel 06](06-benachrichtigungen.md)),
+- **Wiederholung** (siehe unten).
+
+Mit **Speichern** wird der Termin angelegt; eine Live-Region bestätigt
+„Termin gespeichert".
+
+## Termine bearbeiten, verschieben, löschen
+
+- **Bearbeiten:** Termin markieren und mit `Eingabe` (oder über das
+  Kontextmenü **Bearbeiten**) öffnen.
+- **Verschieben:** Im Dialog die Zeiten ändern – das funktioniert
+  zuverlässig und screenreader-freundlich. Per Maus kannst du Termine auch
+  ziehen.
+- **Löschen:** Termin markieren und **Löschen** wählen (Standard: `Entf`).
+  Vor dem Löschen wird nachgefragt.
+
+## Wiederkehrende Termine
+
+Im Termin-Dialog unter **Wiederholung** wählst du ein Muster:
+
+- täglich, wöchentlich (mit Wochentagen), monatlich, jährlich,
+- ein **Ende** (nie, nach X Malen, bis zu einem Datum).
+
+Beim Bearbeiten oder Löschen eines wiederkehrenden Termins fragt Aperio, ob
+sich die Änderung auf **nur diesen Termin**, **diesen und alle folgenden**
+oder **alle** beziehen soll.
+
+> **Tipp:** Wiederkehrende Termine aus externen Kalendern (z. B. iCloud)
+> werden in allen Ansichten korrekt aufgeklappt – auch dann, wenn die erste
+> Wiederholung in der Vergangenheit liegt.
+
+> **Screenreader-Hinweis:** Beim Anlegen springt der Fokus in das
+> Titelfeld des Dialogs. Mit `Tab`/`Umschalt+Tab` gehst du die Felder
+> durch; `Esc` bricht ab, ohne zu speichern. In der Ansicht werden Termine
+> beim Markieren mit Titel, Uhrzeit und Kalender angesagt.
+
+## Zusammenfassung
+
+Du kannst Termine anlegen, bearbeiten, verschieben, löschen und wiederholen
+lassen. Als Nächstes kümmern wir uns um Aufgaben.

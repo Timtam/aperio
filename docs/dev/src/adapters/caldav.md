@@ -1,0 +1,49 @@
+# CalDAV / iCloud
+
+**Crate:** `cal-adapter-caldav` · **Capabilities:** calendars, tasks, contacts
+
+CalDAV/CardDAV is the open standard behind Apple iCloud and many
+self-hosted servers (Nextcloud, Radicale, …). One adapter serves them all;
+iCloud is just CalDAV with Apple's endpoints.
+
+## Protocol
+
+- **Discovery + listing:** `PROPFIND` to enumerate collections (calendars,
+  task lists via `VTODO`, address books) and their properties
+  (`displayname`, `calendar-color`, `getctag`, `sync-token`).
+- **Incremental sync:** `REPORT` with `sync-collection` returns the
+  resources changed since a `sync-token`, plus per-resource deletions. An
+  invalid token triggers a full re-bootstrap.
+- **Bootstrap / bulk read:** a depth-1 `PROPFIND` lists every resource href,
+  then `calendar-multiget` / `addressbook-multiget` fetches their bodies in
+  **chunks** (so a large iCloud calendar doesn't time out on one giant
+  request).
+- **Bodies** are iCalendar (`VEVENT`/`VTODO`) and vCard, parsed in
+  `mapping.rs` into `cal-core` types. `RRULE`/`EXDATE` are carried through;
+  occurrences are expanded on the frontend.
+
+## Authentication
+
+HTTP Basic over TLS with a username + password (for iCloud, an
+**app-specific password**, not the Apple ID password). There is no OAuth.
+The server base URL is user-supplied for self-hosted servers; iCloud uses
+Apple's well-known endpoints.
+
+## Quirks
+
+- **Stable ids.** A resource is keyed by `{href}|{uid}` so renames/moves
+  and per-resource deletions resolve correctly.
+- **Keep recurring masters.** The windowed read keeps any event with a
+  recurrence even when its first occurrence is outside the window
+  (`event_in_window` returns true for `recurrence.is_some()`).
+- **iCloud date sentinels / colours.** Colours arrive as `#RRGGBBAA`; the
+  alpha is dropped to a plain hex.
+- **`getctag` fast-path.** When the collection's ctag is unchanged, the
+  adapter can skip a full enumeration.
+
+## Testing
+
+`mockito` serves canned `PROPFIND`/`REPORT`/multiget XML. Tests assert the
+sync-collection token round-trip, per-resource deletions, the
+`{href}|{uid}` id scheme, and the iCalendar → `cal-core` mapping. For a
+live smoke test, an iCloud account with an app-specific password works.

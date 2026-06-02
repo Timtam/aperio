@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Aperio – Dokumentation</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+      body {
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        line-height: 1.6;
+        max-width: 48rem;
+        margin: 0 auto;
+        padding: 2rem 1.25rem;
+      }
+      h1 {
+        margin-bottom: 0.25rem;
+      }
+      .lead {
+        color: #555;
+        margin-top: 0;
+      }
+      nav ul {
+        list-style: none;
+        padding: 0;
+      }
+      nav li {
+        margin: 0.75rem 0;
+        padding: 1rem 1.25rem;
+        border: 1px solid #ccc;
+        border-radius: 8px;
+      }
+      nav a {
+        font-weight: 600;
+        font-size: 1.1rem;
+      }
+      .desc {
+        display: block;
+        color: #555;
+        font-weight: 400;
+      }
+      footer {
+        margin-top: 2.5rem;
+        color: #777;
+        font-size: 0.9rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Aperio – Dokumentation</h1>
+    <p class="lead">
+      Ein barrierefreier Kalender und Aufgabenplaner. Wähle den passenden
+      Dokumentationsbereich.
+    </p>
+    <nav aria-label="Dokumentationsbereiche">
+      <ul>
+        <li>
+          <a href="user/">Benutzerhandbuch</a>
+          <span class="desc"
+            >Erste Schritte, Schritt-für-Schritt-Tutorial, Tastaturkürzel
+            und Barrierefreiheit (Deutsch).</span
+          >
+        </li>
+        <li>
+          <a href="dev/">Entwickler-Dokumentation</a>
+          <span class="desc"
+            >Architektur, Beiträge, Teststrategie und Adapter-Details
+            (English).</span
+          >
+        </li>
+        <li>
+          <a href="plugin-dev/">Plugin-Entwicklung</a>
+          <span class="desc"
+            >Eigene Plugins erstellen: ABI, Rust-SDK, Manifest und Beispiele
+            (English).</span
+          >
+        </li>
+      </ul>
+    </nav>
+    <footer>
+      <a href="https://github.com/Timtam/aperio">Aperio auf GitHub</a>
+    </footer>
+  </body>
+</html>

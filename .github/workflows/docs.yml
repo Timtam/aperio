@@ -1,0 +1,60 @@
+name: Deploy documentation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch: # allow manual runs
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only one Pages deploy at a time; cancel superseded in-progress runs.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install mdBook
+        uses: peaceiris/actions-mdbook@v2
+        with:
+          mdbook-version: 'latest'
+
+      # `--dest-dir` is relative to the book directory, so ../../ is the
+      # repo root; each book lands in its own subfolder of _site.
+      - name: Build developer docs
+        run: mdbook build docs/dev --dest-dir ../../_site/dev
+
+      - name: Build plugin developer docs
+        run: mdbook build docs/plugin-dev --dest-dir ../../_site/plugin-dev
+
+      - name: Build user docs
+        run: mdbook build docs/user --dest-dir ../../_site/user
+
+      - name: Copy landing page
+        run: cp docs/index.html _site/index.html
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site/
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

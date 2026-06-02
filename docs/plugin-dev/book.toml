@@ -1,0 +1,16 @@
+[book]
+title = "Aperio – Plugin Developer Documentation"
+language = "en"
+src = "src"
+authors = ["Aperio Contributors"]
+
+[output.html]
+site-url = "/aperio/plugin-dev/"
+default-theme = "light"
+preferred-dark-theme = "ayu"
+git-repository-url = "https://github.com/Timtam/aperio"
+edit-url-template = "https://github.com/Timtam/aperio/edit/main/docs/plugin-dev/src/{path}"
+
+[output.html.search]
+enable = true
+limit-results = 20
