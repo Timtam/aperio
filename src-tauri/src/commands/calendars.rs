@@ -403,47 +403,38 @@ pub async fn get_events(
         }
     }
 
-    // Cold path: the requested range isn't cached yet (first run, or a
-    // navigation outside the covered window). Refresh synchronously
-    // (delta-or-full), then serve from the cache. On a network failure
-    // fall back to whatever stale snapshot we have so an offline start
-    // still shows something.
-    match cache_swr::refresh_events(&cache, ext.as_ref(), &account, &request.calendar_id, range)
-        .await
-    {
-        Ok(()) => Ok(cache
-            .read_events(&account, &request.calendar_id, range)
-            .unwrap_or_default()),
-        Err(err) => {
-            let _ = cache.mark_error(
-                &account,
-                SyncScope::Events,
-                &request.calendar_id,
-                &err.to_string(),
-            );
-            let stale = cache
-                .read_events(&account, &request.calendar_id, range)
-                .unwrap_or_default();
-            if stale.is_empty() {
-                tracing::warn!(
-                    target: "aperio::commands",
-                    calendar_id = %request.calendar_id,
-                    ?err,
-                    "get_events failed at adapter, no cache fallback",
-                );
-                Err(err.into())
-            } else {
-                tracing::warn!(
-                    target: "aperio::commands",
-                    calendar_id = %request.calendar_id,
-                    count = stale.len(),
-                    ?err,
-                    "get_events failed at adapter, serving stale cache",
-                );
-                Ok(stale)
-            }
-        }
-    }
+    // Cold path: the requested range isn't fully covered yet (first run,
+    // or a navigation outside the covered window). Do NOT block the first
+    // paint on the network — serve whatever snapshot we have right now
+    // (possibly empty or only partially overlapping) and kick off the
+    // refresh in the background. When it lands, `cache-updated` triggers a
+    // re-read and the view fills in. A slow provider (e.g. a cold iCloud
+    // full sync) therefore no longer freezes startup for 20 s+.
+    let snapshot = cache
+        .read_events(&account, &request.calendar_id, range)
+        .unwrap_or_default();
+    tracing::info!(
+        target: "aperio::cache",
+        calendar_id = %request.calendar_id,
+        count = snapshot.len(),
+        "get_events cold path: serving snapshot, refreshing in background",
+    );
+    let ext_bg = Arc::clone(&ext);
+    let cache_bg = Arc::clone(&cache);
+    let acc = account.clone();
+    let cal = request.calendar_id.clone();
+    cache_swr::spawn_item_refresh(
+        app.clone(),
+        Arc::clone(&cache),
+        Arc::clone(&coord),
+        SyncScope::Events,
+        account.clone(),
+        request.calendar_id.clone(),
+        move || async move {
+            cache_swr::refresh_events(&cache_bg, ext_bg.as_ref(), &acc, &cal, range).await
+        },
+    );
+    Ok(snapshot)
 }
 
 #[derive(Debug, Deserialize)]

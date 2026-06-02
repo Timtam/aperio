@@ -31,11 +31,21 @@ when caching:
   (Google `syncToken`, Graph `delta`, CalDAV `sync-collection`, EWS
   `SyncFolderItems`). A `410 Gone`/invalid token means "do a full resync".
 - **Folder-complete** snapshots return the *entire* set (EWS events after
-  the folder-sync rework, iCal feeds). These set `ChangeSet.complete =
-  true` so the host stores an unbounded cache window.
+  the folder-sync rework, CalDAV/iCloud events via PROPFIND-enumeration +
+  `sync-collection`, iCal feeds). These set `ChangeSet.complete = true` so
+  the host stores an unbounded cache window and serves every later view
+  range straight from the snapshot.
 - **Range-scoped** reads return only what overlaps a time window
-  (CalDAV/Google/Graph event reads). The host keeps a bounded cache window
+  (Google/Graph event reads, plus the legacy CalDAV ctag fallback for
+  servers without `sync-collection`). The host keeps a bounded cache window
   for these and re-fetches when the view moves outside it.
+
+> **Reads never block the first paint.** `get_events`/`get_tasks`/
+> `get_contacts` serve whatever snapshot exists *right now* and run the
+> refresh in the background (stale-while-revalidate). When it lands the host
+> emits `cache-updated` and the view re-reads. A slow cold sync — e.g. a
+> first iCloud full fetch — therefore fills in progressively instead of
+> freezing startup for 20 s+.
 
 > **Recurring events.** Most adapters return the recurring **master** with
 > its `RRULE`; the frontend expands occurrences for the visible range via

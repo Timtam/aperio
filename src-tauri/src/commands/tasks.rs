@@ -532,20 +532,25 @@ pub async fn get_tasks(
         return Ok(cached);
     }
 
-    // Cold path: no snapshot yet. Refresh (delta-or-full) synchronously,
-    // then serve from cache; fall back to any stale rows on failure.
-    match cache_swr::refresh_tasks(&cache, ext.as_ref(), &account, &list_id).await {
-        Ok(()) => Ok(cache.read_tasks(&account, &list_id).unwrap_or_default()),
-        Err(err) => {
-            let _ = cache.mark_error(&account, SyncScope::Tasks, &list_id, &err.to_string());
-            let stale = cache.read_tasks(&account, &list_id).unwrap_or_default();
-            if stale.is_empty() {
-                Err(err.into())
-            } else {
-                Ok(stale)
-            }
-        }
-    }
+    // Cold path: no snapshot yet. Don't block the first paint on the
+    // network — serve whatever rows exist now (usually none on a genuine
+    // cold start) and refresh in the background; `cache-updated` fills the
+    // list in when the fetch lands.
+    let snapshot = cache.read_tasks(&account, &list_id).unwrap_or_default();
+    let ext_bg = Arc::clone(&ext);
+    let cache_bg = Arc::clone(&cache);
+    let acc = account.clone();
+    let list = list_id.clone();
+    cache_swr::spawn_item_refresh(
+        app.clone(),
+        Arc::clone(&cache),
+        Arc::clone(&coord),
+        SyncScope::Tasks,
+        account.clone(),
+        list_id.clone(),
+        move || async move { cache_swr::refresh_tasks(&cache_bg, ext_bg.as_ref(), &acc, &list).await },
+    );
+    Ok(snapshot)
 }
 
 /// List the sections (Vikunja buckets / Todoist sections) of one

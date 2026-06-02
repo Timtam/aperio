@@ -248,8 +248,13 @@ impl CaldavAdapter {
     ) -> CoreResult<ChangeSet<Event>> {
         match sync::list_resource_hrefs(&self.http, cal_url, &self.credentials).await {
             Ok(hrefs) => {
+                // Folder-complete: the PROPFIND enumerated EVERY resource,
+                // so multiget the whole collection (unbounded range) and
+                // mark the set complete. The host then caches an unbounded
+                // window and serves any later range from the snapshot
+                // instead of forcing a fresh cold sync per view.
                 let changes = self
-                    .multiget_events_windowed(cal_url, &hrefs, range)
+                    .multiget_events_windowed(cal_url, &hrefs, whole_collection_range())
                     .await?;
                 let new_token = self.bootstrap_token(cal_url).await;
                 Ok(ChangeSet {
@@ -257,7 +262,7 @@ impl CaldavAdapter {
                     deletions: Vec::new(),
                     new_token,
                     full_resync: true,
-                    complete: false,
+                    complete: true,
                 })
             }
             Err(_) => {
@@ -605,15 +610,19 @@ impl CaldavAdapter {
             .clone()
             .unwrap_or_else(|| sync_token.to_string());
 
+        // Folder-complete: the snapshot already holds the whole collection
+        // (the bootstrap cached it unbounded), so fold the changed
+        // resources in at any date — no view-window filter — and keep the
+        // set marked complete.
         let changes = self
-            .multiget_events_windowed(cal_url, &result.changed, range)
+            .multiget_events_windowed(cal_url, &result.changed, whole_collection_range())
             .await?;
         Ok(ChangeSet {
             changes,
             deletions: result.deleted,
             new_token: Some(format!("sync:{next_token}")),
             full_resync: false,
-            complete: false,
+            complete: true,
         })
     }
 
@@ -691,6 +700,21 @@ fn to_core_error(err: CaldavError) -> CoreError {
 /// though `sync-collection` reports across the whole collection.
 fn event_in_window(ev: &Event, range: DateRange) -> bool {
     ev.recurrence.is_some() || (ev.end >= range.start && ev.start < range.end)
+}
+
+/// The unbounded range used by the folder-complete event sync. A CalDAV
+/// calendar reached via PROPFIND-enumeration + RFC 6578 sync-collection is
+/// cached in its entirety (every resource, any date), so the multiget must
+/// keep events of all dates instead of filtering to a view window. Passing
+/// this range makes [`event_in_window`] accept everything; the change set
+/// is then marked `complete: true` and the host records an unbounded
+/// snapshot window, so every later view range is served straight from the
+/// cache (no per-range cold re-sync).
+fn whole_collection_range() -> DateRange {
+    DateRange::new(
+        chrono::DateTime::<chrono::Utc>::MIN_UTC,
+        chrono::DateTime::<chrono::Utc>::MAX_UTC,
+    )
 }
 
 #[async_trait]
@@ -1627,6 +1651,10 @@ END:VCALENDAR</c:calendar-data>
             .await
             .unwrap();
         assert!(first.full_resync);
+        // Folder-complete: the PROPFIND enumerated the whole collection, so
+        // the change set covers any date and the host caches an unbounded
+        // window (no per-range cold re-sync on later views).
+        assert!(first.complete);
         assert_eq!(first.changes.len(), 1);
         assert_eq!(first.new_token.as_deref(), Some("sync:ST1"));
         no_query.assert_async().await;
@@ -1669,6 +1697,10 @@ END:VCALENDAR</c:calendar-data>
             .await
             .unwrap();
         assert!(!cs.full_resync);
+        // Incremental deltas stay folder-complete: the snapshot already
+        // holds the whole collection, so changed resources fold in at any
+        // date and the window stays unbounded.
+        assert!(cs.complete);
         assert_eq!(cs.changes.len(), 1);
         assert_eq!(cs.new_token.as_deref(), Some("sync:ST2"));
     }

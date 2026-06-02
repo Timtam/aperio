@@ -197,20 +197,26 @@ pub async fn get_contacts(
         return Ok(cached);
     }
 
-    // Cold path: refresh (delta-or-full), then serve from cache; fall
-    // back to any stale rows on failure.
-    match cache_swr::refresh_contacts(&cache, ext.as_ref(), &account, &list_id).await {
-        Ok(()) => Ok(cache.read_contacts(&account, &list_id).unwrap_or_default()),
-        Err(err) => {
-            let _ = cache.mark_error(&account, SyncScope::Contacts, &list_id, &err.to_string());
-            let stale = cache.read_contacts(&account, &list_id).unwrap_or_default();
-            if stale.is_empty() {
-                Err(err.into())
-            } else {
-                Ok(stale)
-            }
-        }
-    }
+    // Cold path: no snapshot yet. Don't block the first paint on the
+    // network — serve whatever rows exist now and refresh in the
+    // background; `cache-updated` fills the list in when the fetch lands.
+    let snapshot = cache.read_contacts(&account, &list_id).unwrap_or_default();
+    let ext_bg = Arc::clone(&ext);
+    let cache_bg = Arc::clone(&cache);
+    let acc = account.clone();
+    let list = list_id.clone();
+    cache_swr::spawn_item_refresh(
+        app.clone(),
+        Arc::clone(&cache),
+        Arc::clone(&coord),
+        SyncScope::Contacts,
+        account.clone(),
+        list_id.clone(),
+        move || async move {
+            cache_swr::refresh_contacts(&cache_bg, ext_bg.as_ref(), &acc, &list).await
+        },
+    );
+    Ok(snapshot)
 }
 
 /// Cross-account contacts search. Local hits land first, external

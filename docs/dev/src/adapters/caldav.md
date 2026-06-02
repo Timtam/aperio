@@ -18,6 +18,12 @@ iCloud is just CalDAV with Apple's endpoints.
   then `calendar-multiget` / `addressbook-multiget` fetches their bodies in
   **chunks** (so a large iCloud calendar doesn't time out on one giant
   request).
+- **Folder-complete caching:** because the bootstrap already enumerated the
+  whole collection, the event sync multigets **all** dates (not just the
+  view window) and marks the change set `complete`, so the host caches an
+  unbounded window. Later views are served from cache and only a background
+  `sync-collection` delta touches the network. Servers without
+  `sync-collection` fall back to a windowed, range-scoped read.
 - **Bodies** are iCalendar (`VEVENT`/`VTODO`) and vCard, parsed in
   `mapping.rs` into `cal-core` types. `RRULE`/`EXDATE` are carried through;
   occurrences are expanded on the frontend.
@@ -33,8 +39,9 @@ Apple's well-known endpoints.
 
 - **Stable ids.** A resource is keyed by `{href}|{uid}` so renames/moves
   and per-resource deletions resolve correctly.
-- **Keep recurring masters.** The windowed read keeps any event with a
-  recurrence even when its first occurrence is outside the window
+- **Keep recurring masters.** The folder-complete sync keeps every event
+  regardless of date; the legacy windowed fallback still keeps any event
+  with a recurrence even when its first occurrence is outside the window
   (`event_in_window` returns true for `recurrence.is_some()`).
 - **iCloud date sentinels / colours.** Colours arrive as `#RRGGBBAA`; the
   alpha is dropped to a plain hex.
