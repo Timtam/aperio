@@ -210,6 +210,22 @@ button {
   min-width: 0;
 }
 
+/*
+ * The active-view wrapper has to forward `.app-main`'s height down to the
+ * view inside it. Every `.view` is `flex: 1; min-height: 0` and expects a
+ * bounded flex parent; without this rule the wrapper is a plain block that
+ * sizes to its content, so the view can't fill the window (the month grid
+ * left ~1/3 of the area empty) and `min-height: 0` on inner rows collapsed
+ * them. Making the wrapper a bounded flex column closes that gap for all
+ * views.
+ */
+.app-active-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
 /* ── Title bar ──────────────────────────────────────────────────────────── */
 
 .title-bar {
@@ -2516,6 +2532,7 @@ button[aria-disabled='true'] {
   display: flex;
   flex-direction: column;
   flex: 1;
+  min-height: 0;
   margin-top: var(--space-3);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
@@ -2546,6 +2563,11 @@ button[aria-disabled='true'] {
 .month-grid__row {
   border-bottom: 1px solid var(--color-border);
   flex: 1;
+  /* Share the grid's height equally; `min-height: 0` lets a row shrink
+     below its content so cells stay uniform and clip overflow instead of
+     stretching the grid. Safe now that the parent chain is height-bounded
+     (see `.app-active-view`). */
+  min-height: 0;
 }
 
 .month-grid__row:last-child {
@@ -2558,7 +2580,17 @@ button[aria-disabled='true'] {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  min-height: 60px;
+  /* Cells stretch to their row's height (the rows share the grid's height
+     equally), so every day cell is the SAME size and the grid fills the
+     window — no wasted band at the bottom, and it re-flows on resize.
+     `min-height: 0` + `overflow: hidden` keeps a busy day from stretching
+     the grid; events past what fits are clipped (per-event titles also
+     ellipsize via `.month-event`). The number of events shown adapts to
+     the cell height in MonthView. Screen readers still reach every event —
+     overflow events stay in the DOM (`.month-event--overflow`) with their
+     full aria-label, just clipped from view. */
+  min-height: 0;
+  overflow: hidden;
   font-size: var(--font-size-xs);
 }
 

@@ -303,6 +303,35 @@ export function MonthView() {
   const rowCount = cells.length / 7;
   const gridRef = useAutoFocus<HTMLDivElement>(!loading);
 
+  // How many event chips fit in a day cell depends on the cell height,
+  // which depends on the window height (the grid fills the available
+  // space). Measure a row after layout and recompute on resize so a taller
+  // window shows more events instead of empty space — and a shorter one
+  // collapses gracefully to a "+N" hint. Overflow events stay in the DOM
+  // either way (see the render note); this only changes how many are
+  // visible.
+  const [visiblePerCell, setVisiblePerCell] = useState(3);
+  useEffect(() => {
+    const grid = gridRef.current;
+    if (!grid || typeof ResizeObserver === 'undefined') return;
+    const recompute = () => {
+      const row = grid.querySelector('.month-grid__row');
+      const rowH = row?.getBoundingClientRect().height ?? 0;
+      if (rowH <= 0) return;
+      // Rough cell budget for the xs font: date line + cell padding, then
+      // one chip per event. Being off by a chip is harmless — the cell
+      // clips overflow, and an extra event just becomes "+N more".
+      const CELL_OVERHEAD = 28;
+      const CHIP = 21;
+      const fit = Math.max(1, Math.floor((rowH - CELL_OVERHEAD) / CHIP));
+      setVisiblePerCell((prev) => (prev === fit ? prev : fit));
+    };
+    recompute();
+    const ro = new ResizeObserver(recompute);
+    ro.observe(grid);
+    return () => ro.disconnect();
+  }, [gridRef, rowCount]);
+
   return (
     <section className="view view--month" aria-label={t('views.month.title')}>
       <header className="view__header">
@@ -431,6 +460,14 @@ export function MonthView() {
                 const dayEvents = eventsByDay.get(keyOf(day)) ?? [];
                 const focused = flatIndex === focusIndex;
                 const outside = !isSameMonth(day, anchor);
+                // When there are more events than fit, reserve the last
+                // visible slot for the "+N more" hint so the cell never
+                // overflows its row.
+                const visibleLimit =
+                  dayEvents.length > visiblePerCell
+                    ? Math.max(0, visiblePerCell - 1)
+                    : visiblePerCell;
+                const moreCount = dayEvents.length - visibleLimit;
                 return (
                   <div
                     key={day.toISOString()}
@@ -490,7 +527,7 @@ export function MonthView() {
                             total: span.totalDays,
                           })
                         : ariaBase;
-                      const hidden = evIdx >= 3;
+                      const hidden = evIdx >= visibleLimit;
                       return (
                         <span
                           key={ev.id}
@@ -530,13 +567,13 @@ export function MonthView() {
                         </span>
                       );
                     })}
-                    {dayEvents.length > 3 && (
+                    {moreCount > 0 && (
                       <span
                         className="month-event month-event--more"
                         aria-hidden="true"
                       >
                         {t('views.month.moreEvents', {
-                          count: dayEvents.length - 3,
+                          count: moreCount,
                         })}
                       </span>
                     )}
