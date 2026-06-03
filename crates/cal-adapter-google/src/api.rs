@@ -11,9 +11,10 @@
 
 use std::sync::Arc;
 
-use cal_core::{Calendar, Event, NewEvent};
+use cal_core::{Calendar, DateRange, Event, FreeBusy, FreeBusySlot, NewEvent};
+use chrono::{DateTime, Utc};
 use serde::de::DeserializeOwned;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tracing::warn;
 use url::Url;
@@ -587,6 +588,72 @@ fn send_updates_param(notify: bool) -> &'static str {
     }
 }
 
+/// `POST /freeBusy` — attendee availability. Returns one [`FreeBusy`] per
+/// requested email the API answered for; an email Google can't see (no
+/// permission / unknown) is simply omitted (the host reads that as
+/// "couldn't determine").
+pub async fn query_free_busy(
+    state: &ApiState,
+    emails: &[&str],
+    range: DateRange,
+) -> GoogleResult<Vec<FreeBusy>> {
+    let body = FreeBusyQuery {
+        time_min: range.start.to_rfc3339(),
+        time_max: range.end.to_rfc3339(),
+        items: emails.iter().map(|e| FreeBusyItem { id: e }).collect(),
+    };
+    let resp: FreeBusyResponse = state.post_json("/freeBusy", &body).await?;
+    Ok(emails
+        .iter()
+        .filter_map(|email| {
+            let cal = resp.calendars.get(*email)?;
+            Some(FreeBusy {
+                email: (*email).to_string(),
+                slots: cal
+                    .busy
+                    .iter()
+                    .map(|b| FreeBusySlot {
+                        start: b.start,
+                        end: b.end,
+                    })
+                    .collect(),
+            })
+        })
+        .collect())
+}
+
+#[derive(Serialize)]
+struct FreeBusyQuery<'a> {
+    #[serde(rename = "timeMin")]
+    time_min: String,
+    #[serde(rename = "timeMax")]
+    time_max: String,
+    items: Vec<FreeBusyItem<'a>>,
+}
+
+#[derive(Serialize)]
+struct FreeBusyItem<'a> {
+    id: &'a str,
+}
+
+#[derive(Deserialize)]
+struct FreeBusyResponse {
+    #[serde(default)]
+    calendars: std::collections::HashMap<String, FreeBusyCalendar>,
+}
+
+#[derive(Deserialize)]
+struct FreeBusyCalendar {
+    #[serde(default)]
+    busy: Vec<BusyPeriod>,
+}
+
+#[derive(Deserialize)]
+struct BusyPeriod {
+    start: DateTime<Utc>,
+    end: DateTime<Utc>,
+}
+
 /// Fetch the recurring master, append `occurrence` to its EXDATE
 /// list, PATCH back. Used for Aperio's "delete only this
 /// occurrence" flow on a recurring series.
@@ -929,6 +996,49 @@ mod tests {
         delete_event(&state, "primary", "abc123", false)
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn query_free_busy_parses_busy_blocks() {
+        let mut server = mockito::Server::new_async().await;
+        let m = server
+            .mock("POST", "/freeBusy")
+            .match_body(mockito::Matcher::Regex(
+                r#""id":"alice@example.com""#.into(),
+            ))
+            .with_status(200)
+            .with_body(
+                r##"{ "calendars": {
+                    "alice@example.com": { "busy": [
+                      { "start": "2026-05-25T10:00:00Z", "end": "2026-05-25T11:00:00Z" }
+                    ] },
+                    "bob@example.com": { "busy": [] }
+                } }"##,
+            )
+            .create_async()
+            .await;
+        let state = fixture_state(&server.url());
+        let range = DateRange::new(
+            chrono::Utc.with_ymd_and_hms(2026, 5, 25, 9, 0, 0).unwrap(),
+            chrono::Utc.with_ymd_and_hms(2026, 5, 25, 17, 0, 0).unwrap(),
+        );
+        let fb = query_free_busy(&state, &["alice@example.com", "bob@example.com"], range)
+            .await
+            .unwrap();
+        m.assert_async().await;
+        assert_eq!(fb.len(), 2);
+        let alice = fb.iter().find(|f| f.email == "alice@example.com").unwrap();
+        assert_eq!(alice.slots.len(), 1);
+        assert_eq!(
+            alice.slots[0].start.to_rfc3339(),
+            "2026-05-25T10:00:00+00:00"
+        );
+        assert!(fb
+            .iter()
+            .find(|f| f.email == "bob@example.com")
+            .unwrap()
+            .slots
+            .is_empty());
     }
 
     #[tokio::test]
