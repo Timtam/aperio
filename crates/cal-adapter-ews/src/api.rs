@@ -458,10 +458,6 @@ async fn enrich_item_details(client: &EwsClient, state: &mut SyncedFolderState) 
         items = to_enrich.len(),
         "GetItem fan-out for body + recurrence enrichment",
     );
-    eprintln!(
-        "[EWS] enrich_item_details: {} item(s) need detail",
-        to_enrich.len()
-    );
 
     for batch in to_enrich.chunks(GET_ITEM_BATCH_SIZE) {
         let body = crate::soap::get_calendar_items_with_recurrence(batch);
@@ -485,6 +481,13 @@ async fn enrich_item_details(client: &EwsClient, state: &mut SyncedFolderState) 
             cached.recurrence = fresh.recurrence;
             cached.modified_occurrences = fresh.modified_occurrences;
             cached.deleted_occurrence_starts = fresh.deleted_occurrence_starts;
+            // Organizer + attendees (RSVP / availability) are detail-only
+            // too: the SyncFolderItems shape never carries them, so they
+            // arrive solely through this GetItem fan-out. Merge them here
+            // or the read path renders every meeting with an empty
+            // attendee list.
+            cached.organizer = fresh.organizer;
+            cached.attendees = fresh.attendees;
             cached.detail_fetched = true;
             // Refresh the ChangeKey if GetItem returned a newer one
             // — detail reads don't bump it server-side typically,
@@ -492,14 +495,13 @@ async fn enrich_item_details(client: &EwsClient, state: &mut SyncedFolderState) 
             if fresh.change_key.is_some() {
                 cached.change_key = fresh.change_key;
             }
-            eprintln!(
-                "[EWS] enrich item_id={} subject={:?} has_body={} has_recurrence={} mods={} dels={}",
-                cached.item_id,
-                cached.subject,
-                cached.body.is_some(),
-                cached.recurrence.is_some(),
-                cached.modified_occurrences.len(),
-                cached.deleted_occurrence_starts.len(),
+            tracing::debug!(
+                target: "cal_adapter_ews::sync",
+                item_id = %cached.item_id,
+                has_body = cached.body.is_some(),
+                has_recurrence = cached.recurrence.is_some(),
+                attendees = cached.attendees.len(),
+                "EWS detail enrich",
             );
         }
     }
@@ -1346,6 +1348,86 @@ mod tests {
         delete_event(&client_for(&server), "ITEM-ID|CK", false)
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn enrich_merges_organizer_and_attendees_into_cached_item() {
+        // Regression: the GetItem detail fan-out parsed Organizer +
+        // RequiredAttendees but the merge dropped them, so every EWS
+        // meeting rendered with an empty attendee list. Drive a cold
+        // sync (SyncFolderItems Create → GetItem enrich) and assert the
+        // cached item carries the attendees.
+        let mut server = Server::new_async().await;
+        let sync_body = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:SyncFolderItemsResponse><m:ResponseMessages>
+    <m:SyncFolderItemsResponseMessage ResponseClass="Success">
+      <m:ResponseCode>NoError</m:ResponseCode>
+      <m:SyncState>COOKIE-1</m:SyncState>
+      <m:IncludesLastItemInRange>true</m:IncludesLastItemInRange>
+      <m:Changes>
+        <t:Create>
+          <t:CalendarItem>
+            <t:ItemId Id="MTG" ChangeKey="CK"/>
+            <t:Subject>Planning</t:Subject>
+            <t:Start>2026-05-22T08:00:00Z</t:Start>
+            <t:End>2026-05-22T09:00:00Z</t:End>
+            <t:CalendarItemType>Single</t:CalendarItemType>
+          </t:CalendarItem>
+        </t:Create>
+      </m:Changes>
+    </m:SyncFolderItemsResponseMessage>
+  </m:ResponseMessages></m:SyncFolderItemsResponse></s:Body>
+</s:Envelope>"#;
+        let get_body = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body><m:GetItemResponse><m:ResponseMessages>
+    <m:GetItemResponseMessage ResponseClass="Success">
+      <m:Items>
+        <t:CalendarItem>
+          <t:ItemId Id="MTG" ChangeKey="CK"/>
+          <t:Subject>Planning</t:Subject>
+          <t:Organizer><t:Mailbox>
+            <t:Name>The Boss</t:Name><t:EmailAddress>boss@example.com</t:EmailAddress>
+          </t:Mailbox></t:Organizer>
+          <t:RequiredAttendees>
+            <t:Attendee>
+              <t:Mailbox><t:Name>Me</t:Name><t:EmailAddress>me@example.com</t:EmailAddress></t:Mailbox>
+              <t:ResponseType>Accept</t:ResponseType>
+            </t:Attendee>
+          </t:RequiredAttendees>
+        </t:CalendarItem>
+      </m:Items>
+    </m:GetItemResponseMessage>
+  </m:ResponseMessages></m:GetItemResponse></s:Body>
+</s:Envelope>"#;
+        let _sync = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::Regex("SyncFolderItems".into()))
+            .with_status(200)
+            .with_body(sync_body)
+            .create_async()
+            .await;
+        let _get = server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::Regex("GetItem".into()))
+            .with_status(200)
+            .with_body(get_body)
+            .create_async()
+            .await;
+
+        let state = sync_events_to_completion(&client_for(&server), "FA|FCK", Default::default())
+            .await
+            .unwrap();
+        let item = state.items.get("MTG").expect("item cached");
+        assert_eq!(item.organizer.as_deref(), Some("boss@example.com"));
+        assert_eq!(item.attendees.len(), 1);
+        assert_eq!(item.attendees[0].email, "me@example.com");
+        assert_eq!(item.attendees[0].response_type.as_deref(), Some("Accept"));
     }
 
     #[tokio::test]
