@@ -36,6 +36,13 @@ In the event dialog you can also set:
 > with a summary (announced via the live region). If a provider can't
 > answer (missing permission), that attendee reads as "free/unknown".
 
+> **Responding to invitations (RSVP):** When you open a meeting you were
+> invited to (iCloud, Google, Exchange/Outlook), **Your response** appears
+> at the top of the dialog with **Accept**, **Tentative** and **Decline**
+> buttons — your current reply is highlighted. Your answer is sent to the
+> organizer automatically. If you are the organizer, you instead see each
+> attendee's response status.
+
 ## Editing, moving and deleting events
 
 - **Edit:** Select the event and open it with `Enter` (or **Edit** from the

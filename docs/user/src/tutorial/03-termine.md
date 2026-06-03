@@ -41,6 +41,13 @@ Mit **Speichern** wird der Termin angelegt; eine Live-Region bestätigt
 > (die Live-Region kündigt es an). Antwortet ein Anbieter nicht (fehlende
 > Berechtigung), gilt der Teilnehmer als „frei/unbekannt".
 
+> **Einladungen beantworten (RSVP):** Öffnest du ein Meeting, zu dem du
+> eingeladen wurdest (iCloud, Google, Exchange/Outlook), erscheint oben im
+> Dialog **Deine Antwort** mit den Schaltflächen **Zusagen**, **Vorläufig**
+> und **Absagen** – die aktuelle Antwort ist hervorgehoben. Deine Antwort
+> geht automatisch an den Organisator. Bist du selbst der Organisator,
+> siehst du stattdessen den Antwortstatus aller Teilnehmer.
+
 ## Termine bearbeiten, verschieben, löschen
 
 - **Bearbeiten:** Termin markieren und mit `Eingabe` (oder über das
