@@ -6,9 +6,11 @@
 
 use std::sync::Arc;
 
-use cal_core::{Calendar, Event, NewEvent, NewTask, Task, TaskList};
+use cal_core::{
+    Calendar, DateRange, Event, FreeBusy, FreeBusySlot, NewEvent, NewTask, Task, TaskList,
+};
 use serde::de::DeserializeOwned;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tracing::warn;
 use url::Url;
@@ -18,8 +20,8 @@ use crate::error::{GraphError, GraphResult};
 use crate::mapping::{
     event_to_body, map_calendar, map_event, map_task, map_task_list, new_event_to_body,
     new_task_to_body, split_task_id, task_to_body, CalendarListResponse, EventDeltaResponse,
-    EventEntry, EventListResponse, TodoListEntry, TodoListResponse, TodoTaskDeltaResponse,
-    TodoTaskEntry, TodoTaskResponse,
+    EventEntry, EventListResponse, GraphDateTime, TodoListEntry, TodoListResponse,
+    TodoTaskDeltaResponse, TodoTaskEntry, TodoTaskResponse,
 };
 
 pub const API_BASE: &str = "https://graph.microsoft.com/v1.0";
@@ -424,6 +426,90 @@ pub async fn delete_event(state: &ApiState, event_id: &str) -> GraphResult<()> {
     let id_enc = urlencoding(event_id);
     let path = format!("/me/events/{id_enc}");
     state.delete_request(&path).await
+}
+
+/// `POST /me/calendar/getSchedule` — attendee availability. Each schedule's
+/// `scheduleItems` carry a status (`free`/`tentative`/`busy`/`oof`/…); we
+/// surface everything except `free` as a busy block. We request a UTC window;
+/// Graph echoes `scheduleId` so we can map results back to emails.
+pub async fn query_free_busy(
+    state: &ApiState,
+    emails: &[&str],
+    range: DateRange,
+) -> GraphResult<Vec<FreeBusy>> {
+    let fmt = |dt: chrono::DateTime<chrono::Utc>| dt.format("%Y-%m-%dT%H:%M:%S").to_string();
+    let body = GetScheduleRequest {
+        schedules: emails.iter().map(|e| e.to_string()).collect(),
+        start_time: ScheduleTime {
+            date_time: fmt(range.start),
+            time_zone: "UTC".into(),
+        },
+        end_time: ScheduleTime {
+            date_time: fmt(range.end),
+            time_zone: "UTC".into(),
+        },
+        availability_view_interval: 30,
+    };
+    let resp: GetScheduleResponse = state.post_json("/me/calendar/getSchedule", &body).await?;
+    let mut out = Vec::new();
+    for info in resp.value {
+        let mut slots = Vec::new();
+        for item in &info.schedule_items {
+            if item.status.eq_ignore_ascii_case("free") {
+                continue;
+            }
+            slots.push(FreeBusySlot {
+                start: item.start.to_utc()?,
+                end: item.end.to_utc()?,
+            });
+        }
+        out.push(FreeBusy {
+            email: info.schedule_id,
+            slots,
+        });
+    }
+    Ok(out)
+}
+
+#[derive(Serialize)]
+struct GetScheduleRequest {
+    schedules: Vec<String>,
+    #[serde(rename = "startTime")]
+    start_time: ScheduleTime,
+    #[serde(rename = "endTime")]
+    end_time: ScheduleTime,
+    #[serde(rename = "availabilityViewInterval")]
+    availability_view_interval: u32,
+}
+
+#[derive(Serialize)]
+struct ScheduleTime {
+    #[serde(rename = "dateTime")]
+    date_time: String,
+    #[serde(rename = "timeZone")]
+    time_zone: String,
+}
+
+#[derive(Deserialize)]
+struct GetScheduleResponse {
+    #[serde(default)]
+    value: Vec<ScheduleInfo>,
+}
+
+#[derive(Deserialize)]
+struct ScheduleInfo {
+    #[serde(rename = "scheduleId", default)]
+    schedule_id: String,
+    #[serde(rename = "scheduleItems", default)]
+    schedule_items: Vec<ScheduleItem>,
+}
+
+#[derive(Deserialize)]
+struct ScheduleItem {
+    #[serde(default)]
+    status: String,
+    start: GraphDateTime,
+    end: GraphDateTime,
 }
 
 pub async fn rename_calendar(
@@ -977,6 +1063,46 @@ mod tests {
             .await;
         let state = fixture_state(&server.url());
         delete_event(&state, "ev-x").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn query_free_busy_parses_schedule_items() {
+        let mut server = mockito::Server::new_async().await;
+        let m = server
+            .mock("POST", "/me/calendar/getSchedule")
+            .match_body(mockito::Matcher::Regex(r#""schedules""#.into()))
+            .with_status(200)
+            .with_body(
+                r##"{ "value": [
+                    { "scheduleId": "alice@example.com", "scheduleItems": [
+                        { "status": "busy",
+                          "start": {"dateTime":"2026-05-25T10:00:00.0000000","timeZone":"UTC"},
+                          "end":   {"dateTime":"2026-05-25T11:00:00.0000000","timeZone":"UTC"} },
+                        { "status": "free",
+                          "start": {"dateTime":"2026-05-25T12:00:00.0000000","timeZone":"UTC"},
+                          "end":   {"dateTime":"2026-05-25T13:00:00.0000000","timeZone":"UTC"} }
+                    ] }
+                ] }"##,
+            )
+            .create_async()
+            .await;
+        let state = fixture_state(&server.url());
+        let range = DateRange::new(
+            "2026-05-25T09:00:00Z".parse().unwrap(),
+            "2026-05-25T17:00:00Z".parse().unwrap(),
+        );
+        let fb = query_free_busy(&state, &["alice@example.com"], range)
+            .await
+            .unwrap();
+        m.assert_async().await;
+        assert_eq!(fb.len(), 1);
+        assert_eq!(fb[0].email, "alice@example.com");
+        // The "free" item is dropped; only the busy one remains.
+        assert_eq!(fb[0].slots.len(), 1);
+        assert_eq!(
+            fb[0].slots[0].start.to_rfc3339(),
+            "2026-05-25T10:00:00+00:00"
+        );
     }
 
     #[tokio::test]
