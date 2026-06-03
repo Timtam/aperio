@@ -40,6 +40,17 @@ when caching:
   servers without `sync-collection`). The host keeps a bounded cache window
   for these and re-fetches when the view moves outside it.
 
+> **The host's token is authoritative for a delta.** `get_*_delta(…,
+> since_token)` must compute its changes relative to `since_token` — the
+> cursor the host's cache is actually at — **not** any cursor the adapter
+> persists for itself. Other host paths read the same provider on their own
+> schedule (the reminder scanner calls `get_events` directly), so a stateful
+> adapter that drains from its *own* advancing cursor would skip changes that
+> path already consumed but the host never cached, stranding an edited event
+> at its old time until a full resync. CalDAV is the model — `sync-collection`
+> drains straight from the passed token; EWS learned this the hard way and
+> now seeds its `SyncFolderItems` drain from `since_token` too.
+
 > **Reads never block the first paint.** `get_events`/`get_tasks`/
 > `get_contacts` serve whatever snapshot exists *right now* and run the
 > refresh in the background (stale-while-revalidate). When it lands the host

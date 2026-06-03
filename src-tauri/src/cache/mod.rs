@@ -615,6 +615,28 @@ impl CacheStore {
         })
     }
 
+    /// Drop the delta cursor + window + freshness for EVERY event container
+    /// owned by `account`, forcing the next refresh of each to do a full
+    /// resync (the cached rows stay as an offline fallback). Unlike
+    /// [`Self::invalidate`] this needs no container id — it fans out across
+    /// the account's whole event scope. Used for the one-time EWS cursor
+    /// heal: an older build let the reminder scan advance the provider cursor
+    /// independently of the host's, so a delta could skip changes the host
+    /// never cached; clearing the cursor makes the next warm pass re-pull the
+    /// whole folder and recover them. Returns the number of containers reset.
+    pub fn reset_event_sync(&self, account: &str) -> DbResult<usize> {
+        self.db.with_conn(|c| {
+            let n = c.execute(
+                "UPDATE cache_sync_state
+                    SET sync_token = NULL, window_start = NULL, window_end = NULL,
+                        last_refreshed_at = NULL
+                  WHERE account_id = ?1 AND scope = 'events'",
+                params![account],
+            )?;
+            Ok(n)
+        })
+    }
+
     /// Record a failed refresh: stamp `last_error`, leave the rest
     /// (including the still-valid cached data + window) intact.
     pub fn mark_error(

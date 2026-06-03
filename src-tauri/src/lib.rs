@@ -136,6 +136,57 @@ pub fn run() {
     // deduplicated refresh.
     let cache_store = Arc::new(cache::CacheStore::new(db.clone()));
     let refresh_coordinator = Arc::new(cache::RefreshCoordinator::new());
+
+    // One-time heal for the EWS cursor-desync bug: older builds let the
+    // reminder scan's `get_events` drain advance + persist the EWS
+    // SyncFolderItems cookie independently of the host's, so a later delta
+    // could skip changes the host never cached — an edited Outlook event
+    // stuck at its old time. The drain is now host-token-authoritative; this
+    // clears the host's EWS event cursor ONCE so the next warm pass
+    // full-resyncs and recovers any already-stuck edits. Best-effort: on any
+    // failure the completion flag stays unset and the heal retries next boot.
+    {
+        const HEAL_FLAG: &str = "cache.ewsCursorHealV1";
+        let shared = db.shared();
+        let prefs = crate::user_prefs::UserPrefsRepo::new(&shared);
+        let already_done = matches!(prefs.get(HEAL_FLAG).ok().flatten().as_deref(), Some("done"));
+        if !already_done {
+            match accounts::AccountsRepo::new(&shared).list() {
+                Ok(accts) => {
+                    let mut healed = 0usize;
+                    for acc in accts
+                        .iter()
+                        .filter(|a| a.adapter_kind == accounts::AdapterKind::Ews)
+                    {
+                        match cache_store.reset_event_sync(&acc.id) {
+                            Ok(n) => healed += n,
+                            Err(err) => tracing::warn!(
+                                account_id = %acc.id,
+                                ?err,
+                                "EWS cursor heal: reset_event_sync failed",
+                            ),
+                        }
+                    }
+                    match prefs.set(HEAL_FLAG, "done") {
+                        Ok(()) => tracing::info!(
+                            target: "aperio::cache",
+                            containers = healed,
+                            "EWS cursor heal: cleared event cursors for a one-time full resync",
+                        ),
+                        Err(err) => tracing::warn!(
+                            ?err,
+                            "EWS cursor heal: couldn't persist completion flag; will retry next boot",
+                        ),
+                    }
+                }
+                Err(err) => tracing::warn!(
+                    ?err,
+                    "EWS cursor heal: couldn't list accounts; will retry next boot",
+                ),
+            }
+        }
+    }
+
     // CACHE-3: clones for the background warm/periodic refresher spawned
     // in `setup()` (the originals are moved into Tauri State below).
     let registry_for_cache_refresh = Arc::clone(&registry);

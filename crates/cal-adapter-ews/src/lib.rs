@@ -515,12 +515,30 @@ impl EwsAdapter {
             let mut guard = self.events_sync.lock().await;
             guard.remove(calendar_id).unwrap_or_default()
         };
-        // A cold per-folder state can't produce a real delta — and the
-        // host treats a token-less round as a wholesale replace — so both
-        // force the full in-range set into `changes`.
-        let mut force_full = prior.sync_state.is_none() || since_token.is_none();
+        // Host-authoritative cursor. The snapshot cache the host folds this
+        // delta into is keyed to `since_token`, so we MUST drain from THAT,
+        // not from our own persisted cookie. `get_events` (the reminder
+        // scan's read path) shares this same per-folder state and advances +
+        // persists the cookie on its own schedule; draining from our cookie
+        // would then silently skip every change that read already consumed
+        // but the host never saw — leaving edited events stuck at their old
+        // time until a full resync. We keep the accumulated `items` (so a
+        // changed recurring master still emits with its overrides) and only
+        // reset the cursor to the host's. With no `since_token`, or when our
+        // own snapshot is cold (no cookie/items to merge a delta into), the
+        // host replaces wholesale, so we drain the COMPLETE folder from
+        // scratch instead.
+        let adapter_warm = prior.sync_state.is_some();
+        let mut force_full = since_token.is_none() || !adapter_warm;
+        let seed = match since_token {
+            Some(tok) if adapter_warm => SyncedFolderState {
+                sync_state: Some(tok.to_string()),
+                ..prior
+            },
+            _ => SyncedFolderState::default(),
+        };
         let (updated, changed_ids, deleted_ids) =
-            match api::sync_events_delta(&self.client, calendar_id, prior).await {
+            match api::sync_events_delta(&self.client, calendar_id, seed).await {
                 Ok(t) => t,
                 Err(err) if is_sync_state_invalid(&err) => {
                     tracing::warn!(
@@ -1508,6 +1526,85 @@ mod delta_read_tests {
         // native_id host-side.
         assert_eq!(warm.deletions, vec!["B".to_string()]);
         assert_eq!(warm.new_token.as_deref(), Some("COOKIE-2"));
+    }
+
+    /// Regression: the adapter's own SyncFolderItems cookie can be advanced
+    /// (and persisted) independently by the `get_events` read path — the
+    /// reminder scan drains the same per-folder state on its own schedule.
+    /// The host-facing delta must therefore re-drain from the HOST's
+    /// `since_token`, never from our advanced cookie; otherwise a change that
+    /// read already consumed but never wrote to the host cache is lost (an
+    /// edited Outlook event stuck at its old time until a full resync). Here
+    /// the adapter sits at `ADAPTER-AHEAD` while the host is still at
+    /// `HOST-BEHIND`; the delta must hit the server with `HOST-BEHIND`.
+    #[tokio::test]
+    async fn delta_drains_from_host_token_not_the_adapters_advanced_cookie() {
+        use mockito::Matcher;
+        let mut server = Server::new_async().await;
+
+        // The SyncFolderItems page is served ONLY when the request carries the
+        // host's cursor. If the code regressed to draining from the adapter's
+        // own (advanced) cookie, this matcher fails → the mock 501s → the call
+        // errors → the test fails loudly.
+        let update = r#"<t:Update><t:CalendarItem>
+                 <t:ItemId Id="A" ChangeKey="CKA2"/>
+                 <t:Subject>Alpha v2</t:Subject>
+                 <t:Start>2026-05-20T08:30:00Z</t:Start>
+                 <t:End>2026-05-20T09:30:00Z</t:End>
+                 <t:CalendarItemType>Single</t:CalendarItemType>
+               </t:CalendarItem></t:Update>"#;
+        let _sync = server
+            .mock("POST", "/")
+            .match_body(Matcher::AllOf(vec![
+                Matcher::Regex("SyncFolderItems".into()),
+                Matcher::Regex("HOST-BEHIND".into()),
+            ]))
+            .with_status(200)
+            .with_body(sync_page("COOKIE-3", update))
+            .expect(1)
+            .create_async()
+            .await;
+        let _enrich = server
+            .mock("POST", "/")
+            .match_body(Matcher::Regex("GetItem".into()))
+            .with_status(200)
+            .with_body(getitem_body(
+                r#"<t:CalendarItem><t:ItemId Id="A" ChangeKey="CKA2"/></t:CalendarItem>"#,
+            ))
+            .expect(1)
+            .create_async()
+            .await;
+
+        let adapter = EwsAdapter::new(server.url(), creds());
+        // Seed the per-folder state as if a prior get_events drain advanced
+        // the cookie past the change and persisted it, with the OLD item still
+        // cached.
+        {
+            let mut guard = adapter.events_sync.lock().await;
+            let mut state = SyncedFolderState {
+                sync_state: Some("ADAPTER-AHEAD".into()),
+                ..Default::default()
+            };
+            state.items.insert(
+                "A".into(),
+                ParsedItem {
+                    item_id: "A".into(),
+                    subject: "Alpha".into(),
+                    ..ParsedItem::default()
+                },
+            );
+            guard.insert("FA|FCK".into(), state);
+        }
+
+        let cs = adapter
+            .get_events_delta("FA|FCK", range(), Some("HOST-BEHIND"))
+            .await
+            .expect("delta must re-drain from the host token, not the adapter cookie");
+        assert!(!cs.full_resync, "host has a token → incremental");
+        assert_eq!(cs.changes.len(), 1);
+        assert_eq!(cs.changes[0].id, "S:A|CKA2");
+        assert_eq!(cs.changes[0].title, "Alpha v2");
+        assert_eq!(cs.new_token.as_deref(), Some("COOKIE-3"));
     }
 }
 
