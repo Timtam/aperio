@@ -30,6 +30,12 @@ In the event dialog you can also set:
 > itself never sends email. Deleting an event that has attendees likewise
 > triggers a cancellation.
 
+> **Check availability:** Below that toggle sits a **Check availability**
+> button. It looks up, for the currently entered time window, which
+> attendees are **free** or **busy**, and shows the result per attendee
+> with a summary (announced via the live region). If a provider can't
+> answer (missing permission), that attendee reads as "free/unknown".
+
 ## Editing, moving and deleting events
 
 - **Edit:** Select the event and open it with `Enter` (or **Edit** from the

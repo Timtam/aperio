@@ -34,6 +34,13 @@ Mit **Speichern** wird der Termin angelegt; eine Live-Region bestätigt
 > Beim Löschen eines Termins mit Teilnehmern wird entsprechend eine Absage
 > ausgelöst.
 
+> **Verfügbarkeit prüfen:** Unter demselben Schalter erscheint die
+> Schaltfläche **Verfügbarkeit prüfen**. Sie fragt für das aktuell
+> eingestellte Zeitfenster ab, welche Teilnehmer **frei** oder **belegt**
+> sind, und zeigt das Ergebnis pro Teilnehmer mit einer Zusammenfassung an
+> (die Live-Region kündigt es an). Antwortet ein Anbieter nicht (fehlende
+> Berechtigung), gilt der Teilnehmer als „frei/unbekannt".
+
 ## Termine bearbeiten, verschieben, löschen
 
 - **Bearbeiten:** Termin markieren und mit `Eingabe` (oder über das
