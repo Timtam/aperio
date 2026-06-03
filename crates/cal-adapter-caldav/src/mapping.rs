@@ -134,6 +134,9 @@ fn map_event(ev: &icalendar::Event, calendar_id: &str, href: Option<&str>) -> Ca
         created_at: created,
         updated_at: updated,
         etag: None,
+        // Populated by the read-side parse (R-3); empty placeholder here.
+        organizer: None,
+        attendee_responses: Vec::new(),
     })
 }
 

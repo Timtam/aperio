@@ -282,6 +282,9 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GoogleResult<Option<Ev
         created_at: created,
         updated_at: updated,
         etag: entry.etag,
+        // Populated by the read-side parse (R-3); empty placeholder here.
+        organizer: None,
+        attendee_responses: Vec::new(),
     }))
 }
 
@@ -697,6 +700,8 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             etag: None,
+            organizer: None,
+            attendee_responses: vec![],
         };
         let body = event_to_body(&ev);
         let json = serde_json::to_value(&body).unwrap();

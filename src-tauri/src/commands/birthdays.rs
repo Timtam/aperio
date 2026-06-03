@@ -286,6 +286,8 @@ fn events_for_contacts(
                 created_at: contact.created_at,
                 updated_at: contact.updated_at,
                 etag: None,
+                organizer: None,
+                attendee_responses: Vec::new(),
             });
         }
     }

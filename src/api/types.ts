@@ -168,6 +168,28 @@ export interface CalendarEvent {
   created_at: string;
   updated_at: string;
   etag: string | null;
+  /** Organizer address (mailto: stripped) when the provider exposes it on
+   *  read. Lets the UI tell whether the connected account is an *attendee*
+   *  of this meeting rather than its organizer — the gate for RSVP. */
+  organizer?: string | null;
+  /** Per-attendee RSVP state, populated on read where the provider reports
+   *  it. Read-only; absent/empty otherwise. */
+  attendee_responses?: AttendeeResponse[];
+}
+
+/** An attendee's RSVP status (RFC 5545 PARTSTAT), normalised across
+ *  providers. Mirrors cal-core `AttendeeStatus` (serde kebab-case). */
+export type AttendeeStatus =
+  | 'needs-action'
+  | 'accepted'
+  | 'declined'
+  | 'tentative';
+
+/** One attendee's RSVP state on an event read from a provider. */
+export interface AttendeeResponse {
+  email: string;
+  name?: string | null;
+  status: AttendeeStatus;
 }
 
 export interface NewEvent {

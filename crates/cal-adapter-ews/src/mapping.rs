@@ -1425,6 +1425,9 @@ pub fn to_event(item: ParsedItem, calendar_id: &str) -> EwsResult<Event> {
         created_at: item.created.unwrap_or_else(Utc::now),
         updated_at: item.last_modified.unwrap_or_else(Utc::now),
         etag: item.change_key,
+        // Populated by the read-side parse (R-3); empty placeholder here.
+        organizer: None,
+        attendee_responses: Vec::new(),
     })
 }
 
@@ -3413,6 +3416,8 @@ mod tests {
             created_at: "2026-05-19T00:00:00Z".parse().unwrap(),
             updated_at: "2026-05-19T00:00:00Z".parse().unwrap(),
             etag: Some("CK".into()),
+            organizer: None,
+            attendee_responses: Vec::new(),
         };
         let (set, del) = event_to_update_field_xml(&ev).unwrap();
         assert!(set.contains("<t:Subject>Updated</t:Subject>"));

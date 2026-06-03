@@ -287,6 +287,9 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GraphResult<Option<Eve
         created_at: created,
         updated_at: updated,
         etag: entry.etag,
+        // Populated by the read-side parse (R-3); empty placeholder here.
+        organizer: None,
+        attendee_responses: Vec::new(),
     }))
 }
 

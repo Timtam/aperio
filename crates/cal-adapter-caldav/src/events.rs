@@ -172,6 +172,10 @@ pub async fn create_event(
         created_at: now,
         updated_at: now,
         etag,
+        // Write path: organizer/RSVP metadata is read-only, populated
+        // only when reading the event back from the server.
+        organizer: None,
+        attendee_responses: Vec::new(),
     })
 }
 
@@ -612,6 +616,8 @@ END:VCALENDAR</c:calendar-data>
             created_at: Utc::now(),
             updated_at: Utc::now(),
             etag: Some("\"old-etag\"".into()),
+            organizer: None,
+            attendee_responses: Vec::new(),
         };
         let updated = update_event(&client(), existing, &creds(&server.url()), None)
             .await
@@ -651,6 +657,8 @@ END:VCALENDAR</c:calendar-data>
             created_at: Utc::now(),
             updated_at: Utc::now(),
             etag: Some("\"stale-etag\"".into()),
+            organizer: None,
+            attendee_responses: Vec::new(),
         };
         let err = update_event(&client(), existing, &creds(&server.url()), None)
             .await

@@ -783,6 +783,9 @@ fn build_event_from_new(
         created_at: now,
         updated_at: now,
         etag: change_key,
+        // Write path: organizer/RSVP metadata are read-only fields.
+        organizer: None,
+        attendee_responses: Vec::new(),
     }
 }
 
@@ -1276,6 +1279,8 @@ mod tests {
             created_at: "2026-05-19T00:00:00Z".parse().unwrap(),
             updated_at: "2026-05-19T00:00:00Z".parse().unwrap(),
             etag: Some("CK-V1".into()),
+            organizer: None,
+            attendee_responses: Vec::new(),
         };
         let updated = update_event(&client_for(&server), &starting).await.unwrap();
         // ChangeKey advances on every successful UpdateItem; the
@@ -1396,6 +1401,8 @@ mod tests {
             created_at: "2026-05-19T00:00:00Z".parse().unwrap(),
             updated_at: "2026-05-19T00:00:00Z".parse().unwrap(),
             etag: Some("OCK".into()),
+            organizer: None,
+            attendee_responses: Vec::new(),
         };
         let updated = update_event(&client_for(&server), &starting).await.unwrap();
         // After series-wide write the kind flips to RecurringMaster
