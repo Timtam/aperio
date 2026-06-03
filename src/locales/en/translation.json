@@ -769,6 +769,16 @@
         "removed": "{{name}} removed.",
         "alreadyOnList": "Already on the attendee list."
       },
+      "availability": {
+        "check": "Check availability",
+        "checking": "Checking …",
+        "allFree": "All attendees are free at this time.",
+        "someBusy_one": "{{count}} attendee is busy at this time.",
+        "someBusy_other": "{{count}} attendees are busy at this time.",
+        "busy": "Busy",
+        "free": "Free",
+        "unknown": "Unknown"
+      },
       "noColorLabel": "(No label)",
       "recurrence": {
         "label": "Repeat",

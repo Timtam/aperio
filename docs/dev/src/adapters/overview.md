@@ -78,6 +78,18 @@ when caching:
 > data. Note: on iCloud and Graph, *storing* attendees and *emailing* them
 > are inseparable — they're written only when notifying.
 
+> **Free/busy lookup** runs through `get_free_busy(emails, range)` and the
+> host `query_free_busy` command (the dialog's "Check availability"
+> button). Each provider answers in its own dialect: EWS `GetUserAvailability`
+> SOAP (`RequestedView=Detailed`, one `MailboxData` per address, results in
+> request order), CalDAV/iCloud an RFC 6638 iTIP `VFREEBUSY` POSTed to the
+> principal's `schedule-outbox-URL` (busy periods parsed out of the
+> `schedule-response`), Google `POST /freeBusy`, Graph `POST
+> /me/calendar/getSchedule`. All degrade gracefully: a mailbox the server
+> can't resolve (or a provider that can't answer) yields an empty slot list
+> — "availability unknown" — rather than failing the call. Local/iCal
+> calendars return empty.
+
 ## The adapters
 
 | Adapter | Crate | Capabilities | Protocol |

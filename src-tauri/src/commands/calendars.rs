@@ -1,7 +1,7 @@
 //! Calendar and event commands.
 
 use cal_adapter_local::LocalAdapter;
-use cal_core::{Calendar, CalendarFeature, DateRange, Event, NewEvent};
+use cal_core::{Calendar, CalendarFeature, DateRange, Event, FreeBusy, NewEvent};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -699,6 +699,50 @@ pub async fn delete_event(
     }
     scheduler.invalidate();
     Ok(())
+}
+
+/// Frontend payload for a free/busy query: which calendar's account to ask
+/// through, the attendee emails to look up, and the window.
+#[derive(Debug, Deserialize)]
+pub struct FreeBusyRequest {
+    pub calendar_id: String,
+    pub emails: Vec<String>,
+    pub range_start: DateTime<Utc>,
+    pub range_end: DateTime<Utc>,
+}
+
+/// Query attendee availability through the account that owns `calendar_id`.
+/// Best-effort: local/iCal calendars and any provider error or missing
+/// permission degrade to an empty result (the UI reads that as "couldn't
+/// determine", never an error) so the dialog never blocks on it.
+#[tauri::command]
+pub async fn query_free_busy(
+    registry: State<'_, Arc<AdapterRegistry>>,
+    request: FreeBusyRequest,
+) -> CommandResult<Vec<FreeBusy>> {
+    let account = registry
+        .account_for_calendar(&request.calendar_id)
+        .unwrap_or_else(|| LOCAL_ID.to_string());
+    if account == LOCAL_ID {
+        return Ok(Vec::new());
+    }
+    let Some(ext) = registry.calendar_adapter(&account) else {
+        return Ok(Vec::new());
+    };
+    let range = DateRange::new(request.range_start, request.range_end);
+    let refs: Vec<&str> = request.emails.iter().map(|s| s.as_str()).collect();
+    match ext.get_free_busy(&refs, range).await {
+        Ok(fb) => Ok(fb),
+        Err(err) => {
+            tracing::warn!(
+                target: "aperio::commands",
+                account = %account,
+                ?err,
+                "free/busy query failed; returning empty",
+            );
+            Ok(Vec::new())
+        }
+    }
 }
 
 #[tauri::command]

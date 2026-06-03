@@ -186,6 +186,19 @@ export interface NewEvent {
   send_invitations?: boolean;
 }
 
+/** One busy time block (ISO 8601 timestamps) from a free/busy query. */
+export interface FreeBusySlot {
+  start: string;
+  end: string;
+}
+
+/** An attendee's busy blocks within the queried window. An empty `slots`
+ *  array means "no known conflicts" (or the provider couldn't answer). */
+export interface FreeBusy {
+  email: string;
+  slots: FreeBusySlot[];
+}
+
 export interface TaskList {
   id: string;
   name: string;

@@ -153,7 +153,7 @@ impl GraphDateTime {
     /// Convert to UTC. For `timeZone == "UTC"` we just append `Z`
     /// before parsing; for anything else we route through
     /// `chrono_tz` (Graph speaks the IANA names natively).
-    fn to_utc(&self) -> GraphResult<DateTime<Utc>> {
+    pub(crate) fn to_utc(&self) -> GraphResult<DateTime<Utc>> {
         // Strip the seven-digit fractional second Graph likes to
         // emit but chrono rejects past three digits.
         let trimmed = trim_fractional_seconds(&self.date_time);

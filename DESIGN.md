@@ -741,8 +741,24 @@ wenn der Zielkalender `supports_scheduling` meldet und Teilnehmer vorhanden sind
 **laufzeit-erkannt** (nur RFC-6638-fähige Server wie iCloud). Bei iCloud/Graph gilt
 „Teilnehmer im Datensatz = es wird gemailt" (keine stille Speicherung).
 
+**Free/Busy-Abfrage (implementiert).** Im Termin-Dialog prüft „Verfügbarkeit
+prüfen" — sichtbar unter demselben Gate wie der Benachrichtigen-Schalter
+(scheduling-fähiger Kalender + Teilnehmer vorhanden) — die Belegung aller
+Teilnehmer im aktuell eingegebenen Zeitfenster. Pro Teilnehmer wird frei/belegt
+angezeigt plus eine Zusammenfassung; das Ergebnis wird über die Live-Region
+angekündigt. Best-Effort: Ein Anbieter, der nicht antworten darf (fehlende
+Berechtigung, kein Outbox), liefert leere Slots ⇒ „frei/unbekannt" statt Fehler.
+Die Abfrage läuft über `CalendarFeature::get_free_busy(emails, range)` und den
+Host-Befehl `query_free_busy`.
+
+| Anbieter | Mechanismus |
+|---|---|
+| **Exchange / EWS** | SOAP `GetUserAvailability` (`RequestedView=Detailed`, ein `MailboxData` je Adresse; Antworten in Anfrage-Reihenfolge) |
+| **iCloud / CalDAV** | RFC 6638: iTIP `VFREEBUSY` (`METHOD:REQUEST`) per POST an die `schedule-outbox-URL`; Belegung aus dem `schedule-response` je Empfänger |
+| **Google** | `POST /freeBusy` (`items[].id`); Belegung aus `calendars[email].busy[]` |
+| **Microsoft Graph** | `POST /me/calendar/getSchedule` (`scheduleItems`, Status ≠ `free`) |
+
 **Noch offen (künftige Iteration):**
-- **Free/Busy-Abfrage:** Verfügbarkeit aller Teilnehmer vor der Buchung prüfen (wo unterstützt)
 - Einladungen annehmen / ablehnen / tentativ bestätigen (**RSVP**)
 - ARIA-Ankündigung bei Status-Änderungen von Einladungen
 

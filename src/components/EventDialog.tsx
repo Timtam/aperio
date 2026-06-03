@@ -15,9 +15,10 @@ import {
   createEvent as apiCreateEvent,
   deleteEventById,
   isCommandError,
+  queryFreeBusy,
   updateEvent as apiUpdateEvent,
 } from '../api/client';
-import type { CalendarEvent } from '../api/types';
+import type { CalendarEvent, FreeBusy, FreeBusySlot } from '../api/types';
 import {
   isExpandedOccurrence,
   occurrenceIsoOf,
@@ -52,6 +53,33 @@ import type { Reminder } from '../api/types';
  * Pass `event=null` to create a new event; pass an existing event to
  * edit it. The dialog handles both with the same form.
  */
+/**
+ * Pull the bare email out of an attendee entry. The AttendeePicker
+ * stores catalog picks as `"Name <email>"`; free-form entries are the
+ * email itself. Free/busy needs just the address.
+ */
+function attendeeEmail(entry: string): string {
+  const angle = entry.match(/<([^>]+)>/);
+  return (angle ? angle[1] : entry).trim();
+}
+
+/**
+ * True when any of `slots` overlaps the `[startIso, endIso)` window.
+ * Compared via epoch millis so it's robust to time-zone/format
+ * differences between the form's ISO and the backend's UTC slots.
+ */
+function isBusyInWindow(
+  slots: FreeBusySlot[],
+  startIso: string,
+  endIso: string,
+): boolean {
+  const ws = new Date(startIso).getTime();
+  const we = new Date(endIso).getTime();
+  return slots.some(
+    (s) => new Date(s.start).getTime() < we && new Date(s.end).getTime() > ws,
+  );
+}
+
 export interface EventDialogProps {
   isOpen: boolean;
   onClose: () => void;
@@ -183,6 +211,21 @@ export function EventDialog({
   // attendees; on submit we gate the wire flag on those too.
   const [notifyAttendees, setNotifyAttendees] = useState(true);
 
+  // Attendee free/busy: result of the last "Check availability" run,
+  // plus the window it was queried for (so the per-attendee busy verdict
+  // is computed against the exact slot the user asked about). `null`
+  // until the user runs a check; cleared whenever the attendees or the
+  // start/end window change so we never show a stale verdict.
+  const [availability, setAvailability] = useState<FreeBusy[] | null>(null);
+  const [availabilityWindow, setAvailabilityWindow] = useState<{
+    start: string;
+    end: string;
+  } | null>(null);
+  const [checkingAvailability, setCheckingAvailability] = useState(false);
+  const [availabilityError, setAvailabilityError] = useState<string | null>(
+    null,
+  );
+
   // When editing a single occurrence of a recurring series the user
   // can apply changes to just this occurrence (creates an EXDATE +
   // standalone override) or to the whole series.
@@ -201,8 +244,29 @@ export function EventDialog({
       // the dialog (re-)opens with a fresh event.
       setKeepRemindersAsDefault(remindersWereFromDefault);
       setNotifyAttendees(true);
+      setAvailability(null);
+      setAvailabilityWindow(null);
+      setAvailabilityError(null);
     }
   }, [isOpen, initialState, remindersWereFromDefault]);
+
+  // Any change to the attendee set, the start/end window, the all-day
+  // flag, or the target calendar invalidates a previous availability
+  // check — drop it so we never render a busy/free verdict against a
+  // window the user has since moved.
+  useEffect(() => {
+    setAvailability(null);
+    setAvailabilityWindow(null);
+    setAvailabilityError(null);
+  }, [
+    form.attendees,
+    form.startDate,
+    form.startTime,
+    form.endDate,
+    form.endTime,
+    form.allDay,
+    form.calendarId,
+  ]);
 
   const update = useCallback(
     <K extends keyof FormState>(key: K, value: FormState[K]) => {
@@ -227,6 +291,54 @@ export function EventDialog({
     },
     [],
   );
+
+  // "Check availability": query the attendees' free/busy over the
+  // currently-entered window and surface who's busy. Best-effort — a
+  // provider that can't answer (no scheduling, permission denied) comes
+  // back with empty slots, which simply read as "free/unknown" rather
+  // than failing the dialog.
+  const checkAvailability = useCallback(async () => {
+    const start = toIso(form.startDate, form.startTime, form.allDay);
+    const end = toIso(form.endDate, form.endTime, form.allDay);
+    if (!start || !end) {
+      setAvailabilityError(t('dialogs.event.dateInvalid'));
+      return;
+    }
+    const emails = form.attendees.map(attendeeEmail).filter(Boolean);
+    if (emails.length === 0) return;
+
+    setCheckingAvailability(true);
+    setAvailabilityError(null);
+    try {
+      const result = await queryFreeBusy(form.calendarId, emails, start, end);
+      setAvailability(result);
+      setAvailabilityWindow({ start, end });
+      const busyCount = result.filter((fb) =>
+        isBusyInWindow(fb.slots, start, end),
+      ).length;
+      announce(
+        busyCount === 0
+          ? t('dialogs.event.availability.allFree')
+          : t('dialogs.event.availability.someBusy', { count: busyCount }),
+      );
+    } catch (err) {
+      setAvailabilityError(
+        isCommandError(err) ? `${err.code}: ${err.message}` : String(err),
+      );
+    } finally {
+      setCheckingAvailability(false);
+    }
+  }, [
+    form.attendees,
+    form.startDate,
+    form.startTime,
+    form.endDate,
+    form.endTime,
+    form.allDay,
+    form.calendarId,
+    announce,
+    t,
+  ]);
 
   const onSubmit = useCallback(
     async (e: FormEvent) => {
@@ -608,14 +720,85 @@ export function EventDialog({
         {calendars.find((c) => c.id === form.calendarId)
           ?.supports_scheduling &&
           form.attendees.length > 0 && (
-            <label className="form__field form__field--inline">
-              <input
-                type="checkbox"
-                checked={notifyAttendees}
-                onChange={(e) => setNotifyAttendees(e.target.checked)}
-              />
-              <span>{t('dialogs.event.fields.notifyAttendees')}</span>
-            </label>
+            <>
+              <label className="form__field form__field--inline">
+                <input
+                  type="checkbox"
+                  checked={notifyAttendees}
+                  onChange={(e) => setNotifyAttendees(e.target.checked)}
+                />
+                <span>{t('dialogs.event.fields.notifyAttendees')}</span>
+              </label>
+
+              <div className="form__field availability">
+                <button
+                  type="button"
+                  className="form__action availability__check"
+                  onClick={checkAvailability}
+                  disabled={checkingAvailability}
+                >
+                  {checkingAvailability
+                    ? t('dialogs.event.availability.checking')
+                    : t('dialogs.event.availability.check')}
+                </button>
+                {availabilityError && (
+                  <p className="form__error" role="alert">
+                    {availabilityError}
+                  </p>
+                )}
+                {availability && availabilityWindow && (
+                  <div className="availability__results" role="status">
+                    <p className="availability__summary">
+                      {availability.filter((fb) =>
+                        isBusyInWindow(
+                          fb.slots,
+                          availabilityWindow.start,
+                          availabilityWindow.end,
+                        ),
+                      ).length === 0
+                        ? t('dialogs.event.availability.allFree')
+                        : t('dialogs.event.availability.someBusy', {
+                            count: availability.filter((fb) =>
+                              isBusyInWindow(
+                                fb.slots,
+                                availabilityWindow.start,
+                                availabilityWindow.end,
+                              ),
+                            ).length,
+                          })}
+                    </p>
+                    <ul className="availability__list">
+                      {availability.map((fb) => {
+                        const busy = isBusyInWindow(
+                          fb.slots,
+                          availabilityWindow.start,
+                          availabilityWindow.end,
+                        );
+                        return (
+                          <li
+                            key={fb.email}
+                            className={
+                              busy
+                                ? 'availability__item availability__item--busy'
+                                : 'availability__item availability__item--free'
+                            }
+                          >
+                            <span className="availability__email">
+                              {fb.email}
+                            </span>
+                            <span className="availability__status">
+                              {busy
+                                ? t('dialogs.event.availability.busy')
+                                : t('dialogs.event.availability.free')}
+                            </span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </>
           )}
 
         <label className="form__field">

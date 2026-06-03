@@ -33,12 +33,12 @@
 //! That keeps the parsers below straightforward — they only need to
 //! handle the happy-path schema.
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDateTime, Utc};
 use quick_xml::events::Event as XmlEvent;
 use quick_xml::reader::Reader;
 use serde::{Deserialize, Serialize};
 
-use cal_core::{Calendar, Event, EventRecurrence, Reminder, ReminderKind};
+use cal_core::{Calendar, Event, EventRecurrence, FreeBusy, FreeBusySlot, Reminder, ReminderKind};
 
 use crate::error::{EwsError, EwsResult};
 
@@ -1197,6 +1197,128 @@ fn parse_ews_datetime(s: &str) -> Option<DateTime<Utc>> {
     DateTime::parse_from_rfc3339(s)
         .ok()
         .map(|d| d.with_timezone(&Utc))
+}
+
+/// Parse a `GetUserAvailability` `CalendarEvent` timestamp.
+///
+/// Unlike the `Z`-suffixed timestamps the item read path sees,
+/// availability times come back **naive** (no offset) — they're
+/// expressed in the time zone the request supplied, which we pin to
+/// UTC. We accept the rare `Z`-suffixed variant too, then fall back
+/// to the naive `YYYY-MM-DDTHH:MM:SS` (optionally with fractional
+/// seconds) form, treating it as UTC.
+fn parse_availability_datetime(s: &str) -> Option<DateTime<Utc>> {
+    let s = s.trim();
+    if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
+        return Some(dt.with_timezone(&Utc));
+    }
+    for fmt in ["%Y-%m-%dT%H:%M:%S%.f", "%Y-%m-%dT%H:%M:%S"] {
+        if let Ok(naive) = NaiveDateTime::parse_from_str(s, fmt) {
+            return Some(DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc));
+        }
+    }
+    None
+}
+
+/// Parse a `GetUserAvailabilityResponse` into one [`FreeBusy`] per
+/// requested address.
+///
+/// EWS returns a `FreeBusyResponseArray` with one `FreeBusyResponse`
+/// per mailbox **in request order** — the address itself is never
+/// echoed back, so we map results to `emails` by position. Each
+/// response carries a `FreeBusyView` whose `CalendarEventArray` lists
+/// the mailbox's busy blocks (`StartTime`/`EndTime`/`BusyType`).
+///
+/// Tolerance is deliberate: a mailbox we aren't allowed to see (or
+/// that doesn't resolve) comes back as a `ResponseMessage` tagged
+/// `Error` with no `CalendarEventArray`. Rather than abort the whole
+/// query, that mailbox simply yields an empty slot list — "availability
+/// unknown" — matching the graceful-degradation contract the other
+/// providers honour. Genuine transport faults are caught earlier by
+/// the HTTP status check; this parser is fed the raw body without the
+/// per-message fault check so partial results survive.
+///
+/// `BusyType` values `Free` and `NoData` are dropped; everything else
+/// (`Busy`, `Tentative`, `OOF`, `WorkingElsewhere`) counts as a busy
+/// slot.
+pub fn parse_get_user_availability(xml: &str, emails: &[&str]) -> EwsResult<Vec<FreeBusy>> {
+    // One slot list per requested mailbox, filled by position.
+    let mut per_mailbox: Vec<Vec<FreeBusySlot>> = vec![Vec::new(); emails.len()];
+
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+
+    // -1 until the first `<m:FreeBusyResponse>` bumps it to 0.
+    let mut idx: isize = -1;
+    let mut in_event = false;
+    let mut start: Option<DateTime<Utc>> = None;
+    let mut end: Option<DateTime<Utc>> = None;
+    let mut busy_type = String::new();
+    let mut text_target: Option<&'static str> = None;
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(XmlEvent::Start(e)) => {
+                let local = e.local_name().as_ref().to_ascii_lowercase();
+                match local.as_slice() {
+                    b"freebusyresponse" => idx += 1,
+                    b"calendarevent" => {
+                        in_event = true;
+                        start = None;
+                        end = None;
+                        busy_type.clear();
+                    }
+                    b"starttime" if in_event => text_target = Some("start"),
+                    b"endtime" if in_event => text_target = Some("end"),
+                    b"busytype" if in_event => text_target = Some("busy"),
+                    _ => {}
+                }
+            }
+            Ok(XmlEvent::Text(t)) => {
+                if let Some(target) = text_target {
+                    let s = t.unescape().map(|c| c.to_string()).unwrap_or_default();
+                    match target {
+                        "start" => start = parse_availability_datetime(&s),
+                        "end" => end = parse_availability_datetime(&s),
+                        "busy" => busy_type.push_str(s.trim()),
+                        _ => {}
+                    }
+                }
+            }
+            Ok(XmlEvent::End(e)) => {
+                let local = e.local_name().as_ref().to_ascii_lowercase();
+                text_target = None;
+                if local.as_slice() == b"calendarevent" {
+                    in_event = false;
+                    let busy = !matches!(busy_type.as_str(), "Free" | "NoData" | "");
+                    if busy {
+                        if let (Some(s), Some(en)) = (start, end) {
+                            if idx >= 0 && (idx as usize) < per_mailbox.len() {
+                                per_mailbox[idx as usize].push(FreeBusySlot { start: s, end: en });
+                            }
+                        }
+                    }
+                    start = None;
+                    end = None;
+                    busy_type.clear();
+                }
+            }
+            Ok(XmlEvent::Eof) => break,
+            Err(err) => return Err(EwsError::Protocol(format!("xml parse: {err}"))),
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(emails
+        .iter()
+        .zip(per_mailbox)
+        .map(|(email, slots)| FreeBusy {
+            email: (*email).to_string(),
+            slots,
+        })
+        .collect())
 }
 
 /// Translate a parsed item into a cal-core `Event`. The calendar id is
@@ -2814,6 +2936,78 @@ pub fn parse_first_item_id(xml: &str) -> EwsResult<ItemRef> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_get_user_availability_busy_blocks_by_mailbox_order() {
+        // Two mailboxes, in request order. The first has a busy and a
+        // tentative block (both count) plus a Free block (dropped); the
+        // second errored (no CalendarEventArray) and must degrade to an
+        // empty slot list rather than abort the whole parse.
+        let xml = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body>
+    <m:GetUserAvailabilityResponse>
+      <m:FreeBusyResponseArray>
+        <m:FreeBusyResponse>
+          <m:ResponseMessage ResponseClass="Success">
+            <m:ResponseCode>NoError</m:ResponseCode>
+          </m:ResponseMessage>
+          <m:FreeBusyView>
+            <t:FreeBusyViewType>Detailed</t:FreeBusyViewType>
+            <t:CalendarEventArray>
+              <t:CalendarEvent>
+                <t:StartTime>2026-06-01T09:00:00</t:StartTime>
+                <t:EndTime>2026-06-01T10:00:00</t:EndTime>
+                <t:BusyType>Busy</t:BusyType>
+              </t:CalendarEvent>
+              <t:CalendarEvent>
+                <t:StartTime>2026-06-01T12:00:00</t:StartTime>
+                <t:EndTime>2026-06-01T12:30:00</t:EndTime>
+                <t:BusyType>Tentative</t:BusyType>
+              </t:CalendarEvent>
+              <t:CalendarEvent>
+                <t:StartTime>2026-06-01T15:00:00</t:StartTime>
+                <t:EndTime>2026-06-01T16:00:00</t:EndTime>
+                <t:BusyType>Free</t:BusyType>
+              </t:CalendarEvent>
+            </t:CalendarEventArray>
+          </m:FreeBusyView>
+        </m:FreeBusyResponse>
+        <m:FreeBusyResponse>
+          <m:ResponseMessage ResponseClass="Error">
+            <m:MessageText>Unable to resolve e-mail address.</m:MessageText>
+            <m:ResponseCode>ErrorMailRecipientNotFound</m:ResponseCode>
+          </m:ResponseMessage>
+        </m:FreeBusyResponse>
+      </m:FreeBusyResponseArray>
+    </m:GetUserAvailabilityResponse>
+  </s:Body>
+</s:Envelope>"#;
+        let emails = ["alice@example.com", "ghost@example.com"];
+        let fb = parse_get_user_availability(xml, &emails).expect("parse availability");
+        assert_eq!(fb.len(), 2);
+        // First mailbox: Busy + Tentative kept, Free dropped → 2 slots,
+        // mapped to the address by position.
+        assert_eq!(fb[0].email, "alice@example.com");
+        assert_eq!(fb[0].slots.len(), 2);
+        assert_eq!(
+            fb[0].slots[0].start,
+            "2026-06-01T09:00:00Z".parse::<DateTime<Utc>>().unwrap()
+        );
+        assert_eq!(
+            fb[0].slots[0].end,
+            "2026-06-01T10:00:00Z".parse::<DateTime<Utc>>().unwrap()
+        );
+        assert_eq!(
+            fb[0].slots[1].start,
+            "2026-06-01T12:00:00Z".parse::<DateTime<Utc>>().unwrap()
+        );
+        // Second mailbox errored → empty, but still present and labelled.
+        assert_eq!(fb[1].email, "ghost@example.com");
+        assert!(fb[1].slots.is_empty());
+    }
 
     #[test]
     fn parses_find_folder_response_with_multiple_folders() {

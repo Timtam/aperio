@@ -333,12 +333,13 @@ impl CalendarFeature for GoogleAdapter {
         )))
     }
 
-    async fn get_free_busy(
-        &self,
-        _emails: &[&str],
-        _range: DateRange,
-    ) -> CoreResult<Vec<FreeBusy>> {
-        Ok(Vec::new())
+    async fn get_free_busy(&self, emails: &[&str], range: DateRange) -> CoreResult<Vec<FreeBusy>> {
+        if emails.is_empty() {
+            return Ok(Vec::new());
+        }
+        api::query_free_busy(&self.state, emails, range)
+            .await
+            .map_err(to_core_error)
     }
 
     fn calendar_color(&self, _calendar_id: &str) -> Option<ContainerColor> {
