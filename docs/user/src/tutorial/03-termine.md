@@ -20,10 +20,19 @@ Im Termin-Dialog kannst du außerdem festlegen:
 - **Ort** und **Beschreibung**,
 - **Farb-Label** (mit Farbpunkt in der Auswahl),
 - **Erinnerung** (siehe [Kapitel 06](06-benachrichtigungen.md)),
+- **Teilnehmer** (Name und/oder E-Mail-Adresse),
 - **Wiederholung** (siehe unten).
 
 Mit **Speichern** wird der Termin angelegt; eine Live-Region bestätigt
 „Termin gespeichert".
+
+> **Teilnehmer benachrichtigen:** Hat ein Termin Teilnehmer und unterstützt
+> der Kalender den serverseitigen Versand (iCloud, Google, Exchange/Outlook),
+> erscheint das Kontrollkästchen **Teilnehmer benachrichtigen** (standardmäßig
+> aktiv). Ist es gesetzt, verschickt der Anbieter beim Speichern automatisch
+> Einladungen bzw. Aktualisierungen – Aperio selbst versendet keine E-Mails.
+> Beim Löschen eines Termins mit Teilnehmern wird entsprechend eine Absage
+> ausgelöst.
 
 ## Termine bearbeiten, verschieben, löschen
 

@@ -723,9 +723,27 @@ Verwendetes Crate: `keyring`
 
 ### 7.3 Teilnehmer-Verwaltung
 
-- Teilnehmer per E-Mail einladen (generiert iCal-Einladung)
-- **Free/Busy-Abfrage:** Verfügbarkeit aller Teilnehmer vor der Terminbuchung prüfen (wo vom Anbieter unterstützt)
-- Einladungen annehmen / ablehnen / tentativ bestätigen (RSVP)
+**Organizer-seitiger Versand (implementiert).** Teilnehmer werden als flache
+Liste (`"Name <email>"` oder reine E-Mail) gepflegt. Beim Anlegen/Ändern/Löschen
+eines Termins kann Aperio den Anbieter **serverseitig** Einladungen / Updates /
+Absagen verschicken lassen — **ohne eigenes SMTP**. Gesteuert über den Schalter
+„Teilnehmer benachrichtigen" im Termin-Dialog (Standard: an), der nur erscheint,
+wenn der Zielkalender `supports_scheduling` meldet und Teilnehmer vorhanden sind.
+
+| Anbieter | Mechanismus | „nicht benachrichtigen" |
+|---|---|---|
+| **Exchange / EWS** | `SendMeetingInvitations*="SendToAllAndSaveCopy"` | `SendToNone`; Teilnehmer werden trotzdem gespeichert |
+| **iCloud / CalDAV** | RFC 6638 Auto-Scheduling: `ORGANIZER`+`ATTENDEE` in der .ics (erkannt via `schedule-outbox-URL`; Organizer aus `calendar-user-address-set`) | `ORGANIZER`/`ATTENDEE` weglassen — kein Versand, Termin ohne Teilnehmer gespeichert |
+| **Google** | `?sendUpdates=all` | `none`; Teilnehmer werden trotzdem gespeichert |
+| **Microsoft Graph** | Teilnehmer im Body ⇒ Graph mailt automatisch | Teilnehmer weglassen — Graph kann sie nicht ohne Versand speichern |
+
+`supports_scheduling` ist statisch true für EWS/Google/Graph und für CalDAV
+**laufzeit-erkannt** (nur RFC-6638-fähige Server wie iCloud). Bei iCloud/Graph gilt
+„Teilnehmer im Datensatz = es wird gemailt" (keine stille Speicherung).
+
+**Noch offen (künftige Iteration):**
+- **Free/Busy-Abfrage:** Verfügbarkeit aller Teilnehmer vor der Buchung prüfen (wo unterstützt)
+- Einladungen annehmen / ablehnen / tentativ bestätigen (**RSVP**)
 - ARIA-Ankündigung bei Status-Änderungen von Einladungen
 
 ### 7.4 Schnellerstellungs-Dialog

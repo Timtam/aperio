@@ -18,9 +18,17 @@ In the event dialog you can also set:
 - **location** and **description**,
 - a **color label** (with a color dot in the picker),
 - a **reminder** (see [Chapter 06](06-benachrichtigungen.md)),
+- **attendees** (name and/or email address),
 - a **recurrence** (see below).
 
 **Save** creates the event; a live region confirms "Event saved".
+
+> **Notify attendees:** When an event has attendees and the calendar
+> supports server-side scheduling (iCloud, Google, Exchange/Outlook), a
+> **Notify attendees** checkbox appears (on by default). When ticked, the
+> provider sends invitations or updates automatically on save – Aperio
+> itself never sends email. Deleting an event that has attendees likewise
+> triggers a cancellation.
 
 ## Editing, moving and deleting events
 
