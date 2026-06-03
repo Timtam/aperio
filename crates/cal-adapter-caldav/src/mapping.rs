@@ -117,6 +117,7 @@ fn map_event(ev: &icalendar::Event, calendar_id: &str, href: Option<&str>) -> Ca
     };
 
     Ok(Event {
+        send_invitations: false,
         id,
         calendar_id: calendar_id.to_string(),
         title: summary,
@@ -401,6 +402,7 @@ pub fn event_to_ical(event: &Event) -> String {
         reminders: event.reminders.clone(),
         sound: event.sound.clone(),
         attendees: event.attendees.clone(),
+        send_invitations: event.send_invitations,
     };
     // The iCalendar `UID` must be the bare provider UID — NOT our composite
     // `{href}|{uid}` row id. Writing the composite changes the event's UID
@@ -626,6 +628,7 @@ END:VCALENDAR\r
             reminders: Vec::new(),
             sound: None,
             attendees: Vec::new(),
+            send_invitations: false,
         };
         let uid = "abcdef-12345@aperio";
         let body = new_event_to_ical(uid, &event);
@@ -658,6 +661,7 @@ END:VCALENDAR\r
             reminders: Vec::new(),
             sound: None,
             attendees: Vec::new(),
+            send_invitations: false,
         };
         let body = new_event_to_ical("bday-uid", &event);
         assert!(
@@ -820,6 +824,7 @@ END:VCALENDAR\r
             ],
             sound: None,
             attendees: Vec::new(),
+            send_invitations: false,
         };
         let body = new_event_to_ical("round-trip-uid", &event);
         let parsed = parse_calendar_data(&body, "cal-1").unwrap();

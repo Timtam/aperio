@@ -136,6 +136,7 @@ fn to_calendar(home_url: &Url, entry: ResponseEntry) -> Calendar {
     });
 
     Calendar {
+        supports_scheduling: false,
         color_label: None,
         id,
         name: entry

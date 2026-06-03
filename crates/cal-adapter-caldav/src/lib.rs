@@ -856,7 +856,7 @@ impl CalendarFeature for CaldavAdapter {
         }))
     }
 
-    async fn delete_event(&self, event_id: &str) -> CoreResult<()> {
+    async fn delete_event(&self, event_id: &str, _send_cancellations: bool) -> CoreResult<()> {
         // The trait signature only gives us the event id. CalDAV
         // needs the calendar collection URL too — we recover it
         // by re-reading the discovery cache; callers that know

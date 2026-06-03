@@ -1268,6 +1268,7 @@ mod tests {
             reminders,
             sound: None,
             attendees: Vec::new(),
+            send_invitations: false,
             created_at: Utc::now(),
             updated_at: Utc::now(),
             etag: None,

@@ -154,6 +154,7 @@ pub async fn create_event(
     let now = Utc::now();
 
     Ok(Event {
+        send_invitations: false,
         id: uid,
         calendar_id: calendar_url.to_string(),
         title: event.title,
@@ -541,6 +542,7 @@ END:VCALENDAR</c:calendar-data>
             reminders: Vec::new(),
             sound: None,
             attendees: Vec::new(),
+            send_invitations: false,
         }
     }
 
@@ -601,6 +603,7 @@ END:VCALENDAR</c:calendar-data>
             reminders: Vec::new(),
             sound: None,
             attendees: Vec::new(),
+            send_invitations: false,
             created_at: Utc::now(),
             updated_at: Utc::now(),
             etag: Some("\"old-etag\"".into()),
@@ -639,6 +642,7 @@ END:VCALENDAR</c:calendar-data>
             reminders: Vec::new(),
             sound: None,
             attendees: Vec::new(),
+            send_invitations: false,
             created_at: Utc::now(),
             updated_at: Utc::now(),
             etag: Some("\"stale-etag\"".into()),

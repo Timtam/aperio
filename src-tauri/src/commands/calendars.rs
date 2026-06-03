@@ -530,6 +530,10 @@ pub async fn update_event(
         // sees a duplicate they can resolve manually rather than
         // an empty calendar where their event used to live.
         let new_payload = NewEvent {
+            // A cross-calendar move re-creates the event at the target; the
+            // organizer-notify intent isn't carried through this path (a
+            // dedicated "notify on move" decision is future work, DESIGN §7.5).
+            send_invitations: false,
             title: event.title.clone(),
             description: event.description.clone(),
             location: event.location.clone(),
@@ -566,11 +570,13 @@ pub async fn update_event(
         // less-bad failure mode.
         let delete_result = if source_account == LOCAL_ID {
             adapter
-                .delete_event(&event.id)
+                // A cross-calendar move is not a cancellation — the event
+                // still exists at the target, so never email attendees here.
+                .delete_event(&event.id, false)
                 .await
                 .map_err(CommandError::from)
         } else if let Some(ext) = registry.calendar_adapter(&source_account) {
-            ext.delete_event(&event.id)
+            ext.delete_event(&event.id, false)
                 .await
                 .map_err(CommandError::from)
         } else {
@@ -659,6 +665,7 @@ pub async fn delete_event(
     event_log: State<'_, Arc<EventLogWriter>>,
     id: String,
     calendar_id: Option<String>,
+    send_cancellations: Option<bool>,
 ) -> CommandResult<()> {
     // The frontend now passes the parent calendar_id so the registry
     // can route the delete to the right adapter. Older callers
@@ -668,9 +675,13 @@ pub async fn delete_event(
         .as_deref()
         .and_then(|cid| registry.account_for_calendar(cid))
         .unwrap_or_else(|| LOCAL_ID.to_string());
+    // Organizer-side cancellation: only meaningful for external,
+    // scheduling-capable calendars (the frontend gates it on
+    // `supports_scheduling`); defaults off when the caller omits it.
+    let send_cancellations = send_cancellations.unwrap_or(false);
     let is_local = account == LOCAL_ID;
     if is_local {
-        adapter.delete_event(&id).await?;
+        adapter.delete_event(&id, false).await?;
     } else {
         let Some(ext) = registry.calendar_adapter(&account) else {
             return Err(CommandError {
@@ -678,7 +689,7 @@ pub async fn delete_event(
                 message: format!("account '{account}' is not routable"),
             });
         };
-        ext.delete_event(&id).await?;
+        ext.delete_event(&id, send_cancellations).await?;
         if let Some(cid) = &calendar_id {
             let _ = cache.invalidate(&account, SyncScope::Events, cid);
         }
@@ -789,6 +800,7 @@ mod tests {
                     reminders: vec![],
                     sound: None,
                     attendees: vec![],
+                    send_invitations: false,
                 },
             )
             .await

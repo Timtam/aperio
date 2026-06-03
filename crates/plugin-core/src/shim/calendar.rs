@@ -245,6 +245,12 @@ struct CreateEventArgs<'a> {
 }
 
 #[derive(Serialize)]
+struct DeleteEventArgs<'a> {
+    event_id: &'a str,
+    send_cancellations: bool,
+}
+
+#[derive(Serialize)]
 struct GetFreeBusyArgs<'a> {
     emails: Vec<&'a str>,
     range: DateRange,
@@ -286,9 +292,13 @@ impl CalendarFeature for FfiCalendarAdapter {
         call_then_decode(self.vtable.update_event, self.handle_addr, &event).await
     }
 
-    async fn delete_event(&self, event_id: &str) -> Result<()> {
+    async fn delete_event(&self, event_id: &str, send_cancellations: bool) -> Result<()> {
         let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
-        call_for_unit(self.vtable.delete_event, self.handle_addr, &event_id).await
+        let args = DeleteEventArgs {
+            event_id,
+            send_cancellations,
+        };
+        call_for_unit(self.vtable.delete_event, self.handle_addr, &args).await
     }
 
     async fn get_free_busy(&self, emails: &[&str], range: DateRange) -> Result<Vec<FreeBusy>> {
@@ -393,6 +403,7 @@ mod tests {
         let cals = vec![
             Calendar {
                 color_label: None,
+                supports_scheduling: false,
                 id: "cal-1".into(),
                 name: "Calendar One".into(),
                 color: None,
@@ -401,6 +412,7 @@ mod tests {
             },
             Calendar {
                 color_label: None,
+                supports_scheduling: false,
                 id: "cal-2".into(),
                 name: "Calendar Two".into(),
                 color: None,
@@ -545,7 +557,7 @@ mod tests {
     #[tokio::test]
     async fn missing_method_yields_unsupported() {
         let adapter = make_fake_adapter(Some(fake_list_calendars), None);
-        let err = adapter.delete_event("ignored").await.unwrap_err();
+        let err = adapter.delete_event("ignored", false).await.unwrap_err();
         assert!(matches!(err, Error::Unsupported(_)));
     }
 

@@ -186,6 +186,7 @@ pub async fn synthesise_birthday_events(
 fn synthesise_calendar(contact_list_id: &str, list_name: &str) -> Calendar {
     Calendar {
         color_label: None,
+        supports_scheduling: false,
         id: birthday_calendar_id(contact_list_id),
         // English default; the user can re-localise via the
         // existing local-override path (DESIGN.md §6.5) since
@@ -268,6 +269,7 @@ fn events_for_contacts(
                 continue;
             }
             out.push(Event {
+                send_invitations: false,
                 id: format!("aperio-birthday:{}:{}", contact.id, year,),
                 calendar_id: calendar_id.to_string(),
                 title: contact.display_name.clone(),

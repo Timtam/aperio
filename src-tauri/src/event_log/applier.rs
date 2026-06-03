@@ -938,6 +938,7 @@ mod tests {
             reminders: Vec::<Reminder>::new(),
             sound: None,
             attendees: Vec::new(),
+            send_invitations: false,
             created_at: Utc.with_ymd_and_hms(2026, 5, 12, 9, 0, 0).unwrap(),
             updated_at: Utc.with_ymd_and_hms(2026, 5, 12, 9, 0, 0).unwrap(),
             etag: None,
@@ -960,6 +961,7 @@ mod tests {
     fn fixture_calendar(id: &str) -> Calendar {
         Calendar {
             color_label: None,
+            supports_scheduling: false,
             id: id.into(),
             name: "From remote".into(),
             color: None,

@@ -892,7 +892,7 @@ impl CalendarFeature for EwsAdapter {
             .map_err(to_core_error)
     }
 
-    async fn delete_event(&self, event_id: &str) -> CoreResult<()> {
+    async fn delete_event(&self, event_id: &str, _send_cancellations: bool) -> CoreResult<()> {
         api::delete_event(&self.client, event_id)
             .await
             .map_err(to_core_error)

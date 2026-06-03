@@ -289,6 +289,7 @@ mod tests {
             reminders: vec![],
             sound: None,
             attendees: vec![],
+            send_invitations: false,
         }
     }
 
@@ -587,7 +588,7 @@ mod tests {
     fn deleted_event_is_dropped_from_index() {
         let (a, cal, _list) = adapter_with_data();
         let ev = block(a.create_event(&cal, make_event("Standup"))).unwrap();
-        block(a.delete_event(&ev.id)).unwrap();
+        block(a.delete_event(&ev.id, false)).unwrap();
         let hits = a.search_default("standup").unwrap();
         assert!(hits.events.is_empty());
     }

@@ -177,12 +177,22 @@ unsafe extern "C" fn ffi_update_event(h: *mut c_void, a: *const u8, l: usize) ->
     dispatch(h, move |p| async move { p.update_event(event).await })
 }
 
+#[derive(Debug, Deserialize)]
+struct DeleteEventArgs {
+    event_id: String,
+    #[serde(default)]
+    send_cancellations: bool,
+}
+
 unsafe extern "C" fn ffi_delete_event(h: *mut c_void, a: *const u8, l: usize) -> PluginCallResult {
-    let event_id: String = match decode_args(a, l) {
+    let args: DeleteEventArgs = match decode_args(a, l) {
         Ok(v) => v,
         Err(r) => return r,
     };
-    dispatch_unit(h, move |p| async move { p.delete_event(&event_id).await })
+    dispatch_unit(h, move |p| async move {
+        p.delete_event(&args.event_id, args.send_cancellations)
+            .await
+    })
 }
 
 #[derive(Debug, Deserialize)]

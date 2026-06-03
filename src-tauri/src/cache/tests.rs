@@ -60,6 +60,7 @@ fn event(id: &str, start_h: u32, end_h: u32) -> Event {
         reminders: Vec::new(),
         sound: None,
         attendees: Vec::new(),
+        send_invitations: false,
         created_at: Utc.with_ymd_and_hms(2026, 5, 1, 0, 0, 0).unwrap(),
         updated_at: Utc.with_ymd_and_hms(2026, 5, 1, 0, 0, 0).unwrap(),
         etag: Some(format!("etag-{id}")),
@@ -116,6 +117,7 @@ fn contact(id: &str) -> Contact {
 fn calendar(id: &str) -> Calendar {
     Calendar {
         color_label: None,
+        supports_scheduling: false,
         id: id.into(),
         name: format!("Cal {id}"),
         color: None,

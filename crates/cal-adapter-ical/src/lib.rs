@@ -364,6 +364,7 @@ impl CalendarFeature for IcalAdapter {
             color: None,
             read_only: true,
             default_sound: None,
+            supports_scheduling: false,
         }])
     }
 
@@ -405,7 +406,7 @@ impl CalendarFeature for IcalAdapter {
         ))
     }
 
-    async fn delete_event(&self, _event_id: &str) -> Result<()> {
+    async fn delete_event(&self, _event_id: &str, _send_cancellations: bool) -> Result<()> {
         Err(Error::Unsupported(
             "iCal feed accounts are read-only".into(),
         ))
@@ -631,7 +632,7 @@ mod tests {
     #[tokio::test]
     async fn write_operations_return_unsupported() {
         let adapter = IcalAdapter::new(cfg("https://example.com/cal.ics")).unwrap();
-        let err = adapter.delete_event("anything").await.unwrap_err();
+        let err = adapter.delete_event("anything", false).await.unwrap_err();
         assert!(matches!(err, Error::Unsupported(_)));
     }
 

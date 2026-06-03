@@ -41,6 +41,15 @@ pub struct Calendar {
     pub read_only: bool,
     /// Default sound for reminders of all events in this calendar.
     pub default_sound: Option<SoundConfig>,
+    /// True when the backing provider can email attendees about
+    /// invitations / updates / cancellations via *server-side* scheduling
+    /// (no client SMTP): EWS, Google and Microsoft Graph always; CalDAV
+    /// only when the server advertises RFC 6638 auto-scheduling; local /
+    /// iCal never. Gates the "notify attendees" toggle in the UI.
+    /// `#[serde(default)]` keeps older wire payloads + stores (which never
+    /// set it) deserialising as `false`.
+    #[serde(default)]
+    pub supports_scheduling: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -59,6 +68,14 @@ pub struct Event {
     /// Sound override at the event level (section 14.4).
     pub sound: Option<SoundConfig>,
     pub attendees: Vec<String>,
+    /// Transient organizer-side send intent for the pending write: when
+    /// `true`, the adapter asks the provider to email attendees about this
+    /// create/update through server-side scheduling. NOT persisted by any
+    /// store and meaningless on a read — `#[serde(default, skip…)]` keeps it
+    /// `false` and off the wire everywhere except an outbound update, where
+    /// it rides the `Event` JSON across the plugin FFI.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub send_invitations: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     /// Provider ETag / sync tag, used for optimistic-concurrency on push.
@@ -79,6 +96,14 @@ pub struct NewEvent {
     pub reminders: Vec<Reminder>,
     pub sound: Option<SoundConfig>,
     pub attendees: Vec<String>,
+    /// Organizer-side send intent for this create — see [`Event::send_invitations`].
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub send_invitations: bool,
+}
+
+/// serde `skip_serializing_if` predicate: keep a `false` flag off the wire.
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 /// Recurrence rule per RFC 5545 (RRULE).

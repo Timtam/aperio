@@ -886,6 +886,7 @@ mod tests {
             reminders: vec![],
             sound: None,
             attendees: vec![],
+            send_invitations: false,
         };
         let ev = create_event(&state, "primary", new).await.unwrap();
         assert_eq!(ev.id, "abc123");

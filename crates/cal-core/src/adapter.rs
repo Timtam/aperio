@@ -78,7 +78,12 @@ pub trait CalendarFeature: Adapter {
     async fn get_events(&self, calendar_id: &str, range: DateRange) -> Result<Vec<Event>>;
     async fn create_event(&self, calendar_id: &str, event: NewEvent) -> Result<Event>;
     async fn update_event(&self, event: Event) -> Result<Event>;
-    async fn delete_event(&self, event_id: &str) -> Result<()>;
+    /// Delete an event. When `send_cancellations` is `true` AND the event is
+    /// a meeting the connected account organises, scheduling-capable
+    /// providers email attendees a cancellation (EWS `SendToAllAndSaveCopy`,
+    /// CalDAV RFC 6638, Google `sendUpdates=all`). Adapters without
+    /// server-side scheduling ignore the flag.
+    async fn delete_event(&self, event_id: &str, send_cancellations: bool) -> Result<()>;
     async fn get_free_busy(&self, emails: &[&str], range: DateRange) -> Result<Vec<FreeBusy>>;
     fn calendar_color(&self, calendar_id: &str) -> Option<ContainerColor>;
 

@@ -311,7 +311,7 @@ impl CalendarFeature for GoogleAdapter {
             .map_err(to_core_error)
     }
 
-    async fn delete_event(&self, event_id: &str) -> CoreResult<()> {
+    async fn delete_event(&self, event_id: &str, _send_cancellations: bool) -> CoreResult<()> {
         // Aperio's command layer hands us the calendar_id alongside
         // the event_id when it can, but the legacy
         // `delete_event(event_id)` trait method doesn't carry it.

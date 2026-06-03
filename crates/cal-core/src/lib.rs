@@ -4,6 +4,7 @@
 //! depend on `cal-core`, never the other way around.
 
 pub mod adapter;
+pub mod attendee;
 pub mod color;
 pub mod error;
 pub mod reminder;

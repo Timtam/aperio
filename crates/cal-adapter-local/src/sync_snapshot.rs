@@ -128,6 +128,7 @@ impl LocalAdapter {
         for r in rows {
             let (id, name, color, read_only, sound, color_label) = r.map_err(map_sql_err)?;
             out.push(Calendar {
+                supports_scheduling: false,
                 color_label: color_label?.map(ColorLabelId),
                 id: id?,
                 name: name?,
@@ -372,6 +373,7 @@ mod tests {
             reminders: vec![],
             sound: None,
             attendees: vec![],
+            send_invitations: false,
             created_at: now,
             updated_at: now,
             etag: None,
@@ -408,6 +410,7 @@ mod tests {
     fn fake_calendar(id: &str, name: &str) -> Calendar {
         Calendar {
             color_label: None,
+            supports_scheduling: false,
             id: id.into(),
             name: name.into(),
             color: Some(container("#112233")),

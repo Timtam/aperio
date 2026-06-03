@@ -65,6 +65,7 @@ impl LocalAdapter {
             color_label,
             read_only: false,
             default_sound,
+            supports_scheduling: false,
         })
     }
 
@@ -181,6 +182,7 @@ impl LocalAdapter {
             color_label: color_label?.map(ColorLabelId),
             read_only: read_only?,
             default_sound: sound?,
+            supports_scheduling: false,
         }))
     }
 
@@ -270,6 +272,7 @@ impl CalendarFeature for LocalAdapter {
         for r in rows {
             let (id, name, color, read_only, sound, color_label) = r.map_err(map_sql_err)?;
             out.push(Calendar {
+                supports_scheduling: false,
                 id: id?,
                 name: name?,
                 color: color?,
@@ -366,7 +369,11 @@ impl CalendarFeature for LocalAdapter {
         Ok(event)
     }
 
-    async fn delete_event(&self, event_id: &str) -> cal_core::Result<()> {
+    async fn delete_event(
+        &self,
+        event_id: &str,
+        _send_cancellations: bool,
+    ) -> cal_core::Result<()> {
         let conn = self.db().lock().expect("db mutex poisoned");
         let changed = conn
             .execute("DELETE FROM events WHERE id = ?", params![event_id])
@@ -532,6 +539,7 @@ fn persist_new_event(
         .map_err(map_sql_err)?;
 
     Ok(Event {
+        send_invitations: false,
         id: id.to_string(),
         calendar_id: calendar_id.to_string(),
         title: event.title,
@@ -576,6 +584,7 @@ pub(crate) fn row_to_event(row: &rusqlite::Row<'_>) -> cal_core::Result<Event> {
     let recurrence = combine_recurrence(rrule, exceptions)?;
 
     Ok(Event {
+        send_invitations: false,
         id,
         calendar_id,
         title,
@@ -659,6 +668,7 @@ mod tests {
                 reminders: vec![],
                 sound: None,
                 attendees: vec![],
+                send_invitations: false,
             },
         )
         .await
@@ -723,6 +733,7 @@ mod tests {
             reminders: vec![],
             sound: None,
             attendees: vec![],
+            send_invitations: false,
         };
         for h in [0, 5, 24] {
             a.create_event(&cal.id, mk(h)).await.unwrap();
@@ -762,6 +773,7 @@ mod tests {
                 reminders: vec![],
                 sound: None,
                 attendees: vec![],
+                send_invitations: false,
             },
         )
         .await
@@ -782,6 +794,7 @@ mod tests {
                 reminders: vec![],
                 sound: None,
                 attendees: vec![],
+                send_invitations: false,
             },
         )
         .await
@@ -822,6 +835,7 @@ mod tests {
                     reminders: vec![],
                     sound: None,
                     attendees: vec![],
+                    send_invitations: false,
                 },
             )
             .await
@@ -841,7 +855,7 @@ mod tests {
     #[tokio::test]
     async fn delete_event_returns_not_found_when_missing() {
         let a = make_adapter();
-        let err = a.delete_event("does-not-exist").await.unwrap_err();
+        let err = a.delete_event("does-not-exist", false).await.unwrap_err();
         assert!(matches!(err, cal_core::Error::NotFound(_)));
     }
 
@@ -868,6 +882,7 @@ mod tests {
                     reminders: vec![],
                     sound: None,
                     attendees: vec![],
+                    send_invitations: false,
                 },
             )
             .await
@@ -909,6 +924,7 @@ mod tests {
                     reminders: vec![],
                     sound: None,
                     attendees: vec![],
+                    send_invitations: false,
                 },
             )
             .await

@@ -49,6 +49,7 @@ pub struct CalendarListEntry {
 pub fn map_calendar(entry: CalendarListEntry) -> Calendar {
     let color = entry.hex_color.and_then(parse_hex_color);
     Calendar {
+        supports_scheduling: false,
         color_label: None,
         id: entry.id,
         name: entry.name,
@@ -267,6 +268,7 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GraphResult<Option<Eve
     let updated = entry.last_modified_date_time.unwrap_or(created);
 
     Ok(Some(Event {
+        send_invitations: false,
         id: entry.id,
         calendar_id: calendar_id.to_string(),
         title: entry.subject.unwrap_or_default(),
@@ -1403,6 +1405,7 @@ mod tests {
             }],
             sound: None,
             attendees: Vec::new(),
+            send_invitations: false,
         };
         let body = new_event_to_body(&new).unwrap();
         let json = serde_json::to_value(&body).unwrap();

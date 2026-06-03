@@ -306,7 +306,7 @@ impl CalendarFeature for MicrosoftGraphAdapter {
             .map_err(to_core_error)
     }
 
-    async fn delete_event(&self, event_id: &str) -> CoreResult<()> {
+    async fn delete_event(&self, event_id: &str, _send_cancellations: bool) -> CoreResult<()> {
         // Graph's event-id is mailbox-wide unique — no calendar
         // walk required, unlike Google.
         api::delete_event(&self.state, event_id)

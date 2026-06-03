@@ -52,6 +52,7 @@ pub fn map_calendar(entry: CalendarListEntry) -> Calendar {
         Some("reader") | Some("freeBusyReader")
     );
     Calendar {
+        supports_scheduling: false,
         color_label: None,
         id: entry.id,
         name: entry.summary,
@@ -262,6 +263,7 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GoogleResult<Option<Ev
         .unwrap_or_default();
 
     Ok(Some(Event {
+        send_invitations: false,
         id: entry.id,
         calendar_id: calendar_id.to_string(),
         title: entry.summary.unwrap_or_default(),
@@ -603,6 +605,7 @@ mod tests {
             }],
             sound: None,
             attendees: vec![],
+            send_invitations: false,
         };
         let body = new_event_to_body(&new);
         let json = serde_json::to_value(&body).unwrap();
@@ -629,6 +632,7 @@ mod tests {
             reminders: vec![],
             sound: None,
             attendees: vec![],
+            send_invitations: false,
         };
         let body = new_event_to_body(&new);
         let json = serde_json::to_value(&body).unwrap();
@@ -658,6 +662,7 @@ mod tests {
             reminders: vec![],
             sound: None,
             attendees: vec![],
+            send_invitations: false,
             created_at: Utc::now(),
             updated_at: Utc::now(),
             etag: None,
@@ -696,6 +701,7 @@ mod tests {
             ],
             sound: None,
             attendees: vec![],
+            send_invitations: false,
         };
         let body = new_event_to_body(&new);
         let json = serde_json::to_value(&body).unwrap();

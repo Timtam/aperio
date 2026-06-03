@@ -960,6 +960,7 @@ mod tests {
             reminders: vec![],
             sound: None,
             attendees: vec![],
+            send_invitations: false,
         };
         let ev = create_event(&state, "cal-1", new).await.unwrap();
         assert_eq!(ev.id, "ev1");

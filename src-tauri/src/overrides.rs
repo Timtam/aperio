@@ -415,6 +415,7 @@ mod tests {
         let mut cals = vec![
             cal_core::Calendar {
                 color_label: None,
+                supports_scheduling: false,
                 id: "ical:42".into(),
                 name: "schulferien-sachsen-anhalt".into(),
                 color: None,
@@ -423,6 +424,7 @@ mod tests {
             },
             cal_core::Calendar {
                 color_label: None,
+                supports_scheduling: false,
                 id: "local-1".into(),
                 name: "Persönlich".into(),
                 color: None,
@@ -461,6 +463,7 @@ mod tests {
         let mut cals = vec![
             cal_core::Calendar {
                 color_label: None,
+                supports_scheduling: false,
                 id: "google:work".into(),
                 name: "Work".into(),
                 color: Some(cal_core::ContainerColor::native("#4285f4")),
@@ -469,6 +472,7 @@ mod tests {
             },
             cal_core::Calendar {
                 color_label: None,
+                supports_scheduling: false,
                 id: "google:other".into(),
                 name: "Other".into(),
                 color: None,

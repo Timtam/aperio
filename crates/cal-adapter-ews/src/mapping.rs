@@ -147,6 +147,7 @@ pub fn to_calendar(folder: ParsedFolder, read_only: bool) -> Calendar {
     // rename) harvest a fresh one at write time instead — see
     // `api::rename_calendar`.
     Calendar {
+        supports_scheduling: false,
         color_label: None,
         id: folder.folder_id,
         name: if folder.display_name.is_empty() {
@@ -1283,6 +1284,7 @@ pub fn to_event(item: ParsedItem, calendar_id: &str) -> EwsResult<Event> {
     });
 
     Ok(Event {
+        send_invitations: false,
         id,
         calendar_id: calendar_id.to_string(),
         title: item.subject,
@@ -2965,6 +2967,7 @@ mod tests {
             reminders: Vec::new(),
             sound: None,
             attendees: Vec::new(),
+            send_invitations: false,
         }
     }
 
@@ -3144,6 +3147,7 @@ mod tests {
             reminders: Vec::new(),
             sound: None,
             attendees: Vec::new(),
+            send_invitations: false,
             created_at: "2026-05-19T00:00:00Z".parse().unwrap(),
             updated_at: "2026-05-19T00:00:00Z".parse().unwrap(),
             etag: Some("CK".into()),
