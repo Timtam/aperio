@@ -156,3 +156,14 @@ lto = true
 strip = true
 opt-level = 3
 panic = "abort"
+
+# Size-optimise dependency crates — the bulk of each plugin cdylib is the
+# statically-linked tokio / reqwest / rustls (+ ring) / std stack, and every
+# one of the 17 plugins carries its own copy. `"*"` matches every dependency
+# but NOT a workspace member (Cargo reference → Profiles → Overrides), so our
+# own code (the host binary, the adapters) keeps `[profile.release]`'s
+# opt-level = 3 and its hot paths (recurrence expansion, rendering) stay
+# speed-optimised. The deps are I/O-bound glue, so size over speed there is
+# a free win.
+[profile.release.package."*"]
+opt-level = "s"
