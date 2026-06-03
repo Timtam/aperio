@@ -1057,6 +1057,57 @@ button[aria-disabled='true'] {
   align-items: center;
 }
 
+/* Attendee free/busy check (DESIGN.md §7.3). A button that queries the
+ * provider's availability + a per-attendee busy/free list. */
+.availability__check {
+  align-self: flex-start;
+}
+
+.availability__results {
+  margin-top: 0.5rem;
+}
+
+.availability__summary {
+  margin: 0 0 0.35rem;
+  font-weight: 600;
+}
+
+.availability__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.availability__item {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+}
+
+.availability__item--busy {
+  background: color-mix(in srgb, var(--color-danger) 14%, transparent);
+}
+
+.availability__item--busy .availability__status {
+  color: var(--color-danger);
+  font-weight: 600;
+}
+
+.availability__item--free .availability__status {
+  color: var(--color-success, #2e7d32);
+}
+
+.availability__email {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Subtasks editor inside TaskDialog (DESIGN.md §9.9). Inline list of
  * existing children with a marker / title / remove triplet per row,
  * plus an "add" input below. Mutations apply immediately, the rest

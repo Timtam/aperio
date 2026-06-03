@@ -769,6 +769,16 @@
         "removed": "{{name}} entfernt.",
         "alreadyOnList": "Steht bereits auf der Teilnehmerliste."
       },
+      "availability": {
+        "check": "Verfügbarkeit prüfen",
+        "checking": "Wird geprüft …",
+        "allFree": "Alle Teilnehmer sind zu dieser Zeit frei.",
+        "someBusy_one": "{{count}} Teilnehmer ist zu dieser Zeit beschäftigt.",
+        "someBusy_other": "{{count}} Teilnehmer sind zu dieser Zeit beschäftigt.",
+        "busy": "Beschäftigt",
+        "free": "Frei",
+        "unknown": "Unbekannt"
+      },
       "noColorLabel": "(Kein Label)",
       "recurrence": {
         "label": "Wiederholung",
