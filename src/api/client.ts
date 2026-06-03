@@ -16,6 +16,7 @@ import type {
   ContactList,
   ContactPhoto,
   FailedPluginInfo,
+  FreeBusy,
   MemberRight,
   NewContact,
   NewEvent,
@@ -126,6 +127,24 @@ export const deleteEventById = (
 
 export const getEventById = (id: string) =>
   invoke<CalendarEvent | null>('get_event_by_id', { id });
+
+/** Look up attendee availability through the account that owns `calendarId`.
+ *  Best-effort: returns `[]` for local calendars or when the provider can't
+ *  answer (no error). `rangeStart`/`rangeEnd` are ISO 8601 strings. */
+export const queryFreeBusy = (
+  calendarId: string,
+  emails: string[],
+  rangeStart: string,
+  rangeEnd: string,
+) =>
+  invoke<FreeBusy[]>('query_free_busy', {
+    request: {
+      calendar_id: calendarId,
+      emails,
+      range_start: rangeStart,
+      range_end: rangeEnd,
+    },
+  });
 
 export const getTaskById = (id: string) =>
   invoke<Task | null>('get_task_by_id', { id });

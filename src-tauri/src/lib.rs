@@ -372,6 +372,7 @@ pub fn run() {
             commands::delete_event,
             commands::add_event_exdate,
             commands::get_event_by_id,
+            commands::query_free_busy,
             commands::get_task_by_id,
             commands::list_task_lists,
             commands::create_task_list,
