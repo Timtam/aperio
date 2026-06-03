@@ -118,6 +118,12 @@ export interface Calendar {
    *  any consumer reading a Calendar from a pre-capabilities
    *  snapshot still parses. Absent → treat as full support. */
   recurrence_capabilities?: RecurrenceCapabilities;
+  /** True when the owning provider can email attendees about
+   *  invitations/updates/cancellations via server-side scheduling (EWS,
+   *  Google, Graph always; CalDAV/iCloud only when the server advertises
+   *  RFC 6638). Gates the "notify attendees" toggle in the event dialog.
+   *  Absent → treat as unsupported. */
+  supports_scheduling?: boolean;
 }
 
 export interface SoundConfig {
@@ -156,6 +162,9 @@ export interface CalendarEvent {
   reminders: Reminder[];
   sound: SoundConfig | null;
   attendees: string[];
+  /** Transient organizer-side send intent for the next update: when true,
+   *  the adapter asks the provider to email attendees. Not persisted. */
+  send_invitations?: boolean;
   created_at: string;
   updated_at: string;
   etag: string | null;
@@ -173,6 +182,8 @@ export interface NewEvent {
   reminders: Reminder[];
   sound: SoundConfig | null;
   attendees: string[];
+  /** Organizer-side send intent for this create — see CalendarEvent. */
+  send_invitations?: boolean;
 }
 
 export interface TaskList {

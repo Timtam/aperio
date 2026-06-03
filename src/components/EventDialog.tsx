@@ -178,6 +178,10 @@ export function EventDialog({
   const [keepRemindersAsDefault, setKeepRemindersAsDefault] = useState(
     remindersWereFromDefault,
   );
+  // "Notify attendees": defaults ON. Only meaningful (and only shown) when
+  // the calendar supports server-side scheduling AND the event has
+  // attendees; on submit we gate the wire flag on those too.
+  const [notifyAttendees, setNotifyAttendees] = useState(true);
 
   // When editing a single occurrence of a recurring series the user
   // can apply changes to just this occurrence (creates an EXDATE +
@@ -196,6 +200,7 @@ export function EventDialog({
       // Re-arm the "keep defaults out of the wire" flag every time
       // the dialog (re-)opens with a fresh event.
       setKeepRemindersAsDefault(remindersWereFromDefault);
+      setNotifyAttendees(true);
     }
   }, [isOpen, initialState, remindersWereFromDefault]);
 
@@ -267,6 +272,15 @@ export function EventDialog({
           ? []
           : form.reminders;
 
+        // Notify attendees: gated identically to the toggle's visibility —
+        // only when the target calendar can schedule server-side AND there
+        // are attendees to notify.
+        const targetCal = calendars.find((c) => c.id === form.calendarId);
+        const sendInvitations =
+          !!targetCal?.supports_scheduling &&
+          form.attendees.length > 0 &&
+          notifyAttendees;
+
         if (isEdit && event) {
           const seriesId = seriesIdOf(event);
 
@@ -290,6 +304,7 @@ export function EventDialog({
                 reminders: remindersForWire,
                 sound: null,
                 attendees: form.attendees,
+                send_invitations: sendInvitations,
               });
               announce(
                 t('dialogs.event.occurrenceUpdated', { title: trimmedTitle }),
@@ -313,6 +328,7 @@ export function EventDialog({
             color_label: form.colorLabel,
             reminders: remindersForWire,
             attendees: form.attendees,
+            send_invitations: sendInvitations,
           };
           // Thread the *original* calendar_id so the backend can
           // tell an in-place edit (Save with the picker untouched)
@@ -339,6 +355,7 @@ export function EventDialog({
             reminders: remindersForWire,
             sound: null,
             attendees: form.attendees,
+            send_invitations: sendInvitations,
           });
           // Remember the calendar for the next new-event open. Only
           // for *creates*: edits shouldn't bias future picks, since
@@ -366,6 +383,8 @@ export function EventDialog({
       isOccurrence,
       editScope,
       keepRemindersAsDefault,
+      calendars,
+      notifyAttendees,
       announce,
       onClose,
       t,
@@ -585,6 +604,19 @@ export function EventDialog({
             labelledBy={attendeesLabelId}
           />
         </div>
+
+        {calendars.find((c) => c.id === form.calendarId)
+          ?.supports_scheduling &&
+          form.attendees.length > 0 && (
+            <label className="form__field form__field--inline">
+              <input
+                type="checkbox"
+                checked={notifyAttendees}
+                onChange={(e) => setNotifyAttendees(e.target.checked)}
+              />
+              <span>{t('dialogs.event.fields.notifyAttendees')}</span>
+            </label>
+          )}
 
         <label className="form__field">
           <span className="form__label">

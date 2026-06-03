@@ -757,6 +757,7 @@
         "location": "Location",
         "description": "Description",
         "attendees": "Attendees",
+        "notifyAttendees": "Notify attendees",
         "colorLabel": "Color label"
       },
       "attendees": {

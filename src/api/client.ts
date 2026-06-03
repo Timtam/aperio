@@ -113,10 +113,15 @@ export const updateEvent = (
  *  event lives on an external account. Omitting it falls back to
  *  "assume local", which is only correct for events the user just
  *  created locally. */
-export const deleteEventById = (id: string, calendarId?: string) =>
+export const deleteEventById = (
+  id: string,
+  calendarId?: string,
+  sendCancellations?: boolean,
+) =>
   invoke<void>('delete_event', {
     id,
     calendarId: calendarId ?? null,
+    sendCancellations: sendCancellations ?? null,
   });
 
 export const getEventById = (id: string) =>

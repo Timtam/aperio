@@ -116,7 +116,13 @@ export function useChipContextMenu(): ChipContextMenuActions {
         // keyboard handlers; keeping the menu simple is intentional.
         const id = seriesIdOf(event);
         try {
-          await deleteEventById(id, event.calendar_id);
+          // Send cancellations when the deleted event has attendees;
+          // scheduling-capable providers email them, the rest ignore it.
+          await deleteEventById(
+            id,
+            event.calendar_id,
+            event.attendees.length > 0,
+          );
           announce(t('dialogs.event.deleted', { title: event.title }));
           invalidateData();
         } catch (err) {

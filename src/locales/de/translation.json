@@ -757,6 +757,7 @@
         "location": "Ort",
         "description": "Beschreibung",
         "attendees": "Teilnehmer",
+        "notifyAttendees": "Teilnehmer benachrichtigen",
         "colorLabel": "Farb-Label"
       },
       "attendees": {
