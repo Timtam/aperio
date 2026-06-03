@@ -11,7 +11,8 @@
 //! (`tasks` API, not Calendar API) land in Phase 6d.2.
 
 use cal_core::{
-    Calendar, ColorSource, ContainerColor, Event, EventRecurrence, NewEvent, Reminder, ReminderKind,
+    AttendeeResponse, AttendeeStatus, Calendar, ColorSource, ContainerColor, Event,
+    EventRecurrence, NewEvent, Reminder, ReminderKind,
 };
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
@@ -151,6 +152,31 @@ pub struct EventEntry {
     /// are out of Aperio's UI scope today.
     #[serde(default)]
     pub reminders: Option<EventReminders>,
+    /// Invitees + their RSVP state. Empty on a non-meeting event.
+    #[serde(default)]
+    pub attendees: Vec<EventAttendeeRead>,
+    /// The meeting organizer. Present on meetings; carries the
+    /// organizer's email (and a `self` flag we don't need).
+    #[serde(default)]
+    pub organizer: Option<EventOrganizer>,
+}
+
+/// One attendee row on a read Google event (`event.attendees[]`).
+#[derive(Debug, Deserialize)]
+pub struct EventAttendeeRead {
+    #[serde(default)]
+    pub email: Option<String>,
+    #[serde(default, rename = "displayName")]
+    pub display_name: Option<String>,
+    /// `needsAction` | `declined` | `tentative` | `accepted`.
+    #[serde(default, rename = "responseStatus")]
+    pub response_status: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct EventOrganizer {
+    #[serde(default)]
+    pub email: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -264,6 +290,31 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GoogleResult<Option<Ev
         })
         .unwrap_or_default();
 
+    // Attendees: keep the editable flat list ("Name <email>" / bare
+    // email) AND the per-attendee RSVP state.
+    let mut attendees = Vec::new();
+    let mut attendee_responses = Vec::new();
+    for a in entry.attendees {
+        let Some(email) = a.email.filter(|e| !e.trim().is_empty()) else {
+            continue;
+        };
+        let name = a.display_name.filter(|n| !n.trim().is_empty());
+        attendees.push(format_attendee(name.as_deref(), &email));
+        attendee_responses.push(AttendeeResponse {
+            status: a
+                .response_status
+                .as_deref()
+                .map(google_status)
+                .unwrap_or_default(),
+            name,
+            email,
+        });
+    }
+    let organizer = entry
+        .organizer
+        .and_then(|o| o.email)
+        .filter(|e| !e.trim().is_empty());
+
     Ok(Some(Event {
         send_invitations: false,
         id: entry.id,
@@ -278,14 +329,33 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GoogleResult<Option<Ev
         color_label: None,
         reminders,
         sound: None,
-        attendees: Vec::new(),
+        attendees,
         created_at: created,
         updated_at: updated,
         etag: entry.etag,
-        // Populated by the read-side parse (R-3); empty placeholder here.
-        organizer: None,
-        attendee_responses: Vec::new(),
+        organizer,
+        attendee_responses,
     }))
+}
+
+/// Map Google's `responseStatus` string to the normalised RSVP enum.
+fn google_status(s: &str) -> AttendeeStatus {
+    match s {
+        "accepted" => AttendeeStatus::Accepted,
+        "declined" => AttendeeStatus::Declined,
+        "tentative" => AttendeeStatus::Tentative,
+        _ => AttendeeStatus::NeedsAction,
+    }
+}
+
+/// Render an attendee for the editable flat list: `"Name <email>"` when
+/// a distinct display name exists, else the bare email — matching the
+/// format the AttendeePicker and the write path use.
+fn format_attendee(name: Option<&str>, email: &str) -> String {
+    match name {
+        Some(n) if n.trim() != email => format!("{} <{}>", n.trim(), email),
+        _ => email.to_string(),
+    }
 }
 
 fn reminder_from_override(o: ReminderOverride) -> Option<Reminder> {
@@ -526,6 +596,34 @@ mod tests {
         assert!(!ev.all_day);
         assert_eq!(ev.etag.as_deref(), Some("\"123\""));
         assert!(ev.recurrence.is_none());
+    }
+
+    #[test]
+    fn map_event_reads_attendees_and_organizer() {
+        let raw = r#"{
+            "id": "ev-mtg",
+            "summary": "Planning",
+            "start": { "dateTime": "2026-05-25T10:00:00Z" },
+            "end":   { "dateTime": "2026-05-25T11:00:00Z" },
+            "organizer": { "email": "boss@example.com", "self": false },
+            "attendees": [
+              { "email": "boss@example.com", "displayName": "The Boss", "responseStatus": "accepted" },
+              { "email": "me@example.com", "responseStatus": "needsAction" },
+              { "email": "skeptic@example.com", "responseStatus": "declined" }
+            ]
+        }"#;
+        let entry: EventEntry = serde_json::from_str(raw).unwrap();
+        let ev = map_event(entry, "primary").unwrap().unwrap();
+        assert_eq!(ev.organizer.as_deref(), Some("boss@example.com"));
+        // Flat editable list: "Name <email>" when named, bare otherwise.
+        assert_eq!(ev.attendees[0], "The Boss <boss@example.com>");
+        assert_eq!(ev.attendees[1], "me@example.com");
+        // Per-attendee RSVP state.
+        assert_eq!(ev.attendee_responses.len(), 3);
+        assert_eq!(ev.attendee_responses[0].status, AttendeeStatus::Accepted);
+        assert_eq!(ev.attendee_responses[1].status, AttendeeStatus::NeedsAction);
+        assert_eq!(ev.attendee_responses[2].status, AttendeeStatus::Declined);
+        assert_eq!(ev.attendee_responses[0].name.as_deref(), Some("The Boss"));
     }
 
     #[test]
