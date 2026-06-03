@@ -49,7 +49,9 @@ pub struct CalendarListEntry {
 pub fn map_calendar(entry: CalendarListEntry) -> Calendar {
     let color = entry.hex_color.and_then(parse_hex_color);
     Calendar {
-        supports_scheduling: false,
+        // Graph always sends invitations when attendees are present in the
+        // body (no per-request suppress) — see EventWriteBody::attendees.
+        supports_scheduling: true,
         color_label: None,
         id: entry.id,
         name: entry.name,
@@ -513,6 +515,45 @@ pub struct EventWriteBody {
     pub reminder_minutes_before_start: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub recurrence: Option<RecurrenceObject>,
+    /// Microsoft Graph QUIRK: putting attendees in the body makes Graph
+    /// EMAIL them on create/update — there is no per-request suppress. So we
+    /// write this ONLY when the user opted to notify; declining means Graph
+    /// stores no attendee list (documented limitation).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub attendees: Vec<GraphAttendeeWrite>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GraphAttendeeWrite {
+    #[serde(rename = "emailAddress")]
+    pub email_address: GraphEmailAddress,
+    #[serde(rename = "type")]
+    pub attendee_type: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GraphEmailAddress {
+    pub address: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+/// Map the flat attendee list to Graph attendee objects — but only when
+/// `notify` is set (see the quirk on [`EventWriteBody::attendees`]).
+fn attendees_to_write(attendees: &[String], notify: bool) -> Vec<GraphAttendeeWrite> {
+    if !notify {
+        return Vec::new();
+    }
+    attendees
+        .iter()
+        .filter_map(|entry| {
+            let (name, address) = cal_core::attendee::parse(entry);
+            (!address.is_empty()).then_some(GraphAttendeeWrite {
+                email_address: GraphEmailAddress { address, name },
+                attendee_type: "required".into(),
+            })
+        })
+        .collect()
 }
 
 #[derive(Debug, Serialize)]
@@ -556,6 +597,7 @@ pub fn new_event_to_body(new: &NewEvent) -> GraphResult<EventWriteBody> {
             Some(r) => Some(rrule_to_recurrence(&r.rrule, new.start)?),
             None => None,
         },
+        attendees: attendees_to_write(&new.attendees, new.send_invitations),
     };
     Ok(body)
 }
@@ -580,6 +622,7 @@ pub fn event_to_body(ev: &Event) -> GraphResult<EventWriteBody> {
             Some(r) => Some(rrule_to_recurrence(&r.rrule, ev.start)?),
             None => None,
         },
+        attendees: attendees_to_write(&ev.attendees, ev.send_invitations),
     })
 }
 
@@ -1415,6 +1458,38 @@ mod tests {
         assert_eq!(json["recurrence"]["pattern"]["type"], "weekly");
         assert_eq!(json["recurrence"]["pattern"]["daysOfWeek"][0], "monday");
         assert_eq!(json["location"]["displayName"], "Studio");
+        // No attendees written when not notifying.
+        assert!(json.get("attendees").is_none());
+    }
+
+    #[test]
+    fn attendees_written_only_when_notifying() {
+        let mut new = NewEvent {
+            title: "Review".into(),
+            description: None,
+            location: None,
+            start: Utc.with_ymd_and_hms(2026, 5, 25, 10, 0, 0).unwrap(),
+            end: Utc.with_ymd_and_hms(2026, 5, 25, 11, 0, 0).unwrap(),
+            all_day: false,
+            recurrence: None,
+            color_label: None,
+            reminders: Vec::new(),
+            sound: None,
+            attendees: vec!["Alice <alice@example.com>".into()],
+            send_invitations: true,
+        };
+        let json = serde_json::to_value(new_event_to_body(&new).unwrap()).unwrap();
+        assert_eq!(
+            json["attendees"][0]["emailAddress"]["address"],
+            "alice@example.com"
+        );
+        assert_eq!(json["attendees"][0]["emailAddress"]["name"], "Alice");
+        assert_eq!(json["attendees"][0]["type"], "required");
+
+        // Same attendees, notify OFF → Graph would email them, so we omit.
+        new.send_invitations = false;
+        let json = serde_json::to_value(new_event_to_body(&new).unwrap()).unwrap();
+        assert!(json.get("attendees").is_none());
     }
 
     // ── Microsoft To Do tests ─────────────────────────────────────────
