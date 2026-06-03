@@ -235,6 +235,79 @@ pub fn find_items_in_range(
     wrap(&body)
 }
 
+/// SOAP body for `GetUserAvailabilityRequest` — query the free/busy
+/// schedule of one or more mailboxes over a time window.
+///
+/// EWS interprets the `TimeWindow` start/end in the time zone the
+/// request supplies via `<t:TimeZone>`, and stamps the returned
+/// `CalendarEvent` times in that **same** zone. We pin a zero-bias
+/// zone whose daylight offset is also zero (a no-op DST transition),
+/// so both the window we send and the busy blocks we get back are
+/// plain UTC — the caller formats `start`/`end` without a trailing
+/// `Z` and re-attaches `Utc` on parse.
+///
+/// `RequestedView="Detailed"` asks for the per-event
+/// `CalendarEventArray` (each block's `StartTime`/`EndTime`/`BusyType`)
+/// rather than the merged free/busy bitmap, so we can surface exact
+/// busy intervals.
+///
+/// Each requested address becomes one `<t:MailboxData>`; the
+/// response's `FreeBusyResponseArray` returns one `FreeBusyResponse`
+/// per mailbox **in the same order** (the address is not echoed back),
+/// so the parser maps results to addresses by position.
+pub fn get_user_availability(emails: &[&str], start: DateTime<Utc>, end: DateTime<Utc>) -> String {
+    // Naive (no `Z`): availability times are relative to the request's
+    // time zone, which we pin to UTC below.
+    let start_naive = start.format("%Y-%m-%dT%H:%M:%S").to_string();
+    let end_naive = end.format("%Y-%m-%dT%H:%M:%S").to_string();
+    let mut mailboxes = String::new();
+    for email in emails {
+        mailboxes.push_str(&format!(
+            r#"        <t:MailboxData>
+          <t:Email>
+            <t:Address>{}</t:Address>
+          </t:Email>
+          <t:AttendeeType>Required</t:AttendeeType>
+          <t:ExcludeConflicts>false</t:ExcludeConflicts>
+        </t:MailboxData>
+"#,
+            escape_xml(email),
+        ));
+    }
+    let body = format!(
+        r#"    <m:GetUserAvailabilityRequest>
+      <t:TimeZone>
+        <t:Bias>0</t:Bias>
+        <t:StandardTime>
+          <t:Bias>0</t:Bias>
+          <t:Time>00:00:00</t:Time>
+          <t:DayOrder>1</t:DayOrder>
+          <t:Month>11</t:Month>
+          <t:DayOfWeek>Sunday</t:DayOfWeek>
+        </t:StandardTime>
+        <t:DaylightTime>
+          <t:Bias>0</t:Bias>
+          <t:Time>00:00:00</t:Time>
+          <t:DayOrder>2</t:DayOrder>
+          <t:Month>3</t:Month>
+          <t:DayOfWeek>Sunday</t:DayOfWeek>
+        </t:DaylightTime>
+      </t:TimeZone>
+      <m:MailboxDataArray>
+{mailboxes}      </m:MailboxDataArray>
+      <t:FreeBusyViewOptions>
+        <t:TimeWindow>
+          <t:StartTime>{start_naive}</t:StartTime>
+          <t:EndTime>{end_naive}</t:EndTime>
+        </t:TimeWindow>
+        <t:MergedFreeBusyIntervalInMinutes>30</t:MergedFreeBusyIntervalInMinutes>
+        <t:RequestedView>Detailed</t:RequestedView>
+      </t:FreeBusyViewOptions>
+    </m:GetUserAvailabilityRequest>"#,
+    );
+    wrap(&body)
+}
+
 /// Look for a SOAP fault in the response body and surface it as
 /// `EwsError::Soap` with the structured EWS code. Returns Ok(()) if
 /// the body is a non-fault response — the caller continues parsing
@@ -875,6 +948,25 @@ mod tests {
         // Opt-out → silent store, no mail leaves the server.
         assert!(create_calendar_item("F", None, "<t:CalendarItem/>", false)
             .contains(r#"SendMeetingInvitations="SendToNone""#));
+    }
+
+    #[test]
+    fn get_user_availability_carries_mailboxes_window_and_detailed_view() {
+        let body = get_user_availability(
+            &["alice@example.com", "bob@example.com"],
+            "2026-06-01T00:00:00Z".parse().unwrap(),
+            "2026-06-02T00:00:00Z".parse().unwrap(),
+        );
+        assert!(body.contains("GetUserAvailabilityRequest"));
+        // One MailboxData per requested address.
+        assert!(body.contains("<t:Address>alice@example.com</t:Address>"));
+        assert!(body.contains("<t:Address>bob@example.com</t:Address>"));
+        // The window goes out naive (no trailing Z) — the request's
+        // zero-bias TimeZone makes those times UTC.
+        assert!(body.contains("<t:StartTime>2026-06-01T00:00:00</t:StartTime>"));
+        assert!(body.contains("<t:EndTime>2026-06-02T00:00:00</t:EndTime>"));
+        // Detailed view → per-event CalendarEventArray in the response.
+        assert!(body.contains("<t:RequestedView>Detailed</t:RequestedView>"));
     }
 
     #[test]

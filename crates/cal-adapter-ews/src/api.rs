@@ -16,7 +16,7 @@
 //! whose `Content-Type` isn't `text/xml; charset=utf-8`, so we set it
 //! explicitly even though reqwest would default to no header.
 
-use cal_core::{Calendar, Event, NewEvent};
+use cal_core::{Calendar, DateRange, Event, FreeBusy, NewEvent};
 use chrono::{DateTime, Utc};
 use reqwest::header::{HeaderValue, CONTENT_TYPE};
 
@@ -25,13 +25,13 @@ use crate::error::{EwsError, EwsResult};
 use crate::mapping::{
     decode_event_id, encode_event_id, event_to_update_field_xml, new_event_to_calendar_item_xml,
     parse_find_folder_response, parse_find_item_response, parse_first_item_id,
-    parse_sync_folder_items_counts, parse_sync_folder_items_response, split_calendar_id,
-    to_calendar, to_event, DecodedEventId, EventIdKind, ParsedItem, SyncChange,
+    parse_get_user_availability, parse_sync_folder_items_counts, parse_sync_folder_items_response,
+    split_calendar_id, to_calendar, to_event, DecodedEventId, EventIdKind, ParsedItem, SyncChange,
 };
 use crate::soap::{
     check_for_fault, create_calendar_item, delete_calendar_item, find_calendar_folders,
-    find_items_in_range, get_recurring_master, sync_folder_items, sync_folder_items_idonly,
-    update_calendar_item, update_folder_displayname,
+    find_items_in_range, get_recurring_master, get_user_availability, sync_folder_items,
+    sync_folder_items_idonly, update_calendar_item, update_folder_displayname,
 };
 
 /// State carried by the adapter — endpoint + credentials + reqwest
@@ -68,6 +68,22 @@ impl EwsClient {
     /// through the same client without duplicating the HTTP +
     /// fault-check plumbing.
     pub(crate) async fn post_soap(&self, body: String) -> EwsResult<String> {
+        let text = self.post_soap_raw(body).await?;
+        check_for_fault(&text)?;
+        Ok(text)
+    }
+
+    /// Like [`post_soap`] but **without** the [`check_for_fault`] pass.
+    ///
+    /// Used by `GetUserAvailability`, where a per-mailbox
+    /// `<m:ResponseMessage ResponseClass="Error">` (an attendee we
+    /// can't resolve or aren't permitted to see) is an expected,
+    /// partial outcome that must NOT abort the whole free/busy query —
+    /// `check_for_fault` bails on the first such message, which is
+    /// exactly the wrong behaviour here. The availability parser
+    /// instead degrades that one mailbox to "no data". Genuine
+    /// transport faults still surface via the HTTP status check below.
+    pub(crate) async fn post_soap_raw(&self, body: String) -> EwsResult<String> {
         let auth = basic_auth_header(&self.credentials)?;
         tracing::debug!(
             target: "cal_adapter_ews::soap",
@@ -106,7 +122,6 @@ impl EwsClient {
                 },
             });
         }
-        check_for_fault(&text)?;
         Ok(text)
     }
 }
@@ -672,6 +687,29 @@ pub async fn rename_calendar(
     let envelope = update_folder_displayname(&folder_id, change_key.as_deref(), new_name);
     client.post_soap(envelope).await?;
     Ok(())
+}
+
+/// Query the free/busy schedule of `emails` over `range` via
+/// `GetUserAvailability`.
+///
+/// Returns one [`FreeBusy`] per requested address, in request order;
+/// a mailbox we can't resolve or aren't permitted to see degrades to
+/// an empty slot list rather than failing the whole call (so adding
+/// one external attendee never blanks the availability of the rest).
+/// We send the body through [`EwsClient::post_soap_raw`] — bypassing
+/// the per-message fault check — precisely so those partial errors
+/// survive into the tolerant parser.
+pub async fn query_free_busy(
+    client: &EwsClient,
+    emails: &[&str],
+    range: DateRange,
+) -> EwsResult<Vec<FreeBusy>> {
+    if emails.is_empty() {
+        return Ok(Vec::new());
+    }
+    let envelope = get_user_availability(emails, range.start, range.end);
+    let xml = client.post_soap_raw(envelope).await?;
+    parse_get_user_availability(&xml, emails)
 }
 
 /// Resolve the current ChangeKey for `folder_id` via FindFolder. The
@@ -1525,5 +1563,86 @@ mod tests {
         rename_calendar(&client_for(&server), "FOLDER-ID", "Renamed")
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn query_free_busy_sends_mailboxes_and_parses_busy_blocks() {
+        let mut server = Server::new_async().await;
+        let body = r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body>
+    <m:GetUserAvailabilityResponse>
+      <m:FreeBusyResponseArray>
+        <m:FreeBusyResponse>
+          <m:ResponseMessage ResponseClass="Success">
+            <m:ResponseCode>NoError</m:ResponseCode>
+          </m:ResponseMessage>
+          <m:FreeBusyView>
+            <t:FreeBusyViewType>Detailed</t:FreeBusyViewType>
+            <t:CalendarEventArray>
+              <t:CalendarEvent>
+                <t:StartTime>2026-06-01T09:00:00</t:StartTime>
+                <t:EndTime>2026-06-01T10:00:00</t:EndTime>
+                <t:BusyType>Busy</t:BusyType>
+              </t:CalendarEvent>
+            </t:CalendarEventArray>
+          </m:FreeBusyView>
+        </m:FreeBusyResponse>
+      </m:FreeBusyResponseArray>
+    </m:GetUserAvailabilityResponse>
+  </s:Body>
+</s:Envelope>"#;
+        let _m = server
+            .mock("POST", "/")
+            // Assert the request shape: a GetUserAvailability envelope
+            // carrying the requested mailbox address.
+            .match_body(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::Regex("GetUserAvailabilityRequest".to_string()),
+                mockito::Matcher::Regex("bob@example.com".to_string()),
+            ]))
+            .with_status(200)
+            .with_header("content-type", "text/xml; charset=utf-8")
+            .with_body(body)
+            .create_async()
+            .await;
+        let range = DateRange::new(
+            "2026-06-01T00:00:00Z".parse().unwrap(),
+            "2026-06-02T00:00:00Z".parse().unwrap(),
+        );
+        let fb = query_free_busy(&client_for(&server), &["bob@example.com"], range)
+            .await
+            .unwrap();
+        assert_eq!(fb.len(), 1);
+        assert_eq!(fb[0].email, "bob@example.com");
+        assert_eq!(fb[0].slots.len(), 1);
+        assert_eq!(
+            fb[0].slots[0].start,
+            "2026-06-01T09:00:00Z".parse::<DateTime<Utc>>().unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn query_free_busy_empty_emails_short_circuits() {
+        // No mailboxes → no round-trip, empty result. The mock with
+        // expect(0) asserts we never hit the wire.
+        let mut server = Server::new_async().await;
+        let m = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body("unused")
+            .expect(0)
+            .create_async()
+            .await;
+        let range = DateRange::new(
+            "2026-06-01T00:00:00Z".parse().unwrap(),
+            "2026-06-02T00:00:00Z".parse().unwrap(),
+        );
+        let fb = query_free_busy(&client_for(&server), &[], range)
+            .await
+            .unwrap();
+        assert!(fb.is_empty());
+        m.assert_async().await;
     }
 }

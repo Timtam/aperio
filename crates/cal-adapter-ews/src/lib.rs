@@ -910,14 +910,10 @@ impl CalendarFeature for EwsAdapter {
         Ok(())
     }
 
-    async fn get_free_busy(
-        &self,
-        _emails: &[&str],
-        _range: DateRange,
-    ) -> CoreResult<Vec<FreeBusy>> {
-        // EWS does expose GetUserAvailability — wiring it up costs
-        // another envelope + parser pair, deferred to a later phase.
-        Ok(Vec::new())
+    async fn get_free_busy(&self, emails: &[&str], range: DateRange) -> CoreResult<Vec<FreeBusy>> {
+        api::query_free_busy(&self.client, emails, range)
+            .await
+            .map_err(to_core_error)
     }
 
     fn calendar_color(&self, _calendar_id: &str) -> Option<ContainerColor> {
