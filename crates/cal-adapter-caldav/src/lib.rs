@@ -976,6 +976,24 @@ impl CalendarFeature for CaldavAdapter {
         .map_err(to_core_error)
     }
 
+    async fn current_user_email(&self) -> CoreResult<Option<String>> {
+        // The principal's calendar-user-address (RFC 6638, discovered
+        // once and cached) is the user's mailto: identity. Strip the
+        // scheme so it matches attendee SMTP addresses. A discovery
+        // failure degrades to None (RSVP simply hidden), never an error.
+        let discovery = match self.discover().await {
+            Ok(d) => d,
+            Err(_) => return Ok(None),
+        };
+        Ok(discovery.calendar_user_address.map(|addr| {
+            let a = addr.trim();
+            a.strip_prefix("mailto:")
+                .or_else(|| a.strip_prefix("MAILTO:"))
+                .unwrap_or(a)
+                .to_string()
+        }))
+    }
+
     fn calendar_color(&self, _calendar_id: &str) -> Option<ContainerColor> {
         // The color is fetched together with the listing and lives
         // on the Calendar struct already. A second per-id round-trip

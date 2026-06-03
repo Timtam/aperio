@@ -29,7 +29,7 @@ use std::os::raw::{c_char, c_void};
 
 use cal_adapter_caldav::{AuthKind, CaldavAccountConfig, CaldavAdapter, Credentials};
 use cal_core::adapter::{Capability, Credentials as CalCredentials};
-use cal_core::types::{ContactPhoto, DateRange, NewContact, NewEvent, NewTask};
+use cal_core::types::{AttendeeStatus, ContactPhoto, DateRange, NewContact, NewEvent, NewTask};
 use cal_core::{CalendarFeature, ContactsFeature, TasksFeature};
 use plugin_sdk::plugin_core::abi::OpenInstanceResult;
 use plugin_sdk::plugin_core::ffi::PluginCallResult;
@@ -271,6 +271,36 @@ unsafe extern "C" fn ffi_rename_calendar(
     };
     dispatch_unit(h, move |p| async move {
         p.rename_calendar(&args.calendar_id, &args.new_name).await
+    })
+}
+
+unsafe extern "C" fn ffi_current_user_email(
+    h: *mut c_void,
+    _a: *const u8,
+    _l: usize,
+) -> PluginCallResult {
+    dispatch(h, |p| async move { p.current_user_email().await })
+}
+
+#[derive(Debug, Deserialize)]
+struct RespondToEventArgs {
+    event_id: String,
+    status: AttendeeStatus,
+    send_response: bool,
+}
+
+unsafe extern "C" fn ffi_respond_to_event(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let args: RespondToEventArgs = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch_unit(h, move |p| async move {
+        p.respond_to_event(&args.event_id, args.status, args.send_response)
+            .await
     })
 }
 
@@ -597,6 +627,8 @@ pub static CALENDAR_VTABLE: CalendarVtable = CalendarVtable {
     add_event_exdate: Some(ffi_add_event_exdate),
     rename_calendar: Some(ffi_rename_calendar),
     get_events_delta: Some(ffi_get_events_delta),
+    current_user_email: Some(ffi_current_user_email),
+    respond_to_event: Some(ffi_respond_to_event),
     ..CalendarVtable::empty()
 };
 

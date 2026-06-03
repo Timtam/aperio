@@ -745,6 +745,27 @@ pub async fn query_free_busy(
     }
 }
 
+/// The connected account's email for `calendar_id`, used by the RSVP
+/// affordance to decide whether the user is an *attendee* (not the
+/// organizer) of a meeting. Local/iCal calendars and any provider that
+/// can't report an identity return `None`, which hides the RSVP buttons.
+#[tauri::command]
+pub async fn calendar_current_user_email(
+    registry: State<'_, Arc<AdapterRegistry>>,
+    calendar_id: String,
+) -> CommandResult<Option<String>> {
+    let account = registry
+        .account_for_calendar(&calendar_id)
+        .unwrap_or_else(|| LOCAL_ID.to_string());
+    if account == LOCAL_ID {
+        return Ok(None);
+    }
+    let Some(ext) = registry.calendar_adapter(&account) else {
+        return Ok(None);
+    };
+    Ok(ext.current_user_email().await.unwrap_or(None))
+}
+
 #[tauri::command]
 pub async fn get_event_by_id(
     adapter: State<'_, LocalAdapter>,

@@ -14,7 +14,7 @@ use async_trait::async_trait;
 use cal_core::adapter::{Adapter, AuthToken, CalendarFeature, Capability, ChangeSet, Credentials};
 use cal_core::color::ContainerColor;
 use cal_core::error::{Error, Result};
-use cal_core::types::{Calendar, DateRange, Event, FreeBusy, NewEvent};
+use cal_core::types::{AttendeeStatus, Calendar, DateRange, Event, FreeBusy, NewEvent};
 use serde::Serialize;
 use tracing::warn;
 
@@ -80,6 +80,8 @@ struct VtableSnapshot {
     add_event_exdate: Option<crate::vtables::VtableMethodFn>,
     rename_calendar: Option<crate::vtables::VtableMethodFn>,
     get_events_delta: Option<crate::vtables::VtableMethodFn>,
+    current_user_email: Option<crate::vtables::VtableMethodFn>,
+    respond_to_event: Option<crate::vtables::VtableMethodFn>,
 }
 
 impl FfiCalendarAdapter {
@@ -137,6 +139,8 @@ impl FfiCalendarAdapter {
             add_event_exdate: vtable_ref.add_event_exdate,
             rename_calendar: vtable_ref.rename_calendar,
             get_events_delta: vtable_ref.get_events_delta,
+            current_user_email: vtable_ref.current_user_email,
+            respond_to_event: vtable_ref.respond_to_event,
         };
 
         let capabilities = super::manifest_capabilities(&plugin.manifest.capabilities);
@@ -268,6 +272,13 @@ struct RenameCalendarArgs<'a> {
     new_name: &'a str,
 }
 
+#[derive(Serialize)]
+struct RespondToEventArgs<'a> {
+    event_id: &'a str,
+    status: AttendeeStatus,
+    send_response: bool,
+}
+
 #[async_trait]
 impl CalendarFeature for FfiCalendarAdapter {
     async fn list_calendars(&self) -> Result<Vec<Calendar>> {
@@ -379,6 +390,39 @@ impl CalendarFeature for FfiCalendarAdapter {
             since_token,
         };
         call_then_decode(self.vtable.get_events_delta, self.handle_addr, &args).await
+    }
+
+    async fn current_user_email(&self) -> Result<Option<String>> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
+        // A null slot (read-only adapters that have no identity) maps to
+        // `Unsupported`; for *this* method that means "identity unknown",
+        // which is `Ok(None)`, not an error — the host just hides RSVP.
+        match call_then_decode::<Option<String>, _>(
+            self.vtable.current_user_email,
+            self.handle_addr,
+            &(),
+        )
+        .await
+        {
+            Ok(v) => Ok(v),
+            Err(Error::Unsupported(_)) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    async fn respond_to_event(
+        &self,
+        event_id: &str,
+        status: AttendeeStatus,
+        send_response: bool,
+    ) -> Result<()> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
+        let args = RespondToEventArgs {
+            event_id,
+            status,
+            send_response,
+        };
+        call_for_unit(self.vtable.respond_to_event, self.handle_addr, &args).await
     }
 }
 

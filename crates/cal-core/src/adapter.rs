@@ -13,8 +13,8 @@ use crate::color::ContainerColor;
 use crate::error::{Error, Result};
 use crate::reminder::SoundConfig;
 use crate::types::{
-    Calendar, Contact, ContactList, ContactPhoto, DateRange, Event, FreeBusy, MemberRight,
-    NewContact, NewEvent, NewTask, Section, Task, TaskList, TaskListShare, TaskUser,
+    AttendeeStatus, Calendar, Contact, ContactList, ContactPhoto, DateRange, Event, FreeBusy,
+    MemberRight, NewContact, NewEvent, NewTask, Section, Task, TaskList, TaskListShare, TaskUser,
 };
 
 /// Stable identifier for the adapter source (e.g. "google", "caldav",
@@ -131,6 +131,39 @@ pub trait CalendarFeature: Adapter {
     ) -> Result<ChangeSet<Event>> {
         Err(Error::Unsupported(
             "get_events_delta is not supported on this adapter".into(),
+        ))
+    }
+
+    /// The email address of the connected account's user, when the
+    /// provider can report it. Lets the host decide whether the user is
+    /// an *attendee* of a meeting (and not its organizer) — the gate for
+    /// the RSVP affordance. Default `None` (identity unknown / not
+    /// applicable, e.g. local + iCal feeds). Implemented per provider:
+    /// CalDAV from the discovered `calendar-user-address`, Graph from
+    /// `/me`, Google from the token's userinfo, EWS from the configured
+    /// login. A failure to determine it degrades to `None`, never an
+    /// error — "unknown identity" simply hides the RSVP buttons.
+    async fn current_user_email(&self) -> Result<Option<String>> {
+        Ok(None)
+    }
+
+    /// RSVP to an invitation: set the connected user's participation
+    /// status on `event_id` to `status`. When `send_response` is `true`
+    /// AND the provider schedules server-side, it also emails the reply
+    /// to the organizer (EWS `AcceptItem`/`DeclineItem`, Graph
+    /// `/accept|/decline`, Google `sendUpdates`, CalDAV iTIP `REPLY`).
+    /// Default `Unsupported`; the four external calendar adapters
+    /// override it. Only meaningful for an event the user is an attendee
+    /// (not organizer) of — the caller gates on
+    /// [`current_user_email`](Self::current_user_email).
+    async fn respond_to_event(
+        &self,
+        _event_id: &str,
+        _status: AttendeeStatus,
+        _send_response: bool,
+    ) -> Result<()> {
+        Err(Error::Unsupported(
+            "respond_to_event is not supported on this adapter".into(),
         ))
     }
 }

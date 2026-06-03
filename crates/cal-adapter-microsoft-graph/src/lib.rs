@@ -323,6 +323,12 @@ impl CalendarFeature for MicrosoftGraphAdapter {
             .map_err(to_core_error)
     }
 
+    async fn current_user_email(&self) -> CoreResult<Option<String>> {
+        // Best-effort: a failed /me (revoked token) degrades to None so
+        // the RSVP UI hides rather than erroring.
+        Ok(api::current_user_email(&self.state).await.unwrap_or(None))
+    }
+
     fn calendar_color(&self, _calendar_id: &str) -> Option<ContainerColor> {
         None
     }

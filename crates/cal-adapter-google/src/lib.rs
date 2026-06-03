@@ -342,6 +342,12 @@ impl CalendarFeature for GoogleAdapter {
             .map_err(to_core_error)
     }
 
+    async fn current_user_email(&self) -> CoreResult<Option<String>> {
+        // Best-effort: a failure (revoked token, missing scope) degrades
+        // to None so the RSVP UI hides rather than surfacing an error.
+        Ok(api::current_user_email(&self.state).await.unwrap_or(None))
+    }
+
     fn calendar_color(&self, _calendar_id: &str) -> Option<ContainerColor> {
         // Colour is read together with the listing; consumers should
         // use the value on the Calendar struct rather than asking

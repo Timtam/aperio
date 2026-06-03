@@ -916,6 +916,17 @@ impl CalendarFeature for EwsAdapter {
             .map_err(to_core_error)
     }
 
+    async fn current_user_email(&self) -> CoreResult<Option<String>> {
+        // EWS has no cheap "who am I" call (Autodiscover/GetUserSettings
+        // is heavyweight). The configured login is the SMTP address on
+        // the vast majority of Exchange/Outlook setups; when it isn't an
+        // email (e.g. DOMAIN\user), we can't safely match it against
+        // attendee SMTP addresses, so we report None and the RSVP UI
+        // stays hidden rather than guessing wrong.
+        let username = self.client.credentials.username.trim();
+        Ok((username.contains('@') && !username.contains('\\')).then(|| username.to_string()))
+    }
+
     fn calendar_color(&self, _calendar_id: &str) -> Option<ContainerColor> {
         // EWS doesn't surface a per-folder colour on the wire; the
         // colour lives in the user's Outlook profile. Leave `None`

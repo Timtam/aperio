@@ -146,6 +146,13 @@ export const queryFreeBusy = (
     },
   });
 
+/** The connected account's email for `calendarId`, or null when the
+ *  provider can't report one (local/iCal, or an identity lookup that
+ *  failed). Drives the RSVP gate: the user can respond only to a meeting
+ *  they're an attendee (not the organizer) of. */
+export const calendarCurrentUserEmail = (calendarId: string) =>
+  invoke<string | null>('calendar_current_user_email', { calendarId });
+
 export const getTaskById = (id: string) =>
   invoke<Task | null>('get_task_by_id', { id });
 

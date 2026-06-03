@@ -92,6 +92,13 @@ pub struct CalendarVtable {
     /// trait default (`Unsupported`); the host falls back to a full
     /// `get_events`.
     pub get_events_delta: Option<VtableMethodFn>,
+    /// `current_user_email() -> Option<String>` (RSVP identity gate).
+    /// `None` ⇒ the shim treats it as `Ok(None)` ("identity unknown"),
+    /// NOT an error — read-only adapters (iCal) simply leave it unset.
+    pub current_user_email: Option<VtableMethodFn>,
+    /// `respond_to_event(event_id, status, send_response)` (RSVP).
+    /// `None` ⇒ the shim inherits the trait default (`Unsupported`).
+    pub respond_to_event: Option<VtableMethodFn>,
 }
 
 impl CalendarVtable {
@@ -115,6 +122,8 @@ impl CalendarVtable {
             add_event_exdate: None,
             rename_calendar: None,
             get_events_delta: None,
+            current_user_email: None,
+            respond_to_event: None,
         }
     }
 
@@ -163,6 +172,8 @@ mod tests {
         assert!(v.add_event_exdate.is_none());
         assert!(v.rename_calendar.is_none());
         assert!(v.get_events_delta.is_none());
+        assert!(v.current_user_email.is_none());
+        assert!(v.respond_to_event.is_none());
         assert_eq!(v.vtable_version, crate::ABI_VERSION);
     }
 

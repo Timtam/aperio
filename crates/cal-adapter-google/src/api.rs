@@ -622,6 +622,18 @@ pub async fn query_free_busy(
         .collect())
 }
 
+/// The connected account's email. On Google, the **primary calendar's
+/// id IS the user's address**, so a single GET on `/calendars/primary`
+/// yields the identity without needing the `userinfo` scope.
+pub async fn current_user_email(state: &ApiState) -> GoogleResult<Option<String>> {
+    #[derive(Deserialize)]
+    struct PrimaryCalendar {
+        id: String,
+    }
+    let cal: PrimaryCalendar = state.get_json("/calendars/primary").await?;
+    Ok(cal.id.contains('@').then_some(cal.id))
+}
+
 #[derive(Serialize)]
 struct FreeBusyQuery<'a> {
     #[serde(rename = "timeMin")]
@@ -761,6 +773,20 @@ mod tests {
         assert_eq!(cals[0].name, "Me");
         assert!(!cals[0].read_only);
         assert!(cals[1].read_only);
+    }
+
+    #[tokio::test]
+    async fn current_user_email_reads_primary_calendar_id() {
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock("GET", "/calendars/primary")
+            .with_status(200)
+            .with_body(r#"{"id": "alice@gmail.com", "summary": "alice@gmail.com"}"#)
+            .create_async()
+            .await;
+        let state = fixture_state(&server.url());
+        let email = current_user_email(&state).await.unwrap();
+        assert_eq!(email.as_deref(), Some("alice@gmail.com"));
     }
 
     #[tokio::test]

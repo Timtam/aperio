@@ -186,8 +186,9 @@ mod tests {
     #[test]
     fn vtable_sizes_match_c_header() {
         use std::mem::size_of;
-        // 12 method slots each.
-        assert_eq!(size_of::<CalendarVtable>(), 8 + 12 * 8);
+        // 14 method slots: the original 12 + RSVP (current_user_email,
+        // respond_to_event).
+        assert_eq!(size_of::<CalendarVtable>(), 8 + 14 * 8);
         // 19 slots: 12 task methods + assignee support (2:
         // list_task_list_members, current_user) + membership management
         // (5: list_task_list_shares, search_users, add/remove member,

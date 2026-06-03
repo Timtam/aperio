@@ -432,6 +432,24 @@ pub async fn delete_event(state: &ApiState, event_id: &str) -> GraphResult<()> {
 /// `scheduleItems` carry a status (`free`/`tentative`/`busy`/`oof`/…); we
 /// surface everything except `free` as a busy block. We request a UTC window;
 /// Graph echoes `scheduleId` so we can map results back to emails.
+/// The connected account's email via `GET /me`. Prefers `mail` (the
+/// SMTP address); falls back to `userPrincipalName` (the login, usually
+/// the same address). Used to decide whether the user is an attendee of
+/// a meeting (RSVP gate).
+pub async fn current_user_email(state: &ApiState) -> GraphResult<Option<String>> {
+    #[derive(Deserialize)]
+    struct Me {
+        mail: Option<String>,
+        #[serde(rename = "userPrincipalName")]
+        user_principal_name: Option<String>,
+    }
+    let me: Me = state.get_json("/me").await?;
+    Ok(me
+        .mail
+        .or(me.user_principal_name)
+        .filter(|s| s.contains('@')))
+}
+
 pub async fn query_free_busy(
     state: &ApiState,
     emails: &[&str],
@@ -1118,6 +1136,36 @@ mod tests {
         let state = fixture_state(&server.url());
         rename_calendar(&state, "cal-1", "Arbeit").await.unwrap();
         m.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn current_user_email_prefers_mail_then_upn() {
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock("GET", "/me")
+            .with_status(200)
+            .with_body(
+                r#"{"mail":"bob@contoso.com","userPrincipalName":"bob@contoso.onmicrosoft.com"}"#,
+            )
+            .create_async()
+            .await;
+        let state = fixture_state(&server.url());
+        let email = current_user_email(&state).await.unwrap();
+        assert_eq!(email.as_deref(), Some("bob@contoso.com"));
+    }
+
+    #[tokio::test]
+    async fn current_user_email_falls_back_to_upn_when_mail_null() {
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock("GET", "/me")
+            .with_status(200)
+            .with_body(r#"{"mail":null,"userPrincipalName":"carol@contoso.com"}"#)
+            .create_async()
+            .await;
+        let state = fixture_state(&server.url());
+        let email = current_user_email(&state).await.unwrap();
+        assert_eq!(email.as_deref(), Some("carol@contoso.com"));
     }
 
     #[tokio::test]
