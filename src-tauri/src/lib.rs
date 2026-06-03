@@ -187,6 +187,58 @@ pub fn run() {
         }
     }
 
+    // One-time heal for EWS attendees/organizer: events synced before the
+    // RSVP read-path landed were marked `detail_fetched` without ever
+    // pulling `Organizer`/`RequiredAttendees` (the SyncFolderItems shape
+    // omits them and the old detail fan-out neither requested nor merged
+    // them), so existing meetings render with an empty attendee list. A
+    // cold re-sync rebuilds each folder from a fresh state and re-enriches
+    // every item — now including attendees — so we clear the EWS event
+    // cursors ONCE more. Same best-effort + idempotent flag pattern as the
+    // cursor heal above; a separate flag so accounts already cursor-healed
+    // still get the attendee backfill.
+    {
+        const HEAL_FLAG: &str = "cache.ewsAttendeeHealV1";
+        let shared = db.shared();
+        let prefs = crate::user_prefs::UserPrefsRepo::new(&shared);
+        let already_done = matches!(prefs.get(HEAL_FLAG).ok().flatten().as_deref(), Some("done"));
+        if !already_done {
+            match accounts::AccountsRepo::new(&shared).list() {
+                Ok(accts) => {
+                    let mut healed = 0usize;
+                    for acc in accts
+                        .iter()
+                        .filter(|a| a.adapter_kind == accounts::AdapterKind::Ews)
+                    {
+                        match cache_store.reset_event_sync(&acc.id) {
+                            Ok(n) => healed += n,
+                            Err(err) => tracing::warn!(
+                                account_id = %acc.id,
+                                ?err,
+                                "EWS attendee heal: reset_event_sync failed",
+                            ),
+                        }
+                    }
+                    match prefs.set(HEAL_FLAG, "done") {
+                        Ok(()) => tracing::info!(
+                            target: "aperio::cache",
+                            containers = healed,
+                            "EWS attendee heal: cleared event cursors so meetings re-enrich with attendees",
+                        ),
+                        Err(err) => tracing::warn!(
+                            ?err,
+                            "EWS attendee heal: couldn't persist completion flag; will retry next boot",
+                        ),
+                    }
+                }
+                Err(err) => tracing::warn!(
+                    ?err,
+                    "EWS attendee heal: couldn't list accounts; will retry next boot",
+                ),
+            }
+        }
+    }
+
     // CACHE-3: clones for the background warm/periodic refresher spawned
     // in `setup()` (the originals are moved into Tauri State below).
     let registry_for_cache_refresh = Arc::clone(&registry);
