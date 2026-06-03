@@ -171,27 +171,19 @@ jobs:
           cp -R "target/release/plugins" "$STAGE_DIR/"
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
 
-      # Zip the staged layout. Unix runners have `zip`; Windows
-      # runners fall back to the bundled 7z.
-      - name: Pack zip
-        id: pack
-        shell: bash
-        run: |
-          set -euo pipefail
-          ARCHIVE="${{ steps.stage.outputs.name }}.zip"
-          cd dist-stage
-          if command -v zip >/dev/null 2>&1; then
-            zip -r "../$ARCHIVE" "${{ steps.stage.outputs.name }}"
-          else
-            7z a "../$ARCHIVE" "${{ steps.stage.outputs.name }}"
-          fi
-          cd ..
-          echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
-
+      # Upload the staged FOLDER directly — NOT a pre-made zip. GitHub
+      # already zips every artifact on download, so uploading our own zip
+      # produced a zip-inside-a-zip (`<name>.zip` ▸ `<name>.zip` ▸
+      # `Aperio-…/`). Uploading the folder gives a single download zip
+      # `<name>.zip` ▸ `Aperio-…/` ▸ files. The Release workflow re-zips
+      # these folders into the release assets (so those keep their shape).
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.stage.outputs.name }}
-          path: ${{ steps.pack.outputs.archive }}
+          # `dist-stage` (its parent), not `dist-stage/<name>`, so the
+          # named `Aperio-…/` top folder is kept inside the artifact
+          # instead of being flattened to bare files at the zip root.
+          path: dist-stage
           if-no-files-found: error
 
   # ── macOS universal (x86_64 + arm64) ─────────────────────
@@ -328,19 +320,12 @@ jobs:
 
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
 
-      - name: Pack zip
-        id: pack
-        shell: bash
-        run: |
-          set -euo pipefail
-          ARCHIVE="${{ steps.stage.outputs.name }}.zip"
-          cd dist-stage
-          zip -r "../$ARCHIVE" "${{ steps.stage.outputs.name }}"
-          cd ..
-          echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
-
+      # Upload the staged folder (see the native job above for why we
+      # don't pre-zip): GitHub zips artifacts on download, so a pre-made
+      # zip would nest one level too deep. `dist-stage` keeps the named
+      # `Aperio-…/` top folder inside the artifact.
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.stage.outputs.name }}
-          path: ${{ steps.pack.outputs.archive }}
+          path: dist-stage
           if-no-files-found: error

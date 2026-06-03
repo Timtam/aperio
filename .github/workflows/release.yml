@@ -43,13 +43,30 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: dist
-          # The reusable workflow uploads one uniquely-named
-          # artifact per target; flatten them all under `dist/`
-          # without nesting per-artifact dirs.
+          # The reusable workflow uploads one uniquely-named artifact per
+          # target, each containing a single `Aperio-<version>-<target>/`
+          # folder. `merge-multiple` drops them side by side under `dist/`
+          # (distinct folder names → no collision) instead of nesting
+          # per-artifact dirs.
           merge-multiple: true
 
       - name: List downloaded artifacts
         run: ls -la dist
+
+      # The artifacts are now folders (the build workflow stopped
+      # pre-zipping so the Actions-tab download isn't a zip-in-a-zip).
+      # Re-zip each target folder so the release assets stay the familiar
+      # `Aperio-<version>-<target>.zip` ▸ `Aperio-…/` shape.
+      - name: Pack each target folder into a release zip
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          for d in */; do
+            name="${d%/}"
+            zip -qr "$name.zip" "$name"
+          done
+          ls -la
 
       - name: Compute tag
         id: tag
