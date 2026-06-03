@@ -11,7 +11,7 @@
 
 use std::sync::Arc;
 
-use cal_core::{Calendar, DateRange, Event, FreeBusy, FreeBusySlot, NewEvent};
+use cal_core::{AttendeeStatus, Calendar, DateRange, Event, FreeBusy, FreeBusySlot, NewEvent};
 use chrono::{DateTime, Utc};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -622,6 +622,101 @@ pub async fn query_free_busy(
         .collect())
 }
 
+/// The connected account's email. On Google, the **primary calendar's
+/// id IS the user's address**, so a single GET on `/calendars/primary`
+/// yields the identity without needing the `userinfo` scope.
+pub async fn current_user_email(state: &ApiState) -> GoogleResult<Option<String>> {
+    #[derive(Deserialize)]
+    struct PrimaryCalendar {
+        id: String,
+    }
+    let cal: PrimaryCalendar = state.get_json("/calendars/primary").await?;
+    Ok(cal.id.contains('@').then_some(cal.id))
+}
+
+/// RSVP to an event. Google has no dedicated RSVP endpoint: we PATCH the
+/// event's `attendees`, flipping the connected user's `responseStatus`,
+/// with `sendUpdates` controlling whether the organizer is emailed. The
+/// trait signature doesn't carry the calendar id, so we walk the
+/// listing — same approach as [`super::delete_event`]'s caller — GET each
+/// candidate event by id and patch the one that resolves.
+pub async fn respond_to_event(
+    state: &ApiState,
+    event_id: &str,
+    status: AttendeeStatus,
+    send_response: bool,
+) -> GoogleResult<()> {
+    let resp_status = match status {
+        AttendeeStatus::Accepted => "accepted",
+        AttendeeStatus::Declined => "declined",
+        AttendeeStatus::Tentative => "tentative",
+        AttendeeStatus::NeedsAction => {
+            return Err(GoogleError::Protocol(
+                "cannot RSVP with status needs-action".into(),
+            ));
+        }
+    };
+    let me = current_user_email(state).await?.ok_or_else(|| {
+        GoogleError::Protocol("cannot RSVP without knowing the account's own email".into())
+    })?;
+
+    let ev_enc = urlencoding(event_id);
+    let su = send_updates_param(send_response);
+    let mut last_err: Option<GoogleError> = None;
+    for cal in list_calendars(state).await? {
+        let cal_enc = urlencoding(&cal.id);
+        let event: EventEntry = match state
+            .get_json(&format!("/calendars/{cal_enc}/events/{ev_enc}"))
+            .await
+        {
+            Ok(e) => e,
+            Err(e) => {
+                last_err = Some(e);
+                continue;
+            }
+        };
+        // Replace the whole attendees array (Google's PATCH semantics for
+        // this field), flipping only our own row's responseStatus.
+        let attendees: Vec<AttendeePatch> = event
+            .attendees
+            .into_iter()
+            .filter_map(|a| {
+                let email = a.email?;
+                let is_self = email.eq_ignore_ascii_case(&me);
+                Some(AttendeePatch {
+                    response_status: if is_self {
+                        Some(resp_status.to_string())
+                    } else {
+                        a.response_status
+                    },
+                    email,
+                })
+            })
+            .collect();
+        let path = format!("/calendars/{cal_enc}/events/{ev_enc}?sendUpdates={su}");
+        let _: EventEntry = state
+            .patch_json(&path, &EventAttendeesPatch { attendees })
+            .await?;
+        return Ok(());
+    }
+    Err(last_err.unwrap_or_else(|| GoogleError::Http {
+        status: 404,
+        message: format!("event '{event_id}' not found in any calendar"),
+    }))
+}
+
+#[derive(Serialize)]
+struct AttendeePatch {
+    email: String,
+    #[serde(rename = "responseStatus", skip_serializing_if = "Option::is_none")]
+    response_status: Option<String>,
+}
+
+#[derive(Serialize)]
+struct EventAttendeesPatch {
+    attendees: Vec<AttendeePatch>,
+}
+
 #[derive(Serialize)]
 struct FreeBusyQuery<'a> {
     #[serde(rename = "timeMin")]
@@ -761,6 +856,73 @@ mod tests {
         assert_eq!(cals[0].name, "Me");
         assert!(!cals[0].read_only);
         assert!(cals[1].read_only);
+    }
+
+    #[tokio::test]
+    async fn respond_to_event_patches_self_attendee_status() {
+        let mut server = mockito::Server::new_async().await;
+        // current_user_email → primary calendar id is the account email.
+        server
+            .mock("GET", "/calendars/primary")
+            .with_status(200)
+            .with_body(r#"{"id": "me@gmail.com"}"#)
+            .create_async()
+            .await;
+        // list_calendars → one calendar ("primary").
+        server
+            .mock("GET", "/users/me/calendarList")
+            .with_status(200)
+            .with_body(r#"{"items":[{"id":"primary","summary":"Me","accessRole":"owner"}]}"#)
+            .create_async()
+            .await;
+        // GET the event to read its attendees.
+        server
+            .mock("GET", "/calendars/primary/events/EV-1")
+            .with_status(200)
+            .with_body(
+                r#"{"id":"EV-1","start":{"dateTime":"2026-05-25T10:00:00Z"},
+                    "end":{"dateTime":"2026-05-25T11:00:00Z"},
+                    "attendees":[
+                      {"email":"boss@example.com","responseStatus":"accepted"},
+                      {"email":"me@gmail.com","responseStatus":"needsAction"}
+                    ]}"#,
+            )
+            .create_async()
+            .await;
+        // PATCH flips our row to "declined" and notifies (sendUpdates=all).
+        let patch = server
+            .mock("PATCH", "/calendars/primary/events/EV-1?sendUpdates=all")
+            .match_body(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::Regex(r#""email":"me@gmail.com""#.into()),
+                mockito::Matcher::Regex(r#""responseStatus":"declined""#.into()),
+                // The other attendee's accepted status is preserved.
+                mockito::Matcher::Regex(r#""responseStatus":"accepted""#.into()),
+            ]))
+            .with_status(200)
+            .with_body(r#"{"id":"EV-1","start":{"dateTime":"2026-05-25T10:00:00Z"},"end":{"dateTime":"2026-05-25T11:00:00Z"}}"#)
+            .expect(1)
+            .create_async()
+            .await;
+
+        let state = fixture_state(&server.url());
+        respond_to_event(&state, "EV-1", AttendeeStatus::Declined, true)
+            .await
+            .unwrap();
+        patch.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn current_user_email_reads_primary_calendar_id() {
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock("GET", "/calendars/primary")
+            .with_status(200)
+            .with_body(r#"{"id": "alice@gmail.com", "summary": "alice@gmail.com"}"#)
+            .create_async()
+            .await;
+        let state = fixture_state(&server.url());
+        let email = current_user_email(&state).await.unwrap();
+        assert_eq!(email.as_deref(), Some("alice@gmail.com"));
     }
 
     #[tokio::test]

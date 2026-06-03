@@ -23,10 +23,10 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use cal_core::{
-    Adapter, AuthToken, Calendar, CalendarFeature, Capability, ChangeSet, Contact, ContactList,
-    ContactPhoto, ContactsFeature, ContainerColor, Credentials as CoreCredentials, DateRange,
-    Error as CoreError, Event, FreeBusy, NewContact, NewEvent, NewTask, Result as CoreResult, Task,
-    TaskList, TasksFeature,
+    Adapter, AttendeeStatus, AuthToken, Calendar, CalendarFeature, Capability, ChangeSet, Contact,
+    ContactList, ContactPhoto, ContactsFeature, ContainerColor, Credentials as CoreCredentials,
+    DateRange, Error as CoreError, Event, FreeBusy, NewContact, NewEvent, NewTask,
+    Result as CoreResult, Task, TaskList, TasksFeature,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -338,6 +338,23 @@ impl CalendarFeature for GoogleAdapter {
             return Ok(Vec::new());
         }
         api::query_free_busy(&self.state, emails, range)
+            .await
+            .map_err(to_core_error)
+    }
+
+    async fn current_user_email(&self) -> CoreResult<Option<String>> {
+        // Best-effort: a failure (revoked token, missing scope) degrades
+        // to None so the RSVP UI hides rather than surfacing an error.
+        Ok(api::current_user_email(&self.state).await.unwrap_or(None))
+    }
+
+    async fn respond_to_event(
+        &self,
+        event_id: &str,
+        status: AttendeeStatus,
+        send_response: bool,
+    ) -> CoreResult<()> {
+        api::respond_to_event(&self.state, event_id, status, send_response)
             .await
             .map_err(to_core_error)
     }

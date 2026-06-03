@@ -37,10 +37,10 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use cal_core::{
-    Adapter, AuthToken, Calendar, CalendarFeature, Capability, ChangeSet, Contact, ContactList,
-    ContactsFeature, ContainerColor, Credentials as CoreCredentials, DateRange, Error as CoreError,
-    Event, FreeBusy, NewContact, NewEvent, NewTask, Result as CoreResult, Task, TaskList,
-    TasksFeature,
+    Adapter, AttendeeStatus, AuthToken, Calendar, CalendarFeature, Capability, ChangeSet, Contact,
+    ContactList, ContactsFeature, ContainerColor, Credentials as CoreCredentials, DateRange,
+    Error as CoreError, Event, FreeBusy, NewContact, NewEvent, NewTask, Result as CoreResult, Task,
+    TaskList, TasksFeature,
 };
 use reqwest::Client;
 use url::Url;
@@ -970,6 +970,62 @@ impl CalendarFeature for CaldavAdapter {
             &organizer,
             emails,
             range,
+            &self.credentials,
+        )
+        .await
+        .map_err(to_core_error)
+    }
+
+    async fn current_user_email(&self) -> CoreResult<Option<String>> {
+        // The principal's calendar-user-address (RFC 6638, discovered
+        // once and cached) is the user's mailto: identity. Strip the
+        // scheme so it matches attendee SMTP addresses. A discovery
+        // failure degrades to None (RSVP simply hidden), never an error.
+        let discovery = match self.discover().await {
+            Ok(d) => d,
+            Err(_) => return Ok(None),
+        };
+        Ok(discovery.calendar_user_address.map(|addr| {
+            let a = addr.trim();
+            a.strip_prefix("mailto:")
+                .or_else(|| a.strip_prefix("MAILTO:"))
+                .unwrap_or(a)
+                .to_string()
+        }))
+    }
+
+    async fn respond_to_event(
+        &self,
+        event_id: &str,
+        status: AttendeeStatus,
+        send_response: bool,
+    ) -> CoreResult<()> {
+        // Need our own calendar-user-address to find our ATTENDEE row,
+        // and any base URL (scheme+host) — the event id's encoded href
+        // supplies the resource path. RFC 6638 servers (iCloud) emit the
+        // iTIP REPLY automatically when we PUT the PARTSTAT change.
+        let discovery = self.discover().await.map_err(to_core_error)?;
+        let self_email = discovery
+            .calendar_user_address
+            .as_deref()
+            .map(|a| {
+                let a = a.trim();
+                a.strip_prefix("mailto:")
+                    .or_else(|| a.strip_prefix("MAILTO:"))
+                    .unwrap_or(a)
+            })
+            .ok_or_else(|| {
+                CoreError::Unsupported(
+                    "RSVP needs the account's calendar-user-address, which this server didn't advertise".into(),
+                )
+            })?;
+        events::respond_to_event(
+            &self.http,
+            &discovery.dav_root,
+            event_id,
+            self_email,
+            status,
+            send_response,
             &self.credentials,
         )
         .await

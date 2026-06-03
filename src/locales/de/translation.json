@@ -779,6 +779,22 @@
         "free": "Frei",
         "unknown": "Unbekannt"
       },
+      "rsvp": {
+        "yourResponseLabel": "Deine Antwort",
+        "attendeeStatusLabel": "Antworten der Teilnehmer",
+        "responded": "Antwort gesendet: {{status}}.",
+        "action": {
+          "accepted": "Zusagen",
+          "tentative": "Vorläufig",
+          "declined": "Absagen"
+        },
+        "status": {
+          "needs-action": "Keine Antwort",
+          "accepted": "Zugesagt",
+          "tentative": "Vorläufig",
+          "declined": "Abgesagt"
+        }
+      },
       "noColorLabel": "(Kein Label)",
       "recurrence": {
         "label": "Wiederholung",

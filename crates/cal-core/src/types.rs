@@ -80,6 +80,45 @@ pub struct Event {
     pub updated_at: DateTime<Utc>,
     /// Provider ETag / sync tag, used for optimistic-concurrency on push.
     pub etag: Option<String>,
+    /// The organizer's address (RFC 5545 `ORGANIZER`, `mailto:` stripped),
+    /// when the provider exposes it on read. Lets the host decide "is the
+    /// connected account an *attendee* of this meeting rather than its
+    /// organizer?" — the gate for showing RSVP buttons. Read-only: never
+    /// sent on a write. `#[serde(default, skip…)]` keeps it `None` and off
+    /// the wire on providers / stores that don't surface it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub organizer: Option<String>,
+    /// Per-attendee RSVP state, populated on read where the provider
+    /// exposes it (CalDAV `ATTENDEE;PARTSTAT`, EWS `ResponseType`,
+    /// Google/Graph `responseStatus`). Distinct from the flat, editable
+    /// [`attendees`](Self::attendees) list. Empty on write and on
+    /// providers that don't report response status.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attendee_responses: Vec<AttendeeResponse>,
+}
+
+/// An attendee's RSVP status — RFC 5545 `PARTSTAT`, normalised across
+/// providers. `NeedsAction` is the default for an invitee who hasn't
+/// replied yet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AttendeeStatus {
+    #[default]
+    NeedsAction,
+    Accepted,
+    Declined,
+    Tentative,
+}
+
+/// One attendee's RSVP state on an event read from a provider. Populated
+/// on read only; the editable invitee set stays the flat
+/// [`Event::attendees`] list.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AttendeeResponse {
+    pub email: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub status: AttendeeStatus,
 }
 
 /// Payload for creating a new event (without server-assigned IDs).
@@ -593,4 +632,43 @@ fn deserialize_b64<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error>
     base64::engine::general_purpose::STANDARD
         .decode(s.as_bytes())
         .map_err(serde::de::Error::custom)
+}
+
+#[cfg(test)]
+mod rsvp_tests {
+    use super::*;
+
+    #[test]
+    fn attendee_status_serialises_kebab_case() {
+        // The TS union type + the FFI wire depend on exactly these.
+        assert_eq!(
+            serde_json::to_string(&AttendeeStatus::NeedsAction).unwrap(),
+            "\"needs-action\""
+        );
+        assert_eq!(
+            serde_json::to_string(&AttendeeStatus::Accepted).unwrap(),
+            "\"accepted\""
+        );
+        assert_eq!(
+            serde_json::to_string(&AttendeeStatus::Declined).unwrap(),
+            "\"declined\""
+        );
+        assert_eq!(
+            serde_json::to_string(&AttendeeStatus::Tentative).unwrap(),
+            "\"tentative\""
+        );
+        assert_eq!(AttendeeStatus::default(), AttendeeStatus::NeedsAction);
+    }
+
+    #[test]
+    fn attendee_response_omits_absent_name() {
+        let r = AttendeeResponse {
+            email: "bob@example.com".into(),
+            name: None,
+            status: AttendeeStatus::Accepted,
+        };
+        let json = serde_json::to_string(&r).unwrap();
+        assert!(json.contains("\"status\":\"accepted\""));
+        assert!(!json.contains("name"));
+    }
 }

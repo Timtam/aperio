@@ -25,7 +25,9 @@
 //!
 //! VTIMEZONE and ATTENDEE mapping still live behind follow-up tasks.
 
-use cal_core::{Event, EventRecurrence, NewEvent, Reminder, ReminderKind};
+use cal_core::{
+    AttendeeResponse, AttendeeStatus, Event, EventRecurrence, NewEvent, Reminder, ReminderKind,
+};
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use icalendar::{Calendar as ICalendar, Component, DatePerhapsTime, EventLike};
 
@@ -116,6 +118,43 @@ fn map_event(ev: &icalendar::Event, calendar_id: &str, href: Option<&str>) -> Ca
         _ => uid.to_string(),
     };
 
+    // ORGANIZER + ATTENDEE;PARTSTAT (RFC 5545). ATTENDEE is multi-valued
+    // (one property per invitee, stored under `multi_properties`).
+    let organizer = ev
+        .properties()
+        .get("ORGANIZER")
+        .map(|p| strip_mailto(p.value()))
+        .filter(|s| !s.is_empty());
+    let mut attendees = Vec::new();
+    let mut attendee_responses = Vec::new();
+    if let Some(atts) = ev.multi_properties().get("ATTENDEE") {
+        for p in atts {
+            let email = strip_mailto(p.value());
+            if email.is_empty() {
+                continue;
+            }
+            let name = p
+                .params()
+                .get("CN")
+                .map(|c| c.value().trim().to_string())
+                .filter(|n| !n.is_empty());
+            let status = p
+                .params()
+                .get("PARTSTAT")
+                .map(|c| caldav_partstat(c.value()))
+                .unwrap_or_default();
+            attendees.push(match &name {
+                Some(n) if n != &email => format!("{n} <{email}>"),
+                _ => email.clone(),
+            });
+            attendee_responses.push(AttendeeResponse {
+                email,
+                name,
+                status,
+            });
+        }
+    }
+
     Ok(Event {
         send_invitations: false,
         id,
@@ -130,11 +169,35 @@ fn map_event(ev: &icalendar::Event, calendar_id: &str, href: Option<&str>) -> Ca
         color_label: None,
         reminders,
         sound: None,
-        attendees: Vec::new(),
+        attendees,
         created_at: created,
         updated_at: updated,
         etag: None,
+        organizer,
+        attendee_responses,
     })
+}
+
+/// Strip the `mailto:` scheme (case-insensitive) from a calendar-user
+/// address, leaving the bare email for display + RSVP matching.
+fn strip_mailto(s: &str) -> String {
+    let s = s.trim();
+    s.strip_prefix("mailto:")
+        .or_else(|| s.strip_prefix("MAILTO:"))
+        .unwrap_or(s)
+        .trim()
+        .to_string()
+}
+
+/// Map an RFC 5545 `PARTSTAT` to the normalised RSVP enum. DELEGATED and
+/// any unknown value fall through to `NeedsAction`.
+fn caldav_partstat(s: &str) -> AttendeeStatus {
+    match s.trim().to_ascii_uppercase().as_str() {
+        "ACCEPTED" => AttendeeStatus::Accepted,
+        "DECLINED" => AttendeeStatus::Declined,
+        "TENTATIVE" => AttendeeStatus::Tentative,
+        _ => AttendeeStatus::NeedsAction,
+    }
 }
 
 /// Walk every child component on a VEVENT, pick out the VALARMs, and
@@ -534,6 +597,36 @@ fn format_utc_compact(dt: DateTime<Utc>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn maps_organizer_and_attendee_partstats() {
+        let body = "BEGIN:VCALENDAR\r
+VERSION:2.0\r
+PRODID:-//test//EN\r
+BEGIN:VEVENT\r
+UID:mtg-1@aperio\r
+SUMMARY:Planning\r
+DTSTART:20260520T080000Z\r
+DTEND:20260520T090000Z\r
+ORGANIZER;CN=The Boss:mailto:boss@example.com\r
+ATTENDEE;CN=The Boss;PARTSTAT=ACCEPTED:mailto:boss@example.com\r
+ATTENDEE;CN=Me;PARTSTAT=NEEDS-ACTION:mailto:me@example.com\r
+ATTENDEE;PARTSTAT=DECLINED:mailto:skeptic@example.com\r
+END:VEVENT\r
+END:VCALENDAR\r
+";
+        let events = parse_calendar_data(body, "cal-1").unwrap();
+        let ev = &events[0];
+        assert_eq!(ev.organizer.as_deref(), Some("boss@example.com"));
+        // Flat editable list: "Name <email>" when CN present, else bare.
+        assert_eq!(ev.attendees[0], "The Boss <boss@example.com>");
+        assert_eq!(ev.attendees[2], "skeptic@example.com");
+        assert_eq!(ev.attendee_responses.len(), 3);
+        assert_eq!(ev.attendee_responses[0].status, AttendeeStatus::Accepted);
+        assert_eq!(ev.attendee_responses[1].status, AttendeeStatus::NeedsAction);
+        assert_eq!(ev.attendee_responses[2].status, AttendeeStatus::Declined);
+        assert_eq!(ev.attendee_responses[0].name.as_deref(), Some("The Boss"));
+    }
 
     #[test]
     fn maps_a_minimal_utc_event() {

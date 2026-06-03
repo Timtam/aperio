@@ -75,7 +75,8 @@ typedef PluginCallResult (*AperioVtableMethodFn)(
  *   create_event/update_event → Event; delete_event/add_event_exdate/
  *   rename_calendar → null; get_free_busy → Vec<FreeBusy>;
  *   calendar_color → Option<ContainerColor> (synchronous);
- *   get_events_delta → ChangeSet<Event>.
+ *   get_events_delta → ChangeSet<Event>;
+ *   current_user_email → Option<String>; respond_to_event → null.
  */
 typedef struct AperioCalendarVtable {
     uint32_t vtable_version;
@@ -98,6 +99,12 @@ typedef struct AperioCalendarVtable {
        ChangeSet<Event> (CACHE-4). NULL ⇒ host falls back to a full
        get_events. */
     AperioVtableMethodFn get_events_delta;
+    /* current_user_email() -> Option<String> (RSVP identity gate).
+       NULL ⇒ host treats it as Ok(None) ("identity unknown"). */
+    AperioVtableMethodFn current_user_email;
+    /* respond_to_event(event_id, status, send_response) (RSVP).
+       NULL ⇒ default-Unsupported. */
+    AperioVtableMethodFn respond_to_event;
 } AperioCalendarVtable;
 
 /*

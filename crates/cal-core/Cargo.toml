@@ -22,5 +22,10 @@ uuid.workspace = true
 # same way — no per-adapter base64 quirks.
 base64 = "0.22"
 
+[dev-dependencies]
+# Pins the JSON wire format of the RSVP enum (kebab-case) that the
+# FFI + TS types depend on.
+serde_json.workspace = true
+
 [lints]
 workspace = true

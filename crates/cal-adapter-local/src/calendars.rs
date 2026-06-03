@@ -556,6 +556,8 @@ fn persist_new_event(
         created_at: now,
         updated_at: now,
         etag: None,
+        organizer: None,
+        attendee_responses: Vec::new(),
     })
 }
 
@@ -601,6 +603,10 @@ pub(crate) fn row_to_event(row: &rusqlite::Row<'_>) -> cal_core::Result<Event> {
         created_at,
         updated_at,
         etag,
+        // Local events have no organizer/RSVP metadata; those are
+        // read-only fields populated only by external providers.
+        organizer: None,
+        attendee_responses: Vec::new(),
     })
 }
 

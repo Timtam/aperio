@@ -1,7 +1,7 @@
 //! Calendar and event commands.
 
 use cal_adapter_local::LocalAdapter;
-use cal_core::{Calendar, CalendarFeature, DateRange, Event, FreeBusy, NewEvent};
+use cal_core::{AttendeeStatus, Calendar, CalendarFeature, DateRange, Event, FreeBusy, NewEvent};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -743,6 +743,63 @@ pub async fn query_free_busy(
             Ok(Vec::new())
         }
     }
+}
+
+/// The connected account's email for `calendar_id`, used by the RSVP
+/// affordance to decide whether the user is an *attendee* (not the
+/// organizer) of a meeting. Local/iCal calendars and any provider that
+/// can't report an identity return `None`, which hides the RSVP buttons.
+#[tauri::command]
+pub async fn calendar_current_user_email(
+    registry: State<'_, Arc<AdapterRegistry>>,
+    calendar_id: String,
+) -> CommandResult<Option<String>> {
+    let account = registry
+        .account_for_calendar(&calendar_id)
+        .unwrap_or_else(|| LOCAL_ID.to_string());
+    if account == LOCAL_ID {
+        return Ok(None);
+    }
+    let Some(ext) = registry.calendar_adapter(&account) else {
+        return Ok(None);
+    };
+    Ok(ext.current_user_email().await.unwrap_or(None))
+}
+
+/// RSVP to an invitation: set the connected user's participation status
+/// on `event_id`. When `send_response` is true the provider also emails
+/// the reply to the organizer. Invalidates the calendar's event cache so
+/// the next read reflects the new status. Local/iCal calendars and
+/// unroutable accounts return a not-found error (the UI only offers RSVP
+/// on scheduling-capable, non-organizer meetings).
+#[tauri::command]
+pub async fn respond_to_event(
+    registry: State<'_, Arc<AdapterRegistry>>,
+    cache: State<'_, Arc<CacheStore>>,
+    calendar_id: String,
+    event_id: String,
+    status: AttendeeStatus,
+    send_response: bool,
+) -> CommandResult<()> {
+    let account = registry
+        .account_for_calendar(&calendar_id)
+        .unwrap_or_else(|| LOCAL_ID.to_string());
+    if account == LOCAL_ID {
+        return Err(CommandError {
+            code: "unsupported",
+            message: "RSVP is only available on external calendar accounts".into(),
+        });
+    }
+    let Some(ext) = registry.calendar_adapter(&account) else {
+        return Err(CommandError {
+            code: "not_found",
+            message: format!("account '{account}' is not routable"),
+        });
+    };
+    ext.respond_to_event(&event_id, status, send_response)
+        .await?;
+    let _ = cache.invalidate(&account, SyncScope::Events, &calendar_id);
+    Ok(())
 }
 
 #[tauri::command]

@@ -15,7 +15,8 @@
 //! refusing the write.
 
 use cal_core::{
-    Calendar, ColorSource, ContainerColor, Event, EventRecurrence, NewEvent, Reminder, ReminderKind,
+    AttendeeResponse, AttendeeStatus, Calendar, ColorSource, ContainerColor, Event,
+    EventRecurrence, NewEvent, Reminder, ReminderKind,
 };
 use chrono::{DateTime, Datelike, NaiveDate, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
@@ -129,12 +130,52 @@ pub struct EventEntry {
     pub last_modified_date_time: Option<DateTime<Utc>>,
     #[serde(default, rename = "@odata.etag")]
     pub etag: Option<String>,
+    /// Invitees + their RSVP state (`event.attendees[]`). Empty on a
+    /// non-meeting event.
+    #[serde(default)]
+    pub attendees: Vec<GraphAttendeeRead>,
+    /// The meeting organizer.
+    #[serde(default)]
+    pub organizer: Option<GraphRecipient>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct EventLocation {
     #[serde(default, rename = "displayName")]
     pub display_name: Option<String>,
+}
+
+/// One attendee row on a read Graph event.
+#[derive(Debug, Deserialize)]
+pub struct GraphAttendeeRead {
+    #[serde(default, rename = "emailAddress")]
+    pub email_address: Option<GraphEmailAddressRead>,
+    #[serde(default)]
+    pub status: Option<GraphResponseStatus>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GraphRecipient {
+    #[serde(default, rename = "emailAddress")]
+    pub email_address: Option<GraphEmailAddressRead>,
+}
+
+/// Read-side counterpart of the write [`GraphEmailAddress`] — fields are
+/// optional because Graph may omit `name` (or, rarely, `address`).
+#[derive(Debug, Deserialize)]
+pub struct GraphEmailAddressRead {
+    #[serde(default)]
+    pub address: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GraphResponseStatus {
+    /// `none` | `organizer` | `tentativelyAccepted` | `accepted` |
+    /// `declined` | `notResponded`.
+    #[serde(default)]
+    pub response: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -269,6 +310,41 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GraphResult<Option<Eve
     let created = entry.created_date_time.unwrap_or_else(Utc::now);
     let updated = entry.last_modified_date_time.unwrap_or(created);
 
+    // Attendees: the editable flat list ("Name <email>" / bare email)
+    // plus per-attendee RSVP state.
+    let mut attendees = Vec::new();
+    let mut attendee_responses = Vec::new();
+    for a in entry.attendees {
+        let Some(email) = a
+            .email_address
+            .as_ref()
+            .and_then(|e| e.address.clone())
+            .filter(|s| !s.trim().is_empty())
+        else {
+            continue;
+        };
+        let name = a
+            .email_address
+            .and_then(|e| e.name)
+            .filter(|n| !n.trim().is_empty());
+        attendees.push(format_attendee(name.as_deref(), &email));
+        attendee_responses.push(AttendeeResponse {
+            status: a
+                .status
+                .and_then(|s| s.response)
+                .as_deref()
+                .map(graph_status)
+                .unwrap_or_default(),
+            name,
+            email,
+        });
+    }
+    let organizer = entry
+        .organizer
+        .and_then(|o| o.email_address)
+        .and_then(|e| e.address)
+        .filter(|s| !s.trim().is_empty());
+
     Ok(Some(Event {
         send_invitations: false,
         id: entry.id,
@@ -283,11 +359,34 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GraphResult<Option<Eve
         color_label: None,
         reminders,
         sound: None,
-        attendees: Vec::new(),
+        attendees,
         created_at: created,
         updated_at: updated,
         etag: entry.etag,
+        organizer,
+        attendee_responses,
     }))
+}
+
+/// Map Graph's attendee `status.response` to the normalised RSVP enum.
+/// `organizer` (the response on the organizer's own row) reads as an
+/// implicit acceptance.
+fn graph_status(s: &str) -> AttendeeStatus {
+    match s {
+        "accepted" | "organizer" => AttendeeStatus::Accepted,
+        "declined" => AttendeeStatus::Declined,
+        "tentativelyAccepted" => AttendeeStatus::Tentative,
+        _ => AttendeeStatus::NeedsAction,
+    }
+}
+
+/// Render an attendee for the editable flat list — `"Name <email>"`
+/// when a distinct display name exists, else the bare email.
+fn format_attendee(name: Option<&str>, email: &str) -> String {
+    match name {
+        Some(n) if n.trim() != email => format!("{} <{}>", n.trim(), email),
+        _ => email.to_string(),
+    }
 }
 
 // ── Recurrence: Graph ⇄ RRULE ───────────────────────────────────────────
@@ -1290,6 +1389,37 @@ mod tests {
             ReminderKind::Relative { minutes_before } => assert_eq!(minutes_before, 15),
             ref other => panic!("expected Relative, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn map_event_reads_attendees_and_organizer() {
+        let raw = r#"{
+            "id": "ev-mtg",
+            "subject": "Planning",
+            "start": { "dateTime": "2026-05-25T10:00:00.0000000", "timeZone": "UTC" },
+            "end":   { "dateTime": "2026-05-25T11:00:00.0000000", "timeZone": "UTC" },
+            "isAllDay": false,
+            "organizer": { "emailAddress": { "name": "The Boss", "address": "boss@example.com" } },
+            "attendees": [
+              { "type": "required", "status": { "response": "organizer" },
+                "emailAddress": { "name": "The Boss", "address": "boss@example.com" } },
+              { "type": "required", "status": { "response": "tentativelyAccepted" },
+                "emailAddress": { "name": "Me", "address": "me@example.com" } },
+              { "type": "required", "status": { "response": "none" },
+                "emailAddress": { "address": "nobody@example.com" } }
+            ]
+        }"#;
+        let entry: EventEntry = serde_json::from_str(raw).unwrap();
+        let ev = map_event(entry, "primary").unwrap().unwrap();
+        assert_eq!(ev.organizer.as_deref(), Some("boss@example.com"));
+        assert_eq!(ev.attendees[0], "The Boss <boss@example.com>");
+        assert_eq!(ev.attendees[2], "nobody@example.com");
+        assert_eq!(ev.attendee_responses.len(), 3);
+        // organizer → implicit accept; tentativelyAccepted → Tentative;
+        // none → NeedsAction.
+        assert_eq!(ev.attendee_responses[0].status, AttendeeStatus::Accepted);
+        assert_eq!(ev.attendee_responses[1].status, AttendeeStatus::Tentative);
+        assert_eq!(ev.attendee_responses[2].status, AttendeeStatus::NeedsAction);
     }
 
     #[test]

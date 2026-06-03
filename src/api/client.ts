@@ -8,6 +8,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type {
   Account,
   AdapterKind,
+  AttendeeStatus,
   Calendar,
   CalendarEvent,
   ColorLabel,
@@ -144,6 +145,30 @@ export const queryFreeBusy = (
       range_start: rangeStart,
       range_end: rangeEnd,
     },
+  });
+
+/** The connected account's email for `calendarId`, or null when the
+ *  provider can't report one (local/iCal, or an identity lookup that
+ *  failed). Drives the RSVP gate: the user can respond only to a meeting
+ *  they're an attendee (not the organizer) of. */
+export const calendarCurrentUserEmail = (calendarId: string) =>
+  invoke<string | null>('calendar_current_user_email', { calendarId });
+
+/** RSVP to an invitation: set the connected user's participation status
+ *  on the event. When `sendResponse` is true the provider also emails the
+ *  reply to the organizer. Only valid on scheduling-capable external
+ *  calendars where the user is a (non-organizer) attendee. */
+export const respondToEvent = (
+  calendarId: string,
+  eventId: string,
+  status: AttendeeStatus,
+  sendResponse: boolean,
+) =>
+  invoke<void>('respond_to_event', {
+    calendarId,
+    eventId,
+    status,
+    sendResponse,
   });
 
 export const getTaskById = (id: string) =>

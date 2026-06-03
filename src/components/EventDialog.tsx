@@ -36,6 +36,7 @@ import {
   timeInput,
   toIso,
 } from './eventDateTime';
+import { EventRsvp } from './EventRsvp';
 import { readLastUsedCalendar, writeLastUsedCalendar } from './lastUsedCalendar';
 import { Modal } from './Modal';
 import { RecurrenceSelector } from './RecurrenceSelector';
@@ -579,6 +580,9 @@ export function EventDialog({
       dismissOnBackdrop={false}
     >
       <form onSubmit={onSubmit} className="form">
+        {isEdit && event && (
+          <EventRsvp event={event} onResponded={onClose} />
+        )}
         <label className="form__field">
           <span className="form__label">{t('dialogs.event.fields.title')}</span>
           <input

@@ -38,7 +38,10 @@ use quick_xml::events::Event as XmlEvent;
 use quick_xml::reader::Reader;
 use serde::{Deserialize, Serialize};
 
-use cal_core::{Calendar, Event, EventRecurrence, FreeBusy, FreeBusySlot, Reminder, ReminderKind};
+use cal_core::{
+    AttendeeResponse, AttendeeStatus, Calendar, Event, EventRecurrence, FreeBusy, FreeBusySlot,
+    Reminder, ReminderKind,
+};
 
 use crate::error::{EwsError, EwsResult};
 
@@ -348,6 +351,16 @@ pub struct ParsedItem {
     /// also edited the content fields.
     #[serde(default)]
     pub modified_occurrences: Vec<ModifiedOccurrence>,
+    /// `<t:Organizer><t:Mailbox><t:EmailAddress>` — the meeting
+    /// organizer's SMTP address. Populated only by the detail GetItem
+    /// fan-out (the `SyncFolderItems`/`FindItem` shapes omit it).
+    #[serde(default)]
+    pub organizer: Option<String>,
+    /// `<t:RequiredAttendees>` + `<t:OptionalAttendees>` — the invitees
+    /// with their `<t:ResponseType>`. Same detail-fetch caveat as
+    /// `organizer`.
+    #[serde(default)]
+    pub attendees: Vec<EwsAttendee>,
     /// True once the per-item detail GetItem fan-out has populated
     /// this row's `body` (and, for masters, `recurrence`). The
     /// `SyncFolderItems` shape never carries `<t:Body>` or
@@ -377,6 +390,19 @@ pub struct ModifiedOccurrence {
     /// this as the master's EXDATE so the expander skips the
     /// vacated slot.
     pub original_start: DateTime<Utc>,
+}
+
+/// One invitee from a CalendarItem's `RequiredAttendees` /
+/// `OptionalAttendees` list. `response_type` is the raw EWS value
+/// (`Accept`, `Decline`, `Tentative`, `Organizer`, `NoResponseReceived`,
+/// `Unknown`), normalised to [`cal_core::AttendeeStatus`] in `to_event`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct EwsAttendee {
+    pub email: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub response_type: Option<String>,
 }
 
 /// Walk a `FindItemResponse` body and yield one `ParsedItem` per
@@ -1008,6 +1034,12 @@ pub fn parse_get_calendar_items_response(xml: &str) -> EwsResult<Vec<ParsedItem>
     let mut inside_modified_occurrences = false;
     let mut inside_modified_occurrence = false;
     let mut current_override = ModifiedOccurrenceBuilder::default();
+    // Attendee / organizer subtree state.
+    let mut inside_attendees = false;
+    let mut inside_attendee = false;
+    let mut inside_organizer = false;
+    let mut inside_mailbox = false;
+    let mut current_attendee = EwsAttendee::default();
 
     loop {
         match reader.read_event_into(&mut buf) {
@@ -1086,6 +1118,32 @@ pub fn parse_get_calendar_items_response(xml: &str) -> EwsResult<Vec<ParsedItem>
                     b"end" if inside_item => text_target = Some("end"),
                     b"isrecurring" if inside_item => text_target = Some("recurring"),
                     b"calendaritemtype" if inside_item => text_target = Some("item_type"),
+                    // Organizer + attendee subtree. The `Mailbox`
+                    // (EmailAddress/Name) is shared by both, so the
+                    // text targets are scoped by the enclosing flag.
+                    b"organizer" if inside_item => inside_organizer = true,
+                    b"requiredattendees" | b"optionalattendees" if inside_item => {
+                        inside_attendees = true;
+                    }
+                    b"attendee" if inside_attendees => {
+                        inside_attendee = true;
+                        current_attendee = EwsAttendee::default();
+                    }
+                    b"mailbox" if inside_attendee || inside_organizer => {
+                        inside_mailbox = true;
+                    }
+                    b"emailaddress" if inside_mailbox && inside_attendee => {
+                        text_target = Some("attendee_email");
+                    }
+                    b"emailaddress" if inside_mailbox && inside_organizer => {
+                        text_target = Some("organizer_email");
+                    }
+                    b"name" if inside_mailbox && inside_attendee => {
+                        text_target = Some("attendee_name");
+                    }
+                    b"responsetype" if inside_attendee => {
+                        text_target = Some("attendee_response");
+                    }
                     _ => {}
                 }
             }
@@ -1120,6 +1178,17 @@ pub fn parse_get_calendar_items_response(xml: &str) -> EwsResult<Vec<ParsedItem>
                             current.modified_occurrences.push(o);
                         }
                     }
+                    b"attendee" if inside_attendee => {
+                        inside_attendee = false;
+                        if !current_attendee.email.trim().is_empty() {
+                            current
+                                .attendees
+                                .push(std::mem::take(&mut current_attendee));
+                        }
+                    }
+                    b"mailbox" => inside_mailbox = false,
+                    b"requiredattendees" | b"optionalattendees" => inside_attendees = false,
+                    b"organizer" => inside_organizer = false,
                     b"calendaritem" => {
                         if !current.item_id.is_empty() {
                             items.push(std::mem::take(&mut current));
@@ -1147,6 +1216,25 @@ pub fn parse_get_calendar_items_response(xml: &str) -> EwsResult<Vec<ParsedItem>
                     continue;
                 }
                 match text_target {
+                    Some("attendee_email") => current_attendee.email.push_str(s),
+                    Some("attendee_name") => {
+                        current_attendee
+                            .name
+                            .get_or_insert_with(String::new)
+                            .push_str(s);
+                    }
+                    Some("attendee_response") => {
+                        current_attendee
+                            .response_type
+                            .get_or_insert_with(String::new)
+                            .push_str(s);
+                    }
+                    Some("organizer_email") => {
+                        current
+                            .organizer
+                            .get_or_insert_with(String::new)
+                            .push_str(s);
+                    }
                     Some("subject") => current.subject.push_str(s),
                     Some("body") => {
                         let acc = current.body.get_or_insert_with(String::new);
@@ -1407,6 +1495,30 @@ pub fn to_event(item: ParsedItem, calendar_id: &str) -> EwsResult<Event> {
         }
     });
 
+    // Attendees → editable flat list ("Name <email>" / bare) + RSVP state.
+    let mut attendees = Vec::new();
+    let mut attendee_responses = Vec::new();
+    for a in item.attendees {
+        if a.email.trim().is_empty() {
+            continue;
+        }
+        let name = a.name.filter(|n| !n.trim().is_empty());
+        attendees.push(match &name {
+            Some(n) if n != &a.email => format!("{n} <{}>", a.email),
+            _ => a.email.clone(),
+        });
+        attendee_responses.push(AttendeeResponse {
+            status: a
+                .response_type
+                .as_deref()
+                .map(ews_response_type)
+                .unwrap_or_default(),
+            name,
+            email: a.email,
+        });
+    }
+    let organizer = item.organizer.filter(|s| !s.trim().is_empty());
+
     Ok(Event {
         send_invitations: false,
         id,
@@ -1421,11 +1533,26 @@ pub fn to_event(item: ParsedItem, calendar_id: &str) -> EwsResult<Event> {
         color_label: None,
         reminders,
         sound: None,
-        attendees: Vec::new(),
+        attendees,
         created_at: item.created.unwrap_or_else(Utc::now),
         updated_at: item.last_modified.unwrap_or_else(Utc::now),
         etag: item.change_key,
+        organizer,
+        attendee_responses,
     })
+}
+
+/// Map EWS `<t:ResponseType>` to the normalised RSVP enum. `Organizer`
+/// (the organizer's own row) reads as an implicit acceptance;
+/// `Unknown` / `NoResponseReceived` are "no reply yet".
+fn ews_response_type(s: &str) -> AttendeeStatus {
+    match s {
+        "Accept" => AttendeeStatus::Accepted,
+        "Decline" => AttendeeStatus::Declined,
+        "Tentative" => AttendeeStatus::Tentative,
+        "Organizer" => AttendeeStatus::Accepted,
+        _ => AttendeeStatus::NeedsAction,
+    }
 }
 
 // ── Write side ──────────────────────────────────────────────────────────
@@ -3166,6 +3293,8 @@ mod tests {
             recurrence: None,
             deleted_occurrence_starts: Vec::new(),
             modified_occurrences: Vec::new(),
+            organizer: None,
+            attendees: Vec::new(),
             detail_fetched: false,
         };
         let ev = to_event(item, "FID|CK").unwrap();
@@ -3413,6 +3542,8 @@ mod tests {
             created_at: "2026-05-19T00:00:00Z".parse().unwrap(),
             updated_at: "2026-05-19T00:00:00Z".parse().unwrap(),
             etag: Some("CK".into()),
+            organizer: None,
+            attendee_responses: Vec::new(),
         };
         let (set, del) = event_to_update_field_xml(&ev).unwrap();
         assert!(set.contains("<t:Subject>Updated</t:Subject>"));
@@ -3492,6 +3623,8 @@ mod tests {
             recurrence: None,
             deleted_occurrence_starts: Vec::new(),
             modified_occurrences: Vec::new(),
+            organizer: None,
+            attendees: Vec::new(),
             detail_fetched: false,
         };
         assert_eq!(to_event(mk(Some("Single")), "FID").unwrap().id, "S:IID|ICK");
@@ -4293,6 +4426,90 @@ mod tests {
         assert_eq!(ov.item_id, "OCC-MOVED");
         assert_eq!(ov.start.to_rfc3339(), "2026-06-03T14:00:00+00:00");
         assert_eq!(ov.original_start.to_rfc3339(), "2026-06-03T09:00:00+00:00");
+    }
+
+    #[test]
+    fn parse_get_items_response_reads_organizer_and_attendees() {
+        let xml = r#"<?xml version="1.0"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+               xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+               xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <soap:Body>
+    <m:GetItemResponse>
+      <m:ResponseMessages>
+        <m:GetItemResponseMessage ResponseClass="Success">
+          <m:Items>
+            <t:CalendarItem>
+              <t:ItemId Id="MTG-1" ChangeKey="CK"/>
+              <t:Subject>Planning</t:Subject>
+              <t:Organizer>
+                <t:Mailbox>
+                  <t:Name>The Boss</t:Name>
+                  <t:EmailAddress>boss@example.com</t:EmailAddress>
+                </t:Mailbox>
+              </t:Organizer>
+              <t:RequiredAttendees>
+                <t:Attendee>
+                  <t:Mailbox>
+                    <t:Name>The Boss</t:Name>
+                    <t:EmailAddress>boss@example.com</t:EmailAddress>
+                  </t:Mailbox>
+                  <t:ResponseType>Organizer</t:ResponseType>
+                </t:Attendee>
+                <t:Attendee>
+                  <t:Mailbox>
+                    <t:Name>Me</t:Name>
+                    <t:EmailAddress>me@example.com</t:EmailAddress>
+                  </t:Mailbox>
+                  <t:ResponseType>Tentative</t:ResponseType>
+                </t:Attendee>
+              </t:RequiredAttendees>
+              <t:OptionalAttendees>
+                <t:Attendee>
+                  <t:Mailbox>
+                    <t:EmailAddress>maybe@example.com</t:EmailAddress>
+                  </t:Mailbox>
+                  <t:ResponseType>Decline</t:ResponseType>
+                </t:Attendee>
+              </t:OptionalAttendees>
+            </t:CalendarItem>
+          </m:Items>
+        </m:GetItemResponseMessage>
+      </m:ResponseMessages>
+    </m:GetItemResponse>
+  </soap:Body>
+</soap:Envelope>"#;
+        let parsed = parse_get_calendar_items_response(xml).unwrap();
+        assert_eq!(parsed.len(), 1);
+        let item = &parsed[0];
+        assert_eq!(item.organizer.as_deref(), Some("boss@example.com"));
+        // Required + optional attendees collected in document order.
+        assert_eq!(item.attendees.len(), 3);
+        assert_eq!(item.attendees[0].email, "boss@example.com");
+        assert_eq!(item.attendees[0].name.as_deref(), Some("The Boss"));
+        assert_eq!(
+            item.attendees[0].response_type.as_deref(),
+            Some("Organizer")
+        );
+        assert_eq!(item.attendees[1].email, "me@example.com");
+        assert_eq!(
+            item.attendees[1].response_type.as_deref(),
+            Some("Tentative")
+        );
+        assert_eq!(item.attendees[2].email, "maybe@example.com");
+        assert_eq!(item.attendees[2].response_type.as_deref(), Some("Decline"));
+
+        // And the cal-core mapping normalises the response types.
+        let mut full = item.clone();
+        full.start = Some("2026-05-25T10:00:00Z".parse().unwrap());
+        full.end = Some("2026-05-25T11:00:00Z".parse().unwrap());
+        let ev = to_event(full, "cal-1").unwrap();
+        assert_eq!(ev.organizer.as_deref(), Some("boss@example.com"));
+        assert_eq!(ev.attendees[0], "The Boss <boss@example.com>");
+        assert_eq!(ev.attendees[2], "maybe@example.com");
+        assert_eq!(ev.attendee_responses[0].status, AttendeeStatus::Accepted);
+        assert_eq!(ev.attendee_responses[1].status, AttendeeStatus::Tentative);
+        assert_eq!(ev.attendee_responses[2].status, AttendeeStatus::Declined);
     }
 
     #[test]

@@ -90,6 +90,19 @@ when caching:
 > — "availability unknown" — rather than failing the call. Local/iCal
 > calendars return empty.
 
+> **RSVP** rides three pieces: read-side population of `Event.organizer` +
+> `attendee_responses` (per provider — CalDAV `ATTENDEE;PARTSTAT`, EWS
+> `ResponseType`, Google/Graph `responseStatus`), `current_user_email()`
+> for the "am I a non-organizer attendee?" gate (CalDAV
+> calendar-user-address, Graph `/me`, Google primary-calendar id, EWS
+> login), and `respond_to_event(event_id, status, send_response)`: EWS
+> `AcceptItem`/`DeclineItem`/`TentativelyAcceptItem`, Graph
+> `/accept|/decline|/tentativelyAccept`, Google self-`responseStatus`
+> patch + `sendUpdates`, CalDAV `PARTSTAT` PUT (RFC 6638 servers auto-emit
+> the iTIP `REPLY`; `Schedule-Reply: F` suppresses it). `NeedsAction`
+> isn't respondable. The shim maps a null `current_user_email` slot to
+> `Ok(None)` so read-only adapters hide RSVP rather than erroring.
+
 ## The adapters
 
 | Adapter | Crate | Capabilities | Protocol |

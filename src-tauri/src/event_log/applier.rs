@@ -942,6 +942,8 @@ mod tests {
             created_at: Utc.with_ymd_and_hms(2026, 5, 12, 9, 0, 0).unwrap(),
             updated_at: Utc.with_ymd_and_hms(2026, 5, 12, 9, 0, 0).unwrap(),
             etag: None,
+            organizer: None,
+            attendee_responses: Vec::new(),
         }
     }
 

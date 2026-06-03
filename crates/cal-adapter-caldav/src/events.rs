@@ -12,7 +12,7 @@
 //! a different component name on the filter side and a different
 //! ID/etag tracking concern (completed_at vs start_utc).
 
-use cal_core::{DateRange, Event, EventRecurrence, NewEvent};
+use cal_core::{AttendeeStatus, DateRange, Event, EventRecurrence, NewEvent};
 use chrono::{DateTime, Utc};
 use reqwest::{
     header::{HeaderName, HeaderValue, ACCEPT, CONTENT_TYPE, ETAG, IF_MATCH, IF_NONE_MATCH},
@@ -172,6 +172,10 @@ pub async fn create_event(
         created_at: now,
         updated_at: now,
         etag,
+        // Write path: organizer/RSVP metadata is read-only, populated
+        // only when reading the event back from the server.
+        organizer: None,
+        attendee_responses: Vec::new(),
     })
 }
 
@@ -385,6 +389,160 @@ pub async fn add_event_exdate(
 #[allow(dead_code)]
 fn _touch_recurrence(_: &EventRecurrence) {}
 
+/// RSVP to a meeting by surgically updating the connected user's
+/// `ATTENDEE;PARTSTAT` in the stored `.ics` and PUTting it back. On an
+/// RFC 6638 auto-scheduling server (iCloud) the PUT triggers the iTIP
+/// `REPLY` to the organizer automatically; `Schedule-Reply: F`
+/// suppresses that when `send_response` is false.
+///
+/// We edit the raw body rather than re-serialising via `event_to_ical`
+/// so every server-side property (RRULE, the other attendees, X-props)
+/// is preserved untouched — only the matching `PARTSTAT` parameter
+/// changes. `base_url` only needs the right scheme+host; the event id's
+/// encoded href (absolute path) supplies the resource path.
+pub async fn respond_to_event(
+    client: &Client,
+    base_url: &Url,
+    event_id: &str,
+    self_email: &str,
+    status: AttendeeStatus,
+    send_response: bool,
+    credentials: &Credentials,
+) -> CaldavResult<()> {
+    let partstat = match status {
+        AttendeeStatus::Accepted => "ACCEPTED",
+        AttendeeStatus::Declined => "DECLINED",
+        AttendeeStatus::Tentative => "TENTATIVE",
+        AttendeeStatus::NeedsAction => {
+            return Err(CaldavError::Protocol(
+                "cannot RSVP with status needs-action".into(),
+            ));
+        }
+    };
+    let resource = resource_url_for_event(base_url, event_id)?;
+
+    // Fetch the current body + ETag.
+    let mut get_headers = auth_header(credentials)?;
+    get_headers.insert(ACCEPT, HeaderValue::from_static("text/calendar"));
+    let response = client
+        .get(resource.clone())
+        .headers(get_headers)
+        .send()
+        .await?;
+    let status_code = response.status();
+    if !status_code.is_success() {
+        let text = response.text().await.unwrap_or_default();
+        return Err(CaldavError::Http {
+            status: status_code.as_u16(),
+            message: if text.is_empty() {
+                status_code.canonical_reason().unwrap_or("").to_string()
+            } else {
+                text.chars().take(200).collect()
+            },
+        });
+    }
+    let etag = extract_etag(&response);
+    let body = response.text().await?;
+
+    let new_body = set_self_partstat(&body, self_email, partstat).ok_or_else(|| {
+        CaldavError::Protocol(format!(
+            "'{self_email}' is not an attendee of event '{event_id}'"
+        ))
+    })?;
+
+    let mut put_headers = auth_header(credentials)?;
+    put_headers.insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static("text/calendar; charset=utf-8"),
+    );
+    if let Some(tag) = etag {
+        if let Ok(v) = HeaderValue::from_str(&tag) {
+            put_headers.insert(IF_MATCH, v);
+        }
+    }
+    if !send_response {
+        // RFC 6638 §8.1: suppress the auto-generated scheduling reply.
+        put_headers.insert(
+            HeaderName::from_static("schedule-reply"),
+            HeaderValue::from_static("F"),
+        );
+    }
+    let put = client
+        .put(resource)
+        .headers(put_headers)
+        .body(new_body)
+        .send()
+        .await?;
+    expect_write_success(&put)?;
+    Ok(())
+}
+
+/// Surgically set `PARTSTAT` on the `ATTENDEE` line whose value matches
+/// `email`, leaving every other line (and its folding) untouched.
+/// Returns `None` when no matching attendee is present. Only the edited
+/// ATTENDEE line is unfolded — typical attendee lines fit one physical
+/// line, so we emit it unfolded and pass everything else through
+/// verbatim.
+fn set_self_partstat(body: &str, email: &str, partstat: &str) -> Option<String> {
+    let needle = email.trim().to_ascii_lowercase();
+    let mut out = String::with_capacity(body.len() + 16);
+    let mut changed = false;
+    let mut lines = body.split_inclusive('\n').peekable();
+    while let Some(phys) = lines.next() {
+        let trimmed = phys.trim_end_matches(['\r', '\n']);
+        if !trimmed.to_ascii_uppercase().starts_with("ATTENDEE") {
+            out.push_str(phys);
+            continue;
+        }
+        let ending = if phys.ends_with("\r\n") { "\r\n" } else { "\n" };
+        // Gather any continuation lines into one logical ATTENDEE line.
+        let mut logical = trimmed.to_string();
+        while let Some(next) = lines.peek() {
+            if next.starts_with(' ') || next.starts_with('\t') {
+                let cont = lines.next().unwrap();
+                logical.push_str(cont.trim_end_matches(['\r', '\n']).get(1..).unwrap_or(""));
+            } else {
+                break;
+            }
+        }
+        if logical.to_ascii_lowercase().contains(&needle) {
+            logical = replace_partstat(&logical, partstat);
+            changed = true;
+        }
+        out.push_str(&logical);
+        out.push_str(ending);
+    }
+    changed.then_some(out)
+}
+
+/// Replace (or insert) the `PARTSTAT` parameter on a single logical
+/// content line. The property value (after the first unquoted `:`) is
+/// left intact, including its `mailto:` colon.
+fn replace_partstat(line: &str, partstat: &str) -> String {
+    let Some(colon) = line.find(':') else {
+        return line.to_string();
+    };
+    let (head, value) = line.split_at(colon); // value starts at ':'
+    let mut found = false;
+    let rebuilt: Vec<String> = head
+        .split(';')
+        .enumerate()
+        .map(|(i, p)| {
+            if i > 0 && p.to_ascii_uppercase().starts_with("PARTSTAT=") {
+                found = true;
+                format!("PARTSTAT={partstat}")
+            } else {
+                p.to_string()
+            }
+        })
+        .collect();
+    let mut head = rebuilt.join(";");
+    if !found {
+        head.push_str(&format!(";PARTSTAT={partstat}"));
+    }
+    format!("{head}{value}")
+}
+
 fn resource_url(calendar_url: &Url, uid: &str) -> CaldavResult<Url> {
     // CalDAV resource URLs are `<collection>/<slug>.ics`. The UID
     // makes a stable slug — collisions are vanishingly unlikely
@@ -450,6 +608,37 @@ mod tests {
     use crate::config::{AuthKind, CaldavAccountConfig};
     use chrono::TimeZone;
     use mockito::Server;
+
+    #[test]
+    fn set_self_partstat_updates_only_the_matching_attendee() {
+        let body = "BEGIN:VCALENDAR\r
+BEGIN:VEVENT\r
+UID:mtg-1\r
+SUMMARY:Planning\r
+ORGANIZER;CN=Boss:mailto:boss@example.com\r
+ATTENDEE;CN=Boss;PARTSTAT=ACCEPTED:mailto:boss@example.com\r
+ATTENDEE;CN=Me;PARTSTAT=NEEDS-ACTION:mailto:me@example.com\r
+END:VEVENT\r
+END:VCALENDAR\r
+";
+        let out = set_self_partstat(body, "me@example.com", "DECLINED").unwrap();
+        // Our row flipped to DECLINED…
+        assert!(out.contains("ATTENDEE;CN=Me;PARTSTAT=DECLINED:mailto:me@example.com"));
+        // …the organizer's row is untouched…
+        assert!(out.contains("ATTENDEE;CN=Boss;PARTSTAT=ACCEPTED:mailto:boss@example.com"));
+        // …and the rest of the body is intact.
+        assert!(out.contains("SUMMARY:Planning"));
+        assert!(out.contains("ORGANIZER;CN=Boss:mailto:boss@example.com"));
+    }
+
+    #[test]
+    fn set_self_partstat_inserts_when_absent_and_reports_no_match() {
+        let body = "BEGIN:VEVENT\r\nATTENDEE;CN=Me:mailto:me@example.com\r\nEND:VEVENT\r\n";
+        let out = set_self_partstat(body, "me@example.com", "TENTATIVE").unwrap();
+        assert!(out.contains("ATTENDEE;CN=Me;PARTSTAT=TENTATIVE:mailto:me@example.com"));
+        // A non-attendee yields None (so the caller can surface a clear error).
+        assert!(set_self_partstat(body, "stranger@example.com", "ACCEPTED").is_none());
+    }
 
     fn creds(server_url: &str) -> Credentials {
         Credentials::new(
@@ -612,6 +801,8 @@ END:VCALENDAR</c:calendar-data>
             created_at: Utc::now(),
             updated_at: Utc::now(),
             etag: Some("\"old-etag\"".into()),
+            organizer: None,
+            attendee_responses: Vec::new(),
         };
         let updated = update_event(&client(), existing, &creds(&server.url()), None)
             .await
@@ -651,6 +842,8 @@ END:VCALENDAR</c:calendar-data>
             created_at: Utc::now(),
             updated_at: Utc::now(),
             etag: Some("\"stale-etag\"".into()),
+            organizer: None,
+            attendee_responses: Vec::new(),
         };
         let err = update_event(&client(), existing, &creds(&server.url()), None)
             .await

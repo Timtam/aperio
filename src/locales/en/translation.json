@@ -779,6 +779,22 @@
         "free": "Free",
         "unknown": "Unknown"
       },
+      "rsvp": {
+        "yourResponseLabel": "Your response",
+        "attendeeStatusLabel": "Attendee responses",
+        "responded": "Response sent: {{status}}.",
+        "action": {
+          "accepted": "Accept",
+          "tentative": "Tentative",
+          "declined": "Decline"
+        },
+        "status": {
+          "needs-action": "No reply",
+          "accepted": "Accepted",
+          "tentative": "Tentative",
+          "declined": "Declined"
+        }
+      },
       "noColorLabel": "(No label)",
       "recurrence": {
         "label": "Repeat",

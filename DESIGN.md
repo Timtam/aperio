@@ -758,9 +758,26 @@ Host-Befehl `query_free_busy`.
 | **Google** | `POST /freeBusy` (`items[].id`); Belegung aus `calendars[email].busy[]` |
 | **Microsoft Graph** | `POST /me/calendar/getSchedule` (`scheduleItems`, Status ≠ `free`) |
 
-**Noch offen (künftige Iteration):**
-- Einladungen annehmen / ablehnen / tentativ bestätigen (**RSVP**)
-- ARIA-Ankündigung bei Status-Änderungen von Einladungen
+**RSVP (implementiert).** Beim Öffnen eines bestehenden Meetings zeigt der
+Termin-Dialog eine RSVP-Leiste, sobald der Termin Antwortdaten trägt
+(externe Anbieter): Ist der verbundene Account ein **Teilnehmer** (nicht der
+Organisator), erscheinen **Zusagen / Vorläufig / Absagen** mit der aktuellen
+Antwort hervorgehoben; ist er der **Organisator**, erscheinen schreibgeschützte
+Status-Chips je Teilnehmer. Das Modell trägt `Event.organizer` +
+`attendee_responses[{email,name,status}]` (read-only, `AttendeeStatus` =
+NeedsAction/Accepted/Declined/Tentative), beim Lesen aus jedem Anbieter
+befüllt. „Wer bin ich" liefert `CalendarFeature::current_user_email()`
+(CalDAV: `calendar-user-address`; Graph: `/me`; Google: primärer Kalender =
+E-Mail; EWS: Login). Antworten läuft über
+`CalendarFeature::respond_to_event(event_id, status, send_response)` + den
+Host-Befehl `respond_to_event`.
+
+| Anbieter | Antwort-Mechanismus |
+|---|---|
+| **Exchange / EWS** | `AcceptItem` / `DeclineItem` / `TentativelyAcceptItem` (CreateItem, `SendAndSaveCopy` vs. `SaveOnly`) |
+| **iCloud / CalDAV** | `ATTENDEE;PARTSTAT` im `.ics` per PUT setzen; RFC-6638-Server senden den iTIP-`REPLY` automatisch (`Schedule-Reply: F` unterdrückt) |
+| **Google** | Self-`responseStatus` im `attendees[]` patchen, `sendUpdates=all/none` |
+| **Microsoft Graph** | `POST /me/events/{id}/accept\|decline\|tentativelyAccept` (`sendResponse`) |
 
 ### 7.4 Schnellerstellungs-Dialog
 

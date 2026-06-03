@@ -1272,6 +1272,8 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             etag: None,
+            organizer: None,
+            attendee_responses: Vec::new(),
         }
     }
 

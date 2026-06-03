@@ -373,6 +373,8 @@ pub fn run() {
             commands::add_event_exdate,
             commands::get_event_by_id,
             commands::query_free_busy,
+            commands::calendar_current_user_email,
+            commands::respond_to_event,
             commands::get_task_by_id,
             commands::list_task_lists,
             commands::create_task_list,
