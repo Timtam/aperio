@@ -536,7 +536,11 @@ pub async fn create_event(
     new: NewEvent,
 ) -> GoogleResult<Event> {
     let cal_enc = urlencoding(calendar_id);
-    let path = format!("/calendars/{cal_enc}/events");
+    // `sendUpdates=all` makes Google email the attendees; `none` stores
+    // them silently. Only notify when the user opted in and there's
+    // someone to notify.
+    let su = send_updates_param(new.send_invitations && !new.attendees.is_empty());
+    let path = format!("/calendars/{cal_enc}/events?sendUpdates={su}");
     let body = new_event_to_body(&new);
     let entry: EventEntry = state.post_json(&path, &body).await?;
     map_event(entry, calendar_id)?
@@ -550,7 +554,8 @@ pub async fn create_event(
 pub async fn update_event(state: &ApiState, ev: &Event) -> GoogleResult<Event> {
     let cal_enc = urlencoding(&ev.calendar_id);
     let ev_enc = urlencoding(&ev.id);
-    let path = format!("/calendars/{cal_enc}/events/{ev_enc}");
+    let su = send_updates_param(ev.send_invitations && !ev.attendees.is_empty());
+    let path = format!("/calendars/{cal_enc}/events/{ev_enc}?sendUpdates={su}");
     let body = event_to_body(ev);
     let entry: EventEntry = state.patch_json(&path, &body).await?;
     map_event(entry, &ev.calendar_id)?
@@ -559,11 +564,27 @@ pub async fn update_event(state: &ApiState, ev: &Event) -> GoogleResult<Event> {
 
 /// `DELETE /calendars/{id}/events/{eventId}` — delete an entire
 /// event row (or a single non-recurring instance).
-pub async fn delete_event(state: &ApiState, calendar_id: &str, event_id: &str) -> GoogleResult<()> {
+pub async fn delete_event(
+    state: &ApiState,
+    calendar_id: &str,
+    event_id: &str,
+    send_cancellations: bool,
+) -> GoogleResult<()> {
     let cal_enc = urlencoding(calendar_id);
     let ev_enc = urlencoding(event_id);
-    let path = format!("/calendars/{cal_enc}/events/{ev_enc}");
+    let su = send_updates_param(send_cancellations);
+    let path = format!("/calendars/{cal_enc}/events/{ev_enc}?sendUpdates={su}");
     state.delete_request(&path).await
+}
+
+/// Google's `sendUpdates` query value: `all` emails attendees, `none`
+/// stores/deletes silently.
+fn send_updates_param(notify: bool) -> &'static str {
+    if notify {
+        "all"
+    } else {
+        "none"
+    }
 }
 
 /// Fetch the recurring master, append `occurrence` to its EXDATE
@@ -856,6 +877,7 @@ mod tests {
         let mut server = mockito::Server::new_async().await;
         let m = server
             .mock("POST", "/calendars/primary/events")
+            .match_query(mockito::Matcher::Any)
             .match_header("authorization", "Bearer initial-token")
             .match_header("content-type", "application/json")
             .match_body(mockito::Matcher::Regex("\"summary\":\"Standup\"".into()))
@@ -899,11 +921,56 @@ mod tests {
         let mut server = mockito::Server::new_async().await;
         server
             .mock("DELETE", "/calendars/primary/events/abc123")
+            .match_query(mockito::Matcher::Any)
             .with_status(204)
             .create_async()
             .await;
         let state = fixture_state(&server.url());
-        delete_event(&state, "primary", "abc123").await.unwrap();
+        delete_event(&state, "primary", "abc123", false)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn create_with_attendees_and_notify_sets_send_updates_all() {
+        let mut server = mockito::Server::new_async().await;
+        let m = server
+            .mock("POST", "/calendars/primary/events")
+            .match_query(mockito::Matcher::UrlEncoded(
+                "sendUpdates".into(),
+                "all".into(),
+            ))
+            .match_body(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::Regex(r#""email":"alice@example.com""#.into()),
+                mockito::Matcher::Regex(r#""displayName":"Alice""#.into()),
+            ]))
+            .with_status(200)
+            .with_body(
+                r##"{ "id": "ev1", "summary": "Review",
+                      "start": { "dateTime": "2026-05-25T10:00:00Z" },
+                      "end":   { "dateTime": "2026-05-25T10:30:00Z" } }"##,
+            )
+            .create_async()
+            .await;
+        let state = fixture_state(&server.url());
+        let new = NewEvent {
+            title: "Review".into(),
+            description: None,
+            location: None,
+            start: chrono::Utc.with_ymd_and_hms(2026, 5, 25, 10, 0, 0).unwrap(),
+            end: chrono::Utc
+                .with_ymd_and_hms(2026, 5, 25, 10, 30, 0)
+                .unwrap(),
+            all_day: false,
+            recurrence: None,
+            color_label: None,
+            reminders: vec![],
+            sound: None,
+            attendees: vec!["Alice <alice@example.com>".into()],
+            send_invitations: true,
+        };
+        create_event(&state, "primary", new).await.unwrap();
+        m.assert_async().await;
     }
 
     #[tokio::test]

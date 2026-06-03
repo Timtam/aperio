@@ -311,7 +311,7 @@ impl CalendarFeature for GoogleAdapter {
             .map_err(to_core_error)
     }
 
-    async fn delete_event(&self, event_id: &str, _send_cancellations: bool) -> CoreResult<()> {
+    async fn delete_event(&self, event_id: &str, send_cancellations: bool) -> CoreResult<()> {
         // Aperio's command layer hands us the calendar_id alongside
         // the event_id when it can, but the legacy
         // `delete_event(event_id)` trait method doesn't carry it.
@@ -321,7 +321,7 @@ impl CalendarFeature for GoogleAdapter {
         // copes with the same signature gap.
         let cals = self.list_calendars().await?;
         for cal in cals {
-            if api::delete_event(&self.state, &cal.id, event_id)
+            if api::delete_event(&self.state, &cal.id, event_id, send_cancellations)
                 .await
                 .is_ok()
             {

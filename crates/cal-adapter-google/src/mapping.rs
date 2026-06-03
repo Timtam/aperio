@@ -52,7 +52,9 @@ pub fn map_calendar(entry: CalendarListEntry) -> Calendar {
         Some("reader") | Some("freeBusyReader")
     );
     Calendar {
-        supports_scheduling: false,
+        // Google always schedules server-side; emailing is per-request via
+        // the `sendUpdates` query param.
+        supports_scheduling: true,
         color_label: None,
         id: entry.id,
         name: entry.summary,
@@ -314,6 +316,33 @@ pub struct EventWriteBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub recurrence: Option<Vec<String>>,
     pub reminders: EventRemindersWrite,
+    /// Attendees are always written (Google stores them); whether Google
+    /// EMAILS them is governed by the `sendUpdates` query param on the
+    /// request, not the body.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub attendees: Vec<EventAttendeeWrite>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct EventAttendeeWrite {
+    pub email: String,
+    #[serde(rename = "displayName", skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+}
+
+/// Map Aperio's flat `"Name <email>"` / bare-email entries to Google's
+/// attendee objects, dropping any entry without a usable address.
+fn attendees_to_write(attendees: &[String]) -> Vec<EventAttendeeWrite> {
+    attendees
+        .iter()
+        .filter_map(|entry| {
+            let (name, email) = cal_core::attendee::parse(entry);
+            (!email.is_empty()).then_some(EventAttendeeWrite {
+                email,
+                display_name: name,
+            })
+        })
+        .collect()
 }
 
 #[derive(Debug, Serialize)]
@@ -354,6 +383,7 @@ pub fn new_event_to_body(new: &NewEvent) -> EventWriteBody {
             .as_ref()
             .map(|r| recurrence_to_lines(&r.rrule, &r.exceptions)),
         reminders: reminders_to_write(&new.reminders),
+        attendees: attendees_to_write(&new.attendees),
     }
 }
 
@@ -373,6 +403,7 @@ pub fn event_to_body(ev: &Event) -> EventWriteBody {
             .as_ref()
             .map(|r| recurrence_to_lines(&r.rrule, &r.exceptions)),
         reminders: reminders_to_write(&ev.reminders),
+        attendees: attendees_to_write(&ev.attendees),
     }
 }
 
