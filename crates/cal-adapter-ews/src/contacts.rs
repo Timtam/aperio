@@ -524,7 +524,7 @@ pub async fn update_contact(client: &EwsClient, contact: &Contact) -> EwsResult<
 /// points at an appointment, a task, or a contact.
 pub async fn delete_contact(client: &EwsClient, contact_id: &str) -> EwsResult<()> {
     let (item_id, change_key) = split_calendar_id(contact_id);
-    let envelope = delete_calendar_item(&item_id, change_key.as_deref());
+    let envelope = delete_calendar_item(&item_id, change_key.as_deref(), false);
     client.post_soap(envelope).await?;
     Ok(())
 }

@@ -510,12 +510,25 @@ pub fn get_calendar_items_with_recurrence(ids: &[(String, Option<String>)]) -> S
     wrap(&body)
 }
 
+/// The `SendMeetingInvitations*` attribute value: when `send` is true we
+/// ask Exchange to email attendees (and keep a copy in Sent Items);
+/// otherwise the item is stored silently. Exchange only actually sends when
+/// the item is a meeting (has attendees) the connected mailbox organises.
+fn send_disposition(send: bool) -> &'static str {
+    if send {
+        "SendToAllAndSaveCopy"
+    } else {
+        "SendToNone"
+    }
+}
+
 /// SOAP body for `CreateItem` into a calendar folder. The
 /// `calendar_item_xml` slice is the pre-rendered `<t:CalendarItem>`
 /// payload (built by `mapping::calendar_item_create_body`); we wrap
-/// it in the appropriate envelope with `MessageDisposition="SaveOnly"`
-/// and `SendMeetingInvitations="SendToNone"` so EWS just stores the
-/// event without firing meeting invitations to attendees.
+/// it in the appropriate envelope with `MessageDisposition="SaveOnly"`.
+/// `send_invitations` selects the `SendMeetingInvitations` disposition —
+/// `SendToNone` (silent store) by default, `SendToAllAndSaveCopy` when the
+/// caller opted to notify attendees of a meeting the user organises.
 ///
 /// We pin the parent folder explicitly so Exchange knows which
 /// calendar to file the event under — without `SavedItemFolderId`
@@ -525,6 +538,7 @@ pub fn create_calendar_item(
     folder_id: &str,
     change_key: Option<&str>,
     calendar_item_xml: &str,
+    send_invitations: bool,
 ) -> String {
     let folder_id_attr = match change_key {
         Some(ck) => format!(
@@ -534,8 +548,9 @@ pub fn create_calendar_item(
         ),
         None => format!(r#"<t:FolderId Id="{}"/>"#, escape_xml(folder_id)),
     };
+    let send = send_disposition(send_invitations);
     let body = format!(
-        r#"    <m:CreateItem MessageDisposition="SaveOnly" SendMeetingInvitations="SendToNone">
+        r#"    <m:CreateItem MessageDisposition="SaveOnly" SendMeetingInvitations="{send}">
       <m:SavedItemFolderId>
         {folder_id_attr}
       </m:SavedItemFolderId>
@@ -554,15 +569,15 @@ pub fn create_calendar_item(
 /// `ConflictResolution="AlwaysOverwrite"` is the right setting for
 /// Aperio's "what you see is what you get" semantics — the user's
 /// edit wins even if someone else touched the event in parallel.
-/// `SendMeetingInvitationsOrCancellations="SendToNone"` matches the
-/// CreateItem stance: no calendar invitations leave the server,
-/// since Aperio's attendee story is still a list of email addresses
-/// without explicit RSVP wiring.
+/// `send_invitations` drives `SendMeetingInvitationsOrCancellations`:
+/// `SendToNone` (silent) by default, `SendToAllAndSaveCopy` when the user
+/// chose to notify attendees of the change.
 pub fn update_calendar_item(
     item_id: &str,
     change_key: Option<&str>,
     set_fields_xml: &str,
     delete_fields_xml: &str,
+    send_invitations: bool,
 ) -> String {
     let id_attr = match change_key {
         Some(ck) => format!(
@@ -572,10 +587,11 @@ pub fn update_calendar_item(
         ),
         None => format!(r#"<t:ItemId Id="{}"/>"#, escape_xml(item_id)),
     };
+    let send = send_disposition(send_invitations);
     let body = format!(
         r#"    <m:UpdateItem ConflictResolution="AlwaysOverwrite"
                    MessageDisposition="SaveOnly"
-                   SendMeetingInvitationsOrCancellations="SendToNone">
+                   SendMeetingInvitationsOrCancellations="{send}">
       <m:ItemChanges>
         <t:ItemChange>
           {id_attr}
@@ -601,7 +617,11 @@ pub fn update_calendar_item(
 /// occurrence" flow needs. Series-wide delete works against the
 /// master id, which we don't read in 6f.1a/1b but can address with a
 /// follow-up FindItem-without-CalendarView pass when needed.
-pub fn delete_calendar_item(item_id: &str, change_key: Option<&str>) -> String {
+pub fn delete_calendar_item(
+    item_id: &str,
+    change_key: Option<&str>,
+    send_cancellations: bool,
+) -> String {
     let id_attr = match change_key {
         Some(ck) => format!(
             r#"<t:ItemId Id="{}" ChangeKey="{}"/>"#,
@@ -610,9 +630,10 @@ pub fn delete_calendar_item(item_id: &str, change_key: Option<&str>) -> String {
         ),
         None => format!(r#"<t:ItemId Id="{}"/>"#, escape_xml(item_id)),
     };
+    let send = send_disposition(send_cancellations);
     let body = format!(
         r#"    <m:DeleteItem DeleteType="MoveToDeletedItems"
-                   SendMeetingCancellations="SendToNone">
+                   SendMeetingCancellations="{send}">
       <m:ItemIds>
         {id_attr}
       </m:ItemIds>
@@ -807,6 +828,7 @@ mod tests {
             "FOLDER-ID",
             Some("FK"),
             "<t:CalendarItem><t:Subject>Lunch</t:Subject></t:CalendarItem>",
+            false,
         );
         assert!(body.contains("CreateItem"));
         assert!(body.contains(r#"SendMeetingInvitations="SendToNone""#));
@@ -822,6 +844,7 @@ mod tests {
             Some("IK"),
             "<t:SetItemField><t:FieldURI FieldURI=\"item:Subject\"/></t:SetItemField>",
             "<t:DeleteItemField><t:FieldURI FieldURI=\"item:ReminderIsSet\"/></t:DeleteItemField>",
+            false,
         );
         assert!(body.contains("UpdateItem"));
         assert!(body.contains(r#"ConflictResolution="AlwaysOverwrite""#));
@@ -833,11 +856,25 @@ mod tests {
 
     #[test]
     fn delete_calendar_item_uses_move_to_deleted_items() {
-        let body = delete_calendar_item("ITEM-ID", Some("IK"));
+        let body = delete_calendar_item("ITEM-ID", Some("IK"), false);
         assert!(body.contains("DeleteItem"));
         assert!(body.contains(r#"DeleteType="MoveToDeletedItems""#));
         assert!(body.contains(r#"Id="ITEM-ID""#));
         assert!(body.contains(r#"ChangeKey="IK""#));
+    }
+
+    #[test]
+    fn send_flag_selects_the_meeting_disposition() {
+        // Opt-in → Exchange emails attendees (and saves a copy).
+        assert!(create_calendar_item("F", None, "<t:CalendarItem/>", true)
+            .contains(r#"SendMeetingInvitations="SendToAllAndSaveCopy""#));
+        assert!(update_calendar_item("I", None, "", "", true)
+            .contains(r#"SendMeetingInvitationsOrCancellations="SendToAllAndSaveCopy""#));
+        assert!(delete_calendar_item("I", None, true)
+            .contains(r#"SendMeetingCancellations="SendToAllAndSaveCopy""#));
+        // Opt-out → silent store, no mail leaves the server.
+        assert!(create_calendar_item("F", None, "<t:CalendarItem/>", false)
+            .contains(r#"SendMeetingInvitations="SendToNone""#));
     }
 
     #[test]

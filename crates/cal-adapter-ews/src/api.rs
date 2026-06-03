@@ -510,7 +510,12 @@ pub async fn create_event(
 ) -> EwsResult<Event> {
     let (folder_id, folder_change_key) = split_calendar_id(calendar_id);
     let item_xml = new_event_to_calendar_item_xml(&event)?;
-    let envelope = create_calendar_item(&folder_id, folder_change_key.as_deref(), &item_xml);
+    // Only ask Exchange to send when the user opted in AND there are
+    // attendees to notify — `SendToAllAndSaveCopy` on an attendee-less item
+    // would still drop a stray copy into Sent Items for nothing.
+    let notify = event.send_invitations && !event.attendees.is_empty();
+    let envelope =
+        create_calendar_item(&folder_id, folder_change_key.as_deref(), &item_xml, notify);
     let response = client.post_soap(envelope).await?;
     let item_ref = parse_first_item_id(&response)?;
     // A freshly created item is a RecurringMaster when it has a
@@ -544,11 +549,13 @@ pub async fn update_event(client: &EwsClient, event: &Event) -> EwsResult<Event>
     let decoded = decode_event_id(&event.id);
     let target = resolve_write_target(client, &decoded).await?;
     let (set_xml, delete_xml) = event_to_update_field_xml(event)?;
+    let notify = event.send_invitations && !event.attendees.is_empty();
     let envelope = update_calendar_item(
         &target.item_id,
         target.change_key.as_deref(),
         &set_xml,
         &delete_xml,
+        notify,
     );
     let response = client.post_soap(envelope).await?;
     let item_ref = parse_first_item_id(&response)?;
@@ -577,10 +584,18 @@ pub async fn update_event(client: &EwsClient, event: &Event) -> EwsResult<Event>
 /// Per-occurrence skip (the EXDATE-equivalent) goes through
 /// `add_event_exdate` instead, which always targets the raw
 /// occurrence id.
-pub async fn delete_event(client: &EwsClient, event_id: &str) -> EwsResult<()> {
+pub async fn delete_event(
+    client: &EwsClient,
+    event_id: &str,
+    send_cancellations: bool,
+) -> EwsResult<()> {
     let decoded = decode_event_id(event_id);
     let target = resolve_write_target(client, &decoded).await?;
-    let envelope = delete_calendar_item(&target.item_id, target.change_key.as_deref());
+    let envelope = delete_calendar_item(
+        &target.item_id,
+        target.change_key.as_deref(),
+        send_cancellations,
+    );
     client.post_soap(envelope).await?;
     Ok(())
 }
@@ -598,7 +613,9 @@ pub async fn delete_event(client: &EwsClient, event_id: &str) -> EwsResult<()> {
 /// delete button.
 pub async fn add_event_exdate(client: &EwsClient, event_id: &str) -> EwsResult<()> {
     let decoded = decode_event_id(event_id);
-    let envelope = delete_calendar_item(&decoded.item_id, decoded.change_key.as_deref());
+    // Skipping a single occurrence is an EXDATE-equivalent, not a meeting
+    // cancellation — never notify attendees here.
+    let envelope = delete_calendar_item(&decoded.item_id, decoded.change_key.as_deref(), false);
     client.post_soap(envelope).await?;
     Ok(())
 }
@@ -1252,7 +1269,7 @@ mod tests {
             .with_body(body)
             .create_async()
             .await;
-        delete_event(&client_for(&server), "ITEM-ID|CK")
+        delete_event(&client_for(&server), "ITEM-ID|CK", false)
             .await
             .unwrap();
     }
@@ -1439,7 +1456,7 @@ mod tests {
             .with_body(delete_body)
             .create_async()
             .await;
-        delete_event(&client_for(&server), "O:OCC-ID|OCK")
+        delete_event(&client_for(&server), "O:OCC-ID|OCK", false)
             .await
             .unwrap();
     }

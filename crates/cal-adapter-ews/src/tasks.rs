@@ -118,7 +118,7 @@ pub async fn update_task(client: &EwsClient, task: &Task) -> EwsResult<Task> {
 /// id points at an appointment or a task.
 pub async fn delete_task(client: &EwsClient, task_id: &str) -> EwsResult<()> {
     let (item_id, change_key) = split_calendar_id(task_id);
-    let envelope = delete_calendar_item(&item_id, change_key.as_deref());
+    let envelope = delete_calendar_item(&item_id, change_key.as_deref(), false);
     client.post_soap(envelope).await?;
     Ok(())
 }

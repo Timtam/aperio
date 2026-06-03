@@ -147,7 +147,9 @@ pub fn to_calendar(folder: ParsedFolder, read_only: bool) -> Calendar {
     // rename) harvest a fresh one at write time instead — see
     // `api::rename_calendar`.
     Calendar {
-        supports_scheduling: false,
+        // EWS/Exchange always performs server-side meeting scheduling when
+        // the CreateItem/UpdateItem send-disposition asks for it.
+        supports_scheduling: true,
         color_label: None,
         id: folder.folder_id,
         name: if folder.display_name.is_empty() {
@@ -1372,6 +1374,12 @@ pub fn new_event_to_calendar_item_xml(event: &NewEvent) -> EwsResult<String> {
             escape_xml(location)
         ));
     }
+    // Attendees are written whenever present (turning the item into a
+    // meeting) regardless of the send flag — whether Exchange EMAILS them is
+    // controlled separately by the CreateItem `SendMeetingInvitations`
+    // disposition. `RequiredAttendees` must precede `Recurrence` in the EWS
+    // CalendarItem element order.
+    out.push_str(&required_attendees_xml(&event.attendees));
     if let Some(rec) = &event.recurrence {
         let rec_xml = rrule_to_ews_recurrence(&rec.rrule, event.start)?;
         out.push_str("          ");
@@ -1380,6 +1388,37 @@ pub fn new_event_to_calendar_item_xml(event: &NewEvent) -> EwsResult<String> {
     }
     out.push_str("        </t:CalendarItem>");
     Ok(out)
+}
+
+/// Render the `<t:RequiredAttendees>` block for a CalendarItem from Aperio's
+/// flat attendee list (`"Name <email>"` or bare email). Returns an empty
+/// string when there are no usable entries, so callers can splice it in
+/// unconditionally. EWS is order-sensitive: inside `<t:CalendarItem>` this
+/// belongs after `Location` and before `Recurrence`.
+fn required_attendees_xml(attendees: &[String]) -> String {
+    let mut inner = String::new();
+    for entry in attendees {
+        let (name, email) = cal_core::attendee::parse(entry);
+        if email.is_empty() {
+            continue;
+        }
+        inner.push_str("            <t:Attendee>\n              <t:Mailbox>\n");
+        if let Some(name) = name {
+            inner.push_str(&format!(
+                "                <t:Name>{}</t:Name>\n",
+                escape_xml(&name)
+            ));
+        }
+        inner.push_str(&format!(
+            "                <t:EmailAddress>{}</t:EmailAddress>\n",
+            escape_xml(&email)
+        ));
+        inner.push_str("              </t:Mailbox>\n            </t:Attendee>\n");
+    }
+    if inner.is_empty() {
+        return String::new();
+    }
+    format!("          <t:RequiredAttendees>\n{inner}          </t:RequiredAttendees>\n")
 }
 
 /// Build the `<t:Updates>` body that goes inside an `UpdateItem`
@@ -1448,6 +1487,17 @@ pub fn event_to_update_field_xml(event: &Event) -> EwsResult<(String, String)> {
     // "Die Löschaktion wird für diese Eigenschaft nicht unterstützt"
     // failure when editing a recurring series.)
 
+    // Attendees: SET when present (stored as a meeting). We do NOT emit a
+    // DeleteItemField for an empty list — clearing all attendees doesn't
+    // propagate (acceptable, and avoids an accidental mass-uninvite on edits
+    // that never touched the attendee list). Whether attendees are EMAILED is
+    // governed by the envelope's SendMeetingInvitationsOrCancellations.
+    let attendees_xml = required_attendees_xml(&event.attendees);
+    if !attendees_xml.is_empty() {
+        set.push_str(&format!(
+            "            <t:SetItemField>\n              <t:FieldURI FieldURI=\"calendar:RequiredAttendees\"/>\n              <t:CalendarItem>\n{attendees_xml}              </t:CalendarItem>\n            </t:SetItemField>\n"
+        ));
+    }
     if let Some(rec) = &event.recurrence {
         let rec_xml = rrule_to_ews_recurrence(&rec.rrule, event.start)?;
         // Wrap the recurrence element in a SetItemField against
@@ -3012,6 +3062,24 @@ mod tests {
         let xml = new_event_to_calendar_item_xml(&ev).unwrap();
         assert!(xml.contains("Sync &amp; lunch"));
         assert!(xml.contains("Room &lt;A&gt;"));
+    }
+
+    #[test]
+    fn new_event_to_calendar_item_xml_emits_required_attendees() {
+        let mut ev = new_event_min("Review");
+        ev.attendees = vec![
+            "Alice Smith <alice@example.com>".into(),
+            "bob@example.com".into(),
+        ];
+        // Attendees are written whenever present, independent of send_invitations.
+        let xml = new_event_to_calendar_item_xml(&ev).unwrap();
+        assert!(xml.contains("<t:RequiredAttendees>"));
+        assert!(xml.contains("<t:Name>Alice Smith</t:Name>"));
+        assert!(xml.contains("<t:EmailAddress>alice@example.com</t:EmailAddress>"));
+        assert!(xml.contains("<t:EmailAddress>bob@example.com</t:EmailAddress>"));
+        // No attendees → no RequiredAttendees block at all.
+        let none = new_event_to_calendar_item_xml(&new_event_min("Solo")).unwrap();
+        assert!(!none.contains("<t:RequiredAttendees>"));
     }
 
     #[test]
