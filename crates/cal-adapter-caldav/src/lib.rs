@@ -25,6 +25,7 @@ pub mod ctag;
 pub mod discovery;
 pub mod error;
 pub mod events;
+pub mod freebusy;
 pub mod mapping;
 pub mod sync;
 pub mod tasks;
@@ -943,15 +944,36 @@ impl CalendarFeature for CaldavAdapter {
         }))
     }
 
-    async fn get_free_busy(
-        &self,
-        _emails: &[&str],
-        _range: DateRange,
-    ) -> CoreResult<Vec<FreeBusy>> {
-        // CalDAV exposes free-busy at the principal level via a
-        // separate REPORT. Out of scope for the calendar-first
-        // iteration; returning an empty list keeps consumers calm.
-        Ok(Vec::new())
+    async fn get_free_busy(&self, emails: &[&str], range: DateRange) -> CoreResult<Vec<FreeBusy>> {
+        if emails.is_empty() {
+            return Ok(Vec::new());
+        }
+        // Free-busy rides RFC 6638: POST an iTIP VFREEBUSY to the
+        // principal's schedule-outbox. Needs both the outbox URL and a
+        // usable ORGANIZER address (the user's calendar-user-address).
+        // Discovery is cached; a server without an outbox — or a
+        // discovery failure — degrades to "availability unknown"
+        // (empty slots per address) rather than erroring.
+        let discovery = match self.discover().await {
+            Ok(d) => d,
+            Err(_) => return Ok(freebusy::unknown(emails)),
+        };
+        let (Some(outbox), Some(organizer)) = (
+            discovery.schedule_outbox_url,
+            discovery.calendar_user_address,
+        ) else {
+            return Ok(freebusy::unknown(emails));
+        };
+        freebusy::query_free_busy(
+            &self.http,
+            &outbox,
+            &organizer,
+            emails,
+            range,
+            &self.credentials,
+        )
+        .await
+        .map_err(to_core_error)
     }
 
     fn calendar_color(&self, _calendar_id: &str) -> Option<ContainerColor> {

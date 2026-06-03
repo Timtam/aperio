@@ -99,6 +99,11 @@ pub struct Discovery {
     /// `calendar-user-address-set`), used as `ORGANIZER` when writing a
     /// scheduled event. `None` when the server advertised none.
     pub calendar_user_address: Option<String>,
+    /// Absolute URL of the principal's `schedule-outbox-URL` (RFC 6638).
+    /// We POST an iTIP `VFREEBUSY` request here to query attendees'
+    /// availability. `None` when the server doesn't advertise an outbox
+    /// (free-busy then degrades to "unknown").
+    pub schedule_outbox_url: Option<Url>,
 }
 
 pub async fn run(client: &Client, credentials: &Credentials) -> CaldavResult<Discovery> {
@@ -124,7 +129,7 @@ pub async fn run(client: &Client, credentials: &Credentials) -> CaldavResult<Dis
     // RFC 6638 scheduling support + organizer address. Best-effort: a
     // server without the properties (or an odd response) just means "no
     // scheduling", which hides the notify toggle rather than failing.
-    let (supports_scheduling, calendar_user_address) =
+    let (supports_scheduling, calendar_user_address, schedule_outbox_url) =
         find_scheduling(client, &principal_url, credentials).await;
     Ok(Discovery {
         dav_root,
@@ -133,34 +138,42 @@ pub async fn run(client: &Client, credentials: &Credentials) -> CaldavResult<Dis
         addressbook_home_url,
         supports_scheduling,
         calendar_user_address,
+        schedule_outbox_url,
     })
 }
 
 /// Best-effort RFC 6638 probe on the principal. Returns
-/// `(supports_scheduling, organizer_mailto)`. Never errors — any network /
-/// parse failure, or a server that doesn't expose the properties, degrades
-/// to `(false, None)` so the rest of discovery still succeeds and the UI
-/// simply hides the "notify attendees" toggle for this account.
+/// `(supports_scheduling, organizer_mailto, schedule_outbox_url)`. Never
+/// errors — any network / parse failure, or a server that doesn't expose
+/// the properties, degrades to `(false, None, None)` so the rest of
+/// discovery still succeeds and the UI simply hides the "notify attendees"
+/// toggle for this account.
 async fn find_scheduling(
     client: &Client,
     principal_url: &Url,
     credentials: &Credentials,
-) -> (bool, Option<String>) {
+) -> (bool, Option<String>, Option<Url>) {
     let body = match propfind(client, principal_url, SCHEDULING_BODY, credentials, 0).await {
         Ok(resp) => match expect_207(resp).await {
             Ok(b) => b,
-            Err(_) => return (false, None),
+            Err(_) => return (false, None, None),
         },
-        Err(_) => return (false, None),
+        Err(_) => return (false, None, None),
     };
-    let has_outbox = extract_first_nested_href(&body, b"schedule-outbox-URL")
+    // Resolve the outbox href against the principal so it's absolute and
+    // ready to POST to.
+    let outbox_url = extract_first_nested_href(&body, b"schedule-outbox-URL")
         .ok()
         .flatten()
-        .is_some();
+        .and_then(|href| principal_url.join(&href).ok());
     let organizer = first_mailto(&body);
     // Need BOTH server auto-scheduling AND a usable organizer address —
     // without the latter we can't write a valid ORGANIZER.
-    (has_outbox && organizer.is_some(), organizer)
+    (
+        outbox_url.is_some() && organizer.is_some(),
+        organizer,
+        outbox_url,
+    )
 }
 
 /// Pull the first `mailto:` calendar-user-address out of a PROPFIND body.
@@ -582,6 +595,12 @@ mod tests {
         assert_eq!(
             d.calendar_user_address.as_deref(),
             Some("mailto:alice@example.com")
+        );
+        // The outbox href is resolved to an absolute URL ready to POST to.
+        let expected_outbox = format!("{}/calendars/alice/outbox/", server.url());
+        assert_eq!(
+            d.schedule_outbox_url.as_ref().map(Url::as_str),
+            Some(expected_outbox.as_str())
         );
     }
 }
