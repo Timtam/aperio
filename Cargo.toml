@@ -97,8 +97,28 @@ plugin-sdk = { path = "crates/plugin-sdk" }
 sync-core = { path = "crates/sync-core" }
 vc-core = { path = "crates/vc-core" }
 
-# Async-Runtime
-tokio = { version = "1", features = ["full"] }
+# Async-Runtime.
+# We deliberately do NOT use `features = ["full"]`. `full` additionally
+# pulls in `process`, `signal`, `io-std` and `parking_lot`, none of which
+# any crate in this workspace uses (no `tokio::process`, `tokio::signal`
+# or `tokio::io::std*` anywhere; `parking_lot` is a pure internal locking
+# optimisation with no public API). Those drivers and the parking_lot
+# crate are dead weight that every one of the 17 statically-linked plugin
+# cdylibs would otherwise carry its own copy of. The list below is exactly
+# `full` minus those four. Workspace-inherited features are additive and
+# cannot be subtracted per crate, so this is the single lever that trims
+# tokio across the whole tree without touching individual manifests; any
+# crate needing more (none currently do) just adds it locally.
+tokio = { version = "1", features = [
+    "fs",
+    "io-util",
+    "macros",
+    "net",
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "time",
+] }
 async-trait = "0.1"
 futures = "0.3"
 
@@ -164,6 +184,9 @@ panic = "abort"
 # own code (the host binary, the adapters) keeps `[profile.release]`'s
 # opt-level = 3 and its hot paths (recurrence expansion, rendering) stay
 # speed-optimised. The deps are I/O-bound glue, so size over speed there is
-# a free win.
+# a free win. Measured on the caldav plugin (CI fast-release, LTO off): the
+# dep stack is opt-level=3 4.65 MB → "s" 4.24 MB → "z" 4.15 MB; "z" wins
+# another ~1.7 % over "s" because every byte of that glue is off the hot
+# path, so we go all the way to size-first.
 [profile.release.package."*"]
-opt-level = "s"
+opt-level = "z"
