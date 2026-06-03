@@ -43,10 +43,10 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use cal_core::{
-    Adapter, AuthToken, Calendar, CalendarFeature, Capability, ChangeSet, Contact, ContactList,
-    ContactsFeature, ContainerColor, Credentials as CoreCredentials, DateRange, Error as CoreError,
-    Event, FreeBusy, NewContact, NewEvent, NewTask, Result as CoreResult, Task, TaskList,
-    TasksFeature,
+    Adapter, AttendeeStatus, AuthToken, Calendar, CalendarFeature, Capability, ChangeSet, Contact,
+    ContactList, ContactsFeature, ContainerColor, Credentials as CoreCredentials, DateRange,
+    Error as CoreError, Event, FreeBusy, NewContact, NewEvent, NewTask, Result as CoreResult, Task,
+    TaskList, TasksFeature,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -925,6 +925,17 @@ impl CalendarFeature for EwsAdapter {
         // stays hidden rather than guessing wrong.
         let username = self.client.credentials.username.trim();
         Ok((username.contains('@') && !username.contains('\\')).then(|| username.to_string()))
+    }
+
+    async fn respond_to_event(
+        &self,
+        event_id: &str,
+        status: AttendeeStatus,
+        send_response: bool,
+    ) -> CoreResult<()> {
+        api::respond_to_event(&self.client, event_id, status, send_response)
+            .await
+            .map_err(to_core_error)
     }
 
     fn calendar_color(&self, _calendar_id: &str) -> Option<ContainerColor> {

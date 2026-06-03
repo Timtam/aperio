@@ -16,7 +16,7 @@
 //! whose `Content-Type` isn't `text/xml; charset=utf-8`, so we set it
 //! explicitly even though reqwest would default to no header.
 
-use cal_core::{Calendar, DateRange, Event, FreeBusy, NewEvent};
+use cal_core::{AttendeeStatus, Calendar, DateRange, Event, FreeBusy, NewEvent};
 use chrono::{DateTime, Utc};
 use reqwest::header::{HeaderValue, CONTENT_TYPE};
 
@@ -30,8 +30,8 @@ use crate::mapping::{
 };
 use crate::soap::{
     check_for_fault, create_calendar_item, delete_calendar_item, find_calendar_folders,
-    find_items_in_range, get_recurring_master, get_user_availability, sync_folder_items,
-    sync_folder_items_idonly, update_calendar_item, update_folder_displayname,
+    find_items_in_range, get_recurring_master, get_user_availability, respond_to_meeting,
+    sync_folder_items, sync_folder_items_idonly, update_calendar_item, update_folder_displayname,
 };
 
 /// State carried by the adapter — endpoint + credentials + reqwest
@@ -685,6 +685,37 @@ pub async fn rename_calendar(
     // fresh one via FindFolder right before the write.
     let change_key = folder_change_key(client, &folder_id).await?;
     let envelope = update_folder_displayname(&folder_id, change_key.as_deref(), new_name);
+    client.post_soap(envelope).await?;
+    Ok(())
+}
+
+/// RSVP to a meeting via an `AcceptItem` / `DeclineItem` /
+/// `TentativelyAcceptItem` response object. The event id decodes to the
+/// meeting's `ItemId` (+ ChangeKey) that the response references.
+/// `NeedsAction` isn't respondable (it's the absence of a reply).
+pub async fn respond_to_event(
+    client: &EwsClient,
+    event_id: &str,
+    status: AttendeeStatus,
+    send_response: bool,
+) -> EwsResult<()> {
+    let element = match status {
+        AttendeeStatus::Accepted => "AcceptItem",
+        AttendeeStatus::Declined => "DeclineItem",
+        AttendeeStatus::Tentative => "TentativelyAcceptItem",
+        AttendeeStatus::NeedsAction => {
+            return Err(EwsError::Protocol(
+                "cannot RSVP with status needs-action".into(),
+            ));
+        }
+    };
+    let decoded = decode_event_id(event_id);
+    let envelope = respond_to_meeting(
+        &decoded.item_id,
+        decoded.change_key.as_deref(),
+        element,
+        send_response,
+    );
     client.post_soap(envelope).await?;
     Ok(())
 }

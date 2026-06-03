@@ -796,7 +796,8 @@ pub async fn respond_to_event(
             message: format!("account '{account}' is not routable"),
         });
     };
-    ext.respond_to_event(&event_id, status, send_response).await?;
+    ext.respond_to_event(&event_id, status, send_response)
+        .await?;
     let _ = cache.invalidate(&account, SyncScope::Events, &calendar_id);
     Ok(())
 }

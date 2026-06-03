@@ -718,6 +718,46 @@ pub fn delete_calendar_item(
     wrap(&body)
 }
 
+/// SOAP body for an RSVP response object — `AcceptItem`, `DeclineItem`
+/// or `TentativelyAcceptItem`. EWS models a meeting reply as a *new*
+/// item created against the meeting via `<t:ReferenceItemId>`; the
+/// server flips the connected user's `ResponseType` and (when the
+/// disposition sends) emails the organizer.
+///
+/// `MessageDisposition="SendAndSaveCopy"` sends the reply + keeps a copy
+/// in Sent Items; `"SaveOnly"` updates the status silently without
+/// mailing the organizer.
+pub fn respond_to_meeting(
+    item_id: &str,
+    change_key: Option<&str>,
+    response_element: &str,
+    send_response: bool,
+) -> String {
+    let id_attr = match change_key {
+        Some(ck) => format!(
+            r#"<t:ReferenceItemId Id="{}" ChangeKey="{}"/>"#,
+            escape_xml(item_id),
+            escape_xml(ck),
+        ),
+        None => format!(r#"<t:ReferenceItemId Id="{}"/>"#, escape_xml(item_id)),
+    };
+    let disposition = if send_response {
+        "SendAndSaveCopy"
+    } else {
+        "SaveOnly"
+    };
+    let body = format!(
+        r#"    <m:CreateItem MessageDisposition="{disposition}">
+      <m:Items>
+        <t:{response_element}>
+          {id_attr}
+        </t:{response_element}>
+      </m:Items>
+    </m:CreateItem>"#,
+    );
+    wrap(&body)
+}
+
 /// SOAP body for `UpdateFolder` setting `folder:DisplayName`. The
 /// rename pushes the new name into Outlook profile — every Exchange
 /// client (Outlook desktop, OWA, mobile) picks it up on its next
@@ -970,6 +1010,20 @@ mod tests {
         assert!(body.contains("<t:EndTime>2026-06-02T00:00:00</t:EndTime>"));
         // Detailed view → per-event CalendarEventArray in the response.
         assert!(body.contains("<t:RequestedView>Detailed</t:RequestedView>"));
+    }
+
+    #[test]
+    fn respond_to_meeting_builds_the_response_object() {
+        // Accept + send → AcceptItem with SendAndSaveCopy.
+        let accept = respond_to_meeting("ITEM-ID", Some("CK"), "AcceptItem", true);
+        assert!(accept.contains("CreateItem"));
+        assert!(accept.contains(r#"MessageDisposition="SendAndSaveCopy""#));
+        assert!(accept.contains("<t:AcceptItem>"));
+        assert!(accept.contains(r#"<t:ReferenceItemId Id="ITEM-ID" ChangeKey="CK"/>"#));
+        // Decline + no-send → DeclineItem with SaveOnly (silent).
+        let decline = respond_to_meeting("I", None, "DeclineItem", false);
+        assert!(decline.contains("<t:DeclineItem>"));
+        assert!(decline.contains(r#"MessageDisposition="SaveOnly""#));
     }
 
     #[test]

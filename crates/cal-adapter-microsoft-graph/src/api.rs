@@ -7,7 +7,8 @@
 use std::sync::Arc;
 
 use cal_core::{
-    Calendar, DateRange, Event, FreeBusy, FreeBusySlot, NewEvent, NewTask, Task, TaskList,
+    AttendeeStatus, Calendar, DateRange, Event, FreeBusy, FreeBusySlot, NewEvent, NewTask, Task,
+    TaskList,
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -95,6 +96,34 @@ impl ApiState {
             })
             .await?;
         decode_json(response).await
+    }
+
+    /// POST a JSON body and discard the response payload. The RSVP
+    /// action endpoints (`/accept`, `/decline`, `/tentativelyAccept`)
+    /// answer `202 Accepted` with an empty body, so `post_json` (which
+    /// decodes a typed response) would choke — this keeps just the
+    /// status.
+    pub async fn post_no_content<B: Serialize>(&self, path: &str, body: &B) -> GraphResult<()> {
+        let url = self.build_url(path)?;
+        let json = serde_json::to_string(body)?;
+        let response = self
+            .send_with_refresh(|access| {
+                self.http
+                    .post(url.clone())
+                    .bearer_auth(access)
+                    .header("content-type", "application/json")
+                    .body(json.clone())
+            })
+            .await?;
+        let status = response.status();
+        if status.is_success() {
+            return Ok(());
+        }
+        let text = response.text().await.unwrap_or_default();
+        Err(GraphError::Http {
+            status: status.as_u16(),
+            message: text.chars().take(300).collect(),
+        })
     }
 
     pub async fn delete_request(&self, path: &str) -> GraphResult<()> {
@@ -426,6 +455,39 @@ pub async fn delete_event(state: &ApiState, event_id: &str) -> GraphResult<()> {
     let id_enc = urlencoding(event_id);
     let path = format!("/me/events/{id_enc}");
     state.delete_request(&path).await
+}
+
+/// RSVP via Graph's dedicated action endpoints
+/// (`POST /me/events/{id}/accept|decline|tentativelyAccept`). `sendResponse`
+/// controls whether Graph emails the reply to the organizer. `NeedsAction`
+/// is not a respondable state (it's the absence of a reply).
+pub async fn respond_to_event(
+    state: &ApiState,
+    event_id: &str,
+    status: AttendeeStatus,
+    send_response: bool,
+) -> GraphResult<()> {
+    let action = match status {
+        AttendeeStatus::Accepted => "accept",
+        AttendeeStatus::Declined => "decline",
+        AttendeeStatus::Tentative => "tentativelyAccept",
+        AttendeeStatus::NeedsAction => {
+            return Err(GraphError::Protocol(
+                "cannot RSVP with status needs-action".into(),
+            ));
+        }
+    };
+    let id_enc = urlencoding(event_id);
+    let path = format!("/me/events/{id_enc}/{action}");
+
+    #[derive(Serialize)]
+    struct RespondBody {
+        #[serde(rename = "sendResponse")]
+        send_response: bool,
+    }
+    state
+        .post_no_content(&path, &RespondBody { send_response })
+        .await
 }
 
 /// `POST /me/calendar/getSchedule` — attendee availability. Each schedule's
@@ -1136,6 +1198,32 @@ mod tests {
         let state = fixture_state(&server.url());
         rename_calendar(&state, "cal-1", "Arbeit").await.unwrap();
         m.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn respond_to_event_posts_to_accept_action() {
+        let mut server = mockito::Server::new_async().await;
+        let m = server
+            .mock("POST", "/me/events/EV-1/accept")
+            .match_body(mockito::Matcher::Regex("\"sendResponse\":true".into()))
+            .with_status(202)
+            .expect(1)
+            .create_async()
+            .await;
+        let state = fixture_state(&server.url());
+        respond_to_event(&state, "EV-1", AttendeeStatus::Accepted, true)
+            .await
+            .unwrap();
+        m.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn respond_to_event_rejects_needs_action() {
+        let state = fixture_state("http://unused.invalid");
+        let err = respond_to_event(&state, "EV-1", AttendeeStatus::NeedsAction, false)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, GraphError::Protocol(_)));
     }
 
     #[tokio::test]
