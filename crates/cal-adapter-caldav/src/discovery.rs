@@ -61,6 +61,17 @@ const ADDRESSBOOK_HOME_SET_BODY: &str = r#"<?xml version="1.0" encoding="utf-8"?
   </d:prop>
 </d:propfind>"#;
 
+/// RFC 6638 scheduling probe: the principal's `schedule-outbox-URL` (its
+/// presence means the server auto-schedules) plus `calendar-user-address-set`
+/// (the user's `mailto:` for `ORGANIZER`).
+const SCHEDULING_BODY: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+  <d:prop>
+    <c:calendar-user-address-set/>
+    <c:schedule-outbox-URL/>
+  </d:prop>
+</d:propfind>"#;
+
 /// Result of a full discovery pass.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Discovery {
@@ -79,6 +90,15 @@ pub struct Discovery {
     /// adapter declines the `Contacts` capability at the trait
     /// boundary.
     pub addressbook_home_url: Option<Url>,
+    /// True when the server advertises RFC 6638 calendar auto-scheduling
+    /// (it exposes a `schedule-outbox-URL` on the principal) AND we found a
+    /// usable `mailto:` organizer address. When false the adapter never
+    /// writes `ORGANIZER`/`ATTENDEE`, so the server never emails attendees.
+    pub supports_scheduling: bool,
+    /// The user's `mailto:` calendar-user-address (from
+    /// `calendar-user-address-set`), used as `ORGANIZER` when writing a
+    /// scheduled event. `None` when the server advertised none.
+    pub calendar_user_address: Option<String>,
 }
 
 pub async fn run(client: &Client, credentials: &Credentials) -> CaldavResult<Discovery> {
@@ -101,12 +121,59 @@ pub async fn run(client: &Client, credentials: &Credentials) -> CaldavResult<Dis
                 None
             }
         };
+    // RFC 6638 scheduling support + organizer address. Best-effort: a
+    // server without the properties (or an odd response) just means "no
+    // scheduling", which hides the notify toggle rather than failing.
+    let (supports_scheduling, calendar_user_address) =
+        find_scheduling(client, &principal_url, credentials).await;
     Ok(Discovery {
         dav_root,
         principal_url,
         calendar_home_url,
         addressbook_home_url,
+        supports_scheduling,
+        calendar_user_address,
     })
+}
+
+/// Best-effort RFC 6638 probe on the principal. Returns
+/// `(supports_scheduling, organizer_mailto)`. Never errors — any network /
+/// parse failure, or a server that doesn't expose the properties, degrades
+/// to `(false, None)` so the rest of discovery still succeeds and the UI
+/// simply hides the "notify attendees" toggle for this account.
+async fn find_scheduling(
+    client: &Client,
+    principal_url: &Url,
+    credentials: &Credentials,
+) -> (bool, Option<String>) {
+    let body = match propfind(client, principal_url, SCHEDULING_BODY, credentials, 0).await {
+        Ok(resp) => match expect_207(resp).await {
+            Ok(b) => b,
+            Err(_) => return (false, None),
+        },
+        Err(_) => return (false, None),
+    };
+    let has_outbox = extract_first_nested_href(&body, b"schedule-outbox-URL")
+        .ok()
+        .flatten()
+        .is_some();
+    let organizer = first_mailto(&body);
+    // Need BOTH server auto-scheduling AND a usable organizer address —
+    // without the latter we can't write a valid ORGANIZER.
+    (has_outbox && organizer.is_some(), organizer)
+}
+
+/// Pull the first `mailto:` calendar-user-address out of a PROPFIND body.
+/// `calendar-user-address-set` lists several addresses (principal paths and
+/// mailtos); `ORGANIZER`/`ATTENDEE` need the `mailto:` form.
+fn first_mailto(body: &str) -> Option<String> {
+    let start = body.find("mailto:")?;
+    let rest = &body[start..];
+    let end = rest
+        .find(|c: char| c == '<' || c == '"' || c.is_whitespace())
+        .unwrap_or(rest.len());
+    let addr = rest[..end].trim();
+    (addr.len() > "mailto:".len()).then(|| addr.to_string())
 }
 
 fn parse_base_url(raw: &str) -> CaldavResult<Url> {
@@ -445,5 +512,76 @@ mod tests {
     fn parse_base_url_rejects_unsupported_scheme() {
         let err = parse_base_url("ftp://example.com").unwrap_err();
         assert!(matches!(err, CaldavError::Config(_)));
+    }
+
+    #[test]
+    fn first_mailto_picks_the_mailto_address() {
+        let body = r#"<c:calendar-user-address-set>
+            <d:href>/principals/users/alice/</d:href>
+            <d:href>mailto:alice@example.com</d:href>
+          </c:calendar-user-address-set>"#;
+        assert_eq!(
+            first_mailto(body).as_deref(),
+            Some("mailto:alice@example.com")
+        );
+        assert_eq!(first_mailto("<d:href>/no/mailto/here/</d:href>"), None);
+    }
+
+    const SCHEDULING_RESPONSE: &str = r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+  <d:response>
+    <d:href>/principals/users/alice/</d:href>
+    <d:propstat>
+      <d:prop>
+        <c:calendar-user-address-set>
+          <d:href>mailto:alice@example.com</d:href>
+          <d:href>/principals/users/alice/</d:href>
+        </c:calendar-user-address-set>
+        <c:schedule-outbox-URL>
+          <d:href>/calendars/alice/outbox/</d:href>
+        </c:schedule-outbox-URL>
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+</d:multistatus>"#;
+
+    #[tokio::test]
+    async fn discovery_detects_rfc6638_scheduling() {
+        let mut server = Server::new_async().await;
+        let _wk = server
+            .mock("GET", "/.well-known/caldav")
+            .with_status(404)
+            .create_async()
+            .await;
+        let _principal = server
+            .mock("PROPFIND", "/")
+            .with_status(207)
+            .with_body(PRINCIPAL_RESPONSE)
+            .create_async()
+            .await;
+        // Two PROPFINDs hit the principal — route them by requested property.
+        let _home = server
+            .mock("PROPFIND", "/principals/users/alice/")
+            .match_body(mockito::Matcher::Regex("calendar-home-set".into()))
+            .with_status(207)
+            .with_body(HOME_SET_RESPONSE)
+            .create_async()
+            .await;
+        let _sched = server
+            .mock("PROPFIND", "/principals/users/alice/")
+            .match_body(mockito::Matcher::Regex("schedule-outbox-URL".into()))
+            .with_status(207)
+            .with_body(SCHEDULING_RESPONSE)
+            .create_async()
+            .await;
+
+        let client = test_client();
+        let d = run(&client, &creds(&server.url())).await.unwrap();
+        assert!(d.supports_scheduling);
+        assert_eq!(
+            d.calendar_user_address.as_deref(),
+            Some("mailto:alice@example.com")
+        );
     }
 }

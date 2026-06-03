@@ -665,6 +665,23 @@ impl CaldavAdapter {
         self.discover().await
     }
 
+    /// The user's `mailto:` organizer address for a write — but only when the
+    /// caller opted to notify AND the server actually auto-schedules (RFC
+    /// 6638). Otherwise `None`, so the mapper omits `ORGANIZER`/`ATTENDEE`
+    /// and the server schedules nothing. Discovery is cached, so this is free
+    /// after the first call; a discovery failure degrades to `None` (store
+    /// the event silently rather than failing the write).
+    async fn organizer_for_send(&self, sending: bool) -> Option<String> {
+        if !sending {
+            return None;
+        }
+        self.discover()
+            .await
+            .ok()
+            .filter(|d| d.supports_scheduling)
+            .and_then(|d| d.calendar_user_address)
+    }
+
     /// Test-only: peek at the cached result without going to the wire.
     #[cfg(test)]
     fn cached_calendar_home(&self) -> Option<url::Url> {
@@ -741,10 +758,14 @@ impl CalendarFeature for CaldavAdapter {
             return Ok(cached);
         }
         let discovery = self.discover().await.map_err(to_core_error)?;
-        let fresh =
-            calendars::list_calendars(&self.http, &discovery.calendar_home_url, &self.credentials)
-                .await
-                .map_err(to_core_error)?;
+        let fresh = calendars::list_calendars(
+            &self.http,
+            &discovery.calendar_home_url,
+            &self.credentials,
+            discovery.supports_scheduling,
+        )
+        .await
+        .map_err(to_core_error)?;
         *self.calendars_cache.lock().expect("poison") = Some(ListingCache {
             items: fresh.clone(),
             cached_at: chrono::Utc::now(),
@@ -795,13 +816,21 @@ impl CalendarFeature for CaldavAdapter {
     async fn create_event(&self, calendar_id: &str, event: NewEvent) -> CoreResult<Event> {
         let cal_url =
             Url::parse(calendar_id).map_err(|err| CoreError::InvalidInput(err.to_string()))?;
-        events::create_event(&self.http, &cal_url, event, &self.credentials)
-            .await
-            .map_err(to_core_error)
+        let organizer = self.organizer_for_send(event.send_invitations).await;
+        events::create_event(
+            &self.http,
+            &cal_url,
+            event,
+            &self.credentials,
+            organizer.as_deref(),
+        )
+        .await
+        .map_err(to_core_error)
     }
 
     async fn update_event(&self, event: Event) -> CoreResult<Event> {
-        events::update_event(&self.http, event, &self.credentials)
+        let organizer = self.organizer_for_send(event.send_invitations).await;
+        events::update_event(&self.http, event, &self.credentials, organizer.as_deref())
             .await
             .map_err(to_core_error)
     }
@@ -820,10 +849,14 @@ impl CalendarFeature for CaldavAdapter {
         // fallback if a caller forgot to thread the calendar_id
         // through.
         let discovery = self.discover().await.map_err(to_core_error)?;
-        let cals =
-            calendars::list_calendars(&self.http, &discovery.calendar_home_url, &self.credentials)
-                .await
-                .map_err(to_core_error)?;
+        let cals = calendars::list_calendars(
+            &self.http,
+            &discovery.calendar_home_url,
+            &self.credentials,
+            discovery.supports_scheduling,
+        )
+        .await
+        .map_err(to_core_error)?;
         let mut last_err: Option<CoreError> = None;
         for cal in cals {
             let cal_url = match Url::parse(&cal.id) {
@@ -873,10 +906,14 @@ impl CalendarFeature for CaldavAdapter {
         // left the resource untouched in whichever calendar
         // actually owned it.
         let discovery = self.discover().await.map_err(to_core_error)?;
-        let cals =
-            calendars::list_calendars(&self.http, &discovery.calendar_home_url, &self.credentials)
-                .await
-                .map_err(to_core_error)?;
+        let cals = calendars::list_calendars(
+            &self.http,
+            &discovery.calendar_home_url,
+            &self.credentials,
+            discovery.supports_scheduling,
+        )
+        .await
+        .map_err(to_core_error)?;
         let mut last_err: Option<CoreError> = None;
         for cal in cals {
             let cal_url = match Url::parse(&cal.id) {

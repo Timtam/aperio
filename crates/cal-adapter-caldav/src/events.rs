@@ -131,10 +131,11 @@ pub async fn create_event(
     calendar_url: &Url,
     event: NewEvent,
     credentials: &Credentials,
+    organizer: Option<&str>,
 ) -> CaldavResult<Event> {
     let uid = format!("{}@aperio", Uuid::new_v4());
     let resource = resource_url(calendar_url, &uid)?;
-    let body = new_event_to_ical(&uid, &event);
+    let body = new_event_to_ical(&uid, &event, organizer);
 
     let mut headers = auth_header(credentials)?;
     headers.insert(
@@ -182,11 +183,12 @@ pub async fn update_event(
     client: &Client,
     event: Event,
     credentials: &Credentials,
+    organizer: Option<&str>,
 ) -> CaldavResult<Event> {
     let cal_url = Url::parse(&event.calendar_id)
         .map_err(|e| CaldavError::Config(format!("event.calendar_id is not a URL: {e}")))?;
     let resource = resource_url_for_event(&cal_url, &event.id)?;
-    let body = event_to_ical(&event);
+    let body = event_to_ical(&event, organizer);
 
     let mut headers = auth_header(credentials)?;
     headers.insert(
@@ -353,7 +355,9 @@ pub async fn add_event_exdate(
     // additional sub-components (overrides) and re-serialise just
     // the master with its updated EXDATE list. Servers reattach
     // their other components on the next round-trip.
-    let serialised = crate::mapping::event_to_ical(&master_clone);
+    // Re-serialising the master after an EXDATE skip — never a scheduling
+    // write, so no organizer.
+    let serialised = crate::mapping::event_to_ical(&master_clone, None);
 
     // Step 3: PUT the modified body back. If-Match guards against a
     // race with a concurrent edit; without an ETag we send the
@@ -565,6 +569,7 @@ END:VCALENDAR</c:calendar-data>
             &cal_url,
             sample_new_event(),
             &creds(&server.url()),
+            None,
         )
         .await
         .unwrap();
@@ -608,7 +613,7 @@ END:VCALENDAR</c:calendar-data>
             updated_at: Utc::now(),
             etag: Some("\"old-etag\"".into()),
         };
-        let updated = update_event(&client(), existing, &creds(&server.url()))
+        let updated = update_event(&client(), existing, &creds(&server.url()), None)
             .await
             .unwrap();
         m.assert_async().await;
@@ -647,7 +652,7 @@ END:VCALENDAR</c:calendar-data>
             updated_at: Utc::now(),
             etag: Some("\"stale-etag\"".into()),
         };
-        let err = update_event(&client(), existing, &creds(&server.url()))
+        let err = update_event(&client(), existing, &creds(&server.url()), None)
             .await
             .unwrap_err();
         match err {

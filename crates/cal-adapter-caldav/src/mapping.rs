@@ -380,16 +380,21 @@ fn collect_exdates(ev: &icalendar::Event) -> Vec<DateTime<Utc>> {
 /// Only the same fields the *reader* understands are emitted —
 /// emitting more would round-trip data the rest of Aperio can't see
 /// anyway and the next read would silently drop them.
-pub fn new_event_to_ical(uid: &str, event: &NewEvent) -> String {
+///
+/// `organizer` is the user's `mailto:` calendar-user-address (from CalDAV
+/// discovery). When the event opts to notify attendees AND an organizer
+/// address is known, `ORGANIZER`/`ATTENDEE` are written so an RFC 6638
+/// server schedules the meeting; otherwise they're omitted (no scheduling).
+pub fn new_event_to_ical(uid: &str, event: &NewEvent, organizer: Option<&str>) -> String {
     let mut ical_ev = icalendar::Event::new();
-    apply_common(&mut ical_ev, uid, event);
+    apply_common(&mut ical_ev, uid, event, organizer);
     let mut cal = ICalendar::new();
     cal.push(ical_ev.done());
     cal.to_string()
 }
 
 /// Render an existing event back to iCal for the update PUT.
-pub fn event_to_ical(event: &Event) -> String {
+pub fn event_to_ical(event: &Event, organizer: Option<&str>) -> String {
     let new = NewEvent {
         title: event.title.clone(),
         description: event.description.clone(),
@@ -411,10 +416,15 @@ pub fn event_to_ical(event: &Event) -> String {
     // *different* event and spawns a duplicate. `decode_event_id` yields the
     // bare uid for both composite and legacy bare ids.
     let (_, uid) = decode_event_id(&event.id);
-    new_event_to_ical(uid, &new)
+    new_event_to_ical(uid, &new, organizer)
 }
 
-fn apply_common(ical_ev: &mut icalendar::Event, uid: &str, event: &NewEvent) {
+fn apply_common(
+    ical_ev: &mut icalendar::Event,
+    uid: &str,
+    event: &NewEvent,
+    organizer: Option<&str>,
+) {
     ical_ev.uid(uid);
     ical_ev.summary(&event.title);
     if let Some(desc) = &event.description {
@@ -446,6 +456,34 @@ fn apply_common(ical_ev: &mut icalendar::Event, uid: &str, event: &NewEvent) {
     for reminder in &event.reminders {
         if let Some(alarm) = reminder_to_alarm(reminder, &event.title) {
             ical_ev.alarm(alarm);
+        }
+    }
+    // ORGANIZER + ATTENDEE drive RFC 6638 server-side scheduling. On an
+    // auto-scheduling server (iCloud) their mere presence makes the server
+    // email attendees — there is no per-PUT "store but don't send" — so we
+    // write them ONLY when the user opted to notify AND we know the
+    // organizer's calendar-user-address. With no organizer, or notify off,
+    // they're omitted (the event is stored without attendees, no mail).
+    if event.send_invitations && !event.attendees.is_empty() {
+        if let Some(org) = organizer {
+            ical_ev.add_property("ORGANIZER", org);
+            for entry in &event.attendees {
+                let (name, email) = cal_core::attendee::parse(entry);
+                if email.is_empty() {
+                    continue;
+                }
+                let mut att = icalendar::Property::new("ATTENDEE", format!("mailto:{email}"));
+                att.add_parameter("ROLE", "REQ-PARTICIPANT");
+                att.add_parameter("PARTSTAT", "NEEDS-ACTION");
+                att.add_parameter("RSVP", "TRUE");
+                if let Some(cn) = name.as_deref() {
+                    att.add_parameter("CN", cn);
+                }
+                // `append_multi_property` (not `append_property`) — ATTENDEE
+                // is multi-valued; the single-property map would otherwise
+                // keep only the last one.
+                ical_ev.append_multi_property(att);
+            }
         }
     }
     // DTSTAMP is mandatory per RFC 5545 — icalendar adds it
@@ -551,7 +589,7 @@ END:VCALENDAR\r
         // Precondition: the row id is the composite, not the bare uid.
         assert_eq!(ev.id, format!("{href}|REAL-UID-9876"));
 
-        let ical = event_to_ical(ev);
+        let ical = event_to_ical(ev, None);
         assert!(
             ical.contains("UID:REAL-UID-9876"),
             "expected the bare UID in the PUT body, got:\n{ical}"
@@ -631,7 +669,7 @@ END:VCALENDAR\r
             send_invitations: false,
         };
         let uid = "abcdef-12345@aperio";
-        let body = new_event_to_ical(uid, &event);
+        let body = new_event_to_ical(uid, &event, None);
         // The reader must see exactly the fields we wrote.
         let parsed = parse_calendar_data(&body, "cal-1").unwrap();
         assert_eq!(parsed.len(), 1);
@@ -663,11 +701,49 @@ END:VCALENDAR\r
             attendees: Vec::new(),
             send_invitations: false,
         };
-        let body = new_event_to_ical("bday-uid", &event);
+        let body = new_event_to_ical("bday-uid", &event, None);
         assert!(
             body.contains("DTSTART;VALUE=DATE:20260520"),
             "expected VALUE=DATE DTSTART, got: {body}",
         );
+    }
+
+    #[test]
+    fn writes_organizer_and_attendees_only_when_notifying() {
+        let mut event = NewEvent {
+            title: "Review".into(),
+            description: None,
+            location: None,
+            start: Utc.with_ymd_and_hms(2026, 5, 20, 8, 0, 0).unwrap(),
+            end: Utc.with_ymd_and_hms(2026, 5, 20, 9, 0, 0).unwrap(),
+            all_day: false,
+            recurrence: None,
+            color_label: None,
+            reminders: Vec::new(),
+            sound: None,
+            attendees: vec!["Alice <alice@example.com>".into(), "bob@example.com".into()],
+            send_invitations: true,
+        };
+        let org = Some("mailto:me@example.com");
+        // Unfold iCal line-folding (CRLF + space) so long ATTENDEE lines
+        // don't split the substrings we assert on.
+        let body = new_event_to_ical("uid-1", &event, org).replace("\r\n ", "");
+        assert!(body.contains("ORGANIZER:mailto:me@example.com"), "{body}");
+        assert!(body.contains("ATTENDEE"), "{body}");
+        assert!(body.contains("CN=Alice"), "BODY:\n{body}");
+        assert!(body.contains("mailto:alice@example.com"), "{body}");
+        assert!(body.contains("mailto:bob@example.com"));
+
+        // Notify OFF → no scheduling properties even with attendees + organizer.
+        event.send_invitations = false;
+        let silent = new_event_to_ical("uid-1", &event, org).replace("\r\n ", "");
+        assert!(!silent.contains("ORGANIZER"));
+        assert!(!silent.contains("ATTENDEE"));
+
+        // Notify ON but no organizer (non-RFC-6638 server) → omitted.
+        event.send_invitations = true;
+        let no_org = new_event_to_ical("uid-1", &event, None).replace("\r\n ", "");
+        assert!(!no_org.contains("ORGANIZER"));
     }
 
     #[test]
@@ -826,7 +902,7 @@ END:VCALENDAR\r
             attendees: Vec::new(),
             send_invitations: false,
         };
-        let body = new_event_to_ical("round-trip-uid", &event);
+        let body = new_event_to_ical("round-trip-uid", &event, None);
         let parsed = parse_calendar_data(&body, "cal-1").unwrap();
         let reminders = &parsed[0].reminders;
         assert_eq!(reminders.len(), 2);

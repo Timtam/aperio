@@ -52,13 +52,14 @@ pub async fn list_calendars(
     client: &Client,
     home_url: &Url,
     credentials: &Credentials,
+    supports_scheduling: bool,
 ) -> CaldavResult<Vec<Calendar>> {
     let entries = propfind_calendars(client, home_url, credentials).await?;
     Ok(entries
         .into_iter()
         .filter(|e| e.is_calendar)
         .filter(supports_vevent)
-        .map(|e| to_calendar(home_url, e))
+        .map(|e| to_calendar(home_url, e, supports_scheduling))
         .collect())
 }
 
@@ -111,7 +112,7 @@ fn supports_vevent(entry: &ResponseEntry) -> bool {
             .any(|c| c.eq_ignore_ascii_case("VEVENT"))
 }
 
-fn to_calendar(home_url: &Url, entry: ResponseEntry) -> Calendar {
+fn to_calendar(home_url: &Url, entry: ResponseEntry, supports_scheduling: bool) -> Calendar {
     // Joined absolute URL for the calendar collection — used as the
     // calendar id so subsequent operations can address it directly
     // without re-walking the listing.
@@ -136,7 +137,9 @@ fn to_calendar(home_url: &Url, entry: ResponseEntry) -> Calendar {
     });
 
     Calendar {
-        supports_scheduling: false,
+        // Account-level: the whole iCloud/CalDAV principal either advertises
+        // RFC 6638 auto-scheduling or it doesn't, so every calendar shares it.
+        supports_scheduling,
         color_label: None,
         id,
         name: entry
@@ -305,7 +308,7 @@ mod tests {
             .await;
 
         let home = Url::parse(&format!("{}/calendars/alice/", server.url())).unwrap();
-        let cals = list_calendars(&client(), &home, &creds(&server.url()))
+        let cals = list_calendars(&client(), &home, &creds(&server.url()), false)
             .await
             .unwrap();
         // Only the VEVENT calendar survives — the home-set itself is
@@ -338,7 +341,7 @@ mod tests {
             .create_async()
             .await;
         let home = Url::parse(&format!("{}/calendars/alice/", server.url())).unwrap();
-        let cals = list_calendars(&client(), &home, &creds(&server.url()))
+        let cals = list_calendars(&client(), &home, &creds(&server.url()), false)
             .await
             .unwrap();
         assert_eq!(cals.len(), 1);

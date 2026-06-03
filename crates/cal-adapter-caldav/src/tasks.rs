@@ -445,7 +445,8 @@ pub async fn find_calendar_for_id(
     home_url: &Url,
     credentials: &Credentials,
 ) -> CaldavResult<Vec<Calendar>> {
-    calendars::list_calendars(client, home_url, credentials).await
+    // Tasks routing only needs the ids; the scheduling flag is irrelevant.
+    calendars::list_calendars(client, home_url, credentials, false).await
 }
 
 // ── iCal helpers ─────────────────────────────────────────────────────────
