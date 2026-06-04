@@ -888,6 +888,47 @@ button[aria-disabled='true'] {
   align-self: flex-start;
 }
 
+/* Notification-sound picker (§14.4). Reused at the global, container,
+   item and per-reminder levels; `--compact` tightens it inside a
+   reminder row. */
+.sound-picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.sound-picker__choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.sound-picker__choice {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.sound-picker__custom {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.sound-picker__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.sound-picker--compact {
+  gap: var(--space-1);
+}
+
+.sound-picker--compact .sound-picker__choices {
+  gap: var(--space-2);
+}
+
 .reminders-list {
   list-style: none;
   margin: 0;

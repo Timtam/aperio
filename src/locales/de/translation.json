@@ -53,7 +53,23 @@
       "days": "Tage"
     },
     "absoluteAtLabel": "Datum und Uhrzeit",
-    "appStartHint": "Wird beim nächsten App-Start nach Fälligkeit ausgelöst."
+    "appStartHint": "Wird beim nächsten App-Start nach Fälligkeit ausgelöst.",
+    "sound": {
+      "label": "Benachrichtigungston",
+      "inherit": "Standard verwenden",
+      "system": "Systemstandard",
+      "silent": "Kein Ton",
+      "custom": "Eigener Ton",
+      "selectLabel": "Ton auswählen",
+      "customItem": "{{ext}} · {{short}}",
+      "none": "Noch keine eigenen Töne – importiere einen.",
+      "import": "Datei importieren …",
+      "test": "Testen",
+      "remove": "Entfernen",
+      "dialogTitle": "Audiodatei auswählen",
+      "fileFilter": "Audiodateien",
+      "importError": "Der Ton konnte nicht importiert werden."
+    }
   },
   "app": {
     "title": "Aperio",
@@ -186,6 +202,11 @@
         "empty": "Noch keine Kalender — füge zuerst ein Konto hinzu.",
         "accountHeading": "{{account}}",
         "localAccount": "Lokal"
+      },
+      "notifications": {
+        "heading": "Benachrichtigungstöne",
+        "hint": "Der Ton, den eine Erinnerung abspielt. Kalender, Aufgabenlisten, einzelne Einträge und Erinnerungen können diesen Standard jeweils überschreiben.",
+        "globalLabel": "Standardton"
       },
       "plugins": {
         "hint": "Plugins erweitern Aperio um Kalender-, Sync-, Videokonferenz- und Benachrichtigungs-Adapter. Mitgelieferte Plugins kommen mit der App; Community-Plugins landen unter plugins/user/.",

@@ -32,13 +32,14 @@
 //! sync wave (Phase 7) will persist it.
 
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use cal_adapter_local::SharedConn;
 use cal_core::{
     DateRange, Event, EventRecurrence, RecurrenceEnd, RecurrenceFrequency, Reminder, ReminderKind,
-    Task, TaskRecurrence,
+    SoundConfig, SoundSource, Task, TaskRecurrence,
 };
 use chrono::{DateTime, Duration as ChronoDuration, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use rrule::{RRule, RRuleSet, Tz as RruleTz};
@@ -49,7 +50,9 @@ use tauri_plugin_notification::NotificationExt;
 use tokio::sync::Notify;
 use tracing::{info, warn};
 
+use crate::audio::AudioPlayer;
 use crate::registry::AdapterRegistry;
+use crate::sound::{ContainerKind, SoundPrefs};
 use crate::user_prefs::UserPrefsRepo;
 
 /// Identifier for a single fired reminder. Two reminders fire at the
@@ -78,6 +81,10 @@ struct Trigger {
     body: String,
     trigger_at: DateTime<Utc>,
     relevant_until: DateTime<Utc>,
+    /// Effective notification sound for this occurrence, already
+    /// resolved through the §14.4 hierarchy (reminder → item →
+    /// container → global → System) at build time.
+    sound: SoundConfig,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -113,6 +120,11 @@ pub struct ReminderScheduler {
     invalidate: Arc<Notify>,
     fired: Arc<Mutex<HashSet<FiredKey>>>,
     external_cache: Arc<Mutex<Option<ExternalTriggerCache>>>,
+    /// `<data_dir>/assets/sounds/` — where custom sound files live.
+    /// Used by `fire` to resolve a `SoundSource::Custom` hash to a path.
+    sounds_dir: PathBuf,
+    /// Handle to the process-wide audio thread for custom-sound playback.
+    audio: AudioPlayer,
 }
 
 impl ReminderScheduler {
@@ -128,6 +140,8 @@ impl ReminderScheduler {
     pub fn spawn<R: Runtime>(
         db: SharedConn,
         registry: Arc<AdapterRegistry>,
+        sounds_dir: PathBuf,
+        audio: AudioPlayer,
         app: AppHandle<R>,
     ) -> Arc<Self> {
         let scheduler = Arc::new(Self {
@@ -136,6 +150,8 @@ impl ReminderScheduler {
             invalidate: Arc::new(Notify::new()),
             fired: Arc::new(Mutex::new(HashSet::new())),
             external_cache: Arc::new(Mutex::new(None)),
+            sounds_dir,
+            audio,
         });
         let worker = scheduler.clone();
         tauri::async_runtime::spawn(async move {
@@ -261,6 +277,11 @@ impl ReminderScheduler {
         earliest: DateTime<Utc>,
         latest: DateTime<Utc>,
     ) -> Vec<Trigger> {
+        // Load the §14.4 sound snapshot BEFORE taking the connection
+        // lock below — `SoundPrefs::load` locks the same mutex, and
+        // `std::sync::Mutex` isn't reentrant, so reading it mid-scan
+        // would deadlock.
+        let sound_prefs = SoundPrefs::load(&self.db);
         let conn = match self.db.lock() {
             Ok(c) => c,
             Err(err) => {
@@ -287,6 +308,7 @@ impl ReminderScheduler {
                     let reminders_json: Option<String> = row.get(4).unwrap_or(None);
                     let rrule: Option<String> = row.get(5).unwrap_or(None);
                     let exceptions_json: Option<String> = row.get(6).unwrap_or(None);
+                    let calendar_id: String = row.get(7).unwrap_or_default();
                     let Some(reminders) = parse_reminders(reminders_json.as_deref()) else {
                         continue;
                     };
@@ -309,6 +331,9 @@ impl ReminderScheduler {
                         duration,
                         earliest,
                         latest,
+                        &sound_prefs,
+                        ContainerKind::Calendar,
+                        &calendar_id,
                     ));
                 }
             }
@@ -330,6 +355,7 @@ impl ReminderScheduler {
                     let deadline_time: Option<String> = row.get(5).unwrap_or(None);
                     let reminders_json: Option<String> = row.get(6).unwrap_or(None);
                     let recurrence_json: Option<String> = row.get(7).unwrap_or(None);
+                    let list_id: String = row.get(8).unwrap_or_default();
 
                     let Some(reminders) = parse_reminders(reminders_json.as_deref()) else {
                         continue;
@@ -375,6 +401,9 @@ impl ReminderScheduler {
                         ChronoDuration::zero(),
                         earliest,
                         latest,
+                        &sound_prefs,
+                        ContainerKind::TaskList,
+                        &list_id,
                     ));
                 }
             }
@@ -423,6 +452,12 @@ impl ReminderScheduler {
         let (occ_from, occ_to) = occurrence_window(from, to);
         let range = DateRange::new(occ_from, occ_to);
 
+        // §14.4 sound snapshot for resolving external items' effective
+        // sound (item / container / global overrides live in user_prefs,
+        // same mechanism as local items). No connection lock is held on
+        // this async path, so loading it here is deadlock-free.
+        let sound_prefs = SoundPrefs::load(&self.db);
+
         let mut acc: Vec<Trigger> = Vec::new();
 
         // ── Calendars → events ────────────────────────────────────
@@ -452,7 +487,7 @@ impl ReminderScheduler {
                         continue;
                     }
                 };
-                acc.extend(event_triggers(&events, &defaults, from, to));
+                acc.extend(event_triggers(&events, &defaults, &sound_prefs, from, to));
             }
         }
 
@@ -482,7 +517,7 @@ impl ReminderScheduler {
                         continue;
                     }
                 };
-                acc.extend(task_triggers(&tasks, from, to));
+                acc.extend(task_triggers(&tasks, &sound_prefs, from, to));
             }
         }
 
@@ -549,13 +584,34 @@ impl ReminderScheduler {
             item_id = %t.item_id,
             "firing reminder"
         );
-        let result = app
-            .notification()
-            .builder()
-            .title(&t.title)
-            .body(&t.body)
-            .show();
-        if let Err(err) = result {
+        let builder = app.notification().builder().title(&t.title).body(&t.body);
+        // §14.4 playback dispatch:
+        //   - System → let the OS play its default notification sound.
+        //   - Silent → suppress sound, visual only.
+        //   - Custom → play the file ourselves (the notification plugin
+        //     can't), so silence the toast to avoid a double sound. A
+        //     missing file falls back to the System sound rather than
+        //     silently dropping the audible cue.
+        let builder = match &t.sound.source {
+            SoundSource::System => builder,
+            SoundSource::Silent => builder.silent(),
+            SoundSource::Custom { sha256 } => {
+                match crate::sound_assets::local_sound_path(&self.sounds_dir, sha256) {
+                    Some(path) => {
+                        self.audio.play_file(path);
+                        builder.silent()
+                    }
+                    None => {
+                        warn!(
+                            hash = %sha256,
+                            "custom sound file missing; falling back to system sound",
+                        );
+                        builder
+                    }
+                }
+            }
+        };
+        if let Err(err) = builder.show() {
             warn!(?err, "failed to dispatch notification");
         }
         let mut fired = self.fired.lock().expect("fired set poisoned");
@@ -573,6 +629,9 @@ impl ReminderScheduler {
     /// `cal-adapter-caldav::mapping::reminder_to_alarm`).
     fn fire_app_start_reminders<R: Runtime>(&self, app: &AppHandle<R>) {
         let now = Utc::now();
+        // §14.4 snapshot, loaded before the connection lock below (same
+        // reentrancy reason as `collect_local_triggers_in_window`).
+        let sound_prefs = SoundPrefs::load(&self.db);
         let to_fire: Vec<Trigger> = {
             let conn = match self.db.lock() {
                 Ok(c) => c,
@@ -596,6 +655,7 @@ impl ReminderScheduler {
                         let title: String = row.get(1).unwrap_or_default();
                         let start_str: String = row.get(2).unwrap_or_default();
                         let reminders_json: Option<String> = row.get(4).unwrap_or(None);
+                        let calendar_id: String = row.get(7).unwrap_or_default();
                         let Some(reminders) = parse_reminders(reminders_json.as_deref()) else {
                             continue;
                         };
@@ -620,6 +680,12 @@ impl ReminderScheduler {
                                     // on this code path (we
                                     // explicitly want to fire here).
                                     relevant_until: start,
+                                    sound: sound_prefs.resolve(
+                                        r.sound.as_ref(),
+                                        &id,
+                                        ContainerKind::Calendar,
+                                        &calendar_id,
+                                    ),
                                 });
                             }
                         }
@@ -645,6 +711,7 @@ impl ReminderScheduler {
                         let deadline_date: Option<String> = row.get(4).unwrap_or(None);
                         let deadline_time: Option<String> = row.get(5).unwrap_or(None);
                         let reminders_json: Option<String> = row.get(6).unwrap_or(None);
+                        let list_id: String = row.get(8).unwrap_or_default();
                         let Some(reminders) = parse_reminders(reminders_json.as_deref()) else {
                             continue;
                         };
@@ -669,6 +736,12 @@ impl ReminderScheduler {
                                     body: format_task_body(&due),
                                     trigger_at: now,
                                     relevant_until: due,
+                                    sound: sound_prefs.resolve(
+                                        r.sound.as_ref(),
+                                        &id,
+                                        ContainerKind::TaskList,
+                                        &list_id,
+                                    ),
                                 });
                             }
                         }
@@ -740,8 +813,11 @@ const EMPTY_HORIZON_RETRY: Duration = EXTERNAL_TRIGGERS_TTL;
 /// master's start. Non-recurring events still work — both columns
 /// come back NULL and the expansion helper degrades to a
 /// single-occurrence vector containing the master start.
+/// `calendar_id` (index 7) is appended last so existing column indices
+/// stay put; the scheduler uses it to resolve the §14.4 container-level
+/// notification sound (`sound.calendar.{id}`).
 const EVENT_QUERY: &str = "SELECT id, title, start_utc, end_utc, reminders, \
-    rrule, rrule_exceptions FROM events";
+    rrule, rrule_exceptions, calendar_id FROM events";
 
 /// SELECT id, title, scheduled_date, scheduled_time, deadline_date,
 /// deadline_time, reminders, recurrence FROM tasks
@@ -753,10 +829,13 @@ const EVENT_QUERY: &str = "SELECT id, title, start_utc, end_utc, reminders, \
 /// (the original query collapsed scheduled and deadline times into
 /// the deadline_time column, which lost precision when both were
 /// set).
+/// `list_id` (index 8) is appended last so existing column indices stay
+/// put; the scheduler uses it to resolve the §14.4 container-level
+/// notification sound (`sound.tasklist.{id}`).
 const TASK_QUERY: &str = "SELECT id, title, \
     scheduled_date, scheduled_time, \
     deadline_date, deadline_time, \
-    reminders, recurrence FROM tasks";
+    reminders, recurrence, list_id FROM tasks";
 
 /// Translate a batch of external events into Trigger entries. Empty
 /// `reminders` on an event falls back to the calendar's stored default
@@ -773,6 +852,7 @@ const TASK_QUERY: &str = "SELECT id, title, \
 fn event_triggers(
     events: &[Event],
     calendar_defaults: &[Reminder],
+    sound_prefs: &SoundPrefs,
     window_start: DateTime<Utc>,
     window_end: DateTime<Utc>,
 ) -> Vec<Trigger> {
@@ -802,6 +882,9 @@ fn event_triggers(
             duration,
             window_start,
             window_end,
+            sound_prefs,
+            ContainerKind::Calendar,
+            &ev.calendar_id,
         ));
     }
     out
@@ -832,6 +915,9 @@ fn occurrence_triggers(
     duration: ChronoDuration,
     window_start: DateTime<Utc>,
     window_end: DateTime<Utc>,
+    sound_prefs: &SoundPrefs,
+    container_kind: ContainerKind,
+    container_id: &str,
 ) -> Vec<Trigger> {
     let starts: Vec<DateTime<Utc>> = match recurrence {
         Some(rec) => expand_occurrences(
@@ -865,6 +951,9 @@ fn occurrence_triggers(
                 body: format_event_body(&occ_start),
                 trigger_at: at,
                 relevant_until,
+                // §14.4: per-reminder override wins, else fall through
+                // item → container → global → System.
+                sound: sound_prefs.resolve(r.sound.as_ref(), item_id, container_kind, container_id),
             });
         }
     }
@@ -988,6 +1077,7 @@ fn occurrence_window(
 /// emits exactly one set of triggers off its master due time.
 fn task_triggers(
     tasks: &[Task],
+    sound_prefs: &SoundPrefs,
     window_start: DateTime<Utc>,
     window_end: DateTime<Utc>,
 ) -> Vec<Trigger> {
@@ -1022,6 +1112,9 @@ fn task_triggers(
             ChronoDuration::zero(),
             window_start,
             window_end,
+            sound_prefs,
+            ContainerKind::TaskList,
+            &t.list_id,
         ));
     }
     out
@@ -1246,6 +1339,34 @@ mod tests {
     use cal_core::{EventRecurrence, Reminder, ReminderKind, Task, TaskStatus};
     use chrono::{NaiveDate, NaiveTime};
 
+    /// Test wrappers that inject an empty `SoundPrefs` so the existing
+    /// trigger-shape assertions stay terse. These tests assert on timing
+    /// and counts, not the resolved sound (every occurrence resolves to
+    /// System with an empty snapshot — that precedence is covered in
+    /// `crate::sound`'s own unit tests).
+    fn ev_triggers(
+        events: &[Event],
+        calendar_defaults: &[Reminder],
+        window_start: DateTime<Utc>,
+        window_end: DateTime<Utc>,
+    ) -> Vec<Trigger> {
+        event_triggers(
+            events,
+            calendar_defaults,
+            &SoundPrefs::default(),
+            window_start,
+            window_end,
+        )
+    }
+
+    fn tk_triggers(
+        tasks: &[Task],
+        window_start: DateTime<Utc>,
+        window_end: DateTime<Utc>,
+    ) -> Vec<Trigger> {
+        task_triggers(tasks, &SoundPrefs::default(), window_start, window_end)
+    }
+
     fn rel(minutes_before: i64) -> Reminder {
         Reminder {
             kind: ReminderKind::Relative { minutes_before },
@@ -1327,7 +1448,7 @@ mod tests {
         // reminder list is empty.
         let ev = make_event(vec![rel(15)]);
         let (ws, we) = wide_window();
-        let triggers = event_triggers(&[ev], &[rel(60)], ws, we);
+        let triggers = ev_triggers(&[ev], &[rel(60)], ws, we);
         assert_eq!(triggers.len(), 1);
         // 8:00 start − 15 min = 7:45.
         assert_eq!(
@@ -1344,7 +1465,7 @@ mod tests {
         // default.
         let ev = make_event(Vec::new());
         let (ws, we) = wide_window();
-        let triggers = event_triggers(&[ev], &[rel(15)], ws, we);
+        let triggers = ev_triggers(&[ev], &[rel(15)], ws, we);
         assert_eq!(triggers.len(), 1);
         assert_eq!(
             triggers[0].trigger_at,
@@ -1356,7 +1477,7 @@ mod tests {
     fn event_with_no_reminders_and_no_default_emits_nothing() {
         let ev = make_event(Vec::new());
         let (ws, we) = wide_window();
-        let triggers = event_triggers(&[ev], &[], ws, we);
+        let triggers = ev_triggers(&[ev], &[], ws, we);
         assert!(triggers.is_empty());
     }
 
@@ -1364,7 +1485,7 @@ mod tests {
     fn event_with_multiple_defaults_emits_one_trigger_each() {
         let ev = make_event(Vec::new());
         let (ws, we) = wide_window();
-        let triggers = event_triggers(&[ev], &[rel(60), rel(10)], ws, we);
+        let triggers = ev_triggers(&[ev], &[rel(60), rel(10)], ws, we);
         assert_eq!(triggers.len(), 2);
     }
 
@@ -1384,7 +1505,7 @@ mod tests {
         // occurrences and therefore four triggers — one per week,
         // each firing 15 minutes before the 08:00 start.
         let ev = make_recurring_event("FREQ=WEEKLY;BYDAY=WE", Vec::new());
-        let triggers = event_triggers(
+        let triggers = ev_triggers(
             &[ev],
             &[],
             Utc.with_ymd_and_hms(2026, 5, 19, 0, 0, 0).unwrap(),
@@ -1412,7 +1533,7 @@ mod tests {
             "FREQ=WEEKLY;BYDAY=WE",
             vec![Utc.with_ymd_and_hms(2026, 5, 27, 8, 0, 0).unwrap()],
         );
-        let triggers = event_triggers(
+        let triggers = ev_triggers(
             &[ev],
             &[],
             Utc.with_ymd_and_hms(2026, 5, 19, 0, 0, 0).unwrap(),
@@ -1432,7 +1553,7 @@ mod tests {
         // reminder still fires; subsequent ones simply don't. Better
         // than dropping the row entirely.
         let ev = make_recurring_event("BOGUS=NOPE", Vec::new());
-        let triggers = event_triggers(
+        let triggers = ev_triggers(
             &[ev],
             &[],
             Utc.with_ymd_and_hms(2026, 5, 19, 0, 0, 0).unwrap(),
@@ -1452,7 +1573,7 @@ mod tests {
         // even if the RRULE rolls them out — keeps cache sizes
         // bounded for daily or hourly rules.
         let ev = make_recurring_event("FREQ=WEEKLY;BYDAY=WE", Vec::new());
-        let triggers = event_triggers(
+        let triggers = ev_triggers(
             &[ev],
             &[],
             Utc.with_ymd_and_hms(2026, 5, 19, 0, 0, 0).unwrap(),
@@ -1482,7 +1603,7 @@ mod tests {
             vec![rel(0)], // fire at the reference time itself
         );
         let (ws, we) = task_window();
-        let triggers = task_triggers(&[task], ws, we);
+        let triggers = tk_triggers(&[task], ws, we);
         assert_eq!(triggers.len(), 1);
         // 10:00 local = depends on zone; assert just the date so the
         // test is portable. The original date wins (scheduled), not
@@ -1506,7 +1627,7 @@ mod tests {
             vec![rel(0)],
         );
         let (ws, we) = task_window();
-        let triggers = task_triggers(&[task], ws, we);
+        let triggers = tk_triggers(&[task], ws, we);
         assert_eq!(triggers.len(), 1);
         let dt_local = chrono::Local.from_utc_datetime(&triggers[0].trigger_at.naive_utc());
         assert_eq!(dt_local.time(), NaiveTime::from_hms_opt(9, 0, 0).unwrap());
@@ -1516,7 +1637,7 @@ mod tests {
     fn task_without_any_date_emits_nothing() {
         let task = make_task(None, None, None, None, vec![rel(15)]);
         let (ws, we) = task_window();
-        assert!(task_triggers(&[task], ws, we).is_empty());
+        assert!(tk_triggers(&[task], ws, we).is_empty());
     }
 
     #[test]
@@ -1529,7 +1650,7 @@ mod tests {
             Vec::new(),
         );
         let (ws, we) = task_window();
-        assert!(task_triggers(&[task], ws, we).is_empty());
+        assert!(tk_triggers(&[task], ws, we).is_empty());
     }
 
     // ── TaskRecurrence → RRULE conversion ────────────────────────
@@ -1635,7 +1756,7 @@ mod tests {
             day_of_month: None,
             end: None,
         });
-        let triggers = task_triggers(
+        let triggers = tk_triggers(
             &[task],
             Utc.with_ymd_and_hms(2026, 5, 19, 0, 0, 0).unwrap(),
             Utc.with_ymd_and_hms(2026, 6, 17, 0, 0, 0).unwrap(),
@@ -1657,7 +1778,7 @@ mod tests {
             day_of_month: None,
             end: Some(RecurrenceEnd::After { occurrences: 2 }),
         });
-        let triggers = task_triggers(
+        let triggers = tk_triggers(
             &[task],
             Utc.with_ymd_and_hms(2026, 5, 19, 0, 0, 0).unwrap(),
             // Window wide enough to see four if the rule allowed.
@@ -1677,6 +1798,7 @@ mod tests {
             body: String::new(),
             trigger_at: now + ChronoDuration::minutes(at_offset_min),
             relevant_until: now + ChronoDuration::minutes(relevant_offset_min),
+            sound: SoundConfig::default(),
         }
     }
 
@@ -1742,7 +1864,7 @@ mod tests {
         // grace during which a missed reminder still rings.
         let ev = make_event(vec![rel(15)]);
         let (ws, we) = wide_window();
-        let triggers = event_triggers(&[ev], &[], ws, we);
+        let triggers = ev_triggers(&[ev], &[], ws, we);
         assert_eq!(triggers.len(), 1);
         assert_eq!(
             triggers[0].relevant_until,
@@ -1764,7 +1886,7 @@ mod tests {
             vec![rel(15)],
         );
         let (ws, we) = task_window();
-        let triggers = task_triggers(&[task], ws, we);
+        let triggers = tk_triggers(&[task], ws, we);
         assert_eq!(triggers.len(), 1);
         // relevant_until == due time. Local-time 09:00 round-trips
         // through chrono::Local to UTC; assert the date-level fact.
@@ -1786,7 +1908,7 @@ mod tests {
                 date: NaiveDate::from_ymd_opt(2026, 6, 3).unwrap(),
             }),
         });
-        let triggers = task_triggers(
+        let triggers = tk_triggers(
             &[task],
             Utc.with_ymd_and_hms(2026, 5, 19, 0, 0, 0).unwrap(),
             Utc.with_ymd_and_hms(2026, 7, 1, 0, 0, 0).unwrap(),

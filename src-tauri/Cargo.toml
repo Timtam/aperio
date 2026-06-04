@@ -70,6 +70,17 @@ plugin-core.workspace = true
 # to actually produce those cdylibs.
 
 base64 = "0.22"
+# Custom notification-sound playback (§14.4). The notification plugin
+# can only play NAMED system sounds, so we decode + play user-imported
+# files ourselves on a dedicated audio thread. `symphonia-all` gives
+# pure-Rust decoders for mp3/aac/flac/wav/ogg — no C codec deps to
+# build. cpal (pulled transitively) needs ALSA headers on Linux, hence
+# `libasound2-dev` in the CI / artifact Linux setup steps.
+rodio = { version = "0.19", default-features = false, features = ["symphonia-all"] }
+# SHA-256 content-addressing for the custom-sound importer (§19.2.2):
+# files are stored as `<sha256>.<ext>` so identical audio dedupes and
+# the sync asset store can fetch by hash.
+sha2.workspace = true
 
 rusqlite.workspace = true
 chrono.workspace = true

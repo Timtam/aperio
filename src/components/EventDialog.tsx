@@ -41,6 +41,7 @@ import { readLastUsedCalendar, writeLastUsedCalendar } from './lastUsedCalendar'
 import { Modal } from './Modal';
 import { RecurrenceSelector } from './RecurrenceSelector';
 import { RemindersEditor } from './RemindersEditor';
+import { SoundPrefField } from './SoundPrefField';
 import type { Reminder } from '../api/types';
 
 /**
@@ -838,6 +839,13 @@ export function EventDialog({
           }}
           mode="event"
         />
+
+        {/* §14.4 per-event sound override. Edit-only: the key is the
+            event's (series) id, which a not-yet-created event doesn't
+            have. New events inherit the calendar / global default. */}
+        {isEdit && event && (
+          <SoundPrefField prefKey={`sound.item.${seriesIdOf(event)}`} />
+        )}
 
         {isOccurrence && (
           <fieldset className="form__field">
