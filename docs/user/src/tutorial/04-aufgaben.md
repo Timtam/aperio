@@ -25,9 +25,11 @@ deinen Tag oder deine Woche ein und arbeitest sie ab.
 
 > **Erledigte ausblenden:** Abgehakte Aufgaben wandern in eine
 > eingeklappte Gruppe **Erledigt (N)** ganz unten in der Liste, damit die
-> offenen Aufgaben übersichtlich bleiben. Die Gruppe zeigt die Anzahl an;
-> ein Klick (bzw. `Eingabe`/`Leertaste` auf der Schaltfläche) klappt sie
-> auf. Der Auf-/Zu-Zustand wird gemerkt.
+> offenen Aufgaben übersichtlich bleiben. Die Gruppe zeigt die Anzahl an.
+> Sie ist eine normale Zeile in der Aufgaben-Baumansicht: mit den
+> Pfeiltasten erreichbar, `Eingabe`/`Leertaste` (oder Pfeil-rechts/-links)
+> klappt sie auf bzw. zu — genau wie eine Aufgabe mit Unteraufgaben. Der
+> Auf-/Zu-Zustand wird gemerkt.
 
 ## Aufgaben einplanen
 

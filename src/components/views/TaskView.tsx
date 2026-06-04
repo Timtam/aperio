@@ -27,7 +27,7 @@ import { useTaskStatusToggle } from '../../state/useTaskStatusToggle';
 import { useTasks } from '../../state/useTasks';
 import type { Task } from '../../api/types';
 import { duplicateTask } from '../duplicateActions';
-import { buildEntries, type Entry } from './taskGrouping';
+import { buildEntries, DONE_GROUP_ID, type Entry } from './taskGrouping';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { isCommandError } from '../../api/client';
 
@@ -79,24 +79,21 @@ export function TaskView() {
   // list, but doesn't persist across reloads — a future polish
   // could move this into user_prefs the way the sidebar's
   // expansion map does.
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  // Collapse set for subtree twisties + the synthetic "Done (N)" group
+  // (keyed by DONE_GROUP_ID). The Done group's collapsed state is
+  // persisted to localStorage and seeded here so finished tasks start
+  // tucked away.
+  const [collapsed, setCollapsed] = useState<Set<string>>(() =>
+    loadDoneCollapsed() ? new Set([DONE_GROUP_ID]) : new Set(),
+  );
   const toggleCollapsed = useCallback((id: string) => {
     setCollapsed((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
-      return next;
-    });
-  }, []);
-
-  // Whether the "Done (N)" footer group is collapsed. Defaults to
-  // collapsed so finished tasks don't spam the active list; persisted
-  // to localStorage so the choice survives reloads.
-  const [doneCollapsed, setDoneCollapsed] = useState(loadDoneCollapsed);
-  const toggleDoneCollapsed = useCallback(() => {
-    setDoneCollapsed((prev) => {
-      const next = !prev;
-      saveDoneCollapsed(next);
+      // The Done group's open/closed choice persists across reloads;
+      // per-subtree twisties stay session-local.
+      if (id === DONE_GROUP_ID) saveDoneCollapsed(next.has(id));
       return next;
     });
   }, []);
@@ -107,16 +104,8 @@ export function TaskView() {
   // depth-first under their parent; the `hidden` flag on each entry
   // tells the renderer when the parent above is collapsed.
   const { entries, flatTasks } = useMemo(
-    () =>
-      buildEntries(
-        tasks,
-        taskListById,
-        t,
-        collapsed,
-        sectionsByList,
-        doneCollapsed,
-      ),
-    [tasks, taskListById, t, collapsed, sectionsByList, doneCollapsed],
+    () => buildEntries(tasks, taskListById, t, collapsed, sectionsByList),
+    [tasks, taskListById, t, collapsed, sectionsByList],
   );
 
   const [focusIndex, setFocusIndex] = useState(0);
@@ -194,6 +183,24 @@ export function TaskView() {
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      // The synthetic "Done (N)" group is a collapsible header, not a
+      // task: Enter / Space toggle it; navigation + Arrow expand/collapse
+      // fall through to the normal tree handling below; every task-only
+      // shortcut (duplicate / move / plan / delete / context menu) is
+      // inert so it never acts on a phantom task.
+      if (flatTasks[focusIndex]?.id === DONE_GROUP_ID) {
+        if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+          e.preventDefault();
+          toggleCollapsed(DONE_GROUP_ID);
+          return;
+        }
+        const isNav =
+          e.key.startsWith('Arrow') || e.key === 'Home' || e.key === 'End';
+        if (!isNav) {
+          if (e.key !== 'Tab') e.preventDefault();
+          return;
+        }
+      }
       if (e.ctrlKey || e.metaKey) {
         if (e.key.toLowerCase() === 'd' && !e.shiftKey && !e.altKey) {
           e.preventDefault();
@@ -375,30 +382,6 @@ export function TaskView() {
         )}
         {entries.map((entry, i) => {
           if (entry.kind === 'separator') {
-            // The collapsible "Done (N)" footer renders as a toggle
-            // button (aria-expanded + a chevron) rather than a static
-            // heading, so it's clickable + announced as collapsible.
-            if (entry.collapsible) {
-              return (
-                <li
-                  key={`sep-${i}-done`}
-                  role="presentation"
-                  className="task-list__group task-list__group--done"
-                >
-                  <button
-                    type="button"
-                    className="task-list__done-toggle"
-                    aria-expanded={!entry.collapsed}
-                    onClick={toggleDoneCollapsed}
-                  >
-                    <span className="task-list__done-chevron" aria-hidden="true">
-                      {entry.collapsed ? '▸' : '▾'}
-                    </span>
-                    {entry.label}
-                  </button>
-                </li>
-              );
-            }
             // level 1 = a section sub-header within a list; styled
             // smaller + indented to read as a child of the list head.
             const isSection = entry.level === 1;
@@ -420,10 +403,8 @@ export function TaskView() {
           // Children are rendered by their parent's recursive call
           // (the parent emits a <ul role="group"> below). The
           // top-level iteration only handles depth-0 tasks plus the
-          // separator headings between them. A hidden depth-0 row is a
-          // collapsed Done-group task — skip it (it still holds a
-          // flatTasks slot so keyboard nav stays stable).
-          if (entry.depth > 0 || entry.hidden) return null;
+          // separator headings between them.
+          if (entry.depth > 0) return null;
           return renderTreeItem(entry, {
             t,
             fmt,
@@ -521,6 +502,52 @@ function renderTreeItem(
     if (e.kind === 'separator') break;
     if (e.depth <= depth) break;
     if (e.depth === depth + 1) children.push(e);
+  }
+
+  // The synthetic "Done (N)" group is a collapsible parent treeitem with
+  // no status / due / checkbox — activating the row (click, or Enter /
+  // Space / Arrow handled by the tree's keydown) only toggles expansion.
+  // Modelling it as a treeitem (rather than a foreign <button>) keeps it
+  // reachable by arrow keys and operable without hijacking the focused
+  // task's Space/Enter action.
+  if (task.id === DONE_GROUP_ID) {
+    return (
+      <li
+        key={task.id}
+        id={itemId(index)}
+        role="treeitem"
+        aria-selected={focused}
+        aria-label={task.title}
+        aria-level={depth + 1}
+        aria-expanded={!isCollapsed}
+        className={
+          'task-list__item task-list__item--done-group' +
+          (focused ? ' task-list__item--focused' : '')
+        }
+        onClick={(ev) => {
+          // Only the header toggles — a click that lands on a completed
+          // child row (which has its own onClick) must not also collapse
+          // the group.
+          if (
+            (ev.target as HTMLElement).closest('.task-list__group-children')
+          ) {
+            return;
+          }
+          setFocusIndex(index);
+          toggleCollapsed(task.id);
+        }}
+      >
+        <span className="task-list__done-chevron" aria-hidden="true">
+          {isCollapsed ? '▸' : '▾'}
+        </span>
+        <span className="task-list__done-label">{task.title}</span>
+        {!isCollapsed && (
+          <ul role="group" className="task-list__group-children">
+            {children.map((child) => renderTreeItem(child, ctx))}
+          </ul>
+        )}
+      </li>
+    );
   }
 
   const due = describeDue(task, fmt, t);

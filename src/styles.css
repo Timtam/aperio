@@ -2993,30 +2993,23 @@ button[aria-disabled='true'] {
   border-bottom-style: dashed;
 }
 
-/* Collapsible "Done (N)" footer: a full-width toggle that reads as a
-   group heading but flips its own visibility. Extra top margin sets it
-   apart from the active lists above. */
-.task-list__group--done {
-  margin-top: var(--space-4, 1.25rem);
-  padding-bottom: 0;
-}
-
-.task-list__done-toggle {
+/* The synthetic "Done (N)" group row: a collapsible parent treeitem that
+   reads as a group heading. It opts out of the task row's 5-column grid
+   (no checkbox / due columns) and lays its chevron + label inline, with
+   the completed-task children wrapping to a full-width block below. Extra
+   top margin sets it apart from the active lists above. */
+.task-list__item--done-group {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-1);
-  width: 100%;
-  padding: var(--space-1) 0;
-  background: none;
-  border: none;
-  font: inherit;
+  margin-top: var(--space-4, 1.25rem);
   font-weight: 600;
   color: var(--color-fg-muted);
   cursor: pointer;
-  text-align: left;
 }
 
-.task-list__done-toggle:hover {
+.task-list__item--done-group:hover {
   color: var(--color-fg);
 }
 
@@ -3024,6 +3017,19 @@ button[aria-disabled='true'] {
   display: inline-block;
   width: 1em;
   font-size: 0.85em;
+}
+
+.task-list__done-label {
+  flex: 1;
+}
+
+/* The completed children sit on their own full-width row and aren't part
+   of the header's toggle affordance. */
+.task-list__item--done-group > .task-list__group-children {
+  flex-basis: 100%;
+  cursor: default;
+  font-weight: 400;
+  color: var(--color-fg);
 }
 
 .task-list__item {

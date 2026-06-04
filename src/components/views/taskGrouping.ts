@@ -1,19 +1,14 @@
 import type { Section, Task } from '../../api/types';
 
+/** Sentinel id of the synthetic "Done (N)" parent row. It behaves like a
+ *  collapsible parent treeitem whose children are the completed tasks, so
+ *  it reuses the tree's keyboard model (Arrow/Enter/Space) instead of
+ *  being a foreign tab-stop. The TaskView special-cases this id. */
+export const DONE_GROUP_ID = '__aperio_done_group__';
+
 /** One row in the flattened task tree the TaskView renders. */
 export type Entry =
-  | {
-      kind: 'separator';
-      label: string;
-      level?: number;
-      /** True for the "Done (N)" footer group — rendered as a toggle
-       *  button rather than a static heading. */
-      collapsible?: boolean;
-      /** Current collapsed state of a `collapsible` group. */
-      collapsed?: boolean;
-      /** Number of (top-level) tasks in a `collapsible` group. */
-      count?: number;
-    }
+  | { kind: 'separator'; label: string; level?: number }
   | {
       kind: 'task';
       task: Task;
@@ -35,9 +30,6 @@ export function buildEntries(
   t: (key: string, vars?: Record<string, unknown>) => string,
   collapsed: Set<string>,
   sectionsByList: Record<string, Section[]>,
-  /** Whether the "Done (N)" footer group is collapsed. Defaults to
-   *  collapsed so completed tasks don't spam the active list. */
-  doneCollapsed = true,
 ): { entries: Entry[]; flatTasks: Task[] } {
   // Bucket children under their parent so the depth-first walk
   // below has O(1) lookup. Tasks whose parent_id points at a
@@ -161,21 +153,27 @@ export function buildEntries(
 
   // "Done (N)" footer group — a single collapsible bucket for every
   // completed top-level task across all lists, most-recently-completed
-  // first. Collapsed by default; its rows still join `flatTasks` (with
-  // `hidden`) so the index space + keyboard nav stay stable, exactly
-  // like a collapsed subtree.
+  // first. Modelled as a *synthetic parent treeitem* (sentinel id) whose
+  // children are the done tasks, so it slots straight into the tree's
+  // keyboard model: Arrow navigates to it, Arrow-Right / Enter / Space
+  // expand it, and its rows hide/show through the same `collapsed` set as
+  // any subtree. Collapsed-by-default lives in that set (the caller seeds
+  // it), keeping completed tasks out of the active list.
   if (doneTopLevel.length > 0) {
     doneTopLevel.sort((a, b) =>
       (b.completed_at ?? '').localeCompare(a.completed_at ?? ''),
     );
-    entries.push({
-      kind: 'separator',
-      label: t('views.tasks.done', { count: doneTopLevel.length }),
-      collapsible: true,
-      collapsed: doneCollapsed,
-      count: doneTopLevel.length,
-    });
-    doneTopLevel.forEach((task) => visit(task, 0, doneCollapsed));
+    // Re-parent the done tasks under the synthetic group so `visit`
+    // emits them as its depth-1 children. Their own subtasks still nest
+    // beneath them via the existing `childrenByParent` lookup.
+    childrenByParent.set(DONE_GROUP_ID, doneTopLevel);
+    const groupHeader: Task = {
+      ...doneTopLevel[0],
+      id: DONE_GROUP_ID,
+      parent_id: null,
+      title: t('views.tasks.done', { count: doneTopLevel.length }),
+    };
+    visit(groupHeader, 0, false);
   }
 
   return { entries, flatTasks };
