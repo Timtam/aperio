@@ -637,6 +637,29 @@ impl CacheStore {
         })
     }
 
+    /// Same as [`Self::reset_event_sync`], but for the CONTACTS scope.
+    /// Clears the delta token + freshness for every address book owned
+    /// by `account`, forcing the next read of each to re-bootstrap (the
+    /// cached rows stay as an offline fallback). Used by the one-time
+    /// contacts heal: an older CardDAV read fetched zero contacts via a
+    /// non-standard inline-`address-data` PROPFIND yet still persisted a
+    /// sync token, so every subsequent delta reported "no changes" over
+    /// an empty cache — clearing the token re-bootstraps with the
+    /// multiget read and recovers the contacts. Returns the number of
+    /// containers reset.
+    pub fn reset_contacts_sync(&self, account: &str) -> DbResult<usize> {
+        self.db.with_conn(|c| {
+            let n = c.execute(
+                "UPDATE cache_sync_state
+                    SET sync_token = NULL, window_start = NULL, window_end = NULL,
+                        last_refreshed_at = NULL
+                  WHERE account_id = ?1 AND scope = 'contacts'",
+                params![account],
+            )?;
+            Ok(n)
+        })
+    }
+
     /// Record a failed refresh: stamp `last_error`, leave the rest
     /// (including the still-valid cached data + window) intact.
     pub fn mark_error(

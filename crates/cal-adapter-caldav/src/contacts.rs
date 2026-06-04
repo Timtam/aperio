@@ -6,9 +6,14 @@
 //!   - `list_contact_lists` — PROPFIND Depth: 1 on the
 //!     addressbook-home-set, kept to collections that advertise
 //!     `<CR:addressbook/>` as a resourcetype.
-//!   - `get_contacts` — PROPFIND Depth: 1 on an addressbook URL
-//!     asking for `<CR:address-data/>` so each vCard body comes
-//!     back inline. Saves a follow-up GET per row.
+//!   - `get_contacts` — Depth-1 PROPFIND to enumerate the vCard
+//!     resource hrefs, then `addressbook-multiget` to pull the
+//!     bodies. We do NOT ask for inline `<CR:address-data/>` in a
+//!     plain PROPFIND: that shortcut is non-standard and several
+//!     servers (iCloud, Synology Contacts) silently ignore it,
+//!     returning resources with no body — which yielded an empty
+//!     contact list. multiget is the RFC 6352 way and the same
+//!     two-step the sync-collection delta path uses.
 //!   - `create_contact` / `update_contact` / `delete_contact` —
 //!     PUT / PUT (with `If-Match`) / DELETE on the resource URL.
 //!     Resource URLs follow the same `{href}|{uid}` encoding the
@@ -48,17 +53,6 @@ const ADDRESSBOOK_LIST_PROPFIND_BODY: &str = r#"<?xml version="1.0" encoding="ut
     <d:displayname/>
     <d:resourcetype/>
     <ical:calendar-color/>
-  </d:prop>
-</d:propfind>"#;
-
-/// PROPFIND body for the vcard-listing pass on an address book.
-/// Pulls the etag plus the inline `address-data` so a single
-/// round-trip gives us everything we need to build `Contact`s.
-const ADDRESSBOOK_QUERY_PROPFIND_BODY: &str = r#"<?xml version="1.0" encoding="utf-8"?>
-<d:propfind xmlns:d="DAV:" xmlns:cr="urn:ietf:params:xml:ns:carddav">
-  <d:prop>
-    <d:getetag/>
-    <cr:address-data/>
   </d:prop>
 </d:propfind>"#;
 
@@ -116,57 +110,27 @@ fn to_contact_list(home_url: &Url, entry: ResponseEntry) -> ContactList {
     }
 }
 
-/// `PROPFIND Depth: 1` on the address book URL, asking for the
-/// inline vCard body. Each entry whose `address_data` is non-empty
-/// becomes a `Contact`; the others are the address book itself
-/// (typically the first response with no body) or 404'd
-/// sub-resources, both skipped.
+/// Read every contact in an address book in two steps: a Depth-1
+/// PROPFIND to enumerate the vCard resource hrefs, then an
+/// `addressbook-multiget` to pull their bodies. The collection's own
+/// href comes back with no `address-data` and is dropped by
+/// `parse_contact_entries`, along with any malformed vCard.
 pub async fn get_contacts(
     client: &Client,
     addressbook_url: &Url,
     credentials: &Credentials,
 ) -> CaldavResult<Vec<Contact>> {
-    let entries = propfind(
-        client,
-        addressbook_url,
-        ADDRESSBOOK_QUERY_PROPFIND_BODY,
-        credentials,
-        1,
-    )
-    .await?;
-    let list_id = addressbook_url.as_str();
-    let mut out = Vec::new();
-    for entry in entries {
-        let Some(body) = entry.address_data.as_deref() else {
-            continue;
-        };
-        if body.trim().is_empty() {
-            continue;
-        }
-        // Compose the same `{href}|{uid}` id shape the tasks
-        // module uses: the href is what we need on
-        // update/delete, the UID is the canonical vCard
-        // identifier, and the pipe is a sentinel we'd never see
-        // in either component.
-        let uid = extract_vcard_uid(body).unwrap_or_else(|| entry.href.clone());
-        let id = format!("{}|{}", entry.href, uid);
-        match parse_vcard(body, list_id, id, entry.etag.clone()) {
-            Ok(contact) => out.push(contact),
-            Err(err) => {
-                // A single malformed vCard shouldn't sink the whole
-                // listing — log it and move on. The user might
-                // still need to clean up the offending entry via
-                // the web UI of the server, but their other
-                // contacts stay reachable in Aperio.
-                tracing::warn!(
-                    href = %entry.href,
-                    ?err,
-                    "skipping vcard with parse error",
-                );
-            }
-        }
+    // Two-step robust read (see module docs): enumerate the resource
+    // hrefs, then multiget the vCard bodies. The collection's own href
+    // comes back with no `address-data` and is dropped by
+    // `parse_contact_entries`.
+    let hrefs = crate::sync::list_resource_hrefs(client, addressbook_url, credentials).await?;
+    if hrefs.is_empty() {
+        return Ok(Vec::new());
     }
-    Ok(out)
+    let entries =
+        crate::sync::addressbook_multiget(client, addressbook_url, &hrefs, credentials).await?;
+    Ok(parse_contact_entries(&entries, addressbook_url.as_str()))
 }
 
 /// Map multistatus entries carrying `address-data` (from `get_contacts`'s
@@ -786,11 +750,40 @@ END:VCARD&#13;
   </d:response>
 </d:multistatus>"#;
 
+    /// A Depth-1 PROPFIND listing of the two vCard resource hrefs (no
+    /// bodies) — what `list_resource_hrefs` parses before the multiget.
+    const HREFS_RESPONSE: &str = r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/addressbooks/alice/main/abc.vcf</d:href>
+    <d:propstat>
+      <d:prop><d:getetag>"etag-abc"</d:getetag></d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/addressbooks/alice/main/def.vcf</d:href>
+    <d:propstat>
+      <d:prop><d:getetag>"etag-def"</d:getetag></d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+</d:multistatus>"#;
+
     #[tokio::test]
-    async fn get_contacts_parses_inline_vcards() {
+    async fn get_contacts_reads_via_multiget() {
         let mut server = Server::new_async().await;
-        let _m = server
+        // Step 1: PROPFIND enumerates the resource hrefs.
+        let _hrefs = server
             .mock("PROPFIND", "/addressbooks/alice/main/")
+            .with_status(207)
+            .with_body(HREFS_RESPONSE)
+            .create_async()
+            .await;
+        // Step 2: addressbook-multiget pulls the vCard bodies. We do NOT
+        // ask for inline address-data in the PROPFIND any more.
+        let _bodies = server
+            .mock("REPORT", "/addressbooks/alice/main/")
             .with_status(207)
             .with_body(VCARDS_RESPONSE)
             .create_async()
