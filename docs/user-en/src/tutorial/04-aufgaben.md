@@ -24,8 +24,10 @@ your day or week, and work through them.
 
 > **Hiding completed tasks:** Checked-off tasks move into a collapsed
 > **Done (N)** group at the bottom of the list, so your open tasks stay
-> uncluttered. The group shows the count; one click (or `Enter`/`Space`
-> on the button) expands it. The open/closed state is remembered.
+> uncluttered. The group shows the count. It's a regular row in the task
+> tree: reachable with the arrow keys, and `Enter`/`Space` (or
+> Right/Left arrow) expands or collapses it — just like a task with
+> subtasks. The open/closed state is remembered.
 
 ## Scheduling tasks
 
