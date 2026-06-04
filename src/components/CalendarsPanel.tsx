@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { useCalendarStore } from '../state/calendarStoreContext';
 import { useCalendarDefaultReminders } from '../state/useCalendarDefaultReminders';
 import { RemindersEditor } from './RemindersEditor';
+import { SoundPrefField } from './SoundPrefField';
 
 /**
  * Calendars settings panel.
@@ -76,6 +77,26 @@ export function CalendarsPanel() {
         {t('dialogs.settings.calendars.hint')}
       </FocusableNote>
 
+      {/* §14.4 global notification-sound default. Sits above the
+          per-calendar rows because it's the fallback every calendar /
+          event inherits when nothing more specific is set. */}
+      <section
+        className="calendars-panel__group"
+        aria-label={t('dialogs.settings.notifications.heading')}
+      >
+        <h3 className="calendars-panel__account">
+          {t('dialogs.settings.notifications.heading')}
+        </h3>
+        <p className="form__hint">
+          {t('dialogs.settings.notifications.hint')}
+        </p>
+        <SoundPrefField
+          prefKey="sound.global"
+          allowInherit={false}
+          legend={t('dialogs.settings.notifications.globalLabel')}
+        />
+      </section>
+
       {hydrating && (
         <p className="form__hint" aria-live="polite">
           {t('views.loading')}
@@ -126,6 +147,9 @@ export function CalendarsPanel() {
                     onChange={(next) => setDefaultsFor(cal.id, next)}
                     mode="event"
                   />
+                  {/* §14.4 per-calendar default sound — inherits the
+                      global default unless overridden. */}
+                  <SoundPrefField prefKey={`sound.calendar.${cal.id}`} />
                 </li>
               ))}
             </ul>

@@ -1620,47 +1620,59 @@ Container-Ebene: Kalender oder Aufgabenliste (überschreibt Global)
 Termin- oder Aufgaben-Ebene (überschreibt Container)
         │
         ▼
-Terminserie (nur Termine, überschreibt Einzelinstanz)
+Erinnerungs-Ebene: einzelner Alarm (überschreibt alle obigen)
 ```
 
-> **Hinweis zu wiederkehrenden Aufgaben:** Bei Aufgaben gibt es keine separate Serien-Ebene. Eine wiederkehrende Aufgabe ist eine **Task-Vorlage** (`Task` mit `recurrence`-Feld) – ihr `sound`-Wert gilt für alle daraus erzeugten Instanzen.
+> **Hinweis zu wiederkehrenden Terminen/Aufgaben:** Es gibt keine separate Serien-Ebene. Der Termin-/Aufgaben-Override ist auf die **Serien-ID** geschlüsselt (`sound.item.{seriesId}`) und gilt damit für alle Instanzen. Eine wiederkehrende Aufgabe ist eine **Task-Vorlage** (`Task` mit `recurrence`-Feld); ihr Override gilt für alle daraus erzeugten Instanzen.
+
+> **Status:** Implementiert — Auflösung, Wiedergabe (inkl. eigener Dateien) und die komplette UI (global, Container, Termin/Aufgabe, Erinnerung) sind vorhanden.
 
 #### Ebenen im Detail
 
 | Ebene | Konfigurierbar? | Sync mit API | Speicherort |
 |---|---|---|---|
-| **Global (App-Standard)** | ✅ Ja | ❌ Nein (keine API) | Lokale App-Einstellungen → Event Log Sync |
-| **Container (Kalender / Aufgabenliste)** | ✅ Ja | ❌ Nein (nicht in APIs vorgesehen) | Lokale App-Einstellungen → Event Log Sync |
-| **Termin / Aufgabe** | ✅ Ja | ❌ Nein | Lokale SQLite-Tabelle (`Event.sound` / `Task.sound`) → Event Log Sync |
-| **Terminserie** (nur Termine) | ✅ Ja | ❌ Nein | Lokale SQLite-Tabelle → Event Log Sync |
+| **Global (App-Standard)** | ✅ Ja | ❌ Nein (keine API) | `user_prefs` → `sound.global` → Event Log Sync |
+| **Container (Kalender / Aufgabenliste)** | ✅ Ja | ❌ Nein (nicht in APIs vorgesehen) | `user_prefs` → `sound.calendar.{id}` / `sound.tasklist.{id}` → Event Log Sync |
+| **Termin / Aufgabe** | ✅ Ja | ❌ Nein | `user_prefs` → `sound.item.{id}` (Serien-ID bei Serien) → Event Log Sync |
+| **Erinnerung** (einzelner Alarm) | ✅ Ja | ❌ Nein | im `Reminder`-Objekt (`Reminder.sound`) → Event Log Sync |
 
 Da keiner der Adapter (Kalender, Aufgaben, Kontakte) Sound-Konfigurationen in seinen APIs unterstützt, werden Sound-Einstellungen **nicht** mit externen Diensten synchronisiert. Sie werden jedoch über das **Event Log (Abschnitt 19)** zwischen den eigenen Geräten synchronisiert – inklusive der zugehörigen Audiodateien (Abschnitt 19.2.2). Jedes Gerät hat damit dieselbe Sound-Konfiguration, ohne dass externe Anbieter davon wissen.
 
+#### Speicher-Modell (einheitlich)
+
+Alle Override-Ebenen außer der Erinnerungs-Ebene liegen einheitlich in `user_prefs` unter dem Prefix `sound.` (steht in der Sync-Whitelist, Abschnitt 19.2.1). Das funktioniert identisch für **lokale und externe** Kalender/Items und überlebt einen Cache-Refresh. Die Erinnerungs-Ebene steckt im jeweiligen `Reminder`-Objekt. Die cal-core-Felder `Event.sound`/`Task.sound` und die Traits `Reminderable`/`Container` bleiben für lokale Adapter und Vorwärtskompatibilität erhalten, sind aber **nicht** die Auflösungsquelle.
+
 #### Vererbungslogik
 
-```rust
-/// Bestimmt den Benachrichtigungs-Sound für einen Termin oder eine Aufgabe.
-/// Die Item-Ebene (Termin/Aufgabe) hat Vorrang vor der Container-Ebene
-/// (Kalender oder Aufgabenliste), die wiederum den globalen Standard überschreibt.
-fn resolve_sound(item: &dyn Reminderable, container: &dyn Container, global: &GlobalSettings) -> SoundConfig {
-    if let Some(sound) = item.sound_override() {
-        return sound.clone();
-    }
-    if let Some(sound) = container.default_sound() {
-        return sound.clone();
-    }
-    global.default_sound.clone()
-}
-```
+Der Reminder-Scheduler lädt einmal pro Scan einen `SoundPrefs`-Snapshot aller `sound.*`-Prefs (vor dem Sperren der DB-Verbindung — `std::sync::Mutex` ist nicht reentrant) und löst pro ausgelöster Erinnerung auf, spezifischste Ebene zuerst:
 
-`Reminderable` ist ein gemeinsames Trait, das sowohl `Event` als auch `Task` implementieren – es stellt `sound_override()` bereit. `Container` ist analog ein Trait, das `Calendar` und `TaskList` implementieren und `default_sound()` zurückgibt. Beide Traits leben in `cal-core`.
+```
+reminder.sound
+  ?? prefs["sound.item.{itemId}"]
+  ?? prefs["sound.{calendar|tasklist}.{containerId}"]
+  ?? prefs["sound.global"]
+  ?? System            // SoundConfig::default()
+```
 
 #### Sound-Optionen
 
-- **Systemsound** (Standard): Plattformeigener Benachrichtigungssound
+- **Systemsound** (Standard): Plattformeigener Benachrichtigungssound (das OS spielt ihn)
 - **Kein Sound:** Stille Benachrichtigung (nur visuell)
-- **Benutzerdefiniert:** Eigene Audiodatei (`.mp3`, `.wav`, `.ogg`) – wird lokal gespeichert
-- **Lautstärke:** Unabhängig von der Systemlautstärke konfigurierbar (0–100 %)
+- **Benutzerdefiniert:** Eigene Audiodatei (`.mp3`, `.ogg`, `.wav`, `.m4a`, `.aac`, `.flac`, ≤ 5 MB), inhaltsadressiert per SHA-256
+
+> **Lautstärke:** Eine app-eigene Lautstärkeregelung gibt es bewusst **nicht** — Windows und macOS bieten einen System-Mixer pro Anwendung. Das `volume`-Feld bleibt im Modell erhalten (Vorwärtskompatibilität), wird aber nicht angezeigt oder angewandt.
+
+#### Wiedergabe
+
+`tauri-plugin-notification` kann nur einen **benannten System-Ton** oder Stille auslösen, keine beliebige Datei. Daher:
+
+| Quelle | Verhalten |
+|---|---|
+| Systemsound | OS-Standardton + visuell (`.show()`) |
+| Kein Sound | stille Benachrichtigung, nur visuell (`.silent()`) |
+| Benutzerdefiniert | stille Benachrichtigung **+** Datei wird selbst per `rodio` auf einem dauerhaften, dedizierten Audio-Thread abgespielt |
+
+Fehlt eine referenzierte Custom-Datei lokal, fällt die Wiedergabe auf den Systemsound zurück (kein Absturz, keine stille Erinnerung). Custom-Dateien liegen unter `<data_dir>/assets/sounds/<hash>.<ext>` und werden über den Asset-Store (Abschnitt 19.2.2 / 19.11.7) zwischen Geräten synchronisiert; der Asset-Push erfasst dabei auch nur über `user_prefs` referenzierte Hashes.
 
 #### Sonderfälle
 

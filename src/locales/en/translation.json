@@ -53,7 +53,23 @@
       "days": "Days"
     },
     "absoluteAtLabel": "Date and time",
-    "appStartHint": "Fires on the next launch after the due time."
+    "appStartHint": "Fires on the next launch after the due time.",
+    "sound": {
+      "label": "Notification sound",
+      "inherit": "Use default",
+      "system": "System default",
+      "silent": "Silent",
+      "custom": "Custom sound",
+      "selectLabel": "Choose sound",
+      "customItem": "{{ext}} · {{short}}",
+      "none": "No custom sounds yet — import one.",
+      "import": "Import file …",
+      "test": "Test",
+      "remove": "Remove",
+      "dialogTitle": "Choose an audio file",
+      "fileFilter": "Audio files",
+      "importError": "Couldn't import the sound."
+    }
   },
   "app": {
     "title": "Aperio",
@@ -189,6 +205,11 @@
         "empty": "No calendars yet — add an account first.",
         "accountHeading": "{{account}}",
         "localAccount": "Local"
+      },
+      "notifications": {
+        "heading": "Notification sounds",
+        "hint": "The sound a reminder plays. Calendars, task lists, individual items and reminders can each override this default.",
+        "globalLabel": "Default sound"
       },
       "plugins": {
         "hint": "Plugins extend Aperio with calendar, sync, videoconference and notification adapters. Bundled plugins ship with the app; community plugins land in plugins/user/.",

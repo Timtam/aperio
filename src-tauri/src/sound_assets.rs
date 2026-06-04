@@ -69,7 +69,7 @@ use crate::db::SharedConn;
 /// formats the average user might import; exotic formats
 /// (`.opus`, `.wma`) would need to be added when someone hits
 /// them in the wild.
-const FETCH_EXTENSION_CANDIDATES: &[&str] = &["mp3", "ogg", "wav", "m4a", "aac", "flac"];
+pub(crate) const FETCH_EXTENSION_CANDIDATES: &[&str] = &["mp3", "ogg", "wav", "m4a", "aac", "flac"];
 
 /// Counts surfaced from one `sync_assets` invocation. The
 /// orchestrator folds these into nothing yet — the sync-log
@@ -231,7 +231,7 @@ pub async fn sync_assets(
 ///
 /// A missing directory returns `Ok(Vec::new())` — the importer
 /// hasn't run yet on this device.
-fn list_local_sounds(sounds_dir: &Path) -> SyncResult<Vec<(String, String)>> {
+pub fn list_local_sounds(sounds_dir: &Path) -> SyncResult<Vec<(String, String)>> {
     let read = match std::fs::read_dir(sounds_dir) {
         Ok(r) => r,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
@@ -335,6 +335,14 @@ fn mark_hash_pushed(db: &SharedConn, hash: &str, extension: &str) -> rusqlite::R
 /// `$.source.sha256` is what we extract. `json_each` lets us
 /// walk the reminders arrays per row without exploding them in
 /// the application layer.
+///
+/// The final UNION branch covers the §14.4 sound *overrides* stored in
+/// `user_prefs` (`sound.global`, `sound.calendar.{id}`,
+/// `sound.tasklist.{id}`, `sound.item.{id}`) — those values are whole
+/// `SoundConfig` JSON blobs, so the path is `$.source.sha256`. Without
+/// this branch a custom sound referenced ONLY through a pref (e.g. the
+/// global default) would never get pushed, and a second device could
+/// never fetch it.
 fn referenced_hashes(db: &SharedConn) -> rusqlite::Result<HashSet<String>> {
     // One CTE per source. SQLite's JSON1 is lenient — `json_each`
     // on NULL returns no rows, `json_extract` on missing paths
@@ -359,6 +367,9 @@ fn referenced_hashes(db: &SharedConn) -> rusqlite::Result<HashSet<String>> {
             UNION
             SELECT json_extract(r.value, '$.sound.source.sha256') AS hash
               FROM tasks, json_each(tasks.reminders) AS r
+            UNION
+            SELECT json_extract(value, '$.source.sha256') AS hash
+              FROM user_prefs WHERE key LIKE 'sound.%'
         )
         WHERE hash IS NOT NULL
     ";
@@ -385,6 +396,14 @@ fn is_sha256_hex(s: &str) -> bool {
 /// same place; this keeps the convention in one spot.
 pub fn sounds_dir_under(data_dir: &Path) -> PathBuf {
     data_dir.join("assets").join("sounds")
+}
+
+/// Resolve the on-disk path of a custom sound by hash, probing the
+/// candidate extensions in the same order as the fetch path. Returns
+/// `None` when no file for `hash` exists locally — the reminder
+/// scheduler (§14.4) treats that as "fall back to the system sound".
+pub fn local_sound_path(sounds_dir: &Path, hash: &str) -> Option<PathBuf> {
+    local_hash_present(sounds_dir, hash).map(|ext| sounds_dir.join(format!("{hash}.{ext}")))
 }
 
 #[cfg(test)]
@@ -500,6 +519,48 @@ mod tests {
         assert_eq!(set.len(), 2);
         assert!(set.contains(&hash1));
         assert!(set.contains(&hash2));
+    }
+
+    fn insert_user_pref(db: &SharedConn, key: &str, value: &str) {
+        let conn = db.lock().unwrap();
+        conn.execute(
+            "INSERT INTO user_prefs (key, value, updated_at) VALUES (?, ?, ?)",
+            params![key, value, Utc::now().to_rfc3339()],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn referenced_hashes_collects_from_user_prefs_overrides() {
+        // §14.4 sound overrides live in user_prefs, not a DB column.
+        // A custom sound referenced only there (e.g. the global
+        // default) must still be pushed so other devices can fetch it.
+        let (_tmp, db) = fresh_db();
+        let shared = db.shared();
+        let global_hash = "a".repeat(64);
+        let cal_hash = "b".repeat(64);
+        insert_user_pref(
+            &shared,
+            "sound.global",
+            &format!(r#"{{"source":{{"type":"custom","sha256":"{global_hash}"}},"volume":80}}"#),
+        );
+        insert_user_pref(
+            &shared,
+            "sound.calendar.cal-1",
+            &format!(r#"{{"source":{{"type":"custom","sha256":"{cal_hash}"}},"volume":80}}"#),
+        );
+        // A non-sound pref must not leak into the result set.
+        insert_user_pref(&shared, "sidebar.expansion", r#"{"foo":true}"#);
+        // A System-source override has no sha256 → dropped by the filter.
+        insert_user_pref(
+            &shared,
+            "sound.item.ev-9",
+            r#"{"source":{"type":"system"},"volume":80}"#,
+        );
+        let set = referenced_hashes(&shared).unwrap();
+        assert_eq!(set.len(), 2);
+        assert!(set.contains(&global_hash));
+        assert!(set.contains(&cal_hash));
     }
 
     #[test]

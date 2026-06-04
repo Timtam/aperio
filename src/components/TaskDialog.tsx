@@ -49,6 +49,7 @@ import { AssigneePicker } from './AssigneePicker';
 import { ColorLabelSelect } from './ColorLabelSelect';
 import { Modal } from './Modal';
 import { RemindersEditor } from './RemindersEditor';
+import { SoundPrefField } from './SoundPrefField';
 import { TaskRecurrenceSelector } from './TaskRecurrenceSelector';
 import {
   fromBackend as recurrenceFromBackend,
@@ -1092,6 +1093,13 @@ export function TaskDialog({
           onChange={(next) => update('reminders', next)}
           mode="task"
         />
+
+        {/* §14.4 per-task sound override. Edit-only — a new task has no
+            id to key the pref against; new tasks inherit the list /
+            global default. */}
+        {isEdit && task && (
+          <SoundPrefField prefKey={`sound.item.${task.id}`} />
+        )}
 
         <label className="form__field">
           <span className="form__label">

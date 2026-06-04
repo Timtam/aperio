@@ -2,6 +2,7 @@ import { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { Reminder } from '../api/types';
+import { SoundPicker } from './SoundPicker';
 
 /**
  * Editor for the `reminders` field on an event or task (DESIGN.md
@@ -191,6 +192,19 @@ function ReminderRow({
 
       {value.kind.type === 'app_start' && (
         <p className="form__hint">{t('reminders.appStartHint')}</p>
+      )}
+
+      {/* §14.4 per-reminder sound override — the most specific level.
+          `null` inherits the item/container/global default. Hidden for
+          app_start (host-local catch-up) and email (adapter-delivered),
+          where a per-reminder local sound doesn't apply. */}
+      {(value.kind.type === 'relative' ||
+        value.kind.type === 'absolute') && (
+        <SoundPicker
+          value={value.sound}
+          onChange={(sound) => onChange({ ...value, sound })}
+          compact
+        />
       )}
 
       <button

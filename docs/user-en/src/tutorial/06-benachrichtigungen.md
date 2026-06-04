@@ -23,12 +23,41 @@ In the notification you can:
 - **dismiss** the reminder (acknowledge it),
 - or **snooze** it – the reminder returns after the chosen time.
 
+## Notification sounds
+
+You can choose which sound a reminder plays, on several levels — each one
+overrides the one above it:
+
+1. **Global default** — Settings → Calendars → *Notification sounds*.
+2. **Per calendar / per task list** — in the same settings panel, on each
+   calendar or list row.
+3. **Per event / per task** — in the event or task dialog (while editing an
+   existing entry).
+4. **Per reminder** — directly on a single reminder row.
+
+Every level offers the same choices:
+
+- **System default** — your operating system's notification sound.
+- **Silent** — a visual-only notification, no sound.
+- **Custom sound** — import your own audio file (`.mp3`, `.ogg`, `.wav`,
+  `.m4a`, `.aac`, `.flac`, up to 5 MB). Use **Test** to preview it and
+  **Remove** to delete an imported sound.
+
+Everything below the global level also offers **Use default**, which means
+"inherit the level above". Imported sounds and your choices sync to your
+other devices (the audio file travels with the setting), so a reminder
+sounds the same everywhere.
+
+> **Volume:** Aperio deliberately has no in-app volume slider — use your
+> operating system's per-app volume mixer (Windows and macOS both have
+> one).
+
 ## Notification settings
 
 In the **settings** under **Notifications** you define:
 
 - whether system notifications are used,
-- whether and which **sound** is played,
+- whether and which **sound** is played (see *Notification sounds* above),
 - the default snooze duration,
 - the default lead time for new events.
 

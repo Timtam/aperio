@@ -5,6 +5,7 @@
 //! manager, sync engine, and external adapters arrive in later phases.
 
 pub mod accounts;
+pub mod audio;
 pub mod bundled_plugins;
 pub mod cache;
 pub mod cache_refresh;
@@ -22,6 +23,7 @@ pub mod reminders;
 pub mod remote_plugins;
 pub mod secrets;
 pub mod sftp_host_keys;
+pub mod sound;
 pub mod sound_assets;
 pub mod sync_log;
 pub mod user_prefs;
@@ -358,6 +360,11 @@ pub fn run() {
     // sync/ subtree because the audio files are user content,
     // not sync-engine plumbing.
     let sounds_dir = crate::sound_assets::sounds_dir_under(&data_dir.path);
+    // §14.4: the reminder scheduler (custom-sound playback) and the
+    // sound import/list/preview/delete commands both resolve files out
+    // of this same dir.
+    let sounds_dir_for_scheduler = sounds_dir.clone();
+    let sounds_dir_for_commands = sounds_dir.clone();
     let onboarding = Arc::new(OnboardingService::new(
         db.shared(),
         device_id.clone(),
@@ -395,9 +402,18 @@ pub fn run() {
     let scheduler_orchestrator = Arc::clone(&sync_orchestrator);
     let scheduler_db = db.shared();
 
+    // §14.4: one process-wide audio thread owns the output stream and
+    // plays custom notification sounds. Shared between the reminder
+    // scheduler (which plays on fire) and the `preview_sound` command
+    // (the Test button in the SoundPicker UI).
+    let audio_player = crate::audio::AudioPlayer::spawn();
+    let audio_for_scheduler = audio_player.clone();
+
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
+        .manage(audio_player)
+        .manage(commands::SoundsDir(sounds_dir_for_commands))
         .manage(local_adapter)
         .manage(registry)
         .manage(cache_store)
@@ -454,6 +470,15 @@ pub fn run() {
             commands::search,
             commands::list_upcoming_reminders,
             commands::invalidate_reminders,
+            // §14.4 custom notification sounds: import a user audio
+            // file into the content-addressed store, list/delete the
+            // stored sounds, and preview one (the SoundPicker's Test
+            // button). The sound *config* itself rides the generic
+            // user_prefs commands.
+            commands::import_sound,
+            commands::list_custom_sounds,
+            commands::preview_sound,
+            commands::delete_custom_sound,
             commands::list_accounts,
             commands::list_accounts_missing_credentials,
             commands::set_account_secret,
@@ -608,6 +633,8 @@ pub fn run() {
             let scheduler = ReminderScheduler::spawn(
                 db_for_scheduler.clone(),
                 Arc::clone(&registry_for_scheduler),
+                sounds_dir_for_scheduler.clone(),
+                audio_for_scheduler.clone(),
                 app.handle().clone(),
             );
             app.manage(scheduler);

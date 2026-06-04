@@ -9,6 +9,7 @@ import type {
   DayStartTrigger,
   ListOverrides,
 } from '../state/TaskCascadeProvider';
+import { SoundPrefField } from './SoundPrefField';
 
 /**
  * Tasks settings panel.
@@ -389,6 +390,11 @@ export function TasksPanel() {
                           ))}
                         </select>
                       </label>
+                      {/* §14.4 per-list default notification sound —
+                          inherits the global default unless set. */}
+                      <SoundPrefField
+                        prefKey={`sound.tasklist.${list.id}`}
+                      />
                     </div>
                   </li>
                 );

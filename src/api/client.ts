@@ -26,6 +26,7 @@ import type {
   RemotePluginAnnouncement,
   SearchResults,
   Section,
+  SoundConfig,
   Task,
   TaskList,
   TaskListShare,
@@ -645,6 +646,35 @@ export const setUserPref = (key: string, value: string) =>
 /** Drop the stored value (no-op when nothing was set). */
 export const deleteUserPref = (key: string) =>
   invoke<void>('delete_user_pref', { key });
+
+// ── Custom notification sounds (§14.4) ────────────────────────────────────
+
+/** A custom sound stored on disk, content-addressed by SHA-256. Only
+ *  the hash is persisted in a `SoundConfig`; `ext` is informational for
+ *  the picker's list. */
+export interface ImportedSound {
+  sha256: string;
+  ext: string;
+}
+
+/** Import a user-chosen audio file into the content-addressed store and
+ *  return its hash + extension. Enforces the ≤5 MB / allowed-format
+ *  limits backend-side. */
+export const importSound = (path: string) =>
+  invoke<ImportedSound>('import_sound', { path });
+
+/** List every custom sound currently in the store. */
+export const listCustomSounds = () =>
+  invoke<ImportedSound[]>('list_custom_sounds');
+
+/** Play a sound once (the SoundPicker's "Test" button). Only `custom`
+ *  sources produce audio; system/silent are no-ops. */
+export const previewSound = (config: SoundConfig) =>
+  invoke<void>('preview_sound', { config });
+
+/** Delete a custom sound from the store by hash (idempotent). */
+export const deleteCustomSound = (sha256: string) =>
+  invoke<void>('delete_custom_sound', { sha256 });
 
 /**
  * Wake the reminder scheduler so it re-scans on the next tick AND
