@@ -80,15 +80,16 @@ pub struct Discovery {
     pub dav_root: Url,
     /// Absolute URL of the authenticated user's principal resource.
     pub principal_url: Url,
-    /// Absolute URL of the collection that contains the user's
-    /// calendars — the PROPFIND target for the next layer (calendar
-    /// listing in 6b.2).
-    pub calendar_home_url: Url,
+    /// CalDAV `calendar-home-set` — the collection that contains the
+    /// user's calendars. Optional: a CardDAV-only server (e.g. Synology
+    /// Contacts) advertises no calendar home. Absent ⇒ the adapter
+    /// returns empty calendar/task listings rather than failing.
+    pub calendar_home_url: Option<Url>,
     /// CardDAV `addressbook-home-set`. Optional: a server may
     /// advertise CalDAV only (Apple Calendar server in
     /// calendar-only mode, some Radicale set-ups). Absent ⇒ the
-    /// adapter declines the `Contacts` capability at the trait
-    /// boundary.
+    /// adapter returns empty contact listings. Discovery fails only
+    /// when BOTH homes are absent (see `run`).
     pub addressbook_home_url: Option<Url>,
     /// True when the server advertises RFC 6638 calendar auto-scheduling
     /// (it exposes a `schedule-outbox-URL` on the principal) AND we found a
@@ -110,14 +111,21 @@ pub async fn run(client: &Client, credentials: &Credentials) -> CaldavResult<Dis
     let base = parse_base_url(&credentials.config.server_url)?;
     let dav_root = resolve_well_known(client, &base, credentials).await?;
     let principal_url = find_principal(client, &dav_root, credentials).await?;
-    let calendar_home_url = find_calendar_home(client, &principal_url, credentials).await?;
-    // Addressbook home is best-effort: a missing or 404 response
-    // means "this server doesn't surface CardDAV", which is fine —
-    // we just don't expose the Contacts capability. Anything else
-    // (auth failure, 5xx) we swallow and log; the calendar side is
-    // already authenticated by the time we get here, so a single
-    // odd response on this probe shouldn't tear down the whole
-    // discovery result.
+    // Both homes are best-effort: a server may surface only CalDAV
+    // (calendars/tasks) or only CardDAV (contacts — e.g. Synology
+    // Contacts advertises an addressbook-home-set but no
+    // calendar-home-set). A missing/404 probe just means "this server
+    // doesn't surface that side"; the trait methods then return empty
+    // listings for it. We only tear discovery down when NEITHER home is
+    // present (below), which is the real "wrong URL / not a DAV server"
+    // signal.
+    let calendar_home_url = match find_calendar_home(client, &principal_url, credentials).await {
+        Ok(url) => Some(url),
+        Err(err) => {
+            debug!(?err, "calendar-home-set discovery skipped");
+            None
+        }
+    };
     let addressbook_home_url =
         match find_addressbook_home(client, &principal_url, credentials).await {
             Ok(url) => Some(url),
@@ -126,6 +134,11 @@ pub async fn run(client: &Client, credentials: &Credentials) -> CaldavResult<Dis
                 None
             }
         };
+    if calendar_home_url.is_none() && addressbook_home_url.is_none() {
+        return Err(CaldavError::Discovery(
+            "server advertised neither a calendar-home-set nor an addressbook-home-set".into(),
+        ));
+    }
     // RFC 6638 scheduling support + organizer address. Best-effort: a
     // server without the properties (or an odd response) just means "no
     // scheduling", which hides the notify toggle rather than failing.
@@ -215,26 +228,46 @@ async fn resolve_well_known(
     base: &Url,
     credentials: &Credentials,
 ) -> CaldavResult<Url> {
-    // Construct the well-known path on the host root, not at the
-    // user-supplied path: RFC 6764 places the well-known URI at the
-    // host root regardless of the path the user pasted.
+    // RFC 6764 places the well-known URIs at the HOST ROOT regardless of
+    // the path the user pasted. Try CalDAV first, then CardDAV: a
+    // contacts-only server (e.g. Synology Contacts) only answers the
+    // `carddav` one. This is purely additive — for servers that already
+    // resolved via `caldav` (redirect or 200) nothing changes; only the
+    // previous "caldav 404 → base URL" path now gets a `carddav` probe
+    // before falling back to the pasted URL.
+    for path in ["/.well-known/caldav", "/.well-known/carddav"] {
+        if let Some(resolved) = probe_well_known(client, base, path, credentials).await? {
+            return Ok(resolved);
+        }
+    }
+    Ok(base.clone())
+}
+
+/// Probe one well-known path on the host root. Returns:
+///   - `Some(url)` on a usable redirect (Location resolved) or a 200,
+///   - `None` on 404 / unusable redirect / transient error, so the
+///     caller tries the next candidate or falls back to the base URL.
+async fn probe_well_known(
+    client: &Client,
+    base: &Url,
+    path: &str,
+    credentials: &Credentials,
+) -> CaldavResult<Option<Url>> {
     let mut wk = base.clone();
-    wk.set_path("/.well-known/caldav");
+    wk.set_path(path);
     wk.set_query(None);
     wk.set_fragment(None);
 
-    let response = client
+    let response = match client
         .request(Method::GET, wk.clone())
         .headers(auth_header(credentials)?)
         .send()
-        .await;
-    let response = match response {
+        .await
+    {
         Ok(r) => r,
         Err(_) => {
-            // Server doesn't answer the well-known endpoint at all —
-            // fall back to whatever the user pasted.
-            debug!("well-known request errored; falling back to base URL");
-            return Ok(base.clone());
+            debug!(path, "well-known request errored");
+            return Ok(None);
         }
     };
 
@@ -243,29 +276,28 @@ async fn resolve_well_known(
         if let Some(loc) = response.headers().get(reqwest::header::LOCATION) {
             if let Ok(s) = loc.to_str() {
                 if let Ok(joined) = wk.join(s) {
-                    return Ok(joined);
+                    return Ok(Some(joined));
                 }
             }
         }
-        debug!("well-known redirected but Location header was unusable");
-        return Ok(base.clone());
+        debug!(
+            path,
+            "well-known redirected but Location header was unusable"
+        );
+        return Ok(None);
     }
     if status.is_success() {
-        // 200 on well-known: the server happily serves CalDAV from
-        // there. Use the well-known URL as the new base.
-        return Ok(wk);
+        // 200 on well-known: the server serves DAV from there.
+        return Ok(Some(wk));
     }
     if status == StatusCode::NOT_FOUND {
-        // Common case — many servers don't bother. Caller URL is fine.
-        return Ok(base.clone());
+        // Common case — many servers don't bother. Try the next probe.
+        return Ok(None);
     }
-    // Anything else (5xx, 401) we treat as soft — let the next step
-    // surface a real error against the base URL.
-    debug!(
-        ?status,
-        "well-known returned unexpected status; using base URL"
-    );
-    Ok(base.clone())
+    // Anything else (5xx, 401) we treat as soft — let the next probe or
+    // the base-URL fallback surface a real error downstream.
+    debug!(path, ?status, "well-known returned unexpected status");
+    Ok(None)
 }
 
 async fn find_principal(
@@ -413,6 +445,38 @@ mod tests {
   </d:response>
 </d:multistatus>"#;
 
+    /// A CardDAV-only principal: advertises an `addressbook-home-set`
+    /// but NO `calendar-home-set` (e.g. Synology Contacts). The same
+    /// body answers the calendar-home, addressbook-home and scheduling
+    /// PROPFINDs — only the addressbook probe finds its element.
+    const ADDRESSBOOK_ONLY_RESPONSE: &str = r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav">
+  <d:response>
+    <d:href>/principals/users/alice/</d:href>
+    <d:propstat>
+      <d:prop>
+        <card:addressbook-home-set>
+          <d:href>/addressbooks/alice/</d:href>
+        </card:addressbook-home-set>
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+</d:multistatus>"#;
+
+    /// A principal that advertises neither home — a wrong URL or a
+    /// non-DAV endpoint. Discovery must reject this.
+    const NO_HOME_RESPONSE: &str = r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/principals/users/alice/</d:href>
+    <d:propstat>
+      <d:prop/>
+      <d:status>HTTP/1.1 404 Not Found</d:status>
+    </d:propstat>
+  </d:response>
+</d:multistatus>"#;
+
     #[tokio::test]
     async fn full_discovery_via_well_known_404_fallback() {
         let mut server = Server::new_async().await;
@@ -439,7 +503,92 @@ mod tests {
         let client = test_client();
         let discovery = run(&client, &creds(&server.url())).await.unwrap();
         assert_eq!(discovery.principal_url.path(), "/principals/users/alice/");
-        assert_eq!(discovery.calendar_home_url.path(), "/calendars/alice/");
+        assert_eq!(
+            discovery.calendar_home_url.as_ref().unwrap().path(),
+            "/calendars/alice/",
+        );
+    }
+
+    #[tokio::test]
+    async fn contacts_only_server_discovers_without_calendar_home() {
+        // The Synology Contacts case: the principal advertises an
+        // addressbook-home-set but no calendar-home-set. Discovery must
+        // succeed with calendar_home_url=None (so calendar/task listings
+        // come back empty) rather than erroring "not found".
+        let mut server = Server::new_async().await;
+        let _wk_caldav = server
+            .mock("GET", "/.well-known/caldav")
+            .with_status(404)
+            .create_async()
+            .await;
+        let _wk_carddav = server
+            .mock("GET", "/.well-known/carddav")
+            .with_status(404)
+            .create_async()
+            .await;
+        let _principal = server
+            .mock("PROPFIND", "/")
+            .match_header("depth", "0")
+            .with_status(207)
+            .with_body(PRINCIPAL_RESPONSE)
+            .create_async()
+            .await;
+        let _home = server
+            .mock("PROPFIND", "/principals/users/alice/")
+            .match_header("depth", "0")
+            .with_status(207)
+            .with_body(ADDRESSBOOK_ONLY_RESPONSE)
+            .create_async()
+            .await;
+
+        let client = test_client();
+        let discovery = run(&client, &creds(&server.url())).await.unwrap();
+        assert!(
+            discovery.calendar_home_url.is_none(),
+            "contacts-only server should have no calendar home",
+        );
+        assert_eq!(
+            discovery.addressbook_home_url.as_ref().unwrap().path(),
+            "/addressbooks/alice/",
+        );
+    }
+
+    #[tokio::test]
+    async fn neither_home_returns_discovery_error() {
+        // A principal that advertises neither home — wrong URL / not a
+        // DAV server. Discovery rejects it (the real "not found" case).
+        let mut server = Server::new_async().await;
+        let _wk_caldav = server
+            .mock("GET", "/.well-known/caldav")
+            .with_status(404)
+            .create_async()
+            .await;
+        let _wk_carddav = server
+            .mock("GET", "/.well-known/carddav")
+            .with_status(404)
+            .create_async()
+            .await;
+        let _principal = server
+            .mock("PROPFIND", "/")
+            .match_header("depth", "0")
+            .with_status(207)
+            .with_body(PRINCIPAL_RESPONSE)
+            .create_async()
+            .await;
+        let _home = server
+            .mock("PROPFIND", "/principals/users/alice/")
+            .match_header("depth", "0")
+            .with_status(207)
+            .with_body(NO_HOME_RESPONSE)
+            .create_async()
+            .await;
+
+        let client = test_client();
+        let result = run(&client, &creds(&server.url())).await;
+        assert!(
+            matches!(result, Err(CaldavError::Discovery(_))),
+            "expected a Discovery error, got {result:?}",
+        );
     }
 
     #[tokio::test]

@@ -690,7 +690,7 @@ impl CaldavAdapter {
             .lock()
             .expect("poison")
             .as_ref()
-            .map(|d| d.calendar_home_url.clone())
+            .and_then(|d| d.calendar_home_url.clone())
     }
 }
 
@@ -759,9 +759,13 @@ impl CalendarFeature for CaldavAdapter {
             return Ok(cached);
         }
         let discovery = self.discover().await.map_err(to_core_error)?;
+        // CardDAV-only server (no calendar-home-set) → no calendars.
+        let Some(home) = discovery.calendar_home_url.as_ref() else {
+            return Ok(Vec::new());
+        };
         let fresh = calendars::list_calendars(
             &self.http,
-            &discovery.calendar_home_url,
+            home,
             &self.credentials,
             discovery.supports_scheduling,
         )
@@ -850,14 +854,19 @@ impl CalendarFeature for CaldavAdapter {
         // fallback if a caller forgot to thread the calendar_id
         // through.
         let discovery = self.discover().await.map_err(to_core_error)?;
-        let cals = calendars::list_calendars(
-            &self.http,
-            &discovery.calendar_home_url,
-            &self.credentials,
-            discovery.supports_scheduling,
-        )
-        .await
-        .map_err(to_core_error)?;
+        let cals = match discovery.calendar_home_url.as_ref() {
+            Some(home) => calendars::list_calendars(
+                &self.http,
+                home,
+                &self.credentials,
+                discovery.supports_scheduling,
+            )
+            .await
+            .map_err(to_core_error)?,
+            // No calendar home (CardDAV-only server) → nothing to walk;
+            // the loop below falls through to the not-found error.
+            None => Vec::new(),
+        };
         let mut last_err: Option<CoreError> = None;
         for cal in cals {
             let cal_url = match Url::parse(&cal.id) {
@@ -907,14 +916,19 @@ impl CalendarFeature for CaldavAdapter {
         // left the resource untouched in whichever calendar
         // actually owned it.
         let discovery = self.discover().await.map_err(to_core_error)?;
-        let cals = calendars::list_calendars(
-            &self.http,
-            &discovery.calendar_home_url,
-            &self.credentials,
-            discovery.supports_scheduling,
-        )
-        .await
-        .map_err(to_core_error)?;
+        let cals = match discovery.calendar_home_url.as_ref() {
+            Some(home) => calendars::list_calendars(
+                &self.http,
+                home,
+                &self.credentials,
+                discovery.supports_scheduling,
+            )
+            .await
+            .map_err(to_core_error)?,
+            // No calendar home (CardDAV-only server) → nothing to walk;
+            // the loop below falls through to the not-found error.
+            None => Vec::new(),
+        };
         let mut last_err: Option<CoreError> = None;
         for cal in cals {
             let cal_url = match Url::parse(&cal.id) {
@@ -1064,10 +1078,13 @@ impl TasksFeature for CaldavAdapter {
             return Ok(cached);
         }
         let discovery = self.discover().await.map_err(to_core_error)?;
-        let fresh =
-            tasks::list_task_lists(&self.http, &discovery.calendar_home_url, &self.credentials)
-                .await
-                .map_err(to_core_error)?;
+        // CardDAV-only server (no calendar-home-set) → no task lists.
+        let Some(home) = discovery.calendar_home_url.as_ref() else {
+            return Ok(Vec::new());
+        };
+        let fresh = tasks::list_task_lists(&self.http, home, &self.credentials)
+            .await
+            .map_err(to_core_error)?;
         *self.task_lists_cache.lock().expect("poison") = Some(ListingCache {
             items: fresh.clone(),
             cached_at: chrono::Utc::now(),
@@ -1125,10 +1142,13 @@ impl TasksFeature for CaldavAdapter {
         // list keeps the search going instead of fooling us into
         // thinking the row was already gone.
         let discovery = self.discover().await.map_err(to_core_error)?;
-        let lists =
-            tasks::list_task_lists(&self.http, &discovery.calendar_home_url, &self.credentials)
+        let lists = match discovery.calendar_home_url.as_ref() {
+            Some(home) => tasks::list_task_lists(&self.http, home, &self.credentials)
                 .await
-                .map_err(to_core_error)?;
+                .map_err(to_core_error)?,
+            // No calendar home (CardDAV-only) → nothing to walk.
+            None => Vec::new(),
+        };
         let mut last_err: Option<CoreError> = None;
         for list in lists {
             let url = match Url::parse(&list.id) {
@@ -1162,14 +1182,16 @@ impl TasksFeature for CaldavAdapter {
 
     async fn create_task_list(&self, name: &str, _parent_id: Option<&str>) -> CoreResult<TaskList> {
         let discovery = self.discover().await.map_err(to_core_error)?;
-        let created = tasks::create_task_list(
-            &self.http,
-            &discovery.calendar_home_url,
-            name,
-            &self.credentials,
-        )
-        .await
-        .map_err(to_core_error)?;
+        // Creating a task list needs a calendar home to create the VTODO
+        // collection in; a CardDAV-only account has none.
+        let Some(home) = discovery.calendar_home_url.as_ref() else {
+            return Err(CoreError::Unsupported(
+                "this CalDAV account exposes no calendar home; cannot create a task list".into(),
+            ));
+        };
+        let created = tasks::create_task_list(&self.http, home, name, &self.credentials)
+            .await
+            .map_err(to_core_error)?;
         self.invalidate_listing_caches();
         Ok(created)
     }

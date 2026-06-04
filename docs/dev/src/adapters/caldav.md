@@ -37,6 +37,15 @@ Apple's well-known endpoints.
 
 ## Quirks
 
+- **Both homes are best-effort.** Discovery probes `calendar-home-set`
+  AND `addressbook-home-set` independently and fails only when **neither**
+  is found. A CalDAV-only server (no address books) and a CardDAV-only
+  server (e.g. Synology Contacts — advertises an `addressbook-home-set`
+  but no `calendar-home-set`) both work; the missing side's listings just
+  come back empty. Well-known resolution tries `/.well-known/caldav` then
+  `/.well-known/carddav`. (Before this, a contacts-only server failed
+  account creation with a "not found" error because the calendar home was
+  mandatory.)
 - **Stable ids.** A resource is keyed by `{href}|{uid}` so renames/moves
   and per-resource deletions resolve correctly.
 - **Keep recurring masters.** The folder-complete sync keeps every event
