@@ -169,8 +169,12 @@ export function AccountsPanel() {
   // renders from. We have to nudge it manually after creating or
   // deleting an account — otherwise the new account's calendars
   // wouldn't show up until something else triggers a store refresh.
-  const { refreshCalendars, refreshTaskLists, refreshAccounts } =
-    useCalendarStore();
+  const {
+    refreshCalendars,
+    refreshTaskLists,
+    refreshContactLists,
+    refreshAccounts,
+  } = useCalendarStore();
   // §19.11 step 8 — manual entry point for the "Konten verbinden"
   // wizard. The auto-popup only fires right after accept_remote;
   // when an external account is added on another device and
@@ -486,21 +490,21 @@ export function AccountsPanel() {
         // persisted; a stale sidebar fixes itself on the next normal
         // store refresh.
         //
-        // Contacts get a dedicated `syncContactsNow` kick instead
-        // of a "refresh" — the contacts catalog isn't fetched
-        // on-demand like calendars; it's mirrored locally by the
-        // contact-sync scheduler. Without this kick the sidebar
-        // would show no address-book entries for the new account
-        // until the periodic worker fires (default: 60 min) or
-        // the app restarts. The kick respects the user's
-        // persisted "include read-only directories" pref.
+        // Contacts: the address-book CATALOG is fetched on-demand just
+        // like calendars (the host's `list_contact_lists` has a blocking
+        // cold path), so `refreshContactLists` is what makes the new
+        // account's books appear in the sidebar — without it the sidebar
+        // shows no contacts section until the app restarts. We ALSO kick
+        // `syncContactsNow` to pre-warm each book's contents (respecting
+        // the user's "include read-only directories" pref) so opening the
+        // Contacts view is instant.
         const refreshes: Promise<unknown>[] = [
           refreshAccounts(),
           refreshCalendars(),
           refreshTaskLists(),
         ];
         if (CONTACTS_CAPABLE_KINDS.has(kind)) {
-          refreshes.push(syncContactsNow());
+          refreshes.push(refreshContactLists(), syncContactsNow());
         }
         void Promise.allSettled(refreshes);
       } catch (err) {
@@ -532,6 +536,7 @@ export function AccountsPanel() {
       refreshAccounts,
       refreshCalendars,
       refreshTaskLists,
+      refreshContactLists,
       t,
     ],
   );
@@ -685,18 +690,28 @@ export function AccountsPanel() {
         refocusListAfterReloadRef.current = true;
         refresh();
         // Same as on create: nudge the store so the just-removed
-        // account's calendars disappear from the sidebar.
+        // account's calendars, task lists and address books disappear
+        // from the sidebar.
         void Promise.allSettled([
           refreshAccounts(),
           refreshCalendars(),
           refreshTaskLists(),
+          refreshContactLists(),
         ]);
       } catch (err) {
         if (isCommandError(err)) setError(`${err.code}: ${err.message}`);
         else setError(String(err));
       }
     },
-    [announce, refresh, refreshAccounts, refreshCalendars, refreshTaskLists, t],
+    [
+      announce,
+      refresh,
+      refreshAccounts,
+      refreshCalendars,
+      refreshTaskLists,
+      refreshContactLists,
+      t,
+    ],
   );
 
   const headingId = useId();
