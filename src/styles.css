@@ -2993,6 +2993,39 @@ button[aria-disabled='true'] {
   border-bottom-style: dashed;
 }
 
+/* Collapsible "Done (N)" footer: a full-width toggle that reads as a
+   group heading but flips its own visibility. Extra top margin sets it
+   apart from the active lists above. */
+.task-list__group--done {
+  margin-top: var(--space-4, 1.25rem);
+  padding-bottom: 0;
+}
+
+.task-list__done-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  width: 100%;
+  padding: var(--space-1) 0;
+  background: none;
+  border: none;
+  font: inherit;
+  font-weight: 600;
+  color: var(--color-fg-muted);
+  cursor: pointer;
+  text-align: left;
+}
+
+.task-list__done-toggle:hover {
+  color: var(--color-fg);
+}
+
+.task-list__done-chevron {
+  display: inline-block;
+  width: 1em;
+  font-size: 0.85em;
+}
+
 .task-list__item {
   /* Five columns: twisty (or spacer) / check / title / progress
    * badge / due. The twisty column is fixed-width so rows with and

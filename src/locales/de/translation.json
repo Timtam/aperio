@@ -1350,6 +1350,7 @@
       "title": "Aufgaben",
       "empty": "Keine Aufgaben.",
       "backlog": "Backlog",
+      "done": "Erledigt ({{count}})",
       "taskList": "Aufgabenliste",
       "stateDone": "erledigt",
       "stateOpen": "offen",

@@ -23,6 +23,12 @@ deinen Tag oder deine Woche ein und arbeitest sie ab.
 - **Bearbeiten:** mit `Eingabe` öffnen.
 - **Löschen:** **Löschen** wählen (Standard: `Entf`).
 
+> **Erledigte ausblenden:** Abgehakte Aufgaben wandern in eine
+> eingeklappte Gruppe **Erledigt (N)** ganz unten in der Liste, damit die
+> offenen Aufgaben übersichtlich bleiben. Die Gruppe zeigt die Anzahl an;
+> ein Klick (bzw. `Eingabe`/`Leertaste` auf der Schaltfläche) klappt sie
+> auf. Der Auf-/Zu-Zustand wird gemerkt.
+
 ## Aufgaben einplanen
 
 Aperio unterscheidet zwischen Aufgaben mit und ohne festen Termin:
