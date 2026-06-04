@@ -97,6 +97,73 @@ describe('buildEntries section grouping', () => {
     expect(separators(result)).toEqual([{ label: 'Inbox', level: 0 }]);
   });
 
+  it('moves completed top-level tasks into a collapsible Done group', () => {
+    const tasks = [
+      baseTask({ id: 'open', status: 'open' }),
+      baseTask({ id: 'done1', status: 'completed', completed_at: '2026-05-20T10:00:00Z' }),
+      baseTask({ id: 'done2', status: 'completed', completed_at: '2026-05-21T10:00:00Z' }),
+    ];
+    // doneCollapsed defaults to true.
+    const result = buildEntries(tasks, listById, t, new Set(), {});
+
+    // A collapsible Done separator with the count exists, after the list.
+    const doneSep = result.entries.find(
+      (e): e is Extract<typeof e, { kind: 'separator' }> =>
+        e.kind === 'separator' && e.collapsible === true,
+    );
+    expect(doneSep?.count).toBe(2);
+    expect(doneSep?.collapsed).toBe(true);
+
+    // The open task is visible; the two done tasks are present (stable
+    // index space) but hidden while collapsed, most-recent first.
+    const taskEntries = result.entries.filter(
+      (e): e is Extract<typeof e, { kind: 'task' }> => e.kind === 'task',
+    );
+    expect(taskEntries.map((e) => [e.task.id, e.hidden])).toEqual([
+      ['open', false],
+      ['done2', true],
+      ['done1', true],
+    ]);
+
+    // Expanding the group un-hides the done rows.
+    const expanded = buildEntries(tasks, listById, t, new Set(), {}, false);
+    const doneRows = expanded.entries.filter(
+      (e): e is Extract<typeof e, { kind: 'task' }> =>
+        e.kind === 'task' && e.task.id.startsWith('done'),
+    );
+    expect(doneRows.every((e) => !e.hidden)).toBe(true);
+  });
+
+  it('keeps a completed subtask inline under its open parent', () => {
+    const tasks = [
+      baseTask({ id: 'parent', status: 'open' }),
+      baseTask({ id: 'child', parent_id: 'parent', status: 'completed' }),
+    ];
+    const result = buildEntries(tasks, listById, t, new Set(), {});
+    // No Done group — the only completed task is a subtask, which stays
+    // under its parent rather than being hoisted.
+    expect(
+      result.entries.some(
+        (e) => e.kind === 'separator' && e.collapsible === true,
+      ),
+    ).toBe(false);
+    const ids = result.entries
+      .filter((e): e is Extract<typeof e, { kind: 'task' }> => e.kind === 'task')
+      .map((e) => e.task.id);
+    expect(ids).toEqual(['parent', 'child']);
+  });
+
+  it('omits a list header when the list has only completed tasks', () => {
+    const tasks = [
+      baseTask({ id: 'done', status: 'completed' }),
+    ];
+    const result = buildEntries(tasks, listById, t, new Set(), {});
+    // No "Inbox" list separator — its only task moved to Done.
+    expect(separators(result).map((s) => s.label)).toEqual([
+      'views.tasks.done',
+    ]);
+  });
+
   it('keeps a subtask under its parent regardless of section', () => {
     const tasks = [
       baseTask({ id: 'parent', section_id: 's1' }),

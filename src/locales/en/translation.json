@@ -1350,6 +1350,7 @@
       "title": "Tasks",
       "empty": "No tasks.",
       "backlog": "Backlog",
+      "done": "Done ({{count}})",
       "taskList": "Task list",
       "stateDone": "done",
       "stateOpen": "open",

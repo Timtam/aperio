@@ -22,6 +22,11 @@ your day or week, and work through them.
 - **Edit:** Open it with `Enter`.
 - **Delete:** Choose **Delete** (default: `Delete`).
 
+> **Hiding completed tasks:** Checked-off tasks move into a collapsed
+> **Done (N)** group at the bottom of the list, so your open tasks stay
+> uncluttered. The group shows the count; one click (or `Enter`/`Space`
+> on the button) expands it. The open/closed state is remembered.
+
 ## Scheduling tasks
 
 Aperio distinguishes between tasks with and without a fixed date:

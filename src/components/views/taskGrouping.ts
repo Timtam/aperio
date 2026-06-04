@@ -2,7 +2,18 @@ import type { Section, Task } from '../../api/types';
 
 /** One row in the flattened task tree the TaskView renders. */
 export type Entry =
-  | { kind: 'separator'; label: string; level?: number }
+  | {
+      kind: 'separator';
+      label: string;
+      level?: number;
+      /** True for the "Done (N)" footer group — rendered as a toggle
+       *  button rather than a static heading. */
+      collapsible?: boolean;
+      /** Current collapsed state of a `collapsible` group. */
+      collapsed?: boolean;
+      /** Number of (top-level) tasks in a `collapsible` group. */
+      count?: number;
+    }
   | {
       kind: 'task';
       task: Task;
@@ -24,6 +35,9 @@ export function buildEntries(
   t: (key: string, vars?: Record<string, unknown>) => string,
   collapsed: Set<string>,
   sectionsByList: Record<string, Section[]>,
+  /** Whether the "Done (N)" footer group is collapsed. Defaults to
+   *  collapsed so completed tasks don't spam the active list. */
+  doneCollapsed = true,
 ): { entries: Entry[]; flatTasks: Task[] } {
   // Bucket children under their parent so the depth-first walk
   // below has O(1) lookup. Tasks whose parent_id points at a
@@ -43,12 +57,24 @@ export function buildEntries(
     }
   });
 
-  // Two top-level buckets: backlog (no dates at all) and the
-  // per-list groups. Children inherit their parent's bucket so a
-  // subtask of a backlog task lives under it, not somewhere else.
+  // Completed top-level tasks (with their whole subtree) leave the
+  // active groups and collapse into a single "Done (N)" footer — the
+  // active list shows only open work. A *completed subtask* under an
+  // open parent stays inline (struck-through, in context); only the
+  // top-level placement is diverted here.
+  const doneTopLevel: Task[] = [];
+  const openTopLevel: Task[] = [];
+  topLevel.forEach((task) => {
+    if (task.status === 'completed') doneTopLevel.push(task);
+    else openTopLevel.push(task);
+  });
+
+  // Two top-level buckets for the OPEN tasks: backlog (no dates at all)
+  // and the per-list groups. Children inherit their parent's bucket so
+  // a subtask of a backlog task lives under it, not somewhere else.
   const backlog: Task[] = [];
   const byList = new Map<string, Task[]>();
-  topLevel.forEach((task) => {
+  openTopLevel.forEach((task) => {
     if (!task.scheduled_date && !task.deadline_date) {
       backlog.push(task);
       return;
@@ -132,6 +158,25 @@ export function buildEntries(
         secTasks.forEach((task) => visit(task, 0, false));
       });
   });
+
+  // "Done (N)" footer group — a single collapsible bucket for every
+  // completed top-level task across all lists, most-recently-completed
+  // first. Collapsed by default; its rows still join `flatTasks` (with
+  // `hidden`) so the index space + keyboard nav stay stable, exactly
+  // like a collapsed subtree.
+  if (doneTopLevel.length > 0) {
+    doneTopLevel.sort((a, b) =>
+      (b.completed_at ?? '').localeCompare(a.completed_at ?? ''),
+    );
+    entries.push({
+      kind: 'separator',
+      label: t('views.tasks.done', { count: doneTopLevel.length }),
+      collapsible: true,
+      collapsed: doneCollapsed,
+      count: doneTopLevel.length,
+    });
+    doneTopLevel.forEach((task) => visit(task, 0, doneCollapsed));
+  }
 
   return { entries, flatTasks };
 }

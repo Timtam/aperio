@@ -89,14 +89,34 @@ export function TaskView() {
     });
   }, []);
 
+  // Whether the "Done (N)" footer group is collapsed. Defaults to
+  // collapsed so finished tasks don't spam the active list; persisted
+  // to localStorage so the choice survives reloads.
+  const [doneCollapsed, setDoneCollapsed] = useState(loadDoneCollapsed);
+  const toggleDoneCollapsed = useCallback(() => {
+    setDoneCollapsed((prev) => {
+      const next = !prev;
+      saveDoneCollapsed(next);
+      return next;
+    });
+  }, []);
+
   // Flatten the task buckets into a single options array, interleaved
   // with separator entries. focusIndex points at the *task* index in
   // `flatTasks` — separators never receive focus. Children appear
   // depth-first under their parent; the `hidden` flag on each entry
   // tells the renderer when the parent above is collapsed.
   const { entries, flatTasks } = useMemo(
-    () => buildEntries(tasks, taskListById, t, collapsed, sectionsByList),
-    [tasks, taskListById, t, collapsed, sectionsByList],
+    () =>
+      buildEntries(
+        tasks,
+        taskListById,
+        t,
+        collapsed,
+        sectionsByList,
+        doneCollapsed,
+      ),
+    [tasks, taskListById, t, collapsed, sectionsByList, doneCollapsed],
   );
 
   const [focusIndex, setFocusIndex] = useState(0);
@@ -355,6 +375,30 @@ export function TaskView() {
         )}
         {entries.map((entry, i) => {
           if (entry.kind === 'separator') {
+            // The collapsible "Done (N)" footer renders as a toggle
+            // button (aria-expanded + a chevron) rather than a static
+            // heading, so it's clickable + announced as collapsible.
+            if (entry.collapsible) {
+              return (
+                <li
+                  key={`sep-${i}-done`}
+                  role="presentation"
+                  className="task-list__group task-list__group--done"
+                >
+                  <button
+                    type="button"
+                    className="task-list__done-toggle"
+                    aria-expanded={!entry.collapsed}
+                    onClick={toggleDoneCollapsed}
+                  >
+                    <span className="task-list__done-chevron" aria-hidden="true">
+                      {entry.collapsed ? '▸' : '▾'}
+                    </span>
+                    {entry.label}
+                  </button>
+                </li>
+              );
+            }
             // level 1 = a section sub-header within a list; styled
             // smaller + indented to read as a child of the list head.
             const isSection = entry.level === 1;
@@ -376,8 +420,10 @@ export function TaskView() {
           // Children are rendered by their parent's recursive call
           // (the parent emits a <ul role="group"> below). The
           // top-level iteration only handles depth-0 tasks plus the
-          // separator headings between them.
-          if (entry.depth > 0) return null;
+          // separator headings between them. A hidden depth-0 row is a
+          // collapsed Done-group task — skip it (it still holds a
+          // flatTasks slot so keyboard nav stays stable).
+          if (entry.depth > 0 || entry.hidden) return null;
           return renderTreeItem(entry, {
             t,
             fmt,
@@ -581,6 +627,28 @@ function renderTreeItem(
       )}
     </li>
   );
+}
+
+const DONE_COLLAPSED_KEY = 'aperio.tasks.doneCollapsed';
+
+/** Read the persisted "Done group collapsed" preference. Defaults to
+ *  collapsed (true) — the whole point is to keep finished tasks out of
+ *  the way — and tolerates a missing / unreadable store. */
+function loadDoneCollapsed(): boolean {
+  try {
+    return localStorage.getItem(DONE_COLLAPSED_KEY) !== 'false';
+  } catch {
+    return true;
+  }
+}
+
+function saveDoneCollapsed(value: boolean): void {
+  try {
+    localStorage.setItem(DONE_COLLAPSED_KEY, String(value));
+  } catch {
+    // Private-mode / quota errors are non-fatal — the toggle still
+    // works for the session, it just won't persist.
+  }
 }
 
 /** Find the task entry at flat-task position `index`, ignoring
