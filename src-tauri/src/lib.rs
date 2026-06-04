@@ -253,7 +253,7 @@ pub fn run() {
     // account's contacts scope (a no-op for accounts with no contact
     // data, e.g. calendar-only or task-only providers).
     {
-        const HEAL_FLAG: &str = "cache.contactsMultigetHealV1";
+        const HEAL_FLAG: &str = "cache.contactsMultigetHealV2";
         let shared = db.shared();
         let prefs = crate::user_prefs::UserPrefsRepo::new(&shared);
         let already_done = matches!(prefs.get(HEAL_FLAG).ok().flatten().as_deref(), Some("done"));
