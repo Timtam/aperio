@@ -46,6 +46,14 @@ Apple's well-known endpoints.
   `/.well-known/carddav`. (Before this, a contacts-only server failed
   account creation with a "not found" error because the calendar home was
   mandatory.)
+- **Contacts read via multiget, never inline PROPFIND.** `get_contacts`
+  does a Depth-1 PROPFIND for hrefs then an `addressbook-multiget` for the
+  bodies — it does **not** ask for inline `<CR:address-data/>` in a plain
+  PROPFIND. That shortcut is non-standard; iCloud and Synology Contacts
+  silently return resources with no body, so the old inline read yielded
+  zero contacts while persisting a sync token, leaving address books
+  permanently empty (a one-time `cache.contactsMultigetHealV1` heal clears
+  those poisoned tokens so books re-bootstrap).
 - **Stable ids.** A resource is keyed by `{href}|{uid}` so renames/moves
   and per-resource deletions resolve correctly.
 - **Keep recurring masters.** The folder-complete sync keeps every event

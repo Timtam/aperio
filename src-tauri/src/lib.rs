@@ -241,6 +241,56 @@ pub fn run() {
         }
     }
 
+    // One-time heal for CardDAV/contacts: an older CalDAV read fetched
+    // a book's contacts via a non-standard inline-`address-data` PROPFIND
+    // that iCloud / Synology Contacts silently ignore, so the bootstrap
+    // wrote ZERO contacts yet still persisted a valid sync token. Every
+    // delta since then reported "no changes" over an empty cache, leaving
+    // address books permanently empty. The read now uses
+    // addressbook-multiget; clearing the contacts sync tokens once forces
+    // each book to re-bootstrap and recover its contacts. Best-effort +
+    // idempotent, same pattern as the EWS heals above; resets every
+    // account's contacts scope (a no-op for accounts with no contact
+    // data, e.g. calendar-only or task-only providers).
+    {
+        const HEAL_FLAG: &str = "cache.contactsMultigetHealV1";
+        let shared = db.shared();
+        let prefs = crate::user_prefs::UserPrefsRepo::new(&shared);
+        let already_done = matches!(prefs.get(HEAL_FLAG).ok().flatten().as_deref(), Some("done"));
+        if !already_done {
+            match accounts::AccountsRepo::new(&shared).list() {
+                Ok(accts) => {
+                    let mut healed = 0usize;
+                    for acc in &accts {
+                        match cache_store.reset_contacts_sync(&acc.id) {
+                            Ok(n) => healed += n,
+                            Err(err) => tracing::warn!(
+                                account_id = %acc.id,
+                                ?err,
+                                "contacts heal: reset_contacts_sync failed",
+                            ),
+                        }
+                    }
+                    match prefs.set(HEAL_FLAG, "done") {
+                        Ok(()) => tracing::info!(
+                            target: "aperio::cache",
+                            containers = healed,
+                            "contacts heal: cleared contact sync tokens for a one-time re-bootstrap",
+                        ),
+                        Err(err) => tracing::warn!(
+                            ?err,
+                            "contacts heal: couldn't persist completion flag; will retry next boot",
+                        ),
+                    }
+                }
+                Err(err) => tracing::warn!(
+                    ?err,
+                    "contacts heal: couldn't list accounts; will retry next boot",
+                ),
+            }
+        }
+    }
+
     // CACHE-3: clones for the background warm/periodic refresher spawned
     // in `setup()` (the originals are moved into Tauri State below).
     let registry_for_cache_refresh = Arc::clone(&registry);
