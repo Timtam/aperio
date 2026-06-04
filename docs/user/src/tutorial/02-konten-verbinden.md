@@ -24,6 +24,11 @@ du Konten und legst bei Bedarf lokale Kalender an.
 > Apple-Konto unter „Anmeldung & Sicherheit" zu erstellen), **nicht** dein
 > normales Apple-Passwort.
 
+> **Nur Kontakte (CardDAV):** Auch ein reiner CardDAV-Server ohne Kalender
+> (z. B. Synology Contacts) lässt sich unter **iCloud / CalDAV** hinzufügen –
+> gib einfach dessen Server-Adresse an. Aperio erkennt automatisch, dass es
+> nur Kontakte gibt, und lässt die Kalender-/Aufgaben-Bereiche leer.
+
 > **Vikunja / Todoist:** Den API-Token erzeugst du in den Entwickler- bzw.
 > Integrations-Einstellungen des jeweiligen Dienstes und fügst ihn hier
 > ein.

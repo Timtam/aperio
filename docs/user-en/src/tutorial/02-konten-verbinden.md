@@ -24,6 +24,11 @@ and, if you like, create local calendars.
 > your Apple account under "Sign-In & Security"), **not** your regular Apple
 > password.
 
+> **Contacts-only (CardDAV):** A CardDAV-only server with no calendars
+> (e.g. Synology Contacts) can also be added under **iCloud / CalDAV** —
+> just enter its server address. Aperio detects that it only has contacts
+> and leaves the calendar/task sections empty.
+
 > **Vikunja / Todoist:** Create the API token in the developer or
 > integration settings of the respective service and paste it here.
 
