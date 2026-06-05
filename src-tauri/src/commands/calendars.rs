@@ -89,8 +89,10 @@ pub async fn list_calendars(
     plugin_manager: State<'_, Arc<PluginManager>>,
     db: State<'_, DbHandle>,
 ) -> CommandResult<Vec<CalendarRow>> {
+    let cmd_start = std::time::Instant::now();
     tracing::info!(
-        target: "aperio::commands",
+        target: "aperio::startup",
+        total_ms = crate::startup_elapsed_ms(),
         "list_calendars command invoked",
     );
     let registry = Arc::clone(&registry);
@@ -188,6 +190,13 @@ pub async fn list_calendars(
             recurrence_capabilities,
         });
     }
+    tracing::info!(
+        target: "aperio::startup",
+        elapsed_ms = cmd_start.elapsed().as_millis(),
+        total_ms = crate::startup_elapsed_ms(),
+        calendars = decorated.len(),
+        "list_calendars command returning",
+    );
     Ok(decorated)
 }
 
@@ -339,6 +348,7 @@ pub async fn get_events(
         is_local = (account == LOCAL_ID),
         range_start = %range.start.to_rfc3339(),
         range_end = %range.end.to_rfc3339(),
+        total_ms = crate::startup_elapsed_ms(),
         "get_events command invoked",
     );
     if account == LOCAL_ID {

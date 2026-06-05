@@ -208,6 +208,12 @@ pub async fn list_task_lists(
     plugin_manager: State<'_, Arc<PluginManager>>,
     db: State<'_, DbHandle>,
 ) -> CommandResult<Vec<TaskListRow>> {
+    let cmd_start = std::time::Instant::now();
+    tracing::info!(
+        target: "aperio::startup",
+        total_ms = crate::startup_elapsed_ms(),
+        "list_task_lists command invoked",
+    );
     let registry = Arc::clone(&registry);
     let cache = Arc::clone(&cache);
     let coord = Arc::clone(&coord);
@@ -238,7 +244,7 @@ pub async fn list_task_lists(
                 .collect()
         })
         .unwrap_or_default();
-    Ok(out
+    let rows: Vec<TaskListRow> = out
         .into_iter()
         .map(|list| {
             let account_id = registry
@@ -252,7 +258,15 @@ pub async fn list_task_lists(
                 task_capabilities,
             }
         })
-        .collect())
+        .collect();
+    tracing::info!(
+        target: "aperio::startup",
+        elapsed_ms = cmd_start.elapsed().as_millis(),
+        total_ms = crate::startup_elapsed_ms(),
+        task_lists = rows.len(),
+        "list_task_lists command returning",
+    );
+    Ok(rows)
 }
 
 /// Cache-first aggregation of every external account's task lists. Serves

@@ -39,13 +39,29 @@ use event_log::{
 };
 use registry::AdapterRegistry;
 use reminders::ReminderScheduler;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+use std::time::Instant;
 use tauri::Manager;
 use tokio::sync::Notify;
 use tracing::{info, warn};
 
+/// Process-start instant, set at the very top of [`run`]. Powers the
+/// coarse cold-start timing emitted under the `aperio::startup` tracing
+/// target — temporary instrumentation to localise where the "view opens
+/// but stays empty for a few seconds after launch" time actually goes
+/// (synchronous prologue vs. webview/React mount vs. first IPC).
+static STARTUP: OnceLock<Instant> = OnceLock::new();
+
+/// Milliseconds elapsed since process start. Returns 0 before [`run`]
+/// initialises [`STARTUP`] (e.g. in unit tests that never boot the app),
+/// so callers in the command layer can stamp `total_ms` unconditionally.
+pub fn startup_elapsed_ms() -> u128 {
+    STARTUP.get().map(|t| t.elapsed().as_millis()).unwrap_or(0)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let _ = STARTUP.set(Instant::now());
     init_tracing();
 
     // Register the AUMID and pin it to this process before tauri starts
@@ -63,6 +79,7 @@ pub fn run() {
     let db_path = data_dir.path.join("aperio.sqlite");
     let db = DbHandle::open(&db_path).expect("failed to open local database");
     info!(path = %db_path.display(), "opened local database");
+    info!(target: "aperio::startup", checkpoint = "db_opened", total_ms = startup_elapsed_ms(), "startup checkpoint");
 
     // The Tauri backend owns the connection. Subsystems (calendar adapter,
     // sync engine, plugin manager) take an `Arc` clone of the same mutex.
@@ -90,6 +107,7 @@ pub fn run() {
         plugin_count = plugin_manager.len(),
         "registered bundled + user plugins",
     );
+    info!(target: "aperio::startup", checkpoint = "plugins_built", total_ms = startup_elapsed_ms(), "startup checkpoint");
     // Resolve the per-user plugins dir once so the install /
     // uninstall commands can grab it from Tauri state without
     // re-deriving it from data_dir each time.
@@ -131,6 +149,7 @@ pub fn run() {
         let repo = accounts::AccountsRepo::new(&shared);
         registry.bootstrap(&repo);
     }
+    info!(target: "aperio::startup", checkpoint = "registry_bootstrapped", total_ms = startup_elapsed_ms(), "startup checkpoint");
 
     // CACHE-1: host-owned snapshot cache for external adapters + the
     // background-refresh dedup guard. Both live in Tauri State so the
@@ -290,6 +309,8 @@ pub fn run() {
             }
         }
     }
+
+    info!(target: "aperio::startup", checkpoint = "heals_done", total_ms = startup_elapsed_ms(), "startup checkpoint");
 
     // CACHE-3: clones for the background warm/periodic refresher spawned
     // in `setup()` (the originals are moved into Tauri State below).
@@ -458,6 +479,8 @@ pub fn run() {
     // (the Test button in the SoundPicker UI).
     let audio_player = crate::audio::AudioPlayer::spawn();
     let audio_for_scheduler = audio_player.clone();
+
+    info!(target: "aperio::startup", checkpoint = "prologue_done", total_ms = startup_elapsed_ms(), "startup checkpoint: synchronous prologue complete, building Tauri app + window");
 
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
@@ -677,6 +700,7 @@ pub fn run() {
             commands::get_cache_refresh_status,
         ])
         .setup(move |app| {
+            info!(target: "aperio::startup", checkpoint = "setup_enter", total_ms = startup_elapsed_ms(), "startup checkpoint: tauri setup() entered");
             // Spawn the reminder scheduler on the Tauri/tokio runtime
             // and register its handle so command modules can call
             // `invalidate()` after every mutation.
@@ -761,6 +785,9 @@ pub fn run() {
     // A bounded timeout via `tokio::time::timeout` keeps a hung
     // network drive from stalling the close indefinitely.
     app.run(move |_app, event| {
+        if let tauri::RunEvent::Ready = event {
+            info!(target: "aperio::startup", checkpoint = "window_ready", total_ms = startup_elapsed_ms(), "startup checkpoint: event loop ready (window created)");
+        }
         if let tauri::RunEvent::ExitRequested { .. } = event {
             if !orchestrator_for_exit.status().configured {
                 return;
