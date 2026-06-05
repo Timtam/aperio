@@ -189,6 +189,8 @@
   },
   "dialogs": {
     "contact": {
+      "birthdayClear": "Clear birthday",
+      "birthdayCleared": "Birthday removed.",
       "viewTitle": "Contact details",
       "editTitle": "Edit contact",
       "createTitle": "New contact",
@@ -1001,13 +1003,17 @@
           "legend": "Scheduled for",
           "hint": "The day to work on the task. Add a time to pin it to a specific slot in the day.",
           "date": "Date",
-          "time": "Time"
+          "time": "Time",
+          "clear": "Clear scheduled day",
+          "cleared": "Scheduled day removed."
         },
         "deadline": {
           "legend": "Due by",
           "hint": "Must be done by this day. The task stays in the backlog until done; on the deadline day it gets pinned automatically.",
           "date": "Date",
-          "time": "Time"
+          "time": "Time",
+          "clear": "Clear deadline",
+          "cleared": "Deadline removed."
         },
         "description": "Description",
         "colorLabel": "Color label"

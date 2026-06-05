@@ -189,6 +189,8 @@
   },
   "dialogs": {
     "contact": {
+      "birthdayClear": "Geburtstag entfernen",
+      "birthdayCleared": "Geburtstag entfernt.",
       "viewTitle": "Kontakt-Details",
       "editTitle": "Kontakt bearbeiten",
       "createTitle": "Neuer Kontakt",
@@ -1001,13 +1003,17 @@
           "legend": "Geplant für",
           "hint": "Der Tag, an dem die Aufgabe ansteht. Mit Uhrzeit wird sie zu diesem Zeitpunkt im Tagesraster verortet.",
           "date": "Datum",
-          "time": "Uhrzeit"
+          "time": "Uhrzeit",
+          "clear": "Geplanten Tag entfernen",
+          "cleared": "Geplanter Tag entfernt."
         },
         "deadline": {
           "legend": "Spätestens bis",
           "hint": "Muss bis zu diesem Tag erledigt sein. Die Aufgabe bleibt im Backlog, bis sie erledigt ist; am Deadline-Tag wird sie automatisch auf heute eingeplant.",
           "date": "Datum",
-          "time": "Uhrzeit"
+          "time": "Uhrzeit",
+          "clear": "Frist entfernen",
+          "cleared": "Frist entfernt."
         },
         "description": "Beschreibung",
         "colorLabel": "Farb-Label"

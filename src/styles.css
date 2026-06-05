@@ -1502,6 +1502,15 @@ button[aria-disabled='true'] {
   font-style: italic;
 }
 
+/* "Clear" affordance for an optional date slot — a small, left-aligned
+   secondary button that wipes the slot back to unset. */
+.form__inline-clear {
+  align-self: flex-start;
+  margin-top: var(--space-1);
+  font-size: var(--font-size-xs);
+  padding: var(--space-1) var(--space-2);
+}
+
 /* Day-start review (DESIGN.md § 9.5). Two stacked sections in one
  * modal — deadlines + carry-over. Each section gets a heading, a
  * row list, and its own bulk-action row. The base list/row classes

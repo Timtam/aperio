@@ -3,6 +3,7 @@ import {
   useEffect,
   useId,
   useMemo,
+  useRef,
   useState,
   type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -183,6 +184,11 @@ export function TaskDialog({
   const [form, setForm] = useState<FormState>(initialState);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // Date inputs for the two optional slots. The "clear" buttons move
+  // focus here after wiping the slot (the button itself unmounts once
+  // the date is empty, so focus would otherwise fall to <body>).
+  const scheduledDateRef = useRef<HTMLInputElement>(null);
+  const deadlineDateRef = useRef<HTMLInputElement>(null);
   // Assignee picker data (DESIGN §9.7): the targeted list's member pool
   // + the connected account's own id, loaded per list when open.
   const [members, setMembers] = useState<TaskUser[]>([]);
@@ -366,6 +372,22 @@ export function TaskDialog({
     },
     [],
   );
+
+  // Clear an optional date slot back to unset. A native `<input
+  // type="date">` can't be reliably emptied by keyboard / screen
+  // reader, so each slot gets an explicit button that wipes both the
+  // date and its companion time, then parks focus on the (now empty)
+  // date input and announces the change.
+  const clearScheduled = useCallback(() => {
+    setForm((prev) => ({ ...prev, scheduledDate: '', scheduledTime: '' }));
+    scheduledDateRef.current?.focus();
+    announce(t('dialogs.task.fields.scheduled.cleared'));
+  }, [announce, t]);
+  const clearDeadline = useCallback(() => {
+    setForm((prev) => ({ ...prev, deadlineDate: '', deadlineTime: '' }));
+    deadlineDateRef.current?.focus();
+    announce(t('dialogs.task.fields.deadline.cleared'));
+  }, [announce, t]);
 
   // Subtask mutations apply immediately (not staged with the parent
   // form's Save) so the user can check things off without losing
@@ -1018,6 +1040,7 @@ export function TaskDialog({
                 {t('dialogs.task.fields.scheduled.date')}
               </span>
               <input
+                ref={scheduledDateRef}
                 type="date"
                 value={form.scheduledDate}
                 onChange={(e) => update('scheduledDate', e.target.value)}
@@ -1036,6 +1059,15 @@ export function TaskDialog({
               />
             </label>
           </div>
+          {form.scheduledDate && (
+            <button
+              type="button"
+              className="form__inline-clear"
+              onClick={clearScheduled}
+            >
+              {t('dialogs.task.fields.scheduled.clear')}
+            </button>
+          )}
         </fieldset>
 
         <fieldset className="form__fieldset">
@@ -1051,6 +1083,7 @@ export function TaskDialog({
                 {t('dialogs.task.fields.deadline.date')}
               </span>
               <input
+                ref={deadlineDateRef}
                 type="date"
                 value={form.deadlineDate}
                 onChange={(e) => update('deadlineDate', e.target.value)}
@@ -1069,6 +1102,15 @@ export function TaskDialog({
               />
             </label>
           </div>
+          {form.deadlineDate && (
+            <button
+              type="button"
+              className="form__inline-clear"
+              onClick={clearDeadline}
+            >
+              {t('dialogs.task.fields.deadline.clear')}
+            </button>
+          )}
         </fieldset>
 
         <label className="form__field">

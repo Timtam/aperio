@@ -289,6 +289,15 @@ export function ContactDialog({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // Birthday is optional; a native date input can't be reliably
+  // emptied by keyboard / screen reader, so an explicit "clear"
+  // button wipes it and parks focus back on the (now empty) input.
+  const birthdayRef = useRef<HTMLInputElement>(null);
+  const clearBirthday = useCallback(() => {
+    setForm((p) => ({ ...p, birthday: '' }));
+    birthdayRef.current?.focus();
+    announce(t('dialogs.contact.birthdayCleared'));
+  }, [announce, t]);
   // Photo state. `photo` is the bytes currently held in the
   // dialog (either freshly chosen by the user or fetched from
   // the server on open); `photoLoading` is the in-flight fetch
@@ -745,6 +754,7 @@ export function ContactDialog({
               {t('dialogs.contact.birthdayLabel')}
             </span>
             <input
+              ref={birthdayRef}
               type="date"
               value={form.birthday}
               onChange={(e) =>
@@ -752,6 +762,15 @@ export function ContactDialog({
               }
               readOnly={viewOnly}
             />
+            {!viewOnly && form.birthday && (
+              <button
+                type="button"
+                className="form__inline-clear"
+                onClick={clearBirthday}
+              >
+                {t('dialogs.contact.birthdayClear')}
+              </button>
+            )}
           </label>
 
           <label className="form__field">
