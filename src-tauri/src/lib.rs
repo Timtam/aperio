@@ -740,7 +740,7 @@ pub fn run() {
             app.on_menu_event(move |_app, event| {
                 let state = handle.state::<commands::ContextMenuState>();
                 let mut guard = state.pending.lock().expect("ctx menu poisoned");
-                if let Some(tx) = guard.take() {
+                if let Some((_, tx)) = guard.take() {
                     let _ = tx.send(event.id().as_ref().to_string());
                 }
             });

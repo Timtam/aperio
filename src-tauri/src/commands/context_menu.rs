@@ -31,6 +31,7 @@
 //!     task chips for the Status > {open, in_progress, …} cascade.
 //!   - `Separator` — a horizontal divider, no id.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use tauri::menu::{
@@ -42,23 +43,34 @@ use tokio::sync::oneshot;
 
 use super::{CommandError, CommandResult};
 
-/// Per-app state holding the in-flight popup's reply channel.
+/// Per-app state holding the in-flight popup's reply channel, tagged with
+/// a monotonic generation id.
 ///
-/// Only one popup is expected to be open at a time (the user can't
-/// physically have two native menus visible). If a second popup
-/// arrives while one is pending, the previous sender is dropped —
-/// the previous command's `recv` resolves to a closed-channel error
-/// and the command returns `None`, which is the right semantics
-/// ("the user moved on without picking anything").
+/// Only one popup is visible at a time, but a *dismissed* popup fires no
+/// menu event (Escape / click-away are silent on every platform we
+/// target), so its `show_context_menu` keeps awaiting until a newer popup
+/// replaces — and thereby drops — its sender. When that stale call finally
+/// wakes (closed channel), it must NOT clear the slot the newer popup just
+/// installed; doing so would swallow the next selection and the command
+/// would return `None`. The generation tag lets each call clean up only
+/// its own slot. (Symptom before the tag: open a menu, dismiss it, then the
+/// very next menu does nothing.)
 pub struct ContextMenuState {
-    pub pending: std::sync::Mutex<Option<oneshot::Sender<String>>>,
+    pub pending: std::sync::Mutex<Option<(u64, oneshot::Sender<String>)>>,
+    next_generation: AtomicU64,
 }
 
 impl ContextMenuState {
     pub fn new() -> Self {
         Self {
             pending: std::sync::Mutex::new(None),
+            next_generation: AtomicU64::new(0),
         }
+    }
+
+    /// Allocate a unique generation id for a new popup.
+    fn next_gen(&self) -> u64 {
+        self.next_generation.fetch_add(1, Ordering::Relaxed)
     }
 }
 
@@ -250,7 +262,8 @@ pub async fn show_context_menu(
     // the corresponding await over there will receive a closed
     // channel and convert it to `None`.
     let (tx, rx) = oneshot::channel::<String>();
-    *state.pending.lock().expect("context menu state poisoned") = Some(tx);
+    let generation = state.next_gen();
+    *state.pending.lock().expect("context menu state poisoned") = Some((generation, tx));
 
     // Aperio is a single-window app; the main window is always
     // present. The menu API wants the lower-level `Window` (the
@@ -279,21 +292,87 @@ pub async fn show_context_menu(
     // task could leak forever after a quiet dismiss.
     let result = match tokio::time::timeout(Duration::from_secs(60), rx).await {
         Ok(Ok(id)) => Some(id),
-        // Closed channel (Ok(Err(_))) or timeout (Err(_)) — either
-        // way the user didn't pick. Clean up the sender slot so the
-        // next popup starts fresh.
-        _ => {
-            state
-                .pending
-                .lock()
-                .expect("context menu state poisoned")
-                .take();
-            None
-        }
+        // Closed channel (Ok(Err(_))) or timeout (Err(_)) — either way this
+        // call didn't get a selection.
+        _ => None,
     };
+    // Clear the slot only if it is still OURS. A dismissed popup fires no
+    // menu event, so this call may only have woken because a NEWER popup
+    // replaced (and dropped) our sender — taking unconditionally here would
+    // rip out that newer popup's sender, and its selection would never be
+    // delivered (the "dismiss a menu, the next one does nothing" bug).
+    {
+        let mut guard = state.pending.lock().expect("context menu state poisoned");
+        if matches!(guard.as_ref(), Some((g, _)) if *g == generation) {
+            guard.take();
+        }
+    }
     // TEMP diagnostics (sidebar members "nothing happens" investigation):
     // what id did the native menu hand back? eprintln shares the process
     // stderr so it surfaces in the dev terminal.
     eprintln!("[aperio-diag] show_context_menu resolved -> {result:?}");
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Reproduces the "dismiss a menu, the next one does nothing" bug at the
+    /// state-machine level: a stale popup that woke up (its sender dropped
+    /// by a newer popup) must clean up ONLY its own slot, leaving the newer
+    /// popup's sender intact so `on_menu_event` can still deliver its pick.
+    #[test]
+    fn stale_popup_cleanup_keeps_a_newer_popups_sender() {
+        let state = ContextMenuState::new();
+
+        // Popup A installs its sender (then gets dismissed → no event).
+        let gen_a = state.next_gen();
+        let (tx_a, _rx_a) = oneshot::channel::<String>();
+        *state.pending.lock().unwrap() = Some((gen_a, tx_a));
+
+        // Popup B supersedes A: installing B drops tx_a, which would wake
+        // A's awaiting command.
+        let gen_b = state.next_gen();
+        let (tx_b, mut rx_b) = oneshot::channel::<String>();
+        *state.pending.lock().unwrap() = Some((gen_b, tx_b));
+        assert_ne!(gen_a, gen_b);
+
+        // A wakes and runs its generation-guarded cleanup — must be a no-op
+        // because the slot now belongs to B.
+        {
+            let mut guard = state.pending.lock().unwrap();
+            if matches!(guard.as_ref(), Some((g, _)) if *g == gen_a) {
+                guard.take();
+            }
+        }
+
+        // B's sender survives, so a selection still reaches its receiver.
+        {
+            let mut guard = state.pending.lock().unwrap();
+            let Some((_, tx)) = guard.take() else {
+                panic!("newer popup's sender was evicted by the stale one");
+            };
+            tx.send("members".to_string()).expect("receiver alive");
+        }
+        assert_eq!(rx_b.try_recv().ok(), Some("members".to_string()));
+    }
+
+    /// The ordinary path: a popup that is still the current one cleans up
+    /// its own slot on timeout/close so it doesn't linger.
+    #[test]
+    fn current_popup_cleans_up_its_own_slot() {
+        let state = ContextMenuState::new();
+        let generation = state.next_gen();
+        let (tx, _rx) = oneshot::channel::<String>();
+        *state.pending.lock().unwrap() = Some((generation, tx));
+
+        {
+            let mut guard = state.pending.lock().unwrap();
+            if matches!(guard.as_ref(), Some((g, _)) if *g == generation) {
+                guard.take();
+            }
+        }
+        assert!(state.pending.lock().unwrap().is_none());
+    }
 }
