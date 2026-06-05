@@ -700,7 +700,12 @@ export function Sidebar() {
         // the user staring at a rename input they can't type into.
         startEdit(editKind, leaf.containerId, leaf.name);
       } else if (selected === 'members') {
-        setRestoreFocusToTree(true);
+        // The members dialog grabs focus on open, and DialogState.close()
+        // restores focus to the row that triggered it — so DON'T restore
+        // tree-focus here. The tree-restore effect wins focus races (see
+        // the rename + task-delete-confirm branches), so doing both would
+        // yank focus straight back out of the just-opened modal, leaving a
+        // screen-reader user hearing no change at all.
         const caps = taskLists.find(
           (l) => l.id === leaf.containerId,
         )?.task_capabilities;
@@ -720,6 +725,21 @@ export function Sidebar() {
           if (leaf.kind === 'calendars') await refreshCalendars();
           else if (leaf.kind === 'tasks') await refreshTaskLists();
           else await refreshContactLists();
+          // Recoloring is silent for a screen-reader user — only the swatch
+          // changes — so confirm the result out loud.
+          const labelName = labelId
+            ? colorLabels.find((cl) => cl.id === labelId)?.name
+            : null;
+          announce(
+            labelName
+              ? t('sidebar.menu.colorSetAnnouncement', {
+                  name: leaf.name,
+                  color: labelName,
+                })
+              : t('sidebar.menu.colorClearedAnnouncement', {
+                  name: leaf.name,
+                }),
+          );
         } catch (err) {
           // eslint-disable-next-line no-console
           console.warn('set container color failed', err);

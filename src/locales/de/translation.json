@@ -1308,6 +1308,8 @@
       "members": "Mitglieder verwalten …",
       "color": "Farbe",
       "colorNone": "Keine Farbe",
+      "colorSetAnnouncement": "Farbe von „{{name}}“ auf {{color}} gesetzt.",
+      "colorClearedAnnouncement": "Farbe von „{{name}}“ entfernt.",
       "reparentedAnnouncement": "„{{name}}\" wurde unter „{{parent}}\" verschoben.",
       "reparentedTopAnnouncement": "„{{name}}\" wurde auf die oberste Ebene verschoben."
     },

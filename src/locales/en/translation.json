@@ -1308,6 +1308,8 @@
       "members": "Manage members …",
       "color": "Color",
       "colorNone": "No color",
+      "colorSetAnnouncement": "Set color of “{{name}}” to {{color}}.",
+      "colorClearedAnnouncement": "Removed color of “{{name}}”.",
       "reparentedAnnouncement": "Moved \"{{name}}\" under \"{{parent}}\".",
       "reparentedTopAnnouncement": "Moved \"{{name}}\" to the top level."
     },
