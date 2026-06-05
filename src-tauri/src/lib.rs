@@ -727,6 +727,7 @@ pub fn run() {
             tray::tray_available,
             tray::request_window_close,
             tray::request_window_minimize,
+            tray::set_tray_labels,
         ])
         .setup(move |app| {
             // Spawn the reminder scheduler on the Tauri/tokio runtime

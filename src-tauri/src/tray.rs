@@ -14,6 +14,8 @@
 //! reports `available = false`, the Settings toggles disable themselves,
 //! and close/minimize fall back to their normal behaviour.
 
+use std::sync::Mutex;
+
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
@@ -36,6 +38,12 @@ const MAIN_WINDOW: &str = "main";
 /// Settings gate.
 pub struct TrayHandles {
     pub available: bool,
+    /// The menu-item handles, kept so the frontend can push localized labels
+    /// onto them (via [`set_tray_labels`]) once i18n is up and on every
+    /// language change. `None` when no tray was built. muda menu items are
+    /// shared handles, so re-labelling these updates the live menu.
+    show: Mutex<Option<MenuItem<Wry>>>,
+    quit: Mutex<Option<MenuItem<Wry>>>,
     _icon: Option<TrayIcon<Wry>>,
 }
 
@@ -43,8 +51,10 @@ pub struct TrayHandles {
 /// when the platform/desktop has no tray.
 pub fn build(app: &AppHandle) -> TrayHandles {
     match try_build(app) {
-        Ok(icon) => TrayHandles {
+        Ok((icon, show, quit)) => TrayHandles {
             available: true,
+            show: Mutex::new(Some(show)),
+            quit: Mutex::new(Some(quit)),
             _icon: Some(icon),
         },
         Err(err) => {
@@ -55,19 +65,21 @@ pub fn build(app: &AppHandle) -> TrayHandles {
             );
             TrayHandles {
                 available: false,
+                show: Mutex::new(None),
+                quit: Mutex::new(None),
                 _icon: None,
             }
         }
     }
 }
 
-fn try_build(app: &AppHandle) -> tauri::Result<TrayIcon<Wry>> {
-    // Labels are German: the app UI is German-only today (i18n `lng: 'de'`,
-    // no language switcher). If a switcher lands, push localised labels onto
-    // these items from the frontend via a small command instead of
-    // hard-coding them here.
-    let show = MenuItem::with_id(app, "tray-show", "Aperio anzeigen", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "tray-quit", "Beenden", true, None::<&str>)?;
+fn try_build(app: &AppHandle) -> tauri::Result<(TrayIcon<Wry>, MenuItem<Wry>, MenuItem<Wry>)> {
+    // Placeholder labels in the app's fallback language. The frontend pushes
+    // the localized labels via `set_tray_labels` as soon as i18n is ready
+    // (and again on every language change), so these are only visible in the
+    // brief window before the UI mounts.
+    let show = MenuItem::with_id(app, "tray-show", "Show Aperio", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "tray-quit", "Quit", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show, &quit])?;
 
     // Embed the icon so it doesn't depend on bundle config or a file next to
@@ -99,7 +111,7 @@ fn try_build(app: &AppHandle) -> tauri::Result<TrayIcon<Wry>> {
             }
         })
         .build(app)?;
-    Ok(tray)
+    Ok((tray, show, quit))
 }
 
 /// Reveal + focus the main window (un-hide from the tray).
@@ -128,6 +140,33 @@ pub fn pref_is_true(app: &AppHandle, key: &str) -> bool {
 #[tauri::command]
 pub fn tray_available(tray: State<'_, TrayHandles>) -> bool {
     tray.available
+}
+
+/// Push localized labels onto the tray menu items. The frontend calls this
+/// once i18n is ready and again whenever the language changes, so the tray
+/// menu follows the app language instead of the hard-coded placeholders.
+///
+/// Native menu mutation must happen on the main (UI) thread; Tauri commands
+/// run off it, so we hop via `run_on_main_thread`. No-op when there's no
+/// tray (the handles are `None`).
+#[tauri::command]
+pub fn set_tray_labels(app: AppHandle, show: String, quit: String) {
+    let target = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let tray = target.state::<TrayHandles>();
+        relabel(&tray.show, &show);
+        relabel(&tray.quit, &quit);
+    });
+}
+
+/// Set a tray menu item's text, locking its slot. No-op when the slot is
+/// empty (no tray) or the lock is poisoned.
+fn relabel(slot: &Mutex<Option<MenuItem<Wry>>>, text: &str) {
+    if let Ok(guard) = slot.lock() {
+        if let Some(item) = guard.as_ref() {
+            let _ = item.set_text(text);
+        }
+    }
 }
 
 /// Close button: hide to tray when `closeToTray` is on AND a tray exists;

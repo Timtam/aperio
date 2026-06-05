@@ -71,6 +71,10 @@
       "importError": "Der Ton konnte nicht importiert werden."
     }
   },
+  "tray": {
+    "show": "Aperio anzeigen",
+    "quit": "Beenden"
+  },
   "app": {
     "title": "Aperio",
     "unknownView": "Unbekannte Ansicht: {{view}}",

@@ -71,6 +71,10 @@
       "importError": "Couldn't import the sound."
     }
   },
+  "tray": {
+    "show": "Show Aperio",
+    "quit": "Quit"
+  },
   "app": {
     "title": "Aperio",
     "unknownView": "Unknown view: {{view}}",

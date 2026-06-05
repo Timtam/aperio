@@ -664,6 +664,12 @@ export const requestWindowClose = () =>
 export const requestWindowMinimize = () =>
   invoke<void>('request_window_minimize');
 
+/** Push localized labels onto the tray menu items. The frontend calls this
+ *  once i18n is ready and on every language change so the tray menu follows
+ *  the app language. No-op on platforms without a tray. */
+export const setTrayLabels = (show: string, quit: string) =>
+  invoke<void>('set_tray_labels', { show, quit });
+
 // ── Custom notification sounds (§14.4) ────────────────────────────────────
 
 /** A custom sound stored on disk, content-addressed by SHA-256. Only
