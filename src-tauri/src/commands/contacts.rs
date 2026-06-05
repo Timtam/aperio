@@ -55,12 +55,6 @@ pub async fn list_contact_lists(
     coord: State<'_, Arc<RefreshCoordinator>>,
     db: State<'_, DbHandle>,
 ) -> CommandResult<Vec<ContactListRow>> {
-    let cmd_start = std::time::Instant::now();
-    tracing::info!(
-        target: "aperio::startup",
-        total_ms = crate::startup_elapsed_ms(),
-        "list_contact_lists command invoked",
-    );
     let registry = Arc::clone(&registry);
     let cache = Arc::clone(&cache);
     let coord = Arc::clone(&coord);
@@ -76,7 +70,7 @@ pub async fn list_contact_lists(
     let shared = db.shared();
     let repo = crate::overrides::OverridesRepo::new(&shared);
     crate::overrides::apply_color_to_contact_lists(&repo, &mut out);
-    let rows: Vec<ContactListRow> = out
+    Ok(out
         .into_iter()
         .map(|list| {
             let account_id = registry
@@ -87,15 +81,7 @@ pub async fn list_contact_lists(
                 account_id,
             }
         })
-        .collect();
-    tracing::info!(
-        target: "aperio::startup",
-        elapsed_ms = cmd_start.elapsed().as_millis(),
-        total_ms = crate::startup_elapsed_ms(),
-        contact_lists = rows.len(),
-        "list_contact_lists command returning",
-    );
-    Ok(rows)
+        .collect())
 }
 
 /// Cache-first aggregation of every external account's contact lists.
