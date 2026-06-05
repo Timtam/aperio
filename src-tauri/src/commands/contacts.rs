@@ -112,52 +112,36 @@ async fn external_contact_lists_swr(
             .get_sync_state(&account, SyncScope::ContactLists, "")
             .ok()
             .flatten();
-        if cache_swr::has_snapshot(&state) {
-            let cached = cache.read_contact_lists(&account).unwrap_or_default();
-            for l in &cached {
-                registry.note_contact_list_route(&l.id, &account);
-            }
-            if cache_swr::is_stale(&state, cache_swr::SWR_TTL_SECS) {
-                let adapter_bg = Arc::clone(&adapter);
-                let reg = Arc::clone(registry);
-                let acc = account.clone();
-                cache_swr::spawn_refresh(
-                    app.clone(),
-                    Arc::clone(cache),
-                    Arc::clone(coord),
-                    SyncScope::ContactLists,
-                    account.clone(),
-                    String::new(),
-                    move || async move { adapter_bg.list_contact_lists().await },
-                    move |c, lists: &[ContactList]| {
-                        for l in lists {
-                            reg.note_contact_list_route(&l.id, &acc);
-                        }
-                        c.replace_contact_lists(&acc, lists)
-                    },
-                );
-            }
-            out.extend(cached);
-        } else {
-            match adapter.list_contact_lists().await {
-                Ok(lists) => {
-                    for l in &lists {
-                        registry.note_contact_list_route(&l.id, &account);
-                    }
-                    let _ = cache.replace_contact_lists(&account, &lists);
-                    out.extend(lists);
-                }
-                Err(err) => {
-                    let _ =
-                        cache.mark_error(&account, SyncScope::ContactLists, "", &err.to_string());
-                    let cached = cache.read_contact_lists(&account).unwrap_or_default();
-                    for l in &cached {
-                        registry.note_contact_list_route(&l.id, &account);
-                    }
-                    out.extend(cached);
-                }
-            }
+        // Cache-first, never blocking — see `external_calendars_swr` for
+        // the rationale. Serve the snapshot (empty on first run) and spawn a
+        // deduplicated background refresh when missing or stale; the
+        // resulting `cache-updated` re-runs this listing and re-fetches
+        // contacts once it lands.
+        let cached = cache.read_contact_lists(&account).unwrap_or_default();
+        for l in &cached {
+            registry.note_contact_list_route(&l.id, &account);
         }
+        if cache_swr::is_stale(&state, cache_swr::SWR_TTL_SECS) {
+            let adapter_bg = Arc::clone(&adapter);
+            let reg = Arc::clone(registry);
+            let acc = account.clone();
+            cache_swr::spawn_refresh(
+                app.clone(),
+                Arc::clone(cache),
+                Arc::clone(coord),
+                SyncScope::ContactLists,
+                account.clone(),
+                String::new(),
+                move || async move { adapter_bg.list_contact_lists().await },
+                move |c, lists: &[ContactList]| {
+                    for l in lists {
+                        reg.note_contact_list_route(&l.id, &acc);
+                    }
+                    c.replace_contact_lists(&acc, lists)
+                },
+            );
+        }
+        out.extend(cached);
     }
     out
 }

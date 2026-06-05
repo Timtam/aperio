@@ -71,7 +71,7 @@ export function __resetEventsCacheForTests(): void {
 }
 
 export function useEvents(range: { start: Date; end: Date }) {
-  const { selectedCalendarIds, calendars, loading: storeLoading } =
+  const { selectedCalendarIds, calendars, calendarsLoading } =
     useCalendarStore();
   const { dataVersion } = useDialogState();
   const { focusedCalendarId } = useViewState();
@@ -124,11 +124,13 @@ export function useEvents(range: { start: Date; end: Date }) {
       setLoading(true);
     }
 
-    // Defer the actual network call until the calendar catalog is
-    // ready. The cache short-circuit above already runs unconditionally
-    // — having stale events on screen is fine while the store still
-    // settles.
-    if (storeLoading) return;
+    // Defer the actual network call until the CALENDAR catalog is ready
+    // (not the whole store) — events only need calendars; gating on the
+    // aggregate would make a slow task-list or contacts source delay the
+    // calendar view too. The cache short-circuit above already runs
+    // unconditionally — having stale events on screen is fine while the
+    // store still settles.
+    if (calendarsLoading) return;
 
     const ids = effectiveIds;
     if (ids.length === 0) {
@@ -207,7 +209,7 @@ export function useEvents(range: { start: Date; end: Date }) {
     // the Set ref would re-fetch on every CalendarStore update even
     // when no calendar actually changed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storeLoading, key, dataVersion]);
+  }, [calendarsLoading, key, dataVersion]);
 
   // Lookup table: calendar id → calendar object. Cheap, useful when a
   // view wants to colour-code or label events by source.

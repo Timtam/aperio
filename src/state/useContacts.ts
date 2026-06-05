@@ -51,7 +51,8 @@ export function __resetContactsCacheForTests(): void {
 }
 
 export function useContacts() {
-  const { contactLists, selectedContactListIds } = useCalendarStore();
+  const { contactLists, selectedContactListIds, contactListsLoading } =
+    useCalendarStore();
   const { dataVersion } = useDialogState();
 
   // The cache key folds in the *selected* subset of lists rather
@@ -83,6 +84,14 @@ export function useContacts() {
       setContacts(cached);
       setLoading(false);
     }
+
+    // Wait for the CONTACT-LIST catalog before fetching (the gate the other
+    // data hooks use, which this one was missing). Without it, the first
+    // render — while the catalog is still loading and the selection is
+    // therefore empty — would cache an empty result and flash "no contacts"
+    // before the real fetch. Contacts only need their own catalog, so this
+    // doesn't couple them to a slow calendar or task source.
+    if (contactListsLoading) return;
 
     const ids = contactLists
       .map((l) => l.id)
@@ -130,7 +139,7 @@ export function useContacts() {
     // `idsKey` is the stable projection, same trick the other data
     // hooks use.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [idsKey, dataVersion]);
+  }, [contactListsLoading, idsKey, dataVersion]);
 
   const contactListById = useMemo(() => {
     const map = new Map<string, (typeof contactLists)[number]>();

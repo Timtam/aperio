@@ -90,6 +90,20 @@ the [Plugin Developer book](/aperio/plugin-dev/abi-reference.html).
   app paints instantly on launch, then revalidates in the background
   (stale-while-revalidate). Provider mutations go out through the adapter;
   the provider remains the source of truth.
+  - Both the **item** reads (`get_events`/`get_tasks`/`get_contacts`) **and
+    the catalog** reads (`list_calendars`/`list_task_lists`/
+    `list_contact_lists`) are non-blocking: a cold snapshot is served as the
+    (possibly empty) cached rows plus one deduplicated background refresh —
+    never an inline `await` on the network. A slow provider therefore can't
+    gate first paint. When the refresh lands it registers the
+    container→account routes and emits `cache-updated`; `CacheSyncListener`
+    then re-runs the affected catalog *and* invalidates the item hooks so
+    rows that couldn't be routed on the cold paint fill in.
+  - On the frontend, `CalendarStore` exposes a **per-source** loading flag
+    (`calendarsLoading`/`taskListsLoading`/`contactListsLoading`), and each
+    data hook gates on the one catalog it needs (events → calendars, tasks →
+    task lists, contacts → contact lists). A slow calendar enumeration no
+    longer holds the task or contacts view's first paint.
 
 All persisted files go through `paths::resolve_data_dir()` so the app
 stays portable (a `data/` next to the executable when present, otherwise

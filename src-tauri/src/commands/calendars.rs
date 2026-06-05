@@ -216,51 +216,44 @@ async fn external_calendars_swr(
             .get_sync_state(&account, SyncScope::Calendars, "")
             .ok()
             .flatten();
-        if cache_swr::has_snapshot(&state) {
-            let cached = cache.read_calendars(&account).unwrap_or_default();
-            for c in &cached {
-                registry.note_calendar_route(&c.id, &account);
-            }
-            if cache_swr::is_stale(&state, cache_swr::SWR_TTL_SECS) {
-                let adapter_bg = Arc::clone(&adapter);
-                let reg = Arc::clone(registry);
-                let acc = account.clone();
-                cache_swr::spawn_refresh(
-                    app.clone(),
-                    Arc::clone(cache),
-                    Arc::clone(coord),
-                    SyncScope::Calendars,
-                    account.clone(),
-                    String::new(),
-                    move || async move { adapter_bg.list_calendars().await },
-                    move |c, cals: &[Calendar]| {
-                        for cal in cals {
-                            reg.note_calendar_route(&cal.id, &acc);
-                        }
-                        c.replace_calendars(&acc, cals)
-                    },
-                );
-            }
-            out.extend(cached);
-        } else {
-            match adapter.list_calendars().await {
-                Ok(cals) => {
-                    for c in &cals {
-                        registry.note_calendar_route(&c.id, &account);
-                    }
-                    let _ = cache.replace_calendars(&account, &cals);
-                    out.extend(cals);
-                }
-                Err(err) => {
-                    let _ = cache.mark_error(&account, SyncScope::Calendars, "", &err.to_string());
-                    let cached = cache.read_calendars(&account).unwrap_or_default();
-                    for c in &cached {
-                        registry.note_calendar_route(&c.id, &account);
-                    }
-                    out.extend(cached);
-                }
-            }
+        // Cache-first and NEVER blocking — the catalog read must not await
+        // the network at startup, or a single slow provider (a CalDAV
+        // calendar-home PROPFIND, an EWS folder walk) gates the whole UI:
+        // `list_calendars` feeds the frontend's `storeLoading`, which in
+        // turn holds `useEvents`/`useTasks` from fetching anything. We serve
+        // whatever the snapshot holds (empty on a true first run) and, when
+        // it's missing or stale, spawn ONE deduplicated background refresh.
+        // The refresh's write closure registers the routes and emits
+        // `cache-updated`, which re-runs this listing (now warm) and
+        // re-fetches items — so external calendars fill in a beat later
+        // instead of blocking first paint. `is_stale` is true for a cold
+        // snapshot (`last_refreshed_at` is None), so the first run refreshes
+        // exactly once.
+        let cached = cache.read_calendars(&account).unwrap_or_default();
+        for c in &cached {
+            registry.note_calendar_route(&c.id, &account);
         }
+        if cache_swr::is_stale(&state, cache_swr::SWR_TTL_SECS) {
+            let adapter_bg = Arc::clone(&adapter);
+            let reg = Arc::clone(registry);
+            let acc = account.clone();
+            cache_swr::spawn_refresh(
+                app.clone(),
+                Arc::clone(cache),
+                Arc::clone(coord),
+                SyncScope::Calendars,
+                account.clone(),
+                String::new(),
+                move || async move { adapter_bg.list_calendars().await },
+                move |c, cals: &[Calendar]| {
+                    for cal in cals {
+                        reg.note_calendar_route(&cal.id, &acc);
+                    }
+                    c.replace_calendars(&acc, cals)
+                },
+            );
+        }
+        out.extend(cached);
     }
     out
 }

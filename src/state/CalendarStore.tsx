@@ -126,7 +126,17 @@ export interface CalendarStoreState {
   accounts: Account[];
   refreshAccounts: () => Promise<void>;
 
+  /** "Any catalog still doing its initial load" — the aggregate of the
+   *  three per-type flags below. Kept for general consumers. */
   loading: boolean;
+  /** Per-container-type initial-load flags. Each data hook gates on the
+   *  ONE catalog it actually needs (events → calendars, tasks → task
+   *  lists, contacts → contact lists) so a slow catalog from one source
+   *  never blocks an unrelated view's first paint. This is what stops the
+   *  task list from waiting seconds on a slow calendar enumeration. */
+  calendarsLoading: boolean;
+  taskListsLoading: boolean;
+  contactListsLoading: boolean;
 }
 
 
@@ -184,7 +194,13 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
         : null,
     };
   });
-  const [loading, setLoading] = useState(true);
+  // Per-source initial-load flags (see CalendarStoreState). Each flips
+  // independently the moment its own catalog read returns, so a slow
+  // provider on one container type can't gate another type's first paint.
+  const [calendarsLoading, setCalendarsLoading] = useState(true);
+  const [taskListsLoading, setTaskListsLoading] = useState(true);
+  const [contactListsLoading, setContactListsLoading] = useState(true);
+  const loading = calendarsLoading || taskListsLoading || contactListsLoading;
 
   const refreshCalendars = useCallback(async () => {
     const list = await listCalendars();
@@ -231,22 +247,28 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
     return secs;
   }, []);
 
-  // Initial load: pull both lists in parallel, then drop the loading
-  // flag. The store doesn't auto-refresh on dialog close (we don't yet
-  // have one of our own — and creating containers happens through the
-  // Sidebar, which calls refresh* directly). When the dialog system
-  // grows a container-management dialog, it can call these helpers too.
+  // Initial load: pull every catalog in parallel and drop EACH type's
+  // loading flag the moment its own read returns — not after the slowest
+  // of all of them. That decoupling is the point: the backend serves each
+  // catalog from its snapshot without blocking on the network (a cold
+  // snapshot refreshes in the background), so a slow calendar source no
+  // longer holds the task list (or contacts) hostage at startup. The store
+  // doesn't auto-refresh on dialog close — container creation happens
+  // through the Sidebar, which calls refresh* directly, and CacheSyncListener
+  // re-runs these when a background catalog refresh lands.
   useEffect(() => {
     let cancelled = false;
-    Promise.allSettled([
-      refreshCalendars(),
-      refreshTaskLists(),
-      refreshContactLists(),
-      refreshColorLabels(),
-      refreshAccounts(),
-    ]).then(() => {
-      if (!cancelled) setLoading(false);
+    void refreshCalendars().finally(() => {
+      if (!cancelled) setCalendarsLoading(false);
     });
+    void refreshTaskLists().finally(() => {
+      if (!cancelled) setTaskListsLoading(false);
+    });
+    void refreshContactLists().finally(() => {
+      if (!cancelled) setContactListsLoading(false);
+    });
+    void refreshColorLabels();
+    void refreshAccounts();
     return () => {
       cancelled = true;
     };
@@ -342,6 +364,9 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
       accounts,
       refreshAccounts,
       loading,
+      calendarsLoading,
+      taskListsLoading,
+      contactListsLoading,
     }),
     [
       resolvedCalendars,
@@ -363,6 +388,9 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
       accounts,
       refreshAccounts,
       loading,
+      calendarsLoading,
+      taskListsLoading,
+      contactListsLoading,
     ],
   );
 

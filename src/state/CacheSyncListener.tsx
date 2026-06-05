@@ -62,11 +62,22 @@ export function CacheSyncListener(): null {
       const scopes = new Set(pending);
       pending.clear();
       const h = handlers.current;
+      const listingChanged =
+        scopes.has('calendars') ||
+        scopes.has('task_lists') ||
+        scopes.has('contact_lists');
       if (scopes.has('calendars')) void h.refreshCalendars();
       if (scopes.has('task_lists')) void h.refreshTaskLists();
       if (scopes.has('contact_lists')) void h.refreshContactLists();
-      // Any item-scope change invalidates the SWR data hooks once.
+      // Item-scope changes invalidate the SWR data hooks. A *listing*-scope
+      // change does too: when a cold catalog finishes its background refresh
+      // it registers the container→account routes for the first time, so the
+      // item hooks must re-fetch to pick up external events/tasks/contacts
+      // that couldn't be routed (and so came back empty) on the cold first
+      // paint. Without this the sidebar would fill but the view would stay
+      // blank until an unrelated refresh nudged it.
       if (
+        listingChanged ||
         scopes.has('events') ||
         scopes.has('tasks') ||
         scopes.has('contacts')

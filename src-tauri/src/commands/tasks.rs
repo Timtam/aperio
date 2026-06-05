@@ -286,51 +286,37 @@ async fn external_task_lists_swr(
             .get_sync_state(&account, SyncScope::TaskLists, "")
             .ok()
             .flatten();
-        if cache_swr::has_snapshot(&state) {
-            let cached = cache.read_task_lists(&account).unwrap_or_default();
-            for l in &cached {
-                registry.note_task_list_route(&l.id, &account);
-            }
-            if cache_swr::is_stale(&state, cache_swr::SWR_TTL_SECS) {
-                let adapter_bg = Arc::clone(&adapter);
-                let reg = Arc::clone(registry);
-                let acc = account.clone();
-                cache_swr::spawn_refresh(
-                    app.clone(),
-                    Arc::clone(cache),
-                    Arc::clone(coord),
-                    SyncScope::TaskLists,
-                    account.clone(),
-                    String::new(),
-                    move || async move { adapter_bg.list_task_lists().await },
-                    move |c, lists: &[TaskList]| {
-                        for l in lists {
-                            reg.note_task_list_route(&l.id, &acc);
-                        }
-                        c.replace_task_lists(&acc, lists)
-                    },
-                );
-            }
-            out.extend(cached);
-        } else {
-            match adapter.list_task_lists().await {
-                Ok(lists) => {
-                    for l in &lists {
-                        registry.note_task_list_route(&l.id, &account);
-                    }
-                    let _ = cache.replace_task_lists(&account, &lists);
-                    out.extend(lists);
-                }
-                Err(err) => {
-                    let _ = cache.mark_error(&account, SyncScope::TaskLists, "", &err.to_string());
-                    let cached = cache.read_task_lists(&account).unwrap_or_default();
-                    for l in &cached {
-                        registry.note_task_list_route(&l.id, &account);
-                    }
-                    out.extend(cached);
-                }
-            }
+        // Cache-first, never blocking — see `external_calendars_swr` for
+        // the rationale (a slow provider's catalog enumeration must not gate
+        // `storeLoading` and therefore the whole UI at startup). Serve the
+        // snapshot (empty on first run) and spawn a deduplicated background
+        // refresh when missing or stale; `cache-updated` re-runs this listing
+        // and re-fetches items once it lands.
+        let cached = cache.read_task_lists(&account).unwrap_or_default();
+        for l in &cached {
+            registry.note_task_list_route(&l.id, &account);
         }
+        if cache_swr::is_stale(&state, cache_swr::SWR_TTL_SECS) {
+            let adapter_bg = Arc::clone(&adapter);
+            let reg = Arc::clone(registry);
+            let acc = account.clone();
+            cache_swr::spawn_refresh(
+                app.clone(),
+                Arc::clone(cache),
+                Arc::clone(coord),
+                SyncScope::TaskLists,
+                account.clone(),
+                String::new(),
+                move || async move { adapter_bg.list_task_lists().await },
+                move |c, lists: &[TaskList]| {
+                    for l in lists {
+                        reg.note_task_list_route(&l.id, &acc);
+                    }
+                    c.replace_task_lists(&acc, lists)
+                },
+            );
+        }
+        out.extend(cached);
     }
     out
 }

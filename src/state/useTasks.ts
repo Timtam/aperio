@@ -47,7 +47,7 @@ export function __resetTasksCacheForTests(): void {
 }
 
 export function useTasks() {
-  const { selectedTaskListIds, taskLists, loading: storeLoading } =
+  const { selectedTaskListIds, taskLists, taskListsLoading } =
     useCalendarStore();
   const { dataVersion } = useDialogState();
 
@@ -76,8 +76,10 @@ export function useTasks() {
       setLoading(true);
     }
 
-    // Wait for the task-list catalog before deciding anything else.
-    if (storeLoading) return;
+    // Wait only for the TASK-LIST catalog before deciding anything else —
+    // not the whole store. Tasks don't need calendars or contacts, so a
+    // slow calendar enumeration must not delay the task view's first paint.
+    if (taskListsLoading) return;
 
     const ids = [...selectedTaskListIds];
     if (ids.length === 0) {
@@ -110,7 +112,7 @@ export function useTasks() {
     // selectedTaskListIds intentionally omitted — `idsKey` is the
     // stable projection.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storeLoading, idsKey, dataVersion]);
+  }, [taskListsLoading, idsKey, dataVersion]);
 
   const taskListById = useMemo(() => {
     const map = new Map<string, (typeof taskLists)[number]>();
