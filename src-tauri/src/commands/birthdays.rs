@@ -42,6 +42,7 @@ use cal_core::{Calendar, ColorSource, ContactsFeature, ContainerColor, DateRange
 use chrono::{Datelike, NaiveDate, TimeZone, Utc};
 use std::sync::Arc;
 
+use crate::cache::CacheStore;
 use crate::registry::{AdapterRegistry, LOCAL_ID};
 
 /// Prefix every synthesised birthday calendar id carries. The
@@ -84,15 +85,23 @@ pub fn is_birthday_calendar_id(calendar_id: &str) -> bool {
 /// account_id)` pairs so the caller can stamp the registry's
 /// account-routing alongside the listing.
 ///
-/// Per-adapter errors are logged and skipped — same tolerance the
-/// real `list_calendars` aggregator uses.
+/// External contacts are read from the host SNAPSHOT CACHE, never the
+/// adapter: a birthday layer is a convenience derived from already-synced
+/// contacts and must never trigger a network fetch from inside
+/// `list_calendars`. Probing each external book over the wire — the EWS
+/// Global Address List alone is ~2000 contacts behind a slow ResolveNames
+/// walk — would block the whole calendar listing for tens of seconds on
+/// every startup, even though the calendars themselves are cached. The
+/// layer simply reflects whatever contacts are in the cache; it updates on
+/// the next listing once a contacts background refresh repopulates it.
 pub async fn list_birthday_calendars(
     local: &LocalAdapter,
     registry: &Arc<AdapterRegistry>,
+    cache: &Arc<CacheStore>,
 ) -> Vec<(Calendar, String)> {
     let mut out = Vec::new();
 
-    // Local adapter — always present.
+    // Local adapter — in-process SQLite, cheap to read directly.
     match local.list_contact_lists().await {
         Ok(lists) => {
             for list in lists {
@@ -109,23 +118,14 @@ pub async fn list_birthday_calendars(
         }
     }
 
-    // External adapters that speak ContactsFeature. Snapshot the
-    // registry first so we don't hold the read-lock across awaits.
-    let externals = registry.snapshot_contact_adapters();
-    for (account_id, adapter) in externals {
-        let lists = match adapter.list_contact_lists().await {
-            Ok(l) => l,
-            Err(err) => {
-                tracing::warn!(
-                    ?err,
-                    account_id = %account_id,
-                    "birthday: external list_contact_lists failed",
-                );
-                continue;
-            }
-        };
+    // External contact accounts — read the cached lists + contacts only.
+    for (account_id, _adapter) in registry.snapshot_contact_adapters() {
+        let lists = cache.read_contact_lists(&account_id).unwrap_or_default();
         for list in lists {
-            if external_list_has_birthdays(adapter.as_ref(), &list.id).await {
+            let contacts = cache
+                .read_contacts(&account_id, &list.id)
+                .unwrap_or_default();
+            if contacts.iter().any(|c| c.birthday.is_some()) {
                 out.push((
                     synthesise_calendar(&list.id, &list.name),
                     account_id.clone(),
@@ -144,15 +144,17 @@ pub async fn list_birthday_calendars(
 pub async fn synthesise_birthday_events(
     local: &LocalAdapter,
     registry: &Arc<AdapterRegistry>,
+    cache: &Arc<CacheStore>,
     synthesised_calendar_id: &str,
     range: DateRange,
 ) -> Option<Vec<Event>> {
     let list_id = underlying_contact_list_id(synthesised_calendar_id)?;
-    // The list id alone tells us where to look — every contact
-    // list id is unique across local + external adapters because
-    // each adapter mints its own (UUID for local, server URL for
-    // CalDAV / addressbooks). Try local first, then walk the
-    // registry's contact adapters.
+    // The list id alone tells us where to look — every contact list id is
+    // unique across local + external adapters because each mints its own
+    // (UUID for local, server URL for CalDAV / addressbooks). Try the local
+    // adapter first (in-process), then the host snapshot CACHE for external
+    // books — never the adapter, so rendering a birthday layer can't block
+    // on a network contact fetch.
     if let Ok(contacts) = local.get_contacts(list_id).await {
         if !contacts.is_empty() {
             return Some(events_for_contacts(
@@ -162,22 +164,33 @@ pub async fn synthesise_birthday_events(
             ));
         }
     }
-    let externals = registry.snapshot_contact_adapters();
-    for (_account_id, adapter) in externals {
-        if let Ok(contacts) = adapter.get_contacts(list_id).await {
-            if !contacts.is_empty() {
-                return Some(events_for_contacts(
-                    contacts,
-                    synthesised_calendar_id,
-                    range,
-                ));
-            }
+    // Resolve the owning account via the route map; fall back to scanning
+    // every contact account's cache if the route isn't registered yet.
+    let accounts: Vec<String> = registry
+        .account_for_contact_list(list_id)
+        .map(|a| vec![a])
+        .unwrap_or_else(|| {
+            registry
+                .snapshot_contact_adapters()
+                .into_iter()
+                .map(|(account_id, _adapter)| account_id)
+                .collect()
+        });
+    for account_id in accounts {
+        let contacts = cache
+            .read_contacts(&account_id, list_id)
+            .unwrap_or_default();
+        if !contacts.is_empty() {
+            return Some(events_for_contacts(
+                contacts,
+                synthesised_calendar_id,
+                range,
+            ));
         }
     }
-    // List exists but has no contacts (or every adapter failed).
-    // Empty Vec rather than None so the caller treats this as
-    // "successful read with zero results" — the typical empty
-    // calendar UX.
+    // List exists but has no cached contacts. Empty Vec rather than None so
+    // the caller treats this as "successful read with zero results" — the
+    // typical empty calendar UX.
     Some(Vec::new())
 }
 
@@ -203,13 +216,6 @@ fn synthesise_calendar(contact_list_id: &str, list_name: &str) -> Calendar {
 }
 
 async fn list_has_birthdays(adapter: &LocalAdapter, list_id: &str) -> bool {
-    match adapter.get_contacts(list_id).await {
-        Ok(contacts) => contacts.iter().any(|c| c.birthday.is_some()),
-        Err(_) => false,
-    }
-}
-
-async fn external_list_has_birthdays(adapter: &dyn ContactsFeature, list_id: &str) -> bool {
     match adapter.get_contacts(list_id).await {
         Ok(contacts) => contacts.iter().any(|c| c.birthday.is_some()),
         Err(_) => false,
