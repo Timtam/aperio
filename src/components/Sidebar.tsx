@@ -621,7 +621,10 @@ export function Sidebar() {
           }
           if (subItems.length > 0) {
             items.push({
-              id: 'reparent',
+              // `kind: 'submenu'` is required — see the colour submenu below.
+              // Without it the children are dropped and "Move under" returns
+              // the unhandled id 'reparent' and just closes the menu.
+              kind: 'submenu',
               label: t('sidebar.menu.moveUnder'),
               items: subItems,
             });
@@ -665,7 +668,12 @@ export function Sidebar() {
           })),
         ];
         items.push({
-          id: 'color',
+          // MUST be `kind: 'submenu'` — without it the request deserialises
+          // as a plain text item, the `items` are dropped, and clicking
+          // "Color" just returns the (unhandled) id 'color' and dismisses
+          // the menu. With the discriminator the host builds a real native
+          // submenu whose `color:*` children flow into the dispatch below.
+          kind: 'submenu',
           label: t('sidebar.menu.color'),
           items: colorItems,
         });
