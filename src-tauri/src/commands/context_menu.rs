@@ -307,10 +307,6 @@ pub async fn show_context_menu(
             guard.take();
         }
     }
-    // TEMP diagnostics (sidebar members "nothing happens" investigation):
-    // what id did the native menu hand back? eprintln shares the process
-    // stderr so it surfaces in the dev terminal.
-    eprintln!("[aperio-diag] show_context_menu resolved -> {result:?}");
     Ok(result)
 }
 
