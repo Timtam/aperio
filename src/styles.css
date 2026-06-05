@@ -1132,6 +1132,13 @@ button[aria-disabled='true'] {
   border-bottom: 0;
 }
 
+/* Inline rename input (F2 on a focused row) — fills the name column
+   without overflowing the grid track. */
+.accounts-list__rename-input {
+  width: 100%;
+  min-width: 0;
+}
+
 .accounts-list__item--focused {
   background: var(--color-bg-elevated);
   outline: 2px solid var(--focus-ring-color);

@@ -57,6 +57,14 @@ selben Anbieter (z. B. zwei Google-Konten). Jede Quelle erscheint in der
 Seitenleiste mit eigenem Namen und eigener Farbe und lässt sich einzeln
 ein- und ausblenden.
 
+### Konto umbenennen
+
+Den Anzeigenamen eines Kontos kannst du jederzeit ändern – entweder in
+**Einstellungen → Konten** (Eintrag wählen und **F2** drücken) oder über
+das **Kontextmenü der Konto-Zeile in der Seitenleiste** (Anwendungstaste →
+„Umbenennen"). Der neue Name wird zwischen deinen Geräten synchronisiert;
+auch das lokale Konto lässt sich so umbenennen.
+
 > **Screenreader-Hinweis:** In der Seitenleiste sind Konten, Kategorien
 > (Kalender / Aufgaben / Kontakte) und die einzelnen Listen als Baum
 > angeordnet. Mit den Pfeiltasten nach oben/unten bewegst du dich, mit

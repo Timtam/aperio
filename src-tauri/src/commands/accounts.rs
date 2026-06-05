@@ -798,6 +798,32 @@ pub async fn delete_account(
     Ok(())
 }
 
+/// Rename an account — change its user-visible `display_name`. Writes
+/// the new name to the local row and emits `AccountUpdated` so other
+/// synced devices pick it up (the applier upserts the row, leaving the
+/// account's calendars/lists/secrets untouched). The local account can
+/// be renamed too; only deletion is forbidden for it. Returns the
+/// updated row so the caller can refresh without a round-trip.
+#[tauri::command]
+pub async fn rename_account(
+    db: State<'_, DbHandle>,
+    event_log: State<'_, Arc<EventLogWriter>>,
+    id: String,
+    new_name: String,
+) -> CommandResult<Account> {
+    let trimmed = new_name.trim();
+    if trimmed.is_empty() {
+        return Err(CommandError {
+            code: "invalid_input",
+            message: "Account name must not be empty.".into(),
+        });
+    }
+    let shared = db.shared();
+    let account = AccountsRepo::new(&shared).rename(&id, trimmed)?;
+    event_log.append(SyncEvent::AccountUpdated(account_payload(&account)));
+    Ok(account)
+}
+
 impl From<AccountsError> for CommandError {
     fn from(err: AccountsError) -> Self {
         match err {

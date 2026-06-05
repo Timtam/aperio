@@ -582,6 +582,7 @@ pub fn run() {
             commands::reconnect_microsoft_account,
             commands::create_account,
             commands::delete_account,
+            commands::rename_account,
             commands::test_caldav_connection,
             commands::test_ical_feed,
             commands::test_ews_connection,

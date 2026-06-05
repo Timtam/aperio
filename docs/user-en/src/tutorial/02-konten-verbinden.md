@@ -54,6 +54,14 @@ several from the same provider (e.g. two Google accounts). Each source
 appears in the sidebar with its own name and color and can be shown or
 hidden individually.
 
+### Renaming an account
+
+You can change an account's display name at any time – either in
+**Settings → Accounts** (select the entry and press **F2**) or via the
+**account row's context menu in the sidebar** (Application key → "Rename").
+The new name syncs across your devices; the local account can be renamed
+this way too.
+
 > **Screen-reader note:** In the sidebar, accounts, categories (calendars /
 > tasks / contacts) and the individual lists form a tree. Move up and down
 > with the arrow keys; expand and collapse levels with left and right. Reach

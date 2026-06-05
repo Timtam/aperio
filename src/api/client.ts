@@ -420,6 +420,12 @@ export const createAccount = (request: CreateAccountRequest) =>
 export const deleteAccount = (id: string) =>
   invoke<void>('delete_account', { id });
 
+/** Rename an account (change its user-visible `display_name`). The new
+ *  name syncs to other devices via the event log. Returns the updated
+ *  row. The local account can be renamed too. */
+export const renameAccount = (id: string, newName: string) =>
+  invoke<Account>('rename_account', { id, newName });
+
 /** Adapter-specific CalDAV config JSON shape that lives in
  *  `accounts.config_json`. Mirrors the backend `CaldavAccountConfig`. */
 export interface CaldavConfig {

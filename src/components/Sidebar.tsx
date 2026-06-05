@@ -21,6 +21,7 @@ import {
   deleteContactList,
   deleteTaskList,
   isCommandError,
+  renameAccount,
   renameContactList,
   renameContainer,
   reparentTaskList,
@@ -75,7 +76,9 @@ interface ReparentDrag {
  * `commitEdit` branch cleanly without smuggling a contacts code
  * path through the override-aware `renameContainer`.
  */
-type LeafEditKind = ContainerKind | 'contact_list';
+// Despite the name, the inline-rename machinery also drives account
+// renames (a non-leaf row). `'account'` routes to `rename_account`.
+type LeafEditKind = ContainerKind | 'contact_list' | 'account';
 
 /**
  * Sidebar: tree view of accounts → sections (Calendars / Tasks) →
@@ -112,6 +115,7 @@ export function Sidebar() {
   const announce = useAnnouncer();
   const {
     accounts,
+    refreshAccounts,
     calendars,
     selectedCalendarIds,
     toggleCalendar,
@@ -241,7 +245,18 @@ export function Sidebar() {
         // the registry the same way `renameContainer` does for
         // calendars / tasks. An empty draft is rejected: clearing
         // a name has no local-override fallback to land in.
-        if (kind === 'contact_list') {
+        if (kind === 'account') {
+          // Accounts always store their name locally + sync it via the
+          // event log; there's no source round-trip and no empty-name
+          // fallback, so an empty draft is rejected.
+          if (trimmed === '') {
+            announce(t('sidebar.accountNameRequired'));
+            return;
+          }
+          await renameAccount(id, trimmed);
+          announce(t('sidebar.accountRenamed', { name: trimmed }));
+          await refreshAccounts();
+        } else if (kind === 'contact_list') {
           if (trimmed === '') {
             announce(t('sidebar.contactListNameRequired'));
             return;
@@ -291,6 +306,7 @@ export function Sidebar() {
       refreshCalendars,
       refreshTaskLists,
       refreshContactLists,
+      refreshAccounts,
       announce,
       t,
     ],
@@ -856,6 +872,35 @@ export function Sidebar() {
     [tree],
   );
 
+  const findAccountByKey = useCallback(
+    (key: string): AccountNode | null =>
+      tree.find((account) => account.key === key) ?? null,
+    [tree],
+  );
+
+  // Account rows get a minimal context menu — just "rename", which
+  // opens the inline editor. Mirrors the leaf menu's rename branch:
+  // no tree-focus restore here, so startEdit's autoFocus input wins
+  // the focus race instead of the tree-restore effect.
+  const openContextMenuForAccount = useCallback(
+    async (account: AccountNode, position?: { x: number; y: number }) => {
+      const items: ContextMenuItemRequest[] = [
+        { id: 'rename', label: t('sidebar.menu.rename') },
+      ];
+      let selected: string | null = null;
+      try {
+        selected = await showContextMenu(items, position);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('show_context_menu failed', err);
+      }
+      if (selected === 'rename') {
+        startEdit('account', account.accountId, account.displayName);
+      }
+    },
+    [t, startEdit],
+  );
+
   // ── Multi-toggle: flip every descendant of a parent on/off ───────
   const setManyCalendars = useCallback(
     (ids: string[], next: boolean) => {
@@ -963,7 +1008,10 @@ export function Sidebar() {
           // on every desktop OS. Without Shift, F10 falls through (it
           // moves focus to the OS menu bar on Windows and we don't
           // want to swallow that).
-          if (e.shiftKey && item.kind === 'leaf') {
+          if (
+            e.shiftKey &&
+            (item.kind === 'leaf' || item.kind === 'account')
+          ) {
             e.preventDefault();
             const target = e.currentTarget.querySelector(
               `#${CSS.escape(itemId(item.key))}`,
@@ -972,12 +1020,17 @@ export function Sidebar() {
               target instanceof HTMLElement
                 ? target.getBoundingClientRect()
                 : null;
-            const ctx = findLeafByKey(item.key);
-            if (ctx && rect) {
-              void openContextMenuForLeaf(ctx.leaf, ctx.accountIsLocal, {
-                x: rect.left + 8,
-                y: rect.bottom,
-              });
+            if (rect) {
+              const pos = { x: rect.left + 8, y: rect.bottom };
+              if (item.kind === 'leaf') {
+                const ctx = findLeafByKey(item.key);
+                if (ctx) {
+                  void openContextMenuForLeaf(ctx.leaf, ctx.accountIsLocal, pos);
+                }
+              } else {
+                const account = findAccountByKey(item.key);
+                if (account) void openContextMenuForAccount(account, pos);
+              }
             }
             return;
           }
@@ -986,7 +1039,7 @@ export function Sidebar() {
           // The Menu / ContextMenu key on Windows keyboards. Some
           // setups also surface it as Shift+F10 above; covering both
           // here is cheap.
-          if (item.kind !== 'leaf') return;
+          if (item.kind !== 'leaf' && item.kind !== 'account') return;
           e.preventDefault();
           const target = e.currentTarget.querySelector(
             `#${CSS.escape(itemId(item.key))}`,
@@ -995,12 +1048,17 @@ export function Sidebar() {
             target instanceof HTMLElement
               ? target.getBoundingClientRect()
               : null;
-          const ctx = findLeafByKey(item.key);
-          if (ctx && rect) {
-            void openContextMenuForLeaf(ctx.leaf, ctx.accountIsLocal, {
-              x: rect.left + 8,
-              y: rect.bottom,
-            });
+          if (rect) {
+            const pos = { x: rect.left + 8, y: rect.bottom };
+            if (item.kind === 'leaf') {
+              const ctx = findLeafByKey(item.key);
+              if (ctx) {
+                void openContextMenuForLeaf(ctx.leaf, ctx.accountIsLocal, pos);
+              }
+            } else {
+              const account = findAccountByKey(item.key);
+              if (account) void openContextMenuForAccount(account, pos);
+            }
           }
           return;
         }
@@ -1042,7 +1100,9 @@ export function Sidebar() {
       expansion,
       focusByIndex,
       findLeafByKey,
+      findAccountByKey,
       openContextMenuForLeaf,
+      openContextMenuForAccount,
       itemId,
     ],
   );
@@ -1137,12 +1197,20 @@ export function Sidebar() {
           if (!item.id.startsWith(prefix)) return;
           const key = item.id.slice(prefix.length);
           const ctx = findLeafByKey(key);
-          if (!ctx) return; // not a leaf row — skip the menu
+          if (ctx) {
+            e.preventDefault();
+            setFocusedKey(key);
+            // Omit `position`: the OS anchors at the cursor by default,
+            // which handles multi-monitor / RTL edge cases for us.
+            void openContextMenuForLeaf(ctx.leaf, ctx.accountIsLocal);
+            return;
+          }
+          // Account header rows also offer a (rename-only) menu.
+          const account = findAccountByKey(key);
+          if (!account) return; // not a leaf or account row — skip
           e.preventDefault();
           setFocusedKey(key);
-          // Omit `position`: the OS anchors at the cursor by default,
-          // which handles multi-monitor / RTL edge cases for us.
-          void openContextMenuForLeaf(ctx.leaf, ctx.accountIsLocal);
+          void openContextMenuForAccount(account);
         }}
         className={
           'sidebar__tree' +
@@ -1454,6 +1522,8 @@ function AccountSubtree({
   // Reparent is a local-store gesture — only local accounts' task
   // lists are draggable / droppable.
   const accountIsLocal = account.accountId === LOCAL_ACCOUNT_ID;
+  const isEditing =
+    editing?.kind === 'account' && editing.id === account.accountId;
 
   return (
     <div role="group" className="sidebar__account-group">
@@ -1474,13 +1544,29 @@ function AccountSubtree({
         })}
         className="sidebar__row sidebar__row--account"
       >
-        <span className="sidebar__chevron" aria-hidden="true">
-          {account.children.length === 0 ? '·' : isOpen ? '▾' : '▸'}
-        </span>
-        <span className="sidebar__name">{account.displayName}</span>
-        <span className="sidebar__account-kind" aria-hidden="true">
-          {t(`dialogs.accounts.kindName.${account.adapterKind}`)}
-        </span>
+        {isEditing ? (
+          <RenameField
+            value={draft}
+            onChange={onDraftChange}
+            onCommit={onCommitEdit}
+            onCancel={onCancelEdit}
+            onKeyDown={onEditKey}
+            ariaLabel={t('sidebar.renameInputLabel', {
+              name: account.displayName,
+            })}
+            hint={t('sidebar.renameHint')}
+          />
+        ) : (
+          <>
+            <span className="sidebar__chevron" aria-hidden="true">
+              {account.children.length === 0 ? '·' : isOpen ? '▾' : '▸'}
+            </span>
+            <span className="sidebar__name">{account.displayName}</span>
+            <span className="sidebar__account-kind" aria-hidden="true">
+              {t(`dialogs.accounts.kindName.${account.adapterKind}`)}
+            </span>
+          </>
+        )}
       </TreeRow>
       {account.isEmpty && isOpen && (
         <div role="presentation" className="sidebar__empty-hint">

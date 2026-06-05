@@ -21,6 +21,7 @@ import {
   isCommandError,
   listAccounts,
   listAccountsMissingCredentials,
+  renameAccount,
   setUserPref,
   testCaldavConnection,
   testEwsConnection,
@@ -745,12 +746,28 @@ export function AccountsPanel() {
   // and start reading the topmost option, even though keyboard focus
   // is still on the Settings tab. The gating turns that into a no-op.
   const [listHasFocus, setListHasFocus] = useState(false);
+  // Inline rename (F2 on the focused row). `editingId` drives which
+  // row renders an <input>; `editingRef` mirrors it synchronously so
+  // commit-on-blur and the focus-return blur can't double-fire (state
+  // updates are async, the ref is not).
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState('');
+  const editingRef = useRef(false);
+  const editInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (focusIndex >= accounts.length) {
       setFocusIndex(Math.max(0, accounts.length - 1));
     }
   }, [accounts.length, focusIndex]);
+
+  // Focus + select the rename input when it appears.
+  useEffect(() => {
+    if (editingId) {
+      editInputRef.current?.focus();
+      editInputRef.current?.select();
+    }
+  }, [editingId]);
 
   // After a delete completes (refresh has finished, `loading` flipped
   // back to false) the row that was focused no longer exists — its
@@ -794,7 +811,50 @@ export function AccountsPanel() {
     [accounts, announce, t],
   );
 
+  const startRename = (i: number) => {
+    const acc = accounts[i];
+    if (!acc) return;
+    setFocusIndex(i);
+    setEditDraft(acc.display_name);
+    editingRef.current = true;
+    setEditingId(acc.id);
+  };
+
+  // Close the inline editor. `commit` saves the trimmed draft (when it
+  // actually changed); either way focus returns to the listbox. The
+  // ref guard makes this idempotent so the focus-return blur is a no-op.
+  const finishRename = (commit: boolean) => {
+    if (!editingRef.current) return;
+    editingRef.current = false;
+    const id = editingId;
+    const name = editDraft.trim();
+    const current = id ? accounts.find((a) => a.id === id) : undefined;
+    setEditingId(null);
+    listRef.current?.focus({ preventScroll: true });
+    if (!commit || !id || !name) return;
+    if (current && name === current.display_name) return;
+    void (async () => {
+      try {
+        await renameAccount(id, name);
+        announce(t('dialogs.accounts.renamed', { name }));
+        refresh();
+        refreshAccounts();
+      } catch (err) {
+        if (isCommandError(err)) setError(`${err.code}: ${err.message}`);
+        else setError(String(err));
+      }
+    })();
+  };
+
   const handleListKey = (e: React.KeyboardEvent<HTMLUListElement>) => {
+    // While the inline editor is open the keydown bubbles up from the
+    // <input>; ignore it here so Enter/Delete don't also fire delete.
+    if (editingRef.current) return;
+    if (e.key === 'F2') {
+      e.preventDefault();
+      startRename(focusIndex);
+      return;
+    }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (accounts.length === 0) return;
     switch (e.key) {
@@ -895,6 +955,11 @@ export function AccountsPanel() {
           <h3 id={`${headingId}-list`} className="form__label">
             {t('dialogs.accounts.existingHeading')}
           </h3>
+          {accounts.length > 0 && (
+            <p id={`${headingId}-hint`} className="form__hint">
+              {t('dialogs.accounts.manageHint')}
+            </p>
+          )}
           {accounts.length === 0 && !loading ? (
             <p id={`${headingId}-empty`} className="form__hint">
               {t('dialogs.accounts.empty')}
@@ -905,6 +970,7 @@ export function AccountsPanel() {
               role="listbox"
               tabIndex={0}
               aria-label={t('dialogs.accounts.listLabel')}
+              aria-describedby={`${headingId}-hint`}
               aria-activedescendant={
                 listHasFocus && accounts.length > 0
                   ? optionId(focusIndex)
@@ -970,13 +1036,41 @@ export function AccountsPanel() {
                       (needsPlugin ? ' accounts-list__item--needs-plugin' : '')
                     }
                     onClick={() => {
+                      // Ignore row clicks while inline-editing — the
+                      // click bubbles from the rename <input>.
+                      if (editingRef.current) return;
                       setFocusIndex(i);
                       if (!isLocal) setConfirmTarget(acc);
                     }}
                   >
-                    <span className="accounts-list__name">
-                      {acc.display_name}
-                    </span>
+                    {editingId === acc.id ? (
+                      <input
+                        ref={editInputRef}
+                        type="text"
+                        className="accounts-list__rename-input"
+                        value={editDraft}
+                        aria-label={t('dialogs.accounts.renameLabel', {
+                          name: acc.display_name,
+                        })}
+                        onChange={(e) => setEditDraft(e.target.value)}
+                        onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => {
+                          e.stopPropagation();
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            finishRename(true);
+                          } else if (e.key === 'Escape') {
+                            e.preventDefault();
+                            finishRename(false);
+                          }
+                        }}
+                        onBlur={() => finishRename(true)}
+                      />
+                    ) : (
+                      <span className="accounts-list__name">
+                        {acc.display_name}
+                      </span>
+                    )}
                     <span className="accounts-list__kind">
                       {t(`dialogs.accounts.kindName.${acc.adapter_kind}`)}
                     </span>

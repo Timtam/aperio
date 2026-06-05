@@ -209,6 +209,26 @@ impl<'a> AccountsRepo<'a> {
         })
     }
 
+    /// Change an account's user-visible `display_name`. Returns the
+    /// updated row (re-read so the caller has the fresh `updated_at`
+    /// for the sync payload). The local account can be renamed — only
+    /// deletion is forbidden for it.
+    pub fn rename(&self, id: &str, display_name: &str) -> Result<Account, AccountsError> {
+        let now = Utc::now().to_rfc3339();
+        {
+            let conn = self.db.lock().expect("db mutex poisoned");
+            let changed = conn.execute(
+                "UPDATE accounts SET display_name = ?, updated_at = ? WHERE id = ?",
+                params![display_name, now, id],
+            )?;
+            if changed == 0 {
+                return Err(AccountsError::NotFound(id.to_string()));
+            }
+        }
+        self.get(id)?
+            .ok_or_else(|| AccountsError::NotFound(id.to_string()))
+    }
+
     pub fn delete(&self, id: &str) -> Result<(), AccountsError> {
         if id == LOCAL_ACCOUNT_ID {
             return Err(AccountsError::DeleteLocalForbidden);
@@ -284,6 +304,36 @@ mod tests {
 
         repo.delete(&new.id).unwrap();
         assert!(repo.get(&new.id).unwrap().is_none());
+    }
+
+    #[test]
+    fn rename_updates_display_name() {
+        let (_tmp, db) = fresh_db();
+        let shared = db.shared();
+        let repo = AccountsRepo::new(&shared);
+        let new = repo.create(AdapterKind::Caldav, "Old name", "{}").unwrap();
+        let renamed = repo.rename(&new.id, "New name").unwrap();
+        assert_eq!(renamed.display_name, "New name");
+        assert_eq!(repo.get(&new.id).unwrap().unwrap().display_name, "New name");
+    }
+
+    #[test]
+    fn renaming_missing_account_errors() {
+        let (_tmp, db) = fresh_db();
+        let shared = db.shared();
+        let repo = AccountsRepo::new(&shared);
+        let err = repo.rename("does-not-exist", "X").unwrap_err();
+        assert!(matches!(err, AccountsError::NotFound(_)));
+    }
+
+    #[test]
+    fn local_account_can_be_renamed() {
+        // Unlike delete, renaming the implicit local account is allowed.
+        let (_tmp, db) = fresh_db();
+        let shared = db.shared();
+        let repo = AccountsRepo::new(&shared);
+        let renamed = repo.rename(LOCAL_ACCOUNT_ID, "My device").unwrap();
+        assert_eq!(renamed.display_name, "My device");
     }
 
     #[test]
