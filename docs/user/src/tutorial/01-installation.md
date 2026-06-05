@@ -47,6 +47,14 @@ Ansicht navigierst du mit den Pfeiltasten.
 > Start wird die aktive Ansicht angesagt; Änderungen (z. B. „Termin
 > gespeichert") werden über eine Live-Region mitgeteilt.
 
+## Sprache
+
+Aperio nutzt standardmäßig deine **Systemsprache** (mit Englisch als
+Rückfall, falls deine Sprache nicht verfügbar ist). Unter **Einstellungen →
+Allgemein → Sprache** kannst du fest auf **Deutsch** oder **English**
+umstellen oder „Systemsprache" wählen. Die Wahl wird zwischen deinen
+Geräten synchronisiert.
+
 ## Zusammenfassung
 
 Du hast Aperio entpackt, gestartet und den Erststart-Assistenten

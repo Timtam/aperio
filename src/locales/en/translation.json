@@ -266,6 +266,11 @@
       },
       "general": {
         "hint": "App-wide settings.",
+        "languageHeading": "Language",
+        "languageLabel": "App language",
+        "languageSystem": "System language",
+        "languageGerman": "Deutsch",
+        "languageEnglish": "English",
         "trayHeading": "System tray",
         "trayIntro": "Keep Aperio running in the background — the reminder scheduler stays active and notifications still fire while the window is hidden in the tray.",
         "trayUnavailable": "This system has no usable tray, so these options stay off and the window closes/minimizes normally. (On Linux, GNOME needs an AppIndicator extension to show a tray.)",

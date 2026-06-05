@@ -3,25 +3,28 @@ import { useTranslation } from 'react-i18next';
 
 import { FocusableNote } from '../a11y/FocusableNote';
 import { getUserPref, setUserPref, trayAvailable } from '../api/client';
+import {
+  readLanguagePref,
+  setLanguagePref,
+  type LanguagePref,
+} from '../intl/language';
 
 const CLOSE_TO_TRAY = 'window.closeToTray';
 const MINIMIZE_TO_TRAY = 'window.minimizeToTray';
 
 /**
- * General app settings (Settings → Allgemein).
+ * General app settings (Settings → Allgemein):
  *
- * Currently just the system-tray behaviour: whether closing and/or
- * minimizing the window tucks Aperio into the tray (where the reminder
- * scheduler keeps running) instead of quitting / going to the taskbar.
- *
- * Both toggles persist to `user_prefs` and are read by the backend's
- * window-event handlers. They're gated on `tray_available`: on a desktop
- * with no tray (e.g. GNOME without an AppIndicator extension) the controls
- * disable and a hint explains why — matching the host, which falls back to
- * normal close/minimize there regardless.
+ *  - **Language.** System / Deutsch / English. Persists to the synced
+ *    `locale` pref and applies live via i18next.
+ *  - **System tray.** Whether closing / minimizing tucks Aperio into the
+ *    tray (where the reminder scheduler keeps running) instead of quitting /
+ *    going to the taskbar. Both default off and persist to synced prefs;
+ *    gated on `tray_available` so they disable where there's no tray.
  */
 export function GeneralPanel() {
   const { t } = useTranslation();
+  const [language, setLanguage] = useState<LanguagePref>('system');
   // `null` = still probing tray availability.
   const [available, setAvailable] = useState<boolean | null>(null);
   const [closeToTray, setCloseToTray] = useState(false);
@@ -30,6 +33,8 @@ export function GeneralPanel() {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
+      const langPref = await readLanguagePref();
+      if (!cancelled) setLanguage(langPref);
       try {
         const [avail, closePref, minPref] = await Promise.all([
           trayAvailable(),
@@ -43,7 +48,7 @@ export function GeneralPanel() {
       } catch (err) {
         if (cancelled) return;
         // Outside the Tauri runtime (or the command failed) → treat the
-        // tray as unavailable so the controls stay disabled.
+        // tray as unavailable so those controls stay disabled.
         // eslint-disable-next-line no-console
         console.warn('tray availability probe failed', err);
         setAvailable(false);
@@ -54,6 +59,11 @@ export function GeneralPanel() {
     };
   }, []);
 
+  const onLanguageChange = (value: LanguagePref) => {
+    setLanguage(value);
+    void setLanguagePref(value);
+  };
+
   const persist = (
     key: string,
     value: boolean,
@@ -63,13 +73,41 @@ export function GeneralPanel() {
     void setUserPref(key, value ? 'true' : 'false');
   };
 
-  const disabled = available !== true;
+  const trayDisabled = available !== true;
 
   return (
     <div className="settings-panel general-panel">
       <FocusableNote className="form__hint">
         {t('dialogs.settings.general.hint')}
       </FocusableNote>
+
+      <section
+        className="general-panel__section"
+        aria-label={t('dialogs.settings.general.languageHeading')}
+      >
+        <h3 className="calendars-panel__account">
+          {t('dialogs.settings.general.languageHeading')}
+        </h3>
+        <label className="form__field">
+          <span className="form__label">
+            {t('dialogs.settings.general.languageLabel')}
+          </span>
+          <select
+            value={language}
+            onChange={(e) => onLanguageChange(e.target.value as LanguagePref)}
+          >
+            <option value="system">
+              {t('dialogs.settings.general.languageSystem')}
+            </option>
+            <option value="de">
+              {t('dialogs.settings.general.languageGerman')}
+            </option>
+            <option value="en">
+              {t('dialogs.settings.general.languageEnglish')}
+            </option>
+          </select>
+        </label>
+      </section>
 
       <section
         className="general-panel__section"
@@ -92,7 +130,7 @@ export function GeneralPanel() {
           <input
             type="checkbox"
             checked={closeToTray}
-            disabled={disabled}
+            disabled={trayDisabled}
             onChange={(e) =>
               persist(CLOSE_TO_TRAY, e.target.checked, setCloseToTray)
             }
@@ -107,7 +145,7 @@ export function GeneralPanel() {
           <input
             type="checkbox"
             checked={minimizeToTray}
-            disabled={disabled}
+            disabled={trayDisabled}
             onChange={(e) =>
               persist(MINIMIZE_TO_TRAY, e.target.checked, setMinimizeToTray)
             }

@@ -263,6 +263,11 @@
       },
       "general": {
         "hint": "App-weite Einstellungen.",
+        "languageHeading": "Sprache",
+        "languageLabel": "Sprache der App",
+        "languageSystem": "Systemsprache",
+        "languageGerman": "Deutsch",
+        "languageEnglish": "English",
         "trayHeading": "Infobereich (System Tray)",
         "trayIntro": "Aperio im Hintergrund weiterlaufen lassen — der Erinnerungs-Scheduler bleibt aktiv und Benachrichtigungen erscheinen weiter, auch wenn das Fenster im Infobereich ausgeblendet ist.",
         "trayUnavailable": "Dieses System hat keinen nutzbaren Infobereich, daher bleiben diese Optionen aus und das Fenster schließt/minimiert sich normal. (Unter Linux braucht GNOME eine AppIndicator-Erweiterung, damit ein Infobereich erscheint.)",

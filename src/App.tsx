@@ -18,6 +18,7 @@ import { YearView } from './components/views/YearView';
 import { useDialogShortcuts } from './hooks/useDialogShortcuts';
 import { useRegionFocus } from './hooks/useRegionFocus';
 import { useSuppressBrowserDefaults } from './hooks/useSuppressBrowserDefaults';
+import { useStoredLanguage } from './intl/useStoredLanguage';
 import { CacheSyncListener } from './state/CacheSyncListener';
 import { CalendarStoreProvider } from './state/CalendarStore';
 import { DialogStateProvider } from './state/DialogState';
@@ -51,6 +52,9 @@ import { useViewShortcuts, useViewState } from './state/viewStateContext';
 export function App() {
   useSuppressBrowserDefaults();
   useRegionFocus();
+  // Apply the persisted/synced language choice on start (defaults to the
+  // system language, set synchronously by i18n init).
+  useStoredLanguage();
 
   return (
     <div

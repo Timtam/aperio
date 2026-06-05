@@ -47,6 +47,13 @@ the arrow keys.
 > the active view is announced; changes (e.g. "Event saved") are
 > communicated through a live region.
 
+## Language
+
+By default Aperio uses your **system language** (falling back to English if
+your language isn't available). Under **Settings → General → Language** you
+can pin it to **Deutsch** or **English**, or pick "System language". The
+choice is synced across your devices.
+
 ## Summary
 
 You have extracted and started Aperio and completed the first-launch
