@@ -26,6 +26,7 @@ pub mod sftp_host_keys;
 pub mod sound;
 pub mod sound_assets;
 pub mod sync_log;
+pub mod tray;
 pub mod user_prefs;
 
 pub use db::{DbError, DbHandle, DbResult, SharedConn};
@@ -675,6 +676,12 @@ pub fn run() {
             // toolbar indicator.
             commands::refresh_external_cache,
             commands::get_cache_refresh_status,
+            // System tray: availability gate + close/minimize routing
+            // (the title-bar buttons call these so close/minimize can hide
+            // to the tray when the user opted in).
+            tray::tray_available,
+            tray::request_window_close,
+            tray::request_window_minimize,
         ])
         .setup(move |app| {
             // Spawn the reminder scheduler on the Tauri/tokio runtime
@@ -744,6 +751,32 @@ pub fn run() {
                     let _ = tx.send(event.id().as_ref().to_string());
                 }
             });
+
+            // System tray (close/minimize to tray). Best-effort: a desktop
+            // without a tray reports `available = false` and the Settings
+            // toggles disable themselves. Built here, after the window
+            // exists.
+            let tray_handles = tray::build(app.handle());
+            app.manage(tray_handles);
+            // OS-level close (Alt+F4 / window-manager close) → hide to tray
+            // when the pref is on. The custom title-bar X button routes
+            // through `request_window_close`; this covers the rest.
+            let handle_for_close = app.handle().clone();
+            if let Some(win) = app.get_webview_window("main") {
+                win.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        let tray = handle_for_close.state::<tray::TrayHandles>();
+                        if tray.available
+                            && tray::pref_is_true(&handle_for_close, tray::CLOSE_TO_TRAY_PREF)
+                        {
+                            api.prevent_close();
+                            if let Some(w) = handle_for_close.get_webview_window("main") {
+                                let _ = w.hide();
+                            }
+                        }
+                    }
+                });
+            }
             Ok(())
         })
         .build(tauri::generate_context!())

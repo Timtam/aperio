@@ -17,7 +17,9 @@ path = "src/main.rs"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+# `tray-icon`: optional close/minimize-to-tray (src/tray.rs). `image-png`:
+# decode the embedded tray icon (icons/icon.png) at runtime.
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-notification = "2"
 # Native file picker for the SFTP SSH-key path (DESIGN.md §19.6).
 # A bare text input would let users mis-type the path; the picker

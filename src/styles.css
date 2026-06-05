@@ -640,6 +640,36 @@ button[aria-disabled='true'] {
   font-weight: 600;
 }
 
+/* General settings panel (system-tray toggles). */
+.general-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-1);
+}
+
+.general-panel__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.general-panel__toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+}
+
+.general-panel__toggle input:disabled {
+  cursor: not-allowed;
+}
+
+.general-panel__toggle-hint {
+  margin-top: 0;
+  margin-left: 1.6rem;
+}
+
 /* Tasks settings panel — currently just one section / one toggle. */
 .tasks-settings__section {
   display: flex;

@@ -647,6 +647,23 @@ export const setUserPref = (key: string, value: string) =>
 export const deleteUserPref = (key: string) =>
   invoke<void>('delete_user_pref', { key });
 
+// ── System tray (close/minimize to tray) ──────────────────────────────
+
+/** Whether the platform/desktop exposes a system tray. The General
+ *  settings panel uses this to enable/disable the tray toggles. */
+export const trayAvailable = () => invoke<boolean>('tray_available');
+
+/** Close the window — hides to the tray when `window.closeToTray` is on
+ *  and a tray exists, otherwise quits. Called by the title-bar X. */
+export const requestWindowClose = () =>
+  invoke<void>('request_window_close');
+
+/** Minimize the window — hides to the tray when `window.minimizeToTray` is
+ *  on and a tray exists, otherwise minimizes normally. Called by the
+ *  title-bar minimize button. */
+export const requestWindowMinimize = () =>
+  invoke<void>('request_window_minimize');
+
 // ── Custom notification sounds (§14.4) ────────────────────────────────────
 
 /** A custom sound stored on disk, content-addressed by SHA-256. Only

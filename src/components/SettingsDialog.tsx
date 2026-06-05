@@ -13,6 +13,7 @@ import { AccountsPanel } from './AccountsPanel';
 import { CalendarsPanel } from './CalendarsPanel';
 import { ColorLabelsPanel } from './ColorLabelsPanel';
 import { ContactsPanel } from './ContactsPanel';
+import { GeneralPanel } from './GeneralPanel';
 import { Modal } from './Modal';
 import { PluginsPanel } from './PluginsPanel';
 import { SyncPanel } from './SyncPanel';
@@ -41,6 +42,7 @@ import { TasksPanel } from './TasksPanel';
  */
 
 export type SettingsTabId =
+  | 'general'
   | 'accounts'
   | 'calendars'
   | 'colorLabels'
@@ -50,6 +52,7 @@ export type SettingsTabId =
   | 'plugins';
 
 const TAB_ORDER: SettingsTabId[] = [
+  'general',
   'accounts',
   'calendars',
   'colorLabels',
@@ -93,6 +96,7 @@ export function SettingsDialog({
   // One ref per tab so arrow-key activation can move DOM focus to
   // the newly-active tab (the roving-tabindex contract requires it).
   const tabRefs = useRef<Record<SettingsTabId, HTMLButtonElement | null>>({
+    general: null,
     accounts: null,
     calendars: null,
     colorLabels: null,
@@ -163,6 +167,7 @@ export function SettingsDialog({
   const labels = useMemo(
     () =>
       ({
+        general: t('dialogs.settings.tabs.general'),
         accounts: t('dialogs.settings.tabs.accounts'),
         calendars: t('dialogs.settings.tabs.calendars'),
         colorLabels: t('dialogs.settings.tabs.colorLabels'),
@@ -251,6 +256,7 @@ export function SettingsDialog({
           id={panelId(activeTab)}
           className="settings__panel"
         >
+          {activeTab === 'general' && <GeneralPanel />}
           {activeTab === 'accounts' && <AccountsPanel />}
           {activeTab === 'calendars' && <CalendarsPanel />}
           {activeTab === 'colorLabels' && <ColorLabelsPanel />}

@@ -72,6 +72,23 @@ In den **Einstellungen** unter **Benachrichtigungen** legst du fest:
 > Die Schaltflächen „Öffnen", „Schließen" und „Später erinnern" sind per
 > `Tab` erreichbar und klar beschriftet.
 
+## Im Hintergrund laufen (Infobereich)
+
+Damit Erinnerungen auch dann feuern, wenn du das Fenster nicht offen hast,
+kann Aperio in den **Infobereich** (System Tray) ausgeblendet werden, statt
+sich zu beenden. Unter **Einstellungen → Allgemein**:
+
+- **Beim Schließen in den Infobereich minimieren** – der Schließen-Knopf
+  blendet Aperio aus, statt zu beenden.
+- **Beim Minimieren in den Infobereich** – der Minimieren-Knopf legt das
+  Fenster in den Infobereich statt in die Taskleiste.
+
+Ein Klick auf das Infobereich-Symbol holt das Fenster zurück; über dessen
+Menü kannst du Aperio wirklich beenden. Beide Optionen sind standardmäßig
+aus. Hat dein System keinen Infobereich (z. B. GNOME ohne
+AppIndicator-Erweiterung), sind die Schalter deaktiviert und das Fenster
+verhält sich normal.
+
 ## Zusammenfassung
 
 Du kannst Erinnerungen anlegen, ihre Töne einstellen und auf sie mit

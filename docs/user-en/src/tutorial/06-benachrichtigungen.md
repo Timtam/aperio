@@ -70,6 +70,21 @@ In the **settings** under **Notifications** you define:
 > "Dismiss" and "Snooze" buttons are reachable with `Tab` and clearly
 > labeled.
 
+## Running in the background (system tray)
+
+So reminders fire even when the window isn't open, Aperio can hide into the
+**system tray** instead of quitting. Under **Settings → General**:
+
+- **Minimize to the tray when closing** – the close button hides Aperio
+  instead of quitting.
+- **Minimize to the tray instead of the taskbar** – the minimize button
+  tucks the window into the tray.
+
+Click the tray icon to bring the window back; use its menu to actually quit.
+Both options are off by default. If your system has no tray (e.g. GNOME
+without an AppIndicator extension), the toggles are disabled and the window
+behaves normally.
+
 ## Summary
 
 You can create reminders, set their sounds and respond to them with dismiss

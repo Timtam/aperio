@@ -255,6 +255,7 @@
       "title": "Settings",
       "tablistAria": "Settings categories",
       "tabs": {
+        "general": "General",
         "accounts": "Accounts",
         "calendars": "Calendars",
         "colorLabels": "Color labels",
@@ -262,6 +263,16 @@
         "contacts": "Contacts",
         "sync": "Sync",
         "plugins": "Plugins"
+      },
+      "general": {
+        "hint": "App-wide settings.",
+        "trayHeading": "System tray",
+        "trayIntro": "Keep Aperio running in the background — the reminder scheduler stays active and notifications still fire while the window is hidden in the tray.",
+        "trayUnavailable": "This system has no usable tray, so these options stay off and the window closes/minimizes normally. (On Linux, GNOME needs an AppIndicator extension to show a tray.)",
+        "closeToTray": "Minimize to the tray when closing",
+        "closeToTrayHint": "The close button hides Aperio in the tray instead of quitting. Use the tray icon's menu to quit.",
+        "minimizeToTray": "Minimize to the tray instead of the taskbar",
+        "minimizeToTrayHint": "The minimize button hides Aperio in the tray. Click the tray icon to bring the window back."
       },
       "calendars": {
         "hint": "Default reminders that apply to events without their own reminder. Useful for iCloud calendars: iOS “Default Alert Times” aren't written into the event itself, so without a default here the alarm doesn't show in Aperio.",

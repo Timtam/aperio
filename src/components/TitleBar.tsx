@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
+import { requestWindowClose, requestWindowMinimize } from '../api/client';
+
 /**
  * Custom title bar.
  *
@@ -57,9 +59,12 @@ export function TitleBar() {
   }, []);
 
   const win = () => getCurrentWindow();
-  const onMinimize = () => void win().minimize();
+  // Minimize / close route through the backend so the "… to tray" prefs can
+  // hide the window instead, when the user enabled them and a tray exists.
+  // Maximize stays a plain window op.
+  const onMinimize = () => void requestWindowMinimize();
   const onToggleMaximize = () => void win().toggleMaximize();
-  const onClose = () => void win().close();
+  const onClose = () => void requestWindowClose();
 
   const buttons = (
     <div
