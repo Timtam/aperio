@@ -821,62 +821,30 @@ pub fn run() {
     // network drive from stalling the close indefinitely.
     app.run(move |_app, event| {
         if let tauri::RunEvent::ExitRequested { .. } = event {
-            run_exit_sync_push(&orchestrator_for_exit);
+            if !orchestrator_for_exit.status().configured {
+                return;
+            }
+            info!("running app-exit sync push");
+            let orchestrator = Arc::clone(&orchestrator_for_exit);
+            // 10s ceiling matches the user's patience window for
+            // "I just clicked X" — Phase Sj's network adapters
+            // will tune this per-adapter.
+            tauri::async_runtime::block_on(async move {
+                let push = orchestrator.push_now();
+                match tokio::time::timeout(std::time::Duration::from_secs(10), push).await {
+                    Ok(Ok(count)) => {
+                        info!(pushed = count, "app-exit sync push complete",);
+                    }
+                    Ok(Err(err)) => {
+                        warn!(?err, "app-exit sync push failed");
+                    }
+                    Err(_) => {
+                        warn!("app-exit sync push timed out after 10s");
+                    }
+                }
+            });
         }
     });
-}
-
-/// Flush pending event-log changes to the configured sync target before the
-/// process dies (DESIGN.md §19.8). Push-only (a fetch at exit would be
-/// wasted — the applied events couldn't reach the UI before it closes),
-/// bounded to 10s so a hung network drive can't stall shutdown. No-op when
-/// sync isn't configured. Runs on the calling (main) thread via `block_on`.
-fn run_exit_sync_push(orchestrator: &Arc<SyncOrchestrator>) {
-    let configured = orchestrator.status().configured;
-    eprintln!("[aperio-diag] run_exit_sync_push: configured={configured}");
-    if !configured {
-        return;
-    }
-    info!("running app-exit sync push");
-    let orchestrator = Arc::clone(orchestrator);
-    // 10s ceiling matches the user's patience window for "I just quit".
-    tauri::async_runtime::block_on(async move {
-        let push = orchestrator.push_now();
-        match tokio::time::timeout(std::time::Duration::from_secs(10), push).await {
-            Ok(Ok(count)) => {
-                eprintln!("[aperio-diag] exit push complete: {count}");
-                info!(pushed = count, "app-exit sync push complete");
-            }
-            Ok(Err(err)) => {
-                eprintln!("[aperio-diag] exit push failed: {err:?}");
-                warn!(?err, "app-exit sync push failed");
-            }
-            Err(_) => {
-                eprintln!("[aperio-diag] exit push timed out after 10s");
-                warn!("app-exit sync push timed out after 10s");
-            }
-        }
-    });
-    eprintln!("[aperio-diag] run_exit_sync_push: returned");
-}
-
-/// Quit the app from the tray "Beenden" menu. `app.exit` fires
-/// `RunEvent::Exit`, NOT the `ExitRequested` the window-close path relies
-/// on, so the exit sync push wouldn't run otherwise — and with close-to-tray
-/// enabled, the tray is the ONLY real exit path. Push first (while the
-/// runtime is fully alive), then exit.
-pub fn quit_with_sync_push(app: &tauri::AppHandle) {
-    match app.try_state::<Arc<SyncOrchestrator>>() {
-        Some(orchestrator) => {
-            eprintln!("[aperio-diag] quit_with_sync_push: orchestrator state found");
-            run_exit_sync_push(&orchestrator);
-        }
-        None => {
-            eprintln!("[aperio-diag] quit_with_sync_push: SyncOrchestrator state NOT found");
-        }
-    }
-    eprintln!("[aperio-diag] quit_with_sync_push: calling app.exit(0)");
-    app.exit(0);
 }
 
 fn init_tracing() {

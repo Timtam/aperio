@@ -82,12 +82,10 @@ fn try_build(app: &AppHandle) -> tauri::Result<TrayIcon<Wry>> {
         .menu(&menu)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "tray-show" => show_main_window(app),
-            // `app.exit` fires RunEvent::Exit, not ExitRequested, so route
-            // through the helper that flushes the exit sync push first.
-            "tray-quit" => {
-                eprintln!("[aperio-diag] tray 'Beenden' menu activated");
-                crate::quit_with_sync_push(app);
-            }
+            // `app.exit` raises RunEvent::ExitRequested, so the app-exit
+            // sync push (in `run()`'s run-loop) flushes pending changes here
+            // too — no special handling needed.
+            "tray-quit" => app.exit(0),
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
