@@ -125,36 +125,12 @@ pub async fn get_contacts(
     // comes back with no `address-data` and is dropped by
     // `parse_contact_entries`.
     let hrefs = crate::sync::list_resource_hrefs(client, addressbook_url, credentials).await?;
-    // TEMP diagnostics (contacts-empty investigation): plugin cdylibs
-    // don't reach the host tracing subscriber, but eprintln shares the
-    // process stderr, so this surfaces in the dev terminal. Remove once
-    // the CardDAV-empty cause is fixed.
-    eprintln!(
-        "[aperio-diag] caldav get_contacts {addressbook_url}: list_resource_hrefs -> {} hrefs",
-        hrefs.len()
-    );
     if hrefs.is_empty() {
         return Ok(Vec::new());
     }
     let entries =
         crate::sync::addressbook_multiget(client, addressbook_url, &hrefs, credentials).await?;
-    let with_body = entries
-        .iter()
-        .filter(|e| {
-            e.address_data
-                .as_deref()
-                .map(|b| !b.trim().is_empty())
-                .unwrap_or(false)
-        })
-        .count();
-    let contacts = parse_contact_entries(&entries, addressbook_url.as_str());
-    eprintln!(
-        "[aperio-diag] caldav get_contacts {addressbook_url}: multiget -> {} entries, {} with vcard body, {} parsed contacts",
-        entries.len(),
-        with_body,
-        contacts.len()
-    );
-    Ok(contacts)
+    Ok(parse_contact_entries(&entries, addressbook_url.as_str()))
 }
 
 /// Map multistatus entries carrying `address-data` (from `get_contacts`'s

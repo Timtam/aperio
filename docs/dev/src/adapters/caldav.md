@@ -52,7 +52,7 @@ Apple's well-known endpoints.
   PROPFIND. That shortcut is non-standard; iCloud and Synology Contacts
   silently return resources with no body, so the old inline read yielded
   zero contacts while persisting a sync token, leaving address books
-  permanently empty (a one-time `cache.contactsMultigetHealV1` heal clears
+  permanently empty (a one-time `cache.contactsMultigetHealV2` heal clears
   those poisoned tokens so books re-bootstrap).
 - **Stable ids.** A resource is keyed by `{href}|{uid}` so renames/moves
   and per-resource deletions resolve correctly.

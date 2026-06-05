@@ -194,15 +194,6 @@ pub async fn get_contacts(
                 },
             );
         }
-        // TEMP diagnostics (contacts-empty investigation).
-        tracing::info!(
-            target: "aperio::contacts::diag",
-            account = %account,
-            list = %list_id,
-            path = "warm",
-            count = cached.len(),
-            "get_contacts served from snapshot",
-        );
         return Ok(cached);
     }
 
@@ -210,15 +201,6 @@ pub async fn get_contacts(
     // network — serve whatever rows exist now and refresh in the
     // background; `cache-updated` fills the list in when the fetch lands.
     let snapshot = cache.read_contacts(&account, &list_id).unwrap_or_default();
-    // TEMP diagnostics (contacts-empty investigation).
-    tracing::info!(
-        target: "aperio::contacts::diag",
-        account = %account,
-        list = %list_id,
-        path = "cold",
-        count = snapshot.len(),
-        "get_contacts served (background refresh spawned)",
-    );
     let ext_bg = Arc::clone(&ext);
     let cache_bg = Arc::clone(&cache);
     let acc = account.clone();
@@ -251,14 +233,6 @@ pub async fn search_contacts(
 ) -> CommandResult<Vec<Contact>> {
     let local = adapter.search_contacts(&query).await?;
     let mut external = registry.search_external_contacts(&query).await;
-    // TEMP diagnostics (contacts-empty investigation).
-    tracing::info!(
-        target: "aperio::contacts::diag",
-        query = %query,
-        local = local.len(),
-        external = external.len(),
-        "search_contacts results",
-    );
     let mut out = local;
     out.append(&mut external);
     Ok(out)

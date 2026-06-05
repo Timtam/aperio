@@ -288,18 +288,6 @@ pub async fn refresh_contacts(
         .and_then(|s| s.sync_token);
     match ext.get_contacts_delta(list, token.as_deref()).await {
         Ok(cs) => {
-            // TEMP diagnostics (contacts-empty investigation): what did
-            // the adapter's delta fetch actually return for this book?
-            tracing::info!(
-                target: "aperio::contacts::diag",
-                account = %account,
-                list = %list,
-                had_token = token.is_some(),
-                full_resync = cs.full_resync,
-                changes = cs.changes.len(),
-                deletions = cs.deletions.len(),
-                "refresh_contacts: get_contacts_delta returned",
-            );
             if cs.full_resync || token.is_none() {
                 let _ = cache.replace_list_contacts(account, list, &cs.changes);
                 let _ =
@@ -319,25 +307,9 @@ pub async fn refresh_contacts(
         }
         Err(cal_core::Error::Unsupported(_)) => {
             let contacts = ext.get_contacts(list).await?;
-            tracing::info!(
-                target: "aperio::contacts::diag",
-                account = %account,
-                list = %list,
-                count = contacts.len(),
-                "refresh_contacts: get_contacts (delta unsupported → full read)",
-            );
             let _ = cache.replace_list_contacts(account, list, &contacts);
             Ok(())
         }
-        Err(err) => {
-            tracing::warn!(
-                target: "aperio::contacts::diag",
-                account = %account,
-                list = %list,
-                ?err,
-                "refresh_contacts: get_contacts_delta errored",
-            );
-            Err(err)
-        }
+        Err(err) => Err(err),
     }
 }
