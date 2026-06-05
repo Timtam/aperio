@@ -615,6 +615,10 @@ pub async fn task_list_shares(
     registry: State<'_, Arc<AdapterRegistry>>,
     list_id: String,
 ) -> CommandResult<Vec<TaskListShare>> {
+    // TEMP diagnostics (members dialog "nothing happens"): if this fires
+    // after picking "Manage members", the dialog DID open and the issue is
+    // focus, not the open path.
+    eprintln!("[aperio-diag] task_list_shares invoked for list {list_id}");
     let account = registry
         .account_for_task_list(&list_id)
         .unwrap_or_else(|| LOCAL_ID.to_string());

@@ -277,8 +277,8 @@ pub async fn show_context_menu(
     // pick within seconds or dismiss with Escape (which fires no
     // event on any platform we target). Without the timeout this
     // task could leak forever after a quiet dismiss.
-    match tokio::time::timeout(Duration::from_secs(60), rx).await {
-        Ok(Ok(id)) => Ok(Some(id)),
+    let result = match tokio::time::timeout(Duration::from_secs(60), rx).await {
+        Ok(Ok(id)) => Some(id),
         // Closed channel (Ok(Err(_))) or timeout (Err(_)) — either
         // way the user didn't pick. Clean up the sender slot so the
         // next popup starts fresh.
@@ -288,7 +288,12 @@ pub async fn show_context_menu(
                 .lock()
                 .expect("context menu state poisoned")
                 .take();
-            Ok(None)
+            None
         }
-    }
+    };
+    // TEMP diagnostics (sidebar members "nothing happens" investigation):
+    // what id did the native menu hand back? eprintln shares the process
+    // stderr so it surfaces in the dev terminal.
+    eprintln!("[aperio-diag] show_context_menu resolved -> {result:?}");
+    Ok(result)
 }
