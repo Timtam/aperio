@@ -486,24 +486,19 @@ pub fn run() {
         //     window menu) — Tauri has no dedicated minimize event, so we
         //     watch resizes and check the minimized state.
         .on_window_event(|window, event| {
-            // Hide the MAIN webview window to the tray — the SAME object the
-            // working title-bar command hides, not the bare `&Window` the
-            // event hands us (hiding that left the window on screen). Logs
-            // the hide() result while we confirm the fix.
-            let hide_main = || match window.app_handle().get_webview_window("main") {
-                Some(w) => eprintln!("[aperio-diag] webview hide() -> {:?}", w.hide()),
-                None => eprintln!("[aperio-diag] hide: no webview window 'main'"),
+            // Hide the MAIN *webview* window to the tray (the same object the
+            // title-bar command hides) — hiding the bare `&Window` the event
+            // hands us leaves it on screen.
+            let hide_main = || {
+                if let Some(w) = window.app_handle().get_webview_window("main") {
+                    let _ = w.hide();
+                }
             };
             match event {
                 tauri::WindowEvent::CloseRequested { api, .. } => {
                     let app = window.app_handle();
                     let tray = app.state::<tray::TrayHandles>();
-                    let hide = tray.available && tray::pref_is_true(app, tray::CLOSE_TO_TRAY_PREF);
-                    eprintln!(
-                        "[aperio-diag] CloseRequested -> {}",
-                        if hide { "hide" } else { "close" },
-                    );
-                    if hide {
+                    if tray.available && tray::pref_is_true(app, tray::CLOSE_TO_TRAY_PREF) {
                         api.prevent_close();
                         hide_main();
                     }
@@ -514,13 +509,7 @@ pub fn run() {
                     if matches!(window.is_minimized(), Ok(true)) {
                         let app = window.app_handle();
                         let tray = app.state::<tray::TrayHandles>();
-                        let hide =
-                            tray.available && tray::pref_is_true(app, tray::MINIMIZE_TO_TRAY_PREF);
-                        eprintln!(
-                            "[aperio-diag] Resized+minimized -> {}",
-                            if hide { "hide" } else { "stay" },
-                        );
-                        if hide {
+                        if tray.available && tray::pref_is_true(app, tray::MINIMIZE_TO_TRAY_PREF) {
                             // Clear the minimized state first so the window
                             // isn't stuck minimized-and-hidden, then tuck it
                             // into the tray.
@@ -832,30 +821,43 @@ pub fn run() {
     // network drive from stalling the close indefinitely.
     app.run(move |_app, event| {
         if let tauri::RunEvent::ExitRequested { .. } = event {
-            if !orchestrator_for_exit.status().configured {
-                return;
-            }
-            info!("running app-exit sync push");
-            let orchestrator = Arc::clone(&orchestrator_for_exit);
-            // 10s ceiling matches the user's patience window for
-            // "I just clicked X" — Phase Sj's network adapters
-            // will tune this per-adapter.
-            tauri::async_runtime::block_on(async move {
-                let push = orchestrator.push_now();
-                match tokio::time::timeout(std::time::Duration::from_secs(10), push).await {
-                    Ok(Ok(count)) => {
-                        info!(pushed = count, "app-exit sync push complete",);
-                    }
-                    Ok(Err(err)) => {
-                        warn!(?err, "app-exit sync push failed");
-                    }
-                    Err(_) => {
-                        warn!("app-exit sync push timed out after 10s");
-                    }
-                }
-            });
+            run_exit_sync_push(&orchestrator_for_exit);
         }
     });
+}
+
+/// Flush pending event-log changes to the configured sync target before the
+/// process dies (DESIGN.md §19.8). Push-only (a fetch at exit would be
+/// wasted — the applied events couldn't reach the UI before it closes),
+/// bounded to 10s so a hung network drive can't stall shutdown. No-op when
+/// sync isn't configured. Runs on the calling (main) thread via `block_on`.
+fn run_exit_sync_push(orchestrator: &Arc<SyncOrchestrator>) {
+    if !orchestrator.status().configured {
+        return;
+    }
+    info!("running app-exit sync push");
+    let orchestrator = Arc::clone(orchestrator);
+    // 10s ceiling matches the user's patience window for "I just quit".
+    tauri::async_runtime::block_on(async move {
+        let push = orchestrator.push_now();
+        match tokio::time::timeout(std::time::Duration::from_secs(10), push).await {
+            Ok(Ok(count)) => info!(pushed = count, "app-exit sync push complete"),
+            Ok(Err(err)) => warn!(?err, "app-exit sync push failed"),
+            Err(_) => warn!("app-exit sync push timed out after 10s"),
+        }
+    });
+}
+
+/// Quit the app from the tray "Beenden" menu. `app.exit` fires
+/// `RunEvent::Exit`, NOT the `ExitRequested` the window-close path relies
+/// on, so the exit sync push wouldn't run otherwise — and with close-to-tray
+/// enabled, the tray is the ONLY real exit path. Push first (while the
+/// runtime is fully alive), then exit.
+pub fn quit_with_sync_push(app: &tauri::AppHandle) {
+    if let Some(orchestrator) = app.try_state::<Arc<SyncOrchestrator>>() {
+        run_exit_sync_push(&orchestrator);
+    }
+    app.exit(0);
 }
 
 fn init_tracing() {

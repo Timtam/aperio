@@ -82,9 +82,9 @@ fn try_build(app: &AppHandle) -> tauri::Result<TrayIcon<Wry>> {
         .menu(&menu)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "tray-show" => show_main_window(app),
-            // A real exit so the app-exit sync push (RunEvent::ExitRequested)
-            // still flushes pending changes.
-            "tray-quit" => app.exit(0),
+            // `app.exit` fires RunEvent::Exit, not ExitRequested, so route
+            // through the helper that flushes the exit sync push first.
+            "tray-quit" => crate::quit_with_sync_push(app),
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
