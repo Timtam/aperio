@@ -758,23 +758,47 @@ pub fn run() {
             // exists.
             let tray_handles = tray::build(app.handle());
             app.manage(tray_handles);
-            // OS-level close (Alt+F4 / window-manager close) → hide to tray
-            // when the pref is on. The custom title-bar X button routes
-            // through `request_window_close`; this covers the rest.
-            let handle_for_close = app.handle().clone();
+            // Window events → tray. The custom title-bar X / minimize
+            // buttons route through `request_window_close` /
+            // `request_window_minimize`; these handlers cover the paths that
+            // DON'T go through a button:
+            //   - CloseRequested: OS-level close (Alt+F4, window-manager X).
+            //   - Resized + minimized: OS-level minimize (Win+M, taskbar,
+            //     the window menu). Tauri has no dedicated minimize event, so
+            //     we watch resizes and check the minimized state.
+            let handle_for_window = app.handle().clone();
             if let Some(win) = app.get_webview_window("main") {
-                win.on_window_event(move |event| {
-                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                        let tray = handle_for_close.state::<tray::TrayHandles>();
+                win.on_window_event(move |event| match event {
+                    tauri::WindowEvent::CloseRequested { api, .. } => {
+                        let tray = handle_for_window.state::<tray::TrayHandles>();
                         if tray.available
-                            && tray::pref_is_true(&handle_for_close, tray::CLOSE_TO_TRAY_PREF)
+                            && tray::pref_is_true(&handle_for_window, tray::CLOSE_TO_TRAY_PREF)
                         {
                             api.prevent_close();
-                            if let Some(w) = handle_for_close.get_webview_window("main") {
+                            if let Some(w) = handle_for_window.get_webview_window("main") {
                                 let _ = w.hide();
                             }
                         }
                     }
+                    tauri::WindowEvent::Resized(_) => {
+                        // Cheap state check first; only read the DB pref when
+                        // the window actually became minimized (rare) rather
+                        // than on every drag-resize frame.
+                        if let Some(w) = handle_for_window.get_webview_window("main") {
+                            if matches!(w.is_minimized(), Ok(true)) {
+                                let tray = handle_for_window.state::<tray::TrayHandles>();
+                                if tray.available
+                                    && tray::pref_is_true(
+                                        &handle_for_window,
+                                        tray::MINIMIZE_TO_TRAY_PREF,
+                                    )
+                                {
+                                    let _ = w.hide();
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
                 });
             }
             Ok(())

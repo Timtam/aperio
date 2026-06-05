@@ -33,6 +33,12 @@ pub const SYNC_WHITELIST: &[&str] = &[
     "sound.",
     // Snooze options (configurable per §19.2.1).
     "snooze.options",
+    // Window behaviour: close/minimize-to-tray. Synced so the choice
+    // follows the user; a device without a usable tray simply ignores the
+    // value (the toggle is gated on tray availability). Exact keys, not a
+    // `window.` prefix, so any future device-local window state stays local.
+    "window.closeToTray",
+    "window.minimizeToTray",
     // Which sync adapter is active. Note: adapter *credentials*
     // stay local (keychain), only the choice itself syncs.
     "sync.adapter",
@@ -66,6 +72,12 @@ mod tests {
         assert!(is_synced_key("locale"));
         assert!(is_synced_key("appearance.darkMode"));
         assert!(is_synced_key("snooze.options"));
+    }
+
+    #[test]
+    fn window_tray_prefs_sync() {
+        assert!(is_synced_key("window.closeToTray"));
+        assert!(is_synced_key("window.minimizeToTray"));
     }
 
     #[test]
