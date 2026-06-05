@@ -11,7 +11,7 @@
 
 use super::{DbError, DbHandle, DbResult};
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 22;
+pub const CURRENT_SCHEMA_VERSION: u32 = 23;
 
 struct Migration {
     target: u32,
@@ -106,6 +106,10 @@ const MIGRATIONS: &[Migration] = &[
     Migration {
         target: 22,
         sql: include_str!("sql/0022_container_color_labels.sql"),
+    },
+    Migration {
+        target: 23,
+        sql: include_str!("sql/0023_color_label_ad_hoc.sql"),
     },
 ];
 

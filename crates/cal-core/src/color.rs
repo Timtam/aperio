@@ -68,4 +68,11 @@ pub struct ColorLabel {
     pub name: String,
     /// Hex color value including the leading `#`, e.g. `#e53935`.
     pub hex: String,
+    /// `true` for an *ad-hoc* one-off color created via the custom-color
+    /// picker (its `name` is just the hex). Ad-hoc labels are hidden from
+    /// the palette-management UI and deduplicated by hex, but otherwise
+    /// resolve exactly like a named label. `#[serde(default)]` keeps older
+    /// sync payloads (which lack the field) deserialising to a named label.
+    #[serde(default)]
+    pub ad_hoc: bool,
 }

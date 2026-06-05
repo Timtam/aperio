@@ -1228,6 +1228,7 @@ mod tests {
             id: cal_core::ColorLabelId::new("lbl-a"),
             name: "Work".into(),
             hex: "#ff0000".into(),
+            ad_hoc: false,
         };
         let env = fixture_envelope(
             other,

@@ -330,6 +330,13 @@ export interface CreateColorLabelRequest {
 export const createColorLabel = (request: CreateColorLabelRequest) =>
   invoke<ColorLabel>('create_color_label', { request });
 
+/** Resolve a custom one-off color (hex) to a hidden, hex-deduplicated
+ *  "ad-hoc" color label and return it. Re-picking the same hex reuses the
+ *  same label. Used by the custom-color picker for quick (un-named) colors;
+ *  named colors go through `createColorLabel`. */
+export const getOrCreateAdHocColorLabel = (hex: string) =>
+  invoke<ColorLabel>('get_or_create_ad_hoc_color_label', { hex });
+
 export const updateColorLabel = (label: ColorLabel) =>
   invoke<ColorLabel>('update_color_label', { label });
 

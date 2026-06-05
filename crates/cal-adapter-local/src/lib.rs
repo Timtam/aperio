@@ -149,6 +149,8 @@ pub mod test_support {
         // 0019–0021 touch host-only cache tables; 0022 adds the
         // container color-label binding columns the adapter now reads.
         conn.execute_batch(SCHEMA_V22).expect("apply v22 schema");
+        // 0023 adds the `ad_hoc` flag on color_labels (custom one-off colors).
+        conn.execute_batch(SCHEMA_V23).expect("apply v23 schema");
         Arc::new(Mutex::new(conn))
     }
 
@@ -171,4 +173,6 @@ pub mod test_support {
     const SCHEMA_V18: &str = include_str!("../../../src-tauri/src/db/sql/0018_task_sections.sql");
     const SCHEMA_V22: &str =
         include_str!("../../../src-tauri/src/db/sql/0022_container_color_labels.sql");
+    const SCHEMA_V23: &str =
+        include_str!("../../../src-tauri/src/db/sql/0023_color_label_ad_hoc.sql");
 }

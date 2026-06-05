@@ -812,6 +812,18 @@
       "series": "Whole series",
       "cancel": "Cancel"
     },
+    "colorPicker": {
+      "title": "Custom color",
+      "intro": "Enter a color as a hex value (#rrggbb) or pick it with the swatch.",
+      "colorLabel": "Color",
+      "saveToPalette": "Save as a named label in the palette",
+      "nameLabel": "Name",
+      "nameRequired": "Please enter a name.",
+      "openAction": "Custom color…",
+      "applyAction": "Apply",
+      "applied": "Color applied.",
+      "customOption": "Custom color ({{hex}})"
+    },
     "colorLabels": {
       "title": "Color labels",
       "existingHeading_zero": "Existing color labels",
@@ -1339,6 +1351,7 @@
       "members": "Manage members …",
       "color": "Color",
       "colorNone": "No color",
+      "colorOther": "Other…",
       "colorSetAnnouncement": "Set color of “{{name}}” to {{color}}.",
       "colorClearedAnnouncement": "Removed color of “{{name}}”.",
       "reparentedAnnouncement": "Moved \"{{name}}\" under \"{{parent}}\".",

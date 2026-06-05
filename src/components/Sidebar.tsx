@@ -10,6 +10,7 @@ import {
 import { useTranslation } from 'react-i18next';
 
 import { useAnnouncer } from '../a11y/announcerContext';
+import { ColorPickerModal } from './ColorPickerModal';
 import { ConfirmDialog } from './ConfirmDialog';
 import { PromptDialog } from './PromptDialog';
 import {
@@ -30,6 +31,7 @@ import {
   type ContainerKind,
   type ContextMenuItemRequest,
 } from '../api/client';
+import type { ColorLabel } from '../api/types';
 import { getContactListDisplayName } from '../intl/contactList';
 import { useCalendarStore } from '../state/calendarStoreContext';
 import { useDialogState } from '../state/dialogStateContext';
@@ -203,6 +205,43 @@ export function Sidebar() {
   // than the edit target itself: the tree owns the tab stop, all we
   // need is "should focus go back to the tree?".
   const [restoreFocusToTree, setRestoreFocusToTree] = useState(false);
+
+  // Set when the user picks "Other color…" on a container — drives the
+  // custom-color modal. `initialHex` seeds the composer with the
+  // container's currently-resolved color.
+  const [customColorFor, setCustomColorFor] = useState<{
+    containerId: string;
+    kind: ContainerKind;
+    name: string;
+    initialHex?: string | null;
+  } | null>(null);
+
+  const applyCustomColor = useCallback(
+    async (label: ColorLabel) => {
+      if (!customColorFor) return;
+      const { containerId, kind, name } = customColorFor;
+      try {
+        await setContainerColorLabel(containerId, kind, label.id);
+        if (kind === 'calendar') await refreshCalendars();
+        else if (kind === 'task_list') await refreshTaskLists();
+        else await refreshContactLists();
+        announce(
+          t('sidebar.menu.colorSetAnnouncement', { name, color: label.name }),
+        );
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('set container color failed', err);
+      }
+    },
+    [
+      customColorFor,
+      refreshCalendars,
+      refreshTaskLists,
+      refreshContactLists,
+      announce,
+      t,
+    ],
+  );
 
   // Ref on the `<div role="tree">` so we can move actual DOM focus
   // back to it after the rename input unmounts or the context menu
@@ -676,12 +715,18 @@ export function Sidebar() {
             label: t('sidebar.menu.colorNone'),
             checked: !boundLabel,
           },
-          ...colorLabels.map((cl) => ({
-            kind: 'check' as const,
-            id: `color:${cl.id}`,
-            label: cl.name,
-            checked: boundLabel === cl.id,
-          })),
+          // Named palette labels only — hidden ad-hoc one-off colors never
+          // appear as pickable entries.
+          ...colorLabels
+            .filter((cl) => !cl.ad_hoc)
+            .map((cl) => ({
+              kind: 'check' as const,
+              id: `color:${cl.id}`,
+              label: cl.name,
+              checked: boundLabel === cl.id,
+            })),
+          // Compose a brand-new custom color on the fly.
+          { id: 'color:__other__', label: t('sidebar.menu.colorOther') },
         ];
         items.push({
           // MUST be `kind: 'submenu'` — without it the request deserialises
@@ -734,6 +779,22 @@ export function Sidebar() {
           (l) => l.id === leaf.containerId,
         )?.task_capabilities;
         openTaskMembers(leaf.containerId, leaf.name, caps);
+      } else if (selected === 'color:__other__') {
+        // Compose a custom color for this container. The modal grabs focus
+        // and restores it on close (like the members dialog), so DON'T arm
+        // the tree-restore effect here — it would steal focus from the modal.
+        const kind =
+          leaf.kind === 'calendars'
+            ? 'calendar'
+            : leaf.kind === 'tasks'
+              ? 'task_list'
+              : 'contact_list';
+        setCustomColorFor({
+          containerId: leaf.containerId,
+          kind,
+          name: leaf.name,
+          initialHex: leaf.colorHex,
+        });
       } else if (selected?.startsWith('color:')) {
         setRestoreFocusToTree(true);
         const raw = selected.slice('color:'.length);
@@ -1375,6 +1436,12 @@ export function Sidebar() {
               }
             : undefined
         }
+      />
+      <ColorPickerModal
+        isOpen={customColorFor !== null}
+        onClose={() => setCustomColorFor(null)}
+        initialHex={customColorFor?.initialHex}
+        onResolve={applyCustomColor}
       />
     </aside>
   );

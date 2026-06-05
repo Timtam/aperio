@@ -44,6 +44,30 @@ pub async fn create_color_label(
     Ok(label)
 }
 
+/// Resolve a custom one-off color to a hidden *ad-hoc* color label,
+/// reusing an existing ad-hoc label with the same hex (dedup) or creating
+/// one. Emits `ColorLabelCreated` only when a new label is actually created,
+/// so re-picking the same color doesn't spam the event log. The frontend's
+/// custom-color picker calls this for "quick" (un-named) colors; named
+/// colors go through `create_color_label`.
+#[tauri::command]
+pub async fn get_or_create_ad_hoc_color_label(
+    adapter: State<'_, LocalAdapter>,
+    event_log: State<'_, Arc<EventLogWriter>>,
+    hex: String,
+) -> CommandResult<ColorLabel> {
+    let (label, created) = adapter.get_or_create_ad_hoc_color_label(&hex)?;
+    if created {
+        if let Ok(fields) = serde_json::to_value(&label) {
+            event_log.append(SyncEvent::ColorLabelCreated(EventPayload {
+                id: label.id.as_str().to_string(),
+                fields,
+            }));
+        }
+    }
+    Ok(label)
+}
+
 #[tauri::command]
 pub async fn update_color_label(
     adapter: State<'_, LocalAdapter>,

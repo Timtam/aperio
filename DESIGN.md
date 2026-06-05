@@ -876,6 +876,17 @@ aria-label="Teammeeting, 10:00–11:00, Label: Arbeit, Kalender: Google"
 
 Labels werden über das Event Log zwischen Geräten synchronisiert – mit eigenen Ereignistypen `color_label.created`, `color_label.updated` und `color_label.deleted` (siehe Abschnitt 19.2).
 
+### 8.4 Eigene Farben (ad-hoc)
+
+Neben der benannten Palette kann an jeder Stelle, an der eine Farbe gesetzt wird (Termin-/Aufgaben-Dialog, Sidebar-Kontextmenü `Farbe → Andere…`), über den barrierefreien Farb-Picker (`ColorComposer`: Hex-Textfeld + Farbfeld) **eine beliebige Farbe spontan komponiert** werden. Das vermeidet den Umweg über die Einstellungen.
+
+Eine Custom-Farbe wird als `ColorLabel` realisiert — dadurch greift die gesamte bestehende Mechanik (Binding über `color_label`, Auflösung im `CalendarStore`, Sync via `color_label.*`, Container-Override-Tabelle) unverändert. `ColorLabel` trägt dazu ein Flag `ad_hoc: bool`:
+
+- **`ad_hoc = false`** — normales, benanntes Label (sichtbar in Palette + Pickern).
+- **`ad_hoc = true`** — verstecktes Einmalfarben-Label (`name == hex`). **Nach Hex dedupliziert** (`get_or_create_ad_hoc_color_label`: gleiche Farbe ⇒ gleiches Label, nur bei Neuanlage ein `color_label.created`-Ereignis). Aus der Label-Verwaltung und den Auswahl-Dropdowns **ausgeblendet**, wird aber zur Auflösung normal geladen.
+
+Im Picker lässt sich eine komponierte Farbe optional benennen und damit als reguläres (sichtbares) Label in die Palette übernehmen. Migration `0023` ergänzt die Spalte `ad_hoc`; das Sync-Feld ist `#[serde(default)]`, sodass ältere Peers es ignorieren (Farbe erscheint dort als normales Label).
+
 ---
 
 ## 9. Aufgaben-Management

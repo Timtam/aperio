@@ -561,6 +561,7 @@ pub fn run() {
             commands::delete_section,
             commands::list_color_labels,
             commands::create_color_label,
+            commands::get_or_create_ad_hoc_color_label,
             commands::update_color_label,
             commands::delete_color_label,
             commands::search,

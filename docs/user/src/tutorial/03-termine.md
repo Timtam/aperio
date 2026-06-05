@@ -23,6 +23,13 @@ Im Termin-Dialog kannst du außerdem festlegen:
 - **Teilnehmer** (Name und/oder E-Mail-Adresse),
 - **Wiederholung** (siehe unten).
 
+> **Eigene Farbe:** Neben dem Farb-Label-Auswahlfeld findest du die
+> Schaltfläche **„Andere Farbe…"**. Damit komponierst du spontan eine
+> beliebige Farbe (Hex-Wert oder Farbfeld) und wendest sie direkt an – ohne
+> erst in die Einstellungen zu müssen. Optional übernimmst du sie dabei als
+> benanntes Label in deine Palette. Dieselbe Möglichkeit bietet in der
+> Seitenleiste das Kontextmenü **Farbe → Andere…** an Kalendern und Listen.
+
 Mit **Speichern** wird der Termin angelegt; eine Live-Region bestätigt
 „Termin gespeichert".
 

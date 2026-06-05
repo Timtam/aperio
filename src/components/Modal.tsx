@@ -101,10 +101,18 @@ export function Modal({
     (e: KeyboardEvent<HTMLDivElement>) => {
       if (e.key === 'Escape') {
         e.preventDefault();
+        // Don't let Escape bubble to an ancestor modal. React portals bubble
+        // events through the component tree, so a nested dialog (e.g. the
+        // custom-color picker opened from the event editor) would otherwise
+        // also close its parent. Escape should close only this dialog.
+        e.stopPropagation();
         onClose();
         return;
       }
       if (e.key !== 'Tab') return;
+      // Same for the focus-trap key — keep Tab handling inside this dialog so
+      // a parent modal's trap doesn't fight the nested one.
+      e.stopPropagation();
 
       // Focus trap: keep Tab/Shift+Tab inside the dialog.
       const dialog = dialogRef.current;

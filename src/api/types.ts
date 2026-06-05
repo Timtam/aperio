@@ -300,6 +300,11 @@ export interface ColorLabel {
   id: string;
   name: string;
   hex: string;
+  /** `true` for a hidden "ad-hoc" one-off color composed via the custom
+   *  color picker (name = hex, deduped by hex). Excluded from the palette
+   *  UI, but resolves like any label. Optional in the wire shape so older
+   *  payloads default to a named label. */
+  ad_hoc?: boolean;
 }
 
 /** Address book — the contacts equivalent of `Calendar`/`TaskList`.

@@ -812,6 +812,18 @@
     "save": "Speichern",
     "create": "Anlegen",
     "close": "Schließen",
+    "colorPicker": {
+      "title": "Eigene Farbe",
+      "intro": "Stelle eine Farbe als Hex-Wert (#rrggbb) ein oder wähle sie über das Farbfeld.",
+      "colorLabel": "Farbe",
+      "saveToPalette": "Als benanntes Label in der Palette speichern",
+      "nameLabel": "Name",
+      "nameRequired": "Bitte einen Namen eingeben.",
+      "openAction": "Andere Farbe…",
+      "applyAction": "Übernehmen",
+      "applied": "Farbe übernommen.",
+      "customOption": "Eigene Farbe ({{hex}})"
+    },
     "colorLabels": {
       "title": "Farb-Labels",
       "existingHeading_zero": "Vorhandene Farb-Labels",
@@ -1339,6 +1351,7 @@
       "members": "Mitglieder verwalten …",
       "color": "Farbe",
       "colorNone": "Keine Farbe",
+      "colorOther": "Andere…",
       "colorSetAnnouncement": "Farbe von „{{name}}“ auf {{color}} gesetzt.",
       "colorClearedAnnouncement": "Farbe von „{{name}}“ entfernt.",
       "reparentedAnnouncement": "„{{name}}\" wurde unter „{{parent}}\" verschoben.",

@@ -17,21 +17,27 @@ impl LocalAdapter {
     pub fn list_color_labels(&self) -> cal_core::Result<Vec<ColorLabel>> {
         let conn = self.db().lock().expect("db mutex poisoned");
         let mut stmt = conn
-            .prepare("SELECT id, name, hex FROM color_labels ORDER BY name COLLATE NOCASE")
+            .prepare("SELECT id, name, hex, ad_hoc FROM color_labels ORDER BY name COLLATE NOCASE")
             .map_err(map_sql_err)?;
         let rows = stmt
             .query_map([], |row| {
-                Ok((req_text(row, 0), req_text(row, 1), req_text(row, 2)))
+                Ok((
+                    req_text(row, 0),
+                    req_text(row, 1),
+                    req_text(row, 2),
+                    row.get::<_, i64>(3),
+                ))
             })
             .map_err(map_sql_err)?;
 
         let mut out = Vec::new();
         for r in rows {
-            let (id, name, hex) = r.map_err(map_sql_err)?;
+            let (id, name, hex, ad_hoc) = r.map_err(map_sql_err)?;
             out.push(ColorLabel {
                 id: ColorLabelId::new(id?),
                 name: name?,
                 hex: hex?,
+                ad_hoc: ad_hoc.map_err(map_sql_err)? != 0,
             });
         }
         Ok(out)
@@ -43,22 +49,28 @@ impl LocalAdapter {
     pub fn get_color_label_by_id(&self, id: &str) -> cal_core::Result<Option<ColorLabel>> {
         let conn = self.db().lock().expect("db mutex poisoned");
         let mut stmt = conn
-            .prepare("SELECT id, name, hex FROM color_labels WHERE id = ?")
+            .prepare("SELECT id, name, hex, ad_hoc FROM color_labels WHERE id = ?")
             .map_err(map_sql_err)?;
         let row = stmt
             .query_row(params![id], |r| {
-                Ok((req_text(r, 0), req_text(r, 1), req_text(r, 2)))
+                Ok((
+                    req_text(r, 0),
+                    req_text(r, 1),
+                    req_text(r, 2),
+                    r.get::<_, i64>(3),
+                ))
             })
             .optional()
             .map_err(map_sql_err)?;
         let Some(parts) = row else {
             return Ok(None);
         };
-        let (id, name, hex) = parts;
+        let (id, name, hex, ad_hoc) = parts;
         Ok(Some(ColorLabel {
             id: ColorLabelId::new(id?),
             name: name?,
             hex: hex?,
+            ad_hoc: ad_hoc.map_err(map_sql_err)? != 0,
         }))
     }
 
@@ -68,7 +80,7 @@ impl LocalAdapter {
             .lock()
             .expect("db mutex poisoned")
             .execute(
-                "INSERT INTO color_labels (id, name, hex) VALUES (?, ?, ?)",
+                "INSERT INTO color_labels (id, name, hex, ad_hoc) VALUES (?, ?, ?, 0)",
                 params![id, name, hex],
             )
             .map_err(map_sql_err)?;
@@ -76,7 +88,54 @@ impl LocalAdapter {
             id: ColorLabelId::new(id),
             name: name.to_string(),
             hex: hex.to_string(),
+            ad_hoc: false,
         })
+    }
+
+    /// Resolve a custom one-off color to a hidden *ad-hoc* color label,
+    /// reusing an existing ad-hoc label with the same hex (dedup) or
+    /// creating one (with `name == hex`). Returns the label plus whether
+    /// it was newly created, so the caller can emit a sync event only on
+    /// creation.
+    pub fn get_or_create_ad_hoc_color_label(
+        &self,
+        hex: &str,
+    ) -> cal_core::Result<(ColorLabel, bool)> {
+        let conn = self.db().lock().expect("db mutex poisoned");
+        let existing: Option<String> = conn
+            .query_row(
+                "SELECT id FROM color_labels WHERE hex = ? AND ad_hoc = 1 LIMIT 1",
+                params![hex],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(map_sql_err)?;
+        if let Some(id) = existing {
+            return Ok((
+                ColorLabel {
+                    id: ColorLabelId::new(id),
+                    name: hex.to_string(),
+                    hex: hex.to_string(),
+                    ad_hoc: true,
+                },
+                false,
+            ));
+        }
+        let id = Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT INTO color_labels (id, name, hex, ad_hoc) VALUES (?, ?, ?, 1)",
+            params![id, hex, hex],
+        )
+        .map_err(map_sql_err)?;
+        Ok((
+            ColorLabel {
+                id: ColorLabelId::new(id),
+                name: hex.to_string(),
+                hex: hex.to_string(),
+                ad_hoc: true,
+            },
+            true,
+        ))
     }
 
     pub fn update_color_label(&self, label: ColorLabel) -> cal_core::Result<ColorLabel> {
@@ -183,5 +242,38 @@ mod tests {
         let a = adapter();
         let err = a.delete_color_label("nope").unwrap_err();
         assert!(matches!(err, cal_core::Error::NotFound(_)));
+    }
+
+    #[test]
+    fn ad_hoc_color_label_is_created_then_deduped() {
+        let a = adapter();
+        let (first, created1) = a.get_or_create_ad_hoc_color_label("#3366cc").unwrap();
+        assert!(created1);
+        assert!(first.ad_hoc);
+        assert_eq!(first.name, "#3366cc");
+        assert_eq!(first.hex, "#3366cc");
+
+        // Same hex → same label, no second row.
+        let (second, created2) = a.get_or_create_ad_hoc_color_label("#3366cc").unwrap();
+        assert!(!created2);
+        assert_eq!(second.id, first.id);
+
+        // A different hex makes a distinct ad-hoc label.
+        let (other, created3) = a.get_or_create_ad_hoc_color_label("#cc3366").unwrap();
+        assert!(created3);
+        assert_ne!(other.id, first.id);
+
+        // Both ad-hoc labels are listed (the UI filters them out, not the store).
+        let all = a.list_color_labels().unwrap();
+        assert_eq!(all.iter().filter(|l| l.ad_hoc).count(), 2);
+    }
+
+    #[test]
+    fn named_label_is_not_ad_hoc() {
+        let a = adapter();
+        let l = a.create_color_label("Work", "#e53935").unwrap();
+        assert!(!l.ad_hoc);
+        let fetched = a.get_color_label_by_id(l.id.as_str()).unwrap().unwrap();
+        assert!(!fetched.ad_hoc);
     }
 }

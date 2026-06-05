@@ -328,12 +328,18 @@ impl LocalAdapter {
     pub fn upsert_color_label_from_sync(&self, label: &ColorLabel) -> cal_core::Result<()> {
         let conn = self.db().lock().expect("db mutex poisoned");
         conn.execute(
-            "INSERT INTO color_labels (id, name, hex)
-             VALUES (?, ?, ?)
+            "INSERT INTO color_labels (id, name, hex, ad_hoc)
+             VALUES (?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET
-                 name = excluded.name,
-                 hex  = excluded.hex",
-            params![label.id.as_str(), label.name, label.hex],
+                 name   = excluded.name,
+                 hex    = excluded.hex,
+                 ad_hoc = excluded.ad_hoc",
+            params![
+                label.id.as_str(),
+                label.name,
+                label.hex,
+                label.ad_hoc as i64
+            ],
         )
         .map_err(map_sql_err)?;
         Ok(())

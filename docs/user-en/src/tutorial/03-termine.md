@@ -21,6 +21,13 @@ In the event dialog you can also set:
 - **attendees** (name and/or email address),
 - a **recurrence** (see below).
 
+> **Custom color:** Next to the color-label picker there's a **"Custom
+> color…"** button. Use it to compose an arbitrary color on the fly (hex
+> value or swatch) and apply it directly — no detour through the settings.
+> You can optionally save it as a named label in your palette at the same
+> time. The sidebar offers the same thing via the **Color → Other…** context
+> menu on calendars and lists.
+
 **Save** creates the event; a live region confirms "Event saved".
 
 > **Notify attendees:** When an event has attendees and the calendar

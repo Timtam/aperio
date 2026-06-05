@@ -453,6 +453,10 @@ button[aria-disabled='true'] {
   max-width: 420px;
 }
 
+.modal--color-picker {
+  max-width: 420px;
+}
+
 /* The recurring-event delete dialog carries three buttons instead
    of two, so it needs a bit more horizontal room to keep the
    labels readable. */
@@ -1781,6 +1785,20 @@ button[aria-disabled='true'] {
 .color-label-select__select {
   flex: 1 1 auto;
   min-width: 0;
+}
+
+/* "Custom color…" button beside the label dropdown — opens the picker. */
+.color-label-select__custom {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  font-size: var(--font-size-xs);
+}
+
+/* The custom-color picker modal. */
+.color-picker__save-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
 }
 
 .color-label-select__swatch {

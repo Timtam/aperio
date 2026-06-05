@@ -251,20 +251,26 @@ impl LocalAdapter {
     pub fn dump_color_labels_for_snapshot(&self) -> cal_core::Result<Vec<ColorLabel>> {
         let conn = self.db().lock().expect("db mutex poisoned");
         let mut stmt = conn
-            .prepare("SELECT id, name, hex FROM color_labels")
+            .prepare("SELECT id, name, hex, ad_hoc FROM color_labels")
             .map_err(map_sql_err)?;
         let rows = stmt
             .query_map([], |row| {
-                Ok((req_text(row, 0), req_text(row, 1), req_text(row, 2)))
+                Ok((
+                    req_text(row, 0),
+                    req_text(row, 1),
+                    req_text(row, 2),
+                    row.get::<_, i64>(3),
+                ))
             })
             .map_err(map_sql_err)?;
         let mut out = Vec::new();
         for r in rows {
-            let (id, name, hex) = r.map_err(map_sql_err)?;
+            let (id, name, hex, ad_hoc) = r.map_err(map_sql_err)?;
             out.push(ColorLabel {
                 id: ColorLabelId::new(id?),
                 name: name?,
                 hex: hex?,
+                ad_hoc: ad_hoc.map_err(map_sql_err)? != 0,
             });
         }
         Ok(out)
@@ -463,6 +469,7 @@ mod tests {
             id: ColorLabelId::new("lbl-1".to_string()),
             name: "Red".into(),
             hex: "#ff0000".into(),
+            ad_hoc: false,
         })
         .unwrap();
 

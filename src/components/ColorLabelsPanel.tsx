@@ -42,6 +42,9 @@ export function ColorLabelsPanel() {
   const { t } = useTranslation();
   const announce = useAnnouncer();
   const { colorLabels, refreshColorLabels } = useCalendarStore();
+  // Hidden ad-hoc one-off colors (composed via the custom-color picker) are
+  // never managed here — only named palette labels show up.
+  const namedLabels = colorLabels.filter((l) => !l.ad_hoc);
 
   const [newName, setNewName] = useState('');
   const [newHex, setNewHex] = useState(DEFAULT_NEW_HEX);
@@ -126,7 +129,7 @@ export function ColorLabelsPanel() {
 
   const editingLabel =
     editingId !== null
-      ? colorLabels.find((l) => l.id === editingId) ?? null
+      ? namedLabels.find((l) => l.id === editingId) ?? null
       : null;
 
   return (
@@ -140,7 +143,7 @@ export function ColorLabelsPanel() {
         />
       ) : (
         <ExistingSection
-          colorLabels={colorLabels}
+          colorLabels={namedLabels}
           onEdit={setEditingId}
           focusOnMountRef={focusListOnNextMountRef}
         />
