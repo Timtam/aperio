@@ -264,7 +264,13 @@
         "hint": "Standard-Hinweise, die auf Termine ohne eigenen Hinweis angewendet werden. Hilfreich für iCloud-Kalender: iOS-„Standardhinweise“ werden nicht in den Termin geschrieben, ohne hier konfigurierten Standard erscheint der Hinweis in Aperio nicht.",
         "empty": "Noch keine Kalender — füge zuerst ein Konto hinzu.",
         "accountHeading": "{{account}}",
-        "localAccount": "Lokal"
+        "localAccount": "Lokal",
+        "selectorLabel": "Kalender auswählen",
+        "optionLabel": "{{account}} › {{calendar}}, {{summary}}",
+        "reminderSummaryNone": "keine Standard-Erinnerung",
+        "reminderSummaryOne": "1 Standard-Erinnerung",
+        "reminderSummaryOther": "{{count}} Standard-Erinnerungen",
+        "detailHeading": "Erinnerungen – {{account}} › {{calendar}}"
       },
       "notifications": {
         "heading": "Benachrichtigungstöne",

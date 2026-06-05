@@ -563,6 +563,83 @@ button[aria-disabled='true'] {
   font-weight: 500;
 }
 
+/* Per-calendar reminders: master/detail. A single keyboard-navigable
+   listbox of calendars (one tab stop) + a detail editor for the selected
+   one, so a screen-reader user always knows which calendar they're on and
+   never wades through dozens of inline tab stops. */
+.calendars-panel__master-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.calendars-panel__selector {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.calendars-panel__selector:focus-visible {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: -2px;
+}
+
+.calendars-panel__selector-group + .calendars-panel__selector-group {
+  border-top: 1px solid var(--color-border);
+}
+
+.calendars-panel__selector-group > .calendars-panel__account {
+  display: block;
+  padding: var(--space-1) var(--space-3);
+  background: var(--color-bg-elevated);
+}
+
+.calendars-panel__selector-sublist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.calendars-panel__option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+}
+
+.calendars-panel__option--selected {
+  background: var(--color-bg-elevated);
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: -2px;
+}
+
+.calendars-panel__option-summary {
+  margin-left: auto;
+  font-size: var(--font-size-sm);
+  color: var(--color-fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.calendars-panel__detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.calendars-panel__detail-heading {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
 /* Tasks settings panel — currently just one section / one toggle. */
 .tasks-settings__section {
   display: flex;
