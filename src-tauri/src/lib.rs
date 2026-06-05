@@ -485,43 +485,54 @@ pub fn run() {
         //   - Resized + minimized: OS-level minimize (Win+M, taskbar, the
         //     window menu) — Tauri has no dedicated minimize event, so we
         //     watch resizes and check the minimized state.
-        .on_window_event(|window, event| match event {
-            tauri::WindowEvent::CloseRequested { api, .. } => {
-                let app = window.app_handle();
-                let tray = app.state::<tray::TrayHandles>();
-                let hide = tray.available && tray::pref_is_true(app, tray::CLOSE_TO_TRAY_PREF);
-                // TEMP diagnostics (tray close/minimize "stays open").
-                eprintln!(
-                    "[aperio-diag] CloseRequested: available={}, closeToTray={}, → {}",
-                    tray.available,
-                    tray::pref_is_true(app, tray::CLOSE_TO_TRAY_PREF),
-                    if hide { "hide" } else { "close" },
-                );
-                if hide {
-                    api.prevent_close();
-                    let _ = window.hide();
-                }
-            }
-            tauri::WindowEvent::Resized(_) => {
-                // Cheap state check first; only touch the DB pref when the
-                // window actually became minimized, not every resize frame.
-                if matches!(window.is_minimized(), Ok(true)) {
+        .on_window_event(|window, event| {
+            // Hide the MAIN webview window to the tray — the SAME object the
+            // working title-bar command hides, not the bare `&Window` the
+            // event hands us (hiding that left the window on screen). Logs
+            // the hide() result while we confirm the fix.
+            let hide_main = || match window.app_handle().get_webview_window("main") {
+                Some(w) => eprintln!("[aperio-diag] webview hide() -> {:?}", w.hide()),
+                None => eprintln!("[aperio-diag] hide: no webview window 'main'"),
+            };
+            match event {
+                tauri::WindowEvent::CloseRequested { api, .. } => {
                     let app = window.app_handle();
                     let tray = app.state::<tray::TrayHandles>();
-                    let hide =
-                        tray.available && tray::pref_is_true(app, tray::MINIMIZE_TO_TRAY_PREF);
+                    let hide = tray.available && tray::pref_is_true(app, tray::CLOSE_TO_TRAY_PREF);
                     eprintln!(
-                        "[aperio-diag] Resized+minimized: available={}, minimizeToTray={}, → {}",
-                        tray.available,
-                        tray::pref_is_true(app, tray::MINIMIZE_TO_TRAY_PREF),
-                        if hide { "hide" } else { "stay minimized" },
+                        "[aperio-diag] CloseRequested -> {}",
+                        if hide { "hide" } else { "close" },
                     );
                     if hide {
-                        let _ = window.hide();
+                        api.prevent_close();
+                        hide_main();
                     }
                 }
+                tauri::WindowEvent::Resized(_) => {
+                    // Cheap state check first; only touch the DB pref when the
+                    // window actually became minimized, not every resize frame.
+                    if matches!(window.is_minimized(), Ok(true)) {
+                        let app = window.app_handle();
+                        let tray = app.state::<tray::TrayHandles>();
+                        let hide =
+                            tray.available && tray::pref_is_true(app, tray::MINIMIZE_TO_TRAY_PREF);
+                        eprintln!(
+                            "[aperio-diag] Resized+minimized -> {}",
+                            if hide { "hide" } else { "stay" },
+                        );
+                        if hide {
+                            // Clear the minimized state first so the window
+                            // isn't stuck minimized-and-hidden, then tuck it
+                            // into the tray.
+                            if let Some(w) = app.get_webview_window("main") {
+                                let _ = w.unminimize();
+                            }
+                            hide_main();
+                        }
+                    }
+                }
+                _ => {}
             }
-            _ => {}
         })
         .invoke_handler(tauri::generate_handler![
             app_info,
