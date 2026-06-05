@@ -163,6 +163,31 @@ button {
   cursor: pointer;
 }
 
+/* Custom interactive controls that aren't a native <button>/<a> — list
+   options, tree items, tabs, switches, menu items — still get the pointer
+   cursor, so everything a user can activate looks clickable. (Calendar day
+   cells use role="gridcell" and opt in next to their own styles; drag
+   handles keep grab/grabbing on purpose.) */
+[role='button'],
+[role='link'],
+[role='option'],
+[role='tab'],
+[role='treeitem'],
+[role='menuitem'],
+[role='menuitemradio'],
+[role='menuitemcheckbox'],
+[role='switch'],
+[role='radio'],
+summary {
+  cursor: pointer;
+}
+
+/* A disabled interactive element shows not-allowed, never a misleading
+   pointer. After the rule above so it wins for disabled controls. */
+[aria-disabled='true'] {
+  cursor: not-allowed;
+}
+
 :focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
@@ -2521,6 +2546,8 @@ button[aria-disabled='true'] {
   border-right: 1px solid var(--color-border);
   padding: var(--space-2);
   min-height: 100px;
+  /* The whole day column is clickable (selects that day). */
+  cursor: pointer;
 }
 
 .week-grid__cell:last-child {
@@ -2861,6 +2888,8 @@ button[aria-disabled='true'] {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  /* The whole day cell is clickable (selects that day). */
+  cursor: pointer;
   /* Cells stretch to their row's height (the rows share the grid's height
      equally), so every day cell is the SAME size and the grid fills the
      window — no wasted band at the bottom, and it re-flows on resize.
