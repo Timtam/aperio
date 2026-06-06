@@ -75,25 +75,44 @@ export interface CascadeOptions {
 }
 
 /**
- * Apply the "started → pin to today" rule to a write the planner is
- * about to emit. No-op unless every condition is met:
+ * The "started → pin to today" rule, as a pure function so every entry
+ * point shares one definition. Returns the date to pin (`todayKey`) when
+ * a task moving into `in_progress` has no scheduled day, else `undefined`
+ * ("leave the date as-is"):
  *   - the new status is `in_progress`
- *   - the caller passed a `todayKey`
- *   - the target task currently has no `scheduled_date`
+ *   - a `todayKey` is available (the auto-date setting is on)
+ *   - the task currently has no `scheduled_date`
  *
- * The rule fires identically for the root user-driven transition and
- * for an ancestor that the up-cascade derives to `in_progress`. Both
- * are "the task is now being worked on" from the user's perspective.
+ * Used by both the cascade planner (for the root transition + any ancestor
+ * the up-cascade derives to `in_progress`) and the task editor's own root
+ * write — both mean "the task is now being worked on".
+ */
+export function autoDateOnStart(
+  newStatus: TaskStatus,
+  currentScheduledDate: string | null,
+  todayKey: string | undefined,
+): string | undefined {
+  if (newStatus !== 'in_progress') return undefined;
+  if (!todayKey) return undefined;
+  if (currentScheduledDate !== null) return undefined;
+  return todayKey;
+}
+
+/**
+ * Apply {@link autoDateOnStart} to a write the planner is about to emit.
  */
 function attachAutoDate(
   write: StatusWrite,
   target: Task | undefined,
   options: CascadeOptions | undefined,
 ): StatusWrite {
-  if (write.status !== 'in_progress') return write;
-  if (!options?.todayKey) return write;
-  if (!target || target.scheduled_date !== null) return write;
-  return { ...write, scheduledDate: options.todayKey };
+  if (!target) return write;
+  const date = autoDateOnStart(
+    write.status,
+    target.scheduled_date,
+    options?.todayKey,
+  );
+  return date ? { ...write, scheduledDate: date } : write;
 }
 
 /**

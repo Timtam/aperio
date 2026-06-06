@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { Task, TaskStatus } from '../api/types';
 import {
+  autoDateOnStart,
   deriveStatusFromChildren,
   planAncestorRecompute,
   planStatusCascade,
@@ -36,6 +37,28 @@ const child = (id: string, parent: string, status: TaskStatus): Task => ({
   id,
   parent_id: parent,
   status,
+});
+
+describe('autoDateOnStart', () => {
+  const TODAY = '2026-06-06';
+
+  it('pins a dateless task moving into in_progress to today', () => {
+    expect(autoDateOnStart('in_progress', null, TODAY)).toBe(TODAY);
+  });
+
+  it('leaves a task that already has a scheduled date alone', () => {
+    expect(autoDateOnStart('in_progress', '2026-06-01', TODAY)).toBeUndefined();
+  });
+
+  it('only fires for in_progress', () => {
+    expect(autoDateOnStart('open', null, TODAY)).toBeUndefined();
+    expect(autoDateOnStart('completed', null, TODAY)).toBeUndefined();
+    expect(autoDateOnStart('cancelled', null, TODAY)).toBeUndefined();
+  });
+
+  it('is a no-op when the auto-date setting is off (no todayKey)', () => {
+    expect(autoDateOnStart('in_progress', null, undefined)).toBeUndefined();
+  });
 });
 
 describe('deriveStatusFromChildren', () => {

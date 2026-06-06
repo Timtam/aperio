@@ -38,6 +38,7 @@ import { useCalendarStore } from '../state/calendarStoreContext';
 import { canAssignSection, canMoveTaskBetweenLists } from '../state/taskMoves';
 import { useDialogState } from '../state/dialogStateContext';
 import {
+  autoDateOnStart,
   planAncestorRecompute,
   planStatusCascade,
   type StatusWrite,
@@ -628,6 +629,28 @@ export function TaskDialog({
         deadline_time,
       } = splitDeadline(form);
 
+      // "Started → pin to today": a task that moves into `in_progress`
+      // while it has no scheduled day gets pinned to today, so the
+      // carry-over / missed-tasks flow can find it later. The cascade
+      // (`attachAutoDate`) applies this to ancestors, but the edited /
+      // created task itself is written here separately, so it needs the
+      // rule too — otherwise setting a backlog task to "in progress" from
+      // the editor never schedules it. Only on the *transition* into
+      // in_progress, and only when this save leaves it dateless; an
+      // explicit date set in the same edit wins. Gated by the global
+      // Settings → Tasks "auto-date on start" toggle.
+      const startsInProgress =
+        form.status === 'in_progress' &&
+        (!isEdit || (task !== null && task.status !== 'in_progress'));
+      const rootScheduledDate =
+        (startsInProgress
+          ? autoDateOnStart(
+              form.status,
+              scheduled_date,
+              autoDate ? todayIsoKey() : undefined,
+            )
+          : undefined) ?? scheduled_date;
+
       setSubmitting(true);
       try {
         if (isEdit && task) {
@@ -641,7 +664,7 @@ export function TaskDialog({
               form.listId !== task.list_id ? null : form.sectionId || null,
             status: form.status,
             priority: form.priority,
-            scheduled_date,
+            scheduled_date: rootScheduledDate,
             scheduled_time,
             deadline_date,
             deadline_time,
@@ -718,7 +741,7 @@ export function TaskDialog({
             description: form.description.trim() || null,
             status: form.status,
             priority: form.priority,
-            scheduled_date,
+            scheduled_date: rootScheduledDate,
             scheduled_time,
             deadline_date,
             deadline_time,

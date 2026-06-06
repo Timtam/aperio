@@ -38,6 +38,9 @@ Aperio unterscheidet zwischen Aufgaben mit und ohne festen Termin:
 - **Backlog:** Aufgaben ohne Fälligkeitsdatum sammeln sich hier.
 - **Einplanen:** Gib einer Aufgabe ein Fälligkeitsdatum (oder ziehe sie in
   der Wochenplanung auf einen Tag), um sie fest einzuplanen.
+- **Automatisch auf heute:** Setzt du eine Backlog-Aufgabe auf **„In
+  Bearbeitung"**, plant Aperio sie automatisch für **heute** ein – die Arbeit
+  hat ja begonnen. (Abschaltbar unter *Einstellungen → Aufgaben*.)
 - **Wochenplanung:** Eine Ansicht, in der du Backlog-Aufgaben bequem auf
   die Tage der Woche verteilst.
 

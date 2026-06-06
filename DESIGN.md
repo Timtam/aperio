@@ -993,6 +993,8 @@ pub enum TaskPriority { Low, Medium, High }
 
 **Konfigurierbar:** In welchen Ansichten `By`-Aufgaben erscheinen (Wochen-, Tages-, Monatsansicht etc.) ist unter `Einstellungen → Aufgaben → Ansichten` pro Ansichtstyp ein-/ausschaltbar.
 
+**Auto-Datum beim Start:** Wird eine Aufgabe auf `in_progress` („in Bearbeitung") gesetzt und hat noch keinen geplanten Tag (`scheduled_date`), wird sie automatisch auf **heute** eingeplant – die Arbeit hat begonnen, also gehört die Aufgabe in den heutigen Tag (und der Carry-over-/Verpasste-Aufgaben-Ablauf findet sie später wieder). Ein in derselben Bearbeitung explizit gesetztes Datum hat Vorrang. Pro Liste unter `Einstellungen → Aufgaben` ein-/ausschaltbar (Standard: an). Die Regel gilt einheitlich für den Status-Wechsel über das Kontextmenü **und** über den Aufgaben-Dialog sowie für Eltern-Aufgaben, die durch die Status-Kopplung (§9.1) auf `in_progress` abgeleitet werden. Implementiert als `autoDateOnStart` in `taskCascade.ts`.
+
 ### 9.3 Backlog
 
 Aufgaben ohne Datum sammeln sich im Backlog – der ungeordneten Warteschlange noch nicht eingeplanter Aufgaben.
