@@ -56,8 +56,10 @@ For shared lists (e.g. Todoist) you can:
 - **assign a person** to individual tasks.
 
 > **Screen-reader note:** Tasks are announced with title, status (done /
-> open), due date and priority. Checking off with `Space` is reported
-> immediately as "done" or "open", without moving the focus.
+> open), due date and priority. **High** priority also shows a "↑", **low**
+> a "↓"; medium priority (the default) shows nothing. Checking off with
+> `Space` is reported immediately as "done" or "open", without moving the
+> focus.
 
 ## Summary
 

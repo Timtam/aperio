@@ -1,4 +1,4 @@
-import type { Task, TaskStatus } from '../api/types';
+import type { Task, TaskPriority, TaskStatus } from '../api/types';
 
 /**
  * Per-status glyph for the on-chip / on-row marker.
@@ -30,6 +30,58 @@ export function statusMarker(status: TaskStatus): string {
     case 'open':
       return '○';
   }
+}
+
+/**
+ * Per-priority glyph for the on-chip / on-row indicator. One character
+ * wide like {@link statusMarker}. `medium` — the default for virtually
+ * every task — renders **nothing**, so only deliberately raised or
+ * lowered tasks draw a glyph and the indicator stays quiet. The arrows
+ * read as positions on one axis around an implied neutral middle:
+ * high `↑`, low `↓`, medium = baseline (absent).
+ */
+export function priorityMarker(priority: TaskPriority): string {
+  switch (priority) {
+    case 'high':
+      return '↑';
+    case 'low':
+      return '↓';
+    case 'medium':
+      return '';
+  }
+}
+
+/**
+ * i18n key for the SR-announced priority label, or `null` for `medium`
+ * (no announcement — keeps the common case unchanged). The resolved
+ * string is the bare label ("high priority"); {@link prioritySuffix}
+ * adds the comma separator for inline use, while sites that need a
+ * stand-alone `aria-label` can resolve the key directly.
+ */
+export function priorityI18nKey(priority: TaskPriority): string | null {
+  switch (priority) {
+    case 'high':
+      return 'views.tasks.priorityHigh';
+    case 'low':
+      return 'views.tasks.priorityLow';
+    case 'medium':
+      return null;
+  }
+}
+
+/**
+ * SR-friendly priority suffix for aria-labels. Empty string for
+ * `medium`, so it can be appended unconditionally to any task label.
+ * Like {@link subtaskProgressSuffix} the result is comma-prefixed, so
+ * the calling i18n template (`{{state}}{{priority}}{{progress}}`) needs
+ * no conditional.
+ */
+export function prioritySuffix(
+  t: (key: string, vars?: Record<string, unknown>) => string,
+  priority: TaskPriority,
+): string {
+  const key = priorityI18nKey(priority);
+  return key ? `, ${t(key)}` : '';
 }
 
 /**

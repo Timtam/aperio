@@ -3371,6 +3371,25 @@ button[aria-disabled='true'] {
   font-size: var(--font-size-xs);
 }
 
+/* Priority indicator (↑ high / ↓ low; medium renders nothing). Muted and
+   one glyph wide, sitting beside the status marker — the glyph itself
+   carries the meaning, so colour is never the sole signal. */
+.task-list__priority,
+.day-task__priority,
+.week-task__priority,
+.week-deadline-bar__priority,
+.subtasks__priority,
+.missed-tasks__priority {
+  flex-shrink: 0;
+  color: var(--color-fg-muted);
+}
+
+/* This site follows the title text directly (no trailing space in the
+   glyph), so give it a little breathing room. */
+.missed-tasks__priority {
+  margin-left: var(--space-1);
+}
+
 .task-list__assignees {
   /* Muted assignee pill, same restraint as the subtask-progress badge —
    * present at a glance without competing with the title. Clips long

@@ -15,6 +15,8 @@ import { useDeferredLoading } from '../../hooks/useDeferredLoading';
 import { useDateFormat } from '../../intl/dateFormat';
 import { labelsLookup, resolveTaskColor } from '../../intl/eventColor';
 import {
+  priorityMarker,
+  prioritySuffix,
   statusI18nKey,
   statusMarker,
   subtaskProgress,
@@ -556,12 +558,14 @@ function renderTreeItem(
   const due = describeDue(task, fmt, t);
   const color = resolveTaskColor(task, taskListById, labelById);
   const marker = statusMarker(task.status);
+  const priorityGlyph = priorityMarker(task.priority);
   const stateLabel = t(statusI18nKey(task.status));
   const progress = subtaskProgress(task.id, tasks);
   const aria = t('views.tasks.optionLabel', {
     title: task.title,
     list: listName,
     state: stateLabel,
+    priority: prioritySuffix(t, task.priority),
     progress: subtaskProgressSuffix(t, task.id, tasks),
     due,
   });
@@ -637,7 +641,14 @@ function renderTreeItem(
       >
         {marker}
       </span>
-      <span className="task-list__title">{task.title}</span>
+      <span className="task-list__title">
+        {priorityGlyph && (
+          <span className="task-list__priority" aria-hidden="true">
+            {priorityGlyph}{' '}
+          </span>
+        )}
+        {task.title}
+      </span>
       {task.assignees.length > 0 && (
         <span
           className="task-list__assignees"

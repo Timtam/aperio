@@ -60,9 +60,10 @@ Bei geteilten Listen (z. B. Todoist) kannst du:
 - einzelnen Aufgaben eine **Person zuweisen**.
 
 > **Screenreader-Hinweis:** Aufgaben werden mit Titel, Status (erledigt /
-> offen), Fälligkeit und Priorität angesagt. Das Abhaken über die
-> `Leertaste` wird sofort als „erledigt" bzw. „offen" rückgemeldet, ohne
-> dass sich der Fokus bewegt.
+> offen), Fälligkeit und Priorität angesagt. Eine **hohe** Priorität zeigt
+> zusätzlich ein „↑", eine **niedrige** ein „↓"; die mittlere Priorität
+> (Standard) zeigt nichts. Das Abhaken über die `Leertaste` wird sofort als
+> „erledigt" bzw. „offen" rückgemeldet, ohne dass sich der Fokus bewegt.
 
 ## Zusammenfassung
 

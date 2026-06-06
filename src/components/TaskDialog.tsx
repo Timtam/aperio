@@ -26,7 +26,12 @@ import {
 } from '../api/client';
 import { invoke } from '@tauri-apps/api/core';
 import { todayIsoKey } from '../intl/taskDay';
-import { statusI18nKey, statusMarker } from '../intl/taskStatus';
+import {
+  priorityMarker,
+  prioritySuffix,
+  statusI18nKey,
+  statusMarker,
+} from '../intl/taskStatus';
 import type {
   Reminder,
   Task,
@@ -1226,6 +1231,7 @@ export function TaskDialog({
                       aria-label={t('dialogs.task.subtasks.rowLabel', {
                         title: sub.title,
                         state: stateLabel,
+                        priority: prioritySuffix(t, sub.priority),
                       })}
                       className={
                         'subtasks__row' +
@@ -1254,6 +1260,14 @@ export function TaskDialog({
                             : '')
                         }
                       >
+                        {priorityMarker(sub.priority) && (
+                          <span
+                            className="subtasks__priority"
+                            aria-hidden="true"
+                          >
+                            {priorityMarker(sub.priority)}{' '}
+                          </span>
+                        )}
                         {sub.title}
                       </span>
                     </li>

@@ -36,6 +36,8 @@ import {
   todayIsoKey,
 } from '../../intl/taskDay';
 import {
+  priorityMarker,
+  prioritySuffix,
   statusI18nKey,
   statusMarker,
   subtaskProgressSuffix,
@@ -654,6 +656,14 @@ export function WeekView() {
                   <span className="week-deadline-bar__marker" aria-hidden="true">
                     {statusMarker(bar.task.status)}
                   </span>
+                  {priorityMarker(bar.task.priority) && (
+                    <span
+                      className="week-deadline-bar__priority"
+                      aria-hidden="true"
+                    >
+                      {priorityMarker(bar.task.priority)}{' '}
+                    </span>
+                  )}
                   <span className="week-deadline-bar__title">
                     {bar.task.title}
                   </span>
@@ -830,6 +840,7 @@ export function WeekView() {
                         taskListById,
                         labelById,
                       );
+                      const priorityGlyph = priorityMarker(task.priority);
                       // All four TaskStatus values need their own
                       // glyph + class. The legacy `=== 'completed'`
                       // shortcut would render in_progress and
@@ -910,6 +921,14 @@ export function WeekView() {
                               >
                                 {statusMarker(task.status)}
                               </span>
+                              {priorityGlyph && (
+                                <span
+                                  className="week-task__priority"
+                                  aria-hidden="true"
+                                >
+                                  {priorityGlyph}{' '}
+                                </span>
+                              )}
                               <span className="week-task__title">
                                 {task.title}
                               </span>
@@ -1144,6 +1163,7 @@ function WeekDayTasks({
           : 'views.week.taskChip';
         const color = resolveTaskColor(task, taskListById, labelById);
         const state = t(statusI18nKey(task.status));
+        const priorityGlyph = priorityMarker(task.priority);
         return (
           <li key={task.id} className="week-grid__task-item">
             <button
@@ -1188,6 +1208,7 @@ function WeekDayTasks({
                 title: task.title,
                 deadline: task.deadline_date ?? '',
                 state,
+                priority: prioritySuffix(t, task.priority),
                 progress: subtaskProgressSuffix(t, task.id, allTasks),
               })}
             >
@@ -1202,6 +1223,11 @@ function WeekDayTasks({
                 >
                   {statusMarker(task.status)}
                 </span>
+                {priorityGlyph && (
+                  <span className="week-task__priority" aria-hidden="true">
+                    {priorityGlyph}{' '}
+                  </span>
+                )}
                 <span className="week-task__title">{task.title}</span>
               </span>
             </button>
@@ -1230,6 +1256,7 @@ function taskChipAriaLabel(
     title: task.title,
     time,
     state,
+    priority: prioritySuffix(t, task.priority),
     progress: subtaskProgressSuffix(t, task.id, allTasks),
   });
 }

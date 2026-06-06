@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { useAnnouncer } from '../a11y/announcerContext';
 import type { Task } from '../api/types';
 import { todayIsoKey } from '../intl/taskDay';
+import { priorityI18nKey, priorityMarker } from '../intl/taskStatus';
 import { useDialogState } from '../state/dialogStateContext';
 import { useTaskCascadeEnabled } from '../state/taskCascadeContext';
 import { useTaskStatusActions } from '../state/useTaskStatusToggle';
@@ -428,6 +429,14 @@ export function DayStartReviewDialog({
               <li key={task.id} className="missed-tasks__row">
                 <div className="missed-tasks__title">
                   <span className="missed-tasks__name">{task.title}</span>
+                  {priorityMarker(task.priority) && (
+                    <span
+                      className="missed-tasks__priority"
+                      aria-label={t(priorityI18nKey(task.priority) ?? '')}
+                    >
+                      {priorityMarker(task.priority)}
+                    </span>
+                  )}
                   {task.deadline_date && (
                     <span className="missed-tasks__deadline">
                       {t('dialogs.dayStartReview.deadlines.dateLabel', {
@@ -487,6 +496,14 @@ export function DayStartReviewDialog({
               <li key={task.id} className="missed-tasks__row">
                 <div className="missed-tasks__title">
                   <span className="missed-tasks__name">{task.title}</span>
+                  {priorityMarker(task.priority) && (
+                    <span
+                      className="missed-tasks__priority"
+                      aria-label={t(priorityI18nKey(task.priority) ?? '')}
+                    >
+                      {priorityMarker(task.priority)}
+                    </span>
+                  )}
                   {task.scheduled_date && (
                     <span className="missed-tasks__deadline">
                       {t('dialogs.dayStartReview.carryOver.dateLabel', {

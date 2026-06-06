@@ -1040,7 +1040,7 @@
         "addButton": "Hinzufügen",
         "added": "Unteraufgabe „{{title}}\" hinzugefügt.",
         "listAria": "Unteraufgaben. Pfeiltasten zur Navigation, Leertaste zum Umschalten, Umschalt+F10 für Aktionen.",
-        "rowLabel": "{{title}}, {{state}}"
+        "rowLabel": "{{title}}, {{state}}{{priority}}"
       },
       "status": {
         "open": "Offen",
@@ -1385,9 +1385,9 @@
       "tabAnnounce": "{{day}}: {{title}}",
       "tasksOnDay_one": "1 Aufgabe",
       "tasksOnDay_other": "{{count}} Aufgaben",
-      "taskChip": "Aufgabe: {{title}}, {{state}}{{progress}}",
-      "taskChipBy": "Aufgabe: {{title}}, fällig bis {{deadline}}, {{state}}{{progress}}",
-      "taskChipTimed": "Aufgabe: {{title}}, {{time}}, {{state}}{{progress}}",
+      "taskChip": "Aufgabe: {{title}}, {{state}}{{priority}}{{progress}}",
+      "taskChipBy": "Aufgabe: {{title}}, fällig bis {{deadline}}, {{state}}{{priority}}{{progress}}",
+      "taskChipTimed": "Aufgabe: {{title}}, {{time}}, {{state}}{{priority}}{{progress}}",
       "deadlineBarTitle": "{{title}} — bis {{date}}",
       "taskRescheduled": "Aufgabe „{{title}}“ auf {{date}} verschoben."
     },
@@ -1397,7 +1397,7 @@
       "tasksHeading": "Aufgaben",
       "empty": "Keine Termine an diesem Tag.",
       "eventLabel": "Termin: {{title}}, {{start}} bis {{end}}, Kalender: {{calendar}}",
-      "taskLabel": "Aufgabe: {{title}}, {{time}}, {{state}}{{progress}}"
+      "taskLabel": "Aufgabe: {{title}}, {{time}}, {{state}}{{priority}}{{progress}}"
     },
     "month": {
       "title": "Monatsansicht",
@@ -1435,8 +1435,10 @@
       "stateCancelled": "abgebrochen",
       "expand": "Unteraufgaben von „{{title}}\" ausklappen",
       "collapse": "Unteraufgaben von „{{title}}\" einklappen",
-      "optionLabel": "{{title}}, {{state}}{{progress}}, {{due}}, Liste {{list}}",
+      "optionLabel": "{{title}}, {{state}}{{priority}}{{progress}}, {{due}}, Liste {{list}}",
       "subtaskProgress": ", {{done}} von {{total}} Unteraufgaben erledigt",
+      "priorityHigh": "hohe Priorität",
+      "priorityLow": "niedrige Priorität",
       "subtaskProgressBadge": "{{done}}/{{total}}",
       "subtaskProgressBadgeAria": "{{done}} von {{total}} Unteraufgaben erledigt",
       "assignedTo": "Zugewiesen an: {{names}}",

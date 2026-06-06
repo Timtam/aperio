@@ -34,6 +34,8 @@ import {
   todayIsoKey,
 } from '../../intl/taskDay';
 import {
+  priorityMarker,
+  prioritySuffix,
   statusI18nKey,
   statusMarker,
   subtaskProgressSuffix,
@@ -366,6 +368,7 @@ export function DayView() {
                 : '';
               const color = resolveTaskColor(task, taskListById, labelById);
               const state = t(statusI18nKey(task.status));
+              const priorityGlyph = priorityMarker(task.priority);
               return (
                 <li
                   key={`task-${task.id}`}
@@ -376,6 +379,7 @@ export function DayView() {
                     title: task.title,
                     time: timeStr,
                     state,
+                    priority: prioritySuffix(t, task.priority),
                     progress: subtaskProgressSuffix(t, task.id, tasks),
                   })}
                   className={
@@ -414,6 +418,11 @@ export function DayView() {
                     >
                       {statusMarker(task.status)}{' '}
                     </span>
+                    {priorityGlyph && (
+                      <span className="day-task__priority" aria-hidden="true">
+                        {priorityGlyph}{' '}
+                      </span>
+                    )}
                     {task.title}
                   </span>
                 </li>
@@ -511,6 +520,7 @@ export function DayView() {
                 : 'views.week.taskChip';
               const color = resolveTaskColor(task, taskListById, labelById);
               const state = t(statusI18nKey(task.status));
+              const priorityGlyph = priorityMarker(task.priority);
               return (
                 <li key={task.id} className="day-tasks__item">
                   <button
@@ -562,6 +572,7 @@ export function DayView() {
                       title: task.title,
                       deadline: task.deadline_date ?? '',
                       state,
+                      priority: prioritySuffix(t, task.priority),
                       progress: subtaskProgressSuffix(t, task.id, tasks),
                     })}
                   >
@@ -575,6 +586,11 @@ export function DayView() {
                     >
                       {statusMarker(task.status)}
                     </span>
+                    {priorityGlyph && (
+                      <span className="day-task__priority" aria-hidden="true">
+                        {priorityGlyph}{' '}
+                      </span>
+                    )}
                     <span className="day-task__title">{task.title}</span>
                   </button>
                 </li>

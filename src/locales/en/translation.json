@@ -1040,7 +1040,7 @@
         "addButton": "Add",
         "added": "Subtask \"{{title}}\" added.",
         "listAria": "Subtasks. Arrow keys to navigate, Space to toggle done, Shift+F10 for actions.",
-        "rowLabel": "{{title}}, {{state}}"
+        "rowLabel": "{{title}}, {{state}}{{priority}}"
       },
       "status": {
         "open": "Open",
@@ -1385,9 +1385,9 @@
       "tabAnnounce": "{{day}}: {{title}}",
       "tasksOnDay_one": "1 task",
       "tasksOnDay_other": "{{count}} tasks",
-      "taskChip": "Task: {{title}}, {{state}}{{progress}}",
-      "taskChipBy": "Task: {{title}}, due by {{deadline}}, {{state}}{{progress}}",
-      "taskChipTimed": "Task: {{title}}, {{time}}, {{state}}{{progress}}",
+      "taskChip": "Task: {{title}}, {{state}}{{priority}}{{progress}}",
+      "taskChipBy": "Task: {{title}}, due by {{deadline}}, {{state}}{{priority}}{{progress}}",
+      "taskChipTimed": "Task: {{title}}, {{time}}, {{state}}{{priority}}{{progress}}",
       "deadlineBarTitle": "{{title}} — due by {{date}}",
       "taskRescheduled": "Task \"{{title}}\" moved to {{date}}."
     },
@@ -1396,7 +1396,7 @@
       "eventList": "Events on this day",
       "empty": "No events on this day.",
       "eventLabel": "Event: {{title}}, {{start}} to {{end}}, calendar: {{calendar}}",
-      "taskLabel": "Task: {{title}}, {{time}}, {{state}}{{progress}}",
+      "taskLabel": "Task: {{title}}, {{time}}, {{state}}{{priority}}{{progress}}",
       "tasksHeading": "Tasks"
     },
     "month": {
@@ -1435,8 +1435,10 @@
       "stateCancelled": "cancelled",
       "expand": "Expand subtasks of \"{{title}}\"",
       "collapse": "Collapse subtasks of \"{{title}}\"",
-      "optionLabel": "{{title}}, {{state}}{{progress}}, {{due}}, list {{list}}",
+      "optionLabel": "{{title}}, {{state}}{{priority}}{{progress}}, {{due}}, list {{list}}",
       "subtaskProgress": ", {{done}} of {{total}} subtasks done",
+      "priorityHigh": "high priority",
+      "priorityLow": "low priority",
       "subtaskProgressBadge": "{{done}}/{{total}}",
       "subtaskProgressBadgeAria": "{{done}} of {{total}} subtasks done",
       "assignedTo": "Assigned to: {{names}}",
