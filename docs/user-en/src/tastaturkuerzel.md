@@ -20,7 +20,10 @@ always authoritative.
 
 | Action | Shortcut |
 |---|---|
-| New event / new task | `Ctrl+N` |
+| Quick add event | `Ctrl+N` |
+| New event (full form) | `Ctrl+Shift+N` |
+| Quick add task | `Alt+N` |
+| New task (full form) | `Alt+Shift+N` |
 | Edit entry | `Enter` |
 | Check off / reopen task | `Space` |
 | Delete entry | `Delete` |

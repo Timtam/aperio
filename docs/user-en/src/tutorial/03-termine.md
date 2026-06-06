@@ -7,8 +7,9 @@ In this chapter you create, edit and move events and set up recurrences.
 1. Switch to a calendar view (e.g. **Week**, see
    [Chapter 05](05-ansichten.md)).
 2. Use the arrow keys to navigate to the day or time you want.
-3. Create an event with the **New event** command (default: `Ctrl+N`, or via
-   the context menu). The currently selected time is suggested as the start.
+3. Create an event: **Quick add event** (`Ctrl+N`) opens the quick dialog,
+   **New event** (`Ctrl+Shift+N`) the full form — or via the context menu.
+   The currently selected time is suggested as the start.
 4. In the dialog, enter at least a **title**.
 
 In the event dialog you can also set:

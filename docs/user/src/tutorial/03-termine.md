@@ -8,8 +8,9 @@ richtest Wiederholungen ein.
 1. Wechsle in eine Kalenderansicht (z. B. **Woche**, siehe
    [Kapitel 05](05-ansichten.md)).
 2. Navigiere mit den Pfeiltasten zum gewünschten Tag bzw. zur Uhrzeit.
-3. Lege mit dem Befehl **Neuer Termin** ein Ereignis an (Standard:
-   `Strg+N`, oder über das Kontextmenü). Der gerade markierte Zeitpunkt
+3. Lege ein Ereignis an: **Termin schnell anlegen** (`Strg+N`) öffnet den
+   Schnell-Dialog, **Neuer Termin** (`Strg+Umschalt+N`) das vollständige
+   Formular – oder über das Kontextmenü. Der gerade markierte Zeitpunkt
    wird als Startzeit vorgeschlagen.
 4. Im Dialog gibst du mindestens einen **Titel** ein.
 

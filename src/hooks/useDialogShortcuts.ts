@@ -7,9 +7,12 @@ import { useViewState } from '../state/viewStateContext';
 /**
  * Wire the global dialog-open shortcuts.
  *
- *  - `N` → quick-add event
- *  - `Ctrl/Cmd+N` → full new-event dialog
- *  - `Ctrl/Cmd+Shift+N` → new-task dialog
+ *  Create actions follow one rule — Ctrl/Cmd = event, Alt = task; Shift
+ *  opens the full editor, no Shift opens quick-add:
+ *  - `Ctrl/Cmd+N` → quick-add event
+ *  - `Ctrl/Cmd+Shift+N` → full new-event dialog
+ *  - `Alt+N` → quick-add task
+ *  - `Alt+Shift+N` → full new-task dialog
  *  - `Ctrl/Cmd+,` → Settings dialog (matches the platform convention
  *    used by Visual Studio Code, macOS apps and most modern desktops)
  *
@@ -23,6 +26,7 @@ export function useDialogShortcuts(): void {
     openEventDialog,
     openTaskDialog,
     openQuickAdd,
+    openQuickAddTask,
     openSearch,
     openReminders,
     openSettings,
@@ -52,16 +56,29 @@ export function useDialogShortcuts(): void {
         openReminders();
         return;
       }
-      if (cmd && e.shiftKey && e.key.toLowerCase() === 'n') {
-        e.preventDefault();
-        openTaskDialog(null);
-        return;
-      }
-      if (cmd && !e.shiftKey && e.key.toLowerCase() === 'n') {
+      // Create actions: Ctrl/Cmd = event, Alt = task; Shift = full editor,
+      // no Shift = quick-add. (macOS note: Option+N composes ñ — the app
+      // targets Windows primarily; users can rebind.)
+      if (cmd && !e.altKey && e.shiftKey && e.key.toLowerCase() === 'n') {
         e.preventDefault();
         openEventDialog(null, {
           defaultDate: localDateKey(anchorRef.current),
         });
+        return;
+      }
+      if (cmd && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'n') {
+        e.preventDefault();
+        openQuickAdd();
+        return;
+      }
+      if (e.altKey && !cmd && e.shiftKey && e.key.toLowerCase() === 'n') {
+        e.preventDefault();
+        openTaskDialog(null);
+        return;
+      }
+      if (e.altKey && !cmd && !e.shiftKey && e.key.toLowerCase() === 'n') {
+        e.preventDefault();
+        openQuickAddTask();
         return;
       }
       // `,` is a stable e.key across layouts; we don't compare e.code
@@ -73,11 +90,6 @@ export function useDialogShortcuts(): void {
         openSettings();
         return;
       }
-      if (!cmd && !e.shiftKey && !e.altKey && e.key === 'n') {
-        e.preventDefault();
-        openQuickAdd();
-        return;
-      }
     };
 
     window.addEventListener('keydown', onKeyDown);
@@ -87,6 +99,7 @@ export function useDialogShortcuts(): void {
     openEventDialog,
     openTaskDialog,
     openQuickAdd,
+    openQuickAddTask,
     openSearch,
     openReminders,
     openSettings,

@@ -20,7 +20,10 @@ Tastaturkürzel**, wo du jedes Kürzel ändern kannst.
 
 | Aktion | Kürzel |
 |---|---|
-| Neuer Termin / neue Aufgabe | `Strg+N` |
+| Termin schnell anlegen | `Strg+N` |
+| Neuer Termin (volles Formular) | `Strg+Umschalt+N` |
+| Aufgabe schnell anlegen | `Alt+N` |
+| Neue Aufgabe (volles Formular) | `Alt+Umschalt+N` |
 | Eintrag bearbeiten | `Eingabe` |
 | Aufgabe abhaken / wieder öffnen | `Leertaste` |
 | Eintrag löschen | `Entf` |

@@ -6,7 +6,8 @@ your day or week, and work through them.
 ## Creating a task
 
 1. Open the **task view** or a task list in the sidebar.
-2. Create a task with **New task** (default: `Ctrl+N`).
+2. Create a task: **Quick add task** (`Alt+N`) opens the quick dialog, **New
+   task** (`Alt+Shift+N`) the full form.
 3. Enter a **title**. Optionally:
    - the **task list** it is stored in,
    - a **due date** (and optionally a time),

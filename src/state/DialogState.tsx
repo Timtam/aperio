@@ -51,6 +51,7 @@ export type DialogMode =
       defaultDate?: string;
     }
   | { kind: 'quickAdd' }
+  | { kind: 'quickAddTask' }
   | { kind: 'settings'; initialTab?: SettingsTabId }
   | { kind: 'search' }
   | { kind: 'reminders' }
@@ -106,6 +107,7 @@ export interface DialogStateValue {
   ) => void;
   openTaskDialog: (task?: Task | null, options?: OpenTaskOptions) => void;
   openQuickAdd: () => void;
+  openQuickAddTask: () => void;
   /**
    * Open the unified Settings dialog. Pass an `initialTab` to land on a
    * specific category — used by the legacy entry points that used to
@@ -256,6 +258,10 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     [push],
   );
   const openQuickAdd = useCallback(() => push({ kind: 'quickAdd' }), [push]);
+  const openQuickAddTask = useCallback(
+    () => push({ kind: 'quickAddTask' }),
+    [push],
+  );
   const openSettings = useCallback(
     (initialTab?: SettingsTabId) => push({ kind: 'settings', initialTab }),
     [push],
@@ -360,6 +366,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openEventDialog,
       openTaskDialog,
       openQuickAdd,
+      openQuickAddTask,
       openSettings,
       openColorLabels,
       openAccounts,
@@ -383,6 +390,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openEventDialog,
       openTaskDialog,
       openQuickAdd,
+      openQuickAddTask,
       openSettings,
       openColorLabels,
       openAccounts,

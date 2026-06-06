@@ -5,6 +5,7 @@ import { EventDialog } from './EventDialog';
 import { MoveCopyDialog } from './MoveCopyDialog';
 import { PlanTaskDialog } from './PlanTaskDialog';
 import { QuickAddDialog } from './QuickAddDialog';
+import { QuickAddTaskDialog } from './QuickAddTaskDialog';
 import { RemindersDialog } from './RemindersDialog';
 import { SearchDialog } from './SearchDialog';
 import { SettingsDialog } from './SettingsDialog';
@@ -46,6 +47,8 @@ export function DialogHost() {
       );
     case 'quickAdd':
       return <QuickAddDialog isOpen onClose={close} />;
+    case 'quickAddTask':
+      return <QuickAddTaskDialog isOpen onClose={close} />;
     case 'settings':
       return (
         <SettingsDialog

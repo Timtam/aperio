@@ -302,9 +302,10 @@ Alle Ansichten müssen vollständig per Tastatur navigierbar sein. Die vollstän
 | `Tab` / `Shift+Tab` | Fokus zwischen Hauptbereichen |
 | `Pfeiltasten` | Navigation innerhalb einer Ansicht (Tage, Wochen, etc.) |
 | `Enter` / `Space` | Eintrag öffnen / Aktion auslösen (Space: Aufgabe abhaken in der Aufgaben-Ansicht) |
-| `Ctrl+N` | Neuer Termin |
-| `Ctrl+Shift+N` | Neue Aufgabe |
-| `N` | Schnellerstellung (Quick-Add) |
+| `Ctrl+N` | Termin schnell anlegen (Quick-Add) |
+| `Ctrl+Shift+N` | Neuer Termin (vollständiges Formular) |
+| `Alt+N` | Aufgabe schnell anlegen (Quick-Add) |
+| `Alt+Shift+N` | Neue Aufgabe (vollständiges Formular) |
 | `Escape` | Dialog schließen / Aktion abbrechen |
 | `Ctrl+←` / `Ctrl+→` | Vorherige / nächste Periode |
 | `Ctrl+1–6` | Ansicht wechseln (6 = Aufgaben-Ansicht) |
@@ -1257,7 +1258,8 @@ Die vollständige Kürzel-Referenz befindet sich in Abschnitt 15.7. Aufgaben-spe
 | Kürzel | Aktion |
 |---|---|
 | `Ctrl+6` | Aufgaben-Ansicht öffnen |
-| `Ctrl+Shift+N` | Neue Aufgabe erstellen |
+| `Alt+N` | Aufgabe schnell anlegen (Quick-Add) |
+| `Alt+Shift+N` | Neue Aufgabe (vollständiges Formular) |
 | `Space` | Fokussierte Aufgabe erledigen / rückgängig |
 | `Shift+D` | Datum für fokussierte Aufgabe setzen |
 | `Shift+M` | Aufgabe in andere Liste verschieben/kopieren |
@@ -1817,8 +1819,8 @@ Alle Kürzel sind individuell umbelegbar (siehe Abschnitt 15.10), um Konflikte m
 
 | Kürzel | Aktion |
 |---|---|
-| `Ctrl+N` | Neuer Termin (vollständiges Formular) |
-| `N` | Schnellerstellung (Quick-Add-Dialog) |
+| `Ctrl+N` | Termin schnell anlegen (Quick-Add-Dialog) |
+| `Ctrl+Shift+N` | Neuer Termin (vollständiges Formular) |
 | `Enter` / `Space` | Fokussierten Termin öffnen |
 | `Ctrl+E` | Fokussierten Termin bearbeiten |
 | `Ctrl+D` | Fokussierten Termin duplizieren |
@@ -1841,7 +1843,8 @@ Alle Kürzel sind individuell umbelegbar (siehe Abschnitt 15.10), um Konflikte m
 
 | Kürzel | Aktion |
 |---|---|
-| `Ctrl+Shift+N` | Neue Aufgabe erstellen |
+| `Alt+N` | Aufgabe schnell anlegen (Quick-Add-Dialog) |
+| `Alt+Shift+N` | Neue Aufgabe (vollständiges Formular) |
 | `Space` | Fokussierte Aufgabe als erledigt markieren / rückgängig |
 | `Shift+D` | Datum für fokussierte Aufgabe setzen |
 | `Shift+M` | Aufgabe in andere Aufgabenliste verschieben/kopieren |
@@ -1888,12 +1891,13 @@ Erreichbar über `Einstellungen → Tastaturkürzel` oder per `Ctrl+,` → Reite
 │    ...                                                      │
 │                                                             │
 │  ▼ Termine                                                  │
-│    Neuer Termin                          [Ctrl+N]     [⟳]   │
-│    Schnellerstellung                     [N]          [⟳]   │
+│    Termin schnell anlegen                [Ctrl+N]     [⟳]   │
+│    Neuer Termin                          [Ctrl+Shift+N][⟳]  │
 │    ...                                                      │
 │                                                             │
 │  ▼ Aufgaben                                                 │
-│    Neue Aufgabe                          [Ctrl+Shift+N][⟳]  │
+│    Aufgabe schnell anlegen               [Alt+N]      [⟳]   │
+│    Neue Aufgabe                          [Alt+Shift+N][⟳]   │
 │    ...                                                      │
 │                                                             │
 │  [Alle zurücksetzen]   [Schließen]                          │

@@ -8,7 +8,10 @@ important shortcuts and adjust them if needed. A complete list is in the
 
 | Action | Default shortcut |
 |---|---|
-| New event / new task | `Ctrl+N` |
+| Quick add event | `Ctrl+N` |
+| New event (full form) | `Ctrl+Shift+N` |
+| Quick add task | `Alt+N` |
+| New task (full form) | `Alt+Shift+N` |
 | Open / edit entry | `Enter` |
 | Check off task | `Space` |
 | Delete entry | `Delete` |

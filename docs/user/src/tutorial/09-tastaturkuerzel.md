@@ -9,7 +9,10 @@ vollständige Liste findest du in der
 
 | Aktion | Standard-Kürzel |
 |---|---|
-| Neuer Termin / neue Aufgabe | `Strg+N` |
+| Termin schnell anlegen | `Strg+N` |
+| Neuer Termin (volles Formular) | `Strg+Umschalt+N` |
+| Aufgabe schnell anlegen | `Alt+N` |
+| Neue Aufgabe (volles Formular) | `Alt+Umschalt+N` |
 | Eintrag öffnen / bearbeiten | `Eingabe` |
 | Aufgabe abhaken | `Leertaste` |
 | Eintrag löschen | `Entf` |

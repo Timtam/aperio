@@ -95,7 +95,8 @@
     "today": "Today",
     "create": "Create",
     "search": "Search",
-    "quickAdd": "Quick add",
+    "quickAdd": "Quick add event",
+    "quickAddTask": "Quick add task",
     "newEvent": "New event",
     "newTask": "New task",
     "views": {
@@ -1109,6 +1110,9 @@
     "quickAdd": {
       "title": "Quick add event",
       "moreDetails": "More details …"
+    },
+    "quickAddTask": {
+      "title": "Quick add task"
     },
     "moveCopy": {
       "titleEvent": "Move or copy event \"{{title}}\"",

@@ -95,7 +95,8 @@
     "today": "Heute",
     "create": "Erstellen",
     "search": "Suchen",
-    "quickAdd": "Schnell anlegen",
+    "quickAdd": "Termin schnell anlegen",
+    "quickAddTask": "Aufgabe schnell anlegen",
     "newEvent": "Neuer Termin",
     "newTask": "Neue Aufgabe",
     "views": {
@@ -1109,6 +1110,9 @@
     "quickAdd": {
       "title": "Termin schnell anlegen",
       "moreDetails": "Weitere Details …"
+    },
+    "quickAddTask": {
+      "title": "Aufgabe schnell anlegen"
     },
     "moveCopy": {
       "titleEvent": "Termin „{{title}}\" verschieben oder kopieren",

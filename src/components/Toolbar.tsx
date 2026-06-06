@@ -35,8 +35,13 @@ export function Toolbar() {
   const { t } = useTranslation();
   const fmt = useDateFormat();
   const { view, setView, anchor, jumpToToday, goPrev, goNext } = useViewState();
-  const { openEventDialog, openTaskDialog, openQuickAdd, openSearch } =
-    useDialogState();
+  const {
+    openEventDialog,
+    openTaskDialog,
+    openQuickAdd,
+    openQuickAddTask,
+    openSearch,
+  } = useDialogState();
 
   return (
     <div
@@ -111,7 +116,7 @@ export function Toolbar() {
         <button
           type="button"
           onClick={() => openQuickAdd()}
-          title={t('toolbar.quickAdd') + ' (N)'}
+          title={t('toolbar.quickAdd') + ' (Ctrl+N)'}
         >
           {t('toolbar.quickAdd')}
         </button>
@@ -120,14 +125,21 @@ export function Toolbar() {
           onClick={() =>
             openEventDialog(null, { defaultDate: localDateKey(anchor) })
           }
-          title={t('toolbar.newEvent') + ' (Ctrl+N)'}
+          title={t('toolbar.newEvent') + ' (Ctrl+Shift+N)'}
         >
           {t('toolbar.newEvent')}
         </button>
         <button
           type="button"
+          onClick={() => openQuickAddTask()}
+          title={t('toolbar.quickAddTask') + ' (Alt+N)'}
+        >
+          {t('toolbar.quickAddTask')}
+        </button>
+        <button
+          type="button"
           onClick={() => openTaskDialog(null)}
-          title={t('toolbar.newTask') + ' (Ctrl+Shift+N)'}
+          title={t('toolbar.newTask') + ' (Alt+Shift+N)'}
         >
           {t('toolbar.newTask')}
         </button>

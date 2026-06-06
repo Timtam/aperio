@@ -7,7 +7,8 @@ deinen Tag oder deine Woche ein und arbeitest sie ab.
 
 1. Öffne die **Aufgaben-Ansicht** oder eine Aufgabenliste in der
    Seitenleiste.
-2. Lege mit **Neue Aufgabe** eine Aufgabe an (Standard: `Strg+N`).
+2. Lege eine Aufgabe an: **Aufgabe schnell anlegen** (`Alt+N`) öffnet den
+   Schnell-Dialog, **Neue Aufgabe** (`Alt+Umschalt+N`) das vollständige Formular.
 3. Gib einen **Titel** ein. Optional:
    - **Aufgabenliste**, in der sie gespeichert wird,
    - **Fälligkeitsdatum** (und optional Uhrzeit),
