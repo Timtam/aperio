@@ -36,6 +36,7 @@ const section = (id: string, name: string, order: number): Section => ({
   id,
   list_id: 'L1',
   name,
+  color_label: null,
   order,
 });
 

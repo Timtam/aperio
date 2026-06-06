@@ -286,6 +286,11 @@ export function TaskDialog({
     null,
   );
   const [sectionDraft, setSectionDraft] = useState('');
+  // Color label bound while creating / editing a section in the inline
+  // editor. The section color cascades to its colorless tasks.
+  const [sectionColorDraft, setSectionColorDraft] = useState<string | null>(
+    null,
+  );
   const [sectionBusy, setSectionBusy] = useState(false);
 
   // Reset the inline editor whenever the dialog re-opens or the target
@@ -303,7 +308,11 @@ export function TaskDialog({
       if (sectionMode === 'rename' && form.sectionId) {
         const current = sectionsForList.find((s) => s.id === form.sectionId);
         if (current) {
-          await updateSection({ ...current, name });
+          await updateSection({
+            ...current,
+            name,
+            color_label: sectionColorDraft,
+          });
           announce(t('dialogs.task.section.renamed', { name }));
         }
       } else {
@@ -311,6 +320,7 @@ export function TaskDialog({
           list_id: form.listId,
           name,
           position: sectionsForList.length,
+          color_label: sectionColorDraft,
         });
         // Reload BEFORE selecting the new section so the
         // "section gone from list" reset effect sees it as valid and
@@ -320,6 +330,7 @@ export function TaskDialog({
         announce(t('dialogs.task.section.created', { name }));
         setSectionMode(null);
         setSectionDraft('');
+        setSectionColorDraft(null);
         return;
       }
       await loadSections(form.listId);
@@ -333,6 +344,7 @@ export function TaskDialog({
     }
   }, [
     sectionDraft,
+    sectionColorDraft,
     sectionBusy,
     sectionMode,
     form.sectionId,
@@ -921,6 +933,7 @@ export function TaskDialog({
                     className="section-field__button"
                     onClick={() => {
                       setSectionDraft('');
+                      setSectionColorDraft(null);
                       setSectionMode('create');
                     }}
                   >
@@ -936,6 +949,7 @@ export function TaskDialog({
                             (s) => s.id === form.sectionId,
                           );
                           setSectionDraft(cur?.name ?? '');
+                          setSectionColorDraft(cur?.color_label ?? null);
                           setSectionMode('rename');
                         }}
                       >
@@ -978,6 +992,12 @@ export function TaskDialog({
                   }
                   autoFocus
                   disabled={sectionBusy}
+                />
+                <ColorLabelSelect
+                  value={sectionColorDraft}
+                  onChange={setSectionColorDraft}
+                  labels={colorLabels}
+                  noneLabel={t('dialogs.task.section.noColor')}
                 />
                 <button
                   type="button"

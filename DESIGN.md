@@ -867,6 +867,10 @@ Unter `Einstellungen → Farb-Labels`:
 
 Ein Termin oder eine Aufgabe ohne Label erbt die Farbe seines bzw. ihres Containers (Kalender oder Aufgabenliste). Mit Label: Label-Farbe. Container-Overrides überschreiben globale Labels lokal.
 
+**Abschnittsfarbe (nur Aufgaben):** Aufgaben-Abschnitte (Sections) tragen ein optionales `color_label` und liegen in der Kette **zwischen** Aufgabe und Aufgabenliste: Eine Aufgabe **ohne** eigene Farbe erbt die Farbe ihres Abschnitts; hat der Abschnitt keine, gilt die Aufgabenlisten-Farbe. Auflösungszeit-Kaskade (kein eingefrorener Wert): Verschiebt man eine farblose Aufgabe in einen anderen Abschnitt, übernimmt sie automatisch dessen Farbe; das Umfärben des Abschnitts-Labels färbt alle seine farblosen Aufgaben mit. Die Abschnittsfarbe ist – wie der Abschnitt selbst – ein lokal-eigenes, event-log-synchronisiertes Feld (kein Provider-Roundtrip).
+
+Effektive Kette einer Aufgabe: `Aufgaben-Label → Abschnitts-Label → Aufgabenlisten-Farbe → neutral`.
+
 ### 8.3 Anwendung & Barrierefreiheit
 
 Im Formular: Label-Dropdown mit Autocomplete ("Arb" → "Arbeit"). Da Farbe allein nicht WCAG-konform ist, wird der Label-Name immer im `aria-label` angegeben:

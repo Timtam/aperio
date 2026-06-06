@@ -976,6 +976,10 @@ pub struct CreateSectionRequest {
     /// current section count to keep new sections at the bottom).
     #[serde(default)]
     pub position: u32,
+    /// Optional colour-label binding for the new section — cascades to
+    /// the section's colourless tasks. `None` ⇒ no colour.
+    #[serde(default)]
+    pub color_label: Option<String>,
 }
 
 #[tauri::command]
@@ -984,7 +988,12 @@ pub async fn create_section(
     event_log: State<'_, Arc<EventLogWriter>>,
     request: CreateSectionRequest,
 ) -> CommandResult<Section> {
-    let section = adapter.create_section(&request.list_id, &request.name, request.position)?;
+    let section = adapter.create_section(
+        &request.list_id,
+        &request.name,
+        request.position,
+        request.color_label.clone().map(cal_core::ColorLabelId),
+    )?;
     if let Ok(fields) = serde_json::to_value(&section) {
         event_log.append(SyncEvent::SectionCreated(EventPayload {
             id: section.id.clone(),

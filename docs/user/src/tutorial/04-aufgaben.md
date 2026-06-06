@@ -32,6 +32,13 @@ deinen Tag oder deine Woche ein und arbeitest sie ab.
 > klappt sie auf bzw. zu — genau wie eine Aufgabe mit Unteraufgaben. Der
 > Auf-/Zu-Zustand wird gemerkt.
 
+> **Abschnittsfarben:** Aufgaben-Abschnitte können eine eigene Farbe
+> bekommen (im Aufgaben-Dialog beim Anlegen oder Bearbeiten eines
+> Abschnitts). Aufgaben **ohne** eigene Farbe übernehmen die Farbe ihres
+> Abschnitts; verschiebst du eine solche Aufgabe in einen anderen
+> Abschnitt, färbt sie automatisch mit. Reihenfolge: eigene Aufgaben-Farbe
+> → Abschnitt → Aufgabenliste.
+
 ## Aufgaben einplanen
 
 Aperio unterscheidet zwischen Aufgaben mit und ohne festen Termin:

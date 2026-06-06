@@ -640,6 +640,8 @@ fn map_bucket(entry: BucketEntry, list_id: &str) -> Section {
         id: entry.id.to_string(),
         list_id: list_id.to_string(),
         name: entry.title.unwrap_or_else(|| "Bucket".into()),
+        // Vikunja buckets carry no color of their own.
+        color_label: None,
         order: entry.position.max(0.0) as u32,
     }
 }

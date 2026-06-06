@@ -56,7 +56,8 @@ export function TaskView() {
   const fmt = useDateFormat();
   const announce = useAnnouncer();
   const { tasks, taskListById, loading } = useTasks();
-  const { colorLabels, sectionsByList, loadSections } = useCalendarStore();
+  const { colorLabels, sectionsByList, loadSections, sectionColorById } =
+    useCalendarStore();
   const labelById = useMemo(() => labelsLookup(colorLabels), [colorLabels]);
 
   // Pull sections for every list that currently has tasks. The fetch
@@ -387,17 +388,35 @@ export function TaskView() {
             // level 1 = a section sub-header within a list; styled
             // smaller + indented to read as a child of the list head.
             const isSection = entry.level === 1;
+            // A colored section tints its header (decorative — the
+            // section name carries the meaning; the color also cascades
+            // to the section's colorless task chips below).
+            const sectionHex = entry.sectionId
+              ? sectionColorById.get(entry.sectionId)
+              : undefined;
             return (
               <li
                 key={`sep-${i}-${entry.label}`}
                 role="presentation"
                 aria-hidden="true"
                 className={
-                  isSection
+                  (isSection
                     ? 'task-list__group task-list__group--section'
-                    : 'task-list__group'
+                    : 'task-list__group') +
+                  (sectionHex ? ' task-list__group--colored' : '')
+                }
+                style={
+                  sectionHex
+                    ? ({ '--event-color': sectionHex } as React.CSSProperties)
+                    : undefined
                 }
               >
+                {sectionHex && (
+                  <span
+                    className="task-list__group-swatch"
+                    aria-hidden="true"
+                  />
+                )}
                 {entry.label}
               </li>
             );
@@ -414,6 +433,7 @@ export function TaskView() {
             tasks,
             taskListById,
             labelById,
+            sectionColorById,
             collapsed,
             toggleCollapsed,
             focusIndex,
@@ -456,6 +476,7 @@ interface RenderTreeCtx {
   tasks: Task[];
   taskListById: Map<string, import('../../api/types').TaskList>;
   labelById: Map<string, import('../../api/types').ColorLabel>;
+  sectionColorById: Map<string, string>;
   collapsed: Set<string>;
   toggleCollapsed: (id: string) => void;
   focusIndex: number;
@@ -483,6 +504,7 @@ function renderTreeItem(
     tasks,
     taskListById,
     labelById,
+    sectionColorById,
     collapsed,
     toggleCollapsed,
     focusIndex,
@@ -556,7 +578,7 @@ function renderTreeItem(
   }
 
   const due = describeDue(task, fmt, t);
-  const color = resolveTaskColor(task, taskListById, labelById);
+  const color = resolveTaskColor(task, taskListById, labelById, sectionColorById);
   const marker = statusMarker(task.status);
   const priorityGlyph = priorityMarker(task.priority);
   const stateLabel = t(statusI18nKey(task.status));

@@ -81,7 +81,7 @@ export function DayView() {
     useTaskListShowCompleted();
   const { openForEvent: openEventMenu, openForTask: openTaskMenu } =
     useChipContextMenu();
-  const { colorLabels } = useCalendarStore();
+  const { colorLabels, sectionColorById } = useCalendarStore();
   const labelById = useMemo(() => labelsLookup(colorLabels), [colorLabels]);
 
   // Pick up multi-day all-day events on every day of their span — see
@@ -365,7 +365,12 @@ export function DayView() {
                     'p',
                   )
                 : '';
-              const color = resolveTaskColor(task, taskListById, labelById);
+              const color = resolveTaskColor(
+                task,
+                taskListById,
+                labelById,
+                sectionColorById,
+              );
               const state = t(statusI18nKey(task.status));
               const priorityGlyph = priorityMarker(task.priority);
               return (
@@ -517,7 +522,12 @@ export function DayView() {
               const labelKey = isBy
                 ? 'views.week.taskChipBy'
                 : 'views.week.taskChip';
-              const color = resolveTaskColor(task, taskListById, labelById);
+              const color = resolveTaskColor(
+                task,
+                taskListById,
+                labelById,
+                sectionColorById,
+              );
               const state = t(statusI18nKey(task.status));
               const priorityGlyph = priorityMarker(task.priority);
               return (

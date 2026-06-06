@@ -65,15 +65,39 @@ export function resolveEventColor(
   return { hex: resolveContainerColorHex(calendar, labelsById), labelName: null };
 }
 
+/**
+ * Resolve a task's rendered color. Chain (most specific first):
+ *
+ *   1. the task's own color label;
+ *   2. the color of its **section** (`sectionColorById`, keyed by
+ *      `section_id`) — a section tints its colorless tasks, so moving a
+ *      colorless task to another section re-resolves to that section's
+ *      color with no write;
+ *   3. the task list's color;
+ *   4. `null` → neutral CSS var at the style layer.
+ *
+ * `sectionColorById` carries each section's already-resolved *live* hex
+ * (derived in the store from the section's bound label), so recoloring
+ * the label recolors every bound section's tasks. `labelName` is set only
+ * for the task's own explicit label — the section/list tint is a grouping
+ * cue, not a per-task signal — matching how the list fallback behaves.
+ */
 export function resolveTaskColor(
-  task: Pick<Task, 'color_label' | 'list_id'>,
+  task: Pick<Task, 'color_label' | 'list_id' | 'section_id'>,
   listsById: Map<string, TaskList>,
   labelsById: Map<string, ColorLabel>,
+  sectionColorById: Map<string, string>,
 ): ResolvedColor {
   if (task.color_label) {
     const label = labelsById.get(task.color_label);
     if (label) {
       return { hex: label.hex, labelName: label.name };
+    }
+  }
+  if (task.section_id) {
+    const sectionHex = sectionColorById.get(task.section_id);
+    if (sectionHex) {
+      return { hex: sectionHex, labelName: null };
     }
   }
   const list = listsById.get(task.list_id);

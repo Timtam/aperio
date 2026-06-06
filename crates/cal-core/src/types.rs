@@ -210,6 +210,14 @@ pub struct Section {
     /// The `TaskList.id` this section belongs to.
     pub list_id: String,
     pub name: String,
+    /// Optional binding to a global color label — see `Calendar.color_label`.
+    /// Cascades to the section's tasks that carry no color of their own
+    /// (resolution chain: task → section → list). A label *reference*
+    /// (not a frozen hex) so recoloring the label recolors every bound
+    /// section live. A purely local, Aperio-synced concept like the
+    /// section itself — no provider round-trip.
+    #[serde(default)]
+    pub color_label: Option<ColorLabelId>,
     /// Display order within the list; lower sorts first. Mirrors the
     /// `position` Vikunja attaches to buckets and the order Todoist
     /// gives its sections.

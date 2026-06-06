@@ -990,6 +990,7 @@
         "save": "Speichern",
         "cancel": "Abbrechen",
         "namePlaceholder": "Abschnittsname",
+        "noColor": "Keine Farbe",
         "newLabel": "Name des neuen Abschnitts",
         "renameLabel": "Abschnitt umbenennen",
         "created": "Abschnitt „{{name}}\" wurde angelegt.",

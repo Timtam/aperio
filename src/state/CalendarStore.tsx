@@ -107,6 +107,11 @@ export interface CalendarStoreState {
   /** Fetch (and cache) the sections of one list. Returns them so a
    *  caller can use the result without waiting for the state update. */
   loadSections: (listId: string) => Promise<Section[]>;
+  /** Each section's resolved *live* color hex, keyed by section id — the
+   *  middle level of the task-color chain (task → section → list). A
+   *  section with no bound label is absent. Re-derives when sections or
+   *  color labels change. */
+  sectionColorById: Map<string, string>;
 
   /** Address books (DESIGN.md §10). Each list has its own
    *  selection toggle so users can exclude e.g. the big read-only
@@ -343,6 +348,22 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
     [contactLists, labelsById],
   );
 
+  // Section colors: each section's bound label resolved to its live hex.
+  // Sections carry only a label binding (no native color), so we look the
+  // label up directly. The middle step of the task-color chain.
+  const sectionColorById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const sections of Object.values(sectionsByList)) {
+      for (const section of sections) {
+        if (section.color_label) {
+          const label = labelsById.get(section.color_label);
+          if (label) m.set(section.id, label.hex);
+        }
+      }
+    }
+    return m;
+  }, [sectionsByList, labelsById]);
+
   const value = useMemo<CalendarStoreState>(
     () => ({
       calendars: resolvedCalendars,
@@ -355,6 +376,7 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
       refreshTaskLists,
       sectionsByList,
       loadSections,
+      sectionColorById,
       contactLists: resolvedContactLists,
       selectedContactListIds: contactListSel.selected,
       toggleContactList,
@@ -379,6 +401,7 @@ export function CalendarStoreProvider({ children }: { children: ReactNode }) {
       refreshTaskLists,
       sectionsByList,
       loadSections,
+      sectionColorById,
       resolvedContactLists,
       contactListSel.selected,
       toggleContactList,

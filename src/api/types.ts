@@ -71,6 +71,10 @@ export interface Section {
   id: string;
   list_id: string;
   name: string;
+  /** Optional color-label binding. Cascades to the section's tasks that
+   *  carry no color of their own (resolution chain task → section →
+   *  list). `null` ⇒ no color. */
+  color_label: string | null;
   /** Display order within the list; lower sorts first. */
   order: number;
 }

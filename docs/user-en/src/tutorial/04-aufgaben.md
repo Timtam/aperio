@@ -30,6 +30,12 @@ your day or week, and work through them.
 > Right/Left arrow) expands or collapses it — just like a task with
 > subtasks. The open/closed state is remembered.
 
+> **Section colors:** Task sections can carry their own color (set it in
+> the task dialog when you add or edit a section). Tasks **without** their
+> own color take on their section's color; moving such a task into another
+> section recolors it automatically. Order: task's own color → section →
+> task list.
+
 ## Scheduling tasks
 
 Aperio distinguishes between tasks with and without a fixed date:

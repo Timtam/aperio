@@ -96,7 +96,7 @@ export function WeekView() {
     useTaskListShowCompleted();
   const { openForEvent: openEventMenu, openForTask: openTaskMenu } =
     useChipContextMenu();
-  const { colorLabels } = useCalendarStore();
+  const { colorLabels, sectionColorById } = useCalendarStore();
   const labelById = useMemo(() => labelsLookup(colorLabels), [colorLabels]);
 
   const weekStart = useMemo(
@@ -718,6 +718,7 @@ export function WeekView() {
                         task,
                         taskListById,
                         labelById,
+                        sectionColorById,
                       );
                       const priorityGlyph = priorityMarker(task.priority);
                       // All four TaskStatus values need their own
@@ -1032,6 +1033,7 @@ function WeekDayTasks({
 }) {
   const { t } = useTranslation();
   const fmt = useDateFormat();
+  const { sectionColorById } = useCalendarStore();
   if (tasks.length === 0) return null;
   return (
     <ul
@@ -1047,7 +1049,12 @@ function WeekDayTasks({
         const labelKey = isBy
           ? 'views.week.taskChipBy'
           : 'views.week.taskChip';
-        const color = resolveTaskColor(task, taskListById, labelById);
+        const color = resolveTaskColor(
+          task,
+          taskListById,
+          labelById,
+          sectionColorById,
+        );
         const state = t(statusI18nKey(task.status));
         const priorityGlyph = priorityMarker(task.priority);
         return (

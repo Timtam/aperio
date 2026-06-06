@@ -990,6 +990,7 @@
         "save": "Save",
         "cancel": "Cancel",
         "namePlaceholder": "Section name",
+        "noColor": "No color",
         "newLabel": "New section name",
         "renameLabel": "Rename section",
         "created": "Section \"{{name}}\" created.",

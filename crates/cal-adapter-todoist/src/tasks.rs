@@ -629,6 +629,8 @@ fn map_section(entry: SectionEntry, list_id: &str) -> Section {
         id: entry.id,
         list_id: list_id.to_string(),
         name: entry.name.unwrap_or_default(),
+        // Todoist sections carry no color of their own.
+        color_label: None,
         order: entry.order.max(0) as u32,
     }
 }

@@ -282,6 +282,8 @@ export interface CreateSectionRequest {
   list_id: string;
   name: string;
   position: number;
+  /** Optional color-label id for the new section. */
+  color_label?: string | null;
 }
 
 /** Create a section in a local list. Sections on external providers are

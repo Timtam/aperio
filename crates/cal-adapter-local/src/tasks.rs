@@ -384,6 +384,7 @@ impl LocalAdapter {
         list_id: &str,
         name: &str,
         position: u32,
+        color_label: Option<ColorLabelId>,
     ) -> cal_core::Result<Section> {
         let id = Uuid::new_v4().to_string();
         let now_s = fmt_utc(&Utc::now());
@@ -391,15 +392,24 @@ impl LocalAdapter {
             .lock()
             .expect("db mutex poisoned")
             .execute(
-                "INSERT INTO sections (id, list_id, name, position, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?)",
-                params![id, list_id, name, position as i64, now_s, now_s],
+                "INSERT INTO sections (id, list_id, name, position, color_label_id, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)",
+                params![
+                    id,
+                    list_id,
+                    name,
+                    position as i64,
+                    color_label.as_ref().map(|c| c.as_str()),
+                    now_s,
+                    now_s
+                ],
             )
             .map_err(map_sql_err)?;
         Ok(Section {
             id,
             list_id: list_id.to_string(),
             name: name.to_string(),
+            color_label,
             order: position,
         })
     }
@@ -413,8 +423,14 @@ impl LocalAdapter {
             .lock()
             .expect("db mutex poisoned")
             .execute(
-                "UPDATE sections SET name = ?, position = ?, updated_at = ? WHERE id = ?",
-                params![section.name, section.order as i64, now_s, section.id],
+                "UPDATE sections SET name = ?, position = ?, color_label_id = ?, updated_at = ? WHERE id = ?",
+                params![
+                    section.name,
+                    section.order as i64,
+                    section.color_label.as_ref().map(|c| c.as_str()),
+                    now_s,
+                    section.id
+                ],
             )
             .map_err(map_sql_err)?;
         if changed == 0 {
@@ -448,7 +464,9 @@ impl LocalAdapter {
     pub fn get_section_by_id(&self, id: &str) -> cal_core::Result<Option<Section>> {
         let conn = self.db().lock().expect("db mutex poisoned");
         let mut stmt = conn
-            .prepare("SELECT id, list_id, name, position FROM sections WHERE id = ?")
+            .prepare(
+                "SELECT id, list_id, name, position, color_label_id FROM sections WHERE id = ?",
+            )
             .map_err(map_sql_err)?;
         let row = stmt
             .query_row(params![id], |r| Ok(row_to_section(r)))
@@ -706,7 +724,7 @@ impl TasksFeature for LocalAdapter {
         let conn = self.db().lock().expect("db mutex poisoned");
         let mut stmt = conn
             .prepare(
-                "SELECT id, list_id, name, position
+                "SELECT id, list_id, name, position, color_label_id
                    FROM sections
                   WHERE list_id = ?
                   ORDER BY position, name COLLATE NOCASE",
@@ -728,10 +746,12 @@ pub(crate) fn row_to_section(row: &rusqlite::Row<'_>) -> cal_core::Result<Sectio
     let list_id = req_text(row, 1)?;
     let name = req_text(row, 2)?;
     let position: i64 = row.get(3).map_err(map_sql_err)?;
+    let color_label = opt_text(row, 4)?.map(ColorLabelId);
     Ok(Section {
         id,
         list_id,
         name,
+        color_label,
         // `position` is a non-negative INTEGER in the schema; clamp
         // defensively before the unsigned cast.
         order: position.max(0) as u32,
@@ -1191,8 +1211,8 @@ mod tests {
         let (a, list) = adapter_with_list();
         assert!(a.list_sections(&list.id).await.unwrap().is_empty());
 
-        let s1 = a.create_section(&list.id, "Doing", 0).unwrap();
-        let s2 = a.create_section(&list.id, "Done", 1).unwrap();
+        let s1 = a.create_section(&list.id, "Doing", 0, None).unwrap();
+        let s2 = a.create_section(&list.id, "Done", 1, None).unwrap();
         assert_eq!(s1.list_id, list.id);
 
         let listed = a.list_sections(&list.id).await.unwrap();
@@ -1224,7 +1244,7 @@ mod tests {
     #[tokio::test]
     async fn task_section_id_roundtrips_and_survives_delete() {
         let (a, list) = adapter_with_list();
-        let section = a.create_section(&list.id, "Sprint", 0).unwrap();
+        let section = a.create_section(&list.id, "Sprint", 0, None).unwrap();
 
         let mut new = mk_task("Ship it");
         new.section_id = Some(section.id.clone());

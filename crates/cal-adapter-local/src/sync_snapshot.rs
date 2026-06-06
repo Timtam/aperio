@@ -211,7 +211,7 @@ impl LocalAdapter {
     pub fn dump_sections_for_snapshot(&self) -> cal_core::Result<Vec<Section>> {
         let conn = self.db().lock().expect("db mutex poisoned");
         let mut stmt = conn
-            .prepare("SELECT id, list_id, name, position FROM sections")
+            .prepare("SELECT id, list_id, name, position, color_label_id FROM sections")
             .map_err(map_sql_err)?;
         let rows = stmt
             .query_map([], |row| Ok(row_to_section(row)))

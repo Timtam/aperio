@@ -3134,6 +3134,25 @@ button[aria-disabled='true'] {
   border-bottom-style: dashed;
 }
 
+/* A colored section header: a small swatch + a left accent in the
+   section's color. The color also cascades to the section's colorless
+   task chips below; the header tint is the (decorative) cue that the
+   section carries a color. */
+.task-list__group--colored {
+  border-left: 3px solid var(--event-color);
+  padding-left: var(--space-2);
+}
+
+.task-list__group-swatch {
+  display: inline-block;
+  width: 0.7em;
+  height: 0.7em;
+  border-radius: 50%;
+  background: var(--event-color);
+  margin-right: var(--space-1);
+  vertical-align: middle;
+}
+
 /* The synthetic "Done (N)" group row: a collapsible parent treeitem that
    reads as a group heading. It opts out of the task row's 5-column grid
    (no checkbox / due columns) and lays its chevron + label inline, with

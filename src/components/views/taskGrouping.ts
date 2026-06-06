@@ -8,7 +8,15 @@ export const DONE_GROUP_ID = '__aperio_done_group__';
 
 /** One row in the flattened task tree the TaskView renders. */
 export type Entry =
-  | { kind: 'separator'; label: string; level?: number }
+  | {
+      kind: 'separator';
+      label: string;
+      level?: number;
+      /** Set on a *section* sub-header — carries the section id so the
+       *  header can tint to the section's color and offer a color
+       *  action. Absent on the backlog / list headers. */
+      sectionId?: string;
+    }
   | {
       kind: 'task';
       task: Task;
@@ -146,7 +154,12 @@ export function buildEntries(
       .forEach((section) => {
         const secTasks = bySection.get(section.id);
         if (!secTasks || secTasks.length === 0) return;
-        entries.push({ kind: 'separator', label: section.name, level: 1 });
+        entries.push({
+          kind: 'separator',
+          label: section.name,
+          level: 1,
+          sectionId: section.id,
+        });
         secTasks.forEach((task) => visit(task, 0, false));
       });
   });
