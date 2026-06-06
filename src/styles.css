@@ -2354,9 +2354,20 @@ button[aria-disabled='true'] {
  */
 .sidebar__rename {
   display: flex;
-  align-items: center;
+  /* Stack the input row above the hint: one row can't fit the input plus
+     the wide, non-wrapping hint in the 240px sidebar, which collapsed the
+     input to zero width and hid the text being edited. */
+  flex-direction: column;
+  align-items: stretch;
   gap: var(--space-1);
   flex: 1;
+  min-width: 0;
+}
+
+.sidebar__rename-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
   min-width: 0;
 }
 
@@ -2372,10 +2383,8 @@ button[aria-disabled='true'] {
 }
 
 .sidebar__rename-hint {
-  flex: 0 0 auto;
   font-size: var(--font-size-xs);
   color: var(--color-fg-muted);
-  white-space: nowrap;
 }
 
 .sidebar__rename-action {

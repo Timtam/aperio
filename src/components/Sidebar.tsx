@@ -2075,37 +2075,42 @@ function RenameField({
 }) {
   return (
     <div className="sidebar__rename">
-      <input
-        type="text"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={onKeyDown}
-        onBlur={() => onCommit(false)}
-        aria-label={ariaLabel}
-        autoFocus
-        className="sidebar__rename-input"
-      />
+      {/* Input + actions share the top row so the input keeps the full
+          width and the edited text stays visible; the (long) hint drops
+          to its own line below instead of squeezing the input to zero. */}
+      <div className="sidebar__rename-controls">
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={onKeyDown}
+          onBlur={() => onCommit(false)}
+          aria-label={ariaLabel}
+          autoFocus
+          className="sidebar__rename-input"
+        />
+        <button
+          type="button"
+          className="sidebar__rename-action"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => onCommit(true)}
+          aria-label={ariaLabel}
+        >
+          ✓
+        </button>
+        <button
+          type="button"
+          className="sidebar__rename-action"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => onCancel(true)}
+          aria-label={ariaLabel}
+        >
+          ✕
+        </button>
+      </div>
       <span className="sidebar__rename-hint" aria-hidden="true">
         {hint}
       </span>
-      <button
-        type="button"
-        className="sidebar__rename-action"
-        onMouseDown={(e) => e.preventDefault()}
-        onClick={() => onCommit(true)}
-        aria-label={ariaLabel}
-      >
-        ✓
-      </button>
-      <button
-        type="button"
-        className="sidebar__rename-action"
-        onMouseDown={(e) => e.preventDefault()}
-        onClick={() => onCancel(true)}
-        aria-label={ariaLabel}
-      >
-        ✕
-      </button>
     </div>
   );
 }
