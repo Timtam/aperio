@@ -417,6 +417,7 @@ export function TaskView() {
             focusIndex,
             setFocusIndex,
             toggleStatus,
+            openTaskDialog,
             openTaskMenu,
             itemId,
           });
@@ -458,6 +459,7 @@ interface RenderTreeCtx {
   focusIndex: number;
   setFocusIndex: (i: number) => void;
   toggleStatus: (task: Task) => Promise<void> | void;
+  openTaskDialog: (task: Task) => void;
   openTaskMenu: (task: Task) => Promise<void> | void;
   itemId: (i: number) => string;
 }
@@ -484,6 +486,7 @@ function renderTreeItem(
     focusIndex,
     setFocusIndex,
     toggleStatus,
+    openTaskDialog,
     openTaskMenu,
     itemId,
   } = ctx;
@@ -587,8 +590,11 @@ function renderTreeItem(
         } as React.CSSProperties
       }
       onClick={() => {
+        // Clicking the row opens the editor — consistent with the task
+        // chips in the calendar views. Checking off is the marker's job
+        // (below), so a stray click doesn't flip a task's status.
         setFocusIndex(index);
-        void toggleStatus(task);
+        openTaskDialog(task);
       }}
       onContextMenu={(ev) => {
         ev.preventDefault();
@@ -617,7 +623,18 @@ function renderTreeItem(
       ) : (
         <span aria-hidden="true" className="task-list__twisty-spacer" />
       )}
-      <span className="task-list__check" aria-hidden="true">
+      <span
+        className="task-list__check task-list__check--clickable"
+        aria-hidden="true"
+        // Mouse: clicking the marker toggles the task's done state
+        // without opening the editor (the row's onClick). Keyboard/SR
+        // users toggle with Space on the focused row (unchanged).
+        onClick={(ev) => {
+          ev.stopPropagation();
+          setFocusIndex(index);
+          void toggleStatus(task);
+        }}
+      >
         {marker}
       </span>
       <span className="task-list__title">{task.title}</span>

@@ -3349,6 +3349,23 @@ button[aria-disabled='true'] {
   text-align: center;
 }
 
+/* The marker is the explicit toggle affordance: clicking it checks the
+   task off, while clicking the rest of the row opens the editor. */
+.task-list__check--clickable {
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.task-list__check--clickable:hover {
+  background: color-mix(
+    in srgb,
+    var(--event-color, var(--color-accent)) 18%,
+    transparent
+  );
+}
+
 .task-list__due {
   color: var(--color-fg-muted);
   font-size: var(--font-size-xs);
