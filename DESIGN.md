@@ -972,8 +972,8 @@ pub struct Task {
 pub enum DeadlineType {
     /// Konkreter Tag + opt. Uhrzeit: erscheint nur am Deadline-Tag
     On,
-    /// "Muss bis zum": erscheint in allen konfigurierten Ansichten
-    /// vom heutigen Tag bis zur Deadline
+    /// "Muss bis zum": erscheint als Fälligkeitsmarker am Deadline-Tag
+    /// (Auto-Einplanung verschiebt überfällige Aufgaben dorthin)
     By,
 }
 
@@ -988,7 +988,7 @@ pub enum TaskPriority { Low, Medium, High }
 | **Kein Datum (Backlog)** | Nur im Backlog sichtbar |
 | **Geplanter Tag** (`scheduled_date`) | Erscheint am zugeordneten Tag |
 | **Konkrete Deadline** (`On`) | Erscheint am Deadline-Tag |
-| **"Muss bis zum"** (`By`) | Erscheint in allen konfigurierten Ansichten vom heutigen Tag bis zur Deadline |
+| **"Muss bis zum"** (`By`) | Erscheint als Fälligkeitsmarker am Deadline-Tag |
 
 **Automatische Einplanung:** Aufgaben mit `DeadlineType::By`, die bis zum Deadline-Tag nicht erledigt wurden, werden automatisch auf den Deadline-Tag gesetzt – letzter möglicher Tag.
 
@@ -1016,7 +1016,7 @@ Eingeplante Aufgaben verschwinden aus dem Backlog. Wird das Datum entfernt, wand
 
 ### 9.4 Wochenplanung
 
-Die Wochenansicht bietet eine dedizierte Planungsebene: Backlog als Sidebar, Aufgaben per Drag & Drop auf Wochentage verteilen. `By`-Aufgaben mit Deadline in der aktuellen Woche erscheinen oberhalb des Tagesrasters – an jedem Tag bis zur Deadline sichtbar.
+Die Wochenansicht bietet eine dedizierte Planungsebene: Backlog als Sidebar, Aufgaben per Drag & Drop auf Wochentage verteilen. Eine Aufgabe mit Deadline erscheint als **Fälligkeitsmarker** („fällig bis …") an ihrem Deadline-Tag im Tagesraster – als Punkt, **nicht** als durchgehender Balken über alle Tage bis dahin (das wuchs bei weit entfernten Deadlines unbegrenzt und überfrachtete die Planung). Eine an einem anderen Tag eingeplante Aufgabe erscheint zusätzlich als normaler Chip an ihrem Plan-Tag; fallen Plan- und Deadline-Tag zusammen, bleibt es ein Chip. Die Tages-Ansicht folgt demselben Punkt-Modell.
 
 ### 9.5 Verpasste Aufgaben & Rückfrage
 

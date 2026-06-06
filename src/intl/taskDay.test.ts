@@ -2,9 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import type { Task } from '../api/types';
 import {
-  buildDeadlineBars,
-  filterScheduledTasksOnDay,
   filterTasksOnDay,
+  isDeadlineChip,
   mergeDayItems,
   taskTimeOnDay,
 } from './taskDay';
@@ -34,62 +33,82 @@ const baseTask: Task = {
 };
 
 describe('filterTasksOnDay', () => {
-  const today = '2026-05-20';
-
   it('matches scheduled_date == day', () => {
     const tasks: Task[] = [
       { ...baseTask, id: 'sched', scheduled_date: '2026-05-20' },
       { ...baseTask, id: 'other', scheduled_date: '2026-05-21' },
     ];
-    expect(filterTasksOnDay(tasks, '2026-05-20', today).map((t) => t.id))
-      .toEqual(['sched']);
+    expect(filterTasksOnDay(tasks, '2026-05-20').map((t) => t.id)).toEqual([
+      'sched',
+    ]);
   });
 
   it('matches scheduled_date == day for the merged "on" semantic', () => {
     // Post-migration 0006 the legacy `deadline_type='on'` semantics live
-    // in `scheduled_date` — the day the user committed to. The filter
-    // still picks it up the same way.
+    // in `scheduled_date` — the day the user committed to.
     const tasks: Task[] = [
       { ...baseTask, id: 'on-match', scheduled_date: '2026-05-22' },
       { ...baseTask, id: 'on-other', scheduled_date: '2026-05-21' },
     ];
-    expect(
-      filterTasksOnDay(tasks, '2026-05-22', today).map((t) => t.id),
-    ).toEqual(['on-match']);
+    expect(filterTasksOnDay(tasks, '2026-05-22').map((t) => t.id)).toEqual([
+      'on-match',
+    ]);
   });
 
-  it('deadline-task surfaces on every day from today through deadline', () => {
-    // With the migration `deadline_type` is gone; any task with a
-    // `deadline_date` carries "by"-style window semantics.
+  it('surfaces a deadline task only on its deadline day (point, not span)', () => {
+    // A `deadline_date` puts the task on its deadline day as a single
+    // point marker — NOT on every day from today until then (that span
+    // cluttered the planner for far-future deadlines).
     const tasks: Task[] = [
       { ...baseTask, id: 'by', deadline_date: '2026-05-22' },
     ];
-    // today (5/20) — inside window → yes
-    expect(filterTasksOnDay(tasks, '2026-05-20', today).map((t) => t.id))
-      .toEqual(['by']);
-    // 5/21 — inside → yes
-    expect(filterTasksOnDay(tasks, '2026-05-21', today).map((t) => t.id))
-      .toEqual(['by']);
-    // 5/22 — deadline itself → yes
-    expect(filterTasksOnDay(tasks, '2026-05-22', today).map((t) => t.id))
-      .toEqual(['by']);
-    // 5/23 — past deadline → no
-    expect(filterTasksOnDay(tasks, '2026-05-23', today)).toEqual([]);
-    // 5/19 — before today → no (don't backfill past days)
-    expect(filterTasksOnDay(tasks, '2026-05-19', today)).toEqual([]);
+    // deadline day → yes
+    expect(filterTasksOnDay(tasks, '2026-05-22').map((t) => t.id)).toEqual([
+      'by',
+    ]);
+    // day before the deadline → no (no window)
+    expect(filterTasksOnDay(tasks, '2026-05-21')).toEqual([]);
+    // day after the deadline → no
+    expect(filterTasksOnDay(tasks, '2026-05-23')).toEqual([]);
   });
 
-  it('excludes subtasks (tasks with parent_id set)', () => {
-    // Subtasks are scoped to their parent — calendar surfaces only
-    // render top-level rows, regardless of whether the child carries
-    // its own scheduled_date. The parent is the SoR for "is this on
-    // my plate this day"; the children live inside it.
+  it('surfaces a scheduled+deadline task on BOTH its days', () => {
+    // Scheduled Wed, due Fri → a work chip on Wed and a due marker on
+    // Fri; nothing on the day in between.
     const tasks: Task[] = [
       {
         ...baseTask,
-        id: 'parent',
+        id: 'both',
         scheduled_date: '2026-05-20',
+        deadline_date: '2026-05-22',
       },
+    ];
+    expect(filterTasksOnDay(tasks, '2026-05-20').map((t) => t.id)).toEqual([
+      'both',
+    ]);
+    expect(filterTasksOnDay(tasks, '2026-05-21')).toEqual([]);
+    expect(filterTasksOnDay(tasks, '2026-05-22').map((t) => t.id)).toEqual([
+      'both',
+    ]);
+  });
+
+  it('surfaces a scheduled==deadline task once on that day', () => {
+    const tasks: Task[] = [
+      {
+        ...baseTask,
+        id: 'same',
+        scheduled_date: '2026-05-22',
+        deadline_date: '2026-05-22',
+      },
+    ];
+    expect(filterTasksOnDay(tasks, '2026-05-22').map((t) => t.id)).toEqual([
+      'same',
+    ]);
+  });
+
+  it('excludes subtasks (tasks with parent_id set)', () => {
+    const tasks: Task[] = [
+      { ...baseTask, id: 'parent', scheduled_date: '2026-05-20' },
       {
         ...baseTask,
         id: 'child',
@@ -97,9 +116,9 @@ describe('filterTasksOnDay', () => {
         scheduled_date: '2026-05-20',
       },
     ];
-    expect(
-      filterTasksOnDay(tasks, '2026-05-20', today).map((t) => t.id),
-    ).toEqual(['parent']);
+    expect(filterTasksOnDay(tasks, '2026-05-20').map((t) => t.id)).toEqual([
+      'parent',
+    ]);
   });
 
   it('excludes completed and cancelled tasks', () => {
@@ -116,23 +135,14 @@ describe('filterTasksOnDay', () => {
         scheduled_date: '2026-05-20',
         status: 'cancelled',
       },
-      {
-        ...baseTask,
-        id: 'live',
-        scheduled_date: '2026-05-20',
-        status: 'open',
-      },
+      { ...baseTask, id: 'live', scheduled_date: '2026-05-20', status: 'open' },
     ];
-    expect(
-      filterTasksOnDay(tasks, '2026-05-20', today).map((t) => t.id),
-    ).toEqual(['live']);
+    expect(filterTasksOnDay(tasks, '2026-05-20').map((t) => t.id)).toEqual([
+      'live',
+    ]);
   });
 
   it('keeps completed tasks when the per-list opt-in is true', () => {
-    // Sidebar context menu: "Erledigte Aufgaben in Kalenderansicht
-    // anzeigen". The pref is per-list, so completed rows on lists
-    // the user opted into stay visible, while completed rows on
-    // other lists still vanish.
     const tasks: Task[] = [
       {
         ...baseTask,
@@ -158,14 +168,11 @@ describe('filterTasksOnDay', () => {
     ];
     const visible = (listId: string) => listId === 'list-A';
     expect(
-      filterTasksOnDay(tasks, '2026-05-20', today, visible).map((t) => t.id),
+      filterTasksOnDay(tasks, '2026-05-20', visible).map((t) => t.id),
     ).toEqual(['done-shown', 'live']);
   });
 
   it('still hides cancelled tasks even when the opt-in is true', () => {
-    // Cancelled is a distinct status — the user explicitly walked
-    // away from the row, so it doesn't belong on the calendar even
-    // when the "show completed" flag is on.
     const tasks: Task[] = [
       {
         ...baseTask,
@@ -176,22 +183,65 @@ describe('filterTasksOnDay', () => {
       },
     ];
     const visible = () => true;
-    expect(
-      filterTasksOnDay(tasks, '2026-05-20', today, visible),
-    ).toEqual([]);
+    expect(filterTasksOnDay(tasks, '2026-05-20', visible)).toEqual([]);
   });
 
   it('returns empty when nothing matches', () => {
+    expect(filterTasksOnDay([baseTask], '2026-05-20')).toEqual([]);
+  });
+});
+
+describe('isDeadlineChip', () => {
+  it('is true on the deadline day when not also scheduled there', () => {
     expect(
-      filterTasksOnDay([baseTask], '2026-05-20', today),
-    ).toEqual([]);
+      isDeadlineChip({ ...baseTask, deadline_date: '2026-05-22' }, '2026-05-22'),
+    ).toBe(true);
+  });
+
+  it('is false on a non-deadline day', () => {
+    expect(
+      isDeadlineChip({ ...baseTask, deadline_date: '2026-05-22' }, '2026-05-21'),
+    ).toBe(false);
+  });
+
+  it('is false when the task has no deadline', () => {
+    expect(
+      isDeadlineChip(
+        { ...baseTask, scheduled_date: '2026-05-22' },
+        '2026-05-22',
+      ),
+    ).toBe(false);
+  });
+
+  it('is false when scheduled AND due the same day (schedule wins)', () => {
+    expect(
+      isDeadlineChip(
+        {
+          ...baseTask,
+          scheduled_date: '2026-05-22',
+          deadline_date: '2026-05-22',
+        },
+        '2026-05-22',
+      ),
+    ).toBe(false);
+  });
+
+  it('is true on the deadline day even when scheduled on a different day', () => {
+    expect(
+      isDeadlineChip(
+        {
+          ...baseTask,
+          scheduled_date: '2026-05-20',
+          deadline_date: '2026-05-22',
+        },
+        '2026-05-22',
+      ),
+    ).toBe(true);
   });
 });
 
 describe('taskTimeOnDay', () => {
   it('returns scheduled_time on the scheduled day (legacy "on" semantic)', () => {
-    // What used to be `deadline_type='on' + deadline_time` is now
-    // `scheduled_date + scheduled_time`.
     const task: Task = {
       ...baseTask,
       scheduled_date: '2026-05-22',
@@ -210,9 +260,6 @@ describe('taskTimeOnDay', () => {
   });
 
   it('prefers scheduled_time when both could apply on the same day', () => {
-    // The Plan + Soft-Deadline edge case the migration preserves: both
-    // slots set, possibly on the same day. The schedule-time wins as
-    // the more action-oriented marker for that day.
     const task: Task = {
       ...baseTask,
       scheduled_date: '2026-05-22',
@@ -223,10 +270,7 @@ describe('taskTimeOnDay', () => {
     expect(taskTimeOnDay(task, '2026-05-22')).toBe('09:00:00');
   });
 
-  it('returns null on intermediate days of a deadline window', () => {
-    // Even with a deadline_time, on an intermediate day there is no
-    // time we can honestly point at — the user only committed to that
-    // minute on the deadline date.
+  it('returns null on a day that is neither the scheduled nor deadline day', () => {
     const task: Task = {
       ...baseTask,
       deadline_date: '2026-05-22',
@@ -249,8 +293,6 @@ describe('mergeDayItems', () => {
   const eventTime = (e: { start: string }) => new Date(e.start).getTime();
 
   it('interleaves timed tasks with events sorted by time', () => {
-    // The exact bug the user reported: a 14:00 task lands above a
-    // 15:00 event, not at the bottom of the day cell.
     const events = [
       { id: 'morning', start: '2026-05-22T09:00:00' },
       { id: 'afternoon', start: '2026-05-22T15:00:00' },
@@ -269,8 +311,9 @@ describe('mergeDayItems', () => {
       '2026-05-22',
       eventTime,
     );
-    expect(timed.map((i) => (i.kind === 'event' ? i.event.id : i.task.id)))
-      .toEqual(['morning', 'task-noon', 'afternoon']);
+    expect(
+      timed.map((i) => (i.kind === 'event' ? i.event.id : i.task.id)),
+    ).toEqual(['morning', 'task-noon', 'afternoon']);
     expect(untimed).toEqual([]);
   });
 
@@ -278,11 +321,11 @@ describe('mergeDayItems', () => {
     const events = [{ id: 'meeting', start: '2026-05-22T09:00:00' }];
     const tasks: Task[] = [
       // Pure scheduled — no time of day.
-      { ...baseTask, id: 'sched', scheduled_date: '2026-05-22' },
-      // Deadline-task on an intermediate day, even with deadline_time set.
+      { ...baseTask, id: 'sched', scheduled_date: '2026-05-21' },
+      // Deadline task whose deadline is a different day → no time here.
       {
         ...baseTask,
-        id: 'by-window',
+        id: 'by-other-day',
         deadline_date: '2026-05-22',
         deadline_time: '14:00:00',
       },
@@ -293,185 +336,9 @@ describe('mergeDayItems', () => {
       '2026-05-21',
       eventTime,
     );
-    expect(timed.map((i) => (i.kind === 'event' ? i.event.id : i.task.id)))
-      .toEqual(['meeting']);
-    expect(untimed.map((t) => t.id)).toEqual(['sched', 'by-window']);
-  });
-});
-
-describe('filterScheduledTasksOnDay', () => {
-  it('matches scheduled_date == day only — no deadline-window fallthrough', () => {
-    // The whole point of this filter (used by WeekView's per-day
-    // chips): a task that's surfaced only by `deadline_date` shouldn't
-    // appear as a chip on every day of the window. That lives in the
-    // separate deadline-header lane.
-    const tasks: Task[] = [
-      { ...baseTask, id: 'sched', scheduled_date: '2026-05-20' },
-      {
-        ...baseTask,
-        id: 'deadline-only',
-        deadline_date: '2026-05-22',
-      },
-    ];
     expect(
-      filterScheduledTasksOnDay(tasks, '2026-05-20').map((t) => t.id),
-    ).toEqual(['sched']);
-    // No fallback contribution from `deadline-only` on day 22 either —
-    // the task only shows up if its scheduled_date matches.
-    expect(filterScheduledTasksOnDay(tasks, '2026-05-22')).toEqual([]);
+      timed.map((i) => (i.kind === 'event' ? i.event.id : i.task.id)),
+    ).toEqual(['meeting']);
+    expect(untimed.map((t) => t.id)).toEqual(['sched', 'by-other-day']);
   });
-
-  it('still hides subtasks, cancelled, and (opt-out) completed', () => {
-    const tasks: Task[] = [
-      { ...baseTask, id: 'a', scheduled_date: '2026-05-20' },
-      {
-        ...baseTask,
-        id: 'sub',
-        scheduled_date: '2026-05-20',
-        parent_id: 'a',
-      },
-      {
-        ...baseTask,
-        id: 'cancel',
-        scheduled_date: '2026-05-20',
-        status: 'cancelled',
-      },
-      {
-        ...baseTask,
-        id: 'done',
-        scheduled_date: '2026-05-20',
-        status: 'completed',
-      },
-    ];
-    expect(
-      filterScheduledTasksOnDay(tasks, '2026-05-20').map((t) => t.id),
-    ).toEqual(['a']);
-    expect(
-      filterScheduledTasksOnDay(tasks, '2026-05-20', () => true).map(
-        (t) => t.id,
-      ),
-    ).toEqual(['a', 'done']);
-  });
-});
-
-describe('buildDeadlineBars', () => {
-  // Mon - Sun, ISO week. Use 2026-05-18..24 so today=2026-05-20 lands
-  // mid-week (Wednesday) — gives us "before today", "today", and
-  // "after today" columns to work with.
-  const weekKeys = [
-    '2026-05-18',
-    '2026-05-19',
-    '2026-05-20',
-    '2026-05-21',
-    '2026-05-22',
-    '2026-05-23',
-    '2026-05-24',
-  ];
-  const today = '2026-05-20';
-
-  it('spans from today to deadline when both lie inside the visible week', () => {
-    const tasks: Task[] = [
-      { ...baseTask, id: 'a', deadline_date: '2026-05-22' },
-    ];
-    const bars = buildDeadlineBars(tasks, weekKeys, today);
-    expect(bars).toEqual([
-      {
-        task: tasks[0],
-        startCol: 3, // 2026-05-20 → idx 2 → 1-based col 3
-        endCol: 5, // 2026-05-22 → idx 4 → 1-based col 5
-        lane: 0,
-        continuesBefore: false,
-        continuesAfter: false,
-      },
-    ]);
-  });
-
-  it('ends at the visible-week boundary when the deadline is later', () => {
-    const tasks: Task[] = [
-      { ...baseTask, id: 'a', deadline_date: '2026-05-27' },
-    ];
-    const bars = buildDeadlineBars(tasks, weekKeys, today);
-    expect(bars[0].endCol).toBe(7); // Sun column
-    expect(bars[0].continuesAfter).toBe(true);
-  });
-
-  it('drops bars whose deadline is in the past (handled elsewhere)', () => {
-    const tasks: Task[] = [
-      { ...baseTask, id: 'a', deadline_date: '2026-05-19' },
-    ];
-    expect(buildDeadlineBars(tasks, weekKeys, today)).toEqual([]);
-  });
-
-  it('starts at the week boundary when today is in a previous week (future-week view)', () => {
-    // User navigated to a future week. Today is before this week,
-    // so the bar covers the whole week — and the left edge gets a
-    // chevron because the window started earlier.
-    const tasks: Task[] = [
-      { ...baseTask, id: 'a', deadline_date: '2026-05-22' },
-    ];
-    const futureToday = '2026-05-11';
-    const bars = buildDeadlineBars(tasks, weekKeys, futureToday);
-    expect(bars[0].startCol).toBe(1);
-    expect(bars[0].endCol).toBe(5);
-    expect(bars[0].continuesBefore).toBe(true);
-    expect(bars[0].continuesAfter).toBe(false);
-  });
-
-  it('skips weeks entirely in the past', () => {
-    const tasks: Task[] = [
-      { ...baseTask, id: 'a', deadline_date: '2026-05-22' },
-    ];
-    const tomorrowKeys = ['2026-05-04', '2026-05-05', '2026-05-06'];
-    expect(
-      buildDeadlineBars(tasks, tomorrowKeys, '2026-05-20'),
-    ).toEqual([]);
-  });
-
-  it('skips subtasks, cancelled, and (opt-out) completed tasks', () => {
-    const tasks: Task[] = [
-      { ...baseTask, id: 'a', deadline_date: '2026-05-22' },
-      {
-        ...baseTask,
-        id: 'sub',
-        deadline_date: '2026-05-22',
-        parent_id: 'a',
-      },
-      {
-        ...baseTask,
-        id: 'cancel',
-        deadline_date: '2026-05-22',
-        status: 'cancelled',
-      },
-      {
-        ...baseTask,
-        id: 'done',
-        deadline_date: '2026-05-22',
-        status: 'completed',
-      },
-    ];
-    expect(buildDeadlineBars(tasks, weekKeys, today).map((b) => b.task.id)).toEqual([
-      'a',
-    ]);
-    // With the opt-in callback, completed comes back.
-    expect(
-      buildDeadlineBars(tasks, weekKeys, today, () => true).map(
-        (b) => b.task.id,
-      ),
-    ).toEqual(['a', 'done']);
-  });
-
-  it('lane-packs overlapping bars without colliding', () => {
-    const tasks: Task[] = [
-      { ...baseTask, id: 'mon-wed', deadline_date: '2026-05-20' }, // Wed
-      { ...baseTask, id: 'wed-fri', deadline_date: '2026-05-22' }, // Wed-Fri
-      { ...baseTask, id: 'thu-sat', deadline_date: '2026-05-23' }, // Wed-Sat (because today=Wed)
-    ];
-    const bars = buildDeadlineBars(tasks, weekKeys, today);
-    // All three overlap on Wed (today). They must land on distinct
-    // lanes — 0, 1, 2 — so they stack rather than overwriting each
-    // other.
-    const lanes = bars.map((b) => b.lane).sort();
-    expect(lanes).toEqual([0, 1, 2]);
-  });
-
 });

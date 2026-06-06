@@ -29,11 +29,10 @@ import { useTasks } from '../../state/useTasks';
 import { useViewState } from '../../state/viewStateContext';
 import { visibleRange } from '../../state/viewMath';
 import {
-  buildDeadlineBars,
-  groupScheduledTasksByDay,
+  groupTasksByDay,
+  isDeadlineChip,
   mergeDayItems,
   taskTimeOnDay,
-  todayIsoKey,
 } from '../../intl/taskDay';
 import {
   priorityMarker,
@@ -114,43 +113,16 @@ export function WeekView() {
     [events, days],
   );
 
-  // Bucket tasks per visible day (§9.4): scheduled-on-day, On-deadline-
-  // on-day, and By-deadline-spanning-from-today. The today key is
-  // captured fresh on every render — cheap, avoids stale-date bugs
-  // if the app stays open across midnight.
-  // Per-day chip lists carry the scheduled tasks only. Deadline-window
-  // tasks that aren't scheduled for a specific day land in the
-  // deadline-header bars instead (see `deadlineBars` below) — that's
-  // what § 9.4 means by "oberhalb des Tagesrasters – an jedem Tag bis
-  // zur Deadline sichtbar". The bar carries the every-day visibility;
-  // duplicating the row into each day's chip column would be noise.
+  // Bucket tasks per visible day (§9.4). A task lands on a day when it
+  // is scheduled for that day OR due (deadline) that day — the deadline
+  // shows as a point marker on its deadline day, not a span across every
+  // day until then (see `filterTasksOnDay`). A task scheduled on one day
+  // and due on another therefore appears on both; same-day collapses to
+  // a single chip.
   const tasksByDay = useMemo(() => {
     const dayKeys = days.map((d) => keyOf(d));
-    return groupScheduledTasksByDay(
-      tasks,
-      dayKeys,
-      shouldShowCompletedForList,
-    );
+    return groupTasksByDay(tasks, dayKeys, shouldShowCompletedForList);
   }, [tasks, days, shouldShowCompletedForList]);
-
-  // Deadline bars — one per task whose deadline window overlaps the
-  // visible week. Lane-packed so bars stack vertically when they
-  // overlap horizontally. Re-renders whenever `tasks`, the visible
-  // week, or the per-list "show completed" preference changes.
-  const deadlineBars = useMemo(() => {
-    const today = todayIsoKey();
-    const dayKeys = days.map((d) => keyOf(d));
-    return buildDeadlineBars(
-      tasks,
-      dayKeys,
-      today,
-      shouldShowCompletedForList,
-    );
-  }, [tasks, days, shouldShowCompletedForList]);
-  const deadlineLaneRows = deadlineBars.reduce(
-    (m, b) => Math.max(m, b.lane + 1),
-    0,
-  );
 
   // Pre-merge each day's events + timed tasks into a single time-sorted
   // list, then split that list back into timed and untimed buckets.
@@ -588,99 +560,6 @@ export function WeekView() {
           ))}
         </div>
 
-        {/* Deadline-header lane — § 9.4. Sits between the dow-header
-            row and the all-day event lane (when both are present),
-            so the deadline reminders read above the timed grid but
-            don't clutter the regular all-day event strip. Visual /
-            mouse only (aria-hidden); deadline-only tasks with no
-            scheduled day for the week are reached via TaskView, the
-            same backlog entry point. Tasks with a scheduled day for
-            the week ALSO appear as a chip in that day's column —
-            the bar is awareness, the chip is the actionable
-            handle. */}
-        {deadlineBars.length > 0 && (
-          <div
-            className="week-grid__deadline-lane"
-            aria-hidden="true"
-            style={
-              {
-                '--lane-rows': deadlineLaneRows,
-              } as React.CSSProperties
-            }
-          >
-            {deadlineBars.map((bar) => {
-              const color = resolveTaskColor(
-                bar.task,
-                taskListById,
-                labelById,
-              );
-              const style: React.CSSProperties & Record<string, string> = {
-                gridColumn: `${bar.startCol} / ${bar.endCol + 1}`,
-                gridRow: String(bar.lane + 1),
-              };
-              if (color.hex) style['--task-color'] = color.hex;
-              return (
-                <div
-                  key={bar.task.id}
-                  className={
-                    'week-deadline-bar' +
-                    ` week-deadline-bar--${bar.task.status.replace(
-                      '_',
-                      '-',
-                    )}` +
-                    (bar.continuesBefore
-                      ? ' week-deadline-bar--continues-before'
-                      : '') +
-                    (bar.continuesAfter
-                      ? ' week-deadline-bar--continues-after'
-                      : '')
-                  }
-                  style={style}
-                  onClick={() => openTaskDialog(bar.task)}
-                  title={t('views.week.deadlineBarTitle', {
-                    title: bar.task.title,
-                    date: fmt.format(
-                      new Date(`${bar.task.deadline_date}T00:00:00`),
-                      'PP',
-                    ),
-                  })}
-                >
-                  {bar.continuesBefore && (
-                    <span
-                      className="week-deadline-bar__chevron"
-                      aria-hidden="true"
-                    >
-                      ‹
-                    </span>
-                  )}
-                  <span className="week-deadline-bar__marker" aria-hidden="true">
-                    {statusMarker(bar.task.status)}
-                  </span>
-                  {priorityMarker(bar.task.priority) && (
-                    <span
-                      className="week-deadline-bar__priority"
-                      aria-hidden="true"
-                    >
-                      {priorityMarker(bar.task.priority)}{' '}
-                    </span>
-                  )}
-                  <span className="week-deadline-bar__title">
-                    {bar.task.title}
-                  </span>
-                  {bar.continuesAfter && (
-                    <span
-                      className="week-deadline-bar__chevron"
-                      aria-hidden="true"
-                    >
-                      ›
-                    </span>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-
         {allDayBars.length > 0 && (
           <div
             className="week-grid__lane"
@@ -1015,6 +894,7 @@ export function WeekView() {
                     after the grid is left. */}
                 <WeekDayTasks
                   tasks={untimedTasks}
+                  dayKey={dayKey}
                   allTasks={tasks}
                   onOpen={(task) => openTaskDialog(task)}
                   onToggle={(task) => {
@@ -1114,6 +994,7 @@ function groupEventsByDay(
  */
 function WeekDayTasks({
   tasks,
+  dayKey,
   allTasks,
   onOpen,
   onToggle,
@@ -1125,6 +1006,9 @@ function WeekDayTasks({
   onDragEnd,
 }: {
   tasks: Task[];
+  /** ISO day key of this column — lets a chip tell whether it's here
+   *  because it's DUE today (deadline marker) vs scheduled today. */
+  dayKey: string;
   /** All tasks in the store — used to resolve subtask progress
    *  for the parents that show up in this day's chip list. */
   allTasks: Task[];
@@ -1147,6 +1031,7 @@ function WeekDayTasks({
   onDragEnd: () => void;
 }) {
   const { t } = useTranslation();
+  const fmt = useDateFormat();
   if (tasks.length === 0) return null;
   return (
     <ul
@@ -1154,10 +1039,11 @@ function WeekDayTasks({
       aria-label={t('views.week.tasksOnDay', { count: tasks.length })}
     >
       {tasks.map((task) => {
-        // Post-migration 0006 there's only one deadline kind ("by")
-        // and the marker is "has a deadline_date" — see DayView for
-        // the matching collapse.
-        const isBy = task.deadline_date != null;
+        // "Due here" when the task lands on this day because of its
+        // deadline (not its scheduled day) — that chip is the deadline
+        // marker and reads "fällig bis …"; a scheduled chip stays a
+        // plain work chip even if the task also has a later deadline.
+        const isBy = isDeadlineChip(task, dayKey);
         const labelKey = isBy
           ? 'views.week.taskChipBy'
           : 'views.week.taskChip';
@@ -1206,7 +1092,12 @@ function WeekDayTasks({
               }
               aria-label={t(labelKey, {
                 title: task.title,
-                deadline: task.deadline_date ?? '',
+                deadline: task.deadline_date
+                  ? fmt.format(
+                      new Date(`${task.deadline_date}T00:00:00`),
+                      'PP',
+                    )
+                  : '',
                 state,
                 priority: prioritySuffix(t, task.priority),
                 progress: subtaskProgressSuffix(t, task.id, allTasks),

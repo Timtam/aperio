@@ -42,6 +42,9 @@ Aperio distinguishes between tasks with and without a fixed date:
   all. (Can be turned off under *Settings → Tasks*.)
 - **Week planner:** A view in which you comfortably distribute backlog tasks
   across the days of the week.
+- **Deadline:** A task with a deadline shows up in the week and day planner
+  as a **due marker** on its deadline day ("due by …") — a single point, not
+  a bar spanning every day until then.
 
 ## Recurring tasks
 

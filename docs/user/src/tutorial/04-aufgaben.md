@@ -44,6 +44,9 @@ Aperio unterscheidet zwischen Aufgaben mit und ohne festen Termin:
   hat ja begonnen. (Abschaltbar unter *Einstellungen → Aufgaben*.)
 - **Wochenplanung:** Eine Ansicht, in der du Backlog-Aufgaben bequem auf
   die Tage der Woche verteilst.
+- **Deadline:** Eine Aufgabe mit Deadline erscheint in der Wochen- und
+  Tagesplanung als **Fälligkeitsmarker** an ihrem Deadline-Tag („fällig
+  bis …") – als einzelner Punkt, nicht als Balken über alle Tage bis dahin.
 
 ## Wiederkehrende Aufgaben
 

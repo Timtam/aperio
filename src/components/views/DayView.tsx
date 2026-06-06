@@ -29,9 +29,9 @@ import { visibleRange } from '../../state/viewMath';
 import { localDateKey } from '../../intl/dateKey';
 import {
   filterTasksOnDay,
+  isDeadlineChip,
   mergeDayItems,
   taskTimeOnDay,
-  todayIsoKey,
 } from '../../intl/taskDay';
 import {
   priorityMarker,
@@ -99,7 +99,6 @@ export function DayView() {
       filterTasksOnDay(
         tasks,
         localDateKey(anchor),
-        todayIsoKey(),
         shouldShowCompletedForList,
       ),
     [tasks, anchor, shouldShowCompletedForList],
@@ -510,11 +509,11 @@ export function DayView() {
           </h3>
           <ul className="day-tasks__list">
             {untimedTasks.map((task) => {
-              // After migration 0006 there is only one deadline
-              // semantic ("by"). A task with a `deadline_date` is a
-              // by-task; the old `deadline_type === 'by'` check
-              // collapses to "is deadline_date set".
-              const isBy = task.deadline_date != null;
+              // "Due here" when the task is on this day because of its
+              // deadline (not its scheduled day) — that chip is the
+              // deadline marker ("fällig bis …"). A task scheduled today
+              // stays a plain work chip even with a later deadline.
+              const isBy = isDeadlineChip(task, dayKey);
               const labelKey = isBy
                 ? 'views.week.taskChipBy'
                 : 'views.week.taskChip';
@@ -570,7 +569,12 @@ export function DayView() {
                     }
                     aria-label={t(labelKey, {
                       title: task.title,
-                      deadline: task.deadline_date ?? '',
+                      deadline: task.deadline_date
+                        ? fmt.format(
+                            new Date(`${task.deadline_date}T00:00:00`),
+                            'PP',
+                          )
+                        : '',
                       state,
                       priority: prioritySuffix(t, task.priority),
                       progress: subtaskProgressSuffix(t, task.id, tasks),

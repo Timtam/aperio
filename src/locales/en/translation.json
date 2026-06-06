@@ -1388,7 +1388,6 @@
       "taskChip": "Task: {{title}}, {{state}}{{priority}}{{progress}}",
       "taskChipBy": "Task: {{title}}, due by {{deadline}}, {{state}}{{priority}}{{progress}}",
       "taskChipTimed": "Task: {{title}}, {{time}}, {{state}}{{priority}}{{progress}}",
-      "deadlineBarTitle": "{{title}} — due by {{date}}",
       "taskRescheduled": "Task \"{{title}}\" moved to {{date}}."
     },
     "day": {
