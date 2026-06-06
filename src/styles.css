@@ -3139,7 +3139,7 @@ button[aria-disabled='true'] {
    task chips below; the header tint is the (decorative) cue that the
    section carries a color. */
 .task-list__group--colored {
-  border-left: 3px solid var(--event-color);
+  border-left: 3px solid var(--event-color, var(--color-accent));
   padding-left: var(--space-2);
 }
 
@@ -3148,7 +3148,7 @@ button[aria-disabled='true'] {
   width: 0.7em;
   height: 0.7em;
   border-radius: 50%;
-  background: var(--event-color);
+  background: var(--event-color, var(--color-accent));
   margin-right: var(--space-1);
   vertical-align: middle;
 }

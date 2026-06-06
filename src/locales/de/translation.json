@@ -991,6 +991,7 @@
         "cancel": "Abbrechen",
         "namePlaceholder": "Abschnittsname",
         "noColor": "Keine Farbe",
+        "colorLabel": "Abschnittsfarbe",
         "newLabel": "Name des neuen Abschnitts",
         "renameLabel": "Abschnitt umbenennen",
         "created": "Abschnitt „{{name}}\" wurde angelegt.",

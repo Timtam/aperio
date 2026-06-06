@@ -81,8 +81,22 @@ export function DayView() {
     useTaskListShowCompleted();
   const { openForEvent: openEventMenu, openForTask: openTaskMenu } =
     useChipContextMenu();
-  const { colorLabels, sectionColorById } = useCalendarStore();
+  const { colorLabels, sectionColorById, sectionsByList, loadSections } =
+    useCalendarStore();
   const labelById = useMemo(() => labelsLookup(colorLabels), [colorLabels]);
+
+  // Load sections for the lists with tasks here so a colored section
+  // cascades to its tasks in this view too (cached + cheap; empty for
+  // section-less backends). Mirrors TaskView.
+  const listIdsWithTasks = useMemo(
+    () => Array.from(new Set(tasks.map((task) => task.list_id))),
+    [tasks],
+  );
+  useEffect(() => {
+    for (const listId of listIdsWithTasks) {
+      if (!(listId in sectionsByList)) void loadSections(listId);
+    }
+  }, [listIdsWithTasks, sectionsByList, loadSections]);
 
   // Pick up multi-day all-day events on every day of their span — see
   // intl/multiDay for the rationale.

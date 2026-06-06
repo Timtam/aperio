@@ -991,6 +991,7 @@
         "cancel": "Cancel",
         "namePlaceholder": "Section name",
         "noColor": "No color",
+        "colorLabel": "Section color",
         "newLabel": "New section name",
         "renameLabel": "Rename section",
         "created": "Section \"{{name}}\" created.",

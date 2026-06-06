@@ -998,6 +998,7 @@ export function TaskDialog({
                   onChange={setSectionColorDraft}
                   labels={colorLabels}
                   noneLabel={t('dialogs.task.section.noColor')}
+                  ariaLabel={t('dialogs.task.section.colorLabel')}
                 />
                 <button
                   type="button"
