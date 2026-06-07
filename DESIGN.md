@@ -871,7 +871,16 @@ Ein Termin oder eine Aufgabe ohne Label erbt die Farbe seines bzw. ihres Contain
 
 Effektive Kette einer Aufgabe: `Aufgaben-Label → Abschnitts-Label → Aufgabenlisten-Farbe → neutral`.
 
-Die Abschnittsfarbe wird an zwei Stellen gesetzt — im Abschnitt-Anlegen/Bearbeiten-Dialog **und** über ein Kontextmenü am Abschnitts-Kopf in der Aufgaben-Ansicht (Rechtsklick bzw. die „⋮"-Schaltfläche; analog zu den Sidebar-Containern), inkl. „Andere Farbe…" für Ad-hoc-Farben. Beides nur für **lokale** Listen — Abschnitte externer Anbieter sind schreibgeschützt und tragen keine Farbe.
+Die Abschnittsfarbe wird an zwei Stellen gesetzt — im Abschnitt-Anlegen/Bearbeiten-Dialog **und** über ein Kontextmenü am Abschnitts-Kopf in der Aufgaben-Ansicht (Rechtsklick bzw. die „⋮"-Schaltfläche; analog zu den Sidebar-Containern), inkl. „Andere Farbe…" für Ad-hoc-Farben.
+
+**Lokal vs. extern (Farbquelle).** Die Abschnittsfarbe ist **immer ein lokales Konzept** — kein Anbieter (Todoist/Vikunja) hat ein Section-Farbfeld. Sie wird über `set_section_color` gesetzt, das host-seitig verzweigt, exakt wie `set_container_color_label` (Container-Farben, §6.5):
+
+- **Lokale Abschnitte:** Bindung direkt am `sections.color_label_id` (Migration 0024) + `SectionUpdated`-Event (cross-device-synchronisiert).
+- **Externe Abschnitte:** lokales Override in `section_color_overrides` (Migration 0025; gespiegelt von `container_color_overrides`, nur `section_id`, kein `kind`). `get_sections` stempelt das Override beim Lesen auf `Section.color_label`, sodass die Kaskade einheitlich auflöst. Kein Event-Log (host-lokal).
+
+Ein Abschnitt ist sein Leben lang lokal **oder** extern (das Konto seiner Liste ändert sich nie), also kollidieren die beiden Farbquellen für eine `section_id` nie.
+
+**Zwei Capability-Achsen.** Farbe (Override) ist immer lokal und wird überall angeboten, wo Abschnitte existieren (`sections`). Das **Anlegen/Umbenennen/Löschen** von Abschnitten am Anbieter wird separat über `manageable_sections` (Manifest) gegated — lokal, Todoist und Vikunja deklarieren es; flache Anbieter nicht. Die Mutations-Commands routen nach Konto: lokal → Store + `section.*`-Event; extern → Provider-Adapter (kein Event-Log). Endpunkte: Todoist `POST/DELETE /sections[/{id}]`; Vikunja `PUT/POST/DELETE /projects/{p}/views/{v}/buckets[/{id}]` (Kanban-View wie beim Verschieben).
 
 **Abschnitts-Zuordnung (Schreiben):** Eine Aufgabe lässt sich zwischen Abschnitten verschieben oder aus einem Abschnitt herausnehmen (`section_id → null`), soweit der Adapter es zulässt:
 

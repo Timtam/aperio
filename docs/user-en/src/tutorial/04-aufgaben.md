@@ -37,6 +37,13 @@ your day or week, and work through them.
 > task into another section recolors it automatically. Order: task's own
 > color → section → task list.
 
+> **Creating, renaming, deleting sections:** On **local** lists and on
+> **Todoist** and **Vikunja**, you can add, rename, and delete sections
+> right in the task dialog — the change is made at the provider. A
+> section's **color** always stays local: you can set it for any section
+> (including Todoist/Vikunja, which have no section-color of their own) and
+> it's never sent to the provider.
+
 > **Moving tasks between sections:** Use the **Section** field in the task
 > dialog to file a task under a different section, or pick **No section**
 > to pull it out entirely. This works for local lists, for Todoist, and
