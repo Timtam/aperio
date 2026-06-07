@@ -41,3 +41,6 @@ desktop.ini
 # Claude Code — local settings & worktrees
 .claude/settings.local.json
 .claude/worktrees/
+
+# Runtime lock from the scheduled-tasks system
+.claude/scheduled_tasks.lock
