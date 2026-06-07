@@ -1744,7 +1744,9 @@ mod tests {
             .await;
         let m = server
             .mock("PUT", "/api/v1/projects/3/views/11/buckets")
-            .match_body(mockito::Matcher::Json(serde_json::json!({ "title": "Backlog" })))
+            .match_body(mockito::Matcher::Json(
+                serde_json::json!({ "title": "Backlog" }),
+            ))
             .with_status(200)
             .with_body(r#"{"id":25,"title":"Backlog","position":3.0}"#)
             .create_async()
@@ -1768,7 +1770,9 @@ mod tests {
             .await;
         let m = server
             .mock("POST", "/api/v1/projects/3/views/11/buckets/22")
-            .match_body(mockito::Matcher::Json(serde_json::json!({ "title": "Done" })))
+            .match_body(mockito::Matcher::Json(
+                serde_json::json!({ "title": "Done" }),
+            ))
             .with_status(200)
             .with_body(r#"{"id":22,"title":"Done","position":2.0}"#)
             .create_async()

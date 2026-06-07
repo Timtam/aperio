@@ -221,10 +221,9 @@ unsafe extern "C" fn ffi_create_section(
         Ok(v) => v,
         Err(r) => return r,
     };
-    dispatch(
-        h,
-        move |p| async move { p.create_section(&args.list_id, &args.name).await },
-    )
+    dispatch(h, move |p| async move {
+        p.create_section(&args.list_id, &args.name).await
+    })
 }
 
 unsafe extern "C" fn ffi_update_section(

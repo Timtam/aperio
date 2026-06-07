@@ -1684,7 +1684,9 @@ mod tests {
         let mut server = Server::new_async().await;
         let m = server
             .mock("POST", "/sections/S9")
-            .match_body(mockito::Matcher::Json(serde_json::json!({ "name": "Done" })))
+            .match_body(mockito::Matcher::Json(
+                serde_json::json!({ "name": "Done" }),
+            ))
             .with_status(200)
             .with_body(r#"{"id":"S9","project_id":"P1","order":3,"name":"Done"}"#)
             .create_async()
