@@ -215,7 +215,7 @@ export function WeekView() {
     () =>
       days.map((d) => {
         const merged = dayItemsByDay.get(keyOf(d));
-        const items: DayItem[] =
+        const timed: DayItem[] =
           merged?.timed.map((m) =>
             m.kind === 'event'
               ? {
@@ -229,7 +229,18 @@ export function WeekView() {
                   title: m.task.title,
                 },
           ) ?? [];
-        return { items };
+        // Untimed tasks join the SAME nav buckets, after the timed lane.
+        // The grid traps Tab (handleTab wraps within the buckets and never
+        // lets focus escape), so anything *not* in a bucket is keyboard-
+        // unreachable. WeekDayTasks renders these below the lane and mirrors
+        // their indices (timed count + offset) for aria-activedescendant.
+        const untimed: DayItem[] =
+          merged?.untimed.map((task) => ({
+            kind: 'task' as const,
+            task,
+            title: task.title,
+          })) ?? [];
+        return { items: [...timed, ...untimed] };
       }),
     [days, dayItemsByDay],
   );
@@ -916,15 +927,18 @@ export function WeekView() {
                     a real deadline_time are hoisted into the timed
                     lane above (sorted between events by time); only
                     scheduled-only tasks and By-window intermediate
-                    days end up here. Untimed tasks aren't part of
-                    the grid's aria-activedescendant nav — there is
-                    no minute to slot them at — so they remain plain
-                    buttons reached by the SR's natural Tab order
-                    after the grid is left. */}
+                    days end up here. They join the grid's
+                    aria-activedescendant nav too — their bucket index
+                    continues after the timed lane (`optionIdBase`), so
+                    Tab walks them like any other chip. */}
                 <WeekDayTasks
                   tasks={untimedTasks}
                   dayKey={dayKey}
                   allTasks={tasks}
+                  cellIndex={i}
+                  optionIdBase={timedItems.length}
+                  focusedIndex={focused ? eventIndex : null}
+                  eventOptionId={eventOptionId}
                   onOpen={(task) => openTaskDialog(task)}
                   onToggle={(task) => {
                     void toggleTaskStatus(task);
@@ -1030,6 +1044,10 @@ function WeekDayTasks({
   tasks,
   dayKey,
   allTasks,
+  cellIndex,
+  optionIdBase,
+  focusedIndex,
+  eventOptionId,
   onOpen,
   onToggle,
   onContextMenu,
@@ -1046,6 +1064,17 @@ function WeekDayTasks({
   /** All tasks in the store — used to resolve subtask progress
    *  for the parents that show up in this day's chip list. */
   allTasks: Task[];
+  /** This day's index in the week, for the activedescendant option id. */
+  cellIndex: number;
+  /** Bucket index of the first untimed task: the count of timed items in
+   *  this cell, so untimed chips continue the grid nav after the lane. */
+  optionIdBase: number;
+  /** The grid's focused item index when THIS cell is the focused day,
+   *  else null — drives the chip's focus ring + `aria-selected`. */
+  focusedIndex: number | null;
+  /** Builds the `aria-activedescendant` option id, shared with the grid so
+   *  the keyboard nav and these chips agree on which one is focused. */
+  eventOptionId: (cellIdx: number, itemIdx: number) => string;
   onOpen: (task: Task) => void;
   onToggle: (task: Task) => void;
   onContextMenu: (task: Task) => void;
@@ -1058,7 +1087,7 @@ function WeekDayTasks({
   /** Drag start handler — receives the task plus the native event so
    *  the parent can set `dataTransfer.setData` and update its
    *  `draggingTaskId` state. */
-  onDragStart: (task: Task, ev: React.DragEvent<HTMLButtonElement>) => void;
+  onDragStart: (task: Task, ev: React.DragEvent<HTMLElement>) => void;
   /** Drag end handler — fires on both successful drop and cancel
    *  (Esc / drop outside any target). The parent uses it to clear
    *  the dragging state. */
@@ -1073,7 +1102,7 @@ function WeekDayTasks({
       className="week-grid__tasks"
       aria-label={t('views.week.tasksOnDay', { count: tasks.length })}
     >
-      {tasks.map((task) => {
+      {tasks.map((task, idx) => {
         // "Due here" when the task lands on this day because of its
         // deadline (not its scheduled day) — that chip is the deadline
         // marker and reads "fällig bis …"; a scheduled chip stays a
@@ -1090,35 +1119,34 @@ function WeekDayTasks({
         );
         const state = t(statusI18nKey(task.status));
         const priorityGlyph = priorityMarker(task.priority);
+        // Bucket index of this untimed chip (after the timed lane). The
+        // grid's keyboard nav focuses it via aria-activedescendant, so it's
+        // a focus *target* (a span) like the timed chips — not a separate
+        // tabbable button. Keyboard (Enter / Space / menu) is dispatched by
+        // the grid's handleKeyDown; mouse click + drag stay on the chip.
+        const navIndex = optionIdBase + idx;
+        const isFocused = focusedIndex === navIndex;
         return (
-          <li key={task.id} className="week-grid__task-item">
-            <button
-              type="button"
+          <li
+            key={task.id}
+            role="listitem"
+            className="week-grid__task-item"
+          >
+            <span
+              id={eventOptionId(cellIndex, navIndex)}
               className={
                 'week-task' +
+                (isFocused ? ' week-task--focused' : '') +
                 ` week-task--${task.status.replace('_', '-')}` +
                 (isBy ? ' week-task--by' : '') +
                 (draggingTaskId === task.id
                   ? ' week-task--dragging'
                   : '')
               }
+              aria-selected={isFocused}
               draggable
               onDragStart={(ev) => onDragStart(task, ev)}
               onDragEnd={onDragEnd}
-              // Default <button> behaviour fires onClick on both
-              // Space and Enter — we need Space to toggle and Enter
-              // to open. Intercept in onKeyDown and dispatch by key,
-              // then let onClick still handle the mouse case (which
-              // opens the dialog).
-              onKeyDown={(ev) => {
-                if (ev.key === ' ' || ev.key === 'Spacebar') {
-                  ev.preventDefault();
-                  onToggle(task);
-                } else if (ev.key === 'Enter') {
-                  ev.preventDefault();
-                  onOpen(task);
-                }
-              }}
               onClick={() => onOpen(task)}
               onContextMenu={(ev) => {
                 ev.preventDefault();
@@ -1161,7 +1189,7 @@ function WeekDayTasks({
                 )}
                 <span className="week-task__title">{task.title}</span>
               </span>
-            </button>
+            </span>
           </li>
         );
       })}
