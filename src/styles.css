@@ -1417,6 +1417,28 @@ button[aria-disabled='true'] {
   background: color-mix(in srgb, var(--color-accent) 12%, transparent);
 }
 
+/* Create-mode draft row: title + a remove button (no status check). */
+.subtasks__row--draft {
+  grid-template-columns: 1fr auto;
+  cursor: default;
+}
+.subtasks__remove {
+  border: none;
+  background: transparent;
+  color: var(--color-fg-muted, var(--color-fg));
+  cursor: pointer;
+  padding: 0 var(--space-1);
+  font-size: 1em;
+  line-height: 1;
+}
+.subtasks__remove:hover {
+  color: var(--color-fg);
+}
+.subtasks__remove:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
 .subtasks__check {
   flex-shrink: 0;
   display: inline-flex;

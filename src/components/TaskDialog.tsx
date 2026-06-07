@@ -191,6 +191,10 @@ export function TaskDialog({
   const [form, setForm] = useState<FormState>(initialState);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // Create mode only: subtask titles staged on the form. A brand-new
+  // parent has no id yet, so children can't be written until it exists —
+  // we collect titles here and create them right after the parent on Save.
+  const [draftSubtasks, setDraftSubtasks] = useState<string[]>([]);
   // Date inputs for the two optional slots. The "clear" buttons move
   // focus here after wiping the slot (the button itself unmounts once
   // the date is empty, so focus would otherwise fall to <body>).
@@ -205,6 +209,8 @@ export function TaskDialog({
     if (isOpen) {
       setForm(initialState);
       setError(null);
+      setDraftSubtasks([]);
+      setNewSubtaskTitle('');
     }
   }, [isOpen, initialState]);
 
@@ -216,6 +222,14 @@ export function TaskDialog({
   const sourceList = task
     ? taskLists.find((l) => l.id === task.list_id)
     : undefined;
+  // Create mode: does the target list support subtasks? (Edit mode uses
+  // `supportsSubtasks`, keyed off the existing task's list.) Defaults to
+  // the cal-core-native "subtasks: true" when capabilities are absent.
+  const createSupportsSubtasks = useMemo(
+    () =>
+      task ? false : (listForSections?.task_capabilities?.subtasks ?? true),
+    [task, listForSections],
+  );
   const sectionsEnabled = canAssignSection(listForSections);
   const canMoveLists = canMoveTaskBetweenLists(sourceList);
   // Lock the list picker when editing a task whose source adapter
@@ -477,6 +491,16 @@ export function TaskDialog({
     cascadeEnabled,
     autoDate,
   ]);
+
+  // Create mode: stage a subtask title on the form. They're created right
+  // after the parent on Save (the parent's id doesn't exist yet here).
+  const addDraftSubtask = useCallback(() => {
+    const trimmed = newSubtaskTitle.trim();
+    if (!trimmed) return;
+    setDraftSubtasks((d) => [...d, trimmed]);
+    setNewSubtaskTitle('');
+    announce(t('dialogs.task.subtasks.added', { title: trimmed }));
+  }, [newSubtaskTitle, announce, t]);
 
   // Subtask status changes go through the shared hook — that gives
   // us the same cascade (recompute parent, propagate further up) we
@@ -759,7 +783,7 @@ export function TaskDialog({
           }
           announce(t('dialogs.task.updated', { title: trimmedTitle }));
         } else {
-          await apiCreateTask({
+          const created = await apiCreateTask({
             list_id: form.listId,
             title: trimmedTitle,
             description: form.description.trim() || null,
@@ -777,6 +801,31 @@ export function TaskDialog({
             assignees: form.assignees,
             sound: null,
           });
+          // Create the subtasks staged on the form now that the parent
+          // has an id. They inherit the parent's section so they group
+          // with it, and default to open/medium like the inline add.
+          if (createSupportsSubtasks) {
+            for (const subtaskTitle of draftSubtasks) {
+              await apiCreateTask({
+                list_id: form.listId,
+                title: subtaskTitle,
+                description: null,
+                status: 'open',
+                priority: 'medium',
+                scheduled_date: null,
+                scheduled_time: null,
+                deadline_date: null,
+                deadline_time: null,
+                recurrence: null,
+                parent_id: created.id,
+                section_id: form.sectionId || null,
+                color_label: null,
+                reminders: [],
+                assignees: [],
+                sound: null,
+              });
+            }
+          }
           // Remember for next time — only on create, not edit.
           writeLastUsedTaskList(form.listId);
           announce(t('dialogs.task.created', { title: trimmedTitle }));
@@ -804,6 +853,8 @@ export function TaskDialog({
       tasks,
       cascadeEnabled,
       autoDate,
+      draftSubtasks,
+      createSupportsSubtasks,
     ],
   );
 
@@ -1216,16 +1267,12 @@ export function TaskDialog({
             <legend className="form__label">
               {t('dialogs.task.subtasks.heading')}
             </legend>
-            {/* Subtasks section. Hidden on create — a brand new
-                parent has no id, so children couldn't reference it.
-                The user finishes the create flow first, then
-                re-opens to add subtasks. Existing tasks see the
-                list immediately and can edit it inline.
-                Mutations here persist immediately (not staged with
-                the parent form). That's a deliberate pick: the most
+            {/* Subtasks section (edit mode). Mutations here persist
+                immediately (not staged with the parent form): the most
                 common use is "tick a subtask off mid-edit", which
                 shouldn't be coupled to whether the parent's other
-                changes are saved yet. */}
+                changes are saved yet. Create mode has its own staged
+                variant below (the parent has no id to reference yet). */}
             {subtasks.length === 0 ? (
               <p className="subtasks__empty">
                 {t('dialogs.task.subtasks.empty')}
@@ -1332,6 +1379,72 @@ export function TaskDialog({
                 </button>
               </div>
             )}
+          </fieldset>
+        )}
+
+        {!isEdit && createSupportsSubtasks && (
+          <fieldset className="form__field form__field--subtasks">
+            <legend className="form__label">
+              {t('dialogs.task.subtasks.heading')}
+            </legend>
+            {/* Create mode: subtasks are staged as titles here and
+                written right after the parent on Save (the parent has
+                no id yet). They default to open/medium and inherit the
+                parent's section, matching the inline edit-mode add. */}
+            {draftSubtasks.length === 0 ? (
+              <p className="subtasks__empty">
+                {t('dialogs.task.subtasks.empty')}
+              </p>
+            ) : (
+              <ul
+                className="subtasks__list"
+                aria-label={t('dialogs.task.subtasks.listAria')}
+              >
+                {draftSubtasks.map((title, i) => (
+                  <li
+                    key={`${i}-${title}`}
+                    className="subtasks__row subtasks__row--draft"
+                  >
+                    <span className="subtasks__title">{title}</span>
+                    <button
+                      type="button"
+                      className="subtasks__remove"
+                      onClick={() =>
+                        setDraftSubtasks((d) => d.filter((_, j) => j !== i))
+                      }
+                      aria-label={t('dialogs.task.subtasks.removeAria', {
+                        title,
+                      })}
+                    >
+                      ✕
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="subtasks__add">
+              <input
+                type="text"
+                value={newSubtaskTitle}
+                onChange={(e) => setNewSubtaskTitle(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addDraftSubtask();
+                  }
+                }}
+                placeholder={t('dialogs.task.subtasks.placeholder')}
+                aria-label={t('dialogs.task.subtasks.newAria')}
+              />
+              <button
+                type="button"
+                onClick={addDraftSubtask}
+                disabled={!newSubtaskTitle.trim()}
+                className="subtasks__add-button"
+              >
+                {t('dialogs.task.subtasks.addButton')}
+              </button>
+            </div>
           </fieldset>
         )}
 

@@ -1042,7 +1042,8 @@
         "addButton": "Hinzufügen",
         "added": "Unteraufgabe „{{title}}\" hinzugefügt.",
         "listAria": "Unteraufgaben. Pfeiltasten zur Navigation, Leertaste zum Umschalten, Umschalt+F10 für Aktionen.",
-        "rowLabel": "{{title}}, {{state}}{{priority}}"
+        "rowLabel": "{{title}}, {{state}}{{priority}}",
+        "removeAria": "Unteraufgabe „{{title}}\" entfernen"
       },
       "status": {
         "open": "Offen",
