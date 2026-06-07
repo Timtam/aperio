@@ -114,20 +114,40 @@ pub async fn list_task_lists(client: &VikunjaClient) -> VikunjaResult<Vec<TaskLi
 /// endpoint with the same page-walk logic as `list_task_lists`.
 pub async fn get_tasks(client: &VikunjaClient, list_id: &str) -> VikunjaResult<Vec<Task>> {
     let project_id = parse_id(list_id, "task list id")?;
+    // Resolve the kanban view once so each task's per-view bucket — which
+    // Vikunja ≥0.24 keeps on the view, not on the task — can be stitched
+    // back into its section. `None` on section-less / older servers, where
+    // `map_task` falls back to the flat `bucket_id`.
+    let kanban_view_id = kanban_view(client, project_id).await.map(|v| v.id);
     let mut out = Vec::new();
     let mut page: u32 = 1;
     loop {
         // `filter_by=done&filter_value=false&filter_value=true` would
         // be a more selective fetch but Aperio displays open + done
-        // side by side, so we ask for everything.
-        let path = format!("/projects/{project_id}/tasks?page={page}&per_page=50");
+        // side by side, so we ask for everything. `expand=buckets` adds
+        // the per-view bucket memberships (≥0.24); older servers ignore
+        // the unknown param and keep returning the flat `bucket_id`.
+        let path = format!("/projects/{project_id}/tasks?page={page}&per_page=50&expand=buckets");
         let entries: Vec<TaskEntry> = client.get_json(&path).await?;
         if entries.is_empty() {
             break;
         }
         let len = entries.len();
         for entry in entries {
-            out.push(map_task(entry, list_id));
+            // Prefer the per-view bucket from the expanded `buckets`
+            // array; `map_task` falls back to the flat `bucket_id`.
+            let section_override = kanban_view_id.and_then(|vid| {
+                entry
+                    .buckets
+                    .iter()
+                    .find(|b| b.project_view_id == vid && b.id != 0)
+                    .map(|b| b.id.to_string())
+            });
+            let mut task = map_task(entry, list_id);
+            if let Some(section) = section_override {
+                task.section_id = Some(section);
+            }
+            out.push(task);
         }
         if len < 50 {
             break;
@@ -154,21 +174,10 @@ pub async fn get_tasks(client: &VikunjaClient, list_id: &str) -> VikunjaResult<V
 /// for section-less backends.
 pub async fn list_sections(client: &VikunjaClient, list_id: &str) -> VikunjaResult<Vec<Section>> {
     let project_id = parse_id(list_id, "task list id")?;
-    let views: Vec<ViewEntry> = match client
-        .get_json(&format!("/projects/{project_id}/views"))
-        .await
-    {
-        Ok(v) => v,
-        // No view endpoint (older server) → no sections to surface.
-        Err(_) => return Ok(Vec::new()),
-    };
-    let Some(kanban) = views
-        .into_iter()
-        .find(|v| v.view_kind.as_deref() == Some("kanban"))
-    else {
+    let Some(view) = kanban_view(client, project_id).await else {
         return Ok(Vec::new());
     };
-    let path = format!("/projects/{project_id}/views/{}/buckets", kanban.id);
+    let path = format!("/projects/{project_id}/views/{}/buckets", view.id);
     let buckets: Vec<BucketEntry> = match client.get_json(&path).await {
         Ok(b) => b,
         Err(_) => return Ok(Vec::new()),
@@ -177,6 +186,132 @@ pub async fn list_sections(client: &VikunjaClient, list_id: &str) -> VikunjaResu
         .into_iter()
         .map(|b| map_bucket(b, list_id))
         .collect())
+}
+
+/// Resolve a project's kanban view (id + default bucket), if it has one.
+/// One `GET /projects/{id}/views`; `None` (error swallowed) on servers
+/// without the views endpoint, matching `list_sections`' graceful
+/// degradation.
+async fn kanban_view(client: &VikunjaClient, project_id: i64) -> Option<KanbanView> {
+    let views: Vec<ViewEntry> = client
+        .get_json(&format!("/projects/{project_id}/views"))
+        .await
+        .ok()?;
+    views
+        .into_iter()
+        .find(|v| v.view_kind.as_deref() == Some("kanban"))
+        .map(|v| KanbanView {
+            id: v.id,
+            default_bucket_id: v.default_bucket_id,
+        })
+}
+
+/// The lowest-`position` bucket of a kanban view — Vikunja's implicit
+/// default when the view sets no explicit `default_bucket_id`. `None` if
+/// the buckets can't be read.
+async fn leftmost_bucket(client: &VikunjaClient, project_id: i64, view_id: i64) -> Option<i64> {
+    let buckets: Vec<BucketEntry> = client
+        .get_json(&format!("/projects/{project_id}/views/{view_id}/buckets"))
+        .await
+        .ok()?;
+    buckets
+        .into_iter()
+        .min_by(|a, b| {
+            a.position
+                .partial_cmp(&b.position)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(|b| b.id)
+}
+
+/// Read the task's current bucket id *in the given kanban view*
+/// (`GET /tasks/{id}?expand=buckets`). `None` when the server doesn't
+/// populate it (older Vikunja / no `expand` support / task in no bucket
+/// of this view) — callers treat `None` as "can't determine" and skip
+/// any move rather than risk placing the task in the wrong bucket.
+async fn current_bucket(client: &VikunjaClient, task_id: i64, view_id: i64) -> Option<i64> {
+    let entry: TaskEntry = client
+        .get_json(&format!("/tasks/{task_id}?expand=buckets"))
+        .await
+        .ok()?;
+    entry
+        .buckets
+        .iter()
+        .find(|b| b.project_view_id == view_id && b.id != 0)
+        .map(|b| b.id)
+}
+
+/// Best-effort: place `task` in its target kanban bucket on Vikunja
+/// ≥0.24, where the bucket lives on a per-project kanban *view* and is
+/// set via a dedicated endpoint (the task body's `bucket_id` is ignored).
+///
+/// It first reads the task's current bucket and moves **only when it
+/// actually changed**, so an unrelated edit never reorders the card. A
+/// `section_id` of `None` maps to the view's default (then leftmost)
+/// bucket, since Vikunja kanban has no "ungrouped" state. Degrades
+/// silently — a server without the view/bucket endpoints, or an
+/// unreadable current bucket, skips the move — and never fails the
+/// surrounding task edit.
+async fn move_task_bucket(client: &VikunjaClient, task: &Task, task_id: i64) {
+    let project_id = match parse_id(&task.list_id, "task list id") {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    let Some(view) = kanban_view(client, project_id).await else {
+        if task.section_id.is_some() {
+            tracing::warn!(
+                project_id,
+                "vikunja: no kanban view — section change not applied",
+            );
+        }
+        return;
+    };
+    let Some(current) = current_bucket(client, task_id, view.id).await else {
+        // Can't read where the task currently sits → don't risk a wrong
+        // move. (Older server / no `expand` support.)
+        if task.section_id.is_some() {
+            tracing::warn!(
+                task_id,
+                "vikunja: can't read current bucket — section change not applied",
+            );
+        }
+        return;
+    };
+    let target = match task.section_id.as_deref() {
+        Some(s) => match parse_id(s, "section id") {
+            Ok(b) => b,
+            Err(_) => return,
+        },
+        // No section → the view's default bucket (Vikunja has no "no
+        // bucket"), falling back to the leftmost bucket when unset.
+        None => {
+            if view.default_bucket_id != 0 {
+                view.default_bucket_id
+            } else {
+                match leftmost_bucket(client, project_id, view.id).await {
+                    Some(b) => b,
+                    None => return,
+                }
+            }
+        }
+    };
+    if target == current {
+        return; // already in the right bucket — nothing to do.
+    }
+    let path = format!(
+        "/projects/{project_id}/views/{}/buckets/{target}/tasks",
+        view.id
+    );
+    let body = serde_json::json!({ "task_id": task_id, "bucket_id": target });
+    let moved: VikunjaResult<serde_json::Value> = client.post_json(&path, &body).await;
+    if let Err(err) = moved {
+        tracing::warn!(
+            ?err,
+            task_id,
+            target,
+            "vikunja: bucket move failed — task edit preserved",
+        );
+    }
 }
 
 /// Replace a task's assignee set via `POST /tasks/{id}/assignees/bulk`.
@@ -236,8 +371,16 @@ pub async fn update_task(client: &VikunjaClient, task: &Task) -> VikunjaResult<T
     // Sync the assignee set on every update so the picker can both add
     // and clear assignees (the bulk endpoint takes the full list).
     set_assignees(client, task_id, &task.assignees).await?;
+    // Apply a section (kanban bucket) change via the dedicated per-view
+    // endpoint — the task body's `bucket_id` is ignored on ≥0.24. This is
+    // a best-effort follow-up (like assignees) that never fails the edit.
+    move_task_bucket(client, task, task_id).await;
     let mut mapped = map_task(entry, &task.list_id);
     mapped.assignees = task.assignees.clone();
+    // Reflect the section the caller asked for: the field PUT doesn't
+    // move buckets, and the PUT response can't carry the per-view bucket
+    // here, so `map_task` would otherwise drop it.
+    mapped.section_id = task.section_id.clone();
     Ok(mapped)
 }
 
@@ -507,13 +650,27 @@ struct ProjectEntry {
     parent_project_id: i64,
 }
 
-/// One entry of `GET /projects/{id}/views`. We only need the kanban
-/// view's id; other kinds (`list`, `gantt`, `table`) are ignored.
+/// One entry of `GET /projects/{id}/views`. We need the kanban view's
+/// id and its default bucket; other kinds (`list`, `gantt`, `table`) are
+/// ignored.
 #[derive(Debug, Deserialize)]
 struct ViewEntry {
     id: i64,
     #[serde(default)]
     view_kind: Option<String>,
+    /// Bucket that "bucket-less" tasks land in (Vikunja ≥0.24). `0` ⇒
+    /// unset, in which case Vikunja uses the leftmost bucket. This is the
+    /// target for moving a task to "no section" (Vikunja kanban has no
+    /// ungrouped state).
+    #[serde(default)]
+    default_bucket_id: i64,
+}
+
+/// The kanban view of a project, resolved once before reading or moving
+/// a task's bucket (Vikunja ≥0.24 hangs buckets off the view).
+struct KanbanView {
+    id: i64,
+    default_bucket_id: i64,
 }
 
 /// A Vikunja user, as returned inline on a task's `assignees`, by
@@ -556,6 +713,18 @@ struct BucketEntry {
     /// immaterial).
     #[serde(default)]
     position: f64,
+}
+
+/// One per-view bucket membership of a task, returned with
+/// `?expand=buckets` (Vikunja ≥0.24, where a task's bucket lives per
+/// kanban *view* rather than on the task itself). We pick the entry
+/// whose `project_view_id` matches the project's kanban view.
+#[derive(Debug, Default, Deserialize)]
+struct TaskBucketRef {
+    #[serde(default)]
+    id: i64,
+    #[serde(default)]
+    project_view_id: i64,
 }
 
 /// Vikunja Task. Fields we don't surface yet (labels, attachments,
@@ -605,6 +774,12 @@ struct TaskEntry {
     /// them in the create/update body (`skip_serializing`).
     #[serde(default, skip_serializing)]
     assignees: Option<Vec<VikunjaUser>>,
+    /// Per-view bucket memberships, populated with `?expand=buckets`
+    /// (Vikunja ≥0.24). Read-only; used to resolve the task's section
+    /// for the project's kanban view. Empty on older servers, which use
+    /// the flat `bucket_id` above.
+    #[serde(default, skip_serializing)]
+    buckets: Vec<TaskBucketRef>,
 }
 
 // ── Mappers ────────────────────────────────────────────────────────────
@@ -733,6 +908,7 @@ fn new_task_to_body(new: &NewTask) -> TaskEntry {
         created: None,
         updated: None,
         assignees: None,
+        buckets: Vec::new(),
     }
 }
 
@@ -769,6 +945,7 @@ fn task_to_body(task: &Task) -> TaskEntry {
         created: None,
         updated: None,
         assignees: None,
+        buckets: Vec::new(),
     }
 }
 
@@ -954,6 +1131,7 @@ mod tests {
     fn map_task_pulls_dates_into_separate_slots() {
         let entry = TaskEntry {
             assignees: None,
+            buckets: Vec::new(),
             id: 99,
             title: Some("Submit invoice".into()),
             description: Some("Q2".into()),
@@ -996,6 +1174,7 @@ mod tests {
     fn map_task_marks_completed_when_done() {
         let entry = TaskEntry {
             assignees: None,
+            buckets: Vec::new(),
             id: 1,
             title: Some("Done".into()),
             description: None,
@@ -1022,6 +1201,7 @@ mod tests {
     fn map_task_drops_sentinel_dates() {
         let entry = TaskEntry {
             assignees: None,
+            buckets: Vec::new(),
             id: 1,
             title: Some("No dates".into()),
             description: None,
@@ -1144,8 +1324,19 @@ mod tests {
     #[tokio::test]
     async fn get_tasks_decodes_response() {
         let mut server = Server::new_async().await;
+        // No kanban view → the per-view bucket stitch degrades and we
+        // read the flat `bucket_id` (older-server / section-less path).
+        let _views = server
+            .mock("GET", "/api/v1/projects/3/views")
+            .with_status(200)
+            .with_body("[]")
+            .create_async()
+            .await;
         let _m = server
-            .mock("GET", "/api/v1/projects/3/tasks?page=1&per_page=50")
+            .mock(
+                "GET",
+                "/api/v1/projects/3/tasks?page=1&per_page=50&expand=buckets",
+            )
             .with_status(200)
             .with_body(
                 r#"[{"id":7,"title":"One","done":false,"priority":3,"project_id":3},{"id":8,"title":"Two","done":true,"priority":0,"project_id":3}]"#,
@@ -1211,8 +1402,19 @@ mod tests {
     #[tokio::test]
     async fn get_tasks_maps_bucket_to_section() {
         let mut server = Server::new_async().await;
+        // Older-server / no-kanban-view path: the flat `bucket_id` on the
+        // task maps straight to the section.
+        let _views = server
+            .mock("GET", "/api/v1/projects/3/views")
+            .with_status(200)
+            .with_body("[]")
+            .create_async()
+            .await;
         let _m = server
-            .mock("GET", "/api/v1/projects/3/tasks?page=1&per_page=50")
+            .mock(
+                "GET",
+                "/api/v1/projects/3/tasks?page=1&per_page=50&expand=buckets",
+            )
             .with_status(200)
             .with_body(
                 r#"[{"id":7,"title":"Grouped","project_id":3,"bucket_id":9},{"id":8,"title":"Loose","project_id":3,"bucket_id":0}]"#,
@@ -1224,6 +1426,194 @@ mod tests {
         assert_eq!(tasks[0].section_id.as_deref(), Some("9"));
         // bucket_id 0 (or absent) ⇒ ungrouped.
         assert!(tasks[1].section_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn get_tasks_stitches_per_view_bucket() {
+        // ≥0.24: the task carries no flat bucket_id; its bucket comes from
+        // the expanded `buckets` array, matched to the project's kanban
+        // view (id 11). A bucket from a *different* view must be ignored.
+        let mut server = Server::new_async().await;
+        let _views = server
+            .mock("GET", "/api/v1/projects/3/views")
+            .with_status(200)
+            .with_body(r#"[{"id":11,"view_kind":"kanban","default_bucket_id":5}]"#)
+            .create_async()
+            .await;
+        let _m = server
+            .mock(
+                "GET",
+                "/api/v1/projects/3/tasks?page=1&per_page=50&expand=buckets",
+            )
+            .with_status(200)
+            .with_body(
+                r#"[{"id":7,"title":"Grouped","project_id":3,"buckets":[{"id":9,"project_view_id":11},{"id":99,"project_view_id":22}]},{"id":8,"title":"Loose","project_id":3,"buckets":[]}]"#,
+            )
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        let tasks = get_tasks(&client, "3").await.unwrap();
+        // Bucket 9 belongs to the kanban view (11); bucket 99 (view 22) is
+        // ignored.
+        assert_eq!(tasks[0].section_id.as_deref(), Some("9"));
+        // No bucket in this view ⇒ ungrouped.
+        assert!(tasks[1].section_id.is_none());
+    }
+
+    fn task_fixture(id: &str, list_id: &str, section_id: Option<&str>) -> Task {
+        Task {
+            assignees: Vec::new(),
+            id: id.into(),
+            list_id: list_id.into(),
+            title: "Edit me".into(),
+            description: None,
+            status: TaskStatus::Open,
+            priority: TaskPriority::Medium,
+            scheduled_date: None,
+            scheduled_time: None,
+            deadline_date: None,
+            deadline_time: None,
+            recurrence: None,
+            parent_id: None,
+            section_id: section_id.map(str::to_string),
+            color_label: None,
+            reminders: Vec::new(),
+            sound: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            completed_at: None,
+            etag: None,
+        }
+    }
+
+    /// Mounts the field-update PUT + assignee-sync that every
+    /// `update_task` issues before the bucket move.
+    async fn mount_update_prelude(server: &mut Server) {
+        server
+            .mock("POST", "/api/v1/tasks/7")
+            .with_status(200)
+            .with_body(r#"{"id":7,"title":"Edit me","project_id":3}"#)
+            .create_async()
+            .await;
+        server
+            .mock("POST", "/api/v1/tasks/7/assignees/bulk")
+            .with_status(200)
+            .with_body("{}")
+            .create_async()
+            .await;
+    }
+
+    #[tokio::test]
+    async fn update_task_moves_bucket_when_section_changed() {
+        let mut server = Server::new_async().await;
+        mount_update_prelude(&mut server).await;
+        let _views = server
+            .mock("GET", "/api/v1/projects/3/views")
+            .with_status(200)
+            .with_body(r#"[{"id":11,"view_kind":"kanban","default_bucket_id":5}]"#)
+            .create_async()
+            .await;
+        // The task currently sits in bucket 9 of the kanban view.
+        let _current = server
+            .mock("GET", "/api/v1/tasks/7?expand=buckets")
+            .with_status(200)
+            .with_body(r#"{"id":7,"buckets":[{"id":9,"project_view_id":11}]}"#)
+            .create_async()
+            .await;
+        // …and is moved to bucket 12 (the new section).
+        let mv = server
+            .mock("POST", "/api/v1/projects/3/views/11/buckets/12/tasks")
+            .with_status(200)
+            .with_body("{}")
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        let result = update_task(&client, &task_fixture("7", "3", Some("12")))
+            .await
+            .unwrap();
+        mv.assert_async().await;
+        assert_eq!(result.section_id.as_deref(), Some("12"));
+    }
+
+    #[tokio::test]
+    async fn update_task_skips_move_when_section_unchanged() {
+        let mut server = Server::new_async().await;
+        mount_update_prelude(&mut server).await;
+        let _views = server
+            .mock("GET", "/api/v1/projects/3/views")
+            .with_status(200)
+            .with_body(r#"[{"id":11,"view_kind":"kanban","default_bucket_id":5}]"#)
+            .create_async()
+            .await;
+        let _current = server
+            .mock("GET", "/api/v1/tasks/7?expand=buckets")
+            .with_status(200)
+            .with_body(r#"{"id":7,"buckets":[{"id":9,"project_view_id":11}]}"#)
+            .create_async()
+            .await;
+        // Desired section == current bucket → the move endpoint must NOT
+        // be called (no reorder on an unrelated edit).
+        let mv = server
+            .mock("POST", "/api/v1/projects/3/views/11/buckets/9/tasks")
+            .expect(0)
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        update_task(&client, &task_fixture("7", "3", Some("9")))
+            .await
+            .unwrap();
+        mv.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn update_task_section_none_moves_to_default_bucket() {
+        let mut server = Server::new_async().await;
+        mount_update_prelude(&mut server).await;
+        // Default bucket 5 — the target for "no section" (Vikunja kanban
+        // has no ungrouped state).
+        let _views = server
+            .mock("GET", "/api/v1/projects/3/views")
+            .with_status(200)
+            .with_body(r#"[{"id":11,"view_kind":"kanban","default_bucket_id":5}]"#)
+            .create_async()
+            .await;
+        let _current = server
+            .mock("GET", "/api/v1/tasks/7?expand=buckets")
+            .with_status(200)
+            .with_body(r#"{"id":7,"buckets":[{"id":9,"project_view_id":11}]}"#)
+            .create_async()
+            .await;
+        let mv = server
+            .mock("POST", "/api/v1/projects/3/views/11/buckets/5/tasks")
+            .with_status(200)
+            .with_body("{}")
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        let result = update_task(&client, &task_fixture("7", "3", None))
+            .await
+            .unwrap();
+        mv.assert_async().await;
+        assert!(result.section_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn update_task_degrades_without_kanban_view() {
+        let mut server = Server::new_async().await;
+        mount_update_prelude(&mut server).await;
+        // No kanban view → the move is skipped, but the field edit still
+        // succeeds.
+        let _views = server
+            .mock("GET", "/api/v1/projects/3/views")
+            .with_status(200)
+            .with_body("[]")
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        let result = update_task(&client, &task_fixture("7", "3", Some("12")))
+            .await
+            .unwrap();
+        assert_eq!(result.title, "Edit me");
     }
 
     #[tokio::test]

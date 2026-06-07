@@ -43,8 +43,9 @@ deinen Tag oder deine Woche ein und arbeitest sie ab.
 > **Aufgaben zwischen Abschnitten verschieben:** Über das **Abschnitt**-Feld
 > im Aufgaben-Dialog ordnest du eine Aufgabe einem anderen Abschnitt zu
 > oder löst sie mit **Kein Abschnitt** ganz heraus. Das funktioniert bei
-> lokalen Listen und bei Todoist; bei anderen Anbietern hängt es davon ab,
-> ob der Dienst das Verschieben unterstützt.
+> lokalen Listen, bei Todoist und bei Vikunja (ab 0.24); bei „Kein
+> Abschnitt" landet eine Vikunja-Aufgabe im Standard-Bucket, da Vikunja
+> jede Kanban-Aufgabe in einem Bucket führt.
 
 ## Aufgaben einplanen
 

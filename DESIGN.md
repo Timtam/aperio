@@ -873,7 +873,11 @@ Effektive Kette einer Aufgabe: `Aufgaben-Label → Abschnitts-Label → Aufgaben
 
 Die Abschnittsfarbe wird an zwei Stellen gesetzt — im Abschnitt-Anlegen/Bearbeiten-Dialog **und** über ein Kontextmenü am Abschnitts-Kopf in der Aufgaben-Ansicht (Rechtsklick bzw. die „⋮"-Schaltfläche; analog zu den Sidebar-Containern), inkl. „Andere Farbe…" für Ad-hoc-Farben. Beides nur für **lokale** Listen — Abschnitte externer Anbieter sind schreibgeschützt und tragen keine Farbe.
 
-**Abschnitts-Zuordnung (Schreiben):** Eine Aufgabe lässt sich zwischen Abschnitten verschieben oder aus einem Abschnitt herausnehmen (`section_id → null`), soweit der Adapter es zulässt: lokal direkt; **Todoist** über die Sync-API (`item_move` — REST v2 ignoriert Abschnittswechsel im Update; nur bei tatsächlicher Änderung gefeuert, sonst keine Umsortierung); **Vikunja**-Buckets sind derzeit schreibgeschützt (Zuordnung hängt an einer Kanban-*View* und kennt keinen „bucket-los"-Zustand).
+**Abschnitts-Zuordnung (Schreiben):** Eine Aufgabe lässt sich zwischen Abschnitten verschieben oder aus einem Abschnitt herausnehmen (`section_id → null`), soweit der Adapter es zulässt:
+
+- **Lokal:** direkt (`section_id`-Spalte).
+- **Todoist:** über die Sync-API (`item_move` — REST v2 ignoriert Abschnittswechsel im Update; nur bei tatsächlicher Änderung gefeuert, sonst keine Umsortierung).
+- **Vikunja (≥0.24):** Buckets hängen an einer per-Projekt-Kanban-*View*, nicht mehr am Task. **Lesen:** `?expand=buckets` liefert die per-View-Bucket-Mitgliedschaft, die wir auf die Kanban-View des Projekts matchen (`bucket_id` am Task ist seit 0.24 leer). **Schreiben:** der dedizierte Endpunkt `POST /projects/{p}/views/{v}/buckets/{bucket}/tasks`; vorher wird der aktuelle Bucket gelesen und **nur bei echter Änderung** verschoben (kein Reordering bei unbeteiligten Edits; kann der aktuelle Bucket nicht gelesen werden, wird gar nicht verschoben). „Kein Abschnitt" → `default_bucket_id` der View (sonst linkester Bucket), da Vikunja-Kanban keinen bucket-losen Zustand kennt. Alles best-effort: ältere Server ohne View-Endpunkte überspringen den Move, ohne den Edit zu verlieren.
 
 ### 8.3 Anwendung & Barrierefreiheit
 

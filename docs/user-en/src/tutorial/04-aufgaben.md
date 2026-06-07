@@ -39,8 +39,10 @@ your day or week, and work through them.
 
 > **Moving tasks between sections:** Use the **Section** field in the task
 > dialog to file a task under a different section, or pick **No section**
-> to pull it out entirely. This works for local lists and for Todoist; for
-> other providers it depends on whether the service supports the move.
+> to pull it out entirely. This works for local lists, for Todoist, and
+> for Vikunja (0.24+); picking **No section** on Vikunja files the task
+> into the default bucket, since Vikunja keeps every kanban task in a
+> bucket.
 
 ## Scheduling tasks
 
