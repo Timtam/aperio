@@ -40,6 +40,10 @@ Im Termin-Dialog kannst du außerdem festlegen:
 > abonnierten Feeds wird die Farbe stattdessen lokal auf diesem Gerät behalten
 > (damit sie nie einen Sync-Fehler auslöst) und bleibt genauso angewandt.
 
+> **Abonnierte Kalender:** Wenn ein abonnierter Kalender (iCal-Feed) eigene
+> Pro-Termin-Farben setzt, werden diese jetzt ebenfalls angezeigt – nur
+> lesend, da ein abonnierter Feed nicht bearbeitet werden kann.
+
 Mit **Speichern** wird der Termin angelegt; eine Live-Region bestätigt
 „Termin gespeichert".
 

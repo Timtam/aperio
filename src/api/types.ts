@@ -174,9 +174,11 @@ export interface CalendarEvent {
   all_day: boolean;
   recurrence: EventRecurrence | null;
   color_label: string | null;
-  /** Read-only, transport-only native color (`#rrggbb`, RFC 7986 COLOR) from
-   *  a color-capable provider. The host maps it onto `color_label` on read, so
-   *  the UI never needs it — render from `color_label`. Never send it back. */
+  /** Read-only native color (`#rrggbb`, RFC 7986 COLOR) from a color-capable
+   *  provider. The host maps it onto `color_label` when it matches a known
+   *  label; otherwise it stays here and `resolveEventColor` renders it directly
+   *  (a subscribed feed's color, or a foreign color another client set). Never
+   *  send it back. */
   color_hex?: string | null;
   reminders: Reminder[];
   sound: SoundConfig | null;

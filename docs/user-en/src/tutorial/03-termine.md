@@ -38,6 +38,10 @@ In the event dialog you can also set:
 > locally on this device instead (so it never triggers a sync error), and it
 > stays applied just the same.
 
+> **Subscribed calendars:** If a calendar you subscribe to (an iCal feed)
+> sets its own per-event colors, those now show through as well — read-only,
+> since a subscribed feed can't be edited.
+
 **Save** creates the event; a live region confirms "Event saved".
 
 > **Notify attendees:** When an event has attendees and the calendar

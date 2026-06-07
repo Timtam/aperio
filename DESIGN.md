@@ -921,6 +921,8 @@ Ein einzelner Termin lässt sich umfärben — per Rechtsklick auf den Termin-Ch
 
 Capability-Lookup im Host: aus dem gecachten Kalender-Listing (`cache.read_calendars`); unbekannt → `false` (sichere Voreinstellung: Override). Das Frontend routet identisch (`account_id === 'local' || calendar.supports_event_color`).
 
+**Ungemappte Native-Farben (read-only).** Trägt ein Termin ein `color_hex`, das der Host **keinem** bestehenden Label zuordnen kann (kein Ad-hoc-Label beim Lesen, s. o.), bleibt der Hex am Event und wird im Frontend **direkt** gerendert — die Auflösung in `resolveEventColor` ist `color_label` (benannt) → `color_hex` (roh, namenlos) → Kalenderfarbe. Das betrifft v. a. **abonnierte iCal-Feeds** (deren Adapter sich `cal_adapter_caldav::mapping` teilt und so `COLOR` mitliest) sowie **fremde** Farben auf farbfähigen CalDAV-Kalendern (ein anderer Client hat den Termin gefärbt). Reine Anzeige: ein Feed ist nicht schreibbar; eine fremde CalDAV-Farbe wird beim nächsten Aperio-Edit durch das aufgelöste Label ersetzt. Bewusst **kein** Ad-hoc-Label beim Lesen (sonst DB-Writes + `color_label.created`-Events bei jedem Refresh, geflutete Palette).
+
 Eine Custom-Farbe wird als `ColorLabel` realisiert — dadurch greift die gesamte bestehende Mechanik (Binding über `color_label`, Auflösung im `CalendarStore`, Sync via `color_label.*`, Container-Override-Tabelle) unverändert. `ColorLabel` trägt dazu ein Flag `ad_hoc: bool`:
 
 - **`ad_hoc = false`** — normales, benanntes Label (sichtbar in Palette + Pickern).
