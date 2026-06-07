@@ -16,6 +16,7 @@ import {
   deleteEventById,
   isCommandError,
   queryFreeBusy,
+  setEventColor,
   updateEvent as apiUpdateEvent,
 } from '../api/client';
 import type { CalendarEvent, FreeBusy, FreeBusySlot } from '../api/types';
@@ -405,7 +406,7 @@ export function EventDialog({
             const occIso = occurrenceIsoOf(event);
             if (occIso) {
               await addEventExdate(seriesId, occIso, event.calendar_id);
-              await apiCreateEvent({
+              const created = await apiCreateEvent({
                 calendar_id: form.calendarId,
                 title: trimmedTitle,
                 description: form.description.trim() || null,
@@ -420,6 +421,11 @@ export function EventDialog({
                 attendees: form.attendees,
                 send_invitations: sendInvitations,
               });
+              await setEventColor(
+                created.id,
+                created.calendar_id,
+                form.colorLabel,
+              );
               announce(
                 t('dialogs.event.occurrenceUpdated', { title: trimmedTitle }),
               );
@@ -454,9 +460,17 @@ export function EventDialog({
           // URL. The backend takes the hint and reroutes the
           // change as a create-on-target + delete-from-source.
           await apiUpdateEvent(updated, event.calendar_id);
+          // Color rides update_event for local + color-capable calendars;
+          // for external calendars that can't store it, this writes a
+          // host-local override instead (no-op for the rest).
+          await setEventColor(
+            updated.id,
+            updated.calendar_id,
+            form.colorLabel,
+          );
           announce(t('dialogs.event.updated', { title: trimmedTitle }));
         } else {
-          await apiCreateEvent({
+          const created = await apiCreateEvent({
             calendar_id: form.calendarId,
             title: trimmedTitle,
             description: form.description.trim() || null,
@@ -471,6 +485,11 @@ export function EventDialog({
             attendees: form.attendees,
             send_invitations: sendInvitations,
           });
+          await setEventColor(
+            created.id,
+            created.calendar_id,
+            form.colorLabel,
+          );
           // Remember the calendar for the next new-event open. Only
           // for *creates*: edits shouldn't bias future picks, since
           // the user might have only changed a recurring event in
