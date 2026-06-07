@@ -637,6 +637,21 @@ export const setSectionColor = (
     colorLabelId: color_label_id,
   });
 
+/** Set / clear the host-local color override for an EXTERNAL event whose
+ *  calendar can't store a per-event color (iCloud etc.). No-op for local
+ *  events (those keep their color on the row via `update_event`). The
+ *  `event_id` is the series master id. */
+export const setEventColor = (
+  event_id: string,
+  calendar_id: string,
+  color_label_id: string | null,
+) =>
+  invoke<void>('set_event_color', {
+    eventId: event_id,
+    calendarId: calendar_id,
+    colorLabelId: color_label_id,
+  });
+
 /** Outcome of [`renameContainer`]. `synced_to_source = false` means
  *  the adapter declared the operation unsupported (read-only source
  *  like an iCal feed) and the rename was saved as a local override

@@ -24,6 +24,9 @@
     "moveTo": "Verschieben nach …",
     "copyTo": "Kopieren nach …",
     "status": "Status",
+    "color": "Farbe",
+    "colorNone": "Keine Farbe",
+    "colorSet": "Farbe für „{{title}}\" gesetzt.",
     "statusValue": {
       "open": "Offen",
       "in_progress": "In Arbeit",

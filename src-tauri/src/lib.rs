@@ -596,6 +596,7 @@ pub fn run() {
             commands::clear_container_name_override,
             commands::set_container_color_label,
             commands::set_section_color,
+            commands::set_event_color,
             commands::rename_container,
             commands::get_user_pref,
             commands::set_user_pref,

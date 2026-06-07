@@ -24,6 +24,9 @@
     "moveTo": "Move to …",
     "copyTo": "Copy to …",
     "status": "Status",
+    "color": "Color",
+    "colorNone": "No color",
+    "colorSet": "Color set for \"{{title}}\".",
     "statusValue": {
       "open": "To do",
       "in_progress": "In progress",

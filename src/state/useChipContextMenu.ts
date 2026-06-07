@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 
@@ -6,11 +6,14 @@ import { useAnnouncer } from '../a11y/announcerContext';
 import {
   deleteEventById,
   isCommandError,
+  setEventColor,
   showContextMenu,
+  updateEvent as apiUpdateEvent,
   type ContextMenuItemRequest,
 } from '../api/client';
 import type { CalendarEvent, Task, TaskStatus } from '../api/types';
 import { seriesIdOf } from '../intl/recurrence';
+import { useCalendarStore } from './calendarStoreContext';
 import { useDialogState } from './dialogStateContext';
 import { useTaskStatusActions } from './useTaskStatusToggle';
 
@@ -82,6 +85,11 @@ export function useChipContextMenu(): ChipContextMenuActions {
     invalidateData,
   } = useDialogState();
   const { set: setTaskStatus } = useTaskStatusActions();
+  const { colorLabels, calendars } = useCalendarStore();
+  const calById = useMemo(
+    () => new Map(calendars.map((c) => [c.id, c])),
+    [calendars],
+  );
 
   const openForEvent = useCallback(
     async (
@@ -89,10 +97,36 @@ export function useChipContextMenu(): ChipContextMenuActions {
       position?: { x: number; y: number },
       onAfter?: () => void,
     ) => {
+      // Color submenu — a check row per (non-ad-hoc) label plus "none".
+      // For external events this routes to a host-local override (no
+      // provider write, so iCloud & co. never reject it); local events
+      // keep their color on the row via update_event. Custom one-off
+      // colors stay in the event dialog's picker.
+      const colorSubmenu: ContextMenuItemRequest = {
+        kind: 'submenu',
+        label: t('chipMenu.color'),
+        items: [
+          {
+            kind: 'check',
+            id: 'color:none',
+            label: t('chipMenu.colorNone'),
+            checked: !event.color_label,
+          },
+          ...colorLabels
+            .filter((l) => !l.ad_hoc)
+            .map((l) => ({
+              kind: 'check' as const,
+              id: `color:${l.id}`,
+              label: l.name,
+              checked: event.color_label === l.id,
+            })),
+        ],
+      };
       const items: ContextMenuItemRequest[] = [
         { id: 'edit', label: t('chipMenu.edit') },
         { id: 'move', label: t('chipMenu.moveTo') },
         { id: 'copy', label: t('chipMenu.copyTo') },
+        colorSubmenu,
         { kind: 'separator' },
         { id: 'delete', label: t('chipMenu.delete') },
       ];
@@ -132,10 +166,45 @@ export function useChipContextMenu(): ChipContextMenuActions {
             announce(String(err));
           }
         }
+      } else if (selected?.startsWith('color:')) {
+        const raw = selected.slice('color:'.length);
+        const next = raw === 'none' ? null : raw;
+        const seriesId = seriesIdOf(event);
+        const isLocal =
+          calById.get(event.calendar_id)?.account_id === 'local';
+        try {
+          if (isLocal) {
+            // Local events keep their color on the row.
+            await apiUpdateEvent(
+              { ...event, id: seriesId, color_label: next },
+              event.calendar_id,
+            );
+          } else {
+            // External: host-local override — no provider write, so
+            // there's no PUT for the server (e.g. iCloud) to reject.
+            await setEventColor(seriesId, event.calendar_id, next);
+          }
+          announce(t('chipMenu.colorSet', { title: event.title }));
+          invalidateData();
+        } catch (err) {
+          if (isCommandError(err)) {
+            announce(`${err.code}: ${err.message}`);
+          } else {
+            announce(String(err));
+          }
+        }
       }
       onAfter?.();
     },
-    [t, announce, openEventDialog, openMoveCopy, invalidateData],
+    [
+      t,
+      announce,
+      openEventDialog,
+      openMoveCopy,
+      invalidateData,
+      colorLabels,
+      calById,
+    ],
   );
 
   const openForTask = useCallback(
