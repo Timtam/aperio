@@ -1,4 +1,11 @@
-import { useEffect, useId, useMemo, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useAnnouncer } from '../a11y/announcerContext';
@@ -17,6 +24,11 @@ import {
   setTaskDrag,
   TASK_DND_TYPE,
 } from '../state/moveActions';
+import {
+  BACKLOG_WIDTH_MAX,
+  BACKLOG_WIDTH_MIN,
+  useBacklogWidth,
+} from '../state/useBacklogWidth';
 import { useChipContextMenu } from '../state/useChipContextMenu';
 import { useTasks } from '../state/useTasks';
 
@@ -24,8 +36,9 @@ import { useTasks } from '../state/useTasks';
  * Backlog rail for the week / month planner.
  *
  * Lists the unscheduled backlog — open, top-level tasks with no
- * `scheduled_date` and no `deadline_date` (the same bucket the task view's
- * "Backlog" group shows). Three roles in one:
+ * `scheduled_date` (the same bucket the task view's "Backlog" group shows). A
+ * deadline-only task stays here too — it has no planned work day yet — while
+ * also showing as a due marker on its deadline day. Three roles in one:
  *
  *   - **Drag source** — each option is draggable; drop it on a day cell to
  *     schedule it there (the planner's existing day-drop handles it).
@@ -52,6 +65,50 @@ export function BacklogRail() {
     useCalendarStore();
   const [activeIndex, setActiveIndex] = useState(0);
   const headingId = useId();
+  const { width, setWidth } = useBacklogWidth();
+  const rootRef = useRef<HTMLElement>(null);
+
+  // Drag the column's right edge to resize; the width persists and the grid
+  // beside it flexes to fill the rest.
+  const beginResize = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      const handle = e.currentTarget;
+      const left = rootRef.current?.getBoundingClientRect().left ?? 0;
+      handle.setPointerCapture(e.pointerId);
+      const onMove = (ev: PointerEvent) => setWidth(ev.clientX - left);
+      const onUp = () => {
+        handle.releasePointerCapture(e.pointerId);
+        handle.removeEventListener('pointermove', onMove);
+        handle.removeEventListener('pointerup', onUp);
+      };
+      handle.addEventListener('pointermove', onMove);
+      handle.addEventListener('pointerup', onUp);
+    },
+    [setWidth],
+  );
+
+  // Keyboard resize for the separator: Left/Right by a step, Home/End to the
+  // bounds — keeps the splitter operable without a pointer.
+  const onResizeKey = useCallback(
+    (e: React.KeyboardEvent) => {
+      const STEP = 16;
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        setWidth(width - STEP);
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        setWidth(width + STEP);
+      } else if (e.key === 'Home') {
+        e.preventDefault();
+        setWidth(BACKLOG_WIDTH_MIN);
+      } else if (e.key === 'End') {
+        e.preventDefault();
+        setWidth(BACKLOG_WIDTH_MAX);
+      }
+    },
+    [setWidth, width],
+  );
 
   const backlog = useMemo(() => {
     const ids = new Set(tasks.map((row) => row.id));
@@ -59,8 +116,10 @@ export function BacklogRail() {
       .filter(
         (row) =>
           row.status !== 'completed' &&
+          // No planned WORK day yet. A deadline-only task still belongs here
+          // so it can be dragged onto a work day — it also shows as a due
+          // marker on its deadline day in the grid.
           !row.scheduled_date &&
-          !row.deadline_date &&
           // top-level (or orphaned) — subtasks travel with their parent
           (!row.parent_id || !ids.has(row.parent_id)),
       )
@@ -156,9 +215,11 @@ export function BacklogRail() {
 
   return (
     <section
+      ref={rootRef}
       className="backlog-rail"
       data-region="backlog"
       aria-labelledby={headingId}
+      style={{ flexBasis: `${width}px` }}
       onDragOver={(e) => {
         if (!e.dataTransfer.types.includes(TASK_DND_TYPE)) return;
         // A task dragged over the rail → valid "back to backlog" drop.
@@ -245,6 +306,19 @@ export function BacklogRail() {
           </ul>
         )}
       </div>
+      {/* Drag (or arrow-key) the right edge to resize the column. */}
+      <div
+        className="backlog-rail__resizer"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label={t('views.backlog.resize')}
+        aria-valuenow={width}
+        aria-valuemin={BACKLOG_WIDTH_MIN}
+        aria-valuemax={BACKLOG_WIDTH_MAX}
+        tabIndex={0}
+        onPointerDown={beginResize}
+        onKeyDown={onResizeKey}
+      />
     </section>
   );
 }

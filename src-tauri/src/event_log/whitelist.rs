@@ -21,6 +21,9 @@ pub const SYNC_WHITELIST: &[&str] = &[
     "view.preferred",
     "view.weekStart",
     "view.weekNumbers",
+    // Backlog column width in the week/month planner — a layout choice the
+    // user wants kept consistent across devices.
+    "backlog.width",
     // Reminder defaults — one entry per calendar / task list goes
     // under the calendar.<id>.defaultReminders namespace.
     "calendar.",
@@ -78,6 +81,11 @@ mod tests {
     fn window_tray_prefs_sync() {
         assert!(is_synced_key("window.closeToTray"));
         assert!(is_synced_key("window.minimizeToTray"));
+    }
+
+    #[test]
+    fn backlog_width_syncs() {
+        assert!(is_synced_key("backlog.width"));
     }
 
     #[test]

@@ -61,7 +61,8 @@ your day or week, and work through them.
 
 Aperio distinguishes between tasks with and without a fixed date:
 
-- **Backlog:** Tasks without a due date collect here.
+- **Backlog:** Tasks without a **scheduled day** collect here — including
+  ones that have a deadline but no fixed work day.
 - **Schedule:** Give a task a due date (or, in the week planner, drag it
   onto a day) to schedule it firmly.
 - **Auto-schedule to today:** Setting a backlog task to **"In progress"**
@@ -71,10 +72,13 @@ Aperio distinguishes between tasks with and without a fixed date:
   list **to the left of the grid** with every unscheduled task. Drag a task
   from there onto a day to schedule it — or drag a scheduled task back onto
   the list to return it to the backlog. Without a mouse: focus a task in the
-  list and press **Shift+D** (the plan dialog), or use the context menu.
+  list and press **Shift+D** (the plan dialog), or use the context menu. Drag
+  the list's **right edge** to resize it (the width is saved) — the view
+  beside it adjusts accordingly.
 - **Deadline:** A task with a deadline shows up in the week and day planner
   as a **due marker** on its deadline day ("due by …") — a single point, not
-  a bar spanning every day until then.
+  a bar spanning every day until then. As long as no work day is set, it
+  **also stays in the backlog**, so you can drag it onto a concrete work day.
 
 ## Recurring tasks
 

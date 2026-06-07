@@ -1029,8 +1029,8 @@ pub enum TaskPriority { Low, Medium, High }
 |---|---|
 | **Kein Datum (Backlog)** | Nur im Backlog sichtbar |
 | **Geplanter Tag** (`scheduled_date`) | Erscheint am zugeordneten Tag |
-| **Konkrete Deadline** (`On`) | Erscheint am Deadline-Tag |
-| **"Muss bis zum"** (`By`) | Erscheint als Fälligkeitsmarker am Deadline-Tag |
+| **Konkrete Deadline** (`On`) | Erscheint am Deadline-Tag; ohne geplanten Tag zusätzlich im Backlog |
+| **"Muss bis zum"** (`By`) | Fälligkeitsmarker am Deadline-Tag; ohne geplanten Tag zusätzlich im Backlog |
 
 **Automatische Einplanung:** Aufgaben mit `DeadlineType::By`, die bis zum Deadline-Tag nicht erledigt wurden, werden automatisch auf den Deadline-Tag gesetzt – letzter möglicher Tag.
 
@@ -1040,7 +1040,7 @@ pub enum TaskPriority { Low, Medium, High }
 
 ### 9.3 Backlog
 
-Aufgaben ohne Datum sammeln sich im Backlog – der ungeordneten Warteschlange noch nicht eingeplanter Aufgaben.
+Aufgaben ohne **geplanten Tag** (`scheduled_date`) sammeln sich im Backlog – der ungeordneten Warteschlange noch nicht auf einen Arbeitstag eingeplanter Aufgaben. Das schließt Aufgaben mit Deadline, aber ohne festen Bearbeitungstag mit ein: Sie erscheinen als Fälligkeitsmarker am Deadline-Tag **und** im Backlog, damit man sie von dort auf einen konkreten Arbeitstag ziehen kann. (Maßgeblich ist `scheduled_date`, nicht `deadline_date`.)
 
 **Sichtbarkeit:**
 - **Sidebar im Kalender** (ein-/ausblendbar, Standard: eingeblendet in Wochen- und Tagesansicht)
@@ -1054,7 +1054,7 @@ Aufgaben ohne Datum sammeln sich im Backlog – der ungeordneten Warteschlange n
 | **Kontextmenü** | "Für Tag einplanen" → Datumsauswahl |
 | **Tastatur** | Aufgabe fokussieren → `Shift+D` → Datumsauswahl-Dialog |
 
-Eingeplante Aufgaben verschwinden aus dem Backlog. Wird das Datum entfernt, wandern sie zurück.
+Auf einen Tag eingeplante Aufgaben (`scheduled_date`) verschwinden aus dem Backlog. Wird der geplante Tag entfernt, wandern sie zurück – eine reine Deadline allein hält eine Aufgabe nicht aus dem Backlog fern.
 
 ### 9.4 Wochenplanung
 

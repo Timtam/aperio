@@ -3327,11 +3327,37 @@ button[aria-disabled='true'] {
    lists unscheduled tasks. Drag a chip onto a day to schedule it; drop a
    scheduled task back onto the rail to send it to the backlog. */
 .backlog-rail {
-  flex: 0 0 14rem;
+  /* Width comes from the inline flex-basis (resizable + persisted via
+     useBacklogWidth); grow/shrink pinned to 0 so it stays exactly that and
+     the calendar grid beside it takes the rest. min-width:0 lets long chip
+     titles truncate instead of stretching the column to its widest task. */
+  flex-grow: 0;
+  flex-shrink: 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   min-height: 0;
+  position: relative;
   border-right: 1px solid var(--color-border);
+}
+
+/* Drag handle straddling the column's right edge (also keyboard-operable as
+   an ARIA separator). Transparent until hover/focus. */
+.backlog-rail__resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -3px;
+  width: 7px;
+  cursor: col-resize;
+  background: transparent;
+  z-index: 2;
+  touch-action: none;
+}
+.backlog-rail__resizer:hover,
+.backlog-rail__resizer:focus-visible {
+  background: color-mix(in srgb, var(--color-accent) 35%, transparent);
+  outline: none;
 }
 .backlog-rail__heading {
   margin: 0;

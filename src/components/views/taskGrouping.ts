@@ -89,7 +89,9 @@ export function buildEntries(
   const backlog: Task[] = [];
   const byList = new Map<string, Task[]>();
   openTopLevel.forEach((task) => {
-    if (!task.scheduled_date && !task.deadline_date) {
+    // Backlog = no planned WORK day. A deadline-only task stays here (so it
+    // can be scheduled onto a day) while also showing on its deadline day.
+    if (!task.scheduled_date) {
       backlog.push(task);
       return;
     }

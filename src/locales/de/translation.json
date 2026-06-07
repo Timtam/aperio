@@ -1391,6 +1391,7 @@
     "backlog": {
       "heading": "Backlog ({{count}})",
       "listLabel": "Backlog-Aufgaben",
+      "resize": "Backlog-Spalte breiter/schmaler ziehen",
       "empty": "Keine Aufgaben im Backlog.",
       "chipLabel": "{{title}}, Liste {{list}}{{priority}}",
       "movedToBacklog": "„{{title}}“ in den Backlog verschoben.",
