@@ -20,7 +20,11 @@ import {
   multiDayInfo,
 } from '../../intl/multiDay';
 import { useCalendarStore } from '../../state/calendarStoreContext';
-import { setEventDrag, setTaskDrag } from '../../state/moveActions';
+import {
+  setEventDrag,
+  setTaskDrag,
+  TASK_DND_TYPE,
+} from '../../state/moveActions';
 import { useDialogState } from '../../state/dialogStateContext';
 import { useEvents } from '../../state/useEvents';
 import { useTaskListShowCompleted } from '../../state/useTaskListShowCompleted';
@@ -43,6 +47,7 @@ import {
   subtaskProgressSuffix,
 } from '../../intl/taskStatus';
 import type { CalendarEvent, Task } from '../../api/types';
+import { BacklogRail } from '../BacklogRail';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { DeleteEventScopeDialog } from '../DeleteEventScopeDialog';
 import {
@@ -673,12 +678,13 @@ export function WeekView() {
                 }
                 onClick={() => setAnchor(day)}
                 onDragOver={(e) => {
-                  // Drop-target gate: only react when an Aperio task
-                  // drag is in flight. We can't read `dataTransfer`
-                  // payload during dragover (browsers expose only
-                  // the type list, not values), so `draggingTaskId`
-                  // in state is the source of truth.
-                  if (!draggingTaskId) return;
+                  // Drop-target gate: react when an Aperio task drag is in
+                  // flight. The payload values aren't readable during
+                  // dragover, but the type LIST is — and both the week's
+                  // own chips and the backlog rail tag the drag with the
+                  // task MIME type, so this also accepts backlog drops
+                  // (which never set `draggingTaskId`).
+                  if (!e.dataTransfer.types.includes(TASK_DND_TYPE)) return;
                   e.preventDefault();
                   e.dataTransfer.dropEffect = 'move';
                   if (dragOverDayKey !== dayKey) {
@@ -947,6 +953,8 @@ export function WeekView() {
           })}
         </div>
       </div>
+
+      <BacklogRail />
 
       <ConfirmDialog
         isOpen={confirmTarget !== null}

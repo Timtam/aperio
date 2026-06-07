@@ -1,10 +1,16 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { CalendarEvent, Task } from '../api/types';
+
+const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
+vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
+
 import {
   EVENT_DND_TYPE,
+  moveTaskToBacklog,
   readEventDrag,
   readTaskDrag,
+  scheduleTaskOnDay,
   setEventDrag,
   setTaskDrag,
   TASK_DND_TYPE,
@@ -62,5 +68,47 @@ describe('moveActions drag payloads', () => {
 
   it('returns null for a missing event payload', () => {
     expect(readEventDrag(fakeDataTransfer())).toBeNull();
+  });
+});
+
+describe('moveActions time-axis moves', () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockImplementation(
+      (_cmd: string, args: { task: Task }) => args.task,
+    );
+  });
+
+  it('scheduleTaskOnDay sets scheduled_date on the day', async () => {
+    await scheduleTaskOnDay({ id: 't', scheduled_date: null } as Task, '2026-06-15');
+    const [cmd, args] = invokeMock.mock.calls[0];
+    expect(cmd).toBe('update_task');
+    expect(args.task.scheduled_date).toBe('2026-06-15');
+  });
+
+  it('moveTaskToBacklog clears all dates and reopens a completed task', async () => {
+    await moveTaskToBacklog({
+      id: 't',
+      scheduled_date: '2026-06-15',
+      scheduled_time: '09:00',
+      deadline_date: '2026-06-20',
+      deadline_time: '17:00',
+      status: 'completed',
+    } as Task);
+    const { task } = invokeMock.mock.calls[0][1];
+    expect(task.scheduled_date).toBeNull();
+    expect(task.scheduled_time).toBeNull();
+    expect(task.deadline_date).toBeNull();
+    expect(task.deadline_time).toBeNull();
+    expect(task.status).toBe('open');
+  });
+
+  it('moveTaskToBacklog preserves a non-completed status', async () => {
+    await moveTaskToBacklog({
+      id: 't',
+      status: 'in_progress',
+      scheduled_date: '2026-06-15',
+    } as Task);
+    expect(invokeMock.mock.calls[0][1].task.status).toBe('in_progress');
   });
 });
