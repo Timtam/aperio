@@ -105,6 +105,44 @@ export async function moveTaskToList(
 }
 
 /**
+ * Schedule a task on a specific day (sets `scheduled_date`, keeps the
+ * time-of-day). Used by the week/month planner day-drop. Bumps
+ * `updated_at` so sync engines pick up the change.
+ */
+export async function scheduleTaskOnDay(
+  task: Task,
+  dayKey: string,
+): Promise<Task> {
+  return invoke<Task>('update_task', {
+    task: {
+      ...task,
+      scheduled_date: dayKey,
+      updated_at: new Date().toISOString(),
+    },
+  });
+}
+
+/**
+ * Send a task back to the **backlog**: clears the scheduled date/time and
+ * the deadline so it is truly unscheduled (a lingering deadline would keep
+ * pulling it into upcoming views). Mirrors the plan dialog's "back to
+ * backlog" — a completed task reopens to `open`.
+ */
+export async function moveTaskToBacklog(task: Task): Promise<Task> {
+  return invoke<Task>('update_task', {
+    task: {
+      ...task,
+      scheduled_date: null,
+      scheduled_time: null,
+      deadline_date: null,
+      deadline_time: null,
+      status: task.status === 'completed' ? 'open' : task.status,
+      updated_at: new Date().toISOString(),
+    },
+  });
+}
+
+/**
  * Move an event to a different **calendar**. For a recurring series we move
  * the master (never a single occurrence); the previous `calendar_id` is the
  * cross-adapter move hint, so external adapters reroute as create+delete

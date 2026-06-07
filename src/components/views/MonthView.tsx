@@ -41,6 +41,7 @@ import { useEvents } from '../../state/useEvents';
 import { useViewState } from '../../state/viewStateContext';
 import { visibleRange } from '../../state/viewMath';
 import type { CalendarEvent } from '../../api/types';
+import { BacklogRail } from '../BacklogRail';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { DeleteEventScopeDialog } from '../DeleteEventScopeDialog';
 import {
@@ -48,6 +49,11 @@ import {
   deleteEventById,
   isCommandError,
 } from '../../api/client';
+import {
+  readTaskDrag,
+  scheduleTaskOnDay,
+  TASK_DND_TYPE,
+} from '../../state/moveActions';
 
 /**
  * Month view — six-week calendar grid (DESIGN.md section 3.3,
@@ -174,6 +180,33 @@ export function MonthView() {
       setConfirmTarget(ev);
     }
   }, []);
+
+  // Drag-and-drop: a task dropped on a day cell is scheduled on that day
+  // (e.g. dragged out of the backlog rail). Mouse affordance only.
+  const scheduleByDrop = useCallback(
+    async (day: Date, e: React.DragEvent) => {
+      e.preventDefault();
+      const payload = readTaskDrag(e.dataTransfer);
+      if (!payload) return;
+      const dayKey = localDateKey(day);
+      if (payload.task.scheduled_date === dayKey) return;
+      try {
+        await scheduleTaskOnDay(payload.task, dayKey);
+        invalidateData();
+        announce(
+          t('views.backlog.scheduled', {
+            title: payload.task.title,
+            date: fmt.format(day, 'PP'),
+          }),
+        );
+      } catch (err) {
+        announce(
+          isCommandError(err) ? `${err.code}: ${err.message}` : String(err),
+        );
+      }
+    },
+    [invalidateData, announce, t, fmt],
+  );
 
   // Deferred indicator — see DayView for the rationale.
   const showLoading = useDeferredLoading(loading);
@@ -486,6 +519,12 @@ export function MonthView() {
                       (isSameDay(day, today) ? ' month-grid__cell--today' : '')
                     }
                     onClick={() => setAnchor(day)}
+                    onDragOver={(e) => {
+                      if (!e.dataTransfer.types.includes(TASK_DND_TYPE)) return;
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = 'move';
+                    }}
+                    onDrop={(e) => void scheduleByDrop(day, e)}
                   >
                     <span className="month-grid__date">
                       {fmt.format(day, 'd')}
@@ -585,6 +624,8 @@ export function MonthView() {
           );
         })}
       </div>
+
+      <BacklogRail />
 
       <ConfirmDialog
         isOpen={confirmTarget !== null}

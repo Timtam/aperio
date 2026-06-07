@@ -3150,6 +3150,66 @@ button[aria-disabled='true'] {
   background: var(--color-surface-hover, rgba(127, 127, 127, 0.12));
 }
 
+/* Backlog rail — a collapsible bottom panel in the week/month planner that
+   lists unscheduled tasks. Drag a chip onto a day to schedule it; drop a
+   scheduled task back onto the rail to send it to the backlog. */
+.backlog-rail {
+  flex: none;
+  border-top: 1px solid var(--color-border);
+}
+.backlog-rail__summary {
+  cursor: pointer;
+  padding: var(--space-2);
+  font-weight: 600;
+  user-select: none;
+}
+.backlog-rail__body {
+  max-height: 11rem;
+  overflow-y: auto;
+  padding: 0 var(--space-2) var(--space-2);
+}
+.backlog-rail__empty {
+  margin: 0;
+  opacity: 0.7;
+}
+.backlog-rail__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.backlog-rail__chip {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  max-width: 14rem;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font: inherit;
+  text-align: left;
+  cursor: grab;
+}
+.backlog-rail__chip:hover {
+  background: var(--color-surface-hover, rgba(127, 127, 127, 0.12));
+}
+.backlog-rail__chip:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+.backlog-rail__chip-title {
+  font-weight: 500;
+}
+.backlog-rail__chip-list {
+  font-size: 0.85em;
+  opacity: 0.7;
+}
+
 .task-list__group-swatch {
   display: inline-block;
   width: 0.7em;

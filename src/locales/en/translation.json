@@ -1381,6 +1381,13 @@
     "allDay": "All day",
     "multiDayCompact": "({{day}}/{{total}})",
     "multiDaySuffix": ", day {{day}} of {{total}}",
+    "backlog": {
+      "heading": "Backlog ({{count}})",
+      "empty": "No tasks in the backlog.",
+      "chipLabel": "{{title}}, list {{list}}",
+      "movedToBacklog": "\"{{title}}\" moved to the backlog.",
+      "scheduled": "\"{{title}}\" scheduled for {{date}}."
+    },
     "week": {
       "title": "Week view",
       "kw": "Week {{week}}",

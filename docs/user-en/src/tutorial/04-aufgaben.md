@@ -67,8 +67,11 @@ Aperio distinguishes between tasks with and without a fixed date:
 - **Auto-schedule to today:** Setting a backlog task to **"In progress"**
   schedules it for **today** automatically — you've started the work after
   all. (Can be turned off under *Settings → Tasks*.)
-- **Week planner:** A view in which you comfortably distribute backlog tasks
-  across the days of the week.
+- **Backlog rail:** The **week and month views** show a collapsible
+  **Backlog** rail at the bottom with every unscheduled task. Drag a task
+  from there onto a day to schedule it — or drag a scheduled task back onto
+  the rail to return it to the backlog. Without a mouse: focus a task in the
+  rail and press **Shift+D** (the plan dialog), or use the context menu.
 - **Deadline:** A task with a deadline shows up in the week and day planner
   as a **due marker** on its deadline day ("due by …") — a single point, not
   a bar spanning every day until then.

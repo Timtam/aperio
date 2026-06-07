@@ -43,6 +43,7 @@ import {
   subtaskProgressSuffix,
 } from '../../intl/taskStatus';
 import type { CalendarEvent, Task } from '../../api/types';
+import { BacklogRail } from '../BacklogRail';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { DeleteEventScopeDialog } from '../DeleteEventScopeDialog';
 import {
@@ -947,6 +948,8 @@ export function WeekView() {
           })}
         </div>
       </div>
+
+      <BacklogRail />
 
       <ConfirmDialog
         isOpen={confirmTarget !== null}
