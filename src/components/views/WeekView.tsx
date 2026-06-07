@@ -647,7 +647,6 @@ export function WeekView() {
         <div role="row" className="week-grid__body">
           {days.map((day, i) => {
             const dayKey = keyOf(day);
-            const dayEvents = eventsByDay.get(dayKey) ?? [];
             const merged = dayItemsByDay.get(dayKey);
             const timedItems = merged?.timed ?? [];
             const untimedTasks = merged?.untimed ?? [];
@@ -666,7 +665,8 @@ export function WeekView() {
                 aria-current={isSameDay(day, today) ? 'date' : undefined}
                 aria-label={t('views.week.dayAnnounce', {
                   day: fmt.format(day, 'PPPP'),
-                  count: dayEvents.length,
+                  // Events + tasks (timed + untimed) — every chip in the cell.
+                  count: timedItems.length + untimedTasks.length,
                 })}
                 className={
                   'week-grid__cell' +

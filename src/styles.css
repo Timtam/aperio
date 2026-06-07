@@ -2969,6 +2969,72 @@ button[aria-disabled='true'] {
   pointer-events: auto;
 }
 
+/* A task in a month day cell: the same filled chip as a month event (it also
+   carries the `.month-event` class), set apart only by the check-off marker.
+   The cell stacks chips (flex column), so the chip itself is an inline row of
+   [marker] [priority] [title]. */
+.month-task {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.month-task__check {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.9em;
+  color: inherit;
+  cursor: pointer;
+  border-radius: 2px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.month-task__check:hover {
+  /* Toggle affordance — a wash from the chip's own text colour reads on any
+     fill. Matches the week/day task marker. */
+  background: color-mix(in srgb, currentColor 22%, transparent);
+}
+
+.month-task__priority {
+  flex-shrink: 0;
+  color: inherit;
+}
+
+.month-task__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Deadline ("fällig bis …") task — a thin inset ring, the month-scale
+   version of the week/day `--by` hard-edge cue. */
+.month-task--by {
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--color-accent-fg) 65%, transparent);
+}
+
+/* Done / abandoned: dim the filled chip + strike the title. */
+.month-task--completed,
+.month-task--cancelled {
+  opacity: 0.6;
+}
+
+.month-task--completed .month-task__title,
+.month-task--cancelled .month-task__title {
+  text-decoration: line-through;
+}
+
+/* Source chip while being dragged (to another day, or back to the backlog). */
+.month-task--dragging {
+  opacity: 0.5;
+  cursor: grabbing;
+}
+
 /* ── Day view (flat listbox) ────────────────────────────────────────────── */
 
 .day-list {

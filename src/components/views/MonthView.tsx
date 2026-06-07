@@ -28,19 +28,34 @@ import {
   seriesIdOf,
 } from '../../intl/recurrence';
 import { useDateFormat } from '../../intl/dateFormat';
-import { labelsLookup, resolveEventColor } from '../../intl/eventColor';
+import {
+  labelsLookup,
+  resolveEventColor,
+  resolveTaskColor,
+} from '../../intl/eventColor';
 import {
   buildAllDayBars,
   daysCoveredKeys,
   multiDayInfo,
 } from '../../intl/multiDay';
+import { filterTasksOnDay, isDeadlineChip } from '../../intl/taskDay';
+import {
+  priorityMarker,
+  prioritySuffix,
+  statusI18nKey,
+  statusMarker,
+  subtaskProgressSuffix,
+} from '../../intl/taskStatus';
 import { useCalendarStore } from '../../state/calendarStoreContext';
 import { useChipContextMenu } from '../../state/useChipContextMenu';
 import { useDialogState } from '../../state/dialogStateContext';
 import { useEvents } from '../../state/useEvents';
+import { useTasks } from '../../state/useTasks';
+import { useTaskListShowCompleted } from '../../state/useTaskListShowCompleted';
+import { useTaskStatusToggle } from '../../state/useTaskStatusToggle';
 import { useViewState } from '../../state/viewStateContext';
 import { visibleRange } from '../../state/viewMath';
-import type { CalendarEvent } from '../../api/types';
+import type { CalendarEvent, Task } from '../../api/types';
 import { BacklogRail } from '../BacklogRail';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { DeleteEventScopeDialog } from '../DeleteEventScopeDialog';
@@ -52,6 +67,7 @@ import {
 import {
   readTaskDrag,
   scheduleTaskOnDay,
+  setTaskDrag,
   TASK_DND_TYPE,
 } from '../../state/moveActions';
 
@@ -69,21 +85,89 @@ import {
  * PageUp/PageDown step a whole month. Ctrl-modified arrows are handled
  * by the global shortcut layer.
  */
+
+/** A chip in a month-grid day cell: an event or a task scheduled/due that
+ *  day. The discriminated union lets the render loop, the focus index and
+ *  the aria-activedescendant keyboard nav agree on which chip is focused —
+ *  mirroring WeekView's `DayItem` so Tab walks events *and* tasks. */
+type MonthDayItem =
+  | { kind: 'event'; id: string; title: string; event: CalendarEvent }
+  | { kind: 'task'; id: string; title: string; task: Task; isBy: boolean };
+
 export function MonthView() {
   const { t } = useTranslation();
   const fmt = useDateFormat();
   const announce = useAnnouncer();
   const { anchor, setAnchor, goPrev, goNext } = useViewState();
-  const { openEventDialog, invalidateData } = useDialogState();
-  const { openForEvent: openEventMenu } = useChipContextMenu();
+  const { openEventDialog, openTaskDialog, invalidateData } = useDialogState();
+  const { openForEvent: openEventMenu, openForTask: openTaskMenu } =
+    useChipContextMenu();
 
   const cells = useMemo(() => buildMonthGrid(anchor), [anchor]);
   const range = useMemo(() => visibleRange('month', anchor), [anchor]);
   const { events, calendarById, loading } = useEvents(range);
-  const { colorLabels } = useCalendarStore();
+  const { tasks, taskListById } = useTasks();
+  const toggleTaskStatus = useTaskStatusToggle();
+  const { shouldShow: shouldShowCompletedForList } = useTaskListShowCompleted();
+  const { colorLabels, sectionColorById, sectionsByList, loadSections } =
+    useCalendarStore();
   const labelById = useMemo(() => labelsLookup(colorLabels), [colorLabels]);
 
+  // Load sections for the lists with tasks so a colored section cascades to
+  // its tasks here too (cached + cheap; empty for section-less backends).
+  // Mirrors WeekView / TaskView.
+  const listIdsWithTasks = useMemo(
+    () => Array.from(new Set(tasks.map((task) => task.list_id))),
+    [tasks],
+  );
+  useEffect(() => {
+    for (const listId of listIdsWithTasks) {
+      if (!(listId in sectionsByList)) void loadSections(listId);
+    }
+  }, [listIdsWithTasks, sectionsByList, loadSections]);
+
   const eventsByDay = useMemo(() => groupEventsByDay(events), [events]);
+
+  // Per-day items for the cells + keyboard nav: the day's events followed by
+  // the tasks scheduled or due that day (a "due" task carries `isBy` for the
+  // deadline ring). A discriminated union so the render loop, focus index and
+  // aria-activedescendant all agree on which chip is which — mirroring
+  // WeekView's `DayItem` so Tab walks events *and* tasks in the month grid.
+  const itemsByDay = useMemo(() => {
+    const map = new Map<string, MonthDayItem[]>();
+    for (const cell of cells) {
+      const key = keyOf(cell);
+      const dayEvents = eventsByDay.get(key) ?? [];
+      const toEventItem = (event: CalendarEvent): MonthDayItem => ({
+        kind: 'event',
+        id: event.id,
+        title: event.title,
+        event,
+      });
+      const taskItems: MonthDayItem[] = filterTasksOnDay(
+        tasks,
+        key,
+        shouldShowCompletedForList,
+      ).map((task) => ({
+        kind: 'task',
+        id: `task-${task.id}`,
+        title: task.title,
+        task,
+        isBy: isDeadlineChip(task, key),
+      }));
+      // Order: timed events, then tasks, then all-day events. All-day events
+      // render hidden inside the cell (they live in the lane above the row)
+      // but stay in the DOM for keyboard nav — keeping them last leaves the
+      // cell's visible slots for the timed events and tasks the user actually
+      // sees there, so a task is never starved by a hidden all-day chip.
+      map.set(key, [
+        ...dayEvents.filter((event) => !event.all_day).map(toEventItem),
+        ...taskItems,
+        ...dayEvents.filter((event) => event.all_day).map(toEventItem),
+      ]);
+    }
+    return map;
+  }, [cells, eventsByDay, tasks, shouldShowCompletedForList]);
 
   const focusIndex = useMemo(() => {
     const i = cells.findIndex((c) => isSameDay(c, anchor));
@@ -101,20 +185,20 @@ export function MonthView() {
   // Two-level focus mirrors WeekView; the tab hook below handles
   // chronological cycling across cells.
   const buckets = useMemo(
-    () => cells.map((d) => ({ items: eventsByDay.get(keyOf(d)) ?? [] })),
-    [cells, eventsByDay],
+    () => cells.map((d) => ({ items: itemsByDay.get(keyOf(d)) ?? [] })),
+    [cells, itemsByDay],
   );
-  const focusedDayEvents = useMemo(
+  const focusedDayItems = useMemo(
     () => buckets[focusIndex]?.items ?? [],
     [buckets, focusIndex],
   );
 
   const dayChangeAnnouncer = useCallback(
-    (newDayIdx: number, ev: CalendarEvent) => {
+    (newDayIdx: number, item: MonthDayItem) => {
       announce(
         t('views.month.tabAnnounce', {
           day: fmt.format(cells[newDayIdx], 'PPPP'),
-          title: ev.title,
+          title: item.title,
         }),
       );
     },
@@ -125,7 +209,7 @@ export function MonthView() {
     eventIndex,
     clear: clearEventIndex,
     handleTab,
-  } = useEventTabNavigation({
+  } = useEventTabNavigation<MonthDayItem>({
     buckets,
     dayIndex: focusIndex,
     setDayIndex: (next) => setAnchor(cells[next]),
@@ -145,6 +229,9 @@ export function MonthView() {
     null,
   );
   const [scopeTarget, setScopeTarget] = useState<CalendarEvent | null>(null);
+  // Source task being dragged (to reschedule onto another day, or back to the
+  // backlog rail which unschedules it). Drives the dimming class on the chip.
+  const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
 
   const performDelete = useCallback(
     async (ev: CalendarEvent, scope: 'occurrence' | 'series') => {
@@ -225,7 +312,7 @@ export function MonthView() {
         return;
       }
       if (eventIndex !== null) {
-        const ev = focusedDayEvents[eventIndex];
+        const item = focusedDayItems[eventIndex];
         if (e.key === 'Escape') {
           e.preventDefault();
           clearEventIndex();
@@ -233,12 +320,21 @@ export function MonthView() {
         }
         if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
           e.preventDefault();
-          if (ev) openEventDialog(ev);
+          if (item?.kind === 'event') {
+            openEventDialog(item.event);
+          } else if (item?.kind === 'task') {
+            // Match TaskView / WeekView: Enter opens the task, Space ticks
+            // it off (the visible ☐/⬤ marker).
+            if (e.key === 'Enter') openTaskDialog(item.task);
+            else void toggleTaskStatus(item.task);
+          }
           return;
         }
         if (e.key === 'Delete' || e.key === 'Backspace') {
           e.preventDefault();
-          if (ev) requestDelete(ev);
+          // Only events are deletable from the grid; a task is managed via
+          // its dialog / context menu.
+          if (item?.kind === 'event') requestDelete(item.event);
           return;
         }
         if (
@@ -246,7 +342,7 @@ export function MonthView() {
           (e.shiftKey && e.key === 'F10')
         ) {
           e.preventDefault();
-          if (ev) {
+          if (item) {
             const target = e.currentTarget as HTMLElement;
             const id = eventOptionId(focusIndex, eventIndex);
             const node = target.ownerDocument?.getElementById(id);
@@ -254,7 +350,8 @@ export function MonthView() {
             const pos = rect
               ? { x: rect.left, y: rect.bottom }
               : undefined;
-            void openEventMenu(ev, pos);
+            if (item.kind === 'event') void openEventMenu(item.event, pos);
+            else void openTaskMenu(item.task, pos);
           }
           return;
         }
@@ -299,9 +396,12 @@ export function MonthView() {
         case 'Spacebar': {
           e.preventDefault();
           const focusedDay = cells[focusIndex];
-          const evs = eventsByDay.get(keyOf(focusedDay)) ?? [];
-          if (evs.length > 0) {
-            openEventDialog(evs[0]);
+          const items = itemsByDay.get(keyOf(focusedDay)) ?? [];
+          const first = items[0];
+          if (first?.kind === 'event') {
+            openEventDialog(first.event);
+          } else if (first?.kind === 'task') {
+            openTaskDialog(first.task);
           } else {
             openEventDialog(null, {
               defaultDate: keyOf(focusedDay),
@@ -321,13 +421,16 @@ export function MonthView() {
       cells,
       focusIndex,
       eventIndex,
-      focusedDayEvents,
-      eventsByDay,
+      focusedDayItems,
+      itemsByDay,
       openEventDialog,
+      openTaskDialog,
+      toggleTaskStatus,
       handleTab,
       clearEventIndex,
       requestDelete,
       openEventMenu,
+      openTaskMenu,
       eventOptionId,
     ],
   );
@@ -490,17 +593,17 @@ export function MonthView() {
               </div>
               {cells.slice(row * 7, row * 7 + 7).map((day, col) => {
                 const flatIndex = row * 7 + col;
-                const dayEvents = eventsByDay.get(keyOf(day)) ?? [];
+                const dayItems = itemsByDay.get(keyOf(day)) ?? [];
                 const focused = flatIndex === focusIndex;
                 const outside = !isSameMonth(day, anchor);
-                // When there are more events than fit, reserve the last
-                // visible slot for the "+N more" hint so the cell never
-                // overflows its row.
+                // When there are more chips (events + tasks) than fit,
+                // reserve the last visible slot for the "+N more" hint so the
+                // cell never overflows its row.
                 const visibleLimit =
-                  dayEvents.length > visiblePerCell
+                  dayItems.length > visiblePerCell
                     ? Math.max(0, visiblePerCell - 1)
                     : visiblePerCell;
-                const moreCount = dayEvents.length - visibleLimit;
+                const moreCount = dayItems.length - visibleLimit;
                 return (
                   <div
                     key={day.toISOString()}
@@ -510,7 +613,7 @@ export function MonthView() {
                     aria-current={isSameDay(day, today) ? 'date' : undefined}
                     aria-label={t('views.month.dayAnnounce', {
                       day: fmt.format(day, 'PPPP'),
-                      count: dayEvents.length,
+                      count: dayItems.length,
                     })}
                     className={
                       'month-grid__cell' +
@@ -541,14 +644,104 @@ export function MonthView() {
                        NVDA would fall back to reading "section"
                        instead of the event title.
                      */}
-                    {dayEvents.map((ev, evIdx) => {
+                    {dayItems.map((item, idx) => {
+                      const isFocusedItem = focused && eventIndex === idx;
+                      const hidden = idx >= visibleLimit;
+                      if (item.kind === 'task') {
+                        const task = item.task;
+                        const color = resolveTaskColor(
+                          task,
+                          taskListById,
+                          labelById,
+                          sectionColorById,
+                        );
+                        const priorityGlyph = priorityMarker(task.priority);
+                        const aria = t(
+                          item.isBy
+                            ? 'views.week.taskChipBy'
+                            : 'views.week.taskChip',
+                          {
+                            title: task.title,
+                            deadline: task.deadline_date
+                              ? fmt.format(
+                                  new Date(`${task.deadline_date}T00:00:00`),
+                                  'PP',
+                                )
+                              : '',
+                            state: t(statusI18nKey(task.status)),
+                            priority: prioritySuffix(t, task.priority),
+                            progress: subtaskProgressSuffix(t, task.id, tasks),
+                          },
+                        );
+                        return (
+                          <span
+                            key={item.id}
+                            id={eventOptionId(flatIndex, idx)}
+                            className={
+                              'month-event month-task' +
+                              (isFocusedItem
+                                ? ' month-event--focused'
+                                : '') +
+                              (hidden ? ' month-event--overflow' : '') +
+                              (item.isBy ? ' month-task--by' : '') +
+                              (draggingTaskId === task.id
+                                ? ' month-task--dragging'
+                                : '') +
+                              ` month-task--${task.status.replace('_', '-')}`
+                            }
+                            aria-label={aria}
+                            aria-selected={isFocusedItem}
+                            draggable
+                            onDragStart={(dev) => {
+                              setTaskDrag(
+                                dev.dataTransfer,
+                                task,
+                                tasks.filter((c) => c.parent_id === task.id),
+                              );
+                              setDraggingTaskId(task.id);
+                            }}
+                            onDragEnd={() => setDraggingTaskId(null)}
+                            onContextMenu={(cmev) => {
+                              cmev.preventDefault();
+                              cmev.stopPropagation();
+                              void openTaskMenu(task);
+                            }}
+                            style={
+                              color.hex
+                                ? ({ '--event-color': color.hex } as React.CSSProperties)
+                                : undefined
+                            }
+                          >
+                            <span
+                              className="month-task__check"
+                              aria-hidden="true"
+                              onClick={(cmev) => {
+                                cmev.stopPropagation();
+                                void toggleTaskStatus(task);
+                              }}
+                            >
+                              {statusMarker(task.status)}
+                            </span>
+                            {priorityGlyph && (
+                              <span
+                                className="month-task__priority"
+                                aria-hidden="true"
+                              >
+                                {priorityGlyph}{' '}
+                              </span>
+                            )}
+                            <span className="month-task__title">
+                              {task.title}
+                            </span>
+                          </span>
+                        );
+                      }
+                      const ev = item.event;
                       const color = resolveEventColor(
                         ev,
                         calendarById,
                         labelById,
                       );
-                      const isFocusedEvent =
-                        focused && eventIndex === evIdx;
                       const cal = calendarById.get(ev.calendar_id);
                       const time = ev.all_day
                         ? t('views.allDay')
@@ -566,14 +759,13 @@ export function MonthView() {
                             total: span.totalDays,
                           })
                         : ariaBase;
-                      const hidden = evIdx >= visibleLimit;
                       return (
                         <span
-                          key={ev.id}
-                          id={eventOptionId(flatIndex, evIdx)}
+                          key={item.id}
+                          id={eventOptionId(flatIndex, idx)}
                           className={
                             'month-event' +
-                            (isFocusedEvent
+                            (isFocusedItem
                               ? ' month-event--focused'
                               : '') +
                             (hidden ? ' month-event--overflow' : '') +
@@ -581,7 +773,7 @@ export function MonthView() {
                             (ev.all_day ? ' month-event--in-lane' : '')
                           }
                           aria-label={aria}
-                          aria-selected={isFocusedEvent}
+                          aria-selected={isFocusedItem}
                           onContextMenu={(cmev) => {
                             cmev.preventDefault();
                             cmev.stopPropagation();
