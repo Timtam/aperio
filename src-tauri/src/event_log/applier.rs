@@ -1339,6 +1339,7 @@ mod tests {
             id: "sec-1".into(),
             list_id: "list-1".into(),
             name: "Doing".into(),
+            color_label: None,
             order: 0,
         };
         let create = fixture_envelope(

@@ -253,6 +253,41 @@ pub trait TasksFeature: Adapter {
         ))
     }
 
+    /// Create a section (Vikunja kanban bucket / Todoist section) in a
+    /// list at the source and return the created row. `list_id` is
+    /// carried so backends that scope sections under a view (Vikunja's
+    /// kanban view) can resolve it. Default `Unsupported`; the host only
+    /// routes here for accounts whose manifest declares the
+    /// `manageable_sections` capability — local sections go through the
+    /// store + event log instead. A section's COLOR is never sent to the
+    /// provider (no provider models it); it's a local override.
+    async fn create_section(&self, _list_id: &str, _name: &str) -> Result<Section> {
+        Err(Error::Unsupported(
+            "create_section is not supported on this adapter".into(),
+        ))
+    }
+
+    /// Rename a section at the source. Reordering is intentionally out of
+    /// scope (provider position semantics differ). Default `Unsupported`.
+    async fn update_section(
+        &self,
+        _list_id: &str,
+        _section_id: &str,
+        _new_name: &str,
+    ) -> Result<Section> {
+        Err(Error::Unsupported(
+            "update_section is not supported on this adapter".into(),
+        ))
+    }
+
+    /// Delete a section at the source (its tasks become ungrouped, or
+    /// land in the provider's default bucket). Default `Unsupported`.
+    async fn delete_section(&self, _list_id: &str, _section_id: &str) -> Result<()> {
+        Err(Error::Unsupported(
+            "delete_section is not supported on this adapter".into(),
+        ))
+    }
+
     /// Incremental tasks fetch (CACHE-4). Same shape as
     /// [`CalendarFeature::get_events_delta`]; default `Unsupported`.
     async fn get_tasks_delta(

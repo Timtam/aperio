@@ -24,6 +24,7 @@ export function ColorLabelSelect({
   onChange,
   labels,
   noneLabel,
+  ariaLabel,
 }: {
   value: string | null;
   onChange: (next: string | null) => void;
@@ -32,6 +33,9 @@ export function ColorLabelSelect({
   labels: ColorLabel[];
   /** Localized text for the empty "no color label" option. */
   noneLabel: string;
+  /** Accessible name for the `<select>` when it isn't already wrapped in
+   *  a labelled form field (e.g. the inline section editor). */
+  ariaLabel?: string;
 }) {
   const { t } = useTranslation();
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -50,6 +54,7 @@ export function ColorLabelSelect({
       />
       <select
         className="color-label-select__select"
+        aria-label={ariaLabel}
         value={value ?? ''}
         onChange={(e) => onChange(e.target.value ? e.target.value : null)}
       >

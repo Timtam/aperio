@@ -282,6 +282,8 @@ export interface CreateSectionRequest {
   list_id: string;
   name: string;
   position: number;
+  /** Optional color-label id for the new section. */
+  color_label?: string | null;
 }
 
 /** Create a section in a local list. Sections on external providers are
@@ -292,8 +294,8 @@ export const createSection = (request: CreateSectionRequest) =>
 export const updateSection = (section: Section) =>
   invoke<Section>('update_section', { section });
 
-export const deleteSection = (id: string) =>
-  invoke<void>('delete_section', { id });
+export const deleteSection = (id: string, list_id: string) =>
+  invoke<void>('delete_section', { id, listId: list_id });
 
 export interface CreateTaskRequest {
   list_id: string;
@@ -618,6 +620,20 @@ export const setContainerColorLabel = (
   invoke<void>('set_container_color_label', {
     containerId: container_id,
     kind,
+    colorLabelId: color_label_id,
+  });
+
+/** Set / clear a section's color label. Routes host-side: local sections
+ *  store the binding on their (synced) row; external sections (Todoist /
+ *  Vikunja) store a local color override. `list_id` routes the call. */
+export const setSectionColor = (
+  section_id: string,
+  list_id: string,
+  color_label_id: string | null,
+) =>
+  invoke<void>('set_section_color', {
+    sectionId: section_id,
+    listId: list_id,
     colorLabelId: color_label_id,
   });
 

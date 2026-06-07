@@ -169,6 +169,13 @@ pub struct TaskCapabilities {
     /// (Todoist sections, Vikunja buckets).
     #[serde(default)]
     pub sections: bool,
+    /// The adapter can create / rename / delete sections at the source
+    /// (Todoist sections, Vikunja kanban buckets). Defaults `false`; the
+    /// UI gates the section create/rename/delete controls on it. Coloring
+    /// a section is independent — it's always a local override, so it's
+    /// offered wherever `sections` is true.
+    #[serde(default)]
+    pub manageable_sections: bool,
     /// More than one label per task, beyond cal-core's single
     /// `color_label` slot.
     #[serde(default)]
@@ -211,6 +218,7 @@ impl Default for TaskCapabilities {
             subtasks: true,
             max_subtask_depth: None,
             sections: false,
+            manageable_sections: false,
             multiple_labels: false,
             task_recurrence: true,
             move_between_projects: true,

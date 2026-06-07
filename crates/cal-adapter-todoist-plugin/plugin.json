@@ -12,6 +12,7 @@
   "tasks": {
     "nested_projects": true,
     "sections": true,
+    "manageable_sections": true,
     "subtasks": true,
     "move_between_projects": false,
     "create_lists": true,

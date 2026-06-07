@@ -27,11 +27,17 @@ import { useChipContextMenu } from '../../state/useChipContextMenu';
 import { useDialogState } from '../../state/dialogStateContext';
 import { useTaskStatusToggle } from '../../state/useTaskStatusToggle';
 import { useTasks } from '../../state/useTasks';
-import type { Task } from '../../api/types';
+import type { Section, Task } from '../../api/types';
 import { duplicateTask } from '../duplicateActions';
 import { buildEntries, DONE_GROUP_ID, type Entry } from './taskGrouping';
 import { ConfirmDialog } from '../ConfirmDialog';
-import { isCommandError } from '../../api/client';
+import { ColorPickerModal } from '../ColorPickerModal';
+import {
+  isCommandError,
+  setSectionColor as setSectionColorCmd,
+  showContextMenu,
+  type ContextMenuItemRequest,
+} from '../../api/client';
 
 /**
  * Dedicated task view — flat listbox of tasks with visual group
@@ -56,8 +62,18 @@ export function TaskView() {
   const fmt = useDateFormat();
   const announce = useAnnouncer();
   const { tasks, taskListById, loading } = useTasks();
-  const { colorLabels, sectionsByList, loadSections } = useCalendarStore();
+  const { colorLabels, sectionsByList, loadSections, sectionColorById } =
+    useCalendarStore();
   const labelById = useMemo(() => labelsLookup(colorLabels), [colorLabels]);
+  // Section id → name, for the accessible task label (which section a
+  // task sits in), flattened across all loaded lists.
+  const sectionNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const list of Object.values(sectionsByList)) {
+      for (const s of list) m.set(s.id, s.name);
+    }
+    return m;
+  }, [sectionsByList]);
 
   // Pull sections for every list that currently has tasks. The fetch
   // is cached + cheap (section-less backends return [] via the trait
@@ -156,6 +172,82 @@ export function TaskView() {
   const listRef = useAutoFocus<HTMLUListElement>(!loading);
 
   const [confirmTarget, setConfirmTarget] = useState<Task | null>(null);
+  // Section whose custom ("other…") color is being composed in the
+  // ColorPickerModal, opened from the section-header context menu.
+  const [sectionColorTarget, setSectionColorTarget] = useState<Section | null>(
+    null,
+  );
+
+  // Bind / clear / compose a section's color from its header context menu.
+  // Mirrors the sidebar container color submenu. Persists via
+  // `set_section_color`, which routes host-side: local sections store the
+  // binding on their (synced) row; external sections store a local color
+  // override. Relies on the live cascade to re-tint the section's
+  // colorless tasks.
+  const setSectionColor = useCallback(
+    async (section: Section, labelId: string | null, colorName?: string) => {
+      try {
+        await setSectionColorCmd(section.id, section.list_id, labelId);
+        await loadSections(section.list_id);
+        announce(
+          colorName
+            ? t('views.tasks.sectionColorSet', {
+                name: section.name,
+                color: colorName,
+              })
+            : t('views.tasks.sectionColorCleared', { name: section.name }),
+        );
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('set section color failed', err);
+      }
+    },
+    [loadSections, announce, t],
+  );
+
+  const openSectionColorMenu = useCallback(
+    async (section: Section, position?: { x: number; y: number }) => {
+      if (colorLabels.length === 0) return;
+      const items: ContextMenuItemRequest[] = [
+        {
+          kind: 'check',
+          id: 'color:__none__',
+          label: t('sidebar.menu.colorNone'),
+          checked: !section.color_label,
+        },
+        // Named palette labels only — hidden ad-hoc one-offs never appear.
+        ...colorLabels
+          .filter((cl) => !cl.ad_hoc)
+          .map((cl) => ({
+            kind: 'check' as const,
+            id: `color:${cl.id}`,
+            label: cl.name,
+            checked: section.color_label === cl.id,
+          })),
+        { id: 'color:__other__', label: t('sidebar.menu.colorOther') },
+      ];
+      let selected: string | null = null;
+      try {
+        selected = await showContextMenu(items, position);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('show_context_menu failed', err);
+        return;
+      }
+      if (selected === 'color:__other__') {
+        setSectionColorTarget(section);
+      } else if (selected?.startsWith('color:')) {
+        const raw = selected.slice('color:'.length);
+        const labelId = raw === '__none__' ? null : raw;
+        const labelName = labelId
+          ? colorLabels.find((cl) => cl.id === labelId)?.name
+          : undefined;
+        await setSectionColor(section, labelId, labelName);
+      }
+    },
+    [colorLabels, t, setSectionColor],
+  );
+
   const performDelete = useCallback(
     async (task: Task) => {
       try {
@@ -387,18 +479,77 @@ export function TaskView() {
             // level 1 = a section sub-header within a list; styled
             // smaller + indented to read as a child of the list head.
             const isSection = entry.level === 1;
+            // A colored section tints its header (decorative — the
+            // section name carries the meaning; the color also cascades
+            // to the section's colorless task chips below).
+            const sectionHex = entry.sectionId
+              ? sectionColorById.get(entry.sectionId)
+              : undefined;
+            // The color action is offered for any section (a section's
+            // color is a local concept — synced field for local lists, a
+            // local override for external ones), so it doesn't depend on
+            // the account. The header then becomes interactive (a menu
+            // button + right-click target), so it can't stay aria-hidden.
+            const section =
+              entry.sectionId && entry.listId
+                ? sectionsByList[entry.listId]?.find(
+                    (s) => s.id === entry.sectionId,
+                  )
+                : undefined;
+            const colorable = !!section && colorLabels.length > 0;
             return (
               <li
                 key={`sep-${i}-${entry.label}`}
                 role="presentation"
-                aria-hidden="true"
+                aria-hidden={colorable ? undefined : true}
                 className={
-                  isSection
+                  (isSection
                     ? 'task-list__group task-list__group--section'
-                    : 'task-list__group'
+                    : 'task-list__group') +
+                  (sectionHex ? ' task-list__group--colored' : '')
+                }
+                style={
+                  sectionHex
+                    ? ({ '--event-color': sectionHex } as React.CSSProperties)
+                    : undefined
+                }
+                onContextMenu={
+                  colorable && section
+                    ? (e) => {
+                        e.preventDefault();
+                        void openSectionColorMenu(section, {
+                          x: e.clientX,
+                          y: e.clientY,
+                        });
+                      }
+                    : undefined
                 }
               >
+                {sectionHex && (
+                  <span
+                    className="task-list__group-swatch"
+                    aria-hidden="true"
+                  />
+                )}
                 {entry.label}
+                {colorable && section && (
+                  <button
+                    type="button"
+                    className="task-list__section-menu"
+                    aria-label={t('views.tasks.sectionActions', {
+                      name: section.name,
+                    })}
+                    onClick={(e) => {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      void openSectionColorMenu(section, {
+                        x: rect.left,
+                        y: rect.bottom,
+                      });
+                    }}
+                  >
+                    ⋮
+                  </button>
+                )}
               </li>
             );
           }
@@ -414,6 +565,8 @@ export function TaskView() {
             tasks,
             taskListById,
             labelById,
+            sectionColorById,
+            sectionNameById,
             collapsed,
             toggleCollapsed,
             focusIndex,
@@ -437,6 +590,20 @@ export function TaskView() {
           title: confirmTarget?.title ?? '',
         })}
       />
+      <ColorPickerModal
+        isOpen={sectionColorTarget !== null}
+        onClose={() => setSectionColorTarget(null)}
+        initialHex={
+          sectionColorTarget
+            ? sectionColorById.get(sectionColorTarget.id)
+            : undefined
+        }
+        onResolve={(label) => {
+          if (sectionColorTarget) {
+            void setSectionColor(sectionColorTarget, label.id, label.name);
+          }
+        }}
+      />
     </section>
   );
 }
@@ -456,6 +623,8 @@ interface RenderTreeCtx {
   tasks: Task[];
   taskListById: Map<string, import('../../api/types').TaskList>;
   labelById: Map<string, import('../../api/types').ColorLabel>;
+  sectionColorById: Map<string, string>;
+  sectionNameById: Map<string, string>;
   collapsed: Set<string>;
   toggleCollapsed: (id: string) => void;
   focusIndex: number;
@@ -483,6 +652,8 @@ function renderTreeItem(
     tasks,
     taskListById,
     labelById,
+    sectionColorById,
+    sectionNameById,
     collapsed,
     toggleCollapsed,
     focusIndex,
@@ -556,17 +727,27 @@ function renderTreeItem(
   }
 
   const due = describeDue(task, fmt, t);
-  const color = resolveTaskColor(task, taskListById, labelById);
+  const color = resolveTaskColor(task, taskListById, labelById, sectionColorById);
   const marker = statusMarker(task.status);
   const priorityGlyph = priorityMarker(task.priority);
   const stateLabel = t(statusI18nKey(task.status));
   const progress = subtaskProgress(task.id, tasks);
+  // The section a task sits in is part of its grouping, so name it in the
+  // accessible label (like the list) — otherwise a screen-reader user
+  // navigating by arrow keys can't tell which section a task belongs to
+  // (the section header separators are decorative + skipped in nav).
+  const sectionName = task.section_id
+    ? sectionNameById.get(task.section_id)
+    : undefined;
   const aria = t('views.tasks.optionLabel', {
     title: task.title,
     list: listName,
     state: stateLabel,
     priority: prioritySuffix(t, task.priority),
     progress: subtaskProgressSuffix(t, task.id, tasks),
+    section: sectionName
+      ? t('views.tasks.optionSectionSuffix', { name: sectionName })
+      : '',
     due,
   });
   return (

@@ -18,7 +18,9 @@ use crate::accounts::{AccountsRepo, AdapterKind};
 use crate::cache::{CacheStore, RefreshCoordinator, SyncScope};
 use crate::db::DbHandle;
 use crate::event_log::EventLogWriter;
-use crate::overrides::{apply_color_to_task_lists, apply_to_task_lists, OverridesRepo};
+use crate::overrides::{
+    apply_color_to_sections, apply_color_to_task_lists, apply_to_task_lists, OverridesRepo,
+};
 use crate::registry::{AdapterRegistry, LOCAL_ID};
 use crate::reminders::SchedulerHandle;
 
@@ -146,6 +148,7 @@ fn local_task_capabilities() -> TaskCapabilities {
     TaskCapabilities {
         nested_projects: true,
         sections: true,
+        manageable_sections: true,
         create_lists: true,
         delete_lists: true,
         ..TaskCapabilities::default()
@@ -548,12 +551,14 @@ pub async fn get_tasks(
 pub async fn get_sections(
     adapter: State<'_, LocalAdapter>,
     registry: State<'_, Arc<AdapterRegistry>>,
+    db: State<'_, DbHandle>,
     list_id: String,
 ) -> CommandResult<Vec<Section>> {
     let account = registry
         .account_for_task_list(&list_id)
         .unwrap_or_else(|| LOCAL_ID.to_string());
     if account == LOCAL_ID {
+        // Local sections carry their colour binding on the row already.
         return Ok(adapter.list_sections(&list_id).await?);
     }
     let Some(ext) = registry.task_adapter(&account) else {
@@ -562,7 +567,12 @@ pub async fn get_sections(
             message: format!("task list '{list_id}' is not routable"),
         });
     };
-    Ok(ext.list_sections(&list_id).await?)
+    let mut sections = ext.list_sections(&list_id).await?;
+    // External sections carry no provider colour — stamp the local
+    // override onto `color_label` so the cascade resolves uniformly.
+    let shared = db.shared();
+    apply_color_to_sections(&OverridesRepo::new(&shared), &mut sections);
+    Ok(sections)
 }
 
 /// The users who can be ASSIGNED a task in `list_id` — the list's
@@ -961,12 +971,13 @@ pub async fn delete_task(
 
 // ── Section commands ────────────────────────────────────────────────
 //
-// Sections are currently a local-store concept: the user creates and
-// reorders them on local lists, and they propagate cross-device via the
-// `section.*` event log. External-provider sections (Vikunja buckets,
-// Todoist sections) are read-only here — they surface through
-// `get_sections` but are managed in the provider's own UI, so these
-// mutation commands always target the local adapter.
+// Sections are an Aperio-managed concept on LOCAL lists: the user creates
+// and reorders them, and they propagate cross-device via the `section.*`
+// event log. EXTERNAL-provider sections (Vikunja kanban buckets, Todoist
+// sections) are managed at the source — these commands route the mutation
+// to the provider adapter (no event log; the provider owns its own sync),
+// gated UI-side on the `manageable_sections` capability. A section's COLOR
+// is never sent to the provider; it's a local override (`set_section_color`).
 
 #[derive(Debug, Deserialize)]
 pub struct CreateSectionRequest {
@@ -974,17 +985,43 @@ pub struct CreateSectionRequest {
     pub name: String,
     /// Display order; defaults to 0 (the frontend appends with the
     /// current section count to keep new sections at the bottom).
+    /// Local lists only — external providers order their own sections.
     #[serde(default)]
     pub position: u32,
+    /// Optional colour-label binding for the new section — cascades to
+    /// the section's colourless tasks. `None` ⇒ no colour. Local lists
+    /// only; on external lists the colour is set via `set_section_color`.
+    #[serde(default)]
+    pub color_label: Option<String>,
 }
 
 #[tauri::command]
 pub async fn create_section(
     adapter: State<'_, LocalAdapter>,
+    registry: State<'_, Arc<AdapterRegistry>>,
     event_log: State<'_, Arc<EventLogWriter>>,
     request: CreateSectionRequest,
 ) -> CommandResult<Section> {
-    let section = adapter.create_section(&request.list_id, &request.name, request.position)?;
+    let account = registry
+        .account_for_task_list(&request.list_id)
+        .unwrap_or_else(|| LOCAL_ID.to_string());
+    if account != LOCAL_ID {
+        // External provider — create at the source (no colour, no event
+        // log). The frontend sets any colour afterwards via the override.
+        let Some(ext) = registry.task_adapter(&account) else {
+            return Err(CommandError {
+                code: "not_found",
+                message: format!("task list '{}' is not routable", request.list_id),
+            });
+        };
+        return Ok(ext.create_section(&request.list_id, &request.name).await?);
+    }
+    let section = adapter.create_section(
+        &request.list_id,
+        &request.name,
+        request.position,
+        request.color_label.clone().map(cal_core::ColorLabelId),
+    )?;
     if let Ok(fields) = serde_json::to_value(&section) {
         event_log.append(SyncEvent::SectionCreated(EventPayload {
             id: section.id.clone(),
@@ -997,9 +1034,26 @@ pub async fn create_section(
 #[tauri::command]
 pub async fn update_section(
     adapter: State<'_, LocalAdapter>,
+    registry: State<'_, Arc<AdapterRegistry>>,
     event_log: State<'_, Arc<EventLogWriter>>,
     section: Section,
 ) -> CommandResult<Section> {
+    let account = registry
+        .account_for_task_list(&section.list_id)
+        .unwrap_or_else(|| LOCAL_ID.to_string());
+    if account != LOCAL_ID {
+        // External provider — rename at the source. The colour is a local
+        // override applied via `set_section_color`, never sent here.
+        let Some(ext) = registry.task_adapter(&account) else {
+            return Err(CommandError {
+                code: "not_found",
+                message: format!("task list '{}' is not routable", section.list_id),
+            });
+        };
+        return Ok(ext
+            .update_section(&section.list_id, &section.id, &section.name)
+            .await?);
+    }
     let updated = adapter.update_section(section)?;
     if let Ok(fields) = serde_json::to_value(&updated) {
         event_log.append(SyncEvent::SectionUpdated(EventPayload {
@@ -1013,9 +1067,23 @@ pub async fn update_section(
 #[tauri::command]
 pub async fn delete_section(
     adapter: State<'_, LocalAdapter>,
+    registry: State<'_, Arc<AdapterRegistry>>,
     event_log: State<'_, Arc<EventLogWriter>>,
     id: String,
+    list_id: String,
 ) -> CommandResult<()> {
+    let account = registry
+        .account_for_task_list(&list_id)
+        .unwrap_or_else(|| LOCAL_ID.to_string());
+    if account != LOCAL_ID {
+        let Some(ext) = registry.task_adapter(&account) else {
+            return Err(CommandError {
+                code: "not_found",
+                message: format!("task list '{list_id}' is not routable"),
+            });
+        };
+        return Ok(ext.delete_section(&list_id, &id).await?);
+    }
     adapter.delete_section(&id)?;
     event_log.append(SyncEvent::SectionDeleted(IdPayload { id: id.clone() }));
     Ok(())

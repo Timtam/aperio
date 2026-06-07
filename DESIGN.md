@@ -867,6 +867,27 @@ Unter `Einstellungen → Farb-Labels`:
 
 Ein Termin oder eine Aufgabe ohne Label erbt die Farbe seines bzw. ihres Containers (Kalender oder Aufgabenliste). Mit Label: Label-Farbe. Container-Overrides überschreiben globale Labels lokal.
 
+**Abschnittsfarbe (nur Aufgaben):** Aufgaben-Abschnitte (Sections) tragen ein optionales `color_label` und liegen in der Kette **zwischen** Aufgabe und Aufgabenliste: Eine Aufgabe **ohne** eigene Farbe erbt die Farbe ihres Abschnitts; hat der Abschnitt keine, gilt die Aufgabenlisten-Farbe. Auflösungszeit-Kaskade (kein eingefrorener Wert): Verschiebt man eine farblose Aufgabe in einen anderen Abschnitt, übernimmt sie automatisch dessen Farbe; das Umfärben des Abschnitts-Labels färbt alle seine farblosen Aufgaben mit. Die Abschnittsfarbe ist – wie der Abschnitt selbst – ein lokal-eigenes, event-log-synchronisiertes Feld (kein Provider-Roundtrip).
+
+Effektive Kette einer Aufgabe: `Aufgaben-Label → Abschnitts-Label → Aufgabenlisten-Farbe → neutral`.
+
+Die Abschnittsfarbe wird an zwei Stellen gesetzt — im Abschnitt-Anlegen/Bearbeiten-Dialog **und** über ein Kontextmenü am Abschnitts-Kopf in der Aufgaben-Ansicht (Rechtsklick bzw. die „⋮"-Schaltfläche; analog zu den Sidebar-Containern), inkl. „Andere Farbe…" für Ad-hoc-Farben.
+
+**Lokal vs. extern (Farbquelle).** Die Abschnittsfarbe ist **immer ein lokales Konzept** — kein Anbieter (Todoist/Vikunja) hat ein Section-Farbfeld. Sie wird über `set_section_color` gesetzt, das host-seitig verzweigt, exakt wie `set_container_color_label` (Container-Farben, §6.5):
+
+- **Lokale Abschnitte:** Bindung direkt am `sections.color_label_id` (Migration 0024) + `SectionUpdated`-Event (cross-device-synchronisiert).
+- **Externe Abschnitte:** lokales Override in `section_color_overrides` (Migration 0025; gespiegelt von `container_color_overrides`, nur `section_id`, kein `kind`). `get_sections` stempelt das Override beim Lesen auf `Section.color_label`, sodass die Kaskade einheitlich auflöst. Kein Event-Log (host-lokal).
+
+Ein Abschnitt ist sein Leben lang lokal **oder** extern (das Konto seiner Liste ändert sich nie), also kollidieren die beiden Farbquellen für eine `section_id` nie.
+
+**Zwei Capability-Achsen.** Farbe (Override) ist immer lokal und wird überall angeboten, wo Abschnitte existieren (`sections`). Das **Anlegen/Umbenennen/Löschen** von Abschnitten am Anbieter wird separat über `manageable_sections` (Manifest) gegated — lokal, Todoist und Vikunja deklarieren es; flache Anbieter nicht. Die Mutations-Commands routen nach Konto: lokal → Store + `section.*`-Event; extern → Provider-Adapter (kein Event-Log). Endpunkte: Todoist `POST/DELETE /sections[/{id}]`; Vikunja `PUT/POST/DELETE /projects/{p}/views/{v}/buckets[/{id}]` (Kanban-View wie beim Verschieben).
+
+**Abschnitts-Zuordnung (Schreiben):** Eine Aufgabe lässt sich zwischen Abschnitten verschieben oder aus einem Abschnitt herausnehmen (`section_id → null`), soweit der Adapter es zulässt:
+
+- **Lokal:** direkt (`section_id`-Spalte).
+- **Todoist:** über die Sync-API (`item_move` — REST v2 ignoriert Abschnittswechsel im Update; nur bei tatsächlicher Änderung gefeuert, sonst keine Umsortierung).
+- **Vikunja (≥0.24):** Buckets hängen an einer per-Projekt-Kanban-*View*, nicht mehr am Task. **Lesen:** `?expand=buckets` liefert die per-View-Bucket-Mitgliedschaft, die wir auf die Kanban-View des Projekts matchen (`bucket_id` am Task ist seit 0.24 leer). **Schreiben:** der dedizierte Endpunkt `POST /projects/{p}/views/{v}/buckets/{bucket}/tasks`; vorher wird der aktuelle Bucket gelesen und **nur bei echter Änderung** verschoben (kein Reordering bei unbeteiligten Edits; kann der aktuelle Bucket nicht gelesen werden, wird gar nicht verschoben). „Kein Abschnitt" → `default_bucket_id` der View (sonst linkester Bucket), da Vikunja-Kanban keinen bucket-losen Zustand kennt. Alles best-effort: ältere Server ohne View-Endpunkte überspringen den Move, ohne den Edit zu verlieren.
+
 ### 8.3 Anwendung & Barrierefreiheit
 
 Im Formular: Label-Dropdown mit Autocomplete ("Arb" → "Arbeit"). Da Farbe allein nicht WCAG-konform ist, wird der Label-Name immer im `aria-label` angegeben:

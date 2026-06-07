@@ -191,6 +191,68 @@ unsafe extern "C" fn ffi_delete_task_list(
     )
 }
 
+#[derive(Debug, Deserialize)]
+struct CreateSectionArgs {
+    list_id: String,
+    name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdateSectionArgs {
+    list_id: String,
+    section_id: String,
+    new_name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct DeleteSectionArgs {
+    list_id: String,
+    section_id: String,
+}
+
+unsafe extern "C" fn ffi_create_section(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let args: CreateSectionArgs = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch(h, move |p| async move {
+        p.create_section(&args.list_id, &args.name).await
+    })
+}
+
+unsafe extern "C" fn ffi_update_section(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let args: UpdateSectionArgs = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch(h, move |p| async move {
+        p.update_section(&args.list_id, &args.section_id, &args.new_name)
+            .await
+    })
+}
+
+unsafe extern "C" fn ffi_delete_section(
+    h: *mut c_void,
+    a: *const u8,
+    l: usize,
+) -> PluginCallResult {
+    let args: DeleteSectionArgs = match decode_args(a, l) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    dispatch_unit(h, move |p| async move {
+        p.delete_section(&args.list_id, &args.section_id).await
+    })
+}
+
 // ── Collaboration (DESIGN §9.7) ────────────────────────────
 //
 // Todoist's REST v2 exposes only the read side: the project's
@@ -285,6 +347,9 @@ pub static TASKS_VTABLE: TasksVtable = TasksVtable {
     list_task_list_shares: Some(ffi_list_task_list_shares),
     add_task_list_member: Some(ffi_add_task_list_member),
     remove_task_list_member: Some(ffi_remove_task_list_member),
+    create_section: Some(ffi_create_section),
+    update_section: Some(ffi_update_section),
+    delete_section: Some(ffi_delete_section),
     ..TasksVtable::empty()
 };
 

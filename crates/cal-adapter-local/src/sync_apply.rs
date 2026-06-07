@@ -298,18 +298,20 @@ impl LocalAdapter {
         let now_s = fmt_utc(&Utc::now());
         let conn = self.db().lock().expect("db mutex poisoned");
         conn.execute(
-            "INSERT INTO sections (id, list_id, name, position, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?)
+            "INSERT INTO sections (id, list_id, name, position, color_label_id, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET
-                 list_id    = excluded.list_id,
-                 name       = excluded.name,
-                 position   = excluded.position,
-                 updated_at = excluded.updated_at",
+                 list_id        = excluded.list_id,
+                 name           = excluded.name,
+                 position       = excluded.position,
+                 color_label_id = excluded.color_label_id,
+                 updated_at     = excluded.updated_at",
             params![
                 section.id,
                 section.list_id,
                 section.name,
                 section.order as i64,
+                section.color_label.as_ref().map(|c| c.as_str()),
                 now_s,
                 now_s,
             ],

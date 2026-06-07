@@ -332,6 +332,98 @@ pub fn apply_color_to_contact_lists(repo: &OverridesRepo<'_>, lists: &mut [cal_c
     }
 }
 
+// ── Section color overrides ─────────────────────────────────────────────
+//
+// EXTERNAL sections (Todoist sections, Vikunja kanban buckets) have no
+// provider color field, so a user's color binding lives here, host-local.
+// LOCAL sections carry their (synced) binding on the section row instead
+// and never appear here. Sections are a single id namespace, so — unlike
+// `ColorOverride` — there's no `kind`.
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SectionColorOverride {
+    pub section_id: String,
+    pub color_label_id: String,
+    pub updated_at: String,
+}
+
+impl OverridesRepo<'_> {
+    /// All section color-label overrides (merged onto external sections in
+    /// `get_sections`).
+    pub fn list_section_color_overrides(
+        &self,
+    ) -> Result<Vec<SectionColorOverride>, OverridesError> {
+        let conn = self.db.lock().expect("db mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT section_id, color_label_id, updated_at
+               FROM section_color_overrides",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(SectionColorOverride {
+                section_id: row.get(0)?,
+                color_label_id: row.get(1)?,
+                updated_at: row.get(2)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// Upsert an external section's color-label binding.
+    pub fn set_section_color_label(
+        &self,
+        section_id: &str,
+        color_label_id: &str,
+    ) -> Result<(), OverridesError> {
+        let now = Utc::now().to_rfc3339();
+        let conn = self.db.lock().expect("db mutex poisoned");
+        conn.execute(
+            "INSERT INTO section_color_overrides
+                 (section_id, color_label_id, updated_at)
+             VALUES (?, ?, ?)
+             ON CONFLICT(section_id) DO UPDATE SET
+                 color_label_id = excluded.color_label_id,
+                 updated_at = excluded.updated_at",
+            params![section_id, color_label_id, now],
+        )?;
+        Ok(())
+    }
+
+    /// Drop an external section's color binding (reverts to no color).
+    pub fn clear_section_color_label(&self, section_id: &str) -> Result<(), OverridesError> {
+        let conn = self.db.lock().expect("db mutex poisoned");
+        conn.execute(
+            "DELETE FROM section_color_overrides WHERE section_id = ?",
+            params![section_id],
+        )?;
+        Ok(())
+    }
+}
+
+/// Stamp color-label bindings onto external sections in place. Local
+/// sections carry their own (synced) binding and have no override row, so
+/// they're left untouched.
+pub fn apply_color_to_sections(repo: &OverridesRepo<'_>, sections: &mut [cal_core::Section]) {
+    let map: std::collections::HashMap<String, String> = match repo.list_section_color_overrides() {
+        Ok(o) => o
+            .into_iter()
+            .map(|s| (s.section_id, s.color_label_id))
+            .collect(),
+        Err(err) => {
+            tracing::warn!(?err, "failed to load section color overrides; using none");
+            return;
+        }
+    };
+    for section in sections {
+        if let Some(label) = map.get(&section.id) {
+            section.color_label = Some(cal_core::ColorLabelId(label.clone()));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -492,5 +584,53 @@ mod tests {
         repo.clear_color_label("google:work", ContainerKind::Calendar)
             .unwrap();
         assert!(repo.list_color_overrides().unwrap().is_empty());
+    }
+
+    #[test]
+    fn section_color_override_roundtrips_and_applies() {
+        let (_tmp, db) = fresh_db();
+        let shared = db.shared();
+        shared
+            .lock()
+            .expect("db mutex poisoned")
+            .execute(
+                "INSERT INTO color_labels (id, name, hex) VALUES ('label-2', 'Doing', '#34a853')",
+                [],
+            )
+            .unwrap();
+        let repo = OverridesRepo::new(&shared);
+        repo.set_section_color_label("todoist:sec-1", "label-2")
+            .unwrap();
+        let all = repo.list_section_color_overrides().unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].color_label_id, "label-2");
+
+        // Apply stamps the binding onto the matching external section only.
+        let mut sections = vec![
+            cal_core::Section {
+                id: "todoist:sec-1".into(),
+                list_id: "todoist:p1".into(),
+                name: "Doing".into(),
+                color_label: None,
+                order: 0,
+            },
+            cal_core::Section {
+                id: "todoist:sec-2".into(),
+                list_id: "todoist:p1".into(),
+                name: "Done".into(),
+                color_label: None,
+                order: 1,
+            },
+        ];
+        apply_color_to_sections(&repo, &mut sections);
+        assert_eq!(
+            sections[0].color_label.as_ref().map(|c| c.as_str()),
+            Some("label-2"),
+        );
+        assert!(sections[1].color_label.is_none());
+
+        // Clear reverts.
+        repo.clear_section_color_label("todoist:sec-1").unwrap();
+        assert!(repo.list_section_color_overrides().unwrap().is_empty());
     }
 }

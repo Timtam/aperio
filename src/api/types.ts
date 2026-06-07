@@ -43,6 +43,11 @@ export interface TaskCapabilities {
   /** `null` ⇒ unlimited nesting depth. */
   max_subtask_depth: number | null;
   sections: boolean;
+  /** The adapter can create / rename / delete sections at the source
+   *  (Todoist sections, Vikunja kanban buckets). Gates the section
+   *  create/rename/delete controls. Coloring a section is independent —
+   *  always a local override, offered wherever `sections` is true. */
+  manageable_sections: boolean;
   multiple_labels: boolean;
   task_recurrence: boolean;
   move_between_projects: boolean;
@@ -71,6 +76,10 @@ export interface Section {
   id: string;
   list_id: string;
   name: string;
+  /** Optional color-label binding. Cascades to the section's tasks that
+   *  carry no color of their own (resolution chain task → section →
+   *  list). `null` ⇒ no color. */
+  color_label: string | null;
   /** Display order within the list; lower sorts first. */
   order: number;
 }

@@ -189,11 +189,12 @@ mod tests {
         // 14 method slots: the original 12 + RSVP (current_user_email,
         // respond_to_event).
         assert_eq!(size_of::<CalendarVtable>(), 8 + 14 * 8);
-        // 19 slots: 12 task methods + assignee support (2:
+        // 22 slots: 12 task methods + assignee support (2:
         // list_task_list_members, current_user) + membership management
         // (5: list_task_list_shares, search_users, add/remove member,
-        // set_member_right) — DESIGN §9.7.
-        assert_eq!(size_of::<TasksVtable>(), 8 + 19 * 8);
+        // set_member_right) — DESIGN §9.7 — + section CRUD (3:
+        // create/update/delete_section).
+        assert_eq!(size_of::<TasksVtable>(), 8 + 22 * 8);
         // 14 method slots.
         assert_eq!(size_of::<ContactsVtable>(), 8 + 14 * 8);
         // 10 method slots.

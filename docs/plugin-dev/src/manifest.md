@@ -20,6 +20,7 @@ reads it to discover the plugin before loading any code.
   "tasks": {
     "nested_projects": true,
     "sections": true,
+    "manageable_sections": true,
     "subtasks": true,
     "move_between_projects": false,
     "create_lists": true,
@@ -56,6 +57,7 @@ permissively when absent, so you only set what differs.
 |---|---|
 | `nested_projects` | Task lists nest into a tree (`TaskList.parent_id`). |
 | `sections` | Tasks group into sections within a list. |
+| `manageable_sections` | The adapter can create/rename/delete sections at the source (`create_section`/`update_section`/`delete_section`). Section *color* is a separate, always-local override, so it doesn't need this. |
 | `subtasks` | Tasks can carry subtasks. |
 | `move_between_projects` | A task can move to a different list. |
 | `create_lists` / `delete_lists` | The adapter can create/delete task lists at the source. |

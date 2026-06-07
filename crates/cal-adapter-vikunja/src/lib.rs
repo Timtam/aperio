@@ -272,6 +272,29 @@ impl TasksFeature for VikunjaAdapter {
             .await
             .map_err(to_core_error)
     }
+
+    async fn create_section(&self, list_id: &str, name: &str) -> CoreResult<Section> {
+        tasks::create_section(&self.client, list_id, name)
+            .await
+            .map_err(to_core_error)
+    }
+
+    async fn update_section(
+        &self,
+        list_id: &str,
+        section_id: &str,
+        new_name: &str,
+    ) -> CoreResult<Section> {
+        tasks::update_section(&self.client, list_id, section_id, new_name)
+            .await
+            .map_err(to_core_error)
+    }
+
+    async fn delete_section(&self, list_id: &str, section_id: &str) -> CoreResult<()> {
+        tasks::delete_section(&self.client, list_id, section_id)
+            .await
+            .map_err(to_core_error)
+    }
 }
 
 fn to_core_error(err: VikunjaError) -> CoreError {
