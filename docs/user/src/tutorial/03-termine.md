@@ -31,6 +31,15 @@ Im Termin-Dialog kannst du außerdem festlegen:
 > benanntes Label in deine Palette. Dieselbe Möglichkeit bietet in der
 > Seitenleiste das Kontextmenü **Farbe → Andere…** an Kalendern und Listen.
 
+> **Einzelnen Termin umfärben:** Neben dem Dialog kannst du einen Termin
+> direkt über sein **Rechtsklick-Menü** (Untermenü **Farbe**) umfärben –
+> praktisch für eine schnelle Anpassung ohne das volle Formular. Wo der
+> Anbieter des Kalenders eine Pro-Termin-Farbe speichern kann (lokale
+> Kalender und farbfähige CalDAV-Server), reist die Farbe mit dem Termin und
+> erscheint auch in anderen Clients. Bei iCloud, Google, Exchange/Outlook und
+> abonnierten Feeds wird die Farbe stattdessen lokal auf diesem Gerät behalten
+> (damit sie nie einen Sync-Fehler auslöst) und bleibt genauso angewandt.
+
 Mit **Speichern** wird der Termin angelegt; eine Live-Region bestätigt
 „Termin gespeichert".
 

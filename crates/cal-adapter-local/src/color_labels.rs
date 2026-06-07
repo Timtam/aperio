@@ -74,6 +74,41 @@ impl LocalAdapter {
         }))
     }
 
+    /// Resolve a color-label id to its hex (`#rrggbb`), or `None` when the
+    /// label doesn't exist. The write-path counterpart to
+    /// [`match_hex_to_label`](Self::match_hex_to_label): the host turns an
+    /// event's `color_label` into the `color_hex` a color-capable provider
+    /// stores natively (RFC 7986 `COLOR`).
+    pub fn resolve_label_to_hex(&self, id: &str) -> cal_core::Result<Option<String>> {
+        let conn = self.db().lock().expect("db mutex poisoned");
+        conn.query_row(
+            "SELECT hex FROM color_labels WHERE id = ?",
+            params![id],
+            |r| r.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(map_sql_err)
+    }
+
+    /// Find a color-label id whose hex matches `hex` (case-insensitive),
+    /// preferring a *named* label over an ad-hoc one. `None` when no label
+    /// carries that hex. The read-path counterpart to
+    /// [`resolve_label_to_hex`](Self::resolve_label_to_hex): the host maps a
+    /// provider's native `COLOR` back to a label. No ad-hoc label is minted
+    /// on read, so a foreign color with no matching label resolves to *no*
+    /// label (acceptable for v1).
+    pub fn match_hex_to_label(&self, hex: &str) -> cal_core::Result<Option<String>> {
+        let conn = self.db().lock().expect("db mutex poisoned");
+        conn.query_row(
+            "SELECT id FROM color_labels WHERE hex = ?1 COLLATE NOCASE \
+             ORDER BY ad_hoc ASC LIMIT 1",
+            params![hex],
+            |r| r.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(map_sql_err)
+    }
+
     pub fn create_color_label(&self, name: &str, hex: &str) -> cal_core::Result<ColorLabel> {
         let id = Uuid::new_v4().to_string();
         self.db()
@@ -275,5 +310,47 @@ mod tests {
         assert!(!l.ad_hoc);
         let fetched = a.get_color_label_by_id(l.id.as_str()).unwrap().unwrap();
         assert!(!fetched.ad_hoc);
+    }
+
+    #[test]
+    fn resolve_label_to_hex_round_trips() {
+        let a = adapter();
+        let l = a.create_color_label("Work", "#4285f4").unwrap();
+        assert_eq!(
+            a.resolve_label_to_hex(l.id.as_str()).unwrap().as_deref(),
+            Some("#4285f4"),
+        );
+        // Unknown id → None.
+        assert_eq!(a.resolve_label_to_hex("does-not-exist").unwrap(), None);
+    }
+
+    #[test]
+    fn match_hex_to_label_finds_label_case_insensitively() {
+        let a = adapter();
+        let l = a.create_color_label("Travel", "#fb8c00").unwrap();
+        // Exact match.
+        assert_eq!(
+            a.match_hex_to_label("#fb8c00").unwrap().as_deref(),
+            Some(l.id.as_str()),
+        );
+        // Case-insensitive (CalDAV reads normalise hex to lowercase, but a
+        // stored label may be upper/mixed case).
+        assert_eq!(
+            a.match_hex_to_label("#FB8C00").unwrap().as_deref(),
+            Some(l.id.as_str()),
+        );
+        // No label carries this hex → None (no ad-hoc label is minted here).
+        assert_eq!(a.match_hex_to_label("#000000").unwrap(), None);
+    }
+
+    #[test]
+    fn match_hex_to_label_prefers_named_over_ad_hoc() {
+        let a = adapter();
+        // An ad-hoc label and a named label share the same hex.
+        let (adhoc, _) = a.get_or_create_ad_hoc_color_label("#34a853").unwrap();
+        let named = a.create_color_label("Done", "#34a853").unwrap();
+        let got = a.match_hex_to_label("#34a853").unwrap();
+        assert_eq!(got.as_deref(), Some(named.id.as_str()));
+        assert_ne!(got.as_deref(), Some(adhoc.id.as_str()));
     }
 }

@@ -365,6 +365,8 @@ impl CalendarFeature for IcalAdapter {
             read_only: true,
             default_sound: None,
             supports_scheduling: false,
+            // Read-only subscription feed; nothing to write a color back to.
+            supports_event_color: false,
         }])
     }
 

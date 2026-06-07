@@ -902,6 +902,25 @@ Labels werden über das Event Log zwischen Geräten synchronisiert – mit eigen
 
 Neben der benannten Palette kann an jeder Stelle, an der eine Farbe gesetzt wird (Termin-/Aufgaben-Dialog, Sidebar-Kontextmenü `Farbe → Andere…`), über den barrierefreien Farb-Picker (`ColorComposer`: Hex-Textfeld + Farbfeld) **eine beliebige Farbe spontan komponiert** werden. Das vermeidet den Umweg über die Einstellungen.
 
+### 8.5 Termin-Farben (pro Termin)
+
+Ein einzelner Termin lässt sich umfärben — per Rechtsklick auf den Termin-Chip (`Farbe`-Untermenü) oder über das Label-Feld im Termin-Dialog. Wohin die Bindung geht, hängt davon ab, ob der Anbieter eine **native Pro-Termin-Farbe** speichern kann. Das entscheidet ein Capability-Flag `Calendar.supports_event_color` (`#[serde(default)]`):
+
+- **Lokal:** immer `true` (Farbe liegt auf der Termin-Zeile, `color_label`).
+- **CalDAV:** `true`, **außer iCloud**. Gesetzt im `CalendarFeature`-Impl des CalDAV-Adapters (`server_url.contains("icloud.com")`). iCloud terminiert serverseitig (RFC 6638) — ein `COLOR`-tragendes PUT auf einen Termin mit Teilnehmern würde diese **anmailen**, deshalb bleibt iCloud beim Override.
+- **Google / Microsoft Graph / EWS / iCal / Geburtstage:** `false` (keine in Aperios Farbmodell gemappte Pro-Termin-Farbe).
+
+**Single Source of Truth pro Kalender.** Farbfähig → nativ am Provider (kein Override); nicht farbfähig → host-lokales Override (wie Stage 1).
+
+**Nicht-farbfähig (Override, Stage 1).** Für externe Termine ohne native Farbe lebt die Label-Bindung host-lokal in `event_color_overrides` (Migration 0026; `event_id` = Serien-Master-Id, kein `kind`). `apply_color_to_events` stempelt das Override beim Lesen auf `Event.color_label`. Gesetzt über `set_event_color(event_id, calendar_id, color_label_id)`, das nach Konto verzweigt: lokal **und** farbfähig-extern → No-op (die Farbe reist über `update_event`); nur nicht-farbfähig-extern schreibt das Override. Kein Provider-PUT, also nichts, das iCloud & Co. ablehnen könnten.
+
+**Farbfähig (nativ, Stage 2).** Round-trip über RFC 7986 `COLOR`. Transportfeld `Event`/`NewEvent.color_hex: Option<String>` (`#[serde(default, skip…)]`, ein `#RRGGBB`):
+
+- **Schreiben:** `create_event` / `update_event` lösen für einen farbfähigen externen Zielkalender `event.color_label` → `color_hex` auf (`LocalAdapter::resolve_label_to_hex`), bevor der Adapter gerufen wird; `apply_common` schreibt dann `COLOR:<hex>`. Zur Sicherheit löscht der CalDAV-Adapter `color_hex` für iCloud nochmals am Schreibrand. Ein farbfähiges `update_event` räumt zusätzlich ein evtl. veraltetes Stage-1-Override desselben Termins ab (sonst würde es die native Farbe beim Lesen verdecken).
+- **Lesen:** `map_event` parst `COLOR` → `color_hex` (akzeptiert `#RRGGBB` und bekannte CSS3-Namen, sonst `None`). `get_events` mappt `color_hex` → `color_label` (`match_hex_to_label`, nur gegen **bestehende** Labels, bevorzugt benannte) — **vor** dem Override-Stempel, damit ein Override (Override wird zuletzt angewandt) für den seltenen Fall „Termin trägt beides" gewinnt.
+
+Capability-Lookup im Host: aus dem gecachten Kalender-Listing (`cache.read_calendars`); unbekannt → `false` (sichere Voreinstellung: Override). Das Frontend routet identisch (`account_id === 'local' || calendar.supports_event_color`).
+
 Eine Custom-Farbe wird als `ColorLabel` realisiert — dadurch greift die gesamte bestehende Mechanik (Binding über `color_label`, Auflösung im `CalendarStore`, Sync via `color_label.*`, Container-Override-Tabelle) unverändert. `ColorLabel` trägt dazu ein Flag `ad_hoc: bool`:
 
 - **`ad_hoc = false`** — normales, benanntes Label (sichtbar in Palette + Pickern).

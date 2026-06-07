@@ -166,6 +166,9 @@ pub async fn create_event(
         all_day: event.all_day,
         recurrence: event.recurrence,
         color_label: event.color_label,
+        // Echo the native color we just wrote back to the caller so the
+        // post-create event carries it without a refetch.
+        color_hex: event.color_hex,
         reminders: event.reminders,
         sound: event.sound,
         attendees: event.attendees,
@@ -732,6 +735,7 @@ END:VCALENDAR</c:calendar-data>
             all_day: false,
             recurrence: None,
             color_label: None,
+            color_hex: None,
             reminders: Vec::new(),
             sound: None,
             attendees: Vec::new(),
@@ -794,6 +798,7 @@ END:VCALENDAR</c:calendar-data>
             all_day: false,
             recurrence: None,
             color_label: None,
+            color_hex: None,
             reminders: Vec::new(),
             sound: None,
             attendees: Vec::new(),
@@ -835,6 +840,7 @@ END:VCALENDAR</c:calendar-data>
             all_day: false,
             recurrence: None,
             color_label: None,
+            color_hex: None,
             reminders: Vec::new(),
             sound: None,
             attendees: Vec::new(),

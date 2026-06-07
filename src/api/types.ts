@@ -133,6 +133,12 @@ export interface Calendar {
    *  RFC 6638). Gates the "notify attendees" toggle in the event dialog.
    *  Absent → treat as unsupported. */
   supports_scheduling?: boolean;
+  /** True when the owning provider stores a per-event color natively
+   *  (RFC 7986 COLOR): local always; color-capable CalDAV (non-iCloud);
+   *  Google/Graph/EWS/iCal never. When false the color is kept as a
+   *  host-local override instead. Routes a recolor through `update_event`
+   *  (native) vs `setEventColor` (override). Absent → treat as unsupported. */
+  supports_event_color?: boolean;
 }
 
 export interface SoundConfig {
@@ -168,6 +174,10 @@ export interface CalendarEvent {
   all_day: boolean;
   recurrence: EventRecurrence | null;
   color_label: string | null;
+  /** Read-only, transport-only native color (`#rrggbb`, RFC 7986 COLOR) from
+   *  a color-capable provider. The host maps it onto `color_label` on read, so
+   *  the UI never needs it — render from `color_label`. Never send it back. */
+  color_hex?: string | null;
   reminders: Reminder[];
   sound: SoundConfig | null;
   attendees: string[];

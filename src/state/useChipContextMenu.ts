@@ -170,18 +170,19 @@ export function useChipContextMenu(): ChipContextMenuActions {
         const raw = selected.slice('color:'.length);
         const next = raw === 'none' ? null : raw;
         const seriesId = seriesIdOf(event);
-        const isLocal =
-          calById.get(event.calendar_id)?.account_id === 'local';
+        const cal = calById.get(event.calendar_id);
+        // Color rides update_event when the provider can store it natively:
+        // local always, plus color-capable CalDAV (RFC 7986 COLOR). Otherwise
+        // it goes to a host-local override (no provider PUT to be rejected).
+        const storesColorNatively =
+          cal?.account_id === 'local' || cal?.supports_event_color === true;
         try {
-          if (isLocal) {
-            // Local events keep their color on the row.
+          if (storesColorNatively) {
             await apiUpdateEvent(
               { ...event, id: seriesId, color_label: next },
               event.calendar_id,
             );
           } else {
-            // External: host-local override — no provider write, so
-            // there's no PUT for the server (e.g. iCloud) to reject.
             await setEventColor(seriesId, event.calendar_id, next);
           }
           announce(t('chipMenu.colorSet', { title: event.title }));

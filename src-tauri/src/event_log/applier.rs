@@ -935,6 +935,7 @@ mod tests {
             all_day: false,
             recurrence: None,
             color_label: None,
+            color_hex: None,
             reminders: Vec::<Reminder>::new(),
             sound: None,
             attendees: Vec::new(),
@@ -964,6 +965,7 @@ mod tests {
         Calendar {
             color_label: None,
             supports_scheduling: false,
+            supports_event_color: false,
             id: id.into(),
             name: "From remote".into(),
             color: None,

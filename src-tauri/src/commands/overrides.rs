@@ -25,6 +25,7 @@ use sync_core::{EventPayload, SyncEvent};
 use tauri::State;
 
 use super::{CommandError, CommandResult};
+use crate::cache::CacheStore;
 use crate::db::DbHandle;
 use crate::event_log::EventLogWriter;
 use crate::overrides::{ContainerKind, OverridesError, OverridesRepo};
@@ -171,6 +172,7 @@ pub async fn set_section_color(
 #[tauri::command]
 pub async fn set_event_color(
     registry: State<'_, Arc<AdapterRegistry>>,
+    cache: State<'_, Arc<CacheStore>>,
     db: State<'_, DbHandle>,
     event_id: String,
     calendar_id: String,
@@ -179,9 +181,22 @@ pub async fn set_event_color(
     let account = registry
         .account_for_calendar(&calendar_id)
         .unwrap_or_else(|| LOCAL_ID.to_string());
-    if account == LOCAL_ID {
-        // Local events keep their color on the row; the frontend routes
-        // local color changes through update_event. No override here.
+    // A color-capable external calendar (RFC 7986 COLOR) stores the color
+    // natively through update_event, exactly like a local event keeps it on
+    // its row. The frontend routes both through update_event, so this command
+    // is a no-op for them — and short-circuiting here means even a stray call
+    // can't create a host-local override that would compete with the native
+    // value on read.
+    let color_capable_external = account != LOCAL_ID
+        && cache
+            .read_calendars(&account)
+            .ok()
+            .into_iter()
+            .flatten()
+            .find(|c| c.id == calendar_id)
+            .map(|c| c.supports_event_color)
+            .unwrap_or(false);
+    if account == LOCAL_ID || color_capable_external {
         return Ok(());
     }
     let shared = db.shared();

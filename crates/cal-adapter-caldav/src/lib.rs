@@ -683,6 +683,18 @@ impl CaldavAdapter {
             .and_then(|d| d.calendar_user_address)
     }
 
+    /// Whether this account stores a per-event color natively (RFC 7986
+    /// `COLOR`). True for every CalDAV server *except* iCloud: iCloud
+    /// auto-schedules (RFC 6638), so a `COLOR`-bearing PUT on an event with
+    /// attendees would email them — Stage 1 keeps iCloud per-event colors as
+    /// host-local overrides instead. URL-based heuristic; a generic server
+    /// that silently ignores `COLOR` simply drops the color on next sync
+    /// (rare, user-reportable). Drives both the calendar capability flag and
+    /// the write-side gate that clears `color_hex` before an iCloud PUT.
+    fn supports_event_color(&self) -> bool {
+        !self.credentials.config.server_url.contains("icloud.com")
+    }
+
     /// Test-only: peek at the cached result without going to the wire.
     #[cfg(test)]
     fn cached_calendar_home(&self) -> Option<url::Url> {
@@ -763,7 +775,7 @@ impl CalendarFeature for CaldavAdapter {
         let Some(home) = discovery.calendar_home_url.as_ref() else {
             return Ok(Vec::new());
         };
-        let fresh = calendars::list_calendars(
+        let mut fresh = calendars::list_calendars(
             &self.http,
             home,
             &self.credentials,
@@ -771,6 +783,13 @@ impl CalendarFeature for CaldavAdapter {
         )
         .await
         .map_err(to_core_error)?;
+        // RFC 7986 native per-event COLOR: advertise it for every calendar on
+        // a color-capable (non-iCloud) account so the host routes recolors
+        // through the provider; iCloud keeps the Stage 1 host-local override.
+        let color_capable = self.supports_event_color();
+        for cal in &mut fresh {
+            cal.supports_event_color = color_capable;
+        }
         *self.calendars_cache.lock().expect("poison") = Some(ListingCache {
             items: fresh.clone(),
             cached_at: chrono::Utc::now(),
@@ -818,9 +837,15 @@ impl CalendarFeature for CaldavAdapter {
         }
     }
 
-    async fn create_event(&self, calendar_id: &str, event: NewEvent) -> CoreResult<Event> {
+    async fn create_event(&self, calendar_id: &str, mut event: NewEvent) -> CoreResult<Event> {
         let cal_url =
             Url::parse(calendar_id).map_err(|err| CoreError::InvalidInput(err.to_string()))?;
+        // Defense-in-depth iCloud gate: the host already withholds `color_hex`
+        // from non-capable calendars, but a stray value (e.g. a cross-calendar
+        // move into iCloud) must never reach a COLOR-bearing PUT here.
+        if !self.supports_event_color() {
+            event.color_hex = None;
+        }
         let organizer = self.organizer_for_send(event.send_invitations).await;
         events::create_event(
             &self.http,
@@ -833,7 +858,10 @@ impl CalendarFeature for CaldavAdapter {
         .map_err(to_core_error)
     }
 
-    async fn update_event(&self, event: Event) -> CoreResult<Event> {
+    async fn update_event(&self, mut event: Event) -> CoreResult<Event> {
+        if !self.supports_event_color() {
+            event.color_hex = None;
+        }
         let organizer = self.organizer_for_send(event.send_invitations).await;
         events::update_event(&self.http, event, &self.credentials, organizer.as_deref())
             .await
@@ -1505,6 +1533,30 @@ mod tests {
         let second = adapter.discover().await.unwrap();
         assert_eq!(first.calendar_home_url, second.calendar_home_url);
         assert!(adapter.cached_calendar_home().is_some());
+    }
+
+    #[test]
+    fn supports_event_color_is_false_only_for_icloud() {
+        let mk = |url: &str| {
+            CaldavAdapter::new(
+                Credentials::new(
+                    CaldavAccountConfig {
+                        server_url: url.into(),
+                        username: "alice".into(),
+                        auth_kind: AuthKind::Basic,
+                    },
+                    "hunter2".into(),
+                ),
+                Some(Duration::from_secs(3)),
+            )
+            .unwrap()
+        };
+        // iCloud auto-schedules — a COLOR-bearing PUT would email attendees,
+        // so it keeps the host-local override (Stage 1).
+        assert!(!mk("https://caldav.icloud.com/123/calendars/").supports_event_color());
+        // Generic CalDAV servers round-trip RFC 7986 COLOR natively.
+        assert!(mk("https://cloud.example.com/remote.php/dav").supports_event_color());
+        assert!(mk("https://radicale.example.org/").supports_event_color());
     }
 
     /// Minimal PROPFIND-on-home-set response: one VEVENT-capable

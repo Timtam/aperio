@@ -1386,6 +1386,7 @@ mod tests {
             all_day: false,
             recurrence: None as Option<EventRecurrence>,
             color_label: None,
+            color_hex: None,
             reminders,
             sound: None,
             attendees: Vec::new(),

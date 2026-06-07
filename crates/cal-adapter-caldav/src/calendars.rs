@@ -140,6 +140,11 @@ fn to_calendar(home_url: &Url, entry: ResponseEntry, supports_scheduling: bool) 
         // Account-level: the whole iCloud/CalDAV principal either advertises
         // RFC 6638 auto-scheduling or it doesn't, so every calendar shares it.
         supports_scheduling,
+        // Set conservatively here; the CalendarFeature impl in `lib.rs`
+        // overrides it per account to `!iCloud` (iCloud auto-schedules and
+        // would email attendees on a COLOR-bearing PUT, so it keeps the
+        // host-local override instead — see DESIGN / Stage 2).
+        supports_event_color: false,
         color_label: None,
         id,
         name: entry

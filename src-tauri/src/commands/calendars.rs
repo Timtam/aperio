@@ -1,7 +1,9 @@
 //! Calendar and event commands.
 
 use cal_adapter_local::LocalAdapter;
-use cal_core::{AttendeeStatus, Calendar, CalendarFeature, DateRange, Event, FreeBusy, NewEvent};
+use cal_core::{
+    AttendeeStatus, Calendar, CalendarFeature, ColorLabelId, DateRange, Event, FreeBusy, NewEvent,
+};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -295,6 +297,44 @@ pub struct EventRangeRequest {
     pub end: DateTime<Utc>,
 }
 
+/// Whether the external calendar `calendar_id` (owned by `account`) stores a
+/// per-event color natively (RFC 7986 `COLOR`). Read from the cached calendar
+/// listing — which the sidebar populates before any event edit. An unknown /
+/// uncached id degrades to `false` (the safe default: the color stays a
+/// host-local override, matching Stage 1).
+fn calendar_supports_event_color(cache: &CacheStore, account: &str, calendar_id: &str) -> bool {
+    cache
+        .read_calendars(account)
+        .ok()
+        .into_iter()
+        .flatten()
+        .find(|c| c.id == calendar_id)
+        .map(|c| c.supports_event_color)
+        .unwrap_or(false)
+}
+
+/// Resolve an event's `color_label` to the `#rrggbb` a color-capable provider
+/// stores in `COLOR`. `None` (no label, or the label was deleted) clears the
+/// provider color on the next write.
+fn resolve_color_hex(adapter: &LocalAdapter, label: Option<&ColorLabelId>) -> Option<String> {
+    adapter.resolve_label_to_hex(label?.as_str()).ok().flatten()
+}
+
+/// Map each event's native `color_hex` (set by a color-capable adapter from
+/// the provider's `COLOR`) back to a `color_label`, in place. Runs *before*
+/// the host-local override stamp so a user override still wins for a
+/// non-capable provider (whose events never carry `color_hex`).
+fn map_color_hex_to_labels(adapter: &LocalAdapter, events: &mut [Event]) {
+    for ev in events.iter_mut() {
+        let Some(hex) = ev.color_hex.as_deref() else {
+            continue;
+        };
+        if let Ok(Some(label)) = adapter.match_hex_to_label(hex) {
+            ev.color_label = Some(ColorLabelId::new(label));
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn get_events(
     app: AppHandle,
@@ -381,9 +421,13 @@ pub async fn get_events(
     let mut cached = cache
         .read_events(&account, &request.calendar_id, range)
         .unwrap_or_default();
-    // Stamp host-local color overrides onto external events whose provider
-    // can't store a per-event color (iCloud etc.). Color-capable calendars
-    // carry the color on the event already, so this is a no-op for them.
+    // Native per-event colors first: a color-capable provider (RFC 7986
+    // COLOR) carries `color_hex` on the event — map it back to a color label.
+    map_color_hex_to_labels(&adapter, &mut cached);
+    // Then stamp host-local color overrides for external events whose provider
+    // can't store a per-event color (iCloud etc.). `apply_color_to_events`
+    // skips any event already carrying a native `color_hex`, so a leftover
+    // Stage-1 override can never shadow a provider's native color here.
     apply_color_to_events(&OverridesRepo::new(&db.shared()), &mut cached);
     tracing::info!(
         target: "aperio::cache",
@@ -444,8 +488,14 @@ pub async fn create_event(
                 message: format!("calendar '{}' is not routable", request.calendar_id),
             });
         };
-        ext.create_event(&request.calendar_id, request.event)
-            .await?
+        let mut new_event = request.event;
+        // Color-capable provider: resolve the label to a hex so the adapter
+        // writes a native RFC 7986 COLOR. Non-capable providers keep the
+        // color as a host-local override (set separately via set_event_color).
+        if calendar_supports_event_color(&cache, &account, &request.calendar_id) {
+            new_event.color_hex = resolve_color_hex(&adapter, new_event.color_label.as_ref());
+        }
+        ext.create_event(&request.calendar_id, new_event).await?
     };
     // Only LOCAL events flow through the event log — external
     // adapters (Google, iCloud, EWS, Graph) handle their own
@@ -473,6 +523,7 @@ pub async fn update_event(
     cache: State<'_, Arc<CacheStore>>,
     scheduler: State<'_, SchedulerHandle>,
     event_log: State<'_, Arc<EventLogWriter>>,
+    db: State<'_, DbHandle>,
     event: Event,
     previous_calendar_id: Option<String>,
 ) -> CommandResult<Event> {
@@ -530,7 +581,7 @@ pub async fn update_event(
         // — if the create succeeds and the delete fails, the user
         // sees a duplicate they can resolve manually rather than
         // an empty calendar where their event used to live.
-        let new_payload = NewEvent {
+        let mut new_payload = NewEvent {
             // A cross-calendar move re-creates the event at the target; the
             // organizer-notify intent isn't carried through this path (a
             // dedicated "notify on move" decision is future work, DESIGN §7.5).
@@ -543,10 +594,21 @@ pub async fn update_event(
             all_day: event.all_day,
             recurrence: event.recurrence.clone(),
             color_label: event.color_label.clone(),
+            // Carry the native color hex across the move; the target adapter
+            // emits/strips it per its own capability (iCloud clears it).
+            color_hex: event.color_hex.clone(),
             reminders: event.reminders.clone(),
             sound: event.sound.clone(),
             attendees: event.attendees.clone(),
         };
+        // Preserve the color when moving INTO a color-capable provider:
+        // resolve the label to a hex so the target stores it natively (the
+        // incoming event carries `color_label`, not `color_hex`).
+        if target_account != LOCAL_ID
+            && calendar_supports_event_color(&cache, &target_account, &event.calendar_id)
+        {
+            new_payload.color_hex = resolve_color_hex(&adapter, new_payload.color_label.as_ref());
+        }
 
         let created = if target_account == LOCAL_ID {
             adapter
@@ -641,7 +703,25 @@ pub async fn update_event(
                 message: format!("calendar '{}' is not routable", event.calendar_id),
             });
         };
-        ext.update_event(event).await?
+        let capable = calendar_supports_event_color(&cache, &target_account, &event.calendar_id);
+        let mut event = event;
+        if capable {
+            // Color-capable provider: resolve the label to a hex so the
+            // adapter writes (or clears) the native RFC 7986 COLOR.
+            event.color_hex = resolve_color_hex(&adapter, event.color_label.as_ref());
+        }
+        let updated = ext.update_event(event).await?;
+        if capable {
+            // The provider's COLOR is now authoritative — drop any host-local
+            // override left over from Stage 1 (when this calendar was treated
+            // as non-capable) so it can't shadow the native color on read.
+            let shared = db.shared();
+            let repo = OverridesRepo::new(&shared);
+            if let Err(err) = repo.clear_event_color_label(&updated.id) {
+                tracing::warn!(?err, event_id = %updated.id, "clearing stale event color override failed; non-fatal");
+            }
+        }
+        updated
     };
     if is_local {
         if let Ok(fields) = serde_json::to_value(&updated) {
@@ -899,6 +979,7 @@ mod tests {
                     all_day: false,
                     recurrence: None,
                     color_label: None,
+                    color_hex: None,
                     reminders: vec![],
                     sound: None,
                     attendees: vec![],

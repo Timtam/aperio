@@ -50,6 +50,18 @@ pub struct Calendar {
     /// set it) deserialising as `false`.
     #[serde(default)]
     pub supports_scheduling: bool,
+    /// True when the backing provider can store a per-event color
+    /// *natively* (RFC 7986 `COLOR`) so the color syncs to other clients
+    /// and round-trips: **local** always; **CalDAV** when the server is
+    /// color-capable (set to `!iCloud` by the CalDAV adapter); **Google /
+    /// Microsoft Graph / EWS / iCal** never. When `false`, the host keeps a
+    /// per-event color as a host-local override instead (the Stage 1
+    /// `event_color_overrides` table). Gates how the frontend routes a
+    /// recolor — through `update_event` (native) vs `set_event_color`
+    /// (override). `#[serde(default)]` keeps older wire payloads + stores
+    /// (which never set it) deserialising as `false`.
+    #[serde(default)]
+    pub supports_event_color: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -64,6 +76,19 @@ pub struct Event {
     pub all_day: bool,
     pub recurrence: Option<EventRecurrence>,
     pub color_label: Option<ColorLabelId>,
+    /// Transport-only native per-event color as `#RRGGBB`, used only with
+    /// providers that store a color on the event itself (RFC 7986 `COLOR`,
+    /// i.e. color-capable CalDAV). On a *write* the host resolves
+    /// [`color_label`](Self::color_label) → this hex before handing the
+    /// event to a color-capable adapter, which emits `COLOR`; on a *read*
+    /// the adapter fills it from the provider's `COLOR` and the host maps
+    /// it back to a `color_label`. `None` for local events and for
+    /// non-capable providers (their color lives on `color_label`, kept
+    /// either on the synced row or in a host-local override).
+    /// `#[serde(default, skip…)]` keeps it `None` and off the wire / out of
+    /// stores everywhere it isn't set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color_hex: Option<String>,
     pub reminders: Vec<Reminder>,
     /// Sound override at the event level (section 14.4).
     pub sound: Option<SoundConfig>,
@@ -132,6 +157,11 @@ pub struct NewEvent {
     pub all_day: bool,
     pub recurrence: Option<EventRecurrence>,
     pub color_label: Option<ColorLabelId>,
+    /// Native per-event color as `#RRGGBB` for this create — see
+    /// [`Event::color_hex`]. The host fills it from `color_label` for a
+    /// color-capable target; `None` otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color_hex: Option<String>,
     pub reminders: Vec<Reminder>,
     pub sound: Option<SoundConfig>,
     pub attendees: Vec<String>,
