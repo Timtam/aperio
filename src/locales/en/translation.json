@@ -1042,7 +1042,8 @@
         "addButton": "Add",
         "added": "Subtask \"{{title}}\" added.",
         "listAria": "Subtasks. Arrow keys to navigate, Space to toggle done, Shift+F10 for actions.",
-        "rowLabel": "{{title}}, {{state}}{{priority}}"
+        "rowLabel": "{{title}}, {{state}}{{priority}}",
+        "removeAria": "Remove subtask \"{{title}}\""
       },
       "status": {
         "open": "Open",
