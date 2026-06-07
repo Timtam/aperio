@@ -1043,7 +1043,8 @@
         "added": "Subtask \"{{title}}\" added.",
         "listAria": "Subtasks. Arrow keys to navigate, Space to toggle done, Shift+F10 for actions.",
         "rowLabel": "{{title}}, {{state}}{{priority}}",
-        "removeAria": "Remove subtask \"{{title}}\""
+        "removeAria": "Remove subtask \"{{title}}\"",
+        "listNoSubtasks": "The selected list doesn't support subtasks. Remove the drafts or pick another list."
       },
       "status": {
         "open": "Open",

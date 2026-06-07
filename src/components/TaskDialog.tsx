@@ -669,6 +669,18 @@ export function TaskDialog({
         setError(t('dialogs.task.listRequired'));
         return;
       }
+      // Don't silently drop staged subtasks: if the user switched the
+      // (create-mode) list to one that can't hold subtasks while drafts
+      // are pending, block the save so they remove them or pick another
+      // list, rather than creating a parent with the children lost.
+      if (
+        !isEdit &&
+        draftSubtasks.length > 0 &&
+        !createSupportsSubtasks
+      ) {
+        setError(t('dialogs.task.subtasks.listNoSubtasks'));
+        return;
+      }
 
       const {
         scheduled_date,
@@ -1382,7 +1394,7 @@ export function TaskDialog({
           </fieldset>
         )}
 
-        {!isEdit && createSupportsSubtasks && (
+        {!isEdit && (createSupportsSubtasks || draftSubtasks.length > 0) && (
           <fieldset className="form__field form__field--subtasks">
             <legend className="form__label">
               {t('dialogs.task.subtasks.heading')}
@@ -1422,29 +1434,37 @@ export function TaskDialog({
                 ))}
               </ul>
             )}
-            <div className="subtasks__add">
-              <input
-                type="text"
-                value={newSubtaskTitle}
-                onChange={(e) => setNewSubtaskTitle(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    addDraftSubtask();
-                  }
-                }}
-                placeholder={t('dialogs.task.subtasks.placeholder')}
-                aria-label={t('dialogs.task.subtasks.newAria')}
-              />
-              <button
-                type="button"
-                onClick={addDraftSubtask}
-                disabled={!newSubtaskTitle.trim()}
-                className="subtasks__add-button"
-              >
-                {t('dialogs.task.subtasks.addButton')}
-              </button>
-            </div>
+            {createSupportsSubtasks ? (
+              <div className="subtasks__add">
+                <input
+                  type="text"
+                  value={newSubtaskTitle}
+                  onChange={(e) => setNewSubtaskTitle(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      addDraftSubtask();
+                    }
+                  }}
+                  placeholder={t('dialogs.task.subtasks.placeholder')}
+                  aria-label={t('dialogs.task.subtasks.newAria')}
+                />
+                <button
+                  type="button"
+                  onClick={addDraftSubtask}
+                  disabled={!newSubtaskTitle.trim()}
+                  className="subtasks__add-button"
+                >
+                  {t('dialogs.task.subtasks.addButton')}
+                </button>
+              </div>
+            ) : (
+              // List was switched to one that can't hold subtasks while
+              // drafts are still staged — warn instead of dropping them.
+              <p className="form__hint form__hint--warning">
+                {t('dialogs.task.subtasks.listNoSubtasks')}
+              </p>
+            )}
           </fieldset>
         )}
 

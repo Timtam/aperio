@@ -682,7 +682,7 @@
       "autoDate": {
         "heading": "Automatisches Datum",
         "label": "Backlog-Aufgaben beim Starten auf heute setzen",
-        "hint": "Wenn aktiviert, bekommt eine datumlose Aufgabe automatisch das heutige Datum, sobald ihr Status auf in Bearbeitung wechselt — direkt oder über die Statuskopplung eines Kindes. Deaktiviert: das eingeplante Datum bleibt unangetastet."
+        "hint": "Wenn aktiviert, bekommt eine datumlose Aufgabe automatisch das heutige Datum, sobald ihr Status auf in Arbeit wechselt — direkt oder über die Statuskopplung eines Kindes. Deaktiviert: das eingeplante Datum bleibt unangetastet."
       },
       "carryOverDefault": {
         "heading": "Übernahme-Standard",
@@ -1043,11 +1043,12 @@
         "added": "Unteraufgabe „{{title}}\" hinzugefügt.",
         "listAria": "Unteraufgaben. Pfeiltasten zur Navigation, Leertaste zum Umschalten, Umschalt+F10 für Aktionen.",
         "rowLabel": "{{title}}, {{state}}{{priority}}",
-        "removeAria": "Unteraufgabe „{{title}}\" entfernen"
+        "removeAria": "Unteraufgabe „{{title}}\" entfernen",
+        "listNoSubtasks": "Die gewählte Liste unterstützt keine Unteraufgaben. Entferne die Entwürfe oder wähle eine andere Liste."
       },
       "status": {
         "open": "Offen",
-        "inProgress": "In Bearbeitung",
+        "inProgress": "In Arbeit",
         "completed": "Erledigt",
         "cancelled": "Abgebrochen"
       },
