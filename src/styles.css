@@ -2082,17 +2082,17 @@ button[aria-disabled='true'] {
 
 .week-task,
 .day-task {
-  /* Shared frame: dashed border that picks up the colour label when
-   * one is set (--event-color), so tasks visibly inherit the same
-   * colour signal events do — without filling the chip (events do
-   * the fill; tasks frame). */
+  /* Filled exactly like an event chip (see `.week-event`): tasks read as
+   * appointments, set apart only by the check-off marker. The colour label
+   * drives the fill the same way it does for events; no label → the accent
+   * fill, matching a colourless event. */
   width: 100%;
-  background: transparent;
-  border: 1px dashed var(--event-color, color-mix(in srgb, var(--color-fg-muted) 40%, transparent));
+  background: var(--event-color, var(--color-accent));
+  border: 0;
   border-radius: var(--radius-sm);
   padding: 2px var(--space-1);
   font: inherit;
-  color: var(--color-fg);
+  color: var(--color-accent-fg);
   text-align: left;
   cursor: pointer;
   font-size: var(--font-size-xs);
@@ -2118,34 +2118,42 @@ button[aria-disabled='true'] {
 }
 
 .week-task:hover,
-.day-task:hover,
+.day-task:hover {
+  /* Subtle darken on hover — events carry no hover state, so keep it light
+   * and let the fill stay the dominant signal. */
+  filter: brightness(0.93);
+}
+
 .week-task:focus,
 .day-task:focus {
-  background: color-mix(
-    in srgb,
-    var(--event-color, var(--color-accent)) 12%,
-    transparent
-  );
-  border-color: var(--event-color, var(--color-accent));
+  /* Keyboard focus is drawn by `--focused`; suppress the default ring. */
   outline: none;
 }
 
 .week-task--by,
 .day-task--by {
-  /* By-tasks (deadline window): solid border to differentiate from
-   * scheduled tasks (dashed), signalling "this has a hard cutoff".
-   * The label colour (when present) still drives the border colour. */
-  border-style: solid;
+  /* Deadline ("fällig bis …") tasks keep a hard-edge cue — a thin inset
+   * ring in the chip's own text colour — so they still read apart from
+   * softer scheduled tasks without breaking the filled, event-like look. */
+  box-shadow: inset 0 0 0 1.5px
+    color-mix(in srgb, var(--color-accent-fg) 65%, transparent);
 }
 
-/* "Done with" treatment for completed and cancelled — strike-through
- * plus muted text. In-progress and open both keep full contrast so
- * the marker glyph (◐ / ☐) carries the state signal. */
+/* "Done with" treatment for completed and cancelled: dim the whole filled
+ * chip so it recedes, and strike the title through (kept on the chip's own
+ * text colour so it stays legible on the fill). In-progress and open keep
+ * full contrast so the marker glyph (◐ / ☐) carries the state signal. */
+.week-task--completed,
+.week-task--cancelled,
+.day-task--completed,
+.day-task--cancelled {
+  opacity: 0.6;
+}
+
 .week-task--completed .week-task__title,
 .week-task--cancelled .week-task__title,
 .day-task--completed .day-task__title,
 .day-task--cancelled .day-task__title {
-  color: var(--color-fg-muted);
   text-decoration: line-through;
 }
 
@@ -2177,7 +2185,9 @@ button[aria-disabled='true'] {
 .day-task__marker {
   flex-shrink: 0;
   font-size: 0.85em;
-  color: var(--color-fg-muted);
+  /* Follow the chip's text colour: accent-fg on a filled chip (week/day
+   * untimed), normal fg on the day-list stripe row. */
+  color: inherit;
 }
 
 /* The checkbox marker doubles as a click target so mouse users can
@@ -2193,7 +2203,7 @@ button[aria-disabled='true'] {
   min-width: 1.2em;
   min-height: 1.2em;
   font-size: 1em;
-  color: var(--color-fg-muted);
+  color: inherit;
   cursor: pointer;
   border-radius: var(--radius-sm);
   user-select: none;
@@ -2202,15 +2212,10 @@ button[aria-disabled='true'] {
 
 .week-task__check:hover,
 .day-task__marker--clickable:hover {
-  /* The marker is the explicit toggle affordance — a subtle tint
-   * tells the mouse user "this click does something different from
-   * clicking the title". */
-  background: color-mix(
-    in srgb,
-    var(--event-color, var(--color-accent)) 18%,
-    transparent
-  );
-  color: var(--color-fg);
+  /* The marker is the explicit toggle affordance — a subtle wash tells the
+   * mouse user "this click does something different from clicking the
+   * title". Mixed from the chip's own text colour so it reads on any fill. */
+  background: color-mix(in srgb, currentColor 22%, transparent);
 }
 
 .week-task__title,
@@ -2228,7 +2233,8 @@ button[aria-disabled='true'] {
 .week-task__time {
   flex-shrink: 0;
   font-variant-numeric: tabular-nums;
-  color: var(--color-fg-muted);
+  /* Match `.week-event__time`: the chip's own text colour at 0.85. */
+  color: inherit;
   font-size: var(--font-size-xs);
   opacity: 0.85;
 }
@@ -2238,11 +2244,9 @@ button[aria-disabled='true'] {
  * time stamp instead of start/end. Completed tasks dim the title to
  * match how completed tasks render elsewhere. */
 .day-list__item--task {
-  /* Visually distinct from events: dashed left border (signals "task,
-   * not appointment") that still picks up the colour label, plus a
-   * subtle accent tint when no label is set so the eye doesn't lose
-   * the row in a list of events. */
-  border-left-style: dashed;
+  /* Same solid colour stripe as an event row (`.day-list__item`): the
+   * check-off marker is the only thing that sets a task apart. */
+  border-left-style: solid;
   border-left-color: var(--event-color, var(--color-accent));
 }
 
@@ -3448,6 +3452,14 @@ button[aria-disabled='true'] {
 .missed-tasks__priority {
   flex-shrink: 0;
   color: var(--color-fg-muted);
+}
+
+/* Inside a filled week/day task chip the priority glyph follows the chip's
+ * own text colour (accent-fg); the subtasks/missed-tasks panels keep the
+ * muted treatment above. */
+.week-task__priority,
+.day-task__priority {
+  color: inherit;
 }
 
 /* This site follows the title text directly (no trailing space in the
