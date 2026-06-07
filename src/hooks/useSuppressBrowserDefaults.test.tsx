@@ -76,6 +76,23 @@ describe('useSuppressBrowserDefaults', () => {
     expect(blocked.defaultPrevented).toBe(true);
   });
 
+  it('allows drag from explicitly draggable elements', () => {
+    // The app's chips (backlog tasks, event/task chips, sidebar rows) opt in
+    // via the native `draggable` attribute — the suppressor must let those
+    // start a drag, otherwise schedule-by-drag is dead app-wide.
+    render(
+      <Harness>
+        <div draggable data-testid="drag">
+          item
+        </div>
+      </Harness>,
+    );
+    const el = screen.getByTestId('drag');
+    const ev = new Event('dragstart', { bubbles: true, cancelable: true });
+    el.dispatchEvent(ev);
+    expect(ev.defaultPrevented).toBe(false);
+  });
+
   it('blocks Ctrl+R', () => {
     render(<Harness />);
     const ev = new KeyboardEvent('keydown', {

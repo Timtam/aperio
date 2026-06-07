@@ -480,231 +480,306 @@ export function MonthView() {
         </p>
       )}
 
-      <div
-        ref={gridRef}
-        role="grid"
-        aria-label={t('views.month.gridLabel')}
-        tabIndex={0}
-        aria-activedescendant={
-          eventIndex !== null
-            ? eventOptionId(focusIndex, eventIndex)
-            : cellId(focusIndex)
-        }
-        onKeyDown={handleKeyDown}
-        className="month-grid"
-      >
-        <div role="row" className="month-grid__head">
-          <div role="columnheader" className="month-grid__kw" aria-label="KW">
-            {t('views.month.kwShort')}
-          </div>
-          {cells.slice(0, 7).map((d) => (
-            <div
-              key={d.toISOString()}
-              role="columnheader"
-              className="month-grid__col-head"
-            >
-              {fmt.format(d, 'EEE')}
+      <div className="view__body">
+        <BacklogRail />
+        <div
+          ref={gridRef}
+          role="grid"
+          aria-label={t('views.month.gridLabel')}
+          tabIndex={0}
+          aria-activedescendant={
+            eventIndex !== null
+              ? eventOptionId(focusIndex, eventIndex)
+              : cellId(focusIndex)
+          }
+          onKeyDown={handleKeyDown}
+          className="month-grid"
+        >
+          <div role="row" className="month-grid__head">
+            <div role="columnheader" className="month-grid__kw" aria-label="KW">
+              {t('views.month.kwShort')}
             </div>
-          ))}
-        </div>
-
-        {Array.from({ length: rowCount }, (_, row) => {
-          const rowStart = cells[row * 7];
-          const rowCells = cells.slice(row * 7, row * 7 + 7);
-          const rowBars = buildAllDayBars(events, rowCells);
-          const laneRows = rowBars.reduce(
-            (m, b) => Math.max(m, b.lane + 1),
-            0,
-          );
-          return (
-            <Fragment key={rowStart.toISOString()}>
-              {rowBars.length > 0 && (
-                <div
-                  className="month-grid__lane"
-                  aria-hidden="true"
-                  style={
-                    { '--lane-rows': laneRows } as React.CSSProperties
-                  }
-                >
-                  {rowBars.map((bar) => {
-                    const color = resolveEventColor(
-                      bar.event,
-                      calendarById,
-                      labelById,
-                    );
-                    const isBarFocused =
-                      focusedEvId === bar.event.id;
-                    // The lane shares the row's 8-column layout
-                    // (40 px KW + 7 day columns), so day columns
-                    // start at grid index 2.
-                    const style: React.CSSProperties &
-                      Record<string, string> = {
-                      gridColumn: `${bar.startCol + 1} / ${bar.endCol + 2}`,
-                      gridRow: String(bar.lane + 1),
-                    };
-                    if (color.hex)
-                      style['--event-color'] = color.hex;
-                    return (
-                      <div
-                        key={bar.event.id}
-                        className={
-                          'month-allday-bar' +
-                          (isBarFocused
-                            ? ' month-allday-bar--focused'
-                            : '') +
-                          (bar.continuesBefore
-                            ? ' month-allday-bar--continues-before'
-                            : '') +
-                          (bar.continuesAfter
-                            ? ' month-allday-bar--continues-after'
-                            : '')
-                        }
-                        style={style}
-                        onClick={() => openEventDialog(bar.event)}
-                        title={bar.event.title}
-                      >
-                        {bar.continuesBefore && (
-                          <span
-                            className="month-allday-bar__chevron"
-                            aria-hidden="true"
-                          >
-                            ‹
-                          </span>
-                        )}
-                        <span className="month-allday-bar__title">
-                          {bar.event.title}
-                        </span>
-                        {bar.continuesAfter && (
-                          <span
-                            className="month-allday-bar__chevron"
-                            aria-hidden="true"
-                          >
-                            ›
-                          </span>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-              <div role="row" className="month-grid__row">
-              <div role="rowheader" className="month-grid__kw">
-                {fmt.isoWeek(rowStart)}
+            {cells.slice(0, 7).map((d) => (
+              <div
+                key={d.toISOString()}
+                role="columnheader"
+                className="month-grid__col-head"
+              >
+                {fmt.format(d, 'EEE')}
               </div>
-              {cells.slice(row * 7, row * 7 + 7).map((day, col) => {
-                const flatIndex = row * 7 + col;
-                const dayItems = itemsByDay.get(keyOf(day)) ?? [];
-                const focused = flatIndex === focusIndex;
-                const outside = !isSameMonth(day, anchor);
-                // When there are more chips (events + tasks) than fit,
-                // reserve the last visible slot for the "+N more" hint so the
-                // cell never overflows its row.
-                const visibleLimit =
-                  dayItems.length > visiblePerCell
-                    ? Math.max(0, visiblePerCell - 1)
-                    : visiblePerCell;
-                const moreCount = dayItems.length - visibleLimit;
-                return (
+            ))}
+          </div>
+
+          {Array.from({ length: rowCount }, (_, row) => {
+            const rowStart = cells[row * 7];
+            const rowCells = cells.slice(row * 7, row * 7 + 7);
+            const rowBars = buildAllDayBars(events, rowCells);
+            const laneRows = rowBars.reduce(
+              (m, b) => Math.max(m, b.lane + 1),
+              0,
+            );
+            return (
+              <Fragment key={rowStart.toISOString()}>
+                {rowBars.length > 0 && (
                   <div
-                    key={day.toISOString()}
-                    id={cellId(flatIndex)}
-                    role="gridcell"
-                    aria-selected={focused}
-                    aria-current={isSameDay(day, today) ? 'date' : undefined}
-                    aria-label={t('views.month.dayAnnounce', {
-                      day: fmt.format(day, 'PPPP'),
-                      count: dayItems.length,
-                    })}
-                    className={
-                      'month-grid__cell' +
-                      (focused ? ' month-grid__cell--focused' : '') +
-                      (outside ? ' month-grid__cell--outside' : '') +
-                      (isSameDay(day, today) ? ' month-grid__cell--today' : '')
+                    className="month-grid__lane"
+                    aria-hidden="true"
+                    style={
+                      { '--lane-rows': laneRows } as React.CSSProperties
                     }
-                    onClick={() => setAnchor(day)}
-                    onDragOver={(e) => {
-                      if (!e.dataTransfer.types.includes(TASK_DND_TYPE)) return;
-                      e.preventDefault();
-                      e.dataTransfer.dropEffect = 'move';
-                    }}
-                    onDrop={(e) => void scheduleByDrop(day, e)}
                   >
-                    <span className="month-grid__date">
-                      {fmt.format(day, 'd')}
-                    </span>
-                    {/*
-                       Render *every* event, not just the first three.
-                       The visible cell shows the first three plus a
-                       "+N more" hint; events past that are still in
-                       the DOM but visually clipped via the .sr-only
-                       pattern, so the tab navigation hook's
-                       aria-activedescendant lookup always finds a
-                       real element to point at. Without this an
-                       overflow event would have no DOM target and
-                       NVDA would fall back to reading "section"
-                       instead of the event title.
-                     */}
-                    {dayItems.map((item, idx) => {
-                      const isFocusedItem = focused && eventIndex === idx;
-                      const hidden = idx >= visibleLimit;
-                      if (item.kind === 'task') {
-                        const task = item.task;
-                        const color = resolveTaskColor(
-                          task,
-                          taskListById,
+                    {rowBars.map((bar) => {
+                      const color = resolveEventColor(
+                        bar.event,
+                        calendarById,
+                        labelById,
+                      );
+                      const isBarFocused =
+                        focusedEvId === bar.event.id;
+                      // The lane shares the row's 8-column layout
+                      // (40 px KW + 7 day columns), so day columns
+                      // start at grid index 2.
+                      const style: React.CSSProperties &
+                        Record<string, string> = {
+                        gridColumn: `${bar.startCol + 1} / ${bar.endCol + 2}`,
+                        gridRow: String(bar.lane + 1),
+                      };
+                      if (color.hex)
+                        style['--event-color'] = color.hex;
+                      return (
+                        <div
+                          key={bar.event.id}
+                          className={
+                            'month-allday-bar' +
+                            (isBarFocused
+                              ? ' month-allday-bar--focused'
+                              : '') +
+                            (bar.continuesBefore
+                              ? ' month-allday-bar--continues-before'
+                              : '') +
+                            (bar.continuesAfter
+                              ? ' month-allday-bar--continues-after'
+                              : '')
+                          }
+                          style={style}
+                          onClick={() => openEventDialog(bar.event)}
+                          title={bar.event.title}
+                        >
+                          {bar.continuesBefore && (
+                            <span
+                              className="month-allday-bar__chevron"
+                              aria-hidden="true"
+                            >
+                              ‹
+                            </span>
+                          )}
+                          <span className="month-allday-bar__title">
+                            {bar.event.title}
+                          </span>
+                          {bar.continuesAfter && (
+                            <span
+                              className="month-allday-bar__chevron"
+                              aria-hidden="true"
+                            >
+                              ›
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                <div role="row" className="month-grid__row">
+                <div role="rowheader" className="month-grid__kw">
+                  {fmt.isoWeek(rowStart)}
+                </div>
+                {cells.slice(row * 7, row * 7 + 7).map((day, col) => {
+                  const flatIndex = row * 7 + col;
+                  const dayItems = itemsByDay.get(keyOf(day)) ?? [];
+                  const focused = flatIndex === focusIndex;
+                  const outside = !isSameMonth(day, anchor);
+                  // When there are more chips (events + tasks) than fit,
+                  // reserve the last visible slot for the "+N more" hint so the
+                  // cell never overflows its row.
+                  const visibleLimit =
+                    dayItems.length > visiblePerCell
+                      ? Math.max(0, visiblePerCell - 1)
+                      : visiblePerCell;
+                  const moreCount = dayItems.length - visibleLimit;
+                  return (
+                    <div
+                      key={day.toISOString()}
+                      id={cellId(flatIndex)}
+                      role="gridcell"
+                      aria-selected={focused}
+                      aria-current={isSameDay(day, today) ? 'date' : undefined}
+                      aria-label={t('views.month.dayAnnounce', {
+                        day: fmt.format(day, 'PPPP'),
+                        count: dayItems.length,
+                      })}
+                      className={
+                        'month-grid__cell' +
+                        (focused ? ' month-grid__cell--focused' : '') +
+                        (outside ? ' month-grid__cell--outside' : '') +
+                        (isSameDay(day, today) ? ' month-grid__cell--today' : '')
+                      }
+                      onClick={() => setAnchor(day)}
+                      onDragOver={(e) => {
+                        if (!e.dataTransfer.types.includes(TASK_DND_TYPE)) return;
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = 'move';
+                      }}
+                      onDrop={(e) => void scheduleByDrop(day, e)}
+                    >
+                      <span className="month-grid__date">
+                        {fmt.format(day, 'd')}
+                      </span>
+                      {/*
+                         Render *every* event, not just the first three.
+                         The visible cell shows the first three plus a
+                         "+N more" hint; events past that are still in
+                         the DOM but visually clipped via the .sr-only
+                         pattern, so the tab navigation hook's
+                         aria-activedescendant lookup always finds a
+                         real element to point at. Without this an
+                         overflow event would have no DOM target and
+                         NVDA would fall back to reading "section"
+                         instead of the event title.
+                       */}
+                      {dayItems.map((item, idx) => {
+                        const isFocusedItem = focused && eventIndex === idx;
+                        const hidden = idx >= visibleLimit;
+                        if (item.kind === 'task') {
+                          const task = item.task;
+                          const color = resolveTaskColor(
+                            task,
+                            taskListById,
+                            labelById,
+                            sectionColorById,
+                          );
+                          const priorityGlyph = priorityMarker(task.priority);
+                          const aria = t(
+                            item.isBy
+                              ? 'views.week.taskChipBy'
+                              : 'views.week.taskChip',
+                            {
+                              title: task.title,
+                              deadline: task.deadline_date
+                                ? fmt.format(
+                                    new Date(`${task.deadline_date}T00:00:00`),
+                                    'PP',
+                                  )
+                                : '',
+                              state: t(statusI18nKey(task.status)),
+                              priority: prioritySuffix(t, task.priority),
+                              progress: subtaskProgressSuffix(t, task.id, tasks),
+                            },
+                          );
+                          return (
+                            <span
+                              key={item.id}
+                              id={eventOptionId(flatIndex, idx)}
+                              className={
+                                'month-event month-task' +
+                                (isFocusedItem
+                                  ? ' month-event--focused'
+                                  : '') +
+                                (hidden ? ' month-event--overflow' : '') +
+                                (item.isBy ? ' month-task--by' : '') +
+                                (draggingTaskId === task.id
+                                  ? ' month-task--dragging'
+                                  : '') +
+                                ` month-task--${task.status.replace('_', '-')}`
+                              }
+                              aria-label={aria}
+                              aria-selected={isFocusedItem}
+                              draggable
+                              onDragStart={(dev) => {
+                                setTaskDrag(
+                                  dev.dataTransfer,
+                                  task,
+                                  tasks.filter((c) => c.parent_id === task.id),
+                                );
+                                setDraggingTaskId(task.id);
+                              }}
+                              onDragEnd={() => setDraggingTaskId(null)}
+                              onContextMenu={(cmev) => {
+                                cmev.preventDefault();
+                                cmev.stopPropagation();
+                                void openTaskMenu(task);
+                              }}
+                              style={
+                                color.hex
+                                  ? ({ '--event-color': color.hex } as React.CSSProperties)
+                                  : undefined
+                              }
+                            >
+                              <span
+                                className="month-task__check"
+                                aria-hidden="true"
+                                onClick={(cmev) => {
+                                  cmev.stopPropagation();
+                                  void toggleTaskStatus(task);
+                                }}
+                              >
+                                {statusMarker(task.status)}
+                              </span>
+                              <span className="month-task__title">
+                                {task.title}
+                              </span>
+                              {priorityGlyph && (
+                                <span
+                                  className="month-task__priority"
+                                  aria-hidden="true"
+                                >
+                                  {priorityGlyph}
+                                </span>
+                              )}
+                            </span>
+                          );
+                        }
+                        const ev = item.event;
+                        const color = resolveEventColor(
+                          ev,
+                          calendarById,
                           labelById,
-                          sectionColorById,
                         );
-                        const priorityGlyph = priorityMarker(task.priority);
-                        const aria = t(
-                          item.isBy
-                            ? 'views.week.taskChipBy'
-                            : 'views.week.taskChip',
-                          {
-                            title: task.title,
-                            deadline: task.deadline_date
-                              ? fmt.format(
-                                  new Date(`${task.deadline_date}T00:00:00`),
-                                  'PP',
-                                )
-                              : '',
-                            state: t(statusI18nKey(task.status)),
-                            priority: prioritySuffix(t, task.priority),
-                            progress: subtaskProgressSuffix(t, task.id, tasks),
-                          },
-                        );
+                        const cal = calendarById.get(ev.calendar_id);
+                        const time = ev.all_day
+                          ? t('views.allDay')
+                          : fmt.format(new Date(ev.start), 'p');
+                        const span = multiDayInfo(ev, day);
+                        const ariaBase = t('views.week.eventLabel', {
+                          title: ev.title,
+                          time,
+                          calendar: cal?.name ?? '—',
+                        });
+                        const aria = span
+                          ? ariaBase +
+                            t('views.multiDaySuffix', {
+                              day: span.dayIndex,
+                              total: span.totalDays,
+                            })
+                          : ariaBase;
                         return (
                           <span
                             key={item.id}
                             id={eventOptionId(flatIndex, idx)}
                             className={
-                              'month-event month-task' +
+                              'month-event' +
                               (isFocusedItem
                                 ? ' month-event--focused'
                                 : '') +
                               (hidden ? ' month-event--overflow' : '') +
-                              (item.isBy ? ' month-task--by' : '') +
-                              (draggingTaskId === task.id
-                                ? ' month-task--dragging'
-                                : '') +
-                              ` month-task--${task.status.replace('_', '-')}`
+                              (span ? ' month-event--multiday' : '') +
+                              (ev.all_day ? ' month-event--in-lane' : '')
                             }
                             aria-label={aria}
                             aria-selected={isFocusedItem}
-                            draggable
-                            onDragStart={(dev) => {
-                              setTaskDrag(
-                                dev.dataTransfer,
-                                task,
-                                tasks.filter((c) => c.parent_id === task.id),
-                              );
-                              setDraggingTaskId(task.id);
-                            }}
-                            onDragEnd={() => setDraggingTaskId(null)}
                             onContextMenu={(cmev) => {
                               cmev.preventDefault();
                               cmev.stopPropagation();
-                              void openTaskMenu(task);
+                              void openEventMenu(ev);
                             }}
                             style={
                               color.hex
@@ -712,112 +787,38 @@ export function MonthView() {
                                 : undefined
                             }
                           >
-                            <span
-                              className="month-task__check"
-                              aria-hidden="true"
-                              onClick={(cmev) => {
-                                cmev.stopPropagation();
-                                void toggleTaskStatus(task);
-                              }}
-                            >
-                              {statusMarker(task.status)}
-                            </span>
-                            <span className="month-task__title">
-                              {task.title}
-                            </span>
-                            {priorityGlyph && (
-                              <span
-                                className="month-task__priority"
-                                aria-hidden="true"
-                              >
-                                {priorityGlyph}
+                            {ev.title}
+                            {span && (
+                              <span className="month-event__span">
+                                {' '}
+                                {t('views.multiDayCompact', {
+                                  day: span.dayIndex,
+                                  total: span.totalDays,
+                                })}
                               </span>
                             )}
                           </span>
                         );
-                      }
-                      const ev = item.event;
-                      const color = resolveEventColor(
-                        ev,
-                        calendarById,
-                        labelById,
-                      );
-                      const cal = calendarById.get(ev.calendar_id);
-                      const time = ev.all_day
-                        ? t('views.allDay')
-                        : fmt.format(new Date(ev.start), 'p');
-                      const span = multiDayInfo(ev, day);
-                      const ariaBase = t('views.week.eventLabel', {
-                        title: ev.title,
-                        time,
-                        calendar: cal?.name ?? '—',
-                      });
-                      const aria = span
-                        ? ariaBase +
-                          t('views.multiDaySuffix', {
-                            day: span.dayIndex,
-                            total: span.totalDays,
-                          })
-                        : ariaBase;
-                      return (
+                      })}
+                      {moreCount > 0 && (
                         <span
-                          key={item.id}
-                          id={eventOptionId(flatIndex, idx)}
-                          className={
-                            'month-event' +
-                            (isFocusedItem
-                              ? ' month-event--focused'
-                              : '') +
-                            (hidden ? ' month-event--overflow' : '') +
-                            (span ? ' month-event--multiday' : '') +
-                            (ev.all_day ? ' month-event--in-lane' : '')
-                          }
-                          aria-label={aria}
-                          aria-selected={isFocusedItem}
-                          onContextMenu={(cmev) => {
-                            cmev.preventDefault();
-                            cmev.stopPropagation();
-                            void openEventMenu(ev);
-                          }}
-                          style={
-                            color.hex
-                              ? ({ '--event-color': color.hex } as React.CSSProperties)
-                              : undefined
-                          }
+                          className="month-event month-event--more"
+                          aria-hidden="true"
                         >
-                          {ev.title}
-                          {span && (
-                            <span className="month-event__span">
-                              {' '}
-                              {t('views.multiDayCompact', {
-                                day: span.dayIndex,
-                                total: span.totalDays,
-                              })}
-                            </span>
-                          )}
+                          {t('views.month.moreEvents', {
+                            count: moreCount,
+                          })}
                         </span>
-                      );
-                    })}
-                    {moreCount > 0 && (
-                      <span
-                        className="month-event month-event--more"
-                        aria-hidden="true"
-                      >
-                        {t('views.month.moreEvents', {
-                          count: moreCount,
-                        })}
-                      </span>
-                    )}
-                  </div>
-                );
-              })}
-              </div>
-            </Fragment>
-          );
-        })}
+                      )}
+                    </div>
+                  );
+                })}
+                </div>
+              </Fragment>
+            );
+          })}
+        </div>
       </div>
-
-      <BacklogRail />
 
       <ConfirmDialog
         isOpen={confirmTarget !== null}

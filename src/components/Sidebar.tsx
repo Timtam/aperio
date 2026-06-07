@@ -121,7 +121,15 @@ type LeafEditKind = ContainerKind | 'contact_list' | 'account';
  * Rename, delete, and create are kept as inline actions on the leaf
  * rows — the structural change is purely in the tree wrapping.
  */
-export function Sidebar() {
+export function Sidebar({
+  collapsed,
+}: {
+  /** When true the sidebar is hidden (width 0) and taken out of the tab
+   *  order / a11y tree via `inert`. The show/hide toggle lives in the slim
+   *  rail to the left of the sidebar (App shell), not inside it — so it
+   *  stays focusable while the sidebar is collapsed. */
+  collapsed: boolean;
+}) {
   const { t } = useTranslation();
   const announce = useAnnouncer();
   const {
@@ -1227,9 +1235,14 @@ export function Sidebar() {
   // ── Render ───────────────────────────────────────────────────────
   return (
     <aside
-      className="sidebar"
+      id="app-sidebar"
+      className={'sidebar' + (collapsed ? ' sidebar--collapsed' : '')}
       aria-label={t('sidebar.label')}
       data-region="sidebar"
+      // While collapsed the panel shrinks to width 0; `inert` takes its
+      // (still-mounted) tree out of the tab order and a11y tree so Tab/F6
+      // skip the hidden content. The toolbar toggle brings it back.
+      {...(collapsed ? ({ inert: '' } as { inert: '' }) : {})}
     >
       <h2 className="sidebar__heading">{t('sidebar.containersHeading')}</h2>
       {/* SR-only hint that describes the tree's interaction model.

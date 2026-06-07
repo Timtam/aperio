@@ -31,6 +31,18 @@ Kapitel lernst du sie kennen und wechselst zwischen ihnen.
   „Heute" in der Symbolleiste).
 - **Kalenderwochen** werden in den Wochen- und Monatsansichten angezeigt.
 
+## Seitenleiste ein- und ausklappen
+
+Die **Seitenleiste** (Konten, Kalender und Aufgabenlisten) lässt sich über die
+Schaltfläche am **linken Rand** ein- und ausklappen. Eingeklappt bekommt die
+Ansicht – und in der Wochen-/Monatsplanung auch die Backlog-Liste – **mehr
+Platz**. Der Zustand bleibt über Neustarts erhalten.
+
+> **Tastatur & Screenreader:** Die Schaltfläche liegt in der Tab-Reihenfolge
+> **vor** der Seitenleiste – nach dem Aufklappen erreichst du die Seitenleiste
+> mit einem weiteren Tab, eingeklappt überspringst du sie. Mit `F6` springst du
+> zwischen den Bereichen (Seitenleiste, Symbolleiste, Ansicht, Backlog).
+
 ## Die Monatsansicht
 
 In der Monatsansicht ist jede Tageszelle **gleich groß**, und das Raster

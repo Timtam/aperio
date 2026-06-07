@@ -564,411 +564,412 @@ export function WeekView() {
         </p>
       )}
 
-      <div
-        ref={gridRef}
-        role="grid"
-        aria-label={t('views.week.gridLabel')}
-        tabIndex={0}
-        aria-activedescendant={
-          eventIndex !== null
-            ? eventOptionId(focusIndex, eventIndex)
-            : cellId(focusIndex)
-        }
-        onKeyDown={handleKeyDown}
-        className="week-grid"
-      >
-        <div role="row" className="week-grid__head">
-          {days.map((day) => (
-            <div
-              key={day.toISOString()}
-              role="columnheader"
-              className="week-grid__col-head"
-              aria-current={isSameDay(day, today) ? 'date' : undefined}
-            >
-              <span className="week-grid__dow">{fmt.format(day, 'EEE')}</span>
-              <span className="week-grid__date">{fmt.format(day, 'd')}</span>
-            </div>
-          ))}
-        </div>
+      <div className="view__body">
+        <BacklogRail />
+        <div
+          ref={gridRef}
+          role="grid"
+          aria-label={t('views.week.gridLabel')}
+          tabIndex={0}
+          aria-activedescendant={
+            eventIndex !== null
+              ? eventOptionId(focusIndex, eventIndex)
+              : cellId(focusIndex)
+          }
+          onKeyDown={handleKeyDown}
+          className="week-grid"
+        >
+          <div role="row" className="week-grid__head">
+            {days.map((day) => (
+              <div
+                key={day.toISOString()}
+                role="columnheader"
+                className="week-grid__col-head"
+                aria-current={isSameDay(day, today) ? 'date' : undefined}
+              >
+                <span className="week-grid__dow">{fmt.format(day, 'EEE')}</span>
+                <span className="week-grid__date">{fmt.format(day, 'd')}</span>
+              </div>
+            ))}
+          </div>
 
-        {allDayBars.length > 0 && (
-          <div
-            className="week-grid__lane"
-            aria-hidden="true"
-            style={
-              { '--lane-rows': laneRows } as React.CSSProperties
-            }
-          >
-            {allDayBars.map((bar) => {
-              const color = resolveEventColor(
-                bar.event,
-                calendarById,
-                labelById,
-              );
-              const isBarFocused = focusedEvId === bar.event.id;
-              const span = multiDayInfo(bar.event, new Date(bar.event.start));
-              const style: React.CSSProperties & Record<string, string> = {
-                gridColumn: `${bar.startCol} / ${bar.endCol + 1}`,
-                gridRow: String(bar.lane + 1),
-              };
-              if (color.hex) style['--event-color'] = color.hex;
+          {allDayBars.length > 0 && (
+            <div
+              className="week-grid__lane"
+              aria-hidden="true"
+              style={
+                { '--lane-rows': laneRows } as React.CSSProperties
+              }
+            >
+              {allDayBars.map((bar) => {
+                const color = resolveEventColor(
+                  bar.event,
+                  calendarById,
+                  labelById,
+                );
+                const isBarFocused = focusedEvId === bar.event.id;
+                const span = multiDayInfo(bar.event, new Date(bar.event.start));
+                const style: React.CSSProperties & Record<string, string> = {
+                  gridColumn: `${bar.startCol} / ${bar.endCol + 1}`,
+                  gridRow: String(bar.lane + 1),
+                };
+                if (color.hex) style['--event-color'] = color.hex;
+                return (
+                  <div
+                    key={bar.event.id}
+                    className={
+                      'week-allday-bar' +
+                      (isBarFocused ? ' week-allday-bar--focused' : '') +
+                      (bar.continuesBefore
+                        ? ' week-allday-bar--continues-before'
+                        : '') +
+                      (bar.continuesAfter
+                        ? ' week-allday-bar--continues-after'
+                        : '')
+                    }
+                    style={style}
+                    // Sighted-only affordance: clicking the bar opens
+                    // the event editor. SR users reach the same editor
+                    // via Enter on the per-day chip below.
+                    onClick={() => openEventDialog(bar.event)}
+                    title={
+                      span
+                        ? `${bar.event.title} (${span.dayIndex}/${span.totalDays})`
+                        : bar.event.title
+                    }
+                  >
+                    {bar.continuesBefore && (
+                      <span className="week-allday-bar__chevron" aria-hidden="true">
+                        ‹
+                      </span>
+                    )}
+                    <span className="week-allday-bar__title">
+                      {bar.event.title}
+                    </span>
+                    {bar.continuesAfter && (
+                      <span className="week-allday-bar__chevron" aria-hidden="true">
+                        ›
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <div role="row" className="week-grid__body">
+            {days.map((day, i) => {
+              const dayKey = keyOf(day);
+              const merged = dayItemsByDay.get(dayKey);
+              const timedItems = merged?.timed ?? [];
+              const untimedTasks = merged?.untimed ?? [];
+              // The timedItems array is the same one the Tab-navigation
+              // buckets see, so `itemIdx` below matches the hook's
+              // `eventIndex`. That keeps `aria-activedescendant`,
+              // visual focus, and Enter dispatch in sync for both
+              // events and timed tasks.
+              const focused = i === focusIndex;
               return (
                 <div
-                  key={bar.event.id}
+                  key={day.toISOString()}
+                  id={cellId(i)}
+                  role="gridcell"
+                  aria-selected={focused}
+                  aria-current={isSameDay(day, today) ? 'date' : undefined}
+                  aria-label={t('views.week.dayAnnounce', {
+                    day: fmt.format(day, 'PPPP'),
+                    // Events + tasks (timed + untimed) — every chip in the cell.
+                    count: timedItems.length + untimedTasks.length,
+                  })}
                   className={
-                    'week-allday-bar' +
-                    (isBarFocused ? ' week-allday-bar--focused' : '') +
-                    (bar.continuesBefore
-                      ? ' week-allday-bar--continues-before'
-                      : '') +
-                    (bar.continuesAfter
-                      ? ' week-allday-bar--continues-after'
+                    'week-grid__cell' +
+                    (focused ? ' week-grid__cell--focused' : '') +
+                    (isSameDay(day, today) ? ' week-grid__cell--today' : '') +
+                    (dragOverDayKey === dayKey
+                      ? ' week-grid__cell--drag-over'
                       : '')
                   }
-                  style={style}
-                  // Sighted-only affordance: clicking the bar opens
-                  // the event editor. SR users reach the same editor
-                  // via Enter on the per-day chip below.
-                  onClick={() => openEventDialog(bar.event)}
-                  title={
-                    span
-                      ? `${bar.event.title} (${span.dayIndex}/${span.totalDays})`
-                      : bar.event.title
-                  }
+                  onClick={() => setAnchor(day)}
+                  onDragOver={(e) => {
+                    // Drop-target gate: react when an Aperio task drag is in
+                    // flight. The payload values aren't readable during
+                    // dragover, but the type LIST is — and both the week's
+                    // own chips and the backlog rail tag the drag with the
+                    // task MIME type, so this also accepts backlog drops
+                    // (which never set `draggingTaskId`).
+                    if (!e.dataTransfer.types.includes(TASK_DND_TYPE)) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    if (dragOverDayKey !== dayKey) {
+                      setDragOverDayKey(dayKey);
+                    }
+                  }}
+                  onDragLeave={(e) => {
+                    // Don't flicker the highlight off when the pointer
+                    // moves between the cell's own descendants (chips,
+                    // events). Only clear when the pointer actually
+                    // leaves the cell box.
+                    if (
+                      e.relatedTarget instanceof Node &&
+                      e.currentTarget.contains(e.relatedTarget)
+                    ) {
+                      return;
+                    }
+                    setDragOverDayKey((prev) =>
+                      prev === dayKey ? null : prev,
+                    );
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setDragOverDayKey(null);
+                    const taskId =
+                      e.dataTransfer.getData('text/aperio-task') ||
+                      draggingTaskId;
+                    if (taskId) void rescheduleTaskByDrop(taskId, dayKey);
+                  }}
                 >
-                  {bar.continuesBefore && (
-                    <span className="week-allday-bar__chevron" aria-hidden="true">
-                      ‹
-                    </span>
-                  )}
-                  <span className="week-allday-bar__title">
-                    {bar.event.title}
-                  </span>
-                  {bar.continuesAfter && (
-                    <span className="week-allday-bar__chevron" aria-hidden="true">
-                      ›
-                    </span>
-                  )}
+                  <ul role="list" className="week-grid__events">
+                    {timedItems.map((item, itemIdx) => {
+                      const isFocusedItem =
+                        focused && eventIndex === itemIdx;
+                      if (item.kind === 'task') {
+                        const task = item.task;
+                        // Pull the effective time-of-day for this row
+                        // on this specific day — could come from either
+                        // scheduled_time (the planned slot) or
+                        // deadline_time (when this is the deadline day
+                        // and only a deadline is set). The same helper
+                        // backs taskTimeOnDay-based sorting upstream,
+                        // so chips line up consistently.
+                        const timeOnDay = taskTimeOnDay(task, dayKey);
+                        const time = timeOnDay
+                          ? fmt.format(
+                              new Date(`${dayKey}T${timeOnDay}`),
+                              'p',
+                            )
+                          : '';
+                        const color = resolveTaskColor(
+                          task,
+                          taskListById,
+                          labelById,
+                          sectionColorById,
+                        );
+                        const priorityGlyph = priorityMarker(task.priority);
+                        // All four TaskStatus values need their own
+                        // glyph + class. The legacy `=== 'completed'`
+                        // shortcut would render in_progress and
+                        // cancelled identically to open. Cancelled is
+                        // filtered out of calendar surfaces already,
+                        // but in_progress passes through and would
+                        // otherwise look indistinguishable from open.
+                        return (
+                          <li
+                            key={`task-${task.id}`}
+                            role="listitem"
+                            className="week-grid__task-item"
+                          >
+                            <span
+                              id={eventOptionId(i, itemIdx)}
+                              className={
+                                'week-task week-task--timed' +
+                                (isFocusedItem ? ' week-task--focused' : '') +
+                                (draggingTaskId === task.id
+                                  ? ' week-task--dragging'
+                                  : '') +
+                                ` week-task--${task.status.replace('_', '-')}`
+                              }
+                              // The aria-label carries the status as a
+                              // word suffix so SR users hear it on focus
+                              // — the visible marker is only there for
+                              // sighted users. After Space the toggle
+                              // hook also fires a live-region
+                              // announcement, so confirmation lands
+                              // either way.
+                              aria-label={taskChipAriaLabel(
+                                t,
+                                task,
+                                time,
+                                tasks,
+                              )}
+                              aria-selected={isFocusedItem}
+                              style={
+                                color.hex
+                                  ? ({
+                                      '--event-color': color.hex,
+                                    } as React.CSSProperties)
+                                  : undefined
+                              }
+                              draggable
+                              onDragStart={(ev) => {
+                                setTaskDrag(
+                                  ev.dataTransfer,
+                                  task,
+                                  tasks.filter((c) => c.parent_id === task.id),
+                                );
+                                setDraggingTaskId(task.id);
+                              }}
+                              onDragEnd={() => {
+                                setDraggingTaskId(null);
+                                setDragOverDayKey(null);
+                              }}
+                              // Mouse: clicking outside the checkbox
+                              // opens the editor; the marker's onClick
+                              // below stops the bubble so toggling
+                              // doesn't also open the dialog.
+                              onClick={() => openTaskDialog(task)}
+                              onContextMenu={(ev) => {
+                                ev.preventDefault();
+                                ev.stopPropagation();
+                                void openTaskMenu(task);
+                              }}
+                            >
+                              <span className="week-task__time">{time}</span>
+                              <span className="week-task__body">
+                                <span
+                                  className="week-task__check"
+                                  aria-hidden="true"
+                                  onClick={(ev) => {
+                                    ev.stopPropagation();
+                                    void toggleTaskStatus(task);
+                                  }}
+                                >
+                                  {statusMarker(task.status)}
+                                </span>
+                                <span className="week-task__title">
+                                  {task.title}
+                                </span>
+                                {priorityGlyph && (
+                                  <span
+                                    className="week-task__priority"
+                                    aria-hidden="true"
+                                  >
+                                    {priorityGlyph}
+                                  </span>
+                                )}
+                              </span>
+                            </span>
+                          </li>
+                        );
+                      }
+                      const ev = item.event;
+                      const cal = calendarById.get(ev.calendar_id);
+                      const color = resolveEventColor(ev, calendarById, labelById);
+                      const time = ev.all_day
+                        ? t('views.allDay')
+                        : `${fmt.format(new Date(ev.start), 'p')}`;
+                      const span = multiDayInfo(ev, day);
+                      // Color label is purely visual — it's a visible
+                      // accent strip on the chip, not extra information
+                      // an SR user needs spoken. The calendar / list
+                      // affiliation stays in the label.
+                      const ariaBase = t('views.week.eventLabel', {
+                        title: ev.title,
+                        time,
+                        calendar: cal?.name ?? '—',
+                      });
+                      const aria = span
+                        ? ariaBase +
+                          t('views.multiDaySuffix', {
+                            day: span.dayIndex,
+                            total: span.totalDays,
+                          })
+                        : ariaBase;
+                      // All-day events are visualised by the lane above;
+                      // their per-day chip stays in the listbox as the
+                      // aria-activedescendant target but is clipped out
+                      // of the visual flow so the cell only shows timed
+                      // events. The bar's focused state is driven from
+                      // here via `focusedEvId`.
+                      return (
+                        <li key={ev.id} role="listitem">
+                          <span
+                            id={eventOptionId(i, itemIdx)}
+                            className={
+                              'week-event' +
+                              (isFocusedItem ? ' week-event--focused' : '') +
+                              (span ? ' week-event--multiday' : '') +
+                              (ev.all_day ? ' week-event--in-lane' : '')
+                            }
+                            aria-label={aria}
+                            aria-selected={isFocusedItem}
+                            draggable
+                            onDragStart={(dev) => {
+                              // Drag onto a sidebar calendar row to move the
+                              // event there (mouse affordance; the keyboard/SR
+                              // path is the Move/Copy dialog).
+                              setEventDrag(dev.dataTransfer, ev);
+                            }}
+                            onContextMenu={(cmev) => {
+                              cmev.preventDefault();
+                              cmev.stopPropagation();
+                              void openEventMenu(ev);
+                            }}
+                            style={
+                              color.hex
+                                ? ({ '--event-color': color.hex } as React.CSSProperties)
+                                : undefined
+                            }
+                          >
+                            <span className="week-event__time">{time}</span>
+                            <span className="week-event__title">{ev.title}</span>
+                            {span && (
+                              <span className="week-event__span">
+                                {t('views.multiDayCompact', {
+                                  day: span.dayIndex,
+                                  total: span.totalDays,
+                                })}
+                              </span>
+                            )}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  {/* §9.4: untimed tasks on this day. Tasks that carry
+                      a real deadline_time are hoisted into the timed
+                      lane above (sorted between events by time); only
+                      scheduled-only tasks and By-window intermediate
+                      days end up here. They join the grid's
+                      aria-activedescendant nav too — their bucket index
+                      continues after the timed lane (`optionIdBase`), so
+                      Tab walks them like any other chip. */}
+                  <WeekDayTasks
+                    tasks={untimedTasks}
+                    dayKey={dayKey}
+                    allTasks={tasks}
+                    cellIndex={i}
+                    optionIdBase={timedItems.length}
+                    focusedIndex={focused ? eventIndex : null}
+                    eventOptionId={eventOptionId}
+                    onOpen={(task) => openTaskDialog(task)}
+                    onToggle={(task) => {
+                      void toggleTaskStatus(task);
+                    }}
+                    onContextMenu={(task) => {
+                      void openTaskMenu(task);
+                    }}
+                    taskListById={taskListById}
+                    labelById={labelById}
+                    draggingTaskId={draggingTaskId}
+                    onDragStart={(task, ev) => {
+                      setTaskDrag(
+                        ev.dataTransfer,
+                        task,
+                        tasks.filter((c) => c.parent_id === task.id),
+                      );
+                      setDraggingTaskId(task.id);
+                    }}
+                    onDragEnd={() => {
+                      setDraggingTaskId(null);
+                      setDragOverDayKey(null);
+                    }}
+                  />
                 </div>
               );
             })}
           </div>
-        )}
-
-        <div role="row" className="week-grid__body">
-          {days.map((day, i) => {
-            const dayKey = keyOf(day);
-            const merged = dayItemsByDay.get(dayKey);
-            const timedItems = merged?.timed ?? [];
-            const untimedTasks = merged?.untimed ?? [];
-            // The timedItems array is the same one the Tab-navigation
-            // buckets see, so `itemIdx` below matches the hook's
-            // `eventIndex`. That keeps `aria-activedescendant`,
-            // visual focus, and Enter dispatch in sync for both
-            // events and timed tasks.
-            const focused = i === focusIndex;
-            return (
-              <div
-                key={day.toISOString()}
-                id={cellId(i)}
-                role="gridcell"
-                aria-selected={focused}
-                aria-current={isSameDay(day, today) ? 'date' : undefined}
-                aria-label={t('views.week.dayAnnounce', {
-                  day: fmt.format(day, 'PPPP'),
-                  // Events + tasks (timed + untimed) — every chip in the cell.
-                  count: timedItems.length + untimedTasks.length,
-                })}
-                className={
-                  'week-grid__cell' +
-                  (focused ? ' week-grid__cell--focused' : '') +
-                  (isSameDay(day, today) ? ' week-grid__cell--today' : '') +
-                  (dragOverDayKey === dayKey
-                    ? ' week-grid__cell--drag-over'
-                    : '')
-                }
-                onClick={() => setAnchor(day)}
-                onDragOver={(e) => {
-                  // Drop-target gate: react when an Aperio task drag is in
-                  // flight. The payload values aren't readable during
-                  // dragover, but the type LIST is — and both the week's
-                  // own chips and the backlog rail tag the drag with the
-                  // task MIME type, so this also accepts backlog drops
-                  // (which never set `draggingTaskId`).
-                  if (!e.dataTransfer.types.includes(TASK_DND_TYPE)) return;
-                  e.preventDefault();
-                  e.dataTransfer.dropEffect = 'move';
-                  if (dragOverDayKey !== dayKey) {
-                    setDragOverDayKey(dayKey);
-                  }
-                }}
-                onDragLeave={(e) => {
-                  // Don't flicker the highlight off when the pointer
-                  // moves between the cell's own descendants (chips,
-                  // events). Only clear when the pointer actually
-                  // leaves the cell box.
-                  if (
-                    e.relatedTarget instanceof Node &&
-                    e.currentTarget.contains(e.relatedTarget)
-                  ) {
-                    return;
-                  }
-                  setDragOverDayKey((prev) =>
-                    prev === dayKey ? null : prev,
-                  );
-                }}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  setDragOverDayKey(null);
-                  const taskId =
-                    e.dataTransfer.getData('text/aperio-task') ||
-                    draggingTaskId;
-                  if (taskId) void rescheduleTaskByDrop(taskId, dayKey);
-                }}
-              >
-                <ul role="list" className="week-grid__events">
-                  {timedItems.map((item, itemIdx) => {
-                    const isFocusedItem =
-                      focused && eventIndex === itemIdx;
-                    if (item.kind === 'task') {
-                      const task = item.task;
-                      // Pull the effective time-of-day for this row
-                      // on this specific day — could come from either
-                      // scheduled_time (the planned slot) or
-                      // deadline_time (when this is the deadline day
-                      // and only a deadline is set). The same helper
-                      // backs taskTimeOnDay-based sorting upstream,
-                      // so chips line up consistently.
-                      const timeOnDay = taskTimeOnDay(task, dayKey);
-                      const time = timeOnDay
-                        ? fmt.format(
-                            new Date(`${dayKey}T${timeOnDay}`),
-                            'p',
-                          )
-                        : '';
-                      const color = resolveTaskColor(
-                        task,
-                        taskListById,
-                        labelById,
-                        sectionColorById,
-                      );
-                      const priorityGlyph = priorityMarker(task.priority);
-                      // All four TaskStatus values need their own
-                      // glyph + class. The legacy `=== 'completed'`
-                      // shortcut would render in_progress and
-                      // cancelled identically to open. Cancelled is
-                      // filtered out of calendar surfaces already,
-                      // but in_progress passes through and would
-                      // otherwise look indistinguishable from open.
-                      return (
-                        <li
-                          key={`task-${task.id}`}
-                          role="listitem"
-                          className="week-grid__task-item"
-                        >
-                          <span
-                            id={eventOptionId(i, itemIdx)}
-                            className={
-                              'week-task week-task--timed' +
-                              (isFocusedItem ? ' week-task--focused' : '') +
-                              (draggingTaskId === task.id
-                                ? ' week-task--dragging'
-                                : '') +
-                              ` week-task--${task.status.replace('_', '-')}`
-                            }
-                            // The aria-label carries the status as a
-                            // word suffix so SR users hear it on focus
-                            // — the visible marker is only there for
-                            // sighted users. After Space the toggle
-                            // hook also fires a live-region
-                            // announcement, so confirmation lands
-                            // either way.
-                            aria-label={taskChipAriaLabel(
-                              t,
-                              task,
-                              time,
-                              tasks,
-                            )}
-                            aria-selected={isFocusedItem}
-                            style={
-                              color.hex
-                                ? ({
-                                    '--event-color': color.hex,
-                                  } as React.CSSProperties)
-                                : undefined
-                            }
-                            draggable
-                            onDragStart={(ev) => {
-                              setTaskDrag(
-                                ev.dataTransfer,
-                                task,
-                                tasks.filter((c) => c.parent_id === task.id),
-                              );
-                              setDraggingTaskId(task.id);
-                            }}
-                            onDragEnd={() => {
-                              setDraggingTaskId(null);
-                              setDragOverDayKey(null);
-                            }}
-                            // Mouse: clicking outside the checkbox
-                            // opens the editor; the marker's onClick
-                            // below stops the bubble so toggling
-                            // doesn't also open the dialog.
-                            onClick={() => openTaskDialog(task)}
-                            onContextMenu={(ev) => {
-                              ev.preventDefault();
-                              ev.stopPropagation();
-                              void openTaskMenu(task);
-                            }}
-                          >
-                            <span className="week-task__time">{time}</span>
-                            <span className="week-task__body">
-                              <span
-                                className="week-task__check"
-                                aria-hidden="true"
-                                onClick={(ev) => {
-                                  ev.stopPropagation();
-                                  void toggleTaskStatus(task);
-                                }}
-                              >
-                                {statusMarker(task.status)}
-                              </span>
-                              <span className="week-task__title">
-                                {task.title}
-                              </span>
-                              {priorityGlyph && (
-                                <span
-                                  className="week-task__priority"
-                                  aria-hidden="true"
-                                >
-                                  {priorityGlyph}
-                                </span>
-                              )}
-                            </span>
-                          </span>
-                        </li>
-                      );
-                    }
-                    const ev = item.event;
-                    const cal = calendarById.get(ev.calendar_id);
-                    const color = resolveEventColor(ev, calendarById, labelById);
-                    const time = ev.all_day
-                      ? t('views.allDay')
-                      : `${fmt.format(new Date(ev.start), 'p')}`;
-                    const span = multiDayInfo(ev, day);
-                    // Color label is purely visual — it's a visible
-                    // accent strip on the chip, not extra information
-                    // an SR user needs spoken. The calendar / list
-                    // affiliation stays in the label.
-                    const ariaBase = t('views.week.eventLabel', {
-                      title: ev.title,
-                      time,
-                      calendar: cal?.name ?? '—',
-                    });
-                    const aria = span
-                      ? ariaBase +
-                        t('views.multiDaySuffix', {
-                          day: span.dayIndex,
-                          total: span.totalDays,
-                        })
-                      : ariaBase;
-                    // All-day events are visualised by the lane above;
-                    // their per-day chip stays in the listbox as the
-                    // aria-activedescendant target but is clipped out
-                    // of the visual flow so the cell only shows timed
-                    // events. The bar's focused state is driven from
-                    // here via `focusedEvId`.
-                    return (
-                      <li key={ev.id} role="listitem">
-                        <span
-                          id={eventOptionId(i, itemIdx)}
-                          className={
-                            'week-event' +
-                            (isFocusedItem ? ' week-event--focused' : '') +
-                            (span ? ' week-event--multiday' : '') +
-                            (ev.all_day ? ' week-event--in-lane' : '')
-                          }
-                          aria-label={aria}
-                          aria-selected={isFocusedItem}
-                          draggable
-                          onDragStart={(dev) => {
-                            // Drag onto a sidebar calendar row to move the
-                            // event there (mouse affordance; the keyboard/SR
-                            // path is the Move/Copy dialog).
-                            setEventDrag(dev.dataTransfer, ev);
-                          }}
-                          onContextMenu={(cmev) => {
-                            cmev.preventDefault();
-                            cmev.stopPropagation();
-                            void openEventMenu(ev);
-                          }}
-                          style={
-                            color.hex
-                              ? ({ '--event-color': color.hex } as React.CSSProperties)
-                              : undefined
-                          }
-                        >
-                          <span className="week-event__time">{time}</span>
-                          <span className="week-event__title">{ev.title}</span>
-                          {span && (
-                            <span className="week-event__span">
-                              {t('views.multiDayCompact', {
-                                day: span.dayIndex,
-                                total: span.totalDays,
-                              })}
-                            </span>
-                          )}
-                        </span>
-                      </li>
-                    );
-                  })}
-                </ul>
-                {/* §9.4: untimed tasks on this day. Tasks that carry
-                    a real deadline_time are hoisted into the timed
-                    lane above (sorted between events by time); only
-                    scheduled-only tasks and By-window intermediate
-                    days end up here. They join the grid's
-                    aria-activedescendant nav too — their bucket index
-                    continues after the timed lane (`optionIdBase`), so
-                    Tab walks them like any other chip. */}
-                <WeekDayTasks
-                  tasks={untimedTasks}
-                  dayKey={dayKey}
-                  allTasks={tasks}
-                  cellIndex={i}
-                  optionIdBase={timedItems.length}
-                  focusedIndex={focused ? eventIndex : null}
-                  eventOptionId={eventOptionId}
-                  onOpen={(task) => openTaskDialog(task)}
-                  onToggle={(task) => {
-                    void toggleTaskStatus(task);
-                  }}
-                  onContextMenu={(task) => {
-                    void openTaskMenu(task);
-                  }}
-                  taskListById={taskListById}
-                  labelById={labelById}
-                  draggingTaskId={draggingTaskId}
-                  onDragStart={(task, ev) => {
-                    setTaskDrag(
-                      ev.dataTransfer,
-                      task,
-                      tasks.filter((c) => c.parent_id === task.id),
-                    );
-                    setDraggingTaskId(task.id);
-                  }}
-                  onDragEnd={() => {
-                    setDraggingTaskId(null);
-                    setDragOverDayKey(null);
-                  }}
-                />
-              </div>
-            );
-          })}
         </div>
       </div>
-
-      <BacklogRail />
 
       <ConfirmDialog
         isOpen={confirmTarget !== null}

@@ -1873,6 +1873,35 @@ button[aria-disabled='true'] {
 
 /* ── Sidebar ────────────────────────────────────────────────────────────── */
 
+/* Slim always-visible rail to the LEFT of the sidebar, holding the single
+   show/hide toggle. It lives outside the sidebar so collapsing (which marks
+   the sidebar `inert`) never strips focus from the button, and it sits just
+   before the sidebar in the tab order — one forward Tab then reaches the
+   sidebar when open or skips it when collapsed. */
+.sidebar-rail {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--space-2) var(--space-1);
+  background: var(--color-bg-elevated);
+  border-right: 1px solid var(--color-border);
+}
+
+.sidebar-rail__toggle {
+  background: transparent;
+  border: 0;
+  padding: var(--space-1);
+  color: var(--color-fg-muted);
+  font-size: var(--font-size-base);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.sidebar-rail__toggle:hover {
+  color: var(--color-fg);
+}
+
 .sidebar {
   width: 240px;
   border-right: 1px solid var(--color-border);
@@ -1880,6 +1909,20 @@ button[aria-disabled='true'] {
   padding: var(--space-3);
   overflow: auto;
   flex-shrink: 0;
+  transition:
+    width 0.18s var(--motion-easing),
+    padding 0.18s var(--motion-easing);
+}
+
+/* Collapsed: the panel shrinks to nothing. `inert` (set in JSX) keeps the
+   still-mounted tree out of the tab order / a11y tree; here we just remove
+   its width + chrome. The toolbar's ☰ brings it back. */
+.sidebar--collapsed {
+  width: 0;
+  padding-left: 0;
+  padding-right: 0;
+  border-right-width: 0;
+  overflow: hidden;
 }
 
 .sidebar__section {
@@ -2105,6 +2148,16 @@ button[aria-disabled='true'] {
 .week-task {
   display: flex;
   flex-direction: column;
+  /* Match .week-event: shrink below content so the title truncates instead
+     of widening the day column. */
+  min-width: 0;
+}
+
+/* The task chip's <li> wrapper is a flex item in the events / untimed-tasks
+   column — give it min-width:0 too so the chip's own min-width:0 can take
+   effect all the way down to the truncating title. */
+.week-grid__task-item {
+  min-width: 0;
 }
 
 /* Day untimed task chip stays a one-line row — there's no time slot
@@ -2516,6 +2569,19 @@ button[aria-disabled='true'] {
   overflow: auto;
 }
 
+/* Week/Month split: the backlog list on the left, the calendar grid filling
+   the rest. The grid is flex:1 + min-width:0 so it absorbs the width the
+   sidebar frees when collapsed; the backlog keeps a fixed-width column. The
+   top gap that the grids used to carry themselves now lives here so the
+   backlog and the grid line up under the view header. */
+.view__body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  gap: var(--space-4);
+  margin-top: var(--space-3);
+}
+
 .view__header h2 {
   margin: 0;
   font-size: var(--font-size-lg);
@@ -2558,7 +2624,7 @@ button[aria-disabled='true'] {
   display: flex;
   flex-direction: column;
   flex: 1;
-  margin-top: var(--space-3);
+  min-width: 0;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   overflow: hidden;
@@ -2567,7 +2633,10 @@ button[aria-disabled='true'] {
 .week-grid__head,
 .week-grid__body {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  /* minmax(0, …) lets a column shrink below its content's min-content, so a
+     long task title truncates instead of widening that day column (which
+     would desync the body columns from the fixed header row). */
+  grid-template-columns: repeat(7, minmax(0, 1fr));
 }
 
 .week-grid__head {
@@ -2613,6 +2682,9 @@ button[aria-disabled='true'] {
   border-right: 1px solid var(--color-border);
   padding: var(--space-2);
   min-height: 100px;
+  /* Allow the grid item to shrink below its content so chips truncate
+     rather than stretching the column. */
+  min-width: 0;
   /* The whole day column is clickable (selects that day). */
   cursor: pointer;
 }
@@ -2744,7 +2816,9 @@ button[aria-disabled='true'] {
  */
 .week-grid__lane {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  /* minmax(0, …) to match the head/body grid so the all-day lane columns
+     stay aligned with the day cells below even with long event titles. */
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   grid-template-rows: repeat(var(--lane-rows, 1), minmax(20px, auto));
   gap: 2px;
   padding: 2px;
@@ -2829,7 +2903,7 @@ button[aria-disabled='true'] {
   flex-direction: column;
   flex: 1;
   min-height: 0;
-  margin-top: var(--space-3);
+  min-width: 0;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   overflow: hidden;
@@ -3253,17 +3327,25 @@ button[aria-disabled='true'] {
    lists unscheduled tasks. Drag a chip onto a day to schedule it; drop a
    scheduled task back onto the rail to send it to the backlog. */
 .backlog-rail {
-  flex: none;
-  border-top: 1px solid var(--color-border);
+  flex: 0 0 14rem;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--color-border);
 }
-.backlog-rail__summary {
-  cursor: pointer;
+.backlog-rail__heading {
+  margin: 0;
   padding: var(--space-2);
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-fg-muted);
   font-weight: 600;
-  user-select: none;
+  flex-shrink: 0;
 }
 .backlog-rail__body {
-  max-height: 11rem;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 0 var(--space-2) var(--space-2);
 }
@@ -3276,17 +3358,22 @@ button[aria-disabled='true'] {
   margin: 0;
   padding: 0;
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
+  flex-direction: column;
+  gap: var(--space-1);
 }
 .backlog-rail__chip {
-  display: inline-flex;
+  display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 2px;
-  max-width: 14rem;
+  width: 100%;
+  min-width: 0;
   padding: var(--space-1) var(--space-2);
   border: 1px solid var(--color-border);
+  /* Hierarchical task color (task → section → list) as a left accent
+     stripe; falls back to the regular border tone when colorless. */
+  border-left: 3px solid var(--event-color, var(--color-border));
+  padding-left: calc(var(--space-2) - 2px);
   border-radius: var(--radius-sm);
   background: var(--color-bg);
   color: var(--color-fg);
@@ -3308,8 +3395,24 @@ button[aria-disabled='true'] {
   outline-offset: 1px;
   background: var(--color-surface-hover, rgba(127, 127, 127, 0.12));
 }
+.backlog-rail__chip-main {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-1);
+  width: 100%;
+  min-width: 0;
+}
 .backlog-rail__chip-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-weight: 500;
+}
+.backlog-rail__chip-priority {
+  flex-shrink: 0;
+  color: var(--color-fg-muted);
 }
 .backlog-rail__chip-list {
   font-size: 0.85em;

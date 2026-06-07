@@ -54,6 +54,24 @@ export function priorityMarker(priority: TaskPriority): string {
 }
 
 /**
+ * Numeric sort rank for a priority (ascending = most urgent first):
+ * `high` → 0, `medium` → 1, `low` → 2. Sort a task list by this and high
+ * floats to the top, low sinks to the bottom, medium sits in the middle.
+ * Pair with a *stable* sort so the existing order is the tiebreaker within
+ * one priority bucket.
+ */
+export function priorityRank(priority: TaskPriority): number {
+  switch (priority) {
+    case 'high':
+      return 0;
+    case 'medium':
+      return 1;
+    case 'low':
+      return 2;
+  }
+}
+
+/**
  * i18n key for the SR-announced priority label, or `null` for `medium`
  * (no announcement — keeps the common case unchanged). The resolved
  * string is the bare label ("high priority"); {@link prioritySuffix}

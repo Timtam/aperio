@@ -18,6 +18,10 @@ import { useEffect } from 'react';
  * Regions are discovered live on every keypress, so a future surface
  * just needs to mount with `data-region` to join the cycle — the backlog
  * rail does exactly that in the week and month views.
+ *
+ * Regions inside an `inert` subtree are skipped: a collapsed sidebar stays
+ * mounted (with `data-region`) but marks itself `inert`, so F6 must hop over
+ * it rather than dead-ending on a region that can't take focus.
  */
 export function useRegionFocus(): void {
   useEffect(() => {
@@ -26,7 +30,7 @@ export function useRegionFocus(): void {
       e.preventDefault();
       const regions = Array.from(
         document.querySelectorAll<HTMLElement>('[data-region]'),
-      );
+      ).filter((el) => !el.closest('[inert]'));
       if (regions.length === 0) return;
 
       const activeRegion = (e.target as HTMLElement | null)?.closest(
@@ -55,6 +59,7 @@ function findFirstFocusable(root: HTMLElement): HTMLElement | null {
   for (const el of candidates) {
     if (el.hasAttribute('disabled')) continue;
     if (el.getAttribute('aria-hidden') === 'true') continue;
+    if (el.closest('[inert]')) continue;
     return el;
   }
   return null;

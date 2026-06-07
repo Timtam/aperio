@@ -1,4 +1,5 @@
 import type { Section, Task } from '../../api/types';
+import { priorityRank } from '../../intl/taskStatus';
 
 /** Sentinel id of the synthetic "Done (N)" parent row. It behaves like a
  *  collapsible parent treeitem whose children are the completed tasks, so
@@ -71,6 +72,16 @@ export function buildEntries(
     if (task.status === 'completed') doneTopLevel.push(task);
     else openTopLevel.push(task);
   });
+
+  // High priority floats to the top, low sinks to the bottom (medium in
+  // between). Sorting once here is enough: every downstream bucket — backlog,
+  // per-list, per-section, ungrouped — is filled by walking `openTopLevel` in
+  // order, and `Array.prototype.sort` is stable, so the existing order stays
+  // the tiebreaker within each priority band. (`doneTopLevel` keeps its own
+  // completed-at order.)
+  openTopLevel.sort(
+    (a, b) => priorityRank(a.priority) - priorityRank(b.priority),
+  );
 
   // Two top-level buckets for the OPEN tasks: backlog (no dates at all)
   // and the per-list groups. Children inherit their parent's bucket so

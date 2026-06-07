@@ -31,6 +31,18 @@ to know them and switch between them.
   toolbar).
 - **Week numbers** are shown in the week and month views.
 
+## Collapsing the sidebar
+
+The **sidebar** (accounts, calendars and task lists) can be collapsed and
+expanded with the button at the **left edge**. When collapsed, the view — and,
+in the week/month planner, the backlog list — gets **more room**.
+The state is remembered across restarts.
+
+> **Keyboard & screen reader:** The button sits **before** the sidebar in the
+> tab order — after expanding, one more Tab reaches the sidebar; when collapsed,
+> Tab skips it. Press `F6` to jump between regions (sidebar, toolbar, view,
+> backlog).
+
 ## The month view
 
 In the month view, every day cell is **the same size**, and the grid fills

@@ -26,6 +26,7 @@ import { DialogStateProvider } from './state/DialogState';
 import { useDialogState } from './state/dialogStateContext';
 import { TaskCascadeProvider } from './state/TaskCascadeProvider';
 import { ToastProvider } from './state/ToastProvider';
+import { useSidebarCollapse } from './state/useSidebarCollapse';
 import { ViewStateProvider } from './state/ViewState';
 import { useViewShortcuts, useViewState } from './state/viewStateContext';
 
@@ -106,9 +107,12 @@ export function App() {
 }
 
 function Shell() {
+  const { t } = useTranslation();
   useViewShortcuts();
   useDialogShortcuts();
   const { mode } = useDialogState();
+  const { collapsed: sidebarCollapsed, toggle: toggleSidebar } =
+    useSidebarCollapse();
 
   // While a dialog is open the rest of the app is taken out of the
   // accessibility tree. `aria-modal` on the dialog alone is not enough
@@ -127,7 +131,27 @@ function Shell() {
     >
       <TitleBar />
       <div className="app-body">
-        <Sidebar />
+        {/* Single sidebar show/hide toggle, in a slim rail BEFORE the
+            sidebar in the tab order. Keeping it outside the sidebar means
+            collapsing (which marks the sidebar `inert`) never strips focus
+            from the button, and one forward Tab then reaches the sidebar
+            when open or skips it when collapsed. */}
+        <div className="sidebar-rail">
+          <button
+            type="button"
+            className="sidebar-rail__toggle"
+            aria-controls="app-sidebar"
+            aria-expanded={!sidebarCollapsed}
+            aria-label={
+              sidebarCollapsed ? t('sidebar.show') : t('sidebar.hide')
+            }
+            title={sidebarCollapsed ? t('sidebar.show') : t('sidebar.hide')}
+            onClick={toggleSidebar}
+          >
+            {sidebarCollapsed ? '›' : '‹'}
+          </button>
+        </div>
+        <Sidebar collapsed={sidebarCollapsed} />
         <div className="app-main">
           <Toolbar />
           <FocusBar />

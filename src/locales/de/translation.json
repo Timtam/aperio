@@ -1344,6 +1344,8 @@
     "accountNameRequired": "Kontoname darf nicht leer sein — Umbenennen verworfen.",
     "openSettings": "Einstellungen",
     "containersHeading": "Kalender & Aufgabenlisten",
+    "show": "Seitenleiste einblenden",
+    "hide": "Seitenleiste ausblenden",
     "treeLabel": "Konten, Kalender und Aufgabenlisten",
     "tree": {
       "accountLabel": "{{name}} ({{kind}})",
@@ -1390,7 +1392,7 @@
       "heading": "Backlog ({{count}})",
       "listLabel": "Backlog-Aufgaben",
       "empty": "Keine Aufgaben im Backlog.",
-      "chipLabel": "{{title}}, Liste {{list}}",
+      "chipLabel": "{{title}}, Liste {{list}}{{priority}}",
       "movedToBacklog": "„{{title}}“ in den Backlog verschoben.",
       "scheduled": "„{{title}}“ auf {{date}} geplant."
     },

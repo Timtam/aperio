@@ -1,8 +1,15 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useAnnouncer } from '../a11y/announcerContext';
 import { isCommandError } from '../api/client';
+import { labelsLookup, resolveTaskColor } from '../intl/eventColor';
+import {
+  priorityMarker,
+  priorityRank,
+  prioritySuffix,
+} from '../intl/taskStatus';
+import { useCalendarStore } from '../state/calendarStoreContext';
 import { useDialogState } from '../state/dialogStateContext';
 import {
   moveTaskToBacklog,
@@ -30,9 +37,10 @@ import { useTasks } from '../state/useTasks';
  *     Shift+D opens the plan dialog (schedule), ContextMenu / Shift+F10
  *     opens the task menu. So the rail is fully usable without a mouse.
  *
- * A native `<details>` keeps it a collapsible, accessible disclosure that
- * joins the F6 region cycle (via `data-region`). Rendered identically in
- * the week and month views, so the backlog travels with the planner.
+ * Rendered as a fixed-width vertical list to the left of the week / month
+ * grid; it joins the F6 region cycle (via `data-region`). Each chip carries
+ * its hierarchical color (task → section → list) and a priority marker, and
+ * the list is ordered high → low priority.
  */
 export function BacklogRail() {
   const { t } = useTranslation();
@@ -40,20 +48,39 @@ export function BacklogRail() {
   const { tasks, taskListById } = useTasks();
   const { openTaskDialog, openPlanTask, invalidateData } = useDialogState();
   const { openForTask } = useChipContextMenu();
-  const [open, setOpen] = useState(true);
+  const { colorLabels, sectionColorById, sectionsByList, loadSections } =
+    useCalendarStore();
   const [activeIndex, setActiveIndex] = useState(0);
+  const headingId = useId();
 
   const backlog = useMemo(() => {
     const ids = new Set(tasks.map((row) => row.id));
-    return tasks.filter(
-      (row) =>
-        row.status !== 'completed' &&
-        !row.scheduled_date &&
-        !row.deadline_date &&
-        // top-level (or orphaned) — subtasks travel with their parent
-        (!row.parent_id || !ids.has(row.parent_id)),
-    );
+    return tasks
+      .filter(
+        (row) =>
+          row.status !== 'completed' &&
+          !row.scheduled_date &&
+          !row.deadline_date &&
+          // top-level (or orphaned) — subtasks travel with their parent
+          (!row.parent_id || !ids.has(row.parent_id)),
+      )
+      // High priority to the top, low to the bottom (stable → existing order
+      // is the tiebreaker within one priority band).
+      .sort((a, b) => priorityRank(a.priority) - priorityRank(b.priority));
   }, [tasks]);
+
+  // Per-chip color follows the task → section → list chain. Sections load
+  // lazily, so trigger a load for every list that has a backlog task.
+  const labelById = useMemo(() => labelsLookup(colorLabels), [colorLabels]);
+  const listIds = useMemo(
+    () => Array.from(new Set(backlog.map((task) => task.list_id))),
+    [backlog],
+  );
+  useEffect(() => {
+    for (const listId of listIds) {
+      if (!(listId in sectionsByList)) void loadSections(listId);
+    }
+  }, [listIds, sectionsByList, loadSections]);
 
   // Clamp the active option to the current list (it shrinks as tasks are
   // scheduled away). Derived, so it never points past the end.
@@ -128,11 +155,10 @@ export function BacklogRail() {
   };
 
   return (
-    <details
+    <section
       className="backlog-rail"
       data-region="backlog"
-      open={open}
-      onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}
+      aria-labelledby={headingId}
       onDragOver={(e) => {
         if (!e.dataTransfer.types.includes(TASK_DND_TYPE)) return;
         // A task dragged over the rail → valid "back to backlog" drop.
@@ -141,9 +167,9 @@ export function BacklogRail() {
       }}
       onDrop={(e) => void dropToBacklog(e)}
     >
-      <summary className="backlog-rail__summary">
+      <h2 id={headingId} className="backlog-rail__heading">
         {t('views.backlog.heading', { count: backlog.length })}
-      </summary>
+      </h2>
       <div className="backlog-rail__body">
         {backlog.length === 0 ? (
           <p className="backlog-rail__empty">{t('views.backlog.empty')}</p>
@@ -160,6 +186,13 @@ export function BacklogRail() {
               const children = tasks.filter((c) => c.parent_id === task.id);
               const listName =
                 taskListById.get(task.list_id)?.name ?? task.list_id;
+              const color = resolveTaskColor(
+                task,
+                taskListById,
+                labelById,
+                sectionColorById,
+              );
+              const priorityGlyph = priorityMarker(task.priority);
               return (
                 <li
                   key={task.id}
@@ -169,10 +202,16 @@ export function BacklogRail() {
                   aria-label={t('views.backlog.chipLabel', {
                     title: task.title,
                     list: listName,
+                    priority: prioritySuffix(t, task.priority),
                   })}
                   className={
                     'backlog-rail__chip' +
                     (i === activeIdx ? ' backlog-rail__chip--active' : '')
+                  }
+                  style={
+                    color.hex
+                      ? ({ '--event-color': color.hex } as React.CSSProperties)
+                      : undefined
                   }
                   draggable
                   onDragStart={(e) => setTaskDrag(e.dataTransfer, task, children)}
@@ -186,7 +225,19 @@ export function BacklogRail() {
                     void openForTask(task, { x: e.clientX, y: e.clientY });
                   }}
                 >
-                  <span className="backlog-rail__chip-title">{task.title}</span>
+                  <span className="backlog-rail__chip-main">
+                    <span className="backlog-rail__chip-title">
+                      {task.title}
+                    </span>
+                    {priorityGlyph && (
+                      <span
+                        className="backlog-rail__chip-priority"
+                        aria-hidden="true"
+                      >
+                        {priorityGlyph}
+                      </span>
+                    )}
+                  </span>
                   <span className="backlog-rail__chip-list">{listName}</span>
                 </li>
               );
@@ -194,6 +245,6 @@ export function BacklogRail() {
           </ul>
         )}
       </div>
-    </details>
+    </section>
   );
 }

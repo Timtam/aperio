@@ -72,11 +72,11 @@ Aperio unterscheidet zwischen Aufgaben mit und ohne festen Termin:
 - **Automatisch auf heute:** Setzt du eine Backlog-Aufgabe auf **„In
   Bearbeitung"**, plant Aperio sie automatisch für **heute** ein – die Arbeit
   hat ja begonnen. (Abschaltbar unter *Einstellungen → Aufgaben*.)
-- **Backlog-Streifen:** Die **Wochen- und die Monatsansicht** zeigen unten
-  einen ein-/ausklappbaren **Backlog**-Streifen mit allen ungeplanten
+- **Backlog-Liste:** Die **Wochen- und die Monatsansicht** zeigen **links
+  neben dem Raster** eine feste **Backlog**-Liste mit allen ungeplanten
   Aufgaben. Zieh eine Aufgabe von dort auf einen Tag, um sie einzuplanen –
-  oder zieh eine eingeplante Aufgabe zurück auf den Streifen, um sie wieder
-  in den Backlog zu legen. Ohne Maus: Aufgabe im Streifen fokussieren und
+  oder zieh eine eingeplante Aufgabe zurück auf die Liste, um sie wieder in
+  den Backlog zu legen. Ohne Maus: Aufgabe in der Liste fokussieren und
   **Umschalt+D** (Plan-Dialog) drücken bzw. das Kontextmenü nutzen.
 - **Deadline:** Eine Aufgabe mit Deadline erscheint in der Wochen- und
   Tagesplanung als **Fälligkeitsmarker** an ihrem Deadline-Tag („fällig

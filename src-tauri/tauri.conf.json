@@ -21,7 +21,8 @@
         "transparent": false,
         "resizable": true,
         "fullscreen": false,
-        "label": "main"
+        "label": "main",
+        "dragDropEnabled": false
       }
     ],
     "security": {

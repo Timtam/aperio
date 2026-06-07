@@ -53,9 +53,14 @@ export function useSuppressBrowserDefaults(): void {
     };
 
     const onDragStart = (e: DragEvent) => {
-      // Allow drag from elements that opt in (calendar events, tasks).
-      // Anything else (random text, links) must not start a browser drag.
-      if ((e.target as HTMLElement | null)?.closest('[data-drag-source]')) {
+      // Allow drag from elements that explicitly opt in: anything
+      // `draggable="true"` (the native opt-in every app chip already sets —
+      // backlog tasks, event/task chips, sidebar rows) or inside a
+      // `[data-drag-source]` container. Everything else (selected text, the
+      // links/images the browser would drag by default) must not start a
+      // drag — that feels nothing like a desktop app.
+      const target = e.target as HTMLElement | null;
+      if (target?.closest('[draggable="true"], [data-drag-source]')) {
         return;
       }
       e.preventDefault();
