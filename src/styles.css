@@ -3153,6 +3153,30 @@ button[aria-disabled='true'] {
   vertical-align: middle;
 }
 
+/* The "⋮" actions button on a colorable section header (local lists).
+   Opens the color context menu; also the keyboard/SR entry point, so it
+   carries a real accessible name via aria-label. */
+.task-list__section-menu {
+  margin-left: var(--space-1);
+  padding: 0 var(--space-1);
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 1em;
+  line-height: 1;
+  border-radius: var(--radius-sm, 4px);
+}
+
+.task-list__section-menu:hover {
+  background: var(--color-surface-hover, rgba(127, 127, 127, 0.15));
+}
+
+.task-list__section-menu:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
 /* The synthetic "Done (N)" group row: a collapsible parent treeitem that
    reads as a group heading. It opts out of the task row's 5-column grid
    (no checkbox / due columns) and lays its chevron + label inline, with

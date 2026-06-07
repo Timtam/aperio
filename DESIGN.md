@@ -871,6 +871,10 @@ Ein Termin oder eine Aufgabe ohne Label erbt die Farbe seines bzw. ihres Contain
 
 Effektive Kette einer Aufgabe: `Aufgaben-Label → Abschnitts-Label → Aufgabenlisten-Farbe → neutral`.
 
+Die Abschnittsfarbe wird an zwei Stellen gesetzt — im Abschnitt-Anlegen/Bearbeiten-Dialog **und** über ein Kontextmenü am Abschnitts-Kopf in der Aufgaben-Ansicht (Rechtsklick bzw. die „⋮"-Schaltfläche; analog zu den Sidebar-Containern), inkl. „Andere Farbe…" für Ad-hoc-Farben. Beides nur für **lokale** Listen — Abschnitte externer Anbieter sind schreibgeschützt und tragen keine Farbe.
+
+**Abschnitts-Zuordnung (Schreiben):** Eine Aufgabe lässt sich zwischen Abschnitten verschieben oder aus einem Abschnitt herausnehmen (`section_id → null`), soweit der Adapter es zulässt: lokal direkt; **Todoist** über die Sync-API (`item_move` — REST v2 ignoriert Abschnittswechsel im Update; nur bei tatsächlicher Änderung gefeuert, sonst keine Umsortierung); **Vikunja**-Buckets sind derzeit schreibgeschützt (Zuordnung hängt an einer Kanban-*View* und kennt keinen „bucket-los"-Zustand).
+
 ### 8.3 Anwendung & Barrierefreiheit
 
 Im Formular: Label-Dropdown mit Autocomplete ("Arb" → "Arbeit"). Da Farbe allein nicht WCAG-konform ist, wird der Label-Name immer im `aria-label` angegeben:

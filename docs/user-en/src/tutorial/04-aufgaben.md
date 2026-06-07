@@ -31,10 +31,16 @@ your day or week, and work through them.
 > subtasks. The open/closed state is remembered.
 
 > **Section colors:** Task sections can carry their own color (set it in
-> the task dialog when you add or edit a section). Tasks **without** their
-> own color take on their section's color; moving such a task into another
-> section recolors it automatically. Order: task's own color → section →
-> task list.
+> the task dialog when you add or edit a section — or right on the section
+> header in the task view, via right-click or the **⋮** button). Tasks
+> **without** their own color take on their section's color; moving such a
+> task into another section recolors it automatically. Order: task's own
+> color → section → task list.
+
+> **Moving tasks between sections:** Use the **Section** field in the task
+> dialog to file a task under a different section, or pick **No section**
+> to pull it out entirely. This works for local lists and for Todoist; for
+> other providers it depends on whether the service supports the move.
 
 ## Scheduling tasks
 

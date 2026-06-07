@@ -34,10 +34,17 @@ deinen Tag oder deine Woche ein und arbeitest sie ab.
 
 > **Abschnittsfarben:** Aufgaben-Abschnitte können eine eigene Farbe
 > bekommen (im Aufgaben-Dialog beim Anlegen oder Bearbeiten eines
-> Abschnitts). Aufgaben **ohne** eigene Farbe übernehmen die Farbe ihres
-> Abschnitts; verschiebst du eine solche Aufgabe in einen anderen
-> Abschnitt, färbt sie automatisch mit. Reihenfolge: eigene Aufgaben-Farbe
-> → Abschnitt → Aufgabenliste.
+> Abschnitts — oder direkt am Abschnitts-Kopf in der Aufgaben-Ansicht per
+> Rechtsklick bzw. der **⋮**-Schaltfläche). Aufgaben **ohne** eigene Farbe
+> übernehmen die Farbe ihres Abschnitts; verschiebst du eine solche
+> Aufgabe in einen anderen Abschnitt, färbt sie automatisch mit.
+> Reihenfolge: eigene Aufgaben-Farbe → Abschnitt → Aufgabenliste.
+
+> **Aufgaben zwischen Abschnitten verschieben:** Über das **Abschnitt**-Feld
+> im Aufgaben-Dialog ordnest du eine Aufgabe einem anderen Abschnitt zu
+> oder löst sie mit **Kein Abschnitt** ganz heraus. Das funktioniert bei
+> lokalen Listen und bei Todoist; bei anderen Anbietern hängt es davon ab,
+> ob der Dienst das Verschieben unterstützt.
 
 ## Aufgaben einplanen
 

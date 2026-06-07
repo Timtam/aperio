@@ -16,6 +16,9 @@ export type Entry =
        *  header can tint to the section's color and offer a color
        *  action. Absent on the backlog / list headers. */
       sectionId?: string;
+      /** The list this section belongs to — lets the header gate its
+       *  color action to local lists (external sections are read-only). */
+      listId?: string;
     }
   | {
       kind: 'task';
@@ -159,6 +162,7 @@ export function buildEntries(
           label: section.name,
           level: 1,
           sectionId: section.id,
+          listId,
         });
         secTasks.forEach((task) => visit(task, 0, false));
       });

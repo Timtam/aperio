@@ -177,6 +177,5 @@ pub mod test_support {
         include_str!("../../../src-tauri/src/db/sql/0022_container_color_labels.sql");
     const SCHEMA_V23: &str =
         include_str!("../../../src-tauri/src/db/sql/0023_color_label_ad_hoc.sql");
-    const SCHEMA_V24: &str =
-        include_str!("../../../src-tauri/src/db/sql/0024_section_color.sql");
+    const SCHEMA_V24: &str = include_str!("../../../src-tauri/src/db/sql/0024_section_color.sql");
 }

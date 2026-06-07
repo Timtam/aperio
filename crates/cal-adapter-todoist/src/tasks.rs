@@ -160,6 +160,25 @@ pub async fn update_task(client: &TodoistClient, task: &Task) -> TodoistResult<T
     let entry: TaskEntry = client
         .post_json(&format!("/tasks/{encoded}"), &body)
         .await?;
+    // REST v2 can't change a task's `section_id`, so the body omits it
+    // and the PATCH response still shows the task's *current* section.
+    // If the caller moved the task to a different section — or cleared it
+    // ("no section") — do that via the Sync API's `item_move`. Only fire
+    // when the section actually changed, so a plain title/date edit never
+    // reorders the task within its section.
+    let current_section = entry.section_id.clone().filter(|s| !s.is_empty());
+    let desired_section = task.section_id.clone().filter(|s| !s.is_empty());
+    if current_section != desired_section {
+        let args = match &desired_section {
+            Some(section_id) => {
+                serde_json::json!({ "id": task.id, "section_id": section_id })
+            }
+            // No section: move the task to its project's root, which
+            // detaches it from any section while keeping it in the list.
+            None => serde_json::json!({ "id": task.id, "project_id": task.list_id }),
+        };
+        sync_command(client, "item_move", args).await?;
+    }
     // The update body never carries status — drive it via the
     // dedicated endpoints. We unconditionally fire either close or
     // reopen so the wire state matches `task.status` even if the
@@ -174,6 +193,9 @@ pub async fn update_task(client: &TodoistClient, task: &Task) -> TodoistResult<T
     // value; patch it locally so the caller's `Task` matches what
     // the next `get_tasks` will return.
     result.status = task.status;
+    // …and the pre-move section (REST ignored the section change); reflect
+    // the section we just moved to so the caller's Task is consistent.
+    result.section_id = desired_section;
     if matches!(task.status, TaskStatus::Completed) && result.completed_at.is_none() {
         result.completed_at = Some(Utc::now());
     }
@@ -1366,6 +1388,119 @@ mod tests {
         post.assert_async().await;
         close.assert_async().await;
         assert_eq!(result.status, TaskStatus::Completed);
+    }
+
+    #[tokio::test]
+    async fn update_task_moves_section_via_sync_when_changed() {
+        let mut server = Server::new_async().await;
+        // The PATCH response still shows the *old* section S1 — REST v2
+        // ignores section changes on update.
+        let patch = server
+            .mock("POST", "/tasks/T1")
+            .with_status(200)
+            .with_body(
+                r#"{"id":"T1","project_id":"P1","content":"Buy bread","is_completed":false,"priority":1,"section_id":"S1"}"#,
+            )
+            .create_async()
+            .await;
+        // S1 → S2 differs, so an `item_move` Sync command fires.
+        let mv = server
+            .mock("POST", "/sync")
+            .with_status(200)
+            .with_body(r#"{"sync_status":{}}"#)
+            .create_async()
+            .await;
+        let reopen = server
+            .mock("POST", "/tasks/T1/reopen")
+            .with_status(204)
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        let task = Task {
+            assignees: Vec::new(),
+            id: "T1".into(),
+            list_id: "P1".into(),
+            title: "Buy bread".into(),
+            description: None,
+            status: TaskStatus::Open,
+            priority: TaskPriority::Medium,
+            scheduled_date: None,
+            scheduled_time: None,
+            deadline_date: None,
+            deadline_time: None,
+            recurrence: None,
+            parent_id: None,
+            section_id: Some("S2".into()),
+            color_label: None,
+            reminders: Vec::new(),
+            sound: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            completed_at: None,
+            etag: None,
+        };
+        let result = update_task(&client, &task).await.unwrap();
+        patch.assert_async().await;
+        mv.assert_async().await;
+        reopen.assert_async().await;
+        // The returned Task reflects the section we moved to, not the
+        // pre-move one the PATCH echoed back.
+        assert_eq!(result.section_id.as_deref(), Some("S2"));
+    }
+
+    #[tokio::test]
+    async fn update_task_clears_section_via_sync() {
+        let mut server = Server::new_async().await;
+        let patch = server
+            .mock("POST", "/tasks/T1")
+            .with_status(200)
+            .with_body(
+                r#"{"id":"T1","project_id":"P1","content":"Buy bread","is_completed":false,"priority":1,"section_id":"S1"}"#,
+            )
+            .create_async()
+            .await;
+        // No section desired → `item_move` to the project root, which
+        // detaches the task from its section.
+        let mv = server
+            .mock("POST", "/sync")
+            .with_status(200)
+            .with_body(r#"{"sync_status":{}}"#)
+            .create_async()
+            .await;
+        let reopen = server
+            .mock("POST", "/tasks/T1/reopen")
+            .with_status(204)
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        let task = Task {
+            assignees: Vec::new(),
+            id: "T1".into(),
+            list_id: "P1".into(),
+            title: "Buy bread".into(),
+            description: None,
+            status: TaskStatus::Open,
+            priority: TaskPriority::Medium,
+            scheduled_date: None,
+            scheduled_time: None,
+            deadline_date: None,
+            deadline_time: None,
+            recurrence: None,
+            parent_id: None,
+            section_id: None,
+            color_label: None,
+            reminders: Vec::new(),
+            sound: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            completed_at: None,
+            etag: None,
+        };
+        let result = update_task(&client, &task).await.unwrap();
+        patch.assert_async().await;
+        mv.assert_async().await;
+        reopen.assert_async().await;
+        assert!(result.section_id.is_none());
     }
 
     #[tokio::test]
