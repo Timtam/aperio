@@ -1385,8 +1385,8 @@
       "heading": "Backlog ({{count}})",
       "empty": "Keine Aufgaben im Backlog.",
       "chipLabel": "{{title}}, Liste {{list}}",
-      "movedToBacklog": "„{{title}}\" in den Backlog verschoben.",
-      "scheduled": "„{{title}}\" auf {{date}} geplant."
+      "movedToBacklog": "„{{title}}“ in den Backlog verschoben.",
+      "scheduled": "„{{title}}“ auf {{date}} geplant."
     },
     "week": {
       "title": "Wochenansicht",

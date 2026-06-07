@@ -120,6 +120,22 @@ export function BacklogRail() {
                         e.preventDefault();
                         e.stopPropagation();
                         openPlanTask(task);
+                        return;
+                      }
+                      // ContextMenu / Shift+F10 → the task menu (status,
+                      // move, delete…), anchored at the chip so keyboard
+                      // users reach the same actions as a right-click.
+                      if (
+                        e.key === 'ContextMenu' ||
+                        (e.shiftKey && e.key === 'F10')
+                      ) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        void openForTask(task, {
+                          x: rect.left,
+                          y: rect.bottom,
+                        });
                       }
                     }}
                   >
