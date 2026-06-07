@@ -19,6 +19,7 @@ const DEFAULT_CAPS: TaskCapabilities = {
   subtasks: true,
   max_subtask_depth: null,
   sections: false,
+  manageable_sections: false,
   multiple_labels: false,
   task_recurrence: true,
   move_between_projects: true,

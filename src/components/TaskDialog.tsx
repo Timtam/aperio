@@ -18,6 +18,7 @@ import {
   createTask as apiCreateTask,
   deleteSection,
   isCommandError,
+  setSectionColor,
   showContextMenu,
   taskCurrentUser,
   taskListMembers,
@@ -225,11 +226,13 @@ export function TaskDialog({
     () => sectionsByList[form.listId] ?? [],
     [sectionsByList, form.listId],
   );
-  // Sections are user-managed (create / rename / delete) only on local
-  // lists; external-provider sections are read-only here (managed in
-  // the provider's own UI), so we just offer the picker for those.
+  // Sections are user-managed (create / rename / delete) on local lists
+  // and on providers that declare `manageable_sections` (Todoist,
+  // Vikunja). Providers without it expose sections read-only — we just
+  // offer the picker. (Local lists report the capability too.)
   const sectionsManageable =
-    sectionsEnabled && listForSections?.account_id === 'local';
+    sectionsEnabled &&
+    !!listForSections?.task_capabilities?.manageable_sections;
 
   // Pull the target list's sections when the picker is relevant.
   useEffect(() => {
@@ -308,11 +311,13 @@ export function TaskDialog({
       if (sectionMode === 'rename' && form.sectionId) {
         const current = sectionsForList.find((s) => s.id === form.sectionId);
         if (current) {
-          await updateSection({
-            ...current,
-            name,
-            color_label: sectionColorDraft,
-          });
+          // Rename via update_section (provider-routed); the colour is a
+          // separate, always-local-or-override write so it works for
+          // external sections too.
+          await updateSection({ ...current, name });
+          if (sectionColorDraft !== (current.color_label ?? null)) {
+            await setSectionColor(current.id, form.listId, sectionColorDraft);
+          }
           announce(t('dialogs.task.section.renamed', { name }));
         }
       } else {
@@ -320,8 +325,10 @@ export function TaskDialog({
           list_id: form.listId,
           name,
           position: sectionsForList.length,
-          color_label: sectionColorDraft,
         });
+        if (sectionColorDraft) {
+          await setSectionColor(created.id, form.listId, sectionColorDraft);
+        }
         // Reload BEFORE selecting the new section so the
         // "section gone from list" reset effect sees it as valid and
         // doesn't race-clear the fresh selection.
@@ -362,7 +369,7 @@ export function TaskDialog({
     try {
       // Deleting a section only ungroups its tasks (ON DELETE SET NULL),
       // so there's no destructive-confirm — the tasks survive.
-      await deleteSection(form.sectionId);
+      await deleteSection(form.sectionId, form.listId);
       setForm((prev) => ({ ...prev, sectionId: '' }));
       await loadSections(form.listId);
       announce(

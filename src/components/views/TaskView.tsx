@@ -34,8 +34,8 @@ import { ConfirmDialog } from '../ConfirmDialog';
 import { ColorPickerModal } from '../ColorPickerModal';
 import {
   isCommandError,
+  setSectionColor as setSectionColorCmd,
   showContextMenu,
-  updateSection,
   type ContextMenuItemRequest,
 } from '../../api/client';
 
@@ -179,13 +179,15 @@ export function TaskView() {
   );
 
   // Bind / clear / compose a section's color from its header context menu.
-  // Mirrors the sidebar container color submenu, but persists via
-  // `updateSection` (sections are local-only) and relies on the live
-  // cascade to re-tint the section's colorless tasks.
+  // Mirrors the sidebar container color submenu. Persists via
+  // `set_section_color`, which routes host-side: local sections store the
+  // binding on their (synced) row; external sections store a local color
+  // override. Relies on the live cascade to re-tint the section's
+  // colorless tasks.
   const setSectionColor = useCallback(
     async (section: Section, labelId: string | null, colorName?: string) => {
       try {
-        await updateSection({ ...section, color_label: labelId });
+        await setSectionColorCmd(section.id, section.list_id, labelId);
         await loadSections(section.list_id);
         announce(
           colorName
@@ -483,20 +485,18 @@ export function TaskView() {
             const sectionHex = entry.sectionId
               ? sectionColorById.get(entry.sectionId)
               : undefined;
-            // The color action is offered only for local-list sections —
-            // external provider sections are read-only (and carry no
-            // color). The header then becomes interactive (a menu button
-            // + right-click target), so it can't stay aria-hidden.
+            // The color action is offered for any section (a section's
+            // color is a local concept — synced field for local lists, a
+            // local override for external ones), so it doesn't depend on
+            // the account. The header then becomes interactive (a menu
+            // button + right-click target), so it can't stay aria-hidden.
             const section =
               entry.sectionId && entry.listId
                 ? sectionsByList[entry.listId]?.find(
                     (s) => s.id === entry.sectionId,
                   )
                 : undefined;
-            const colorable =
-              !!section &&
-              colorLabels.length > 0 &&
-              taskListById.get(section.list_id)?.account_id === 'local';
+            const colorable = !!section && colorLabels.length > 0;
             return (
               <li
                 key={`sep-${i}-${entry.label}`}
