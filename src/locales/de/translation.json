@@ -1433,6 +1433,7 @@
       "sectionActions": "Aktionen für Abschnitt „{{name}}\"",
       "sectionColorSet": "Abschnitt „{{name}}\" auf {{color}} gesetzt.",
       "sectionColorCleared": "Farbe für Abschnitt „{{name}}\" entfernt.",
+      "movedToSection": "„{{title}}\" in den Abschnitt verschoben.",
       "stateDone": "erledigt",
       "stateOpen": "offen",
       "stateInProgress": "in Arbeit",

@@ -1433,6 +1433,7 @@
       "sectionActions": "Actions for section \"{{name}}\"",
       "sectionColorSet": "Section \"{{name}}\" set to {{color}}.",
       "sectionColorCleared": "Color cleared for section \"{{name}}\".",
+      "movedToSection": "\"{{title}}\" moved to a section.",
       "stateDone": "done",
       "stateOpen": "open",
       "stateInProgress": "in progress",
