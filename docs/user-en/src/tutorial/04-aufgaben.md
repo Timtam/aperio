@@ -51,6 +51,12 @@ your day or week, and work through them.
 > into the default bucket, since Vikunja keeps every kanban task in a
 > bucket.
 
+> **With the mouse (drag & drop):** You can also drag a task onto a
+> **section header** (in the task view) or onto a **list in the sidebar**
+> to move it there; drag an **event** onto a **calendar in the sidebar**.
+> For keyboard and screen-reader use, the Move/Copy dialog (or the Section
+> field) remains the way.
+
 ## Scheduling tasks
 
 Aperio distinguishes between tasks with and without a fixed date:
