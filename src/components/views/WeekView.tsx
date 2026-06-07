@@ -20,6 +20,7 @@ import {
   multiDayInfo,
 } from '../../intl/multiDay';
 import { useCalendarStore } from '../../state/calendarStoreContext';
+import { setEventDrag, setTaskDrag } from '../../state/moveActions';
 import { useDialogState } from '../../state/dialogStateContext';
 import { useEvents } from '../../state/useEvents';
 import { useTaskListShowCompleted } from '../../state/useTaskListShowCompleted';
@@ -781,11 +782,11 @@ export function WeekView() {
                             }
                             draggable
                             onDragStart={(ev) => {
-                              ev.dataTransfer.setData(
-                                'text/aperio-task',
-                                task.id,
+                              setTaskDrag(
+                                ev.dataTransfer,
+                                task,
+                                tasks.filter((c) => c.parent_id === task.id),
                               );
-                              ev.dataTransfer.effectAllowed = 'move';
                               setDraggingTaskId(task.id);
                             }}
                             onDragEnd={() => {
@@ -872,6 +873,13 @@ export function WeekView() {
                           }
                           aria-label={aria}
                           aria-selected={isFocusedItem}
+                          draggable
+                          onDragStart={(dev) => {
+                            // Drag onto a sidebar calendar row to move the
+                            // event there (mouse affordance; the keyboard/SR
+                            // path is the Move/Copy dialog).
+                            setEventDrag(dev.dataTransfer, ev);
+                          }}
                           onContextMenu={(cmev) => {
                             cmev.preventDefault();
                             cmev.stopPropagation();
@@ -922,8 +930,11 @@ export function WeekView() {
                   labelById={labelById}
                   draggingTaskId={draggingTaskId}
                   onDragStart={(task, ev) => {
-                    ev.dataTransfer.setData('text/aperio-task', task.id);
-                    ev.dataTransfer.effectAllowed = 'move';
+                    setTaskDrag(
+                      ev.dataTransfer,
+                      task,
+                      tasks.filter((c) => c.parent_id === task.id),
+                    );
                     setDraggingTaskId(task.id);
                   }}
                   onDragEnd={() => {

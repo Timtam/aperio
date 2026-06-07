@@ -1301,6 +1301,10 @@
   },
   "sidebar": {
     "label": "Seitenleiste",
+    "dnd": {
+      "taskMoved": "„{{title}}\" in die Liste verschoben.",
+      "eventMoved": "„{{title}}\" in den Kalender verschoben."
+    },
     "calendars": "Kalender",
     "taskLists": "Aufgabenlisten",
     "contactLists": "Kontakte",

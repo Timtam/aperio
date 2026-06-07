@@ -1301,6 +1301,10 @@
   },
   "sidebar": {
     "label": "Sidebar",
+    "dnd": {
+      "taskMoved": "\"{{title}}\" moved to the list.",
+      "eventMoved": "\"{{title}}\" moved to the calendar."
+    },
     "calendars": "Calendars",
     "taskLists": "Task lists",
     "contactLists": "Contacts",
