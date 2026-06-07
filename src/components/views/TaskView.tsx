@@ -65,6 +65,15 @@ export function TaskView() {
   const { colorLabels, sectionsByList, loadSections, sectionColorById } =
     useCalendarStore();
   const labelById = useMemo(() => labelsLookup(colorLabels), [colorLabels]);
+  // Section id → name, for the accessible task label (which section a
+  // task sits in), flattened across all loaded lists.
+  const sectionNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const list of Object.values(sectionsByList)) {
+      for (const s of list) m.set(s.id, s.name);
+    }
+    return m;
+  }, [sectionsByList]);
 
   // Pull sections for every list that currently has tasks. The fetch
   // is cached + cheap (section-less backends return [] via the trait
@@ -557,6 +566,7 @@ export function TaskView() {
             taskListById,
             labelById,
             sectionColorById,
+            sectionNameById,
             collapsed,
             toggleCollapsed,
             focusIndex,
@@ -614,6 +624,7 @@ interface RenderTreeCtx {
   taskListById: Map<string, import('../../api/types').TaskList>;
   labelById: Map<string, import('../../api/types').ColorLabel>;
   sectionColorById: Map<string, string>;
+  sectionNameById: Map<string, string>;
   collapsed: Set<string>;
   toggleCollapsed: (id: string) => void;
   focusIndex: number;
@@ -642,6 +653,7 @@ function renderTreeItem(
     taskListById,
     labelById,
     sectionColorById,
+    sectionNameById,
     collapsed,
     toggleCollapsed,
     focusIndex,
@@ -720,12 +732,22 @@ function renderTreeItem(
   const priorityGlyph = priorityMarker(task.priority);
   const stateLabel = t(statusI18nKey(task.status));
   const progress = subtaskProgress(task.id, tasks);
+  // The section a task sits in is part of its grouping, so name it in the
+  // accessible label (like the list) — otherwise a screen-reader user
+  // navigating by arrow keys can't tell which section a task belongs to
+  // (the section header separators are decorative + skipped in nav).
+  const sectionName = task.section_id
+    ? sectionNameById.get(task.section_id)
+    : undefined;
   const aria = t('views.tasks.optionLabel', {
     title: task.title,
     list: listName,
     state: stateLabel,
     priority: prioritySuffix(t, task.priority),
     progress: subtaskProgressSuffix(t, task.id, tasks),
+    section: sectionName
+      ? t('views.tasks.optionSectionSuffix', { name: sectionName })
+      : '',
     due,
   });
   return (
