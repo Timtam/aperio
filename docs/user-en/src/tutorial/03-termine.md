@@ -29,6 +29,19 @@ In the event dialog you can also set:
 > time. The sidebar offers the same thing via the **Color → Other…** context
 > menu on calendars and lists.
 
+> **Recoloring a single event:** Besides the dialog, you can recolor an event
+> directly from its **right-click menu** (the **Color** submenu) — handy for a
+> quick tweak without opening the full form. Where the calendar's provider can
+> store a per-event color (local calendars and color-capable CalDAV servers),
+> the color travels with the event and shows up in other clients too. For
+> iCloud, Google, Exchange/Outlook and subscribed feeds, the color is kept
+> locally on this device instead (so it never triggers a sync error), and it
+> stays applied just the same.
+
+> **Subscribed calendars:** If a calendar you subscribe to (an iCal feed)
+> sets its own per-event colors, those now show through as well — read-only,
+> since a subscribed feed can't be edited.
+
 **Save** creates the event; a live region confirms "Event saved".
 
 > **Notify attendees:** When an event has attendees and the calendar

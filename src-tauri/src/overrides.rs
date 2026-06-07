@@ -498,6 +498,13 @@ impl OverridesRepo<'_> {
 /// Stamp color-label bindings onto external events in place. Local events and
 /// events on color-capable calendars carry their own binding and have no
 /// override row, so they're left untouched.
+///
+/// An event that already carries a **native** color (`color_hex` set by a
+/// color-capable provider) is the single source of truth for that calendar —
+/// the override is skipped so a leftover Stage-1 row (from when the calendar
+/// was non-capable) can never shadow the provider's color on read. Such a row
+/// is also cleared on the next color-capable `update_event`; this guard makes
+/// the read correct even before that cleanup runs.
 pub fn apply_color_to_events(repo: &OverridesRepo<'_>, events: &mut [cal_core::Event]) {
     let map: std::collections::HashMap<String, String> = match repo.list_event_color_overrides() {
         Ok(o) => o
@@ -510,6 +517,10 @@ pub fn apply_color_to_events(repo: &OverridesRepo<'_>, events: &mut [cal_core::E
         }
     };
     for event in events {
+        // Native color wins: never let a host-local override shadow it.
+        if event.color_hex.is_some() {
+            continue;
+        }
         if let Some(label) = map.get(&event.id) {
             event.color_label = Some(cal_core::ColorLabelId(label.clone()));
         }
@@ -600,6 +611,7 @@ mod tests {
             cal_core::Calendar {
                 color_label: None,
                 supports_scheduling: false,
+                supports_event_color: false,
                 id: "ical:42".into(),
                 name: "schulferien-sachsen-anhalt".into(),
                 color: None,
@@ -609,6 +621,7 @@ mod tests {
             cal_core::Calendar {
                 color_label: None,
                 supports_scheduling: false,
+                supports_event_color: true,
                 id: "local-1".into(),
                 name: "Persönlich".into(),
                 color: None,
@@ -648,6 +661,7 @@ mod tests {
             cal_core::Calendar {
                 color_label: None,
                 supports_scheduling: false,
+                supports_event_color: false,
                 id: "google:work".into(),
                 name: "Work".into(),
                 color: Some(cal_core::ContainerColor::native("#4285f4")),
@@ -657,6 +671,7 @@ mod tests {
             cal_core::Calendar {
                 color_label: None,
                 supports_scheduling: false,
+                supports_event_color: false,
                 id: "google:other".into(),
                 name: "Other".into(),
                 color: None,
@@ -757,6 +772,7 @@ mod tests {
             all_day: false,
             recurrence: None,
             color_label: None,
+            color_hex: None,
             reminders: Vec::new(),
             sound: None,
             attendees: Vec::new(),
@@ -779,5 +795,54 @@ mod tests {
         // Clear reverts.
         repo.clear_event_color_label("icloud:evt-1").unwrap();
         assert!(repo.list_event_color_overrides().unwrap().is_empty());
+    }
+
+    #[test]
+    fn apply_color_to_events_never_shadows_a_native_color() {
+        use chrono::{TimeZone, Utc};
+        let (_tmp, db) = fresh_db();
+        let shared = db.shared();
+        shared
+            .lock()
+            .expect("db mutex poisoned")
+            .execute(
+                "INSERT INTO color_labels (id, name, hex) VALUES ('lbl-old', 'Old', '#111111')",
+                [],
+            )
+            .unwrap();
+        let repo = OverridesRepo::new(&shared);
+        // A stale Stage-1 override exists for an event that is now on a
+        // color-capable calendar (so it carries a native color_hex).
+        repo.set_event_color_label("dav:evt", "lbl-old").unwrap();
+
+        let mut events = vec![cal_core::Event {
+            id: "dav:evt".into(),
+            calendar_id: "dav:cal".into(),
+            title: "Native".into(),
+            description: None,
+            location: None,
+            start: Utc.with_ymd_and_hms(2026, 6, 1, 9, 0, 0).unwrap(),
+            end: Utc.with_ymd_and_hms(2026, 6, 1, 10, 0, 0).unwrap(),
+            all_day: false,
+            recurrence: None,
+            // Native color already mapped onto color_label by the host.
+            color_label: Some(cal_core::ColorLabelId::new("lbl-native")),
+            color_hex: Some("#22ff22".into()),
+            reminders: Vec::new(),
+            sound: None,
+            attendees: Vec::new(),
+            send_invitations: false,
+            created_at: Utc.with_ymd_and_hms(2026, 6, 1, 9, 0, 0).unwrap(),
+            updated_at: Utc.with_ymd_and_hms(2026, 6, 1, 9, 0, 0).unwrap(),
+            etag: None,
+            organizer: None,
+            attendee_responses: Vec::new(),
+        }];
+        apply_color_to_events(&repo, &mut events);
+        // The native label survives — the stale override did NOT shadow it.
+        assert_eq!(
+            events[0].color_label.as_ref().map(|c| c.as_str()),
+            Some("lbl-native"),
+        );
     }
 }

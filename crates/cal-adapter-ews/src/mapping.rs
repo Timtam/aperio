@@ -153,6 +153,9 @@ pub fn to_calendar(folder: ParsedFolder, read_only: bool) -> Calendar {
         // EWS/Exchange always performs server-side meeting scheduling when
         // the CreateItem/UpdateItem send-disposition asks for it.
         supports_scheduling: true,
+        // No RFC 7986 per-event COLOR round-trip on EWS; per-event colors
+        // stay host-local overrides.
+        supports_event_color: false,
         color_label: None,
         id: folder.folder_id,
         name: if folder.display_name.is_empty() {
@@ -1531,6 +1534,8 @@ pub fn to_event(item: ParsedItem, calendar_id: &str) -> EwsResult<Event> {
         all_day: item.is_all_day,
         recurrence,
         color_label: None,
+        // EWS has no native COLOR; per-event colors are host-local overrides.
+        color_hex: None,
         reminders,
         sound: None,
         attendees,
@@ -3337,6 +3342,7 @@ mod tests {
             all_day: false,
             recurrence: None,
             color_label: None,
+            color_hex: None,
             reminders: Vec::new(),
             sound: None,
             attendees: Vec::new(),
@@ -3535,6 +3541,7 @@ mod tests {
             all_day: false,
             recurrence: None,
             color_label: None,
+            color_hex: None,
             reminders: Vec::new(),
             sound: None,
             attendees: Vec::new(),

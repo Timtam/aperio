@@ -395,6 +395,13 @@ export function EventDialog({
           !!targetCal?.supports_scheduling &&
           form.attendees.length > 0 &&
           notifyAttendees;
+        // When the target stores the color natively (local, or color-capable
+        // CalDAV via RFC 7986 COLOR), apiCreate/UpdateEvent already carries it
+        // on `color_label` — so the extra setEventColor call is only needed
+        // for non-capable externals, where it writes a host-local override.
+        const storesColorNatively =
+          targetCal?.account_id === 'local' ||
+          targetCal?.supports_event_color === true;
 
         if (isEdit && event) {
           const seriesId = seriesIdOf(event);
@@ -421,11 +428,13 @@ export function EventDialog({
                 attendees: form.attendees,
                 send_invitations: sendInvitations,
               });
-              await setEventColor(
-                created.id,
-                created.calendar_id,
-                form.colorLabel,
-              );
+              if (!storesColorNatively) {
+                await setEventColor(
+                  created.id,
+                  created.calendar_id,
+                  form.colorLabel,
+                );
+              }
               announce(
                 t('dialogs.event.occurrenceUpdated', { title: trimmedTitle }),
               );
@@ -460,14 +469,15 @@ export function EventDialog({
           // URL. The backend takes the hint and reroutes the
           // change as a create-on-target + delete-from-source.
           await apiUpdateEvent(updated, event.calendar_id);
-          // Color rides update_event for local + color-capable calendars;
-          // for external calendars that can't store it, this writes a
-          // host-local override instead (no-op for the rest).
-          await setEventColor(
-            updated.id,
-            updated.calendar_id,
-            form.colorLabel,
-          );
+          // Color rides update_event for local + color-capable calendars; only
+          // a non-capable external needs the separate host-local override.
+          if (!storesColorNatively) {
+            await setEventColor(
+              updated.id,
+              updated.calendar_id,
+              form.colorLabel,
+            );
+          }
           announce(t('dialogs.event.updated', { title: trimmedTitle }));
         } else {
           const created = await apiCreateEvent({
@@ -485,11 +495,13 @@ export function EventDialog({
             attendees: form.attendees,
             send_invitations: sendInvitations,
           });
-          await setEventColor(
-            created.id,
-            created.calendar_id,
-            form.colorLabel,
-          );
+          if (!storesColorNatively) {
+            await setEventColor(
+              created.id,
+              created.calendar_id,
+              form.colorLabel,
+            );
+          }
           // Remember the calendar for the next new-event open. Only
           // for *creates*: edits shouldn't bias future picks, since
           // the user might have only changed a recurring event in

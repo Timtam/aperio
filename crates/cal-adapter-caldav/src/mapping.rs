@@ -110,6 +110,11 @@ fn map_event(ev: &icalendar::Event, calendar_id: &str, href: Option<&str>) -> Ca
 
     let reminders = parse_valarms(ev);
 
+    // RFC 7986 COLOR → transport hex. Accepts `#RRGGBB` (what Aperio writes)
+    // and known CSS3 color names; anything else is ignored. The host maps
+    // this back to a color label on read.
+    let color_hex = ev.property_value("COLOR").and_then(parse_color);
+
     // Encode the server href into the id (`{href}|{uid}`) when we have
     // it, so removed hrefs from a sync-collection delta map onto the
     // cache's native_id; without it, fall back to the bare UID.
@@ -167,6 +172,7 @@ fn map_event(ev: &icalendar::Event, calendar_id: &str, href: Option<&str>) -> Ca
         all_day,
         recurrence,
         color_label: None,
+        color_hex,
         reminders,
         sound: None,
         attendees,
@@ -467,6 +473,7 @@ pub fn event_to_ical(event: &Event, organizer: Option<&str>) -> String {
         all_day: event.all_day,
         recurrence: event.recurrence.clone(),
         color_label: event.color_label.clone(),
+        color_hex: event.color_hex.clone(),
         reminders: event.reminders.clone(),
         sound: event.sound.clone(),
         attendees: event.attendees.clone(),
@@ -549,6 +556,15 @@ fn apply_common(
             }
         }
     }
+    // RFC 7986 COLOR. `color_hex` is only ever `Some` when the provider is
+    // meant to store the color natively: the host resolves the event's color
+    // label to a hex for color-capable calendars and leaves it `None` for
+    // non-capable ones, and the adapter clears it for iCloud (which would
+    // email attendees on a COLOR-bearing PUT). So emitting unconditionally
+    // here is safe.
+    if let Some(hex) = &event.color_hex {
+        ical_ev.add_property("COLOR", hex);
+    }
     // DTSTAMP is mandatory per RFC 5545 — icalendar adds it
     // automatically on serialise.
 }
@@ -592,6 +608,87 @@ fn reminder_to_alarm(reminder: &Reminder, fallback_summary: &str) -> Option<ical
 
 fn format_utc_compact(dt: DateTime<Utc>) -> String {
     dt.format("%Y%m%dT%H%M%SZ").to_string()
+}
+
+/// Parse an RFC 7986 `COLOR` property value into a normalised `#rrggbb`
+/// transport hex. Accepts `#RGB` / `#RRGGBB` hex (case-insensitive, `#RGB`
+/// expanded) — what Aperio itself writes — and a known CSS3 color keyword
+/// (the format RFC 7986 actually prescribes). Anything else returns `None`,
+/// so an unrecognised value is dropped rather than guessed at.
+fn parse_color(raw: &str) -> Option<String> {
+    let s = raw.trim();
+    if let Some(body) = s.strip_prefix('#') {
+        return normalise_hex(body);
+    }
+    css3_name_to_hex(&s.to_ascii_lowercase()).map(|h| h.to_string())
+}
+
+/// Validate + normalise the body of a hex color (no leading `#`) to lowercase
+/// `#rrggbb`. `RGB` shorthand expands to `RRGGBB`.
+fn normalise_hex(body: &str) -> Option<String> {
+    let body = body.trim();
+    let expanded = match body.len() {
+        3 => body.chars().flat_map(|c| [c, c]).collect::<String>(),
+        6 => body.to_string(),
+        _ => return None,
+    };
+    if !expanded.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    Some(format!("#{}", expanded.to_ascii_lowercase()))
+}
+
+/// Map a CSS3 color keyword (already lowercased) to its `#rrggbb` hex. Covers
+/// the common keywords; unknown names return `None`. RFC 7986 says `COLOR`
+/// carries a CSS3 name, but Aperio always writes hex, so this only matters for
+/// a color a *foreign* client wrote.
+fn css3_name_to_hex(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "black" => "#000000",
+        "silver" => "#c0c0c0",
+        "gray" | "grey" => "#808080",
+        "white" => "#ffffff",
+        "maroon" => "#800000",
+        "red" => "#ff0000",
+        "purple" => "#800080",
+        "fuchsia" | "magenta" => "#ff00ff",
+        "green" => "#008000",
+        "lime" => "#00ff00",
+        "olive" => "#808000",
+        "yellow" => "#ffff00",
+        "navy" => "#000080",
+        "blue" => "#0000ff",
+        "teal" => "#008080",
+        "aqua" | "cyan" => "#00ffff",
+        "orange" => "#ffa500",
+        "tomato" => "#ff6347",
+        "coral" => "#ff7f50",
+        "gold" => "#ffd700",
+        "salmon" => "#fa8072",
+        "crimson" => "#dc143c",
+        "pink" => "#ffc0cb",
+        "hotpink" => "#ff69b4",
+        "indigo" => "#4b0082",
+        "violet" => "#ee82ee",
+        "skyblue" => "#87ceeb",
+        "cornflowerblue" => "#6495ed",
+        "royalblue" => "#4169e1",
+        "steelblue" => "#4682b4",
+        "turquoise" => "#40e0d0",
+        "seagreen" => "#2e8b57",
+        "forestgreen" => "#228b22",
+        "limegreen" => "#32cd32",
+        "olivedrab" => "#6b8e23",
+        "chocolate" => "#d2691e",
+        "brown" => "#a52a2a",
+        "tan" => "#d2b48c",
+        "khaki" => "#f0e68c",
+        "lavender" => "#e6e6fa",
+        "plum" => "#dda0dd",
+        "orchid" => "#da70d6",
+        "slategray" | "slategrey" => "#708090",
+        _ => return None,
+    })
 }
 
 #[cfg(test)]
@@ -756,6 +853,7 @@ END:VCALENDAR\r
                 exceptions: vec![Utc.with_ymd_and_hms(2026, 6, 3, 8, 0, 0).unwrap()],
             }),
             color_label: None,
+            color_hex: None,
             reminders: Vec::new(),
             sound: None,
             attendees: Vec::new(),
@@ -789,6 +887,7 @@ END:VCALENDAR\r
             all_day: true,
             recurrence: None,
             color_label: None,
+            color_hex: None,
             reminders: Vec::new(),
             sound: None,
             attendees: Vec::new(),
@@ -812,6 +911,7 @@ END:VCALENDAR\r
             all_day: false,
             recurrence: None,
             color_label: None,
+            color_hex: None,
             reminders: Vec::new(),
             sound: None,
             attendees: vec!["Alice <alice@example.com>".into(), "bob@example.com".into()],
@@ -979,6 +1079,7 @@ END:VCALENDAR\r
             all_day: false,
             recurrence: None,
             color_label: None,
+            color_hex: None,
             reminders: vec![
                 Reminder {
                     kind: ReminderKind::Relative { minutes_before: 60 },
@@ -1083,5 +1184,96 @@ END:VCALENDAR\r
 ";
         let events = parse_calendar_data(body, "cal-1").unwrap();
         assert!(events.is_empty());
+    }
+
+    fn color_new_event(color_hex: Option<&str>) -> NewEvent {
+        NewEvent {
+            title: "Painted".into(),
+            description: None,
+            location: None,
+            start: Utc.with_ymd_and_hms(2026, 5, 20, 8, 0, 0).unwrap(),
+            end: Utc.with_ymd_and_hms(2026, 5, 20, 9, 0, 0).unwrap(),
+            all_day: false,
+            recurrence: None,
+            color_label: None,
+            color_hex: color_hex.map(str::to_string),
+            reminders: Vec::new(),
+            sound: None,
+            attendees: Vec::new(),
+            send_invitations: false,
+        }
+    }
+
+    #[test]
+    fn writes_color_property_only_when_color_hex_set() {
+        let with = new_event_to_ical("uid-c", &color_new_event(Some("#4285f4")), None);
+        assert!(
+            with.contains("COLOR:#4285f4"),
+            "expected COLOR line, got:\n{with}"
+        );
+        // Absent color_hex → no COLOR property at all.
+        let without = new_event_to_ical("uid-c", &color_new_event(None), None);
+        assert!(
+            !without.contains("COLOR:"),
+            "unexpected COLOR line:\n{without}"
+        );
+    }
+
+    #[test]
+    fn reads_color_hex_property_into_color_hex() {
+        let body = "BEGIN:VCALENDAR\r
+VERSION:2.0\r
+PRODID:-//test//EN\r
+BEGIN:VEVENT\r
+UID:colored@aperio\r
+SUMMARY:Colored\r
+DTSTART:20260520T080000Z\r
+DTEND:20260520T090000Z\r
+COLOR:#FF0000\r
+END:VEVENT\r
+END:VCALENDAR\r
+";
+        let events = parse_calendar_data(body, "cal-1").unwrap();
+        // Hex is normalised to lowercase #rrggbb; color_label stays None
+        // (the host maps the hex back to a label).
+        assert_eq!(events[0].color_hex.as_deref(), Some("#ff0000"));
+        assert!(events[0].color_label.is_none());
+    }
+
+    #[test]
+    fn reads_css3_color_name_into_hex() {
+        let body = "BEGIN:VCALENDAR\r
+VERSION:2.0\r
+PRODID:-//test//EN\r
+BEGIN:VEVENT\r
+UID:named@aperio\r
+SUMMARY:Named\r
+DTSTART:20260520T080000Z\r
+DTEND:20260520T090000Z\r
+COLOR:tomato\r
+END:VEVENT\r
+END:VCALENDAR\r
+";
+        let events = parse_calendar_data(body, "cal-1").unwrap();
+        assert_eq!(events[0].color_hex.as_deref(), Some("#ff6347"));
+    }
+
+    #[test]
+    fn parse_color_accepts_hex_and_names_and_rejects_garbage() {
+        assert_eq!(parse_color("#abc").as_deref(), Some("#aabbcc"));
+        assert_eq!(parse_color("#AABBCC").as_deref(), Some("#aabbcc"));
+        assert_eq!(parse_color(" #4285f4 ").as_deref(), Some("#4285f4"));
+        assert_eq!(parse_color("cornflowerblue").as_deref(), Some("#6495ed"));
+        assert_eq!(parse_color("GREY").as_deref(), Some("#808080"));
+        assert_eq!(parse_color("not-a-color"), None);
+        assert_eq!(parse_color("#12"), None);
+        assert_eq!(parse_color("#nothex"), None);
+    }
+
+    #[test]
+    fn color_round_trips_through_write_then_read() {
+        let body = new_event_to_ical("rt-uid", &color_new_event(Some("#34a853")), None);
+        let parsed = parse_calendar_data(&body, "cal-1").unwrap();
+        assert_eq!(parsed[0].color_hex.as_deref(), Some("#34a853"));
     }
 }

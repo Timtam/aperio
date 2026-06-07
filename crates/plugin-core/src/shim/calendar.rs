@@ -448,6 +448,7 @@ mod tests {
             Calendar {
                 color_label: None,
                 supports_scheduling: false,
+                supports_event_color: false,
                 id: "cal-1".into(),
                 name: "Calendar One".into(),
                 color: None,
@@ -457,6 +458,7 @@ mod tests {
             Calendar {
                 color_label: None,
                 supports_scheduling: false,
+                supports_event_color: false,
                 id: "cal-2".into(),
                 name: "Calendar Two".into(),
                 color: None,

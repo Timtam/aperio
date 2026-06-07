@@ -57,6 +57,7 @@ fn event(id: &str, start_h: u32, end_h: u32) -> Event {
         all_day: false,
         recurrence: None,
         color_label: None,
+        color_hex: None,
         reminders: Vec::new(),
         sound: None,
         attendees: Vec::new(),
@@ -120,6 +121,7 @@ fn calendar(id: &str) -> Calendar {
     Calendar {
         color_label: None,
         supports_scheduling: false,
+        supports_event_color: false,
         id: id.into(),
         name: format!("Cal {id}"),
         color: None,

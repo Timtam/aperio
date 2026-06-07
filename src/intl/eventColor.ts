@@ -38,8 +38,13 @@ export function resolveContainerColorHex(
  *
  *   1. Item-level color label (highest priority) — looked up in
  *      `labelById`.
- *   2. Container color (calendar or task list).
- *   3. Fallback to a neutral CSS variable handled at the style layer
+ *   2. Unmapped native color (`color_hex`): a per-event color a
+ *      color-capable provider stored (RFC 7986 COLOR) that the host
+ *      couldn't match to a known label — a subscribed iCal feed's color,
+ *      or a foreign color another client set on a CalDAV event. Rendered
+ *      directly; display-only and unnamed.
+ *   3. Container color (calendar or task list).
+ *   4. Fallback to a neutral CSS variable handled at the style layer
  *      (the helper returns `null` in that case).
  *
  * The optional `labelName` is what the view should append to the
@@ -51,7 +56,7 @@ export interface ResolvedColor {
 }
 
 export function resolveEventColor(
-  event: Pick<CalendarEvent, 'color_label' | 'calendar_id'>,
+  event: Pick<CalendarEvent, 'color_label' | 'color_hex' | 'calendar_id'>,
   calendarsById: Map<string, Calendar>,
   labelsById: Map<string, ColorLabel>,
 ): ResolvedColor {
@@ -60,6 +65,12 @@ export function resolveEventColor(
     if (label) {
       return { hex: label.hex, labelName: label.name };
     }
+  }
+  // Native color the host couldn't map to a known label (read-only feed
+  // color, or a foreign CalDAV color). Render it directly — there's no label
+  // to name, so it stays a non-critical cue like the container fallback.
+  if (event.color_hex) {
+    return { hex: event.color_hex, labelName: null };
   }
   const calendar = calendarsById.get(event.calendar_id);
   return { hex: resolveContainerColorHex(calendar, labelsById), labelName: null };

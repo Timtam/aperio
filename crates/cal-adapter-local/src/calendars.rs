@@ -66,6 +66,9 @@ impl LocalAdapter {
             read_only: false,
             default_sound,
             supports_scheduling: false,
+            // Local calendars store a per-event color natively (on the
+            // event row), so the host routes recolors through update_event.
+            supports_event_color: true,
         })
     }
 
@@ -183,6 +186,7 @@ impl LocalAdapter {
             read_only: read_only?,
             default_sound: sound?,
             supports_scheduling: false,
+            supports_event_color: true,
         }))
     }
 
@@ -273,6 +277,7 @@ impl CalendarFeature for LocalAdapter {
             let (id, name, color, read_only, sound, color_label) = r.map_err(map_sql_err)?;
             out.push(Calendar {
                 supports_scheduling: false,
+                supports_event_color: true,
                 id: id?,
                 name: name?,
                 color: color?,
@@ -550,6 +555,9 @@ fn persist_new_event(
         all_day: event.all_day,
         recurrence: event.recurrence,
         color_label: event.color_label,
+        // Transport-only; local stores its color on `color_label`. Carried
+        // through verbatim (it is `None` for every local write).
+        color_hex: event.color_hex,
         reminders: event.reminders,
         sound: event.sound,
         attendees: event.attendees,
@@ -597,6 +605,9 @@ pub(crate) fn row_to_event(row: &rusqlite::Row<'_>) -> cal_core::Result<Event> {
         all_day,
         recurrence,
         color_label,
+        // Native color lives on `color_label`; the transport-only hex is
+        // never read from the local row.
+        color_hex: None,
         reminders,
         sound,
         attendees,
@@ -671,6 +682,7 @@ mod tests {
                 all_day: false,
                 recurrence: None,
                 color_label: None,
+                color_hex: None,
                 reminders: vec![],
                 sound: None,
                 attendees: vec![],
@@ -736,6 +748,7 @@ mod tests {
             all_day: false,
             recurrence: None,
             color_label: None,
+            color_hex: None,
             reminders: vec![],
             sound: None,
             attendees: vec![],
@@ -776,6 +789,7 @@ mod tests {
                     exceptions: vec![],
                 }),
                 color_label: None,
+                color_hex: None,
                 reminders: vec![],
                 sound: None,
                 attendees: vec![],
@@ -797,6 +811,7 @@ mod tests {
                 all_day: false,
                 recurrence: None,
                 color_label: None,
+                color_hex: None,
                 reminders: vec![],
                 sound: None,
                 attendees: vec![],
@@ -838,6 +853,7 @@ mod tests {
                     all_day: false,
                     recurrence: None,
                     color_label: None,
+                    color_hex: None,
                     reminders: vec![],
                     sound: None,
                     attendees: vec![],
@@ -885,6 +901,7 @@ mod tests {
                         exceptions: vec![],
                     }),
                     color_label: None,
+                    color_hex: None,
                     reminders: vec![],
                     sound: None,
                     attendees: vec![],
@@ -927,6 +944,7 @@ mod tests {
                     all_day: false,
                     recurrence: None,
                     color_label: None,
+                    color_hex: None,
                     reminders: vec![],
                     sound: None,
                     attendees: vec![],

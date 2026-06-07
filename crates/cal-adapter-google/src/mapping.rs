@@ -56,6 +56,9 @@ pub fn map_calendar(entry: CalendarListEntry) -> Calendar {
         // Google always schedules server-side; emailing is per-request via
         // the `sendUpdates` query param.
         supports_scheduling: true,
+        // Google's per-event colorId isn't mapped into Aperio's color model;
+        // per-event colors stay host-local overrides.
+        supports_event_color: false,
         color_label: None,
         id: entry.id,
         name: entry.summary,
@@ -327,6 +330,8 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GoogleResult<Option<Ev
         all_day,
         recurrence,
         color_label: None,
+        // Google's colorId isn't mapped; per-event colors are host-local overrides.
+        color_hex: None,
         reminders,
         sound: None,
         attendees,
@@ -731,6 +736,7 @@ mod tests {
             all_day: false,
             recurrence: None,
             color_label: None,
+            color_hex: None,
             reminders: vec![Reminder {
                 kind: ReminderKind::Relative { minutes_before: 5 },
                 sound: None,
@@ -761,6 +767,7 @@ mod tests {
             all_day: true,
             recurrence: None,
             color_label: None,
+            color_hex: None,
             reminders: vec![],
             sound: None,
             attendees: vec![],
@@ -791,6 +798,7 @@ mod tests {
                 exceptions: vec![Utc.with_ymd_and_hms(2026, 6, 1, 18, 0, 0).unwrap()],
             }),
             color_label: None,
+            color_hex: None,
             reminders: vec![],
             sound: None,
             attendees: vec![],
@@ -819,6 +827,7 @@ mod tests {
             all_day: false,
             recurrence: None,
             color_label: None,
+            color_hex: None,
             reminders: vec![
                 Reminder {
                     kind: ReminderKind::AppStart,

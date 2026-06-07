@@ -1123,6 +1123,7 @@ mod tests {
             all_day: false,
             recurrence: None,
             color_label: None,
+            color_hex: None,
             reminders: vec![],
             sound: None,
             attendees: vec![],

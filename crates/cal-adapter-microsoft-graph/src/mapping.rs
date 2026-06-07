@@ -53,6 +53,9 @@ pub fn map_calendar(entry: CalendarListEntry) -> Calendar {
         // Graph always sends invitations when attendees are present in the
         // body (no per-request suppress) — see EventWriteBody::attendees.
         supports_scheduling: true,
+        // No RFC 7986 per-event COLOR round-trip on Graph; per-event colors
+        // stay host-local overrides.
+        supports_event_color: false,
         color_label: None,
         id: entry.id,
         name: entry.name,
@@ -357,6 +360,8 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GraphResult<Option<Eve
         all_day: entry.is_all_day,
         recurrence,
         color_label: None,
+        // Graph's per-event color isn't mapped; colors are host-local overrides.
+        color_hex: None,
         reminders,
         sound: None,
         attendees,
@@ -1572,6 +1577,7 @@ mod tests {
                 exceptions: Vec::new(),
             }),
             color_label: None,
+            color_hex: None,
             reminders: vec![Reminder {
                 kind: ReminderKind::Relative { minutes_before: 10 },
                 sound: None,
@@ -1603,6 +1609,7 @@ mod tests {
             all_day: false,
             recurrence: None,
             color_label: None,
+            color_hex: None,
             reminders: Vec::new(),
             sound: None,
             attendees: vec!["Alice <alice@example.com>".into()],
