@@ -161,6 +161,38 @@ pub async fn set_section_color(
     Ok(())
 }
 
+/// Set / clear the host-local color override for an EXTERNAL event whose
+/// calendar can't store a per-event color (iCloud, Graph, EWS, and any
+/// CalDAV account without RFC 7986 COLOR support). The frontend routes
+/// *color-capable* targets — local events and color-capable calendars —
+/// through `update_event` instead (the color rides the event there), so
+/// this command never touches the provider and never errors on the wire.
+/// `event_id` is the series master id (the color applies to the series).
+#[tauri::command]
+pub async fn set_event_color(
+    registry: State<'_, Arc<AdapterRegistry>>,
+    db: State<'_, DbHandle>,
+    event_id: String,
+    calendar_id: String,
+    color_label_id: Option<String>,
+) -> CommandResult<()> {
+    let account = registry
+        .account_for_calendar(&calendar_id)
+        .unwrap_or_else(|| LOCAL_ID.to_string());
+    if account == LOCAL_ID {
+        // Local events keep their color on the row; the frontend routes
+        // local color changes through update_event. No override here.
+        return Ok(());
+    }
+    let shared = db.shared();
+    let repo = OverridesRepo::new(&shared);
+    match color_label_id {
+        Some(id) => repo.set_event_color_label(&event_id, &id)?,
+        None => repo.clear_event_color_label(&event_id)?,
+    }
+    Ok(())
+}
+
 /// Unified rename entry point. Returns a small status object so the
 /// frontend can show "renamed at source" vs. "saved locally only".
 #[derive(Debug, serde::Serialize)]

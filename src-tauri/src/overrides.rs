@@ -444,9 +444,7 @@ pub struct EventColorOverride {
 impl OverridesRepo<'_> {
     /// All event color-label overrides (merged onto external events in
     /// `get_events`).
-    pub fn list_event_color_overrides(
-        &self,
-    ) -> Result<Vec<EventColorOverride>, OverridesError> {
+    pub fn list_event_color_overrides(&self) -> Result<Vec<EventColorOverride>, OverridesError> {
         let conn = self.db.lock().expect("db mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT event_id, color_label_id, updated_at

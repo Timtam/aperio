@@ -21,7 +21,9 @@ use super::{CommandError, CommandResult};
 use crate::accounts::{AccountsRepo, AdapterKind};
 use crate::db::DbHandle;
 use crate::event_log::EventLogWriter;
-use crate::overrides::{apply_color_to_calendars, apply_to_calendars, OverridesRepo};
+use crate::overrides::{
+    apply_color_to_calendars, apply_color_to_events, apply_to_calendars, OverridesRepo,
+};
 use crate::registry::{AdapterRegistry, LOCAL_ID};
 use crate::reminders::SchedulerHandle;
 
@@ -300,6 +302,7 @@ pub async fn get_events(
     registry: State<'_, Arc<AdapterRegistry>>,
     cache: State<'_, Arc<CacheStore>>,
     coord: State<'_, Arc<RefreshCoordinator>>,
+    db: State<'_, DbHandle>,
     request: EventRangeRequest,
 ) -> CommandResult<Vec<Event>> {
     let range = DateRange::new(request.start, request.end);
@@ -375,9 +378,13 @@ pub async fn get_events(
         Some((Some(ws), Some(we))) if ws <= range.start && we >= range.end
     );
     let stale = cache_swr::is_stale(&state, cache_swr::SWR_TTL_SECS);
-    let cached = cache
+    let mut cached = cache
         .read_events(&account, &request.calendar_id, range)
         .unwrap_or_default();
+    // Stamp host-local color overrides onto external events whose provider
+    // can't store a per-event color (iCloud etc.). Color-capable calendars
+    // carry the color on the event already, so this is a no-op for them.
+    apply_color_to_events(&OverridesRepo::new(&db.shared()), &mut cached);
     tracing::info!(
         target: "aperio::cache",
         calendar_id = %request.calendar_id,
