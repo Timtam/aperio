@@ -424,6 +424,100 @@ pub fn apply_color_to_sections(repo: &OverridesRepo<'_>, sections: &mut [cal_cor
     }
 }
 
+// ── Event color overrides ───────────────────────────────────────────────
+//
+// EXTERNAL events whose calendar can't store a per-event color (iCloud, and
+// any provider / account without RFC 7986 COLOR support, plus Graph / EWS)
+// keep the user's color binding here, host-local. LOCAL events carry their
+// (synced) binding on the event row, and external events on color-capable
+// calendars round-trip the color through the provider — neither appears
+// here. Keyed by the series master id (the color applies to the whole
+// series). Like sections, a single id namespace, so no `kind`.
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EventColorOverride {
+    pub event_id: String,
+    pub color_label_id: String,
+    pub updated_at: String,
+}
+
+impl OverridesRepo<'_> {
+    /// All event color-label overrides (merged onto external events in
+    /// `get_events`).
+    pub fn list_event_color_overrides(
+        &self,
+    ) -> Result<Vec<EventColorOverride>, OverridesError> {
+        let conn = self.db.lock().expect("db mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT event_id, color_label_id, updated_at
+               FROM event_color_overrides",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(EventColorOverride {
+                event_id: row.get(0)?,
+                color_label_id: row.get(1)?,
+                updated_at: row.get(2)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// Upsert an external event's color-label binding (host-local).
+    pub fn set_event_color_label(
+        &self,
+        event_id: &str,
+        color_label_id: &str,
+    ) -> Result<(), OverridesError> {
+        let now = Utc::now().to_rfc3339();
+        let conn = self.db.lock().expect("db mutex poisoned");
+        conn.execute(
+            "INSERT INTO event_color_overrides
+                 (event_id, color_label_id, updated_at)
+             VALUES (?, ?, ?)
+             ON CONFLICT(event_id) DO UPDATE SET
+                 color_label_id = excluded.color_label_id,
+                 updated_at = excluded.updated_at",
+            params![event_id, color_label_id, now],
+        )?;
+        Ok(())
+    }
+
+    /// Drop an external event's color binding (reverts to no color).
+    pub fn clear_event_color_label(&self, event_id: &str) -> Result<(), OverridesError> {
+        let conn = self.db.lock().expect("db mutex poisoned");
+        conn.execute(
+            "DELETE FROM event_color_overrides WHERE event_id = ?",
+            params![event_id],
+        )?;
+        Ok(())
+    }
+}
+
+/// Stamp color-label bindings onto external events in place. Local events and
+/// events on color-capable calendars carry their own binding and have no
+/// override row, so they're left untouched.
+pub fn apply_color_to_events(repo: &OverridesRepo<'_>, events: &mut [cal_core::Event]) {
+    let map: std::collections::HashMap<String, String> = match repo.list_event_color_overrides() {
+        Ok(o) => o
+            .into_iter()
+            .map(|e| (e.event_id, e.color_label_id))
+            .collect(),
+        Err(err) => {
+            tracing::warn!(?err, "failed to load event color overrides; using none");
+            return;
+        }
+    };
+    for event in events {
+        if let Some(label) = map.get(&event.id) {
+            event.color_label = Some(cal_core::ColorLabelId(label.clone()));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -632,5 +726,60 @@ mod tests {
         // Clear reverts.
         repo.clear_section_color_label("todoist:sec-1").unwrap();
         assert!(repo.list_section_color_overrides().unwrap().is_empty());
+    }
+
+    #[test]
+    fn event_color_override_roundtrips_and_applies() {
+        use chrono::{TimeZone, Utc};
+        let (_tmp, db) = fresh_db();
+        let shared = db.shared();
+        shared
+            .lock()
+            .expect("db mutex poisoned")
+            .execute(
+                "INSERT INTO color_labels (id, name, hex) VALUES ('label-3', 'Travel', '#fb8c00')",
+                [],
+            )
+            .unwrap();
+        let repo = OverridesRepo::new(&shared);
+        repo.set_event_color_label("icloud:evt-1", "label-3")
+            .unwrap();
+        let all = repo.list_event_color_overrides().unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].color_label_id, "label-3");
+
+        let mk = |id: &str| cal_core::Event {
+            id: id.into(),
+            calendar_id: "icloud:cal".into(),
+            title: "Trip".into(),
+            description: None,
+            location: None,
+            start: Utc.with_ymd_and_hms(2026, 6, 1, 9, 0, 0).unwrap(),
+            end: Utc.with_ymd_and_hms(2026, 6, 1, 10, 0, 0).unwrap(),
+            all_day: false,
+            recurrence: None,
+            color_label: None,
+            reminders: Vec::new(),
+            sound: None,
+            attendees: Vec::new(),
+            send_invitations: false,
+            created_at: Utc.with_ymd_and_hms(2026, 6, 1, 9, 0, 0).unwrap(),
+            updated_at: Utc.with_ymd_and_hms(2026, 6, 1, 9, 0, 0).unwrap(),
+            etag: None,
+            organizer: None,
+            attendee_responses: Vec::new(),
+        };
+        // Apply stamps the binding onto the matching external event only.
+        let mut events = vec![mk("icloud:evt-1"), mk("icloud:evt-2")];
+        apply_color_to_events(&repo, &mut events);
+        assert_eq!(
+            events[0].color_label.as_ref().map(|c| c.as_str()),
+            Some("label-3"),
+        );
+        assert!(events[1].color_label.is_none());
+
+        // Clear reverts.
+        repo.clear_event_color_label("icloud:evt-1").unwrap();
+        assert!(repo.list_event_color_overrides().unwrap().is_empty());
     }
 }
