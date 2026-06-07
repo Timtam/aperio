@@ -188,6 +188,63 @@ pub async fn list_sections(client: &VikunjaClient, list_id: &str) -> VikunjaResu
         .collect())
 }
 
+/// Resolve `(project_id, kanban_view_id)` for a section-management call,
+/// erroring if the project has no kanban view — Vikunja ≥0.24 hangs
+/// buckets off the view, so without one there's nothing to manage.
+async fn section_view(client: &VikunjaClient, list_id: &str) -> VikunjaResult<(i64, i64)> {
+    let project_id = parse_id(list_id, "task list id")?;
+    let Some(view) = kanban_view(client, project_id).await else {
+        return Err(VikunjaError::Protocol(
+            "project has no kanban view — sections can't be managed".into(),
+        ));
+    };
+    Ok((project_id, view.id))
+}
+
+/// `PUT /projects/{p}/views/{v}/buckets` with `{ title }` — create a
+/// kanban bucket (Aperio section). Color is never sent (it's a local
+/// override).
+pub async fn create_section(
+    client: &VikunjaClient,
+    list_id: &str,
+    name: &str,
+) -> VikunjaResult<Section> {
+    let (project_id, view_id) = section_view(client, list_id).await?;
+    let path = format!("/projects/{project_id}/views/{view_id}/buckets");
+    let body = serde_json::json!({ "title": name });
+    let entry: BucketEntry = client.put_json(&path, &body).await?;
+    Ok(map_bucket(entry, list_id))
+}
+
+/// `POST /projects/{p}/views/{v}/buckets/{id}` with `{ title }` — rename
+/// a bucket.
+pub async fn update_section(
+    client: &VikunjaClient,
+    list_id: &str,
+    section_id: &str,
+    new_name: &str,
+) -> VikunjaResult<Section> {
+    let (project_id, view_id) = section_view(client, list_id).await?;
+    let bucket_id = parse_id(section_id, "section id")?;
+    let path = format!("/projects/{project_id}/views/{view_id}/buckets/{bucket_id}");
+    let body = serde_json::json!({ "title": new_name });
+    let entry: BucketEntry = client.post_json(&path, &body).await?;
+    Ok(map_bucket(entry, list_id))
+}
+
+/// `DELETE /projects/{p}/views/{v}/buckets/{id}` — remove a bucket; its
+/// tasks fall back to the view's default bucket at the source.
+pub async fn delete_section(
+    client: &VikunjaClient,
+    list_id: &str,
+    section_id: &str,
+) -> VikunjaResult<()> {
+    let (project_id, view_id) = section_view(client, list_id).await?;
+    let bucket_id = parse_id(section_id, "section id")?;
+    let path = format!("/projects/{project_id}/views/{view_id}/buckets/{bucket_id}");
+    client.delete(&path).await
+}
+
 /// Resolve a project's kanban view (id + default bucket), if it has one.
 /// One `GET /projects/{id}/views`; `None` (error swallowed) on servers
 /// without the views endpoint, matching `list_sections`' graceful
@@ -1674,6 +1731,86 @@ mod tests {
         let client = fixture_client(&server.url());
         // No kanban view → no sections, no error.
         assert!(list_sections(&client, "3").await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn create_section_puts_bucket_on_kanban_view() {
+        let mut server = Server::new_async().await;
+        let _views = server
+            .mock("GET", "/api/v1/projects/3/views")
+            .with_status(200)
+            .with_body(r#"[{"id":11,"view_kind":"kanban","default_bucket_id":21}]"#)
+            .create_async()
+            .await;
+        let m = server
+            .mock("PUT", "/api/v1/projects/3/views/11/buckets")
+            .match_body(mockito::Matcher::Json(serde_json::json!({ "title": "Backlog" })))
+            .with_status(200)
+            .with_body(r#"{"id":25,"title":"Backlog","position":3.0}"#)
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        let section = create_section(&client, "3", "Backlog").await.unwrap();
+        m.assert_async().await;
+        assert_eq!(section.id, "25");
+        assert_eq!(section.name, "Backlog");
+        assert_eq!(section.list_id, "3");
+    }
+
+    #[tokio::test]
+    async fn update_section_renames_bucket() {
+        let mut server = Server::new_async().await;
+        let _views = server
+            .mock("GET", "/api/v1/projects/3/views")
+            .with_status(200)
+            .with_body(r#"[{"id":11,"view_kind":"kanban"}]"#)
+            .create_async()
+            .await;
+        let m = server
+            .mock("POST", "/api/v1/projects/3/views/11/buckets/22")
+            .match_body(mockito::Matcher::Json(serde_json::json!({ "title": "Done" })))
+            .with_status(200)
+            .with_body(r#"{"id":22,"title":"Done","position":2.0}"#)
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        let section = update_section(&client, "3", "22", "Done").await.unwrap();
+        m.assert_async().await;
+        assert_eq!(section.name, "Done");
+    }
+
+    #[tokio::test]
+    async fn delete_section_deletes_bucket() {
+        let mut server = Server::new_async().await;
+        let _views = server
+            .mock("GET", "/api/v1/projects/3/views")
+            .with_status(200)
+            .with_body(r#"[{"id":11,"view_kind":"kanban"}]"#)
+            .create_async()
+            .await;
+        let m = server
+            .mock("DELETE", "/api/v1/projects/3/views/11/buckets/22")
+            .with_status(200)
+            .with_body(r#"{"message":"ok"}"#)
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        delete_section(&client, "3", "22").await.unwrap();
+        m.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn create_section_errors_without_kanban_view() {
+        let mut server = Server::new_async().await;
+        let _views = server
+            .mock("GET", "/api/v1/projects/3/views")
+            .with_status(200)
+            .with_body(r#"[{"id":10,"view_kind":"list"}]"#)
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        // No kanban view → managing sections isn't possible.
+        assert!(create_section(&client, "3", "Backlog").await.is_err());
     }
 
     #[tokio::test]
