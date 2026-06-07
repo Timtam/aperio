@@ -1347,15 +1347,16 @@ export function TaskDialog({
                             : '')
                         }
                       >
+                        {sub.title}
                         {priorityMarker(sub.priority) && (
                           <span
                             className="subtasks__priority"
                             aria-hidden="true"
                           >
-                            {priorityMarker(sub.priority)}{' '}
+                            {' '}
+                            {priorityMarker(sub.priority)}
                           </span>
                         )}
-                        {sub.title}
                       </span>
                     </li>
                   );

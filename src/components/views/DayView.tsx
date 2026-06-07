@@ -445,12 +445,13 @@ export function DayView() {
                     >
                       {statusMarker(task.status)}{' '}
                     </span>
+                    {task.title}
                     {priorityGlyph && (
                       <span className="day-task__priority" aria-hidden="true">
-                        {priorityGlyph}{' '}
+                        {' '}
+                        {priorityGlyph}
                       </span>
                     )}
-                    {task.title}
                   </span>
                 </li>
               );
@@ -627,12 +628,12 @@ export function DayView() {
                     >
                       {statusMarker(task.status)}
                     </span>
+                    <span className="day-task__title">{task.title}</span>
                     {priorityGlyph && (
                       <span className="day-task__priority" aria-hidden="true">
-                        {priorityGlyph}{' '}
+                        {priorityGlyph}
                       </span>
                     )}
-                    <span className="day-task__title">{task.title}</span>
                   </button>
                 </li>
               );

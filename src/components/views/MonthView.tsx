@@ -722,17 +722,17 @@ export function MonthView() {
                             >
                               {statusMarker(task.status)}
                             </span>
+                            <span className="month-task__title">
+                              {task.title}
+                            </span>
                             {priorityGlyph && (
                               <span
                                 className="month-task__priority"
                                 aria-hidden="true"
                               >
-                                {priorityGlyph}{' '}
+                                {priorityGlyph}
                               </span>
                             )}
-                            <span className="month-task__title">
-                              {task.title}
-                            </span>
                           </span>
                         );
                       }

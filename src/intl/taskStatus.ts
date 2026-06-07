@@ -36,21 +36,20 @@ export function statusMarker(status: TaskStatus): string {
 }
 
 /**
- * Per-priority glyph for the on-chip / on-row indicator. One character
- * wide like {@link statusMarker}. `medium` — the default for virtually
- * every task — renders **nothing**, so only deliberately raised or
- * lowered tasks draw a glyph and the indicator stays quiet. The arrows
- * read as positions on one axis around an implied neutral middle:
- * high `↑`, low `↓`, medium = baseline (absent).
+ * Per-priority glyph for the on-chip / on-row indicator: exclamation
+ * marks, one per level — `!` low, `!!` medium, `!!!` high — so the count
+ * reads as "how urgent" at a glance. Rendered *after* the title (right-
+ * aligned on the calendar chips). The glyph carries the meaning; the SR
+ * label still spells the priority out via {@link prioritySuffix}.
  */
 export function priorityMarker(priority: TaskPriority): string {
   switch (priority) {
     case 'high':
-      return '↑';
+      return '!!!';
     case 'low':
-      return '↓';
+      return '!';
     case 'medium':
-      return '';
+      return '!!';
   }
 }
 

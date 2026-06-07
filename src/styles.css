@@ -3508,9 +3508,9 @@ button[aria-disabled='true'] {
   font-size: var(--font-size-xs);
 }
 
-/* Priority indicator (↑ high / ↓ low; medium renders nothing). Muted and
-   one glyph wide, sitting beside the status marker — the glyph itself
-   carries the meaning, so colour is never the sole signal. */
+/* Priority indicator: exclamation marks (! low / !! medium / !!! high),
+   rendered AFTER the title. Muted, sitting at the row's end — the glyph
+   count carries the meaning, so colour is never the sole signal. */
 .task-list__priority,
 .day-task__priority,
 .week-task__priority,
@@ -3526,6 +3526,14 @@ button[aria-disabled='true'] {
 .week-task__priority,
 .day-task__priority {
   color: inherit;
+}
+
+/* The priority sits after the title now — push it to the right edge of the
+ * filled calendar chips (the title takes the remaining width). */
+.week-task__priority,
+.day-task__priority,
+.month-task__priority {
+  margin-left: auto;
 }
 
 /* This site follows the title text directly (no trailing space in the

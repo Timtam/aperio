@@ -833,17 +833,17 @@ export function WeekView() {
                               >
                                 {statusMarker(task.status)}
                               </span>
+                              <span className="week-task__title">
+                                {task.title}
+                              </span>
                               {priorityGlyph && (
                                 <span
                                   className="week-task__priority"
                                   aria-hidden="true"
                                 >
-                                  {priorityGlyph}{' '}
+                                  {priorityGlyph}
                                 </span>
                               )}
-                              <span className="week-task__title">
-                                {task.title}
-                              </span>
                             </span>
                           </span>
                         </li>
@@ -1182,12 +1182,12 @@ function WeekDayTasks({
                 >
                   {statusMarker(task.status)}
                 </span>
+                <span className="week-task__title">{task.title}</span>
                 {priorityGlyph && (
                   <span className="week-task__priority" aria-hidden="true">
-                    {priorityGlyph}{' '}
+                    {priorityGlyph}
                   </span>
                 )}
-                <span className="week-task__title">{task.title}</span>
               </span>
             </span>
           </li>

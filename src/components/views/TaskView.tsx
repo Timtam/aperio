@@ -911,12 +911,13 @@ function renderTreeItem(
         {marker}
       </span>
       <span className="task-list__title">
+        {task.title}
         {priorityGlyph && (
           <span className="task-list__priority" aria-hidden="true">
-            {priorityGlyph}{' '}
+            {' '}
+            {priorityGlyph}
           </span>
         )}
-        {task.title}
       </span>
       {task.assignees.length > 0 && (
         <span
