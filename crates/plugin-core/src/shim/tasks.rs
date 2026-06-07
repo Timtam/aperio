@@ -53,6 +53,9 @@ struct VtableSnapshot {
     add_task_list_member: Option<crate::vtables::VtableMethodFn>,
     remove_task_list_member: Option<crate::vtables::VtableMethodFn>,
     set_task_list_member_right: Option<crate::vtables::VtableMethodFn>,
+    create_section: Option<crate::vtables::VtableMethodFn>,
+    update_section: Option<crate::vtables::VtableMethodFn>,
+    delete_section: Option<crate::vtables::VtableMethodFn>,
 }
 
 impl FfiTasksAdapter {
@@ -107,6 +110,9 @@ impl FfiTasksAdapter {
             add_task_list_member: vtable_ref.add_task_list_member,
             remove_task_list_member: vtable_ref.remove_task_list_member,
             set_task_list_member_right: vtable_ref.set_task_list_member_right,
+            create_section: vtable_ref.create_section,
+            update_section: vtable_ref.update_section,
+            delete_section: vtable_ref.delete_section,
         };
         let capabilities = super::manifest_capabilities(&plugin.manifest.capabilities);
         let handle_addr = instance.handle() as usize;
@@ -219,6 +225,25 @@ struct SetRightArgs<'a> {
     right: MemberRight,
 }
 
+#[derive(Serialize)]
+struct CreateSectionArgs<'a> {
+    list_id: &'a str,
+    name: &'a str,
+}
+
+#[derive(Serialize)]
+struct UpdateSectionArgs<'a> {
+    list_id: &'a str,
+    section_id: &'a str,
+    new_name: &'a str,
+}
+
+#[derive(Serialize)]
+struct DeleteSectionArgs<'a> {
+    list_id: &'a str,
+    section_id: &'a str,
+}
+
 #[async_trait]
 impl Adapter for FfiTasksAdapter {
     async fn authenticate(&self, credentials: Credentials) -> Result<AuthToken> {
@@ -286,6 +311,38 @@ impl TasksFeature for FfiTasksAdapter {
     async fn delete_task_list(&self, list_id: &str) -> Result<()> {
         let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
         call_for_unit(self.vtable.delete_task_list, self.handle_addr, &list_id).await
+    }
+
+    async fn create_section(&self, list_id: &str, name: &str) -> Result<Section> {
+        // A null slot dispatches to Unsupported via `call_method`,
+        // matching the trait default — no special-casing needed.
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
+        let args = CreateSectionArgs { list_id, name };
+        call_then_decode(self.vtable.create_section, self.handle_addr, &args).await
+    }
+
+    async fn update_section(
+        &self,
+        list_id: &str,
+        section_id: &str,
+        new_name: &str,
+    ) -> Result<Section> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
+        let args = UpdateSectionArgs {
+            list_id,
+            section_id,
+            new_name,
+        };
+        call_then_decode(self.vtable.update_section, self.handle_addr, &args).await
+    }
+
+    async fn delete_section(&self, list_id: &str, section_id: &str) -> Result<()> {
+        let _guard = InFlightGuard::enter(Arc::clone(&self.in_flight));
+        let args = DeleteSectionArgs {
+            list_id,
+            section_id,
+        };
+        call_for_unit(self.vtable.delete_section, self.handle_addr, &args).await
     }
 
     async fn get_tasks_delta(

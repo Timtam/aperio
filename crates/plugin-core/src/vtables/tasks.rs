@@ -84,6 +84,15 @@ pub struct TasksVtable {
     /// `set_task_list_member_right(list_id, member_ref, right)`. `None`
     /// ⇒ Unsupported.
     pub set_task_list_member_right: Option<VtableMethodFn>,
+    /// `create_section(list_id, name) -> Section`. `None` ⇒ Unsupported.
+    /// Appended at the end to keep bundled plugins binary-compatible (see
+    /// the `list_sections` note above).
+    pub create_section: Option<VtableMethodFn>,
+    /// `update_section(list_id, section_id, new_name) -> Section`. `None`
+    /// ⇒ Unsupported.
+    pub update_section: Option<VtableMethodFn>,
+    /// `delete_section(list_id, section_id)`. `None` ⇒ Unsupported.
+    pub delete_section: Option<VtableMethodFn>,
 }
 
 impl TasksVtable {
@@ -109,6 +118,9 @@ impl TasksVtable {
             add_task_list_member: None,
             remove_task_list_member: None,
             set_task_list_member_right: None,
+            create_section: None,
+            update_section: None,
+            delete_section: None,
         }
     }
 
@@ -131,6 +143,9 @@ mod tests {
         assert!(v.list_task_lists.is_none());
         assert!(v.get_tasks.is_none());
         assert!(v.get_tasks_delta.is_none());
+        assert!(v.create_section.is_none());
+        assert!(v.update_section.is_none());
+        assert!(v.delete_section.is_none());
         assert!(!v.has_minimum_surface());
         assert_eq!(v.vtable_version, crate::ABI_VERSION);
     }

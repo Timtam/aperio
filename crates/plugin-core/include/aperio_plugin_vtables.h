@@ -148,6 +148,14 @@ typedef struct AperioTasksVtable {
     AperioVtableMethodFn add_task_list_member;
     AperioVtableMethodFn remove_task_list_member;
     AperioVtableMethodFn set_task_list_member_right;
+    /* Section CRUD — appended at the end (additive ABI).
+       create_section(list_id, name) -> Section;
+       update_section(list_id, section_id, new_name) -> Section;
+       delete_section(list_id, section_id) -> null.
+       A section's color is never sent (it's a local override). */
+    AperioVtableMethodFn create_section;
+    AperioVtableMethodFn update_section;
+    AperioVtableMethodFn delete_section;
 } AperioTasksVtable;
 
 /*
