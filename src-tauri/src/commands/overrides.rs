@@ -119,6 +119,48 @@ pub async fn set_container_color_label(
     Ok(())
 }
 
+/// Set / clear a section's color label. Mirrors `set_container_color_label`:
+/// a LOCAL section carries the binding on its own (synced) row — update it
+/// and emit a `SectionUpdated` event so other devices follow. An EXTERNAL
+/// section (Todoist section / Vikunja kanban bucket) has no provider color
+/// field, so the binding is a host-local override the read path
+/// (`get_sections`) stamps on top. `list_id` routes the call.
+#[tauri::command]
+pub async fn set_section_color(
+    adapter: State<'_, LocalAdapter>,
+    registry: State<'_, Arc<AdapterRegistry>>,
+    event_log: State<'_, Arc<EventLogWriter>>,
+    db: State<'_, DbHandle>,
+    section_id: String,
+    list_id: String,
+    color_label_id: Option<String>,
+) -> CommandResult<()> {
+    let account = registry
+        .account_for_task_list(&list_id)
+        .unwrap_or_else(|| LOCAL_ID.to_string());
+    if account == LOCAL_ID {
+        if let Some(mut section) = adapter.get_section_by_id(&section_id)? {
+            section.color_label = color_label_id.map(ColorLabelId);
+            let updated = adapter.update_section(section)?;
+            if let Ok(fields) = serde_json::to_value(&updated) {
+                event_log.append(SyncEvent::SectionUpdated(EventPayload {
+                    id: updated.id.clone(),
+                    fields,
+                }));
+            }
+        }
+        return Ok(());
+    }
+    // External section — host-local override (no event log).
+    let shared = db.shared();
+    let repo = OverridesRepo::new(&shared);
+    match color_label_id {
+        Some(id) => repo.set_section_color_label(&section_id, &id)?,
+        None => repo.clear_section_color_label(&section_id)?,
+    }
+    Ok(())
+}
+
 /// Unified rename entry point. Returns a small status object so the
 /// frontend can show "renamed at source" vs. "saved locally only".
 #[derive(Debug, serde::Serialize)]
