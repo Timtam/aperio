@@ -31,10 +31,19 @@ import {
   type ContainerKind,
   type ContextMenuItemRequest,
 } from '../api/client';
-import type { ColorLabel } from '../api/types';
+import type { CalendarEvent, ColorLabel } from '../api/types';
 import { getContactListDisplayName } from '../intl/contactList';
 import { useCalendarStore } from '../state/calendarStoreContext';
 import { useDialogState } from '../state/dialogStateContext';
+import {
+  EVENT_DND_TYPE,
+  moveEventToCalendar,
+  moveTaskToList,
+  readEventDrag,
+  readTaskDrag,
+  TASK_DND_TYPE,
+  type TaskDragPayload,
+} from '../state/moveActions';
 import {
   accountTriState,
   buildSidebarTree,
@@ -1803,7 +1812,42 @@ function LeafRow({
   accountIsLocal,
 }: LeafRowProps) {
   const { t } = useTranslation();
+  const announce = useAnnouncer();
+  const { invalidateData } = useDialogState();
   const [dropActive, setDropActive] = useState(false);
+  // Move a dropped task into this list / a dropped event onto this
+  // calendar (mouse affordance; the keyboard/SR path is the Move/Copy
+  // dialog). The backend decides whether a cross-provider move is allowed.
+  const handleTaskDrop = useCallback(
+    async (payload: TaskDragPayload, listId: string) => {
+      if (payload.task.list_id === listId) return; // already in this list
+      try {
+        await moveTaskToList(payload.task, listId, payload.children);
+        invalidateData();
+        announce(t('sidebar.dnd.taskMoved', { title: payload.task.title }));
+      } catch (err) {
+        announce(
+          isCommandError(err) ? `${err.code}: ${err.message}` : String(err),
+        );
+      }
+    },
+    [invalidateData, announce, t],
+  );
+  const handleEventDrop = useCallback(
+    async (event: CalendarEvent, calendarId: string) => {
+      if (event.calendar_id === calendarId) return; // already on this calendar
+      try {
+        await moveEventToCalendar(event, calendarId);
+        invalidateData();
+        announce(t('sidebar.dnd.eventMoved', { title: event.title }));
+      } catch (err) {
+        announce(
+          isCommandError(err) ? `${err.code}: ${err.message}` : String(err),
+        );
+      }
+    },
+    [invalidateData, announce, t],
+  );
   // Only local task-list rows take part in reparent drag-and-drop.
   const dndEnabled = accountIsLocal && leaf.kind === 'tasks';
   // LeafEditKind discriminates the three leaf types so the rename
@@ -1836,37 +1880,73 @@ function LeafRow({
   const hasChildren = leaf.children.length > 0;
   const isOpen = expansion.isExpanded(leaf.key);
 
-  const dnd = dndEnabled
-    ? {
-        draggable: true,
-        onDragStart: (e: React.DragEvent) => {
-          e.dataTransfer.effectAllowed = 'move';
-          e.dataTransfer.setData('text/plain', leaf.containerId);
-          reparentDrag.begin(leaf.containerId);
-        },
-        onDragEnd: () => {
-          reparentDrag.end();
-          setDropActive(false);
-        },
-        onDragOver: (e: React.DragEvent) => {
-          if (!reparentDrag.canDropOn(leaf.containerId)) return;
-          // preventDefault marks this row a valid drop target.
-          e.preventDefault();
-          e.dataTransfer.dropEffect = 'move';
-          if (!dropActive) setDropActive(true);
-        },
-        onDragLeave: () => {
-          if (dropActive) setDropActive(false);
-        },
-        onDrop: (e: React.DragEvent) => {
-          e.preventDefault();
-          setDropActive(false);
-          if (reparentDrag.canDropOn(leaf.containerId)) {
-            reparentDrag.drop(leaf.containerId);
-          }
-        },
-      }
-    : undefined;
+  // Item drops (separate from container reparenting): a task dropped on a
+  // task-list row moves to that list; an event dropped on a calendar row
+  // moves to that calendar. Accepted on any such row (not just local), so
+  // the backend decides whether a cross-provider move is allowed.
+  const itemDropType =
+    leaf.kind === 'tasks'
+      ? TASK_DND_TYPE
+      : leaf.kind === 'calendars'
+        ? EVENT_DND_TYPE
+        : null;
+  const dnd =
+    dndEnabled || itemDropType !== null
+      ? {
+          // Drag source only for the reparent flow (local task lists).
+          draggable: dndEnabled,
+          onDragStart: dndEnabled
+            ? (e: React.DragEvent) => {
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', leaf.containerId);
+                reparentDrag.begin(leaf.containerId);
+              }
+            : undefined,
+          onDragEnd: dndEnabled
+            ? () => {
+                reparentDrag.end();
+                setDropActive(false);
+              }
+            : undefined,
+          onDragOver: (e: React.DragEvent) => {
+            const types = e.dataTransfer.types;
+            const reparentOk =
+              dndEnabled &&
+              types.includes('text/plain') &&
+              reparentDrag.canDropOn(leaf.containerId);
+            const itemOk =
+              itemDropType !== null && types.includes(itemDropType);
+            if (!reparentOk && !itemOk) return;
+            // preventDefault marks this row a valid drop target.
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            if (!dropActive) setDropActive(true);
+          },
+          onDragLeave: () => {
+            if (dropActive) setDropActive(false);
+          },
+          onDrop: (e: React.DragEvent) => {
+            e.preventDefault();
+            setDropActive(false);
+            const types = e.dataTransfer.types;
+            if (
+              dndEnabled &&
+              types.includes('text/plain') &&
+              reparentDrag.canDropOn(leaf.containerId)
+            ) {
+              reparentDrag.drop(leaf.containerId);
+              return;
+            }
+            if (leaf.kind === 'tasks') {
+              const payload = readTaskDrag(e.dataTransfer);
+              if (payload) void handleTaskDrop(payload, leaf.containerId);
+            } else if (leaf.kind === 'calendars') {
+              const event = readEventDrag(e.dataTransfer);
+              if (event) void handleEventDrop(event, leaf.containerId);
+            }
+          },
+        }
+      : undefined;
 
   return (
     <>

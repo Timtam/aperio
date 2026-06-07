@@ -11,11 +11,9 @@ import {
   createEvent as apiCreateEvent,
   createTask as apiCreateTask,
   isCommandError,
-  updateEvent as apiUpdateEvent,
 } from '../api/client';
-import { invoke } from '@tauri-apps/api/core';
 import type { CalendarEvent, Task } from '../api/types';
-import { seriesIdOf } from '../intl/recurrence';
+import { moveEventToCalendar, moveTaskToList } from '../state/moveActions';
 import { useCalendarStore } from '../state/calendarStoreContext';
 import type { MoveCopyTarget } from '../state/DialogState';
 import { useTasks } from '../state/useTasks';
@@ -272,30 +270,10 @@ async function moveOrCopyEvent(
   targetCalendarId: string,
   mode: Mode,
 ): Promise<void> {
-  // For expanded occurrences the underlying row is the series; we
-  // never move just one instance of a recurring series. `seriesIdOf`
-  // pulls the master id off the augmented event shape (and handles
-  // CalDAV UIDs that themselves contain '@' — see the helper for
-  // why a `split('@')` shortcut would corrupt them).
-  const seriesId = seriesIdOf(event);
-
   if (mode === 'move') {
-    // Pass the original calendar_id as the move hint. The backend
-    // uses it to detect cross-calendar moves: local-only stays a
-    // single SQL UPDATE on the calendar_id column; for external
-    // adapters (iCloud, Google, Graph, EWS) the backend reroutes
-    // as create-on-target + delete-from-source — without this
-    // hint, a CalDAV move would PUT to a non-existent resource on
-    // the new calendar with the old etag's If-Match, drawing a
-    // 412 from iCloud.
-    await apiUpdateEvent(
-      {
-        ...event,
-        id: seriesId,
-        calendar_id: targetCalendarId,
-      },
-      event.calendar_id,
-    );
+    // Reuses the shared move primitive (see moveActions.ts for the
+    // master-series + cross-calendar-move-hint rationale).
+    await moveEventToCalendar(event, targetCalendarId);
     return;
   }
 
@@ -322,32 +300,9 @@ async function moveOrCopyTask(
   children: Task[],
 ): Promise<void> {
   if (mode === 'move') {
-    // Pass the original list_id as the move hint. Local-only stays
-    // a single SQL UPDATE (row identity preserved); cross-adapter
-    // moves go through create-on-target + delete-from-source on the
-    // backend, which gives the task a new id.
-    //
-    // Children inherit the same move: each one's previous list_id
-    // is wherever it currently lives (`child.list_id`), the target
-    // is the new list. For *cross-adapter* moves the parent's id
-    // changes, so we re-thread each child's parent_id onto the
-    // freshly created parent id the backend just returned. For
-    // local moves the id stays the same and this is a no-op
-    // rewrite. Either way the family stays connected.
-    const movedParent = await invoke<Task>('update_task', {
-      task: { ...task, list_id: targetListId },
-      previousListId: task.list_id,
-    });
-    for (const child of children) {
-      await invoke<Task>('update_task', {
-        task: {
-          ...child,
-          list_id: targetListId,
-          parent_id: movedParent.id,
-        },
-        previousListId: child.list_id,
-      });
-    }
+    // Reuses the shared move primitive (see moveActions.ts for the
+    // move-hint + child-re-threading rationale).
+    await moveTaskToList(task, targetListId, children);
     return;
   }
 

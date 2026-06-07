@@ -18,6 +18,7 @@ import {
   seriesIdOf,
 } from '../../intl/recurrence';
 import { useCalendarStore } from '../../state/calendarStoreContext';
+import { setEventDrag, setTaskDrag } from '../../state/moveActions';
 import { useDialogState } from '../../state/dialogStateContext';
 import { useEvents } from '../../state/useEvents';
 import { useTaskListShowCompleted } from '../../state/useTaskListShowCompleted';
@@ -412,6 +413,14 @@ export function DayView() {
                         } as React.CSSProperties)
                       : undefined
                   }
+                  draggable
+                  onDragStart={(dev) => {
+                    setTaskDrag(
+                      dev.dataTransfer,
+                      task,
+                      tasks.filter((c) => c.parent_id === task.id),
+                    );
+                  }}
                   onClick={() => setFocusIndex(i)}
                   onContextMenu={(ev) => {
                     ev.preventDefault();
@@ -482,6 +491,10 @@ export function DayView() {
                     ? ({ '--event-color': color.hex } as React.CSSProperties)
                     : undefined
                 }
+                draggable
+                onDragStart={(dev) => {
+                  setEventDrag(dev.dataTransfer, ev);
+                }}
                 onClick={() => setFocusIndex(i)}
                 onContextMenu={(cmev) => {
                   cmev.preventDefault();

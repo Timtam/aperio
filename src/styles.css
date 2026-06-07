@@ -3143,6 +3143,13 @@ button[aria-disabled='true'] {
   padding-left: var(--space-2);
 }
 
+/* A section header while a task is being dragged over it (drop target). */
+.task-list__group--drop-active {
+  outline: 2px dashed var(--color-accent);
+  outline-offset: -2px;
+  background: var(--color-surface-hover, rgba(127, 127, 127, 0.12));
+}
+
 .task-list__group-swatch {
   display: inline-block;
   width: 0.7em;

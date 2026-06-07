@@ -38,6 +38,13 @@ import {
   showContextMenu,
   type ContextMenuItemRequest,
 } from '../../api/client';
+import {
+  moveTaskToList,
+  moveTaskToSection,
+  readTaskDrag,
+  setTaskDrag,
+  TASK_DND_TYPE,
+} from '../../state/moveActions';
 
 /**
  * Dedicated task view — flat listbox of tasks with visual group
@@ -268,6 +275,40 @@ export function TaskView() {
       }
     },
     [announce, t, invalidateData],
+  );
+
+  // Drag-and-drop: a task dropped on a section header moves into that
+  // section. If the header belongs to a different list, the task moves to
+  // that list first, then into the section. Mouse affordance only — the
+  // keyboard/SR path stays the section field in the task dialog.
+  const [dragOverSectionId, setDragOverSectionId] = useState<string | null>(
+    null,
+  );
+  const dropTaskOnSection = useCallback(
+    async (sectionId: string, sectionListId: string, e: React.DragEvent) => {
+      e.preventDefault();
+      setDragOverSectionId(null);
+      const payload = readTaskDrag(e.dataTransfer);
+      if (!payload) return;
+      const { task, children } = payload;
+      if (task.list_id === sectionListId && task.section_id === sectionId) {
+        return; // already there
+      }
+      try {
+        if (task.list_id === sectionListId) {
+          await moveTaskToSection(task, sectionId);
+        } else {
+          const moved = await moveTaskToList(task, sectionListId, children);
+          await moveTaskToSection(moved, sectionId);
+        }
+        invalidateData();
+        announce(t('views.tasks.movedToSection', { title: task.title }));
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('drop task on section failed', err);
+      }
+    },
+    [invalidateData, announce, t],
   );
 
   // Shared toggle: WeekView and DayView use the same hook so the
@@ -506,7 +547,10 @@ export function TaskView() {
                   (isSection
                     ? 'task-list__group task-list__group--section'
                     : 'task-list__group') +
-                  (sectionHex ? ' task-list__group--colored' : '')
+                  (sectionHex ? ' task-list__group--colored' : '') +
+                  (section && dragOverSectionId === section.id
+                    ? ' task-list__group--drop-active'
+                    : '')
                 }
                 style={
                   sectionHex
@@ -522,6 +566,41 @@ export function TaskView() {
                           y: e.clientY,
                         });
                       }
+                    : undefined
+                }
+                onDragOver={
+                  section
+                    ? (e) => {
+                        if (
+                          !e.dataTransfer.types.includes(TASK_DND_TYPE)
+                        ) {
+                          return;
+                        }
+                        // A task is over a section header → valid drop.
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = 'move';
+                        if (dragOverSectionId !== section.id) {
+                          setDragOverSectionId(section.id);
+                        }
+                      }
+                    : undefined
+                }
+                onDragLeave={
+                  section
+                    ? () =>
+                        setDragOverSectionId((cur) =>
+                          cur === section.id ? null : cur,
+                        )
+                    : undefined
+                }
+                onDrop={
+                  section
+                    ? (e) =>
+                        void dropTaskOnSection(
+                          section.id,
+                          section.list_id,
+                          e,
+                        )
                     : undefined
                 }
               >
@@ -755,6 +834,15 @@ function renderTreeItem(
       key={task.id}
       id={itemId(index)}
       role="treeitem"
+      draggable={task.id !== DONE_GROUP_ID}
+      onDragStart={
+        task.id === DONE_GROUP_ID
+          ? undefined
+          : (e) => {
+              const childRows = tasks.filter((c) => c.parent_id === task.id);
+              setTaskDrag(e.dataTransfer, task, childRows);
+            }
+      }
       aria-selected={focused}
       aria-label={aria}
       aria-level={depth + 1}

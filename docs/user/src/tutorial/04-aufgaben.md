@@ -55,6 +55,13 @@ deinen Tag oder deine Woche ein und arbeitest sie ab.
 > Abschnitt" landet eine Vikunja-Aufgabe im Standard-Bucket, da Vikunja
 > jede Kanban-Aufgabe in einem Bucket führt.
 
+> **Per Maus (Drag & Drop):** Du kannst eine Aufgabe auch auf einen
+> **Abschnitts-Kopf** (in der Aufgaben-Ansicht) oder auf eine **Liste in
+> der Seitenleiste** ziehen, um sie dorthin zu verschieben; einen **Termin**
+> ziehst du auf einen **Kalender in der Seitenleiste**. Für Tastatur- und
+> Screenreader-Nutzung bleibt der Verschieben/Kopieren-Dialog (bzw. das
+> Abschnitt-Feld) der Weg.
+
 ## Aufgaben einplanen
 
 Aperio unterscheidet zwischen Aufgaben mit und ohne festen Termin:
