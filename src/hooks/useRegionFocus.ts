@@ -13,10 +13,11 @@ import { useEffect } from 'react';
  * this case). Shift+F6 cycles the other way.
  *
  * Current cycle:
- *   Sidebar → Toolbar → Active view → (wrap)
+ *   Sidebar → Toolbar → Active view → [Backlog rail, in week/month] → (wrap)
  *
  * Regions are discovered live on every keypress, so a future surface
- * just needs to mount with `data-region` to join the cycle.
+ * just needs to mount with `data-region` to join the cycle — the backlog
+ * rail does exactly that in the week and month views.
  */
 export function useRegionFocus(): void {
   useEffect(() => {

@@ -20,17 +20,19 @@ import { useTasks } from '../state/useTasks';
  * `scheduled_date` and no `deadline_date` (the same bucket the task view's
  * "Backlog" group shows). Three roles in one:
  *
- *   - **Drag source** — each chip is draggable; drop it on a day cell to
+ *   - **Drag source** — each option is draggable; drop it on a day cell to
  *     schedule it there (the planner's existing day-drop handles it).
  *   - **Drop target** — drop a *scheduled* task onto the rail to send it
  *     back to the backlog (clears the date/deadline).
- *   - **Keyboard / screen-reader** — chips are real buttons: Enter opens
- *     the task, Shift+D opens the plan dialog (schedule it), the context
- *     menu offers the rest. So the rail is fully usable without a mouse.
+ *   - **Keyboard / screen-reader** — a single-tab-stop `listbox`: Tab lands
+ *     on the list once, Arrow/Home/End move the active option (via
+ *     `aria-activedescendant`, not one tab-stop per task), Enter opens it,
+ *     Shift+D opens the plan dialog (schedule), ContextMenu / Shift+F10
+ *     opens the task menu. So the rail is fully usable without a mouse.
  *
- * A native `<details>` keeps it a collapsible, accessible disclosure with
- * no custom widget plumbing. Rendered identically in the week and month
- * views, so the backlog travels with the planner.
+ * A native `<details>` keeps it a collapsible, accessible disclosure that
+ * joins the F6 region cycle (via `data-region`). Rendered identically in
+ * the week and month views, so the backlog travels with the planner.
  */
 export function BacklogRail() {
   const { t } = useTranslation();
@@ -39,6 +41,7 @@ export function BacklogRail() {
   const { openTaskDialog, openPlanTask, invalidateData } = useDialogState();
   const { openForTask } = useChipContextMenu();
   const [open, setOpen] = useState(true);
+  const [activeIndex, setActiveIndex] = useState(0);
 
   const backlog = useMemo(() => {
     const ids = new Set(tasks.map((row) => row.id));
@@ -51,6 +54,12 @@ export function BacklogRail() {
         (!row.parent_id || !ids.has(row.parent_id)),
     );
   }, [tasks]);
+
+  // Clamp the active option to the current list (it shrinks as tasks are
+  // scheduled away). Derived, so it never points past the end.
+  const activeIdx =
+    backlog.length === 0 ? -1 : Math.min(activeIndex, backlog.length - 1);
+  const optionId = (i: number) => `backlog-opt-${i}`;
 
   const dropToBacklog = async (e: React.DragEvent) => {
     e.preventDefault();
@@ -69,9 +78,59 @@ export function BacklogRail() {
     }
   };
 
+  const onListKeyDown = (e: React.KeyboardEvent) => {
+    if (activeIdx < 0) return;
+    const task = backlog[activeIdx];
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault();
+        setActiveIndex(Math.min(activeIdx + 1, backlog.length - 1));
+        return;
+      case 'ArrowUp':
+        e.preventDefault();
+        setActiveIndex(Math.max(activeIdx - 1, 0));
+        return;
+      case 'Home':
+        e.preventDefault();
+        setActiveIndex(0);
+        return;
+      case 'End':
+        e.preventDefault();
+        setActiveIndex(backlog.length - 1);
+        return;
+      case 'Enter':
+      case ' ':
+        e.preventDefault();
+        openTaskDialog(task);
+        return;
+      case 'D':
+      case 'd':
+        if (e.shiftKey) {
+          e.preventDefault();
+          openPlanTask(task);
+        }
+        return;
+      case 'ContextMenu':
+      case 'F10': {
+        if (e.key === 'F10' && !e.shiftKey) return;
+        e.preventDefault();
+        const node = document.getElementById(optionId(activeIdx));
+        const rect = node?.getBoundingClientRect();
+        void openForTask(
+          task,
+          rect ? { x: rect.left, y: rect.bottom } : undefined,
+        );
+        return;
+      }
+      default:
+        return;
+    }
+  };
+
   return (
     <details
       className="backlog-rail"
+      data-region="backlog"
       open={open}
       onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}
       onDragOver={(e) => {
@@ -89,61 +148,46 @@ export function BacklogRail() {
         {backlog.length === 0 ? (
           <p className="backlog-rail__empty">{t('views.backlog.empty')}</p>
         ) : (
-          <ul className="backlog-rail__list" role="list">
-            {backlog.map((task) => {
+          <ul
+            className="backlog-rail__list"
+            role="listbox"
+            aria-label={t('views.backlog.listLabel')}
+            tabIndex={0}
+            aria-activedescendant={optionId(activeIdx)}
+            onKeyDown={onListKeyDown}
+          >
+            {backlog.map((task, i) => {
               const children = tasks.filter((c) => c.parent_id === task.id);
               const listName =
                 taskListById.get(task.list_id)?.name ?? task.list_id;
               return (
-                <li key={task.id}>
-                  <button
-                    type="button"
-                    className="backlog-rail__chip"
-                    draggable
-                    aria-label={t('views.backlog.chipLabel', {
-                      title: task.title,
-                      list: listName,
-                    })}
-                    onDragStart={(e) =>
-                      setTaskDrag(e.dataTransfer, task, children)
-                    }
-                    onClick={() => openTaskDialog(task)}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      void openForTask(task);
-                    }}
-                    onKeyDown={(e) => {
-                      // Shift+D → plan dialog (schedule), matching the
-                      // task views. Stop propagation so the parent view's
-                      // own key handler doesn't double-fire.
-                      if (e.shiftKey && (e.key === 'D' || e.key === 'd')) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        openPlanTask(task);
-                        return;
-                      }
-                      // ContextMenu / Shift+F10 → the task menu (status,
-                      // move, delete…), anchored at the chip so keyboard
-                      // users reach the same actions as a right-click.
-                      if (
-                        e.key === 'ContextMenu' ||
-                        (e.shiftKey && e.key === 'F10')
-                      ) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        const rect = e.currentTarget.getBoundingClientRect();
-                        void openForTask(task, {
-                          x: rect.left,
-                          y: rect.bottom,
-                        });
-                      }
-                    }}
-                  >
-                    <span className="backlog-rail__chip-title">
-                      {task.title}
-                    </span>
-                    <span className="backlog-rail__chip-list">{listName}</span>
-                  </button>
+                <li
+                  key={task.id}
+                  id={optionId(i)}
+                  role="option"
+                  aria-selected={i === activeIdx}
+                  aria-label={t('views.backlog.chipLabel', {
+                    title: task.title,
+                    list: listName,
+                  })}
+                  className={
+                    'backlog-rail__chip' +
+                    (i === activeIdx ? ' backlog-rail__chip--active' : '')
+                  }
+                  draggable
+                  onDragStart={(e) => setTaskDrag(e.dataTransfer, task, children)}
+                  onClick={() => {
+                    setActiveIndex(i);
+                    openTaskDialog(task);
+                  }}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setActiveIndex(i);
+                    void openForTask(task, { x: e.clientX, y: e.clientY });
+                  }}
+                >
+                  <span className="backlog-rail__chip-title">{task.title}</span>
+                  <span className="backlog-rail__chip-list">{listName}</span>
                 </li>
               );
             })}

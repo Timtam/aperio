@@ -1383,6 +1383,7 @@
     "multiDaySuffix": ", day {{day}} of {{total}}",
     "backlog": {
       "heading": "Backlog ({{count}})",
+      "listLabel": "Backlog tasks",
       "empty": "No tasks in the backlog.",
       "chipLabel": "{{title}}, list {{list}}",
       "movedToBacklog": "\"{{title}}\" moved to the backlog.",

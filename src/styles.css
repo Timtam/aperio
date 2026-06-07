@@ -3195,12 +3195,19 @@ button[aria-disabled='true'] {
   text-align: left;
   cursor: grab;
 }
+/* The list is the single tab-stop; the active option is tracked via
+   aria-activedescendant, so the visible "cursor" is --active, not :focus. */
+.backlog-rail__list:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
 .backlog-rail__chip:hover {
   background: var(--color-surface-hover, rgba(127, 127, 127, 0.12));
 }
-.backlog-rail__chip:focus-visible {
+.backlog-rail__chip--active {
   outline: 2px solid var(--color-accent);
   outline-offset: 1px;
+  background: var(--color-surface-hover, rgba(127, 127, 127, 0.12));
 }
 .backlog-rail__chip-title {
   font-weight: 500;
