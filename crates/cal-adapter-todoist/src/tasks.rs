@@ -125,6 +125,43 @@ pub async fn list_sections(client: &TodoistClient, list_id: &str) -> TodoistResu
         .collect())
 }
 
+/// `POST /sections` with `{ project_id, name }` — create a section in a
+/// project. Returns the created section mapped to Aperio's `Section`.
+/// Color is never sent — Todoist sections carry none; it's a local
+/// override.
+pub async fn create_section(
+    client: &TodoistClient,
+    list_id: &str,
+    name: &str,
+) -> TodoistResult<Section> {
+    let body = serde_json::json!({ "project_id": list_id, "name": name });
+    let entry: SectionEntry = client.post_json("/sections", &body).await?;
+    Ok(map_section(entry, list_id))
+}
+
+/// `POST /sections/{id}` with `{ name }` — rename a section. Returns the
+/// updated section.
+pub async fn update_section(
+    client: &TodoistClient,
+    list_id: &str,
+    section_id: &str,
+    new_name: &str,
+) -> TodoistResult<Section> {
+    let encoded = urlencoding(section_id);
+    let body = serde_json::json!({ "name": new_name });
+    let entry: SectionEntry = client
+        .post_json(&format!("/sections/{encoded}"), &body)
+        .await?;
+    Ok(map_section(entry, list_id))
+}
+
+/// `DELETE /sections/{id}` — remove a section; its tasks become
+/// section-less at the source. Todoist returns 204.
+pub async fn delete_section(client: &TodoistClient, section_id: &str) -> TodoistResult<()> {
+    let encoded = urlencoding(section_id);
+    client.delete(&format!("/sections/{encoded}")).await
+}
+
 /// `POST /tasks`. Returns the freshly-created task. When the input
 /// `NewTask` is already `Completed` we follow up with `/close` so
 /// the round-trip preserves the status — the create endpoint
@@ -1619,6 +1656,56 @@ mod tests {
         assert_eq!(sections[0].name, "To Do");
         assert_eq!(sections[0].list_id, "P1");
         assert_eq!(sections[1].order, 2);
+    }
+
+    #[tokio::test]
+    async fn create_section_posts_and_maps() {
+        let mut server = Server::new_async().await;
+        let m = server
+            .mock("POST", "/sections")
+            .match_body(mockito::Matcher::Json(serde_json::json!({
+                "project_id": "P1",
+                "name": "Backlog"
+            })))
+            .with_status(200)
+            .with_body(r#"{"id":"S9","project_id":"P1","order":3,"name":"Backlog"}"#)
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        let section = create_section(&client, "P1", "Backlog").await.unwrap();
+        m.assert_async().await;
+        assert_eq!(section.id, "S9");
+        assert_eq!(section.name, "Backlog");
+        assert_eq!(section.list_id, "P1");
+    }
+
+    #[tokio::test]
+    async fn update_section_renames() {
+        let mut server = Server::new_async().await;
+        let m = server
+            .mock("POST", "/sections/S9")
+            .match_body(mockito::Matcher::Json(serde_json::json!({ "name": "Done" })))
+            .with_status(200)
+            .with_body(r#"{"id":"S9","project_id":"P1","order":3,"name":"Done"}"#)
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        let section = update_section(&client, "P1", "S9", "Done").await.unwrap();
+        m.assert_async().await;
+        assert_eq!(section.name, "Done");
+    }
+
+    #[tokio::test]
+    async fn delete_section_hits_endpoint() {
+        let mut server = Server::new_async().await;
+        let m = server
+            .mock("DELETE", "/sections/S9")
+            .with_status(204)
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        delete_section(&client, "S9").await.unwrap();
+        m.assert_async().await;
     }
 
     #[tokio::test]
