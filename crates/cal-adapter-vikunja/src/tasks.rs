@@ -252,11 +252,14 @@ async fn current_bucket(client: &VikunjaClient, task_id: i64, view_id: i64) -> O
 /// silently — a server without the view/bucket endpoints, or an
 /// unreadable current bucket, skips the move — and never fails the
 /// surrounding task edit.
-async fn move_task_bucket(client: &VikunjaClient, task: &Task, task_id: i64) {
-    let project_id = match parse_id(&task.list_id, "task list id") {
-        Ok(p) => p,
-        Err(_) => return,
-    };
+///
+/// Returns the bucket the task is in **after** the call (so the caller
+/// reports the real section, not an optimistic guess): the target on a
+/// successful move, the unchanged current bucket on a no-op / failed /
+/// skipped move, or `None` when it genuinely can't be determined (no
+/// kanban view, or the current bucket couldn't be read).
+async fn move_task_bucket(client: &VikunjaClient, task: &Task, task_id: i64) -> Option<i64> {
+    let project_id = parse_id(&task.list_id, "task list id").ok()?;
     let Some(view) = kanban_view(client, project_id).await else {
         if task.section_id.is_some() {
             tracing::warn!(
@@ -264,7 +267,7 @@ async fn move_task_bucket(client: &VikunjaClient, task: &Task, task_id: i64) {
                 "vikunja: no kanban view — section change not applied",
             );
         }
-        return;
+        return None;
     };
     let Some(current) = current_bucket(client, task_id, view.id).await else {
         // Can't read where the task currently sits → don't risk a wrong
@@ -275,12 +278,13 @@ async fn move_task_bucket(client: &VikunjaClient, task: &Task, task_id: i64) {
                 "vikunja: can't read current bucket — section change not applied",
             );
         }
-        return;
+        return None;
     };
     let target = match task.section_id.as_deref() {
         Some(s) => match parse_id(s, "section id") {
             Ok(b) => b,
-            Err(_) => return,
+            // Unparseable section id → leave the task where it is.
+            Err(_) => return Some(current),
         },
         // No section → the view's default bucket (Vikunja has no "no
         // bucket"), falling back to the leftmost bucket when unset.
@@ -290,13 +294,13 @@ async fn move_task_bucket(client: &VikunjaClient, task: &Task, task_id: i64) {
             } else {
                 match leftmost_bucket(client, project_id, view.id).await {
                     Some(b) => b,
-                    None => return,
+                    None => return Some(current),
                 }
             }
         }
     };
     if target == current {
-        return; // already in the right bucket — nothing to do.
+        return Some(current); // already in the right bucket — nothing to do.
     }
     let path = format!(
         "/projects/{project_id}/views/{}/buckets/{target}/tasks",
@@ -304,13 +308,18 @@ async fn move_task_bucket(client: &VikunjaClient, task: &Task, task_id: i64) {
     );
     let body = serde_json::json!({ "task_id": task_id, "bucket_id": target });
     let moved: VikunjaResult<serde_json::Value> = client.post_json(&path, &body).await;
-    if let Err(err) = moved {
-        tracing::warn!(
-            ?err,
-            task_id,
-            target,
-            "vikunja: bucket move failed — task edit preserved",
-        );
+    match moved {
+        Ok(_) => Some(target),
+        Err(err) => {
+            tracing::warn!(
+                ?err,
+                task_id,
+                target,
+                "vikunja: bucket move failed — task edit preserved",
+            );
+            // The move didn't apply → the task is still in `current`.
+            Some(current)
+        }
     }
 }
 
@@ -374,13 +383,17 @@ pub async fn update_task(client: &VikunjaClient, task: &Task) -> VikunjaResult<T
     // Apply a section (kanban bucket) change via the dedicated per-view
     // endpoint — the task body's `bucket_id` is ignored on ≥0.24. This is
     // a best-effort follow-up (like assignees) that never fails the edit.
-    move_task_bucket(client, task, task_id).await;
+    let effective_section = move_task_bucket(client, task, task_id).await;
     let mut mapped = map_task(entry, &task.list_id);
     mapped.assignees = task.assignees.clone();
-    // Reflect the section the caller asked for: the field PUT doesn't
-    // move buckets, and the PUT response can't carry the per-view bucket
-    // here, so `map_task` would otherwise drop it.
-    mapped.section_id = task.section_id.clone();
+    // Reflect where the task actually ended up — the field PUT doesn't
+    // move buckets and its response can't carry the per-view bucket, so
+    // `map_task` drops it. `None` means the move couldn't be determined
+    // (no kanban view / unreadable current bucket); keep `map_task`'s
+    // value rather than optimistically claiming the requested section.
+    if let Some(bucket) = effective_section {
+        mapped.section_id = Some(bucket.to_string());
+    }
     Ok(mapped)
 }
 
@@ -1523,6 +1536,11 @@ mod tests {
         // …and is moved to bucket 12 (the new section).
         let mv = server
             .mock("POST", "/api/v1/projects/3/views/11/buckets/12/tasks")
+            // The body must carry `task_id` (path-redundant `bucket_id`
+            // too) — a wrong field name would fail a real server.
+            .match_body(mockito::Matcher::Json(
+                serde_json::json!({ "task_id": 7, "bucket_id": 12 }),
+            ))
             .with_status(200)
             .with_body("{}")
             .create_async()
@@ -1594,7 +1612,9 @@ mod tests {
             .await
             .unwrap();
         mv.assert_async().await;
-        assert!(result.section_id.is_none());
+        // "No section" on Vikunja means the default bucket (there is no
+        // ungrouped state), so the task reports that bucket — not `None`.
+        assert_eq!(result.section_id.as_deref(), Some("5"));
     }
 
     #[tokio::test]
