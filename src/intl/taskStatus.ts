@@ -3,26 +3,29 @@ import type { Task, TaskPriority, TaskStatus } from '../api/types';
 /**
  * Per-status glyph for the on-chip / on-row marker.
  *
- * One character wide on every platform — no SVG, no font dependency,
- * no row-shift surprises across locales. All four glyphs sit on a
- * common visual spine (the circle) so the user reads them as a
- * progression rather than four unrelated symbols. The previous mix
- * of boxes (☐/☑/☒) and a stray circle (◐) for in_progress was
- * confusing — a half-filled circle next to an empty box doesn't tell
- * the eye "these are positions on the same scale".
+ * Glyph-only — no SVG, no font dependency, no row-shift surprises
+ * across locales. All four glyphs sit on a common visual spine (the
+ * circle) so the user reads them as a progression rather than four
+ * unrelated symbols. The previous mix of boxes (☐/☑/☒) and a stray
+ * circle (◐) for in_progress was confusing — a half-filled circle
+ * next to an empty box doesn't tell the eye "these are positions on
+ * the same scale".
  *
  *   open        ○  empty circle
  *   in_progress ◐  half-filled circle — "started, not finished"
- *   completed   ●  filled circle
+ *   completed   ⬤  large filled circle (U+2B24) — reads clearly as a
+ *                  disc rather than a stray bullet (the small ● did)
  *   cancelled   ⊘  slashed circle — "abandoned / no longer pursued"
  *
  * Shared across TaskView and the calendar-chip surfaces so the
- * symbols mean the same thing wherever the user sees them.
+ * symbols mean the same thing wherever the user sees them. The
+ * markers render inside a centred fixed-size box on every surface, so
+ * the larger "completed" glyph stays aligned and never shifts a row.
  */
 export function statusMarker(status: TaskStatus): string {
   switch (status) {
     case 'completed':
-      return '●';
+      return '⬤';
     case 'cancelled':
       return '⊘';
     case 'in_progress':
