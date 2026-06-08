@@ -869,6 +869,7 @@
       "occurrenceUpdated": "This occurrence of \"{{title}}\" was changed.",
       "occurrenceDeleted": "This occurrence of \"{{title}}\" was deleted.",
       "birthdayTitle": "Birthday",
+      "birthdayAge": "Turns {{age}} years old",
       "birthdayHint": "Birthdays come from your contacts. Edit the contact in your address book to change the date.",
       "birthdayClose": "Close",
       "scope": {

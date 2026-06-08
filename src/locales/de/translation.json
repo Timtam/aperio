@@ -869,6 +869,7 @@
       "occurrenceUpdated": "Dieser Einzeltermin von „{{title}}\" wurde geändert.",
       "occurrenceDeleted": "Dieser Einzeltermin von „{{title}}\" wurde gelöscht.",
       "birthdayTitle": "Geburtstag",
+      "birthdayAge": "Wird {{age}} Jahre alt",
       "birthdayHint": "Geburtstage stammen aus deinen Kontakten. Bearbeite den Kontakt im Adressbuch, um das Datum zu ändern.",
       "birthdayClose": "Schließen",
       "scope": {

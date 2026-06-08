@@ -281,7 +281,7 @@ fn events_for_contacts(
                 id: format!("aperio-birthday:{}:{}", contact.id, year,),
                 calendar_id: calendar_id.to_string(),
                 title: contact.display_name.clone(),
-                description: birthday_description(&contact, year, &bday),
+                description: birthday_description(year, &bday),
                 location: None,
                 start,
                 end,
@@ -303,32 +303,25 @@ fn events_for_contacts(
     out
 }
 
-/// Optional "Wird X Jahre alt"-style hint for the description.
-/// Birth year is 1900 or later (RFC 6350 leaves earlier dates
-/// underdefined) — we skip the age when the parsed birthday
-/// looks like a placeholder (year < 1900 or > current+1).
-fn birthday_description(
-    contact: &cal_core::Contact,
-    occurrence_year: i32,
-    birthday: &NaiveDate,
-) -> Option<String> {
+/// The age (in years) the contact reaches on this birthday occurrence,
+/// as a plain number string (e.g. `"39"`). The frontend renders the
+/// localized "Wird X Jahre alt" line from it — UI prose lives in the
+/// app's i18n, never baked into a synthesised event here. Returns `None`
+/// when the birth year is missing or a clearly bogus placeholder (RFC
+/// 6350 leaves pre-1900 dates underdefined) or the age isn't positive;
+/// the title (the contact's name) then stands alone.
+fn birthday_description(occurrence_year: i32, birthday: &NaiveDate) -> Option<String> {
     let birth_year = birthday.year();
     let today_year = Utc::now().naive_utc().year();
     if birth_year < 1900 || birth_year > today_year + 1 {
         // Year omitted in the source vCard or clearly bogus.
-        // Skip the age line; the title alone is fine.
         return None;
     }
     let age = occurrence_year - birth_year;
     if age <= 0 {
         return None;
     }
-    let name = if !contact.display_name.is_empty() {
-        contact.display_name.as_str()
-    } else {
-        "Contact"
-    };
-    Some(format!("{name} turns {age}"))
+    Some(age.to_string())
 }
 
 #[cfg(test)]
@@ -384,9 +377,11 @@ mod tests {
             assert_eq!(ev.calendar_id, "cal");
             assert!(ev.all_day);
             assert_eq!(ev.title, "Max");
-            // Description carries "turns N" when birth year is
-            // sensible — 2024 - 1985 = 39, etc.
-            assert!(ev.description.is_some());
+            // Description carries the age as a bare number string when the
+            // birth year is sensible (2024-1985=39, 2025→40, 2026→41) — the
+            // frontend renders the localized "Wird N Jahre alt" from it.
+            let age: i32 = ev.description.as_deref().unwrap().parse().unwrap();
+            assert!((39..=41).contains(&age));
         }
         // Years 2024 / 2025 / 2026 appear in id.
         let years: Vec<_> = events
@@ -452,25 +447,15 @@ mod tests {
 
     #[test]
     fn birthday_description_emits_age_when_birth_year_is_sensible() {
-        let contact = make_contact("Max", Some(NaiveDate::from_ymd_opt(1985, 4, 17).unwrap()));
-        let desc = birthday_description(
-            &contact,
-            2026,
-            &NaiveDate::from_ymd_opt(1985, 4, 17).unwrap(),
-        );
-        assert_eq!(desc.as_deref(), Some("Max turns 41"));
+        let desc = birthday_description(2026, &NaiveDate::from_ymd_opt(1985, 4, 17).unwrap());
+        assert_eq!(desc.as_deref(), Some("41"));
     }
 
     #[test]
     fn birthday_description_omits_age_for_placeholder_year() {
         // vCard with no birth year sometimes encodes as year 1604
         // or similar sentinel; we skip the age in that case.
-        let contact = make_contact("Anon", Some(NaiveDate::from_ymd_opt(1604, 5, 1).unwrap()));
-        let desc = birthday_description(
-            &contact,
-            2026,
-            &NaiveDate::from_ymd_opt(1604, 5, 1).unwrap(),
-        );
+        let desc = birthday_description(2026, &NaiveDate::from_ymd_opt(1604, 5, 1).unwrap());
         assert!(desc.is_none());
     }
 }

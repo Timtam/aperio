@@ -9,6 +9,7 @@ import {
 import { useTranslation } from 'react-i18next';
 
 import { useAnnouncer } from '../a11y/announcerContext';
+import { FocusableNote } from '../a11y/FocusableNote';
 import { DescriptionLinks } from './DescriptionLinks';
 import {
   addEventExdate,
@@ -581,14 +582,18 @@ export function EventDialog({
         title={t('dialogs.event.birthdayTitle')}
         className="modal--form modal--birthday"
       >
-        <div className="form" role="document">
-          <p>
-            <strong>{event.title}</strong>
-          </p>
+        <div className="form">
+          <FocusableNote className="modal-birthday__name">
+            {event.title}
+          </FocusableNote>
           {event.description && (
-            <p className="form__hint">{event.description}</p>
+            <FocusableNote className="form__hint">
+              {t('dialogs.event.birthdayAge', { age: event.description })}
+            </FocusableNote>
           )}
-          <p className="form__hint">{t('dialogs.event.birthdayHint')}</p>
+          <FocusableNote className="form__hint">
+            {t('dialogs.event.birthdayHint')}
+          </FocusableNote>
           <div className="form__actions">
             <button
               type="button"
