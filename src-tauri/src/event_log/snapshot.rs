@@ -41,6 +41,7 @@ use tracing::warn;
 
 use crate::db::SharedConn;
 use crate::event_log::whitelist::{is_synced_key, SYNC_WHITELIST};
+use crate::secrets::SecretSlot;
 use crate::user_prefs::UserPrefsRepo;
 
 /// The body of an Aperio snapshot. Lives between
@@ -68,6 +69,26 @@ pub struct AperioSnapshotBody {
     /// identifies which keychain entry each account needs.
     #[serde(default)]
     pub accounts: Vec<SnapshotAccount>,
+    /// Account secrets — present ONLY when E2E is enabled, in which case
+    /// the whole snapshot body is an encrypted blob. This is what lets a
+    /// freshly-joined device (and any device after a log compaction)
+    /// recover the credentials without re-entry. When E2E is off the
+    /// build path leaves this empty and `skip_serializing_if` keeps the
+    /// key out of the (plaintext) body entirely. The E2E-disable path
+    /// strips it before any plaintext re-upload.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub credentials: Vec<SnapshotCredential>,
+}
+
+/// One account secret carried in [`AperioSnapshotBody.credentials`].
+/// Only ever serialised inside an E2E-encrypted snapshot. `slot` is the
+/// keychain slot wire name; only the syncable slots (`password`,
+/// `refresh_token`, `api_token`) are ever produced or applied.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SnapshotCredential {
+    pub account_id: String,
+    pub slot: String,
+    pub secret: String,
 }
 
 /// Non-secret account row carried in [`AperioSnapshotBody.accounts`].
@@ -154,10 +175,12 @@ impl SnapshotBuilder {
             .map_err(|err| SyncError::internal(format!("dump rows: {err}")))?;
         let settings = self.dump_settings()?;
         let accounts = self.dump_accounts()?;
+        let credentials = self.dump_credentials()?;
         let body = AperioSnapshotBody {
             dump,
             settings,
             accounts,
+            credentials,
         };
         let body_value = serde_json::to_value(&body)?;
         Ok(Snapshot::new(
@@ -229,6 +252,38 @@ impl SnapshotBuilder {
                 }
             }
         }
+
+        // Account secrets — only present in E2E snapshots (the body was an
+        // encrypted blob, so reaching here means it decrypted). Defense in
+        // depth: only write them when THIS device's E2E is on too. A
+        // credential-bearing body must never be applied on a plaintext-mode
+        // device — the downgrade strip already keeps that from happening,
+        // this guards against the strip ever regressing. Each slot is also
+        // re-validated against the syncable allowlist so a tampered snapshot
+        // can't write an access token or the E2E key. Best-effort per row.
+        if crate::credential_sync::e2e_enabled(&self.db) {
+            for cred in &body.credentials {
+                if cred.account_id == "local" {
+                    continue;
+                }
+                let Some(slot) = SecretSlot::syncable_from_wire(&cred.slot) else {
+                    warn!(slot = %cred.slot, "snapshot credential: non-syncable slot dropped");
+                    continue;
+                };
+                if let Err(err) = crate::secrets::store(&cred.account_id, slot, &cred.secret) {
+                    warn!(
+                        account_id = %cred.account_id,
+                        ?err,
+                        "failed to apply snapshot credential",
+                    );
+                }
+            }
+        } else if !body.credentials.is_empty() {
+            warn!(
+                count = body.credentials.len(),
+                "snapshot carried credentials but E2E is off locally; ignoring them",
+            );
+        }
         Ok(outcome)
     }
 
@@ -268,6 +323,37 @@ impl SnapshotBuilder {
         let mut out = Vec::new();
         for r in rows {
             out.push(r.map_err(|err| SyncError::internal(format!("dump accounts row: {err}")))?);
+        }
+        Ok(out)
+    }
+
+    /// Account secrets for the snapshot — but ONLY when E2E is enabled,
+    /// so they're written exclusively into an encrypted blob. Mirrors the
+    /// live-event gate: the E2E check plus the syncable-slot allowlist
+    /// (via [`SecretSlot`] choice). When E2E is off this returns an empty
+    /// vec and the snapshot carries no secrets at all. Reuses
+    /// [`Self::dump_accounts`] for the id list, so the `local` account
+    /// (which has no secrets anyway) is already excluded.
+    fn dump_credentials(&self) -> SyncResult<Vec<SnapshotCredential>> {
+        if !crate::credential_sync::e2e_enabled(&self.db) {
+            return Ok(Vec::new());
+        }
+        let accounts = self.dump_accounts()?;
+        let mut out = Vec::new();
+        for acc in &accounts {
+            for slot in [
+                SecretSlot::Password,
+                SecretSlot::RefreshToken,
+                SecretSlot::ApiToken,
+            ] {
+                if let Ok(secret) = crate::secrets::retrieve(&acc.id, slot) {
+                    out.push(SnapshotCredential {
+                        account_id: acc.id.clone(),
+                        slot: slot.wire_name().to_string(),
+                        secret,
+                    });
+                }
+            }
         }
         Ok(out)
     }

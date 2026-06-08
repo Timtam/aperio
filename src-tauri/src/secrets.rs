@@ -60,6 +60,31 @@ impl SecretSlot {
             SecretSlot::SyncEncryptionKey => "sync_encryption_key",
         }
     }
+
+    /// Public wire name for the slot — the same string used as the
+    /// keychain service suffix. The credential-sync emit path names the
+    /// slot with this when building a `credential.set` event.
+    pub fn wire_name(self) -> &'static str {
+        self.as_str()
+    }
+
+    /// Map a wire slot name back to a slot, but ONLY for the slots that
+    /// may travel through cross-device credential sync. The short-lived
+    /// [`SecretSlot::AccessToken`] (each device re-derives its own from
+    /// the refresh token) and the E2E key itself
+    /// ([`SecretSlot::SyncEncryptionKey`] — syncing it would defeat
+    /// end-to-end encryption) are deliberately rejected here, so a
+    /// malformed or hostile event can never smuggle them into the
+    /// keychain. This allowlist is the single place that decides what a
+    /// received credential event is allowed to write.
+    pub fn syncable_from_wire(name: &str) -> Option<SecretSlot> {
+        match name {
+            "password" => Some(SecretSlot::Password),
+            "refresh_token" => Some(SecretSlot::RefreshToken),
+            "api_token" => Some(SecretSlot::ApiToken),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Error)]
@@ -180,6 +205,38 @@ mod tests {
             retrieve(&account, SecretSlot::AccessToken),
             Err(SecretError::NotFound)
         ));
+    }
+
+    #[test]
+    fn syncable_allowlist_admits_only_durable_slots() {
+        // The slots that may travel through cross-device credential sync.
+        assert_eq!(
+            SecretSlot::syncable_from_wire("password"),
+            Some(SecretSlot::Password)
+        );
+        assert_eq!(
+            SecretSlot::syncable_from_wire("refresh_token"),
+            Some(SecretSlot::RefreshToken)
+        );
+        assert_eq!(
+            SecretSlot::syncable_from_wire("api_token"),
+            Some(SecretSlot::ApiToken)
+        );
+    }
+
+    #[test]
+    fn syncable_allowlist_rejects_access_token_and_e2e_key() {
+        // The short-lived access token is re-derived per device, and the
+        // E2E key itself must NEVER ride the sync (it would defeat E2E).
+        // Both — and any unknown name — are refused so a received
+        // credential event can't smuggle them into the keychain.
+        assert_eq!(SecretSlot::syncable_from_wire("access_token"), None);
+        assert_eq!(SecretSlot::syncable_from_wire("sync_encryption_key"), None);
+        assert_eq!(SecretSlot::syncable_from_wire(""), None);
+        assert_eq!(SecretSlot::syncable_from_wire("password "), None);
+        // The round-trip names line up with `wire_name`.
+        assert_eq!(SecretSlot::Password.wire_name(), "password");
+        assert_eq!(SecretSlot::RefreshToken.wire_name(), "refresh_token");
     }
 
     #[test]

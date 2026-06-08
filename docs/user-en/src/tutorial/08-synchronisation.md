@@ -28,6 +28,19 @@ data stays with you.
 - If two devices edit the same entry, Aperio detects the **conflict** and
   resolves it in a comprehensible way, or asks which version should win.
 
+## End-to-end encryption & credentials
+
+In the synchronization settings you can turn on **end-to-end encryption** with a
+password. The storage then only ever sees encrypted data – the password never
+leaves your device, and without it the data cannot be recovered (so keep it
+somewhere safe).
+
+When encryption is on, your **account credentials** (passwords, tokens) are
+synced encrypted as well, so your accounts work on every device **without**
+re-entering them. **Without** encryption, credentials stay on each device only.
+If you turn encryption back off, they are removed from the sync store and kept
+locally only.
+
 > **Note:** External accounts (Google, iCloud, Outlook, Vikunja, Todoist) do
 > **not** need this setup – they synchronize through their own service. The
 > synchronization described here only concerns your **local** calendars and

@@ -29,6 +29,20 @@ wird. Es gibt keinen Aperio-Server; deine Daten bleiben bei dir.
   und löst ihn nachvollziehbar auf bzw. fragt nach, welche Fassung gelten
   soll.
 
+## Ende-zu-Ende-Verschlüsselung & Zugangsdaten
+
+In den Synchronisations-Einstellungen kannst du **Ende-zu-Ende-Verschlüsselung**
+mit einem Passwort aktivieren. Der Speicher sieht dann nur noch verschlüsselte
+Daten – das Passwort verlässt nie dein Gerät, und ohne es lassen sich die Daten
+nicht wiederherstellen (bewahre es also sicher auf).
+
+Ist die Verschlüsselung aktiv, werden zusätzlich die **Zugangsdaten deiner
+Konten** (Passwörter, Tokens) verschlüsselt mitsynchronisiert. So funktionieren
+deine Konten auf jedem Gerät, **ohne** dass du die Zugangsdaten erneut eingeben
+musst. **Ohne** Verschlüsselung bleiben Zugangsdaten ausschließlich lokal auf
+dem jeweiligen Gerät. Schaltest du die Verschlüsselung wieder ab, werden sie aus
+dem Sync-Speicher entfernt und nur noch lokal aufbewahrt.
+
 > **Hinweis:** Externe Konten (Google, iCloud, Outlook, Vikunja, Todoist)
 > brauchen diese Einrichtung **nicht** – sie synchronisieren über ihren
 > eigenen Dienst. Die Synchronisation hier betrifft nur deine **lokalen**

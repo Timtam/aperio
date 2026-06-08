@@ -255,6 +255,25 @@ pub enum SyncEvent {
     #[serde(rename = "account.deleted")]
     AccountDeleted(IdPayload),
 
+    /// A secret for an external account (CalDAV/WebDAV password, OAuth
+    /// refresh token, API token) was set or changed.
+    ///
+    /// **Only ever emitted while end-to-end encryption is enabled.** The
+    /// payload carries the plaintext secret, so this variant must only
+    /// exist inside an encrypted log blob — the emit site asserts E2E is
+    /// on before appending, and the E2E-disable downgrade strips these
+    /// events so they never reach a plaintext log/snapshot. The applier
+    /// writes the secret into the receiving device's keychain so the
+    /// account works without re-entering credentials (§19.2.3).
+    #[serde(rename = "credential.set")]
+    CredentialSet(CredentialPayload),
+
+    /// A secret slot for an external account was cleared (E2E only —
+    /// same gating as `credential.set`). The applier removes that slot
+    /// from the receiving device's keychain.
+    #[serde(rename = "credential.cleared")]
+    CredentialCleared(CredentialSlotPayload),
+
     /// Keyboard shortcut for an action was set or rebound
     /// (§15.10 + §19.2.1).
     #[serde(rename = "shortcut.set")]
@@ -369,6 +388,27 @@ pub struct AccountPayload {
     /// snapshot apply would produce.
     pub created_at: String,
     pub updated_at: String,
+}
+
+/// Payload for `credential.set`. Carries the **plaintext secret** for one
+/// `(account_id, slot)` pair — which is why this payload is only ever
+/// produced while E2E is on, so it lives exclusively inside an encrypted
+/// log blob. `slot` is the secret-slot wire name (`password`,
+/// `refresh_token`, `api_token`); the applier maps it back to a keychain
+/// slot. Short-lived `access_token`s are deliberately NOT synced — each
+/// device re-derives its own from the refresh token.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CredentialPayload {
+    pub account_id: String,
+    pub slot: String,
+    pub secret: String,
+}
+
+/// Payload for `credential.cleared` — the account + slot, no secret.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CredentialSlotPayload {
+    pub account_id: String,
+    pub slot: String,
 }
 
 /// Payload for `shortcut.set` — the action key plus the new
@@ -604,6 +644,15 @@ mod tests {
                 updated_at: "2025-05-12T09:20:00.000Z".into(),
             }),
             SyncEvent::AccountDeleted(IdPayload { id: "acc-1".into() }),
+            SyncEvent::CredentialSet(CredentialPayload {
+                account_id: "acc-1".into(),
+                slot: "password".into(),
+                secret: "hunter2".into(),
+            }),
+            SyncEvent::CredentialCleared(CredentialSlotPayload {
+                account_id: "acc-1".into(),
+                slot: "password".into(),
+            }),
             SyncEvent::ShortcutSet(ShortcutPayload {
                 action: "x".into(),
                 binding: "Mod+X".into(),

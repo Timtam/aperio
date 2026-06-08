@@ -200,7 +200,7 @@ const GOOGLEDRIVE_SECRET_ACCOUNT: &str = "sync.adapter.googledrive";
 /// `build_adapter_from_prefs` decide synchronously whether to wrap
 /// the adapter in `EncryptingAdapter` without needing an async
 /// `fetch_meta` round-trip.
-const PREF_E2E_ENABLED: &str = "sync.adapter.e2eEnabled";
+pub const PREF_E2E_ENABLED: &str = "sync.adapter.e2eEnabled";
 
 /// Pseudo-account id for the cross-device sync encryption key.
 /// Different from the WebDAV password slot so disabling sync
@@ -1615,12 +1615,29 @@ pub async fn disable_sync_encryption(
     })?;
     let _verified_dek = resolve_data_key(pp, &current_params).map_err(sync_err)?;
 
-    // 3. Build a fresh PLAIN adapter from the persisted config.
-    //    The encrypting wrapper is what the orchestrator holds —
-    //    we need an unwrapped handle to push plaintext bytes. The
-    //    same builder lib.rs's app-start path uses, so the auth +
-    //    config bits are guaranteed to match.
+    // 2b. Stop credential sync immediately by clearing the local E2E pref.
+    //     This does three things at once: (1) no new `credential.*` event can
+    //     be emitted for the rest of the downgrade — the emit gate reads this
+    //     pref, so a concurrent account action no-ops instead of leaking;
+    //     (2) a concurrent compaction dumps no credentials (same gate); and
+    //     (3) the adapter we build in step 3 is genuinely unwrapped, because
+    //     `build_adapter_from_prefs` wraps in `EncryptingAdapter` only while
+    //     this pref says E2E is on. The orchestrator still holds the
+    //     encrypting adapter until step 7, so the flush below stays encrypted.
     let shared = db.shared();
+    let prefs = UserPrefsRepo::new(&shared);
+    let _ = prefs.delete(PREF_E2E_ENABLED);
+
+    // 2c. Flush the pending local log via the orchestrator's still-encrypting
+    //     adapter, so any credential event emitted just before 2b goes up
+    //     ENCRYPTED and is then caught by the log strip below — rather than
+    //     being pushed plaintext after the step-7 swap.
+    orchestrator.push_now().await.map_err(sync_err)?;
+
+    // 3. Build the now-genuinely-PLAIN adapter from the persisted config —
+    //    an unwrapped handle to push plaintext bytes (the pref was cleared in
+    //    2b, so the builder doesn't wrap it). Same builder the app-start path
+    //    uses, so the auth + config bits are guaranteed to match.
     let plain = build_adapter_from_prefs(&shared, plugin_manager.inner()).ok_or(CommandError {
         code: "not_configured",
         message: "couldn't rebuild the underlying plain adapter".into(),
@@ -1636,13 +1653,24 @@ pub async fn disable_sync_encryption(
         .await
         .map_err(sync_err)?;
     for log in logs {
-        plain.push_log(&log).await.map_err(sync_err)?;
+        // SECURITY: strip any `credential.*` events before writing the
+        // plaintext log. Those events only ever existed because E2E was
+        // on; on the way down to plaintext their secrets must NOT reach
+        // the remote. The secrets stay in this device's keychain — they
+        // are simply purged from the (now plaintext) sync storage, which
+        // is the "remove from remote on E2E off" behaviour by design.
+        let stripped =
+            crate::credential_sync::strip_credential_events(&log).map_err(sync_err)?;
+        plain.push_log(&stripped).await.map_err(sync_err)?;
         report.logs_rewritten += 1;
     }
 
-    // 5. Same for the snapshot, if one exists. Brand-new
-    //    datasets that never compacted skip this branch.
-    if let Some(snapshot) = encrypting.fetch_snapshot().await.map_err(sync_err)? {
+    // 5. Same for the snapshot, if one exists. Brand-new datasets that
+    //    never compacted skip this branch. SECURITY: an E2E snapshot can
+    //    carry account secrets in its `credentials` block — strip them
+    //    before the plaintext re-upload, exactly like the log strip above.
+    if let Some(mut snapshot) = encrypting.fetch_snapshot().await.map_err(sync_err)? {
+        crate::credential_sync::strip_credentials_from_snapshot(&mut snapshot);
         plain.push_snapshot(&snapshot).await.map_err(sync_err)?;
         report.snapshot_rewritten = true;
     }
@@ -1655,18 +1683,12 @@ pub async fn disable_sync_encryption(
     updated.e2e_params = None;
     plain.push_meta(&updated).await.map_err(sync_err)?;
 
-    // 7. Swap the orchestrator over to the plain adapter so
-    //    subsequent rounds in this process don't try to wrap
-    //    pushes with the (now-defunct) key.
+    // 7. Swap the orchestrator to the plain adapter and drop the keychain
+    //    key. The E2E pref was already cleared back in step 2b, so for the
+    //    whole body of this command "the orchestrator is plain" has implied
+    //    "no credential was emitted or dumped" — closing the windows the
+    //    security review flagged (concurrent compaction, in-flight emits).
     orchestrator.configure(Arc::clone(&plain));
-
-    // 8. Clean up local state: drop the keychain entry and
-    //    flip the pref. Failures here are logged but don't
-    //    fail the command — the on-the-wire state is what
-    //    matters, and the local prefs catch up on the next
-    //    boot via build_adapter_from_prefs.
-    let prefs = UserPrefsRepo::new(&shared);
-    let _ = prefs.delete(PREF_E2E_ENABLED);
     delete_e2e_key();
 
     Ok(report)
@@ -1717,6 +1739,7 @@ pub struct EnableE2eReport {
 pub async fn enable_sync_encryption(
     orchestrator: State<'_, Arc<SyncOrchestrator>>,
     db: State<'_, DbHandle>,
+    event_log: State<'_, Arc<crate::event_log::EventLogWriter>>,
     new_passphrase: String,
 ) -> CommandResult<EnableE2eReport> {
     let pp = new_passphrase.trim();
@@ -1817,6 +1840,13 @@ pub async fn enable_sync_encryption(
     let prefs = UserPrefsRepo::new(&shared);
     store_e2e_key(&dek)?;
     prefs.set(PREF_E2E_ENABLED, "true").map_err(internal)?;
+
+    // 10. E2E is now on. Push every existing local account secret into the
+    //     (now-encrypted) log so the user's OTHER devices pick them up
+    //     without re-entry — the late-enable counterpart to the disable
+    //     strip. Routes through the same E2E + slot gate as live emits, so
+    //     it's safe even if state shifted underneath us.
+    crate::credential_sync::emit_all_local_credentials(&event_log, &shared);
 
     Ok(report)
 }

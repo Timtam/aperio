@@ -406,6 +406,12 @@ pub async fn create_account(
                 message: format!("failed to store credential: {err}"),
             });
         }
+        // E2E only: also push the secret to the user's other devices via
+        // the encrypted log so the account works there without re-entry.
+        // A no-op when E2E is off (credentials then stay device-local).
+        crate::credential_sync::emit_credential_set(
+            &event_log, &shared, &created.id, slot, &secret,
+        );
     }
 
     // Register the freshly created external adapter so subsequent
@@ -942,6 +948,15 @@ pub async fn connect_google_account(
                 message: format!("failed to store refresh token: {err}"),
             });
         }
+        // E2E only: sync the durable refresh token to the user's other
+        // devices (the short-lived access token is re-derived per device).
+        crate::credential_sync::emit_credential_set(
+            &event_log,
+            &shared,
+            &created.id,
+            SecretSlot::RefreshToken,
+            refresh,
+        );
     }
 
     // 4) Register the adapter so subsequent reads/writes route
@@ -1042,6 +1057,15 @@ pub async fn connect_microsoft_account(
                 message: format!("failed to store refresh token: {err}"),
             });
         }
+        // E2E only: sync the durable refresh token to the user's other
+        // devices (the short-lived access token is re-derived per device).
+        crate::credential_sync::emit_credential_set(
+            &event_log,
+            &shared,
+            &created.id,
+            SecretSlot::RefreshToken,
+            refresh,
+        );
     }
 
     if let Err(err) = registry.register(&created) {
@@ -1098,6 +1122,7 @@ pub struct ConnectMicrosoftRequest {
 pub async fn set_account_secret(
     db: State<'_, DbHandle>,
     registry: State<'_, Arc<AdapterRegistry>>,
+    event_log: State<'_, Arc<EventLogWriter>>,
     account_id: String,
     secret: String,
 ) -> CommandResult<()> {
@@ -1133,6 +1158,10 @@ pub async fn set_account_secret(
         code: "internal",
         message: format!("failed to store credential: {err}"),
     })?;
+    // E2E only: propagate the (re-)entered secret to other devices.
+    crate::credential_sync::emit_credential_set(
+        &event_log, &shared, &account_id, slot, &secret,
+    );
     // Register so the adapter is live for the rest of this
     // session. A registration failure leaves the secret in place
     // — the user can retry without re-typing the password.
@@ -1156,12 +1185,14 @@ pub async fn set_account_secret(
 pub async fn reconnect_google_account(
     db: State<'_, DbHandle>,
     registry: State<'_, Arc<AdapterRegistry>>,
+    event_log: State<'_, Arc<EventLogWriter>>,
     plugin_manager: State<'_, Arc<PluginManager>>,
     account_id: String,
 ) -> CommandResult<()> {
     reconnect_oauth_account(
         db.inner(),
         registry.inner(),
+        event_log.inner(),
         plugin_manager.inner(),
         &account_id,
         AdapterKind::Google,
@@ -1188,12 +1219,14 @@ pub async fn reconnect_google_account(
 pub async fn reconnect_microsoft_account(
     db: State<'_, DbHandle>,
     registry: State<'_, Arc<AdapterRegistry>>,
+    event_log: State<'_, Arc<EventLogWriter>>,
     plugin_manager: State<'_, Arc<PluginManager>>,
     account_id: String,
 ) -> CommandResult<()> {
     reconnect_oauth_account(
         db.inner(),
         registry.inner(),
+        event_log.inner(),
         plugin_manager.inner(),
         &account_id,
         AdapterKind::MicrosoftGraph,
@@ -1221,6 +1254,7 @@ pub async fn reconnect_microsoft_account(
 async fn reconnect_oauth_account<F>(
     db: &DbHandle,
     registry: &AdapterRegistry,
+    event_log: &EventLogWriter,
     plugin_manager: &PluginManager,
     account_id: &str,
     expected_kind: AdapterKind,
@@ -1268,6 +1302,14 @@ where
                 message: format!("failed to store refresh token: {err}"),
             }
         })?;
+        // E2E only: propagate the refreshed durable token to other devices.
+        crate::credential_sync::emit_credential_set(
+            event_log,
+            &shared,
+            &account.id,
+            SecretSlot::RefreshToken,
+            refresh,
+        );
     }
     if let Err(err) = registry.register(&account) {
         return Err(CommandError {

@@ -54,8 +54,8 @@ use rusqlite::params;
 use serde::Serialize;
 use serde_json::Value;
 use sync_core::{
-    AccountPayload, DeviceId, EventEnvelope, EventPayload, IdPayload, LogFile, PluginPayload,
-    SettingsPayload, SyncError, SyncEvent, SyncResult,
+    AccountPayload, CredentialPayload, CredentialSlotPayload, DeviceId, EventEnvelope, EventPayload,
+    IdPayload, LogFile, PluginPayload, SettingsPayload, SyncError, SyncEvent, SyncResult,
 };
 use tracing::{debug, warn};
 
@@ -363,6 +363,14 @@ impl EventLogApplier {
             }
             SyncEvent::AccountDeleted(payload) => {
                 self.apply_account_delete(payload)?;
+                Ok(true)
+            }
+            SyncEvent::CredentialSet(payload) => {
+                self.apply_credential_set(payload)?;
+                Ok(true)
+            }
+            SyncEvent::CredentialCleared(payload) => {
+                self.apply_credential_clear(payload)?;
                 Ok(true)
             }
             SyncEvent::ShortcutSet(_)
@@ -871,6 +879,59 @@ impl EventLogApplier {
             .map_err(|err| {
                 SyncError::internal(format!("accounts delete for {}: {err}", payload.id,))
             })?;
+        Ok(())
+    }
+
+    /// Apply a `credential.set` event by writing the synced secret into
+    /// the local keychain. Only reached for events that arrived inside an
+    /// E2E-encrypted log — a plaintext log can't legitimately carry these
+    /// (the emit gate refuses to append them when E2E is off, and the
+    /// E2E-disable downgrade strips them). The slot is validated against
+    /// the syncable allowlist ([`crate::secrets::SecretSlot::syncable_from_wire`])
+    /// so a stray `access_token` or the E2E key itself can never be
+    /// written here. Best-effort: a keychain failure (locked /
+    /// unavailable) is logged and skipped so the rest of the batch still
+    /// integrates; the account just stays "credentials missing" until a
+    /// later sync retries.
+    fn apply_credential_set(&self, payload: &CredentialPayload) -> SyncResult<()> {
+        if payload.account_id == "local" {
+            return Ok(());
+        }
+        let Some(slot) = crate::secrets::SecretSlot::syncable_from_wire(&payload.slot) else {
+            warn!(
+                slot = %payload.slot,
+                account_id = %payload.account_id,
+                "credential.set: non-syncable slot rejected",
+            );
+            return Ok(());
+        };
+        if let Err(err) = crate::secrets::store(&payload.account_id, slot, &payload.secret) {
+            warn!(
+                ?err,
+                account_id = %payload.account_id,
+                "credential.set: keychain write failed (account stays credentials-missing)",
+            );
+        }
+        Ok(())
+    }
+
+    /// Apply a `credential.cleared` event by removing that slot from the
+    /// local keychain. Same allowlist + best-effort semantics as
+    /// [`Self::apply_credential_set`].
+    fn apply_credential_clear(&self, payload: &CredentialSlotPayload) -> SyncResult<()> {
+        if payload.account_id == "local" {
+            return Ok(());
+        }
+        let Some(slot) = crate::secrets::SecretSlot::syncable_from_wire(&payload.slot) else {
+            return Ok(());
+        };
+        if let Err(err) = crate::secrets::delete(&payload.account_id, slot) {
+            warn!(
+                ?err,
+                account_id = %payload.account_id,
+                "credential.cleared: keychain delete failed",
+            );
+        }
         Ok(())
     }
 

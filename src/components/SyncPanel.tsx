@@ -1257,6 +1257,13 @@ export function SyncPanel() {
               : t('dialogs.settings.sync.e2eInactive')}
           </FocusableNote>
         )}
+        {status?.configured && (
+          <FocusableNote className="sync-panel__hint">
+            {status.e2e_enabled
+              ? t('dialogs.settings.sync.credentialsSyncedNote')
+              : t('dialogs.settings.sync.credentialsLocalNote')}
+          </FocusableNote>
+        )}
         <FocusableNote className="sync-panel__hint">{lastSyncedLabel}</FocusableNote>
         {lastReport && (
           <FocusableNote className="sync-panel__hint">

@@ -2317,6 +2317,8 @@ Jedes Gerät hat eine eindeutige `device_id` (UUID, beim ersten Start generiert)
 | `shortcut.reset` | Tastaturkürzel auf Standardbelegung zurückgesetzt |
 | `shortcut.cleared` | Tastaturkürzel bewusst ohne Ersatz entfernt |
 | `settings.updated` | App-Einstellungen geändert (nur synchronisierbare Einstellungen, siehe 19.2.1) |
+| `credential.set` | Account-Zugangsdaten gesetzt/geändert — **nur bei aktivem E2E** (§19.7); trägt das Secret und existiert daher ausschließlich im verschlüsselten Log |
+| `credential.cleared` | Ein Zugangsdaten-Slot eines Accounts entfernt (gleiche E2E-Kopplung wie `credential.set`) |
 
 #### 19.2.1 Einstellungs-Synchronisation: Granularität
 
@@ -2338,7 +2340,7 @@ Nicht alle Einstellungen sind geräteübergreifend sinnvoll. Sie werden in drei 
 | Fenstergröße & -position | ❌ Lokal | ❌ Nein |
 | Systemintegration (.ics, webcal://) | ❌ Lokal | ❌ Nein |
 | Geräte-ID | ❌ Lokal | ❌ Nein |
-| Adapter-Zugangsdaten (Sync-, Daten-, Videokonferenz-Adapter) | ❌ Lokal (Keychain) | ❌ Nein |
+| Adapter-Zugangsdaten (Sync-, Daten-, Videokonferenz-Adapter) | Lokal (Keychain); **bei aktivem E2E** zusätzlich Ende-zu-Ende-verschlüsselt synchronisiert (§19.7) | ❌ Fest an E2E gekoppelt |
 | **Konfigurierbar durch Nutzer** | | |
 | Sync-Adapter-Auswahl (welcher Adapter aktiv) | Standard: ✅ Sync | ✅ Ja |
 | Tastaturkürzel-Belegung | Standard: ✅ Sync (via `shortcut.*`-Ereignisse) | ✅ Ja |
@@ -2479,6 +2481,12 @@ Konfigurierbar pro Sync-Adapter: Der Nutzer kann ein Passwort (oder einen Schlü
 - Der Schlüssel wird **niemals** auf dem Sync-Speicher abgelegt; er muss auf jedem Gerät separat eingegeben werden
 
 > **Hinweis:** Bei aktivierter E2E-Verschlüsselung ist eine Schlüsselwiederherstellung ohne das Passwort nicht möglich. Ein Hinweis darauf wird bei der Einrichtung prominent angezeigt.
+
+**Account-Zugangsdaten (nur bei E2E).** Adapter-Zugangsdaten (CalDAV-/WebDAV-Passwörter, OAuth-Refresh-Tokens, API-Tokens) liegen normalerweise ausschließlich lokal im OS-Keyring (§6.6). **Ist E2E aktiv, werden sie zusätzlich Ende-zu-Ende-verschlüsselt synchronisiert** — als `credential.set` / `credential.cleared`-Ereignisse im (dann verschlüsselten) Event-Log und im `credentials`-Block des (verschlüsselten) Snapshots —, damit Accounts auf allen Geräten ohne erneute Eingabe funktionieren. Die Kopplung ist **fest**: kein E2E → kein Credential-Sync; bei E2E-aus bleiben Zugangsdaten strikt lokal.
+
+- **Single Chokepoint:** Genau eine Stelle (`credential_sync.rs`) verwandelt ein Secret in ein Ereignis, doppelt gegated (E2E muss an sein **und** der Slot muss syncbar sein).
+- **Syncbare Slots:** nur `password`, `refresh_token`, `api_token`. Kurzlebige Access-Tokens (pro Gerät aus dem Refresh-Token neu ableitbar) und der E2E-Schlüssel selbst werden **nie** synchronisiert — sowohl beim Senden als auch beim Anwenden per Allowlist erzwungen.
+- **Übergänge:** E2E nachträglich aktivieren → alle bestehenden lokalen Zugangsdaten werden in den jetzt verschlüsselten Log gepusht. E2E deaktivieren → beim Klartext-Downgrade werden die Credential-Ereignisse aus den Logs **und** der `credentials`-Block aus dem Snapshot entfernt (Strip/Purge); lokal bleiben die Zugangsdaten im Keyring erhalten.
 
 ### 19.8 Sync-Auslöser
 
