@@ -54,8 +54,9 @@ use rusqlite::params;
 use serde::Serialize;
 use serde_json::Value;
 use sync_core::{
-    AccountPayload, CredentialPayload, CredentialSlotPayload, DeviceId, EventEnvelope, EventPayload,
-    IdPayload, LogFile, PluginPayload, SettingsPayload, SyncError, SyncEvent, SyncResult,
+    AccountPayload, CredentialPayload, CredentialSlotPayload, DeviceId, EventEnvelope,
+    EventPayload, IdPayload, LogFile, PluginPayload, SettingsPayload, SyncError, SyncEvent,
+    SyncResult,
 };
 use tracing::{debug, warn};
 

@@ -1672,8 +1672,7 @@ pub async fn disable_sync_encryption(
         // remote. The secrets stay in this device's keychain — they are
         // simply purged from the (now plaintext) sync storage, which is the
         // "remove from remote on E2E off" behaviour by design.
-        let stripped =
-            crate::credential_sync::strip_credential_events(&log).map_err(sync_err)?;
+        let stripped = crate::credential_sync::strip_credential_events(&log).map_err(sync_err)?;
         plain.push_log(&stripped).await.map_err(sync_err)?;
         report.logs_rewritten += 1;
     }

@@ -246,7 +246,10 @@ mod tests {
         // CRITICAL: no secret and no credential event type may remain in
         // the bytes that the downgrade would push as plaintext.
         let text = String::from_utf8(stripped.bytes.clone()).unwrap();
-        assert!(!text.contains("s3cr3t-p4ss"), "secret leaked into plaintext log");
+        assert!(
+            !text.contains("s3cr3t-p4ss"),
+            "secret leaked into plaintext log"
+        );
         assert!(!text.contains("credential.set"));
         assert!(!text.contains("credential.cleared"));
     }

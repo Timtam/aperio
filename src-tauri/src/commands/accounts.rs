@@ -410,7 +410,11 @@ pub async fn create_account(
         // the encrypted log so the account works there without re-entry.
         // A no-op when E2E is off (credentials then stay device-local).
         crate::credential_sync::emit_credential_set(
-            &event_log, &shared, &created.id, slot, &secret,
+            &event_log,
+            &shared,
+            &created.id,
+            slot,
+            &secret,
         );
     }
 
@@ -1159,9 +1163,7 @@ pub async fn set_account_secret(
         message: format!("failed to store credential: {err}"),
     })?;
     // E2E only: propagate the (re-)entered secret to other devices.
-    crate::credential_sync::emit_credential_set(
-        &event_log, &shared, &account_id, slot, &secret,
-    );
+    crate::credential_sync::emit_credential_set(&event_log, &shared, &account_id, slot, &secret);
     // Register so the adapter is live for the rest of this
     // session. A registration failure leaves the secret in place
     // — the user can retry without re-typing the password.
