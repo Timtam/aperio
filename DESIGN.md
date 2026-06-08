@@ -3808,6 +3808,11 @@ Eine einfache barrierefreie HTML-Seite, die alle drei Bereiche mit kurzer Beschr
 
 ## 25. Offene Punkte & Ausstehend
 
+> **Hinweis:** Eine laufende, gegen den Code abgeglichene Aufgabenliste der noch
+> offenen *Implementierungs*-Baustellen liegt in [`TODO.md`](TODO.md). Die Tabelle
+> hier verfolgt den **Spezifikations**-Status; `TODO.md` verfolgt, was davon im
+> Code tatsächlich umgesetzt ist.
+
 Die folgenden Punkte sind noch nicht vollständig spezifiziert und werden in zukünftigen Iterationen ergänzt:
 
 | Punkt | Status | Notiz |
