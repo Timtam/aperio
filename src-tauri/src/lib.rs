@@ -29,6 +29,7 @@ pub mod sound_assets;
 pub mod sync_log;
 pub mod tray;
 pub mod user_prefs;
+mod window_state;
 
 pub use db::{DbError, DbHandle, DbResult, SharedConn};
 pub use paths::{resolve_data_dir, DataDirKind, DataDirResolution};
@@ -497,6 +498,10 @@ pub fn run() {
             };
             match event {
                 tauri::WindowEvent::CloseRequested { api, .. } => {
+                    // §15.3: remember the window's size + position before it
+                    // closes (or hides to the tray). Captures the last visible
+                    // geometry either way.
+                    window_state::flush(window);
                     let app = window.app_handle();
                     let tray = app.state::<tray::TrayHandles>();
                     if tray.available && tray::pref_is_true(app, tray::CLOSE_TO_TRAY_PREF) {
@@ -504,7 +509,13 @@ pub fn run() {
                         hide_main();
                     }
                 }
+                tauri::WindowEvent::Moved(_) => {
+                    // §15.3: track position changes into the in-memory store.
+                    window_state::remember(window);
+                }
                 tauri::WindowEvent::Resized(_) => {
+                    // §15.3: track size changes into the in-memory store.
+                    window_state::remember(window);
                     // Cheap state check first; only touch the DB pref when the
                     // window actually became minimized, not every resize frame.
                     if matches!(window.is_minimized(), Ok(true)) {
@@ -809,6 +820,19 @@ pub fn run() {
             // exists.
             let tray_handles = tray::build(app.handle());
             app.manage(tray_handles);
+
+            // §15.3: restore the saved window size + position (device-local,
+            // `app_config.json`). Register the geometry store FIRST so the
+            // resize/move events that `set_size` / `maximize` emit below can
+            // find it.
+            app.manage(window_state::Store::default());
+            if let (Some(geom), Some(win)) = (window_state::load(), app.get_webview_window("main"))
+            {
+                window_state::restore(&win, &geom);
+                if let Some(store) = app.try_state::<window_state::Store>() {
+                    *store.lock().expect("window-state mutex poisoned") = Some(geom);
+                }
+            }
             Ok(())
         })
         .build(tauri::generate_context!())

@@ -84,8 +84,12 @@ Verschieben zusätzlich EXDATE auf die Quell-Serie (Create-then-exclude, kein Da
 ### B4 · Mini-Kalender-Sidebar-Widget (§5.3) `[ ]`
 - [ ] Optionales, ein-/ausblendbares Datums-Widget für schnelle Navigation in der Sidebar.
 
-### B5 · Fenster-Status-Persistenz (§15.3) `[ ]`
-- [ ] Fenstergröße + -position beim Schließen speichern und beim Start wiederherstellen (`app_config.json`).
+### B5 · Fenster-Status-Persistenz (§15.3) ✅ erledigt
+Fenstergröße + -position werden beim Schließen in `app_config.json` (im aufgelösten
+Data-Dir via `resolve_data_dir()`, **gerätlokal — nicht** synchronisiert) gespeichert
+und beim Start wiederhergestellt — inkl. Maximiert-Status und Schutz gegen
+Off-Screen-Positionen (z. B. getrennter Zweitmonitor).
+- [x] `window_state.rs` (Store + load/save/remember/flush/restore, mit Tests) in `lib.rs` verdrahtet: Move/Resize → merken, Close → schreiben, Setup → wiederherstellen.
 
 ### B6 · Anhang-Suche (§13.1) `[ ]` — nur falls Anhänge überhaupt Feature werden
 - [ ] `attachments`-Feld am Event-Model + `attachments`-Spalte in `events_fts` + Trigger.
