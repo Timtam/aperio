@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect } from 'react';
 
-import { VIEWS, type ViewId } from './viewMath';
+import { VIEWS, type ViewId, type WeekStart } from './viewMath';
 
 /**
  * Active-view state context + consumer hooks. Split out of
@@ -24,6 +24,13 @@ export interface ViewStateValue {
   focusedCalendarId: string | null;
   enterFocus: (calendarId: string) => void;
   exitFocus: () => void;
+  /**
+   * Visual first day of the week (0 = Sunday … 6 = Saturday), a synced
+   * user preference (`view.weekStart`, DESIGN.md §5.2). Defaults to Monday.
+   * Only affects column order; KW numbers stay ISO-8601.
+   */
+  weekStartsOn: WeekStart;
+  setWeekStartsOn: (d: WeekStart) => void;
 }
 
 export const ViewStateContext = createContext<ViewStateValue | null>(null);

@@ -6,7 +6,15 @@ import {
   type ReactNode,
 } from 'react';
 
-import { nextPeriod, prevPeriod, today, VIEWS, type ViewId } from './viewMath';
+import { getUserPref, setUserPref } from '../api/client';
+import {
+  nextPeriod,
+  prevPeriod,
+  today,
+  VIEWS,
+  type ViewId,
+  type WeekStart,
+} from './viewMath';
 import { ViewStateContext, type ViewStateValue } from './viewStateContext';
 
 /**
@@ -25,6 +33,13 @@ import { ViewStateContext, type ViewStateValue } from './viewStateContext';
  */
 
 const STORAGE_KEY = 'aperio.view.v1';
+/** Synced (cross-device) pref for the visual first day of the week. Unlike
+ *  `view`/`anchor` (device-local localStorage), this rides the sync log. */
+const WEEK_START_PREF = 'view.weekStart';
+
+function isValidWeekStart(n: number): n is WeekStart {
+  return Number.isInteger(n) && n >= 0 && n <= 6;
+}
 
 interface PersistedView {
   view?: ViewId;
@@ -64,6 +79,24 @@ export function ViewStateProvider({ children }: { children: ReactNode }) {
         ? initial.focusedCalendarId
         : null,
   );
+  // Synced view pref (cross-device), hydrated from user_prefs on mount.
+  // Defaults to Monday (ISO) until the round-trip returns.
+  const [weekStartsOn, setWeekStartsOnState] = useState<WeekStart>(1);
+  useEffect(() => {
+    let cancelled = false;
+    getUserPref(WEEK_START_PREF)
+      .then((raw) => {
+        if (cancelled || raw == null) return;
+        const n = Number(raw);
+        if (isValidWeekStart(n)) setWeekStartsOnState(n);
+      })
+      .catch(() => {
+        // Backend unreachable during init → keep the Monday default.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     try {
@@ -96,6 +129,10 @@ export function ViewStateProvider({ children }: { children: ReactNode }) {
     [],
   );
   const exitFocus = useCallback(() => setFocusedCalendarId(null), []);
+  const setWeekStartsOn = useCallback((d: WeekStart) => {
+    setWeekStartsOnState(d);
+    void setUserPref(WEEK_START_PREF, String(d));
+  }, []);
 
   const value = useMemo<ViewStateValue>(
     () => ({
@@ -109,6 +146,8 @@ export function ViewStateProvider({ children }: { children: ReactNode }) {
       focusedCalendarId,
       enterFocus,
       exitFocus,
+      weekStartsOn,
+      setWeekStartsOn,
     }),
     [
       view,
@@ -121,6 +160,8 @@ export function ViewStateProvider({ children }: { children: ReactNode }) {
       focusedCalendarId,
       enterFocus,
       exitFocus,
+      weekStartsOn,
+      setWeekStartsOn,
     ],
   );
 

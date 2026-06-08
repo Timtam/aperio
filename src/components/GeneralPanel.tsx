@@ -1,13 +1,17 @@
-import { useEffect, useState } from 'react';
+import { addDays, format } from 'date-fns';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { FocusableNote } from '../a11y/FocusableNote';
 import { getUserPref, setUserPref, trayAvailable } from '../api/client';
+import { localeFor } from '../intl/dateFormat';
 import {
   readLanguagePref,
   setLanguagePref,
   type LanguagePref,
 } from '../intl/language';
+import { type WeekStart } from '../state/viewMath';
+import { useViewState } from '../state/viewStateContext';
 
 const CLOSE_TO_TRAY = 'window.closeToTray';
 const MINIMIZE_TO_TRAY = 'window.minimizeToTray';
@@ -23,8 +27,20 @@ const MINIMIZE_TO_TRAY = 'window.minimizeToTray';
  *    gated on `tray_available` so they disable where there's no tray.
  */
 export function GeneralPanel() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const { weekStartsOn, setWeekStartsOn } = useViewState();
   const [language, setLanguage] = useState<LanguagePref>('system');
+
+  // Localized weekday names for the week-start picker. 7 Jan 2024 is a
+  // Sunday (date-fns weekStartsOn 0), so option index d maps to that weekday.
+  const weekdayOptions = useMemo(() => {
+    const locale = localeFor(i18n.language);
+    const sundayRef = new Date(2024, 0, 7);
+    return Array.from({ length: 7 }, (_, d) => ({
+      value: d as WeekStart,
+      label: format(addDays(sundayRef, d), 'EEEE', { locale }),
+    }));
+  }, [i18n.language]);
   // `null` = still probing tray availability.
   const [available, setAvailable] = useState<boolean | null>(null);
   const [closeToTray, setCloseToTray] = useState(false);
@@ -107,6 +123,35 @@ export function GeneralPanel() {
             </option>
           </select>
         </label>
+      </section>
+
+      <section
+        className="general-panel__section"
+        aria-label={t('dialogs.settings.general.viewsHeading')}
+      >
+        <h3 className="calendars-panel__account">
+          {t('dialogs.settings.general.viewsHeading')}
+        </h3>
+        <label className="form__field">
+          <span className="form__label">
+            {t('dialogs.settings.general.weekStartLabel')}
+          </span>
+          <select
+            value={weekStartsOn}
+            onChange={(e) =>
+              setWeekStartsOn(Number(e.target.value) as WeekStart)
+            }
+          >
+            {weekdayOptions.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p className="form__hint">
+          {t('dialogs.settings.general.weekStartHint')}
+        </p>
       </section>
 
       <section

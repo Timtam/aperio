@@ -33,6 +33,14 @@ export type ViewId =
   | 'tasks'
   | 'contacts';
 
+/**
+ * Which weekday a week visually starts on, as `date-fns`' `weekStartsOn`
+ * (0 = Sunday … 6 = Saturday). Configurable per user (DESIGN.md §5.2,
+ * synced pref `view.weekStart`). NOTE: this only affects the visual
+ * column order — KW numbers stay ISO-8601 (Monday-based) regardless.
+ */
+export type WeekStart = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+
 export const VIEWS: ViewId[] = [
   'day',
   'week',
@@ -43,15 +51,20 @@ export const VIEWS: ViewId[] = [
   'contacts',
 ];
 
-/** Range visible in the given view, anchored at `date`. */
-export function visibleRange(view: ViewId, date: Date): { start: Date; end: Date } {
+/** Range visible in the given view, anchored at `date`. The week range
+ *  honours the configurable `weekStartsOn` (defaults to Monday/ISO). */
+export function visibleRange(
+  view: ViewId,
+  date: Date,
+  weekStartsOn: WeekStart = 1,
+): { start: Date; end: Date } {
   switch (view) {
     case 'day':
       return { start: startOfDay(date), end: endOfDay(date) };
     case 'week':
       return {
-        start: startOfWeek(date, { weekStartsOn: 1 }),
-        end: endOfWeek(date, { weekStartsOn: 1 }),
+        start: startOfWeek(date, { weekStartsOn }),
+        end: endOfWeek(date, { weekStartsOn }),
       };
     case 'month':
       return { start: startOfMonth(date), end: endOfMonth(date) };

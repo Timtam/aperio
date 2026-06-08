@@ -4,9 +4,17 @@
 
 import { invoke } from '@tauri-apps/api/core';
 
-import { updateEvent as apiUpdateEvent } from '../api/client';
+import {
+  addEventExdate,
+  createEvent as apiCreateEvent,
+  updateEvent as apiUpdateEvent,
+} from '../api/client';
 import type { CalendarEvent, Task } from '../api/types';
-import { seriesIdOf } from '../intl/recurrence';
+import {
+  isExpandedOccurrence,
+  occurrenceIsoOf,
+  seriesIdOf,
+} from '../intl/recurrence';
 
 // ── Drag-and-drop payloads ──────────────────────────────────────────────
 //
@@ -157,4 +165,62 @@ export async function moveEventToCalendar(
     { ...event, id: seriesId, calendar_id: targetCalendarId },
     event.calendar_id,
   );
+}
+
+export type MoveCopyMode = 'move' | 'copy';
+/** For a recurring event: act on just the focused occurrence, or the whole
+ *  series. Ignored for non-recurring events. */
+export type MoveCopyScope = 'occurrence' | 'series';
+
+/**
+ * Move or copy an event to another calendar, honouring the recurrence scope
+ * (DESIGN.md §7.5 — "Nur diesen Termin" vs. "Gesamte Serie").
+ *
+ *  - **series** → move the master row, or copy it with its recurrence rule.
+ *  - **occurrence** → create a STANDALONE single event (no recurrence) at the
+ *    occurrence's concrete time on the target. For a MOVE we then EXDATE the
+ *    source series so the instance is detached — created first, excluded
+ *    second, so a failed create never silently drops the occurrence.
+ *
+ * `occurrence` scope only takes effect for an actual expanded occurrence; a
+ * plain master row falls back to whole-series behaviour.
+ */
+export async function moveOrCopyEvent(
+  event: CalendarEvent,
+  targetCalendarId: string,
+  mode: MoveCopyMode,
+  scope: MoveCopyScope = 'series',
+): Promise<void> {
+  const asOccurrence = scope === 'occurrence' && isExpandedOccurrence(event);
+
+  // Whole-series move is the only path that updates the existing row in place
+  // (and lets external adapters reroute via the move hint). Everything else
+  // creates a row on the target.
+  if (mode === 'move' && !asOccurrence) {
+    await moveEventToCalendar(event, targetCalendarId);
+    return;
+  }
+
+  await apiCreateEvent({
+    calendar_id: targetCalendarId,
+    title: event.title,
+    description: event.description,
+    location: event.location,
+    start: event.start,
+    end: event.end,
+    all_day: event.all_day,
+    // Occurrence scope detaches into a single event; series keeps the rule.
+    recurrence: asOccurrence ? null : event.recurrence,
+    color_label: event.color_label,
+    reminders: event.reminders,
+    sound: event.sound,
+    attendees: event.attendees,
+  });
+
+  if (mode === 'move' && asOccurrence) {
+    const occIso = occurrenceIsoOf(event);
+    if (occIso) {
+      await addEventExdate(seriesIdOf(event), occIso, event.calendar_id);
+    }
+  }
 }

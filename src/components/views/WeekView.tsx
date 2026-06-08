@@ -90,11 +90,14 @@ export function WeekView() {
   const { t } = useTranslation();
   const fmt = useDateFormat();
   const announce = useAnnouncer();
-  const { anchor, setAnchor, goPrev, goNext } = useViewState();
+  const { anchor, setAnchor, goPrev, goNext, weekStartsOn } = useViewState();
   const { openEventDialog, openTaskDialog, invalidateData } =
     useDialogState();
 
-  const range = useMemo(() => visibleRange('week', anchor), [anchor]);
+  const range = useMemo(
+    () => visibleRange('week', anchor, weekStartsOn),
+    [anchor, weekStartsOn],
+  );
   const { events, calendarById, loading } = useEvents(range);
   const { tasks, taskListById } = useTasks();
   const toggleTaskStatus = useTaskStatusToggle();
@@ -120,8 +123,8 @@ export function WeekView() {
   const labelById = useMemo(() => labelsLookup(colorLabels), [colorLabels]);
 
   const weekStart = useMemo(
-    () => startOfWeek(anchor, { weekStartsOn: 1 }),
-    [anchor],
+    () => startOfWeek(anchor, { weekStartsOn }),
+    [anchor, weekStartsOn],
   );
   const days = useMemo(
     () => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)),
@@ -544,7 +547,10 @@ export function WeekView() {
   );
 
   const today = useMemo(() => new Date(), []);
-  const isoWeek = fmt.isoWeek(weekStart);
+  // KW stays ISO-8601 regardless of the visual week start: derive it from a
+  // stable mid-week day (Thursday for a Monday start — unchanged default) so
+  // a Sunday/Saturday start doesn't slip the number to the adjacent ISO week.
+  const isoWeek = fmt.isoWeek(addDays(weekStart, 3));
   // Wait for the first fetch before focusing so the screen reader
   // announces the real day-event count, not the initial empty one.
   const gridRef = useAutoFocus<HTMLDivElement>(!loading);

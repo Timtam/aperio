@@ -7,6 +7,7 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
 
 import {
   EVENT_DND_TYPE,
+  moveOrCopyEvent,
   moveTaskToBacklog,
   readEventDrag,
   readTaskDrag,
@@ -15,6 +16,27 @@ import {
   setTaskDrag,
   TASK_DND_TYPE,
 } from './moveActions';
+
+/** An expanded recurring occurrence (what the views/dialog hand in). */
+function occurrence(): CalendarEvent {
+  return {
+    id: 'e1@2026-06-15T09:00:00.000Z',
+    series_id: 'e1',
+    occurrence_start: '2026-06-15T09:00:00.000Z',
+    calendar_id: 'c1',
+    title: 'Standup',
+    description: null,
+    location: null,
+    start: '2026-06-15T09:00:00.000Z',
+    end: '2026-06-15T09:30:00.000Z',
+    all_day: false,
+    recurrence: { rrule: 'FREQ=DAILY', exceptions: [] },
+    color_label: null,
+    reminders: [],
+    sound: null,
+    attendees: [],
+  } as unknown as CalendarEvent;
+}
 
 /** Minimal DataTransfer stand-in (jsdom doesn't supply one). */
 function fakeDataTransfer(): DataTransfer {
@@ -110,5 +132,70 @@ describe('moveActions time-axis moves', () => {
       scheduled_date: '2026-06-15',
     } as Task);
     expect(invokeMock.mock.calls[0][1].task.status).toBe('in_progress');
+  });
+});
+
+describe('moveOrCopyEvent recurrence scope (§7.5)', () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue({});
+  });
+
+  it('copy + occurrence → one standalone create, recurrence stripped, no EXDATE', async () => {
+    await moveOrCopyEvent(occurrence(), 'c2', 'copy', 'occurrence');
+    expect(invokeMock.mock.calls).toHaveLength(1);
+    const [cmd, args] = invokeMock.mock.calls[0];
+    expect(cmd).toBe('create_event');
+    expect(args.request.calendar_id).toBe('c2');
+    expect(args.request.recurrence).toBeNull();
+    // The occurrence's concrete time, not the master's stored start.
+    expect(args.request.start).toBe('2026-06-15T09:00:00.000Z');
+  });
+
+  it('move + occurrence → create standalone, THEN EXDATE the source series', async () => {
+    await moveOrCopyEvent(occurrence(), 'c2', 'move', 'occurrence');
+    const calls = invokeMock.mock.calls;
+    expect(calls).toHaveLength(2);
+    expect(calls[0][0]).toBe('create_event');
+    expect(calls[0][1].request.recurrence).toBeNull();
+    // EXDATE targets the MASTER series id + the occurrence date on the source.
+    expect(calls[1][0]).toBe('add_event_exdate');
+    expect(calls[1][1]).toMatchObject({
+      id: 'e1',
+      occurrence: '2026-06-15T09:00:00.000Z',
+      calendarId: 'c1',
+    });
+  });
+
+  it('copy + series → keeps the recurrence rule, no EXDATE', async () => {
+    await moveOrCopyEvent(occurrence(), 'c2', 'copy', 'series');
+    expect(invokeMock.mock.calls).toHaveLength(1);
+    const [cmd, args] = invokeMock.mock.calls[0];
+    expect(cmd).toBe('create_event');
+    expect(args.request.recurrence).toMatchObject({ rrule: 'FREQ=DAILY' });
+  });
+
+  it('move + series → moves the master via update_event, no create/EXDATE', async () => {
+    await moveOrCopyEvent(occurrence(), 'c2', 'move', 'series');
+    expect(invokeMock.mock.calls).toHaveLength(1);
+    const [cmd, args] = invokeMock.mock.calls[0];
+    expect(cmd).toBe('update_event');
+    expect(args.event.id).toBe('e1'); // master series id, not the occurrence id
+    expect(args.event.calendar_id).toBe('c2');
+  });
+
+  it('a non-recurring event ignores occurrence scope (whole-row move)', async () => {
+    const plain = {
+      id: 'p1',
+      calendar_id: 'c1',
+      title: 'One-off',
+      start: '2026-06-15T09:00:00.000Z',
+      end: '2026-06-15T10:00:00.000Z',
+      recurrence: null,
+    } as unknown as CalendarEvent;
+    await moveOrCopyEvent(plain, 'c2', 'move', 'occurrence');
+    // Not an expanded occurrence → falls back to whole-series move (update).
+    expect(invokeMock.mock.calls).toHaveLength(1);
+    expect(invokeMock.mock.calls[0][0]).toBe('update_event');
   });
 });

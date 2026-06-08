@@ -25,10 +25,17 @@ describe('viewMath', () => {
     expect(end.getTime() - start.getTime()).toBeGreaterThan(23 * 60 * 60 * 1000);
   });
 
-  it('week view starts on Monday (ISO 8601)', () => {
+  it('week view starts on Monday (ISO 8601) by default', () => {
     // 2026-05-19 is a Tuesday → range starts Monday 2026-05-18.
     const { start } = visibleRange('week', REF);
     expect(start.getDay()).toBe(1);
+  });
+
+  it('week view honours a configurable week start', () => {
+    // getDay(): 0 = Sunday … 6 = Saturday — matches the weekStartsOn arg.
+    expect(visibleRange('week', REF, 0).start.getDay()).toBe(0); // Sunday
+    expect(visibleRange('week', REF, 1).start.getDay()).toBe(1); // Monday
+    expect(visibleRange('week', REF, 6).start.getDay()).toBe(6); // Saturday
   });
 
   it('month view range covers the calendar month', () => {

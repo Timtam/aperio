@@ -54,7 +54,7 @@ import { useTasks } from '../../state/useTasks';
 import { useTaskListShowCompleted } from '../../state/useTaskListShowCompleted';
 import { useTaskStatusToggle } from '../../state/useTaskStatusToggle';
 import { useViewState } from '../../state/viewStateContext';
-import { visibleRange } from '../../state/viewMath';
+import { visibleRange, type WeekStart } from '../../state/viewMath';
 import type { CalendarEvent, Task } from '../../api/types';
 import { BacklogRail } from '../BacklogRail';
 import { ConfirmDialog } from '../ConfirmDialog';
@@ -98,12 +98,15 @@ export function MonthView() {
   const { t } = useTranslation();
   const fmt = useDateFormat();
   const announce = useAnnouncer();
-  const { anchor, setAnchor, goPrev, goNext } = useViewState();
+  const { anchor, setAnchor, goPrev, goNext, weekStartsOn } = useViewState();
   const { openEventDialog, openTaskDialog, invalidateData } = useDialogState();
   const { openForEvent: openEventMenu, openForTask: openTaskMenu } =
     useChipContextMenu();
 
-  const cells = useMemo(() => buildMonthGrid(anchor), [anchor]);
+  const cells = useMemo(
+    () => buildMonthGrid(anchor, weekStartsOn),
+    [anchor, weekStartsOn],
+  );
   const range = useMemo(() => visibleRange('month', anchor), [anchor]);
   const { events, calendarById, loading } = useEvents(range);
   const { tasks, taskListById } = useTasks();
@@ -375,12 +378,12 @@ export function MonthView() {
           return;
         case 'Home': {
           e.preventDefault();
-          setAnchor(startOfWeek(anchor, { weekStartsOn: 1 }));
+          setAnchor(startOfWeek(anchor, { weekStartsOn }));
           return;
         }
         case 'End': {
           e.preventDefault();
-          setAnchor(endOfWeek(anchor, { weekStartsOn: 1 }));
+          setAnchor(endOfWeek(anchor, { weekStartsOn }));
           return;
         }
         case 'PageUp':
@@ -418,6 +421,7 @@ export function MonthView() {
       setAnchor,
       goPrev,
       goNext,
+      weekStartsOn,
       cells,
       focusIndex,
       eventIndex,
@@ -591,7 +595,7 @@ export function MonthView() {
                 )}
                 <div role="row" className="month-grid__row">
                 <div role="rowheader" className="month-grid__kw">
-                  {fmt.isoWeek(rowStart)}
+                  {fmt.isoWeek(addDays(rowStart, 3))}
                 </div>
                 {cells.slice(row * 7, row * 7 + 7).map((day, col) => {
                   const flatIndex = row * 7 + col;
@@ -847,11 +851,11 @@ export function MonthView() {
   );
 }
 
-function buildMonthGrid(anchor: Date): Date[] {
+function buildMonthGrid(anchor: Date, weekStartsOn: WeekStart): Date[] {
   const first = startOfMonth(anchor);
   const last = endOfMonth(anchor);
-  const gridStart = startOfWeek(first, { weekStartsOn: 1 });
-  const gridEnd = endOfWeek(last, { weekStartsOn: 1 });
+  const gridStart = startOfWeek(first, { weekStartsOn });
+  const gridEnd = endOfWeek(last, { weekStartsOn });
   const out: Date[] = [];
   let cur = gridStart;
   while (cur <= gridEnd) {

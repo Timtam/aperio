@@ -64,14 +64,17 @@
 
 ## 🟠 B. Teilweise umgesetzt / kleinere Lücken
 
-### B1 · Woche-Start konfigurierbar (§5.2) `[~]`
-Backend-Pref `view.weekStart` ist bereits gewhitelistet/synchronisiert, aber das Frontend hardcodet Montag (`weekStartsOn: 1`).
-- [ ] UI-Auswahl (Mo / So / …) + `getUserPref('view.weekStart')` in `WeekView`/`MonthView`/`YearView`/`viewMath.ts` lesen und anwenden.
+### B1 · Woche-Start konfigurierbar (§5.2) ✅ erledigt
+`view.weekStart` lebt jetzt als synchronisierte Pref im ViewState-Context; Wochen-,
+Monats- und Jahresansicht (Spalten + Home/End-Navigation) richten sich danach;
+KW-Nummern bleiben ISO 8601. Auswahl in **Einstellungen → Allgemein → Ansichten**.
+- [x] UI-Auswahl (lokalisierte Wochentage) + `view.weekStart` in `WeekView` / `MonthView` / `YearView` / `viewMath.ts` gelesen und angewandt.
 
-### B2 · Serien-Verschieben/Kopieren-Scope (§7.5) `[~]`
-Move/Copy eines Serientermins betrifft aktuell immer die ganze Serie.
-- [ ] „Nur dieser Termin / Ganze Serie"-Auswahl im `MoveCopyDialog` (analog `DeleteEventScopeDialog`).
-- Einstieg: `src/components/MoveCopyDialog.tsx`, `src/state/moveActions.ts`.
+### B2 · Serien-Verschieben/Kopieren-Scope (§7.5) ✅ erledigt
+Bei wiederkehrenden Vorkommen bietet der `MoveCopyDialog` jetzt „Nur diesen Termin /
+Gesamte Serie". Einzel-Vorkommen → eigenständiger Termin am Ziel (ohne Serie); beim
+Verschieben zusätzlich EXDATE auf die Quell-Serie (Create-then-exclude, kein Datenverlust).
+- [x] „Nur dieser Termin / Gesamte Serie"-Auswahl im `MoveCopyDialog`; Logik in `moveOrCopyEvent` (`moveActions.ts`) mit Tests für alle vier Kombinationen.
 
 ### B3 · Sync-Restpunkte (§19) `[~]`
 - [ ] Per-Einstellung-Sync-Umschalter-UI im `SyncPanel` (§19.2.1; Backend hat eine feste `SYNC_WHITELIST`)

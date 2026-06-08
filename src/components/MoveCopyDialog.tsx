@@ -7,13 +7,14 @@ import {
 import { useTranslation } from 'react-i18next';
 
 import { useAnnouncer } from '../a11y/announcerContext';
+import { createTask as apiCreateTask, isCommandError } from '../api/client';
+import type { Task } from '../api/types';
+import { isExpandedOccurrence } from '../intl/recurrence';
 import {
-  createEvent as apiCreateEvent,
-  createTask as apiCreateTask,
-  isCommandError,
-} from '../api/client';
-import type { CalendarEvent, Task } from '../api/types';
-import { moveEventToCalendar, moveTaskToList } from '../state/moveActions';
+  moveOrCopyEvent,
+  moveTaskToList,
+  type MoveCopyScope,
+} from '../state/moveActions';
 import { useCalendarStore } from '../state/calendarStoreContext';
 import type { MoveCopyTarget } from '../state/DialogState';
 import { useTasks } from '../state/useTasks';
@@ -60,6 +61,11 @@ export function MoveCopyDialog({
   // can pre-select either mode. Default stays `move` to match the
   // long-standing Shift+M behaviour.
   const [mode, setMode] = useState<Mode>(target.defaultMode ?? 'move');
+  // Recurring events reach the dialog as expanded occurrences; only then is
+  // the "this occurrence vs the whole series" choice meaningful (§7.5).
+  const isRecurringOccurrence =
+    target.kind === 'event' && isExpandedOccurrence(target.event);
+  const [scope, setScope] = useState<MoveCopyScope>('occurrence');
   const [targetContainerId, setTargetContainerId] = useState(initialContainerId);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -115,7 +121,7 @@ export function MoveCopyDialog({
       setSubmitting(true);
       try {
         if (target.kind === 'event') {
-          await moveOrCopyEvent(target.event, targetContainerId, mode);
+          await moveOrCopyEvent(target.event, targetContainerId, mode, scope);
         } else {
           await moveOrCopyTask(
             target.task,
@@ -146,6 +152,7 @@ export function MoveCopyDialog({
     [
       target,
       mode,
+      scope,
       targetContainerId,
       initialContainerId,
       announce,
@@ -197,6 +204,34 @@ export function MoveCopyDialog({
             <span>{t('dialogs.moveCopy.modeCopy')}</span>
           </label>
         </fieldset>
+
+        {isRecurringOccurrence && (
+          <fieldset className="form__field">
+            <legend className="form__label">
+              {t('dialogs.moveCopy.scopeLabel')}
+            </legend>
+            <label className="form__field form__field--inline">
+              <input
+                type="radio"
+                name="movecopy-scope"
+                value="occurrence"
+                checked={scope === 'occurrence'}
+                onChange={() => setScope('occurrence')}
+              />
+              <span>{t('dialogs.moveCopy.scopeOccurrence')}</span>
+            </label>
+            <label className="form__field form__field--inline">
+              <input
+                type="radio"
+                name="movecopy-scope"
+                value="series"
+                checked={scope === 'series'}
+                onChange={() => setScope('series')}
+              />
+              <span>{t('dialogs.moveCopy.scopeSeries')}</span>
+            </label>
+          </fieldset>
+        )}
 
         <label className="form__field">
           <span className="form__label">
@@ -263,34 +298,6 @@ export function MoveCopyDialog({
       </form>
     </Modal>
   );
-}
-
-async function moveOrCopyEvent(
-  event: CalendarEvent,
-  targetCalendarId: string,
-  mode: Mode,
-): Promise<void> {
-  if (mode === 'move') {
-    // Reuses the shared move primitive (see moveActions.ts for the
-    // master-series + cross-calendar-move-hint rationale).
-    await moveEventToCalendar(event, targetCalendarId);
-    return;
-  }
-
-  await apiCreateEvent({
-    calendar_id: targetCalendarId,
-    title: event.title,
-    description: event.description,
-    location: event.location,
-    start: event.start,
-    end: event.end,
-    all_day: event.all_day,
-    recurrence: event.recurrence,
-    color_label: event.color_label,
-    reminders: event.reminders,
-    sound: event.sound,
-    attendees: event.attendees,
-  });
 }
 
 async function moveOrCopyTask(

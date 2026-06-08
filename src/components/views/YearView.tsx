@@ -15,6 +15,7 @@ import {
 
 import { useAutoFocus } from '../../hooks/useAutoFocus';
 import { useDateFormat } from '../../intl/dateFormat';
+import { type WeekStart } from '../../state/viewMath';
 import { useViewState } from '../../state/viewStateContext';
 
 /**
@@ -33,7 +34,7 @@ import { useViewState } from '../../state/viewStateContext';
 export function YearView() {
   const { t } = useTranslation();
   const fmt = useDateFormat();
-  const { anchor, setAnchor, setView } = useViewState();
+  const { anchor, setAnchor, setView, weekStartsOn } = useViewState();
 
   const months = useMemo(
     () => Array.from({ length: 12 }, (_, i) => setMonth(anchor, i)),
@@ -111,7 +112,7 @@ export function YearView() {
         className="year-grid"
       >
         {months.map((month, i) => {
-          const cells = buildMiniGrid(month);
+          const cells = buildMiniGrid(month, weekStartsOn);
           const isCurrentMonth = isSameMonth(month, today);
           const focused = i === focusIndex;
           return (
@@ -164,11 +165,11 @@ export function YearView() {
   );
 }
 
-function buildMiniGrid(month: Date): Date[] {
+function buildMiniGrid(month: Date, weekStartsOn: WeekStart): Date[] {
   const first = startOfMonth(month);
   const last = endOfMonth(month);
-  const start = startOfWeek(first, { weekStartsOn: 1 });
-  const end = endOfWeek(last, { weekStartsOn: 1 });
+  const start = startOfWeek(first, { weekStartsOn });
+  const end = endOfWeek(last, { weekStartsOn });
   const out: Date[] = [];
   let cur = start;
   while (cur <= end) {
