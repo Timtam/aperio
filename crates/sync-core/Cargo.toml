@@ -28,9 +28,7 @@ uuid.workspace = true
 # crate boundary speaks `Result<T, SyncError>` so consumers (the
 # command layer, individual sync adapters) get one place to map errors.
 thiserror.workspace = true
-# tokio for the async runtime + tracing for diagnostics; both align
-# with the rest of the workspace.
-tokio = { workspace = true, features = ["fs", "io-util", "rt", "sync"] }
+# tracing for diagnostics, aligned with the rest of the workspace.
 tracing.workspace = true
 
 # E2E encryption (Phase Sk, DESIGN.md §19.7). AES-256-GCM gives
@@ -44,6 +42,13 @@ base64 = "0.22"
 # aes-gcm crate's `OsRng` re-export pulls this in but we depend
 # explicitly for clarity.
 rand = "0.8"
+
+[dev-dependencies]
+# Only the unit tests need an async runtime (`#[tokio::test]`). The crate's
+# production code is runtime-agnostic (pure async-trait + serde), so its
+# consumers — the app and every plugin cdylib — no longer link tokio
+# through sync-core.
+tokio = { workspace = true }
 
 [lints]
 workspace = true
