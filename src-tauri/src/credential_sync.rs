@@ -163,6 +163,26 @@ pub fn strip_credentials_from_snapshot(snapshot: &mut Snapshot) {
     }
 }
 
+/// Reduce a raw log fetched during an E2E downgrade to its plaintext form,
+/// tolerating logs that a prior *interrupted* downgrade already rewrote as
+/// plaintext. AES-GCM authenticates, so a plaintext (non-ciphertext) blob
+/// fails to decrypt and is returned verbatim, while a genuinely encrypted
+/// log is decrypted. This is what makes a retried `disable_sync_encryption`
+/// idempotent instead of choking on a half-converted dataset — the strict
+/// `EncryptingAdapter::fetch_new_logs` would error on the already-plaintext
+/// logs. (A genuinely corrupt/tampered ciphertext that fails to decrypt is
+/// returned as-is and then surfaces downstream when the strip can't parse it
+/// as JSONL — it is never silently accepted as valid events.)
+pub fn downgrade_log_to_plaintext(dek: &[u8; sync_core::KEY_LEN], raw: LogFile) -> LogFile {
+    match sync_core::decrypt(dek, &raw.bytes) {
+        Ok(decrypted) => LogFile {
+            name: raw.name,
+            bytes: decrypted,
+        },
+        Err(_) => raw,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -229,5 +249,36 @@ mod tests {
         assert!(!text.contains("s3cr3t-p4ss"), "secret leaked into plaintext log");
         assert!(!text.contains("credential.set"));
         assert!(!text.contains("credential.cleared"));
+    }
+
+    #[test]
+    fn downgrade_tolerates_plaintext_and_decrypts_ciphertext() {
+        let dek = sync_core::fresh_data_key();
+        let dev = DeviceId::from_string("dev-a".into());
+        let env = EventEnvelope {
+            id: "1".into(),
+            device_id: dev.clone(),
+            timestamp: ts(),
+            event: SyncEvent::EventCreated(EventPayload {
+                id: "e1".into(),
+                fields: serde_json::json!({ "title": "x" }),
+            }),
+        };
+        let plaintext_log = LogFile::from_envelopes(dev.clone(), ts(), &[env]).unwrap();
+
+        // A plaintext log (as a prior interrupted downgrade would leave it)
+        // passes through verbatim.
+        let out = downgrade_log_to_plaintext(&dek, plaintext_log.clone());
+        assert_eq!(out.bytes, plaintext_log.bytes);
+
+        // A genuinely encrypted log (normal E2E state) decrypts back to the
+        // same plaintext.
+        let ciphertext = sync_core::encrypt(&dek, &plaintext_log.bytes).unwrap();
+        let encrypted_log = LogFile {
+            name: plaintext_log.name.clone(),
+            bytes: ciphertext,
+        };
+        let out2 = downgrade_log_to_plaintext(&dek, encrypted_log);
+        assert_eq!(out2.bytes, plaintext_log.bytes);
     }
 }

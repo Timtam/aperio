@@ -1613,7 +1613,7 @@ pub async fn disable_sync_encryption(
         code: "protocol",
         message: "meta.json says e2e but carries no params".into(),
     })?;
-    let _verified_dek = resolve_data_key(pp, &current_params).map_err(sync_err)?;
+    let verified_dek = resolve_data_key(pp, &current_params).map_err(sync_err)?;
 
     // 2b. Stop credential sync immediately by clearing the local E2E pref.
     //     This does three things at once: (1) no new `credential.*` event can
@@ -1645,20 +1645,33 @@ pub async fn disable_sync_encryption(
 
     let mut report = DisableE2eReport::default();
 
-    // 4. Re-encrypt every log: fetch via encrypting (decrypts),
-    //    push via plain (writes verbatim). Adapter push_log
-    //    overwrites at the same path, so no orphan files.
-    let logs = encrypting
+    // 4. Rewrite every log as stripped plaintext. We fetch the RAW bytes via
+    //    the plain (unwrapped) adapter and decrypt each log ourselves, with a
+    //    PLAINTEXT FALLBACK. This makes a retried disable idempotent: a run
+    //    that was interrupted (e.g. a network blip) after rewriting some logs
+    //    as plaintext can be re-run, whereas the strict
+    //    `encrypting.fetch_new_logs` would choke trying to decrypt the
+    //    already-plaintext ones and leave the dataset stuck half-converted.
+    //    The fallback is safe — AES-GCM authenticates, so a plaintext (non-
+    //    ciphertext) log fails to decrypt and is passed through verbatim,
+    //    while a genuinely encrypted log decrypts. Normal-operation tamper
+    //    detection is unaffected: that path still uses the strict encrypting
+    //    fetch; only this downgrade, where a mixed state is expected, is
+    //    lenient. `push_log` overwrites at the same path, so no orphans.
+    let raw_logs = plain
         .fetch_new_logs(&sync_core::DeviceCursor::epoch())
         .await
         .map_err(sync_err)?;
-    for log in logs {
+    for raw in raw_logs {
+        // Decrypt the log, tolerating ones a prior interrupted disable already
+        // left as plaintext (see `downgrade_log_to_plaintext`).
+        let log = crate::credential_sync::downgrade_log_to_plaintext(&verified_dek, raw);
         // SECURITY: strip any `credential.*` events before writing the
-        // plaintext log. Those events only ever existed because E2E was
-        // on; on the way down to plaintext their secrets must NOT reach
-        // the remote. The secrets stay in this device's keychain — they
-        // are simply purged from the (now plaintext) sync storage, which
-        // is the "remove from remote on E2E off" behaviour by design.
+        // plaintext log. Those events only ever existed because E2E was on;
+        // on the way down to plaintext their secrets must NOT reach the
+        // remote. The secrets stay in this device's keychain — they are
+        // simply purged from the (now plaintext) sync storage, which is the
+        // "remove from remote on E2E off" behaviour by design.
         let stripped =
             crate::credential_sync::strip_credential_events(&log).map_err(sync_err)?;
         plain.push_log(&stripped).await.map_err(sync_err)?;
