@@ -246,6 +246,16 @@ impl Compactor {
             .fetch_meta()
             .await?
             .unwrap_or_else(|| MetaJson::fresh(&self.app_version));
+        // §19.13: if this app writes a newer sync wire format than the dataset
+        // currently records, the snapshot we just generated IS that migrated
+        // artifact — bump schema_version and raise min_app_version so apps too
+        // old to read the new format stop syncing (the "force snapshot + meta
+        // update on schema upgrade" step). A no-op while SCHEMA_VERSION is
+        // unchanged, which is the common case.
+        if meta.schema_version < sync_core::SCHEMA_VERSION {
+            meta.schema_version = sync_core::SCHEMA_VERSION;
+            meta.min_app_version = self.app_version.clone();
+        }
         meta.snapshot_timestamp = snapshot_ts;
         let device_name = UserPrefsRepo::new(&self.db)
             .get(crate::event_log::PREF_DEVICE_NAME)
@@ -540,6 +550,42 @@ mod tests {
             .metadata
             .snapshot_timestamp;
         assert_eq!(meta.snapshot_timestamp, snap_ts);
+    }
+
+    #[tokio::test]
+    async fn compact_bumps_schema_and_min_app_version_on_upgrade() {
+        // §19.13: a dataset written by an older wire format gets its
+        // schema_version raised + min_app_version set to this app's version
+        // when we compact (the snapshot we just generated is the new format).
+        let (_tmp, _db, compactor) = build_compactor(); // app_version "1.0.0-test"
+        let adapter = FakeAdapter::new();
+        let mut old = sync_core::MetaJson::fresh("0.9.0");
+        old.schema_version = sync_core::SCHEMA_VERSION.saturating_sub(1);
+        old.min_app_version = "0.9.0".into();
+        *adapter.meta.lock().unwrap() = Some(old);
+
+        compactor.compact_now(&adapter).await.unwrap();
+
+        let meta = adapter.meta.lock().unwrap().clone().unwrap();
+        assert_eq!(meta.schema_version, sync_core::SCHEMA_VERSION);
+        assert_eq!(meta.min_app_version, "1.0.0-test");
+    }
+
+    #[tokio::test]
+    async fn compact_preserves_min_app_version_when_schema_already_current() {
+        // No schema upgrade → the existing min_app_version must NOT be raised.
+        let (_tmp, _db, compactor) = build_compactor();
+        let adapter = FakeAdapter::new();
+        let mut current = sync_core::MetaJson::fresh("0.5.0");
+        current.schema_version = sync_core::SCHEMA_VERSION;
+        current.min_app_version = "0.5.0".into();
+        *adapter.meta.lock().unwrap() = Some(current);
+
+        compactor.compact_now(&adapter).await.unwrap();
+
+        let meta = adapter.meta.lock().unwrap().clone().unwrap();
+        assert_eq!(meta.schema_version, sync_core::SCHEMA_VERSION);
+        assert_eq!(meta.min_app_version, "0.5.0");
     }
 
     #[tokio::test]

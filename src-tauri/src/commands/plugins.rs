@@ -587,13 +587,21 @@ pub async fn install_plugin_archive(
     // User; we name the variant for clarity rather than
     // skip the check.
     if matches!(PluginSource::User, PluginSource::User) {
-        event_log.append(SyncEvent::PluginInstalled(PluginPayload {
+        let payload = PluginPayload {
             id: m.id.clone(),
             version: m.version.clone(),
             source: None,
             name: Some(m.name.clone()),
             plugin_type: Some(m.plugin_type.as_str().to_string()),
-        }));
+        };
+        // §19.2 / §20.8: installing over an already-present plugin is an
+        // UPGRADE — emit `plugin.updated` so other devices surface it as an
+        // update (and re-fetch the new version) rather than a fresh install.
+        event_log.append(if is_upgrade {
+            SyncEvent::PluginUpdated(payload)
+        } else {
+            SyncEvent::PluginInstalled(payload)
+        });
     }
 
     // Local mirror: if the remote_plugins table carried an

@@ -76,10 +76,10 @@ Gesamte Serie". Einzel-Vorkommen → eigenständiger Termin am Ziel (ohne Serie)
 Verschieben zusätzlich EXDATE auf die Quell-Serie (Create-then-exclude, kein Datenverlust).
 - [x] „Nur dieser Termin / Gesamte Serie"-Auswahl im `MoveCopyDialog`; Logik in `moveOrCopyEvent` (`moveActions.ts`) mit Tests für alle vier Kombinationen.
 
-### B3 · Sync-Restpunkte (§19) `[~]`
-- [ ] Per-Einstellung-Sync-Umschalter-UI im `SyncPanel` (§19.2.1; Backend hat eine feste `SYNC_WHITELIST`)
-- [ ] Schema-Migration-Nachlauf: Migration erkennen → Snapshot erzwingen → `meta.json.schema_version` / `min_app_version` aktualisieren (§19.13; SQLite-Migration selbst läuft bereits)
-- [ ] `plugin.updated`-Event emittieren (definiert, wird nie gesendet) (§19.2)
+### B3 · Sync-Restpunkte (§19) `[~]` (Toggle-UI bewusst zurückgestellt)
+- [ ] Per-Einstellung-Sync-Umschalter-UI im `SyncPanel` (§19.2.1; Backend hat eine feste `SYNC_WHITELIST`) — **bewusst zurückgestellt** (auf Wunsch).
+- [x] Schema-Versions-Nachlauf (§19.13): Der Compactor hebt `meta.json.schema_version` + `min_app_version` an, sobald diese App ein neueres **Sync-Wire-Format** schreibt (der frisch erzeugte Snapshot *ist* das migrierte Artefakt). **Klarstellung:** Der Audit hatte lokale SQLite-Migrationen (`db::CURRENT_SCHEMA_VERSION = 26`) mit dem Sync-Format (`sync_core::SCHEMA_VERSION = 1`) verwechselt — getrennte Dinge; die Versions-*Prüfung* (`ensure_compatible` beim Sync-Start) war bereits implementiert.
+- [x] `plugin.updated`-Event wird beim Upgrade emittiert (vorher immer `plugin.installed`; der `is_upgrade`-Flag existierte bereits).
 
 ### B4 · Mini-Kalender-Sidebar-Widget (§5.3) `[ ]`
 - [ ] Optionales, ein-/ausblendbares Datums-Widget für schnelle Navigation in der Sidebar.
