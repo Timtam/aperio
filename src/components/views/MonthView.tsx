@@ -65,11 +65,17 @@ import {
   isCommandError,
 } from '../../api/client';
 import {
+  EVENT_DND_TYPE,
+  moveEventToDay,
+  readEventDrag,
   readTaskDrag,
   scheduleTaskOnDay,
+  setEventDrag,
   setTaskDrag,
   TASK_DND_TYPE,
+  type MoveCopyScope,
 } from '../../state/moveActions';
+import { MoveEventScopeDialog } from '../MoveEventScopeDialog';
 
 /**
  * Month view — six-week calendar grid (DESIGN.md section 3.3,
@@ -271,14 +277,53 @@ export function MonthView() {
     }
   }, []);
 
+  // Event chip dropped on a day cell → move it there (time + duration
+  // stay). Recurring events first ask for the §7.5 scope ("only this
+  // occurrence / whole series") via the pending state + dialog below.
+  const [pendingEventDrop, setPendingEventDrop] = useState<{
+    event: CalendarEvent;
+    dayKey: string;
+  } | null>(null);
+  const performEventDrop = useCallback(
+    async (ev: CalendarEvent, dayKey: string, scope: MoveCopyScope) => {
+      try {
+        const moved = await moveEventToDay(ev, dayKey, scope);
+        if (!moved) return; // same-day drop — nothing to announce
+        announce(
+          t('views.eventMovedToDay', {
+            title: ev.title,
+            date: fmt.format(new Date(`${dayKey}T00:00:00`), 'PP'),
+          }),
+        );
+        invalidateData();
+      } catch (err) {
+        announce(
+          isCommandError(err) ? `${err.code}: ${err.message}` : String(err),
+        );
+      }
+    },
+    [announce, t, fmt, invalidateData],
+  );
+
   // Drag-and-drop: a task dropped on a day cell is scheduled on that day
-  // (e.g. dragged out of the backlog rail). Mouse affordance only.
+  // (e.g. dragged out of the backlog rail); an event dropped on a day
+  // cell moves there. Mouse affordance only — the keyboard/SR paths are
+  // the task plan dialog and the event editor.
   const scheduleByDrop = useCallback(
     async (day: Date, e: React.DragEvent) => {
       e.preventDefault();
-      const payload = readTaskDrag(e.dataTransfer);
-      if (!payload) return;
       const dayKey = localDateKey(day);
+      const payload = readTaskDrag(e.dataTransfer);
+      if (!payload) {
+        const dropped = readEventDrag(e.dataTransfer);
+        if (!dropped) return;
+        if (isExpandedOccurrence(dropped) || dropped.recurrence?.rrule) {
+          setPendingEventDrop({ event: dropped, dayKey });
+          return;
+        }
+        await performEventDrop(dropped, dayKey, 'series');
+        return;
+      }
       if (payload.task.scheduled_date === dayKey) return;
       try {
         await scheduleTaskOnDay(payload.task, dayKey);
@@ -295,7 +340,7 @@ export function MonthView() {
         );
       }
     },
-    [invalidateData, announce, t, fmt],
+    [invalidateData, announce, t, fmt, performEventDrop],
   );
 
   // Deferred indicator — see DayView for the rationale.
@@ -629,7 +674,13 @@ export function MonthView() {
                       }
                       onClick={() => setAnchor(day)}
                       onDragOver={(e) => {
-                        if (!e.dataTransfer.types.includes(TASK_DND_TYPE)) return;
+                        const types = e.dataTransfer.types;
+                        if (
+                          !types.includes(TASK_DND_TYPE) &&
+                          !types.includes(EVENT_DND_TYPE)
+                        ) {
+                          return;
+                        }
                         e.preventDefault();
                         e.dataTransfer.dropEffect = 'move';
                       }}
@@ -780,6 +831,15 @@ export function MonthView() {
                             }
                             aria-label={aria}
                             aria-selected={isFocusedItem}
+                            draggable
+                            onDragStart={(dev) => {
+                              // Drag onto another day cell to move the
+                              // event there, or onto a sidebar calendar
+                              // row to move it to that calendar (mouse
+                              // affordance; keyboard/SR paths are the
+                              // editor + Move/Copy dialog).
+                              setEventDrag(dev.dataTransfer, ev);
+                            }}
                             onContextMenu={(cmev) => {
                               cmev.preventDefault();
                               cmev.stopPropagation();
@@ -845,6 +905,29 @@ export function MonthView() {
         }}
         onSeries={() => {
           if (scopeTarget) void performDelete(scopeTarget, 'series');
+        }}
+      />
+      <MoveEventScopeDialog
+        isOpen={pendingEventDrop !== null}
+        onClose={() => setPendingEventDrop(null)}
+        title={pendingEventDrop?.event.title ?? ''}
+        onOccurrence={() => {
+          if (pendingEventDrop) {
+            void performEventDrop(
+              pendingEventDrop.event,
+              pendingEventDrop.dayKey,
+              'occurrence',
+            );
+          }
+        }}
+        onSeries={() => {
+          if (pendingEventDrop) {
+            void performEventDrop(
+              pendingEventDrop.event,
+              pendingEventDrop.dayKey,
+              'series',
+            );
+          }
         }}
       />
     </section>

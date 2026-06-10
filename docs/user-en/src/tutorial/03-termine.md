@@ -69,7 +69,11 @@ In the event dialog you can also set:
 - **Edit:** Select the event and open it with `Enter` (or **Edit** from the
   context menu).
 - **Move:** Change the times in the dialog – this works reliably and is
-  screen-reader friendly. With a mouse you can also drag events.
+  screen-reader friendly. With a mouse you can also drag an event onto a
+  **different day** in the week or month view (time of day and duration
+  are preserved) or onto a **calendar in the sidebar** to move it to that
+  calendar. For recurring events Aperio asks whether to move just this
+  occurrence or the whole series.
 - **Delete:** Select the event and choose **Delete** (default: `Delete`).
   You are asked to confirm before deletion.
 

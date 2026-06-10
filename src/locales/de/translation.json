@@ -818,6 +818,13 @@
       "series": "Ganze Serie",
       "cancel": "Abbrechen"
     },
+    "moveScope": {
+      "title": "Serientermin verschieben",
+      "message": "„{{title}}\" ist Teil einer Serie. Nur diesen Termin oder die ganze Serie verschieben?",
+      "occurrence": "Nur diesen Termin",
+      "series": "Ganze Serie",
+      "cancel": "Abbrechen"
+    },
     "save": "Speichern",
     "create": "Anlegen",
     "close": "Schließen",
@@ -1397,6 +1404,7 @@
     "allDay": "Ganztags",
     "multiDayCompact": "({{day}}/{{total}})",
     "multiDaySuffix": ", Tag {{day}} von {{total}}",
+    "eventMovedToDay": "„{{title}}“ auf {{date}} verschoben.",
     "backlog": {
       "heading": "Backlog ({{count}})",
       "listLabel": "Backlog-Aufgaben",

@@ -21,10 +21,16 @@ import {
 } from '../../intl/multiDay';
 import { useCalendarStore } from '../../state/calendarStoreContext';
 import {
+  EVENT_DND_TYPE,
+  moveEventToDay,
+  readEventDrag,
   setEventDrag,
   setTaskDrag,
   TASK_DND_TYPE,
+  type MoveCopyScope,
 } from '../../state/moveActions';
+import { isExpandedOccurrence } from '../../intl/recurrence';
+import { MoveEventScopeDialog } from '../MoveEventScopeDialog';
 import { useDialogState } from '../../state/dialogStateContext';
 import { useEvents } from '../../state/useEvents';
 import { useTaskListShowCompleted } from '../../state/useTaskListShowCompleted';
@@ -350,6 +356,46 @@ export function WeekView() {
       }
     },
     [tasks, announce, t, fmt, invalidateData],
+  );
+
+  // Event chip dropped on a day cell → move it there (time + duration
+  // stay). Recurring events first ask for the §7.5 scope ("only this
+  // occurrence / whole series") via the pending state + dialog below.
+  const [pendingEventDrop, setPendingEventDrop] = useState<{
+    event: CalendarEvent;
+    dayKey: string;
+  } | null>(null);
+  const performEventDrop = useCallback(
+    async (ev: CalendarEvent, dayKey: string, scope: MoveCopyScope) => {
+      try {
+        const moved = await moveEventToDay(ev, dayKey, scope);
+        if (!moved) return; // same-day drop — nothing to announce
+        announce(
+          t('views.eventMovedToDay', {
+            title: ev.title,
+            date: fmt.format(new Date(`${dayKey}T00:00:00`), 'PP'),
+          }),
+        );
+        invalidateData();
+      } catch (err) {
+        if (isCommandError(err)) {
+          announce(`${err.code}: ${err.message}`);
+        } else {
+          announce(String(err));
+        }
+      }
+    },
+    [announce, t, fmt, invalidateData],
+  );
+  const handleEventDayDrop = useCallback(
+    (ev: CalendarEvent, dayKey: string) => {
+      if (isExpandedOccurrence(ev) || ev.recurrence?.rrule) {
+        setPendingEventDrop({ event: ev, dayKey });
+        return;
+      }
+      void performEventDrop(ev, dayKey, 'series');
+    },
+    [performEventDrop],
   );
 
   const performDelete = useCallback(
@@ -697,13 +743,19 @@ export function WeekView() {
                   }
                   onClick={() => setAnchor(day)}
                   onDragOver={(e) => {
-                    // Drop-target gate: react when an Aperio task drag is in
-                    // flight. The payload values aren't readable during
-                    // dragover, but the type LIST is — and both the week's
-                    // own chips and the backlog rail tag the drag with the
-                    // task MIME type, so this also accepts backlog drops
-                    // (which never set `draggingTaskId`).
-                    if (!e.dataTransfer.types.includes(TASK_DND_TYPE)) return;
+                    // Drop-target gate: react when an Aperio task OR event
+                    // drag is in flight. The payload values aren't readable
+                    // during dragover, but the type LIST is — and both the
+                    // week's own chips and the backlog rail tag the drag
+                    // with the task MIME type, so this also accepts backlog
+                    // drops (which never set `draggingTaskId`).
+                    const types = e.dataTransfer.types;
+                    if (
+                      !types.includes(TASK_DND_TYPE) &&
+                      !types.includes(EVENT_DND_TYPE)
+                    ) {
+                      return;
+                    }
                     e.preventDefault();
                     e.dataTransfer.dropEffect = 'move';
                     if (dragOverDayKey !== dayKey) {
@@ -731,7 +783,12 @@ export function WeekView() {
                     const taskId =
                       e.dataTransfer.getData('text/aperio-task') ||
                       draggingTaskId;
-                    if (taskId) void rescheduleTaskByDrop(taskId, dayKey);
+                    if (taskId) {
+                      void rescheduleTaskByDrop(taskId, dayKey);
+                      return;
+                    }
+                    const dropped = readEventDrag(e.dataTransfer);
+                    if (dropped) handleEventDayDrop(dropped, dayKey);
                   }}
                 >
                   <ul role="list" className="week-grid__events">
@@ -998,6 +1055,29 @@ export function WeekView() {
         }}
         onSeries={() => {
           if (scopeTarget) void performDelete(scopeTarget, 'series');
+        }}
+      />
+      <MoveEventScopeDialog
+        isOpen={pendingEventDrop !== null}
+        onClose={() => setPendingEventDrop(null)}
+        title={pendingEventDrop?.event.title ?? ''}
+        onOccurrence={() => {
+          if (pendingEventDrop) {
+            void performEventDrop(
+              pendingEventDrop.event,
+              pendingEventDrop.dayKey,
+              'occurrence',
+            );
+          }
+        }}
+        onSeries={() => {
+          if (pendingEventDrop) {
+            void performEventDrop(
+              pendingEventDrop.event,
+              pendingEventDrop.dayKey,
+              'series',
+            );
+          }
         }}
       />
     </section>

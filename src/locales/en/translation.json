@@ -821,6 +821,13 @@
       "series": "Whole series",
       "cancel": "Cancel"
     },
+    "moveScope": {
+      "title": "Move recurring event",
+      "message": "\"{{title}}\" is part of a series. Move just this occurrence, or the whole series?",
+      "occurrence": "This occurrence only",
+      "series": "Whole series",
+      "cancel": "Cancel"
+    },
     "colorPicker": {
       "title": "Custom color",
       "intro": "Enter a color as a hex value (#rrggbb) or pick it with the swatch.",
@@ -1397,6 +1404,7 @@
     "allDay": "All day",
     "multiDayCompact": "({{day}}/{{total}})",
     "multiDaySuffix": ", day {{day}} of {{total}}",
+    "eventMovedToDay": "Moved \"{{title}}\" to {{date}}.",
     "backlog": {
       "heading": "Backlog ({{count}})",
       "listLabel": "Backlog tasks",

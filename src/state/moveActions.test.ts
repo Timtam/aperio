@@ -7,6 +7,7 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
 
 import {
   EVENT_DND_TYPE,
+  moveEventToDay,
   moveOrCopyEvent,
   moveTaskToBacklog,
   readEventDrag,
@@ -197,5 +198,92 @@ describe('moveOrCopyEvent recurrence scope (§7.5)', () => {
     // Not an expanded occurrence → falls back to whole-series move (update).
     expect(invokeMock.mock.calls).toHaveLength(1);
     expect(invokeMock.mock.calls[0][0]).toBe('update_event');
+  });
+});
+
+describe('moveEventToDay (planner drag-and-drop)', () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue({});
+  });
+
+  /** Local YYYY-MM-DD of an instant (mirrors the views' day keys). */
+  const localKey = (iso: string, plusDays = 0) => {
+    const d = new Date(iso);
+    d.setDate(d.getDate() + plusDays);
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${d.getFullYear()}-${mm}-${dd}`;
+  };
+
+  it('moves a plain event to another day, keeping time + duration', async () => {
+    const plain = {
+      id: 'p1',
+      calendar_id: 'c1',
+      title: 'One-off',
+      start: '2026-06-15T09:00:00.000Z',
+      end: '2026-06-15T10:30:00.000Z',
+      recurrence: null,
+    } as unknown as CalendarEvent;
+    const target = localKey(plain.start, 2);
+    const moved = await moveEventToDay(plain, target);
+    expect(moved).toBe(true);
+    const [cmd, args] = invokeMock.mock.calls[0];
+    expect(cmd).toBe('update_event');
+    const newStart = new Date(args.event.start);
+    const newEnd = new Date(args.event.end);
+    // Landed on the target local day…
+    expect(localKey(args.event.start)).toBe(target);
+    // …with the wall-clock time preserved…
+    const old = new Date(plain.start);
+    expect(newStart.getHours()).toBe(old.getHours());
+    expect(newStart.getMinutes()).toBe(old.getMinutes());
+    // …and the duration intact (90 min).
+    expect(newEnd.getTime() - newStart.getTime()).toBe(90 * 60 * 1000);
+  });
+
+  it('same-day drop is a no-op', async () => {
+    const plain = {
+      id: 'p1',
+      calendar_id: 'c1',
+      start: '2026-06-15T09:00:00.000Z',
+      end: '2026-06-15T10:00:00.000Z',
+      recurrence: null,
+    } as unknown as CalendarEvent;
+    const moved = await moveEventToDay(plain, localKey(plain.start));
+    expect(moved).toBe(false);
+    expect(invokeMock.mock.calls).toHaveLength(0);
+  });
+
+  it('occurrence scope detaches: standalone create on the target day, then EXDATE', async () => {
+    const occ = occurrence();
+    const target = localKey(occ.start, 3);
+    const moved = await moveEventToDay(occ, target, 'occurrence');
+    expect(moved).toBe(true);
+    const calls = invokeMock.mock.calls;
+    expect(calls).toHaveLength(2);
+    expect(calls[0][0]).toBe('create_event');
+    expect(calls[0][1].request.calendar_id).toBe('c1'); // same calendar
+    expect(calls[0][1].request.recurrence).toBeNull(); // detached
+    expect(localKey(calls[0][1].request.start)).toBe(target);
+    expect(calls[1][0]).toBe('add_event_exdate');
+    expect(calls[1][1]).toMatchObject({
+      id: 'e1',
+      occurrence: '2026-06-15T09:00:00.000Z',
+      calendarId: 'c1',
+    });
+  });
+
+  it('series scope re-anchors the MASTER row on the target day', async () => {
+    const occ = occurrence();
+    const target = localKey(occ.start, 1);
+    await moveEventToDay(occ, target, 'series');
+    expect(invokeMock.mock.calls).toHaveLength(1);
+    const [cmd, args] = invokeMock.mock.calls[0];
+    expect(cmd).toBe('update_event');
+    expect(args.event.id).toBe('e1'); // master series id
+    expect(localKey(args.event.start)).toBe(target);
+    // The recurrence rule travels with the master.
+    expect(args.event.recurrence).toMatchObject({ rrule: 'FREQ=DAILY' });
   });
 });

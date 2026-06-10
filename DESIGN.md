@@ -799,6 +799,7 @@ Termine können jederzeit in einen anderen Kalender – auch kalender- und konto
 | **Terminformular** | Kalender-Dropdown im Bearbeitungsdialog ändern (verschiebt) |
 | **Kontextmenü** | Rechtsklick / Kontextmenü-Taste → "In Kalender verschieben" oder "In Kalender kopieren" → Untermenü mit allen verfügbaren Kalendern |
 | **Tastatur** | Im Termin-Fokus: `Shift+M` öffnet Kalender-Auswahl-Dialog mit Verschieben/Kopieren-Wahl; `Ctrl+D` dupliziert in denselben Kalender (Schnellkopie) |
+| **Drag & Drop** | Termin-Chip auf einen Kalender in der Sidebar ziehen (verschiebt in diesen Kalender) oder auf einen anderen Tag in der Wochen-/Monatsansicht (verschiebt den Tag; Uhrzeit + Dauer bleiben). Serientermine fragen nach dem Umfang („Nur diesen Termin" / „Ganze Serie"). Reine Maus-Affordanz — Tastatur-/Screenreader-Weg bleiben Dialog + `Shift+M` |
 
 #### Technischer Ablauf
 

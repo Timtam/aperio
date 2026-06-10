@@ -74,8 +74,12 @@ Mit **Speichern** wird der Termin angelegt; eine Live-Region bestätigt
 - **Bearbeiten:** Termin markieren und mit `Eingabe` (oder über das
   Kontextmenü **Bearbeiten**) öffnen.
 - **Verschieben:** Im Dialog die Zeiten ändern – das funktioniert
-  zuverlässig und screenreader-freundlich. Per Maus kannst du Termine auch
-  ziehen.
+  zuverlässig und screenreader-freundlich. Per Maus kannst du einen Termin
+  auch auf einen **anderen Tag** in der Wochen- oder Monatsansicht ziehen
+  (Uhrzeit und Dauer bleiben erhalten) oder auf einen **Kalender in der
+  Seitenleiste**, um ihn in diesen Kalender zu verschieben. Bei
+  Serienterminen fragt Aperio, ob nur dieser Termin oder die ganze Serie
+  verschoben werden soll.
 - **Löschen:** Termin markieren und **Löschen** wählen (Standard: `Entf`).
   Vor dem Löschen wird nachgefragt.
 

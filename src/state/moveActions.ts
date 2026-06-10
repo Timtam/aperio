@@ -3,6 +3,7 @@
 // lock-step. Pure async functions over the Tauri commands — no React.
 
 import { invoke } from '@tauri-apps/api/core';
+import { differenceInCalendarDays } from 'date-fns';
 
 import {
   addEventExdate,
@@ -223,4 +224,70 @@ export async function moveOrCopyEvent(
       await addEventExdate(seriesIdOf(event), occIso, event.calendar_id);
     }
   }
+}
+
+/**
+ * Move an event to another calendar DAY (drag-and-drop in the week /
+ * month planners). The wall-clock time and the duration stay; only the
+ * day shifts (`setDate` keeps the local time across DST transitions).
+ *
+ * Recurrence scope mirrors §7.5:
+ *  - **series** — update the MASTER row with the dragged occurrence's
+ *    shifted dates, re-anchoring the whole series on the new day (the
+ *    same master-row semantics `moveEventToCalendar` uses; works for
+ *    external providers without needing to fetch the master).
+ *  - **occurrence** — detach: create a STANDALONE event on the target
+ *    day, then EXDATE the source occurrence (created first, excluded
+ *    second, so a failed create never loses the occurrence).
+ *
+ * Returns false for a same-day drop (no-op — matches the task DnD
+ * behaviour for the "dragged a few pixels" misfire).
+ */
+export async function moveEventToDay(
+  event: CalendarEvent,
+  targetDayKey: string,
+  scope: MoveCopyScope = 'series',
+): Promise<boolean> {
+  const [y, m, d] = targetDayKey.split('-').map(Number);
+  if (!y || !m || !d) return false;
+  const delta = differenceInCalendarDays(
+    new Date(y, m - 1, d),
+    new Date(event.start),
+  );
+  if (delta === 0) return false;
+  const shift = (iso: string) => {
+    const when = new Date(iso);
+    when.setDate(when.getDate() + delta);
+    return when.toISOString();
+  };
+
+  if (scope === 'occurrence' && isExpandedOccurrence(event)) {
+    await apiCreateEvent({
+      calendar_id: event.calendar_id,
+      title: event.title,
+      description: event.description,
+      location: event.location,
+      start: shift(event.start),
+      end: shift(event.end),
+      all_day: event.all_day,
+      recurrence: null,
+      color_label: event.color_label,
+      reminders: event.reminders,
+      sound: event.sound,
+      attendees: event.attendees,
+    });
+    const occIso = occurrenceIsoOf(event);
+    if (occIso) {
+      await addEventExdate(seriesIdOf(event), occIso, event.calendar_id);
+    }
+    return true;
+  }
+
+  await apiUpdateEvent({
+    ...event,
+    id: seriesIdOf(event),
+    start: shift(event.start),
+    end: shift(event.end),
+  });
+  return true;
 }
