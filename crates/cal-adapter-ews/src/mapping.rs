@@ -33,7 +33,7 @@
 //! That keeps the parsers below straightforward — they only need to
 //! handle the happy-path schema.
 
-use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono::{DateTime, Local, NaiveDateTime, TimeZone, Utc};
 use quick_xml::events::Event as XmlEvent;
 use quick_xml::reader::Reader;
 use serde::{Deserialize, Serialize};
@@ -1443,6 +1443,13 @@ pub fn to_event(item: ParsedItem, calendar_id: &str) -> EwsResult<Event> {
     let end = item
         .end
         .ok_or_else(|| EwsError::Protocol("CalendarItem missing End".into()))?;
+    // All-day boundaries re-anchor at LOCAL midnight of their local
+    // calendar day (the app-internal convention; see all_day_local_anchor).
+    let (start, end) = if item.is_all_day {
+        (all_day_local_anchor(start), all_day_local_anchor(end))
+    } else {
+        (start, end)
+    };
 
     // Prefix the id with the CalendarItemType so writes know how to
     // route — series-wide ops resolve the master from an Occurrence
@@ -1611,13 +1618,24 @@ pub fn new_event_to_calendar_item_xml(event: &NewEvent) -> EwsResult<String> {
     } else {
         out.push_str("          <t:ReminderIsSet>false</t:ReminderIsSet>\n");
     }
+    // All-day events pin their boundaries to UTC midnight of the LOCAL
+    // calendar day (see ews_all_day_boundary); timed events write the
+    // instant verbatim.
+    let (wire_start, wire_end) = if event.all_day {
+        (
+            ews_all_day_boundary(event.start),
+            ews_all_day_boundary(event.end),
+        )
+    } else {
+        (event.start, event.end)
+    };
     out.push_str(&format!(
         "          <t:Start>{}</t:Start>\n",
-        format_ews_datetime(event.start)
+        format_ews_datetime(wire_start)
     ));
     out.push_str(&format!(
         "          <t:End>{}</t:End>\n",
-        format_ews_datetime(event.end)
+        format_ews_datetime(wire_end)
     ));
     if event.all_day {
         out.push_str("          <t:IsAllDayEvent>true</t:IsAllDayEvent>\n");
@@ -1706,8 +1724,17 @@ pub fn event_to_update_field_xml(event: &Event) -> EwsResult<(String, String)> {
             del.push_str(delete_item_field_xml("calendar:Location").as_str());
         }
     }
-    push_set_datetime(&mut set, "calendar:Start", "Start", event.start);
-    push_set_datetime(&mut set, "calendar:End", "End", event.end);
+    // Same all-day boundary pinning as the create path.
+    let (wire_start, wire_end) = if event.all_day {
+        (
+            ews_all_day_boundary(event.start),
+            ews_all_day_boundary(event.end),
+        )
+    } else {
+        (event.start, event.end)
+    };
+    push_set_datetime(&mut set, "calendar:Start", "Start", wire_start);
+    push_set_datetime(&mut set, "calendar:End", "End", wire_end);
     push_set_bool(
         &mut set,
         "calendar:IsAllDayEvent",
@@ -1779,6 +1806,36 @@ fn first_relative_reminder_minutes(reminders: &[Reminder]) -> Option<i64> {
 /// is what Outlook itself sends, so we stay on the well-trodden path.
 fn format_ews_datetime(ts: DateTime<Utc>) -> String {
     ts.format("%Y-%m-%dT%H:%M:%SZ").to_string()
+}
+
+/// All-day boundary for the wire: UTC midnight of the LOCAL calendar day.
+/// Exchange normalises all-day Start/End to whole days in the request's
+/// timezone context (UTC for us) — writing the raw boundary instant (a
+/// local midnight, e.g. 22:00Z of the previous day for UTC+2) would pin
+/// the event to the WRONG day. The internal end is already exclusive
+/// (next day's midnight), which is the whole-day span EWS expects.
+fn ews_all_day_boundary(when: DateTime<Utc>) -> DateTime<Utc> {
+    let day = when.with_timezone(&Local).date_naive();
+    Utc.from_utc_datetime(&day.and_hms_opt(0, 0, 0).unwrap())
+}
+
+/// Re-anchor an all-day boundary read from EWS at LOCAL midnight of the
+/// intended calendar day — the app-internal all-day convention.
+///
+/// EWS hands back a plain instant that is midnight of the intended day
+/// in SOME zone (the mailbox timezone, or UTC for boundaries we wrote
+/// ourselves) without saying which. Sampling 12 hours INTO the day lands
+/// inside the intended day in UTC for any zone offset in (−12h, +12h],
+/// so the sample's UTC date recovers the day without guessing the zone.
+/// DST edge: fall forward when the local zone skips midnight.
+fn all_day_local_anchor(when: DateTime<Utc>) -> DateTime<Utc> {
+    let day = (when + chrono::Duration::hours(12)).date_naive();
+    let midnight = day.and_hms_opt(0, 0, 0).unwrap();
+    Local
+        .from_local_datetime(&midnight)
+        .earliest()
+        .map(|l| l.with_timezone(&Utc))
+        .unwrap_or(when)
 }
 
 fn push_set_string(out: &mut String, field_uri: &str, tag: &str, value: &str) {
@@ -3382,6 +3439,80 @@ mod tests {
         ev.all_day = true;
         let xml = new_event_to_calendar_item_xml(&ev).unwrap();
         assert!(xml.contains("<t:IsAllDayEvent>true</t:IsAllDayEvent>"));
+    }
+
+    /// All-day instants the way the frontend produces them: LOCAL
+    /// midnights (end exclusive), expressed in UTC. Keeps the asserted
+    /// wire dates timezone-agnostic.
+    fn local_midnight(y: i32, m: u32, d: u32) -> DateTime<Utc> {
+        Local
+            .from_local_datetime(
+                &chrono::NaiveDate::from_ymd_opt(y, m, d)
+                    .unwrap()
+                    .and_hms_opt(0, 0, 0)
+                    .unwrap(),
+            )
+            .earliest()
+            .unwrap()
+            .with_timezone(&Utc)
+    }
+
+    /// The off-by-one guard: a two-day all-day event (June 10–11, end
+    /// exclusive June 12) must hit the wire pinned to UTC midnights of
+    /// the LOCAL days — not the raw boundary instants, which for a UTC+2
+    /// user serialise as 22:00Z of the previous day and make Exchange
+    /// pin the event to the wrong day.
+    #[test]
+    fn all_day_write_pins_local_days_to_utc_midnight() {
+        let mut ev = new_event_min("Conference");
+        ev.all_day = true;
+        ev.start = local_midnight(2026, 6, 10);
+        ev.end = local_midnight(2026, 6, 12);
+        let xml = new_event_to_calendar_item_xml(&ev).unwrap();
+        assert!(
+            xml.contains("<t:Start>2026-06-10T00:00:00Z</t:Start>"),
+            "{xml}"
+        );
+        assert!(xml.contains("<t:End>2026-06-12T00:00:00Z</t:End>"), "{xml}");
+    }
+
+    /// Read side: all-day boundaries re-anchor at LOCAL midnight, so the
+    /// instant renders on the same LOCAL calendar day Exchange pinned.
+    #[test]
+    fn all_day_read_anchors_local_midnight() {
+        let item = ParsedItem {
+            item_id: "IID".into(),
+            subject: "Conference".into(),
+            start: Some("2026-06-10T00:00:00Z".parse().unwrap()),
+            end: Some("2026-06-12T00:00:00Z".parse().unwrap()),
+            is_all_day: true,
+            ..Default::default()
+        };
+        let ev = to_event(item, "FID").unwrap();
+        assert!(ev.all_day);
+        // Round-trip stability: writing the read event reproduces the
+        // same wire days (no drift on repeated edits).
+        let xml = new_event_to_calendar_item_xml(&NewEvent {
+            title: ev.title.clone(),
+            description: None,
+            location: None,
+            start: ev.start,
+            end: ev.end,
+            all_day: true,
+            recurrence: None,
+            color_label: None,
+            color_hex: None,
+            reminders: Vec::new(),
+            sound: None,
+            attendees: Vec::new(),
+            send_invitations: false,
+        })
+        .unwrap();
+        assert!(
+            xml.contains("<t:Start>2026-06-10T00:00:00Z</t:Start>"),
+            "{xml}"
+        );
+        assert!(xml.contains("<t:End>2026-06-12T00:00:00Z</t:End>"), "{xml}");
     }
 
     #[test]

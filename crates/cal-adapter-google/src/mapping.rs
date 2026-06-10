@@ -14,7 +14,7 @@ use cal_core::{
     AttendeeResponse, AttendeeStatus, Calendar, ColorSource, ContainerColor, Event,
     EventRecurrence, NewEvent, Reminder, ReminderKind,
 };
-use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
+use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{GoogleError, GoogleResult};
@@ -212,15 +212,23 @@ pub struct EventDateTime {
 
 impl EventDateTime {
     /// Returns `(utc_datetime, is_all_day)`. All-day dates anchor at
-    /// 00:00 UTC, mirroring the iCal adapter's convention so the
-    /// frontend's multi-day handling works the same way.
+    /// LOCAL midnight (expressed as a UTC instant) — the app-internal
+    /// all-day convention shared with the CalDAV adapter, so the views'
+    /// local-day bucketing and the write-side round-trip line up in any
+    /// timezone. DST edge: a zone can skip midnight on a transition
+    /// day; fall forward to the first valid local time then.
     fn resolve(&self) -> GoogleResult<(DateTime<Utc>, bool)> {
         if let Some(dt) = self.date_time {
             return Ok((dt, false));
         }
         if let Some(d) = self.date {
             let midnight = d.and_time(NaiveTime::from_hms_opt(0, 0, 0).unwrap());
-            return Ok((Utc.from_utc_datetime(&midnight), true));
+            let anchored = Local
+                .from_local_datetime(&midnight)
+                .earliest()
+                .map(|l| l.with_timezone(&Utc))
+                .unwrap_or_else(|| Utc.from_utc_datetime(&midnight));
+            return Ok((anchored, true));
         }
         Err(GoogleError::Protocol(
             "event start/end has neither dateTime nor date".into(),
@@ -489,7 +497,12 @@ fn range_to_write(when: DateTime<Utc>, all_day: bool) -> EventDateTimeWrite {
     if all_day {
         EventDateTimeWrite {
             date_time: None,
-            date: Some(when.date_naive()),
+            // The boundary instant is a LOCAL midnight expressed in UTC;
+            // `date_naive()` on it would emit the UTC day — one early for
+            // users east of UTC. Read the day off the local clock. The
+            // internal end is already exclusive, matching Google's
+            // exclusive `end.date`.
+            date: Some(when.with_timezone(&Local).date_naive()),
             time_zone: "Etc/UTC".into(),
         }
     } else {
@@ -642,7 +655,53 @@ mod tests {
         let entry: EventEntry = serde_json::from_str(raw).unwrap();
         let ev = map_event(entry, "primary").unwrap().unwrap();
         assert!(ev.all_day);
-        assert_eq!(ev.start, Utc.with_ymd_and_hms(2026, 7, 4, 0, 0, 0).unwrap());
+        // All-day boundaries anchor at LOCAL midnight of the wire date —
+        // assert via the same Local construction so the test holds in any
+        // timezone it runs in, and check the instant lands on the right
+        // LOCAL calendar day.
+        assert_eq!(
+            ev.start,
+            Local
+                .from_local_datetime(
+                    &NaiveDate::from_ymd_opt(2026, 7, 4)
+                        .unwrap()
+                        .and_hms_opt(0, 0, 0)
+                        .unwrap()
+                )
+                .earliest()
+                .unwrap()
+                .with_timezone(&Utc),
+        );
+        assert_eq!(
+            ev.start.with_timezone(&Local).date_naive(),
+            NaiveDate::from_ymd_opt(2026, 7, 4).unwrap(),
+        );
+    }
+
+    /// Wire round-trip for the all-day boundaries: the dates Google sent
+    /// must serialise back unchanged (write derives the LOCAL day of the
+    /// local-midnight instants the read anchored). Guards the off-by-one
+    /// the CalDAV adapter had for users east of UTC.
+    #[test]
+    fn all_day_dates_round_trip_through_write() {
+        let raw = r#"{
+            "id": "ev-conf",
+            "summary": "Conference",
+            "start": { "date": "2026-06-10" },
+            "end":   { "date": "2026-06-12" }
+        }"#;
+        let entry: EventEntry = serde_json::from_str(raw).unwrap();
+        let ev = map_event(entry, "primary").unwrap().unwrap();
+        let write = event_to_body(&ev);
+        assert_eq!(
+            write.start.date,
+            Some(NaiveDate::from_ymd_opt(2026, 6, 10).unwrap()),
+        );
+        assert_eq!(
+            write.end.date,
+            Some(NaiveDate::from_ymd_opt(2026, 6, 12).unwrap()),
+        );
+        assert!(write.start.date_time.is_none());
     }
 
     #[test]
@@ -758,12 +817,27 @@ mod tests {
 
     #[test]
     fn new_event_to_body_all_day_sends_date_not_datetime() {
+        // All-day instants the way the frontend produces them: LOCAL
+        // midnights (end exclusive), expressed in UTC — so the asserted
+        // wire dates hold in any timezone the test runs in.
+        let local_midnight = |y: i32, m: u32, d: u32| {
+            Local
+                .from_local_datetime(
+                    &NaiveDate::from_ymd_opt(y, m, d)
+                        .unwrap()
+                        .and_hms_opt(0, 0, 0)
+                        .unwrap(),
+                )
+                .earliest()
+                .unwrap()
+                .with_timezone(&Utc)
+        };
         let new = NewEvent {
             title: "Urlaub".into(),
             description: None,
             location: None,
-            start: Utc.with_ymd_and_hms(2026, 7, 4, 0, 0, 0).unwrap(),
-            end: Utc.with_ymd_and_hms(2026, 7, 19, 0, 0, 0).unwrap(),
+            start: local_midnight(2026, 7, 4),
+            end: local_midnight(2026, 7, 19),
             all_day: true,
             recurrence: None,
             color_label: None,

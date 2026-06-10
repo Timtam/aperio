@@ -18,7 +18,7 @@ use cal_core::{
     AttendeeResponse, AttendeeStatus, Calendar, ColorSource, ContainerColor, Event,
     EventRecurrence, NewEvent, Reminder, ReminderKind,
 };
-use chrono::{DateTime, Datelike, NaiveDate, TimeZone, Utc};
+use chrono::{DateTime, Datelike, Local, NaiveDate, NaiveTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{GraphError, GraphResult};
@@ -224,6 +224,28 @@ impl GraphDateTime {
             })
             .map(|local| local.with_timezone(&Utc))
     }
+
+    /// All-day boundary: the calendar DAY named in the wire string,
+    /// anchored at LOCAL midnight (the app-internal all-day convention).
+    /// For all-day events the date component IS the intended day — Graph
+    /// pins the boundaries to midnight of that day in whatever zone the
+    /// event carries — so we read the date verbatim instead of converting
+    /// the instant (which could slip a day across timezones). DST edge:
+    /// fall forward to the first valid local time when midnight is
+    /// skipped.
+    pub(crate) fn to_all_day_boundary(&self) -> GraphResult<DateTime<Utc>> {
+        let trimmed = trim_fractional_seconds(&self.date_time);
+        let naive = chrono::NaiveDateTime::parse_from_str(&trimmed, "%Y-%m-%dT%H:%M:%S")
+            .map_err(|e| GraphError::Protocol(format!("graph naive datetime: {e}")))?;
+        let midnight = naive
+            .date()
+            .and_time(NaiveTime::from_hms_opt(0, 0, 0).unwrap());
+        Ok(Local
+            .from_local_datetime(&midnight)
+            .earliest()
+            .map(|l| l.with_timezone(&Utc))
+            .unwrap_or_else(|| Utc.from_utc_datetime(&midnight)))
+    }
 }
 
 fn trim_fractional_seconds(raw: &str) -> String {
@@ -286,8 +308,17 @@ pub fn map_event(entry: EventEntry, calendar_id: &str) -> GraphResult<Option<Eve
     if entry.is_cancelled {
         return Ok(None);
     }
-    let start = entry.start.to_utc()?;
-    let end = entry.end.to_utc()?;
+    // All-day boundaries carry the intended calendar day in the wire
+    // string — anchor those at LOCAL midnight (the app-internal all-day
+    // convention) instead of converting the instant.
+    let (start, end) = if entry.is_all_day {
+        (
+            entry.start.to_all_day_boundary()?,
+            entry.end.to_all_day_boundary()?,
+        )
+    } else {
+        (entry.start.to_utc()?, entry.end.to_utc()?)
+    };
     let recurrence = match entry.recurrence {
         Some(r) => recurrence_to_rrule(&r).map(|rrule| EventRecurrence {
             rrule,
@@ -732,10 +763,17 @@ pub fn event_to_body(ev: &Event) -> GraphResult<EventWriteBody> {
 
 fn write_datetime(when: DateTime<Utc>, all_day: bool) -> GraphDateTimeWrite {
     if all_day {
-        // For all-day events Graph still expects a `dateTime`
-        // (not a `date`) but at 00:00:00 in UTC.
+        // For all-day events Graph still expects a `dateTime` (not a
+        // `date`) at 00:00:00 in the given zone. The DAY must be the
+        // user's LOCAL calendar day — formatting the UTC instant would
+        // emit the UTC day, one early for users east of UTC (the
+        // boundary instants are local midnights expressed in UTC). The
+        // internal end is already exclusive, as Graph requires.
         GraphDateTimeWrite {
-            date_time: when.format("%Y-%m-%dT00:00:00").to_string(),
+            date_time: when
+                .with_timezone(&Local)
+                .format("%Y-%m-%dT00:00:00")
+                .to_string(),
             time_zone: "UTC".into(),
         }
     } else {
@@ -1343,6 +1381,51 @@ fn day_name_to_weekday(s: &str) -> Option<cal_core::Weekday> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// All-day instants the way the frontend produces them: LOCAL
+    /// midnights (end exclusive), expressed in UTC. Keeps the asserted
+    /// wire dates timezone-agnostic.
+    fn local_midnight(y: i32, m: u32, d: u32) -> DateTime<Utc> {
+        Local
+            .from_local_datetime(
+                &NaiveDate::from_ymd_opt(y, m, d)
+                    .unwrap()
+                    .and_hms_opt(0, 0, 0)
+                    .unwrap(),
+            )
+            .earliest()
+            .unwrap()
+            .with_timezone(&Utc)
+    }
+
+    /// The off-by-one guard: all-day boundaries serialise as midnight of
+    /// the LOCAL calendar day — formatting the raw UTC instant would emit
+    /// the previous day for users east of UTC.
+    #[test]
+    fn write_datetime_all_day_uses_local_day_at_midnight() {
+        let w = write_datetime(local_midnight(2026, 6, 10), true);
+        assert_eq!(w.date_time, "2026-06-10T00:00:00");
+        assert_eq!(w.time_zone, "UTC");
+    }
+
+    /// Read → write round-trip for all-day boundaries: the day named in
+    /// Graph's wire string survives unchanged in any timezone.
+    #[test]
+    fn all_day_boundary_round_trips_through_write() {
+        let wire = GraphDateTime {
+            date_time: "2026-06-10T00:00:00.0000000".into(),
+            time_zone: "UTC".into(),
+        };
+        let instant = wire.to_all_day_boundary().unwrap();
+        // The instant lands on the named LOCAL calendar day…
+        assert_eq!(
+            instant.with_timezone(&Local).date_naive(),
+            NaiveDate::from_ymd_opt(2026, 6, 10).unwrap(),
+        );
+        // …and writing it back emits the same wire day.
+        let back = write_datetime(instant, true);
+        assert_eq!(back.date_time, "2026-06-10T00:00:00");
+    }
 
     #[test]
     fn calendar_can_edit_false_maps_to_read_only() {
