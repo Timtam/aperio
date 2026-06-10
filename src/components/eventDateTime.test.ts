@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  allDayFormEndDate,
+  allDayWireEnd,
   applyDateTimeChange,
   combine,
   dateInput,
@@ -158,5 +160,41 @@ describe('combine / toIso round-trips', () => {
   it('returns null on a malformed date', () => {
     expect(combine('not-a-date', '14:30', false)).toBeNull();
     expect(toIso('', '14:30', false)).toBeNull();
+  });
+});
+
+describe('all-day wire end (exclusive) round-trip', () => {
+  it('allDayWireEnd is local midnight of the day AFTER the last day', () => {
+    // The wire instant must equal local midnight of June 12 — one past the
+    // form's (inclusive) end input June 11. Compare against a locally
+    // constructed Date so the test passes in any timezone.
+    const wire = allDayWireEnd('2026-06-11');
+    expect(wire).toBe(new Date(2026, 5, 12, 0, 0, 0, 0).toISOString());
+  });
+
+  it('returns null on a malformed end date', () => {
+    expect(allDayWireEnd('')).toBeNull();
+    expect(allDayWireEnd('garbage')).toBeNull();
+  });
+
+  it('allDayFormEndDate maps the exclusive end back to the last day', () => {
+    // 10.–11. June (two days): start June 10, exclusive end June 12.
+    const start = new Date(2026, 5, 10);
+    const end = new Date(2026, 5, 12);
+    expect(allDayFormEndDate(start, end)).toBe('2026-06-11');
+  });
+
+  it('form ↔ wire round-trips for a two-day event', () => {
+    const wireEnd = allDayWireEnd('2026-06-11')!;
+    expect(allDayFormEndDate(new Date(2026, 5, 10), new Date(wireEnd))).toBe(
+      '2026-06-11',
+    );
+  });
+
+  it('clamps legacy inclusive rows (end == start) to a single day', () => {
+    // Rows written before the exclusive convention have end == start;
+    // end − 1 would fall BEFORE the start, so the form clamps to start.
+    const day = new Date(2026, 5, 10);
+    expect(allDayFormEndDate(day, day)).toBe('2026-06-10');
   });
 });

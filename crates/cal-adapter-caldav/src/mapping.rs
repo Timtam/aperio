@@ -12,7 +12,7 @@
 //!   - LOCATION    → Event.location
 //!   - DTSTART     → Event.start (UTC)
 //!   - DTEND       → Event.end   (UTC; falls back to DTSTART when absent)
-//!   - DTSTART VALUE=DATE → all_day = true, start of day in UTC
+//!   - DTSTART VALUE=DATE → all_day = true, LOCAL midnight as a UTC instant
 //!   - RRULE       → EventRecurrence.rrule (verbatim)
 //!   - EXDATE      → EventRecurrence.exceptions
 //!   - CREATED     → Event.created_at (fallback: DTSTAMP, then now)
@@ -28,7 +28,7 @@
 use cal_core::{
     AttendeeResponse, AttendeeStatus, Event, EventRecurrence, NewEvent, Reminder, ReminderKind,
 };
-use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
+use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use icalendar::{Calendar as ICalendar, Component, DatePerhapsTime, EventLike};
 
 use crate::error::{CaldavError, CaldavResult};
@@ -385,9 +385,20 @@ fn datetime_to_utc(value: DatePerhapsTime) -> (DateTime<Utc>, bool) {
     }
 }
 
+/// Anchor a DATE value (all-day boundary) at LOCAL midnight, expressed
+/// as a UTC instant — the app-internal all-day convention. Anchoring at
+/// UTC midnight instead would shift the rendered day for any user west
+/// of UTC (June 10 00:00 UTC is June 9 in the evening in the Americas),
+/// and would break the write-side round-trip (which reads the local day
+/// back off the instant). DST edge: a zone can skip midnight on a
+/// transition day; fall forward to the first valid local time then.
 fn naive_date_to_utc(d: NaiveDate) -> DateTime<Utc> {
     let midnight = NaiveDateTime::new(d, NaiveTime::from_hms_opt(0, 0, 0).unwrap());
-    Utc.from_utc_datetime(&midnight)
+    Local
+        .from_local_datetime(&midnight)
+        .earliest()
+        .map(|l| l.with_timezone(&Utc))
+        .unwrap_or_else(|| Utc.from_utc_datetime(&midnight))
 }
 
 fn resolve_with_tzid(naive: NaiveDateTime, tzid: &str) -> Option<DateTime<Utc>> {
@@ -504,12 +515,17 @@ fn apply_common(
         ical_ev.location(loc);
     }
     if event.all_day {
-        ical_ev.starts(event.start.date_naive());
+        // DATE values are CALENDAR days. The internal instants are local
+        // midnights expressed in UTC, so the day must be read off the
+        // LOCAL clock — `date_naive()` on the UTC instant would emit the
+        // UTC day, which for a user east of UTC is the day BEFORE
+        // (June 10 00:00 +02:00 is June 9 22:00 UTC → "June 9").
+        ical_ev.starts(event.start.with_timezone(&Local).date_naive());
         // For all-day events DTEND is exclusive — RFC 5545 §3.6.1.
-        // Aperio stores end as the start-of-next-day already, so
-        // emitting `event.end.date_naive()` is exactly the right
-        // exclusive boundary.
-        ical_ev.ends(event.end.date_naive());
+        // Aperio stores end as the local start-of-next-day already, so
+        // the local day of `event.end` is exactly the right exclusive
+        // boundary.
+        ical_ev.ends(event.end.with_timezone(&Local).date_naive());
     } else {
         ical_ev.starts(event.start);
         ical_ev.ends(event.end);
@@ -805,12 +821,20 @@ END:VCALENDAR\r
         let events = parse_calendar_data(body, "cal-1").unwrap();
         let ev = &events[0];
         assert!(ev.all_day);
-        assert_eq!(
-            ev.start,
-            Utc.with_ymd_and_hms(2026, 5, 20, 0, 0, 0).unwrap()
-        );
+        // DATE values anchor at LOCAL midnight (the app-internal all-day
+        // convention) — compare against the same Local construction so the
+        // assertion holds in any timezone the test runs in.
+        assert_eq!(ev.start, local_midnight_utc(2026, 5, 20));
         // Missing DTEND on an all-day event: end of day.
-        assert_eq!(ev.end, Utc.with_ymd_and_hms(2026, 5, 21, 0, 0, 0).unwrap());
+        assert_eq!(
+            ev.end,
+            local_midnight_utc(2026, 5, 20) + chrono::Duration::days(1)
+        );
+        // The instant renders on the right LOCAL calendar day.
+        assert_eq!(
+            ev.start.with_timezone(&Local).date_naive(),
+            NaiveDate::from_ymd_opt(2026, 5, 20).unwrap(),
+        );
     }
 
     #[test]
@@ -876,14 +900,24 @@ END:VCALENDAR\r
         assert_eq!(rec.exceptions.len(), 1);
     }
 
+    /// All-day instants the way the frontend produces them: LOCAL
+    /// midnight of the calendar day, expressed in UTC. Tests built on
+    /// this stay correct in whatever timezone they run in.
+    fn local_midnight_utc(y: i32, m: u32, d: u32) -> DateTime<Utc> {
+        let date = NaiveDate::from_ymd_opt(y, m, d).unwrap();
+        naive_date_to_utc(date)
+    }
+
     #[test]
     fn write_all_day_uses_value_date() {
         let event = NewEvent {
             title: "Birthday".into(),
             description: None,
             location: None,
-            start: Utc.with_ymd_and_hms(2026, 5, 20, 0, 0, 0).unwrap(),
-            end: Utc.with_ymd_and_hms(2026, 5, 21, 0, 0, 0).unwrap(),
+            // The frontend sends local midnights; end is EXCLUSIVE
+            // (single-day event covering May 20 → end May 21).
+            start: local_midnight_utc(2026, 5, 20),
+            end: local_midnight_utc(2026, 5, 21),
             all_day: true,
             recurrence: None,
             color_label: None,
@@ -897,6 +931,66 @@ END:VCALENDAR\r
         assert!(
             body.contains("DTSTART;VALUE=DATE:20260520"),
             "expected VALUE=DATE DTSTART, got: {body}",
+        );
+        assert!(
+            body.contains("DTEND;VALUE=DATE:20260521"),
+            "expected exclusive VALUE=DATE DTEND, got: {body}",
+        );
+    }
+
+    /// The reported iCloud bug: a two-day all-day event (June 10–11,
+    /// created at local midnights with an exclusive end of June 12) must
+    /// hit the wire as DTSTART June 10 / DTEND June 12 — NOT shifted to
+    /// the UTC day (June 9 for a UTC+2 user), and NOT one day short.
+    #[test]
+    fn write_two_day_all_day_keeps_local_days_and_exclusive_end() {
+        let event = NewEvent {
+            title: "Conference".into(),
+            description: None,
+            location: None,
+            start: local_midnight_utc(2026, 6, 10),
+            end: local_midnight_utc(2026, 6, 12),
+            all_day: true,
+            recurrence: None,
+            color_label: None,
+            color_hex: None,
+            reminders: Vec::new(),
+            sound: None,
+            attendees: Vec::new(),
+            send_invitations: false,
+        };
+        let body = new_event_to_ical("conf-uid", &event, None);
+        assert!(body.contains("DTSTART;VALUE=DATE:20260610"), "{body}");
+        assert!(body.contains("DTEND;VALUE=DATE:20260612"), "{body}");
+    }
+
+    /// Server → Aperio → server round-trip: DATE boundaries read from a
+    /// server body must serialise back to the SAME dates, regardless of
+    /// the machine's timezone.
+    #[test]
+    fn all_day_date_boundaries_round_trip() {
+        let body = "BEGIN:VCALENDAR\r
+VERSION:2.0\r
+PRODID:-//test//EN\r
+BEGIN:VEVENT\r
+UID:conf@aperio\r
+SUMMARY:Conference\r
+DTSTART;VALUE=DATE:20260610\r
+DTEND;VALUE=DATE:20260612\r
+END:VEVENT\r
+END:VCALENDAR\r
+";
+        let events = parse_calendar_data(body, "cal-1").unwrap();
+        let ev = &events[0];
+        assert!(ev.all_day);
+        let rewritten = event_to_ical(ev, None);
+        assert!(
+            rewritten.contains("DTSTART;VALUE=DATE:20260610"),
+            "{rewritten}"
+        );
+        assert!(
+            rewritten.contains("DTEND;VALUE=DATE:20260612"),
+            "{rewritten}"
         );
     }
 

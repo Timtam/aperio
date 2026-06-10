@@ -84,6 +84,36 @@ export function toIso(
   return d ? d.toISOString() : null;
 }
 
+/** Wire end for an ALL-DAY event from the form's (inclusive) end-date
+ *  input: local midnight of the day AFTER the last day, as ISO 8601.
+ *
+ *  The app-internal all-day convention is END-EXCLUSIVE — the views walk
+ *  `[start, end)` (see `daysCoveredKeys`) and every provider adapter
+ *  serialises the end as the exclusive boundary RFC 5545 / the Google &
+ *  Graph APIs expect. The form's "Ende" input is the last day the user
+ *  means the event to cover, so the wire value is that day + 1. */
+export function allDayWireEnd(date: string): string | null {
+  const d = combine(date, '', true);
+  if (!d) return null;
+  d.setDate(d.getDate() + 1);
+  return d.toISOString();
+}
+
+/** Inverse of {@link allDayWireEnd} for hydrating the form from a stored
+ *  event: the (exclusive) end instant maps back to the LAST covered day
+ *  (end − 1 day, in local time). Clamped to the start's day so legacy
+ *  rows from the old inclusive convention (end == start) still hydrate
+ *  to a valid single-day range instead of ending before they start. */
+export function allDayFormEndDate(start: Date, end: Date): string {
+  const lastDay = new Date(end.getFullYear(), end.getMonth(), end.getDate() - 1);
+  const startDay = new Date(
+    start.getFullYear(),
+    start.getMonth(),
+    start.getDate(),
+  );
+  return dateInput(lastDay.getTime() < startDay.getTime() ? startDay : lastDay);
+}
+
 /** Parse the form's `YYYY-MM-DD` start string into a local-midnight Date
  *  for the recurrence picker. Falls back to today on an empty/garbled
  *  value. */

@@ -31,6 +31,8 @@ import { useCalendarDefaultReminders } from '../state/useCalendarDefaultReminder
 import { AttendeePicker } from './AttendeePicker';
 import { ColorLabelSelect } from './ColorLabelSelect';
 import {
+  allDayFormEndDate,
+  allDayWireEnd,
   applyDateTimeChange,
   dateInput,
   defaultNewEventTimes,
@@ -303,7 +305,11 @@ export function EventDialog({
   // than failing the dialog.
   const checkAvailability = useCallback(async () => {
     const start = toIso(form.startDate, form.startTime, form.allDay);
-    const end = toIso(form.endDate, form.endTime, form.allDay);
+    // All-day wire end is exclusive (last day + 1) so the free/busy
+    // window actually covers the event's final day.
+    const end = form.allDay
+      ? allDayWireEnd(form.endDate)
+      : toIso(form.endDate, form.endTime, false);
     if (!start || !end) {
       setAvailabilityError(t('dialogs.event.dateInvalid'));
       return;
@@ -361,7 +367,12 @@ export function EventDialog({
       }
 
       const start = toIso(form.startDate, form.startTime, form.allDay);
-      const end = toIso(form.endDate, form.endTime, form.allDay);
+      // All-day events go on the wire with an EXCLUSIVE end (last day + 1,
+      // local midnight) — the convention the views and every provider
+      // adapter assume. The form's end-date input stays inclusive.
+      const end = form.allDay
+        ? allDayWireEnd(form.endDate)
+        : toIso(form.endDate, form.endTime, false);
       if (!start || !end) {
         setError(t('dialogs.event.dateInvalid'));
         return;
@@ -967,7 +978,12 @@ function buildInitialState(
       calendarId: event.calendar_id,
       startDate: dateInput(start),
       startTime: timeInput(start),
-      endDate: dateInput(end),
+      // All-day ends are stored EXCLUSIVE (last day + 1); the form's
+      // end-date input shows the last covered day. Legacy inclusive
+      // rows (end == start) clamp to a valid single-day range.
+      endDate: event.all_day
+        ? allDayFormEndDate(start, end)
+        : dateInput(end),
       endTime: timeInput(end),
       allDay: event.all_day,
       location: event.location ?? '',

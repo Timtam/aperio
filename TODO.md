@@ -112,6 +112,16 @@ Off-Screen-Positionen (z. B. getrennter Zweitmonitor).
 - [ ] Move/Copy-Prompts (Subtasks mitnehmen / Recurrence-Instanz vs. Regel / Reminder-Kompatibilität)
 - [ ] `role="group"` + `aria-label` an Subtask-Eltern (a11y)
 
+### C3 · All-Day-Datumsbehandlung in Google / Graph / EWS prüfen
+Der iCloud-Ganztägig-Bug (UTC-Kalendertag statt lokalem → −1 Tag für UTC+-Nutzer)
+ist im CalDAV-Adapter gefixt; das Frontend sendet seither ein **exklusives**
+All-Day-Ende (letzter Tag + 1, lokale Mitternacht). Die Schwester-Adapter nutzen
+dieselben Muster und sind ungeprüft:
+- [ ] Google: `mapping.rs` schreibt `date: when.date_naive()` (UTC-Tag — gleicher Bug-Verdacht; Lesepfad ebenso prüfen: DATE → lokale Mitternacht?)
+- [ ] Microsoft Graph: `write_datetime(new.start/end, all_day)` + Lesepfad prüfen
+- [ ] EWS: `IsAllDayEvent`-Schreib-/Lesepfad prüfen
+- Referenz-Konvention: intern = `[lokale Mitternacht Start, lokale Mitternacht Tag-nach-Ende)`; Tests TZ-agnostisch über `Local` konstruieren (siehe `cal-adapter-caldav/src/mapping.rs`).
+
 ---
 
 ## ⚪ D. Geplant / Optional (DESIGN.md §25)
