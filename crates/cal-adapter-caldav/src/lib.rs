@@ -26,6 +26,7 @@ pub mod discovery;
 pub mod error;
 pub mod events;
 pub mod freebusy;
+mod http;
 pub mod mapping;
 pub mod sync;
 pub mod tasks;
@@ -119,6 +120,13 @@ impl CaldavAdapter {
     /// be left waiting on a typo'd URL for the full system default.
     pub fn new(credentials: Credentials, connect_timeout: Option<Duration>) -> CaldavResult<Self> {
         let connect = connect_timeout.unwrap_or(Duration::from_secs(10));
+        // Both clients drop idle pooled connections after 25 s — well below
+        // reqwest's 90 s default. iCloud's CalDAV hosts kill idle keep-alive
+        // sockets much earlier than that, and a request riding such a dead
+        // socket fails with "error sending request" before any HTTP response
+        // (seen as a spurious network error on the first write after the app
+        // sat idle). See `http::SendRetrying` for the second line of defense.
+        let pool_idle = Duration::from_secs(25);
         // Production client: follow redirects up to 5 hops. CalDAV
         // PROPFIND / PROPPATCH / REPORT / PUT / DELETE on a moved
         // collection should land on the new URL transparently
@@ -127,6 +135,7 @@ impl CaldavAdapter {
             .redirect(reqwest::redirect::Policy::limited(5))
             .connect_timeout(connect)
             .timeout(Duration::from_secs(30))
+            .pool_idle_timeout(pool_idle)
             .build()?;
         // Discovery client: never auto-follow. The well-known
         // discovery step needs to see the 301/302 directly to read
@@ -137,6 +146,7 @@ impl CaldavAdapter {
             .redirect(reqwest::redirect::Policy::none())
             .connect_timeout(connect)
             .timeout(Duration::from_secs(30))
+            .pool_idle_timeout(pool_idle)
             .build()?;
         Ok(Self {
             credentials,

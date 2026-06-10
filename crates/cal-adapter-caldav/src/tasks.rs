@@ -35,6 +35,7 @@ use crate::auth::auth_header;
 use crate::calendars;
 use crate::config::Credentials;
 use crate::error::{CaldavError, CaldavResult};
+use crate::http::SendRetrying;
 use crate::xml::{parse_multistatus, ResponseEntry};
 
 const TASK_LIST_PROPFIND_BODY: &str = r#"<?xml version="1.0" encoding="utf-8"?>
@@ -160,7 +161,7 @@ pub async fn create_task_list(
         .request(method, collection_url.clone())
         .headers(headers)
         .body(body)
-        .send()
+        .send_retrying()
         .await?;
     let status = response.status();
     if !status.is_success() {
@@ -198,7 +199,7 @@ pub async fn delete_task_list(
     let response = client
         .delete(list_url.clone())
         .headers(headers)
-        .send()
+        .send_retrying()
         .await?;
     let status = response.status();
     if !status.is_success() {
@@ -237,7 +238,7 @@ pub async fn get_tasks(
         .request(method, list_url.clone())
         .headers(headers)
         .body(VTODO_QUERY_BODY)
-        .send()
+        .send_retrying()
         .await?;
     let status = response.status();
     if status != StatusCode::from_u16(207).unwrap() && !status.is_success() {
@@ -328,7 +329,7 @@ pub async fn create_task(
         .put(resource.clone())
         .headers(headers)
         .body(body)
-        .send()
+        .send_retrying()
         .await?;
     let etag = expect_write(&response)?;
     let now = Utc::now();
@@ -385,7 +386,7 @@ pub async fn update_task(
         .put(resource.clone())
         .headers(headers)
         .body(body)
-        .send()
+        .send_retrying()
         .await?;
     let new_etag = expect_write(&response)?;
     Ok(Task {
@@ -417,7 +418,11 @@ pub async fn delete_task(
         let value = HeaderValue::from_str(etag).map_err(|e| CaldavError::Config(e.to_string()))?;
         headers.insert(IF_MATCH, value);
     }
-    let response = client.delete(resource).headers(headers).send().await?;
+    let response = client
+        .delete(resource)
+        .headers(headers)
+        .send_retrying()
+        .await?;
     let status = response.status();
     if status == StatusCode::NOT_FOUND {
         return Ok(crate::events::DeleteOutcome::NotFound);
@@ -676,7 +681,7 @@ async fn propfind(
         .request(method, url.clone())
         .headers(headers)
         .body(body)
-        .send()
+        .send_retrying()
         .await?;
     let status = response.status();
     if status != StatusCode::from_u16(207).unwrap() && !status.is_success() {

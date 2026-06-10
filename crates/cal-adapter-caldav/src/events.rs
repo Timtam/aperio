@@ -24,6 +24,7 @@ use uuid::Uuid;
 use crate::auth::auth_header;
 use crate::config::Credentials;
 use crate::error::{CaldavError, CaldavResult};
+use crate::http::{is_transient_send_error, SendRetrying};
 use crate::mapping::{
     decode_event_id, event_to_ical, new_event_to_ical, parse_calendar_data,
     parse_calendar_data_with_href,
@@ -56,7 +57,7 @@ pub async fn get_events(
         .request(method, calendar_url.clone())
         .headers(headers)
         .body(body)
-        .send()
+        .send_retrying()
         .await?;
     let status = response.status();
     if status != StatusCode::from_u16(207).unwrap() && !status.is_success() {
@@ -144,14 +145,29 @@ pub async fn create_event(
     );
     headers.insert(IF_NONE_MATCH, HeaderValue::from_static("*"));
 
-    let response = client
-        .put(resource.clone())
-        .headers(headers)
-        .body(body)
-        .send()
-        .await?;
-    expect_write_success(&response)?;
-    let etag = extract_etag(&response);
+    // Hand-rolled retry (instead of `send_retrying`) so the replay reuses
+    // the SAME freshly minted UID: if the first PUT secretly landed before
+    // the connection died, the replay answers 412 (`If-None-Match: *` on an
+    // existing resource) — and since nobody else can own this UUID, a 412
+    // *after a retry* simply means "our first attempt succeeded". That turns
+    // the worst-case duplicate into a clean success.
+    let request = client.put(resource.clone()).headers(headers).body(body);
+    let retry = request.try_clone();
+    let (response, retried) = match request.send().await {
+        Ok(response) => (response, false),
+        Err(err) if is_transient_send_error(&err) => match retry {
+            Some(builder) => (builder.send().await?, true),
+            None => return Err(err.into()),
+        },
+        Err(err) => return Err(err.into()),
+    };
+    let etag = if retried && response.status() == StatusCode::PRECONDITION_FAILED {
+        // First PUT landed; a 412 carries no ETag — the next read refreshes it.
+        None
+    } else {
+        expect_write_success(&response)?;
+        extract_etag(&response)
+    };
     let now = Utc::now();
 
     Ok(Event {
@@ -211,7 +227,7 @@ pub async fn update_event(
         .put(resource.clone())
         .headers(headers)
         .body(body)
-        .send()
+        .send_retrying()
         .await?;
     expect_write_success(&response)?;
     let new_etag = extract_etag(&response);
@@ -268,7 +284,7 @@ pub async fn delete_event(
     let response = client
         .delete(resource.clone())
         .headers(headers)
-        .send()
+        .send_retrying()
         .await?;
     let status = response.status();
     if status == StatusCode::NOT_FOUND {
@@ -314,7 +330,7 @@ pub async fn add_event_exdate(
     let response = client
         .get(resource.clone())
         .headers(get_headers)
-        .send()
+        .send_retrying()
         .await?;
     let status = response.status();
     if status == StatusCode::NOT_FOUND {
@@ -383,7 +399,7 @@ pub async fn add_event_exdate(
         .put(resource)
         .headers(put_headers)
         .body(serialised)
-        .send()
+        .send_retrying()
         .await?;
     expect_write_success(&put)?;
     Ok(())
@@ -430,7 +446,7 @@ pub async fn respond_to_event(
     let response = client
         .get(resource.clone())
         .headers(get_headers)
-        .send()
+        .send_retrying()
         .await?;
     let status_code = response.status();
     if !status_code.is_success() {
@@ -474,7 +490,7 @@ pub async fn respond_to_event(
         .put(resource)
         .headers(put_headers)
         .body(new_body)
-        .send()
+        .send_retrying()
         .await?;
     expect_write_success(&put)?;
     Ok(())
@@ -770,6 +786,62 @@ END:VCALENDAR</c:calendar-data>
         assert!(created.id.contains("@aperio"));
         assert_eq!(created.etag.as_deref(), Some("\"server-etag-1\""));
         assert_eq!(created.calendar_id, cal_url.to_string());
+    }
+
+    /// The iCloud stale-keep-alive shape: the first PUT's connection dies
+    /// before any response, the replay reuses the SAME UID, and the server
+    /// answers 412 (`If-None-Match: *` on the resource the first PUT
+    /// actually created). `create_event` must report success — not a
+    /// network error, and never a duplicate.
+    #[tokio::test]
+    async fn create_event_treats_412_after_connection_retry_as_success() {
+        use std::sync::{Arc, Mutex};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        fn request_path(buf: &[u8]) -> String {
+            let head = String::from_utf8_lossy(buf);
+            head.lines()
+                .next()
+                .and_then(|l| l.split_whitespace().nth(1))
+                .unwrap_or_default()
+                .to_string()
+        }
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let paths: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let paths_srv = Arc::clone(&paths);
+        tokio::spawn(async move {
+            // 1st connection: read the request, record its path, then die
+            // WITHOUT a response.
+            if let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = [0u8; 4096];
+                let _ = sock.read(&mut buf).await;
+                paths_srv.lock().unwrap().push(request_path(&buf));
+                drop(sock);
+            }
+            // 2nd connection: the replay. Record the path, answer 412.
+            if let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = [0u8; 4096];
+                let _ = sock.read(&mut buf).await;
+                paths_srv.lock().unwrap().push(request_path(&buf));
+                let _ = sock
+                    .write_all(b"HTTP/1.1 412 Precondition Failed\r\ncontent-length: 0\r\n\r\n")
+                    .await;
+                let _ = sock.shutdown().await;
+            }
+        });
+
+        let cal_url = Url::parse(&format!("{base}/calendars/alice/work/")).unwrap();
+        let created = create_event(&client(), &cal_url, sample_new_event(), &creds(&base), None)
+            .await
+            .expect("412 after a retried send means the first PUT landed");
+
+        assert!(created.id.contains("@aperio"));
+        assert!(created.etag.is_none(), "a 412 carries no ETag");
+        let seen = paths.lock().unwrap().clone();
+        assert_eq!(seen.len(), 2, "exactly one replay");
+        assert_eq!(seen[0], seen[1], "the replay must reuse the SAME UID");
     }
 
     #[tokio::test]

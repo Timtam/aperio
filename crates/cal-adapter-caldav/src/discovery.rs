@@ -28,6 +28,7 @@ use url::Url;
 use crate::auth::auth_header;
 use crate::config::Credentials;
 use crate::error::{CaldavError, CaldavResult};
+use crate::http::SendRetrying;
 use crate::xml::extract_first_nested_href;
 
 const PROPFIND: &str = "PROPFIND";
@@ -261,7 +262,7 @@ async fn probe_well_known(
     let response = match client
         .request(Method::GET, wk.clone())
         .headers(auth_header(credentials)?)
-        .send()
+        .send_retrying()
         .await
     {
         Ok(r) => r,
@@ -367,7 +368,7 @@ async fn propfind(
         .request(method, url.clone())
         .headers(headers)
         .body(body)
-        .send()
+        .send_retrying()
         .await?;
     Ok(resp)
 }

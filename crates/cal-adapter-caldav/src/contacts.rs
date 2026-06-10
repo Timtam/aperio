@@ -35,6 +35,7 @@ use uuid::Uuid;
 use crate::auth::auth_header;
 use crate::config::Credentials;
 use crate::error::{CaldavError, CaldavResult};
+use crate::http::SendRetrying;
 use crate::vcard::{build_vcard, parse_vcard, parse_vcard_photo, rebuild_vcard};
 use crate::xml::{parse_multistatus, ResponseEntry};
 
@@ -178,7 +179,7 @@ pub async fn create_contact(
         .put(resource.clone())
         .headers(headers)
         .body(body)
-        .send()
+        .send_retrying()
         .await?;
     let etag = expect_write(&response)?;
     let now = chrono::Utc::now();
@@ -268,7 +269,7 @@ pub async fn update_contact(
         .put(resource.clone())
         .headers(headers)
         .body(body)
-        .send()
+        .send_retrying()
         .await?;
     let new_etag = expect_write(&response)?;
     Ok(Contact {
@@ -292,7 +293,11 @@ async fn fetch_vcard_body(
         ACCEPT,
         HeaderValue::from_static("text/vcard, text/x-vcard, */*"),
     );
-    let response = client.get(resource.clone()).headers(headers).send().await?;
+    let response = client
+        .get(resource.clone())
+        .headers(headers)
+        .send_retrying()
+        .await?;
     let status = response.status();
     if !status.is_success() {
         let body = response.text().await.unwrap_or_default();
@@ -387,7 +392,7 @@ async fn read_etag_from_get(
     let response = client
         .request(Method::HEAD, resource.clone())
         .headers(headers)
-        .send()
+        .send_retrying()
         .await
         .ok()?;
     response
@@ -421,7 +426,7 @@ async fn put_vcard(
         .put(resource.clone())
         .headers(headers)
         .body(body.to_string())
-        .send()
+        .send_retrying()
         .await?;
     expect_write(&response)?;
     Ok(())
@@ -440,7 +445,11 @@ pub async fn delete_contact(
         let value = HeaderValue::from_str(etag).map_err(|e| CaldavError::Config(e.to_string()))?;
         headers.insert(IF_MATCH, value);
     }
-    let response = client.delete(resource).headers(headers).send().await?;
+    let response = client
+        .delete(resource)
+        .headers(headers)
+        .send_retrying()
+        .await?;
     let status = response.status();
     if !status.is_success() && status != StatusCode::NOT_FOUND {
         let body = response.text().await.unwrap_or_default();
@@ -479,7 +488,7 @@ async fn propfind(
         .request(method, url.clone())
         .headers(headers)
         .body(body)
-        .send()
+        .send_retrying()
         .await?;
     let status = response.status();
     if status != StatusCode::from_u16(207).unwrap() && !status.is_success() {

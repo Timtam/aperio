@@ -29,6 +29,7 @@ use url::Url;
 
 use crate::config::Credentials;
 use crate::error::{CaldavError, CaldavResult};
+use crate::http::SendRetrying;
 use crate::xml::{parse_multistatus, ResponseEntry};
 
 /// Parsed result of a `sync-collection` REPORT (also reused to pluck the
@@ -88,7 +89,7 @@ pub async fn read_sync_token(
         .request(method, collection_url.clone())
         .headers(headers)
         .body(BODY)
-        .send()
+        .send_retrying()
         .await?;
     let status = response.status();
     if status != StatusCode::from_u16(207).unwrap() && !status.is_success() {
@@ -129,7 +130,7 @@ pub async fn list_resource_hrefs(
         .request(method, collection_url.clone())
         .headers(headers)
         .body(BODY)
-        .send()
+        .send_retrying()
         .await?;
     let status = response.status();
     if status != StatusCode::from_u16(207).unwrap() && !status.is_success() {
@@ -229,7 +230,7 @@ async fn send_report(
         .request(method, url.clone())
         .headers(headers)
         .body(body)
-        .send()
+        .send_retrying()
         .await?;
     let status = response.status();
     if status != StatusCode::from_u16(207).unwrap() && !status.is_success() {

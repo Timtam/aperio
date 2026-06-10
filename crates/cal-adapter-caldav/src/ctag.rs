@@ -27,6 +27,7 @@ use url::Url;
 
 use crate::config::Credentials;
 use crate::error::{CaldavError, CaldavResult};
+use crate::http::SendRetrying;
 use crate::xml::parse_multistatus;
 
 const CTAG_PROPFIND_BODY: &str = r#"<?xml version="1.0" encoding="utf-8"?>
@@ -60,7 +61,7 @@ pub async fn read_ctag(
         .request(method, collection_url.clone())
         .headers(headers)
         .body(CTAG_PROPFIND_BODY)
-        .send()
+        .send_retrying()
         .await?;
     let status = response.status();
     if status != StatusCode::from_u16(207).unwrap() && !status.is_success() {

@@ -27,6 +27,7 @@ use url::Url;
 
 use crate::config::Credentials;
 use crate::error::{CaldavError, CaldavResult};
+use crate::http::SendRetrying;
 use crate::xml::{parse_multistatus, ResponseEntry};
 
 const CALENDAR_PROPFIND_BODY: &str = r#"<?xml version="1.0" encoding="utf-8"?>
@@ -82,7 +83,7 @@ async fn propfind_calendars(
         .request(method, url.clone())
         .headers(headers)
         .body(CALENDAR_PROPFIND_BODY)
-        .send()
+        .send_retrying()
         .await?;
     let status = response.status();
     if status != StatusCode::from_u16(207).unwrap() && !status.is_success() {
@@ -199,7 +200,7 @@ pub async fn proppatch_displayname(
         .request(method, collection_url.clone())
         .headers(headers)
         .body(body)
-        .send()
+        .send_retrying()
         .await?;
     let status = response.status();
     if status != StatusCode::from_u16(207).unwrap() && !status.is_success() {

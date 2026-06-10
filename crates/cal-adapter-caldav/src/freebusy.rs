@@ -37,6 +37,7 @@ use uuid::Uuid;
 use crate::auth::auth_header;
 use crate::config::Credentials;
 use crate::error::{CaldavError, CaldavResult};
+use crate::http::SendRetrying;
 use crate::xml::local_name_eq;
 
 /// Query the free/busy schedule of `emails` over `range` by POSTing an
@@ -81,7 +82,7 @@ pub async fn query_free_busy(
         .request(Method::POST, outbox_url.clone())
         .headers(headers)
         .body(body)
-        .send()
+        .send_retrying()
         .await?;
     let status = response.status();
     if status != StatusCode::from_u16(207).unwrap() && !status.is_success() {
