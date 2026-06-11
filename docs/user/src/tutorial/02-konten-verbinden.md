@@ -20,6 +20,12 @@ du Konten und legst bei Bedarf lokale Kalender an.
 | **Vikunja** | API-Token + Server-Adresse | nur Aufgaben |
 | **Todoist** | API-Token | nur Aufgaben |
 
+> **Google:** Aktuell brauchst du dafür einmalig **eigene
+> OAuth-Zugangsdaten** (Client-ID + Client-Secret) aus der Google Cloud
+> Console — Aperio bringt noch keine verifizierte Google-Registrierung mit.
+> Die ausführliche Schritt-für-Schritt-Anleitung steht unter
+> [Google einbinden (OAuth-Anleitung)](../google-oauth.md).
+
 > **iCloud:** Apple verlangt ein **app-spezifisches Passwort** (in deinem
 > Apple-Konto unter „Anmeldung & Sicherheit" zu erstellen), **nicht** dein
 > normales Apple-Passwort.

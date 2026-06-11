@@ -18,3 +18,4 @@
 
 - [Tastaturkürzel](tastaturkuerzel.md)
 - [Barrierefreiheit](barrierefreiheit.md)
+- [Google einbinden (OAuth-Anleitung)](google-oauth.md)

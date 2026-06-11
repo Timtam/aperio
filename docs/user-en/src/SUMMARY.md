@@ -18,3 +18,4 @@
 
 - [Keyboard Shortcuts](tastaturkuerzel.md)
 - [Accessibility](barrierefreiheit.md)
+- [Connecting Google (OAuth guide)](google-oauth.md)

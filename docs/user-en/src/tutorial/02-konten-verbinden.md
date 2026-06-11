@@ -20,6 +20,12 @@ and, if you like, create local calendars.
 | **Vikunja** | API token + server address | Tasks only |
 | **Todoist** | API token | Tasks only |
 
+> **Google:** For now this requires your own **OAuth credentials** (client
+> ID + client secret) from the Google Cloud Console, created once — Aperio
+> does not ship a verified Google registration yet. The detailed
+> step-by-step guide lives at
+> [Connecting Google (OAuth guide)](../google-oauth.md).
+
 > **iCloud:** Apple requires an **app-specific password** (create one in
 > your Apple account under "Sign-In & Security"), **not** your regular Apple
 > password.
