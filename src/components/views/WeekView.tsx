@@ -681,8 +681,15 @@ export function WeekView() {
                     }
                     style={style}
                     // Sighted-only affordance: clicking the bar opens
-                    // the event editor. SR users reach the same editor
-                    // via Enter on the per-day chip below.
+                    // the event editor; dragging it moves the event to
+                    // another day / calendar (the lane is the all-day
+                    // event's only VISIBLE representation — the per-day
+                    // chips below are clipped a11y anchors). SR users
+                    // reach the same actions via the chip + dialogs.
+                    draggable
+                    onDragStart={(dev) => {
+                      setEventDrag(dev.dataTransfer, bar.event);
+                    }}
                     onClick={() => openEventDialog(bar.event)}
                     title={
                       span

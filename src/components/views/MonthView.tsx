@@ -611,6 +611,15 @@ export function MonthView() {
                               : '')
                           }
                           style={style}
+                          // The bar is the all-day event's only VISIBLE
+                          // representation (the in-cell chips are clipped
+                          // a11y anchors) — so it must be the drag source
+                          // for day-/calendar-moves too. Mouse-only; SR
+                          // paths go through the chip + dialogs.
+                          draggable
+                          onDragStart={(dev) => {
+                            setEventDrag(dev.dataTransfer, bar.event);
+                          }}
                           onClick={() => openEventDialog(bar.event)}
                           title={bar.event.title}
                         >
