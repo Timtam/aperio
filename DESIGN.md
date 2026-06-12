@@ -1559,6 +1559,8 @@ CREATE VIRTUAL TABLE tasks_fts USING fts5(
 
 Suchanfragen werden als Tauri-Command an das Rust-Backend übergeben und dort gegen beide FTS5-Indizes ausgeführt. Ergebnisse werden zusammengeführt, nach Relevanz (FTS5-Ranking) und Datum sortiert und mit einem Typ-Kennzeichen (Termin / Aufgabe) zurückgegeben.
 
+**Externe Konten (Snapshot-Cache).** Termine und Aufgaben externer Anbieter liegen nicht in den lokalen `events`/`tasks`-Tabellen, sondern im Snapshot-Cache (`cache_events` / `cache_tasks`, Abschnitt CACHE-1). Damit der Suchumfang aus 13.1 („alle lokal gecachten … über alle Konten hinweg") tatsächlich gilt, führen Trigger-gepflegte FTS5-Spiegel (`cache_events_fts` / `cache_tasks_fts`) die Textfelder der Cache-Payloads nach (per `json_extract` beim Schreiben). Der Such-Command fragt beide Hälften mit demselben präparierten Präfix-Query ab und mergt die Treffer; Filter (Kalender/Liste, Zeitraum, Termin-Typ, Aufgaben-Status) wirken auf beiden Seiten identisch.
+
 ### 13.3 Bedienung
 
 - Suche aufrufbar per `Ctrl+F` aus jeder Ansicht heraus

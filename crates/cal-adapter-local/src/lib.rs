@@ -23,7 +23,7 @@ mod sync_apply;
 mod sync_snapshot;
 mod tasks;
 
-pub use search::{EventTypeFilter, SearchFilters, SearchKind, SearchResults};
+pub use search::{prepare_fts_query, EventTypeFilter, SearchFilters, SearchKind, SearchResults};
 pub use sync_snapshot::{SnapshotApplyReport, SnapshotDump};
 
 use std::sync::{Arc, Mutex};

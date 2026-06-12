@@ -76,7 +76,7 @@ impl LocalAdapter {
     /// tasks_fts indexes. Returns the matching rows in full so the UI
     /// can render them without a second round-trip.
     pub fn search(&self, query: &str, filters: &SearchFilters) -> cal_core::Result<SearchResults> {
-        let prepared = prepare_query(query);
+        let prepared = prepare_fts_query(query);
         if prepared.is_empty() {
             return Ok(SearchResults {
                 events: Vec::new(),
@@ -236,7 +236,7 @@ fn iso_date_part(iso: &str) -> String {
 /// so the query is prefix-matched and AND-combined. An empty result
 /// means the input had nothing tokenisable — the caller short-circuits
 /// to no hits.
-fn prepare_query(input: &str) -> String {
+pub fn prepare_fts_query(input: &str) -> String {
     input
         .split_whitespace()
         .map(|tok| {

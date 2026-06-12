@@ -820,3 +820,112 @@ fn refresh_coordinator_dedups_until_released() {
     coord.release(key);
     assert!(coord.try_claim(key));
 }
+
+// ── External-cache full-text search (migration 0027 + cache/search.rs) ──
+
+use cal_adapter_local::SearchFilters;
+
+#[test]
+fn search_finds_cached_external_event_by_prefix() {
+    // The reported bug: an Exchange event "WG: Diversity Audit" was
+    // unfindable via "diver" because only LOCAL tables were indexed.
+    let store = setup();
+    let mut ev = event("e1", 9, 10);
+    ev.title = "WG: Diversity Audit".into();
+    store
+        .replace_calendar_events(ACC, CAL, wide(), &[ev])
+        .unwrap();
+
+    let hits = store
+        .search_events_fts("diver*", &SearchFilters::default())
+        .unwrap();
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].title, "WG: Diversity Audit");
+
+    // Unrelated terms stay quiet.
+    assert!(store
+        .search_events_fts("zzznope*", &SearchFilters::default())
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn search_index_follows_upserts_and_deletes() {
+    let store = setup();
+    let mut ev = event("e1", 9, 10);
+    ev.title = "Quarterly Review".into();
+    store
+        .replace_calendar_events(ACC, CAL, wide(), &[ev.clone()])
+        .unwrap();
+
+    // Upsert with a new title: the old term must stop matching, the new
+    // one must match exactly once (no duplicate index rows).
+    ev.title = "Team Offsite".into();
+    store.upsert_event(ACC, CAL, &ev).unwrap();
+    assert!(store
+        .search_events_fts("quarter*", &SearchFilters::default())
+        .unwrap()
+        .is_empty());
+    let hits = store
+        .search_events_fts("offsite*", &SearchFilters::default())
+        .unwrap();
+    assert_eq!(hits.len(), 1);
+
+    // Removal clears the index row.
+    store.remove_event(ACC, CAL, "e1").unwrap();
+    assert!(store
+        .search_events_fts("offsite*", &SearchFilters::default())
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn search_event_calendar_filter_restricts() {
+    let store = setup();
+    let mut ev = event("e1", 9, 10);
+    ev.title = "Diversity Audit".into();
+    store
+        .replace_calendar_events(ACC, CAL, wide(), &[ev])
+        .unwrap();
+
+    let other_cal = SearchFilters {
+        calendar_ids: vec!["some-other-cal".into()],
+        ..Default::default()
+    };
+    assert!(store
+        .search_events_fts("diver*", &other_cal)
+        .unwrap()
+        .is_empty());
+
+    let this_cal = SearchFilters {
+        calendar_ids: vec![CAL.into()],
+        ..Default::default()
+    };
+    assert_eq!(
+        store.search_events_fts("diver*", &this_cal).unwrap().len(),
+        1
+    );
+}
+
+#[test]
+fn search_finds_cached_external_task_with_status_filter() {
+    let store = setup();
+    let mut t1 = task("t1");
+    t1.title = "Diversity training prep".into();
+    store.replace_list_tasks(ACC, LIST, &[t1]).unwrap();
+
+    let hits = store
+        .search_tasks_fts("diver*", &SearchFilters::default())
+        .unwrap();
+    assert_eq!(hits.len(), 1);
+
+    // Status whitelist that excludes 'open' hides the task.
+    let filters = SearchFilters {
+        task_statuses: vec!["completed".into()],
+        ..Default::default()
+    };
+    assert!(store
+        .search_tasks_fts("diver*", &filters)
+        .unwrap()
+        .is_empty());
+}

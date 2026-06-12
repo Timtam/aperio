@@ -29,6 +29,8 @@ use cal_core::{Calendar, Contact, ContactList, DateRange, Event, Task, TaskList}
 
 use crate::db::{DbError, DbHandle, DbResult};
 
+mod search;
+
 #[cfg(test)]
 mod tests;
 
