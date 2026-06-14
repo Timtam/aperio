@@ -35,6 +35,7 @@ import {
 } from '../api/client';
 import { useDateFormat } from '../intl/dateFormat';
 import { useDialogState } from '../state/dialogStateContext';
+import { useCalendarStore } from '../state/calendarStoreContext';
 import { useSync } from '../state/useSync';
 import { fetchAccountsNeedingConnect } from './accountsNeedingConnect';
 import { SyncProtocolSection } from './SyncProtocolSection';
@@ -66,6 +67,32 @@ export function SyncPanel() {
   const fmt = useDateFormat();
   const { openSyncConflicts, openSyncAccountsConnect, invalidateData } =
     useDialogState();
+  // The sidebar's container catalogs (calendars / task lists / contact
+  // books / labels / accounts) load once at mount and DON'T re-read on a
+  // `dataVersion` bump — only on a background cache-updated event. After
+  // onboarding pulls a whole dataset into the local DB, nothing emits that,
+  // so we refresh the catalogs explicitly (otherwise the sidebar stays empty
+  // until an app restart re-mounts the store).
+  const {
+    refreshCalendars,
+    refreshTaskLists,
+    refreshContactLists,
+    refreshColorLabels,
+    refreshAccounts,
+  } = useCalendarStore();
+  const refreshCatalogs = useCallback(() => {
+    void refreshCalendars();
+    void refreshTaskLists();
+    void refreshContactLists();
+    void refreshColorLabels();
+    void refreshAccounts();
+  }, [
+    refreshAccounts,
+    refreshCalendars,
+    refreshColorLabels,
+    refreshContactLists,
+    refreshTaskLists,
+  ]);
   const {
     status,
     lastReport,
@@ -569,16 +596,23 @@ export function SyncPanel() {
             console.warn('get_sync_adapter_summary failed', err);
           });
         // Make the just-onboarded data visible WITHOUT a restart:
-        //   - invalidateData() bumps dataVersion so the sidebar/views
-        //     re-read the LOCAL calendars/lists/tasks the snapshot applied;
+        //   - refreshCatalogs() re-reads the sidebar's container lists
+        //     (calendars / task lists / contacts / labels / accounts) — the
+        //     store doesn't re-read these on a dataVersion bump, so the LOCAL
+        //     containers the snapshot applied would otherwise stay hidden;
+        //   - invalidateData() bumps dataVersion so the views re-read the
+        //     events/tasks inside those containers;
         //   - refreshExternalCache() warms the restored external accounts'
         //     containers from their providers (credentials are in the
-        //     keychain now); its cache-updated events bump dataVersion again
-        //     as each scope lands;
-        //   - triggerSync() registers this device + pulls anything new.
+        //     keychain now); each cache-updated event then re-refreshes the
+        //     catalogs as that scope lands.
+        // We deliberately do NOT trigger a sync round here: the backend
+        // already kicks the scheduler at the end of accept/adopt, and a
+        // second manual round racing it produced a spurious "failed" then
+        // "succeeded" pair in the Protokoll.
+        refreshCatalogs();
         invalidateData();
         void refreshExternalCache();
-        void triggerSync();
       } catch (err) {
         // eslint-disable-next-line no-console
         console.warn('connect failed', err);
@@ -600,8 +634,8 @@ export function SyncPanel() {
       openSyncAccountsConnect,
       passphraseDraft,
       preview,
+      refreshCatalogs,
       t,
-      triggerSync,
     ],
   );
 
