@@ -1305,33 +1305,48 @@ pub async fn accept_remote_dataset(
         None
     };
     let adapter = wrap_if_encrypted(Arc::clone(&plain), key);
+    let prefs = UserPrefsRepo::new(&shared);
 
-    // Run the onboarding side first. If it fails (e.g. remote has
-    // no meta.json or the passphrase is wrong → applier fails to
-    // parse JSON), we haven't yet altered the orchestrator's
-    // state — the next attempt can pick a different path.
+    // Set the local E2E flag BEFORE applying the dataset. The credential
+    // restore in the snapshot apply is gated on this device's
+    // `PREF_E2E_ENABLED` (defense in depth: never write synced secrets on a
+    // plaintext-mode device). Adopting an E2E dataset makes this an E2E
+    // device, so the flag must already be true while `accept_remote` applies
+    // the snapshot — otherwise the snapshot's credentials hit the "E2E is off
+    // locally; ignoring them" branch and every account's password is silently
+    // dropped, re-prompting the user for all of them. Revert on failure so a
+    // botched adopt leaves no half-configured state.
+    if e2e_active {
+        prefs.set(PREF_E2E_ENABLED, "true").map_err(internal)?;
+    }
+
+    // Run the onboarding side. If it fails (e.g. remote has no meta.json or
+    // the passphrase is wrong → applier fails to parse JSON), we haven't yet
+    // altered the orchestrator's state — the next attempt can pick a
+    // different path.
     let trimmed = device_name
         .as_deref()
         .map(str::trim)
         .filter(|s| !s.is_empty());
-    let report = onboarding
-        .accept_remote(adapter.as_ref(), trimmed)
-        .await
-        .map_err(sync_err)?;
+    let report = match onboarding.accept_remote(adapter.as_ref(), trimmed).await {
+        Ok(report) => report,
+        Err(err) => {
+            if e2e_active {
+                let _ = prefs.delete(PREF_E2E_ENABLED);
+            }
+            return Err(sync_err(err));
+        }
+    };
 
-    // Commit the choice into the orchestrator + user_prefs only
-    // now that onboarding has succeeded.
+    // Commit the rest of the choice now that onboarding has succeeded.
     orchestrator.configure(Arc::clone(&adapter));
-    let prefs = UserPrefsRepo::new(&shared);
     persist_adapter_config(&prefs, &config)?;
-    // Persist E2E state alongside the adapter config — the
-    // restore-on-boot path reads both.
+    // E2E key for the restore-on-boot path; `PREF_E2E_ENABLED` was set above.
     if let Some(k) = key {
         store_e2e_key(&k)?;
-        prefs.set(PREF_E2E_ENABLED, "true").map_err(internal)?;
     } else {
-        // Joining a non-E2E dataset wipes any stale flag from a
-        // previous session.
+        // Joining a non-E2E dataset wipes any stale flag from a previous
+        // session.
         let _ = prefs.delete(PREF_E2E_ENABLED);
     }
     scheduler.kick();
