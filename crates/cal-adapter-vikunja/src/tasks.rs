@@ -1078,10 +1078,16 @@ fn task_to_body(task: &Task) -> TaskEntry {
 /// Vikunja's own UI labelling (Low/Medium/High at 2/3/4 with 0–1
 /// shown as "no priority"); we collapse the bottom band to Low so
 /// the round-trip preserves the user-visible bucket.
+// Vikunja's scale is 0=Unset, 1=Low, 2=Medium, 3=High, 4=Urgent, 5=DO NOW.
+// Map by matching LABELS, not by spreading across the range: an earlier
+// version mapped Medium→3 and High→5, so an Aperio "Medium" task showed up
+// in Vikunja as "High" (and "High" as "DO NOW"). Aperio has three levels, so
+// Vikunja's Urgent/DO NOW collapse to High on read (and write back as High);
+// Unset reads as Low.
 fn vikunja_priority_to_aperio(raw: i32) -> TaskPriority {
     match raw {
         i32::MIN..=1 => TaskPriority::Low,
-        2..=3 => TaskPriority::Medium,
+        2 => TaskPriority::Medium,
         _ => TaskPriority::High,
     }
 }
@@ -1089,8 +1095,8 @@ fn vikunja_priority_to_aperio(raw: i32) -> TaskPriority {
 fn aperio_priority_to_vikunja(p: TaskPriority) -> i32 {
     match p {
         TaskPriority::Low => 1,
-        TaskPriority::Medium => 3,
-        TaskPriority::High => 5,
+        TaskPriority::Medium => 2,
+        TaskPriority::High => 3,
     }
 }
 
@@ -1152,17 +1158,25 @@ mod tests {
     // ── Priority mapping ───────────────────────────────────────
 
     #[test]
-    fn priority_round_trips_through_buckets() {
-        assert_eq!(vikunja_priority_to_aperio(0), TaskPriority::Low);
+    fn priority_maps_by_label() {
+        // Vikunja: 0 Unset, 1 Low, 2 Medium, 3 High, 4 Urgent, 5 DO NOW.
+        assert_eq!(vikunja_priority_to_aperio(0), TaskPriority::Low); // unset → floor
         assert_eq!(vikunja_priority_to_aperio(1), TaskPriority::Low);
         assert_eq!(vikunja_priority_to_aperio(2), TaskPriority::Medium);
-        assert_eq!(vikunja_priority_to_aperio(3), TaskPriority::Medium);
-        assert_eq!(vikunja_priority_to_aperio(4), TaskPriority::High);
-        assert_eq!(vikunja_priority_to_aperio(5), TaskPriority::High);
+        assert_eq!(vikunja_priority_to_aperio(3), TaskPriority::High);
+        assert_eq!(vikunja_priority_to_aperio(4), TaskPriority::High); // Urgent → High
+        assert_eq!(vikunja_priority_to_aperio(5), TaskPriority::High); // DO NOW → High
 
+        // Aperio's three levels map onto the SAME-labelled Vikunja values —
+        // Medium → 2 (Medium), not 3 (which Vikunja labels "High").
         assert_eq!(aperio_priority_to_vikunja(TaskPriority::Low), 1);
-        assert_eq!(aperio_priority_to_vikunja(TaskPriority::Medium), 3);
-        assert_eq!(aperio_priority_to_vikunja(TaskPriority::High), 5);
+        assert_eq!(aperio_priority_to_vikunja(TaskPriority::Medium), 2);
+        assert_eq!(aperio_priority_to_vikunja(TaskPriority::High), 3);
+
+        // The three Aperio levels round-trip exactly.
+        for p in [TaskPriority::Low, TaskPriority::Medium, TaskPriority::High] {
+            assert_eq!(vikunja_priority_to_aperio(aperio_priority_to_vikunja(p)), p);
+        }
     }
 
     // ── Date helpers ───────────────────────────────────────────
@@ -1372,7 +1386,8 @@ mod tests {
         assert_eq!(body.title.as_deref(), Some("Buy bread"));
         assert_eq!(body.start_date.as_deref(), Some("2026-05-22T08:00:00Z"));
         assert_eq!(body.due_date.as_deref(), Some("2026-05-23T00:00:00Z"));
-        assert_eq!(body.priority, 5);
+        // sample_new_task() is High → Vikunja 3 ("High"), not 5 ("DO NOW").
+        assert_eq!(body.priority, 3);
         assert!(!body.done);
     }
 
@@ -1529,7 +1544,8 @@ mod tests {
         assert_eq!(tasks.len(), 2);
         assert_eq!(tasks[0].title, "One");
         assert_eq!(tasks[0].status, TaskStatus::Open);
-        assert_eq!(tasks[0].priority, TaskPriority::Medium);
+        // Vikunja priority 3 is "High".
+        assert_eq!(tasks[0].priority, TaskPriority::High);
         assert_eq!(tasks[1].status, TaskStatus::Completed);
     }
 

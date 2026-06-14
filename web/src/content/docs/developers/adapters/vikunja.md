@@ -24,7 +24,9 @@ instance).
   `scheduled_*`/`deadline_*`. Vikunja uses an RFC-3339 sentinel
   (`0001-01-01T…`) for "no date" — treated as unset on read, emitted on
   write when a slot is empty.
-- **Priority** 0–5 collapses to Aperio's Low/Medium/High.
+- **Priority** maps by label: Vikunja 1/2/3 (Low/Medium/High) ↔ Aperio
+  Low/Medium/High. Unset (0) reads as Low; Urgent (4) and DO NOW (5) collapse
+  to High and write back as High (3) — Aperio has only three levels.
 
 ## Collaboration (assignment + membership)
 
