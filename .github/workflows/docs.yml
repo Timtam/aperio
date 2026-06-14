@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'docs/**'
+      - 'web/**'
       - '.github/workflows/docs.yml'
   workflow_dispatch: # allow manual runs
 
@@ -24,35 +24,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install mdBook
-        uses: peaceiris/actions-mdbook@v2
+      - uses: actions/setup-node@v4
         with:
-          mdbook-version: 'latest'
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
 
-      # Build each book into its default `book/` directory, then assemble
-      # `_site/` explicitly. mdBook resolves `--dest-dir` relative to the
-      # current working directory, so relying on `../../` is brittle; this
-      # avoids it entirely.
-      - name: Build books
-        run: |
-          mdbook build docs/dev
-          mdbook build docs/plugin-dev
-          mdbook build docs/user
-          mdbook build docs/user-en
+      # Single Astro Starlight site (landing + bilingual docs), replacing
+      # the four mdBooks. Built at base /aperio/ for the GitHub Pages project
+      # path; switch `site`/`base` in web/astro.config.mjs for a custom domain.
+      - name: Install dependencies
+        run: npm ci
+        working-directory: web
 
-      - name: Assemble site
-        run: |
-          mkdir -p _site
-          cp docs/index.html _site/index.html
-          cp -r docs/dev/book _site/dev
-          cp -r docs/plugin-dev/book _site/plugin-dev
-          cp -r docs/user/book _site/user
-          cp -r docs/user-en/book _site/user-en
+      - name: Build site
+        run: npm run build
+        working-directory: web
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: _site/
+          path: web/dist
 
   deploy:
     needs: build

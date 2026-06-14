@@ -5,8 +5,11 @@ template: splash
 hero:
   tagline: An accessible, keyboard-first calendar, tasks and contacts app for the desktop. Screen-reader-first, local-first, provider-agnostic.
   actions:
+    # NOTE: hero links come from frontmatter and bypass the base-rewrite
+    # rehype plugin, so they carry the deploy base explicitly. On the domain
+    # switch (BASE → '/') drop the `/aperio` prefix here and in de/index.mdx.
     - text: User Guide
-      link: /guides/
+      link: /aperio/guides/
       icon: right-arrow
     - text: View on GitHub
       link: https://github.com/Timtam/aperio

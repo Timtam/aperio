@@ -2,12 +2,45 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 
-// TODO: set `site` to the production domain once registered (needed for
-// canonical URLs, OG tags and sitemap). Deployed at the domain root, so
-// `base` stays "/". For a GitHub Pages *project* path instead, set
-// base: '/aperio/' and rewrite the absolute links accordingly.
+// Deploy target. Interim: GitHub Pages *project* site at /aperio/. When the
+// custom domain lands, set `site` to it and `BASE` to '/' — that single
+// change is enough; the rehype plugin below re-bases content links and
+// Starlight re-bases its own navigation automatically.
+const SITE = 'https://timtam.github.io';
+const BASE = '/aperio/';
+
+/**
+ * Prefix internal absolute links (`/guides/…`) in Markdown/MDX content with
+ * the deploy base. Starlight already bases its own nav/sidebar/links, but
+ * raw author-written absolute hrefs in prose are not touched by Astro — so a
+ * `/guides/x` link would 404 under a project base without this. Idempotent:
+ * already-based and external (`//`, `http`) links are left alone.
+ */
+function rehypeBaseLinks() {
+  const prefix = BASE.replace(/\/$/, ''); // "/aperio"
+  /** @param {any} node */
+  const walk = (node) => {
+    if (node.type === 'element' && node.tagName === 'a') {
+      const href = node.properties && node.properties.href;
+      if (
+        typeof href === 'string' &&
+        href.startsWith('/') &&
+        !href.startsWith('//') &&
+        href !== prefix &&
+        !href.startsWith(prefix + '/')
+      ) {
+        node.properties.href = prefix + href;
+      }
+    }
+    if (node.children) node.children.forEach(walk);
+  };
+  return (/** @type {any} */ tree) => walk(tree);
+}
+
 export default defineConfig({
-  // site: 'https://your-domain.example',
+  site: SITE,
+  base: BASE,
+  markdown: { rehypePlugins: [rehypeBaseLinks] },
   integrations: [
     starlight({
       title: 'Aperio',

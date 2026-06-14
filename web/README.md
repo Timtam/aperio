@@ -35,30 +35,27 @@ removing that H1), renaming each book's intro page to the area index, and
 rewriting internal `.md` links to locale-aware Starlight URLs. It can be re-run
 until the old mdBooks are decommissioned; after that it can be deleted.
 
-## Go-live checklist (not done yet — intentionally)
+## Deployment
 
-The old mdBook deploy (`.github/workflows/docs.yml`) is still live and
-untouched, so nothing breaks. To switch over:
+`.github/workflows/docs.yml` now builds **this** site and deploys it to GitHub
+Pages on every push to `web/**`. Interim target: the project path
+`https://timtam.github.io/aperio/` (so `base` is `/aperio/`). The old mdBooks
+under `../docs` are no longer built or deployed.
 
-1. **Register the domain** (needed for OAuth verification anyway) and add a
-   `CNAME` (GitHub Pages custom domain) → the site serves from the root, so the
-   absolute links (`/guides/…`) resolve correctly. _Do not_ deploy to the
-   `…github.io/aperio/` project path without setting `base: '/aperio/'` and
-   adjusting links.
-2. Set `site: 'https://your-domain'` in `astro.config.mjs` (enables canonical
-   URLs, OG tags and the sitemap).
-3. Replace the `mdbook build`/assemble steps in `docs.yml` with an Astro build:
-   ```yaml
-   - uses: actions/setup-node@v4
-     with: { node-version: 20, cache: npm, cache-dependency-path: web/package-lock.json }
-   - run: npm ci
-     working-directory: web
-   - run: npm run build
-     working-directory: web
-   - uses: actions/upload-pages-artifact@v3
-     with: { path: web/dist }
-   ```
+### Switching to a custom domain (for OAuth verification)
+
+The domain is needed for Google/Microsoft verification anyway. To move from the
+`/aperio/` project path to a domain root:
+
+1. Add the domain as a GitHub Pages custom domain (creates a `CNAME`).
+2. In `astro.config.mjs`, set `SITE` to the domain and `BASE` to `'/'`. The
+   rehype plugin re-bases content links and Starlight re-bases its own nav
+   automatically.
+3. Drop the `/aperio` prefix from the **hero `link:` values** in
+   `src/content/docs/index.mdx` and `src/content/docs/de/index.mdx` (hero links
+   come from frontmatter and bypass the rehype re-basing — the only manual
+   touch-point).
 4. Fill in the real legal content (`/impressum`, `/privacy`, `/terms` + `/de/…`)
    and have it reviewed.
-5. Once verified live, remove `../docs` (the four mdBooks) and this migration
-   script.
+5. Once verified live, remove `../docs` (the four mdBooks) and
+   `scripts/migrate-docs.mjs`.
