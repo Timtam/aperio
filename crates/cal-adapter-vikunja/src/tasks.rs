@@ -845,7 +845,10 @@ struct TaskBucketRef {
 /// serde tolerates unknown fields by default.
 #[derive(Debug, Default, Deserialize, Serialize)]
 struct TaskEntry {
-    #[serde(default)]
+    // Skip a zero id on write. The create body (`new_task_to_body`) carries
+    // id 0; sending it is at best noise, and `project_id` below is the real
+    // hazard. Reads are unaffected (skip_serializing_if only touches writes).
+    #[serde(default, skip_serializing_if = "is_zero")]
     id: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     title: Option<String>,
@@ -866,7 +869,14 @@ struct TaskEntry {
     /// 1 / 3 / 5.
     #[serde(default)]
     priority: i32,
-    #[serde(default)]
+    // CRITICAL: never serialize a zero project_id. The create endpoint is
+    // `PUT /projects/{id}/tasks` — the project comes from the URL path — but
+    // current Vikunja also binds `project_id` from the request body and lets
+    // it WIN over the path. The body builders set this to 0, so sending it
+    // pinned every create to project 0 → "project does not exist" (error
+    // 3001). Omitting a zero lets the URL define the project; a real value
+    // (e.g. a future move) is still sent. Reads are unaffected.
+    #[serde(default, skip_serializing_if = "is_zero")]
     project_id: i64,
     /// Kanban bucket the task sits in, mapped to Aperio's section.
     /// `0` ⇒ ungrouped (Vikunja's "no bucket" sentinel). Vikunja
@@ -1955,6 +1965,62 @@ mod tests {
         assert_eq!(list.id, "12");
         assert_eq!(list.name, "New Project");
         assert_eq!(list.parent_id.as_deref(), Some("3"));
+    }
+
+    fn new_task_min(title: &str) -> NewTask {
+        NewTask {
+            title: title.into(),
+            description: None,
+            status: TaskStatus::Open,
+            priority: TaskPriority::Medium,
+            scheduled_date: None,
+            scheduled_time: None,
+            deadline_date: None,
+            deadline_time: None,
+            recurrence: None,
+            parent_id: None,
+            section_id: None,
+            color_label: None,
+            reminders: Vec::new(),
+            sound: None,
+            assignees: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn create_body_omits_zero_project_and_id() {
+        // A zero `project_id` in the body overrode the URL path on current
+        // Vikunja, pinning every create to project 0 → error 3001. The
+        // create body must carry neither it nor a zero id.
+        let body = serde_json::to_value(new_task_to_body(&new_task_min("Play"))).unwrap();
+        assert!(
+            body.get("project_id").is_none(),
+            "zero project_id leaked into the create body: {body}"
+        );
+        assert!(body.get("id").is_none(), "zero id leaked: {body}");
+        assert_eq!(body["title"], "Play");
+    }
+
+    #[tokio::test]
+    async fn create_task_targets_project_url_without_zero_project_id() {
+        let mut server = Server::new_async().await;
+        let m = server
+            .mock("PUT", "/api/v1/projects/5/tasks")
+            // The mock matches only if the body does NOT pin project_id to 0.
+            .match_body(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::PartialJsonString(r#"{"title":"Play"}"#.into()),
+            ]))
+            .with_status(200)
+            .with_body(r#"{"id":99,"title":"Play","project_id":5}"#)
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        let task = create_task(&client, "5", new_task_min("Play"))
+            .await
+            .unwrap();
+        m.assert_async().await;
+        assert_eq!(task.id, "99");
+        assert_eq!(task.list_id, "5");
     }
 
     #[tokio::test]
