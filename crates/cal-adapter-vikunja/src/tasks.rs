@@ -637,6 +637,23 @@ pub async fn search_users(client: &VikunjaClient, query: &str) -> VikunjaResult<
         .collect())
 }
 
+/// Body for `PUT /projects/{id}/users`. The share is keyed on the
+/// USERNAME, which Vikunja resolves server-side via `GetUserByUsername`.
+///
+/// Vikunja renamed this body field from `user_id` (≤ 0.x) to `username`
+/// (current): the Go field is `Username string json:"username"` and the
+/// numeric `UserID` is `json:"-"` (server-derived). We send BOTH keys so
+/// either server reads the value and the other ignores an unknown field —
+/// sending only the old `user_id` left `Username` empty on current
+/// servers, so the lookup hit error 1005 ("The user does not exist").
+fn share_user_body(member_ref: &str, right: Option<MemberRight>) -> serde_json::Value {
+    serde_json::json!({
+        "username": member_ref,
+        "user_id": member_ref,
+        "right": member_right_to_vikunja(right),
+    })
+}
+
 /// `PUT /projects/{id}/users` — share with a user (by username) at a
 /// right level. Immediate; no invitation flow.
 pub async fn add_task_list_member(
@@ -646,10 +663,7 @@ pub async fn add_task_list_member(
     right: Option<MemberRight>,
 ) -> VikunjaResult<()> {
     let project_id = parse_id(list_id, "task list id")?;
-    let body = serde_json::json!({
-        "user_id": member_ref,
-        "right": member_right_to_vikunja(right),
-    });
+    let body = share_user_body(member_ref, right);
     let _: serde_json::Value = client
         .put_json(&format!("/projects/{project_id}/users"), &body)
         .await?;
@@ -1351,6 +1365,41 @@ mod tests {
             .await;
         let client = fixture_client(&server.url());
         delete_task(&client, "42").await.unwrap();
+    }
+
+    // ── Member sharing body ────────────────────────────────────
+
+    #[test]
+    fn share_body_sends_username_key() {
+        // Current Vikunja keys the share on `username`; older servers
+        // read `user_id`. We send both so either resolves the user —
+        // sending only `user_id` left `Username` empty on current
+        // servers and produced error 1005 ("The user does not exist").
+        let body = share_user_body("alice", Some(MemberRight::Write));
+        assert_eq!(body["username"], "alice");
+        assert_eq!(body["user_id"], "alice");
+        assert_eq!(body["right"], 1);
+    }
+
+    #[tokio::test]
+    async fn add_member_puts_username_in_body() {
+        let mut server = Server::new_async().await;
+        let m = server
+            .mock("PUT", "/api/v1/projects/7/users")
+            // The mock only matches when the request body carries the
+            // `username` field — i.e. the 1005 regression is fixed.
+            .match_body(mockito::Matcher::PartialJsonString(
+                r#"{"username":"alice"}"#.into(),
+            ))
+            .with_status(200)
+            .with_body(r#"{"id":1,"username":"alice","right":1}"#)
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        add_task_list_member(&client, "7", "alice", Some(MemberRight::Write))
+            .await
+            .unwrap();
+        m.assert_async().await;
     }
 
     #[tokio::test]
