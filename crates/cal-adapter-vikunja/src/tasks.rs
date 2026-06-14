@@ -83,6 +83,17 @@ pub async fn list_task_lists(client: &VikunjaClient) -> VikunjaResult<Vec<TaskLi
         }
         let len = entries.len();
         for entry in entries {
+            // Skip Vikunja's pseudo-projects. `GET /projects` also returns
+            // the Favorites collection (id -1) once anything is favorited
+            // and saved filters (negative ids). They aren't real
+            // containers: creating a task in one fails server-side with
+            // error 3001 ("This project does not exist"), and a favorited
+            // task would also double up (it still lives in its real
+            // project, so it'd appear under both ids). Real projects have
+            // positive, auto-increment ids.
+            if entry.id < 1 {
+                continue;
+            }
             // Vikunja returns shared / read-only projects through
             // the same endpoint; we currently flag them all
             // writable because the user's API token already
@@ -1557,6 +1568,27 @@ mod tests {
         // Nested project → parent surfaced as the parent project id.
         assert_eq!(lists[1].id, "2");
         assert_eq!(lists[1].parent_id.as_deref(), Some("1"));
+    }
+
+    #[tokio::test]
+    async fn list_task_lists_skips_pseudo_projects() {
+        // Vikunja injects Favorites (id -1) and saved filters (negative
+        // ids) into GET /projects. They must be dropped — creating a task
+        // in one returns error 3001 ("This project does not exist").
+        let mut server = Server::new_async().await;
+        let _m = server
+            .mock("GET", "/api/v1/projects?page=1&per_page=50")
+            .with_status(200)
+            .with_body(
+                r#"[{"id":-1,"title":"Favorites","parent_project_id":0},{"id":-2,"title":"My filter","parent_project_id":0},{"id":5,"title":"Real","parent_project_id":0}]"#,
+            )
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        let lists = list_task_lists(&client).await.unwrap();
+        assert_eq!(lists.len(), 1, "only the real project should remain");
+        assert_eq!(lists[0].id, "5");
+        assert_eq!(lists[0].name, "Real");
     }
 
     #[tokio::test]
