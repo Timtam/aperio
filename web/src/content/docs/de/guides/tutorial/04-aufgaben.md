@@ -22,7 +22,12 @@ deinen Tag oder deine Woche ein und arbeitest sie ab.
 ## Erledigen und bearbeiten
 
 - **Erledigt markieren:** Aufgabe markieren und mit `Leertaste`
-  abhaken (erneut drücken hebt es wieder auf).
+  abhaken (erneut drücken hebt es wieder auf). Das **Erledigungsdatum**
+  wird festgehalten und angezeigt – in der Aufgabenliste zeigt eine
+  erledigte Aufgabe *„Erledigt: <Datum>“* anstelle ihres Fälligkeitsdatums,
+  im Editor erscheint eine Zeile *„Erledigt am“*. Es wird mit jedem Anbieter
+  in beide Richtungen synchronisiert (Apple Erinnerungen, Google, Vikunja,
+  Microsoft To Do, Exchange, Todoist).
 - **Bearbeiten:** mit `Eingabe` öffnen.
 - **Löschen:** **Löschen** wählen (Standard: `Entf`).
 

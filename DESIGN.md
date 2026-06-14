@@ -3195,7 +3195,7 @@ Dieser Ablauf stellt sicher, dass bei einem Update keine Nutzerdaten verloren ge
 
 #### Dokumentations-Workflow (bei Änderungen unter `docs/`)
 
-Separater Workflow – siehe Abschnitt 24.5 für vollständige Konfiguration. Baut alle drei mdBook-Instanzen und deployt auf GitHub Pages.
+Separater Workflow – siehe Abschnitt 24.5 für vollständige Konfiguration. Baut die Astro-Starlight-Site (`web/`) und deployt sie auf GitHub Pages.
 
 #### Continuous Integration (bei jedem Push/PR)
 
@@ -3464,55 +3464,28 @@ Die App erfordert drei eigenständige Dokumentations-Bereiche, die von Anfang an
 
 ### 24.1 Übersicht & Ablageort
 
-Alle Dokumentationen liegen im Repository unter `docs/`:
+Alle Dokumentationen liegen im Repository unter `web/` – eine Astro-Starlight-Site (Landing + Docs), siehe Abschnitt 24.5:
 
 ```
-docs/
-├── dev/                        # Entwickler-Dokumentation (Englisch)
-│   ├── book.toml               # mdBook-Konfiguration
-│   └── src/
-│       ├── SUMMARY.md          # Inhaltsverzeichnis (steuert mdBook-Navigation)
-│       ├── getting-started.md  # Einstieg für neue Mitwirkende
-│       ├── architecture.md     # Architektur-Übersicht
-│       ├── contributing.md     # Beitragsrichtlinien
-│       ├── testing.md          # Teststrategie
-│       └── adapters/           # Adapter-spezifische Dokumentation
-│           ├── overview.md
-│           ├── google.md
-│           ├── microsoft.md
-│           └── ...
-├── plugin-dev/                 # Plugin-Entwickler-Dokumentation (Englisch)
-│   ├── book.toml
-│   └── src/
-│       ├── SUMMARY.md
-│       ├── getting-started.md  # Erstes Plugin in 15 Minuten
-│       ├── abi-reference.md    # C-ABI-Schnittstellenvertrag
-│       ├── rust-sdk.md         # Rust-SDK-Referenz
-│       ├── manifest.md         # plugin.json-Spezifikation
-│       └── examples/           # Beispiel-Plugins
-│           ├── hello-world/
-│           └── calendar-adapter-template/
-├── user/                       # Nutzer-Dokumentation (Deutsch)
-│   ├── book.toml
-│   └── src/
-│       ├── SUMMARY.md
-│       ├── einstieg.md         # Erste Schritte
-│       ├── tutorial/           # Schritt-für-Schritt-Tutorial
-│       │   ├── 01-installation.md
-│       │   ├── 02-konten-verbinden.md
-│       │   ├── 03-termine.md
-│       │   ├── 04-aufgaben.md
-│       │   ├── 05-ansichten.md
-│       │   ├── 06-benachrichtigungen.md
-│       │   ├── 07-suche.md
-│       │   ├── 08-synchronisation.md
-│       │   └── 09-tastaturkuerzel.md
-│       ├── tastaturkuerzel.md  # Vollständige Kürzel-Referenz
-│       └── barrierefreiheit.md # Tipps für Screen-Reader-Nutzer
-└── index.html                  # Landing Page → verlinkt alle drei Bereiche
+web/src/content/docs/
+├── index.mdx                   # Splash-Landing (Englisch); de/index.mdx (Deutsch)
+├── privacy.md / terms.md / impressum.md   # Rechtsseiten (Englisch; de/ darunter)
+├── guides/                     # Benutzerhandbuch (Englisch, Root-Locale)
+│   ├── index.md                # Einstieg (Willkommen)
+│   ├── tutorial/               # 01-installation … 09-tastaturkuerzel
+│   ├── tastaturkuerzel.md      # Vollständige Kürzel-Referenz
+│   ├── barrierefreiheit.md     # Tipps für Screen-Reader-Nutzer
+│   └── google-oauth.md         # OAuth-Anleitung (Übergangslösung)
+├── developers/                 # Entwickler-Dokumentation (Englisch)
+│   ├── getting-started.md / architecture.md / contributing.md / testing.md
+│   └── adapters/               # overview, local, caldav, google, microsoft, ews, vikunja, todoist
+├── plugins/                    # Plugin-Entwicklung (Englisch)
+│   ├── getting-started.md / abi-reference.md / rust-sdk.md / manifest.md
+│   └── examples/               # hello-world, calendar-adapter-template
+└── de/guides/                  # Benutzerhandbuch (Deutsch, gespiegelte Struktur)
 ```
 
-> **Hinweis zur mdBook-Struktur:** Jeder Dokumentations-Bereich folgt dem mdBook-Konventionsschema: `book.toml` (Konfiguration) auf der Bereich-Wurzel und alle Markdown-Quellen unter `src/` mit einer `SUMMARY.md` als Inhaltsverzeichnis. Die mdBook-Konfiguration ist in Abschnitt 24.5 detailliert dokumentiert.
+> **Hinweis:** Inhalte sind Markdown/MDX mit `title`-Frontmatter; Navigation (Sidebar, Reihenfolge, Gruppen) steuert `web/astro.config.mjs`. Zweisprachigkeit, Volltextsuche und Theming liefert Starlight (Abschnitt 24.5).
 
 ### 24.2 Entwickler-Dokumentation (Englisch)
 
@@ -3629,183 +3602,49 @@ Dedizierte Seite für Screen-Reader-Nutzer:
 - Tipps für NVDA, JAWS, VoiceOver und Narrator jeweils separat
 - Bekannte Einschränkungen und Workarounds
 
-### 24.5 Hosting: GitHub Pages mit mdBook
+### 24.5 Hosting: GitHub Pages mit Astro Starlight
 
-#### Tool-Wahl: mdBook
+Landing Page **und** Dokumentation liegen als **eine** Astro-Starlight-Site im Verzeichnis `web/` und werden über GitHub Pages ausgeliefert. Das ersetzt die früheren vier separaten mdBooks.
 
-Alle drei Dokumentations-Bereiche werden mit **mdBook** gebaut – einem in Rust geschriebenen statischen Dokumentations-Generator, der auch für die offizielle Rust-Dokumentation verwendet wird.
+**Warum Starlight:** barrierefreies, tastatur- und screenreaderfreundliches Standard-Theme; native Zweisprachigkeit (i18n) mit Sprachumschalter und Fallback; eingebaute Volltextsuche (Pagefind, läuft im Browser); Markdown/MDX-Inhalte; zusätzlich freie Landing-/Rechtsseiten im selben Projekt. Ein Build und ein Deploy decken so Marketing-Landing (für die OAuth-Verifizierung nötig), Rechtsseiten und alle Docs ab.
 
-Vorteile im Kontext dieses Projekts:
-- Rust-nativ, keine Fremdabhängigkeiten (Node, Python etc.)
-- Produziert barrierefreie statische HTML-Seiten
-- Eingebaute Volltextsuche
-- Einfache Navigation per Sidebar
-- Gut mit Screen Readern nutzbar
-
-#### Struktur im Repository
+**Struktur (`web/src/content/docs/`):**
 
 ```
-docs/
-├── dev/
-│   ├── book.toml               # mdBook-Konfiguration (Entwickler-Doku)
-│   └── src/
-│       ├── SUMMARY.md          # Inhaltsverzeichnis (steuert mdBook-Navigation)
-│       ├── getting-started.md
-│       ├── architecture.md
-│       ├── contributing.md
-│       ├── testing.md
-│       └── adapters/
-│           ├── overview.md
-│           └── ...
-├── plugin-dev/
-│   ├── book.toml               # mdBook-Konfiguration (Plugin-Doku)
-│   └── src/
-│       ├── SUMMARY.md
-│       ├── getting-started.md
-│       ├── abi-reference.md
-│       ├── manifest.md
-│       └── examples/
-│           └── ...
-├── user/
-│   ├── book.toml               # mdBook-Konfiguration (Nutzer-Doku)
-│   └── src/
-│       ├── SUMMARY.md
-│       ├── einstieg.md
-│       ├── tutorial/
-│       │   ├── 01-installation.md
-│       │   └── ...
-│       ├── tastaturkuerzel.md
-│       └── barrierefreiheit.md
-└── index.html                  # Landing Page → verlinkt alle drei Bereiche
+web/
+├── astro.config.mjs            # Starlight-Konfiguration (i18n, Sidebar, Base)
+└── src/content/docs/
+    ├── index.mdx               # Splash-Landing (en); de unter de/index.mdx
+    ├── privacy.md / terms.md / impressum.md   # Rechtsseiten (en; de unter de/)
+    ├── guides/                 # Benutzerhandbuch (Englisch, Root-Locale)
+    ├── developers/             # Entwickler-Doku (Englisch)
+    ├── plugins/                # Plugin-Entwicklung (Englisch)
+    └── de/guides/              # Benutzerhandbuch (Deutsch)
 ```
 
-#### `book.toml`-Konfiguration (Beispiel für Nutzer-Doku)
+**i18n:** `en` ist die Root-Locale (Auslieferung ohne Präfix), `de` die zweite (`/de/…`). Nur das Benutzerhandbuch ist zweisprachig; Entwickler-/Plugin-Doku sind Englisch und fallen für `de`-Besucher automatisch auf Englisch zurück.
 
-```toml
-[book]
-title = "Aperio – Benutzerhandbuch"
-language = "de"
-src = "src"
+**Deployment:** `.github/workflows/docs.yml` baut bei jedem Push auf `web/**` die Site (`npm ci && npm run build`) und deployt `web/dist` nach GitHub Pages. Interimsziel ist der Projektpfad `https://timtam.github.io/aperio/` (daher `base: '/aperio/'`); ein „Diese Seite bearbeiten"-Link je Seite zeigt direkt auf GitHub.
 
-[output.html]
-site-url = "/Aperio/user/"
-default-theme = "light"
-preferred-dark-theme = "ayu"
-git-repository-url = "https://github.com/Timtam/Aperio"
-edit-url-template = "https://github.com/Timtam/Aperio/edit/main/docs/user/src/{path}"
-
-[output.html.search]
-enable = true
-limit-results = 20
-```
-
-Das `edit-url-template` erzeugt auf jeder Seite einen "Diese Seite bearbeiten"-Link direkt zu GitHub – senkt die Hürde für Community-Beiträge zur Dokumentation erheblich.
-
-#### GitHub Actions CI/CD-Workflow
-
-```yaml
-# .github/workflows/docs.yml
-name: Dokumentation deployen
-
-on:
-  push:
-    branches: [main]
-    paths:
-      - 'docs/**'
-  workflow_dispatch:             # Manuelles Auslösen möglich
-
-permissions:
-  contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: pages
-  cancel-in-progress: true
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: mdBook installieren
-        uses: peaceiris/actions-mdbook@v2
-        with:
-          mdbook-version: 'latest'
-
-      - name: Entwickler-Doku bauen
-        run: mdbook build docs/dev --dest-dir ../../_site/dev
-        # --dest-dir ist relativ zum Buch-Verzeichnis (docs/dev), ../../ = Repo-Root
-
-      - name: Plugin-Doku bauen
-        run: mdbook build docs/plugin-dev --dest-dir ../../_site/plugin-dev
-
-      - name: Nutzer-Doku bauen
-        run: mdbook build docs/user --dest-dir ../../_site/user
-
-      - name: Landing Page kopieren
-        run: cp docs/index.html _site/index.html
-
-      - name: GitHub Pages Artefakt hochladen
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: _site/
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Auf GitHub Pages deployen
-        id: deployment
-        uses: actions/deploy-pages@v4
-```
-
-Der Workflow wird nur ausgelöst, wenn Dateien unter `docs/` geändert werden (`paths: - 'docs/**'`) – kein unnötiges Deployment bei Code-Änderungen.
-
-#### Erreichbare URLs
+**Erreichbare URLs:**
 
 ```
-https://timtam.github.io/Aperio/              → Landing Page
-https://timtam.github.io/Aperio/dev/          → Entwickler-Doku
-https://timtam.github.io/Aperio/plugin-dev/   → Plugin-Entwickler-Doku
-https://timtam.github.io/Aperio/user/         → Nutzer-Doku (Deutsch)
+https://timtam.github.io/aperio/              → Landing
+https://timtam.github.io/aperio/guides/       → Benutzerhandbuch (Englisch)
+https://timtam.github.io/aperio/de/guides/    → Benutzerhandbuch (Deutsch)
+https://timtam.github.io/aperio/developers/   → Entwickler-Doku
+https://timtam.github.io/aperio/plugins/      → Plugin-Entwicklung
 ```
 
-#### Landing Page (`docs/index.html`)
-
-Eine einfache barrierefreie HTML-Seite, die alle drei Bereiche mit kurzer Beschreibung verlinkt – kein Framework, kein Build-Schritt nötig:
-
-```html
-<!DOCTYPE html>
-<html lang="de">
-<head>
-  <meta charset="UTF-8">
-  <title>Aperio – Dokumentation</title>
-</head>
-<body>
-  <h1>Aperio – Dokumentation</h1>
-  <nav aria-label="Dokumentationsbereiche">
-    <ul>
-      <li><a href="user/">Benutzerhandbuch</a> – Erste Schritte, Tutorial, Tastaturkürzel</li>
-      <li><a href="dev/">Entwickler-Dokumentation</a> – Architektur, Beiträge, Testing</li>
-      <li><a href="plugin-dev/">Plugin-Entwicklung</a> – Eigene Plugins erstellen</li>
-    </ul>
-  </nav>
-</body>
-</html>
-```
+Beim Wechsel auf eine eigene Domain (für die OAuth-Verifizierung ohnehin nötig) genügt eine Config-Änderung (`SITE`/`BASE`); Details in `web/README.md`.
 
 ### 24.6 Pflege & Aktualität
 
 - Dokumentation liegt im selben Repository wie der Code – kein separates Wiki
 - PRs, die neue Features einführen, müssen die zugehörige Dokumentation mitliefern (wird im PR-Template als Checkliste vermerkt)
 - Nutzer-Dokumentation wird bei jedem Release auf Aktualität geprüft
-- "Diese Seite bearbeiten"-Links in jeder mdBook-Seite senken die Hürde für Community-Beiträge
-- Versionierung: Dokumentation trägt dieselbe Versionsnummer wie die App (`docs/` enthält ein `version.md` mit aktuellem Stand)
+- "Diese Seite bearbeiten"-Links auf jeder Doku-Seite senken die Hürde für Community-Beiträge
+- Versionierung: Dokumentation wird gemeinsam mit dem Code im selben Repository (`web/`) gepflegt und mitversioniert
 
 ---
 

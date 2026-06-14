@@ -120,4 +120,4 @@ one `ffi_*` wrapper per method you implemented, a `CalendarVtable` /
   the host maps them to user-facing messages.
 - **Recurrence:** decide up front whether you return masters (frontend
   expands) or server-expanded instances — see the
-  [adapters overview](/aperio/dev/adapters/overview.html).
+  [adapters overview](/developers/adapters/overview/).

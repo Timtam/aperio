@@ -80,7 +80,7 @@ adding a *method* means appending a new slot to the end of the vtable
 On the host side, `plugin_core::shim` adapts a loaded vtable back into an
 ordinary `cal-core` trait object (`FfiCalendarAdapter`, `FfiTasksAdapter`,
 …), so the rest of the host is plugin-agnostic. The full contract lives in
-the [Plugin Developer book](/aperio/plugin-dev/abi-reference.html).
+the [Plugin Developer docs](/plugins/abi-reference/).
 
 ## Data path: local vs. external
 

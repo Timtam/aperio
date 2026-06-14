@@ -21,7 +21,11 @@ your day or week, and work through them.
 ## Completing and editing
 
 - **Mark as done:** Select the task and check it off with `Space`
-  (pressing again unchecks it).
+  (pressing again unchecks it). The **completion date** is recorded and
+  shown — in the task list a finished task displays *“Completed: <date>”*
+  in place of its due date, and the editor shows a *“Completed on”* line.
+  It syncs both ways with every provider (Apple Reminders, Google, Vikunja,
+  Microsoft To Do, Exchange, Todoist).
 - **Edit:** Open it with `Enter`.
 - **Delete:** Choose **Delete** (default: `Delete`).
 

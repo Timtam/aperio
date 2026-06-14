@@ -43,5 +43,5 @@ and the ABI is versioned for forward compatibility.
 | [The manifest](/plugins/manifest/) | Every `plugin.json` field. |
 | [Examples](/plugins/examples/) | `hello-world` and a full calendar-adapter template. |
 
-> The contributor-facing book for the app itself is the
-> [Developer Documentation](/aperio/dev/).
+> The contributor-facing docs for the app itself are the
+> [Developer Documentation](/developers/).

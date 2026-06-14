@@ -62,8 +62,8 @@ Automated checks can't prove screen-reader usability, so accessibility is
 
 When you change an interactive surface, verify with at least one screen
 reader that focus order, roles/states, and live announcements behave, and
-note what you tested in the PR. See the user book's
-[accessibility page](/aperio/user/barrierefreiheit.html) for the intended
+note what you tested in the PR. See the user guide's
+[accessibility page](/guides/barrierefreiheit/) for the intended
 behaviour per reader.
 
 ## CI

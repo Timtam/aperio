@@ -26,21 +26,15 @@ npm run build    # static output in dist/
 npm run preview  # serve the built dist/
 ```
 
-## How the content was migrated
-
-`scripts/migrate-docs.mjs` is a one-shot transformer: it copied every mdBook
-page from `../docs/{user-en,user,dev,plugin-dev}/src` into
-`src/content/docs/…`, adding a `title` frontmatter from the first H1 (and
-removing that H1), renaming each book's intro page to the area index, and
-rewriting internal `.md` links to locale-aware Starlight URLs. It can be re-run
-until the old mdBooks are decommissioned; after that it can be deleted.
+This site replaced the four mdBooks that used to live under `docs/` (now
+removed). It is the single source for the landing page, legal pages and all
+documentation.
 
 ## Deployment
 
-`.github/workflows/docs.yml` now builds **this** site and deploys it to GitHub
+`.github/workflows/docs.yml` builds **this** site and deploys it to GitHub
 Pages on every push to `web/**`. Interim target: the project path
-`https://timtam.github.io/aperio/` (so `base` is `/aperio/`). The old mdBooks
-under `../docs` are no longer built or deployed.
+`https://timtam.github.io/aperio/` (so `base` is `/aperio/`).
 
 ### Switching to a custom domain (for OAuth verification)
 
@@ -57,5 +51,3 @@ The domain is needed for Google/Microsoft verification anyway. To move from the
    touch-point).
 4. Fill in the real legal content (`/impressum`, `/privacy`, `/terms` + `/de/…`)
    and have it reviewed.
-5. Once verified live, remove `../docs` (the four mdBooks) and
-   `scripts/migrate-docs.mjs`.

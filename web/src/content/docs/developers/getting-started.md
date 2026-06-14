@@ -73,7 +73,7 @@ Pick the layer that matches your interest:
 | The UI | `src/` (React/TS) |
 | A specific provider (Google, iCloud, …) | `crates/cal-adapter-*` — see [Adapters](/developers/adapters/overview/) |
 | The sync engine (event log, CRDT-ish merge) | `crates/sync-core`, `src-tauri/src/event_log`, `src-tauri/src/sync` |
-| Writing a *new* provider as a plugin | the [Plugin Developer book](/aperio/plugin-dev/) |
+| Writing a *new* provider as a plugin | the [Plugin Developer docs](/plugins/) |
 
 The [Architecture](/developers/architecture/) chapter explains how these pieces talk
 to each other.

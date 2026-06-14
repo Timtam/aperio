@@ -9,7 +9,7 @@ application/focus mode, while remaining a fast, native desktop app.
 This book is for **contributors to the application itself**. If you instead
 want to write a *plugin* (a new calendar/task/contact provider, a sync
 backend, or a video-conferencing integration), read the
-[Plugin Developer Documentation](/aperio/plugin-dev/).
+[Plugin Developer Documentation](/plugins/).
 
 ## The stack at a glance
 
