@@ -169,6 +169,16 @@ export function SyncPanel() {
   const [intervalDraft, setIntervalDraft] = useState<number | null>(null);
   const [busyAdapter, setBusyAdapter] = useState(false);
   const [busyTest, setBusyTest] = useState(false);
+  // Result of the last "Verbindung testen" / "Verbinden" attempt,
+  // rendered as a VISIBLE message next to the buttons. Previously these
+  // outcomes were only spoken via the live-region announcer, so sighted
+  // users saw nothing — especially on failure. Mirrors the visible
+  // `previewError` pattern below (role="alert"/"status" doubles as the
+  // screen-reader live region, so a separate announce() isn't needed).
+  const [adapterFeedback, setAdapterFeedback] = useState<{
+    kind: 'ok' | 'error';
+    message: string;
+  } | null>(null);
   const [busyPreview, setBusyPreview] = useState(false);
   const [busyAccept, setBusyAccept] = useState(false);
   const [busyAdopt, setBusyAdopt] = useState(false);
@@ -474,6 +484,7 @@ export function SyncPanel() {
   const finishConfigure = useCallback(
     async (config: SyncAdapterConfig) => {
       setBusyAdapter(true);
+      setAdapterFeedback(null);
       try {
         await configureSyncAdapter(config);
         // Clear password fields after a successful connect so they
@@ -514,20 +525,24 @@ export function SyncPanel() {
       } catch (err) {
         // eslint-disable-next-line no-console
         console.warn('configure_sync_adapter failed', err);
-        announce(
-          `${t('dialogs.settings.sync.errorPrefix')}: ${messageForError(err)}`,
-          'assertive',
-        );
+        setAdapterFeedback({
+          kind: 'error',
+          message: `${t('dialogs.settings.sync.errorPrefix')}: ${messageForError(err)}`,
+        });
       } finally {
         setBusyAdapter(false);
       }
     },
-    [announce, messageForError, t],
+    [messageForError, t],
   );
 
   const onConfigure = useCallback(async () => {
+    setAdapterFeedback(null);
     if (configMissingRequired) {
-      announce(t('dialogs.settings.sync.adapterNeedPath'), 'assertive');
+      setAdapterFeedback({
+        kind: 'error',
+        message: t('dialogs.settings.sync.adapterNeedPath'),
+      });
       return;
     }
     const config = buildConfig();
@@ -543,10 +558,10 @@ export function SyncPanel() {
       } catch (err) {
         // eslint-disable-next-line no-console
         console.warn('preview_sftp_host_key failed', err);
-        announce(
-          `${t('dialogs.settings.sync.errorPrefix')}: ${messageForError(err)}`,
-          'assertive',
-        );
+        setAdapterFeedback({
+          kind: 'error',
+          message: `${t('dialogs.settings.sync.errorPrefix')}: ${messageForError(err)}`,
+        });
         setBusyAdapter(false);
         return;
       }
@@ -568,7 +583,6 @@ export function SyncPanel() {
     // Non-SFTP backends configure directly.
     await finishConfigure(config);
   }, [
-    announce,
     buildConfig,
     configMissingRequired,
     finishConfigure,
@@ -596,16 +610,15 @@ export function SyncPanel() {
       } catch (err) {
         // eslint-disable-next-line no-console
         console.warn('trust_sftp_host_key failed', err);
-        announce(
-          `${t('dialogs.settings.sync.errorPrefix')}: ${messageForError(err)}`,
-          'assertive',
-        );
+        setAdapterFeedback({
+          kind: 'error',
+          message: `${t('dialogs.settings.sync.errorPrefix')}: ${messageForError(err)}`,
+        });
         return;
       }
       await finishConfigure(config);
     },
     [
-      announce,
       finishConfigure,
       messageForError,
       pendingSftpConfig,
@@ -621,29 +634,35 @@ export function SyncPanel() {
 
   // "Verbindung testen" — build the adapter, run `test_connection`,
   // throw the handle away. Never persists, never mutates the
-  // active orchestrator. Errors are announced verbatim via the
-  // standard error path; success gets a brief "OK" announcement.
+  // active orchestrator. Both outcomes land in `adapterFeedback`, shown
+  // as a visible message (and live region) beside the buttons.
   const onTest = useCallback(async () => {
+    setAdapterFeedback(null);
     if (configMissingRequired) {
-      announce(t('dialogs.settings.sync.adapterNeedPath'), 'assertive');
+      setAdapterFeedback({
+        kind: 'error',
+        message: t('dialogs.settings.sync.adapterNeedPath'),
+      });
       return;
     }
     setBusyTest(true);
     try {
       await testSyncAdapter(buildConfig());
-      announce(t('dialogs.settings.sync.adapterTestOk'));
+      setAdapterFeedback({
+        kind: 'ok',
+        message: t('dialogs.settings.sync.adapterTestOk'),
+      });
     } catch (err) {
       // eslint-disable-next-line no-console
       console.warn('test_sync_adapter failed', err);
-      announce(
-        `${t('dialogs.settings.sync.errorPrefix')}: ${messageForError(err)}`,
-        'assertive',
-      );
+      setAdapterFeedback({
+        kind: 'error',
+        message: `${t('dialogs.settings.sync.errorPrefix')}: ${messageForError(err)}`,
+      });
     } finally {
       setBusyTest(false);
     }
   }, [
-    announce,
     buildConfig,
     configMissingRequired,
     messageForError,
@@ -1052,12 +1071,13 @@ export function SyncPanel() {
   }, [refreshDropboxSignedIn]);
 
   const onConnectDropbox = useCallback(async () => {
+    setAdapterFeedback(null);
     const clientId = dropboxClientIdDraft.trim();
     if (!clientId) {
-      announce(
-        t('dialogs.settings.sync.adapterDropboxNeedsClientId'),
-        'assertive',
-      );
+      setAdapterFeedback({
+        kind: 'error',
+        message: t('dialogs.settings.sync.adapterDropboxNeedsClientId'),
+      });
       return;
     }
     setBusyDropboxOauth(true);
@@ -1071,10 +1091,10 @@ export function SyncPanel() {
     } catch (err) {
       // eslint-disable-next-line no-console
       console.warn('connect_dropbox_oauth failed', err);
-      announce(
-        `${t('dialogs.settings.sync.errorPrefix')}: ${messageForError(err)}`,
-        'assertive',
-      );
+      setAdapterFeedback({
+        kind: 'error',
+        message: `${t('dialogs.settings.sync.errorPrefix')}: ${messageForError(err)}`,
+      });
     } finally {
       setBusyDropboxOauth(false);
     }
@@ -1106,13 +1126,14 @@ export function SyncPanel() {
   }, [refreshGdriveSignedIn]);
 
   const onConnectGoogledrive = useCallback(async () => {
+    setAdapterFeedback(null);
     const clientId = gdriveClientIdDraft.trim();
     const clientSecret = gdriveClientSecretDraft.trim();
     if (!clientId || !clientSecret) {
-      announce(
-        t('dialogs.settings.sync.adapterGoogledriveNeedsClientId'),
-        'assertive',
-      );
+      setAdapterFeedback({
+        kind: 'error',
+        message: t('dialogs.settings.sync.adapterGoogledriveNeedsClientId'),
+      });
       return;
     }
     setBusyGdriveOauth(true);
@@ -1125,10 +1146,10 @@ export function SyncPanel() {
     } catch (err) {
       // eslint-disable-next-line no-console
       console.warn('connect_googledrive_oauth failed', err);
-      announce(
-        `${t('dialogs.settings.sync.errorPrefix')}: ${messageForError(err)}`,
-        'assertive',
-      );
+      setAdapterFeedback({
+        kind: 'error',
+        message: `${t('dialogs.settings.sync.errorPrefix')}: ${messageForError(err)}`,
+      });
     } finally {
       setBusyGdriveOauth(false);
     }
@@ -2033,6 +2054,21 @@ export function SyncPanel() {
             </button>
           )}
         </div>
+        {/* Visible outcome of test / connect — sighted users would
+            otherwise get no feedback (especially on failure). role
+            doubles as the screen-reader live region. Uses the globally
+            styled form classes (red error / muted hint), as AccountsPanel
+            does for the same connection-test feedback. */}
+        {adapterFeedback && (
+          <p
+            className={
+              adapterFeedback.kind === 'error' ? 'form__error' : 'form__hint'
+            }
+            role={adapterFeedback.kind === 'error' ? 'alert' : 'status'}
+          >
+            {adapterFeedback.message}
+          </p>
+        )}
           </>
         )}
       </section>
