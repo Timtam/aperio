@@ -24,6 +24,7 @@ import {
   isCommandError,
   previewSftpHostKey,
   previewSyncTarget,
+  refreshExternalCache,
   setSyncInterval,
   testSyncAdapter,
   trustSftpHostKey,
@@ -63,7 +64,8 @@ export function SyncPanel() {
   const { t } = useTranslation();
   const announce = useAnnouncer();
   const fmt = useDateFormat();
-  const { openSyncConflicts, openSyncAccountsConnect } = useDialogState();
+  const { openSyncConflicts, openSyncAccountsConnect, invalidateData } =
+    useDialogState();
   const {
     status,
     lastReport,
@@ -566,6 +568,17 @@ export function SyncPanel() {
             // eslint-disable-next-line no-console
             console.warn('get_sync_adapter_summary failed', err);
           });
+        // Make the just-onboarded data visible WITHOUT a restart:
+        //   - invalidateData() bumps dataVersion so the sidebar/views
+        //     re-read the LOCAL calendars/lists/tasks the snapshot applied;
+        //   - refreshExternalCache() warms the restored external accounts'
+        //     containers from their providers (credentials are in the
+        //     keychain now); its cache-updated events bump dataVersion again
+        //     as each scope lands;
+        //   - triggerSync() registers this device + pulls anything new.
+        invalidateData();
+        void refreshExternalCache();
+        void triggerSync();
       } catch (err) {
         // eslint-disable-next-line no-console
         console.warn('connect failed', err);
@@ -582,11 +595,13 @@ export function SyncPanel() {
       announce,
       deviceNameDraft,
       enableE2eDraft,
+      invalidateData,
       messageForError,
       openSyncAccountsConnect,
       passphraseDraft,
       preview,
       t,
+      triggerSync,
     ],
   );
 
