@@ -606,7 +606,7 @@ pub async fn list_task_list_shares(
                     name: display,
                     email: e.email.filter(|s| !s.trim().is_empty()),
                 },
-                right: Some(vikunja_right_to_member(e.right)),
+                right: Some(vikunja_right_to_member(e.permission)),
                 pending: false,
             }
         })
@@ -640,18 +640,31 @@ pub async fn search_users(client: &VikunjaClient, query: &str) -> VikunjaResult<
 /// Body for `PUT /projects/{id}/users`. The share is keyed on the
 /// USERNAME, which Vikunja resolves server-side via `GetUserByUsername`.
 ///
-/// Vikunja renamed this body field from `user_id` (≤ 0.x) to `username`
-/// (current): the Go field is `Username string json:"username"` and the
-/// numeric `UserID` is `json:"-"` (server-derived). We send BOTH keys so
-/// either server reads the value and the other ignores an unknown field —
-/// sending only the old `user_id` left `Username` empty on current
-/// servers, so the lookup hit error 1005 ("The user does not exist").
+/// Vikunja renamed two body fields over time, and we send the old + new
+/// name for each so current and legacy servers both bind the value (an
+/// unknown extra field is ignored):
+///   - the user key: `user_id` (≤ 0.x) → `username` (current). Sending
+///     only `user_id` left `Username` empty on current servers, so the
+///     lookup hit error 1005 ("The user does not exist").
+///   - the level: `right` (≤ 0.x) → `permission` (current). Sending only
+///     `right` left `Permission` at 0 on current servers, so every share
+///     was created/updated as Read regardless of the chosen level.
 fn share_user_body(member_ref: &str, right: Option<MemberRight>) -> serde_json::Value {
+    let perm = member_right_to_vikunja(right);
     serde_json::json!({
         "username": member_ref,
         "user_id": member_ref,
-        "right": member_right_to_vikunja(right),
+        "permission": perm,
+        "right": perm,
     })
+}
+
+/// Body for `POST /projects/{id}/users/{user}` (change a share's level).
+/// Sends both `permission` (current) and `right` (legacy) — see
+/// [`share_user_body`].
+fn member_permission_body(right: MemberRight) -> serde_json::Value {
+    let perm = member_right_to_vikunja(Some(right));
+    serde_json::json!({ "permission": perm, "right": perm })
 }
 
 /// `PUT /projects/{id}/users` — share with a user (by username) at a
@@ -693,7 +706,7 @@ pub async fn set_task_list_member_right(
     right: MemberRight,
 ) -> VikunjaResult<()> {
     let project_id = parse_id(list_id, "task list id")?;
-    let body = serde_json::json!({ "right": member_right_to_vikunja(Some(right)) });
+    let body = member_permission_body(right);
     let _: serde_json::Value = client
         .post_json(
             &format!("/projects/{project_id}/users/{}", encode_query(member_ref)),
@@ -715,8 +728,12 @@ struct ProjectUserEntry {
     name: Option<String>,
     #[serde(default)]
     email: Option<String>,
-    #[serde(default)]
-    right: i32,
+    // Vikunja renamed this field `right` → `permission` (model
+    // `UserWithPermission`). Accept either so the share level reads back
+    // correctly on both current and legacy servers; without this it
+    // always defaulted to 0 → every member showed "Read".
+    #[serde(default, rename = "permission", alias = "right")]
+    permission: i32,
 }
 
 // ── JSON wire shapes ───────────────────────────────────────────────────
@@ -1370,15 +1387,38 @@ mod tests {
     // ── Member sharing body ────────────────────────────────────
 
     #[test]
-    fn share_body_sends_username_key() {
-        // Current Vikunja keys the share on `username`; older servers
-        // read `user_id`. We send both so either resolves the user —
-        // sending only `user_id` left `Username` empty on current
-        // servers and produced error 1005 ("The user does not exist").
+    fn share_body_sends_username_and_permission_keys() {
+        // Current Vikunja keys the share on `username` + `permission`;
+        // older servers read `user_id` + `right`. We send both names for
+        // each — sending only the old names left the user unresolved
+        // (error 1005) and the level stuck at Read.
         let body = share_user_body("alice", Some(MemberRight::Write));
         assert_eq!(body["username"], "alice");
         assert_eq!(body["user_id"], "alice");
+        assert_eq!(body["permission"], 1);
         assert_eq!(body["right"], 1);
+    }
+
+    #[test]
+    fn permission_body_sends_both_level_keys() {
+        let admin = member_permission_body(MemberRight::Admin);
+        assert_eq!(admin["permission"], 2);
+        assert_eq!(admin["right"], 2);
+        let read = member_permission_body(MemberRight::Read);
+        assert_eq!(read["permission"], 0);
+        assert_eq!(read["right"], 0);
+    }
+
+    #[test]
+    fn member_reads_back_permission_field() {
+        // A current-server row uses `permission`; a legacy row uses
+        // `right`. Both must map to the same level.
+        let modern: ProjectUserEntry =
+            serde_json::from_str(r#"{"id":3,"username":"bob","permission":2}"#).unwrap();
+        assert_eq!(modern.permission, 2);
+        let legacy: ProjectUserEntry =
+            serde_json::from_str(r#"{"id":3,"username":"bob","right":1}"#).unwrap();
+        assert_eq!(legacy.permission, 1);
     }
 
     #[tokio::test]

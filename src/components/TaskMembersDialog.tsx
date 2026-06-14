@@ -140,10 +140,32 @@ export function TaskMembersDialog({
       announce(t('dialogs.taskMembers.removed', { name: share.user.name }));
     });
 
-  const changeRight = (share: TaskListShare, right: MemberRight) =>
-    void run(async () => {
-      await taskSetMemberRight(listId, share.user.id, right);
-    });
+  const changeRight = (share: TaskListShare, right: MemberRight) => {
+    const prev = share.right;
+    // Optimistic in place: update just this row's right so the <select>
+    // keeps both its value and the focus. The old path went through
+    // `run`, which flipped `busy` (disabling the focused select — NVDA
+    // lost focus) and reloaded the whole list (rebuilding the rows, so
+    // the value appeared to snap back to "read" until the refetch). We
+    // mutate the single row and revert only on failure.
+    setShares((rows) =>
+      rows.map((r) => (r.user.id === share.user.id ? { ...r, right } : r)),
+    );
+    void taskSetMemberRight(listId, share.user.id, right)
+      .then(() =>
+        announce(
+          t('dialogs.taskMembers.rightChanged', { name: share.user.name }),
+        ),
+      )
+      .catch((err) => {
+        setShares((rows) =>
+          rows.map((r) =>
+            r.user.id === share.user.id ? { ...r, right: prev } : r,
+          ),
+        );
+        setError(formatErr(err));
+      });
+  };
 
   const existingIds = new Set(shares.map((s) => s.user.id));
 

@@ -1125,7 +1125,8 @@
         "admin": "Admin"
       },
       "added": "Added {{name}}.",
-      "removed": "Removed {{name}}."
+      "removed": "Removed {{name}}.",
+      "rightChanged": "Changed permission for {{name}}."
     },
     "quickAdd": {
       "title": "Quick add event",

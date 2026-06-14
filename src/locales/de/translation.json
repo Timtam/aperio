@@ -1125,7 +1125,8 @@
         "admin": "Admin"
       },
       "added": "{{name}} hinzugefügt.",
-      "removed": "{{name}} entfernt."
+      "removed": "{{name}} entfernt.",
+      "rightChanged": "Berechtigung für {{name}} geändert."
     },
     "quickAdd": {
       "title": "Termin schnell anlegen",
