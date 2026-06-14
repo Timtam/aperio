@@ -1903,6 +1903,7 @@ pub async fn enable_sync_encryption(
 pub async fn adopt_remote_encryption(
     orchestrator: State<'_, Arc<SyncOrchestrator>>,
     db: State<'_, DbHandle>,
+    event_log: State<'_, Arc<crate::event_log::EventLogWriter>>,
     passphrase: String,
 ) -> CommandResult<()> {
     let pp = passphrase.trim();
@@ -1948,6 +1949,14 @@ pub async fn adopt_remote_encryption(
     store_e2e_key(&dek)?;
     prefs.set(PREF_E2E_ENABLED, "true").map_err(internal)?;
     orchestrator.configure(encrypting);
+
+    // E2E is now on for this device too. Push any local account secret that
+    // predates the encryption — created while syncing in plaintext, so it
+    // never got a `credential.set` — into the now-encrypted log, so those
+    // accounts reach the other devices without re-entry. Mirrors step 10 of
+    // `enable_sync_encryption`; idempotent and routed through the same E2E +
+    // slot gate as live emits.
+    crate::credential_sync::emit_all_local_credentials(&event_log, &shared);
 
     Ok(())
 }

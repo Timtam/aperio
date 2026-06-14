@@ -41,7 +41,9 @@ nicht wiederherstellen (bewahre es also sicher auf).
 Ist die Verschlüsselung aktiv, werden zusätzlich die **Zugangsdaten deiner
 Konten** (Passwörter, Tokens) verschlüsselt mitsynchronisiert. So funktionieren
 deine Konten auf jedem Gerät, **ohne** dass du die Zugangsdaten erneut eingeben
-musst. **Ohne** Verschlüsselung bleiben Zugangsdaten ausschließlich lokal auf
+musst. Das gilt auch für Konten, die du **vor** dem Aktivieren der
+Verschlüsselung angelegt hast – deren Zugangsdaten werden beim Einschalten
+automatisch nachgezogen. **Ohne** Verschlüsselung bleiben Zugangsdaten ausschließlich lokal auf
 dem jeweiligen Gerät. Schaltest du die Verschlüsselung wieder ab, werden sie aus
 dem Sync-Speicher entfernt und nur noch lokal aufbewahrt.
 

@@ -39,7 +39,9 @@ somewhere safe).
 
 When encryption is on, your **account credentials** (passwords, tokens) are
 synced encrypted as well, so your accounts work on every device **without**
-re-entering them. **Without** encryption, credentials stay on each device only.
+re-entering them. This also covers accounts you created **before** turning
+encryption on — their credentials are backfilled automatically when you enable
+it. **Without** encryption, credentials stay on each device only.
 If you turn encryption back off, they are removed from the sync store and kept
 locally only.
 
