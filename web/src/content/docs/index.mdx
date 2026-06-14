@@ -1,0 +1,58 @@
+---
+title: Aperio
+description: An accessible, keyboard-first calendar, task and contact app for the desktop — local-first and provider-agnostic.
+template: splash
+hero:
+  tagline: An accessible, keyboard-first calendar, tasks and contacts app for the desktop. Screen-reader-first, local-first, provider-agnostic.
+  actions:
+    - text: User Guide
+      link: /guides/
+      icon: right-arrow
+    - text: View on GitHub
+      link: https://github.com/Timtam/aperio
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+## What is Aperio?
+
+Aperio shows calendars, tasks and contacts from many sources side by side —
+Google, iCloud / CalDAV, Outlook / Microsoft 365, Exchange, Vikunja, Todoist
+and purely local lists — in day, week, month, year, agenda and task views.
+Accessibility is the project's founding constraint: it is developed and tested
+**screen-reader-first**, and every action is reachable from the keyboard.
+
+<CardGrid>
+  <Card title="User Guide" icon="open-book">
+    Getting started, the step-by-step tutorial, keyboard shortcuts and
+    accessibility notes. [Read the guide](/guides/)
+  </Card>
+  <Card title="Connect Google" icon="email">
+    Use your own OAuth client until the verified app ships.
+    [Step-by-step walkthrough](/guides/google-oauth/)
+  </Card>
+  <Card title="Developer docs" icon="setting">
+    Architecture, contributing, testing and the provider adapters.
+    [Open developer docs](/developers/)
+  </Card>
+  <Card title="Write a plugin" icon="puzzle">
+    Build your own provider behind the stable C ABI.
+    [Plugin development](/plugins/)
+  </Card>
+</CardGrid>
+
+## Built around accessibility
+
+- Developed and manually tested **screen-reader-first** (primarily NVDA).
+- **Keyboard-first:** every action reachable without a mouse; drag-and-drop is
+  always a redundant mouse affordance on top of a keyboard path.
+- English and German throughout.
+
+---
+
+<small>
+  [Privacy Policy](/privacy/) · [Terms of Service](/terms/) ·
+  [Legal notice (Impressum)](/impressum/)
+</small>

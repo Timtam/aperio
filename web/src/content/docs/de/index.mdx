@@ -1,0 +1,59 @@
+---
+title: Aperio
+description: Eine barrierefreie, tastaturorientierte Kalender-, Aufgaben- und Kontakt-App für den Desktop — local-first und anbieterunabhängig.
+template: splash
+hero:
+  tagline: Eine barrierefreie, tastaturorientierte Kalender-, Aufgaben- und Kontakt-App für den Desktop. Screenreader-first, local-first, anbieterunabhängig.
+  actions:
+    - text: Benutzerhandbuch
+      link: /de/guides/
+      icon: right-arrow
+    - text: Auf GitHub ansehen
+      link: https://github.com/Timtam/aperio
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+## Was ist Aperio?
+
+Aperio zeigt Kalender, Aufgaben und Kontakte aus vielen Quellen
+nebeneinander — Google, iCloud / CalDAV, Outlook / Microsoft 365, Exchange,
+Vikunja, Todoist sowie rein lokale Listen — in Tages-, Wochen-, Monats-,
+Jahres-, Agenda- und Aufgabenansicht. Barrierefreiheit ist das Gründungsprinzip:
+Die App wird **screenreader-first** entwickelt und getestet, und jede Aktion ist
+per Tastatur erreichbar.
+
+<CardGrid>
+  <Card title="Benutzerhandbuch" icon="open-book">
+    Erste Schritte, das Schritt-für-Schritt-Tutorial, Tastaturkürzel und
+    Hinweise zur Barrierefreiheit. [Zum Handbuch](/de/guides/)
+  </Card>
+  <Card title="Google einbinden" icon="email">
+    Bis zur verifizierten App nutzt du eigene OAuth-Zugangsdaten.
+    [Schritt-für-Schritt-Anleitung](/de/guides/google-oauth/)
+  </Card>
+  <Card title="Entwickler-Doku" icon="setting">
+    Architektur, Mitwirken, Tests und die Anbieter-Adapter (Englisch).
+    [Entwickler-Doku öffnen](/developers/)
+  </Card>
+  <Card title="Plugin schreiben" icon="puzzle">
+    Eigene Anbieter hinter der stabilen C-ABI (Englisch).
+    [Plugin-Entwicklung](/plugins/)
+  </Card>
+</CardGrid>
+
+## Rund um Barrierefreiheit gebaut
+
+- Entwickelt und manuell getestet **screenreader-first** (vorrangig NVDA).
+- **Tastatur-first:** jede Aktion ohne Maus erreichbar; Drag & Drop ist stets
+  eine redundante Maus-Ergänzung zu einem Tastaturweg.
+- Durchgängig Deutsch und Englisch.
+
+---
+
+<small>
+  [Datenschutz](/de/privacy/) · [Nutzungsbedingungen](/de/terms/) ·
+  [Impressum](/de/impressum/)
+</small>
