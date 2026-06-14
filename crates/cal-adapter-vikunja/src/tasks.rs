@@ -615,17 +615,18 @@ pub async fn list_task_list_shares(
 
 /// `GET /users?s=` — directory search for users to add as members. The
 /// returned `TaskUser.id` carries the USERNAME (the membership add key).
+///
+/// Errors propagate (rather than collapsing to an empty list) so the
+/// members dialog can tell "no matches" apart from "the request failed"
+/// and surface the latter to the user. A genuine no-match is a `200`
+/// with an empty array, which still maps to `Ok(vec![])`.
 pub async fn search_users(client: &VikunjaClient, query: &str) -> VikunjaResult<Vec<TaskUser>> {
     if query.trim().is_empty() {
         return Ok(Vec::new());
     }
-    let users: Vec<VikunjaUser> = match client
+    let users: Vec<VikunjaUser> = client
         .get_json(&format!("/users?s={}", encode_query(query)))
-        .await
-    {
-        Ok(u) => u,
-        Err(_) => return Ok(Vec::new()),
-    };
+        .await?;
     Ok(users
         .into_iter()
         .filter_map(|u| {

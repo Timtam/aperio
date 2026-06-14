@@ -92,6 +92,15 @@ For shared lists (e.g. Todoist) you can:
 - **manage members** from the list's context menu (invite, remove),
 - **assign a person** to individual tasks.
 
+> **Vikunja – finding people:** In the **Manage members** dialog you search
+> for people. Vikunja matches a **username only exactly** (the full name,
+> case-insensitive) – a partial username is not enough. Partial matches work
+> only for the **display name**, and the **email** must again be exact. The
+> person must also have marked themselves **discoverable** in their Vikunja
+> settings (by name and/or by email). Vikunja deliberately offers no
+> "list all users". You change permissions (read / write / admin) afterwards
+> right in the member list.
+
 > **Screen-reader note:** Tasks are announced with title, status (done /
 > open), due date and priority. **High** priority also shows a "↑", **low**
 > a "↓"; medium priority (the default) shows nothing. Checking off with

@@ -3730,6 +3730,17 @@ button[aria-disabled='true'] {
   font-size: var(--font-size-xs);
 }
 
+/* Search status line under the add field. Empty while idle (collapses to
+   nothing); carries loading / no-match / error / count messages. The
+   :empty rule drops its margin so the idle state adds no gap. */
+.task-members__search-status {
+  margin: var(--space-1) 0 0;
+}
+
+.task-members__search-status:empty {
+  margin: 0;
+}
+
 .task-members__results {
   list-style: none;
   margin: var(--space-1) 0 0;

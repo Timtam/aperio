@@ -101,6 +101,16 @@ Bei geteilten Listen (z. B. Todoist) kannst du:
   entfernen),
 - einzelnen Aufgaben eine **Person zuweisen**.
 
+> **Vikunja – Personen finden:** Im Dialog **Mitglieder verwalten** suchst
+> du nach Personen. Vikunja findet einen **Benutzernamen nur exakt** (der
+> vollständige Name, Groß-/Kleinschreibung egal) – ein Teil davon genügt
+> nicht. Teiltreffer funktionieren nur beim **Anzeigenamen**, die **E-Mail**
+> muss wiederum exakt sein. Die gesuchte Person muss sich außerdem in ihren
+> Vikunja-Einstellungen als **auffindbar** markiert haben (per Name bzw. per
+> E-Mail). Eine Liste „aller Nutzer" bietet Vikunja bewusst nicht an.
+> Berechtigungen (Lesen / Schreiben / Admin) änderst du danach direkt in der
+> Mitgliederliste.
+
 > **Screenreader-Hinweis:** Aufgaben werden mit Titel, Status (erledigt /
 > offen), Fälligkeit und Priorität angesagt. Eine **hohe** Priorität zeigt
 > zusätzlich ein „↑", eine **niedrige** ein „↓"; die mittlere Priorität

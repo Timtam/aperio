@@ -52,6 +52,13 @@ export function TaskMembersDialog({
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<TaskUser[]>([]);
+  // Search lifecycle so the results area is never silent: idle (query too
+  // short) → loading → done | error. Without this, an empty result set or
+  // a failed request rendered nothing at all.
+  const [searchState, setSearchState] = useState<
+    'idle' | 'loading' | 'done' | 'error'
+  >('idle');
+  const [searchError, setSearchError] = useState('');
   const [busy, setBusy] = useState(false);
 
   const reload = useCallback(async () => {
@@ -70,6 +77,7 @@ export function TaskMembersDialog({
     if (isOpen) {
       setQuery('');
       setResults([]);
+      setSearchState('idle');
       void reload();
     }
   }, [isOpen, reload]);
@@ -81,16 +89,23 @@ export function TaskMembersDialog({
     const q = query.trim();
     if (q.length < 2) {
       setResults([]);
+      setSearchState('idle');
       return;
     }
     let cancelled = false;
+    setSearchState('loading');
     const handle = setTimeout(() => {
       void taskSearchUsers(listId, q)
         .then((r) => {
-          if (!cancelled) setResults(r);
+          if (cancelled) return;
+          setResults(r);
+          setSearchState('done');
         })
-        .catch(() => {
-          if (!cancelled) setResults([]);
+        .catch((err) => {
+          if (cancelled) return;
+          setResults([]);
+          setSearchError(formatErr(err));
+          setSearchState('error');
         });
     }, 250);
     return () => {
@@ -168,6 +183,36 @@ export function TaskMembersDialog({
   };
 
   const existingIds = new Set(shares.map((s) => s.user.id));
+  // Directory matches not already in the list — the actually-addable set.
+  const addable = results.filter((u) => !existingIds.has(u.id));
+
+  // Single status line for the search area (search-mode adapters only).
+  // Never silent: it explains loading, failure, no-match (with the
+  // Vikunja exact-username caveat) and the all-already-members case.
+  let searchStatus = '';
+  let searchStatusError = false;
+  if (!addByEmail) {
+    if (searchState === 'loading') {
+      searchStatus = t('dialogs.taskMembers.searching');
+    } else if (searchState === 'error') {
+      searchStatus = t('dialogs.taskMembers.searchError', {
+        error: searchError,
+      });
+      searchStatusError = true;
+    } else if (searchState === 'done') {
+      if (results.length === 0) {
+        searchStatus = t('dialogs.taskMembers.noResults', {
+          query: query.trim(),
+        });
+      } else if (addable.length === 0) {
+        searchStatus = t('dialogs.taskMembers.allAlreadyMembers');
+      } else {
+        searchStatus = t('dialogs.taskMembers.searchResults', {
+          count: addable.length,
+        });
+      }
+    }
+  }
 
   return (
     <Modal
@@ -269,11 +314,24 @@ export function TaskMembersDialog({
               {t('dialogs.taskMembers.invite')}
             </button>
           ) : (
-            results.length > 0 && (
-              <ul className="task-members__results">
-                {results
-                  .filter((u) => !existingIds.has(u.id))
-                  .map((u) => (
+            <>
+              {/* Always-present polite live region — collapses to nothing
+                  when empty, so the search area is never silent yet adds
+                  no gap while idle. */}
+              <p
+                role="status"
+                aria-live="polite"
+                className={
+                  searchStatusError
+                    ? 'task-members__search-status form__error'
+                    : 'task-members__search-status form__hint'
+                }
+              >
+                {searchStatus}
+              </p>
+              {addable.length > 0 && (
+                <ul className="task-members__results">
+                  {addable.map((u) => (
                     <li key={u.id}>
                       <button
                         type="button"
@@ -285,8 +343,9 @@ export function TaskMembersDialog({
                       </button>
                     </li>
                   ))}
-              </ul>
-            )
+                </ul>
+              )}
+            </>
           )}
         </div>
       </div>
