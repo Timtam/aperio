@@ -1030,6 +1030,7 @@
         "assignees": "Assigned to",
         "status": "Status",
         "priority": "Priority",
+        "completedAt": "Completed on {{date}}",
         "scheduled": {
           "legend": "Scheduled for",
           "hint": "The day to work on the task. Add a time to pin it to a specific slot in the day.",
@@ -1495,6 +1496,7 @@
       "dueScheduled": "Scheduled: {{date}}",
       "dueDeadline": "Due: {{date}}",
       "dueNone": "No date",
+      "completedAt": "Completed: {{date}}",
       "toggleLabel": "Toggle done state for {{title}} (list {{list}})",
       "completedAnnounce": "Task \"{{title}}\" marked complete.",
       "reopenedAnnounce": "Task \"{{title}}\" reopened.",

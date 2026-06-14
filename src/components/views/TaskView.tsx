@@ -1028,6 +1028,14 @@ function describeDue(
   fmt: ReturnType<typeof useDateFormat>,
   t: (key: string, vars?: Record<string, unknown>) => string,
 ): string {
+  // A finished task shows WHEN it was finished — the scheduled/deadline date
+  // is moot once it's done. Flows into both the visible due column and the
+  // row's aria-label (which is built from `due`).
+  if (task.status === 'completed' && task.completed_at) {
+    return t('views.tasks.completedAt', {
+      date: fmt.format(new Date(task.completed_at), 'PP'),
+    });
+  }
   if (task.scheduled_date) {
     return t('views.tasks.dueScheduled', {
       date: fmt.format(new Date(task.scheduled_date), 'PP'),

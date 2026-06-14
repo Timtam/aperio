@@ -1560,6 +1560,11 @@ button[aria-disabled='true'] {
   font-style: italic;
 }
 
+/* "Completed on …" line, sitting just under the status/priority row. */
+.task-dialog__completed-at {
+  margin-top: calc(-1 * var(--space-1));
+}
+
 /* A hint that warns rather than merely informs (e.g. staged subtasks the
    chosen list can't hold). Not colour-only — the message text carries it. */
 .form__hint--warning {

@@ -1030,6 +1030,7 @@
         "assignees": "Zugewiesen an",
         "status": "Status",
         "priority": "Priorität",
+        "completedAt": "Erledigt am {{date}}",
         "scheduled": {
           "legend": "Geplant für",
           "hint": "Der Tag, an dem die Aufgabe ansteht. Mit Uhrzeit wird sie zu diesem Zeitpunkt im Tagesraster verortet.",
@@ -1495,6 +1496,7 @@
       "dueScheduled": "Geplant: {{date}}",
       "dueDeadline": "Fällig: {{date}}",
       "dueNone": "Ohne Datum",
+      "completedAt": "Erledigt: {{date}}",
       "toggleLabel": "{{title}} (Liste {{list}}) als erledigt umschalten",
       "completedAnnounce": "Aufgabe „{{title}}\" als erledigt markiert.",
       "reopenedAnnounce": "Aufgabe „{{title}}\" wieder geöffnet.",

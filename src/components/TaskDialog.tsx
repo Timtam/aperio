@@ -13,6 +13,7 @@ import { useTranslation } from 'react-i18next';
 import { DescriptionLinks } from './DescriptionLinks';
 
 import { useAnnouncer } from '../a11y/announcerContext';
+import { useDateFormat } from '../intl/dateFormat';
 import {
   createSection,
   createTask as apiCreateTask,
@@ -120,6 +121,7 @@ export function TaskDialog({
 }: TaskDialogProps) {
   const { t } = useTranslation();
   const announce = useAnnouncer();
+  const fmt = useDateFormat();
   const { taskLists, colorLabels, sectionsByList, loadSections } =
     useCalendarStore();
   const { tasks } = useTasks();
@@ -1137,6 +1139,18 @@ export function TaskDialog({
             </select>
           </label>
         </div>
+
+        {/* Read-only "completed on" line for a task that is actually
+            recorded as done. Mirrors the providers' completion timestamp
+            (set locally on check-off, read back from the server on sync).
+            Hidden once the user flips the status away from completed. */}
+        {form.status === 'completed' && task?.completed_at && (
+          <p className="form__hint task-dialog__completed-at">
+            {t('dialogs.task.fields.completedAt', {
+              date: fmt.format(new Date(task.completed_at), 'PPp'),
+            })}
+          </p>
+        )}
 
         {/* Two independent date+time blocks. Either or both can be
             unset (empty date input). The time input next to each
