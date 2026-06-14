@@ -76,7 +76,6 @@ export function SyncPanel() {
   const stateHeadingId = useId();
   const adapterHeadingId = useId();
   const intervalHeadingId = useId();
-  const previewHeadingId = useId();
   const protocolHeadingId = useId();
   const passphraseHeadingId = useId();
   // §19.7 — heading id for the "enable encryption on an existing
@@ -179,12 +178,9 @@ export function SyncPanel() {
     kind: 'ok' | 'error';
     message: string;
   } | null>(null);
-  const [busyPreview, setBusyPreview] = useState(false);
-  const [busyAccept, setBusyAccept] = useState(false);
   const [busyAdopt, setBusyAdopt] = useState(false);
   const [busyCompact, setBusyCompact] = useState(false);
   const [preview, setPreview] = useState<SyncPreview | null>(null);
-  const [previewError, setPreviewError] = useState<string | null>(null);
   // Phase Sm-3: SFTP host-key trust dialog. `trustPreview` holds
   // the snapshot the backend returned from `previewSftpHostKey`;
   // when non-null and `status.kind !== 'unchanged'` the dialog is
@@ -477,66 +473,124 @@ export function SyncPanel() {
     [announce, status?.interval_minutes, t],
   );
 
-  // Shared tail of the configure flow used by both the non-SFTP
-  // branch and the post-trust-dialog SFTP resume. Pulled out so
-  // both call sites stay literally identical — the trust dialog
-  // doesn't bypass any of the success bookkeeping.
-  const finishConfigure = useCallback(
+  // The unified "Verbinden": inspect what's at the target and do the right
+  // thing in one gesture, replacing the old configure→error→"Datensatz
+  // prüfen"→adopt dance. The flow is:
+  //   - empty target          → reveal the optional "enable encryption"
+  //                             setup, then (on the next click) initialize
+  //                             the dataset from this device;
+  //   - existing, unencrypted → join it immediately;
+  //   - existing, encrypted   → reveal the passphrase field, then join.
+  // Re-previews on every call so a stale config or a just-typed passphrase
+  // is always reflected. `preview` (the prior result) gates whether an
+  // empty target has already surfaced its options.
+  const runConnect = useCallback(
     async (config: SyncAdapterConfig) => {
       setBusyAdapter(true);
       setAdapterFeedback(null);
+      const priorPreview = preview;
       try {
-        await configureSyncAdapter(config);
-        // Clear password fields after a successful connect so they
-        // don't sit in memory longer than necessary. The keychain
-        // entry is the canonical store from this point on.
+        const p = await previewSyncTarget(config);
+        setPreview(p);
+        const device = deviceNameDraft.trim() || null;
+
+        if (p.kind === 'existing') {
+          if (p.e2e_enabled && !passphraseDraft.trim()) {
+            // Encrypted target — the passphrase prompt is now visible
+            // (driven by `preview`); ask for it and wait for the next click.
+            setAdapterFeedback({
+              kind: 'error',
+              message: t('dialogs.settings.sync.e2eRemoteRequiresPassphrase'),
+            });
+            return;
+          }
+          const report = await acceptRemoteDataset(
+            config,
+            device,
+            p.e2e_enabled ? passphraseDraft.trim() : null,
+          );
+          announce(
+            report.device_count === 1
+              ? t('dialogs.settings.sync.onboardingDone_one')
+              : t('dialogs.settings.sync.onboardingDone_other', {
+                  count: report.device_count,
+                }),
+          );
+          // §19.11 step 8: surface accounts whose secrets didn't arrive so
+          // the user can attach them in one go (no-op when all are present).
+          const needConnect = await fetchAccountsNeedingConnect();
+          if (needConnect && needConnect.length > 0) {
+            openSyncAccountsConnect(needConnect);
+          }
+        } else {
+          // Empty target → this device initializes the dataset. On first
+          // surface, reveal the optional encryption setup and let the user
+          // confirm with a second click; don't silently create a plaintext
+          // dataset behind their back.
+          if (priorPreview?.kind !== 'empty') {
+            setAdapterFeedback({
+              kind: 'ok',
+              message: t('dialogs.settings.sync.connectEmptyReveal'),
+            });
+            return;
+          }
+          if (enableE2eDraft && !passphraseDraft.trim()) {
+            setAdapterFeedback({
+              kind: 'error',
+              message: t('dialogs.settings.sync.e2ePassphraseRequired'),
+            });
+            return;
+          }
+          await adoptLocalDataset(
+            config,
+            device,
+            enableE2eDraft ? passphraseDraft.trim() : null,
+          );
+          announce(t('dialogs.settings.sync.onboardingFresh'));
+        }
+
+        // Shared success bookkeeping. Clear the password/passphrase drafts
+        // (the keychain is canonical now), drop the preview, and refresh the
+        // "Verbunden mit X" card immediately.
         if (config.kind === 'webdav') setPasswordDraft('');
         if (config.kind === 'sftp') {
           setSftpPasswordDraft('');
           setSftpKeyPassphraseDraft('');
         }
-        // Refresh the persisted-adapter summary so the
-        // "Verbunden mit X" card lands immediately, without
-        // waiting for the next sync-status event.
+        setPassphraseDraft('');
+        setEnableE2eDraft(false);
+        setPreview(null);
         getSyncAdapterSummary()
           .then(setAdapterSummary)
           .catch((err) => {
             // eslint-disable-next-line no-console
             console.warn('get_sync_adapter_summary failed', err);
           });
-        // Auto-fire preview so the user lands directly on the
-        // Adopt/Accept + E2E-checkbox step instead of having to
-        // click "Datensatz prüfen" as a separate gesture (which
-        // hid the E2E option entirely if they didn't realise
-        // the second click was needed).
-        setBusyPreview(true);
-        setPreviewError(null);
-        try {
-          const result = await previewSyncTarget(config);
-          setPreview(result);
-        } catch (err) {
-          // eslint-disable-next-line no-console
-          console.warn('preview after configure failed', err);
-          setPreviewError(messageForError(err));
-          setPreview(null);
-        } finally {
-          setBusyPreview(false);
-        }
       } catch (err) {
         // eslint-disable-next-line no-console
-        console.warn('configure_sync_adapter failed', err);
+        console.warn('connect failed', err);
         setAdapterFeedback({
           kind: 'error',
           message: `${t('dialogs.settings.sync.errorPrefix')}: ${messageForError(err)}`,
         });
+        setPreview(null);
       } finally {
         setBusyAdapter(false);
       }
     },
-    [messageForError, t],
+    [
+      announce,
+      deviceNameDraft,
+      enableE2eDraft,
+      messageForError,
+      openSyncAccountsConnect,
+      passphraseDraft,
+      preview,
+      t,
+    ],
   );
 
-  const onConfigure = useCallback(async () => {
+  const onConnect = useCallback(async () => {
     setAdapterFeedback(null);
     if (configMissingRequired) {
       setAdapterFeedback({
@@ -546,10 +600,9 @@ export function SyncPanel() {
       return;
     }
     const config = buildConfig();
-    // SFTP: probe the host key BEFORE committing the configure.
-    // The user gets a deliberate trust gesture on first use or
-    // on key rotation (§19.5). `unchanged` skips the gesture —
-    // we already trust this server.
+    // SFTP: probe the host key BEFORE connecting. The user gets a
+    // deliberate trust gesture on first use or on key rotation (§19.5).
+    // `unchanged` skips the gesture — we already trust this server.
     if (config.kind === 'sftp') {
       setBusyAdapter(true);
       let previewResult: HostKeyPreview;
@@ -567,31 +620,30 @@ export function SyncPanel() {
       }
       if (previewResult.status.kind === 'unchanged') {
         // Pin matches the stored one — skip the dialog. `setBusyAdapter`
-        // is reset inside `finishConfigure`.
+        // is reset inside `runConnect`.
         setBusyAdapter(false);
-        await finishConfigure(config);
+        await runConnect(config);
         return;
       }
-      // Hand off to the dialog. Park the bespoke config so the
-      // accept handler can call configure with exactly the same
-      // payload (incl. password / key bits) the user submitted.
+      // Hand off to the dialog. Park the config so the accept handler can
+      // resume the connect with exactly the same payload the user submitted.
       setBusyAdapter(false);
       setPendingSftpConfig(config);
       setTrustPreview(previewResult);
       return;
     }
-    // Non-SFTP backends configure directly.
-    await finishConfigure(config);
+    // Non-SFTP backends connect directly.
+    await runConnect(config);
   }, [
     buildConfig,
     configMissingRequired,
-    finishConfigure,
     messageForError,
+    runConnect,
     t,
   ]);
 
   // Trust dialog: user accepted the fingerprint. Pin it via the
-  // backend then resume the parked configure call.
+  // backend then resume the parked connect.
   const onTrustAccept = useCallback(
     async (fingerprint: string) => {
       const config = pendingSftpConfig;
@@ -616,12 +668,12 @@ export function SyncPanel() {
         });
         return;
       }
-      await finishConfigure(config);
+      await runConnect(config);
     },
     [
-      finishConfigure,
       messageForError,
       pendingSftpConfig,
+      runConnect,
       t,
       trustPreview,
     ],
@@ -683,123 +735,39 @@ export function SyncPanel() {
     }
   }, []);
 
-  const onPreview = useCallback(async () => {
-    if (kindDraft === 'none' || configMissingRequired) {
-      announce(t('dialogs.settings.sync.adapterNeedPath'), 'assertive');
-      return;
-    }
-    setBusyPreview(true);
-    setPreviewError(null);
-    try {
-      const result = await previewSyncTarget(buildConfig());
-      setPreview(result);
-    } catch (err) {
-      setPreviewError(messageForError(err));
-      setPreview(null);
-    } finally {
-      setBusyPreview(false);
-    }
-  }, [
-    announce,
-    buildConfig,
-    configMissingRequired,
-    kindDraft,
-    messageForError,
-    t,
-  ]);
-
-  const onAccept = useCallback(async () => {
-    setBusyAccept(true);
-    try {
-      const report = await acceptRemoteDataset(
-        buildConfig(),
-        deviceNameDraft.trim() || null,
-        passphraseDraft.trim() || null,
-      );
-      const message =
-        report.device_count === 1
-          ? t('dialogs.settings.sync.onboardingDone_one')
-          : t('dialogs.settings.sync.onboardingDone_other', {
-              count: report.device_count,
-            });
-      announce(message);
-      setPreview(null);
-      // Clear the passphrase after a successful onboarding; the
-      // derived key lives in the keychain from this point on.
-      setPassphraseDraft('');
-      // §19.11 step 8: the snapshot we just applied may have
-      // brought in external account rows whose secrets are not
-      // on this device yet. Open the reconnect wizard so the
-      // user can re-attach credentials in one go. Skip silently
-      // when there's nothing to do (Local-only datasets, or the
-      // user already has every secret in their keychain).
-      const needConnect = await fetchAccountsNeedingConnect();
-      if (needConnect && needConnect.length > 0) {
-        openSyncAccountsConnect(needConnect);
-      }
-    } catch (err) {
-      announce(
-        `${t('dialogs.settings.sync.errorPrefix')}: ${messageForError(err)}`,
-        'assertive',
-      );
-    } finally {
-      setBusyAccept(false);
-    }
-  }, [
-    announce,
-    buildConfig,
-    deviceNameDraft,
-    messageForError,
-    openSyncAccountsConnect,
-    passphraseDraft,
-    t,
-  ]);
-
-  const onAdopt = useCallback(async () => {
-    const confirmed = window.confirm(t('dialogs.settings.sync.previewAdoptConfirm'));
-    if (!confirmed) return;
-    // Phase Sk: if the user ticked "Enable encryption", a
-    // passphrase is required. Empty + ticked is a dead-end
-    // configuration; gate before hitting the backend.
-    if (enableE2eDraft && !passphraseDraft.trim()) {
-      announce(
-        t('dialogs.settings.sync.e2ePassphraseRequired'),
-        'assertive',
-      );
-      return;
-    }
+  // Destructive secondary action for an EXISTING remote dataset: discard
+  // it and re-initialize from this device. Behind an explicit confirm; not
+  // the default (the default "Verbinden" joins, non-destructively). Creates
+  // a plaintext dataset — the user can enable encryption afterwards.
+  const onOverwrite = useCallback(async () => {
+    if (!window.confirm(t('dialogs.settings.sync.previewAdoptConfirm'))) return;
     setBusyAdopt(true);
+    setAdapterFeedback(null);
     try {
-      const report = await adoptLocalDataset(
+      await adoptLocalDataset(
         buildConfig(),
         deviceNameDraft.trim() || null,
-        enableE2eDraft ? passphraseDraft.trim() : null,
+        null,
       );
-      const message = report.remote_was_empty
-        ? t('dialogs.settings.sync.onboardingFresh')
-        : t('dialogs.settings.sync.onboardingDone_one');
-      announce(message);
+      announce(t('dialogs.settings.sync.onboardingFresh'));
       setPreview(null);
-      // Clear the passphrase after a successful onboarding.
       setPassphraseDraft('');
       setEnableE2eDraft(false);
+      getSyncAdapterSummary()
+        .then(setAdapterSummary)
+        .catch((err) => {
+          // eslint-disable-next-line no-console
+          console.warn('get_sync_adapter_summary failed', err);
+        });
     } catch (err) {
-      announce(
-        `${t('dialogs.settings.sync.errorPrefix')}: ${messageForError(err)}`,
-        'assertive',
-      );
+      setAdapterFeedback({
+        kind: 'error',
+        message: `${t('dialogs.settings.sync.errorPrefix')}: ${messageForError(err)}`,
+      });
     } finally {
       setBusyAdopt(false);
     }
-  }, [
-    announce,
-    buildConfig,
-    deviceNameDraft,
-    enableE2eDraft,
-    messageForError,
-    passphraseDraft,
-    t,
-  ]);
+  }, [announce, buildConfig, deviceNameDraft, messageForError, t]);
 
   // Native directory picker for the local-FS adapter path.
   // Same plugin / failure-mode contract as `onBrowseKey` below —
@@ -2028,20 +1996,61 @@ export function SyncPanel() {
             </div>
           </>
         )}
+        {/* Device name — registers this device when joining or
+            initializing a dataset. */}
+        <div className="sync-panel__field">
+          <label>
+            {t('dialogs.settings.sync.deviceName')}
+            <input
+              type="text"
+              value={deviceNameDraft}
+              onChange={(e) => setDeviceNameDraft(e.target.value)}
+              placeholder="Desktop"
+            />
+          </label>
+          <FocusableNote className="sync-panel__hint">
+            {t('dialogs.settings.sync.deviceNameHint')}
+          </FocusableNote>
+        </div>
+
+        {/* Inputs the connect preview reveals on demand:
+            - empty target → optional "enable encryption" setup;
+            - existing + encrypted → passphrase to unlock;
+            - existing → a short summary of what's there. */}
+        {preview?.kind === 'empty' && (
+          <E2eEnableInput
+            enabled={enableE2eDraft}
+            onToggle={setEnableE2eDraft}
+            passphrase={passphraseDraft}
+            onPassphraseChange={setPassphraseDraft}
+            t={t}
+          />
+        )}
+        {preview?.kind === 'existing' && (
+          <>
+            {preview.e2e_enabled && (
+              <E2ePassphrasePrompt
+                passphrase={passphraseDraft}
+                onPassphraseChange={setPassphraseDraft}
+                t={t}
+              />
+            )}
+            <SyncExistingInfo preview={preview} t={t} fmt={fmt} />
+          </>
+        )}
+
         <div className="sync-panel__actions">
           <button
             type="button"
             disabled={busyAdapter}
-            onClick={() => void onConfigure()}
+            onClick={() => void onConnect()}
           >
             {busyAdapter
               ? t('dialogs.settings.sync.adapterConnecting')
               : t('dialogs.settings.sync.adapterConfigure')}
           </button>
-          {/* "Verbindung testen" lets the user verify host / URL /
-              credentials without persisting anything. Disabled for
-              the `none` kind (nothing to test) and while a real
-              configure is in flight. */}
+          {/* "Verbindung testen" verifies host / URL / credentials
+              without committing anything. */}
           {kindDraft !== 'none' && (
             <button
               type="button"
@@ -2054,11 +2063,23 @@ export function SyncPanel() {
             </button>
           )}
         </div>
-        {/* Visible outcome of test / connect — sighted users would
-            otherwise get no feedback (especially on failure). role
-            doubles as the screen-reader live region. Uses the globally
-            styled form classes (red error / muted hint), as AccountsPanel
-            does for the same connection-test feedback. */}
+
+        {/* Secondary, destructive: discard the existing remote dataset and
+            re-initialize from this device. Never the default — "Verbinden"
+            above joins non-destructively. */}
+        {preview?.kind === 'existing' && (
+          <button
+            type="button"
+            className="sync-panel__overwrite form__action--danger"
+            disabled={busyAdopt}
+            onClick={() => void onOverwrite()}
+          >
+            {t('dialogs.settings.sync.previewAdoptButton')}
+          </button>
+        )}
+
+        {/* Visible outcome of connect / test — also the screen-reader live
+            region (red error / muted hint), as AccountsPanel does. */}
         {adapterFeedback && (
           <p
             className={
@@ -2073,85 +2094,6 @@ export function SyncPanel() {
         )}
       </section>
 
-      {/* Preview/onboarding stays visible while a preview result
-          is in hand, even after `status.configured` flips to true
-          (the auto-preview that fires after configure relies on
-          this — the user lands directly on the Adopt/Accept +
-          E2E checkbox without losing the section). */}
-      {(!status?.configured || preview !== null) && (
-        <section aria-labelledby={previewHeadingId}>
-          <h3 id={previewHeadingId}>
-            {t('dialogs.settings.sync.previewTitle')}
-          </h3>
-          <FocusableNote>{t('dialogs.settings.sync.previewBody')}</FocusableNote>
-          <div className="sync-panel__field">
-            <label>
-              {t('dialogs.settings.sync.deviceName')}
-              <input
-                type="text"
-                value={deviceNameDraft}
-                onChange={(e) => setDeviceNameDraft(e.target.value)}
-                placeholder="Desktop"
-              />
-            </label>
-            <FocusableNote className="sync-panel__hint">
-              {t('dialogs.settings.sync.deviceNameHint')}
-            </FocusableNote>
-          </div>
-          <button
-            type="button"
-            disabled={busyPreview}
-            onClick={() => void onPreview()}
-          >
-            {t('dialogs.settings.sync.previewButton')}
-          </button>
-          {previewError && (
-            <p className="sync-panel__error" role="alert">
-              {t('dialogs.settings.sync.errorPrefix')}: {previewError}
-            </p>
-          )}
-          {preview?.kind === 'empty' && (
-            <>
-              <E2eEnableInput
-                enabled={enableE2eDraft}
-                onToggle={setEnableE2eDraft}
-                passphrase={passphraseDraft}
-                onPassphraseChange={setPassphraseDraft}
-                t={t}
-              />
-              <PreviewEmpty
-                t={t}
-                busyAdopt={busyAdopt}
-                onAdopt={onAdopt}
-              />
-            </>
-          )}
-          {/* Trust dialog is mounted as part of the panel so it can
-              reach into the `pendingSftpConfig` + `trustPreview`
-              state without going through the global DialogState
-              stack. See `SyncSftpTrustDialog` for the rationale. */}
-          {preview?.kind === 'existing' && (
-            <>
-              {preview.e2e_enabled && (
-                <E2ePassphrasePrompt
-                  passphrase={passphraseDraft}
-                  onPassphraseChange={setPassphraseDraft}
-                  t={t}
-                />
-              )}
-              <PreviewExisting
-                preview={preview}
-                t={t}
-                fmt={fmt}
-                busyAccept={busyAccept}
-                busyAdopt={busyAdopt}
-                onAccept={onAccept}
-                onAdopt={onAdopt}
-              />
-            </>
-          )}
-        </section>
-      )}
       {/* §19.7 — cross-device adoption banner. Appears when
           local thinks E2E is off but the last sync round failed
           with `encryption_required` (= another device just
@@ -2347,45 +2289,18 @@ export function SyncPanel() {
   );
 }
 
-function PreviewEmpty({
-  t,
-  busyAdopt,
-  onAdopt,
-}: {
-  t: ReturnType<typeof useTranslation>['t'];
-  busyAdopt: boolean;
-  onAdopt: () => void;
-}) {
-  return (
-    <div className="sync-panel__preview">
-      <FocusableNote>{t('dialogs.settings.sync.previewEmpty')}</FocusableNote>
-      <button
-        type="button"
-        disabled={busyAdopt}
-        onClick={onAdopt}
-      >
-        {t('dialogs.settings.sync.previewAdoptButton')}
-      </button>
-    </div>
-  );
-}
-
-function PreviewExisting({
+/** Read-only summary of what's already in an existing remote dataset,
+ *  shown under the connect form once a preview detects one. The actions
+ *  (join / overwrite) live on the unified "Verbinden" + the secondary
+ *  destructive button in the main panel. */
+function SyncExistingInfo({
   preview,
   t,
   fmt,
-  busyAccept,
-  busyAdopt,
-  onAccept,
-  onAdopt,
 }: {
   preview: Extract<SyncPreview, { kind: 'existing' }>;
   t: ReturnType<typeof useTranslation>['t'];
   fmt: ReturnType<typeof useDateFormat>;
-  busyAccept: boolean;
-  busyAdopt: boolean;
-  onAccept: () => void;
-  onAdopt: () => void;
 }) {
   const summary =
     preview.snapshot_timestamp !== null
@@ -2418,30 +2333,6 @@ function PreviewExisting({
           names,
         })}
       </FocusableNote>
-      <div className="sync-panel__preview-actions">
-        <div>
-          <h4>{t('dialogs.settings.sync.previewAcceptTitle')}</h4>
-          <FocusableNote>{t('dialogs.settings.sync.previewAcceptBody')}</FocusableNote>
-          <button
-            type="button"
-            disabled={busyAccept}
-            onClick={onAccept}
-          >
-            {t('dialogs.settings.sync.previewAcceptButton')}
-          </button>
-        </div>
-        <div>
-          <h4>{t('dialogs.settings.sync.previewAdoptTitle')}</h4>
-          <FocusableNote>{t('dialogs.settings.sync.previewAdoptBody')}</FocusableNote>
-          <button
-            type="button"
-            disabled={busyAdopt}
-            onClick={onAdopt}
-          >
-            {t('dialogs.settings.sync.previewAdoptButton')}
-          </button>
-        </div>
-      </div>
     </div>
   );
 }

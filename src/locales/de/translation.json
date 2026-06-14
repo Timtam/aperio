@@ -605,6 +605,7 @@
         "onboardingDone_one": "Verbunden, 1 Gerät bekannt.",
         "onboardingDone_other": "Verbunden, {{count}} Geräte bekannt.",
         "onboardingFresh": "Verbunden — dieses Gerät ist das erste am Datensatz.",
+        "connectEmptyReveal": "Leeres Ziel — hier richtest du einen neuen Datensatz ein. Verschlüsselung optional aktivieren, dann erneut auf „Verbinden\" klicken.",
         "errorPrefix": "Fehler",
         "errorAuth": "Authentifizierung fehlgeschlagen.",
         "errorIo": "Pfad nicht erreichbar.",

@@ -608,6 +608,7 @@
         "onboardingDone_one": "Connected, 1 device known.",
         "onboardingDone_other": "Connected, {{count}} devices known.",
         "onboardingFresh": "Connected — this device is the first on the dataset.",
+        "connectEmptyReveal": "Empty target — you're setting up a new dataset here. Optionally enable encryption, then click \"Connect\" again.",
         "errorPrefix": "Error",
         "errorAuth": "Authentication failed.",
         "errorIo": "Path unreachable.",
