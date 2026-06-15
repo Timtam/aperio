@@ -27,7 +27,15 @@ pub const SYNC_WHITELIST: &[&str] = &[
     // Reminder defaults — one entry per calendar / task list goes
     // under the calendar.<id>.defaultReminders namespace.
     "calendar.",
-    "tasks.showCompleted",
+    // All task settings follow the user across devices — they're user
+    // preferences, not device state. Covers the display toggle
+    // (`tasks.showCompleted`) plus every behaviour knob from the Tasks
+    // settings tab: `tasks.cascadeStatusCoupling`, `tasks.autoDateOnStart`,
+    // `tasks.carryOverDefault`, `tasks.dayStartTrigger`, `tasks.checkoffMode`
+    // and the per-list overrides (`tasks.listOverrides`, keyed by synced
+    // list ids). The `aperio.tasks.*` UI state lives in localStorage, not
+    // user_prefs, so it isn't affected by this prefix.
+    "tasks.",
     "reminders.defaults.",
     // Sound configuration (Phase 14.4 — container/event/task
     // overrides + the global default). Asset files themselves
@@ -86,6 +94,21 @@ mod tests {
     #[test]
     fn backlog_width_syncs() {
         assert!(is_synced_key("backlog.width"));
+    }
+
+    #[test]
+    fn task_settings_sync() {
+        // The whole `tasks.` namespace follows the user — display toggle,
+        // behaviour knobs, and per-list overrides.
+        assert!(is_synced_key("tasks.showCompleted"));
+        assert!(is_synced_key("tasks.cascadeStatusCoupling"));
+        assert!(is_synced_key("tasks.autoDateOnStart"));
+        assert!(is_synced_key("tasks.carryOverDefault"));
+        assert!(is_synced_key("tasks.dayStartTrigger"));
+        assert!(is_synced_key("tasks.checkoffMode"));
+        assert!(is_synced_key("tasks.listOverrides"));
+        // Bare prefix isn't a real key and must not match.
+        assert!(!is_synced_key("tasks."));
     }
 
     #[test]
