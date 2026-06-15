@@ -2156,6 +2156,15 @@ button[aria-disabled='true'] {
   gap: 2px;
 }
 
+/* Pin the untimed tasks to the bottom of the day cell (the cell is a flex
+   column that fills the body row), so the free space lands between the
+   time-ordered chips and the "no fixed time" tasks — making the two
+   groups easy to tell apart. Collapses to a normal gap when the cell is
+   already full. Week view only; the DayView list keeps its top flow. */
+.week-grid__tasks {
+  margin-top: auto;
+}
+
 .day-tasks {
   padding: var(--space-2) var(--space-3);
   border-top: 1px solid var(--color-border);
@@ -2740,6 +2749,12 @@ button[aria-disabled='true'] {
   min-width: 0;
   /* The whole day column is clickable (selects that day). */
   cursor: pointer;
+  /* Column layout so the timed lane sits at the top and the untimed task
+     list can be pushed to the bottom edge (see `.week-grid__tasks`),
+     visually separating "no fixed time" work from the time-ordered chips
+     above. The cell already stretches to the body row's full height. */
+  display: flex;
+  flex-direction: column;
 }
 
 .week-grid__cell:last-child {
