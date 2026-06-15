@@ -51,6 +51,7 @@
 
 use cal_core::{Calendar, ColorLabel, ColorLabelId, Event, Section, Task, TaskList};
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 
 use crate::calendars::row_to_event;
 use crate::mapping::{opt_text, read_bool, read_container_color, read_sound, req_text};
@@ -298,10 +299,32 @@ impl LocalAdapter {
                 Err(_) => report.failed += 1,
             }
         }
-        for list in &dump.task_lists {
+        // Parent-before-child order: `task_lists.parent_id` is a
+        // self-referential FK (migration 0018, ON DELETE SET NULL) and
+        // foreign_keys is ON, so inserting a child before its parent fails
+        // the FK check. The dump comes out in rowid order, which is NOT
+        // hierarchy order once a list has been reparented under a
+        // later-created one — the child then has the lower rowid and lands
+        // first. That insert used to fail silently (Err(_) dropped), so a
+        // user who nested several lists under one parent saw only the
+        // parent survive on the second device. Re-order here so every
+        // parent is inserted first; this also repairs snapshots already
+        // sitting on the remote (the fix is on the apply side).
+        for list in order_parent_first(
+            &dump.task_lists,
+            |l| l.id.as_str(),
+            |l| l.parent_id.as_deref(),
+        ) {
             match self.upsert_task_list_from_sync(list) {
                 Ok(()) => report.applied += 1,
-                Err(_) => report.failed += 1,
+                Err(err) => {
+                    warn!(
+                        list_id = %list.id,
+                        ?err,
+                        "snapshot apply: task_list upsert failed",
+                    );
+                    report.failed += 1;
+                }
             }
         }
         // Sections reference task_lists and are referenced by tasks, so
@@ -324,14 +347,85 @@ impl LocalAdapter {
                 Err(_) => report.failed += 1,
             }
         }
-        for task in &dump.tasks {
+        // Subtasks have the same self-referential FK hazard as nested
+        // task lists (tasks.parent_id REFERENCES tasks(id)), so order
+        // parents before children here too — otherwise a reparented
+        // subtask dumped ahead of its parent would FK-fail and vanish.
+        for task in order_parent_first(
+            &dump.tasks,
+            |t| t.id.as_str(),
+            |t| t.parent_id.as_deref(),
+        ) {
             match self.upsert_task_from_sync(task) {
                 Ok(()) => report.applied += 1,
-                Err(_) => report.failed += 1,
+                Err(err) => {
+                    warn!(
+                        task_id = %task.id,
+                        ?err,
+                        "snapshot apply: task upsert failed",
+                    );
+                    report.failed += 1;
+                }
             }
         }
         Ok(report)
     }
+}
+
+/// Order self-referential rows so a parent always precedes its children,
+/// making the snapshot insert FK-safe no matter what order rows came out of
+/// the source DB.
+///
+/// Both `task_lists.parent_id` and `tasks.parent_id` are self-referential
+/// FKs; with `foreign_keys=ON` inserting a child before its parent fails.
+/// The dump comes out in rowid order, which is NOT hierarchy order once a
+/// row has been reparented under a later-created one (the child then has the
+/// lower rowid and lands first). Such inserts used to fail silently and the
+/// row vanished — that's how "several local lists, only one on the second
+/// device" happened, and the same hazard applies to subtasks.
+///
+/// A row whose parent isn't in `items` is treated as a root (defensive — the
+/// `ON DELETE SET NULL` / `ON DELETE CASCADE` constraints mean a parent
+/// can't actually dangle). A cycle (which the create/reparent paths can't
+/// produce) can't stall the loop: once a pass makes no progress the
+/// remaining rows are emitted in their original order.
+fn order_parent_first<T>(
+    items: &[T],
+    id_of: impl Fn(&T) -> &str,
+    parent_of: impl Fn(&T) -> Option<&str>,
+) -> Vec<&T> {
+    use std::collections::HashSet;
+    let ids: HashSet<&str> = items.iter().map(&id_of).collect();
+    let mut emitted: HashSet<&str> = HashSet::with_capacity(items.len());
+    let mut out: Vec<&T> = Vec::with_capacity(items.len());
+    loop {
+        let before = out.len();
+        for it in items {
+            let id = id_of(it);
+            if emitted.contains(id) {
+                continue;
+            }
+            let ready = match parent_of(it) {
+                None => true,
+                Some(p) => !ids.contains(p) || emitted.contains(p),
+            };
+            if ready {
+                out.push(it);
+                emitted.insert(id);
+            }
+        }
+        // Whole set placed, or a pass made no progress (cycle) — stop.
+        if out.len() == items.len() || out.len() == before {
+            break;
+        }
+    }
+    // Cycle fallback: append anything still unplaced, original order.
+    for it in items {
+        if !emitted.contains(id_of(it)) {
+            out.push(it);
+        }
+    }
+    out
 }
 
 /// Counter pair returned by [`LocalAdapter::apply_snapshot_dump`]. The
@@ -441,6 +535,68 @@ mod tests {
             parent_id: None,
             read_only: false,
         }
+    }
+
+    /// Regression: nested task lists must all survive a snapshot apply
+    /// regardless of the order they appear in the dump. Before the fix the
+    /// dump came out in rowid order, so a list reparented under a
+    /// later-created one (child rowid < parent rowid) was inserted before
+    /// its parent existed, hit the self-referential FK, and was silently
+    /// dropped — leaving "several local lists" looking like only one on the
+    /// second device. Feed the apply a fully parent-after-child order and
+    /// assert the whole 3-level chain lands with its links intact.
+    #[test]
+    fn apply_orders_nested_task_lists_so_none_are_dropped() {
+        let grandparent = fake_task_list("L-gp", "Grandparent");
+        let mut parent = fake_task_list("L-p", "Parent");
+        parent.parent_id = Some("L-gp".into());
+        let mut child = fake_task_list("L-c", "Child");
+        child.parent_id = Some("L-p".into());
+
+        // Fully reversed: every list precedes its parent — the FK-hostile
+        // order the unsorted dump could produce.
+        let dump = SnapshotDump {
+            task_lists: vec![child, parent, grandparent],
+            ..SnapshotDump::default()
+        };
+
+        let dst = make_adapter();
+        let report = dst.apply_snapshot_dump(&dump).unwrap();
+        assert_eq!(report.failed, 0, "no FK failures expected after reordering");
+        assert_eq!(report.applied, 3, "all three nested lists should land");
+
+        let got = dst.dump_for_snapshot().unwrap().task_lists;
+        assert_eq!(got.len(), 3, "every nested list survives the round-trip");
+        let by_id = |id: &str| got.iter().find(|l| l.id == id).cloned().unwrap();
+        assert_eq!(by_id("L-p").parent_id.as_deref(), Some("L-gp"));
+        assert_eq!(by_id("L-c").parent_id.as_deref(), Some("L-p"));
+    }
+
+    /// Same FK hazard, sibling table: `tasks.parent_id` is self-referential
+    /// too, so a subtask dumped before its parent task must still survive.
+    #[test]
+    fn apply_orders_subtasks_so_none_are_dropped() {
+        let list = fake_task_list("L1", "List");
+        let parent = fake_task("T-parent", "L1");
+        let mut child = fake_task("T-child", "L1");
+        child.parent_id = Some("T-parent".into());
+
+        let dump = SnapshotDump {
+            task_lists: vec![list],
+            // Child BEFORE parent — the FK-hostile order.
+            tasks: vec![child, parent],
+            ..SnapshotDump::default()
+        };
+
+        let dst = make_adapter();
+        let report = dst.apply_snapshot_dump(&dump).unwrap();
+        assert_eq!(report.failed, 0, "no FK failures expected after reordering");
+        assert_eq!(report.applied, 3, "1 list + parent task + subtask");
+
+        let tasks = dst.dump_for_snapshot().unwrap().tasks;
+        assert_eq!(tasks.len(), 2, "both the parent task and its subtask survive");
+        let child = tasks.iter().find(|t| t.id == "T-child").unwrap();
+        assert_eq!(child.parent_id.as_deref(), Some("T-parent"));
     }
 
     #[tokio::test]
