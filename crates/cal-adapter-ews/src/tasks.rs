@@ -1378,6 +1378,11 @@ mod tests {
         let (set, del) = task_to_update_field_xml(&task);
         // Subject + Importance + Status are always set
         assert!(set.contains("item:Subject"));
+        assert!(set.contains("item:Importance"));
+        // Medium priority maps to the EWS "Normal" importance — assert the
+        // rendered value, not just the field URI, so a regression that drops
+        // priority (or mismaps it) on task updates is actually caught.
+        assert!(set.contains("<t:Importance>Normal</t:Importance>"));
         assert!(set.contains("task:Status"));
         // Body, dates, ReminderDueBy → DeleteItemField since they're
         // cleared
