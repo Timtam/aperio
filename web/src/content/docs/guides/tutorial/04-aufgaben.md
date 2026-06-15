@@ -29,6 +29,11 @@ your day or week, and work through them.
 - **Edit:** Open it with `Enter`.
 - **Delete:** Choose **Delete** (default: `Delete`).
 
+> **Quick status & priority:** Right-click a task — or press the Menu key
+> (`Shift+F10`) — for a context menu with **Status** and **Priority**
+> submenus. Change either in a single click without opening the editor; the
+> current value carries a check-mark.
+
 > **Check-off behaviour:** By default checking off flips between *open* and
 > *completed*. Under **Settings → Tasks → Check-off behaviour** you can switch
 > to a status cycle instead: each check-off steps *open → in progress →

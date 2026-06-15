@@ -31,6 +31,12 @@ deinen Tag oder deine Woche ein und arbeitest sie ab.
 - **Bearbeiten:** mit `Eingabe` öffnen.
 - **Löschen:** **Löschen** wählen (Standard: `Entf`).
 
+> **Status & Priorität schnell ändern:** Rechtsklick auf eine Aufgabe – oder
+> die Menü-Taste (`Umschalt+F10`) – öffnet ein Kontextmenü mit den
+> Untermenüs **Status** und **Priorität**. Beides lässt sich per Klick
+> ändern, ohne den Editor zu öffnen; der aktuelle Wert ist mit einem Häkchen
+> markiert.
+
 > **Abhaken-Verhalten:** Standardmäßig wechselt das Abhaken zwischen *offen*
 > und *abgeschlossen*. Unter **Einstellungen → Aufgaben → Abhaken-Verhalten**
 > kannst du stattdessen einen Status-Zyklus wählen: Jedes Abhaken durchläuft

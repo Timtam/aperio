@@ -24,6 +24,8 @@
     "moveTo": "Move to …",
     "copyTo": "Copy to …",
     "status": "Status",
+    "priority": "Priority",
+    "prioritySet": "Priority for \"{{title}}\" set to {{priority}}.",
     "color": "Color",
     "colorNone": "No color",
     "colorSet": "Color set for \"{{title}}\".",

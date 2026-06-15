@@ -52,6 +52,7 @@ import {
 } from '../state/taskCascade';
 import { useTaskCascadeEnabled } from '../state/taskCascadeContext';
 import { useTasks } from '../state/useTasks';
+import { useTaskPriorityAction } from '../state/useTaskPriority';
 import { useTaskStatusActions } from '../state/useTaskStatusToggle';
 import { readLastUsedTaskList, writeLastUsedTaskList } from './lastUsedTaskList';
 import { AssigneePicker } from './AssigneePicker';
@@ -131,6 +132,7 @@ export function TaskDialog({
   // Space-toggle and the per-row context menu.
   const { toggle: toggleSubtaskAction, set: setSubtaskAction } =
     useTaskStatusActions();
+  const setSubtaskPriority = useTaskPriorityAction();
   // Settings → Tasks → "couple parent and subtask status" + auto-date
   // toggle. The first short-circuits both planners; the second drops
   // the `todayKey` companion-write so a started backlog task isn't
@@ -553,11 +555,14 @@ export function TaskDialog({
     [setSubtaskAction],
   );
 
-  // Per-subtask context menu (right-click + Shift+F10). Limited to
-  // status + delete — opening a TaskDialog from inside another
-  // TaskDialog would stack modals on the same surface, which is the
-  // reason "edit" lives in TaskView instead. Status changes use
-  // CheckMenuItems so the OS draws its own glyph on the active row.
+  // Per-subtask context menu (right-click + Shift+F10). Offers status,
+  // priority and delete — but not "edit": opening a TaskDialog from
+  // inside another TaskDialog would stack modals on the same surface,
+  // which is why "edit" lives in TaskView instead. Status and priority
+  // are direct context-menu writes (no nested dialog), so they belong
+  // here too and match what the calendar/task surfaces offer for any
+  // task via useChipContextMenu. Both use CheckMenuItems so the OS
+  // draws its own glyph on the active row.
   const openSubtaskMenu = useCallback(
     async (
       subtask: Task,
@@ -576,6 +581,16 @@ export function TaskDialog({
             checked: subtask.status === s,
           })),
         },
+        {
+          kind: 'submenu',
+          label: t('chipMenu.priority'),
+          items: (['low', 'medium', 'high'] as TaskPriority[]).map((p) => ({
+            kind: 'check' as const,
+            id: `priority:${p}`,
+            label: t(`dialogs.task.priority.${p}`),
+            checked: subtask.priority === p,
+          })),
+        },
         { kind: 'separator' },
         { id: 'delete', label: t('chipMenu.delete') },
       ];
@@ -588,11 +603,16 @@ export function TaskDialog({
       }
       if (selected?.startsWith('status:')) {
         await setSubtaskStatus(subtask, selected.slice('status:'.length) as TaskStatus);
+      } else if (selected?.startsWith('priority:')) {
+        await setSubtaskPriority(
+          subtask,
+          selected.slice('priority:'.length) as TaskPriority,
+        );
       } else if (selected === 'delete') {
         await deleteSubtask(subtask);
       }
     },
-    [t, setSubtaskStatus, deleteSubtask],
+    [t, setSubtaskStatus, setSubtaskPriority, deleteSubtask],
   );
 
   const onSubtaskListKey = useCallback(

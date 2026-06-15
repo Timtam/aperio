@@ -11,10 +11,16 @@ import {
   updateEvent as apiUpdateEvent,
   type ContextMenuItemRequest,
 } from '../api/client';
-import type { CalendarEvent, Task, TaskStatus } from '../api/types';
+import type {
+  CalendarEvent,
+  Task,
+  TaskPriority,
+  TaskStatus,
+} from '../api/types';
 import { seriesIdOf } from '../intl/recurrence';
 import { useCalendarStore } from './calendarStoreContext';
 import { useDialogState } from './dialogStateContext';
+import { useTaskPriorityAction } from './useTaskPriority';
 import { useTaskStatusActions } from './useTaskStatusToggle';
 
 /**
@@ -43,6 +49,12 @@ import { useTaskStatusActions } from './useTaskStatusToggle';
  *         · Abgebrochen
  *       (each entry is a check item; the one matching the task's
  *        current status carries a check-mark glyph, drawn by the OS)
+ *     - Priorität >
+ *         · Niedrig
+ *         · Mittel
+ *         · Hoch
+ *       (same check-row shape as Status — a one-click priority change
+ *        without opening the editor)
  *     - Verschieben nach…
  *     - Kopieren nach…
  *     - ──
@@ -85,6 +97,7 @@ export function useChipContextMenu(): ChipContextMenuActions {
     invalidateData,
   } = useDialogState();
   const { set: setTaskStatus } = useTaskStatusActions();
+  const setTaskPriority = useTaskPriorityAction();
   const { colorLabels, calendars } = useCalendarStore();
   const calById = useMemo(
     () => new Map(calendars.map((c) => [c.id, c])),
@@ -230,6 +243,22 @@ export function useChipContextMenu(): ChipContextMenuActions {
           checked: task.status === s,
         })),
       };
+      // Priority submenu — Low / Medium / High as check rows, in the
+      // same order as the editor's priority picker. The row matching the
+      // task's current priority carries the OS check-mark, just like the
+      // status submenu. Reuses the dialog's priority labels so the wording
+      // lives in one place; medium is the neutral default. A one-click
+      // priority change without opening the editor.
+      const prioritySubmenu: ContextMenuItemRequest = {
+        kind: 'submenu',
+        label: t('chipMenu.priority'),
+        items: (['low', 'medium', 'high'] as TaskPriority[]).map((p) => ({
+          kind: 'check' as const,
+          id: `priority:${p}`,
+          label: t(`dialogs.task.priority.${p}`),
+          checked: task.priority === p,
+        })),
+      };
       // Subtasks can't be moved or copied independently — they're
       // glued to their parent. Hide the Move/Copy entries entirely
       // so the user doesn't see a path that leads nowhere; the
@@ -239,6 +268,7 @@ export function useChipContextMenu(): ChipContextMenuActions {
       const items: ContextMenuItemRequest[] = [
         { id: 'edit', label: t('chipMenu.edit') },
         statusSubmenu,
+        prioritySubmenu,
         ...(isSubtask
           ? []
           : ([
@@ -264,6 +294,9 @@ export function useChipContextMenu(): ChipContextMenuActions {
       } else if (selected?.startsWith('status:')) {
         const next = selected.slice('status:'.length) as TaskStatus;
         await setTaskStatus(task, next);
+      } else if (selected?.startsWith('priority:')) {
+        const next = selected.slice('priority:'.length) as TaskPriority;
+        await setTaskPriority(task, next);
       } else if (selected === 'delete') {
         // Tasks don't have a recurring-occurrence concept on the
         // delete side (Phase 9.x leaves task recurrence as a future
@@ -292,6 +325,7 @@ export function useChipContextMenu(): ChipContextMenuActions {
       openMoveCopy,
       invalidateData,
       setTaskStatus,
+      setTaskPriority,
     ],
   );
 
