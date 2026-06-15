@@ -58,6 +58,7 @@ const FULL_CAPS: RecurrenceCapabilities = {
   relative_monthly: true,
   relative_yearly: true,
   weekly_byday: true,
+  monthly_day_of_month: true,
   count: true,
   until: true,
 };

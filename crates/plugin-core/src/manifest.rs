@@ -102,6 +102,13 @@ pub struct RecurrenceCapabilities {
     /// Weekly weekday picker (BYDAY on WEEKLY).
     #[serde(default = "yes")]
     pub weekly_byday: bool,
+    /// An explicit monthly day-of-month can be stored. Vikunja's monthly
+    /// recurrence repeats on the task's due-date day implicitly and can't
+    /// take a separate day number, so it sets this `false`; the task UI
+    /// then disables the "day of month" field. Calendar events always
+    /// store BYMONTHDAY, so the default stays `true`.
+    #[serde(default = "yes")]
+    pub monthly_day_of_month: bool,
     /// COUNT end mode ("after N occurrences").
     #[serde(default = "yes")]
     pub count: bool,
@@ -118,6 +125,7 @@ impl Default for RecurrenceCapabilities {
             relative_monthly: true,
             relative_yearly: true,
             weekly_byday: true,
+            monthly_day_of_month: true,
             count: true,
             until: true,
         }
@@ -218,6 +226,16 @@ pub struct TaskCapabilities {
     /// dialog's add control; ignored when `manageable` is `false`.
     #[serde(default)]
     pub member_add_by: MemberAddMethod,
+    /// Which recurrence shapes this adapter can store for tasks (mirrors
+    /// the calendar side's per-account recurrence caps). Absent → full
+    /// support, so the task recurrence editor offers everything. A backend
+    /// with a simpler model narrows it — Vikunja stores a plain interval
+    /// (`repeat_after` seconds) plus a monthly mode, so it drops yearly,
+    /// the weekday picker, an explicit day-of-month and the COUNT / UNTIL
+    /// end modes; the editor greys those out instead of dropping them
+    /// silently on save.
+    #[serde(default)]
+    pub recurrence: RecurrenceCapabilities,
 }
 
 impl Default for TaskCapabilities {
@@ -236,6 +254,7 @@ impl Default for TaskCapabilities {
             delete_lists: false,
             manageable: false,
             member_add_by: MemberAddMethod::Search,
+            recurrence: RecurrenceCapabilities::default(),
         }
     }
 }

@@ -1281,6 +1281,7 @@ export function TaskDialog({
         <TaskRecurrenceSelector
           value={form.recurrence}
           onChange={(recurrence) => update('recurrence', recurrence)}
+          capabilities={listForSections?.task_capabilities?.recurrence}
         />
 
         <RemindersEditor

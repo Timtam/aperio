@@ -43,12 +43,18 @@
 //!     local interpretation, but the round-trip with the SAME user
 //!     stays stable).
 //!
+//! Recurrence maps the shapes Vikunja can store: daily / weekly become a
+//! `repeat_after` seconds period (mode 0) and monthly uses Vikunja's
+//! monthly mode (mode 1). Yearly, a weekday picker, an explicit
+//! day-of-month and the COUNT / UNTIL end modes have no Vikunja
+//! equivalent — the adapter declares a restricted `recurrence`
+//! capability so the task editor greys those out, and any such rule
+//! arriving from elsewhere is dropped with a `tracing::warn` rather than
+//! approximated. See `recurrence_from_vikunja` / `recurrence_to_vikunja`.
+//!
 //! Out of scope for Phase 6g.1 (logged with `tracing::warn` on
 //! write so we know the field is being dropped):
 //!
-//!   - Recurrence (Vikunja's `repeat_after` + `repeat_mode` differs
-//!     from Aperio's calendar-style recurrence enum; would need a
-//!     dedicated mapper).
 //!   - Reminders (Vikunja's `reminders[]` is rich enough — relative
 //!     periods, multiple reminders — but Aperio's per-task reminder
 //!     edit UI doesn't surface a multi-row editor for it yet).
@@ -57,8 +63,8 @@
 //!     ColorLabel system is local-only at the moment).
 
 use cal_core::{
-    MemberRight, NewTask, Section, Task, TaskList, TaskListShare, TaskPriority, TaskStatus,
-    TaskUser,
+    MemberRight, NewTask, RecurrenceFrequency, Section, Task, TaskList, TaskListShare,
+    TaskPriority, TaskRecurrence, TaskStatus, TaskUser,
 };
 use chrono::{DateTime, Datelike, NaiveDate, NaiveTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
@@ -892,6 +898,17 @@ struct TaskEntry {
     created: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     updated: Option<String>,
+    /// Recurrence period in SECONDS. Paired with `repeat_mode`. `0` ⇒ no
+    /// recurrence. Always serialized (no skip) so an update that clears
+    /// recurrence sends `0` and actually clears it server-side.
+    #[serde(default)]
+    repeat_after: i64,
+    /// Recurrence mode: `0` repeat `repeat_after` from the due date,
+    /// `1` monthly (period ignored), `2` repeat `repeat_after` from the
+    /// completion date. Aperio maps daily/weekly → mode 0 and monthly →
+    /// mode 1; see `recurrence_from_vikunja` / `recurrence_to_vikunja`.
+    #[serde(default)]
+    repeat_mode: i32,
     /// Assignees of the task. Read-only on this struct: Vikunja sets
     /// them via the dedicated `…/assignees` endpoints, so we never send
     /// them in the create/update body (`skip_serializing`).
@@ -944,6 +961,65 @@ fn map_bucket(entry: BucketEntry, list_id: &str) -> Section {
     }
 }
 
+const SECONDS_PER_DAY: i64 = 86_400;
+const SECONDS_PER_WEEK: i64 = 604_800;
+
+/// Vikunja recurrence → Aperio. Vikunja stores a plain period
+/// (`repeat_after` seconds) with a `repeat_mode`; only the shapes Aperio
+/// can express survive:
+///   - `repeat_mode == 1` → monthly, interval 1 (the day comes from the
+///     task's due date).
+///   - otherwise a positive `repeat_after` → weekly when it's a whole
+///     number of weeks, else daily when it's a whole number of days.
+///
+/// Sub-day periods, and `repeat_mode == 2`'s "from completion" anchor,
+/// have no task-recurrence equivalent and collapse (the anchor is lost).
+/// `None` ⇒ no recurrence.
+fn recurrence_from_vikunja(repeat_after: i64, repeat_mode: i32) -> Option<TaskRecurrence> {
+    let simple = |frequency, interval: i64| {
+        Some(TaskRecurrence {
+            frequency,
+            interval: interval.max(1) as u32,
+            day_of_week: None,
+            day_of_month: None,
+            end: None,
+        })
+    };
+    if repeat_mode == 1 {
+        return simple(RecurrenceFrequency::Monthly, 1);
+    }
+    if repeat_after <= 0 {
+        return None;
+    }
+    if repeat_after % SECONDS_PER_WEEK == 0 {
+        simple(RecurrenceFrequency::Weekly, repeat_after / SECONDS_PER_WEEK)
+    } else if repeat_after % SECONDS_PER_DAY == 0 {
+        simple(RecurrenceFrequency::Daily, repeat_after / SECONDS_PER_DAY)
+    } else {
+        // A period that isn't a whole number of days (e.g. an hourly
+        // repeat set in Vikunja directly) can't be shown in Aperio's
+        // day-granular task recurrence — leave it unset rather than lie.
+        None
+    }
+}
+
+/// Aperio recurrence → Vikunja `(repeat_after_seconds, repeat_mode)`.
+/// Returns `None` for shapes Vikunja can't store (yearly). The task
+/// recurrence capability greys those out in the UI, so this is a
+/// defensive fallback (e.g. a task carrying a yearly rule from another
+/// list). Weekday selection, an explicit day-of-month and the COUNT /
+/// UNTIL end modes are likewise dropped (also gated off in the UI):
+/// Vikunja's monthly mode just repeats on the due date's day.
+fn recurrence_to_vikunja(rec: &TaskRecurrence) -> Option<(i64, i32)> {
+    let interval = i64::from(rec.interval.max(1));
+    match rec.frequency {
+        RecurrenceFrequency::Daily => Some((interval * SECONDS_PER_DAY, 0)),
+        RecurrenceFrequency::Weekly => Some((interval * SECONDS_PER_WEEK, 0)),
+        RecurrenceFrequency::Monthly => Some((0, 1)),
+        RecurrenceFrequency::Yearly => None,
+    }
+}
+
 fn map_task(entry: TaskEntry, list_id: &str) -> Task {
     let status = if entry.done {
         TaskStatus::Completed
@@ -982,9 +1058,10 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
         scheduled_time: scheduled.map(|dt| dt.time()).filter(non_midnight),
         deadline_date: deadline.map(|dt| dt.date_naive()),
         deadline_time: deadline.map(|dt| dt.time()).filter(non_midnight),
-        // Recurrence + parent_id + reminders are intentionally
-        // dropped on read; documented in the module preamble.
-        recurrence: None,
+        // parent_id + reminders are intentionally dropped on read;
+        // documented in the module preamble. Recurrence round-trips the
+        // shapes Vikunja can store (daily/weekly periods + monthly).
+        recurrence: recurrence_from_vikunja(entry.repeat_after, entry.repeat_mode),
         parent_id: None,
         // Kanban bucket → section. `0` is Vikunja's "no bucket".
         section_id: (entry.bucket_id != 0).then(|| entry.bucket_id.to_string()),
@@ -1001,11 +1078,7 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
 }
 
 fn new_task_to_body(new: &NewTask) -> TaskEntry {
-    if new.recurrence.is_some() {
-        tracing::warn!(
-            "Vikunja adapter dropping recurrence on create — schema mismatch with Aperio's calendar-style RRULE",
-        );
-    }
+    let (repeat_after, repeat_mode) = recurrence_body(new.recurrence.as_ref(), "create");
     if !new.reminders.is_empty() {
         tracing::warn!(
             "Vikunja adapter dropping reminders on create — Vikunja's reminders[] schema not surfaced yet",
@@ -1030,17 +1103,33 @@ fn new_task_to_body(new: &NewTask) -> TaskEntry {
         hex_color: None,
         created: None,
         updated: None,
+        repeat_after,
+        repeat_mode,
         assignees: None,
         buckets: Vec::new(),
     }
 }
 
-fn task_to_body(task: &Task) -> TaskEntry {
-    if task.recurrence.is_some() {
-        tracing::warn!(
-            "Vikunja adapter dropping recurrence on update — schema mismatch with Aperio's calendar-style RRULE",
-        );
+/// Resolve the `(repeat_after, repeat_mode)` to put in a task body.
+/// `None` recurrence (and any rule Vikunja can't store) sends `0/0`,
+/// which clears recurrence server-side. A set-but-unsupported shape
+/// (yearly) only reaches here from a rule that originated elsewhere —
+/// the recurrence capability greys it out in the UI — so we drop it with
+/// a warn rather than approximate it.
+fn recurrence_body(rec: Option<&TaskRecurrence>, op: &str) -> (i64, i32) {
+    match rec {
+        None => (0, 0),
+        Some(r) => recurrence_to_vikunja(r).unwrap_or_else(|| {
+            tracing::warn!(
+                "Vikunja adapter dropping unsupported recurrence on {op} — only daily / weekly / monthly round-trip",
+            );
+            (0, 0)
+        }),
     }
+}
+
+fn task_to_body(task: &Task) -> TaskEntry {
+    let (repeat_after, repeat_mode) = recurrence_body(task.recurrence.as_ref(), "update");
     if !task.reminders.is_empty() {
         tracing::warn!(
             "Vikunja adapter dropping reminders on update — Vikunja's reminders[] schema not surfaced yet",
@@ -1067,6 +1156,8 @@ fn task_to_body(task: &Task) -> TaskEntry {
         hex_color: None,
         created: None,
         updated: None,
+        repeat_after,
+        repeat_mode,
         assignees: None,
         buckets: Vec::new(),
     }
@@ -1282,6 +1373,7 @@ mod tests {
             hex_color: None,
             created: Some("2026-05-01T10:00:00Z".into()),
             updated: Some("2026-05-02T11:00:00Z".into()),
+            ..Default::default()
         };
         let task = map_task(entry, "7");
         assert_eq!(task.id, "99");
@@ -1325,6 +1417,7 @@ mod tests {
             hex_color: None,
             created: Some("2026-05-20T10:00:00Z".into()),
             updated: Some("2026-05-22T15:00:00Z".into()),
+            ..Default::default()
         };
         let task = map_task(entry, "1");
         assert_eq!(task.status, TaskStatus::Completed);
@@ -1352,10 +1445,76 @@ mod tests {
             hex_color: None,
             created: None,
             updated: None,
+            ..Default::default()
         };
         let task = map_task(entry, "1");
         assert!(task.scheduled_date.is_none());
         assert!(task.deadline_date.is_none());
+    }
+
+    #[test]
+    fn recurrence_maps_the_shapes_vikunja_can_store() {
+        let rule = |frequency, interval| TaskRecurrence {
+            frequency,
+            interval,
+            day_of_week: None,
+            day_of_month: None,
+            end: None,
+        };
+        // Aperio → Vikunja: daily/weekly become a seconds period (mode 0),
+        // monthly uses Vikunja's monthly mode, yearly can't be stored.
+        assert_eq!(
+            recurrence_to_vikunja(&rule(RecurrenceFrequency::Daily, 3)),
+            Some((3 * 86_400, 0)),
+        );
+        assert_eq!(
+            recurrence_to_vikunja(&rule(RecurrenceFrequency::Weekly, 2)),
+            Some((2 * 604_800, 0)),
+        );
+        assert_eq!(
+            recurrence_to_vikunja(&rule(RecurrenceFrequency::Monthly, 1)),
+            Some((0, 1)),
+        );
+        assert_eq!(
+            recurrence_to_vikunja(&rule(RecurrenceFrequency::Yearly, 1)),
+            None,
+        );
+
+        // Vikunja → Aperio: mode 1 → monthly; a weekly multiple → weekly;
+        // a day multiple → daily; mode 2 keeps the interval (anchor lost);
+        // sub-day / none → no recurrence.
+        assert_eq!(
+            recurrence_from_vikunja(0, 1).map(|r| r.frequency),
+            Some(RecurrenceFrequency::Monthly),
+        );
+        let weekly = recurrence_from_vikunja(2 * 604_800, 0).expect("weekly");
+        assert_eq!(weekly.frequency, RecurrenceFrequency::Weekly);
+        assert_eq!(weekly.interval, 2);
+        let daily = recurrence_from_vikunja(3 * 86_400, 2).expect("daily");
+        assert_eq!(daily.frequency, RecurrenceFrequency::Daily);
+        assert_eq!(daily.interval, 3);
+        assert!(recurrence_from_vikunja(0, 0).is_none());
+        assert!(recurrence_from_vikunja(3_600, 0).is_none());
+    }
+
+    #[test]
+    fn new_task_body_carries_and_clears_recurrence() {
+        let mut new = sample_new_task();
+        new.recurrence = Some(TaskRecurrence {
+            frequency: RecurrenceFrequency::Daily,
+            interval: 1,
+            day_of_week: None,
+            day_of_month: None,
+            end: None,
+        });
+        let body = new_task_to_body(&new);
+        assert_eq!(body.repeat_after, 86_400);
+        assert_eq!(body.repeat_mode, 0);
+        // Clearing recurrence sends 0/0 so Vikunja actually drops it.
+        new.recurrence = None;
+        let cleared = new_task_to_body(&new);
+        assert_eq!(cleared.repeat_after, 0);
+        assert_eq!(cleared.repeat_mode, 0);
     }
 
     // ── Body shape (NewTask → wire) ────────────────────────────

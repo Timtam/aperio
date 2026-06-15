@@ -23,6 +23,11 @@ export interface RecurrenceCapabilities {
   relative_monthly: boolean;
   relative_yearly: boolean;
   weekly_byday: boolean;
+  /** An explicit monthly day-of-month can be stored. Vikunja repeats
+   *  monthly on the task's due-date day implicitly, so it sets this false
+   *  and the task editor disables the "day of month" field. Calendar
+   *  events always store BYMONTHDAY → default true. */
+  monthly_day_of_month: boolean;
   count: boolean;
   until: boolean;
 }
@@ -50,6 +55,12 @@ export interface TaskCapabilities {
   manageable_sections: boolean;
   multiple_labels: boolean;
   task_recurrence: boolean;
+  /** Which recurrence shapes the adapter can store for tasks (mirrors the
+   *  calendar side). Absent ⇒ full support. The task recurrence editor
+   *  greys out what the source can't round-trip — e.g. Vikunja drops
+   *  yearly, the weekday picker, an explicit day-of-month and the
+   *  COUNT / UNTIL end modes. */
+  recurrence?: RecurrenceCapabilities;
   /** The source stores the "in progress" status as a distinct state.
    *  Backends with only open/done (Google Tasks, Vikunja, Todoist) set
    *  this false — an in_progress write reads back as open — so the UI

@@ -18,6 +18,16 @@
     "create_lists": true,
     "delete_lists": true,
     "manageable": true,
-    "member_add_by": "search"
+    "member_add_by": "search",
+    "recurrence": {
+      "frequencies": ["daily", "weekly", "monthly"],
+      "interval_frequencies": ["daily", "weekly"],
+      "relative_monthly": false,
+      "relative_yearly": false,
+      "weekly_byday": false,
+      "monthly_day_of_month": false,
+      "count": false,
+      "until": false
+    }
   }
 }

@@ -1151,7 +1151,8 @@
         "untilLabel": "Ende-Datum",
         "dayOfMonthLabel": "Tag im Monat",
         "dayOfMonthPlaceholder": "Automatisch",
-        "dayOfMonthHint": "Leer = es wird der Erledigungstag verwendet. Werte über den Monatsende hinaus werden gekappt (z. B. 31 → Februar-Ende)."
+        "dayOfMonthHint": "Leer = es wird der Erledigungstag verwendet. Werte über den Monatsende hinaus werden gekappt (z. B. 31 → Februar-Ende).",
+        "unsupportedHint": "Vom Konto dieser Aufgabe nicht unterstützt."
       }
     },
     "taskMembers": {
