@@ -24,18 +24,62 @@ env:
   CARGO_PROFILE_TEST_DEBUG: "line-tables-only"
 
 jobs:
+  # Detect WHAT changed so the heavy Rust matrix is skipped when a commit
+  # only touches the frontend (and the frontend checks are skipped when a
+  # commit only touches Rust). A frontend-only change still rebuilds the
+  # artifact — the UI is embedded in the binary at compile time — but no
+  # longer pays for clippy/build/test of the whole Rust workspace, and the
+  # heavy steps are gated PER STEP so the `rust` / `frontend` jobs still run
+  # and report their status checks (required-check / branch-protection safe).
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            rust:
+              - 'crates/**'
+              - 'src-tauri/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'rust-toolchain*'
+              - '.cargo/**'
+              - '.github/workflows/ci.yml'
+              - '.github/workflows/build-artifacts.yml'
+            frontend:
+              - 'src/**'
+              - 'public/**'
+              - 'index.html'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'tsconfig*.json'
+              - 'vite.config.*'
+              - 'vitest.config.*'
+              - '.eslintrc*'
+              - '.github/workflows/ci.yml'
+
   rust:
     name: Rust (${{ matrix.os }})
+    needs: changes
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    # Every step below is gated on `needs.changes.outputs.rust`: on a
+    # frontend-only change the job still runs (and the matrix checks report
+    # green for branch protection), but it does no compilation.
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Linux system dependencies (for Tauri)
-        if: matrix.os == 'ubuntu-latest'
+        if: needs.changes.outputs.rust == 'true' && matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -49,19 +93,23 @@ jobs:
             libasound2-dev
 
       - uses: dtolnay/rust-toolchain@stable
+        if: needs.changes.outputs.rust == 'true'
         with:
           components: clippy, rustfmt
 
       - uses: Swatinem/rust-cache@v2
+        if: needs.changes.outputs.rust == 'true'
         with:
           # Keep the dep cache even on a failed run, so retries on a
           # red build don't recompile every dependency cold.
           cache-on-failure: true
 
       - name: rustfmt
+        if: needs.changes.outputs.rust == 'true'
         run: cargo fmt --all -- --check
 
       - name: clippy
+        if: needs.changes.outputs.rust == 'true'
         run: cargo clippy --workspace --all-targets -- -D warnings
 
       # Build the workspace BEFORE testing so the plugin
@@ -82,33 +130,44 @@ jobs:
       # `cargo:rerun-if-changed=<cdylib_src>` so the now-
       # present cdylibs get staged into plugins/bundled/.
       - name: cargo build (workspace + stage plugins)
+        if: needs.changes.outputs.rust == 'true'
         run: |
           cargo build --workspace
           cargo build -p aperio
 
       - name: cargo test
+        if: needs.changes.outputs.rust == 'true'
         run: cargo test --workspace
 
   frontend:
     name: Frontend
+    needs: changes
     runs-on: ubuntu-latest
+    # Gated per step like the Rust job: a Rust-only change skips the checks
+    # but the job still reports green.
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
+        if: needs.changes.outputs.frontend == 'true'
         with:
           node-version: "20"
           cache: "npm"
 
-      - run: npm ci
+      - name: npm ci
+        if: needs.changes.outputs.frontend == 'true'
+        run: npm ci
 
       - name: TypeScript check
+        if: needs.changes.outputs.frontend == 'true'
         run: npx tsc --noEmit
 
       - name: ESLint
+        if: needs.changes.outputs.frontend == 'true'
         run: npm run lint
 
       - name: Vitest
+        if: needs.changes.outputs.frontend == 'true'
         run: npm test
 
   # Build the per-OS release zips (Linux x64, Windows x64,
@@ -119,7 +178,15 @@ jobs:
   # (incl. the double-arch macOS build) only runs once a commit
   # is actually green. No `version` input → artifact names use
   # the short commit SHA.
+  #
+  # Skipped when neither Rust nor the frontend changed (e.g. a docs-only
+  # commit) — the artifact would be identical, so there's nothing to rebuild.
   artifacts:
     name: Build artifacts
-    needs: [rust, frontend]
+    needs: [changes, rust, frontend]
+    if: >-
+      ${{ !cancelled()
+      && needs.rust.result == 'success'
+      && needs.frontend.result == 'success'
+      && (needs.changes.outputs.rust == 'true' || needs.changes.outputs.frontend == 'true') }}
     uses: ./.github/workflows/build-artifacts.yml
