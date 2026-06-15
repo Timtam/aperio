@@ -61,6 +61,17 @@ export function canStoreInProgress(list: TaskList | undefined): boolean {
   return capabilitiesOf(list).supports_in_progress;
 }
 
+/** Can tasks in `list` carry a recurrence the adapter actually stores?
+ *  Backends that can't round-trip it (Google Tasks has no recurrence;
+ *  Todoist uses natural-language due strings; CalDAV + EWS task
+ *  recurrence isn't implemented yet) report false, and the task editor
+ *  hides the recurrence control rather than dropping the rule on save.
+ *  The finer `recurrence` capability then says which shapes a supporting
+ *  backend can store (e.g. Vikunja's limited set). */
+export function canRecur(list: TaskList | undefined): boolean {
+  return capabilitiesOf(list).task_recurrence;
+}
+
 /** Can `list` host nested child projects / be reparented at all?
  *  Gated on its account's `nested_projects` capability. */
 export function supportsNestedProjects(list: TaskList | undefined): boolean {

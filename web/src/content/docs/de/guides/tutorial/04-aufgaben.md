@@ -148,15 +148,19 @@ Wie Termine können auch Aufgaben sich wiederholen (täglich, wöchentlich,
 monatlich, jährlich). Hakst du eine wiederkehrende Aufgabe ab, erzeugt
 Aperio automatisch die nächste Fälligkeit.
 
-> **Wiederholung & Anbieter:** Wie viel von einer Wiederholung gespeichert
-> werden kann, hängt vom Anbieter ab; der Editor **blendet aus, was die
-> Liste nicht kann** (statt es beim Speichern still zu verwerfen).
-> **Vikunja** speichert einfache Wiederholungen – *täglich* und *wöchentlich*
-> (mit Intervall, z. B. „alle 2 Wochen") sowie *monatlich* –, kennt aber kein
-> *jährlich*, keine **Wochentagsauswahl**, keinen festen **Tag im Monat** (es
-> wiederholt sich am Tag des Fälligkeitsdatums) und kein **Enddatum**; diese
-> Felder sind bei Vikunja-Aufgaben ausgegraut. Lokale Listen unterstützen die
-> volle Wiederholung.
+> **Wiederholung & Anbieter:** Ob – und wie viel – von einer Wiederholung
+> gespeichert werden kann, hängt vom Anbieter ab. Der Editor erscheint nur
+> dort, wo die Liste sie auch speichern kann, und **blendet einzelne Felder
+> aus, die der Anbieter nicht kann** (statt sie beim Speichern still zu
+> verwerfen). **Lokale** Listen und **Microsoft To Do** unterstützen die
+> volle Wiederholung. **Vikunja** speichert einfache Wiederholungen –
+> *täglich*/*wöchentlich* (mit Intervall, z. B. „alle 2 Wochen") und
+> *monatlich* –, kennt aber kein *jährlich*, keine **Wochentagsauswahl**,
+> keinen festen **Tag im Monat** (es wiederholt am Tag des Fälligkeitsdatums)
+> und kein **Enddatum**; diese Felder sind dort ausgegraut. Bei **Google
+> Tasks**, **Todoist**, **Apple Erinnerungen / CalDAV** und **Exchange** wird
+> der Wiederholungs-Editor **gar nicht** angezeigt – diese Anbieter speichern
+> (noch) keine Aufgaben-Wiederholung.
 
 ## Mitglieder und Zuweisungen
 

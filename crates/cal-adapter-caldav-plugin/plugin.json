@@ -11,6 +11,7 @@
   "signed": false,
   "tasks": {
     "subtasks": true,
+    "task_recurrence": false,
     "create_lists": true,
     "delete_lists": true
   }

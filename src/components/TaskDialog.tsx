@@ -42,7 +42,11 @@ import type {
   TaskUser,
 } from '../api/types';
 import { useCalendarStore } from '../state/calendarStoreContext';
-import { canAssignSection, canMoveTaskBetweenLists } from '../state/taskMoves';
+import {
+  canAssignSection,
+  canMoveTaskBetweenLists,
+  canRecur,
+} from '../state/taskMoves';
 import { useDialogState } from '../state/dialogStateContext';
 import {
   autoDateOnStart,
@@ -1278,11 +1282,19 @@ export function TaskDialog({
         </label>
         <DescriptionLinks text={form.description} />
 
-        <TaskRecurrenceSelector
-          value={form.recurrence}
-          onChange={(recurrence) => update('recurrence', recurrence)}
-          capabilities={listForSections?.task_capabilities?.recurrence}
-        />
+        {/* Hide the recurrence editor entirely for providers that can't
+            store a recurrence at all (Google Tasks, Todoist, and CalDAV /
+            EWS until their task recurrence lands) — offering it would just
+            drop the rule silently on save. Providers that DO support it
+            (local, Microsoft To Do, Vikunja) show it, with the finer
+            `recurrence` caps greying out individual unsupported shapes. */}
+        {canRecur(listForSections) && (
+          <TaskRecurrenceSelector
+            value={form.recurrence}
+            onChange={(recurrence) => update('recurrence', recurrence)}
+            capabilities={listForSections?.task_capabilities?.recurrence}
+          />
+        )}
 
         <RemindersEditor
           value={form.reminders}

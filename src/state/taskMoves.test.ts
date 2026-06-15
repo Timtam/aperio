@@ -4,6 +4,7 @@ import type { TaskCapabilities, TaskList } from '../api/types';
 import {
   canAssignSection,
   canMoveTaskBetweenLists,
+  canRecur,
   canReparentList,
   canStoreInProgress,
   createCapableAccounts,
@@ -69,6 +70,15 @@ describe('capability predicates', () => {
         list('a', 'acc', null, { supports_in_progress: false }),
       ),
     ).toBe(false);
+  });
+
+  it('recurrence support defaults to true and respects the flag', () => {
+    // Default (local / Microsoft To Do / Vikunja store recurrence)
+    expect(canRecur(list('a', 'acc'))).toBe(true);
+    // Backends that drop it (Google Tasks / Todoist / CalDAV / EWS)
+    expect(canRecur(list('a', 'acc', null, { task_recurrence: false }))).toBe(
+      false,
+    );
   });
 });
 
