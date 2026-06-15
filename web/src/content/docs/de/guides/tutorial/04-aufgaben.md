@@ -31,6 +31,12 @@ deinen Tag oder deine Woche ein und arbeitest sie ab.
 - **Bearbeiten:** mit `Eingabe` öffnen.
 - **Löschen:** **Löschen** wählen (Standard: `Entf`).
 
+> **Abhaken-Verhalten:** Standardmäßig wechselt das Abhaken zwischen *offen*
+> und *abgeschlossen*. Unter **Einstellungen → Aufgaben → Abhaken-Verhalten**
+> kannst du stattdessen einen Status-Zyklus wählen: Jedes Abhaken durchläuft
+> *Offen → In Arbeit → Abgeschlossen → Offen*, sodass der Status „In Arbeit"
+> per `Leertaste` oder Klick erreichbar ist, ohne den Editor zu öffnen.
+
 > **Erledigte ausblenden:** Abgehakte Aufgaben wandern in eine
 > eingeklappte Gruppe **Erledigt (N)** ganz unten in der Liste, damit die
 > offenen Aufgaben übersichtlich bleiben. Die Gruppe zeigt die Anzahl an.

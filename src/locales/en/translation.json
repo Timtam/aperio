@@ -686,6 +686,14 @@
       "resolved": "Conflict resolved."
     },
     "tasks": {
+      "checkoffMode": {
+        "heading": "Check-off behaviour",
+        "hint": "What the check-off gesture (Space or clicking the circle) does. The default flips between open and completed. The status cycle instead steps open → in progress → completed → open, so the \"in progress\" step is reachable directly.",
+        "options": {
+          "toggle": "Open ↔ completed (default)",
+          "cycle": "Open → in progress → completed"
+        }
+      },
       "statusCoupling": {
         "heading": "Status coupling",
         "label": "Couple parent and subtask status",

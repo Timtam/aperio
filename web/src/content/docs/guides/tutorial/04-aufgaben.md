@@ -29,6 +29,12 @@ your day or week, and work through them.
 - **Edit:** Open it with `Enter`.
 - **Delete:** Choose **Delete** (default: `Delete`).
 
+> **Check-off behaviour:** By default checking off flips between *open* and
+> *completed*. Under **Settings → Tasks → Check-off behaviour** you can switch
+> to a status cycle instead: each check-off steps *open → in progress →
+> completed → open*, so the "in progress" state is reachable with `Space` or a
+> click without opening the editor.
+
 > **Hiding completed tasks:** Checked-off tasks move into a collapsed
 > **Done (N)** group at the bottom of the list, so your open tasks stay
 > uncluttered. The group shows the count. It's a regular row in the task

@@ -58,7 +58,7 @@ export function useTaskStatusActions(): TaskStatusActions {
   // here without affecting the rest of the app. Parent and child
   // tasks live in the same list (invariant from #98), so the cascade
   // planner walking the tree all reads the same per-list setting.
-  const { effectiveForList } = useTaskCascadeEnabled();
+  const { effectiveForList, checkoffMode } = useTaskCascadeEnabled();
 
   const set = useCallback(
     async (task: Task, nextStatus: TaskStatus): Promise<void> => {
@@ -102,10 +102,17 @@ export function useTaskStatusActions(): TaskStatusActions {
   const toggle = useCallback(
     async (task: Task): Promise<void> => {
       const nextStatus: TaskStatus =
-        task.status === 'completed' ? 'open' : 'completed';
+        checkoffMode === 'cycle'
+          ? nextCycleStatus(task.status)
+          : // Default: flip between open and completed (anything not
+            // already completed — open / in_progress / cancelled — becomes
+            // completed; completed goes back to open).
+            task.status === 'completed'
+            ? 'open'
+            : 'completed';
       await set(task, nextStatus);
     },
-    [set],
+    [set, checkoffMode],
   );
 
   return useMemo(() => ({ toggle, set }), [toggle, set]);
@@ -120,6 +127,25 @@ export function useTaskStatusActions(): TaskStatusActions {
 export function useTaskStatusToggle(): (task: Task) => Promise<void> {
   const { toggle } = useTaskStatusActions();
   return toggle;
+}
+
+/**
+ * Three-state check-off cycle (Settings → Tasks → check-off mode = cycle):
+ * `open → in_progress → completed → open`. A cancelled task re-enters the
+ * cycle at `open` so a check-off un-cancels it rather than dead-ending.
+ */
+export function nextCycleStatus(current: TaskStatus): TaskStatus {
+  switch (current) {
+    case 'open':
+      return 'in_progress';
+    case 'in_progress':
+      return 'completed';
+    case 'completed':
+      return 'open';
+    default:
+      // cancelled (or any future state) → back into the cycle.
+      return 'open';
+  }
 }
 
 /**

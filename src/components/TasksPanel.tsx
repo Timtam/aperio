@@ -6,6 +6,7 @@ import { useCalendarStore } from '../state/calendarStoreContext';
 import { useTaskCascadeEnabled } from '../state/taskCascadeContext';
 import type {
   CarryOverDefault,
+  CheckoffMode,
   DayStartTrigger,
   ListOverrides,
 } from '../state/TaskCascadeProvider';
@@ -49,6 +50,9 @@ const DAY_START_TRIGGER_OPTIONS: readonly DayStartTrigger[] = [
   'app-start',
 ];
 
+/** Check-off gesture behaviour choices, rendered as a radio group. */
+const CHECKOFF_MODE_OPTIONS: readonly CheckoffMode[] = ['toggle', 'cycle'];
+
 export function TasksPanel() {
   const { t } = useTranslation();
   const {
@@ -60,6 +64,8 @@ export function TasksPanel() {
     setCarryOverDefault,
     dayStartTrigger,
     setDayStartTrigger,
+    checkoffMode,
+    setCheckoffMode,
     listOverrides,
     setListOverride,
   } = useTaskCascadeEnabled();
@@ -91,6 +97,9 @@ export function TasksPanel() {
     }));
   }, [taskLists, accountNameById, t]);
 
+  const checkoffHeadingId = useId();
+  const checkoffHintId = useId();
+  const checkoffGroupId = useId();
   const couplingHeadingId = useId();
   const couplingHintId = useId();
   const autoDateHeadingId = useId();
@@ -125,6 +134,40 @@ export function TasksPanel() {
 
   return (
     <div className="form">
+      <section
+        aria-labelledby={checkoffHeadingId}
+        className="tasks-settings__section"
+      >
+        <h3 id={checkoffHeadingId} className="color-labels__heading">
+          {t('dialogs.tasks.checkoffMode.heading')}
+        </h3>
+        <p id={checkoffHintId} className="tasks-settings__hint">
+          {t('dialogs.tasks.checkoffMode.hint')}
+        </p>
+        <div
+          role="radiogroup"
+          id={checkoffGroupId}
+          aria-labelledby={checkoffHeadingId}
+          aria-describedby={checkoffHintId}
+          className="tasks-settings__radiogroup"
+        >
+          {CHECKOFF_MODE_OPTIONS.map((option) => (
+            <label key={option} className="tasks-settings__radio">
+              <input
+                type="radio"
+                name={checkoffGroupId}
+                value={option}
+                checked={checkoffMode === option}
+                onChange={() => setCheckoffMode(option)}
+              />
+              <span>
+                {t(`dialogs.tasks.checkoffMode.options.${option}`)}
+              </span>
+            </label>
+          ))}
+        </div>
+      </section>
+
       <section
         aria-labelledby={couplingHeadingId}
         className="tasks-settings__section"

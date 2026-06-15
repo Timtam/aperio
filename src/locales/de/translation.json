@@ -683,6 +683,14 @@
       "resolved": "Konflikt gelöst."
     },
     "tasks": {
+      "checkoffMode": {
+        "heading": "Abhaken-Verhalten",
+        "hint": "Was die Abhaken-Geste (Leertaste oder Klick in den Kreis) macht. Standard wechselt zwischen Offen und Abgeschlossen. Der Status-Zyklus durchläuft stattdessen Offen → In Arbeit → Abgeschlossen → Offen, sodass der „In Arbeit\"-Schritt direkt erreichbar ist.",
+        "options": {
+          "toggle": "Offen ↔ Abgeschlossen (Standard)",
+          "cycle": "Offen → In Arbeit → Abgeschlossen"
+        }
+      },
       "statusCoupling": {
         "heading": "Status-Verknüpfung",
         "label": "Status von Eltern- und Unteraufgaben koppeln",

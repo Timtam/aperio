@@ -46,6 +46,7 @@ const CASCADE_KEY = 'tasks.cascadeStatusCoupling';
 const AUTO_DATE_KEY = 'tasks.autoDateOnStart';
 const CARRY_OVER_KEY = 'tasks.carryOverDefault';
 const DAY_START_TRIGGER_KEY = 'tasks.dayStartTrigger';
+const CHECKOFF_MODE_KEY = 'tasks.checkoffMode';
 /**
  * Single JSON pref holding the per-list override map. Keyed by
  * task-list id, value is a `ListOverrides` record carrying any
@@ -108,6 +109,25 @@ function isCarryOverDefault(value: unknown): value is CarryOverDefault {
 }
 
 /**
+ * How the check-off gesture (Space / clicking the circle) advances a
+ * task's status:
+ *   - `'toggle'` (default): flip between `open` and `completed`, the
+ *     historical behaviour.
+ *   - `'cycle'`: step `open → in_progress → completed → open`, so a
+ *     three-state workflow is reachable from the keyboard / one click.
+ */
+export type CheckoffMode = 'toggle' | 'cycle';
+
+const CHECKOFF_MODE_VALUES: readonly CheckoffMode[] = ['toggle', 'cycle'];
+
+function isCheckoffMode(value: unknown): value is CheckoffMode {
+  return (
+    typeof value === 'string' &&
+    (CHECKOFF_MODE_VALUES as readonly string[]).includes(value)
+  );
+}
+
+/**
  * Per-list override of any subset of the three task-behaviour
  * knobs. Absent fields inherit the corresponding global default —
  * a list with `{ carryOverDefault: 'today' }` keeps the global
@@ -151,6 +171,10 @@ export interface TaskCascadeContextValue {
   dayStartTrigger: DayStartTrigger;
   /** Set the day-start-trigger preference. Debounced-persisted. */
   setDayStartTrigger: (value: DayStartTrigger) => void;
+  /** How the check-off gesture advances a task's status. */
+  checkoffMode: CheckoffMode;
+  /** Set the check-off mode preference. Debounced-persisted. */
+  setCheckoffMode: (value: CheckoffMode) => void;
   /** Per-list overrides for the cascade / auto-date / carry-over
    *  knobs. Keyed by task-list id. Absent keys mean "inherit". */
   listOverrides: Record<string, ListOverrides>;
@@ -180,6 +204,9 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
   // which is what users of always-on PCs expect.
   const [dayStartTrigger, setDayStartTriggerState] =
     useState<DayStartTrigger>('00:00');
+  // Default 'toggle' = the historical open ↔ completed flip.
+  const [checkoffMode, setCheckoffModeState] =
+    useState<CheckoffMode>('toggle');
   const [listOverrides, setListOverridesState] = useState<
     Record<string, ListOverrides>
   >({});
@@ -192,10 +219,18 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
       getUserPref(AUTO_DATE_KEY).catch(() => null),
       getUserPref(CARRY_OVER_KEY).catch(() => null),
       getUserPref(DAY_START_TRIGGER_KEY).catch(() => null),
+      getUserPref(CHECKOFF_MODE_KEY).catch(() => null),
       getUserPref(LIST_OVERRIDES_KEY).catch(() => null),
     ])
       .then(
-        ([cascadeRaw, autoDateRaw, carryOverRaw, triggerRaw, listOverridesRaw]) => {
+        ([
+          cascadeRaw,
+          autoDateRaw,
+          carryOverRaw,
+          triggerRaw,
+          checkoffRaw,
+          listOverridesRaw,
+        ]) => {
           if (cancelled) return;
           // Cascade + auto-date follow the same on/off convention as
           // before — only literal "false" toggles the default off.
@@ -210,6 +245,11 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
           // enum members. Garbage falls back to the default '00:00'.
           if (isDayStartTrigger(triggerRaw)) {
             setDayStartTriggerState(triggerRaw);
+          }
+          // Check-off mode: accept only the known enum members; garbage
+          // falls back to the default 'toggle'.
+          if (isCheckoffMode(checkoffRaw)) {
+            setCheckoffModeState(checkoffRaw);
           }
           // Per-list overrides: a JSON blob of `Record<listId,
           // ListOverrides>`. Validate per-list-per-field so a corrupt
@@ -330,6 +370,23 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
     };
   }, [dayStartTrigger, hydrating]);
 
+  const checkoffModeTimer = useRef<number | null>(null);
+  useEffect(() => {
+    if (hydrating) return;
+    if (checkoffModeTimer.current !== null) {
+      window.clearTimeout(checkoffModeTimer.current);
+    }
+    checkoffModeTimer.current = window.setTimeout(() => {
+      void setUserPref(CHECKOFF_MODE_KEY, checkoffMode);
+    }, WRITE_DEBOUNCE_MS);
+    return () => {
+      if (checkoffModeTimer.current !== null) {
+        window.clearTimeout(checkoffModeTimer.current);
+        checkoffModeTimer.current = null;
+      }
+    };
+  }, [checkoffMode, hydrating]);
+
   const listOverridesTimer = useRef<number | null>(null);
   useEffect(() => {
     if (hydrating) return;
@@ -361,6 +418,9 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
   }, []);
   const setDayStartTrigger = useCallback((value: DayStartTrigger) => {
     setDayStartTriggerState(value);
+  }, []);
+  const setCheckoffMode = useCallback((value: CheckoffMode) => {
+    setCheckoffModeState(value);
   }, []);
 
   const setListOverride = useCallback(
@@ -414,6 +474,8 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
       setCarryOverDefault,
       dayStartTrigger,
       setDayStartTrigger,
+      checkoffMode,
+      setCheckoffMode,
       listOverrides,
       setListOverride,
       effectiveForList,
@@ -428,6 +490,8 @@ export function TaskCascadeProvider({ children }: { children: ReactNode }) {
       setCarryOverDefault,
       dayStartTrigger,
       setDayStartTrigger,
+      checkoffMode,
+      setCheckoffMode,
       listOverrides,
       setListOverride,
       effectiveForList,
