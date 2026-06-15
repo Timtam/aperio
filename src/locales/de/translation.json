@@ -271,7 +271,37 @@
         "tasks": "Aufgaben",
         "contacts": "Kontakte",
         "sync": "Synchronisation",
-        "plugins": "Plugins"
+        "plugins": "Plugins",
+        "logs": "Protokolle"
+      },
+      "logs": {
+        "hint": "Aperio führt zur Fehlersuche eine rollierende Protokolldatei. Wähle, wie ausführlich protokolliert wird, sieh die letzten Zeilen ein oder exportiere das Protokoll, um es für den Support zu senden.",
+        "levelHeading": "Detailgrad",
+        "levelLabel": "Protokoll-Stufe",
+        "levelHint": "Höhere Stufen protokollieren mehr Details, machen das Protokoll aber umfangreicher. Nutze Debug oder Trace nur beim Nachstellen eines Problems.",
+        "level": {
+          "error": "Nur Fehler",
+          "warn": "Warnungen",
+          "info": "Normal (empfohlen)",
+          "debug": "Debug (ausführlich)",
+          "trace": "Trace (sehr ausführlich)"
+        },
+        "exportHeading": "Exportieren & verwalten",
+        "redact": "Persönliche Daten entfernen",
+        "redactHint": "Ersetzt E-Mail-Adressen und Zugriffstokens vor dem Export durch Platzhalter. Lass dies aktiviert, sofern der Support nicht anders bittet.",
+        "export": "In Datei exportieren …",
+        "copy": "In Zwischenablage kopieren",
+        "clear": "Protokolle löschen",
+        "clearConfirm": "Gespeicherte Protokolldateien löschen? Die aktuelle Sitzung wird weiter protokolliert.",
+        "location": "Protokolle liegen unter: {{path}}",
+        "copyPath": "Pfad kopieren",
+        "viewHeading": "Aktuelles Protokoll",
+        "refresh": "Aktualisieren",
+        "empty": "Noch keine Protokolleinträge.",
+        "exported": "Protokolle exportiert.",
+        "copied": "Protokolle in die Zwischenablage kopiert.",
+        "pathCopied": "Pfad kopiert.",
+        "cleared": "Protokolle gelöscht."
       },
       "general": {
         "hint": "App-weite Einstellungen.",

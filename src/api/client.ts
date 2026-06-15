@@ -1428,6 +1428,36 @@ export const listSyncLogEntries = (limit?: number) =>
 /** Drop every row from the protocol table. */
 export const clearSyncLog = () => invoke<void>('clear_sync_log');
 
+// ── Diagnostics log (Settings → Protokolle) ──
+
+/** Log levels the diagnostics filter accepts, least → most verbose. */
+export type LogLevel = 'error' | 'warn' | 'info' | 'debug' | 'trace';
+
+/** The persisted diagnostics log level (device-local). */
+export const getLogLevel = () => invoke<string>('get_log_level');
+
+/** Change the live verbosity and persist it. */
+export const setLogLevel = (level: LogLevel) =>
+  invoke<void>('set_log_level', { level });
+
+/** Tail of the newest log file for the in-app viewer. */
+export const getRecentLogs = (lines?: number) =>
+  invoke<string>('get_recent_logs', { lines: lines ?? null });
+
+/** The full (optionally redacted) log bundle as a string — for clipboard. */
+export const collectLogs = (redact = true) =>
+  invoke<string>('collect_logs', { redact });
+
+/** Write the (optionally redacted) bundle to a user-chosen path. */
+export const exportLogs = (destPath: string, redact = true) =>
+  invoke<void>('export_logs', { destPath, redact });
+
+/** Remove rotated log files (the active one is kept). */
+export const clearLogs = () => invoke<void>('clear_logs');
+
+/** The on-disk logs directory path, for display + copy. */
+export const logsDirPath = () => invoke<string>('logs_dir_path');
+
 // ── SFTP host-key trust dialog (§19.5) ──
 
 /** Snapshot returned by `previewSftpHostKey`. The frontend uses

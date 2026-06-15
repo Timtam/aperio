@@ -169,6 +169,10 @@ anyhow = "1"
 # Logging
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# Rolling, non-blocking file appender for persistent (release) logs.
+tracing-appender = "0.2"
+# Used by the log-export redaction pass (scrub e-mails / token-like strings).
+regex = "1"
 
 [profile.release]
 codegen-units = 1

@@ -707,6 +707,40 @@ button[aria-disabled='true'] {
   padding: var(--space-1);
 }
 
+/* Diagnostics (Protokolle) panel. */
+.logs-panel__view-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.logs-panel__output {
+  margin: 0;
+  max-height: 16rem;
+  overflow: auto;
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-subtle);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Inline text button (e.g. "copy path") that reads as a link. */
+.link-button {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--color-accent);
+  cursor: pointer;
+  text-decoration: underline;
+  font: inherit;
+}
+
 .tasks-settings__hint {
   margin: 0;
   color: var(--color-fg-muted);

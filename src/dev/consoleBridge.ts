@@ -1,14 +1,16 @@
 import { invoke } from '@tauri-apps/api/core';
 
 /**
- * DEV diagnostic: mirror webview `console.*` output into the Rust/tracing
- * stream (target `aperio::webview`) so frontend logs appear in the same dev
- * terminal as backend logs. Patches `console.{log,info,warn,error,debug}` to
- * also forward to the `frontend_log` Tauri command, while still calling the
- * original (so the browser devtools console keeps working too).
+ * Mirror webview `console.*` output into the Rust/tracing stream (target
+ * `aperio::webview`) so frontend logs land in the same sinks as backend logs.
+ * Patches `console.{log,info,warn,error,debug}` to also forward to the
+ * `frontend_log` Tauri command, while still calling the original (so the
+ * browser devtools console keeps working too).
  *
- * Install once at startup, gated on `import.meta.env.DEV` — production builds
- * never forward.
+ * Installed in EVERY build (see `main.tsx`): in dev it surfaces in the
+ * terminal; in release it flows into the persistent log file so a user's
+ * exported log captures frontend errors. Messages are truncated to 4000
+ * chars; failures to forward are swallowed (never let logging throw).
  */
 export function installConsoleBridge(): void {
   const levels = ['log', 'info', 'warn', 'error', 'debug'] as const;

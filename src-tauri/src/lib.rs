@@ -16,6 +16,7 @@ pub mod credential_sync;
 pub mod db;
 pub mod device_names;
 pub mod event_log;
+pub mod logging;
 pub mod overrides;
 mod paths;
 mod platform;
@@ -49,14 +50,16 @@ use tracing::{info, warn};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    init_tracing();
+    // Resolve the data dir first: the file-logging layer lives under it, and
+    // logging must be up before anything else emits a trace.
+    let data_dir = resolve_data_dir();
+    let log_state = logging::init(&data_dir.path);
 
     // Register the AUMID and pin it to this process before tauri starts
     // — toast notifications inherit it at process scope. On non-Windows
     // platforms this is a no-op.
     platform::setup();
 
-    let data_dir = resolve_data_dir();
     info!(
         kind = ?data_dir.kind,
         path = %data_dir.path.display(),
@@ -66,6 +69,19 @@ pub fn run() {
     let db_path = data_dir.path.join("aperio.sqlite");
     let db = DbHandle::open(&db_path).expect("failed to open local database");
     info!(path = %db_path.display(), "opened local database");
+
+    // Apply the user's saved log level now the DB is open. init() started at
+    // RUST_LOG / the default so early startup is captured; this overrides it
+    // with the persisted choice (Settings → Protokolle). Device-local pref —
+    // deliberately NOT on the sync whitelist.
+    {
+        let shared = db.shared();
+        if let Ok(Some(level)) =
+            crate::user_prefs::UserPrefsRepo::new(&shared).get(commands::PREF_LOG_LEVEL)
+        {
+            log_state.set_filter(&level);
+        }
+    }
 
     // The Tauri backend owns the connection. Subsystems (calendar adapter,
     // sync engine, plugin manager) take an `Arc` clone of the same mutex.
@@ -480,6 +496,10 @@ pub fn run() {
         // user plugins; the newtype wrapper keeps the State
         // lookup unambiguous.
         .manage(commands::UserPluginsDir(user_plugins_dir))
+        // Diagnostics: the file-logging state (writer guard + reload handle).
+        // Managing it keeps the non-blocking writer's WorkerGuard alive for
+        // the whole process and lets the log commands change verbosity.
+        .manage(log_state)
         // Window events → tray. The custom title-bar buttons route through
         // `request_window_close` / `request_window_minimize`; this global
         // handler covers the paths that DON'T go through a button:
@@ -538,6 +558,13 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             app_info,
             frontend_log,
+            commands::get_log_level,
+            commands::set_log_level,
+            commands::get_recent_logs,
+            commands::collect_logs,
+            commands::export_logs,
+            commands::clear_logs,
+            commands::logs_dir_path,
             commands::open_external_url,
             commands::list_calendars,
             commands::create_calendar,
@@ -877,17 +904,6 @@ pub fn run() {
     });
 }
 
-fn init_tracing() {
-    use tracing_subscriber::{fmt, prelude::*, EnvFilter};
-
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-
-    tracing_subscriber::registry()
-        .with(filter)
-        .with(fmt::layer())
-        .init();
-}
-
 #[tauri::command]
 fn app_info() -> AppInfo {
     AppInfo {
@@ -896,14 +912,16 @@ fn app_info() -> AppInfo {
     }
 }
 
-/// Dev diagnostic: mirror a webview `console.*` call into the Rust tracing
-/// stream (target `aperio::webview`) so frontend logs land in the same dev
-/// terminal as backend logs. The frontend only forwards in dev builds.
+/// Mirror a webview `console.*` call into the Rust tracing stream (target
+/// `aperio::webview`) so frontend logs land in the same sinks as backend logs
+/// — the dev terminal AND the persistent log file. The frontend forwards in
+/// every build now (release included) so a user's exported log captures
+/// frontend errors too.
 #[tauri::command]
 fn frontend_log(level: String, message: String) {
     // Map to INFO and above so everything is visible under the default
-    // (INFO) log filter — the whole point is to surface webview output in
-    // the dev terminal without raising the global level.
+    // (INFO) log filter — the whole point is to surface webview output
+    // without raising the global level.
     match level.as_str() {
         "error" => tracing::error!(target: "aperio::webview", "{message}"),
         "warn" => tracing::warn!(target: "aperio::webview", "{message}"),

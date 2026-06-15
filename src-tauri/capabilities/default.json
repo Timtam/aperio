@@ -16,6 +16,7 @@
     "notification:allow-is-permission-granted",
     "notification:allow-request-permission",
     "dialog:default",
-    "dialog:allow-open"
+    "dialog:allow-open",
+    "dialog:allow-save"
   ]
 }

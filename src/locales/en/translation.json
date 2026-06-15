@@ -274,7 +274,37 @@
         "tasks": "Tasks",
         "contacts": "Contacts",
         "sync": "Sync",
-        "plugins": "Plugins"
+        "plugins": "Plugins",
+        "logs": "Logs"
+      },
+      "logs": {
+        "hint": "Aperio keeps a rolling log file to help diagnose problems. Choose how much detail to record, view the latest lines, or export the log to send for support.",
+        "levelHeading": "Detail level",
+        "levelLabel": "Log level",
+        "levelHint": "Higher levels record more detail but make the log noisier. Use Debug or Trace only while reproducing a problem.",
+        "level": {
+          "error": "Errors only",
+          "warn": "Warnings",
+          "info": "Normal (recommended)",
+          "debug": "Debug (verbose)",
+          "trace": "Trace (very verbose)"
+        },
+        "exportHeading": "Export & manage",
+        "redact": "Remove personal data",
+        "redactHint": "Replaces e-mail addresses and access tokens with placeholders before exporting. Leave on unless support asks otherwise.",
+        "export": "Export to file …",
+        "copy": "Copy to clipboard",
+        "clear": "Clear logs",
+        "clearConfirm": "Delete the stored log files? The current session keeps logging.",
+        "location": "Logs are stored at: {{path}}",
+        "copyPath": "Copy path",
+        "viewHeading": "Recent log",
+        "refresh": "Refresh",
+        "empty": "No log entries yet.",
+        "exported": "Logs exported.",
+        "copied": "Logs copied to clipboard.",
+        "pathCopied": "Path copied.",
+        "cleared": "Logs cleared."
       },
       "general": {
         "hint": "App-wide settings.",
