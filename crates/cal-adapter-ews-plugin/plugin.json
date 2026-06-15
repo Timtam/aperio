@@ -14,8 +14,10 @@
   },
   "tasks": {
     "subtasks": false,
-    "task_recurrence": false,
     "create_lists": true,
-    "delete_lists": true
+    "delete_lists": true,
+    "recurrence": {
+      "interval_frequencies": ["daily", "weekly", "monthly"]
+    }
   }
 }

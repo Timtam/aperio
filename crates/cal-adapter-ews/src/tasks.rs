@@ -20,14 +20,39 @@
 //!     each row as a distinct task — there's no occurrence id we'd
 //!     need to round-trip.
 //!
+//! Recurrence round-trips through the same `<t:Recurrence>` machinery the
+//! calendar side uses: on read the shared [`RecurrenceWalker`] parses the
+//! subtree into an [`EwsRecurrence`], which converts to an RFC 5545 RRULE
+//! and then to the structured `TaskRecurrence`; on write the inverse
+//! ([`rrule_to_ews_recurrence`]) splices a `<t:Recurrence>` element into
+//! the task body. EWS can't store a yearly interval, so the adapter
+//! declares a restricted recurrence capability and the editor greys that
+//! out; relative monthly/yearly patterns the model can't hold collapse to
+//! their plain frequency on read.
+//!
+//! ⚠ **UNVERIFIED against a live Exchange server** (no one on the team has
+//! an EWS mailbox with tasks to test against). The XML build + parse
+//! round-trip is unit-tested, but two things are unconfirmed on real
+//! Exchange:
+//!   1. **Read:** whether a `FindItem` actually *returns* `task:Recurrence`.
+//!      The calendar side documents that `SyncFolderItems` drops complex
+//!      properties (Recurrence, …) regardless of `AdditionalProperties` and
+//!      needs a `GetItem` enrichment pass — `FindItem` on tasks may behave
+//!      the same, in which case writes persist server-side but reads come
+//!      back as one-shots. This is the most likely failure.
+//!   2. **Write:** whether Exchange accepts `<t:Recurrence>` at the position
+//!      we emit it in `<t:Task>` (EWS element-order strictness varies; our
+//!      existing field order already deviates from the XSD and is accepted,
+//!      which is mild evidence it's lenient).
+//! If a recurring EWS task misbehaves — recurrence vanishing on save or
+//! never reading back — START HERE: `new_task_to_task_item_xml` /
+//! `task_to_update_field_xml` (write), `parse_find_task_item_response`
+//! (read), and the `task:Recurrence` request in the FindItem body. The fix
+//! for case 1 is a `GetItem` enrichment, like the calendar adapter does.
+//!
 //! Out of scope for the first cut:
 //!
 //!   - Subtasks. EWS tasks don't model hierarchy.
-//!   - Recurrence. EWS supports `<t:TaskRecurrence>` but it's a
-//!     separate XML shape from CalendarItem's, and recurring tasks
-//!     are rarer than recurring events. Round-trips lose the
-//!     recurrence on read (master is parsed as a one-shot) and drop
-//!     it on write (with a `tracing::warn` so we know).
 //!
 //! Date semantics: EWS `StartDate` / `DueDate` are `xs:dateTime`
 //! even though task UIs treat them as dates. We write Aperio's
@@ -41,11 +66,17 @@ use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use quick_xml::events::Event as XmlEvent;
 use quick_xml::reader::Reader;
 
-use cal_core::{NewTask, Task, TaskList, TaskPriority, TaskStatus};
+use cal_core::{
+    rrule_to_task_recurrence, task_recurrence_to_rrule, NewTask, Task, TaskList, TaskPriority,
+    TaskStatus,
+};
 
 use crate::api::EwsClient;
 use crate::error::{EwsError, EwsResult};
-use crate::mapping::{parse_first_item_id, split_calendar_id};
+use crate::mapping::{
+    parse_first_item_id, rrule_to_ews_recurrence, split_calendar_id, EwsRecurrence,
+    RecurrenceWalker,
+};
 use crate::soap::{delete_calendar_item, escape_xml};
 
 // ── Public adapter-side surface ────────────────────────────────────────
@@ -226,6 +257,12 @@ pub fn find_task_folders() -> String {
 /// SOAP body for `FindItem` with a `Shallow` traversal over a task
 /// folder. Default shape plus the task-specific fields we need to
 /// reconstruct a cal-core `Task` without per-row GetItem traffic.
+///
+/// ⚠ It also requests `task:Recurrence`, but it's UNVERIFIED whether
+/// `FindItem` returns that complex property on live Exchange — the
+/// calendar `SyncFolderItems` drops complex properties and needs a
+/// `GetItem` enrichment. If recurring tasks read back as one-shots, this
+/// is why; see the module docs.
 pub fn find_tasks_in_folder(folder_id: &str, change_key: Option<&str>) -> String {
     let folder_id_attr = match change_key {
         Some(ck) => format!(
@@ -250,6 +287,7 @@ pub fn find_tasks_in_folder(folder_id: &str, change_key: Option<&str>) -> String
           <t:FieldURI FieldURI="task:DueDate"/>
           <t:FieldURI FieldURI="task:CompleteDate"/>
           <t:FieldURI FieldURI="task:Status"/>
+          <t:FieldURI FieldURI="task:Recurrence"/>
         </t:AdditionalProperties>
       </m:ItemShape>
       <m:ParentFolderIds>
@@ -499,6 +537,8 @@ pub struct ParsedTask {
     pub reminder_due_by: Option<DateTime<Utc>>,
     pub created: Option<DateTime<Utc>>,
     pub last_modified: Option<DateTime<Utc>>,
+    /// Parsed `<t:Recurrence>` subtree, `None` for a one-shot task.
+    pub recurrence: Option<EwsRecurrence>,
 }
 
 /// Walk a `FindItemResponse` body whose `<t:Items>` carries
@@ -513,6 +553,11 @@ pub fn parse_find_task_item_response(xml: &str) -> EwsResult<Vec<ParsedTask>> {
     let mut inside_item = false;
     let mut current = ParsedTask::default();
     let mut text_target: Option<&'static str> = None;
+    // Some(_) while inside a `<t:Recurrence>` subtree — events route to the
+    // shared walker instead of the flat field map (mirrors the calendar
+    // parser), so pattern/range elements don't collide with the task's
+    // own `<t:Status>` / date fields.
+    let mut recurrence_walker: Option<RecurrenceWalker> = None;
 
     loop {
         match reader.read_event_into(&mut buf) {
@@ -526,7 +571,15 @@ pub fn parse_find_task_item_response(xml: &str) -> EwsResult<Vec<ParsedTask>> {
                 if !inside_item {
                     continue;
                 }
+                // Inside `<t:Recurrence>`: hand every start to the walker.
+                if let Some(walker) = recurrence_walker.as_mut() {
+                    walker.observe_start(local.as_slice());
+                    continue;
+                }
                 match local.as_slice() {
+                    b"recurrence" => {
+                        recurrence_walker = Some(RecurrenceWalker::default());
+                    }
                     b"itemid" => {
                         for a in e.attributes().flatten() {
                             let key = a.key.as_ref();
@@ -559,17 +612,42 @@ pub fn parse_find_task_item_response(xml: &str) -> EwsResult<Vec<ParsedTask>> {
                         items.push(std::mem::take(&mut current));
                     }
                     inside_item = false;
+                    recurrence_walker = None;
+                    continue;
+                }
+                // Recurrence outer-end → finish the walker (a malformed /
+                // unsupported subtree only nukes THIS row's recurrence, never
+                // the whole parse). Inner ends route in via observe_end.
+                if local.as_slice() == b"recurrence" {
+                    if let Some(walker) = recurrence_walker.take() {
+                        if let Ok(rec) = walker.finish() {
+                            current.recurrence = Some(rec);
+                        }
+                    }
+                    text_target = None;
+                    continue;
+                }
+                if let Some(walker) = recurrence_walker.as_mut() {
+                    walker.observe_end_generic();
                     continue;
                 }
                 text_target = None;
             }
-            Ok(XmlEvent::Text(t)) if text_target.is_some() => {
+            Ok(XmlEvent::Text(t)) => {
                 let raw = match t.unescape() {
                     Ok(c) => c.to_string(),
                     Err(_) => continue,
                 };
                 let s = raw.trim();
                 if s.is_empty() {
+                    continue;
+                }
+                // Recurrence subtree text routes to the walker.
+                if let Some(walker) = recurrence_walker.as_mut() {
+                    walker.observe_text(s);
+                    continue;
+                }
+                if text_target.is_none() {
                     continue;
                 }
                 match text_target {
@@ -700,7 +778,13 @@ pub fn to_task(item: ParsedTask, list_id: &str) -> EwsResult<Task> {
         scheduled_time,
         deadline_date,
         deadline_time,
-        recurrence: None,
+        // EWS recurrence → RRULE (the shared EwsRecurrence walker) → the
+        // structured TaskRecurrence. Shapes the model can't hold (relative
+        // monthly/yearly) collapse to their plain frequency on the way.
+        recurrence: item
+            .recurrence
+            .as_ref()
+            .and_then(|r| rrule_to_task_recurrence(&r.to_rrule())),
         parent_id: None,
         section_id: None,
         color_label: None,
@@ -764,19 +848,34 @@ pub fn new_task_to_task_item_xml(task: &NewTask) -> String {
             format_ews_datetime(due),
         ));
     }
+    // Recurrence sits before Status in the EWS Task schema. Anchor the
+    // pattern at the task's start (or due, or now) — EWS needs a StartDate
+    // inside the recurrence range.
+    if let Some(rec) = &task.recurrence {
+        let start = combine_date_time(task.scheduled_date, task.scheduled_time)
+            .or_else(|| combine_date_time(task.deadline_date, task.deadline_time))
+            .unwrap_or_else(Utc::now);
+        if let Some(rec_xml) = ews_recurrence_xml(rec, start) {
+            out.push_str("          ");
+            out.push_str(&rec_xml);
+            out.push('\n');
+        }
+    }
     out.push_str(&format!(
         "          <t:Status>{}</t:Status>\n",
         task_status_to_ews(task.status),
     ));
 
-    if task.recurrence.is_some() {
-        tracing::warn!(
-            "EWS task adapter dropping recurrence on write — task recurrence not implemented yet (Phase 6f.2 follow-up)",
-        );
-    }
-
     out.push_str("        </t:Task>");
     out
+}
+
+/// Build the `<t:Recurrence>` XML for a task recurrence, anchored at
+/// `start` (EWS needs a start inside the range). `None` when the rule
+/// can't be expressed in EWS — the recurrence capability greys those out,
+/// so this only guards against a stray rule arriving from elsewhere.
+fn ews_recurrence_xml(rec: &cal_core::TaskRecurrence, start: DateTime<Utc>) -> Option<String> {
+    rrule_to_ews_recurrence(&task_recurrence_to_rrule(rec), start).ok()
 }
 
 /// Build the `<t:Updates>` body for an `UpdateItem` envelope —
@@ -829,10 +928,18 @@ pub fn task_to_update_field_xml(task: &Task) -> (String, String) {
         }
     }
 
-    if task.recurrence.is_some() {
-        tracing::warn!(
-            "EWS task adapter dropping recurrence on update — task recurrence not implemented yet (Phase 6f.2 follow-up)",
-        );
+    match &task.recurrence {
+        Some(rec) => {
+            let start = combine_date_time(task.scheduled_date, task.scheduled_time)
+                .or_else(|| combine_date_time(task.deadline_date, task.deadline_time))
+                .unwrap_or_else(Utc::now);
+            if let Some(rec_xml) = ews_recurrence_xml(rec, start) {
+                set.push_str(&format!(
+                    "            <t:SetItemField>\n              <t:FieldURI FieldURI=\"task:Recurrence\"/>\n              <t:Task>\n                {rec_xml}\n              </t:Task>\n            </t:SetItemField>\n",
+                ));
+            }
+        }
+        None => del.push_str(&delete_field_xml("task:Recurrence")),
     }
 
     (set, del)
@@ -1164,6 +1271,57 @@ mod tests {
         assert_eq!(combined.to_rfc3339(), "2026-05-20T14:30:00+00:00",);
     }
 
+    #[test]
+    fn recurrence_round_trips_through_create_xml_and_parse() {
+        use cal_core::{RecurrenceEnd, RecurrenceFrequency, TaskRecurrence};
+        let rec = TaskRecurrence {
+            frequency: RecurrenceFrequency::Daily,
+            interval: 3,
+            day_of_week: None,
+            day_of_month: None,
+            end: Some(RecurrenceEnd::OnDate {
+                date: NaiveDate::from_ymd_opt(2026, 6, 30).unwrap(),
+            }),
+        };
+        let new = NewTask {
+            assignees: Vec::new(),
+            title: "Water plants".into(),
+            description: None,
+            status: TaskStatus::Open,
+            priority: TaskPriority::Medium,
+            scheduled_date: Some(NaiveDate::from_ymd_opt(2026, 5, 21).unwrap()),
+            scheduled_time: None,
+            deadline_date: None,
+            deadline_time: None,
+            recurrence: Some(rec.clone()),
+            parent_id: None,
+            section_id: None,
+            color_label: None,
+            reminders: Vec::new(),
+            sound: None,
+        };
+        // Write: the `<t:Recurrence>` element lands in the create body.
+        let task_xml = new_task_to_task_item_xml(&new);
+        assert!(
+            task_xml.contains("<t:DailyRecurrence>") && task_xml.contains("<t:EndDateRecurrence>"),
+            "create XML must carry the recurrence, got:\n{task_xml}",
+        );
+        // Read: wrap it in a FindItem response (a row needs an ItemId) and
+        // parse it back — the structured recurrence survives the round-trip.
+        let envelope = format!(
+            "<m:FindItemResponse><m:Items>{}</m:Items></m:FindItemResponse>",
+            task_xml.replacen(
+                "<t:Task>",
+                "<t:Task><t:ItemId Id=\"AAA\" ChangeKey=\"CK\"/>",
+                1,
+            ),
+        );
+        let parsed = parse_find_task_item_response(&envelope).expect("parses");
+        assert_eq!(parsed.len(), 1, "one task row");
+        let task = to_task(parsed.into_iter().next().unwrap(), "list").expect("maps");
+        assert_eq!(task.recurrence, Some(rec));
+    }
+
     // ── Parsers ─────────────────────────────────────────────────────
 
     #[test]
@@ -1273,6 +1431,7 @@ mod tests {
             ),
             created: None,
             last_modified: None,
+            recurrence: None,
         }
     }
 

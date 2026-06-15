@@ -154,14 +154,15 @@ Aperio automatisch die nächste Fälligkeit.
 > aus, die der Anbieter nicht kann** (statt sie beim Speichern still zu
 > verwerfen). **Lokale** Listen, **Microsoft To Do** und **Apple
 > Erinnerungen / CalDAV** (`RRULE` im VTODO) unterstützen die volle
-> Wiederholung. **Vikunja** speichert einfache Wiederholungen –
-> *täglich*/*wöchentlich* (mit Intervall, z. B. „alle 2 Wochen") und
-> *monatlich* –, kennt aber kein *jährlich*, keine **Wochentagsauswahl**,
-> keinen festen **Tag im Monat** (es wiederholt am Tag des Fälligkeitsdatums)
-> und kein **Enddatum**; diese Felder sind dort ausgegraut. Bei **Google
-> Tasks**, **Todoist** und **Exchange** wird der Wiederholungs-Editor **gar
-> nicht** angezeigt – diese Anbieter speichern (noch) keine
-> Aufgaben-Wiederholung.
+> Wiederholung; **Exchange** ebenfalls – nur ohne **Jahres-Intervall**
+> (jährlich geht als „jedes Jahr", aber nicht „alle 2 Jahre"). **Vikunja**
+> speichert einfache Wiederholungen – *täglich*/*wöchentlich* (mit Intervall,
+> z. B. „alle 2 Wochen") und *monatlich* –, kennt aber kein *jährlich*, keine
+> **Wochentagsauswahl**, keinen festen **Tag im Monat** (es wiederholt am Tag
+> des Fälligkeitsdatums) und kein **Enddatum**; diese Felder sind dort
+> ausgegraut. Bei **Google Tasks** und **Todoist** wird der
+> Wiederholungs-Editor **gar nicht** angezeigt – diese Anbieter speichern
+> keine Aufgaben-Wiederholung.
 
 ## Mitglieder und Zuweisungen
 

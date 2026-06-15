@@ -138,12 +138,14 @@ check off a recurring task, Aperio automatically creates the next due date.
 > store it, and **greys out individual fields the provider can't do** (rather
 > than dropping them silently on save). **Local** lists, **Microsoft To Do**
 > and **Apple Reminders / CalDAV** (`RRULE` in the VTODO) support full
-> recurrence. **Vikunja** stores simple repeats — *daily*/*weekly* (with an
-> interval, e.g. "every 2 weeks") and *monthly* — but has no *yearly*, no
-> **weekday picker**, no fixed **day of month** (it repeats on the due date's
-> day) and no **end date**; those fields are greyed out there. For **Google
-> Tasks**, **Todoist** and **Exchange** the recurrence editor isn't shown at
-> all — these providers don't (yet) store task recurrence.
+> recurrence; **Exchange** too — only without a **yearly interval** (yearly
+> works as "every year" but not "every 2 years"). **Vikunja** stores simple
+> repeats — *daily*/*weekly* (with an interval, e.g. "every 2 weeks") and
+> *monthly* — but has no *yearly*, no **weekday picker**, no fixed **day of
+> month** (it repeats on the due date's day) and no **end date**; those
+> fields are greyed out there. For **Google Tasks** and **Todoist** the
+> recurrence editor isn't shown at all — these providers don't store task
+> recurrence.
 
 ## Members and assignments
 
