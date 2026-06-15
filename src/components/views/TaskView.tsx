@@ -37,6 +37,7 @@ import {
   DONE_GROUP_ID,
   type Entry,
 } from './taskGrouping';
+import { suppressGroupHeaderKey } from './taskTreeKeys';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { ColorPickerModal } from '../ColorPickerModal';
 import {
@@ -419,7 +420,10 @@ export function TaskView() {
         const isNav =
           e.key.startsWith('Arrow') || e.key === 'Home' || e.key === 'End';
         if (!isNav) {
-          if (e.key !== 'Tab') e.preventDefault();
+          // Task-only shortcuts are inert on a group header — but OS / global
+          // shortcuts (Alt+F4, Ctrl+R, …) and Tab must reach the window, so
+          // only a plain key has its browser default suppressed.
+          if (suppressGroupHeaderKey(e)) e.preventDefault();
           return;
         }
       }
