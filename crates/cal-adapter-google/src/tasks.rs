@@ -44,7 +44,7 @@
 
 use std::sync::Arc;
 
-use cal_core::{NewTask, Task, TaskList, TaskPriority, TaskStatus};
+use cal_core::{NewTask, Task, TaskList, TaskPriority, TaskRecurrence, TaskStatus};
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex as _Mutex;
@@ -282,12 +282,23 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
         .and_then(parse_google_datetime)
         .unwrap_or_else(Utc::now);
 
+    // DESIGN §9.12: Google Tasks stores no Aperio recurrence natively, so
+    // the on-demand axes / resurface_date / series_id ride a visible block
+    // in `notes`. Strip it and overlay the carried fields.
+    let (clean_notes, extras) = cal_core::extras::extract(entry.notes.as_deref());
+    let mut recurrence = None;
+    let mut resurface_date = None;
+    let mut series_id = None;
+    if let Some(extras) = &extras {
+        cal_core::apply_task_extras(extras, &mut recurrence, &mut resurface_date, &mut series_id);
+    }
+
     Task {
         assignees: Vec::new(),
         id: entry.id,
         list_id: list_id.to_string(),
         title: entry.title.unwrap_or_default(),
-        description: entry.notes,
+        description: clean_notes.filter(|s| !s.is_empty()),
         status,
         // Google Tasks has no priority field. Default to Medium so
         // round-trips through the local UI don't show every task as
@@ -301,7 +312,7 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
         scheduled_time: None,
         deadline_date: None,
         deadline_time: None,
-        recurrence: None,
+        recurrence,
         parent_id: entry.parent,
         section_id: None,
         color_label: None,
@@ -314,14 +325,35 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
         updated_at,
         completed_at,
         etag: entry.etag,
-        resurface_date: None,
-        series_id: None,
+        resurface_date,
+        series_id,
     }
+}
+
+/// DESIGN §9.12: fold the Aperio-only fields into a visible extras block on
+/// `notes` (Google Tasks' only shared channel). Backlog/on-demand
+/// recurrence round-trips here; a plain scheduled rule has no Google home
+/// and is dropped with a warning.
+fn google_notes(
+    notes: Option<&str>,
+    recurrence: Option<&TaskRecurrence>,
+    resurface_date: Option<NaiveDate>,
+    series_id: Option<&str>,
+) -> Option<String> {
+    let extras = cal_core::extras_for_task(recurrence, resurface_date, series_id);
+    cal_core::extras::embed(notes, &extras).filter(|s| !s.is_empty())
+}
+
+/// A recurrence Google genuinely can't keep: a plain scheduled rule, which
+/// has no extras block and no native Google channel. Backlog/on-demand
+/// rules ride the bag, so they're not "dropped".
+fn recurrence_dropped(recurrence: Option<&TaskRecurrence>) -> bool {
+    recurrence.is_some_and(|r| !cal_core::recurrence_needs_extras(r))
 }
 
 fn new_task_to_body(new: &NewTask) -> TaskEntry {
     let due = combine_date_to_google(new.scheduled_date.or(new.deadline_date));
-    if new.recurrence.is_some() {
+    if recurrence_dropped(new.recurrence.as_ref()) {
         tracing::warn!(
             "Google Tasks adapter dropping recurrence on write — Google Tasks API has no recurrence field",
         );
@@ -340,7 +372,12 @@ fn new_task_to_body(new: &NewTask) -> TaskEntry {
         id: String::new(),
         etag: None,
         title: Some(new.title.clone()),
-        notes: new.description.clone().filter(|s| !s.is_empty()),
+        notes: google_notes(
+            new.description.as_deref(),
+            new.recurrence.as_ref(),
+            new.resurface_date,
+            new.series_id.as_deref(),
+        ),
         status: Some(task_status_to_google(new.status).to_string()),
         due,
         completed: None,
@@ -354,7 +391,7 @@ fn new_task_to_body(new: &NewTask) -> TaskEntry {
 
 fn task_to_body(task: &Task) -> TaskEntry {
     let due = combine_date_to_google(task.scheduled_date.or(task.deadline_date));
-    if task.recurrence.is_some() {
+    if recurrence_dropped(task.recurrence.as_ref()) {
         tracing::warn!(
             "Google Tasks adapter dropping recurrence on update — Google Tasks API has no recurrence field",
         );
@@ -373,7 +410,12 @@ fn task_to_body(task: &Task) -> TaskEntry {
         id: task.id.clone(),
         etag: task.etag.clone(),
         title: Some(task.title.clone()),
-        notes: task.description.clone().filter(|s| !s.is_empty()),
+        notes: google_notes(
+            task.description.as_deref(),
+            task.recurrence.as_ref(),
+            task.resurface_date,
+            task.series_id.as_deref(),
+        ),
         status: Some(task_status_to_google(task.status).to_string()),
         due,
         completed: task.completed_at.map(format_google_datetime),
@@ -589,6 +631,50 @@ mod tests {
         assert_eq!(body.due.as_deref(), Some("2026-05-22T00:00:00.000Z"));
         // Parent never goes in the body — it rides on the URL.
         assert!(body.parent.is_none());
+    }
+
+    #[test]
+    fn extras_block_round_trips_backlog_recurrence_through_notes() {
+        use cal_core::{
+            MonthDay, RecurrenceAnchor, RecurrenceEnd, RecurrenceFrequency, RecurrencePlacement,
+            TaskRecurrence,
+        };
+        let mut nt = sample_new_task();
+        nt.description = Some("Swap shoes".into());
+        nt.recurrence = Some(TaskRecurrence {
+            frequency: RecurrenceFrequency::Yearly,
+            interval: 1,
+            day_of_week: None,
+            day_of_month: None,
+            end: Some(RecurrenceEnd::Never),
+            anchor: RecurrenceAnchor::FromCompletion,
+            placement: RecurrencePlacement::Backlog,
+            fixed_dates: Some(vec![MonthDay { month: 4, day: 1 }]),
+        });
+        nt.resurface_date = Some(NaiveDate::from_ymd_opt(2026, 4, 1).unwrap());
+        nt.series_id = Some("series-shoes".into());
+
+        let body = new_task_to_body(&nt);
+        let notes = body.notes.clone().unwrap();
+        assert!(notes.starts_with("Swap shoes"));
+        assert!(notes.contains("aperio:1:"));
+
+        let entry = TaskEntry {
+            id: "T1".into(),
+            etag: None,
+            title: Some("Swap shoes".into()),
+            notes: body.notes,
+            status: Some("needsAction".into()),
+            due: None,
+            completed: None,
+            parent: None,
+            updated: None,
+        };
+        let restored = map_task(entry, "L1");
+        assert_eq!(restored.description.as_deref(), Some("Swap shoes"));
+        assert_eq!(restored.recurrence, nt.recurrence);
+        assert_eq!(restored.resurface_date, nt.resurface_date);
+        assert_eq!(restored.series_id.as_deref(), Some("series-shoes"));
     }
 
     #[test]

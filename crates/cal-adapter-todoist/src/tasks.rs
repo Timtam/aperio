@@ -54,7 +54,8 @@
 use std::collections::HashMap;
 
 use cal_core::{
-    NewTask, Section, Task, TaskList, TaskListShare, TaskPriority, TaskStatus, TaskUser,
+    NewTask, Section, Task, TaskList, TaskListShare, TaskPriority, TaskRecurrence, TaskStatus,
+    TaskUser,
 };
 use chrono::{DateTime, NaiveDate, NaiveTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
@@ -758,12 +759,23 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
         .unwrap_or_else(Utc::now);
     let completed_at = entry.completed_at.as_deref().and_then(parse_rfc3339);
 
+    // DESIGN §9.12: Todoist stores no Aperio recurrence natively, so the
+    // on-demand axes / resurface_date / series_id ride a visible block in
+    // the description. Strip it and overlay the carried fields.
+    let (clean_description, extras) = cal_core::extras::extract(entry.description.as_deref());
+    let mut recurrence = None;
+    let mut resurface_date = None;
+    let mut series_id = None;
+    if let Some(extras) = &extras {
+        cal_core::apply_task_extras(extras, &mut recurrence, &mut resurface_date, &mut series_id);
+    }
+
     Task {
         assignees: extract_assignees(entry.assignee_id),
         id: entry.id,
         list_id: list_id.to_string(),
         title: entry.content.unwrap_or_default(),
-        description: entry.description.filter(|s| !s.is_empty()),
+        description: clean_description.filter(|s| !s.is_empty()),
         status,
         priority,
         scheduled_date,
@@ -773,7 +785,7 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
         // date+no-time and accept that any locally-set
         // `deadline_time` is lost on the next round-trip.
         deadline_time: None,
-        recurrence: None,
+        recurrence,
         parent_id: entry.parent_id.filter(|s| !s.is_empty()),
         section_id: entry.section_id.filter(|s| !s.is_empty()),
         color_label: None,
@@ -786,14 +798,35 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
         updated_at: created_at,
         completed_at,
         etag: None,
-        resurface_date: None,
-        series_id: None,
+        resurface_date,
+        series_id,
     }
+}
+
+/// DESIGN §9.12: fold the Aperio-only fields into a visible extras block on
+/// the description (Todoist's only shared channel). Backlog/on-demand
+/// recurrence round-trips here; a plain scheduled rule still has no Todoist
+/// home and is dropped with a warning (see `warn_on_unsupported_fields`).
+fn todoist_description(
+    description: Option<&str>,
+    recurrence: Option<&TaskRecurrence>,
+    resurface_date: Option<NaiveDate>,
+    series_id: Option<&str>,
+) -> Option<String> {
+    let extras = cal_core::extras_for_task(recurrence, resurface_date, series_id);
+    cal_core::extras::embed(description, &extras).filter(|s| !s.is_empty())
+}
+
+/// A recurrence Todoist genuinely can't keep: a plain scheduled rule, which
+/// has no extras block and no native Todoist channel. Backlog/on-demand
+/// rules ride the bag, so they're not "dropped".
+fn recurrence_dropped(recurrence: Option<&TaskRecurrence>) -> bool {
+    recurrence.is_some_and(|r| !cal_core::recurrence_needs_extras(r))
 }
 
 fn new_task_to_create_body(list_id: &str, new: &NewTask) -> CreateTaskBody {
     warn_on_unsupported_fields(
-        new.recurrence.is_some(),
+        recurrence_dropped(new.recurrence.as_ref()),
         !new.reminders.is_empty(),
         new.parent_id.as_deref(),
     );
@@ -801,7 +834,12 @@ fn new_task_to_create_body(list_id: &str, new: &NewTask) -> CreateTaskBody {
     CreateTaskBody {
         project_id: Some(list_id.to_string()),
         content: Some(new.title.clone()),
-        description: new.description.clone().filter(|s| !s.is_empty()),
+        description: todoist_description(
+            new.description.as_deref(),
+            new.recurrence.as_ref(),
+            new.resurface_date,
+            new.series_id.as_deref(),
+        ),
         priority: Some(aperio_priority_to_todoist(new.priority)),
         assignee_id: first_assignee_id(&new.assignees),
         parent_id: new.parent_id.clone().filter(|s| !s.is_empty()),
@@ -814,14 +852,19 @@ fn new_task_to_create_body(list_id: &str, new: &NewTask) -> CreateTaskBody {
 
 fn task_to_update_body(task: &Task) -> UpdateTaskBody {
     warn_on_unsupported_fields(
-        task.recurrence.is_some(),
+        recurrence_dropped(task.recurrence.as_ref()),
         !task.reminders.is_empty(),
         task.parent_id.as_deref(),
     );
     let (due_date, due_datetime) = format_scheduled(task.scheduled_date, task.scheduled_time);
     UpdateTaskBody {
         content: Some(task.title.clone()),
-        description: task.description.clone().filter(|s| !s.is_empty()),
+        description: todoist_description(
+            task.description.as_deref(),
+            task.recurrence.as_ref(),
+            task.resurface_date,
+            task.series_id.as_deref(),
+        ),
         priority: Some(aperio_priority_to_todoist(task.priority)),
         assignee_id: first_assignee_id(&task.assignees),
         due_date,
@@ -1268,6 +1311,51 @@ mod tests {
         assert!(json.get("due_date").is_none());
         assert!(json.get("due_datetime").is_none());
         assert!(json.get("deadline_date").is_none());
+    }
+
+    #[test]
+    fn extras_block_round_trips_backlog_recurrence() {
+        use cal_core::{RecurrenceAnchor, RecurrenceEnd, RecurrenceFrequency, RecurrencePlacement};
+        let mut nt = sample_new_task();
+        nt.description = Some("Empty dishwasher".into());
+        nt.recurrence = Some(TaskRecurrence {
+            frequency: RecurrenceFrequency::Daily,
+            interval: 0,
+            day_of_week: None,
+            day_of_month: None,
+            end: Some(RecurrenceEnd::Never),
+            anchor: RecurrenceAnchor::FromCompletion,
+            placement: RecurrencePlacement::Backlog,
+            fixed_dates: None,
+        });
+        nt.resurface_date = None; // immediate resurface
+        nt.series_id = Some("series-dish".into());
+
+        let body = new_task_to_create_body("P1", &nt);
+        let desc = body.description.clone().unwrap();
+        assert!(desc.starts_with("Empty dishwasher"));
+        assert!(desc.contains("aperio:1:"));
+
+        // Read the description back as if Todoist echoed it.
+        let entry = TaskEntry {
+            id: "T1".into(),
+            project_id: "P1".into(),
+            content: Some("Empty dishwasher".into()),
+            description: body.description,
+            is_completed: false,
+            priority: 1,
+            assignee_id: None,
+            due: None,
+            deadline: None,
+            parent_id: None,
+            section_id: None,
+            created_at: None,
+            completed_at: None,
+        };
+        let restored = map_task(entry, "P1");
+        assert_eq!(restored.description.as_deref(), Some("Empty dishwasher"));
+        assert_eq!(restored.recurrence, nt.recurrence);
+        assert_eq!(restored.series_id.as_deref(), Some("series-dish"));
     }
 
     // ── End-to-end via mockito ────────────────────────────────
