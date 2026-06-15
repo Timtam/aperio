@@ -40,7 +40,18 @@ use crate::reminders::SchedulerHandle;
 /// more replay now that the comparison is second-granular, recovering
 /// those lost tasks. Idempotent (receivers dedupe via
 /// `sync_applied_events`).
-const PREF_LOCAL_TASKS_BACKFILLED: &str = "sync.localTasks.eventBackfillDone.v2";
+///
+/// `.v3`: recover local lists/tasks that exist on a device but never
+/// reached the remote — e.g. created in a session whose events were lost
+/// to the `boot_at` bug *before* the `.v2` key was set, so the one-shot
+/// backfill already ran and won't re-emit them. The symptom users hit was
+/// "several local task lists, but only the oldest one shows on the second
+/// device" (the oldest survived because it had been compacted into the
+/// snapshot; the rest vanished with their reaped session file). Re-emitting
+/// from the local DB (the source of truth) repushes them; receivers dedupe,
+/// so devices already in sync just no-op. Needs one app restart on the
+/// device that still holds the missing lists.
+const PREF_LOCAL_TASKS_BACKFILLED: &str = "sync.localTasks.eventBackfillDone.v3";
 
 /// Catch-up emit for local task lists + their tasks. Idempotent:
 /// gated by [`PREF_LOCAL_TASKS_BACKFILLED`], and receivers dedupe
@@ -73,19 +84,32 @@ pub fn backfill_local_task_events(db: &DbHandle, event_log: &EventLogWriter) {
         let lists = adapter.list_task_lists().await?;
         let mut out: Vec<SyncEvent> = Vec::new();
         for list in &lists {
-            if let Ok(fields) = serde_json::to_value(list) {
-                out.push(SyncEvent::TaskListCreated(EventPayload {
+            match serde_json::to_value(list) {
+                Ok(fields) => out.push(SyncEvent::TaskListCreated(EventPayload {
                     id: list.id.clone(),
                     fields,
-                }));
+                })),
+                // Shouldn't happen for a valid row, but don't let a single
+                // bad serialise silently swallow a list the way the original
+                // `if let Ok` did — surface it.
+                Err(err) => tracing::warn!(
+                    list_id = %list.id,
+                    ?err,
+                    "local-task backfill: skipping list that failed to serialise",
+                ),
             }
             let tasks = adapter.get_tasks(&list.id).await?;
             for task in &tasks {
-                if let Ok(fields) = serde_json::to_value(task) {
-                    out.push(SyncEvent::TaskCreated(EventPayload {
+                match serde_json::to_value(task) {
+                    Ok(fields) => out.push(SyncEvent::TaskCreated(EventPayload {
                         id: task.id.clone(),
                         fields,
-                    }));
+                    })),
+                    Err(err) => tracing::warn!(
+                        task_id = %task.id,
+                        ?err,
+                        "local-task backfill: skipping task that failed to serialise",
+                    ),
                 }
             }
         }
