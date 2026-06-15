@@ -172,6 +172,24 @@ pub fn embed(description: Option<&str>, extras: &AperioExtras) -> Option<String>
     }
 }
 
+/// Encode the bag as the bare `aperio:<v>:<base64>` payload line — the value
+/// for an invisible custom-property channel (CalDAV `X-` property, EWS
+/// extended property, Graph open extension). `None` for an empty bag, so the
+/// caller can omit the property entirely.
+pub fn encode_payload(extras: &AperioExtras) -> Option<String> {
+    if extras.is_empty() {
+        None
+    } else {
+        Some(to_payload(extras))
+    }
+}
+
+/// Decode a bare payload line (from a custom-property channel) back into the
+/// bag. `None` on anything malformed — degrades to "no extras".
+pub fn decode_payload(line: &str) -> Option<AperioExtras> {
+    parse_payload(line)
+}
+
 /// Does this recurrence carry an aspect no external provider stores
 /// natively (DESIGN §9.12)? A plain scheduled rule (`FromDate` + `Schedule`
 /// + no fixed dates) maps onto the provider's own recurrence, so it needs
@@ -412,6 +430,19 @@ mod tests {
         assert_eq!(recurrence, Some(backlog));
         assert_eq!(resurface, NaiveDate::from_ymd_opt(2026, 4, 1));
         assert_eq!(series.as_deref(), Some("series-9"));
+    }
+
+    #[test]
+    fn bare_payload_round_trips_for_property_channels() {
+        let extras = sample();
+        let line = encode_payload(&extras).unwrap();
+        assert!(line.starts_with("aperio:1:"));
+        // No warning line / surrounding text — just the payload.
+        assert!(!line.contains('\n'));
+        assert_eq!(decode_payload(&line), Some(extras));
+        // Empty bag ⇒ no property value at all.
+        assert_eq!(encode_payload(&AperioExtras::new()), None);
+        assert_eq!(decode_payload("not-a-payload"), None);
     }
 
     #[test]

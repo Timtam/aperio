@@ -19,10 +19,11 @@ use url::Url;
 use crate::auth::{self, TokenSet};
 use crate::error::{GraphError, GraphResult};
 use crate::mapping::{
-    event_to_body, map_calendar, map_event, map_task, map_task_list, new_event_to_body,
-    new_task_to_body, split_task_id, task_to_body, CalendarListResponse, EventDeltaResponse,
-    EventEntry, EventListResponse, GraphDateTime, TodoListEntry, TodoListResponse,
-    TodoTaskDeltaResponse, TodoTaskEntry, TodoTaskResponse,
+    aperio_extension_write, event_to_body, map_calendar, map_event, map_task, map_task_list,
+    new_event_to_body, new_task_to_body, split_task_id, task_to_body, CalendarListResponse,
+    EventDeltaResponse, EventEntry, EventListResponse, GraphDateTime, TodoListEntry,
+    TodoListResponse, TodoTaskDeltaResponse, TodoTaskEntry, TodoTaskResponse,
+    APERIO_EXTENSION_NAME,
 };
 
 pub const API_BASE: &str = "https://graph.microsoft.com/v1.0";
@@ -731,7 +732,61 @@ pub async fn update_task(state: &ApiState, task: &Task) -> GraphResult<Task> {
     let path = format!("/me/todo/lists/{list_enc}/tasks/{task_enc}");
     let body = task_to_body(task)?;
     let entry: TodoTaskEntry = state.patch_json(&path, &body).await?;
-    map_task(entry, &list_id)
+    // Graph ignores inline extensions on PATCH, so reconcile the
+    // Aperio-Extras open extension separately (DESIGN §9.12).
+    reconcile_task_extension(state, &list_enc, &task_enc, task).await?;
+    // The PATCH response doesn't expand extensions, so carry the
+    // Aperio-only fields we just wrote into the echoed task.
+    let mut result = map_task(entry, &list_id)?;
+    result.recurrence = task.recurrence.clone();
+    result.resurface_date = task.resurface_date;
+    result.series_id = task.series_id.clone();
+    Ok(result)
+}
+
+/// DESIGN §9.12: bring a task's Aperio-Extras open extension in line with
+/// its current fields. Graph honours inline extensions only on create, so an
+/// update upserts (delete-then-create — idempotent, no 404/409 branching) or
+/// removes a now-stale extension. A missing extension on delete is fine.
+async fn reconcile_task_extension(
+    state: &ApiState,
+    list_enc: &str,
+    task_enc: &str,
+    task: &Task,
+) -> GraphResult<()> {
+    let ext_path =
+        format!("/me/todo/lists/{list_enc}/tasks/{task_enc}/extensions/{APERIO_EXTENSION_NAME}");
+    match aperio_extension_write(
+        task.recurrence.as_ref(),
+        task.resurface_date,
+        task.series_id.as_deref(),
+    ) {
+        Some(ext) => {
+            ignore_not_found(state.delete_request(&ext_path).await)?;
+            let create_path = format!("/me/todo/lists/{list_enc}/tasks/{task_enc}/extensions");
+            state.post_no_content(&create_path, &ext).await?;
+        }
+        // Nothing non-native now — drop a possibly-stale extension, but only
+        // when the task carries fields that could have produced one (skip the
+        // call for the common plain task that never had an extension).
+        None if task.recurrence.is_some()
+            || task.series_id.is_some()
+            || task.resurface_date.is_some() =>
+        {
+            ignore_not_found(state.delete_request(&ext_path).await)?;
+        }
+        None => {}
+    }
+    Ok(())
+}
+
+/// Treat a `404 Not Found` as success — used when deleting an extension that
+/// may never have existed.
+fn ignore_not_found(result: GraphResult<()>) -> GraphResult<()> {
+    match result {
+        Err(GraphError::Http { status: 404, .. }) => Ok(()),
+        other => other,
+    }
 }
 
 pub async fn delete_task(state: &ApiState, task_id: &str) -> GraphResult<()> {

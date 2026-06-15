@@ -67,6 +67,7 @@ use quick_xml::events::Event as XmlEvent;
 use quick_xml::reader::Reader;
 
 use cal_core::{
+    apply_task_extras, decode_payload, encode_payload, extras_for_task, recurrence_needs_extras,
     rrule_to_task_recurrence, task_recurrence_to_rrule, NewTask, Task, TaskList, TaskPriority,
     TaskStatus,
 };
@@ -78,6 +79,21 @@ use crate::mapping::{
     RecurrenceWalker,
 };
 use crate::soap::{delete_calendar_item, escape_xml};
+
+/// DESIGN §9.12: the Aperio-Extras blob rides an invisible EWS extended
+/// property (a custom named property — `PropertySetId` + `PropertyName`),
+/// so nothing leaks into the user-facing body. The GUID is arbitrary but
+/// stable, so every Aperio client reads/writes the same property.
+const APERIO_EXTRAS_PROPSET: &str = "1A9B2C8D-4E6F-4A7B-8C9D-0E1F2A3B4C5D";
+const APERIO_EXTRAS_PROPNAME: &str = "AperioExtras";
+
+/// The `<t:ExtendedFieldURI>` that names the Aperio-Extras property — shared
+/// by the read shape, the create body, and the update field set.
+fn aperio_extras_field_uri() -> String {
+    format!(
+        r#"<t:ExtendedFieldURI PropertySetId="{APERIO_EXTRAS_PROPSET}" PropertyName="{APERIO_EXTRAS_PROPNAME}" PropertyType="String"/>"#
+    )
+}
 
 // ── Public adapter-side surface ────────────────────────────────────────
 
@@ -273,6 +289,7 @@ pub fn find_tasks_in_folder(folder_id: &str, change_key: Option<&str>) -> String
         ),
         None => format!(r#"<t:FolderId Id="{}"/>"#, escape_xml(folder_id)),
     };
+    let extras_field_uri = aperio_extras_field_uri();
     let body = format!(
         r#"    <m:FindItem Traversal="Shallow">
       <m:ItemShape>
@@ -289,6 +306,7 @@ pub fn find_tasks_in_folder(folder_id: &str, change_key: Option<&str>) -> String
           <t:FieldURI FieldURI="task:CompleteDate"/>
           <t:FieldURI FieldURI="task:Status"/>
           <t:FieldURI FieldURI="task:Recurrence"/>
+          {extras_field_uri}
         </t:AdditionalProperties>
       </m:ItemShape>
       <m:ParentFolderIds>
@@ -540,6 +558,9 @@ pub struct ParsedTask {
     pub last_modified: Option<DateTime<Utc>>,
     /// Parsed `<t:Recurrence>` subtree, `None` for a one-shot task.
     pub recurrence: Option<EwsRecurrence>,
+    /// Raw `aperio:<v>:<b64>` payload from the `AperioExtras` extended
+    /// property (DESIGN §9.12), `None` when the property isn't present.
+    pub extras_payload: Option<String>,
 }
 
 /// Walk a `FindItemResponse` body whose `<t:Items>` carries
@@ -559,6 +580,10 @@ pub fn parse_find_task_item_response(xml: &str) -> EwsResult<Vec<ParsedTask>> {
     // parser), so pattern/range elements don't collide with the task's
     // own `<t:Status>` / date fields.
     let mut recurrence_walker: Option<RecurrenceWalker> = None;
+    // Some(_) while inside a `<t:ExtendedProperty>`; `ext_is_aperio` flips on
+    // once its `<t:ExtendedFieldURI>` matches the AperioExtras named property.
+    let mut in_ext_prop = false;
+    let mut ext_is_aperio = false;
 
     loop {
         match reader.read_event_into(&mut buf) {
@@ -580,6 +605,28 @@ pub fn parse_find_task_item_response(xml: &str) -> EwsResult<Vec<ParsedTask>> {
                 match local.as_slice() {
                     b"recurrence" => {
                         recurrence_walker = Some(RecurrenceWalker::default());
+                    }
+                    b"extendedproperty" => {
+                        in_ext_prop = true;
+                        ext_is_aperio = false;
+                    }
+                    b"extendedfielduri" if in_ext_prop => {
+                        let mut set_ok = false;
+                        let mut name_ok = false;
+                        for a in e.attributes().flatten() {
+                            let key = a.key.as_ref();
+                            if key.eq_ignore_ascii_case(b"PropertySetId") {
+                                set_ok = a
+                                    .value
+                                    .eq_ignore_ascii_case(APERIO_EXTRAS_PROPSET.as_bytes());
+                            } else if key.eq_ignore_ascii_case(b"PropertyName") {
+                                name_ok = a.value.as_ref() == APERIO_EXTRAS_PROPNAME.as_bytes();
+                            }
+                        }
+                        ext_is_aperio = set_ok && name_ok;
+                    }
+                    b"value" if in_ext_prop && ext_is_aperio => {
+                        text_target = Some("extras_value");
                     }
                     b"itemid" => {
                         for a in e.attributes().flatten() {
@@ -625,6 +672,12 @@ pub fn parse_find_task_item_response(xml: &str) -> EwsResult<Vec<ParsedTask>> {
                             current.recurrence = Some(rec);
                         }
                     }
+                    text_target = None;
+                    continue;
+                }
+                if local.as_slice() == b"extendedproperty" {
+                    in_ext_prop = false;
+                    ext_is_aperio = false;
                     text_target = None;
                     continue;
                 }
@@ -678,6 +731,12 @@ pub fn parse_find_task_item_response(xml: &str) -> EwsResult<Vec<ParsedTask>> {
                     }
                     Some("created") => current.created = parse_ews_datetime(s),
                     Some("modified") => current.last_modified = parse_ews_datetime(s),
+                    Some("extras_value") => {
+                        current
+                            .extras_payload
+                            .get_or_insert_with(String::new)
+                            .push_str(s);
+                    }
                     _ => {}
                 }
             }
@@ -767,6 +826,27 @@ pub fn to_task(item: ParsedTask, list_id: &str) -> EwsResult<Task> {
         Vec::new()
     };
 
+    // EWS recurrence → RRULE (the shared EwsRecurrence walker) → the
+    // structured TaskRecurrence. Shapes the model can't hold (relative
+    // monthly/yearly) collapse to their plain frequency on the way. The
+    // AperioExtras property (DESIGN §9.12) then overlays the on-demand axes /
+    // resurface_date / series_id, overriding the RRULE-derived recurrence
+    // when it carries one.
+    let mut recurrence = item
+        .recurrence
+        .as_ref()
+        .and_then(|r| rrule_to_task_recurrence(&r.to_rrule()));
+    let mut resurface_date = None;
+    let mut series_id = None;
+    if let Some(extras) = item.extras_payload.as_deref().and_then(decode_payload) {
+        apply_task_extras(
+            &extras,
+            &mut recurrence,
+            &mut resurface_date,
+            &mut series_id,
+        );
+    }
+
     Ok(Task {
         assignees: Vec::new(),
         id,
@@ -779,13 +859,7 @@ pub fn to_task(item: ParsedTask, list_id: &str) -> EwsResult<Task> {
         scheduled_time,
         deadline_date,
         deadline_time,
-        // EWS recurrence → RRULE (the shared EwsRecurrence walker) → the
-        // structured TaskRecurrence. Shapes the model can't hold (relative
-        // monthly/yearly) collapse to their plain frequency on the way.
-        recurrence: item
-            .recurrence
-            .as_ref()
-            .and_then(|r| rrule_to_task_recurrence(&r.to_rrule())),
+        recurrence,
         parent_id: None,
         section_id: None,
         color_label: None,
@@ -795,8 +869,8 @@ pub fn to_task(item: ParsedTask, list_id: &str) -> EwsResult<Task> {
         updated_at: item.last_modified.unwrap_or_else(Utc::now),
         completed_at: item.complete_date,
         etag: item.change_key,
-        resurface_date: None,
-        series_id: None,
+        resurface_date,
+        series_id,
     })
 }
 
@@ -839,6 +913,19 @@ pub fn new_task_to_task_item_xml(task: &NewTask) -> String {
         out.push_str("          <t:ReminderIsSet>false</t:ReminderIsSet>\n");
     }
 
+    // DESIGN §9.12: the Aperio-Extras blob rides an invisible extended
+    // property. It's an ItemType field, so it sits before the TaskType
+    // fields (StartDate / DueDate / Recurrence / Status) below.
+    if let Some(prop) = aperio_extras_property_xml(
+        task.recurrence.as_ref(),
+        task.resurface_date,
+        task.series_id.as_deref(),
+    ) {
+        out.push_str("          ");
+        out.push_str(&prop);
+        out.push('\n');
+    }
+
     if let Some(start) = combine_date_time(task.scheduled_date, task.scheduled_time) {
         out.push_str(&format!(
             "          <t:StartDate>{}</t:StartDate>\n",
@@ -853,8 +940,14 @@ pub fn new_task_to_task_item_xml(task: &NewTask) -> String {
     }
     // Recurrence sits before Status in the EWS Task schema. Anchor the
     // pattern at the task's start (or due, or now) — EWS needs a StartDate
-    // inside the recurrence range.
-    if let Some(rec) = &task.recurrence {
+    // inside the recurrence range. A backlog/on-demand rule (DESIGN §9.12)
+    // has no EWS recurrence expression and rides the extras property above
+    // instead, so only a plain scheduled rule emits `<t:Recurrence>`.
+    if let Some(rec) = task
+        .recurrence
+        .as_ref()
+        .filter(|r| !recurrence_needs_extras(r))
+    {
         let start = combine_date_time(task.scheduled_date, task.scheduled_time)
             .or_else(|| combine_date_time(task.deadline_date, task.deadline_time))
             .unwrap_or_else(Utc::now);
@@ -879,6 +972,24 @@ pub fn new_task_to_task_item_xml(task: &NewTask) -> String {
 /// so this only guards against a stray rule arriving from elsewhere.
 fn ews_recurrence_xml(rec: &cal_core::TaskRecurrence, start: DateTime<Utc>) -> Option<String> {
     rrule_to_ews_recurrence(&task_recurrence_to_rrule(rec), start).ok()
+}
+
+/// Build the `<t:ExtendedProperty>` element carrying the Aperio-Extras blob
+/// (DESIGN §9.12), or `None` when there's nothing to carry. The base64
+/// payload is XML-escaped defensively even though it has no XML-special
+/// characters.
+fn aperio_extras_property_xml(
+    recurrence: Option<&cal_core::TaskRecurrence>,
+    resurface_date: Option<NaiveDate>,
+    series_id: Option<&str>,
+) -> Option<String> {
+    let extras = extras_for_task(recurrence, resurface_date, series_id);
+    let payload = encode_payload(&extras)?;
+    Some(format!(
+        "<t:ExtendedProperty>{}<t:Value>{}</t:Value></t:ExtendedProperty>",
+        aperio_extras_field_uri(),
+        escape_xml(&payload),
+    ))
 }
 
 /// Build the `<t:Updates>` body for an `UpdateItem` envelope —
@@ -931,7 +1042,14 @@ pub fn task_to_update_field_xml(task: &Task) -> (String, String) {
         }
     }
 
-    match &task.recurrence {
+    // Only a plain scheduled rule rides EWS's native recurrence; a
+    // backlog/on-demand rule is cleared here and rides the extras property
+    // below (DESIGN §9.12).
+    match task
+        .recurrence
+        .as_ref()
+        .filter(|r| !recurrence_needs_extras(r))
+    {
         Some(rec) => {
             let start = combine_date_time(task.scheduled_date, task.scheduled_time)
                 .or_else(|| combine_date_time(task.deadline_date, task.deadline_time))
@@ -943,6 +1061,25 @@ pub fn task_to_update_field_xml(task: &Task) -> (String, String) {
             }
         }
         None => del.push_str(&delete_field_xml("task:Recurrence")),
+    }
+
+    // Aperio-Extras extended property: set it when there's something to
+    // carry, otherwise delete it so a cleared backlog rule doesn't linger.
+    match aperio_extras_property_xml(
+        task.recurrence.as_ref(),
+        task.resurface_date,
+        task.series_id.as_deref(),
+    ) {
+        Some(prop) => {
+            let field_uri = aperio_extras_field_uri();
+            set.push_str(&format!(
+                "            <t:SetItemField>\n              {field_uri}\n              <t:Task>\n                {prop}\n              </t:Task>\n            </t:SetItemField>\n",
+            ));
+        }
+        None => del.push_str(&format!(
+            "            <t:DeleteItemField>\n              {}\n            </t:DeleteItemField>\n",
+            aperio_extras_field_uri(),
+        )),
     }
 
     (set, del)
@@ -1118,8 +1255,8 @@ fn build_task_from_new(
         updated_at: now,
         completed_at: None,
         etag: change_key,
-        resurface_date: None,
-        series_id: None,
+        resurface_date: new.resurface_date,
+        series_id: new.series_id.clone(),
     }
 }
 
@@ -1332,6 +1469,75 @@ mod tests {
         assert_eq!(task.recurrence, Some(rec));
     }
 
+    #[test]
+    fn backlog_extras_round_trip_through_extended_property() {
+        use cal_core::{
+            MonthDay, RecurrenceAnchor, RecurrenceEnd, RecurrenceFrequency, RecurrencePlacement,
+            TaskRecurrence,
+        };
+        let rec = TaskRecurrence {
+            frequency: RecurrenceFrequency::Yearly,
+            interval: 1,
+            day_of_week: None,
+            day_of_month: None,
+            end: Some(RecurrenceEnd::Never),
+            anchor: RecurrenceAnchor::FromCompletion,
+            placement: RecurrencePlacement::Backlog,
+            fixed_dates: Some(vec![
+                MonthDay { month: 4, day: 1 },
+                MonthDay { month: 10, day: 1 },
+            ]),
+        };
+        let new = NewTask {
+            assignees: Vec::new(),
+            title: "Swap shoes".into(),
+            description: None,
+            status: TaskStatus::Open,
+            priority: TaskPriority::Medium,
+            scheduled_date: None,
+            scheduled_time: None,
+            deadline_date: None,
+            deadline_time: None,
+            recurrence: Some(rec.clone()),
+            parent_id: None,
+            section_id: None,
+            color_label: None,
+            reminders: Vec::new(),
+            sound: None,
+            resurface_date: Some(NaiveDate::from_ymd_opt(2026, 10, 1).unwrap()),
+            series_id: Some("series-shoes".into()),
+        };
+        // Write: the extended property carries the blob; no native recurrence.
+        let task_xml = new_task_to_task_item_xml(&new);
+        assert!(
+            task_xml.contains("<t:ExtendedProperty>")
+                && task_xml.contains("AperioExtras")
+                && task_xml.contains("aperio:1:"),
+            "create XML must carry the extended property, got:\n{task_xml}",
+        );
+        assert!(
+            !task_xml.contains("Recurrence"),
+            "a backlog rule must not emit a native recurrence, got:\n{task_xml}",
+        );
+        // Read: wrap + parse back; the carried fields survive.
+        let envelope = format!(
+            "<m:FindItemResponse><m:Items>{}</m:Items></m:FindItemResponse>",
+            task_xml.replacen(
+                "<t:Task>",
+                "<t:Task><t:ItemId Id=\"AAA\" ChangeKey=\"CK\"/>",
+                1,
+            ),
+        );
+        let parsed = parse_find_task_item_response(&envelope).expect("parses");
+        let task = to_task(parsed.into_iter().next().unwrap(), "list").expect("maps");
+        assert_eq!(task.recurrence, Some(rec));
+        assert_eq!(
+            task.resurface_date,
+            Some(NaiveDate::from_ymd_opt(2026, 10, 1).unwrap()),
+        );
+        assert_eq!(task.series_id.as_deref(), Some("series-shoes"));
+    }
+
     // ── Parsers ─────────────────────────────────────────────────────
 
     #[test]
@@ -1442,6 +1648,7 @@ mod tests {
             created: None,
             last_modified: None,
             recurrence: None,
+            extras_payload: None,
         }
     }
 

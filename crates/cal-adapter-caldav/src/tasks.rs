@@ -25,6 +25,7 @@
 //! general.
 
 use cal_core::{
+    apply_task_extras, decode_payload, encode_payload, extras_for_task, recurrence_needs_extras,
     rrule_to_task_recurrence, task_recurrence_to_rrule, AdapterSource, Calendar, NewTask, Task,
     TaskList, TaskPriority, TaskStatus,
 };
@@ -361,8 +362,8 @@ pub async fn create_task(
         updated_at: now,
         completed_at: None,
         etag,
-        resurface_date: None,
-        series_id: None,
+        resurface_date: new.resurface_date,
+        series_id: new.series_id,
     })
 }
 
@@ -489,8 +490,8 @@ fn build_vtodo_from_task(task: &Task) -> String {
         color_label: task.color_label.clone(),
         reminders: task.reminders.clone(),
         sound: task.sound.clone(),
-        resurface_date: None,
-        series_id: None,
+        resurface_date: task.resurface_date,
+        series_id: task.series_id.clone(),
     };
     // The id may be the composite `{href}|{uid}` we encode in
     // `map_todo`; strip the href back off so the iCal UID matches what
@@ -560,11 +561,26 @@ fn apply_common(todo: &mut Todo, uid: &str, task: &NewTask, completed_at: Option
     if let Some(completed) = completed_at {
         todo.add_property("COMPLETED", completed.format("%Y%m%dT%H%M%SZ").to_string());
     }
-    // RRULE: VTODO recurrence is a plain RFC 5545 rule, so we serialize
-    // Aperio's structured `TaskRecurrence` into one. (EXDATE / per-occurrence
-    // overrides aren't surfaced for tasks yet.)
+    // RRULE: a plain scheduled rule serializes to an RFC 5545 rule. A
+    // backlog/on-demand rule (DESIGN §9.12) has no RRULE expression, so it
+    // rides the X-property below instead and no RRULE is written.
+    // (EXDATE / per-occurrence overrides aren't surfaced for tasks yet.)
     if let Some(rec) = &task.recurrence {
-        todo.add_property("RRULE", task_recurrence_to_rrule(rec));
+        if !recurrence_needs_extras(rec) {
+            todo.add_property("RRULE", task_recurrence_to_rrule(rec));
+        }
+    }
+
+    // DESIGN §9.12: the Aperio-only fields ride an invisible `X-APERIO-EXTRAS`
+    // property — CalDAV has a real custom-property channel, so nothing
+    // pollutes the user-facing description. Empty bag ⇒ no property.
+    let extras = extras_for_task(
+        task.recurrence.as_ref(),
+        task.resurface_date,
+        task.series_id.as_deref(),
+    );
+    if let Some(payload) = encode_payload(&extras) {
+        todo.add_property("X-APERIO-EXTRAS", payload);
     }
 }
 
@@ -618,6 +634,26 @@ fn map_todo(todo: &Todo, list_id: &str, href: Option<&str>) -> Option<Task> {
         .or_else(|| todo.property_value("DTSTAMP").and_then(parse_compact_utc))
         .unwrap_or(created_at);
 
+    // DESIGN §9.12: a plain scheduled rule comes from RRULE; the on-demand
+    // axes / resurface_date / series_id come from the X-property and
+    // override it (the bag's recurrence is authoritative when present).
+    let mut recurrence = todo
+        .property_value("RRULE")
+        .and_then(rrule_to_task_recurrence);
+    let mut resurface_date = None;
+    let mut series_id = None;
+    if let Some(extras) = todo
+        .property_value("X-APERIO-EXTRAS")
+        .and_then(decode_payload)
+    {
+        apply_task_extras(
+            &extras,
+            &mut recurrence,
+            &mut resurface_date,
+            &mut series_id,
+        );
+    }
+
     Some(Task {
         assignees: Vec::new(),
         id: uid,
@@ -630,9 +666,7 @@ fn map_todo(todo: &Todo, list_id: &str, href: Option<&str>) -> Option<Task> {
         scheduled_time,
         deadline_date,
         deadline_time,
-        recurrence: todo
-            .property_value("RRULE")
-            .and_then(rrule_to_task_recurrence),
+        recurrence,
         parent_id: None,
         section_id: None,
         color_label: None,
@@ -642,8 +676,8 @@ fn map_todo(todo: &Todo, list_id: &str, href: Option<&str>) -> Option<Task> {
         updated_at,
         completed_at,
         etag: None,
-        resurface_date: None,
-        series_id: None,
+        resurface_date,
+        series_id,
     })
 }
 
@@ -1037,6 +1071,57 @@ END:VCALENDAR</c:calendar-data>
             .expect("has a VTODO");
         let task = map_todo(todo, "list", None).expect("maps");
         assert_eq!(task.recurrence, Some(rec));
+    }
+
+    #[test]
+    fn build_vtodo_carries_backlog_extras_in_x_property() {
+        use cal_core::{
+            MonthDay, RecurrenceAnchor, RecurrenceEnd, RecurrenceFrequency, RecurrencePlacement,
+            TaskRecurrence,
+        };
+        let rec = TaskRecurrence {
+            frequency: RecurrenceFrequency::Yearly,
+            interval: 1,
+            day_of_week: None,
+            day_of_month: None,
+            end: Some(RecurrenceEnd::Never),
+            anchor: RecurrenceAnchor::FromCompletion,
+            placement: RecurrencePlacement::Backlog,
+            fixed_dates: Some(vec![
+                MonthDay { month: 4, day: 1 },
+                MonthDay { month: 10, day: 1 },
+            ]),
+        };
+        let mut new = sample_new_task();
+        new.title = "Swap shoes".into();
+        new.recurrence = Some(rec.clone());
+        new.resurface_date = Some(NaiveDate::from_ymd_opt(2026, 10, 1).unwrap());
+        new.series_id = Some("series-shoes".into());
+
+        let body = build_vtodo_body("uid-bl", &new, None);
+        // Rides the invisible X-property; no RRULE for a backlog rule.
+        assert!(body.contains("X-APERIO-EXTRAS:aperio:1:"), "got:\n{body}");
+        assert!(
+            !body.contains("RRULE"),
+            "a backlog rule must not emit an RRULE:\n{body}"
+        );
+
+        let parsed = body.parse::<ICalendar>().expect("valid ical");
+        let todo = parsed
+            .components
+            .iter()
+            .find_map(|c| match c {
+                icalendar::CalendarComponent::Todo(t) => Some(t),
+                _ => None,
+            })
+            .expect("has a VTODO");
+        let task = map_todo(todo, "list", None).expect("maps");
+        assert_eq!(task.recurrence, Some(rec));
+        assert_eq!(
+            task.resurface_date,
+            Some(NaiveDate::from_ymd_opt(2026, 10, 1).unwrap()),
+        );
+        assert_eq!(task.series_id.as_deref(), Some("series-shoes"));
     }
 
     #[tokio::test]

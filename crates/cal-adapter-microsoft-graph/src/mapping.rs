@@ -820,7 +820,55 @@ fn first_reminder_minutes(reminders: &[Reminder]) -> Option<i64> {
 //     gone — every deadline is "by" semantics — so no wire changes
 //     are needed on top of the column rename in this file.
 
-use cal_core::{NewTask, Task, TaskList, TaskPriority, TaskStatus};
+use cal_core::{
+    apply_task_extras, decode_payload, encode_payload, extras_for_task, recurrence_needs_extras,
+    NewTask, Task, TaskList, TaskPriority, TaskStatus,
+};
+
+/// DESIGN §9.12: Graph strips HTML from the task body, so the visible-block
+/// channel can't survive — the Aperio-Extras blob rides an **open
+/// extension** instead. The name is the conventional reverse-DNS form.
+pub const APERIO_EXTENSION_NAME: &str = "com.aperio.extras";
+const OPEN_EXTENSION_ODATA_TYPE: &str = "microsoft.graph.openTypeExtension";
+
+/// One entry in a todoTask's `extensions` collection (read side). The
+/// custom `aperioExtras` property sits at the top level of an open
+/// extension object alongside the well-known `extensionName`.
+#[derive(Debug, Deserialize)]
+pub struct OpenExtensionEntry {
+    #[serde(default, rename = "extensionName")]
+    pub extension_name: Option<String>,
+    #[serde(default, rename = "aperioExtras")]
+    pub aperio_extras: Option<String>,
+}
+
+/// Open-extension body for a write (create or the update reconcile). Graph
+/// requires the `@odata.type` discriminator on each extension object.
+#[derive(Debug, Serialize)]
+pub struct OpenExtensionWrite {
+    #[serde(rename = "@odata.type")]
+    pub odata_type: &'static str,
+    #[serde(rename = "extensionName")]
+    pub extension_name: &'static str,
+    #[serde(rename = "aperioExtras")]
+    pub aperio_extras: String,
+}
+
+/// Build the Aperio open-extension for a task, or `None` when there's
+/// nothing non-native to carry.
+pub fn aperio_extension_write(
+    recurrence: Option<&cal_core::TaskRecurrence>,
+    resurface_date: Option<NaiveDate>,
+    series_id: Option<&str>,
+) -> Option<OpenExtensionWrite> {
+    let extras = extras_for_task(recurrence, resurface_date, series_id);
+    let payload = encode_payload(&extras)?;
+    Some(OpenExtensionWrite {
+        odata_type: OPEN_EXTENSION_ODATA_TYPE,
+        extension_name: APERIO_EXTENSION_NAME,
+        aperio_extras: payload,
+    })
+}
 
 // ── Task list listing ──────────────────────────────────────────────────
 
@@ -917,6 +965,10 @@ pub struct TodoTaskEntry {
     pub last_modified_date_time: Option<DateTime<Utc>>,
     #[serde(default, rename = "@odata.etag")]
     pub etag: Option<String>,
+    /// Open extensions, present when the read expanded them (DESIGN §9.12).
+    /// Absent in a plain delta page ⇒ "no extras", which degrades cleanly.
+    #[serde(default)]
+    pub extensions: Vec<OpenExtensionEntry>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -988,10 +1040,29 @@ pub fn map_task(entry: TodoTaskEntry, list_id: &str) -> GraphResult<Task> {
         Vec::new()
     };
 
-    let recurrence = entry
+    // Native patternedRecurrence covers plain scheduled rules; the open
+    // extension (DESIGN §9.12) overlays the on-demand axes / resurface_date /
+    // series_id, overriding the native recurrence when it carries one.
+    let mut recurrence = entry
         .recurrence
         .as_ref()
         .and_then(graph_recurrence_to_task_recurrence);
+    let mut resurface_date = None;
+    let mut series_id = None;
+    if let Some(extras) = entry
+        .extensions
+        .iter()
+        .find(|e| e.extension_name.as_deref() == Some(APERIO_EXTENSION_NAME))
+        .and_then(|e| e.aperio_extras.as_deref())
+        .and_then(decode_payload)
+    {
+        apply_task_extras(
+            &extras,
+            &mut recurrence,
+            &mut resurface_date,
+            &mut series_id,
+        );
+    }
 
     let completed_at = entry
         .completed_date_time
@@ -1018,8 +1089,8 @@ pub fn map_task(entry: TodoTaskEntry, list_id: &str) -> GraphResult<Task> {
         scheduled_time,
         deadline_date,
         deadline_time,
-        resurface_date: None,
-        series_id: None,
+        resurface_date,
+        series_id,
         recurrence,
         parent_id: None,
         section_id: None,
@@ -1090,6 +1161,11 @@ pub struct TodoTaskWriteBody {
     pub is_reminder_on: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub recurrence: Option<RecurrenceObject>,
+    /// Inline open extensions — honoured by Graph on **create** (POST). On
+    /// update the extension is reconciled with a separate request, so the
+    /// update body leaves this empty.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub extensions: Vec<OpenExtensionWrite>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1121,11 +1197,22 @@ pub fn new_task_to_body(new: &NewTask) -> GraphResult<TodoTaskWriteBody> {
             }
         }),
         is_reminder_on: first_absolute_reminder_at(&new.reminders).is_some(),
+        // Only a plain scheduled rule rides Graph's native recurrence; a
+        // backlog/on-demand rule rides the open extension below.
         recurrence: new
             .recurrence
             .as_ref()
+            .filter(|r| !recurrence_needs_extras(r))
             .map(task_recurrence_to_graph)
             .transpose()?,
+        // Create honours inline extensions.
+        extensions: aperio_extension_write(
+            new.recurrence.as_ref(),
+            new.resurface_date,
+            new.series_id.as_deref(),
+        )
+        .into_iter()
+        .collect(),
     })
 }
 
@@ -1154,8 +1241,12 @@ pub fn task_to_body(task: &Task) -> GraphResult<TodoTaskWriteBody> {
         recurrence: task
             .recurrence
             .as_ref()
+            .filter(|r| !recurrence_needs_extras(r))
             .map(task_recurrence_to_graph)
             .transpose()?,
+        // Update leaves extensions empty — Graph ignores inline extensions on
+        // PATCH, so the api layer reconciles the extension separately.
+        extensions: Vec::new(),
     })
 }
 
@@ -1850,6 +1941,71 @@ mod tests {
         // `null` and "missing" differently for some fields.
         assert!(json.get("dueDateTime").is_none());
         assert!(json.get("startDateTime").is_none());
+        // No extras ⇒ no inline extensions on the wire.
+        assert!(json.get("extensions").is_none());
+    }
+
+    #[test]
+    fn open_extension_round_trips_backlog_recurrence() {
+        use cal_core::{
+            MonthDay, RecurrenceAnchor, RecurrenceEnd, RecurrenceFrequency, RecurrencePlacement,
+            TaskRecurrence,
+        };
+        let rec = TaskRecurrence {
+            frequency: RecurrenceFrequency::Yearly,
+            interval: 1,
+            day_of_week: None,
+            day_of_month: None,
+            end: Some(RecurrenceEnd::Never),
+            anchor: RecurrenceAnchor::FromCompletion,
+            placement: RecurrencePlacement::Backlog,
+            fixed_dates: Some(vec![MonthDay { month: 4, day: 1 }]),
+        };
+        let new = NewTask {
+            assignees: Vec::new(),
+            title: "Swap shoes".into(),
+            description: None,
+            status: TaskStatus::Open,
+            priority: TaskPriority::Medium,
+            scheduled_date: None,
+            scheduled_time: None,
+            deadline_date: None,
+            deadline_time: None,
+            resurface_date: Some(NaiveDate::from_ymd_opt(2026, 4, 1).unwrap()),
+            series_id: Some("series-shoes".into()),
+            recurrence: Some(rec.clone()),
+            parent_id: None,
+            section_id: None,
+            color_label: None,
+            reminders: Vec::new(),
+            sound: None,
+        };
+        let body = new_task_to_body(&new).unwrap();
+        // Backlog rule ⇒ no native recurrence; the open extension carries it.
+        assert!(body.recurrence.is_none());
+        assert_eq!(body.extensions.len(), 1);
+        let payload = body.extensions[0].aperio_extras.clone();
+        assert!(payload.starts_with("aperio:1:"));
+
+        // Read it back via a todoTask whose extensions were expanded.
+        let entry: TodoTaskEntry = serde_json::from_value(serde_json::json!({
+            "id": "T9",
+            "title": "Swap shoes",
+            "status": "notStarted",
+            "extensions": [{
+                "@odata.type": "microsoft.graph.openTypeExtension",
+                "extensionName": "com.aperio.extras",
+                "aperioExtras": payload,
+            }],
+        }))
+        .unwrap();
+        let task = map_task(entry, "L").unwrap();
+        assert_eq!(task.recurrence, Some(rec));
+        assert_eq!(
+            task.resurface_date,
+            Some(NaiveDate::from_ymd_opt(2026, 4, 1).unwrap()),
+        );
+        assert_eq!(task.series_id.as_deref(), Some("series-shoes"));
     }
 
     #[test]
