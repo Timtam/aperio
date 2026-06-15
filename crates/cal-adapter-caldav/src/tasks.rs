@@ -17,11 +17,17 @@
 //!   - create_task / update_task / delete_task: PUT/DELETE on the
 //!     resource URL with the matching iCal body
 //!
-//! Status, priority, scheduled/due dates, and the completed_at flag
-//! all round-trip. Reminders (VALARM) and sound overrides come with
-//! the later wave that addresses VALARM mapping in general.
+//! Status, priority, scheduled/due dates, recurrence (`RRULE`, via
+//! `cal_core::{task_recurrence_to_rrule, rrule_to_task_recurrence}`) and
+//! the completed_at flag all round-trip. Per-occurrence overrides
+//! (`EXDATE`) aren't surfaced for tasks yet. Reminders (VALARM) and sound
+//! overrides come with the later wave that addresses VALARM mapping in
+//! general.
 
-use cal_core::{AdapterSource, Calendar, NewTask, Task, TaskList, TaskPriority, TaskStatus};
+use cal_core::{
+    rrule_to_task_recurrence, task_recurrence_to_rrule, AdapterSource, Calendar, NewTask, Task,
+    TaskList, TaskPriority, TaskStatus,
+};
 use chrono::{DateTime, NaiveDate, NaiveTime, TimeZone, Utc};
 use icalendar::{Calendar as ICalendar, CalendarDateTime, Component, DatePerhapsTime, Todo};
 use reqwest::{
@@ -550,6 +556,12 @@ fn apply_common(todo: &mut Todo, uid: &str, task: &NewTask, completed_at: Option
     if let Some(completed) = completed_at {
         todo.add_property("COMPLETED", completed.format("%Y%m%dT%H%M%SZ").to_string());
     }
+    // RRULE: VTODO recurrence is a plain RFC 5545 rule, so we serialize
+    // Aperio's structured `TaskRecurrence` into one. (EXDATE / per-occurrence
+    // overrides aren't surfaced for tasks yet.)
+    if let Some(rec) = &task.recurrence {
+        todo.add_property("RRULE", task_recurrence_to_rrule(rec));
+    }
 }
 
 fn map_todo(todo: &Todo, list_id: &str, href: Option<&str>) -> Option<Task> {
@@ -614,7 +626,9 @@ fn map_todo(todo: &Todo, list_id: &str, href: Option<&str>) -> Option<Task> {
         scheduled_time,
         deadline_date,
         deadline_time,
-        recurrence: None,
+        recurrence: todo
+            .property_value("RRULE")
+            .and_then(rrule_to_task_recurrence),
         parent_id: None,
         section_id: None,
         color_label: None,
@@ -959,6 +973,53 @@ END:VCALENDAR</c:calendar-data>
             !body.contains("VALUE=DATE-TIME"),
             "DUE date-time should not carry VALUE=DATE-TIME (RFC 5545 default), got:\n{body}",
         );
+    }
+
+    #[test]
+    fn build_vtodo_round_trips_recurrence_through_rrule() {
+        use cal_core::{RecurrenceEnd, RecurrenceFrequency, TaskRecurrence, Weekday};
+        let rec = TaskRecurrence {
+            frequency: RecurrenceFrequency::Weekly,
+            interval: 2,
+            day_of_week: Some(vec![Weekday::Monday, Weekday::Wednesday]),
+            day_of_month: None,
+            end: Some(RecurrenceEnd::After { occurrences: 6 }),
+        };
+        let new = NewTask {
+            assignees: Vec::new(),
+            title: "Water plants".into(),
+            description: None,
+            status: TaskStatus::Open,
+            priority: TaskPriority::Medium,
+            scheduled_date: Some(NaiveDate::from_ymd_opt(2026, 5, 21).unwrap()),
+            scheduled_time: None,
+            deadline_date: None,
+            deadline_time: None,
+            recurrence: Some(rec.clone()),
+            parent_id: None,
+            section_id: None,
+            color_label: None,
+            reminders: Vec::new(),
+            sound: None,
+        };
+        let body = build_vtodo_body("uid-rec", &new, None);
+        assert!(
+            body.contains("RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE;COUNT=6"),
+            "VTODO must carry the RRULE, got:\n{body}",
+        );
+        // Parse it back exactly as the read path does and confirm the
+        // structured recurrence survives the round-trip.
+        let parsed = body.parse::<ICalendar>().expect("valid ical");
+        let todo = parsed
+            .components
+            .iter()
+            .find_map(|c| match c {
+                icalendar::CalendarComponent::Todo(t) => Some(t),
+                _ => None,
+            })
+            .expect("has a VTODO");
+        let task = map_todo(todo, "list", None).expect("maps");
+        assert_eq!(task.recurrence, Some(rec));
     }
 
     #[tokio::test]
