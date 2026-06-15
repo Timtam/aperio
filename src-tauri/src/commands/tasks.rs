@@ -2,7 +2,8 @@
 
 use cal_adapter_local::LocalAdapter;
 use cal_core::{
-    MemberRight, NewTask, Section, Task, TaskList, TaskListShare, TaskUser, TasksFeature,
+    MemberRight, NewTask, Section, Task, TaskList, TaskListShare, TaskStatus, TaskUser,
+    TasksFeature,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -787,6 +788,7 @@ pub async fn create_task(
         .unwrap_or_else(|| LOCAL_ID.to_string());
     let is_local = account == LOCAL_ID;
     let task = if is_local {
+        // The local adapter assigns its own series ids on create.
         adapter.create_task(&request.list_id, request.task).await?
     } else {
         let Some(ext) = registry.task_adapter(&account) else {
@@ -795,7 +797,20 @@ pub async fn create_task(
                 message: format!("task list '{}' is not routable", request.list_id),
             });
         };
-        ext.create_task(&request.list_id, request.task).await?
+        // DESIGN §9.12: an on-demand recurring task on an external list needs
+        // a stable series id (transported via the extras channel) so the
+        // Aperio-side spawner can dedup across clients on a shared list. Plain
+        // scheduled rules are left to the provider, so they get no series id.
+        let mut new = request.task;
+        if new.series_id.is_none()
+            && new
+                .recurrence
+                .as_ref()
+                .is_some_and(cal_core::recurrence_needs_extras)
+        {
+            new.series_id = Some(uuid::Uuid::new_v4().to_string());
+        }
+        ext.create_task(&request.list_id, new).await?
     };
     if is_local {
         if let Ok(fields) = serde_json::to_value(&task) {
@@ -961,6 +976,7 @@ pub async fn update_task(
     // Plain in-place update.
     let is_local = target_account == LOCAL_ID;
     let updated = if is_local {
+        // The local adapter spawns the next on-demand instance itself.
         adapter.update_task(task).await?
     } else {
         let Some(ext) = registry.task_adapter(&target_account) else {
@@ -969,7 +985,14 @@ pub async fn update_task(
                 message: format!("task list '{}' is not routable", task.list_id),
             });
         };
-        ext.update_task(task).await?
+        // Capture the completion intent before the value is moved into the
+        // provider write — the Aperio-side spawn needs it.
+        let completed = task.clone();
+        let updated = ext.update_task(task).await?;
+        // DESIGN §9.12: providers don't understand backlog/on-demand
+        // recurrence, so Aperio spawns the next instance for external lists.
+        spawn_external_on_demand(ext.as_ref(), &cache, &target_account, &completed).await;
+        updated
     };
     if is_local {
         if let Ok(fields) = serde_json::to_value(&updated) {
@@ -983,6 +1006,68 @@ pub async fn update_task(
     }
     scheduler.invalidate();
     Ok(updated)
+}
+
+/// DESIGN §9.12: run Aperio's recurrence spawner for an external list. A
+/// provider only understands its own (scheduled) recurrence, so when an
+/// on-demand / backlog task completes there, Aperio creates the next instance
+/// via the same adapter.
+///
+/// Best-effort: a failure here is logged, not surfaced — the user's task is
+/// already marked done, and the next sync still reflects that. Plain
+/// scheduled recurrence is left to the provider (no `series_id`, no spawn).
+async fn spawn_external_on_demand(
+    ext: &dyn TasksFeature,
+    cache: &Arc<CacheStore>,
+    account: &str,
+    completed: &Task,
+) {
+    if completed.status != TaskStatus::Completed {
+        return;
+    }
+    let Some(rec) = completed.recurrence.as_ref() else {
+        return;
+    };
+    if !cal_core::recurrence_needs_extras(rec) {
+        return;
+    }
+
+    // The cached snapshot reflects the pre-update state, so it tells us both
+    // whether this completion is a fresh transition and whether the series
+    // already has an open instance (idempotency).
+    let cached = cache
+        .read_tasks(account, &completed.list_id)
+        .unwrap_or_default();
+    let is_open = |status| matches!(status, TaskStatus::Open | TaskStatus::InProgress);
+
+    // Re-saving an already-completed task must not spawn again.
+    if cached
+        .iter()
+        .any(|t| t.id == completed.id && t.status == TaskStatus::Completed)
+    {
+        return;
+    }
+    // A series spawns at most one open instance — if another client already
+    // created the next turn (and it's synced into our cache), do nothing.
+    if let Some(sid) = completed.series_id.as_deref() {
+        if cached.iter().any(|t| {
+            t.id != completed.id && t.series_id.as_deref() == Some(sid) && is_open(t.status)
+        }) {
+            return;
+        }
+    }
+
+    let Some(next) = cal_core::next_recurrence_instance(completed) else {
+        return;
+    };
+    if let Err(err) = ext.create_task(&completed.list_id, next).await {
+        tracing::warn!(
+            account = %account,
+            list = %completed.list_id,
+            ?err,
+            "external on-demand recurrence spawn failed",
+        );
+    }
 }
 
 #[tauri::command]

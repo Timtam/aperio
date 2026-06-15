@@ -10,6 +10,7 @@ pub mod error;
 pub mod extras;
 pub mod recurrence;
 pub mod reminder;
+pub mod spawn;
 pub mod types;
 
 pub use adapter::{
@@ -24,6 +25,7 @@ pub use extras::{
 };
 pub use recurrence::{rrule_to_task_recurrence, task_recurrence_to_rrule};
 pub use reminder::{Reminder, ReminderKind, SoundConfig, SoundSource};
+pub use spawn::{advance, next_recurrence_instance};
 pub use types::{
     AttendeeResponse, AttendeeStatus, Calendar, Contact, ContactAddress, ContactList, ContactPhoto,
     DateRange, Event, EventRecurrence, FreeBusy, FreeBusySlot, GroupMember, MemberRight, MonthDay,

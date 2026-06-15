@@ -2,11 +2,10 @@
 
 use async_trait::async_trait;
 use cal_core::{
-    ColorLabelId, ContainerColor, MonthDay, NewTask, RecurrenceAnchor, RecurrenceEnd,
-    RecurrenceFrequency, RecurrencePlacement, Reminder, Section, SoundConfig, Task, TaskList,
-    TaskPriority, TaskRecurrence, TaskStatus, TasksFeature, Weekday,
+    ColorLabelId, ContainerColor, NewTask, Reminder, Section, SoundConfig, Task, TaskList,
+    TaskPriority, TaskRecurrence, TaskStatus, TasksFeature,
 };
-use chrono::{Datelike, Days, Months, NaiveDate, Utc};
+use chrono::Utc;
 use rusqlite::{params, OptionalExtension};
 use uuid::Uuid;
 
@@ -173,11 +172,7 @@ impl LocalAdapter {
     ///
     /// Returns `Ok(None)` when nothing should be spawned (rule ended, no
     /// anchor to advance from, or the series is already covered).
-    fn spawn_next_recurring_task(
-        &self,
-        template: &Task,
-        recurrence: &TaskRecurrence,
-    ) -> cal_core::Result<Option<Task>> {
+    fn spawn_next_recurring_task(&self, template: &Task) -> cal_core::Result<Option<Task>> {
         // Idempotency gate: never spawn a second open instance of a series.
         if let Some(sid) = template.series_id.as_deref() {
             if self.has_open_series_instance(sid)? {
@@ -185,11 +180,9 @@ impl LocalAdapter {
             }
         }
 
-        let next = match recurrence.placement {
-            RecurrencePlacement::Schedule => next_scheduled_instance(template, recurrence),
-            RecurrencePlacement::Backlog => next_backlog_instance(template, recurrence),
-        };
-        let Some(new) = next else {
+        // The placement-aware computation lives in `cal_core::spawn` so the
+        // host can run the same logic for external lists (DESIGN §9.12).
+        let Some(new) = cal_core::next_recurrence_instance(template) else {
             return Ok(None);
         };
         let task = self.create_task_sync(&template.list_id, new)?;
@@ -672,15 +665,16 @@ impl TasksFeature for LocalAdapter {
         // (and was not already there) the template generates its next
         // instance. The "post-completion, not pre" semantics matches
         // DESIGN.md section 9.6.
-        if task.status == TaskStatus::Completed && prev_status != Some(TaskStatus::Completed) {
-            if let Some(recurrence) = task.recurrence.clone() {
-                if let Some(next) = self.spawn_next_recurring_task(&task, &recurrence)? {
-                    // We don't return the next task — the caller wired
-                    // the existing one. The new row shows up on the
-                    // next list refresh, which views already trigger
-                    // on dialog close.
-                    let _ = next;
-                }
+        if task.status == TaskStatus::Completed
+            && prev_status != Some(TaskStatus::Completed)
+            && task.recurrence.is_some()
+        {
+            if let Some(next) = self.spawn_next_recurring_task(&task)? {
+                // We don't return the next task — the caller wired
+                // the existing one. The new row shows up on the
+                // next list refresh, which views already trigger
+                // on dialog close.
+                let _ = next;
             }
         }
 
@@ -784,140 +778,6 @@ fn ensure_series_id(task: &mut NewTask) {
     }
 }
 
-/// The calendar date a task was completed on. Falls back to today when the
-/// row carries no `completed_at` (a status flip without a stamp), so the
-/// backlog/`FromCompletion` math always has an anchor.
-fn completion_date(template: &Task) -> NaiveDate {
-    template
-        .completed_at
-        .map(|dt| dt.date_naive())
-        .unwrap_or_else(|| Utc::now().date_naive())
-}
-
-/// True when a date-ended rule (`OnDate`) has run past its boundary.
-/// `After { occurrences }` isn't tracked here (no per-row counter) and
-/// `Never`/absent never end.
-fn recurrence_ended(rule: &TaskRecurrence, date: NaiveDate) -> bool {
-    matches!(&rule.end, Some(RecurrenceEnd::OnDate { date: end }) if date > *end)
-}
-
-/// Next trigger date for a `Schedule`-placement rule: the next `fixed_dates`
-/// entry when set, otherwise `advance` by frequency × interval.
-fn next_trigger(base: NaiveDate, rule: &TaskRecurrence) -> Option<NaiveDate> {
-    match rule.fixed_dates.as_ref().filter(|d| !d.is_empty()) {
-        Some(dates) => next_fixed_date_after(base, dates),
-        None => advance(base, rule),
-    }
-}
-
-/// The earliest `MonthDay` strictly after `from`, scanning the current year
-/// then the next so wrap-around (e.g. completing in November with an April
-/// trigger) lands on next April. Out-of-range months are skipped; a day past
-/// the month's length is clamped (Feb 30 → Feb 28/29).
-fn next_fixed_date_after(from: NaiveDate, dates: &[MonthDay]) -> Option<NaiveDate> {
-    let mut best: Option<NaiveDate> = None;
-    for year in [from.year(), from.year() + 1] {
-        for md in dates {
-            if !(1..=12).contains(&md.month) {
-                continue;
-            }
-            let day = u32::from(md.day).max(1);
-            let Some(cand) = clamp_to_month(year, u32::from(md.month), day) else {
-                continue;
-            };
-            if cand > from && best.map_or(true, |b| cand < b) {
-                best = Some(cand);
-            }
-        }
-    }
-    best
-}
-
-/// Build the next `Schedule`-placement instance: a dated copy of the
-/// template advanced to the next trigger. `None` when there's no anchor to
-/// advance from or the rule has ended.
-fn next_scheduled_instance(template: &Task, rule: &TaskRecurrence) -> Option<NewTask> {
-    let base = match rule.anchor {
-        RecurrenceAnchor::FromDate => template.scheduled_date.or(template.deadline_date)?,
-        RecurrenceAnchor::FromCompletion => completion_date(template),
-    };
-    let next_date = next_trigger(base, rule)?;
-    if recurrence_ended(rule, next_date) {
-        return None;
-    }
-    // Preserve which date field(s) the template used.
-    let scheduled_date = template.scheduled_date.map(|_| next_date);
-    let deadline_date = template.deadline_date.map(|_| next_date);
-    // A `FromCompletion` rule on an otherwise-undated task still needs a
-    // date to land on; default it to the scheduled slot.
-    let (scheduled_date, deadline_date) = if scheduled_date.is_none() && deadline_date.is_none() {
-        (Some(next_date), None)
-    } else {
-        (scheduled_date, deadline_date)
-    };
-    Some(instance_skeleton(
-        template,
-        rule,
-        scheduled_date,
-        deadline_date,
-        None,
-    ))
-}
-
-/// Build the next `Backlog`-placement instance: an undated copy whose
-/// `resurface_date` decides when it re-enters the active backlog. `None`
-/// when a `fixed_dates` rule has no valid trigger or the rule has ended.
-fn next_backlog_instance(template: &Task, rule: &TaskRecurrence) -> Option<NewTask> {
-    let from = completion_date(template);
-    let resurface: Option<NaiveDate> = match rule.fixed_dates.as_ref().filter(|d| !d.is_empty()) {
-        Some(dates) => Some(next_fixed_date_after(from, dates)?),
-        // No interval ⇒ surface immediately (the dishwasher case):
-        // `None` resurface_date means "visible now".
-        None if rule.interval == 0 => None,
-        None => Some(advance(from, rule)?),
-    };
-    if let Some(d) = resurface {
-        if recurrence_ended(rule, d) {
-            return None;
-        }
-    }
-    Some(instance_skeleton(template, rule, None, None, resurface))
-}
-
-/// Shared constructor for a spawned instance: inherits the template's
-/// content (title, description, priority, section, color, reminders, sound,
-/// recurrence rule and `series_id`), resets completion state, and takes the
-/// caller's date placement. Times survive only alongside their date.
-fn instance_skeleton(
-    template: &Task,
-    rule: &TaskRecurrence,
-    scheduled_date: Option<NaiveDate>,
-    deadline_date: Option<NaiveDate>,
-    resurface_date: Option<NaiveDate>,
-) -> NewTask {
-    NewTask {
-        assignees: Vec::new(),
-        title: template.title.clone(),
-        description: template.description.clone(),
-        status: TaskStatus::Open,
-        priority: template.priority,
-        scheduled_date,
-        scheduled_time: scheduled_date.and(template.scheduled_time),
-        deadline_date,
-        deadline_time: deadline_date.and(template.deadline_time),
-        recurrence: Some(rule.clone()),
-        resurface_date,
-        // The next instance stays in the same series for idempotent spawning.
-        series_id: template.series_id.clone(),
-        parent_id: None,
-        // Keep the next occurrence in the same section as its template.
-        section_id: template.section_id.clone(),
-        color_label: template.color_label.clone(),
-        reminders: template.reminders.clone(),
-        sound: template.sound.clone(),
-    }
-}
-
 /// True for statuses that count as a live (uncompleted) task.
 fn is_open_status(status: TaskStatus) -> bool {
     matches!(status, TaskStatus::Open | TaskStatus::InProgress)
@@ -962,88 +822,6 @@ fn dedupe_open_series(tasks: Vec<Task>) -> Vec<Task> {
         })
         .map(|(_, t)| t)
         .collect()
-}
-
-/// Compute the next occurrence date for a recurring task.
-///
-/// Honours `interval` (every N days/weeks/months/years) and, for
-/// weekly rules with `day_of_week` set, snaps forward to the next
-/// listed weekday relative to the anchor. `day_of_month` for monthly
-/// rules is respected verbatim, clamped to the target month's length
-/// (e.g. the 31st in February becomes the last day of February).
-pub(crate) fn advance(anchor: NaiveDate, rule: &TaskRecurrence) -> Option<NaiveDate> {
-    let interval = rule.interval.max(1) as i64;
-    match rule.frequency {
-        RecurrenceFrequency::Daily => anchor.checked_add_days(Days::new(interval as u64)),
-        RecurrenceFrequency::Weekly => {
-            if let Some(days) = rule.day_of_week.as_ref().filter(|d| !d.is_empty()) {
-                next_weekday_after(anchor, days, interval as u64)
-            } else {
-                anchor.checked_add_days(Days::new(7 * interval as u64))
-            }
-        }
-        RecurrenceFrequency::Monthly => {
-            let next = anchor.checked_add_months(Months::new(interval as u32))?;
-            if let Some(d) = rule.day_of_month {
-                clamp_to_month(next.year(), next.month(), d.into())
-            } else {
-                Some(next)
-            }
-        }
-        RecurrenceFrequency::Yearly => anchor.checked_add_months(Months::new(12 * interval as u32)),
-    }
-}
-
-/// Within the same week (or the next interval-week block), find the
-/// first weekday listed in `days` after the anchor.
-fn next_weekday_after(
-    anchor: NaiveDate,
-    days: &[Weekday],
-    interval_weeks: u64,
-) -> Option<NaiveDate> {
-    let allowed: Vec<u32> = days.iter().map(|w| weekday_to_iso(*w)).collect();
-    if allowed.is_empty() {
-        return None;
-    }
-    // Step day by day up to 7 days; if none of the next 7 days match,
-    // jump to the start of the interval-week block after.
-    for offset in 1..=7 {
-        let candidate = anchor.checked_add_days(Days::new(offset))?;
-        let iso = candidate.weekday().number_from_monday();
-        if allowed.contains(&iso) {
-            return Some(candidate);
-        }
-    }
-    // Fallback for interval > 1: skip the whole gap.
-    anchor.checked_add_days(Days::new(7 * interval_weeks.max(1)))
-}
-
-fn weekday_to_iso(w: Weekday) -> u32 {
-    match w {
-        Weekday::Monday => 1,
-        Weekday::Tuesday => 2,
-        Weekday::Wednesday => 3,
-        Weekday::Thursday => 4,
-        Weekday::Friday => 5,
-        Weekday::Saturday => 6,
-        Weekday::Sunday => 7,
-    }
-}
-
-fn clamp_to_month(year: i32, month: u32, day: u32) -> Option<NaiveDate> {
-    let last = last_day_of_month(year, month);
-    NaiveDate::from_ymd_opt(year, month, day.min(last))
-}
-
-fn last_day_of_month(year: i32, month: u32) -> u32 {
-    // First day of the next month minus one.
-    let (ny, nm) = if month == 12 {
-        (year + 1, 1)
-    } else {
-        (year, month + 1)
-    };
-    let first_next = NaiveDate::from_ymd_opt(ny, nm, 1).unwrap();
-    first_next.pred_opt().unwrap().day()
 }
 
 fn task_status_str(s: TaskStatus) -> &'static str {
@@ -1158,7 +936,10 @@ pub(crate) fn row_to_task(row: &rusqlite::Row<'_>) -> cal_core::Result<Task> {
 mod tests {
     use super::*;
     use crate::test_support::open_test_db;
-    use cal_core::TasksFeature;
+    use cal_core::{
+        MonthDay, RecurrenceAnchor, RecurrenceEnd, RecurrenceFrequency, RecurrencePlacement,
+        TasksFeature, Weekday,
+    };
     use chrono::NaiveDate;
 
     fn adapter_with_list() -> (LocalAdapter, TaskList) {
@@ -1572,11 +1353,7 @@ mod tests {
         assert!(a.has_open_series_instance(&series).unwrap());
         // …so a second spawn for the same template is a no-op (this is the
         // "other client already created it" path on a shared list).
-        let rule = completed.recurrence.clone().unwrap();
-        assert!(a
-            .spawn_next_recurring_task(&completed, &rule)
-            .unwrap()
-            .is_none());
+        assert!(a.spawn_next_recurring_task(&completed).unwrap().is_none());
 
         let tasks = a.get_tasks(&list.id).await.unwrap();
         assert_eq!(tasks.len(), 2, "no third instance was created");
