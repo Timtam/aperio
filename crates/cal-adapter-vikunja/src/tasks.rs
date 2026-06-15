@@ -457,7 +457,19 @@ pub async fn update_task(client: &VikunjaClient, task: &Task) -> VikunjaResult<T
     // Apply a section (kanban bucket) change via the dedicated per-view
     // endpoint — the task body's `bucket_id` is ignored on ≥0.24. This is
     // a best-effort follow-up (like assignees) that never fails the edit.
-    let effective_section = move_task_bucket(client, task, task_id).await;
+    //
+    // EXCEPT when we're completing the task: Vikunja files a done task into
+    // its kanban "done bucket", so `current_bucket` reads it there. Since
+    // that differs from the task's own section, `move_task_bucket` would move
+    // it back to a regular bucket — and moving a task *out* of the done
+    // bucket flips it undone again, so it'd reappear as open in its section.
+    // A done task's bucket is irrelevant in Aperio (the Done group ignores
+    // sections), so leave it where Vikunja put it.
+    let effective_section = if matches!(task.status, TaskStatus::Completed) {
+        None
+    } else {
+        move_task_bucket(client, task, task_id).await
+    };
     let mut mapped = map_task(entry, &task.list_id);
     mapped.assignees = task.assignees.clone();
     // Reflect where the task actually ended up — the field PUT doesn't
@@ -2074,6 +2086,27 @@ mod tests {
             .await
             .unwrap();
         mv.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn update_task_completed_skips_bucket_move() {
+        // Vikunja files a done task into its kanban done bucket; moving it
+        // back to its section bucket would flip it undone. So completing a
+        // task must not touch the kanban bucket at all — the whole move path
+        // (views lookup included) is skipped.
+        let mut server = Server::new_async().await;
+        mount_update_prelude(&mut server).await;
+        let views = server
+            .mock("GET", "/api/v1/projects/3/views")
+            .expect(0)
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        let mut done = task_fixture("7", "3", Some("12"));
+        done.status = TaskStatus::Completed;
+        done.completed_at = Some(Utc::now());
+        update_task(&client, &done).await.unwrap();
+        views.assert_async().await;
     }
 
     #[tokio::test]
