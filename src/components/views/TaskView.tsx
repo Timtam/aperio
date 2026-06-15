@@ -576,7 +576,9 @@ export function TaskView() {
             {t('views.tasks.empty')}
           </li>
         )}
-        {entries.map((entry, i) => {
+        {renderForest(
+          entries
+            .map((entry, i): ForestItem | null => {
           if (entry.kind === 'separator') {
             // A real section sub-header (Vikunja bucket / Todoist section)
             // carries a sectionId — that's what gets the section styling,
@@ -612,8 +614,12 @@ export function TaskView() {
               : false;
             const sectionActionable =
               !!section && (sectionManageable || colorLabels.length > 0);
-            return (
-              <li
+            return {
+              kind: 'sep' as const,
+              level,
+              label: entry.label,
+              node: (
+                <li
                 key={`sep-${i}-${entry.label}`}
                 role="presentation"
                 aria-hidden={sectionActionable ? undefined : true}
@@ -728,14 +734,20 @@ export function TaskView() {
                   </button>
                 )}
               </li>
-            );
+              ),
+            };
           }
           // Children are rendered by their parent's recursive call
           // (the parent emits a <ul role="group"> below). The
           // top-level iteration only handles depth-0 tasks plus the
           // separator headings between them.
           if (entry.depth > 0) return null;
-          return renderTreeItem(entry, {
+          return {
+            kind:
+              entry.task.id === DONE_GROUP_ID
+                ? ('done' as const)
+                : ('task' as const),
+            node: renderTreeItem(entry, {
             t,
             fmt,
             entries,
@@ -752,8 +764,11 @@ export function TaskView() {
             openTaskDialog,
             openTaskMenu,
             itemId,
-          });
-        })}
+            }),
+          };
+        })
+          .filter((it): it is ForestItem => it !== null)
+        )}
       </ul>
 
       <ConfirmDialog
@@ -785,6 +800,70 @@ export function TaskView() {
   );
 }
 
+/** One render unit for {@link renderForest}: a visual group header, or an
+ *  already-rendered task / done-group row. */
+type ForestItem =
+  | { kind: 'sep'; level: number; label: string; node: React.ReactNode }
+  | { kind: 'task' | 'done'; node: React.ReactNode };
+
+/**
+ * Wrap the flat, level-tagged render units into nested `role="group"`
+ * containers so a screen reader hears the list / section a task belongs to
+ * as a group (announced on entry) rather than only as a label suffix. The
+ * visual headers and the keyboard model (aria-activedescendant over the flat
+ * task order) are unchanged — the groups are an accessibility overlay.
+ *
+ * A separator opens a group at its `level`; a deeper-or-equal separator
+ * closes the open ones first, so Backlog → list → section nests correctly.
+ * The synthetic "Done" row has no separator and sits at the root, so it
+ * closes every open group.
+ */
+function renderForest(items: ForestItem[]): React.ReactNode {
+  interface Frame {
+    level: number;
+    label: string;
+    nodes: React.ReactNode[];
+    key: string;
+  }
+  const root: React.ReactNode[] = [];
+  const stack: Frame[] = [];
+  let gid = 0;
+  const peek = () => (stack.length ? stack[stack.length - 1].nodes : root);
+  const closeTo = (level: number) => {
+    while (stack.length && stack[stack.length - 1].level >= level) {
+      const frame = stack.pop()!;
+      peek().push(
+        <ul
+          key={frame.key}
+          role="group"
+          aria-label={frame.label}
+          className="task-list__group-children"
+        >
+          {frame.nodes}
+        </ul>,
+      );
+    }
+  };
+  for (const item of items) {
+    if (item.kind === 'sep') {
+      closeTo(item.level);
+      peek().push(item.node);
+      stack.push({
+        level: item.level,
+        label: item.label,
+        nodes: [],
+        key: `grp-${gid++}`,
+      });
+    } else if (item.kind === 'done') {
+      closeTo(0);
+      root.push(item.node);
+    } else {
+      peek().push(item.node);
+    }
+  }
+  closeTo(0);
+  return root;
+}
 
 /**
  * Render context for the recursive `renderTreeItem` walker. All
