@@ -5,6 +5,7 @@ import {
   buildEntries,
   DEFERRED_GROUP_ID,
   DONE_GROUP_ID,
+  isTaskDeferred,
   type Entry,
 } from './taskGrouping';
 
@@ -292,6 +293,25 @@ describe('buildEntries section grouping', () => {
     });
     // Backlog → Inbox → To Do → task a : four navigable rows.
     expect(result.flatTasks).toHaveLength(4);
+  });
+});
+
+describe('isTaskDeferred', () => {
+  it('is true only for a future resurface date', () => {
+    expect(
+      isTaskDeferred(baseTask({ resurface_date: '2026-10-01' }), TODAY),
+    ).toBe(true);
+    // today or past ⇒ active now, not deferred
+    expect(isTaskDeferred(baseTask({ resurface_date: TODAY }), TODAY)).toBe(
+      false,
+    );
+    expect(
+      isTaskDeferred(baseTask({ resurface_date: '2026-01-01' }), TODAY),
+    ).toBe(false);
+    // no resurface date ⇒ never deferred
+    expect(isTaskDeferred(baseTask({ resurface_date: null }), TODAY)).toBe(
+      false,
+    );
   });
 });
 

@@ -32,6 +32,8 @@ import {
 } from '../state/useBacklogWidth';
 import { useChipContextMenu } from '../state/useChipContextMenu';
 import { useTasks } from '../state/useTasks';
+import { useCurrentDayKey } from '../hooks/useCurrentDayKey';
+import { isTaskDeferred } from './views/taskGrouping';
 
 /**
  * Backlog rail for the week / month planner.
@@ -59,6 +61,7 @@ import { useTasks } from '../state/useTasks';
 export function BacklogRail() {
   const { t } = useTranslation();
   const announce = useAnnouncer();
+  const todayKey = useCurrentDayKey();
   const { tasks, taskListById } = useTasks();
   const { openTaskDialog, openPlanTask, invalidateData } = useDialogState();
   const { openForTask } = useChipContextMenu();
@@ -121,13 +124,18 @@ export function BacklogRail() {
           // so it can be dragged onto a work day — it also shows as a due
           // marker on its deadline day in the grid.
           !row.scheduled_date &&
+          // DESIGN §9.3/§9.12: a deferred backlog task (resurfaces on a
+          // future day) waits in the task view's "Zukünftig" group, not in
+          // the active backlog — keep it out of the rail too so it doesn't
+          // appear in both places.
+          !isTaskDeferred(row, todayKey) &&
           // top-level (or orphaned) — subtasks travel with their parent
           (!row.parent_id || !ids.has(row.parent_id)),
       )
       // High priority to the top, low to the bottom (stable → existing order
       // is the tiebreaker within one priority band).
       .sort((a, b) => priorityRank(a.priority) - priorityRank(b.priority));
-  }, [tasks]);
+  }, [tasks, todayKey]);
 
   // Per-chip color follows the task → section → list chain. Sections load
   // lazily, so trigger a load for every list that has a backlog task.

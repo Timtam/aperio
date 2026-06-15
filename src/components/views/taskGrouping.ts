@@ -9,6 +9,17 @@ export const BACKLOG_GROUP_ID = '__aperio_backlog_group__';
  *  whose `resurface_date` is still in the future (DESIGN §9.12). */
 export const DEFERRED_GROUP_ID = '__aperio_deferred_group__';
 
+/**
+ * A backlog task is **deferred** when its `resurface_date` is strictly after
+ * `today` (`YYYY-MM-DD`): it's waiting to come back and must be held out of
+ * the active backlog (DESIGN §9.3 / §9.12). The single source of truth for
+ * every backlog surface — the task view's grouping AND the week/month backlog
+ * rail — so they can't drift apart and show the same task in two places.
+ */
+export function isTaskDeferred(task: Task, today: string): boolean {
+  return task.resurface_date != null && task.resurface_date > today;
+}
+
 /** Metadata carried by a group-header row (Backlog / a list / a section /
  *  the synthetic Done or Deferred group). When `group` is set on an
  *  {@link Entry}, the row is a collapsible header rather than a real task. */
@@ -143,13 +154,11 @@ export function buildEntries(
   // Deferred (DESIGN §9.12): a backlog task whose resurface day is still in
   // the future is held out of the active groups and collected under
   // "Zukünftig" — it's neither lost nor cluttering today's work. The same
-  // gate doubles as the §9.3 backlog filter.
-  const isDeferred = (task: Task) =>
-    task.resurface_date != null && task.resurface_date > today;
+  // gate doubles as the §9.3 backlog filter (see `isTaskDeferred`).
   const deferred: Task[] = [];
   const active: Task[] = [];
   openTopLevel.forEach((task) => {
-    if (isDeferred(task)) deferred.push(task);
+    if (isTaskDeferred(task, today)) deferred.push(task);
     else active.push(task);
   });
 
