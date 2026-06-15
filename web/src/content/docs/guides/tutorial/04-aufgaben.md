@@ -147,6 +147,49 @@ check off a recurring task, Aperio automatically creates the next due date.
 > recurrence editor isn't shown at all — these providers don't store task
 > recurrence.
 
+Not every chore repeats on a fixed calendar day — some come back **when
+they're needed** and should reappear in the **backlog** as a reminder rather
+than landing on a date. The recurrence editor has two extra choices for this:
+
+- **Next instance** — *Schedule on a day* (the classic behaviour) or
+  *Resurface in the backlog*, where the next turn is undated and simply shows
+  up in the backlog again.
+- **Counts from** — *From the task's date* (advance from the due date, as
+  before) or *From completion* (advance from the day you actually finished it).
+
+With *Resurface in the backlog* you can set the interval to **0** — *straight
+back into the backlog on completion*. You can also give one or more **Fixed
+dates** (month + day); these drive the schedule instead of the
+daily/weekly/monthly interval. Two examples:
+
+- **Empty the dishwasher** — *Counts from: From completion*, *Next instance:
+  Resurface in the backlog*, interval **0**. Check it off and it's instantly
+  back in your backlog, ready for next time.
+- **Swap summer / winter shoes** — add the **Fixed dates** *1 April* and
+  *1 October* with *Resurface in the backlog*. It reappears around each date
+  every year instead of on a fixed interval.
+
+> **The "Upcoming (N)" group:** A backlog task set to resurface on a future
+> date doesn't clutter your active backlog until then — it waits in a
+> collapsed **Upcoming (N)** group at the bottom of the task view, next to
+> **Done**, with each task showing its resurface date (*"Resurfaces: …"*).
+> It's a regular tree row: reachable with the arrow keys, `Enter`/`Space` (or
+> Right/Left arrow) expands or collapses it, and the open/closed state is
+> remembered. Want a waiting task back sooner? Right-click it (or
+> `Shift+F10`) and choose **Bring to backlog** to pull it into the active
+> backlog now. A future resurface date is a gentle reminder, not a deadline,
+> so it never triggers the "missed tasks" prompt.
+
+> **On-demand recurrence & providers:** *Resurface in the backlog*, *from
+> completion* and *fixed dates* aren't part of any provider's own recurrence,
+> so Aperio carries them itself and **creates the next instance for you on
+> every list** — a provider can't. On a **shared plain-text list** (Vikunja,
+> Todoist, Google Tasks) the extra data rides a small **managed block**
+> appended to the task's description, marked *"⚙ Aperio · please don't edit"*:
+> leave it untouched — Aperio strips it back out so your description stays
+> clean. On **CalDAV, Exchange and Microsoft To Do** it rides an invisible
+> custom property instead, so nothing shows in the description at all.
+
 ## Members and assignments
 
 For shared lists (e.g. Todoist) you can:

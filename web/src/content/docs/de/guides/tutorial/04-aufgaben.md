@@ -164,6 +164,53 @@ Aperio automatisch die nächste Fälligkeit.
 > Wiederholungs-Editor **gar nicht** angezeigt – diese Anbieter speichern
 > keine Aufgaben-Wiederholung.
 
+Nicht jede Aufgabe wiederholt sich an einem festen Kalendertag – manche
+kommen **bei Bedarf** zurück und sollen als Erinnerung wieder im **Backlog**
+auftauchen, statt auf einen Tag gelegt zu werden. Der Wiederholungs-Editor
+hat dafür zwei zusätzliche Optionen:
+
+- **Nächste Instanz** – *Auf einen Tag einplanen* (das bisherige Verhalten)
+  oder *Im Backlog auftauchen*: die nächste Runde ist ohne Datum und erscheint
+  einfach wieder im Backlog.
+- **Zählt ab** – *Ab dem Aufgaben-Datum* (ab der Fälligkeit, wie bisher) oder
+  *Ab dem Abschluss* (ab dem Tag, an dem du sie tatsächlich erledigt hast).
+
+Bei *Im Backlog auftauchen* kannst du das Intervall auf **0** setzen – *sofort
+wieder im Backlog nach dem Abhaken*. Außerdem kannst du eine oder mehrere
+**Feste Termine** (Monat + Tag) angeben; sie bestimmen das Auftauchen statt
+des täglichen/wöchentlichen/monatlichen Intervalls. Zwei Beispiele:
+
+- **Geschirrspüler ausräumen** – *Zählt ab: Ab dem Abschluss*, *Nächste
+  Instanz: Im Backlog auftauchen*, Intervall **0**. Hakst du sie ab, liegt sie
+  sofort wieder im Backlog, bereit fürs nächste Mal.
+- **Schuhe Sommer/Winter tauschen** – trag die **Feste Termine** *1. April*
+  und *1. Oktober* mit *Im Backlog auftauchen* ein. Sie taucht jedes Jahr um
+  diese Termine herum wieder auf, statt nach festem Intervall.
+
+> **Die Gruppe „Zukünftig (N)":** Eine Backlog-Aufgabe, die erst zu einem
+> künftigen Datum auftauchen soll, verstopft bis dahin nicht deinen aktiven
+> Backlog – sie wartet in einer eingeklappten Gruppe **Zukünftig (N)** ganz
+> unten in der Aufgaben-Ansicht, neben **Erledigt**, und zeigt je Aufgabe ihr
+> Auftauch-Datum (*„Taucht auf: …"*). Sie ist eine normale Zeile der
+> Baumansicht: mit den Pfeiltasten erreichbar, `Eingabe`/`Leertaste` (oder
+> Pfeil-rechts/-links) klappt sie auf bzw. zu, und der Auf-/Zu-Zustand wird
+> gemerkt. Du brauchst eine wartende Aufgabe früher? Rechtsklick (oder
+> `Umschalt+F10`) und **Ins Backlog holen** zieht sie sofort in den aktiven
+> Backlog. Ein künftiges Auftauch-Datum ist eine sanfte Erinnerung, keine
+> Deadline – es löst deshalb nie den Hinweis auf „verpasste Aufgaben" aus.
+
+> **Bedarfs-Wiederholung & Anbieter:** *Im Backlog auftauchen*, *ab dem
+> Abschluss* und *feste Termine* gehören zu keiner anbietereigenen
+> Wiederholung, also trägt Aperio sie selbst – und **erzeugt die nächste
+> Instanz für dich auf jeder Liste**, denn ein Anbieter kann das nicht. Auf
+> einer **geteilten Klartext-Liste** (Vikunja, Todoist, Google Tasks) reist
+> die Zusatzinfo in einem kleinen **verwalteten Block** am Ende der
+> Beschreibung mit, gekennzeichnet mit *„⚙ Aperio · bitte nicht bearbeiten"*:
+> Lass ihn unangetastet – Aperio entfernt ihn beim Lesen wieder, sodass deine
+> Beschreibung sauber bleibt. Bei **CalDAV, Exchange und Microsoft To Do**
+> reist sie stattdessen in einer unsichtbaren benutzerdefinierten Eigenschaft
+> mit, sodass in der Beschreibung gar nichts erscheint.
+
 ## Mitglieder und Zuweisungen
 
 Bei geteilten Listen (z. B. Todoist) kannst du:
