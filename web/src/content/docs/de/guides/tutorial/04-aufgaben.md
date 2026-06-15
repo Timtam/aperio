@@ -85,12 +85,16 @@ deinen Tag oder deine Woche ein und arbeitest sie ab.
 > Abschnitt" landet eine Vikunja-Aufgabe im Standard-Bucket, da Vikunja
 > jede Kanban-Aufgabe in einem Bucket führt.
 
-> **Wo Abschnitte erscheinen:** In der **Aufgaben-Ansicht** erscheinen
-> Abschnitte als Unter-Überschriften unter ihrer Liste — auch innerhalb der
-> **Backlog**-Gruppe, sodass die Buckets einer Liste (z. B. *To-Do / Doing /
-> Done* eines Vikunja-Projekts) auch ohne eingeplanten Tag sichtbar sind. Ein
-> Abschnitt ist nur eine Gruppierung; der **Status** einer Aufgabe (offen /
-> erledigt) ist unabhängig davon, in welchem Abschnitt sie liegt.
+> **Wo Abschnitte erscheinen:** In der **Aufgaben-Ansicht** erscheinen Liste
+> und Abschnitt als **eigene, anspringbare Zeilen** der Baumansicht
+> (Backlog → Liste → Abschnitt) — auch innerhalb der **Backlog**-Gruppe,
+> sodass die Buckets einer Liste (z. B. *To-Do / Doing / Done* eines
+> Vikunja-Projekts) auch ohne eingeplanten Tag sichtbar sind. Jede
+> Gruppenzeile ist mit den Pfeiltasten erreichbar; `Eingabe`/`Leertaste`
+> (oder Pfeil-rechts/-links) klappt sie auf bzw. zu — genau wie die
+> **Erledigt**-Gruppe oder eine Aufgabe mit Unteraufgaben. Ein Abschnitt ist
+> nur eine Gruppierung; der **Status** einer Aufgabe (offen / erledigt) ist
+> unabhängig davon, in welchem Abschnitt sie liegt.
 
 > **Per Maus (Drag & Drop):** Du kannst eine Aufgabe auch auf einen
 > **Abschnitts-Kopf** (in der Aufgaben-Ansicht) oder auf eine **Liste in
@@ -151,8 +155,12 @@ Bei geteilten Listen (z. B. Todoist) kannst du:
 > **Screenreader-Hinweis:** Aufgaben werden mit Titel, Status (erledigt /
 > offen), Fälligkeit und Priorität angesagt. Eine **hohe** Priorität zeigt
 > zusätzlich ein „↑", eine **niedrige** ein „↓"; die mittlere Priorität
-> (Standard) zeigt nichts. Das Abhaken über die `Leertaste` wird sofort als
-> „erledigt" bzw. „offen" rückgemeldet, ohne dass sich der Fokus bewegt.
+> (Standard) zeigt nichts. **Liste und Abschnitt** werden nicht mehr im
+> Aufgaben-Label wiederholt, sondern ergeben sich aus den übergeordneten
+> **Gruppenzeilen** (Backlog → Liste → Abschnitt), die du beim Navigieren mit
+> den Pfeiltasten durchläufst und mit `Eingabe`/`Leertaste` auf- und zuklappst.
+> Das Abhaken über die `Leertaste` wird sofort als „erledigt" bzw. „offen"
+> rückgemeldet, ohne dass sich der Fokus bewegt.
 
 ## Zusammenfassung
 

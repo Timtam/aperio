@@ -73,15 +73,6 @@ export function TaskView() {
   const { colorLabels, sectionsByList, loadSections, sectionColorById } =
     useCalendarStore();
   const labelById = useMemo(() => labelsLookup(colorLabels), [colorLabels]);
-  // Section id → name, for the accessible task label (which section a
-  // task sits in), flattened across all loaded lists.
-  const sectionNameById = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const list of Object.values(sectionsByList)) {
-      for (const s of list) m.set(s.id, s.name);
-    }
-    return m;
-  }, [sectionsByList]);
 
   // Pull sections for every list that currently has tasks. The fetch
   // is cached + cheap (section-less backends return [] via the trait
@@ -379,15 +370,34 @@ export function TaskView() {
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      // The synthetic "Done (N)" group is a collapsible header, not a
-      // task: Enter / Space toggle it; navigation + Arrow expand/collapse
-      // fall through to the normal tree handling below; every task-only
-      // shortcut (duplicate / move / plan / delete / context menu) is
-      // inert so it never acts on a phantom task.
-      if (flatTasks[focusIndex]?.id === DONE_GROUP_ID) {
+      // Group headers (Backlog, a list, a section, the synthetic "Done (N)"
+      // group) are collapsible tree rows, not tasks: Enter / Space toggle
+      // them; a section header additionally opens its ⋮ menu via the menu
+      // key; navigation + Arrow expand/collapse fall through to the normal
+      // tree handling below; every task-only shortcut (duplicate / move /
+      // plan / delete / task context menu) is inert so it never acts on a
+      // phantom task.
+      const focusedEntry = focusedTaskEntry(entries, focusIndex);
+      if (focusedEntry?.group) {
+        const grp = focusedEntry.group;
         if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
           e.preventDefault();
-          toggleCollapsed(DONE_GROUP_ID);
+          toggleCollapsed(focusedEntry.task.id);
+          return;
+        }
+        if (
+          grp.section &&
+          (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey))
+        ) {
+          e.preventDefault();
+          const node = (
+            e.currentTarget as HTMLElement
+          ).ownerDocument?.getElementById(itemId(focusIndex));
+          const rect = node?.getBoundingClientRect();
+          void openSectionMenu(
+            grp.section,
+            rect ? { x: rect.left, y: rect.bottom } : undefined,
+          );
           return;
         }
         const isNav =
@@ -531,12 +541,185 @@ export function TaskView() {
       announce,
       t,
       openTaskMenu,
+      openSectionMenu,
       itemId,
       entries,
       collapsed,
       toggleCollapsed,
     ],
   );
+
+  // Shared context for the recursive task-row renderer.
+  const renderCtx = {
+    t,
+    fmt,
+    entries,
+    tasks,
+    taskListById,
+    labelById,
+    sectionColorById,
+    collapsed,
+    toggleCollapsed,
+    focusIndex,
+    setFocusIndex,
+    toggleStatus,
+    openTaskDialog,
+    openTaskMenu,
+    itemId,
+  };
+
+  // Dispatch a row. A real task delegates to renderTreeItem (which renders
+  // its own subtask subtree); a group header (Backlog / list / section /
+  // Done) renders here as a collapsible treeitem — defined in the component
+  // so it keeps the colour + ⋮ + drop-target closures the old visual header
+  // had, while now being a real, arrow-reachable tree node.
+  function renderNode(entry: Entry): React.ReactNode {
+    if (!entry.group) {
+      return renderTreeItem(entry, renderCtx);
+    }
+    const idx = entries.indexOf(entry);
+    const children: Entry[] = [];
+    for (let i = idx + 1; i < entries.length; i++) {
+      const e = entries[i];
+      if (e.depth <= entry.depth) break;
+      if (e.depth === entry.depth + 1) children.push(e);
+    }
+    return renderGroupHeader(entry, children);
+  }
+
+  function renderGroupHeader(entry: Entry, children: Entry[]): React.ReactNode {
+    const meta = entry.group!;
+    const id = entry.task.id;
+    const focused = entry.index === focusIndex;
+    const isCollapsed = collapsed.has(id);
+    const section = meta.section;
+    const sectionHex = meta.sectionId
+      ? sectionColorById.get(meta.sectionId)
+      : undefined;
+    const sectionManageable = section
+      ? (taskListById.get(section.list_id)?.task_capabilities
+          ?.manageable_sections ?? false)
+      : false;
+    const sectionActionable =
+      !!section && (sectionManageable || colorLabels.length > 0);
+    return (
+      <li
+        key={id}
+        id={itemId(entry.index)}
+        role="treeitem"
+        aria-selected={focused}
+        aria-label={entry.task.title}
+        aria-level={entry.depth + 1}
+        aria-expanded={entry.hasChildren ? !isCollapsed : undefined}
+        className={
+          'task-list__item task-list__group-row' +
+          ` task-list__group-row--${meta.kind}` +
+          (focused ? ' task-list__item--focused' : '') +
+          (sectionHex ? ' task-list__group-row--colored' : '') +
+          (section && dragOverSectionId === section.id
+            ? ' task-list__group-row--drop-active'
+            : '')
+        }
+        style={
+          {
+            '--task-depth': entry.depth,
+            ...(sectionHex ? { '--event-color': sectionHex } : {}),
+          } as React.CSSProperties
+        }
+        onClick={(ev) => {
+          // The header toggles its own group; clicks that land on a child row
+          // or the ⋮ button have their own handlers and must not also collapse.
+          const target = ev.target as HTMLElement;
+          if (
+            target.closest('.task-list__group-children') ||
+            target.closest('.task-list__section-menu')
+          ) {
+            return;
+          }
+          setFocusIndex(entry.index);
+          toggleCollapsed(id);
+        }}
+        onContextMenu={
+          sectionActionable && section
+            ? (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setFocusIndex(entry.index);
+                void openSectionMenu(section, { x: e.clientX, y: e.clientY });
+              }
+            : undefined
+        }
+        onDragOver={
+          section
+            ? (e) => {
+                if (!e.dataTransfer.types.includes(TASK_DND_TYPE)) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                if (dragOverSectionId !== section.id) {
+                  setDragOverSectionId(section.id);
+                }
+              }
+            : undefined
+        }
+        onDragLeave={
+          section
+            ? () =>
+                setDragOverSectionId((cur) =>
+                  cur === section.id ? null : cur,
+                )
+            : undefined
+        }
+        onDrop={
+          section
+            ? (e) => void dropTaskOnSection(section.id, section.list_id, e)
+            : undefined
+        }
+      >
+        <span className="task-list__group-twisty" aria-hidden="true">
+          {entry.hasChildren ? (isCollapsed ? '▸' : '▾') : ''}
+        </span>
+        {sectionHex && (
+          <span className="task-list__group-swatch" aria-hidden="true" />
+        )}
+        <span className="task-list__group-label">{entry.task.title}</span>
+        {sectionActionable && section && (
+          <button
+            type="button"
+            className="task-list__section-menu"
+            aria-label={t('views.tasks.sectionActions', {
+              name: section.name,
+            })}
+            onClick={(e) => {
+              e.stopPropagation();
+              const rect = e.currentTarget.getBoundingClientRect();
+              void openSectionMenu(section, { x: rect.left, y: rect.bottom });
+            }}
+            onKeyDown={(e) => {
+              if (
+                e.key === 'ContextMenu' ||
+                (e.key === 'F10' && e.shiftKey)
+              ) {
+                e.preventDefault();
+                e.stopPropagation();
+                const rect = e.currentTarget.getBoundingClientRect();
+                void openSectionMenu(section, {
+                  x: rect.left,
+                  y: rect.bottom,
+                });
+              }
+            }}
+          >
+            ⋮
+          </button>
+        )}
+        {entry.hasChildren && !isCollapsed && (
+          <ul role="group" className="task-list__group-children">
+            {children.map((child) => renderNode(child))}
+          </ul>
+        )}
+      </li>
+    );
+  }
 
   return (
     <section className="view view--tasks" aria-label={t('views.tasks.title')}>
@@ -576,199 +759,10 @@ export function TaskView() {
             {t('views.tasks.empty')}
           </li>
         )}
-        {renderForest(
-          entries
-            .map((entry, i): ForestItem | null => {
-          if (entry.kind === 'separator') {
-            // A real section sub-header (Vikunja bucket / Todoist section)
-            // carries a sectionId — that's what gets the section styling,
-            // colour tint and the ⋮ actions. Plain group headers (Backlog, a
-            // list name) carry none. Indentation is driven by `level` so the
-            // backlog's nested list (1) and section (2) headers step in.
-            const isSection = entry.sectionId != null;
-            const level = entry.level ?? 0;
-            // A colored section tints its header (decorative — the
-            // section name carries the meaning; the color also cascades
-            // to the section's colorless task chips below).
-            const sectionHex = entry.sectionId
-              ? sectionColorById.get(entry.sectionId)
-              : undefined;
-            // The color action is offered for any section (a section's
-            // color is a local concept — synced field for local lists, a
-            // local override for external ones), so it doesn't depend on
-            // the account. The header then becomes interactive (a menu
-            // button + right-click target), so it can't stay aria-hidden.
-            const section =
-              entry.sectionId && entry.listId
-                ? sectionsByList[entry.listId]?.find(
-                    (s) => s.id === entry.sectionId,
-                  )
-                : undefined;
-            // The header becomes interactive when there's any section
-            // action to offer: colour (wherever labels exist) or — on
-            // provider-manageable lists — add / rename / delete. Once
-            // interactive it can't stay aria-hidden.
-            const sectionManageable = section
-              ? (taskListById.get(section.list_id)?.task_capabilities
-                  ?.manageable_sections ?? false)
-              : false;
-            const sectionActionable =
-              !!section && (sectionManageable || colorLabels.length > 0);
-            return {
-              kind: 'sep' as const,
-              level,
-              label: entry.label,
-              node: (
-                <li
-                key={`sep-${i}-${entry.label}`}
-                role="presentation"
-                aria-hidden={sectionActionable ? undefined : true}
-                className={
-                  'task-list__group' +
-                  (level >= 1 ? ' task-list__group--nested' : '') +
-                  (isSection ? ' task-list__group--section' : '') +
-                  (sectionHex ? ' task-list__group--colored' : '') +
-                  (section && dragOverSectionId === section.id
-                    ? ' task-list__group--drop-active'
-                    : '')
-                }
-                style={
-                  {
-                    ...(level > 0
-                      ? {
-                          '--group-indent': `calc(var(--space-3) * ${level})`,
-                        }
-                      : {}),
-                    ...(sectionHex ? { '--event-color': sectionHex } : {}),
-                  } as React.CSSProperties
-                }
-                onContextMenu={
-                  sectionActionable && section
-                    ? (e) => {
-                        e.preventDefault();
-                        void openSectionMenu(section, {
-                          x: e.clientX,
-                          y: e.clientY,
-                        });
-                      }
-                    : undefined
-                }
-                onDragOver={
-                  section
-                    ? (e) => {
-                        if (
-                          !e.dataTransfer.types.includes(TASK_DND_TYPE)
-                        ) {
-                          return;
-                        }
-                        // A task is over a section header → valid drop.
-                        e.preventDefault();
-                        e.dataTransfer.dropEffect = 'move';
-                        if (dragOverSectionId !== section.id) {
-                          setDragOverSectionId(section.id);
-                        }
-                      }
-                    : undefined
-                }
-                onDragLeave={
-                  section
-                    ? () =>
-                        setDragOverSectionId((cur) =>
-                          cur === section.id ? null : cur,
-                        )
-                    : undefined
-                }
-                onDrop={
-                  section
-                    ? (e) =>
-                        void dropTaskOnSection(
-                          section.id,
-                          section.list_id,
-                          e,
-                        )
-                    : undefined
-                }
-              >
-                {sectionHex && (
-                  <span
-                    className="task-list__group-swatch"
-                    aria-hidden="true"
-                  />
-                )}
-                {entry.label}
-                {sectionActionable && section && (
-                  <button
-                    type="button"
-                    className="task-list__section-menu"
-                    aria-label={t('views.tasks.sectionActions', {
-                      name: section.name,
-                    })}
-                    onClick={(e) => {
-                      const rect = e.currentTarget.getBoundingClientRect();
-                      void openSectionMenu(section, {
-                        x: rect.left,
-                        y: rect.bottom,
-                      });
-                    }}
-                    onKeyDown={(e) => {
-                      // Menu key / Shift+F10 open the section menu from the
-                      // focused ⋮ button. stopPropagation so the keystroke
-                      // doesn't bubble to the tree's handler, which would
-                      // otherwise open the *task* menu for the focused row.
-                      // (Enter/Space already activate onClick natively.)
-                      if (
-                        e.key === 'ContextMenu' ||
-                        (e.key === 'F10' && e.shiftKey)
-                      ) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        const rect = e.currentTarget.getBoundingClientRect();
-                        void openSectionMenu(section, {
-                          x: rect.left,
-                          y: rect.bottom,
-                        });
-                      }
-                    }}
-                  >
-                    ⋮
-                  </button>
-                )}
-              </li>
-              ),
-            };
-          }
-          // Children are rendered by their parent's recursive call
-          // (the parent emits a <ul role="group"> below). The
-          // top-level iteration only handles depth-0 tasks plus the
-          // separator headings between them.
+        {entries.map((entry) => {
           if (entry.depth > 0) return null;
-          return {
-            kind:
-              entry.task.id === DONE_GROUP_ID
-                ? ('done' as const)
-                : ('task' as const),
-            node: renderTreeItem(entry, {
-            t,
-            fmt,
-            entries,
-            tasks,
-            taskListById,
-            labelById,
-            sectionColorById,
-            sectionNameById,
-            collapsed,
-            toggleCollapsed,
-            focusIndex,
-            setFocusIndex,
-            toggleStatus,
-            openTaskDialog,
-            openTaskMenu,
-            itemId,
-            }),
-          };
-        })
-          .filter((it): it is ForestItem => it !== null)
-        )}
+          return renderNode(entry);
+        })}
       </ul>
 
       <ConfirmDialog
@@ -800,71 +794,6 @@ export function TaskView() {
   );
 }
 
-/** One render unit for {@link renderForest}: a visual group header, or an
- *  already-rendered task / done-group row. */
-type ForestItem =
-  | { kind: 'sep'; level: number; label: string; node: React.ReactNode }
-  | { kind: 'task' | 'done'; node: React.ReactNode };
-
-/**
- * Wrap the flat, level-tagged render units into nested `role="group"`
- * containers so a screen reader hears the list / section a task belongs to
- * as a group (announced on entry) rather than only as a label suffix. The
- * visual headers and the keyboard model (aria-activedescendant over the flat
- * task order) are unchanged — the groups are an accessibility overlay.
- *
- * A separator opens a group at its `level`; a deeper-or-equal separator
- * closes the open ones first, so Backlog → list → section nests correctly.
- * The synthetic "Done" row has no separator and sits at the root, so it
- * closes every open group.
- */
-function renderForest(items: ForestItem[]): React.ReactNode {
-  interface Frame {
-    level: number;
-    label: string;
-    nodes: React.ReactNode[];
-    key: string;
-  }
-  const root: React.ReactNode[] = [];
-  const stack: Frame[] = [];
-  let gid = 0;
-  const peek = () => (stack.length ? stack[stack.length - 1].nodes : root);
-  const closeTo = (level: number) => {
-    while (stack.length && stack[stack.length - 1].level >= level) {
-      const frame = stack.pop()!;
-      peek().push(
-        <ul
-          key={frame.key}
-          role="group"
-          aria-label={frame.label}
-          className="task-list__group-children"
-        >
-          {frame.nodes}
-        </ul>,
-      );
-    }
-  };
-  for (const item of items) {
-    if (item.kind === 'sep') {
-      closeTo(item.level);
-      peek().push(item.node);
-      stack.push({
-        level: item.level,
-        label: item.label,
-        nodes: [],
-        key: `grp-${gid++}`,
-      });
-    } else if (item.kind === 'done') {
-      closeTo(0);
-      root.push(item.node);
-    } else {
-      peek().push(item.node);
-    }
-  }
-  closeTo(0);
-  return root;
-}
-
 /**
  * Render context for the recursive `renderTreeItem` walker. All
  * the data + callbacks the tree needs travel as a single object so
@@ -880,7 +809,6 @@ interface RenderTreeCtx {
   taskListById: Map<string, import('../../api/types').TaskList>;
   labelById: Map<string, import('../../api/types').ColorLabel>;
   sectionColorById: Map<string, string>;
-  sectionNameById: Map<string, string>;
   collapsed: Set<string>;
   toggleCollapsed: (id: string) => void;
   focusIndex: number;
@@ -909,7 +837,6 @@ function renderTreeItem(
     taskListById,
     labelById,
     sectionColorById,
-    sectionNameById,
     collapsed,
     toggleCollapsed,
     focusIndex,
@@ -919,7 +846,7 @@ function renderTreeItem(
     openTaskMenu,
     itemId,
   } = ctx;
-  const { task, listName, index, depth, hasChildren } = entry;
+  const { task, index, depth, hasChildren } = entry;
   const focused = index === focusIndex;
   const isCollapsed = collapsed.has(task.id);
   // Direct children (depth+1, same parent_id) — discovered via the
@@ -931,79 +858,24 @@ function renderTreeItem(
   const myIdx = entries.indexOf(entry);
   for (let i = myIdx + 1; i < entries.length; i++) {
     const e = entries[i];
-    if (e.kind === 'separator') break;
     if (e.depth <= depth) break;
     if (e.depth === depth + 1) children.push(e);
-  }
-
-  // The synthetic "Done (N)" group is a collapsible parent treeitem with
-  // no status / due / checkbox — activating the row (click, or Enter /
-  // Space / Arrow handled by the tree's keydown) only toggles expansion.
-  // Modelling it as a treeitem (rather than a foreign <button>) keeps it
-  // reachable by arrow keys and operable without hijacking the focused
-  // task's Space/Enter action.
-  if (task.id === DONE_GROUP_ID) {
-    return (
-      <li
-        key={task.id}
-        id={itemId(index)}
-        role="treeitem"
-        aria-selected={focused}
-        aria-label={task.title}
-        aria-level={depth + 1}
-        aria-expanded={!isCollapsed}
-        className={
-          'task-list__item task-list__item--done-group' +
-          (focused ? ' task-list__item--focused' : '')
-        }
-        onClick={(ev) => {
-          // Only the header toggles — a click that lands on a completed
-          // child row (which has its own onClick) must not also collapse
-          // the group.
-          if (
-            (ev.target as HTMLElement).closest('.task-list__group-children')
-          ) {
-            return;
-          }
-          setFocusIndex(index);
-          toggleCollapsed(task.id);
-        }}
-      >
-        <span className="task-list__done-chevron" aria-hidden="true">
-          {isCollapsed ? '▸' : '▾'}
-        </span>
-        <span className="task-list__done-label">{task.title}</span>
-        {!isCollapsed && (
-          <ul role="group" className="task-list__group-children">
-            {children.map((child) => renderTreeItem(child, ctx))}
-          </ul>
-        )}
-      </li>
-    );
   }
 
   const due = describeDue(task, fmt, t);
   const color = resolveTaskColor(task, taskListById, labelById, sectionColorById);
   const marker = statusMarker(task.status);
   const priorityGlyph = priorityMarker(task.priority);
-  const stateLabel = t(statusI18nKey(task.status));
   const progress = subtaskProgress(task.id, tasks);
-  // The section a task sits in is part of its grouping, so name it in the
-  // accessible label (like the list) — otherwise a screen-reader user
-  // navigating by arrow keys can't tell which section a task belongs to
-  // (the section header separators are decorative + skipped in nav).
-  const sectionName = task.section_id
-    ? sectionNameById.get(task.section_id)
-    : undefined;
+  // The list and section a task sits in are now conveyed structurally by
+  // the surrounding group-header treeitems (a screen-reader user lands on
+  // "Backlog → Inbox → To Do" before reaching the task), so the row's own
+  // label no longer repeats them.
   const aria = t('views.tasks.optionLabel', {
     title: task.title,
-    list: listName,
-    state: stateLabel,
+    state: t(statusI18nKey(task.status)),
     priority: prioritySuffix(t, task.priority),
     progress: subtaskProgressSuffix(t, task.id, tasks),
-    section: sectionName
-      ? t('views.tasks.optionSectionSuffix', { name: sectionName })
-      : '',
     due,
   });
   return (
@@ -1011,15 +883,11 @@ function renderTreeItem(
       key={task.id}
       id={itemId(index)}
       role="treeitem"
-      draggable={task.id !== DONE_GROUP_ID}
-      onDragStart={
-        task.id === DONE_GROUP_ID
-          ? undefined
-          : (e) => {
-              const childRows = tasks.filter((c) => c.parent_id === task.id);
-              setTaskDrag(e.dataTransfer, task, childRows);
-            }
-      }
+      draggable
+      onDragStart={(e) => {
+        const childRows = tasks.filter((c) => c.parent_id === task.id);
+        setTaskDrag(e.dataTransfer, task, childRows);
+      }}
       aria-selected={focused}
       aria-label={aria}
       aria-level={depth + 1}

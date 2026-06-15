@@ -1,40 +1,96 @@
 import type { Section, Task } from '../../api/types';
 import { priorityRank } from '../../intl/taskStatus';
 
-/** Sentinel id of the synthetic "Done (N)" parent row. It behaves like a
- *  collapsible parent treeitem whose children are the completed tasks, so
- *  it reuses the tree's keyboard model (Arrow/Enter/Space) instead of
- *  being a foreign tab-stop. The TaskView special-cases this id. */
+/** Sentinel id of the synthetic "Done (N)" group row. */
 export const DONE_GROUP_ID = '__aperio_done_group__';
+/** Sentinel id of the synthetic "Backlog" group row. */
+export const BACKLOG_GROUP_ID = '__aperio_backlog_group__';
 
-/** One row in the flattened task tree the TaskView renders. */
-export type Entry =
+/** Metadata carried by a group-header row (Backlog / a list / a section /
+ *  the synthetic Done group). When `group` is set on an {@link Entry}, the
+ *  row is a collapsible header rather than a real task. */
+export interface GroupMeta {
+  kind: 'backlog' | 'list' | 'section' | 'done';
+  /** Section row id — present only for `kind: 'section'`; lets the header
+   *  tint to the section colour and offer the ⋮ actions. */
+  sectionId?: string;
+  /** The owning list — present for list + section headers. */
+  listId?: string;
+  /** The section row itself (for the colour + ⋮ menu + drop target). */
+  section?: Section;
+}
+
+/**
+ * One row in the flattened task tree the TaskView renders. Every row is a
+ * `treeitem`: real tasks, plus the synthetic group headers (Backlog, each
+ * list, each section, the Done group) which carry {@link GroupMeta}. Headers
+ * being real tree rows is what lets a screen-reader user arrow onto them and
+ * hear "Backlog, level 1, collapsed" instead of the grouping living only in
+ * each task's label.
+ */
+export interface Entry {
+  kind: 'task';
+  task: Task;
+  listName: string;
+  /** Position in `flatTasks` — what `focusIndex` indexes into. */
+  index: number;
+  /** 0 for a top-level row, +1 per nesting level (drives aria-level + indent). */
+  depth: number;
+  /** Set when this row has at least one child row. */
+  hasChildren: boolean;
+  /** True when an ancestor row is collapsed (renderer skips it; the index
+   *  space stays stable so keyboard nav can clamp). */
+  hidden: boolean;
+  /** Present when this row is a group header rather than a real task. */
+  group?: GroupMeta;
+}
+
+/** Minimal synthetic Task standing in for a group header. Only its `id`
+ *  (collapse key + activedescendant target) and `parent_id` (Left-arrow
+ *  parent jump) matter — the render branches on `entry.group` before it
+ *  would read any task-shaped field. */
+function groupTask(
+  id: string,
+  title: string,
+  listId: string,
+  parentId: string | null,
+): Task {
+  return {
+    id,
+    list_id: listId,
+    title,
+    description: null,
+    status: 'open',
+    priority: 'medium',
+    scheduled_date: null,
+    scheduled_time: null,
+    deadline_date: null,
+    deadline_time: null,
+    recurrence: null,
+    parent_id: parentId,
+    section_id: null,
+    color_label: null,
+    reminders: [],
+    assignees: [],
+    sound: null,
+    created_at: '',
+    updated_at: '',
+    completed_at: null,
+    etag: null,
+  };
+}
+
+/** A node in the group forest built below: either a collapsible group header
+ *  or a real task (whose own subtasks are resolved at emit time). */
+type GNode =
   | {
-      kind: 'separator';
-      label: string;
-      level?: number;
-      /** Set on a *section* sub-header — carries the section id so the
-       *  header can tint to the section's color and offer a color
-       *  action. Absent on the backlog / list headers. */
-      sectionId?: string;
-      /** The list this section belongs to — lets the header gate its
-       *  color action to local lists (external sections are read-only). */
-      listId?: string;
+      t: 'group';
+      id: string;
+      title: string;
+      meta: GroupMeta;
+      children: GNode[];
     }
-  | {
-      kind: 'task';
-      task: Task;
-      listName: string;
-      /** Position in `flatTasks` — what `focusIndex` indexes into. */
-      index: number;
-      /** 0 for top-level, 1+ for nested under a parent. */
-      depth: number;
-      /** Set when this task has at least one child in the list. */
-      hasChildren: boolean;
-      /** True when the parent row above is collapsed (so the
-       *  caller knows to skip this child during rendering). */
-      hidden: boolean;
-    };
+  | { t: 'task'; task: Task };
 
 export function buildEntries(
   tasks: Task[],
@@ -43,10 +99,8 @@ export function buildEntries(
   collapsed: Set<string>,
   sectionsByList: Record<string, Section[]>,
 ): { entries: Entry[]; flatTasks: Task[] } {
-  // Bucket children under their parent so the depth-first walk
-  // below has O(1) lookup. Tasks whose parent_id points at a
-  // missing row become orphans — surface them at top level rather
-  // than swallowing them silently.
+  // Bucket children under their parent for O(1) subtask lookup. Tasks whose
+  // parent_id points at a missing row are orphans → surfaced at top level.
   const childrenByParent = new Map<string, Task[]>();
   const allIds = new Set<string>();
   tasks.forEach((task) => allIds.add(task.id));
@@ -61,11 +115,9 @@ export function buildEntries(
     }
   });
 
-  // Completed top-level tasks (with their whole subtree) leave the
-  // active groups and collapse into a single "Done (N)" footer — the
-  // active list shows only open work. A *completed subtask* under an
-  // open parent stays inline (struck-through, in context); only the
-  // top-level placement is diverted here.
+  // Completed top-level tasks (with their subtree) collapse into a single
+  // "Done (N)" group; the active groups show only open work. A completed
+  // *subtask* under an open parent stays inline.
   const doneTopLevel: Task[] = [];
   const openTopLevel: Task[] = [];
   topLevel.forEach((task) => {
@@ -73,24 +125,17 @@ export function buildEntries(
     else openTopLevel.push(task);
   });
 
-  // High priority floats to the top, low sinks to the bottom (medium in
-  // between). Sorting once here is enough: every downstream bucket — backlog,
-  // per-list, per-section, ungrouped — is filled by walking `openTopLevel` in
-  // order, and `Array.prototype.sort` is stable, so the existing order stays
-  // the tiebreaker within each priority band. (`doneTopLevel` keeps its own
-  // completed-at order.)
+  // High priority floats up, low sinks. Stable sort keeps existing order as
+  // the tiebreaker within a band. Every downstream bucket is filled by
+  // walking `openTopLevel` in order, so this one sort is enough.
   openTopLevel.sort(
     (a, b) => priorityRank(a.priority) - priorityRank(b.priority),
   );
 
-  // Two top-level buckets for the OPEN tasks: backlog (no dates at all)
-  // and the per-list groups. Children inherit their parent's bucket so
-  // a subtask of a backlog task lives under it, not somewhere else.
+  // Backlog (no planned work day) vs the per-list groups (scheduled).
   const backlog: Task[] = [];
   const byList = new Map<string, Task[]>();
   openTopLevel.forEach((task) => {
-    // Backlog = no planned WORK day. A deadline-only task stays here (so it
-    // can be scheduled onto a day) while also showing on its deadline day.
     if (!task.scheduled_date) {
       backlog.push(task);
       return;
@@ -100,59 +145,21 @@ export function buildEntries(
     byList.set(task.list_id, bucket);
   });
 
-  // Sort list groups by display name (stable, user-meaningful — the raw
-  // list ids are UUIDs for local lists). Shared by the scheduled groups and
-  // the backlog's per-list sub-grouping.
-  const byName = (a: string, b: string) =>
-    (taskListById.get(a)?.name ?? a).localeCompare(
-      taskListById.get(b)?.name ?? b,
-    );
-  const sortedLists = Array.from(byList.entries()).sort(([a], [b]) =>
-    byName(a, b),
-  );
+  const nameOf = (listId: string) => taskListById.get(listId)?.name ?? listId;
+  const byName = (a: string, b: string) => nameOf(a).localeCompare(nameOf(b));
 
-  const entries: Entry[] = [];
-  const flatTasks: Task[] = [];
-
-  // Depth-first emit. Hidden rows still join `flatTasks` so the
-  // index space stays stable across collapse — but the renderer
-  // skips them, and the keyboard nav effect clamps focus on
-  // collapse so the user never lands inside a hidden node.
-  const visit = (task: Task, depth: number, hidden: boolean) => {
-    const children = childrenByParent.get(task.id) ?? [];
-    const listName =
-      taskListById.get(task.list_id)?.name ?? task.list_id;
-    entries.push({
-      kind: 'task',
-      task,
-      listName,
-      index: flatTasks.length,
-      depth,
-      hasChildren: children.length > 0,
-      hidden,
-    });
-    flatTasks.push(task);
-    const childHidden = hidden || collapsed.has(task.id);
-    children.forEach((child) => visit(child, depth + 1, childHidden));
-  };
-
-  // Emit a list's tasks grouped by section, each section sub-header at
-  // `sectionLevel`. Ungrouped tasks (no/unknown section) lead with no header.
-  // Shared by the scheduled per-list groups and the backlog (nested one level
-  // deeper, under its per-list sub-headers).
-  const emitListSections = (
+  // A list's tasks → [ungrouped task nodes] + a section group node per
+  // non-empty section (in declared order). `idScope` keeps the synthetic
+  // section ids unique between a list's backlog and scheduled appearances.
+  const listChildren = (
     listId: string,
     items: Task[],
-    sectionLevel: number,
-  ) => {
+    idScope: string,
+  ): GNode[] => {
     const sections = sectionsByList[listId] ?? [];
     if (sections.length === 0) {
-      // Section-less backend (or not yet loaded) → flat under the list.
-      items.forEach((task) => visit(task, 0, false));
-      return;
+      return items.map((task) => ({ t: 'task', task }) as GNode);
     }
-    // Subtasks follow their parent via `visit`, so only top-level placement
-    // matters here.
     const sectionIds = new Set(sections.map((s) => s.id));
     const bySection = new Map<string, Task[]>();
     const ungrouped: Task[] = [];
@@ -165,76 +172,125 @@ export function buildEntries(
         ungrouped.push(task);
       }
     });
-    // Ungrouped tasks lead, with no sub-header (the fallback bucket).
-    ungrouped.forEach((task) => visit(task, 0, false));
-    // Then each non-empty section in its declared order, under a sub-header.
+    const out: GNode[] = ungrouped.map((task) => ({ t: 'task', task }) as GNode);
     [...sections]
       .sort((a, b) => a.order - b.order)
       .forEach((section) => {
         const secTasks = bySection.get(section.id);
         if (!secTasks || secTasks.length === 0) return;
-        entries.push({
-          kind: 'separator',
-          label: section.name,
-          level: sectionLevel,
-          sectionId: section.id,
-          listId,
+        out.push({
+          t: 'group',
+          id: `grp:sec:${idScope}:${section.id}`,
+          title: section.name,
+          meta: { kind: 'section', sectionId: section.id, listId, section },
+          children: secTasks.map((task) => ({ t: 'task', task }) as GNode),
         });
-        secTasks.forEach((task) => visit(task, 0, false));
       });
+    return out;
   };
 
+  const forest: GNode[] = [];
+
+  // Backlog → list → section. Grouping the backlog (not just the scheduled
+  // tasks) is what makes e.g. a Vikunja project's buckets visible even when
+  // nothing is scheduled.
   if (backlog.length > 0) {
-    entries.push({ kind: 'separator', label: t('views.tasks.backlog') });
-    // Group the backlog by list → section too, so a list's sections (e.g. a
-    // Vikunja project's To-Do / Doing / Done buckets) appear as groups even
-    // when nothing is scheduled. Nested one level deeper than the scheduled
-    // groups: Backlog (0) → list (1) → section (2).
     const backlogByList = new Map<string, Task[]>();
     backlog.forEach((task) => {
       const arr = backlogByList.get(task.list_id) ?? [];
       arr.push(task);
       backlogByList.set(task.list_id, arr);
     });
-    Array.from(backlogByList.entries())
+    const listNodes: GNode[] = Array.from(backlogByList.entries())
       .sort(([a], [b]) => byName(a, b))
-      .forEach(([listId, items]) => {
-        const name = taskListById.get(listId)?.name ?? listId;
-        entries.push({ kind: 'separator', label: name, level: 1 });
-        emitListSections(listId, items, 2);
-      });
+      .map(([listId, items]) => ({
+        t: 'group',
+        id: `grp:bl:list:${listId}`,
+        title: nameOf(listId),
+        meta: { kind: 'list', listId },
+        children: listChildren(listId, items, `bl:${listId}`),
+      }));
+    forest.push({
+      t: 'group',
+      id: BACKLOG_GROUP_ID,
+      title: t('views.tasks.backlog'),
+      meta: { kind: 'backlog' },
+      children: listNodes,
+    });
   }
 
-  sortedLists.forEach(([listId, items]) => {
-    const name = taskListById.get(listId)?.name ?? listId;
-    entries.push({ kind: 'separator', label: name });
-    emitListSections(listId, items, 1);
-  });
+  // Scheduled per-list groups, sorted by list name.
+  Array.from(byList.entries())
+    .sort(([a], [b]) => byName(a, b))
+    .forEach(([listId, items]) => {
+      forest.push({
+        t: 'group',
+        id: `grp:sc:list:${listId}`,
+        title: nameOf(listId),
+        meta: { kind: 'list', listId },
+        children: listChildren(listId, items, `sc:${listId}`),
+      });
+    });
 
-  // "Done (N)" footer group — a single collapsible bucket for every
-  // completed top-level task across all lists, most-recently-completed
-  // first. Modelled as a *synthetic parent treeitem* (sentinel id) whose
-  // children are the done tasks, so it slots straight into the tree's
-  // keyboard model: Arrow navigates to it, Arrow-Right / Enter / Space
-  // expand it, and its rows hide/show through the same `collapsed` set as
-  // any subtree. Collapsed-by-default lives in that set (the caller seeds
-  // it), keeping completed tasks out of the active list.
+  // Done group last, most-recently-completed first.
   if (doneTopLevel.length > 0) {
     doneTopLevel.sort((a, b) =>
       (b.completed_at ?? '').localeCompare(a.completed_at ?? ''),
     );
-    // Re-parent the done tasks under the synthetic group so `visit`
-    // emits them as its depth-1 children. Their own subtasks still nest
-    // beneath them via the existing `childrenByParent` lookup.
-    childrenByParent.set(DONE_GROUP_ID, doneTopLevel);
-    const groupHeader: Task = {
-      ...doneTopLevel[0],
+    forest.push({
+      t: 'group',
       id: DONE_GROUP_ID,
-      parent_id: null,
       title: t('views.tasks.done', { count: doneTopLevel.length }),
-    };
-    visit(groupHeader, 0, false);
+      meta: { kind: 'done' },
+      children: doneTopLevel.map((task) => ({ t: 'task', task }) as GNode),
+    });
   }
+
+  // Depth-first emit. Hidden rows still join `flatTasks` so the index space
+  // stays stable across collapse; the renderer skips them.
+  const entries: Entry[] = [];
+  const flatTasks: Task[] = [];
+
+  const emitTask = (task: Task, depth: number, hidden: boolean) => {
+    const subtasks = childrenByParent.get(task.id) ?? [];
+    entries.push({
+      kind: 'task',
+      task,
+      listName: nameOf(task.list_id),
+      index: flatTasks.length,
+      depth,
+      hasChildren: subtasks.length > 0,
+      hidden,
+    });
+    flatTasks.push(task);
+    const childHidden = hidden || collapsed.has(task.id);
+    subtasks.forEach((child) => emitTask(child, depth + 1, childHidden));
+  };
+
+  const emitNode = (node: GNode, depth: number, hidden: boolean, parentId: string | null) => {
+    if (node.t === 'task') {
+      emitTask(node.task, depth, hidden);
+      return;
+    }
+    const synthetic = groupTask(node.id, node.title, node.meta.listId ?? '', parentId);
+    entries.push({
+      kind: 'task',
+      task: synthetic,
+      listName: '',
+      index: flatTasks.length,
+      depth,
+      hasChildren: node.children.length > 0,
+      hidden,
+      group: node.meta,
+    });
+    flatTasks.push(synthetic);
+    const childHidden = hidden || collapsed.has(node.id);
+    node.children.forEach((child) =>
+      emitNode(child, depth + 1, childHidden, node.id),
+    );
+  };
+
+  forest.forEach((root) => emitNode(root, 0, false, null));
 
   return { entries, flatTasks };
 }

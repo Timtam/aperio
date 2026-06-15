@@ -3328,55 +3328,6 @@ button[aria-disabled='true'] {
   text-align: center;
 }
 
-.task-list__group {
-  margin-top: var(--space-3);
-  font-size: var(--font-size-sm);
-  font-weight: 600;
-  color: var(--color-fg-muted);
-  border-bottom: 1px solid var(--color-border);
-  padding-bottom: var(--space-1);
-  /* Indent scales with nesting depth (set inline per `level`): scheduled
-     sections + the backlog's list / section sub-headers step in. */
-  padding-left: var(--group-indent, 0);
-}
-
-.task-list__group:first-child {
-  margin-top: 0;
-}
-
-/* Any nested group header (level >= 1): a list under Backlog, or a section
-   under a list. Sits closer under its parent than a top-level group. */
-.task-list__group--nested {
-  margin-top: var(--space-2);
-}
-
-/* Section sub-header within a list group (Vikunja bucket / Todoist
-   section). Indented + lighter than the list head so it reads as a
-   child grouping rather than a peer. */
-.task-list__group--section {
-  margin-top: var(--space-2);
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-size: var(--font-size-xs, 0.75rem);
-  border-bottom-style: dashed;
-}
-
-/* A colored section header: a small swatch + a left accent in the
-   section's color. The color also cascades to the section's colorless
-   task chips below; the header tint is the (decorative) cue that the
-   section carries a color. */
-.task-list__group--colored {
-  border-left: 3px solid var(--event-color, var(--color-accent));
-}
-
-/* A section header while a task is being dragged over it (drop target). */
-.task-list__group--drop-active {
-  outline: 2px dashed var(--color-accent);
-  outline-offset: -2px;
-  background: var(--color-surface-hover, rgba(127, 127, 127, 0.12));
-}
-
 /* Backlog rail — a collapsible bottom panel in the week/month planner that
    lists unscheduled tasks. Drag a chip onto a day to schedule it; drop a
    scheduled task back onto the rail to send it to the backlog. */
@@ -3533,45 +3484,6 @@ button[aria-disabled='true'] {
   outline-offset: 1px;
 }
 
-/* The synthetic "Done (N)" group row: a collapsible parent treeitem that
-   reads as a group heading. It opts out of the task row's 5-column grid
-   (no checkbox / due columns) and lays its chevron + label inline, with
-   the completed-task children wrapping to a full-width block below. Extra
-   top margin sets it apart from the active lists above. */
-.task-list__item--done-group {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-1);
-  margin-top: var(--space-4, 1.25rem);
-  font-weight: 600;
-  color: var(--color-fg-muted);
-  cursor: pointer;
-}
-
-.task-list__item--done-group:hover {
-  color: var(--color-fg);
-}
-
-.task-list__done-chevron {
-  display: inline-block;
-  width: 1em;
-  font-size: 0.85em;
-}
-
-.task-list__done-label {
-  flex: 1;
-}
-
-/* The completed children sit on their own full-width row and aren't part
-   of the header's toggle affordance. */
-.task-list__item--done-group > .task-list__group-children {
-  flex-basis: 100%;
-  cursor: default;
-  font-weight: 400;
-  color: var(--color-fg);
-}
-
 .task-list__item {
   /* Five columns: twisty (or spacer) / check / title / progress
    * badge / due. The twisty column is fixed-width so rows with and
@@ -3586,6 +3498,83 @@ button[aria-disabled='true'] {
   padding: var(--space-1) var(--space-2);
   padding-left: calc(var(--space-2) + var(--task-depth, 0) * 20px);
   border-bottom: 1px solid var(--color-border);
+}
+
+/* Group-header rows (Backlog / a list / a section / the synthetic "Done"
+   group). Each is a collapsible `role="treeitem"` — a real, arrow-reachable
+   tree node — so it overrides the task row's 5-column grid and lays its
+   twisty + label (+ optional swatch / ⋮ menu) out inline, with the child
+   rows wrapping to a full-width block below. Defined after `.task-list__item`
+   so the flex layout wins over its grid on equal specificity. The depth
+   indent still comes from `.task-list__item`'s --task-depth padding. */
+.task-list__group-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  font-weight: 600;
+  color: var(--color-fg-muted);
+  cursor: pointer;
+}
+
+.task-list__group-row:hover {
+  color: var(--color-fg);
+}
+
+/* Top-level groups read as distinct sections, so give them room above. */
+.task-list__group-row--backlog,
+.task-list__group-row--list {
+  margin-top: var(--space-3);
+}
+
+.task-list__group-row--done {
+  margin-top: var(--space-4, 1.25rem);
+}
+
+.task-list__group-row:first-child {
+  margin-top: 0;
+}
+
+/* Section sub-headers (Vikunja bucket / Todoist section): lighter +
+   uppercase so they read as a child grouping under their list, not a peer. */
+.task-list__group-row--section {
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: var(--font-size-xs, 0.75rem);
+}
+
+/* A colored section header: left accent in the section's color (the same
+   color cascades to the section's colorless task chips below). */
+.task-list__group-row--colored {
+  border-left: 3px solid var(--event-color, var(--color-accent));
+}
+
+/* A section header while a task is dragged over it (drop target). */
+.task-list__group-row--drop-active {
+  outline: 2px dashed var(--color-accent);
+  outline-offset: -2px;
+  background: var(--color-surface-hover, rgba(127, 127, 127, 0.12));
+}
+
+.task-list__group-twisty {
+  display: inline-block;
+  width: 1em;
+  font-size: 0.85em;
+  color: var(--color-fg-muted);
+}
+
+.task-list__group-label {
+  flex: 1;
+}
+
+/* The child rows sit on their own full-width line and aren't part of the
+   header's toggle affordance — they carry their own row chrome + handlers. */
+.task-list__group-row > .task-list__group-children {
+  flex-basis: 100%;
+  cursor: default;
+  font-weight: 400;
+  color: var(--color-fg);
 }
 
 .task-list__progress {

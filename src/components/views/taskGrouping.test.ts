@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Section, Task } from '../../api/types';
-import { buildEntries, DONE_GROUP_ID } from './taskGrouping';
+import { buildEntries, DONE_GROUP_ID, type Entry } from './taskGrouping';
 
 const t = (key: string) => key;
 
@@ -42,15 +42,27 @@ const section = (id: string, name: string, order: number): Section => ({
 
 const listById = new Map([['L1', { name: 'Inbox' }]]);
 
-/** Labels of the separator (group-header) entries, in order. */
-function separators(
+/**
+ * Group-header rows (Backlog / a list / a section / the Done group), in
+ * DFS order. Headers are now real tree rows — `kind: 'task'` entries that
+ * carry {@link Entry.group} meta — so a screen-reader user can arrow onto
+ * them; `depth` doubles as the old separator "level".
+ */
+function headers(
   result: ReturnType<typeof buildEntries>,
-): { label: string; level: number }[] {
+): { label: string; level: number; kind: string }[] {
   return result.entries
-    .filter((e): e is Extract<typeof e, { kind: 'separator' }> =>
-      e.kind === 'separator',
-    )
-    .map((e) => ({ label: e.label, level: e.level ?? 0 }));
+    .filter((e) => e.group)
+    .map((e) => ({
+      label: e.task.title,
+      level: e.depth,
+      kind: e.group!.kind,
+    }));
+}
+
+/** Real-task rows (everything that is not a group header), in DFS order. */
+function taskRows(result: ReturnType<typeof buildEntries>): Entry[] {
+  return result.entries.filter((e) => !e.group);
 }
 
 describe('buildEntries section grouping', () => {
@@ -64,20 +76,17 @@ describe('buildEntries section grouping', () => {
       L1: [section('s1', 'To Do', 1), section('s2', 'Doing', 2)],
     });
 
-    // List head (level 0), then the section sub-headers in order. No
+    // List head (depth 0), then the section sub-headers in order. No
     // sub-header precedes the ungrouped task — it just follows the list
-    // head.
-    expect(separators(result)).toEqual([
-      { label: 'Inbox', level: 0 },
-      { label: 'To Do', level: 1 },
-      { label: 'Doing', level: 1 },
+    // head, one level in.
+    expect(headers(result)).toEqual([
+      { label: 'Inbox', level: 0, kind: 'list' },
+      { label: 'To Do', level: 1, kind: 'section' },
+      { label: 'Doing', level: 1, kind: 'section' },
     ]);
 
     // Task order: ungrouped (c), then s1 (b), then s2 (a).
-    const taskIds = result.entries
-      .filter((e): e is Extract<typeof e, { kind: 'task' }> => e.kind === 'task')
-      .map((e) => e.task.id);
-    expect(taskIds).toEqual(['c', 'b', 'a']);
+    expect(taskRows(result).map((e) => e.task.id)).toEqual(['c', 'b', 'a']);
   });
 
   it('omits headers for empty sections', () => {
@@ -85,40 +94,52 @@ describe('buildEntries section grouping', () => {
     const result = buildEntries(tasks, listById, t, new Set(), {
       L1: [section('s1', 'To Do', 1), section('s2', 'Empty', 2)],
     });
-    expect(separators(result).map((s) => s.label)).toEqual(['Inbox', 'To Do']);
+    expect(headers(result).map((h) => h.label)).toEqual(['Inbox', 'To Do']);
   });
 
-  it('renders flat (no section headers) when the list has no sections', () => {
+  it('renders flat (just the list head) when the list has no sections', () => {
     const tasks = [
       baseTask({ id: 'a', section_id: 's1' }),
       baseTask({ id: 'b' }),
     ];
     const result = buildEntries(tasks, listById, t, new Set(), {});
     // Only the list head — section_id is ignored when no sections exist.
-    expect(separators(result)).toEqual([{ label: 'Inbox', level: 0 }]);
+    expect(headers(result)).toEqual([
+      { label: 'Inbox', level: 0, kind: 'list' },
+    ]);
+    expect(taskRows(result).map((e) => e.task.id)).toEqual(['a', 'b']);
   });
 
   it('collects completed top-level tasks under a synthetic Done parent', () => {
     const tasks = [
       baseTask({ id: 'open', status: 'open' }),
-      baseTask({ id: 'done1', status: 'completed', completed_at: '2026-05-20T10:00:00Z' }),
-      baseTask({ id: 'done2', status: 'completed', completed_at: '2026-05-21T10:00:00Z' }),
+      baseTask({
+        id: 'done1',
+        status: 'completed',
+        completed_at: '2026-05-20T10:00:00Z',
+      }),
+      baseTask({
+        id: 'done2',
+        status: 'completed',
+        completed_at: '2026-05-21T10:00:00Z',
+      }),
     ];
     // Expanded: DONE_GROUP_ID is NOT in the collapsed set.
     const expanded = buildEntries(tasks, listById, t, new Set(), {});
-    const taskEntries = expanded.entries.filter(
-      (e): e is Extract<typeof e, { kind: 'task' }> => e.kind === 'task',
-    );
-    // Open task (depth 0), then the synthetic group parent (depth 0),
-    // then its two completed children (depth 1), most-recent first.
-    expect(taskEntries.map((e) => [e.task.id, e.depth, e.hidden])).toEqual([
-      ['open', 0, false],
-      [DONE_GROUP_ID, 0, false],
+    const done = expanded.entries.find((e) => e.task.id === DONE_GROUP_ID)!;
+    expect(done.group?.kind).toBe('done');
+    expect(done.depth).toBe(0);
+    expect(done.hasChildren).toBe(true);
+    // Completed children sit under the Done header (depth 1), most recent
+    // first, and are visible while the group is expanded.
+    expect(
+      expanded.entries
+        .filter((e) => e.task.id.startsWith('done'))
+        .map((e) => [e.task.id, e.depth, e.hidden]),
+    ).toEqual([
       ['done2', 1, false],
       ['done1', 1, false],
     ]);
-    const group = taskEntries.find((e) => e.task.id === DONE_GROUP_ID)!;
-    expect(group.hasChildren).toBe(true);
 
     // Collapsed: DONE_GROUP_ID in the set → the children are hidden but
     // the parent header stays visible (stable index space + keyboard nav).
@@ -129,14 +150,11 @@ describe('buildEntries section grouping', () => {
       new Set([DONE_GROUP_ID]),
       {},
     );
-    const collapsedTasks = collapsed.entries.filter(
-      (e): e is Extract<typeof e, { kind: 'task' }> => e.kind === 'task',
-    );
     expect(
-      collapsedTasks.find((e) => e.task.id === DONE_GROUP_ID)?.hidden,
+      collapsed.entries.find((e) => e.task.id === DONE_GROUP_ID)?.hidden,
     ).toBe(false);
     expect(
-      collapsedTasks
+      collapsed.entries
         .filter((e) => e.task.id.startsWith('done'))
         .every((e) => e.hidden),
     ).toBe(true);
@@ -148,25 +166,24 @@ describe('buildEntries section grouping', () => {
       baseTask({ id: 'child', parent_id: 'parent', status: 'completed' }),
     ];
     const result = buildEntries(tasks, listById, t, new Set(), {});
-    const ids = result.entries
-      .filter((e): e is Extract<typeof e, { kind: 'task' }> => e.kind === 'task')
-      .map((e) => e.task.id);
     // No Done group — the only completed task is a subtask, which stays
     // under its parent rather than being hoisted.
-    expect(ids).toEqual(['parent', 'child']);
-    expect(ids).not.toContain(DONE_GROUP_ID);
+    expect(result.entries.some((e) => e.task.id === DONE_GROUP_ID)).toBe(false);
+    expect(taskRows(result).map((e) => e.task.id)).toEqual(['parent', 'child']);
   });
 
   it('omits a list header when the list has only completed tasks', () => {
     const tasks = [baseTask({ id: 'done', status: 'completed' })];
     const result = buildEntries(tasks, listById, t, new Set(), {});
-    // No "Inbox" list separator — its only task is in the Done group,
-    // which is itself a parent task-row, not a separator heading.
-    expect(separators(result).map((s) => s.label)).toEqual([]);
-    const ids = result.entries
-      .filter((e): e is Extract<typeof e, { kind: 'task' }> => e.kind === 'task')
-      .map((e) => e.task.id);
-    expect(ids).toEqual([DONE_GROUP_ID, 'done']);
+    // No list / section header — its only task is in the Done group. The
+    // Done header itself is the sole heading.
+    expect(headers(result)).toEqual([
+      { label: 'views.tasks.done', level: 0, kind: 'done' },
+    ]);
+    expect(result.entries.map((e) => e.task.id)).toEqual([
+      DONE_GROUP_ID,
+      'done',
+    ]);
   });
 
   it('keeps a subtask under its parent regardless of section', () => {
@@ -177,17 +194,17 @@ describe('buildEntries section grouping', () => {
     const result = buildEntries(tasks, listById, t, new Set(), {
       L1: [section('s1', 'To Do', 1)],
     });
-    const taskEntries = result.entries.filter(
-      (e): e is Extract<typeof e, { kind: 'task' }> => e.kind === 'task',
-    );
-    // Child follows its parent depth-first and is indented (depth 1),
-    // not hoisted into the ungrouped bucket.
-    expect(taskEntries.map((e) => e.task.id)).toEqual(['parent', 'child']);
-    expect(taskEntries.find((e) => e.task.id === 'child')!.depth).toBe(1);
+    const rows = taskRows(result);
+    // Child follows its parent depth-first and is indented one level
+    // deeper, not hoisted into the ungrouped bucket.
+    expect(rows.map((e) => e.task.id)).toEqual(['parent', 'child']);
+    const parent = rows.find((e) => e.task.id === 'parent')!;
+    const child = rows.find((e) => e.task.id === 'child')!;
+    expect(child.depth).toBe(parent.depth + 1);
   });
 
   it('groups the backlog by list (1) then section (2)', () => {
-    // Unscheduled tasks land in the backlog; it now sub-groups by list and
+    // Unscheduled tasks land in the backlog; it sub-groups by list and
     // section so e.g. Vikunja buckets show even without a scheduled day.
     const tasks = [
       baseTask({ id: 'a', scheduled_date: null, section_id: 's1' }),
@@ -196,24 +213,39 @@ describe('buildEntries section grouping', () => {
     const result = buildEntries(tasks, listById, t, new Set(), {
       L1: [section('s1', 'To Do', 1)],
     });
-    expect(separators(result)).toEqual([
-      { label: 'views.tasks.backlog', level: 0 },
-      { label: 'Inbox', level: 1 },
-      { label: 'To Do', level: 2 },
+    expect(headers(result)).toEqual([
+      { label: 'views.tasks.backlog', level: 0, kind: 'backlog' },
+      { label: 'Inbox', level: 1, kind: 'list' },
+      { label: 'To Do', level: 2, kind: 'section' },
     ]);
     // Ungrouped (b) leads, then the section task (a).
-    const ids = result.entries
-      .filter((e): e is Extract<typeof e, { kind: 'task' }> => e.kind === 'task')
-      .map((e) => e.task.id);
-    expect(ids).toEqual(['b', 'a']);
+    expect(taskRows(result).map((e) => e.task.id)).toEqual(['b', 'a']);
   });
 
   it('shows a backlog list sub-header even when the list has no sections', () => {
     const tasks = [baseTask({ id: 'a', scheduled_date: null })];
     const result = buildEntries(tasks, listById, t, new Set(), {});
-    expect(separators(result)).toEqual([
-      { label: 'views.tasks.backlog', level: 0 },
-      { label: 'Inbox', level: 1 },
+    expect(headers(result)).toEqual([
+      { label: 'views.tasks.backlog', level: 0, kind: 'backlog' },
+      { label: 'Inbox', level: 1, kind: 'list' },
     ]);
+  });
+
+  it('makes every row navigable (flatTasks aligns with entries)', () => {
+    // Group headers are real tree rows: each entry has a matching
+    // flatTasks slot at its own index, so arrow-key nav reaches headers
+    // and tasks alike.
+    const tasks = [
+      baseTask({ id: 'a', scheduled_date: null, section_id: 's1' }),
+    ];
+    const result = buildEntries(tasks, listById, t, new Set(), {
+      L1: [section('s1', 'To Do', 1)],
+    });
+    expect(result.flatTasks).toHaveLength(result.entries.length);
+    result.entries.forEach((e) => {
+      expect(result.flatTasks[e.index].id).toBe(e.task.id);
+    });
+    // Backlog → Inbox → To Do → task a : four navigable rows.
+    expect(result.flatTasks).toHaveLength(4);
   });
 });

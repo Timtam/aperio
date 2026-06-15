@@ -77,10 +77,13 @@ your day or week, and work through them.
 > into the default bucket, since Vikunja keeps every kanban task in a
 > bucket.
 
-> **Where sections show:** In the **task view**, sections appear as
-> sub-headings under their list — including inside the **Backlog** group, so
-> a list's buckets (e.g. a Vikunja project's *To-Do / Doing / Done*) are
-> visible even when nothing is scheduled. A section is only a grouping; a
+> **Where sections show:** In the **task view**, the list and section appear
+> as their **own, focusable rows** in the tree (Backlog → list → section) —
+> including inside the **Backlog** group, so a list's buckets (e.g. a Vikunja
+> project's *To-Do / Doing / Done*) are visible even when nothing is
+> scheduled. Each group row is reachable with the arrow keys;
+> `Enter`/`Space` (or Right/Left arrow) expands or collapses it — just like
+> the **Done** group or a task with subtasks. A section is only a grouping; a
 > task's **status** (open / done) is independent of which section it's in.
 
 > **With the mouse (drag & drop):** You can also drag a task onto a
@@ -135,9 +138,12 @@ For shared lists (e.g. Todoist) you can:
 
 > **Screen-reader note:** Tasks are announced with title, status (done /
 > open), due date and priority. **High** priority also shows a "↑", **low**
-> a "↓"; medium priority (the default) shows nothing. Checking off with
-> `Space` is reported immediately as "done" or "open", without moving the
-> focus.
+> a "↓"; medium priority (the default) shows nothing. The **list and
+> section** are no longer repeated in each task's label — they come from the
+> surrounding **group rows** (Backlog → list → section) you pass through as
+> you arrow down, expanding or collapsing them with `Enter`/`Space`. Checking
+> off with `Space` is reported immediately as "done" or "open", without
+> moving the focus.
 
 ## Summary
 
