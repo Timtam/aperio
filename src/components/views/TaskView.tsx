@@ -461,24 +461,19 @@ export function TaskView() {
           return;
         }
         case 'ArrowLeft': {
-          // Left on an expanded parent collapses it; on a child
-          // jumps to the parent. Lets the user dismiss a noisy
-          // sub-tree with one keystroke.
+          // Left on an expanded parent collapses it; on a leaf / collapsed
+          // row jumps to the tree parent — a subtask's parent task, or the
+          // group header (section / list / Backlog) the row sits under.
+          // The parent is resolved by depth, not parent_id, so a top-level
+          // task under a header (parent_id === null) still climbs to it.
+          // Root-level rows (depth 0) have no parent and stay put.
           e.preventDefault();
           const focused = focusedTaskEntry(entries, focusIndex);
-          if (
-            focused?.hasChildren &&
-            !collapsed.has(focused.task.id)
-          ) {
+          if (focused?.hasChildren && !collapsed.has(focused.task.id)) {
             toggleCollapsed(focused.task.id);
-          } else if (focused && focused.task.parent_id) {
-            const parentIdx = entries
-              .filter(
-                (e): e is Extract<Entry, { kind: 'task' }> =>
-                  e.kind === 'task',
-              )
-              .find((e) => e.task.id === focused.task.parent_id)?.index;
-            if (parentIdx !== undefined) setFocusIndex(parentIdx);
+          } else if (focused && focused.depth > 0) {
+            const parent = parentEntry(entries, focused);
+            if (parent) setFocusIndex(parent.index);
           }
           return;
         }
@@ -1021,14 +1016,26 @@ function saveDoneCollapsed(value: boolean): void {
   }
 }
 
-/** Find the task entry at flat-task position `index`, ignoring
- *  separators and respecting the index/entries decoupling. */
-function focusedTaskEntry(
-  entries: Entry[],
-  index: number,
-): Extract<Entry, { kind: 'task' }> | null {
+/** Find the row at flat-task position `index` (respecting the
+ *  index/entries decoupling). Every row — real task or group header — is a
+ *  navigable entry, so this resolves both. */
+function focusedTaskEntry(entries: Entry[], index: number): Entry | null {
   for (const e of entries) {
-    if (e.kind === 'task' && e.index === index) return e;
+    if (e.index === index) return e;
+  }
+  return null;
+}
+
+/** The tree parent of `entry`: the nearest preceding row (DFS order) one
+ *  depth shallower. Unlike `parent_id` — which links a subtask to its parent
+ *  *task* only — this resolves the structural parent for every row: a task
+ *  under a section / list / Backlog header, or a header under another header.
+ *  Returns null at the root level (depth 0 has no parent). `entry.index` is
+ *  its own position in `entries` (entries + flatTasks grow in lockstep), so
+ *  we scan back from it without an identity-based lookup. */
+function parentEntry(entries: Entry[], entry: Entry): Entry | null {
+  for (let i = entry.index - 1; i >= 0; i--) {
+    if (entries[i].depth === entry.depth - 1) return entries[i];
   }
   return null;
 }

@@ -231,6 +231,39 @@ describe('buildEntries section grouping', () => {
     ]);
   });
 
+  it('emits a depth-1 structural parent before every nested row', () => {
+    // The ArrowLeft "jump to parent" navigation relies on this DFS
+    // invariant: every row below the root is preceded by a row exactly one
+    // level shallower — its tree parent, be it a group header or a parent
+    // task. Resolving the parent by depth (not parent_id) is what lets a
+    // top-level task under a header climb to that header.
+    const tasks = [
+      baseTask({ id: 'p', scheduled_date: null, section_id: 's1' }),
+      baseTask({
+        id: 'c',
+        parent_id: 'p',
+        scheduled_date: null,
+        section_id: null,
+      }),
+    ];
+    const result = buildEntries(tasks, listById, t, new Set(), {
+      L1: [section('s1', 'To Do', 1)],
+    });
+    // Backlog(0) → Inbox(1) → To Do(2) → p(3) → c(4): a strictly nested chain.
+    expect(result.entries.map((e) => e.depth)).toEqual([0, 1, 2, 3, 4]);
+    result.entries.forEach((entry, idx) => {
+      if (entry.depth === 0) return;
+      let parent: (typeof result.entries)[number] | null = null;
+      for (let i = idx - 1; i >= 0; i--) {
+        if (result.entries[i].depth === entry.depth - 1) {
+          parent = result.entries[i];
+          break;
+        }
+      }
+      expect(parent, `${entry.task.id} (depth ${entry.depth})`).not.toBeNull();
+    });
+  });
+
   it('makes every row navigable (flatTasks aligns with entries)', () => {
     // Group headers are real tree rows: each entry has a matching
     // flatTasks slot at its own index, so arrow-key nav reaches headers
