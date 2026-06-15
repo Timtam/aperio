@@ -12,6 +12,7 @@
   "tasks": {
     "subtasks": true,
     "max_subtask_depth": 1,
+    "supports_in_progress": false,
     "create_lists": true,
     "delete_lists": true
   }

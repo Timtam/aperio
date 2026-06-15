@@ -22,6 +22,7 @@ const DEFAULT_CAPS: TaskCapabilities = {
   manageable_sections: false,
   multiple_labels: false,
   task_recurrence: true,
+  supports_in_progress: true,
   move_between_projects: true,
   create_lists: false,
   delete_lists: false,
@@ -49,6 +50,15 @@ export function canMoveTaskBetweenLists(
  *  Todoist section)? Gated on the list's `sections` capability. */
 export function canAssignSection(list: TaskList | undefined): boolean {
   return capabilitiesOf(list).sections;
+}
+
+/** Does `list`'s adapter store the "in progress" status as a distinct
+ *  state? Backends with only open/done (Google Tasks, Vikunja, Todoist)
+ *  report false — an in_progress write reads back as open. Used to skip
+ *  the auto-schedule-to-today that a "started" task would otherwise get,
+ *  since a status that can't stick shouldn't move the date. */
+export function canStoreInProgress(list: TaskList | undefined): boolean {
+  return capabilitiesOf(list).supports_in_progress;
 }
 
 /** Can `list` host nested child projects / be reparented at all?

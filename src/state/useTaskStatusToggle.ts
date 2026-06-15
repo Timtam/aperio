@@ -7,6 +7,7 @@ import { todayIsoKey } from '../intl/taskDay';
 import { useDialogState } from './dialogStateContext';
 import { planStatusCascade, type StatusWrite } from './taskCascade';
 import { useTaskCascadeEnabled } from './taskCascadeContext';
+import { canStoreInProgress } from './taskMoves';
 import { useTasks } from './useTasks';
 import type { Task, TaskStatus } from '../api/types';
 
@@ -44,8 +45,10 @@ export function useTaskStatusActions(): TaskStatusActions {
   const { invalidateData } = useDialogState();
   // The cascade planner needs the latest snapshot of every task so
   // it can walk parents and siblings. `useTasks` returns the global
-  // store, refreshed whenever `dataVersion` bumps.
-  const { tasks } = useTasks();
+  // store, refreshed whenever `dataVersion` bumps. `taskListById` lets
+  // us read the owning list's capabilities (e.g. whether it can store
+  // the in_progress status at all).
+  const { tasks, taskListById } = useTasks();
   // Honour two Settings → Tasks knobs PER LIST:
   //   - `cascade` (cascade-status-coupling): when off the planner
   //     degrades to a single-row write.
@@ -64,6 +67,13 @@ export function useTaskStatusActions(): TaskStatusActions {
     async (task: Task, nextStatus: TaskStatus): Promise<void> => {
       if (task.status === nextStatus) return;
       const { cascade, autoDate } = effectiveForList(task.list_id);
+      // Skip the auto-pin when the owning provider can't store
+      // in_progress (Google Tasks / Vikunja / Todoist): the status
+      // reverts to open on the next read, so silently moving the date
+      // to today would be a surprise with nothing to show for it. The
+      // explicit scheduling paths (drag onto a day, the plan dialog)
+      // are untouched — they don't go through this cascade.
+      const inProgressSticks = canStoreInProgress(taskListById.get(task.list_id));
       const writes = planStatusCascade(task.id, nextStatus, tasks, {
         cascadeEnabled: cascade,
         // Auto-date: a dateless task transitioning into in_progress
@@ -73,7 +83,7 @@ export function useTaskStatusActions(): TaskStatusActions {
         // Settings → Tasks autoDate toggle — when off we omit
         // `todayKey` and the planner stops emitting the companion
         // scheduledDate field.
-        ...(autoDate ? { todayKey: todayIsoKey() } : {}),
+        ...(autoDate && inProgressSticks ? { todayKey: todayIsoKey() } : {}),
       });
       if (writes.length === 0) return;
       try {
@@ -96,14 +106,22 @@ export function useTaskStatusActions(): TaskStatusActions {
         console.warn('update_task failed', err);
       }
     },
-    [announce, t, invalidateData, tasks, effectiveForList],
+    [announce, t, invalidateData, tasks, taskListById, effectiveForList],
   );
 
   const toggle = useCallback(
     async (task: Task): Promise<void> => {
       const nextStatus: TaskStatus =
         checkoffMode === 'cycle'
-          ? nextCycleStatus(task.status)
+          ? // Skip the in_progress step on providers that can't store it
+            // (Google Tasks / Vikunja / Todoist): it would revert to open
+            // on read-back, trapping the cycle at open so a check-off could
+            // never reach completed. There the cycle is open → completed →
+            // open.
+            nextCycleStatus(
+              task.status,
+              canStoreInProgress(taskListById.get(task.list_id)),
+            )
           : // Default: flip between open and completed (anything not
             // already completed — open / in_progress / cancelled — becomes
             // completed; completed goes back to open).
@@ -112,7 +130,7 @@ export function useTaskStatusActions(): TaskStatusActions {
             : 'completed';
       await set(task, nextStatus);
     },
-    [set, checkoffMode],
+    [set, checkoffMode, taskListById],
   );
 
   return useMemo(() => ({ toggle, set }), [toggle, set]);
@@ -133,11 +151,19 @@ export function useTaskStatusToggle(): (task: Task) => Promise<void> {
  * Three-state check-off cycle (Settings → Tasks → check-off mode = cycle):
  * `open → in_progress → completed → open`. A cancelled task re-enters the
  * cycle at `open` so a check-off un-cancels it rather than dead-ending.
+ *
+ * `canInProgress` (default `true`) drops the in_progress step for providers
+ * that can't store it (Google Tasks / Vikunja / Todoist) — there the cycle
+ * is `open → completed → open`, so a check-off isn't trapped at open by a
+ * status that reverts on the next read.
  */
-export function nextCycleStatus(current: TaskStatus): TaskStatus {
+export function nextCycleStatus(
+  current: TaskStatus,
+  canInProgress = true,
+): TaskStatus {
   switch (current) {
     case 'open':
-      return 'in_progress';
+      return canInProgress ? 'in_progress' : 'completed';
     case 'in_progress':
       return 'completed';
     case 'completed':

@@ -44,6 +44,20 @@ deinen Tag oder deine Woche ein und arbeitest sie ab.
 > *Mittel*. Lokale Listen, Apple Erinnerungen / CalDAV, Exchange, Microsoft
 > To Do, Vikunja und Todoist behalten sie.
 
+> **„In Arbeit" & Anbieter:** Den Status **In Arbeit** speichern nur Anbieter
+> mit einem echten Zwischenstatus: **lokale** Listen, **Apple Erinnerungen /
+> CalDAV** (`IN-PROCESS`), **Exchange** und **Microsoft To Do**. **Google
+> Tasks, Vikunja und Todoist** kennen nur *offen / erledigt* – setzt du dort
+> eine Aufgabe auf *In Arbeit*, fällt sie beim nächsten Abgleich wieder auf
+> *Offen* zurück. Bei diesen Anbietern unterbleibt deshalb auch das
+> automatische **Einplanen auf heute**, das eine begonnene Aufgabe sonst
+> auslöst (sie ließe sich ja gar nicht als „begonnen" merken). Das **manuelle**
+> Einplanen – eine Aufgabe aus dem Backlog auf einen Tag ziehen oder per
+> Plan-Dialog (`Umschalt+D`) ein Datum setzen – funktioniert unverändert. Im
+> **Status-Zyklus** (siehe *Abhaken-Verhalten*) überspringt das Abhaken bei
+> diesen Anbietern den Schritt *In Arbeit*: der Zyklus läuft *Offen →
+> Erledigt → Offen*, damit die `Leertaste` nicht bei *Offen* hängen bleibt.
+
 > **Abhaken-Verhalten:** Standardmäßig wechselt das Abhaken zwischen *offen*
 > und *abgeschlossen*. Unter **Einstellungen → Aufgaben → Abhaken-Verhalten**
 > kannst du stattdessen einen Status-Zyklus wählen: Jedes Abhaken durchläuft

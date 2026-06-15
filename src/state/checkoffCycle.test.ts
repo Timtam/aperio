@@ -21,4 +21,14 @@ describe('nextCycleStatus (three-state check-off)', () => {
     s = nextCycleStatus(s); // open
     expect(s).toBe('open');
   });
+
+  it('skips in_progress when the provider cannot store it', () => {
+    // Google Tasks / Vikunja / Todoist: open → completed → open, so a
+    // check-off is never trapped at open by an in_progress that reverts.
+    expect(nextCycleStatus('open', false)).toBe('completed');
+    expect(nextCycleStatus('completed', false)).toBe('open');
+    // A task already in_progress (e.g. left over from a capable provider
+    // or a stale snapshot) still advances to completed.
+    expect(nextCycleStatus('in_progress', false)).toBe('completed');
+  });
 });

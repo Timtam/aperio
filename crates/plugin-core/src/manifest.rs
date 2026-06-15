@@ -183,6 +183,15 @@ pub struct TaskCapabilities {
     /// Tasks support a recurrence rule.
     #[serde(default = "yes")]
     pub task_recurrence: bool,
+    /// The source can store the "in progress" status as a distinct state.
+    /// Backends with only open/done (Google Tasks, Vikunja, Todoist) set
+    /// this `false`: an `in_progress` write collapses to `open` on
+    /// read-back, so the UI skips the auto-schedule-to-today a "started"
+    /// task would otherwise trigger (a status that can't stick shouldn't
+    /// move the date). Defaults `true` — cal-core-native: local, CalDAV,
+    /// Exchange and Microsoft To Do all keep it.
+    #[serde(default = "yes")]
+    pub supports_in_progress: bool,
     /// A task can be moved to a different container. Todoist defers
     /// cross-project moves, so it sets this `false`.
     #[serde(default = "yes")]
@@ -221,6 +230,7 @@ impl Default for TaskCapabilities {
             manageable_sections: false,
             multiple_labels: false,
             task_recurrence: true,
+            supports_in_progress: true,
             move_between_projects: true,
             create_lists: false,
             delete_lists: false,

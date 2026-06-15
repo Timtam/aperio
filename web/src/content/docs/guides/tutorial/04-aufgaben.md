@@ -40,6 +40,19 @@ your day or week, and work through them.
 > after the next sync. Local lists, Apple Reminders / CalDAV, Exchange,
 > Microsoft To Do, Vikunja and Todoist all keep it.
 
+> **"In progress" & providers:** Only providers with a real intermediate
+> status store **In progress**: **local** lists, **Apple Reminders / CalDAV**
+> (`IN-PROCESS`), **Exchange** and **Microsoft To Do**. **Google Tasks,
+> Vikunja and Todoist** only know *open / done* — setting a task there to
+> *In progress* falls back to *open* on the next sync. For those providers the
+> automatic **schedule-to-today** that a started task would otherwise trigger
+> is skipped too (it can't be remembered as "started" anyway). **Manual**
+> scheduling — dragging a backlog task onto a day, or setting a date via the
+> plan dialog (`Shift+D`) — still works exactly as before. In the **status
+> cycle** (see *Check-off behaviour*) the check-off skips the *In progress*
+> step for these providers: the cycle runs *open → completed → open*, so
+> `Space` isn't trapped at *open*.
+
 > **Check-off behaviour:** By default checking off flips between *open* and
 > *completed*. Under **Settings → Tasks → Check-off behaviour** you can switch
 > to a status cycle instead: each check-off steps *open → in progress →

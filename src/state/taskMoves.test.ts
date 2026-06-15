@@ -5,6 +5,7 @@ import {
   canAssignSection,
   canMoveTaskBetweenLists,
   canReparentList,
+  canStoreInProgress,
   createCapableAccounts,
   reparentCandidates,
   supportsNestedProjects,
@@ -57,6 +58,17 @@ describe('capability predicates', () => {
     expect(
       supportsNestedProjects(list('a', 'acc', null, { nested_projects: true })),
     ).toBe(true);
+  });
+
+  it('in-progress support defaults to true and respects the flag', () => {
+    // cal-core-native default (local / CalDAV / Exchange / Graph keep it)
+    expect(canStoreInProgress(list('a', 'acc'))).toBe(true);
+    // Backends with only open/done (Google Tasks / Vikunja / Todoist)
+    expect(
+      canStoreInProgress(
+        list('a', 'acc', null, { supports_in_progress: false }),
+      ),
+    ).toBe(false);
   });
 });
 

@@ -50,6 +50,12 @@ export interface TaskCapabilities {
   manageable_sections: boolean;
   multiple_labels: boolean;
   task_recurrence: boolean;
+  /** The source stores the "in progress" status as a distinct state.
+   *  Backends with only open/done (Google Tasks, Vikunja, Todoist) set
+   *  this false — an in_progress write reads back as open — so the UI
+   *  skips the auto-schedule-to-today a started task would trigger.
+   *  Absent → true (cal-core-native: local / CalDAV / Exchange / Graph). */
+  supports_in_progress: boolean;
   move_between_projects: boolean;
   /** The adapter can create new task lists (projects) at the source.
    *  The sidebar offers "new list in this account" only where true. */
