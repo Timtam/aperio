@@ -91,6 +91,7 @@ export default defineConfig({
               items: [
                 { label: 'Keyboard Shortcuts', translations: { de: 'Tastaturkürzel' }, slug: 'guides/tastaturkuerzel' },
                 { label: 'Accessibility', translations: { de: 'Barrierefreiheit' }, slug: 'guides/barrierefreiheit' },
+                { label: 'Troubleshooting & Logs', translations: { de: 'Fehlersuche & Protokolle' }, slug: 'guides/troubleshooting' },
                 { label: 'Connecting Google (OAuth guide)', translations: { de: 'Google einbinden (OAuth-Anleitung)' }, slug: 'guides/google-oauth' },
               ],
             },
