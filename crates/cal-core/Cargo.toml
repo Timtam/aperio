@@ -21,11 +21,14 @@ uuid.workspace = true
 # every adapter and the command-layer serialize / deserialize the
 # same way — no per-adapter base64 quirks.
 base64 = "0.22"
+# The Aperio-Extras codec (task::extras) serializes a forward-compatible
+# metadata bag to JSON before base64-ing it into a provider field, so
+# serde_json is a runtime dependency, not just a test one.
+serde_json.workspace = true
 
 [dev-dependencies]
-# Pins the JSON wire format of the RSVP enum (kebab-case) that the
-# FFI + TS types depend on.
-serde_json.workspace = true
+# (serde_json is now a regular dependency above — used by the extras
+# codec — so it no longer needs a separate dev-dependency entry.)
 
 [lints]
 workspace = true
