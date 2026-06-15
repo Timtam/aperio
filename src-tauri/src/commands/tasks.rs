@@ -74,6 +74,31 @@ pub fn backfill_local_task_events(db: &DbHandle, event_log: &EventLogWriter) {
             return;
         }
     }
+    replay_local_task_events(db, event_log);
+}
+
+/// Force a one-time replay of local lists/tasks regardless of the
+/// [`PREF_LOCAL_TASKS_BACKFILLED`] gate.
+///
+/// Called when a device becomes the sync origin (`adopt_local_dataset`):
+/// adopting must onboard the device's EXISTING local lists/tasks onto the
+/// fresh remote, but the startup backfill may already have run (e.g. on a
+/// clean install, before any list existed) and set the gate — so the gated
+/// path would skip them, and `adopt_local` itself only pushes `meta.json`.
+/// Re-emitting from the local store (the source of truth) guarantees they
+/// reach the remote; receivers dedupe via `sync_applied_events`, so a
+/// device already in sync just no-ops.
+pub fn force_backfill_local_task_events(db: &DbHandle, event_log: &EventLogWriter) {
+    replay_local_task_events(db, event_log);
+}
+
+/// Walk the local store and re-emit every list + task as a `*Created`
+/// event, then mark the backfill done. Shared by the gated startup path
+/// ([`backfill_local_task_events`]) and the forced adopt path
+/// ([`force_backfill_local_task_events`]).
+fn replay_local_task_events(db: &DbHandle, event_log: &EventLogWriter) {
+    let shared = db.shared();
+    let prefs = crate::user_prefs::UserPrefsRepo::new(&shared);
 
     // `list_task_lists` / `get_tasks` are async trait methods backed
     // by synchronous SQLite. `run()` isn't itself inside an async

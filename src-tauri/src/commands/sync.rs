@@ -1371,6 +1371,7 @@ pub async fn adopt_local_dataset(
     scheduler: State<'_, Arc<SyncScheduler>>,
     onboarding: State<'_, Arc<OnboardingService>>,
     plugin_manager: State<'_, Arc<PluginManager>>,
+    event_log: State<'_, Arc<crate::event_log::EventLogWriter>>,
     config: SyncAdapterConfig,
     device_name: Option<String>,
     passphrase: Option<String>,
@@ -1426,6 +1427,13 @@ pub async fn adopt_local_dataset(
     } else {
         let _ = prefs.delete(PREF_E2E_ENABLED);
     }
+    // Onboard this device's EXISTING local lists/tasks onto the freshly
+    // created remote. `adopt_local` only writes meta.json, and the startup
+    // backfill is one-shot-gated — on a clean install it runs before any
+    // list exists, so lists created later (but still before sync was turned
+    // on) would otherwise never be re-emitted. Force a replay now so a
+    // second device actually receives them; receivers dedupe.
+    crate::commands::force_backfill_local_task_events(db.inner(), event_log.inner());
     scheduler.kick();
     Ok(report)
 }
