@@ -37,6 +37,13 @@ deinen Tag oder deine Woche ein und arbeitest sie ab.
 > ändern, ohne den Editor zu öffnen; der aktuelle Wert ist mit einem Häkchen
 > markiert.
 
+> **Priorität & Anbieter:** Alle Anbieter speichern die Priorität einer
+> Aufgabe – außer **Google Tasks**, das kein eigenes Prioritätsfeld hat: Eine
+> Priorität, die du an einer Google-Aufgabe setzt, wird auf Google-Seite nicht
+> gespeichert und erscheint nach der nächsten Synchronisation wieder als
+> *Mittel*. Lokale Listen, Apple Erinnerungen / CalDAV, Exchange, Microsoft
+> To Do, Vikunja und Todoist behalten sie.
+
 > **Abhaken-Verhalten:** Standardmäßig wechselt das Abhaken zwischen *offen*
 > und *abgeschlossen*. Unter **Einstellungen → Aufgaben → Abhaken-Verhalten**
 > kannst du stattdessen einen Status-Zyklus wählen: Jedes Abhaken durchläuft

@@ -34,6 +34,12 @@ your day or week, and work through them.
 > submenus. Change either in a single click without opening the editor; the
 > current value carries a check-mark.
 
+> **Priority & providers:** Every provider keeps a task's priority except
+> **Google Tasks**, which has no priority field of its own — a priority you set
+> on a Google task isn't stored on Google's side and reads back as *Medium*
+> after the next sync. Local lists, Apple Reminders / CalDAV, Exchange,
+> Microsoft To Do, Vikunja and Todoist all keep it.
+
 > **Check-off behaviour:** By default checking off flips between *open* and
 > *completed*. Under **Settings → Tasks → Check-off behaviour** you can switch
 > to a status cycle instead: each check-off steps *open → in progress →

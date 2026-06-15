@@ -18,7 +18,9 @@
 //!                          documented in the comment on
 //!                          `task_status_to_google`).
 //!  - Priority    ↔ dropped (Google Tasks has no priority field);
-//!                   reads default to Medium.
+//!                   reads default to Medium. A non-default priority on
+//!                   write logs a tracing::warn — it can't round-trip and
+//!                   reads back as Medium on the next sync.
 //!  - scheduled_* ↔ `due` (Google has ONE date slot; scheduled wins
 //!                   on write, falling back to deadline_date when
 //!                   absent). Date-only — Google ignores the time
@@ -327,6 +329,11 @@ fn new_task_to_body(new: &NewTask) -> TaskEntry {
             "Google Tasks adapter dropping reminders on write — Google Tasks API has no reminder field",
         );
     }
+    if new.priority != TaskPriority::Medium {
+        tracing::warn!(
+            "Google Tasks adapter dropping non-default priority on write — Google Tasks API has no priority field (it reads back as Medium)",
+        );
+    }
     TaskEntry {
         id: String::new(),
         etag: None,
@@ -353,6 +360,11 @@ fn task_to_body(task: &Task) -> TaskEntry {
     if !task.reminders.is_empty() {
         tracing::warn!(
             "Google Tasks adapter dropping reminders on update — Google Tasks API has no reminder field",
+        );
+    }
+    if task.priority != TaskPriority::Medium {
+        tracing::warn!(
+            "Google Tasks adapter dropping non-default priority on update — Google Tasks API has no priority field (it reads back as Medium)",
         );
     }
     TaskEntry {
