@@ -40,6 +40,7 @@ import {
 } from '../../intl/multiDay';
 import { filterTasksOnDay, isDeadlineChip } from '../../intl/taskDay';
 import {
+  assigneeSuffix,
   priorityMarker,
   prioritySuffix,
   statusI18nKey,
@@ -737,6 +738,7 @@ export function MonthView() {
                               state: t(statusI18nKey(task.status)),
                               priority: prioritySuffix(t, task.priority),
                               progress: subtaskProgressSuffix(t, task.id, tasks),
+                              assignee: assigneeSuffix(t, task.assignees),
                             },
                           );
                           return (

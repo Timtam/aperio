@@ -167,9 +167,11 @@ Bei geteilten Listen (z. B. Todoist) kannst du:
 > Mitgliederliste.
 
 > **Screenreader-Hinweis:** Aufgaben werden mit Titel, Status (erledigt /
-> offen), Fälligkeit und Priorität angesagt. Eine **hohe** Priorität zeigt
-> zusätzlich ein „↑", eine **niedrige** ein „↓"; die mittlere Priorität
-> (Standard) zeigt nichts. **Liste und Abschnitt** werden nicht mehr im
+> offen), Fälligkeit, Priorität und – sofern jemand zugewiesen ist – der
+> **zugewiesenen Person** angesagt (in **allen** Ansichten: Aufgaben-,
+> Wochen-, Tages- und Monatsansicht sowie im Backlog). Eine **hohe**
+> Priorität zeigt zusätzlich ein „↑", eine **niedrige** ein „↓"; die mittlere
+> Priorität (Standard) zeigt nichts. **Liste und Abschnitt** werden nicht mehr im
 > Aufgaben-Label wiederholt, sondern ergeben sich aus den übergeordneten
 > **Gruppenzeilen** (Backlog → Liste → Abschnitt), die du beim Navigieren mit
 > den Pfeiltasten durchläufst und mit `Eingabe`/`Leertaste` auf- und zuklappst.

@@ -15,6 +15,7 @@ import { useDeferredLoading } from '../../hooks/useDeferredLoading';
 import { useDateFormat } from '../../intl/dateFormat';
 import { labelsLookup, resolveTaskColor } from '../../intl/eventColor';
 import {
+  assigneeSuffix,
   priorityMarker,
   prioritySuffix,
   statusI18nKey,
@@ -872,6 +873,7 @@ function renderTreeItem(
     priority: prioritySuffix(t, task.priority),
     progress: subtaskProgressSuffix(t, task.id, tasks),
     due,
+    assignee: assigneeSuffix(t, task.assignees),
   });
   return (
     <li
@@ -960,12 +962,11 @@ function renderTreeItem(
         )}
       </span>
       {task.assignees.length > 0 && (
-        <span
-          className="task-list__assignees"
-          aria-label={t('views.tasks.assignedTo', {
-            names: task.assignees.map((a) => a.name).join(', '),
-          })}
-        >
+        // Decorative: the assignee is announced via the row's aria-label
+        // (the assignee suffix), so the visible chip is hidden from AT to
+        // avoid a double read — same pattern as the priority / progress
+        // spans.
+        <span className="task-list__assignees" aria-hidden="true">
           {task.assignees.map((a) => a.name).join(', ')}
         </span>
       )}

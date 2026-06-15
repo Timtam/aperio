@@ -1463,7 +1463,7 @@
       "listLabel": "Backlog-Aufgaben",
       "resize": "Backlog-Spalte breiter/schmaler ziehen",
       "empty": "Keine Aufgaben im Backlog.",
-      "chipLabel": "{{title}}, Liste {{list}}{{priority}}",
+      "chipLabel": "{{title}}, Liste {{list}}{{priority}}{{assignee}}",
       "movedToBacklog": "„{{title}}“ in den Backlog verschoben.",
       "scheduled": "„{{title}}“ auf {{date}} geplant."
     },
@@ -1477,9 +1477,9 @@
       "tabAnnounce": "{{day}}: {{title}}",
       "tasksOnDay_one": "1 Aufgabe",
       "tasksOnDay_other": "{{count}} Aufgaben",
-      "taskChip": "Aufgabe: {{title}}, {{state}}{{priority}}{{progress}}",
-      "taskChipBy": "Aufgabe: {{title}}, fällig bis {{deadline}}, {{state}}{{priority}}{{progress}}",
-      "taskChipTimed": "Aufgabe: {{title}}, {{time}}, {{state}}{{priority}}{{progress}}",
+      "taskChip": "Aufgabe: {{title}}, {{state}}{{priority}}{{progress}}{{assignee}}",
+      "taskChipBy": "Aufgabe: {{title}}, fällig bis {{deadline}}, {{state}}{{priority}}{{progress}}{{assignee}}",
+      "taskChipTimed": "Aufgabe: {{title}}, {{time}}, {{state}}{{priority}}{{progress}}{{assignee}}",
       "taskRescheduled": "Aufgabe „{{title}}“ auf {{date}} verschoben."
     },
     "day": {
@@ -1488,7 +1488,7 @@
       "tasksHeading": "Aufgaben",
       "empty": "Keine Termine an diesem Tag.",
       "eventLabel": "Termin: {{title}}, {{start}} bis {{end}}, Kalender: {{calendar}}",
-      "taskLabel": "Aufgabe: {{title}}, {{time}}, {{state}}{{priority}}{{progress}}"
+      "taskLabel": "Aufgabe: {{title}}, {{time}}, {{state}}{{priority}}{{progress}}{{assignee}}"
     },
     "month": {
       "title": "Monatsansicht",
@@ -1530,13 +1530,13 @@
       "stateCancelled": "abgebrochen",
       "expand": "Unteraufgaben von „{{title}}\" ausklappen",
       "collapse": "Unteraufgaben von „{{title}}\" einklappen",
-      "optionLabel": "{{title}}, {{state}}{{priority}}{{progress}}, {{due}}",
+      "optionLabel": "{{title}}, {{state}}{{priority}}{{progress}}, {{due}}{{assignee}}",
       "subtaskProgress": ", {{done}} von {{total}} Unteraufgaben erledigt",
       "priorityHigh": "hohe Priorität",
       "priorityLow": "niedrige Priorität",
       "subtaskProgressBadge": "{{done}}/{{total}}",
       "subtaskProgressBadgeAria": "{{done}} von {{total}} Unteraufgaben erledigt",
-      "assignedTo": "Zugewiesen an: {{names}}",
+      "assigneeSuffix": ", zugewiesen an {{names}}",
       "dueScheduled": "Geplant: {{date}}",
       "dueDeadline": "Fällig: {{date}}",
       "dueNone": "Ohne Datum",

@@ -46,6 +46,7 @@ import {
   taskTimeOnDay,
 } from '../../intl/taskDay';
 import {
+  assigneeSuffix,
   priorityMarker,
   prioritySuffix,
   statusI18nKey,
@@ -1271,6 +1272,7 @@ function WeekDayTasks({
                 state,
                 priority: prioritySuffix(t, task.priority),
                 progress: subtaskProgressSuffix(t, task.id, allTasks),
+                assignee: assigneeSuffix(t, task.assignees),
               })}
             >
               <span className="week-task__body">
@@ -1319,5 +1321,6 @@ function taskChipAriaLabel(
     state,
     priority: prioritySuffix(t, task.priority),
     progress: subtaskProgressSuffix(t, task.id, allTasks),
+    assignee: assigneeSuffix(t, task.assignees),
   });
 }

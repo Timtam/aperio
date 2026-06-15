@@ -150,8 +150,10 @@ For shared lists (e.g. Todoist) you can:
 > right in the member list.
 
 > **Screen-reader note:** Tasks are announced with title, status (done /
-> open), due date and priority. **High** priority also shows a "↑", **low**
-> a "↓"; medium priority (the default) shows nothing. The **list and
+> open), due date, priority and — if anyone is assigned — the **assignee**
+> (in **every** view: the task, week, day and month views, plus the
+> backlog). **High** priority also shows a "↑", **low** a "↓"; medium
+> priority (the default) shows nothing. The **list and
 > section** are no longer repeated in each task's label — they come from the
 > surrounding **group rows** (Backlog → list → section) you pass through as
 > you arrow down, expanding or collapsing them with `Enter`/`Space`. Checking

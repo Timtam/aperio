@@ -12,6 +12,7 @@ import { useAnnouncer } from '../a11y/announcerContext';
 import { isCommandError } from '../api/client';
 import { labelsLookup, resolveTaskColor } from '../intl/eventColor';
 import {
+  assigneeSuffix,
   priorityMarker,
   priorityRank,
   prioritySuffix,
@@ -264,6 +265,7 @@ export function BacklogRail() {
                     title: task.title,
                     list: listName,
                     priority: prioritySuffix(t, task.priority),
+                    assignee: assigneeSuffix(t, task.assignees),
                   })}
                   className={
                     'backlog-rail__chip' +

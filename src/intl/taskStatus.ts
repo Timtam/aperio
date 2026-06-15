@@ -1,4 +1,4 @@
-import type { Task, TaskPriority, TaskStatus } from '../api/types';
+import type { Task, TaskPriority, TaskStatus, TaskUser } from '../api/types';
 
 /**
  * Per-status glyph for the on-chip / on-row marker.
@@ -173,4 +173,24 @@ export function subtaskProgressSuffix(
   const progress = subtaskProgress(parentId, allTasks);
   if (!progress) return '';
   return t('views.tasks.subtaskProgress', progress);
+}
+
+/**
+ * SR-friendly assignee suffix for aria-labels. Empty string when the
+ * task has no assignees — so it appends unconditionally to any task
+ * label that ends with `{{assignee}}`. Resolves through
+ * `views.tasks.assigneeSuffix`, which starts with a comma separator, so
+ * the calling i18n template needs no conditional. Shared across every
+ * task surface (the TaskView row, the week / day / month chips and the
+ * backlog rail) so an assignment — e.g. a Vikunja assignee — is
+ * announced wherever the task appears, not just where it's drawn.
+ */
+export function assigneeSuffix(
+  t: (key: string, vars?: Record<string, unknown>) => string,
+  assignees: TaskUser[],
+): string {
+  if (assignees.length === 0) return '';
+  return t('views.tasks.assigneeSuffix', {
+    names: assignees.map((a) => a.name).join(', '),
+  });
 }

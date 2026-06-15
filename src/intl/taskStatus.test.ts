@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { Task } from '../api/types';
 import {
+  assigneeSuffix,
   statusI18nKey,
   statusMarker,
   subtaskProgress,
@@ -105,5 +106,23 @@ describe('subtaskProgressSuffix', () => {
     expect(subtaskProgressSuffix(t, 'p', tasks)).toBe(
       'views.tasks.subtaskProgress({"done":1,"total":2})',
     );
+  });
+});
+
+describe('assigneeSuffix', () => {
+  const t = (k: string, v?: Record<string, unknown>) =>
+    `${k}(${JSON.stringify(v)})`;
+
+  it('returns the empty string when there are no assignees', () => {
+    expect(assigneeSuffix(t, [])).toBe('');
+  });
+
+  it('joins assignee names and passes them to the i18n function', () => {
+    expect(
+      assigneeSuffix(t, [
+        { id: 'u1', name: 'Anna', email: null },
+        { id: 'u2', name: 'Ben', email: 'ben@example.test' },
+      ]),
+    ).toBe('views.tasks.assigneeSuffix({"names":"Anna, Ben"})');
   });
 });

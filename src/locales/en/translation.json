@@ -1463,7 +1463,7 @@
       "listLabel": "Backlog tasks",
       "resize": "Resize the backlog column",
       "empty": "No tasks in the backlog.",
-      "chipLabel": "{{title}}, list {{list}}{{priority}}",
+      "chipLabel": "{{title}}, list {{list}}{{priority}}{{assignee}}",
       "movedToBacklog": "\"{{title}}\" moved to the backlog.",
       "scheduled": "\"{{title}}\" scheduled for {{date}}."
     },
@@ -1477,9 +1477,9 @@
       "tabAnnounce": "{{day}}: {{title}}",
       "tasksOnDay_one": "1 task",
       "tasksOnDay_other": "{{count}} tasks",
-      "taskChip": "Task: {{title}}, {{state}}{{priority}}{{progress}}",
-      "taskChipBy": "Task: {{title}}, due by {{deadline}}, {{state}}{{priority}}{{progress}}",
-      "taskChipTimed": "Task: {{title}}, {{time}}, {{state}}{{priority}}{{progress}}",
+      "taskChip": "Task: {{title}}, {{state}}{{priority}}{{progress}}{{assignee}}",
+      "taskChipBy": "Task: {{title}}, due by {{deadline}}, {{state}}{{priority}}{{progress}}{{assignee}}",
+      "taskChipTimed": "Task: {{title}}, {{time}}, {{state}}{{priority}}{{progress}}{{assignee}}",
       "taskRescheduled": "Task \"{{title}}\" moved to {{date}}."
     },
     "day": {
@@ -1487,7 +1487,7 @@
       "eventList": "Events on this day",
       "empty": "No events on this day.",
       "eventLabel": "Event: {{title}}, {{start}} to {{end}}, calendar: {{calendar}}",
-      "taskLabel": "Task: {{title}}, {{time}}, {{state}}{{priority}}{{progress}}",
+      "taskLabel": "Task: {{title}}, {{time}}, {{state}}{{priority}}{{progress}}{{assignee}}",
       "tasksHeading": "Tasks"
     },
     "month": {
@@ -1530,13 +1530,13 @@
       "stateCancelled": "cancelled",
       "expand": "Expand subtasks of \"{{title}}\"",
       "collapse": "Collapse subtasks of \"{{title}}\"",
-      "optionLabel": "{{title}}, {{state}}{{priority}}{{progress}}, {{due}}",
+      "optionLabel": "{{title}}, {{state}}{{priority}}{{progress}}, {{due}}{{assignee}}",
       "subtaskProgress": ", {{done}} of {{total}} subtasks done",
       "priorityHigh": "high priority",
       "priorityLow": "low priority",
       "subtaskProgressBadge": "{{done}}/{{total}}",
       "subtaskProgressBadgeAria": "{{done}} of {{total}} subtasks done",
-      "assignedTo": "Assigned to: {{names}}",
+      "assigneeSuffix": ", assigned to {{names}}",
       "dueScheduled": "Scheduled: {{date}}",
       "dueDeadline": "Due: {{date}}",
       "dueNone": "No date",

@@ -35,6 +35,7 @@ import {
   taskTimeOnDay,
 } from '../../intl/taskDay';
 import {
+  assigneeSuffix,
   priorityMarker,
   prioritySuffix,
   statusI18nKey,
@@ -400,6 +401,7 @@ export function DayView() {
                     state,
                     priority: prioritySuffix(t, task.priority),
                     progress: subtaskProgressSuffix(t, task.id, tasks),
+                    assignee: assigneeSuffix(t, task.assignees),
                   })}
                   className={
                     'day-list__item day-list__item--task' +
@@ -623,6 +625,7 @@ export function DayView() {
                       state,
                       priority: prioritySuffix(t, task.priority),
                       progress: subtaskProgressSuffix(t, task.id, tasks),
+                      assignee: assigneeSuffix(t, task.assignees),
                     })}
                   >
                     <span
