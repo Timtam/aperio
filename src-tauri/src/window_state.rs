@@ -142,6 +142,46 @@ pub fn restore(window: &WebviewWindow, geom: &WindowGeometry) {
     }
 }
 
+/// Cap `(w, h)` to a monitor of `(mon_w, mon_h)` physical px, leaving a
+/// margin for the taskbar / window chrome, but never below the minimum.
+/// Width keeps almost the whole monitor (a bottom taskbar doesn't eat it);
+/// height gives a bit more back for the taskbar.
+fn clamp_to_monitor(w: u32, h: u32, mon_w: u32, mon_h: u32) -> (u32, u32) {
+    let max_w = ((mon_w as f64 * 0.95) as u32).max(MIN_W);
+    let max_h = ((mon_h as f64 * 0.92) as u32).max(MIN_H);
+    (w.min(max_w).max(MIN_W), h.min(max_h).max(MIN_H))
+}
+
+/// Shrink the window if it's larger than the monitor it sits on, then
+/// re-center it. The config default is 1280×800 *logical* px, which at
+/// 150 % display scaling is 1920×1200 physical — taller than a 1080p
+/// screen, so the bottom and the toolbar's right edge (the sync
+/// indicator) end up off-canvas. No-op when the window already fits or is
+/// maximized. Physical pixels throughout.
+pub fn fit_to_current_monitor(window: &WebviewWindow) {
+    if window.is_maximized().unwrap_or(false) {
+        return;
+    }
+    let Ok(Some(monitor)) = window.current_monitor() else {
+        return;
+    };
+    let Ok(cur) = window.outer_size() else {
+        return;
+    };
+    let mon = monitor.size();
+    let (w, h) = clamp_to_monitor(cur.width, cur.height, mon.width, mon.height);
+    if w == cur.width && h == cur.height {
+        return;
+    }
+    let _ = window.set_size(PhysicalSize::new(w, h));
+    // Re-center on the monitor so the shrunk window isn't pinned against an
+    // edge (or still partly off-canvas after the resize).
+    let pos = monitor.position();
+    let x = pos.x + (mon.width.saturating_sub(w) / 2) as i32;
+    let y = pos.y + (mon.height.saturating_sub(h) / 2) as i32;
+    let _ = window.set_position(PhysicalPosition::new(x, y));
+}
+
 /// Whether `(x, y)` (the window's top-left) sits inside a connected monitor —
 /// keeps the title bar (the only drag handle) reachable.
 fn position_visible(window: &WebviewWindow, x: i32, y: i32) -> bool {
@@ -197,5 +237,28 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(config_path(dir.path()), b"{ not json").unwrap();
         assert!(load_from(dir.path()).is_none());
+    }
+
+    #[test]
+    fn clamp_shrinks_an_oversized_window_to_the_monitor() {
+        // Default 1280×800 logical at 150 % scaling = 1920×1200 physical on
+        // a 1920×1080 screen: width fits, height must shrink.
+        let (w, h) = clamp_to_monitor(1920, 1200, 1920, 1080);
+        assert_eq!(w, 1824); // 1920 * 0.95
+        assert_eq!(h, 993); // 1080 * 0.92
+    }
+
+    #[test]
+    fn clamp_leaves_a_fitting_window_untouched() {
+        // A normal window well within the screen is returned unchanged.
+        let (w, h) = clamp_to_monitor(1280, 800, 2560, 1440);
+        assert_eq!((w, h), (1280, 800));
+    }
+
+    #[test]
+    fn clamp_never_goes_below_the_minimum() {
+        // Even a tiny monitor can't force a sub-minimum window.
+        let (w, h) = clamp_to_monitor(1000, 1000, 100, 100);
+        assert_eq!((w, h), (MIN_W, MIN_H));
     }
 }

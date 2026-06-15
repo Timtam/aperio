@@ -853,12 +853,21 @@ pub fn run() {
             // resize/move events that `set_size` / `maximize` emit below can
             // find it.
             app.manage(window_state::Store::default());
-            if let (Some(geom), Some(win)) = (window_state::load(), app.get_webview_window("main"))
-            {
-                window_state::restore(&win, &geom);
-                if let Some(store) = app.try_state::<window_state::Store>() {
-                    *store.lock().expect("window-state mutex poisoned") = Some(geom);
+            if let Some(win) = app.get_webview_window("main") {
+                // Restore the saved geometry when there is one; otherwise the
+                // window keeps the config default (1280×800 logical).
+                if let Some(geom) = window_state::load() {
+                    window_state::restore(&win, &geom);
+                    if let Some(store) = app.try_state::<window_state::Store>() {
+                        *store.lock().expect("window-state mutex poisoned") = Some(geom);
+                    }
                 }
+                // Either way, shrink the window if it ends up larger than the
+                // monitor it's on — at high display scaling even the default
+                // size exceeds the screen, leaving the toolbar's right edge
+                // (the sync indicator) off-canvas. The resize it may emit is
+                // picked up by the geometry store registered just above.
+                window_state::fit_to_current_monitor(&win);
             }
             Ok(())
         })

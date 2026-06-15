@@ -2544,6 +2544,12 @@ button[aria-disabled='true'] {
 .toolbar {
   display: flex;
   align-items: center;
+  /* Wrap to a second row instead of clipping: at higher zoom / a narrow
+     window the text buttons can't all fit on one line, and the status
+     group (sync indicator) sits at the right edge — without wrapping it
+     overflows past the window and gets cut off (§19.9 wants it always
+     visible). The `gap` doubles as the row gap between wrapped lines. */
+  flex-wrap: wrap;
   gap: var(--space-3);
   padding: var(--space-2) var(--space-4);
   border-bottom: 1px solid var(--color-border);
