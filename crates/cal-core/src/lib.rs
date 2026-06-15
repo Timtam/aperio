@@ -18,7 +18,7 @@ pub use adapter::{
 };
 pub use color::{ColorLabel, ColorLabelId, ColorSource, ContainerColor};
 pub use error::{Error, Result};
-pub use extras::AperioExtras;
+pub use extras::{apply_task_extras, extras_for_task, recurrence_needs_extras, AperioExtras};
 pub use recurrence::{rrule_to_task_recurrence, task_recurrence_to_rrule};
 pub use reminder::{Reminder, ReminderKind, SoundConfig, SoundSource};
 pub use types::{

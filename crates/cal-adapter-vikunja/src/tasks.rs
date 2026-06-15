@@ -1044,6 +1044,19 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
         .and_then(parse_vikunja_datetime)
         .unwrap_or(created_at);
 
+    // DESIGN §9.12: the description carries an Aperio-Extras block for fields
+    // Vikunja can't store natively. Strip it back out so the user-facing
+    // description stays clean, then overlay the carried fields — the bag's
+    // recurrence (when present) is authoritative over Vikunja's lossy
+    // repeat_after/repeat_mode projection.
+    let (clean_description, extras) = cal_core::extras::extract(entry.description.as_deref());
+    let mut recurrence = recurrence_from_vikunja(entry.repeat_after, entry.repeat_mode);
+    let mut resurface_date = None;
+    let mut series_id = None;
+    if let Some(extras) = &extras {
+        cal_core::apply_task_extras(extras, &mut recurrence, &mut resurface_date, &mut series_id);
+    }
+
     Task {
         assignees: entry
             .assignees
@@ -1054,7 +1067,7 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
         id: entry.id.to_string(),
         list_id: list_id.to_string(),
         title: entry.title.unwrap_or_default(),
-        description: entry.description.filter(|s| !s.is_empty()),
+        description: clean_description.filter(|s| !s.is_empty()),
         status,
         priority,
         scheduled_date: scheduled.map(|dt| dt.date_naive()),
@@ -1063,11 +1076,12 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
         deadline_time: deadline.map(|dt| dt.time()).filter(non_midnight),
         // parent_id + reminders are intentionally dropped on read;
         // documented in the module preamble. Recurrence round-trips the
-        // shapes Vikunja can store (daily/weekly periods + monthly).
-        recurrence: recurrence_from_vikunja(entry.repeat_after, entry.repeat_mode),
+        // shapes Vikunja can store (daily/weekly periods + monthly) plus the
+        // on-demand axes carried in the extras block.
+        recurrence,
         parent_id: None,
-        resurface_date: None,
-        series_id: None,
+        resurface_date,
+        series_id,
         // Kanban bucket → section. `0` is Vikunja's "no bucket".
         section_id: (entry.bucket_id != 0).then(|| entry.bucket_id.to_string()),
         color_label: None,
@@ -1082,8 +1096,34 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
     }
 }
 
+/// DESIGN §9.12: fold the Aperio-only fields (on-demand recurrence axes,
+/// `resurface_date`, `series_id`) into a visible extras block on the
+/// description, and decide what — if anything — to put in Vikunja's own
+/// recurrence fields. A plain scheduled rule projects to native
+/// `repeat_after/repeat_mode`; anything with a non-native aspect rides the
+/// bag instead, so Vikunja's own scheduler doesn't fight Aperio's spawner.
+fn vikunja_body_extras(
+    description: Option<&str>,
+    recurrence: Option<&TaskRecurrence>,
+    resurface_date: Option<NaiveDate>,
+    series_id: Option<&str>,
+    op: &str,
+) -> (Option<String>, i64, i32) {
+    let extras = cal_core::extras_for_task(recurrence, resurface_date, series_id);
+    let description = cal_core::extras::embed(description, &extras).filter(|s| !s.is_empty());
+    let native = recurrence.filter(|r| !cal_core::recurrence_needs_extras(r));
+    let (repeat_after, repeat_mode) = recurrence_body(native, op);
+    (description, repeat_after, repeat_mode)
+}
+
 fn new_task_to_body(new: &NewTask) -> TaskEntry {
-    let (repeat_after, repeat_mode) = recurrence_body(new.recurrence.as_ref(), "create");
+    let (description, repeat_after, repeat_mode) = vikunja_body_extras(
+        new.description.as_deref(),
+        new.recurrence.as_ref(),
+        new.resurface_date,
+        new.series_id.as_deref(),
+        "create",
+    );
     if !new.reminders.is_empty() {
         tracing::warn!(
             "Vikunja adapter dropping reminders on create — Vikunja's reminders[] schema not surfaced yet",
@@ -1097,7 +1137,7 @@ fn new_task_to_body(new: &NewTask) -> TaskEntry {
     TaskEntry {
         id: 0,
         title: Some(new.title.clone()),
-        description: new.description.clone().filter(|s| !s.is_empty()),
+        description,
         done: matches!(new.status, TaskStatus::Completed),
         done_at: None,
         due_date: combine_date_time(new.deadline_date, new.deadline_time),
@@ -1134,7 +1174,13 @@ fn recurrence_body(rec: Option<&TaskRecurrence>, op: &str) -> (i64, i32) {
 }
 
 fn task_to_body(task: &Task) -> TaskEntry {
-    let (repeat_after, repeat_mode) = recurrence_body(task.recurrence.as_ref(), "update");
+    let (description, repeat_after, repeat_mode) = vikunja_body_extras(
+        task.description.as_deref(),
+        task.recurrence.as_ref(),
+        task.resurface_date,
+        task.series_id.as_deref(),
+        "update",
+    );
     if !task.reminders.is_empty() {
         tracing::warn!(
             "Vikunja adapter dropping reminders on update — Vikunja's reminders[] schema not surfaced yet",
@@ -1148,7 +1194,7 @@ fn task_to_body(task: &Task) -> TaskEntry {
     TaskEntry {
         id: parse_id(&task.id, "task id").unwrap_or(0),
         title: Some(task.title.clone()),
-        description: task.description.clone().filter(|s| !s.is_empty()),
+        description,
         done: matches!(task.status, TaskStatus::Completed),
         // We never write `done_at` ourselves — Vikunja sets it
         // server-side when `done` flips to true.
@@ -1455,6 +1501,74 @@ mod tests {
         let task = map_task(entry, "1");
         assert!(task.scheduled_date.is_none());
         assert!(task.deadline_date.is_none());
+    }
+
+    #[test]
+    fn extras_block_round_trips_backlog_recurrence() {
+        use cal_core::{MonthDay, RecurrenceAnchor, RecurrenceEnd, RecurrencePlacement};
+        // A seasonal backlog task — no native Vikunja recurrence expresses it.
+        let mut task = task_fixture("7", "3", None);
+        task.description = Some("Swap shoes".into());
+        task.recurrence = Some(TaskRecurrence {
+            frequency: RecurrenceFrequency::Yearly,
+            interval: 1,
+            day_of_week: None,
+            day_of_month: None,
+            end: Some(RecurrenceEnd::Never),
+            anchor: RecurrenceAnchor::FromCompletion,
+            placement: RecurrencePlacement::Backlog,
+            fixed_dates: Some(vec![
+                MonthDay { month: 4, day: 1 },
+                MonthDay { month: 10, day: 1 },
+            ]),
+        });
+        task.resurface_date = Some(NaiveDate::from_ymd_opt(2026, 10, 1).unwrap());
+        task.series_id = Some("series-shoes".into());
+
+        let body = task_to_body(&task);
+        // User text + an Aperio block; native recurrence stays cleared so
+        // Vikunja's scheduler doesn't double-spawn the backlog task.
+        let desc = body.description.clone().unwrap();
+        assert!(desc.starts_with("Swap shoes"));
+        assert!(desc.contains("aperio:1:"));
+        assert_eq!(body.repeat_after, 0);
+        assert_eq!(body.repeat_mode, 0);
+
+        // Read the body back as if the server echoed it.
+        let entry = TaskEntry {
+            id: 7,
+            title: Some("Swap shoes".into()),
+            description: body.description,
+            repeat_after: body.repeat_after,
+            repeat_mode: body.repeat_mode,
+            ..Default::default()
+        };
+        let restored = map_task(entry, "3");
+        assert_eq!(restored.description.as_deref(), Some("Swap shoes"));
+        assert_eq!(restored.recurrence, task.recurrence);
+        assert_eq!(restored.resurface_date, task.resurface_date);
+        assert_eq!(restored.series_id.as_deref(), Some("series-shoes"));
+    }
+
+    #[test]
+    fn plain_scheduled_recurrence_stays_in_native_fields() {
+        // A daily rule has no non-native aspect, so it rides Vikunja's own
+        // repeat fields and leaves the description block-free.
+        let mut task = task_fixture("7", "3", None);
+        task.description = Some("Standup".into());
+        task.recurrence = Some(TaskRecurrence {
+            frequency: RecurrenceFrequency::Daily,
+            interval: 1,
+            day_of_week: None,
+            day_of_month: None,
+            end: None,
+            anchor: Default::default(),
+            placement: Default::default(),
+            fixed_dates: None,
+        });
+        let body = task_to_body(&task);
+        assert_eq!(body.description.as_deref(), Some("Standup"));
+        assert!(body.repeat_after > 0, "daily period rides the native field");
     }
 
     #[test]

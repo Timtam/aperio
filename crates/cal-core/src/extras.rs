@@ -19,7 +19,10 @@
 //! description and it replaces only Aperio's block, preserving the rest.
 
 use base64::Engine;
+use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
+
+use crate::{RecurrenceAnchor, RecurrencePlacement, TaskRecurrence};
 
 /// Current on-wire format version — the payload line is `aperio:<v>:<b64>`.
 const FORMAT_VERSION: u32 = 1;
@@ -169,6 +172,72 @@ pub fn embed(description: Option<&str>, extras: &AperioExtras) -> Option<String>
     }
 }
 
+/// Does this recurrence carry an aspect no external provider stores
+/// natively (DESIGN §9.12)? A plain scheduled rule (`FromDate` + `Schedule`
+/// + no fixed dates) maps onto the provider's own recurrence, so it needs
+/// no extras block; backlog placement, completion-anchoring, or fixed dates
+/// do.
+pub fn recurrence_needs_extras(rec: &TaskRecurrence) -> bool {
+    rec.placement != RecurrencePlacement::Schedule
+        || rec.anchor != RecurrenceAnchor::FromDate
+        || rec.fixed_dates.is_some()
+}
+
+/// Build the Aperio-Extras bag for a task: exactly the fields an external
+/// provider can't represent natively. `resurface_date` and `series_id` ride
+/// whenever set; the full `recurrence` rides only when it has a non-native
+/// aspect (so a plain scheduled rule stays in the provider's own field). An
+/// empty bag means "nothing to carry" — the caller writes no block.
+pub fn extras_for_task(
+    recurrence: Option<&TaskRecurrence>,
+    resurface_date: Option<NaiveDate>,
+    series_id: Option<&str>,
+) -> AperioExtras {
+    let mut extras = AperioExtras::new();
+    if let Some(date) = resurface_date {
+        extras.insert(
+            "resurface_date",
+            serde_json::Value::String(date.to_string()),
+        );
+    }
+    if let Some(sid) = series_id {
+        extras.insert("series_id", serde_json::Value::String(sid.to_string()));
+    }
+    if let Some(rec) = recurrence {
+        if recurrence_needs_extras(rec) {
+            if let Ok(value) = serde_json::to_value(rec) {
+                extras.insert("recurrence", value);
+            }
+        }
+    }
+    extras
+}
+
+/// Read an Aperio-Extras bag back into task fields, overriding the
+/// provider-native values the bag is authoritative for. Unknown / missing
+/// keys leave their field untouched, so a partial or future-versioned bag
+/// degrades cleanly.
+pub fn apply_task_extras(
+    extras: &AperioExtras,
+    recurrence: &mut Option<TaskRecurrence>,
+    resurface_date: &mut Option<NaiveDate>,
+    series_id: &mut Option<String>,
+) {
+    if let Some(raw) = extras.get("resurface_date").and_then(|v| v.as_str()) {
+        if let Ok(date) = raw.parse::<NaiveDate>() {
+            *resurface_date = Some(date);
+        }
+    }
+    if let Some(raw) = extras.get("series_id").and_then(|v| v.as_str()) {
+        *series_id = Some(raw.to_string());
+    }
+    if let Some(value) = extras.get("recurrence") {
+        if let Ok(rec) = serde_json::from_value::<TaskRecurrence>(value.clone()) {
+            *recurrence = Some(rec);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -256,5 +325,109 @@ mod tests {
         let (clean, back) = extract(Some(&stored));
         assert_eq!(clean, None);
         assert_eq!(back, Some(sample()));
+    }
+
+    use crate::{RecurrenceEnd, RecurrenceFrequency};
+
+    fn rule(
+        placement: RecurrencePlacement,
+        anchor: RecurrenceAnchor,
+        fixed_dates: Option<Vec<crate::MonthDay>>,
+    ) -> TaskRecurrence {
+        TaskRecurrence {
+            frequency: RecurrenceFrequency::Daily,
+            interval: 1,
+            day_of_week: None,
+            day_of_month: None,
+            end: Some(RecurrenceEnd::Never),
+            anchor,
+            placement,
+            fixed_dates,
+        }
+    }
+
+    #[test]
+    fn plain_scheduled_recurrence_needs_no_extras() {
+        let plain = rule(
+            RecurrencePlacement::Schedule,
+            RecurrenceAnchor::FromDate,
+            None,
+        );
+        assert!(!recurrence_needs_extras(&plain));
+        // …so the bag carries nothing from it.
+        let bag = extras_for_task(Some(&plain), None, None);
+        assert!(bag.is_empty());
+    }
+
+    #[test]
+    fn backlog_recurrence_and_fields_ride_the_bag() {
+        let backlog = rule(
+            RecurrencePlacement::Backlog,
+            RecurrenceAnchor::FromCompletion,
+            None,
+        );
+        assert!(recurrence_needs_extras(&backlog));
+        let bag = extras_for_task(
+            Some(&backlog),
+            Some(NaiveDate::from_ymd_opt(2026, 10, 1).unwrap()),
+            Some("series-7"),
+        );
+        assert_eq!(
+            bag.get("resurface_date").and_then(|v| v.as_str()),
+            Some("2026-10-01"),
+        );
+        assert_eq!(
+            bag.get("series_id").and_then(|v| v.as_str()),
+            Some("series-7")
+        );
+        assert!(bag.get("recurrence").is_some());
+    }
+
+    #[test]
+    fn apply_round_trips_fields_through_a_provider_description() {
+        let backlog = rule(
+            RecurrencePlacement::Backlog,
+            RecurrenceAnchor::FromCompletion,
+            Some(vec![crate::MonthDay { month: 4, day: 1 }]),
+        );
+        let bag = extras_for_task(
+            Some(&backlog),
+            Some(NaiveDate::from_ymd_opt(2026, 4, 1).unwrap()),
+            Some("series-9"),
+        );
+        let stored = embed(Some("Swap shoes"), &bag).unwrap();
+
+        // Read it back out of a provider description and onto fresh fields.
+        let (clean, extracted) = extract(Some(&stored));
+        assert_eq!(clean.as_deref(), Some("Swap shoes"));
+        let mut recurrence = None;
+        let mut resurface = None;
+        let mut series = None;
+        apply_task_extras(
+            &extracted.unwrap(),
+            &mut recurrence,
+            &mut resurface,
+            &mut series,
+        );
+        assert_eq!(recurrence, Some(backlog));
+        assert_eq!(resurface, NaiveDate::from_ymd_opt(2026, 4, 1));
+        assert_eq!(series.as_deref(), Some("series-9"));
+    }
+
+    #[test]
+    fn apply_leaves_untouched_fields_alone() {
+        // An empty bag changes nothing.
+        let mut recurrence = None;
+        let mut resurface = None;
+        let mut series = Some("keep-me".to_string());
+        apply_task_extras(
+            &AperioExtras::new(),
+            &mut recurrence,
+            &mut resurface,
+            &mut series,
+        );
+        assert!(recurrence.is_none());
+        assert!(resurface.is_none());
+        assert_eq!(series.as_deref(), Some("keep-me"));
     }
 }
