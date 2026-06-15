@@ -73,8 +73,8 @@ Mit **Speichern** wird der Termin angelegt; eine Live-Region bestätigt
 
 ## Termine bearbeiten, verschieben, löschen
 
-- **Bearbeiten:** Termin markieren und mit `Eingabe` (oder über das
-  Kontextmenü **Bearbeiten**) öffnen.
+- **Bearbeiten:** Termin markieren und mit `Eingabe` öffnen, ihn
+  **doppelklicken** oder über das Kontextmenü **Bearbeiten** wählen.
 - **Verschieben:** Im Dialog die Zeiten ändern – das funktioniert
   zuverlässig und screenreader-freundlich. Per Maus kannst du einen Termin
   auch auf einen **anderen Tag** in der Wochen- oder Monatsansicht ziehen

@@ -259,6 +259,9 @@ export function AgendaView() {
             t,
             itemId,
             onSelect: setFocusIndex,
+            onOpen: (event) => {
+              openEventDialog(event);
+            },
             onContextMenu: (event) => {
               void openEventMenu(event);
             },
@@ -300,6 +303,7 @@ interface RenderContext {
   t: (key: string, vars?: Record<string, unknown>) => string;
   itemId: (i: number) => string;
   onSelect: (i: number) => void;
+  onOpen: (event: CalendarEvent, index: number) => void;
   onContextMenu: (event: CalendarEvent, index: number) => void;
 }
 
@@ -369,6 +373,13 @@ function renderOccurrences(
             : undefined
         }
         onClick={() => ctx.onSelect(i)}
+        onDoubleClick={(e) => {
+          // Open the editor, mirroring the task chips (single click just
+          // moves focus; the keyboard path is Enter).
+          e.stopPropagation();
+          ctx.onSelect(i);
+          ctx.onOpen(ev, i);
+        }}
         onContextMenu={(e) => {
           e.preventDefault();
           e.stopPropagation();

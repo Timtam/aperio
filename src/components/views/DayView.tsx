@@ -497,6 +497,13 @@ export function DayView() {
                   setEventDrag(dev.dataTransfer, ev);
                 }}
                 onClick={() => setFocusIndex(i)}
+                onDoubleClick={(dcev) => {
+                  // Open the editor, mirroring the task chips (single click
+                  // just moves focus; the keyboard path is Enter).
+                  dcev.stopPropagation();
+                  setFocusIndex(i);
+                  openEventDialog(ev);
+                }}
                 onContextMenu={(cmev) => {
                   cmev.preventDefault();
                   cmev.stopPropagation();

@@ -969,6 +969,14 @@ export function WeekView() {
                               // path is the Move/Copy dialog).
                               setEventDrag(dev.dataTransfer, ev);
                             }}
+                            onDoubleClick={(dcev) => {
+                              // Open the editor, mirroring the task chips
+                              // (the keyboard path is Enter on the focused
+                              // item). Single click stays free for the cell's
+                              // day-anchor selection.
+                              dcev.stopPropagation();
+                              openEventDialog(ev);
+                            }}
                             onContextMenu={(cmev) => {
                               cmev.preventDefault();
                               cmev.stopPropagation();

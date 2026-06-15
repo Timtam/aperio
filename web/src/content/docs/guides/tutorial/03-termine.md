@@ -68,8 +68,8 @@ In the event dialog you can also set:
 
 ## Editing, moving and deleting events
 
-- **Edit:** Select the event and open it with `Enter` (or **Edit** from the
-  context menu).
+- **Edit:** Select the event and open it with `Enter`, **double-click** it,
+  or choose **Edit** from the context menu.
 - **Move:** Change the times in the dialog – this works reliably and is
   screen-reader friendly. With a mouse you can also drag an event onto a
   **different day** in the week or month view (time of day and duration
