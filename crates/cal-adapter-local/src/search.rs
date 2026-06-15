@@ -219,7 +219,7 @@ impl LocalAdapter {
 /// of values. Caller is responsible for binding the values in the same
 /// order they appear in the original list.
 fn in_placeholders(column: &str, n: usize) -> String {
-    let placeholders = std::iter::repeat("?").take(n).collect::<Vec<_>>().join(",");
+    let placeholders = std::iter::repeat_n("?", n).collect::<Vec<_>>().join(",");
     format!(" AND {column} IN ({placeholders})")
 }
 

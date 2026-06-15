@@ -184,7 +184,7 @@ impl CacheStore {
 /// ` AND column IN (?, ?, …)` for an arbitrary value count — same shape
 /// as the local search helper.
 fn in_placeholders(column: &str, n: usize) -> String {
-    let placeholders = std::iter::repeat("?").take(n).collect::<Vec<_>>().join(",");
+    let placeholders = std::iter::repeat_n("?", n).collect::<Vec<_>>().join(",");
     format!(" AND {column} IN ({placeholders})")
 }
 

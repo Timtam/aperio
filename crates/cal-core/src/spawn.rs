@@ -70,7 +70,7 @@ fn next_fixed_date_after(from: NaiveDate, dates: &[MonthDay]) -> Option<NaiveDat
             let Some(cand) = clamp_to_month(year, u32::from(md.month), day) else {
                 continue;
             };
-            if cand > from && best.map_or(true, |b| cand < b) {
+            if cand > from && best.is_none_or(|b| cand < b) {
                 best = Some(cand);
             }
         }
