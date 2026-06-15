@@ -3335,10 +3335,19 @@ button[aria-disabled='true'] {
   color: var(--color-fg-muted);
   border-bottom: 1px solid var(--color-border);
   padding-bottom: var(--space-1);
+  /* Indent scales with nesting depth (set inline per `level`): scheduled
+     sections + the backlog's list / section sub-headers step in. */
+  padding-left: var(--group-indent, 0);
 }
 
 .task-list__group:first-child {
   margin-top: 0;
+}
+
+/* Any nested group header (level >= 1): a list under Backlog, or a section
+   under a list. Sits closer under its parent than a top-level group. */
+.task-list__group--nested {
+  margin-top: var(--space-2);
 }
 
 /* Section sub-header within a list group (Vikunja bucket / Todoist
@@ -3346,7 +3355,6 @@ button[aria-disabled='true'] {
    child grouping rather than a peer. */
 .task-list__group--section {
   margin-top: var(--space-2);
-  padding-left: var(--space-3);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -3360,7 +3368,6 @@ button[aria-disabled='true'] {
    section carries a color. */
 .task-list__group--colored {
   border-left: 3px solid var(--event-color, var(--color-accent));
-  padding-left: var(--space-2);
 }
 
 /* A section header while a task is being dragged over it (drop target). */

@@ -578,9 +578,13 @@ export function TaskView() {
         )}
         {entries.map((entry, i) => {
           if (entry.kind === 'separator') {
-            // level 1 = a section sub-header within a list; styled
-            // smaller + indented to read as a child of the list head.
-            const isSection = entry.level === 1;
+            // A real section sub-header (Vikunja bucket / Todoist section)
+            // carries a sectionId — that's what gets the section styling,
+            // colour tint and the ⋮ actions. Plain group headers (Backlog, a
+            // list name) carry none. Indentation is driven by `level` so the
+            // backlog's nested list (1) and section (2) headers step in.
+            const isSection = entry.sectionId != null;
+            const level = entry.level ?? 0;
             // A colored section tints its header (decorative — the
             // section name carries the meaning; the color also cascades
             // to the section's colorless task chips below).
@@ -614,18 +618,23 @@ export function TaskView() {
                 role="presentation"
                 aria-hidden={sectionActionable ? undefined : true}
                 className={
-                  (isSection
-                    ? 'task-list__group task-list__group--section'
-                    : 'task-list__group') +
+                  'task-list__group' +
+                  (level >= 1 ? ' task-list__group--nested' : '') +
+                  (isSection ? ' task-list__group--section' : '') +
                   (sectionHex ? ' task-list__group--colored' : '') +
                   (section && dragOverSectionId === section.id
                     ? ' task-list__group--drop-active'
                     : '')
                 }
                 style={
-                  sectionHex
-                    ? ({ '--event-color': sectionHex } as React.CSSProperties)
-                    : undefined
+                  {
+                    ...(level > 0
+                      ? {
+                          '--group-indent': `calc(var(--space-3) * ${level})`,
+                        }
+                      : {}),
+                    ...(sectionHex ? { '--event-color': sectionHex } : {}),
+                  } as React.CSSProperties
                 }
                 onContextMenu={
                   sectionActionable && section

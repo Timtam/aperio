@@ -100,8 +100,15 @@ export function buildEntries(
     byList.set(task.list_id, bucket);
   });
 
+  // Sort list groups by display name (stable, user-meaningful — the raw
+  // list ids are UUIDs for local lists). Shared by the scheduled groups and
+  // the backlog's per-list sub-grouping.
+  const byName = (a: string, b: string) =>
+    (taskListById.get(a)?.name ?? a).localeCompare(
+      taskListById.get(b)?.name ?? b,
+    );
   const sortedLists = Array.from(byList.entries()).sort(([a], [b]) =>
-    a.localeCompare(b),
+    byName(a, b),
   );
 
   const entries: Entry[] = [];
@@ -129,25 +136,23 @@ export function buildEntries(
     children.forEach((child) => visit(child, depth + 1, childHidden));
   };
 
-  if (backlog.length > 0) {
-    entries.push({ kind: 'separator', label: t('views.tasks.backlog') });
-    backlog.forEach((task) => visit(task, 0, false));
-  }
-
-  sortedLists.forEach(([listId, items]) => {
-    const name = taskListById.get(listId)?.name ?? listId;
-    entries.push({ kind: 'separator', label: name });
-
+  // Emit a list's tasks grouped by section, each section sub-header at
+  // `sectionLevel`. Ungrouped tasks (no/unknown section) lead with no header.
+  // Shared by the scheduled per-list groups and the backlog (nested one level
+  // deeper, under its per-list sub-headers).
+  const emitListSections = (
+    listId: string,
+    items: Task[],
+    sectionLevel: number,
+  ) => {
     const sections = sectionsByList[listId] ?? [];
     if (sections.length === 0) {
-      // Section-less backend (or not yet loaded) → flat under the list,
-      // exactly the pre-sections shape.
+      // Section-less backend (or not yet loaded) → flat under the list.
       items.forEach((task) => visit(task, 0, false));
       return;
     }
-
-    // Group the list's top-level tasks by section. Subtasks follow
-    // their parent via `visit`, so only top-level placement matters.
+    // Subtasks follow their parent via `visit`, so only top-level placement
+    // matters here.
     const sectionIds = new Set(sections.map((s) => s.id));
     const bySection = new Map<string, Task[]>();
     const ungrouped: Task[] = [];
@@ -160,11 +165,9 @@ export function buildEntries(
         ungrouped.push(task);
       }
     });
-
     // Ungrouped tasks lead, with no sub-header (the fallback bucket).
     ungrouped.forEach((task) => visit(task, 0, false));
-    // Then each non-empty section in its declared order, under a
-    // level-1 sub-header.
+    // Then each non-empty section in its declared order, under a sub-header.
     [...sections]
       .sort((a, b) => a.order - b.order)
       .forEach((section) => {
@@ -173,12 +176,39 @@ export function buildEntries(
         entries.push({
           kind: 'separator',
           label: section.name,
-          level: 1,
+          level: sectionLevel,
           sectionId: section.id,
           listId,
         });
         secTasks.forEach((task) => visit(task, 0, false));
       });
+  };
+
+  if (backlog.length > 0) {
+    entries.push({ kind: 'separator', label: t('views.tasks.backlog') });
+    // Group the backlog by list → section too, so a list's sections (e.g. a
+    // Vikunja project's To-Do / Doing / Done buckets) appear as groups even
+    // when nothing is scheduled. Nested one level deeper than the scheduled
+    // groups: Backlog (0) → list (1) → section (2).
+    const backlogByList = new Map<string, Task[]>();
+    backlog.forEach((task) => {
+      const arr = backlogByList.get(task.list_id) ?? [];
+      arr.push(task);
+      backlogByList.set(task.list_id, arr);
+    });
+    Array.from(backlogByList.entries())
+      .sort(([a], [b]) => byName(a, b))
+      .forEach(([listId, items]) => {
+        const name = taskListById.get(listId)?.name ?? listId;
+        entries.push({ kind: 'separator', label: name, level: 1 });
+        emitListSections(listId, items, 2);
+      });
+  }
+
+  sortedLists.forEach(([listId, items]) => {
+    const name = taskListById.get(listId)?.name ?? listId;
+    entries.push({ kind: 'separator', label: name });
+    emitListSections(listId, items, 1);
   });
 
   // "Done (N)" footer group — a single collapsible bucket for every

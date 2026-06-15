@@ -185,4 +185,35 @@ describe('buildEntries section grouping', () => {
     expect(taskEntries.map((e) => e.task.id)).toEqual(['parent', 'child']);
     expect(taskEntries.find((e) => e.task.id === 'child')!.depth).toBe(1);
   });
+
+  it('groups the backlog by list (1) then section (2)', () => {
+    // Unscheduled tasks land in the backlog; it now sub-groups by list and
+    // section so e.g. Vikunja buckets show even without a scheduled day.
+    const tasks = [
+      baseTask({ id: 'a', scheduled_date: null, section_id: 's1' }),
+      baseTask({ id: 'b', scheduled_date: null, section_id: null }),
+    ];
+    const result = buildEntries(tasks, listById, t, new Set(), {
+      L1: [section('s1', 'To Do', 1)],
+    });
+    expect(separators(result)).toEqual([
+      { label: 'views.tasks.backlog', level: 0 },
+      { label: 'Inbox', level: 1 },
+      { label: 'To Do', level: 2 },
+    ]);
+    // Ungrouped (b) leads, then the section task (a).
+    const ids = result.entries
+      .filter((e): e is Extract<typeof e, { kind: 'task' }> => e.kind === 'task')
+      .map((e) => e.task.id);
+    expect(ids).toEqual(['b', 'a']);
+  });
+
+  it('shows a backlog list sub-header even when the list has no sections', () => {
+    const tasks = [baseTask({ id: 'a', scheduled_date: null })];
+    const result = buildEntries(tasks, listById, t, new Set(), {});
+    expect(separators(result)).toEqual([
+      { label: 'views.tasks.backlog', level: 0 },
+      { label: 'Inbox', level: 1 },
+    ]);
+  });
 });

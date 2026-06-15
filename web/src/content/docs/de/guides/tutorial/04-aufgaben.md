@@ -85,6 +85,13 @@ deinen Tag oder deine Woche ein und arbeitest sie ab.
 > Abschnitt" landet eine Vikunja-Aufgabe im Standard-Bucket, da Vikunja
 > jede Kanban-Aufgabe in einem Bucket führt.
 
+> **Wo Abschnitte erscheinen:** In der **Aufgaben-Ansicht** erscheinen
+> Abschnitte als Unter-Überschriften unter ihrer Liste — auch innerhalb der
+> **Backlog**-Gruppe, sodass die Buckets einer Liste (z. B. *To-Do / Doing /
+> Done* eines Vikunja-Projekts) auch ohne eingeplanten Tag sichtbar sind. Ein
+> Abschnitt ist nur eine Gruppierung; der **Status** einer Aufgabe (offen /
+> erledigt) ist unabhängig davon, in welchem Abschnitt sie liegt.
+
 > **Per Maus (Drag & Drop):** Du kannst eine Aufgabe auch auf einen
 > **Abschnitts-Kopf** (in der Aufgaben-Ansicht) oder auf eine **Liste in
 > der Seitenleiste** ziehen, um sie dorthin zu verschieben; einen **Termin**

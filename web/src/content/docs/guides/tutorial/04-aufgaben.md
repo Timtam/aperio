@@ -77,6 +77,12 @@ your day or week, and work through them.
 > into the default bucket, since Vikunja keeps every kanban task in a
 > bucket.
 
+> **Where sections show:** In the **task view**, sections appear as
+> sub-headings under their list — including inside the **Backlog** group, so
+> a list's buckets (e.g. a Vikunja project's *To-Do / Doing / Done*) are
+> visible even when nothing is scheduled. A section is only a grouping; a
+> task's **status** (open / done) is independent of which section it's in.
+
 > **With the mouse (drag & drop):** You can also drag a task onto a
 > **section header** (in the task view) or onto a **list in the sidebar**
 > to move it there; drag an **event** onto a **calendar in the sidebar**.
