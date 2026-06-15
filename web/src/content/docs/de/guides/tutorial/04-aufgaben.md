@@ -67,12 +67,16 @@ deinen Tag oder deine Woche ein und arbeitest sie ab.
 > Reihenfolge: eigene Aufgaben-Farbe → Abschnitt → Aufgabenliste.
 
 > **Abschnitte anlegen, umbenennen, löschen:** Bei **lokalen** Listen sowie
-> bei **Todoist** und **Vikunja** legst du Abschnitte direkt im
-> Aufgaben-Dialog an, benennst sie um und löschst sie — die Änderung läuft
-> beim jeweiligen Anbieter. Die **Farbe** eines Abschnitts bleibt dabei
-> immer lokal: Sie lässt sich für jeden Abschnitt setzen (auch bei
-> Todoist/Vikunja, die selbst keine Abschnittsfarbe kennen) und wird nicht
-> zum Anbieter übertragen.
+> bei **Todoist** und **Vikunja** kannst du Abschnitte an drei Stellen
+> anlegen, umbenennen und löschen — je nachdem, was gerade am nächsten
+> liegt: über das **⋮-Menü** am Abschnitts-Kopf (oder Rechtsklick /
+> `Umschalt+F10`) in der Aufgaben-Ansicht, über das **Kontextmenü einer
+> Aufgabenliste in der Seitenleiste** (*Abschnitt hinzufügen*) oder über das
+> Feld **Abschnitt** im Aufgaben-Dialog. Die Änderung läuft beim jeweiligen
+> Anbieter. Die **Farbe** eines Abschnitts bleibt dabei immer lokal: Sie
+> lässt sich für jeden Abschnitt setzen (auch bei Todoist/Vikunja, die
+> selbst keine Abschnittsfarbe kennen) und wird nicht zum Anbieter
+> übertragen.
 
 > **Aufgaben zwischen Abschnitten verschieben:** Über das **Abschnitt**-Feld
 > im Aufgaben-Dialog ordnest du eine Aufgabe einem anderen Abschnitt zu

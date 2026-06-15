@@ -1011,6 +1011,10 @@
       "noSection": "No section",
       "section": {
         "add": "+ Section",
+        "addAction": "Add section",
+        "createTitle": "New section",
+        "renameTitle": "Rename section",
+        "nameField": "Name",
         "rename": "Rename",
         "delete": "Delete",
         "create": "Create",

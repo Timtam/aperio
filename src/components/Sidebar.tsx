@@ -149,7 +149,8 @@ export function Sidebar({
     refreshContactLists,
     colorLabels,
   } = useCalendarStore();
-  const { openSettings, openTaskMembers } = useDialogState();
+  const { openSettings, openTaskMembers, openSectionDialog } =
+    useDialogState();
   const expansion = useSidebarExpansion();
   const showCompleted = useTaskListShowCompleted();
   const { focusedCalendarId, enterFocus, exitFocus } = useViewState();
@@ -706,11 +707,21 @@ export function Sidebar({
         // declares membership management (Vikunja, Todoist). Local lists
         // and flat backends (Google Tasks, MS To Do) have no membership
         // concept, so they never offer the entry.
-        const membersCaps = taskLists.find(
+        const taskCaps = taskLists.find(
           (l) => l.id === leaf.containerId,
         )?.task_capabilities;
-        if (membersCaps?.manageable) {
+        if (taskCaps?.manageable) {
           items.push({ id: 'members', label: t('sidebar.menu.members') });
+        }
+        // Add a section straight from the list — a discoverable entry point
+        // for the section editor (otherwise reachable only from the task
+        // editor's Section field). Only where the provider can manage
+        // sections (local, Todoist, Vikunja).
+        if (taskCaps?.manageable_sections) {
+          items.push({
+            id: 'addSection',
+            label: t('dialogs.task.section.addAction'),
+          });
         }
       }
       // Color: bind the container's color to one of the predefined
@@ -796,6 +807,11 @@ export function Sidebar({
           (l) => l.id === leaf.containerId,
         )?.task_capabilities;
         openTaskMembers(leaf.containerId, leaf.name, caps);
+      } else if (selected === 'addSection') {
+        // Same focus reasoning as 'members': the SectionDialog grabs focus
+        // and DialogState.close() restores it to the triggering row, so
+        // DON'T arm the tree-restore effect here.
+        openSectionDialog(leaf.containerId, null);
       } else if (selected === 'color:__other__') {
         // Compose a custom color for this container. The modal grabs focus
         // and restores it on close (like the members dialog), so DON'T arm
@@ -913,6 +929,7 @@ export function Sidebar({
     [
       startEdit,
       openTaskMembers,
+      openSectionDialog,
       onDeleteCalendar,
       onDeleteContactListAction,
       taskLists,

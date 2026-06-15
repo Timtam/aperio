@@ -8,6 +8,7 @@ import { QuickAddDialog } from './QuickAddDialog';
 import { QuickAddTaskDialog } from './QuickAddTaskDialog';
 import { RemindersDialog } from './RemindersDialog';
 import { SearchDialog } from './SearchDialog';
+import { SectionDialog } from './SectionDialog';
 import { SettingsDialog } from './SettingsDialog';
 import { SyncAccountsConnectDialog } from './SyncAccountsConnectDialog';
 import { SyncConflictsDialog } from './SyncConflictsDialog';
@@ -72,6 +73,15 @@ export function DialogHost() {
           onClose={close}
           task={mode.task}
           onPlanned={invalidateData}
+        />
+      );
+    case 'sectionEdit':
+      return (
+        <SectionDialog
+          isOpen
+          onClose={close}
+          listId={mode.listId}
+          section={mode.section}
         />
       );
     case 'taskMembers':

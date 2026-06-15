@@ -1011,6 +1011,10 @@
       "noSection": "Kein Abschnitt",
       "section": {
         "add": "+ Abschnitt",
+        "addAction": "Abschnitt hinzufügen",
+        "createTitle": "Neuer Abschnitt",
+        "renameTitle": "Abschnitt umbenennen",
+        "nameField": "Name",
         "rename": "Umbenennen",
         "delete": "Löschen",
         "create": "Anlegen",

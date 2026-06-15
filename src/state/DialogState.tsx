@@ -10,6 +10,7 @@ import type {
   Account,
   CalendarEvent,
   Contact,
+  Section,
   Task,
   TaskCapabilities,
 } from '../api/types';
@@ -57,6 +58,7 @@ export type DialogMode =
   | { kind: 'reminders' }
   | { kind: 'moveCopy'; target: MoveCopyTarget }
   | { kind: 'planTask'; task: Task }
+  | { kind: 'sectionEdit'; listId: string; section: Section | null }
   | {
       kind: 'taskMembers';
       listId: string;
@@ -123,6 +125,13 @@ export interface DialogStateValue {
   openReminders: () => void;
   openMoveCopy: (target: MoveCopyTarget) => void;
   openPlanTask: (task: Task) => void;
+  /** Open the create/rename section dialog. Pass `section=null` (or omit)
+   *  to create a new section in `listId`; pass an existing Section to
+   *  rename / recolor it. Shared by the task-view section-header menu and
+   *  the sidebar list menu so both surfaces reach the same accessible name
+   *  editor (the only previous entry point was the task editor's Section
+   *  field, which wasn't discoverable). */
+  openSectionDialog: (listId: string, section?: Section | null) => void;
   /** Open the task-list membership/sharing dialog (DESIGN §9.7). Pass the
    *  list's `task_capabilities` so the dialog can switch between
    *  search-add (Vikunja) and email-invite (Todoist). */
@@ -287,6 +296,11 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
     (task: Task) => push({ kind: 'planTask', task }),
     [push],
   );
+  const openSectionDialog = useCallback(
+    (listId: string, section: Section | null = null) =>
+      push({ kind: 'sectionEdit', listId, section }),
+    [push],
+  );
   const openTaskMembers = useCallback(
     (listId: string, listName: string, capabilities?: TaskCapabilities) =>
       push({ kind: 'taskMembers', listId, listName, capabilities }),
@@ -374,6 +388,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openReminders,
       openMoveCopy,
       openPlanTask,
+      openSectionDialog,
       openTaskMembers,
       openDayStartReview,
       openContactDialog,
@@ -398,6 +413,7 @@ export function DialogStateProvider({ children }: { children: ReactNode }) {
       openReminders,
       openMoveCopy,
       openPlanTask,
+      openSectionDialog,
       openTaskMembers,
       openDayStartReview,
       openContactDialog,

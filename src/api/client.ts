@@ -286,8 +286,10 @@ export interface CreateSectionRequest {
   color_label?: string | null;
 }
 
-/** Create a section in a local list. Sections on external providers are
- *  read-only here, so this targets the local store only. */
+/** Create a section. On local lists it's stored locally; on external lists
+ *  whose provider declares `manageable_sections` (Todoist, Vikunja) the
+ *  backend creates it at the provider. The section colour is always a local
+ *  concern — set it separately via `setSectionColor`. */
 export const createSection = (request: CreateSectionRequest) =>
   invoke<Section>('create_section', { request });
 

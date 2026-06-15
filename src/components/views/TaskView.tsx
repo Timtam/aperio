@@ -33,6 +33,7 @@ import { buildEntries, DONE_GROUP_ID, type Entry } from './taskGrouping';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { ColorPickerModal } from '../ColorPickerModal';
 import {
+  deleteSection,
   isCommandError,
   setSectionColor as setSectionColorCmd,
   showContextMenu,
@@ -95,8 +96,13 @@ export function TaskView() {
       if (!(listId in sectionsByList)) void loadSections(listId);
     }
   }, [listIdsWithTasks, sectionsByList, loadSections]);
-  const { openTaskDialog, openMoveCopy, openPlanTask, invalidateData } =
-    useDialogState();
+  const {
+    openTaskDialog,
+    openMoveCopy,
+    openPlanTask,
+    openSectionDialog,
+    invalidateData,
+  } = useDialogState();
 
   // Parent-task collapse state: the set of parent ids whose
   // children are currently hidden. Lives in component state so a
@@ -212,27 +218,53 @@ export function TaskView() {
     [loadSections, announce, t],
   );
 
-  const openSectionColorMenu = useCallback(
+  // Full section-header menu (right-click + the ⋮ button): create /
+  // rename / recolor / delete. Create + rename + delete show only where the
+  // list's provider can manage sections (local, Todoist, Vikunja); the
+  // colour submenu shows wherever colour labels exist (a section's colour is
+  // a local concept even for external lists). Create/rename route to the
+  // shared SectionDialog so a screen-reader user has a discoverable path
+  // right where sections live — not only buried in the task editor.
+  const openSectionMenu = useCallback(
     async (section: Section, position?: { x: number; y: number }) => {
-      if (colorLabels.length === 0) return;
-      const items: ContextMenuItemRequest[] = [
-        {
-          kind: 'check',
-          id: 'color:__none__',
-          label: t('sidebar.menu.colorNone'),
-          checked: !section.color_label,
-        },
-        // Named palette labels only — hidden ad-hoc one-offs never appear.
-        ...colorLabels
-          .filter((cl) => !cl.ad_hoc)
-          .map((cl) => ({
-            kind: 'check' as const,
-            id: `color:${cl.id}`,
-            label: cl.name,
-            checked: section.color_label === cl.id,
-          })),
-        { id: 'color:__other__', label: t('sidebar.menu.colorOther') },
-      ];
+      const manageable =
+        taskListById.get(section.list_id)?.task_capabilities
+          ?.manageable_sections ?? false;
+      const colorable = colorLabels.length > 0;
+      if (!manageable && !colorable) return;
+      const items: ContextMenuItemRequest[] = [];
+      if (manageable) {
+        items.push({ id: 'add', label: t('dialogs.task.section.addAction') });
+        items.push({ id: 'rename', label: t('dialogs.task.section.rename') });
+      }
+      if (colorable) {
+        items.push({
+          kind: 'submenu',
+          label: t('sidebar.menu.color'),
+          items: [
+            {
+              kind: 'check',
+              id: 'color:__none__',
+              label: t('sidebar.menu.colorNone'),
+              checked: !section.color_label,
+            },
+            // Named palette labels only — hidden ad-hoc one-offs never appear.
+            ...colorLabels
+              .filter((cl) => !cl.ad_hoc)
+              .map((cl) => ({
+                kind: 'check' as const,
+                id: `color:${cl.id}`,
+                label: cl.name,
+                checked: section.color_label === cl.id,
+              })),
+            { id: 'color:__other__', label: t('sidebar.menu.colorOther') },
+          ],
+        });
+      }
+      if (manageable) {
+        items.push({ kind: 'separator' });
+        items.push({ id: 'delete', label: t('dialogs.task.section.delete') });
+      }
       let selected: string | null = null;
       try {
         selected = await showContextMenu(items, position);
@@ -241,7 +273,27 @@ export function TaskView() {
         console.warn('show_context_menu failed', err);
         return;
       }
-      if (selected === 'color:__other__') {
+      if (selected === 'add') {
+        openSectionDialog(section.list_id, null);
+      } else if (selected === 'rename') {
+        openSectionDialog(section.list_id, section);
+      } else if (selected === 'delete') {
+        // Deleting a section only ungroups its tasks (ON DELETE SET NULL),
+        // so there's no destructive confirm — the announce spells out that
+        // the tasks survive.
+        try {
+          await deleteSection(section.id, section.list_id);
+          await loadSections(section.list_id);
+          announce(t('dialogs.task.section.deleted', { name: section.name }));
+          invalidateData();
+        } catch (err) {
+          if (isCommandError(err)) {
+            announce(`${err.code}: ${err.message}`);
+          } else {
+            announce(String(err));
+          }
+        }
+      } else if (selected === 'color:__other__') {
         setSectionColorTarget(section);
       } else if (selected?.startsWith('color:')) {
         const raw = selected.slice('color:'.length);
@@ -252,7 +304,16 @@ export function TaskView() {
         await setSectionColor(section, labelId, labelName);
       }
     },
-    [colorLabels, t, setSectionColor],
+    [
+      colorLabels,
+      taskListById,
+      t,
+      setSectionColor,
+      openSectionDialog,
+      loadSections,
+      announce,
+      invalidateData,
+    ],
   );
 
   const performDelete = useCallback(
@@ -537,12 +598,21 @@ export function TaskView() {
                     (s) => s.id === entry.sectionId,
                   )
                 : undefined;
-            const colorable = !!section && colorLabels.length > 0;
+            // The header becomes interactive when there's any section
+            // action to offer: colour (wherever labels exist) or — on
+            // provider-manageable lists — add / rename / delete. Once
+            // interactive it can't stay aria-hidden.
+            const sectionManageable = section
+              ? (taskListById.get(section.list_id)?.task_capabilities
+                  ?.manageable_sections ?? false)
+              : false;
+            const sectionActionable =
+              !!section && (sectionManageable || colorLabels.length > 0);
             return (
               <li
                 key={`sep-${i}-${entry.label}`}
                 role="presentation"
-                aria-hidden={colorable ? undefined : true}
+                aria-hidden={sectionActionable ? undefined : true}
                 className={
                   (isSection
                     ? 'task-list__group task-list__group--section'
@@ -558,10 +628,10 @@ export function TaskView() {
                     : undefined
                 }
                 onContextMenu={
-                  colorable && section
+                  sectionActionable && section
                     ? (e) => {
                         e.preventDefault();
-                        void openSectionColorMenu(section, {
+                        void openSectionMenu(section, {
                           x: e.clientX,
                           y: e.clientY,
                         });
@@ -611,7 +681,7 @@ export function TaskView() {
                   />
                 )}
                 {entry.label}
-                {colorable && section && (
+                {sectionActionable && section && (
                   <button
                     type="button"
                     className="task-list__section-menu"
@@ -620,10 +690,29 @@ export function TaskView() {
                     })}
                     onClick={(e) => {
                       const rect = e.currentTarget.getBoundingClientRect();
-                      void openSectionColorMenu(section, {
+                      void openSectionMenu(section, {
                         x: rect.left,
                         y: rect.bottom,
                       });
+                    }}
+                    onKeyDown={(e) => {
+                      // Menu key / Shift+F10 open the section menu from the
+                      // focused ⋮ button. stopPropagation so the keystroke
+                      // doesn't bubble to the tree's handler, which would
+                      // otherwise open the *task* menu for the focused row.
+                      // (Enter/Space already activate onClick natively.)
+                      if (
+                        e.key === 'ContextMenu' ||
+                        (e.key === 'F10' && e.shiftKey)
+                      ) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        void openSectionMenu(section, {
+                          x: rect.left,
+                          y: rect.bottom,
+                        });
+                      }
                     }}
                   >
                     ⋮

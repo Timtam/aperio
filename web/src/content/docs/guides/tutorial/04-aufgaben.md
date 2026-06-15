@@ -61,11 +61,14 @@ your day or week, and work through them.
 > color → section → task list.
 
 > **Creating, renaming, deleting sections:** On **local** lists and on
-> **Todoist** and **Vikunja**, you can add, rename, and delete sections
-> right in the task dialog — the change is made at the provider. A
-> section's **color** always stays local: you can set it for any section
-> (including Todoist/Vikunja, which have no section-color of their own) and
-> it's never sent to the provider.
+> **Todoist** and **Vikunja**, you can add, rename, and delete sections from
+> three places — whichever is closest to hand: the section header's **⋮
+> menu** (or right-click / `Shift+F10`) in the task view, a task list's
+> **context menu in the sidebar** (*Add section*), or the **Section** field
+> in the task dialog. The change is made at the provider. A section's
+> **color** always stays local: you can set it for any section (including
+> Todoist/Vikunja, which have no section-color of their own) and it's never
+> sent to the provider.
 
 > **Moving tasks between sections:** Use the **Section** field in the task
 > dialog to file a task under a different section, or pick **No section**
