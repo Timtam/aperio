@@ -361,6 +361,8 @@ pub async fn create_task(
         updated_at: now,
         completed_at: None,
         etag,
+        resurface_date: None,
+        series_id: None,
     })
 }
 
@@ -487,6 +489,8 @@ fn build_vtodo_from_task(task: &Task) -> String {
         color_label: task.color_label.clone(),
         reminders: task.reminders.clone(),
         sound: task.sound.clone(),
+        resurface_date: None,
+        series_id: None,
     };
     // The id may be the composite `{href}|{uid}` we encode in
     // `map_todo`; strip the href back off so the iCal UID matches what
@@ -638,6 +642,8 @@ fn map_todo(todo: &Todo, list_id: &str, href: Option<&str>) -> Option<Task> {
         updated_at,
         completed_at,
         etag: None,
+        resurface_date: None,
+        series_id: None,
     })
 }
 
@@ -819,6 +825,8 @@ mod tests {
             color_label: None,
             reminders: Vec::new(),
             sound: None,
+            resurface_date: None,
+            series_id: None,
         }
     }
 
@@ -930,6 +938,8 @@ END:VCALENDAR</c:calendar-data>
             color_label: None,
             reminders: Vec::new(),
             sound: None,
+            resurface_date: None,
+            series_id: None,
         };
         let body = build_vtodo_body("uid-1", &new, None);
         assert!(
@@ -963,6 +973,8 @@ END:VCALENDAR</c:calendar-data>
             color_label: None,
             reminders: Vec::new(),
             sound: None,
+            resurface_date: None,
+            series_id: None,
         };
         let body = build_vtodo_body("uid-2", &new, None);
         assert!(
@@ -984,6 +996,9 @@ END:VCALENDAR</c:calendar-data>
             day_of_week: Some(vec![Weekday::Monday, Weekday::Wednesday]),
             day_of_month: None,
             end: Some(RecurrenceEnd::After { occurrences: 6 }),
+            anchor: Default::default(),
+            placement: Default::default(),
+            fixed_dates: None,
         };
         let new = NewTask {
             assignees: Vec::new(),
@@ -1001,6 +1016,8 @@ END:VCALENDAR</c:calendar-data>
             color_label: None,
             reminders: Vec::new(),
             sound: None,
+            resurface_date: None,
+            series_id: None,
         };
         let body = build_vtodo_body("uid-rec", &new, None);
         assert!(

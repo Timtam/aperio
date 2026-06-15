@@ -206,6 +206,11 @@ impl LocalAdapter {
             deadline_date: template.deadline_date.map(|_| next_date),
             deadline_time: template.deadline_time,
             recurrence: Some(recurrence.clone()),
+            // DESIGN §9.12: the next instance stays in the same series; the
+            // resurface/backlog placement is computed by the spawner in a
+            // later phase (this phase only carries the fields).
+            resurface_date: None,
+            series_id: template.series_id.clone(),
             parent_id: None,
             // Keep the next occurrence in the same section as its template.
             section_id: template.section_id.clone(),
@@ -239,9 +244,9 @@ impl LocalAdapter {
                 "INSERT INTO tasks (
                     id, list_id, parent_id, section_id, title, description, status, priority,
                     scheduled_date, scheduled_time, deadline_date, deadline_time,
-                    recurrence, color_label_id, reminders, sound,
+                    recurrence, resurface_date, series_id, color_label_id, reminders, sound,
                     created_at, updated_at, completed_at, etag
-                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)",
+                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)",
                 params![
                     id,
                     list_id,
@@ -256,6 +261,8 @@ impl LocalAdapter {
                     task.deadline_date.as_ref().map(fmt_date),
                     task.deadline_time.as_ref().map(fmt_time),
                     recurrence_json,
+                    task.resurface_date.as_ref().map(fmt_date),
+                    task.series_id,
                     task.color_label.as_ref().map(|c| c.as_str()),
                     reminders_json,
                     sound_json,
@@ -278,6 +285,8 @@ impl LocalAdapter {
             deadline_date: task.deadline_date,
             deadline_time: task.deadline_time,
             recurrence: task.recurrence,
+            resurface_date: task.resurface_date,
+            series_id: task.series_id,
             parent_id: task.parent_id,
             section_id: task.section_id,
             color_label: task.color_label,
@@ -357,7 +366,8 @@ impl LocalAdapter {
                 "SELECT id, list_id, parent_id, title, description, status,
                         priority, scheduled_date, scheduled_time, deadline_date,
                         deadline_time, recurrence, color_label_id, reminders, sound,
-                        created_at, updated_at, completed_at, etag, section_id
+                        created_at, updated_at, completed_at, etag, section_id,
+                        resurface_date, series_id
                    FROM tasks WHERE id = ?",
             )
             .map_err(map_sql_err)?;
@@ -554,9 +564,9 @@ impl TasksFeature for LocalAdapter {
                 "INSERT INTO tasks (
                     id, list_id, parent_id, section_id, title, description, status, priority,
                     scheduled_date, scheduled_time, deadline_date, deadline_time,
-                    recurrence, color_label_id, reminders, sound,
+                    recurrence, resurface_date, series_id, color_label_id, reminders, sound,
                     created_at, updated_at, completed_at, etag
-                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)",
+                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)",
                 params![
                     id,
                     list_id,
@@ -571,6 +581,8 @@ impl TasksFeature for LocalAdapter {
                     task.deadline_date.as_ref().map(fmt_date),
                     task.deadline_time.as_ref().map(fmt_time),
                     recurrence_json,
+                    task.resurface_date.as_ref().map(fmt_date),
+                    task.series_id,
                     task.color_label.as_ref().map(|c| c.as_str()),
                     reminders_json,
                     sound_json,
@@ -593,6 +605,8 @@ impl TasksFeature for LocalAdapter {
             deadline_date: task.deadline_date,
             deadline_time: task.deadline_time,
             recurrence: task.recurrence,
+            resurface_date: task.resurface_date,
+            series_id: task.series_id,
             parent_id: task.parent_id,
             section_id: task.section_id,
             color_label: task.color_label,
@@ -761,7 +775,8 @@ pub(crate) fn row_to_section(row: &rusqlite::Row<'_>) -> cal_core::Result<Sectio
 const TASK_SELECT: &str = "SELECT id, list_id, parent_id, title, description, status,
             priority, scheduled_date, scheduled_time, deadline_date,
             deadline_time, recurrence, color_label_id, reminders, sound,
-            created_at, updated_at, completed_at, etag, section_id
+            created_at, updated_at, completed_at, etag, section_id,
+            resurface_date, series_id
        FROM tasks
       WHERE list_id = ?
       ORDER BY COALESCE(scheduled_date, deadline_date, ''), created_at";
@@ -923,6 +938,11 @@ pub(crate) fn row_to_task(row: &rusqlite::Row<'_>) -> cal_core::Result<Task> {
     };
     let etag = opt_text(row, 18)?;
     let section_id = opt_text(row, 19)?;
+    let resurface_date = match opt_text(row, 20)? {
+        Some(s) => Some(parse_date(&s)?),
+        None => None,
+    };
+    let series_id = opt_text(row, 21)?;
 
     Ok(Task {
         assignees: Vec::new(),
@@ -937,6 +957,8 @@ pub(crate) fn row_to_task(row: &rusqlite::Row<'_>) -> cal_core::Result<Task> {
         deadline_date,
         deadline_time,
         recurrence,
+        resurface_date,
+        series_id,
         parent_id,
         section_id,
         color_label,
@@ -974,6 +996,8 @@ mod tests {
             deadline_date: None,
             deadline_time: None,
             recurrence: None,
+            resurface_date: None,
+            series_id: None,
             parent_id: None,
             section_id: None,
             color_label: None,
@@ -1061,6 +1085,9 @@ mod tests {
         let mut nt = mk_task("Water plants");
         nt.scheduled_date = Some(anchor);
         nt.recurrence = Some(TaskRecurrence {
+            anchor: Default::default(),
+            placement: Default::default(),
+            fixed_dates: None,
             frequency: RecurrenceFrequency::Daily,
             interval: 3,
             day_of_week: None,
@@ -1097,6 +1124,9 @@ mod tests {
         let mut nt = mk_task("Standup");
         nt.scheduled_date = Some(anchor);
         nt.recurrence = Some(TaskRecurrence {
+            anchor: Default::default(),
+            placement: Default::default(),
+            fixed_dates: None,
             frequency: RecurrenceFrequency::Weekly,
             interval: 1,
             day_of_week: Some(vec![Weekday::Thursday]),
@@ -1125,6 +1155,9 @@ mod tests {
         let mut nt = mk_task("One last time");
         nt.scheduled_date = Some(anchor);
         nt.recurrence = Some(TaskRecurrence {
+            anchor: Default::default(),
+            placement: Default::default(),
+            fixed_dates: None,
             frequency: RecurrenceFrequency::Daily,
             interval: 1,
             day_of_week: None,
@@ -1151,6 +1184,9 @@ mod tests {
         let mut nt = mk_task("Daily");
         nt.scheduled_date = Some(anchor);
         nt.recurrence = Some(TaskRecurrence {
+            anchor: Default::default(),
+            placement: Default::default(),
+            fixed_dates: None,
             frequency: RecurrenceFrequency::Daily,
             interval: 1,
             day_of_week: None,

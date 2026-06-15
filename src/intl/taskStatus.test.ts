@@ -21,6 +21,8 @@ const baseTask: Task = {
   deadline_date: null,
   deadline_time: null,
   recurrence: null,
+  resurface_date: null,
+  series_id: null,
   parent_id: null,
   section_id: null,
   color_label: null,

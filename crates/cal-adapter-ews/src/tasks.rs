@@ -140,6 +140,7 @@ pub async fn update_task(client: &EwsClient, task: &Task) -> EwsResult<Task> {
         id: new_id,
         etag: item_ref.change_key,
         updated_at: Utc::now(),
+        // resurface_date / series_id inherit from `task` via the spread.
         ..task.clone()
     })
 }
@@ -794,6 +795,8 @@ pub fn to_task(item: ParsedTask, list_id: &str) -> EwsResult<Task> {
         updated_at: item.last_modified.unwrap_or_else(Utc::now),
         completed_at: item.complete_date,
         etag: item.change_key,
+        resurface_date: None,
+        series_id: None,
     })
 }
 
@@ -1115,6 +1118,8 @@ fn build_task_from_new(
         updated_at: now,
         completed_at: None,
         etag: change_key,
+        resurface_date: None,
+        series_id: None,
     }
 }
 
@@ -1282,6 +1287,9 @@ mod tests {
             end: Some(RecurrenceEnd::OnDate {
                 date: NaiveDate::from_ymd_opt(2026, 6, 30).unwrap(),
             }),
+            anchor: Default::default(),
+            placement: Default::default(),
+            fixed_dates: None,
         };
         let new = NewTask {
             assignees: Vec::new(),
@@ -1299,6 +1307,8 @@ mod tests {
             color_label: None,
             reminders: Vec::new(),
             sound: None,
+            resurface_date: None,
+            series_id: None,
         };
         // Write: the `<t:Recurrence>` element lands in the create body.
         let task_xml = new_task_to_task_item_xml(&new);
@@ -1491,6 +1501,8 @@ mod tests {
                 sound: None,
             }],
             sound: None,
+            resurface_date: None,
+            series_id: None,
         }
     }
 
@@ -1533,6 +1545,8 @@ mod tests {
             updated_at: Utc::now(),
             completed_at: None,
             etag: Some("TCK".into()),
+            resurface_date: None,
+            series_id: None,
         };
         let (set, del) = task_to_update_field_xml(&task);
         // Subject + Importance + Status are always set
@@ -1682,6 +1696,8 @@ mod tests {
             updated_at: Utc::now(),
             completed_at: None,
             etag: Some("TCK-V1".into()),
+            resurface_date: None,
+            series_id: None,
         };
         let updated = update_task(&client_for(&server), &starting).await.unwrap();
         assert_eq!(updated.id, "TID|TCK-V2");

@@ -84,6 +84,8 @@ fn task(id: &str) -> Task {
         deadline_date: None,
         deadline_time: None,
         recurrence: None,
+        resurface_date: None,
+        series_id: None,
         parent_id: None,
         section_id: None,
         color_label: None,

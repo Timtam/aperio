@@ -983,6 +983,9 @@ fn recurrence_from_vikunja(repeat_after: i64, repeat_mode: i32) -> Option<TaskRe
             day_of_week: None,
             day_of_month: None,
             end: None,
+            anchor: Default::default(),
+            placement: Default::default(),
+            fixed_dates: None,
         })
     };
     if repeat_mode == 1 {
@@ -1063,6 +1066,8 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
         // shapes Vikunja can store (daily/weekly periods + monthly).
         recurrence: recurrence_from_vikunja(entry.repeat_after, entry.repeat_mode),
         parent_id: None,
+        resurface_date: None,
+        series_id: None,
         // Kanban bucket → section. `0` is Vikunja's "no bucket".
         section_id: (entry.bucket_id != 0).then(|| entry.bucket_id.to_string()),
         color_label: None,
@@ -1460,6 +1465,9 @@ mod tests {
             day_of_week: None,
             day_of_month: None,
             end: None,
+            anchor: Default::default(),
+            placement: Default::default(),
+            fixed_dates: None,
         };
         // Aperio → Vikunja: daily/weekly become a seconds period (mode 0),
         // monthly uses Vikunja's monthly mode, yearly can't be stored.
@@ -1506,6 +1514,9 @@ mod tests {
             day_of_week: None,
             day_of_month: None,
             end: None,
+            anchor: Default::default(),
+            placement: Default::default(),
+            fixed_dates: None,
         });
         let body = new_task_to_body(&new);
         assert_eq!(body.repeat_after, 86_400);
@@ -1532,6 +1543,8 @@ mod tests {
             deadline_time: None,
             recurrence: None,
             parent_id: None,
+            resurface_date: None,
+            series_id: None,
             section_id: None,
             color_label: None,
             reminders: Vec::new(),
@@ -1852,6 +1865,8 @@ mod tests {
             deadline_time: None,
             recurrence: None,
             parent_id: None,
+            resurface_date: None,
+            series_id: None,
             section_id: section_id.map(str::to_string),
             color_label: None,
             reminders: Vec::new(),
@@ -2154,6 +2169,8 @@ mod tests {
             deadline_time: None,
             recurrence: None,
             parent_id: None,
+            resurface_date: None,
+            series_id: None,
             section_id: None,
             color_label: None,
             reminders: Vec::new(),

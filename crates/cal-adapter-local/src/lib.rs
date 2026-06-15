@@ -153,6 +153,9 @@ pub mod test_support {
         conn.execute_batch(SCHEMA_V23).expect("apply v23 schema");
         // 0024 adds the `color_label_id` binding on sections.
         conn.execute_batch(SCHEMA_V24).expect("apply v24 schema");
+        // 0025–0027 touch host-only tables; 0028 adds the on-demand
+        // recurrence columns (`resurface_date`, `series_id`) on tasks.
+        conn.execute_batch(SCHEMA_V28).expect("apply v28 schema");
         Arc::new(Mutex::new(conn))
     }
 
@@ -178,4 +181,6 @@ pub mod test_support {
     const SCHEMA_V23: &str =
         include_str!("../../../src-tauri/src/db/sql/0023_color_label_ad_hoc.sql");
     const SCHEMA_V24: &str = include_str!("../../../src-tauri/src/db/sql/0024_section_color.sql");
+    const SCHEMA_V28: &str =
+        include_str!("../../../src-tauri/src/db/sql/0028_task_resurface_series.sql");
 }

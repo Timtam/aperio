@@ -786,6 +786,8 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
         updated_at: created_at,
         completed_at,
         etag: None,
+        resurface_date: None,
+        series_id: None,
     }
 }
 
@@ -1230,6 +1232,8 @@ mod tests {
             color_label: None,
             reminders: Vec::new(),
             sound: None,
+            resurface_date: None,
+            series_id: None,
         }
     }
 
@@ -1420,6 +1424,8 @@ mod tests {
             updated_at: Utc::now(),
             completed_at: None,
             etag: None,
+            resurface_date: None,
+            series_id: None,
         };
         let result = update_task(&client, &task).await.unwrap();
         post.assert_async().await;
@@ -1475,6 +1481,8 @@ mod tests {
             updated_at: Utc::now(),
             completed_at: None,
             etag: None,
+            resurface_date: None,
+            series_id: None,
         };
         let result = update_task(&client, &task).await.unwrap();
         patch.assert_async().await;
@@ -1532,6 +1540,8 @@ mod tests {
             updated_at: Utc::now(),
             completed_at: None,
             etag: None,
+            resurface_date: None,
+            series_id: None,
         };
         let result = update_task(&client, &task).await.unwrap();
         patch.assert_async().await;
@@ -1579,6 +1589,8 @@ mod tests {
             updated_at: Utc::now(),
             completed_at: None,
             etag: None,
+            resurface_date: None,
+            series_id: None,
         };
         let result = update_task(&client, &task).await.unwrap();
         post.assert_async().await;
@@ -1846,6 +1858,8 @@ mod tests {
             updated_at: Utc::now(),
             completed_at: None,
             etag: None,
+            resurface_date: None,
+            series_id: None,
         };
         let json = serde_json::to_value(task_to_update_body(&task)).unwrap();
         assert!(json.get("assignee_id").is_some());

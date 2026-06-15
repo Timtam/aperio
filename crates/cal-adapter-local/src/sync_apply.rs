@@ -180,8 +180,9 @@ impl LocalAdapter {
                 id, list_id, parent_id, section_id, title, description, status, priority,
                 scheduled_date, scheduled_time, deadline_date, deadline_time,
                 recurrence, color_label_id, reminders, sound,
-                created_at, updated_at, completed_at, etag
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                created_at, updated_at, completed_at, etag,
+                resurface_date, series_id
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET
                  list_id        = excluded.list_id,
                  parent_id      = excluded.parent_id,
@@ -200,7 +201,9 @@ impl LocalAdapter {
                  sound          = excluded.sound,
                  updated_at     = excluded.updated_at,
                  completed_at   = excluded.completed_at,
-                 etag           = excluded.etag",
+                 etag           = excluded.etag,
+                 resurface_date = excluded.resurface_date,
+                 series_id      = excluded.series_id",
             params![
                 task.id,
                 task.list_id,
@@ -222,6 +225,8 @@ impl LocalAdapter {
                 fmt_utc(&task.updated_at),
                 task.completed_at.as_ref().map(fmt_utc),
                 task.etag,
+                task.resurface_date.as_ref().map(fmt_date),
+                task.series_id,
             ],
         )
         .map_err(map_sql_err)?;

@@ -14,7 +14,10 @@
 
 use chrono::NaiveDate;
 
-use crate::types::{RecurrenceEnd, RecurrenceFrequency, TaskRecurrence, Weekday};
+use crate::types::{
+    RecurrenceAnchor, RecurrenceEnd, RecurrenceFrequency, RecurrencePlacement, TaskRecurrence,
+    Weekday,
+};
 
 fn freq_token(f: RecurrenceFrequency) -> &'static str {
     match f {
@@ -165,6 +168,11 @@ pub fn rrule_to_task_recurrence(rrule: &str) -> Option<TaskRecurrence> {
         day_of_week,
         day_of_month,
         end,
+        // RRULE carries only the fixed-schedule subset; the on-demand /
+        // backlog axes (DESIGN §9.12) travel via the extras codec, not here.
+        anchor: RecurrenceAnchor::FromDate,
+        placement: RecurrencePlacement::Schedule,
+        fixed_dates: None,
     })
 }
 
@@ -193,6 +201,9 @@ mod tests {
             day_of_week,
             day_of_month,
             end,
+            anchor: RecurrenceAnchor::FromDate,
+            placement: RecurrencePlacement::Schedule,
+            fixed_dates: None,
         }
     }
 

@@ -233,7 +233,8 @@ impl LocalAdapter {
                 "SELECT id, list_id, parent_id, title, description, status,
                         priority, scheduled_date, scheduled_time, deadline_date,
                         deadline_time, recurrence, color_label_id, reminders, sound,
-                        created_at, updated_at, completed_at, etag, section_id
+                        created_at, updated_at, completed_at, etag, section_id,
+                        resurface_date, series_id
                    FROM tasks",
             )
             .map_err(map_sql_err)?;
@@ -495,6 +496,8 @@ mod tests {
             deadline_date: None,
             deadline_time: None,
             recurrence: None,
+            resurface_date: None,
+            series_id: None,
             parent_id: None,
             section_id: None,
             color_label: None,

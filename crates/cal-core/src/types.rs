@@ -323,6 +323,16 @@ pub struct Task {
     pub deadline_time: Option<NaiveTime>,
 
     pub recurrence: Option<TaskRecurrence>,
+    /// DESIGN §9.12: a backlog task surfaces in the active backlog only
+    /// on/after this date (the recurrence "resurface" trigger). `None` ⇒
+    /// visible now. Until then it lives in the "Zukünftig" group.
+    #[serde(default)]
+    pub resurface_date: Option<NaiveDate>,
+    /// DESIGN §9.12: stable id of the recurring series this instance
+    /// belongs to, so two Aperio clients on a shared list don't each spawn
+    /// the next instance. `None` ⇒ not part of a managed series.
+    #[serde(default)]
+    pub series_id: Option<String>,
     pub parent_id: Option<String>,
     /// Section (Vikunja bucket / Todoist section) this task is filed
     /// under within its list. `None` ⇒ ungrouped, or a backend with no
@@ -356,6 +366,12 @@ pub struct NewTask {
     pub deadline_date: Option<NaiveDate>,
     pub deadline_time: Option<NaiveTime>,
     pub recurrence: Option<TaskRecurrence>,
+    /// See `Task::resurface_date` (DESIGN §9.12).
+    #[serde(default)]
+    pub resurface_date: Option<NaiveDate>,
+    /// See `Task::series_id` (DESIGN §9.12).
+    #[serde(default)]
+    pub series_id: Option<String>,
     pub parent_id: Option<String>,
     /// Section to file the new task under; see `Task::section_id`.
     #[serde(default)]
@@ -393,6 +409,48 @@ pub struct TaskRecurrence {
     pub day_of_week: Option<Vec<Weekday>>,
     pub day_of_month: Option<u8>,
     pub end: Option<RecurrenceEnd>,
+    /// DESIGN §9.12: from when the next instance is computed. Defaults to
+    /// `FromDate` so existing rules behave as before.
+    #[serde(default)]
+    pub anchor: RecurrenceAnchor,
+    /// DESIGN §9.12: where the next instance lands. Defaults to `Schedule`.
+    #[serde(default)]
+    pub placement: RecurrencePlacement,
+    /// DESIGN §9.12: explicit (month, day) triggers, e.g. April 1 + Oct 1.
+    /// When `Some`, these drive the schedule instead of frequency/interval.
+    #[serde(default)]
+    pub fixed_dates: Option<Vec<MonthDay>>,
+}
+
+/// DESIGN §9.12: anchor for a recurring task's next occurrence.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecurrenceAnchor {
+    /// Advance from the task's own date (today's behavior).
+    #[default]
+    FromDate,
+    /// Advance from when the task was completed (org-mode `.+`).
+    FromCompletion,
+}
+
+/// DESIGN §9.12: where a recurring task's next instance is placed.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecurrencePlacement {
+    /// The next instance gets the computed date (today's behavior).
+    #[default]
+    Schedule,
+    /// The next instance is undated and surfaces in the backlog (gated by
+    /// the task's `resurface_date`).
+    Backlog,
+}
+
+/// A yearless calendar anchor — e.g. `{ month: 4, day: 1 }` for "April 1".
+/// See DESIGN §9.12 (seasonal tasks with fixed dates).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MonthDay {
+    pub month: u8,
+    pub day: u8,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

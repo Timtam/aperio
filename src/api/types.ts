@@ -317,6 +317,13 @@ export interface Task {
   deadline_date: string | null;
   deadline_time: string | null;
   recurrence: unknown;
+  /** DESIGN §9.12: a backlog task surfaces in the active backlog only
+   *  on/after this date (the recurrence "resurface" trigger). `null` ⇒
+   *  visible now; until then it sits in the "Zukünftig" group. */
+  resurface_date: string | null;
+  /** DESIGN §9.12: stable id of the recurring series this instance belongs
+   *  to (so shared-list clients don't double-spawn). `null` ⇒ not managed. */
+  series_id: string | null;
   parent_id: string | null;
   /** Section (Vikunja bucket / Todoist section) this task is filed
    *  under within its list. `null` ⇒ ungrouped, or a backend with no

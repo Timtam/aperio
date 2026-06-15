@@ -314,6 +314,8 @@ fn map_task(entry: TaskEntry, list_id: &str) -> Task {
         updated_at,
         completed_at,
         etag: entry.etag,
+        resurface_date: None,
+        series_id: None,
     }
 }
 
@@ -573,6 +575,8 @@ mod tests {
             color_label: None,
             reminders: Vec::new(),
             sound: None,
+            resurface_date: None,
+            series_id: None,
         }
     }
 

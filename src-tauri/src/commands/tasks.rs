@@ -882,6 +882,8 @@ pub async fn update_task(
             deadline_date: task.deadline_date,
             deadline_time: task.deadline_time,
             recurrence: task.recurrence.clone(),
+            resurface_date: task.resurface_date,
+            series_id: task.series_id.clone(),
             parent_id: task.parent_id.clone(),
             section_id: None,
             color_label: task.color_label.clone(),

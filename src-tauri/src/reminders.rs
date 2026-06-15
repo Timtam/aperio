@@ -1419,6 +1419,8 @@ mod tests {
             deadline_date,
             deadline_time,
             recurrence: None,
+            resurface_date: None,
+            series_id: None,
             parent_id: None,
             section_id: None,
             color_label: None,
@@ -1672,6 +1674,9 @@ mod tests {
             ]),
             day_of_month: None,
             end: Some(RecurrenceEnd::After { occurrences: 4 }),
+            anchor: Default::default(),
+            placement: Default::default(),
+            fixed_dates: None,
         };
         let body = task_recurrence_to_rrule_body(&rec).expect("valid rrule");
         // The exact ordering of parts is deterministic in the
@@ -1693,6 +1698,9 @@ mod tests {
             end: Some(RecurrenceEnd::OnDate {
                 date: NaiveDate::from_ymd_opt(2026, 12, 31).unwrap(),
             }),
+            anchor: Default::default(),
+            placement: Default::default(),
+            fixed_dates: None,
         };
         let body = task_recurrence_to_rrule_body(&rec).expect("valid rrule");
         assert!(body.contains("FREQ=MONTHLY"), "got: {body}");
@@ -1713,6 +1721,9 @@ mod tests {
             day_of_week: None,
             day_of_month: None,
             end: None,
+            anchor: Default::default(),
+            placement: Default::default(),
+            fixed_dates: None,
         };
         assert!(task_recurrence_to_rrule_body(&rec).is_none());
     }
@@ -1728,6 +1739,9 @@ mod tests {
             day_of_week: None,
             day_of_month: None,
             end: Some(RecurrenceEnd::After { occurrences: 0 }),
+            anchor: Default::default(),
+            placement: Default::default(),
+            fixed_dates: None,
         };
         assert!(task_recurrence_to_rrule_body(&rec).is_none());
     }
@@ -1756,6 +1770,9 @@ mod tests {
             day_of_week: Some(weekday(cal_core::Weekday::Wednesday)),
             day_of_month: None,
             end: None,
+            anchor: Default::default(),
+            placement: Default::default(),
+            fixed_dates: None,
         });
         let triggers = tk_triggers(
             &[task],
@@ -1778,6 +1795,9 @@ mod tests {
             day_of_week: Some(weekday(cal_core::Weekday::Wednesday)),
             day_of_month: None,
             end: Some(RecurrenceEnd::After { occurrences: 2 }),
+            anchor: Default::default(),
+            placement: Default::default(),
+            fixed_dates: None,
         });
         let triggers = tk_triggers(
             &[task],
@@ -1908,6 +1928,9 @@ mod tests {
             end: Some(RecurrenceEnd::OnDate {
                 date: NaiveDate::from_ymd_opt(2026, 6, 3).unwrap(),
             }),
+            anchor: Default::default(),
+            placement: Default::default(),
+            fixed_dates: None,
         });
         let triggers = tk_triggers(
             &[task],

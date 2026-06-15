@@ -23,7 +23,8 @@ pub use recurrence::{rrule_to_task_recurrence, task_recurrence_to_rrule};
 pub use reminder::{Reminder, ReminderKind, SoundConfig, SoundSource};
 pub use types::{
     AttendeeResponse, AttendeeStatus, Calendar, Contact, ContactAddress, ContactList, ContactPhoto,
-    DateRange, Event, EventRecurrence, FreeBusy, FreeBusySlot, GroupMember, MemberRight,
-    NewContact, NewEvent, NewTask, RecurrenceEnd, RecurrenceFrequency, Section, Task, TaskList,
-    TaskListShare, TaskPriority, TaskRecurrence, TaskStatus, TaskUser, Weekday,
+    DateRange, Event, EventRecurrence, FreeBusy, FreeBusySlot, GroupMember, MemberRight, MonthDay,
+    NewContact, NewEvent, NewTask, RecurrenceAnchor, RecurrenceEnd, RecurrenceFrequency,
+    RecurrencePlacement, Section, Task, TaskList, TaskListShare, TaskPriority, TaskRecurrence,
+    TaskStatus, TaskUser, Weekday,
 };
