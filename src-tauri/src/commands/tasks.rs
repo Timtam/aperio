@@ -835,9 +835,24 @@ pub async fn update_task(
     cache: State<'_, Arc<CacheStore>>,
     scheduler: State<'_, SchedulerHandle>,
     event_log: State<'_, Arc<EventLogWriter>>,
-    task: Task,
+    mut task: Task,
     previous_list_id: Option<String>,
 ) -> CommandResult<Task> {
+    // DESIGN §9.12: a task that gains on-demand recurrence via an edit (not
+    // just at creation) needs a stable series_id, or the idempotent spawner
+    // has nothing to dedup on and re-completing it spawns a duplicate. Mirror
+    // `create_task`'s assignment here so editing a task to "resurface in the
+    // backlog" is as safe as creating it that way. (Plain scheduled rules get
+    // none — the provider owns those; the local adapter assigns its own.)
+    if task.series_id.is_none()
+        && task
+            .recurrence
+            .as_ref()
+            .is_some_and(cal_core::recurrence_needs_extras)
+    {
+        task.series_id = Some(uuid::Uuid::new_v4().to_string());
+    }
+
     let target_account = registry
         .account_for_task_list(&task.list_id)
         .unwrap_or_else(|| LOCAL_ID.to_string());
