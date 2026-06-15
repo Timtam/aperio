@@ -1314,6 +1314,105 @@ Die vollständige Kürzel-Referenz befindet sich in Abschnitt 15.7. Aufgaben-spe
 
 ---
 
+### 9.12 Bedarfs-Wiederholung & Aperio-Extras
+
+Manche wiederkehrenden Aufgaben haben **kein festes Intervall**, sondern kommen **bei Bedarf** zurück — und sollen im **Backlog** als Erinnerung auftauchen, statt auf einen Kalendertag gelegt zu werden. Beispiele:
+
+- **Geschirrspüler einräumen** — sobald genug Geschirr da ist; nach Erledigung sofort wieder im Backlog.
+- **Schuhe Sommer↔Winter tauschen** — soll ab dem 1. April bzw. 1. Oktober im Backlog auftauchen (wetterabhängig, kein konkreter Tag).
+
+Erweitert das Vorlagen-Modell (§9.6) um zwei Achsen plus ein Transport-Konzept für geteilte Listen mit getrennten Sync-Quellen.
+
+#### Datenmodell
+
+```rust
+pub struct TaskRecurrence {
+    // … bestehend: frequency, interval, day_of_week, day_of_month, end …
+    pub anchor: RecurrenceAnchor,           // ab wann zählt das Intervall?
+    pub placement: RecurrencePlacement,     // wohin geht die nächste Instanz?
+    pub fixed_dates: Option<Vec<MonthDay>>, // gesetzt ⇒ Trigger statt freq/interval
+}
+pub enum RecurrenceAnchor { FromDate, FromCompletion }  // Default FromDate (heutiges Verhalten)
+pub enum RecurrencePlacement { Schedule, Backlog }      // Default Schedule (heutiges Verhalten)
+pub struct MonthDay { pub month: u8, pub day: u8 }      // z.B. {4,1}, {10,1}
+
+pub struct Task {
+    // … bestehend …
+    pub resurface_date: Option<NaiveDate>,  // im Backlog erst ab diesem Datum sichtbar; None = sofort
+    pub series_id: Option<String>,          // identifiziert die Serie für idempotentes Spawnen
+}
+```
+
+- `anchor=FromDate, placement=Schedule, fixed_dates=None` = bisheriges Verhalten → RRULE-Round-Trip (§9.7) unverändert.
+- Geschirrspüler: `{ anchor: FromCompletion, interval: 0, placement: Backlog }`
+- Schuhe: `{ fixed_dates: [{4,1},{10,1}], placement: Backlog }`
+
+#### Spawner-Verhalten
+
+Bei `open→completed` einer Instanz mit Wiederholung wird die nächste Instanz erzeugt (§9.6). Neu:
+
+- **`placement=Backlog`** → nächste Instanz `scheduled_date=None`, `resurface_date` =
+  - `FromCompletion`: Abschlussdatum + Intervall (sofort, wenn Intervall 0/leer)
+  - `fixed_dates`: nächstes der Daten nach dem Abschluss
+- Die Instanz erbt die `series_id` der Vorlage.
+- **Läuft auch für externe Listen.** Bisher spawnt bei externen Aufgaben der Provider (über die RRULE); Bedarfs-/Backlog-Wiederholungen kennt kein Provider → **Aperio spawnt selbst**, für alle Listen.
+
+##### Idempotenz bei geteilten Listen
+
+Zwei Aperio-Clients gegen denselben Provider dürfen beim Abhaken **nicht beide** eine Folge-Instanz erzeugen:
+
+- Jede Serie trägt eine stabile **`series_id`** (im Extras-Beutel transportiert).
+- **Spawn-Regel:** neue Instanz nur, wenn **keine offene Instanz dieser `series_id`** im gesyncten Bestand existiert. Wer zuerst synct, erzeugt sie; der andere sieht sie schon.
+- **Sicherheitsnetz:** Dedup-on-read — gibt es doch zwei offene Instanzen einer `series_id` (Race), wird die kanonische (älteste) behalten.
+
+#### Aperio-Extras: Transport nicht-nativer Felder
+
+Die obigen Felder kennt kein externer Provider nativ. Für **geteilte Listen** ist der einzige gemeinsame Kanal der Provider selbst → Aperio bettet sie als **generischen, versionierten Beutel** ein:
+
+```jsonc
+{ "v": 1, "extras": { "recurrence": { … }, "resurface_date": "2026-10-01", "series_id": "…" } }
+```
+
+**Kanal pro Adapter** (unsichtbar wo möglich):
+
+| Adapter | Kanal |
+|---|---|
+| local | native DB-Spalten — **kein** Codec |
+| Vikunja, Todoist, Google | **sichtbarer „managed block"** im Beschreibungsfeld |
+| CalDAV | `X-APERIO-EXTRAS`-Property (unsichtbar) |
+| EWS | Extended MAPI Property (unsichtbar) |
+| Microsoft Graph | Open Extension (unsichtbar) |
+
+**Sichtbarer Block** (nur Plaintext-Provider ohne Custom-Property-Kanal) — am Ende der Beschreibung, mit zweisprachiger Warnung und base64-Payload (HTML-sicher gegen Vikunjas Rich-Text-Editor):
+
+```
+<Beschreibung des Nutzers>
+
+— ⚙ Aperio · bitte nicht bearbeiten / please don't edit —
+aperio:1:<base64(json)>
+```
+
+- **Lesen:** Block/Property extrahieren → `Task.description` bleibt sauber, Felder landen in echten Task-Feldern. Fehlt/kaputt ⇒ als normale Aufgabe behandeln (sauberes Degradieren, nie Datenverlust).
+- **Schreiben (defensiver Merge):** vor dem Schreiben die aktuelle Beschreibung **neu lesen**, **nur den Block ersetzen**, restlichen Text erhalten. Nur schreiben, wenn sich die Extras tatsächlich ändern.
+- Codec liegt in `cal-core` (`extras::{embed, extract, …}`); jeder Adapter wählt seinen Kanal.
+
+#### Frontend
+
+- **„Zukünftig (N)"-Gruppe** in der Aufgaben-Ansicht — analog zur „Erledigt (N)"-Gruppe: navigierbare, einklappbare Baum-Zeile (`DEFERRED_GROUP_ID`) mit allen Aufgaben `resurface_date > heute`; zeigt je Aufgabe das Auftauch-Datum; Kontextmenü „ins Backlog holen" (löscht `resurface_date`). Standard eingeklappt, Zustand gemerkt.
+- **Backlog-Filter** (§9.3) blendet `resurface_date > heute` aus dem aktiven Backlog aus.
+- **Recurrence-Selector**: `anchor` (ab Datum / ab Abschluss), `placement` (einplanen / im Backlog auftauchen), Fixed-Dates-Eingabe — gegated über die `recurrence`-Capability (§9.7).
+- `resurface_date` löst **nicht** den „Verpasste Aufgaben"-Flow (§9.5) aus — weicher Auftauch-Trigger, keine Deadline.
+
+#### Phasen
+
+1. `cal-core::extras` — Beutel + sichtbarer-Block-Codec (embed/extract/defensiver Merge) + Round-Trip-/Degradier-Tests.
+2. Datenmodell — `anchor`/`placement`/`fixed_dates`/`resurface_date`/`series_id` durch alle Schichten (DB-Migration, Event-Log, TS).
+3. Spawner — Backlog-Placement, resurface, Fixed-Dates, `series_id`-Idempotenz, Lauf für externe Listen.
+4. Frontend — „Zukünftig"-Gruppe, Backlog-Filter, Recurrence-Selector-Knöpfe.
+5. Kanäle — Vikunja (sichtbar) zuerst; dann CalDAV X-Props, EWS Extended Props, Graph Open Extension.
+
+---
+
 ## 10. Kontakte & CardDAV-Integration
 
 ### 10.1 Designprinzip: Kontakte als Teil bestehender Adapter
