@@ -11,6 +11,7 @@ import { invoke } from '@tauri-apps/api/core';
 
 import { useAnnouncer } from '../../a11y/announcerContext';
 import { useAutoFocus } from '../../hooks/useAutoFocus';
+import { useCurrentDayKey } from '../../hooks/useCurrentDayKey';
 import { useDeferredLoading } from '../../hooks/useDeferredLoading';
 import { useDateFormat } from '../../intl/dateFormat';
 import { labelsLookup, resolveTaskColor } from '../../intl/eventColor';
@@ -30,7 +31,12 @@ import { useTaskStatusToggle } from '../../state/useTaskStatusToggle';
 import { useTasks } from '../../state/useTasks';
 import type { Section, Task } from '../../api/types';
 import { duplicateTask } from '../duplicateActions';
-import { buildEntries, DONE_GROUP_ID, type Entry } from './taskGrouping';
+import {
+  buildEntries,
+  DEFERRED_GROUP_ID,
+  DONE_GROUP_ID,
+  type Entry,
+} from './taskGrouping';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { ColorPickerModal } from '../ColorPickerModal';
 import {
@@ -106,20 +112,28 @@ export function TaskView() {
   // (keyed by DONE_GROUP_ID). The Done group's collapsed state is
   // persisted to localStorage and seeded here so finished tasks start
   // tucked away.
-  const [collapsed, setCollapsed] = useState<Set<string>>(() =>
-    loadDoneCollapsed() ? new Set([DONE_GROUP_ID]) : new Set(),
-  );
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => {
+    const seed = new Set<string>();
+    if (loadDoneCollapsed()) seed.add(DONE_GROUP_ID);
+    if (loadDeferredCollapsed()) seed.add(DEFERRED_GROUP_ID);
+    return seed;
+  });
   const toggleCollapsed = useCallback((id: string) => {
     setCollapsed((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
-      // The Done group's open/closed choice persists across reloads;
-      // per-subtree twisties stay session-local.
+      // The Done and Zukünftig groups persist their open/closed choice
+      // across reloads; per-subtree twisties stay session-local.
       if (id === DONE_GROUP_ID) saveDoneCollapsed(next.has(id));
+      else if (id === DEFERRED_GROUP_ID) saveDeferredCollapsed(next.has(id));
       return next;
     });
   }, []);
+
+  // Local day key (refreshes at the date rollover) gates which backlog
+  // tasks are still "future" and so live in the Zukünftig group.
+  const todayKey = useCurrentDayKey();
 
   // Flatten the task buckets into a single options array, interleaved
   // with separator entries. focusIndex points at the *task* index in
@@ -127,8 +141,9 @@ export function TaskView() {
   // depth-first under their parent; the `hidden` flag on each entry
   // tells the renderer when the parent above is collapsed.
   const { entries, flatTasks } = useMemo(
-    () => buildEntries(tasks, taskListById, t, collapsed, sectionsByList),
-    [tasks, taskListById, t, collapsed, sectionsByList],
+    () =>
+      buildEntries(tasks, taskListById, t, collapsed, sectionsByList, todayKey),
+    [tasks, taskListById, t, collapsed, sectionsByList, todayKey],
   );
 
   const [focusIndex, setFocusIndex] = useState(0);
@@ -562,6 +577,7 @@ export function TaskView() {
     openTaskDialog,
     openTaskMenu,
     itemId,
+    today: todayKey,
   };
 
   // Dispatch a row. A real task delegates to renderTreeItem (which renders
@@ -813,6 +829,8 @@ interface RenderTreeCtx {
   openTaskDialog: (task: Task) => void;
   openTaskMenu: (task: Task) => Promise<void> | void;
   itemId: (i: number) => string;
+  /** Local `YYYY-MM-DD` — lets a row show its future resurface date. */
+  today: string;
 }
 
 /**
@@ -841,6 +859,7 @@ function renderTreeItem(
     openTaskDialog,
     openTaskMenu,
     itemId,
+    today,
   } = ctx;
   const { task, index, depth, hasChildren } = entry;
   const focused = index === focusIndex;
@@ -858,7 +877,7 @@ function renderTreeItem(
     if (e.depth === depth + 1) children.push(e);
   }
 
-  const due = describeDue(task, fmt, t);
+  const due = describeDue(task, fmt, t, today);
   const color = resolveTaskColor(task, taskListById, labelById, sectionColorById);
   const marker = statusMarker(task.status);
   const priorityGlyph = priorityMarker(task.priority);
@@ -1017,6 +1036,27 @@ function saveDoneCollapsed(value: boolean): void {
   }
 }
 
+const DEFERRED_COLLAPSED_KEY = 'aperio.tasks.deferredCollapsed';
+
+/** Read the persisted "Zukünftig group collapsed" preference. Defaults to
+ *  collapsed (true) — future tasks shouldn't crowd today's work — and
+ *  tolerates a missing / unreadable store. */
+function loadDeferredCollapsed(): boolean {
+  try {
+    return localStorage.getItem(DEFERRED_COLLAPSED_KEY) !== 'false';
+  } catch {
+    return true;
+  }
+}
+
+function saveDeferredCollapsed(value: boolean): void {
+  try {
+    localStorage.setItem(DEFERRED_COLLAPSED_KEY, String(value));
+  } catch {
+    // Non-fatal — see saveDoneCollapsed.
+  }
+}
+
 /** Find the row at flat-task position `index` (respecting the
  *  index/entries decoupling). Every row — real task or group header — is a
  *  navigable entry, so this resolves both. */
@@ -1080,6 +1120,7 @@ function describeDue(
   task: Task,
   fmt: ReturnType<typeof useDateFormat>,
   t: (key: string, vars?: Record<string, unknown>) => string,
+  today: string,
 ): string {
   // A finished task shows WHEN it was finished — the scheduled/deadline date
   // is moot once it's done. Flows into both the visible due column and the
@@ -1087,6 +1128,13 @@ function describeDue(
   if (task.status === 'completed' && task.completed_at) {
     return t('views.tasks.completedAt', {
       date: fmt.format(new Date(task.completed_at), 'PP'),
+    });
+  }
+  // A deferred backlog task (DESIGN §9.12) shows WHEN it will resurface —
+  // the only date that matters while it waits in the Zukünftig group.
+  if (task.resurface_date && task.resurface_date > today) {
+    return t('views.tasks.resurfacesOn', {
+      date: fmt.format(new Date(task.resurface_date), 'PP'),
     });
   }
   if (task.scheduled_date) {

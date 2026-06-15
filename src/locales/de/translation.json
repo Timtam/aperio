@@ -23,6 +23,8 @@
     "delete": "Löschen",
     "moveTo": "Verschieben nach …",
     "copyTo": "Kopieren nach …",
+    "bringToBacklog": "Ins Backlog holen",
+    "broughtToBacklog": "„{{title}}\" ins Backlog geholt.",
     "status": "Status",
     "priority": "Priorität",
     "prioritySet": "Priorität für „{{title}}\" auf {{priority}} gesetzt.",
@@ -1152,7 +1154,24 @@
         "dayOfMonthLabel": "Tag im Monat",
         "dayOfMonthPlaceholder": "Automatisch",
         "dayOfMonthHint": "Leer = es wird der Erledigungstag verwendet. Werte über den Monatsende hinaus werden gekappt (z. B. 31 → Februar-Ende).",
-        "unsupportedHint": "Vom Konto dieser Aufgabe nicht unterstützt."
+        "unsupportedHint": "Vom Konto dieser Aufgabe nicht unterstützt.",
+        "placementLabel": "Nächste Instanz",
+        "placement": {
+          "schedule": "Auf einen Tag einplanen",
+          "backlog": "Im Backlog auftauchen"
+        },
+        "anchorLabel": "Zählt ab",
+        "anchor": {
+          "fromDate": "Ab dem Aufgaben-Datum",
+          "fromCompletion": "Ab dem Abschluss"
+        },
+        "backlogIntervalHint": "0 = sofort wieder im Backlog.",
+        "fixedDatesLabel": "Feste Termine",
+        "fixedDatesHint": "Wenn gesetzt, bestimmen diese (Monat/Tag) das Auftauchen statt des Intervalls — z. B. 1. April und 1. Oktober.",
+        "fixedDateMonth": "Monat (1–12)",
+        "fixedDateDay": "Tag (1–31)",
+        "fixedDateAdd": "Termin hinzufügen",
+        "fixedDateRemove": "Termin entfernen"
       }
     },
     "taskMembers": {
@@ -1520,6 +1539,7 @@
       "empty": "Keine Aufgaben.",
       "backlog": "Backlog",
       "done": "Erledigt ({{count}})",
+      "deferred": "Zukünftig ({{count}})",
       "taskList": "Aufgabenliste",
       "sectionActions": "Aktionen für Abschnitt „{{name}}\"",
       "sectionColorSet": "Abschnitt „{{name}}\" auf {{color}} gesetzt.",
@@ -1541,6 +1561,7 @@
       "dueScheduled": "Geplant: {{date}}",
       "dueDeadline": "Fällig: {{date}}",
       "dueNone": "Ohne Datum",
+      "resurfacesOn": "Taucht auf: {{date}}",
       "completedAt": "Erledigt: {{date}}",
       "toggleLabel": "{{title}} (Liste {{list}}) als erledigt umschalten",
       "completedAnnounce": "Aufgabe „{{title}}\" als erledigt markiert.",

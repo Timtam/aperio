@@ -1,7 +1,13 @@
 import { useTranslation } from 'react-i18next';
 
 import type { RecurrenceCapabilities, RecurrenceFreq } from '../api/types';
-import type { TaskFreq, TaskRecurrenceValue } from './taskRecurrence';
+import type {
+  TaskAnchor,
+  TaskFixedDate,
+  TaskFreq,
+  TaskPlacement,
+  TaskRecurrenceValue,
+} from './taskRecurrence';
 
 /**
  * Recurrence editor for tasks. The value model + backend conversion
@@ -82,10 +88,13 @@ export function TaskRecurrenceSelector({
     onChange({ ...value, ...patch });
 
   const intervalEnabled = intervalSupported(value.freq, caps);
-  // Clamp the displayed interval to 1 when this source can't store one
-  // for the frequency, so the disabled input shows what'll actually
-  // round-trip (matches the event selector).
-  const shownInterval = intervalEnabled ? value.interval : 1;
+  // Backlog placement (DESIGN §9.12) allows interval 0 — "resurface
+  // immediately on completion" (the dishwasher). Scheduled rules stay ≥ 1.
+  const minInterval = value.placement === 'BACKLOG' ? 0 : 1;
+  // Clamp the displayed interval when this source can't store one for the
+  // frequency, so the disabled input shows what'll actually round-trip
+  // (matches the event selector).
+  const shownInterval = intervalEnabled ? value.interval : minInterval;
   const unsupportedHint = (
     <span className="form__hint recurrence__unsupported">
       {t('dialogs.task.recurrence.unsupportedHint')}
@@ -125,28 +134,82 @@ export function TaskRecurrenceSelector({
 
       {value.freq !== 'NONE' && (
         <>
+          {/* DESIGN §9.12 — placement: schedule the next instance on a day,
+              or let it resurface in the backlog (undated). */}
           <label className="form__field">
             <span className="form__label">
-              {t('dialogs.task.recurrence.intervalLabel', {
-                unit: t(`dialogs.task.recurrence.unit.${value.freq}`),
-              })}
+              {t('dialogs.task.recurrence.placementLabel')}
             </span>
-            <input
-              type="number"
-              min={1}
-              max={365}
-              value={shownInterval}
-              disabled={!intervalEnabled}
+            <select
+              value={value.placement}
               onChange={(e) =>
-                update({
-                  interval: Math.max(1, Number(e.target.value) || 1),
-                })
+                update({ placement: e.target.value as TaskPlacement })
               }
-            />
-            {!intervalEnabled && unsupportedHint}
+            >
+              <option value="SCHEDULE">
+                {t('dialogs.task.recurrence.placement.schedule')}
+              </option>
+              <option value="BACKLOG">
+                {t('dialogs.task.recurrence.placement.backlog')}
+              </option>
+            </select>
           </label>
 
-          {value.freq === 'WEEKLY' && (
+          {/* DESIGN §9.12 — anchor: advance from the task's own date, or
+              from when it was completed (org-mode `.+`). */}
+          <label className="form__field">
+            <span className="form__label">
+              {t('dialogs.task.recurrence.anchorLabel')}
+            </span>
+            <select
+              value={value.anchor}
+              onChange={(e) =>
+                update({ anchor: e.target.value as TaskAnchor })
+              }
+            >
+              <option value="FROM_DATE">
+                {t('dialogs.task.recurrence.anchor.fromDate')}
+              </option>
+              <option value="FROM_COMPLETION">
+                {t('dialogs.task.recurrence.anchor.fromCompletion')}
+              </option>
+            </select>
+          </label>
+
+          {value.fixedDates.length === 0 && (
+            <label className="form__field">
+              <span className="form__label">
+                {t('dialogs.task.recurrence.intervalLabel', {
+                  unit: t(`dialogs.task.recurrence.unit.${value.freq}`),
+                })}
+              </span>
+              <input
+                type="number"
+                min={minInterval}
+                max={365}
+                value={shownInterval}
+                disabled={!intervalEnabled}
+                onChange={(e) =>
+                  update({
+                    interval: Math.max(
+                      minInterval,
+                      Number(e.target.value) || minInterval,
+                    ),
+                  })
+                }
+              />
+              {!intervalEnabled && unsupportedHint}
+              {minInterval === 0 && (
+                <span className="form__hint">
+                  {t('dialogs.task.recurrence.backlogIntervalHint')}
+                </span>
+              )}
+            </label>
+          )}
+
+          {value.freq === 'WEEKLY' &&
+            value.placement === 'SCHEDULE' &&
+            value.fixedDates.length === 0 && (
             <fieldset className="form__field recurrence__weekdays">
               <legend className="form__label">
                 {t('dialogs.task.recurrence.weekdays')}
@@ -176,7 +239,9 @@ export function TaskRecurrenceSelector({
             </fieldset>
           )}
 
-          {value.freq === 'MONTHLY' && (
+          {value.freq === 'MONTHLY' &&
+            value.placement === 'SCHEDULE' &&
+            value.fixedDates.length === 0 && (
             <label className="form__field">
               <span className="form__label">
                 {t('dialogs.task.recurrence.dayOfMonthLabel')}
@@ -202,6 +267,15 @@ export function TaskRecurrenceSelector({
               </span>
             </label>
           )}
+
+          {/* DESIGN §9.12 — fixed (month, day) triggers, e.g. the seasonal
+              shoe-swap on Apr 1 / Oct 1. When any exist they drive the
+              schedule instead of frequency/interval. */}
+          <FixedDatesEditor
+            value={value.fixedDates}
+            onChange={(fixedDates) => update({ fixedDates })}
+            t={t}
+          />
 
           <label className="form__field">
             <span className="form__label">
@@ -240,4 +314,74 @@ export function TaskRecurrenceSelector({
       )}
     </div>
   );
+}
+
+interface FixedDatesEditorProps {
+  value: TaskFixedDate[];
+  onChange: (next: TaskFixedDate[]) => void;
+  t: (key: string, vars?: Record<string, unknown>) => string;
+}
+
+/** Editor for the optional `fixed_dates` list (DESIGN §9.12). Each row is a
+ *  month (1–12) + day (1–31) pair; "add" appends Jan 1 as a starting point.
+ *  Values are clamped on input and re-validated on save by `toBackend`. */
+function FixedDatesEditor({ value, onChange, t }: FixedDatesEditorProps) {
+  const setAt = (i: number, patch: Partial<TaskFixedDate>) =>
+    onChange(value.map((d, j) => (j === i ? { ...d, ...patch } : d)));
+  const removeAt = (i: number) => onChange(value.filter((_, j) => j !== i));
+  const add = () => onChange([...value, { month: 1, day: 1 }]);
+  return (
+    <fieldset className="form__field recurrence__fixed-dates">
+      <legend className="form__label">
+        {t('dialogs.task.recurrence.fixedDatesLabel')}
+      </legend>
+      {value.map((d, i) => (
+        // Index key: rows are a simple add/remove list with fully controlled
+        // inputs and no reordering, so position is a stable identity here.
+        <div key={i} className="recurrence__fixed-date-row">
+          <input
+            type="number"
+            min={1}
+            max={12}
+            aria-label={t('dialogs.task.recurrence.fixedDateMonth')}
+            value={d.month}
+            onChange={(e) => setAt(i, { month: clampInt(e.target.value, 1, 12) })}
+          />
+          <input
+            type="number"
+            min={1}
+            max={31}
+            aria-label={t('dialogs.task.recurrence.fixedDateDay')}
+            value={d.day}
+            onChange={(e) => setAt(i, { day: clampInt(e.target.value, 1, 31) })}
+          />
+          <button
+            type="button"
+            className="recurrence__fixed-date-remove"
+            aria-label={t('dialogs.task.recurrence.fixedDateRemove')}
+            onClick={() => removeAt(i)}
+          >
+            ×
+          </button>
+        </div>
+      ))}
+      <button
+        type="button"
+        className="recurrence__fixed-date-add"
+        onClick={add}
+      >
+        {t('dialogs.task.recurrence.fixedDateAdd')}
+      </button>
+      <span className="form__hint">
+        {t('dialogs.task.recurrence.fixedDatesHint')}
+      </span>
+    </fieldset>
+  );
+}
+
+/** Parse an integer from an input value, clamped to `[min, max]`. */
+function clampInt(raw: string, min: number, max: number): number {
+  const n = Math.trunc(Number(raw));
+  if (!Number.isFinite(n)) return min;
+  return Math.min(max, Math.max(min, n));
 }

@@ -20,6 +20,7 @@ import type {
 import { seriesIdOf } from '../intl/recurrence';
 import { useCalendarStore } from './calendarStoreContext';
 import { useDialogState } from './dialogStateContext';
+import { surfaceTaskNow } from './moveActions';
 import { useTaskPriorityAction } from './useTaskPriority';
 import { useTaskStatusActions } from './useTaskStatusToggle';
 
@@ -265,10 +266,19 @@ export function useChipContextMenu(): ChipContextMenuActions {
       // parent's row carries the moveable handle for the whole
       // family.
       const isSubtask = task.parent_id !== null;
+      // "Ins Backlog holen" — only for a deferred task (a future resurface
+      // day waiting in the "Zukünftig" group, DESIGN §9.12). Clearing the
+      // resurface date pulls it back into the active backlog now.
+      const isDeferred = task.resurface_date !== null;
       const items: ContextMenuItemRequest[] = [
         { id: 'edit', label: t('chipMenu.edit') },
         statusSubmenu,
         prioritySubmenu,
+        ...(isDeferred
+          ? ([
+              { id: 'surface', label: t('chipMenu.bringToBacklog') },
+            ] as ContextMenuItemRequest[])
+          : []),
         ...(isSubtask
           ? []
           : ([
@@ -297,6 +307,18 @@ export function useChipContextMenu(): ChipContextMenuActions {
       } else if (selected?.startsWith('priority:')) {
         const next = selected.slice('priority:'.length) as TaskPriority;
         await setTaskPriority(task, next);
+      } else if (selected === 'surface') {
+        try {
+          await surfaceTaskNow(task);
+          announce(t('chipMenu.broughtToBacklog', { title: task.title }));
+          invalidateData();
+        } catch (err) {
+          if (isCommandError(err)) {
+            announce(`${err.code}: ${err.message}`);
+          } else {
+            announce(String(err));
+          }
+        }
       } else if (selected === 'delete') {
         // Tasks don't have a recurring-occurrence concept on the
         // delete side (Phase 9.x leaves task recurrence as a future

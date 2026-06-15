@@ -1,9 +1,17 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Section, Task } from '../../api/types';
-import { buildEntries, DONE_GROUP_ID, type Entry } from './taskGrouping';
+import {
+  buildEntries,
+  DEFERRED_GROUP_ID,
+  DONE_GROUP_ID,
+  type Entry,
+} from './taskGrouping';
 
 const t = (key: string) => key;
+
+/** Fixed "today" for the deferred (resurface) gate. */
+const TODAY = '2026-05-21';
 
 const baseTask = (over: Partial<Task>): Task => ({
   id: 'x',
@@ -44,6 +52,14 @@ const section = (id: string, name: string, order: number): Section => ({
 
 const listById = new Map([['L1', { name: 'Inbox' }]]);
 
+/** `buildEntries` with the fixtures' list map, identity `t`, and a fixed
+ *  "today" pre-applied. */
+const build = (
+  tasks: Task[],
+  collapsed: Set<string> = new Set(),
+  sectionsByList: Record<string, Section[]> = {},
+) => buildEntries(tasks, listById, t, collapsed, sectionsByList, TODAY);
+
 /**
  * Group-header rows (Backlog / a list / a section / the Done group), in
  * DFS order. Headers are now real tree rows — `kind: 'task'` entries that
@@ -74,7 +90,7 @@ describe('buildEntries section grouping', () => {
       baseTask({ id: 'b', section_id: 's1' }),
       baseTask({ id: 'c', section_id: null }),
     ];
-    const result = buildEntries(tasks, listById, t, new Set(), {
+    const result = build(tasks, new Set(), {
       L1: [section('s1', 'To Do', 1), section('s2', 'Doing', 2)],
     });
 
@@ -93,7 +109,7 @@ describe('buildEntries section grouping', () => {
 
   it('omits headers for empty sections', () => {
     const tasks = [baseTask({ id: 'a', section_id: 's1' })];
-    const result = buildEntries(tasks, listById, t, new Set(), {
+    const result = build(tasks, new Set(), {
       L1: [section('s1', 'To Do', 1), section('s2', 'Empty', 2)],
     });
     expect(headers(result).map((h) => h.label)).toEqual(['Inbox', 'To Do']);
@@ -104,7 +120,7 @@ describe('buildEntries section grouping', () => {
       baseTask({ id: 'a', section_id: 's1' }),
       baseTask({ id: 'b' }),
     ];
-    const result = buildEntries(tasks, listById, t, new Set(), {});
+    const result = build(tasks);
     // Only the list head — section_id is ignored when no sections exist.
     expect(headers(result)).toEqual([
       { label: 'Inbox', level: 0, kind: 'list' },
@@ -127,7 +143,7 @@ describe('buildEntries section grouping', () => {
       }),
     ];
     // Expanded: DONE_GROUP_ID is NOT in the collapsed set.
-    const expanded = buildEntries(tasks, listById, t, new Set(), {});
+    const expanded = build(tasks);
     const done = expanded.entries.find((e) => e.task.id === DONE_GROUP_ID)!;
     expect(done.group?.kind).toBe('done');
     expect(done.depth).toBe(0);
@@ -145,13 +161,7 @@ describe('buildEntries section grouping', () => {
 
     // Collapsed: DONE_GROUP_ID in the set → the children are hidden but
     // the parent header stays visible (stable index space + keyboard nav).
-    const collapsed = buildEntries(
-      tasks,
-      listById,
-      t,
-      new Set([DONE_GROUP_ID]),
-      {},
-    );
+    const collapsed = build(tasks, new Set([DONE_GROUP_ID]));
     expect(
       collapsed.entries.find((e) => e.task.id === DONE_GROUP_ID)?.hidden,
     ).toBe(false);
@@ -167,7 +177,7 @@ describe('buildEntries section grouping', () => {
       baseTask({ id: 'parent', status: 'open' }),
       baseTask({ id: 'child', parent_id: 'parent', status: 'completed' }),
     ];
-    const result = buildEntries(tasks, listById, t, new Set(), {});
+    const result = build(tasks);
     // No Done group — the only completed task is a subtask, which stays
     // under its parent rather than being hoisted.
     expect(result.entries.some((e) => e.task.id === DONE_GROUP_ID)).toBe(false);
@@ -176,7 +186,7 @@ describe('buildEntries section grouping', () => {
 
   it('omits a list header when the list has only completed tasks', () => {
     const tasks = [baseTask({ id: 'done', status: 'completed' })];
-    const result = buildEntries(tasks, listById, t, new Set(), {});
+    const result = build(tasks);
     // No list / section header — its only task is in the Done group. The
     // Done header itself is the sole heading.
     expect(headers(result)).toEqual([
@@ -193,7 +203,7 @@ describe('buildEntries section grouping', () => {
       baseTask({ id: 'parent', section_id: 's1' }),
       baseTask({ id: 'child', parent_id: 'parent', section_id: null }),
     ];
-    const result = buildEntries(tasks, listById, t, new Set(), {
+    const result = build(tasks, new Set(), {
       L1: [section('s1', 'To Do', 1)],
     });
     const rows = taskRows(result);
@@ -212,7 +222,7 @@ describe('buildEntries section grouping', () => {
       baseTask({ id: 'a', scheduled_date: null, section_id: 's1' }),
       baseTask({ id: 'b', scheduled_date: null, section_id: null }),
     ];
-    const result = buildEntries(tasks, listById, t, new Set(), {
+    const result = build(tasks, new Set(), {
       L1: [section('s1', 'To Do', 1)],
     });
     expect(headers(result)).toEqual([
@@ -226,7 +236,7 @@ describe('buildEntries section grouping', () => {
 
   it('shows a backlog list sub-header even when the list has no sections', () => {
     const tasks = [baseTask({ id: 'a', scheduled_date: null })];
-    const result = buildEntries(tasks, listById, t, new Set(), {});
+    const result = build(tasks);
     expect(headers(result)).toEqual([
       { label: 'views.tasks.backlog', level: 0, kind: 'backlog' },
       { label: 'Inbox', level: 1, kind: 'list' },
@@ -248,7 +258,7 @@ describe('buildEntries section grouping', () => {
         section_id: null,
       }),
     ];
-    const result = buildEntries(tasks, listById, t, new Set(), {
+    const result = build(tasks, new Set(), {
       L1: [section('s1', 'To Do', 1)],
     });
     // Backlog(0) → Inbox(1) → To Do(2) → p(3) → c(4): a strictly nested chain.
@@ -273,7 +283,7 @@ describe('buildEntries section grouping', () => {
     const tasks = [
       baseTask({ id: 'a', scheduled_date: null, section_id: 's1' }),
     ];
-    const result = buildEntries(tasks, listById, t, new Set(), {
+    const result = build(tasks, new Set(), {
       L1: [section('s1', 'To Do', 1)],
     });
     expect(result.flatTasks).toHaveLength(result.entries.length);
@@ -282,5 +292,83 @@ describe('buildEntries section grouping', () => {
     });
     // Backlog → Inbox → To Do → task a : four navigable rows.
     expect(result.flatTasks).toHaveLength(4);
+  });
+});
+
+describe('buildEntries deferred (Zukünftig) grouping', () => {
+  it('holds a future-resurface backlog task in the Deferred group', () => {
+    const tasks = [
+      baseTask({ id: 'now', scheduled_date: null }),
+      baseTask({
+        id: 'later',
+        scheduled_date: null,
+        resurface_date: '2026-10-01',
+      }),
+    ];
+    const result = build(tasks);
+    // The future task is NOT in the active backlog…
+    const backlogChildIds = taskRows(result).map((e) => e.task.id);
+    expect(backlogChildIds).toContain('now');
+    // …it lives under the Deferred header instead.
+    const deferred = result.entries.find(
+      (e) => e.task.id === DEFERRED_GROUP_ID,
+    )!;
+    expect(deferred.group?.kind).toBe('deferred');
+    expect(deferred.depth).toBe(0);
+    const deferredChildren = result.entries.filter(
+      (e) => !e.group && e.depth === deferred.depth + 1 && e.index > deferred.index,
+    );
+    expect(deferredChildren.map((e) => e.task.id)).toEqual(['later']);
+  });
+
+  it('treats a resurface date of today (or past) as visible now', () => {
+    const tasks = [
+      baseTask({ id: 'today', scheduled_date: null, resurface_date: TODAY }),
+      baseTask({ id: 'past', scheduled_date: null, resurface_date: '2026-01-01' }),
+    ];
+    const result = build(tasks);
+    // Neither is deferred — a resurface date that's already arrived means
+    // the task belongs in the active backlog.
+    expect(result.entries.some((e) => e.task.id === DEFERRED_GROUP_ID)).toBe(
+      false,
+    );
+    expect(taskRows(result).map((e) => e.task.id).sort()).toEqual([
+      'past',
+      'today',
+    ]);
+  });
+
+  it('orders deferred tasks soonest-resurface first', () => {
+    const tasks = [
+      baseTask({ id: 'oct', scheduled_date: null, resurface_date: '2026-10-01' }),
+      baseTask({ id: 'jun', scheduled_date: null, resurface_date: '2026-06-01' }),
+    ];
+    const result = build(tasks);
+    const deferred = result.entries.find(
+      (e) => e.task.id === DEFERRED_GROUP_ID,
+    )!;
+    const children = result.entries.filter(
+      (e) => !e.group && e.index > deferred.index,
+    );
+    expect(children.map((e) => e.task.id)).toEqual(['jun', 'oct']);
+  });
+
+  it('starts the Deferred group collapsed via the collapsed set', () => {
+    const tasks = [
+      baseTask({
+        id: 'later',
+        scheduled_date: null,
+        resurface_date: '2026-10-01',
+      }),
+    ];
+    const result = build(tasks, new Set([DEFERRED_GROUP_ID]));
+    expect(
+      result.entries.find((e) => e.task.id === DEFERRED_GROUP_ID)?.hidden,
+    ).toBe(false);
+    expect(
+      result.entries
+        .filter((e) => e.task.id === 'later')
+        .every((e) => e.hidden),
+    ).toBe(true);
   });
 });

@@ -12,6 +12,16 @@
  */
 export type TaskFreq = 'NONE' | 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY';
 
+/** DESIGN §9.12: from when the next instance is computed. */
+export type TaskAnchor = 'FROM_DATE' | 'FROM_COMPLETION';
+/** DESIGN §9.12: where the next instance lands. */
+export type TaskPlacement = 'SCHEDULE' | 'BACKLOG';
+/** A yearless calendar trigger, e.g. `{ month: 4, day: 1 }` for "April 1". */
+export interface TaskFixedDate {
+  month: number; // 1..12
+  day: number; // 1..31
+}
+
 export interface TaskRecurrenceValue {
   freq: TaskFreq;
   interval: number;
@@ -20,6 +30,14 @@ export interface TaskRecurrenceValue {
   dayOfMonth: number;
   endMode: 'NEVER' | 'UNTIL';
   until: string; // YYYY-MM-DD, only meaningful when endMode = 'UNTIL'
+  /** DESIGN §9.12: advance from the task's own date or from completion. */
+  anchor: TaskAnchor;
+  /** DESIGN §9.12: schedule the next instance on a day, or surface it in
+   *  the backlog (undated, gated by its resurface date). */
+  placement: TaskPlacement;
+  /** DESIGN §9.12: when non-empty, these (month, day) triggers drive the
+   *  schedule instead of freq/interval — e.g. the seasonal shoe-swap. */
+  fixedDates: TaskFixedDate[];
 }
 
 export const TASK_RECURRENCE_DEFAULT: TaskRecurrenceValue = {
@@ -29,6 +47,9 @@ export const TASK_RECURRENCE_DEFAULT: TaskRecurrenceValue = {
   dayOfMonth: 0,
   endMode: 'NEVER',
   until: '',
+  anchor: 'FROM_DATE',
+  placement: 'SCHEDULE',
+  fixedDates: [],
 };
 
 // ── Conversion between the form value and the backend struct ────────────────
@@ -39,6 +60,9 @@ interface BackendRecurrence {
   day_of_week: string[] | null;
   day_of_month: number | null;
   end: BackendEnd | null;
+  anchor: 'from_date' | 'from_completion';
+  placement: 'schedule' | 'backlog';
+  fixed_dates: TaskFixedDate[] | null;
 }
 
 type BackendEnd =
@@ -68,9 +92,15 @@ export function toBackend(
     value.endMode === 'UNTIL' && value.until
       ? { type: 'on_date', date: value.until }
       : { type: 'never' };
+  const fixedDates = sanitizeFixedDates(value.fixedDates);
   return {
     frequency: value.freq.toLowerCase() as BackendRecurrence['frequency'],
-    interval: value.interval,
+    // Backlog placement allows interval 0 (resurface immediately on
+    // completion — the dishwasher case); scheduled rules stay ≥ 1.
+    interval:
+      value.placement === 'BACKLOG'
+        ? Math.max(0, value.interval)
+        : Math.max(1, value.interval),
     day_of_week:
       value.freq === 'WEEKLY' && value.byDay.length > 0
         ? value.byDay.map((d) => WEEKDAY_TO_BACKEND[d]).filter(Boolean)
@@ -80,7 +110,23 @@ export function toBackend(
         ? value.dayOfMonth
         : null,
     end,
+    anchor: value.anchor === 'FROM_COMPLETION' ? 'from_completion' : 'from_date',
+    placement: value.placement === 'BACKLOG' ? 'backlog' : 'schedule',
+    fixed_dates: fixedDates.length > 0 ? fixedDates : null,
   };
+}
+
+/** Keep only well-formed (month 1..12, day 1..31) triggers. */
+function sanitizeFixedDates(dates: TaskFixedDate[]): TaskFixedDate[] {
+  return dates.filter(
+    (d) =>
+      Number.isInteger(d.month) &&
+      d.month >= 1 &&
+      d.month <= 12 &&
+      Number.isInteger(d.day) &&
+      d.day >= 1 &&
+      d.day <= 31,
+  );
 }
 
 export function fromBackend(raw: unknown): TaskRecurrenceValue {
@@ -105,9 +151,20 @@ export function fromBackend(raw: unknown): TaskRecurrenceValue {
       until = r.end.date;
     }
   }
+  const placement: TaskPlacement = r.placement === 'backlog' ? 'BACKLOG' : 'SCHEDULE';
+  const anchor: TaskAnchor =
+    r.anchor === 'from_completion' ? 'FROM_COMPLETION' : 'FROM_DATE';
+  const fixedDates = Array.isArray(r.fixed_dates)
+    ? sanitizeFixedDates(r.fixed_dates)
+    : [];
+  // Backlog rules may legitimately carry interval 0 (resurface immediately);
+  // scheduled rules are clamped to ≥ 1 as before.
+  const rawInterval = typeof r.interval === 'number' ? r.interval : 1;
+  const interval =
+    placement === 'BACKLOG' ? Math.max(0, rawInterval) : Math.max(1, rawInterval);
   return {
     freq: validFreq,
-    interval: Math.max(1, r.interval ?? 1),
+    interval,
     byDay,
     dayOfMonth:
       typeof r.day_of_month === 'number' && r.day_of_month >= 1 && r.day_of_month <= 31
@@ -115,5 +172,8 @@ export function fromBackend(raw: unknown): TaskRecurrenceValue {
         : 0,
     endMode,
     until,
+    anchor,
+    placement,
+    fixedDates,
   };
 }

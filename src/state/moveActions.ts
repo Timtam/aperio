@@ -132,6 +132,22 @@ export async function scheduleTaskOnDay(
 }
 
 /**
+ * Pull a deferred task into the active backlog now by clearing its
+ * `resurface_date` (DESIGN §9.12). The "Zukünftig" group's context-menu
+ * action — the user decides they want the task back before its scheduled
+ * resurface day.
+ */
+export async function surfaceTaskNow(task: Task): Promise<Task> {
+  return invoke<Task>('update_task', {
+    task: {
+      ...task,
+      resurface_date: null,
+      updated_at: new Date().toISOString(),
+    },
+  });
+}
+
+/**
  * Send a task back to the **backlog**: clears the scheduled date/time and
  * the deadline so it is truly unscheduled (a lingering deadline would keep
  * pulling it into upcoming views). Mirrors the plan dialog's "back to

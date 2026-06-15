@@ -23,6 +23,8 @@
     "delete": "Delete",
     "moveTo": "Move to …",
     "copyTo": "Copy to …",
+    "bringToBacklog": "Bring to backlog",
+    "broughtToBacklog": "\"{{title}}\" brought to the backlog.",
     "status": "Status",
     "priority": "Priority",
     "prioritySet": "Priority for \"{{title}}\" set to {{priority}}.",
@@ -1152,7 +1154,24 @@
         "dayOfMonthLabel": "Day of month",
         "dayOfMonthPlaceholder": "Auto",
         "dayOfMonthHint": "Leave empty to use the completion day. Values past the end of a short month are clamped (e.g. 31 → February's last day).",
-        "unsupportedHint": "Not supported by this task's account."
+        "unsupportedHint": "Not supported by this task's account.",
+        "placementLabel": "Next instance",
+        "placement": {
+          "schedule": "Schedule on a day",
+          "backlog": "Resurface in the backlog"
+        },
+        "anchorLabel": "Counts from",
+        "anchor": {
+          "fromDate": "From the task's date",
+          "fromCompletion": "From completion"
+        },
+        "backlogIntervalHint": "0 = back in the backlog immediately.",
+        "fixedDatesLabel": "Fixed dates",
+        "fixedDatesHint": "When set, these (month/day) triggers drive resurfacing instead of the interval — e.g. April 1 and October 1.",
+        "fixedDateMonth": "Month (1–12)",
+        "fixedDateDay": "Day (1–31)",
+        "fixedDateAdd": "Add date",
+        "fixedDateRemove": "Remove date"
       }
     },
     "taskMembers": {
@@ -1520,6 +1539,7 @@
       "empty": "No tasks.",
       "backlog": "Backlog",
       "done": "Done ({{count}})",
+      "deferred": "Upcoming ({{count}})",
       "taskList": "Task list",
       "sectionActions": "Actions for section \"{{name}}\"",
       "sectionColorSet": "Section \"{{name}}\" set to {{color}}.",
@@ -1541,6 +1561,7 @@
       "dueScheduled": "Scheduled: {{date}}",
       "dueDeadline": "Due: {{date}}",
       "dueNone": "No date",
+      "resurfacesOn": "Resurfaces: {{date}}",
       "completedAt": "Completed: {{date}}",
       "toggleLabel": "Toggle done state for {{title}} (list {{list}})",
       "completedAnnounce": "Task \"{{title}}\" marked complete.",

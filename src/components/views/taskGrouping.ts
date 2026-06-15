@@ -5,12 +5,15 @@ import { priorityRank } from '../../intl/taskStatus';
 export const DONE_GROUP_ID = '__aperio_done_group__';
 /** Sentinel id of the synthetic "Backlog" group row. */
 export const BACKLOG_GROUP_ID = '__aperio_backlog_group__';
+/** Sentinel id of the synthetic "Zukünftig (N)" group row — backlog tasks
+ *  whose `resurface_date` is still in the future (DESIGN §9.12). */
+export const DEFERRED_GROUP_ID = '__aperio_deferred_group__';
 
 /** Metadata carried by a group-header row (Backlog / a list / a section /
- *  the synthetic Done group). When `group` is set on an {@link Entry}, the
- *  row is a collapsible header rather than a real task. */
+ *  the synthetic Done or Deferred group). When `group` is set on an
+ *  {@link Entry}, the row is a collapsible header rather than a real task. */
 export interface GroupMeta {
-  kind: 'backlog' | 'list' | 'section' | 'done';
+  kind: 'backlog' | 'list' | 'section' | 'done' | 'deferred';
   /** Section row id — present only for `kind: 'section'`; lets the header
    *  tint to the section colour and offer the ⋮ actions. */
   sectionId?: string;
@@ -100,6 +103,9 @@ export function buildEntries(
   t: (key: string, vars?: Record<string, unknown>) => string,
   collapsed: Set<string>,
   sectionsByList: Record<string, Section[]>,
+  /** Today as `YYYY-MM-DD`; tasks whose `resurface_date` is strictly after
+   *  it are held back in the "Zukünftig" group (DESIGN §9.12). */
+  today: string,
 ): { entries: Entry[]; flatTasks: Task[] } {
   // Bucket children under their parent for O(1) subtask lookup. Tasks whose
   // parent_id points at a missing row are orphans → surfaced at top level.
@@ -134,10 +140,23 @@ export function buildEntries(
     (a, b) => priorityRank(a.priority) - priorityRank(b.priority),
   );
 
+  // Deferred (DESIGN §9.12): a backlog task whose resurface day is still in
+  // the future is held out of the active groups and collected under
+  // "Zukünftig" — it's neither lost nor cluttering today's work. The same
+  // gate doubles as the §9.3 backlog filter.
+  const isDeferred = (task: Task) =>
+    task.resurface_date != null && task.resurface_date > today;
+  const deferred: Task[] = [];
+  const active: Task[] = [];
+  openTopLevel.forEach((task) => {
+    if (isDeferred(task)) deferred.push(task);
+    else active.push(task);
+  });
+
   // Backlog (no planned work day) vs the per-list groups (scheduled).
   const backlog: Task[] = [];
   const byList = new Map<string, Task[]>();
-  openTopLevel.forEach((task) => {
+  active.forEach((task) => {
     if (!task.scheduled_date) {
       backlog.push(task);
       return;
@@ -233,6 +252,21 @@ export function buildEntries(
         children: listChildren(listId, items, `sc:${listId}`),
       });
     });
+
+  // "Zukünftig" group: backlog tasks waiting to resurface, soonest first.
+  // Sits just before Done — both are end-of-list, navigable, collapsible.
+  if (deferred.length > 0) {
+    deferred.sort((a, b) =>
+      (a.resurface_date ?? '').localeCompare(b.resurface_date ?? ''),
+    );
+    forest.push({
+      t: 'group',
+      id: DEFERRED_GROUP_ID,
+      title: t('views.tasks.deferred', { count: deferred.length }),
+      meta: { kind: 'deferred' },
+      children: deferred.map((task) => ({ t: 'task', task }) as GNode),
+    });
+  }
 
   // Done group last, most-recently-completed first.
   if (doneTopLevel.length > 0) {
