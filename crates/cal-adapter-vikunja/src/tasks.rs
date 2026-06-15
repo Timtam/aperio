@@ -135,7 +135,16 @@ pub async fn get_tasks(client: &VikunjaClient, list_id: &str) -> VikunjaResult<V
     // Vikunja ≥0.24 keeps on the view, not on the task — can be stitched
     // back into its section. `None` on section-less / older servers, where
     // `map_task` falls back to the flat `bucket_id`.
-    let kanban_view_id = kanban_view(client, project_id).await.map(|v| v.id);
+    let view = kanban_view(client, project_id).await;
+    let kanban_view_id = view.as_ref().map(|v| v.id);
+    // The "done bucket" (DESIGN §8.2) is Vikunja's done-status mechanism, not
+    // a user section — a task it filed there on completion must not surface as
+    // if it lived in that section, so we blank it out below.
+    let done_bucket = view
+        .as_ref()
+        .map(|v| v.done_bucket_id)
+        .filter(|&id| id != 0);
+    let done_bucket_str = done_bucket.map(|id| id.to_string());
     let mut out = Vec::new();
     let mut page: u32 = 1;
     loop {
@@ -163,6 +172,11 @@ pub async fn get_tasks(client: &VikunjaClient, list_id: &str) -> VikunjaResult<V
             let mut task = map_task(entry, list_id);
             if let Some(section) = section_override {
                 task.section_id = Some(section);
+            }
+            // Drop the done bucket — it isn't a user section.
+            if task.section_id.is_some() && task.section_id.as_deref() == done_bucket_str.as_deref()
+            {
+                task.section_id = None;
             }
             out.push(task);
         }
@@ -199,8 +213,11 @@ pub async fn list_sections(client: &VikunjaClient, list_id: &str) -> VikunjaResu
         Ok(b) => b,
         Err(_) => return Ok(Vec::new()),
     };
+    // The done bucket is Vikunja's done-status mechanism, not a user section —
+    // never offer it as a manageable/pickable section (DESIGN §8.2).
     Ok(buckets
         .into_iter()
+        .filter(|b| view.done_bucket_id == 0 || b.id != view.done_bucket_id)
         .map(|b| map_bucket(b, list_id))
         .collect())
 }
@@ -208,14 +225,27 @@ pub async fn list_sections(client: &VikunjaClient, list_id: &str) -> VikunjaResu
 /// Resolve `(project_id, kanban_view_id)` for a section-management call,
 /// erroring if the project has no kanban view — Vikunja ≥0.24 hangs
 /// buckets off the view, so without one there's nothing to manage.
-async fn section_view(client: &VikunjaClient, list_id: &str) -> VikunjaResult<(i64, i64)> {
+async fn section_view(client: &VikunjaClient, list_id: &str) -> VikunjaResult<(i64, KanbanView)> {
     let project_id = parse_id(list_id, "task list id")?;
     let Some(view) = kanban_view(client, project_id).await else {
         return Err(VikunjaError::Protocol(
             "project has no kanban view — sections can't be managed".into(),
         ));
     };
-    Ok((project_id, view.id))
+    Ok((project_id, view))
+}
+
+/// Reject a section-management op aimed at the done bucket — renaming or
+/// deleting it would silently re-point / clear Vikunja's done mechanism
+/// (DESIGN §8.2). `list_sections` already hides it, so this only fires on a
+/// stale id or a direct API misuse.
+fn reject_done_bucket(view: &KanbanView, bucket_id: i64) -> VikunjaResult<()> {
+    if view.done_bucket_id != 0 && bucket_id == view.done_bucket_id {
+        return Err(VikunjaError::Protocol(
+            "that bucket is Vikunja's done bucket, not a user section".into(),
+        ));
+    }
+    Ok(())
 }
 
 /// `PUT /projects/{p}/views/{v}/buckets` with `{ title }` — create a
@@ -226,8 +256,8 @@ pub async fn create_section(
     list_id: &str,
     name: &str,
 ) -> VikunjaResult<Section> {
-    let (project_id, view_id) = section_view(client, list_id).await?;
-    let path = format!("/projects/{project_id}/views/{view_id}/buckets");
+    let (project_id, view) = section_view(client, list_id).await?;
+    let path = format!("/projects/{project_id}/views/{}/buckets", view.id);
     let body = serde_json::json!({ "title": name });
     let entry: BucketEntry = client.put_json(&path, &body).await?;
     Ok(map_bucket(entry, list_id))
@@ -241,9 +271,13 @@ pub async fn update_section(
     section_id: &str,
     new_name: &str,
 ) -> VikunjaResult<Section> {
-    let (project_id, view_id) = section_view(client, list_id).await?;
+    let (project_id, view) = section_view(client, list_id).await?;
     let bucket_id = parse_id(section_id, "section id")?;
-    let path = format!("/projects/{project_id}/views/{view_id}/buckets/{bucket_id}");
+    reject_done_bucket(&view, bucket_id)?;
+    let path = format!(
+        "/projects/{project_id}/views/{}/buckets/{bucket_id}",
+        view.id
+    );
     let body = serde_json::json!({ "title": new_name });
     let entry: BucketEntry = client.post_json(&path, &body).await?;
     Ok(map_bucket(entry, list_id))
@@ -256,9 +290,13 @@ pub async fn delete_section(
     list_id: &str,
     section_id: &str,
 ) -> VikunjaResult<()> {
-    let (project_id, view_id) = section_view(client, list_id).await?;
+    let (project_id, view) = section_view(client, list_id).await?;
     let bucket_id = parse_id(section_id, "section id")?;
-    let path = format!("/projects/{project_id}/views/{view_id}/buckets/{bucket_id}");
+    reject_done_bucket(&view, bucket_id)?;
+    let path = format!(
+        "/projects/{project_id}/views/{}/buckets/{bucket_id}",
+        view.id
+    );
     client.delete(&path).await
 }
 
@@ -277,25 +315,39 @@ async fn kanban_view(client: &VikunjaClient, project_id: i64) -> Option<KanbanVi
         .map(|v| KanbanView {
             id: v.id,
             default_bucket_id: v.default_bucket_id,
+            done_bucket_id: v.done_bucket_id,
         })
 }
 
 /// The lowest-`position` bucket of a kanban view — Vikunja's implicit
 /// default when the view sets no explicit `default_bucket_id`. `None` if
-/// the buckets can't be read.
-async fn leftmost_bucket(client: &VikunjaClient, project_id: i64, view_id: i64) -> Option<i64> {
+/// the buckets can't be read. `exclude` (the done bucket, `0` = none) is
+/// skipped so we never fall back to filing a task as "done".
+async fn leftmost_bucket(
+    client: &VikunjaClient,
+    project_id: i64,
+    view_id: i64,
+    exclude: i64,
+) -> Option<i64> {
     let buckets: Vec<BucketEntry> = client
         .get_json(&format!("/projects/{project_id}/views/{view_id}/buckets"))
         .await
         .ok()?;
     buckets
         .into_iter()
+        .filter(|b| exclude == 0 || b.id != exclude)
         .min_by(|a, b| {
             a.position
                 .partial_cmp(&b.position)
                 .unwrap_or(std::cmp::Ordering::Equal)
         })
         .map(|b| b.id)
+}
+
+/// A bucket id seen as an Aperio section — `None` for the done bucket, which
+/// is Vikunja's done-status mechanism rather than a user section (DESIGN §8.2).
+fn open_section(bucket: i64, done_bucket_id: i64) -> Option<i64> {
+    (done_bucket_id == 0 || bucket != done_bucket_id).then_some(bucket)
 }
 
 /// Read the task's current bucket id *in the given kanban view*
@@ -354,27 +406,37 @@ async fn move_task_bucket(client: &VikunjaClient, task: &Task, task_id: i64) -> 
         }
         return None;
     };
-    let target = match task.section_id.as_deref() {
-        Some(s) => match parse_id(s, "section id") {
-            Ok(b) => b,
-            // Unparseable section id → leave the task where it is.
-            Err(_) => return Some(current),
-        },
-        // No section → the view's default bucket (Vikunja has no "no
-        // bucket"), falling back to the leftmost bucket when unset.
+    let done = view.done_bucket_id;
+    // Resolve the bucket the task should sit in. The done bucket is NEVER a
+    // valid target — it's Vikunja's done-status mechanism, not a section — so
+    // an explicit section pointing at it (the read path filters it, but be
+    // defensive), or a default/leftmost that *is* it, falls through to a real
+    // open bucket. That fall-through is what lets a reopened task actually
+    // leave the done bucket when the project's only/default bucket coincides
+    // with it (DESIGN §8.2).
+    let explicit = task
+        .section_id
+        .as_deref()
+        .and_then(|s| parse_id(s, "section id").ok())
+        .filter(|&b| done == 0 || b != done);
+    let target = match explicit {
+        Some(b) => b,
+        // No (real) section → the view's default open bucket, else the
+        // leftmost open bucket; both skip the done bucket.
         None => {
-            if view.default_bucket_id != 0 {
+            if view.default_bucket_id != 0 && view.default_bucket_id != done {
                 view.default_bucket_id
             } else {
-                match leftmost_bucket(client, project_id, view.id).await {
+                match leftmost_bucket(client, project_id, view.id, done).await {
                     Some(b) => b,
-                    None => return Some(current),
+                    // Only the done bucket exists — nothing open to move to.
+                    None => return open_section(current, done),
                 }
             }
         }
     };
     if target == current {
-        return Some(current); // already in the right bucket — nothing to do.
+        return open_section(current, done); // already in the right bucket.
     }
     let path = format!(
         "/projects/{project_id}/views/{}/buckets/{target}/tasks",
@@ -383,6 +445,7 @@ async fn move_task_bucket(client: &VikunjaClient, task: &Task, task_id: i64) -> 
     let body = serde_json::json!({ "task_id": task_id, "bucket_id": target });
     let moved: VikunjaResult<serde_json::Value> = client.post_json(&path, &body).await;
     match moved {
+        // `target` is a non-done bucket by construction.
         Ok(_) => Some(target),
         Err(err) => {
             tracing::warn!(
@@ -392,7 +455,7 @@ async fn move_task_bucket(client: &VikunjaClient, task: &Task, task_id: i64) -> 
                 "vikunja: bucket move failed — task edit preserved",
             );
             // The move didn't apply → the task is still in `current`.
-            Some(current)
+            open_section(current, done)
         }
     }
 }
@@ -439,6 +502,20 @@ pub async fn create_task(
     if !task.assignees.is_empty() {
         set_assignees(client, new_id, &task.assignees).await?;
         mapped.assignees = task.assignees;
+    }
+    // Honour the requested section. A fresh task lands in the view's default
+    // bucket, so relocate it the way `update_task` does — otherwise a
+    // sectioned task (e.g. a spawned recurring instance, DESIGN §9.12) drifts
+    // to the default column. Best-effort: a move failure never fails the
+    // create, and the done bucket is filtered inside `move_task_bucket`.
+    if let Some(requested) = task.section_id.clone() {
+        let mut probe = mapped.clone();
+        probe.section_id = Some(requested);
+        if let Some(bucket) = move_task_bucket(client, &probe, new_id).await {
+            mapped.section_id = Some(bucket.to_string());
+        }
+        // `None` ⇒ the move couldn't be determined; keep the default bucket
+        // `map_task` already resolved rather than claim the requested section.
     }
     Ok(mapped)
 }
@@ -795,6 +872,11 @@ struct ViewEntry {
     /// ungrouped state).
     #[serde(default)]
     default_bucket_id: i64,
+    /// Bucket Vikunja treats as "done": marking a task done files it here,
+    /// and moving a task out of it flips it back to undone. `0` ⇒ none set.
+    /// Aperio must NOT treat it as a user section (DESIGN §8.2).
+    #[serde(default)]
+    done_bucket_id: i64,
 }
 
 /// The kanban view of a project, resolved once before reading or moving
@@ -802,6 +884,8 @@ struct ViewEntry {
 struct KanbanView {
     id: i64,
     default_bucket_id: i64,
+    /// `0` when the view has no done bucket; see [`ViewEntry::done_bucket_id`].
+    done_bucket_id: i64,
 }
 
 /// A Vikunja user, as returned inline on a task's `assignees`, by
@@ -1974,6 +2058,144 @@ mod tests {
         assert_eq!(tasks[0].section_id.as_deref(), Some("9"));
         // No bucket in this view ⇒ ungrouped.
         assert!(tasks[1].section_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn get_tasks_blanks_the_done_bucket() {
+        // Vikunja's done bucket (id 9 here) is a done-status mechanism, not a
+        // user section — a task it filed there on completion must read back
+        // section-less, not as if it lived in that bucket (DESIGN §8.2).
+        let mut server = Server::new_async().await;
+        let _views = server
+            .mock("GET", "/api/v1/projects/3/views")
+            .with_status(200)
+            .with_body(
+                r#"[{"id":11,"view_kind":"kanban","default_bucket_id":5,"done_bucket_id":9}]"#,
+            )
+            .create_async()
+            .await;
+        let _m = server
+            .mock(
+                "GET",
+                "/api/v1/projects/3/tasks?page=1&per_page=50&expand=buckets",
+            )
+            .with_status(200)
+            .with_body(
+                r#"[{"id":7,"title":"Filed done","project_id":3,"buckets":[{"id":9,"project_view_id":11}]},{"id":8,"title":"In a real bucket","project_id":3,"buckets":[{"id":12,"project_view_id":11}]}]"#,
+            )
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        let tasks = get_tasks(&client, "3").await.unwrap();
+        // In the done bucket ⇒ no section.
+        assert!(tasks[0].section_id.is_none());
+        // In a regular bucket ⇒ that section.
+        assert_eq!(tasks[1].section_id.as_deref(), Some("12"));
+    }
+
+    #[tokio::test]
+    async fn update_task_never_moves_into_the_done_bucket() {
+        // A move whose target resolves to the done bucket (id 9) must be
+        // skipped — moving a task into the done bucket would mark it done.
+        let mut server = Server::new_async().await;
+        mount_update_prelude(&mut server).await;
+        let _views = server
+            .mock("GET", "/api/v1/projects/3/views")
+            .with_status(200)
+            .with_body(
+                r#"[{"id":11,"view_kind":"kanban","default_bucket_id":5,"done_bucket_id":9}]"#,
+            )
+            .create_async()
+            .await;
+        let _current = server
+            .mock("GET", "/api/v1/tasks/7?expand=buckets")
+            .with_status(200)
+            .with_body(r#"{"id":7,"buckets":[{"id":5,"project_view_id":11}]}"#)
+            .create_async()
+            .await;
+        let mv = server
+            .mock("POST", "/api/v1/projects/3/views/11/buckets/9/tasks")
+            .expect(0)
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        // section_id "9" == the done bucket → the move is skipped.
+        update_task(&client, &task_fixture("7", "3", Some("9")))
+            .await
+            .unwrap();
+        mv.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn update_task_reopens_out_of_done_bucket_when_default_is_done() {
+        // The pathological case the user hit (buckets deleted down to one):
+        // default_bucket_id == done_bucket_id (both 9). A reopened task sits
+        // in the done bucket (current 9) with no section; it must be moved to
+        // a real OPEN bucket (the leftmost non-done one, 5), not stranded.
+        let mut server = Server::new_async().await;
+        mount_update_prelude(&mut server).await;
+        let _views = server
+            .mock("GET", "/api/v1/projects/3/views")
+            .with_status(200)
+            .with_body(
+                r#"[{"id":11,"view_kind":"kanban","default_bucket_id":9,"done_bucket_id":9}]"#,
+            )
+            .create_async()
+            .await;
+        let _current = server
+            .mock("GET", "/api/v1/tasks/7?expand=buckets")
+            .with_status(200)
+            .with_body(r#"{"id":7,"buckets":[{"id":9,"project_view_id":11}]}"#)
+            .create_async()
+            .await;
+        // The default == done, so the move target falls back to the leftmost
+        // OPEN bucket: 9 is excluded, 5 is the lowest-position survivor.
+        let _buckets = server
+            .mock("GET", "/api/v1/projects/3/views/11/buckets")
+            .with_status(200)
+            .with_body(r#"[{"id":9,"position":0},{"id":5,"position":1}]"#)
+            .create_async()
+            .await;
+        let mv = server
+            .mock("POST", "/api/v1/projects/3/views/11/buckets/5/tasks")
+            .with_status(200)
+            .with_body("{}")
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        // No section, currently in the done bucket → relocated to bucket 5.
+        let result = update_task(&client, &task_fixture("7", "3", None))
+            .await
+            .unwrap();
+        mv.assert_async().await;
+        assert_eq!(result.section_id.as_deref(), Some("5"));
+    }
+
+    #[tokio::test]
+    async fn list_sections_hides_the_done_bucket() {
+        // The done bucket is a status mechanism, not a user-pickable section —
+        // list_sections must not surface it.
+        let mut server = Server::new_async().await;
+        let _views = server
+            .mock("GET", "/api/v1/projects/3/views")
+            .with_status(200)
+            .with_body(
+                r#"[{"id":11,"view_kind":"kanban","default_bucket_id":5,"done_bucket_id":9}]"#,
+            )
+            .create_async()
+            .await;
+        let _buckets = server
+            .mock("GET", "/api/v1/projects/3/views/11/buckets")
+            .with_status(200)
+            .with_body(
+                r#"[{"id":5,"title":"To Do","position":0},{"id":9,"title":"Done","position":1},{"id":12,"title":"Doing","position":2}]"#,
+            )
+            .create_async()
+            .await;
+        let client = fixture_client(&server.url());
+        let sections = list_sections(&client, "3").await.unwrap();
+        let ids: Vec<&str> = sections.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, vec!["5", "12"], "the done bucket (9) is filtered out");
     }
 
     fn task_fixture(id: &str, list_id: &str, section_id: Option<&str>) -> Task {
