@@ -351,11 +351,7 @@ impl LocalAdapter {
         // task lists (tasks.parent_id REFERENCES tasks(id)), so order
         // parents before children here too — otherwise a reparented
         // subtask dumped ahead of its parent would FK-fail and vanish.
-        for task in order_parent_first(
-            &dump.tasks,
-            |t| t.id.as_str(),
-            |t| t.parent_id.as_deref(),
-        ) {
+        for task in order_parent_first(&dump.tasks, |t| t.id.as_str(), |t| t.parent_id.as_deref()) {
             match self.upsert_task_from_sync(task) {
                 Ok(()) => report.applied += 1,
                 Err(err) => {
@@ -594,7 +590,11 @@ mod tests {
         assert_eq!(report.applied, 3, "1 list + parent task + subtask");
 
         let tasks = dst.dump_for_snapshot().unwrap().tasks;
-        assert_eq!(tasks.len(), 2, "both the parent task and its subtask survive");
+        assert_eq!(
+            tasks.len(),
+            2,
+            "both the parent task and its subtask survive"
+        );
         let child = tasks.iter().find(|t| t.id == "T-child").unwrap();
         assert_eq!(child.parent_id.as_deref(), Some("T-parent"));
     }
