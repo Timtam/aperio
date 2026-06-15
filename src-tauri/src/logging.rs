@@ -106,8 +106,11 @@ pub fn recent_lines(logs_dir: &Path, max_lines: usize) -> String {
 }
 
 /// Concatenate every log file (oldest → newest) into one export bundle.
-/// `redact` runs the PII/token scrub.
-pub fn collect(logs_dir: &Path, redact: bool) -> String {
+/// `redact` runs the PII/token scrub. `max_bytes` caps the result to its
+/// most-recent N bytes (used for the clipboard path so a huge trace bundle
+/// doesn't choke the IPC bridge / clipboard); the file export passes `None`
+/// for the complete log.
+pub fn collect(logs_dir: &Path, redact: bool, max_bytes: Option<usize>) -> String {
     let mut files = log_files(logs_dir);
     files.sort();
     let mut out = String::new();
@@ -117,6 +120,18 @@ pub fn collect(logs_dir: &Path, redact: bool) -> String {
             if !out.ends_with('\n') {
                 out.push('\n');
             }
+        }
+    }
+    if let Some(max) = max_bytes {
+        if out.len() > max {
+            let mut cut = out.len() - max;
+            while !out.is_char_boundary(cut) {
+                cut += 1;
+            }
+            // Start at the next whole line so the cap never splits one.
+            let tail = &out[cut..];
+            let tail = tail.find('\n').map(|i| &tail[i + 1..]).unwrap_or(tail);
+            out = format!("[… earlier log lines truncated …]\n{tail}");
         }
     }
     if redact {
@@ -149,9 +164,15 @@ fn log_files(logs_dir: &Path) -> Vec<PathBuf> {
         .flatten()
         .map(|e| e.path())
         .filter(|p| {
-            p.file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(|n| n.starts_with(LOG_FILE_PREFIX))
+            p.file_name().and_then(|n| n.to_str()).is_some_and(|n| {
+                // Match only our own files: exactly the prefix, or prefix
+                // followed by the rotation separator `.`. A stray
+                // `aperio.log_backup` the user dropped in here is NOT ours —
+                // otherwise prune_old_logs could delete their file.
+                n == LOG_FILE_PREFIX
+                    || (n.starts_with(LOG_FILE_PREFIX)
+                        && n.as_bytes().get(LOG_FILE_PREFIX.len()) == Some(&b'.'))
+            })
         })
         .collect()
 }
@@ -186,19 +207,38 @@ fn prune_old_logs(logs_dir: &Path, max_age_days: u64) {
     }
 }
 
-/// Scrub e-mail addresses and long token-like runs from exportable text.
-/// Defense-in-depth only — see the module docs.
+/// Scrub the obvious secret/PII shapes from exportable text. Defense-in-depth
+/// only — the primary guarantee is the no-secrets/no-PII logging convention
+/// (see the module docs). This catches: credentials embedded in URLs
+/// (`scheme://user:pass@host`), e-mail addresses, JWTs, and long token runs.
+/// It does NOT catch free-form names / phone numbers / short provider keys
+/// with hyphens — those rely on the convention.
 fn redact_text(input: &str) -> String {
+    static URL_CREDS: OnceLock<Regex> = OnceLock::new();
     static EMAIL: OnceLock<Regex> = OnceLock::new();
+    static JWT: OnceLock<Regex> = OnceLock::new();
     static TOKEN: OnceLock<Regex> = OnceLock::new();
+    let url = URL_CREDS.get_or_init(|| {
+        // scheme://user:password@host → scheme://[redacted-credentials]@host
+        Regex::new(r"([A-Za-z][A-Za-z0-9+.\-]*://)[^\s:/@]+:[^\s/@]+@")
+            .expect("static url-creds regex")
+    });
     let email = EMAIL.get_or_init(|| {
         Regex::new(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}").expect("static email regex")
     });
-    // 40+ contiguous base64/hex-ish chars (no hyphens, so UUIDs — which are
-    // safe + useful ids — survive). Catches API keys / refresh tokens / JW!
-    let token = TOKEN.get_or_init(|| Regex::new(r"[A-Za-z0-9_]{40,}").expect("static token regex"));
-    let step1 = email.replace_all(input, "[redacted-email]");
-    token.replace_all(&step1, "[redacted-token]").into_owned()
+    let jwt = JWT.get_or_init(|| {
+        // header.payload.signature — base64url with dots/hyphens, which the
+        // contiguous-run token regex below would miss.
+        Regex::new(r"eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+")
+            .expect("static jwt regex")
+    });
+    // 32+ contiguous base64/hex/underscore run (no hyphens, so UUIDs — safe,
+    // useful ids — survive). Catches API keys / refresh / session tokens.
+    let token = TOKEN.get_or_init(|| Regex::new(r"[A-Za-z0-9_]{32,}").expect("static token regex"));
+    let s = url.replace_all(input, "${1}[redacted-credentials]@");
+    let s = email.replace_all(&s, "[redacted-email]");
+    let s = jwt.replace_all(&s, "[redacted-token]");
+    token.replace_all(&s, "[redacted-token]").into_owned()
 }
 
 #[cfg(test)]
@@ -221,8 +261,30 @@ mod tests {
         write(tmp.path(), "aperio.log.2026-06-02", "newer\n");
         // A non-log file must be ignored.
         write(tmp.path(), "notes.txt", "ignore me\n");
-        let out = collect(tmp.path(), false);
+        let out = collect(tmp.path(), false, None);
         assert_eq!(out, "older\nnewer\n");
+    }
+
+    #[test]
+    fn log_files_filter_does_not_match_lookalikes() {
+        let tmp = TempDir::new().unwrap();
+        write(tmp.path(), "aperio.log.2026-06-01", "ours\n");
+        // Lookalikes a user might drop here — must NOT be treated as ours
+        // (prune would otherwise delete them).
+        write(tmp.path(), "aperio.log_backup", "theirs\n");
+        write(tmp.path(), "aperio.logs", "theirs\n");
+        let out = collect(tmp.path(), false, None);
+        assert_eq!(out, "ours\n");
+    }
+
+    #[test]
+    fn collect_max_bytes_tails_and_marks_truncation() {
+        let tmp = TempDir::new().unwrap();
+        write(tmp.path(), "aperio.log.2026-06-01", "l1\nl2\nl3\nl4\nl5\n");
+        let out = collect(tmp.path(), false, Some(6));
+        assert!(out.starts_with("[… earlier log lines truncated …]\n"));
+        assert!(out.contains("l5"));
+        assert!(!out.contains("l1"));
     }
 
     #[test]
@@ -244,6 +306,19 @@ mod tests {
         assert!(out.contains("[redacted-token]"));
         // UUID (hyphen-broken, ≤32-char runs) survives — safe + useful.
         assert!(out.contains("550e8400-e29b-41d4-a716-446655440000"));
+    }
+
+    #[test]
+    fn redaction_scrubs_url_credentials_and_jwts() {
+        let jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.SflKxwRJSMeKKF2QT4fwpMeJ";
+        let input = format!("GET https://alice:s3cr3t@dav.example.com/cal jwt={jwt}");
+        let out = redact_text(&input);
+        // URL userinfo gone, but the scheme + host stay for debugging.
+        assert!(!out.contains("s3cr3t"));
+        assert!(out.contains("https://[redacted-credentials]@dav.example.com"));
+        // The whole JWT (dotted base64url) is redacted, not just one segment.
+        assert!(!out.contains(jwt));
+        assert!(out.contains("[redacted-token]"));
     }
 
     #[test]

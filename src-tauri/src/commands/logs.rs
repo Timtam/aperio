@@ -73,11 +73,17 @@ pub fn get_recent_logs(
 
 /// The full (optionally redacted) log bundle as a string — used for
 /// copy-to-clipboard. Defaults to redacted.
+/// Clipboard bundles are capped to the most-recent ~2 MB — plenty of context
+/// for support, and it keeps a huge trace bundle from choking the IPC bridge
+/// / clipboard. The file export ([`export_logs`]) writes the complete log.
+const CLIPBOARD_MAX_BYTES: usize = 2 * 1024 * 1024;
+
 #[tauri::command]
 pub fn collect_logs(log_state: State<'_, LogState>, redact: Option<bool>) -> CommandResult<String> {
     Ok(logging::collect(
         &log_state.logs_dir,
         redact.unwrap_or(true),
+        Some(CLIPBOARD_MAX_BYTES),
     ))
 }
 
@@ -90,7 +96,7 @@ pub fn export_logs(
     dest_path: String,
     redact: Option<bool>,
 ) -> CommandResult<()> {
-    let content = logging::collect(&log_state.logs_dir, redact.unwrap_or(true));
+    let content = logging::collect(&log_state.logs_dir, redact.unwrap_or(true), None);
     std::fs::write(&dest_path, content).map_err(|e| CommandError {
         code: "io",
         message: e.to_string(),

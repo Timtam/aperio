@@ -10,12 +10,18 @@ import {
   exportLogs,
   getLogLevel,
   getRecentLogs,
+  isCommandError,
   logsDirPath,
   setLogLevel,
   type LogLevel,
 } from '../api/client';
 
 const LEVELS: LogLevel[] = ['error', 'warn', 'info', 'debug', 'trace'];
+
+/** Human-readable message from a thrown value (CommandError → its message). */
+function errMessage(err: unknown): string {
+  return isCommandError(err) ? err.message : String(err);
+}
 
 /**
  * Settings → Protokolle (diagnostics).
@@ -66,28 +72,30 @@ export function LogsPanel() {
   }, [refresh]);
 
   const onLevelChange = (next: LogLevel) => {
+    const prev = level;
     setLevel(next);
     void setLogLevel(next).catch((err) => {
       // eslint-disable-next-line no-console
       console.warn('set_log_level failed', err);
+      // Roll the UI back so it doesn't claim a level the backend rejected.
+      setLevel(prev);
+      setError(errMessage(err));
     });
   };
 
   const onExport = useCallback(async () => {
     setError(null);
+    setBusy(true);
     try {
       const path = await save({
         defaultPath: 'aperio-logs.txt',
-        filters: [
-          { name: 'Log', extensions: ['txt', 'log'] },
-        ],
+        filters: [{ name: 'Log', extensions: ['txt', 'log'] }],
       });
       if (!path) return;
-      setBusy(true);
       await exportLogs(path, redact);
       announce(t('dialogs.settings.logs.exported'));
     } catch (err) {
-      setError(String(err));
+      setError(errMessage(err));
     } finally {
       setBusy(false);
     }
@@ -101,7 +109,7 @@ export function LogsPanel() {
       await navigator.clipboard.writeText(text);
       announce(t('dialogs.settings.logs.copied'));
     } catch (err) {
-      setError(String(err));
+      setError(errMessage(err));
     } finally {
       setBusy(false);
     }
@@ -124,7 +132,7 @@ export function LogsPanel() {
       await refresh();
       announce(t('dialogs.settings.logs.cleared'));
     } catch (err) {
-      setError(String(err));
+      setError(errMessage(err));
     }
   }, [refresh, announce, t]);
 
