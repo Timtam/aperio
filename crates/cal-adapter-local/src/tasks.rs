@@ -205,12 +205,14 @@ impl LocalAdapter {
         Ok(count > 0)
     }
 
-    /// Synchronous variant of `create_task` for the recurrence spawner.
-    /// `TasksFeature::create_task` is async to match the trait shape
-    /// shared with network-backed adapters, but the local adapter does
-    /// no IO that benefits from async — duplicating the body here
-    /// avoids dragging a runtime handle through the call.
-    fn create_task_sync(&self, list_id: &str, mut task: NewTask) -> cal_core::Result<Task> {
+    /// Synchronous task creation — the one implementation behind both the
+    /// async [`TasksFeature::create_task`] (which simply forwards here) and
+    /// the on-device FFI store. `TasksFeature` is async to match the trait
+    /// shape shared with network-backed adapters, but the local adapter does
+    /// no IO that benefits from async, so the real work lives here and no
+    /// runtime handle is dragged through the call (the recurrence spawner
+    /// relies on this too).
+    pub fn create_task_sync(&self, list_id: &str, mut task: NewTask) -> cal_core::Result<Task> {
         ensure_series_id(&mut task);
         let id = Uuid::new_v4().to_string();
         let now = Utc::now();
@@ -281,6 +283,191 @@ impl LocalAdapter {
             completed_at: None,
             etag: None,
         })
+    }
+
+    /// Synchronous task listing — the implementation behind the async
+    /// [`TasksFeature::get_tasks`] and the FFI store. See
+    /// [`LocalAdapter::create_task_sync`] for why the work is sync.
+    pub fn get_tasks_sync(&self, list_id: &str) -> cal_core::Result<Vec<Task>> {
+        let conn = self.db().lock().expect("db mutex poisoned");
+        let mut stmt = conn.prepare(TASK_SELECT).map_err(map_sql_err)?;
+        let rows = stmt
+            .query_map(params![list_id], |row| Ok(row_to_task(row)))
+            .map_err(map_sql_err)?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r.map_err(map_sql_err)??);
+        }
+        Ok(dedupe_open_series(out))
+    }
+
+    /// Synchronous task update — the implementation behind the async
+    /// [`TasksFeature::update_task`] and the FFI store. Carries the
+    /// completion → next-instance recurrence spawn (DESIGN §9.12).
+    pub fn update_task_sync(&self, task: Task) -> cal_core::Result<Task> {
+        // If this update completes a recurring task, generate the next
+        // instance afterwards. We snapshot the previous status before
+        // the write so we can detect the transition reliably.
+        let prev_status = self.read_task_status(&task.id)?;
+
+        let now = Utc::now();
+        let mut task = task;
+        task.updated_at = now;
+        let reminders_json = encode_json(&task.reminders)?;
+        let recurrence_json = task.recurrence.as_ref().map(encode_json).transpose()?;
+        let sound_json = write_sound(&task.sound)?;
+        let status = task_status_str(task.status);
+        let priority = task_priority_str(task.priority);
+
+        let changed = self
+            .db()
+            .lock()
+            .expect("db mutex poisoned")
+            .execute(
+                "UPDATE tasks
+                    SET list_id = ?, parent_id = ?, section_id = ?, title = ?, description = ?,
+                        status = ?, priority = ?, scheduled_date = ?, scheduled_time = ?,
+                        deadline_date = ?, deadline_time = ?,
+                        recurrence = ?, color_label_id = ?, reminders = ?, sound = ?,
+                        updated_at = ?, completed_at = ?, etag = ?
+                  WHERE id = ?",
+                params![
+                    task.list_id,
+                    task.parent_id,
+                    task.section_id,
+                    task.title,
+                    task.description,
+                    status,
+                    priority,
+                    task.scheduled_date.as_ref().map(fmt_date),
+                    task.scheduled_time.as_ref().map(fmt_time),
+                    task.deadline_date.as_ref().map(fmt_date),
+                    task.deadline_time.as_ref().map(fmt_time),
+                    recurrence_json,
+                    task.color_label.as_ref().map(|c| c.as_str()),
+                    reminders_json,
+                    sound_json,
+                    fmt_utc(&task.updated_at),
+                    task.completed_at.as_ref().map(fmt_utc),
+                    task.etag,
+                    task.id,
+                ],
+            )
+            .map_err(map_sql_err)?;
+        if changed == 0 {
+            return Err(cal_core::Error::NotFound(format!(
+                "task '{}' not found",
+                task.id
+            )));
+        }
+
+        // Recurrence: when a recurring task transitions into Completed
+        // (and was not already there) the template generates its next
+        // instance. The "post-completion, not pre" semantics matches
+        // DESIGN.md section 9.6.
+        if task.status == TaskStatus::Completed
+            && prev_status != Some(TaskStatus::Completed)
+            && task.recurrence.is_some()
+        {
+            if let Some(next) = self.spawn_next_recurring_task(&task)? {
+                // We don't return the next task — the caller wired
+                // the existing one. The new row shows up on the
+                // next list refresh, which views already trigger
+                // on dialog close.
+                let _ = next;
+            }
+        }
+
+        Ok(task)
+    }
+
+    /// Synchronous task delete — the implementation behind the async
+    /// [`TasksFeature::delete_task`] and the FFI store.
+    pub fn delete_task_sync(&self, task_id: &str) -> cal_core::Result<()> {
+        let changed = self
+            .db()
+            .lock()
+            .expect("db mutex poisoned")
+            .execute("DELETE FROM tasks WHERE id = ?", params![task_id])
+            .map_err(map_sql_err)?;
+        if changed == 0 {
+            return Err(cal_core::Error::NotFound(format!(
+                "task '{task_id}' not found"
+            )));
+        }
+        Ok(())
+    }
+
+    /// Synchronous task-list listing — the implementation behind the async
+    /// [`TasksFeature::list_task_lists`] and the FFI store.
+    pub fn list_task_lists_sync(&self) -> cal_core::Result<Vec<TaskList>> {
+        let conn = self.db().lock().expect("db mutex poisoned");
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, name, color_hex, color_source, default_sound,
+                        embedded_in_calendar, read_only, parent_id, color_label_id
+                   FROM task_lists
+                  ORDER BY name COLLATE NOCASE",
+            )
+            .map_err(map_sql_err)?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    req_text(row, 0),
+                    req_text(row, 1),
+                    read_container_color(row, 2, 3),
+                    read_sound(row, 4),
+                    opt_text(row, 5),
+                    read_bool(row, 6),
+                    opt_text(row, 7),
+                    opt_text(row, 8),
+                ))
+            })
+            .map_err(map_sql_err)?;
+
+        let mut out = Vec::new();
+        for r in rows {
+            let (id, name, color, sound, embedded, read_only, parent_id, color_label) =
+                r.map_err(map_sql_err)?;
+            out.push(TaskList {
+                color_label: color_label?.map(ColorLabelId),
+                id: id?,
+                name: name?,
+                color: color?,
+                default_sound: sound?,
+                embedded_in_calendar: embedded?,
+                parent_id: parent_id?,
+                read_only: read_only?,
+            });
+        }
+        Ok(out)
+    }
+
+    /// Synchronous task-list rename — the implementation behind the async
+    /// [`TasksFeature::rename_task_list`] and the FFI store. Rejects an
+    /// empty (or whitespace-only) name.
+    pub fn rename_task_list_sync(&self, list_id: &str, new_name: &str) -> cal_core::Result<()> {
+        let trimmed = new_name.trim();
+        if trimmed.is_empty() {
+            return Err(cal_core::Error::InvalidInput(
+                "task list name must not be empty".into(),
+            ));
+        }
+        let changed = self
+            .db()
+            .lock()
+            .expect("db mutex poisoned")
+            .execute(
+                "UPDATE task_lists SET name = ? WHERE id = ?",
+                params![trimmed, list_id],
+            )
+            .map_err(map_sql_err)?;
+        if changed == 0 {
+            return Err(cal_core::Error::NotFound(format!(
+                "task list '{list_id}' not found"
+            )));
+        }
+        Ok(())
     }
 
     pub fn delete_task_list(&self, id: &str) -> cal_core::Result<()> {
@@ -476,248 +663,27 @@ impl LocalAdapter {
 #[async_trait]
 impl TasksFeature for LocalAdapter {
     async fn list_task_lists(&self) -> cal_core::Result<Vec<TaskList>> {
-        let conn = self.db().lock().expect("db mutex poisoned");
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, name, color_hex, color_source, default_sound,
-                        embedded_in_calendar, read_only, parent_id, color_label_id
-                   FROM task_lists
-                  ORDER BY name COLLATE NOCASE",
-            )
-            .map_err(map_sql_err)?;
-        let rows = stmt
-            .query_map([], |row| {
-                Ok((
-                    req_text(row, 0),
-                    req_text(row, 1),
-                    read_container_color(row, 2, 3),
-                    read_sound(row, 4),
-                    opt_text(row, 5),
-                    read_bool(row, 6),
-                    opt_text(row, 7),
-                    opt_text(row, 8),
-                ))
-            })
-            .map_err(map_sql_err)?;
-
-        let mut out = Vec::new();
-        for r in rows {
-            let (id, name, color, sound, embedded, read_only, parent_id, color_label) =
-                r.map_err(map_sql_err)?;
-            out.push(TaskList {
-                color_label: color_label?.map(ColorLabelId),
-                id: id?,
-                name: name?,
-                color: color?,
-                default_sound: sound?,
-                embedded_in_calendar: embedded?,
-                parent_id: parent_id?,
-                read_only: read_only?,
-            });
-        }
-        Ok(out)
+        self.list_task_lists_sync()
     }
 
     async fn get_tasks(&self, list_id: &str) -> cal_core::Result<Vec<Task>> {
-        let conn = self.db().lock().expect("db mutex poisoned");
-        let mut stmt = conn.prepare(TASK_SELECT).map_err(map_sql_err)?;
-        let rows = stmt
-            .query_map(params![list_id], |row| Ok(row_to_task(row)))
-            .map_err(map_sql_err)?;
-        let mut out = Vec::new();
-        for r in rows {
-            out.push(r.map_err(map_sql_err)??);
-        }
-        Ok(dedupe_open_series(out))
+        self.get_tasks_sync(list_id)
     }
 
-    async fn create_task(&self, list_id: &str, mut task: NewTask) -> cal_core::Result<Task> {
-        ensure_series_id(&mut task);
-        let id = Uuid::new_v4().to_string();
-        let now = Utc::now();
-        let now_s = fmt_utc(&now);
-        let reminders_json = encode_json(&task.reminders)?;
-        let recurrence_json = task.recurrence.as_ref().map(encode_json).transpose()?;
-        let sound_json = write_sound(&task.sound)?;
-        let status = task_status_str(task.status);
-        let priority = task_priority_str(task.priority);
-
-        self.db()
-            .lock()
-            .expect("db mutex poisoned")
-            .execute(
-                "INSERT INTO tasks (
-                    id, list_id, parent_id, section_id, title, description, status, priority,
-                    scheduled_date, scheduled_time, deadline_date, deadline_time,
-                    recurrence, resurface_date, series_id, color_label_id, reminders, sound,
-                    created_at, updated_at, completed_at, etag
-                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)",
-                params![
-                    id,
-                    list_id,
-                    task.parent_id,
-                    task.section_id,
-                    task.title,
-                    task.description,
-                    status,
-                    priority,
-                    task.scheduled_date.as_ref().map(fmt_date),
-                    task.scheduled_time.as_ref().map(fmt_time),
-                    task.deadline_date.as_ref().map(fmt_date),
-                    task.deadline_time.as_ref().map(fmt_time),
-                    recurrence_json,
-                    task.resurface_date.as_ref().map(fmt_date),
-                    task.series_id,
-                    task.color_label.as_ref().map(|c| c.as_str()),
-                    reminders_json,
-                    sound_json,
-                    now_s,
-                    now_s,
-                ],
-            )
-            .map_err(map_sql_err)?;
-
-        Ok(Task {
-            assignees: Vec::new(),
-            id,
-            list_id: list_id.to_string(),
-            title: task.title,
-            description: task.description,
-            status: task.status,
-            priority: task.priority,
-            scheduled_date: task.scheduled_date,
-            scheduled_time: task.scheduled_time,
-            deadline_date: task.deadline_date,
-            deadline_time: task.deadline_time,
-            recurrence: task.recurrence,
-            resurface_date: task.resurface_date,
-            series_id: task.series_id,
-            parent_id: task.parent_id,
-            section_id: task.section_id,
-            color_label: task.color_label,
-            reminders: task.reminders,
-            sound: task.sound,
-            created_at: now,
-            updated_at: now,
-            completed_at: None,
-            etag: None,
-        })
+    async fn create_task(&self, list_id: &str, task: NewTask) -> cal_core::Result<Task> {
+        self.create_task_sync(list_id, task)
     }
 
     async fn update_task(&self, task: Task) -> cal_core::Result<Task> {
-        // If this update completes a recurring task, generate the next
-        // instance afterwards. We snapshot the previous status before
-        // the write so we can detect the transition reliably.
-        let prev_status = self.read_task_status(&task.id)?;
-
-        let now = Utc::now();
-        let mut task = task;
-        task.updated_at = now;
-        let reminders_json = encode_json(&task.reminders)?;
-        let recurrence_json = task.recurrence.as_ref().map(encode_json).transpose()?;
-        let sound_json = write_sound(&task.sound)?;
-        let status = task_status_str(task.status);
-        let priority = task_priority_str(task.priority);
-
-        let changed = self
-            .db()
-            .lock()
-            .expect("db mutex poisoned")
-            .execute(
-                "UPDATE tasks
-                    SET list_id = ?, parent_id = ?, section_id = ?, title = ?, description = ?,
-                        status = ?, priority = ?, scheduled_date = ?, scheduled_time = ?,
-                        deadline_date = ?, deadline_time = ?,
-                        recurrence = ?, color_label_id = ?, reminders = ?, sound = ?,
-                        updated_at = ?, completed_at = ?, etag = ?
-                  WHERE id = ?",
-                params![
-                    task.list_id,
-                    task.parent_id,
-                    task.section_id,
-                    task.title,
-                    task.description,
-                    status,
-                    priority,
-                    task.scheduled_date.as_ref().map(fmt_date),
-                    task.scheduled_time.as_ref().map(fmt_time),
-                    task.deadline_date.as_ref().map(fmt_date),
-                    task.deadline_time.as_ref().map(fmt_time),
-                    recurrence_json,
-                    task.color_label.as_ref().map(|c| c.as_str()),
-                    reminders_json,
-                    sound_json,
-                    fmt_utc(&task.updated_at),
-                    task.completed_at.as_ref().map(fmt_utc),
-                    task.etag,
-                    task.id,
-                ],
-            )
-            .map_err(map_sql_err)?;
-        if changed == 0 {
-            return Err(cal_core::Error::NotFound(format!(
-                "task '{}' not found",
-                task.id
-            )));
-        }
-
-        // Recurrence: when a recurring task transitions into Completed
-        // (and was not already there) the template generates its next
-        // instance. The "post-completion, not pre" semantics matches
-        // DESIGN.md section 9.6.
-        if task.status == TaskStatus::Completed
-            && prev_status != Some(TaskStatus::Completed)
-            && task.recurrence.is_some()
-        {
-            if let Some(next) = self.spawn_next_recurring_task(&task)? {
-                // We don't return the next task — the caller wired
-                // the existing one. The new row shows up on the
-                // next list refresh, which views already trigger
-                // on dialog close.
-                let _ = next;
-            }
-        }
-
-        Ok(task)
+        self.update_task_sync(task)
     }
 
     async fn delete_task(&self, task_id: &str) -> cal_core::Result<()> {
-        let changed = self
-            .db()
-            .lock()
-            .expect("db mutex poisoned")
-            .execute("DELETE FROM tasks WHERE id = ?", params![task_id])
-            .map_err(map_sql_err)?;
-        if changed == 0 {
-            return Err(cal_core::Error::NotFound(format!(
-                "task '{task_id}' not found"
-            )));
-        }
-        Ok(())
+        self.delete_task_sync(task_id)
     }
 
     async fn rename_task_list(&self, list_id: &str, new_name: &str) -> cal_core::Result<()> {
-        let trimmed = new_name.trim();
-        if trimmed.is_empty() {
-            return Err(cal_core::Error::InvalidInput(
-                "task list name must not be empty".into(),
-            ));
-        }
-        let changed = self
-            .db()
-            .lock()
-            .expect("db mutex poisoned")
-            .execute(
-                "UPDATE task_lists SET name = ? WHERE id = ?",
-                params![trimmed, list_id],
-            )
-            .map_err(map_sql_err)?;
-        if changed == 0 {
-            return Err(cal_core::Error::NotFound(format!(
-                "task list '{list_id}' not found"
-            )));
-        }
-        Ok(())
+        self.rename_task_list_sync(list_id, new_name)
     }
 
     async fn list_sections(&self, list_id: &str) -> cal_core::Result<Vec<Section>> {
