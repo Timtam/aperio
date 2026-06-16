@@ -39,3 +39,11 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# cal-ffi native libs are built by cargo-ndk (regenerable; not committed)
+/modules/cal-ffi/android/src/main/jniLibs/
+
+# Gradle build output for local native modules (regenerable; never commit)
+/modules/*/android/build/
+/modules/*/android/.cxx/
+/modules/*/android/.gradle/

@@ -10,6 +10,8 @@ import {
   View,
 } from 'react-native';
 
+import CalFfi from './modules/cal-ffi';
+
 // Pilot screen whose only job is to prove, on a real iPhone under
 // VoiceOver, that the building blocks Aperio cares about actually
 // work through React Native:
@@ -36,6 +38,11 @@ const INITIAL_TASKS: Task[] = [
 export default function App() {
   const [tasks, setTasks] = useState<Task[]>(INITIAL_TASKS);
   const [status, setStatus] = useState('Bereit. Wische zu einer Aufgabe.');
+
+  // Vertical-slice proof: this calls the Rust `cal-core` parser through the
+  // cal-ffi UniFFI native module — real Rust running inside the RN process.
+  const sampleEntry = 'Dr. Alice Schmidt <alice@example.com>';
+  const parsedAttendee = CalFfi.parseAttendee(sampleEntry);
 
   const announce = useCallback((message: string) => {
     setStatus(message);
@@ -92,6 +99,19 @@ export default function App() {
         <Text accessibilityRole="header" style={styles.heading}>
           Aperio – Barrierefreiheits-Pilot
         </Text>
+
+        <View style={styles.rustBox}>
+          <Text accessibilityRole="header" style={styles.subheading}>
+            Rust-Brücke (cal-ffi)
+          </Text>
+          <Text style={styles.rustLine}>Eingabe: {sampleEntry}</Text>
+          <Text style={styles.rustLine}>
+            Name aus Rust: {parsedAttendee.name ?? '—'}
+          </Text>
+          <Text style={styles.rustLine}>
+            E-Mail aus Rust: {parsedAttendee.email}
+          </Text>
+        </View>
 
         <Text style={styles.intro}>
           Aktiviere VoiceOver. Wische zu einer Aufgabe und dann mit einem
@@ -155,6 +175,23 @@ const styles = StyleSheet.create({
     fontSize: 26,
     fontWeight: '700',
     color: '#10131a',
+  },
+  subheading: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#10131a',
+  },
+  rustBox: {
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#bcd0c7',
+    backgroundColor: '#eef6f1',
+    gap: 6,
+  },
+  rustLine: {
+    fontSize: 16,
+    color: '#1d3a2f',
   },
   intro: {
     fontSize: 16,
