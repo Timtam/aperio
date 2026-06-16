@@ -29,14 +29,29 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use thiserror::Error;
 
+mod compactor;
 mod snapshot;
 mod writer;
+pub use compactor::{
+    CompactionReport, Compactor, DEFAULT_MAX_AGE_DAYS, DEFAULT_MAX_BYTES, DEFAULT_MAX_LOGS,
+    PREF_BYTES_SINCE_SNAPSHOT, PREF_LOGS_SINCE_SNAPSHOT, PREF_MAX_AGE_DAYS, PREF_MAX_BYTES,
+    PREF_MAX_LOGS,
+};
 pub use snapshot::{
     AperioSnapshotBody, SnapshotAccount, SnapshotApplyOutcome, SnapshotBuilder, SnapshotCredential,
 };
 pub use writer::EventLogWriter;
 
 pub mod whitelist;
+
+#[cfg(test)]
+mod test_support;
+
+/// `user_prefs` key holding this device's human-readable name (surfaced
+/// in `meta.json`'s device registry). Defined here — the canonical
+/// engine-level sync pref — and re-exported by the desktop onboarding
+/// module, which owns the UI that sets it.
+pub const PREF_DEVICE_NAME: &str = "sync.deviceName";
 
 // ─────────────────────────── round report / status ─────────────────────────
 // Moved verbatim from src-tauri/src/event_log/orchestrator.rs so both the
@@ -178,9 +193,15 @@ pub trait SyncStore: Send + Sync {
     /// The whitelisted `user_prefs` rows (key → value). Only keys that
     /// pass [`whitelist::is_synced_key`] are returned.
     fn dump_synced_settings(&self) -> Result<BTreeMap<String, String>, StoreError>;
+    /// Read one `user_prefs` row, `None` when absent. Used for the
+    /// engine's own device-local state — compaction counters and
+    /// thresholds, the device name, the sync cursor.
+    fn get_pref(&self, key: &str) -> Result<Option<String>, StoreError>;
     /// Write one `user_prefs` row WITHOUT emitting an event-log event
-    /// (the snapshot apply path must not loop back through the writer).
-    fn set_setting(&self, key: &str, value: &str) -> Result<(), StoreError>;
+    /// (the snapshot apply + compaction paths must not loop back through
+    /// the writer). Whether a key is a *synced* setting is the caller's
+    /// policy (the whitelist gate), not this primitive's.
+    fn set_pref(&self, key: &str, value: &str) -> Result<(), StoreError>;
     /// Every external account row (excludes the implicit `local` one).
     fn dump_accounts(&self) -> Result<Vec<SnapshotAccount>, StoreError>;
     /// Insert-or-update one account row from a snapshot (skips `local`).

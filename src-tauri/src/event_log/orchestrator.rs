@@ -795,7 +795,7 @@ impl SyncOrchestrator {
     /// `run_round`) will trigger a frontend refresh.
     fn record_compaction_row(
         &self,
-        result: &Result<crate::event_log::compactor::CompactionReport, sync_core::SyncError>,
+        result: &Result<crate::event_log::CompactionReport, sync_core::SyncError>,
         duration_ms: u64,
     ) {
         use crate::sync_log::{SyncLogCounters, SyncLogRepo, SyncTrigger};

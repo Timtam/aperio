@@ -58,10 +58,10 @@ use sync_core::{
 };
 use tracing::{debug, info, warn};
 
-use crate::db::SharedConn;
-use crate::event_log::EventLogWriter;
-use crate::event_log::{SnapshotApplyOutcome, SnapshotBuilder};
-use crate::user_prefs::UserPrefsRepo;
+use crate::{
+    AperioSnapshotBody, EventLogWriter, SnapshotApplyOutcome, SnapshotBuilder, SyncStore,
+    PREF_DEVICE_NAME,
+};
 
 /// `user_prefs` keys the compactor reads + writes.
 pub const PREF_MAX_AGE_DAYS: &str = "sync.compaction.maxAgeDays";
@@ -108,7 +108,9 @@ impl CompactionReport {
 /// can run a snapshot build + apply round-trip without any other
 /// services.
 pub struct Compactor {
-    db: SharedConn,
+    /// Local store seam — the engine's device-local prefs: the
+    /// compaction counters + thresholds and the device name.
+    store: Arc<dyn SyncStore>,
     builder: Arc<SnapshotBuilder>,
     local_device_id: DeviceId,
     app_version: String,
@@ -128,7 +130,7 @@ pub struct Compactor {
 
 impl Compactor {
     pub fn new(
-        db: SharedConn,
+        store: Arc<dyn SyncStore>,
         builder: Arc<SnapshotBuilder>,
         local_device_id: DeviceId,
         app_version: impl Into<String>,
@@ -136,7 +138,7 @@ impl Compactor {
         pending_dir: Option<PathBuf>,
     ) -> Self {
         Self {
-            db,
+            store,
             builder,
             local_device_id,
             app_version: app_version.into(),
@@ -257,10 +259,7 @@ impl Compactor {
             meta.min_app_version = self.app_version.clone();
         }
         meta.snapshot_timestamp = snapshot_ts;
-        let device_name = UserPrefsRepo::new(&self.db)
-            .get(crate::event_log::PREF_DEVICE_NAME)
-            .ok()
-            .flatten();
+        let device_name = self.store.get_pref(PREF_DEVICE_NAME).ok().flatten();
         meta.upsert_device(
             &self.local_device_id,
             DeviceRecord {
@@ -314,9 +313,8 @@ impl Compactor {
         // 6. Reset local counters. Use `set` to "0" rather than
         //    `delete` so the next read returns a clean 0 without
         //    re-checking the absent-key path.
-        let prefs = UserPrefsRepo::new(&self.db);
-        let _ = prefs.set(PREF_LOGS_SINCE_SNAPSHOT, "0");
-        let _ = prefs.set(PREF_BYTES_SINCE_SNAPSHOT, "0");
+        let _ = self.store.set_pref(PREF_LOGS_SINCE_SNAPSHOT, "0");
+        let _ = self.store.set_pref(PREF_BYTES_SINCE_SNAPSHOT, "0");
 
         info!(
             snapshot_ts = %snapshot_ts,
@@ -332,16 +330,19 @@ impl Compactor {
     /// after every successful `push_log` so the threshold check
     /// keeps up to date.
     pub fn record_pushed_log(&self, bytes: usize) {
-        let prefs = UserPrefsRepo::new(&self.db);
         let new_logs = self.read_counter_u64(PREF_LOGS_SINCE_SNAPSHOT) + 1;
         let new_bytes = self.read_counter_u64(PREF_BYTES_SINCE_SNAPSHOT) + bytes as u64;
-        let _ = prefs.set(PREF_LOGS_SINCE_SNAPSHOT, &new_logs.to_string());
-        let _ = prefs.set(PREF_BYTES_SINCE_SNAPSHOT, &new_bytes.to_string());
+        let _ = self
+            .store
+            .set_pref(PREF_LOGS_SINCE_SNAPSHOT, &new_logs.to_string());
+        let _ = self
+            .store
+            .set_pref(PREF_BYTES_SINCE_SNAPSHOT, &new_bytes.to_string());
     }
 
     fn read_pref_u32(&self, key: &str, default: u32) -> u32 {
-        UserPrefsRepo::new(&self.db)
-            .get(key)
+        self.store
+            .get_pref(key)
             .ok()
             .flatten()
             .and_then(|s| s.parse::<u32>().ok())
@@ -349,8 +350,8 @@ impl Compactor {
     }
 
     fn read_pref_u64(&self, key: &str, default: u64) -> u64 {
-        UserPrefsRepo::new(&self.db)
-            .get(key)
+        self.store
+            .get_pref(key)
             .ok()
             .flatten()
             .and_then(|s| s.parse::<u64>().ok())
@@ -358,8 +359,8 @@ impl Compactor {
     }
 
     fn read_counter_u64(&self, key: &str) -> u64 {
-        UserPrefsRepo::new(&self.db)
-            .get(key)
+        self.store
+            .get_pref(key)
             .ok()
             .flatten()
             .and_then(|s| s.parse::<u64>().ok())
@@ -372,7 +373,7 @@ impl Compactor {
         // We could re-parse the body here, but the dump we built
         // 50 lines ago already has the counts. Simplest:
         // re-deserialise into the typed shape and count.
-        let body: crate::event_log::AperioSnapshotBody =
+        let body: AperioSnapshotBody =
             serde_json::from_value(snapshot.body.clone()).unwrap_or_default();
         SnapshotApplyOutcome {
             rows_applied: body.dump.calendars.len()
@@ -431,9 +432,8 @@ async fn sweep_redundant_pending(pending_dir: &Path, cut: DateTime<Utc>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::DbHandle;
+    use crate::test_support::{FakeSecrets, FakeStore};
     use async_trait::async_trait;
-    use cal_adapter_local::LocalAdapter;
     use std::sync::Mutex;
     use sync_core::{LogFile, LogFileName, Snapshot};
     use tempfile::TempDir;
@@ -512,33 +512,33 @@ mod tests {
         }
     }
 
-    fn build_compactor() -> (TempDir, DbHandle, Compactor) {
-        let dir = TempDir::new().unwrap();
-        let db = DbHandle::open(dir.path().join("test.sqlite")).unwrap();
-        let adapter = Arc::new(LocalAdapter::new(db.shared()));
-        let store = Arc::new(crate::event_log::DesktopSyncStore::new(
-            db.shared(),
-            adapter,
-        ));
+    /// Build a compactor over an in-memory [`FakeStore`] (no DB, no
+    /// keychain). The returned store handle lets a test seed thresholds
+    /// and read back the post-compaction counters. The snapshot rows are
+    /// empty — these tests exercise the compaction algorithm (snapshot
+    /// push, meta update, log GC, counter reset), not snapshot contents.
+    fn build_compactor() -> (Arc<FakeStore>, Compactor) {
+        let store = Arc::new(FakeStore::default());
+        let store_dyn: Arc<dyn SyncStore> = store.clone();
         let builder = Arc::new(SnapshotBuilder::new(
-            store,
-            Arc::new(crate::secrets::KeyringSecretStore),
+            store_dyn.clone(),
+            Arc::new(FakeSecrets::default()),
             "1.0.0-test",
         ));
         let compactor = Compactor::new(
-            db.shared(),
+            store_dyn,
             builder,
             DeviceId::from_string("dev-this".into()),
             "1.0.0-test",
             None,
             None,
         );
-        (dir, db, compactor)
+        (store, compactor)
     }
 
     #[tokio::test]
     async fn compact_now_pushes_snapshot_and_meta() {
-        let (_tmp, _db, compactor) = build_compactor();
+        let (_store, compactor) = build_compactor();
         let adapter = FakeAdapter::new();
         let report = compactor.compact_now(&adapter).await.unwrap();
         assert!(report.snapshot_timestamp.is_some());
@@ -565,7 +565,7 @@ mod tests {
         // §19.13: a dataset written by an older wire format gets its
         // schema_version raised + min_app_version set to this app's version
         // when we compact (the snapshot we just generated is the new format).
-        let (_tmp, _db, compactor) = build_compactor(); // app_version "1.0.0-test"
+        let (_store, compactor) = build_compactor(); // app_version "1.0.0-test"
         let adapter = FakeAdapter::new();
         let mut old = sync_core::MetaJson::fresh("0.9.0");
         old.schema_version = sync_core::SCHEMA_VERSION.saturating_sub(1);
@@ -582,7 +582,7 @@ mod tests {
     #[tokio::test]
     async fn compact_preserves_min_app_version_when_schema_already_current() {
         // No schema upgrade → the existing min_app_version must NOT be raised.
-        let (_tmp, _db, compactor) = build_compactor();
+        let (_store, compactor) = build_compactor();
         let adapter = FakeAdapter::new();
         let mut current = sync_core::MetaJson::fresh("0.5.0");
         current.schema_version = sync_core::SCHEMA_VERSION;
@@ -598,7 +598,7 @@ mod tests {
 
     #[tokio::test]
     async fn compact_now_deletes_logs_older_than_safe_cutoff() {
-        let (_tmp, _db, compactor) = build_compactor();
+        let (_store, compactor) = build_compactor();
         let adapter = FakeAdapter::new();
 
         // Pre-populate two logs from another device. The "old"
@@ -641,12 +641,10 @@ mod tests {
 
     #[tokio::test]
     async fn should_compact_fires_on_log_count_threshold() {
-        let (_tmp, db, compactor) = build_compactor();
+        let (store, compactor) = build_compactor();
         // Crank the threshold down so we don't need 1000 fake
         // pushes.
-        UserPrefsRepo::new(&db.shared())
-            .set(PREF_MAX_LOGS, "3")
-            .unwrap();
+        store.set_pref(PREF_MAX_LOGS, "3").unwrap();
         // Simulate four pushes since the last snapshot.
         compactor.record_pushed_log(100);
         compactor.record_pushed_log(100);
@@ -661,20 +659,21 @@ mod tests {
 
     #[tokio::test]
     async fn record_pushed_log_resets_after_compaction() {
-        let (_tmp, db, compactor) = build_compactor();
+        let (store, compactor) = build_compactor();
         compactor.record_pushed_log(500);
         compactor.record_pushed_log(500);
         let adapter = FakeAdapter::new();
         compactor.compact_now(&adapter).await.unwrap();
         // Counters cleared.
-        let shared = db.shared();
-        let prefs = UserPrefsRepo::new(&shared);
         assert_eq!(
-            prefs.get(PREF_LOGS_SINCE_SNAPSHOT).unwrap().as_deref(),
+            store.get_pref(PREF_LOGS_SINCE_SNAPSHOT).unwrap().as_deref(),
             Some("0"),
         );
         assert_eq!(
-            prefs.get(PREF_BYTES_SINCE_SNAPSHOT).unwrap().as_deref(),
+            store
+                .get_pref(PREF_BYTES_SINCE_SNAPSHOT)
+                .unwrap()
+                .as_deref(),
             Some("0"),
         );
     }
@@ -682,12 +681,10 @@ mod tests {
     #[tokio::test]
     async fn compact_now_rotates_writer_and_drops_the_pre_compaction_log() {
         let dir = TempDir::new().unwrap();
-        let db = DbHandle::open(dir.path().join("test.sqlite")).unwrap();
-        let local = Arc::new(LocalAdapter::new(db.shared()));
-        let store = Arc::new(crate::event_log::DesktopSyncStore::new(db.shared(), local));
+        let store: Arc<dyn SyncStore> = Arc::new(FakeStore::default());
         let builder = Arc::new(SnapshotBuilder::new(
-            store,
-            Arc::new(crate::secrets::KeyringSecretStore),
+            store.clone(),
+            Arc::new(FakeSecrets::default()),
             "1.0.0-test",
         ));
         let device = DeviceId::from_string("dev-rot".into());
@@ -719,7 +716,7 @@ mod tests {
         );
 
         let compactor = Compactor::new(
-            db.shared(),
+            Arc::clone(&store),
             builder,
             device.clone(),
             "1.0.0-test",
@@ -771,12 +768,10 @@ mod tests {
         // re-uploaded them forever. Compaction must sweep ALL pending files
         // the snapshot covers, while keeping the live post-rotation file.
         let dir = TempDir::new().unwrap();
-        let db = DbHandle::open(dir.path().join("test.sqlite")).unwrap();
-        let local = Arc::new(LocalAdapter::new(db.shared()));
-        let store = Arc::new(crate::event_log::DesktopSyncStore::new(db.shared(), local));
+        let store: Arc<dyn SyncStore> = Arc::new(FakeStore::default());
         let builder = Arc::new(SnapshotBuilder::new(
-            store,
-            Arc::new(crate::secrets::KeyringSecretStore),
+            store.clone(),
+            Arc::new(FakeSecrets::default()),
             "1.0.0-test",
         ));
         let device = DeviceId::from_string("dev-sweep".into());
@@ -802,7 +797,7 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(80)).await;
 
         let compactor = Compactor::new(
-            db.shared(),
+            Arc::clone(&store),
             builder,
             device.clone(),
             "1.0.0-test",

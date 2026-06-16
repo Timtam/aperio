@@ -96,10 +96,16 @@ impl SyncStore for DesktopSyncStore {
         Ok(out)
     }
 
-    fn set_setting(&self, key: &str, value: &str) -> Result<(), StoreError> {
+    fn get_pref(&self, key: &str) -> Result<Option<String>, StoreError> {
+        UserPrefsRepo::new(&self.db)
+            .get(key)
+            .map_err(|err| StoreError::Backend(format!("get pref: {err}")))
+    }
+
+    fn set_pref(&self, key: &str, value: &str) -> Result<(), StoreError> {
         UserPrefsRepo::new(&self.db)
             .set(key, value)
-            .map_err(|err| StoreError::Backend(format!("set setting: {err}")))
+            .map_err(|err| StoreError::Backend(format!("set pref: {err}")))
     }
 
     /// Read every account row except the implicit `local` one. The

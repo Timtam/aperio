@@ -61,8 +61,11 @@ use crate::user_prefs::UserPrefsRepo;
 
 /// `user_prefs` key holding the user-chosen device name. Surfaces in
 /// other devices' "known devices" lists via `meta.json`. Optional —
-/// when unset the meta record falls back to the bare device id.
-pub const PREF_DEVICE_NAME: &str = "sync.deviceName";
+/// when unset the meta record falls back to the bare device id. The
+/// canonical definition lives in `sync-engine` (the compactor writes it
+/// into meta too); re-exported here because onboarding owns the UI that
+/// sets it.
+pub use sync_engine::PREF_DEVICE_NAME;
 
 /// `user_prefs` key flagging that onboarding has completed at least
 /// once. Lets the frontend tell "first launch, no adapter ever

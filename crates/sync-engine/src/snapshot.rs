@@ -232,7 +232,7 @@ impl SnapshotBuilder {
                 outcome.settings_failed += 1;
                 continue;
             }
-            match self.store.set_setting(key, value) {
+            match self.store.set_pref(key, value) {
                 Ok(()) => outcome.settings_applied += 1,
                 Err(err) => {
                     warn!(
@@ -335,95 +335,8 @@ impl SnapshotBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{SecretError, StoreError};
-    use std::collections::HashMap;
+    use crate::test_support::{FakeSecrets, FakeStore};
     use std::sync::Mutex;
-
-    /// In-memory [`SyncStore`] double for the builder-logic tests. The
-    /// DB-backed round-trip tests (real schema + LocalAdapter) live in
-    /// the desktop crate against `DesktopSyncStore`; here we only need
-    /// to exercise the builder's own gating logic.
-    #[derive(Default)]
-    struct FakeStore {
-        settings: Mutex<BTreeMap<String, String>>,
-        accounts: Mutex<Vec<SnapshotAccount>>,
-        e2e: bool,
-    }
-
-    impl SyncStore for FakeStore {
-        fn dump_for_snapshot(&self) -> Result<SnapshotDump, StoreError> {
-            Ok(SnapshotDump::default())
-        }
-        fn apply_snapshot_dump(
-            &self,
-            _dump: &SnapshotDump,
-        ) -> Result<cal_adapter_local::SnapshotApplyReport, StoreError> {
-            Ok(cal_adapter_local::SnapshotApplyReport::default())
-        }
-        fn dump_synced_settings(&self) -> Result<BTreeMap<String, String>, StoreError> {
-            Ok(self.settings.lock().unwrap().clone())
-        }
-        fn set_setting(&self, key: &str, value: &str) -> Result<(), StoreError> {
-            self.settings
-                .lock()
-                .unwrap()
-                .insert(key.to_string(), value.to_string());
-            Ok(())
-        }
-        fn dump_accounts(&self) -> Result<Vec<SnapshotAccount>, StoreError> {
-            Ok(self.accounts.lock().unwrap().clone())
-        }
-        fn upsert_account(&self, account: &SnapshotAccount) -> Result<(), StoreError> {
-            self.accounts.lock().unwrap().push(account.clone());
-            Ok(())
-        }
-        fn e2e_enabled(&self) -> bool {
-            self.e2e
-        }
-    }
-
-    /// In-memory [`SecretStore`] double keyed by `(account_id, slot)`.
-    #[derive(Default)]
-    struct FakeSecrets {
-        map: Mutex<HashMap<(String, &'static str), String>>,
-    }
-
-    impl SecretStore for FakeSecrets {
-        fn store(
-            &self,
-            account_id: &str,
-            slot: SecretSlot,
-            value: &str,
-        ) -> Result<(), SecretError> {
-            self.map.lock().unwrap().insert(
-                (account_id.to_string(), slot.wire_name()),
-                value.to_string(),
-            );
-            Ok(())
-        }
-        fn retrieve(&self, account_id: &str, slot: SecretSlot) -> Result<String, SecretError> {
-            self.map
-                .lock()
-                .unwrap()
-                .get(&(account_id.to_string(), slot.wire_name()))
-                .cloned()
-                .ok_or(SecretError::NotFound)
-        }
-        fn delete(&self, account_id: &str, slot: SecretSlot) -> Result<(), SecretError> {
-            self.map
-                .lock()
-                .unwrap()
-                .remove(&(account_id.to_string(), slot.wire_name()));
-            Ok(())
-        }
-        fn delete_all(&self, account_id: &str) -> Result<(), SecretError> {
-            self.map
-                .lock()
-                .unwrap()
-                .retain(|(acc, _), _| acc != account_id);
-            Ok(())
-        }
-    }
 
     fn builder(store: Arc<FakeStore>, secrets: Arc<FakeSecrets>) -> SnapshotBuilder {
         SnapshotBuilder::new(store, secrets, "1.0.0-test")
@@ -449,10 +362,10 @@ mod tests {
         assert_eq!(outcome.settings_applied, 1);
         assert_eq!(outcome.settings_failed, 1);
         // Confirm the protected key didn't land and the legit one did.
-        let settings = store.settings.lock().unwrap();
-        assert!(!settings.contains_key("sync.deviceId"));
+        let prefs = store.prefs.lock().unwrap();
+        assert!(!prefs.contains_key("sync.deviceId"));
         assert_eq!(
-            settings.get("appearance.darkMode").map(String::as_str),
+            prefs.get("appearance.darkMode").map(String::as_str),
             Some("true")
         );
     }

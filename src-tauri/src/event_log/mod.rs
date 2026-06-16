@@ -8,7 +8,6 @@
 //! orchestrator, compactor, snapshot, scheduler, onboarding).
 
 pub mod applier;
-pub mod compactor;
 pub mod desktop_store;
 pub mod onboarding;
 pub mod orchestrator;
@@ -20,10 +19,6 @@ pub mod scheduler;
 pub use sync_engine::whitelist;
 
 pub use applier::{ApplyReport, EventLogApplier};
-pub use compactor::{
-    CompactionReport, Compactor, DEFAULT_MAX_AGE_DAYS, DEFAULT_MAX_BYTES, DEFAULT_MAX_LOGS,
-    PREF_MAX_AGE_DAYS, PREF_MAX_BYTES, PREF_MAX_LOGS,
-};
 /// The snapshot builder lives in the reusable `sync-engine` crate; the
 /// desktop SQLite-backed `SyncStore` it runs against lives here. Both are
 /// re-exported so the existing `crate::event_log::{SnapshotBuilder, …}`
@@ -39,6 +34,12 @@ pub use scheduler::{
     PREF_SYNC_INTERVAL_MINUTES,
 };
 pub use sync_engine::{AperioSnapshotBody, SnapshotApplyOutcome, SnapshotBuilder};
+/// The compactor now lives in the reusable `sync-engine` crate; re-exported
+/// so existing `crate::event_log::{Compactor, …}` paths keep resolving.
+pub use sync_engine::{
+    CompactionReport, Compactor, DEFAULT_MAX_AGE_DAYS, DEFAULT_MAX_BYTES, DEFAULT_MAX_LOGS,
+    PREF_MAX_AGE_DAYS, PREF_MAX_BYTES, PREF_MAX_LOGS,
+};
 
 /// The event-log writer lives in the reusable `sync-engine` crate.
 pub use sync_engine::EventLogWriter;
