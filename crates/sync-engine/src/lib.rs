@@ -29,6 +29,8 @@ use thiserror::Error;
 mod writer;
 pub use writer::EventLogWriter;
 
+pub mod whitelist;
+
 // ─────────────────────────── round report / status ─────────────────────────
 // Moved verbatim from src-tauri/src/event_log/orchestrator.rs so both the
 // desktop app and the engine share one definition.

@@ -13,7 +13,11 @@ pub mod onboarding;
 pub mod orchestrator;
 pub mod scheduler;
 pub mod snapshot;
-pub mod whitelist;
+
+/// The settings sync whitelist lives in the reusable `sync-engine` crate;
+/// re-exported here so existing `crate::event_log::whitelist::…` paths
+/// (the command layer, the snapshot builder) keep resolving unchanged.
+pub use sync_engine::whitelist;
 
 pub use applier::{ApplyReport, EventLogApplier};
 pub use compactor::{
