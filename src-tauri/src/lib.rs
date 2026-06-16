@@ -337,7 +337,7 @@ pub fn run() {
     // `<data_dir>/sync/log/pending/` and appends every local
     // mutation that flows through the command layer's writer
     // hooks. Wrapped in Arc so cloning into Tauri State is free.
-    let device_id = EventLogWriter::load_or_mint_device_id(&db.shared());
+    let device_id = crate::event_log::load_or_mint_device_id(&db.shared());
     info!(
         device_id = %device_id,
         "event-log writer device id",

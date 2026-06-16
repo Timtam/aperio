@@ -96,6 +96,7 @@ cal-adapter-local = { path = "crates/cal-adapter-local" }
 plugin-core = { path = "crates/plugin-core" }
 plugin-sdk = { path = "crates/plugin-sdk" }
 sync-core = { path = "crates/sync-core" }
+sync-engine = { path = "crates/sync-engine" }
 vc-core = { path = "crates/vc-core" }
 
 # Async-Runtime.
