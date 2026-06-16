@@ -47,20 +47,15 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use async_trait::async_trait;
 use chrono::{DateTime, Timelike, Utc};
-use serde::Serialize;
-use sync_core::{DeviceCursor, DeviceId, LogFile, SyncAdapter, SyncResult};
+use sync_core::{DeviceCursor, DeviceId, LogFile, SyncAdapter, SyncError, SyncResult};
 use tracing::{debug, info, warn};
 
-use crate::db::SharedConn;
-use crate::event_log::{ApplyReport, Compactor, EventLogApplier, OnboardingService};
-use crate::user_prefs::UserPrefsRepo;
-
-/// Bring the scheduler's interval pref into status reads. The
-/// orchestrator owns the `SyncStatus` shape; reading the interval
-/// from the same source-of-truth keeps the frontend from having to
-/// query two endpoints.
-use crate::event_log::scheduler::read_interval_minutes;
+use crate::{
+    ApplyReport, CompactionReport, Compactor, EventLogApplier, SyncRoundReport, SyncStatus,
+    SyncStore, DEFAULT_SYNC_INTERVAL_MINUTES, PREF_SYNC_INTERVAL_MINUTES,
+};
 
 /// `user_prefs` key holding the RFC 3339 timestamp of the
 /// newest log file we've already fetched from the remote. The
@@ -79,37 +74,10 @@ pub const SYNC_CURSOR_PREF_KEY: &str = "sync.cursor.lastSeenLog";
 /// was nothing to fetch.
 pub const SYNC_LAST_ROUND_PREF_KEY: &str = "sync.lastSuccessfulRound";
 
-/// Result of one `sync_now()` invocation. Surfaced to the
-/// frontend via the `sync_now` Tauri command so the user
-/// dialogue can show "12 events applied" or "no new changes".
-#[derive(Debug, Default, Clone, Serialize, PartialEq, Eq)]
-pub struct SyncRoundReport {
-    /// Number of pending log files we successfully pushed to the
-    /// remote.
-    pub pushed_logs: usize,
-    /// Number of log files we pulled from the remote (after
-    /// cursor + own-device filtering).
-    pub fetched_logs: usize,
-    /// Aggregate apply counts across every fetched log.
-    pub applied: usize,
-    pub skipped_own: usize,
-    pub skipped_already_applied: usize,
-    pub skipped_unsupported: usize,
-    /// Per-envelope failures inside the applier. Non-fatal —
-    /// the round itself still counts as a success.
-    pub apply_failures: usize,
-    /// Push failures we logged but kept going on. Same
-    /// philosophy as the applier: one bad file shouldn't sink
-    /// the entire sync round.
-    pub push_failures: usize,
-    /// Field-level conflicts the applier recorded during this
-    /// round (DESIGN.md §19.3). The scheduler reads this to
-    /// decide whether to fire a §19.9 system notification +
-    /// emit `sync-conflicts-changed` so the status bar refreshes
-    /// its badge count.
-    pub conflicts: usize,
-}
-
+/// `SyncRoundReport` (what one round did) and `SyncStatus` (the read-only
+/// state snapshot) are defined in the crate root so the desktop app and
+/// the engine share one definition; this module owns the orchestration
+/// that produces them.
 impl SyncRoundReport {
     fn merge_apply(&mut self, report: ApplyReport) {
         self.applied += report.applied;
@@ -121,69 +89,35 @@ impl SyncRoundReport {
     }
 }
 
-/// Read-only snapshot of the orchestrator's state, returned by
-/// `get_sync_status`. The scheduler in Phase Se will extend this
-/// with the next scheduled tick + interval; the Sd version
-/// carries just enough for a "last synced at …" indicator.
-#[derive(Debug, Clone, Serialize)]
-pub struct SyncStatus {
-    pub configured: bool,
-    pub in_flight: bool,
-    pub last_synced_at: Option<String>,
-    /// Currently-configured periodic interval, in minutes. Surfaced
-    /// alongside the other status bits so the Settings → Sync panel
-    /// can render the slider value without a second round-trip.
-    pub interval_minutes: u32,
-    /// Whether the current dataset is end-to-end encrypted (Phase
-    /// Sk). Read straight from `user_prefs.sync.adapter.e2eEnabled`
-    /// — kept in sync by the onboarding + configure paths so the
-    /// status indicator can flip a "🔒 verschlüsselt" badge on
-    /// without a network call.
-    pub e2e_enabled: bool,
-    /// Phase Sl: latched `true` when the last sync round failed
-    /// with `SyncError::SchemaTooOld`. The frontend pops the
-    /// §19.13 "update required" modal off this flag; clears on
-    /// the next successful round.
-    pub schema_too_old: bool,
-    /// When `schema_too_old`, the dataset's `min_app_version`
-    /// requirement. Shown verbatim in the update prompt so the
-    /// user knows what version they need. `None` when sync is
-    /// fine.
-    pub min_app_version_required: Option<String>,
-    /// `true` when the scheduler has seen three or more
-    /// consecutive failed rounds. Drives a warning tone on the
-    /// status indicator + a banner in the Settings panel so the
-    /// user doesn't have to read the log to notice a remote
-    /// that's been unreachable for a while.
-    ///
-    /// The orchestrator itself doesn't track failure history —
-    /// it gets `false` by default. The scheduler decorates the
-    /// status before emitting / serving via `get_sync_status`.
-    #[serde(default)]
-    pub sustained_failure: bool,
-    /// Phase §19.10: when set, this device's `meta.json` entry
-    /// has been marked stale by the compactor — its
-    /// `last_seen_log` was older than the snapshot horizon when
-    /// the last sync round opened. Sync rounds short-circuit
-    /// while this is latched; the user has to confirm a
-    /// snapshot re-pull via the resume dialog before normal
-    /// rounds can run again. RFC3339 timestamp of the snapshot
-    /// the dialog should reference.
-    pub stale_device_since: Option<String>,
-    /// Stable identifier of the most recent sync-round failure
-    /// (matches [`sync_core::SyncError::code`]). Latched by the
-    /// scheduler when a round errors out; cleared on the next
-    /// success. Lets the status indicator branch on the failure
-    /// kind without having to parse the human-readable message
-    /// — most notably to surface an "auth failed, reconnect
-    /// here" banner specifically for `"auth"`.
-    ///
-    /// `None` when no failure is outstanding. The orchestrator
-    /// itself never sets this; the scheduler decorates the
-    /// status before emitting / serving via `get_sync_status`
-    /// (same pattern as `sustained_failure`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_error_code: Option<String>,
+/// Platform-coordination hooks the sync round invokes but doesn't own —
+/// the steps that live outside the reusable engine (DESIGN-sync-engine.md).
+/// Desktop wraps the onboarding service (meta heartbeat + app version),
+/// the sound-asset sync, and the sync-log audit; mobile provides its own.
+/// The two optional steps default to no-ops so a mobile target can adopt
+/// them incrementally without the round failing.
+#[async_trait]
+pub trait SyncRoundHooks: Send + Sync {
+    /// This build's app version — fed to the schema-compatibility gate.
+    fn app_version(&self) -> String;
+    /// Refresh this device's heartbeat in `meta.json` after a round so
+    /// other devices + the compactor see a current `last_seen_log`.
+    async fn heartbeat(
+        &self,
+        adapter: &dyn SyncAdapter,
+        last_seen_log: DateTime<Utc>,
+    ) -> SyncResult<()>;
+    /// Sync out-of-band sound assets (push local-only files, fetch
+    /// referenced-but-missing ones). Best-effort; default no-op.
+    async fn sync_sound_assets(&self, _adapter: &dyn SyncAdapter) -> SyncResult<()> {
+        Ok(())
+    }
+    /// Cache the device names announced in `meta.json` locally so a UI
+    /// (the §20.8 Plugins panel's "Used on: <Name>") can render them
+    /// without a round-trip. Best-effort; default no-op.
+    fn cache_device_names(&self, _meta: &sync_core::MetaJson) {}
+    /// Record a compaction outcome in the platform's sync audit log so the
+    /// user can see when log files were GCed. Default no-op.
+    fn record_compaction(&self, _result: &Result<CompactionReport, SyncError>, _duration_ms: u64) {}
 }
 
 /// The orchestrator itself. Holds an `Option<adapter>` so the
@@ -191,27 +125,24 @@ pub struct SyncStatus {
 /// a sensible "not configured" error in that case rather than
 /// panicking.
 pub struct SyncOrchestrator {
-    db: SharedConn,
+    /// Local store seam — the fetch cursor, the last-round timestamp and
+    /// the interval pref (all in `user_prefs`).
+    store: Arc<dyn SyncStore>,
     /// `<data_dir>/sync/log/pending/` — the staging directory
     /// the writer drops session files into.
     pending_dir: PathBuf,
-    /// `<data_dir>/assets/sounds/` — local store for custom
-    /// notification sounds. The §19.10 / §19.11.7 sound-asset
-    /// sync hook walks this dir after every successful round to
-    /// push local-only files + fetch referenced-but-missing
-    /// ones. See `crate::sound_assets`.
-    sounds_dir: PathBuf,
     /// Our device id. Used to filter our own files out of
     /// `fetch_new_logs` results so we don't re-apply our own
     /// events.
     local_device_id: DeviceId,
     /// The applier reused across rounds.
     applier: Arc<EventLogApplier>,
-    /// Phase Sf: shared with the onboarding command layer. Used
-    /// after each successful round to refresh this device's
-    /// heartbeat in `meta.json` so other devices and the
-    /// compaction algorithm see a current `last_seen_log`.
-    onboarding: Arc<OnboardingService>,
+    /// Platform-coordination hooks: the `meta.json` heartbeat (+ this
+    /// build's app version for the schema gate), the out-of-band
+    /// sound-asset sync, and the compaction audit log. Desktop wraps the
+    /// onboarding service + `sound_assets` + `sync_log`; the round itself
+    /// stays platform-agnostic.
+    hooks: Arc<dyn SyncRoundHooks>,
     /// Phase Sg: snapshot generator + log compactor. Polled at
     /// the end of every sync round; if the configured thresholds
     /// (age / log-count / byte size since last snapshot) are
@@ -246,7 +177,7 @@ pub struct SyncOrchestrator {
     /// future events in this session would land in it).
     ///
     /// MUST be the exact same instant passed to the
-    /// [`EventLogWriter`](crate::event_log::EventLogWriter) as its
+    /// [`EventLogWriter`](crate::EventLogWriter) as its
     /// `session_at` (both are wired from one value in `lib.rs`).
     /// The writer names the live session file with this instant, so
     /// the cleanup's strict `<` keeps it (`==`) while still reaping
@@ -275,22 +206,20 @@ fn is_stale_empty_stub(file_session: DateTime<Utc>, boot_at: DateTime<Utc>) -> b
 
 impl SyncOrchestrator {
     pub fn new(
-        db: SharedConn,
+        store: Arc<dyn SyncStore>,
         pending_dir: PathBuf,
-        sounds_dir: PathBuf,
         local_device_id: DeviceId,
         applier: Arc<EventLogApplier>,
-        onboarding: Arc<OnboardingService>,
+        hooks: Arc<dyn SyncRoundHooks>,
         compactor: Arc<Compactor>,
         boot_at: DateTime<Utc>,
     ) -> Self {
         Self {
-            db,
+            store,
             pending_dir,
-            sounds_dir,
             local_device_id,
             applier,
-            onboarding,
+            hooks,
             compactor,
             adapter: Mutex::new(None),
             schema_too_old: Mutex::new(None),
@@ -335,16 +264,18 @@ impl SyncOrchestrator {
     pub fn status(&self) -> SyncStatus {
         let configured = self.adapter.lock().expect("adapter mutex poison").is_some();
         let in_flight = *self.in_flight.lock().expect("in-flight mutex poison");
-        let last_synced_at = UserPrefsRepo::new(&self.db)
-            .get(SYNC_LAST_ROUND_PREF_KEY)
+        let last_synced_at = self
+            .store
+            .get_pref(SYNC_LAST_ROUND_PREF_KEY)
             .ok()
             .flatten()
             // Fall back to the fetch cursor on pre-upgrade
             // datasets that don't have the new pref written yet.
             .or_else(|| self.read_cursor());
-        let interval_minutes = read_interval_minutes(&self.db);
-        let e2e_enabled = UserPrefsRepo::new(&self.db)
-            .get("sync.adapter.e2eEnabled")
+        let interval_minutes = self.read_interval_minutes();
+        let e2e_enabled = self
+            .store
+            .get_pref("sync.adapter.e2eEnabled")
             .ok()
             .flatten()
             .as_deref()
@@ -435,7 +366,7 @@ impl SyncOrchestrator {
         if let Some(meta) = adapter.fetch_meta().await? {
             // Returns `Err(SchemaTooOld)` when the running version
             // is older than meta.min_app_version.
-            match sync_core::ensure_compatible(&meta, self.onboarding.app_version()) {
+            match sync_core::ensure_compatible(&meta, &self.hooks.app_version()) {
                 Ok(_) => {
                     // Clear any prior latched state — the user
                     // presumably updated since the last failed
@@ -451,24 +382,11 @@ impl SyncOrchestrator {
                     return Err(err);
                 }
             }
-            // §20.8 helper: cache every announced device's
-            // name into the local device_names table so the
-            // Settings → Plugins panel can render "Used on:
-            // <Name>" without a separate round-trip. Errors
-            // here are non-fatal — the panel falls back to
-            // the raw id.
-            {
-                let repo = crate::device_names::DeviceNamesRepo::new(&self.db);
-                for (device_id, record) in &meta.devices {
-                    if let Err(err) = repo.upsert(device_id, record.name.as_deref()) {
-                        tracing::warn!(
-                            device_id = %device_id,
-                            ?err,
-                            "couldn't cache device name from meta.json",
-                        );
-                    }
-                }
-            }
+            // §20.8 helper: cache every announced device's name into the
+            // local device_names table so the Settings → Plugins panel can
+            // render "Used on: <Name>" without a separate round-trip. A
+            // platform hook owns the table; best-effort, errors swallowed.
+            self.hooks.cache_device_names(&meta);
 
             // §19.10 stale gate. The compactor marks devices
             // whose `last_seen_log` predates the snapshot
@@ -563,35 +481,17 @@ impl SyncOrchestrator {
         // Failures here are non-fatal: the next round retries, and
         // a missed heartbeat at worst means our entry looks
         // slightly stale in someone else's UI until then.
-        if let Err(err) = self
-            .onboarding
-            .heartbeat_meta(adapter.as_ref(), Utc::now())
-            .await
-        {
+        if let Err(err) = self.hooks.heartbeat(adapter.as_ref(), Utc::now()).await {
             warn!(?err, "meta.json heartbeat failed");
         }
 
-        // 5. (DESIGN.md §19.10 / §19.11.7) Sound-asset sync.
-        // Pushes local-only sound files + fetches referenced
-        // hashes that aren't present locally. Best-effort: a
-        // failure here doesn't sink the round, the next pass
-        // retries. The asset bytes flow OUT-OF-BAND from the
-        // event log — see `sound_assets` for the algorithm.
-        match crate::sound_assets::sync_assets(&self.db, &self.sounds_dir, adapter.as_ref()).await {
-            Ok(asset_report) => {
-                if asset_report.pushed > 0
-                    || asset_report.fetched > 0
-                    || asset_report.missing_on_remote > 0
-                {
-                    info!(
-                        pushed = asset_report.pushed,
-                        fetched = asset_report.fetched,
-                        missing = asset_report.missing_on_remote,
-                        "sound asset sync",
-                    );
-                }
-            }
-            Err(err) => warn!(?err, "sound asset sync failed"),
+        // 5. (DESIGN.md §19.10 / §19.11.7) Sound-asset sync — pushes
+        // local-only sound files + fetches referenced-but-missing hashes,
+        // out-of-band from the event log. A platform hook owns the
+        // algorithm (desktop: `sound_assets`). Best-effort: a failure here
+        // doesn't sink the round, the next pass retries.
+        if let Err(err) = self.hooks.sync_sound_assets(adapter.as_ref()).await {
+            warn!(?err, "sound asset sync failed");
         }
 
         // 6. (Phase Sg) Evaluate compaction thresholds. We run
@@ -616,7 +516,7 @@ impl SyncOrchestrator {
                 if let Err(err) = &outcome {
                     warn!(?err, "auto-compaction failed");
                 }
-                self.record_compaction_row(&outcome, duration_ms);
+                self.hooks.record_compaction(&outcome, duration_ms);
             }
             Ok(false) => {}
             Err(err) => warn!(?err, "couldn't evaluate compaction thresholds"),
@@ -628,8 +528,9 @@ impl SyncOrchestrator {
         // foreign logs, so on a single-device setup it would
         // never move and the user would forever see "noch kein
         // Abgleich" even after dozens of successful rounds.
-        if let Err(err) =
-            UserPrefsRepo::new(&self.db).set(SYNC_LAST_ROUND_PREF_KEY, &Utc::now().to_rfc3339())
+        if let Err(err) = self
+            .store
+            .set_pref(SYNC_LAST_ROUND_PREF_KEY, &Utc::now().to_rfc3339())
         {
             warn!(?err, "couldn't persist last-round timestamp");
         }
@@ -766,74 +667,29 @@ impl SyncOrchestrator {
     }
 
     fn read_cursor(&self) -> Option<String> {
-        UserPrefsRepo::new(&self.db)
-            .get(SYNC_CURSOR_PREF_KEY)
-            .ok()
-            .flatten()
+        self.store.get_pref(SYNC_CURSOR_PREF_KEY).ok().flatten()
     }
 
     fn save_cursor(&self, ts: DateTime<Utc>) -> SyncResult<()> {
-        UserPrefsRepo::new(&self.db)
-            .set(SYNC_CURSOR_PREF_KEY, &ts.to_rfc3339())
+        self.store
+            .set_pref(SYNC_CURSOR_PREF_KEY, &ts.to_rfc3339())
             .map_err(|err| sync_core::SyncError::internal(format!("save cursor: {err}")))?;
         Ok(())
     }
 
-    /// Write a `Compaction`-trigger row into the sync_log. Used
-    /// by the auto-compaction hook in `sync_now` to surface
-    /// compaction outcomes in the Settings Protokoll viewer
-    /// without going through the scheduler (which doesn't own
-    /// the orchestrator — the relationship goes the other way).
-    /// Mirrors the layout `SyncScheduler::record_compaction_outcome`
-    /// produces for the manual path so both rows render
-    /// identically in the UI.
-    ///
-    /// Best-effort: persistence failures are logged but don't
-    /// surface upstream. We don't emit `sync-log-changed` from
-    /// here because the orchestrator has no `AppHandle`; the
-    /// next sync round's emit (which always fires after
-    /// `run_round`) will trigger a frontend refresh.
-    fn record_compaction_row(
-        &self,
-        result: &Result<crate::event_log::compactor::CompactionReport, sync_core::SyncError>,
-        duration_ms: u64,
-    ) {
-        use crate::sync_log::{SyncLogCounters, SyncLogRepo, SyncTrigger};
-        let (success, counters, error) = match result {
-            Ok(report) => {
-                let success = report.failed_deletes == 0;
-                let error = if success {
-                    None
-                } else {
-                    Some(format!(
-                        "{} of {} log deletions failed",
-                        report.failed_deletes,
-                        report.deleted_logs + report.failed_deletes,
-                    ))
-                };
-                (
-                    success,
-                    SyncLogCounters {
-                        pushed_logs: None,
-                        fetched_logs: None,
-                        applied: Some(u32::try_from(report.deleted_logs).unwrap_or(u32::MAX)),
-                        conflicts: None,
-                    },
-                    error,
-                )
-            }
-            Err(err) => (false, SyncLogCounters::default(), Some(err.to_string())),
-        };
-        let repo = SyncLogRepo::new(&self.db);
-        if let Err(err) = repo.record(
-            SyncTrigger::Compaction,
-            success,
-            &counters,
-            Some(duration_ms),
-            error.as_deref(),
-        ) {
-            warn!(?err, "couldn't persist compaction sync_log entry");
-        }
+    /// The configured periodic sync interval (minutes), read from
+    /// `user_prefs` with the default fallback. Mirrors the desktop
+    /// scheduler's `read_interval_minutes`; surfaced in `SyncStatus`.
+    fn read_interval_minutes(&self) -> u32 {
+        self.store
+            .get_pref(PREF_SYNC_INTERVAL_MINUTES)
+            .ok()
+            .flatten()
+            .and_then(|s| s.parse::<u32>().ok())
+            // Clamp to >= 1 minute, matching the desktop scheduler's
+            // `read_interval_minutes` so a stray "0" can't busy-loop.
+            .map(|m| m.max(1))
+            .unwrap_or(DEFAULT_SYNC_INTERVAL_MINUTES)
     }
 }
 

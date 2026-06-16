@@ -1,0 +1,41 @@
+[package]
+name = "sync-engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Aperio — platform-agnostic sync engine (event-log writer/applier/orchestrator/compactor) shared by desktop and mobile, behind platform traits."
+
+[dependencies]
+async-trait.workspace = true
+# The snapshot body's row sections (SnapshotDump / SnapshotApplyReport)
+# are owned by cal-adapter-local — the shared local SQLite adapter used
+# on desktop AND mobile, so depending on it here keeps the engine
+# platform-agnostic. Only the snapshot wire types are referenced; the
+# desktop SQL stays in the SyncStore impl.
+cal-adapter-local.workspace = true
+# The applier deserialises event payloads into cal-core row types
+# (Event / Task / TaskList / Section / Calendar / ColorLabel) before
+# handing them to the adapter's `*_from_sync` upserts.
+cal-core.workspace = true
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sync-core.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[features]
+# Exposes the in-memory test doubles (FakeStore / FakeSecrets) so the
+# desktop crate's tests can reuse them — e.g. the applier tests run against
+# the real DesktopSyncStore but an in-memory SecretStore (no OS keychain).
+test-support = []
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

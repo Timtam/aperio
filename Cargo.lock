@@ -146,6 +146,7 @@ dependencies = [
  "sha2",
  "sync-adapter-local",
  "sync-core",
+ "sync-engine",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
@@ -6461,6 +6462,23 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "sync-engine"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "cal-adapter-local",
+ "cal-core",
+ "chrono",
+ "serde",
+ "serde_json",
+ "sync-core",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

@@ -2,7 +2,10 @@
 //!
 //! Lifted out of `commands::user_prefs` so both the command layer
 //! (which gates writes) and the snapshot builder (which dumps the
-//! current values) reference the same single source of truth.
+//! current values) reference the same single source of truth. It now
+//! lives in `sync-engine` because the snapshot builder and applier do,
+//! and the desktop command layer reaches it through the re-export in
+//! `event_log::whitelist`.
 //!
 //! Anything NOT on this list stays device-local. The scheduler's own
 //! per-device state (`contacts.lastSyncedAt`, `sync.deviceId`,

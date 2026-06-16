@@ -56,14 +56,16 @@ use sync_core::{
 use tracing::{debug, info, warn};
 
 use crate::db::SharedConn;
-use crate::event_log::snapshot::SnapshotBuilder;
-use crate::event_log::{ApplyReport, EventLogApplier, SYNC_CURSOR_PREF_KEY};
+use crate::event_log::{ApplyReport, EventLogApplier, SnapshotBuilder, SYNC_CURSOR_PREF_KEY};
 use crate::user_prefs::UserPrefsRepo;
 
 /// `user_prefs` key holding the user-chosen device name. Surfaces in
 /// other devices' "known devices" lists via `meta.json`. Optional —
-/// when unset the meta record falls back to the bare device id.
-pub const PREF_DEVICE_NAME: &str = "sync.deviceName";
+/// when unset the meta record falls back to the bare device id. The
+/// canonical definition lives in `sync-engine` (the compactor writes it
+/// into meta too); re-exported here because onboarding owns the UI that
+/// sets it.
+pub use sync_engine::PREF_DEVICE_NAME;
 
 /// `user_prefs` key flagging that onboarding has completed at least
 /// once. Lets the frontend tell "first launch, no adapter ever
@@ -921,12 +923,20 @@ mod tests {
     fn build_service_with_pending(db: SharedConn, pending_dir: PathBuf) -> OnboardingService {
         let device_id = DeviceId::from_string("dev-this".into());
         let adapter = Arc::new(LocalAdapter::new(db.clone()));
+        let store: Arc<dyn sync_engine::SyncStore> = Arc::new(
+            crate::event_log::DesktopSyncStore::new(db.clone(), Arc::clone(&adapter)),
+        );
         let applier = Arc::new(EventLogApplier::new(
-            db.clone(),
+            Arc::clone(&store),
+            Arc::new(crate::secrets::KeyringSecretStore),
             Arc::clone(&adapter),
             device_id.clone(),
         ));
-        let snapshot_builder = Arc::new(SnapshotBuilder::new(db.clone(), adapter, "1.0.0-test"));
+        let snapshot_builder = Arc::new(SnapshotBuilder::new(
+            Arc::clone(&store),
+            Arc::new(crate::secrets::KeyringSecretStore),
+            "1.0.0-test",
+        ));
         OnboardingService::new(
             db,
             device_id,

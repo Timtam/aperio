@@ -45,6 +45,7 @@ anyhow.workspace = true
 cal-core.workspace = true
 cal-adapter-local.workspace = true
 sync-core.workspace = true
+sync-engine.workspace = true
 vc-core.workspace = true
 plugin-core.workspace = true
 # Zero direct adapter deps left after Iteration 9. Every
@@ -117,6 +118,10 @@ cal-adapter-local = { workspace = true, features = ["test-support"] }
 # choice. Not needed by the main binary — the orchestrator
 # reaches it via the dlopen'd sync-adapter-local-plugin.
 sync-adapter-local = { path = "../crates/sync-adapter-local" }
+# The in-memory test doubles (FakeSecrets) for the applier tests —
+# they run against the real DesktopSyncStore but must not touch the OS
+# keychain. test-support only activates for the test build.
+sync-engine = { workspace = true, features = ["test-support"] }
 
 [features]
 # Default: plugins are loaded dynamically as shared libraries (desktop).

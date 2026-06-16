@@ -337,7 +337,7 @@ pub fn run() {
     // `<data_dir>/sync/log/pending/` and appends every local
     // mutation that flows through the command layer's writer
     // hooks. Wrapped in Arc so cloning into Tauri State is free.
-    let device_id = EventLogWriter::load_or_mint_device_id(&db.shared());
+    let device_id = crate::event_log::load_or_mint_device_id(&db.shared());
     info!(
         device_id = %device_id,
         "event-log writer device id",
@@ -388,8 +388,17 @@ pub fn run() {
     // refactor every `State<'_, LocalAdapter>` command signature
     // into `State<'_, Arc<LocalAdapter>>`.
     let applier_adapter = Arc::new(LocalAdapter::new(db.shared()));
+    // The event-log applier, snapshot builder and compactor all live in the
+    // reusable `sync-engine` crate now and reach local storage through two
+    // platform seams: the desktop `SyncStore` (SQLite, via the applier's
+    // adapter) and the desktop `SecretStore` (the OS keychain). One store,
+    // shared (cloned) across all three.
+    let sync_store: Arc<dyn sync_engine::SyncStore> = Arc::new(
+        crate::event_log::DesktopSyncStore::new(db.shared(), Arc::clone(&applier_adapter)),
+    );
     let applier = Arc::new(EventLogApplier::new(
-        db.shared(),
+        Arc::clone(&sync_store),
+        Arc::new(crate::secrets::KeyringSecretStore),
         Arc::clone(&applier_adapter),
         device_id.clone(),
     ));
@@ -398,8 +407,8 @@ pub fn run() {
     // accept_remote) and with the compactor (for snapshot
     // generation during the compaction round).
     let snapshot_builder = Arc::new(SnapshotBuilder::new(
-        db.shared(),
-        Arc::clone(&applier_adapter),
+        Arc::clone(&sync_store),
+        Arc::new(crate::secrets::KeyringSecretStore),
         env!("CARGO_PKG_VERSION"),
     ));
     // `<data_dir>/sync/log/pending/` — the local staging dir the writer
@@ -408,7 +417,7 @@ pub fn run() {
     // snapshot), the orchestrator, and the onboarding service.
     let pending_dir = data_dir.path.join("sync").join("log").join("pending");
     let compactor = Arc::new(Compactor::new(
-        db.shared(),
+        Arc::clone(&sync_store),
         Arc::clone(&snapshot_builder),
         device_id.clone(),
         env!("CARGO_PKG_VERSION"),
@@ -443,13 +452,21 @@ pub fn run() {
         sounds_dir.clone(),
         env!("CARGO_PKG_VERSION"),
     ));
-    let sync_orchestrator = Arc::new(SyncOrchestrator::new(
+    // The sync round itself lives in the reusable `sync-engine` crate; the
+    // desktop coordination steps it calls back into (meta heartbeat,
+    // sound-asset sync, device-name cache, compaction audit) are bundled in
+    // the `SyncRoundHooks` impl here.
+    let round_hooks = Arc::new(crate::event_log::DesktopSyncRoundHooks::new(
         db.shared(),
-        pending_dir,
+        Arc::clone(&onboarding),
         sounds_dir,
+    ));
+    let sync_orchestrator = Arc::new(SyncOrchestrator::new(
+        Arc::clone(&sync_store),
+        pending_dir,
         device_id,
         applier,
-        Arc::clone(&onboarding),
+        round_hooks,
         Arc::clone(&compactor),
         boot_at,
     ));
