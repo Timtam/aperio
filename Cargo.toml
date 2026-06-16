@@ -6,6 +6,7 @@ members = [
     "crates/plugin-core",
     "crates/plugin-sdk",
     "crates/sync-core",
+    "crates/sync-engine",
     "crates/vc-core",
 
     # Kalender- und Aufgaben-Adapter

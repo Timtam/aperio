@@ -1,0 +1,18 @@
+[package]
+name = "sync-engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Aperio — platform-agnostic sync engine (event-log writer/applier/orchestrator/compactor) shared by desktop and mobile, behind platform traits."
+
+[dependencies]
+async-trait.workspace = true
+chrono.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
