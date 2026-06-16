@@ -42,6 +42,7 @@ regex.workspace = true
 dirs.workspace = true
 anyhow.workspace = true
 
+aperio-db.workspace = true
 cal-core.workspace = true
 cal-adapter-local.workspace = true
 sync-core.workspace = true
