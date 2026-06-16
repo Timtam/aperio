@@ -91,26 +91,11 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      # Cache the cargo deps AND the workspace's own build artifacts, keyed
-      # on the RUST sources (not the frontend). A frontend-only change is an
-      # exact key hit, so target/ is restored whole and nothing but `aperio`
-      # recompiles below. This deliberately keeps the workspace-crate
-      # artifacts that Swatinem/rust-cache prunes — the cost is a bigger
-      # cache (mind the repo's 10 GB Actions-cache budget). `restore-keys`
-      # gives a Rust change the previous build to compile incrementally from.
-      - uses: actions/cache@v4
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
-          # `lto-<bool>` keeps the CI (LTO-off) and release (LTO-on) artifacts
-          # in separate caches — same key would fingerprint-mismatch and force
-          # a full recompile every time the two profiles alternated.
-          key: artifacts-v1-${{ matrix.label }}-lto-${{ inputs.release_profile }}-${{ hashFiles('crates/**', 'src-tauri/**', 'Cargo.toml', 'Cargo.lock', '.cargo/**') }}
-          restore-keys: |
-            artifacts-v1-${{ matrix.label }}-lto-${{ inputs.release_profile }}-
+          # Keep the dep cache even when a job fails, so iterating on
+          # a red build doesn't recompile every dependency cold.
+          cache-on-failure: true
 
       - uses: actions/setup-node@v4
         with:
@@ -118,16 +103,6 @@ jobs:
           cache: "npm"
 
       - run: npm ci
-
-      # The frontend is embedded into the aperio binary at COMPILE time, so a
-      # frontend change must recompile aperio even when target/ came from the
-      # cache (cargo can't see the regenerated dist/ as an input). Clean just
-      # that one crate — every dependency, the 17 plugin cdylibs, and every
-      # other workspace crate stay cached — so the embed is always fresh while
-      # the expensive rebuild stays warm.
-      - name: Force a fresh frontend embed
-        shell: bash
-        run: cargo clean -p aperio --release
 
       # `cargo tauri build` with bundle.active = false produces
       # just the raw release binary. src-tauri is a workspace
@@ -233,20 +208,11 @@ jobs:
         with:
           targets: x86_64-apple-darwin,aarch64-apple-darwin
 
-      # Full-target cache (deps + workspace crates for both arches), keyed on
-      # the Rust sources — see the native `build` job for the rationale. The
-      # `aperio` recompile that re-embeds the frontend is forced per arch in
-      # the build step below.
-      - uses: actions/cache@v4
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
-          key: artifacts-v1-macos-universal-lto-${{ inputs.release_profile }}-${{ hashFiles('crates/**', 'src-tauri/**', 'Cargo.toml', 'Cargo.lock', '.cargo/**') }}
-          restore-keys: |
-            artifacts-v1-macos-universal-lto-${{ inputs.release_profile }}-
+          # Keep the dep cache even when a job fails, so iterating on
+          # a red build doesn't recompile every dependency cold.
+          cache-on-failure: true
 
       - uses: actions/setup-node@v4
         with:
@@ -273,15 +239,10 @@ jobs:
       # yet; the second `-p aperio` pass re-triggers build.rs via
       # `cargo:rerun-if-changed=<cdylib>` so the now-present cdylibs
       # get staged into target/<triple>/release/plugins/bundled/<id>/.
-      # `cargo clean -p aperio` per arch forces the frontend re-embed (the
-      # binary can't see the regenerated dist/ as a cargo input); deps + the
-      # plugin cdylibs + every other crate stay cached.
       - name: Build workspace for both macOS arches
         run: |
-          cargo clean -p aperio --release --target x86_64-apple-darwin
           cargo build --workspace --release --target x86_64-apple-darwin
           cargo build -p aperio --release --target x86_64-apple-darwin
-          cargo clean -p aperio --release --target aarch64-apple-darwin
           cargo build --workspace --release --target aarch64-apple-darwin
           cargo build -p aperio --release --target aarch64-apple-darwin
 
