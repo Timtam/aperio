@@ -59,8 +59,8 @@ use sync_core::{
 use tracing::{debug, info, warn};
 
 use crate::db::SharedConn;
-use crate::event_log::snapshot::{SnapshotApplyOutcome, SnapshotBuilder};
 use crate::event_log::EventLogWriter;
+use crate::event_log::{SnapshotApplyOutcome, SnapshotBuilder};
 use crate::user_prefs::UserPrefsRepo;
 
 /// `user_prefs` keys the compactor reads + writes.
@@ -372,7 +372,7 @@ impl Compactor {
         // We could re-parse the body here, but the dump we built
         // 50 lines ago already has the counts. Simplest:
         // re-deserialise into the typed shape and count.
-        let body: crate::event_log::snapshot::AperioSnapshotBody =
+        let body: crate::event_log::AperioSnapshotBody =
             serde_json::from_value(snapshot.body.clone()).unwrap_or_default();
         SnapshotApplyOutcome {
             rows_applied: body.dump.calendars.len()
@@ -516,7 +516,15 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let db = DbHandle::open(dir.path().join("test.sqlite")).unwrap();
         let adapter = Arc::new(LocalAdapter::new(db.shared()));
-        let builder = Arc::new(SnapshotBuilder::new(db.shared(), adapter, "1.0.0-test"));
+        let store = Arc::new(crate::event_log::DesktopSyncStore::new(
+            db.shared(),
+            adapter,
+        ));
+        let builder = Arc::new(SnapshotBuilder::new(
+            store,
+            Arc::new(crate::secrets::KeyringSecretStore),
+            "1.0.0-test",
+        ));
         let compactor = Compactor::new(
             db.shared(),
             builder,
@@ -676,7 +684,12 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let db = DbHandle::open(dir.path().join("test.sqlite")).unwrap();
         let local = Arc::new(LocalAdapter::new(db.shared()));
-        let builder = Arc::new(SnapshotBuilder::new(db.shared(), local, "1.0.0-test"));
+        let store = Arc::new(crate::event_log::DesktopSyncStore::new(db.shared(), local));
+        let builder = Arc::new(SnapshotBuilder::new(
+            store,
+            Arc::new(crate::secrets::KeyringSecretStore),
+            "1.0.0-test",
+        ));
         let device = DeviceId::from_string("dev-rot".into());
 
         // A writer staging into <dir>/sync/log/pending/. Its session
@@ -760,7 +773,12 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let db = DbHandle::open(dir.path().join("test.sqlite")).unwrap();
         let local = Arc::new(LocalAdapter::new(db.shared()));
-        let builder = Arc::new(SnapshotBuilder::new(db.shared(), local, "1.0.0-test"));
+        let store = Arc::new(crate::event_log::DesktopSyncStore::new(db.shared(), local));
+        let builder = Arc::new(SnapshotBuilder::new(
+            store,
+            Arc::new(crate::secrets::KeyringSecretStore),
+            "1.0.0-test",
+        ));
         let device = DeviceId::from_string("dev-sweep".into());
         let pending = dir.path().join("sync").join("log").join("pending");
         tokio::fs::create_dir_all(&pending).await.unwrap();

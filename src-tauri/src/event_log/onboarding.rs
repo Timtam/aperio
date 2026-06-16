@@ -56,8 +56,7 @@ use sync_core::{
 use tracing::{debug, info, warn};
 
 use crate::db::SharedConn;
-use crate::event_log::snapshot::SnapshotBuilder;
-use crate::event_log::{ApplyReport, EventLogApplier, SYNC_CURSOR_PREF_KEY};
+use crate::event_log::{ApplyReport, EventLogApplier, SnapshotBuilder, SYNC_CURSOR_PREF_KEY};
 use crate::user_prefs::UserPrefsRepo;
 
 /// `user_prefs` key holding the user-chosen device name. Surfaces in
@@ -926,7 +925,12 @@ mod tests {
             Arc::clone(&adapter),
             device_id.clone(),
         ));
-        let snapshot_builder = Arc::new(SnapshotBuilder::new(db.clone(), adapter, "1.0.0-test"));
+        let store = Arc::new(crate::event_log::DesktopSyncStore::new(db.clone(), adapter));
+        let snapshot_builder = Arc::new(SnapshotBuilder::new(
+            store,
+            Arc::new(crate::secrets::KeyringSecretStore),
+            "1.0.0-test",
+        ));
         OnboardingService::new(
             db,
             device_id,

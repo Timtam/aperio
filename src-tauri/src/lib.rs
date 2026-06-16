@@ -397,9 +397,17 @@ pub fn run() {
     // with the onboarding service (for snapshot consumption on
     // accept_remote) and with the compactor (for snapshot
     // generation during the compaction round).
-    let snapshot_builder = Arc::new(SnapshotBuilder::new(
+    // The snapshot builder now lives in the reusable `sync-engine` crate
+    // and reaches local storage through two platform seams: the desktop
+    // `SyncStore` (SQLite, via the applier's adapter) and the desktop
+    // `SecretStore` (the OS keychain). Both are wired up here.
+    let snapshot_store = Arc::new(crate::event_log::DesktopSyncStore::new(
         db.shared(),
         Arc::clone(&applier_adapter),
+    ));
+    let snapshot_builder = Arc::new(SnapshotBuilder::new(
+        snapshot_store,
+        Arc::new(crate::secrets::KeyringSecretStore),
         env!("CARGO_PKG_VERSION"),
     ));
     // `<data_dir>/sync/log/pending/` — the local staging dir the writer

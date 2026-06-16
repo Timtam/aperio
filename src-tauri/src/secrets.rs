@@ -23,84 +23,30 @@
 //! sees one logical entry per slot per account.
 
 use keyring::Entry;
-use thiserror::Error;
 use tracing::warn;
+
+/// `SecretSlot` (the per-account credential slots) and `SecretError` are
+/// defined in the `sync-engine` crate so the platform-agnostic snapshot
+/// builder / applier can name them; they're re-exported here because this
+/// module is the desktop keychain implementation that produces and
+/// consumes them, and the rest of the backend reaches them through
+/// `crate::secrets`.
+pub use sync_engine::{SecretError, SecretSlot};
 
 /// Service prefix used in the platform credential store. Keeping the
 /// "Aperio:" prefix lets a user (or a sysadmin) spot Aperio's entries
 /// at a glance and clean them up by hand if needed.
 const SERVICE_PREFIX: &str = "Aperio";
 
-/// One logical slot per account. Adding a new slot is a code change
-/// rather than a string, so typos can't cause a silent migration.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SecretSlot {
-    /// Short-lived OAuth2 access token.
-    AccessToken,
-    /// OAuth2 refresh token (long-lived).
-    RefreshToken,
-    /// Generic password — used by Basic Auth (CalDAV, WebDAV, …).
-    Password,
-    /// API token (Vikunja, Todoist, …).
-    ApiToken,
-    /// 32-byte AES-256 key for cross-device sync E2E encryption
-    /// (Phase Sk). Stored as base64 so the keychain backend
-    /// doesn't choke on null bytes; the value is `KEY_LEN`
-    /// bytes after decode.
-    SyncEncryptionKey,
-}
-
-impl SecretSlot {
-    fn as_str(self) -> &'static str {
-        match self {
-            SecretSlot::AccessToken => "access_token",
-            SecretSlot::RefreshToken => "refresh_token",
-            SecretSlot::Password => "password",
-            SecretSlot::ApiToken => "api_token",
-            SecretSlot::SyncEncryptionKey => "sync_encryption_key",
-        }
-    }
-
-    /// Public wire name for the slot — the same string used as the
-    /// keychain service suffix. The credential-sync emit path names the
-    /// slot with this when building a `credential.set` event.
-    pub fn wire_name(self) -> &'static str {
-        self.as_str()
-    }
-
-    /// Map a wire slot name back to a slot, but ONLY for the slots that
-    /// may travel through cross-device credential sync. The short-lived
-    /// [`SecretSlot::AccessToken`] (each device re-derives its own from
-    /// the refresh token) and the E2E key itself
-    /// ([`SecretSlot::SyncEncryptionKey`] — syncing it would defeat
-    /// end-to-end encryption) are deliberately rejected here, so a
-    /// malformed or hostile event can never smuggle them into the
-    /// keychain. This allowlist is the single place that decides what a
-    /// received credential event is allowed to write.
-    pub fn syncable_from_wire(name: &str) -> Option<SecretSlot> {
-        match name {
-            "password" => Some(SecretSlot::Password),
-            "refresh_token" => Some(SecretSlot::RefreshToken),
-            "api_token" => Some(SecretSlot::ApiToken),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Error)]
-pub enum SecretError {
-    #[error("no secret stored for this account/slot")]
-    NotFound,
-    #[error("keychain error: {0}")]
-    Backend(String),
-}
-
-impl From<keyring::Error> for SecretError {
-    fn from(err: keyring::Error) -> Self {
-        match err {
-            keyring::Error::NoEntry => SecretError::NotFound,
-            other => SecretError::Backend(other.to_string()),
-        }
+/// Map a `keyring` backend error into our [`SecretError`]: a missing
+/// entry becomes [`SecretError::NotFound`], everything else a
+/// stringified backend failure. A blanket `From<keyring::Error>` impl
+/// can't live here now that `SecretError` is a foreign type (orphan
+/// rule), so the free functions map explicitly through this helper.
+fn from_keyring(err: keyring::Error) -> SecretError {
+    match err {
+        keyring::Error::NoEntry => SecretError::NotFound,
+        other => SecretError::Backend(other.to_string()),
     }
 }
 
@@ -109,7 +55,7 @@ impl From<keyring::Error> for SecretError {
 /// multiple entries for the same (service, user) pair.
 pub fn store(account_id: &str, slot: SecretSlot, value: &str) -> Result<(), SecretError> {
     let entry = entry_for(account_id, slot)?;
-    entry.set_password(value).map_err(Into::into)
+    entry.set_password(value).map_err(from_keyring)
 }
 
 /// Read the previously stored value for `(account_id, slot)`. Returns
@@ -117,7 +63,7 @@ pub fn store(account_id: &str, slot: SecretSlot, value: &str) -> Result<(), Secr
 /// that into "user needs to re-authenticate".
 pub fn retrieve(account_id: &str, slot: SecretSlot) -> Result<String, SecretError> {
     let entry = entry_for(account_id, slot)?;
-    entry.get_password().map_err(Into::into)
+    entry.get_password().map_err(from_keyring)
 }
 
 /// Best-effort secret removal. A missing entry is treated as success
@@ -128,7 +74,7 @@ pub fn delete(account_id: &str, slot: SecretSlot) -> Result<(), SecretError> {
     match entry.delete_password() {
         Ok(()) => Ok(()),
         Err(keyring::Error::NoEntry) => Ok(()),
-        Err(err) => Err(err.into()),
+        Err(err) => Err(from_keyring(err)),
     }
 }
 
@@ -160,8 +106,33 @@ pub fn delete_all(account_id: &str) -> Result<(), SecretError> {
 }
 
 fn entry_for(account_id: &str, slot: SecretSlot) -> Result<Entry, SecretError> {
-    let service = format!("{SERVICE_PREFIX}:{}", slot.as_str());
-    Entry::new(&service, account_id).map_err(Into::into)
+    let service = format!("{SERVICE_PREFIX}:{}", slot.wire_name());
+    Entry::new(&service, account_id).map_err(from_keyring)
+}
+
+/// Desktop implementation of `sync_engine::SecretStore` — the platform
+/// keychain via this module's free functions. Handed to the
+/// `SnapshotBuilder` (and, later, the applier) so the engine can read and
+/// write account secrets without knowing about the `keyring` crate.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct KeyringSecretStore;
+
+impl sync_engine::SecretStore for KeyringSecretStore {
+    fn store(&self, account_id: &str, slot: SecretSlot, value: &str) -> Result<(), SecretError> {
+        store(account_id, slot, value)
+    }
+
+    fn retrieve(&self, account_id: &str, slot: SecretSlot) -> Result<String, SecretError> {
+        retrieve(account_id, slot)
+    }
+
+    fn delete(&self, account_id: &str, slot: SecretSlot) -> Result<(), SecretError> {
+        delete(account_id, slot)
+    }
+
+    fn delete_all(&self, account_id: &str) -> Result<(), SecretError> {
+        delete_all(account_id)
+    }
 }
 
 #[cfg(test)]

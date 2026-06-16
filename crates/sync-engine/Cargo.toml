@@ -10,6 +10,12 @@ description = "Aperio — platform-agnostic sync engine (event-log writer/applie
 
 [dependencies]
 async-trait.workspace = true
+# The snapshot body's row sections (SnapshotDump / SnapshotApplyReport)
+# are owned by cal-adapter-local — the shared local SQLite adapter used
+# on desktop AND mobile, so depending on it here keeps the engine
+# platform-agnostic. Only the snapshot wire types are referenced; the
+# desktop SQL stays in the SyncStore impl.
+cal-adapter-local.workspace = true
 chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -6311,6 +6311,7 @@ name = "sync-engine"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "cal-adapter-local",
  "chrono",
  "serde",
  "serde_json",

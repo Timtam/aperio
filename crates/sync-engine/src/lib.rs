@@ -22,11 +22,18 @@
 //! This is built up incrementally, desktop-first, keeping the desktop test
 //! suite green at every step (DESIGN-sync-engine.md §5).
 
+use std::collections::BTreeMap;
+
+use cal_adapter_local::{SnapshotApplyReport, SnapshotDump};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use thiserror::Error;
 
+mod snapshot;
 mod writer;
+pub use snapshot::{
+    AperioSnapshotBody, SnapshotAccount, SnapshotApplyOutcome, SnapshotBuilder, SnapshotCredential,
+};
 pub use writer::EventLogWriter;
 
 pub mod whitelist;
@@ -140,6 +147,47 @@ pub trait SecretStore: Send + Sync {
     fn delete(&self, account_id: &str, slot: SecretSlot) -> Result<(), SecretError>;
     /// Clear every slot tied to `account_id`.
     fn delete_all(&self, account_id: &str) -> Result<(), SecretError>;
+}
+
+// ──────────────────────────────────── store ────────────────────────────────
+
+#[derive(Debug, Error)]
+pub enum StoreError {
+    #[error("store error: {0}")]
+    Backend(String),
+}
+
+/// The local store seam used by the snapshot builder (and, later, the
+/// applier / compactor / orchestrator): the calendar/event/task rows,
+/// the whitelisted `user_prefs` settings, the non-secret account rows,
+/// and the cross-device E2E flag.
+///
+/// Desktop implements this over its SQLite (`LocalAdapter` for the rows,
+/// `UserPrefsRepo` + ad-hoc SQL for settings/accounts); mobile over the
+/// same `LocalAdapter` plus its own settings/account storage. Secrets are
+/// a separate seam ([`SecretStore`]) because they live in the platform
+/// keychain, never in the SQLite store.
+pub trait SyncStore: Send + Sync {
+    /// Dump every local calendar/event/task/list/label row for a
+    /// snapshot body, preserving wire ids (so `apply_snapshot_dump`
+    /// round-trips them).
+    fn dump_for_snapshot(&self) -> Result<SnapshotDump, StoreError>;
+    /// Restore a snapshot's rows; the returned report carries the
+    /// per-section applied/failed counts.
+    fn apply_snapshot_dump(&self, dump: &SnapshotDump) -> Result<SnapshotApplyReport, StoreError>;
+    /// The whitelisted `user_prefs` rows (key → value). Only keys that
+    /// pass [`whitelist::is_synced_key`] are returned.
+    fn dump_synced_settings(&self) -> Result<BTreeMap<String, String>, StoreError>;
+    /// Write one `user_prefs` row WITHOUT emitting an event-log event
+    /// (the snapshot apply path must not loop back through the writer).
+    fn set_setting(&self, key: &str, value: &str) -> Result<(), StoreError>;
+    /// Every external account row (excludes the implicit `local` one).
+    fn dump_accounts(&self) -> Result<Vec<SnapshotAccount>, StoreError>;
+    /// Insert-or-update one account row from a snapshot (skips `local`).
+    fn upsert_account(&self, account: &SnapshotAccount) -> Result<(), StoreError>;
+    /// Whether cross-device end-to-end encryption is enabled on this
+    /// device — gates whether account secrets ride along in the body.
+    fn e2e_enabled(&self) -> bool;
 }
 
 // ──────────────────────────────────── clock ────────────────────────────────
