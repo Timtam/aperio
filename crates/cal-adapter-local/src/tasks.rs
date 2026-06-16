@@ -324,11 +324,17 @@ impl LocalAdapter {
             .lock()
             .expect("db mutex poisoned")
             .execute(
+                // `resurface_date` and `series_id` are written here too, in
+                // step with the INSERT: a task edited into an on-demand
+                // recurring one is assigned a series_id by the host command,
+                // and that — plus any resurface trigger — must persist, or the
+                // idempotent spawner (DESIGN §9.12) has nothing to dedup on.
                 "UPDATE tasks
                     SET list_id = ?, parent_id = ?, section_id = ?, title = ?, description = ?,
                         status = ?, priority = ?, scheduled_date = ?, scheduled_time = ?,
                         deadline_date = ?, deadline_time = ?,
-                        recurrence = ?, color_label_id = ?, reminders = ?, sound = ?,
+                        recurrence = ?, resurface_date = ?, series_id = ?, color_label_id = ?,
+                        reminders = ?, sound = ?,
                         updated_at = ?, completed_at = ?, etag = ?
                   WHERE id = ?",
                 params![
@@ -344,6 +350,8 @@ impl LocalAdapter {
                     task.deadline_date.as_ref().map(fmt_date),
                     task.deadline_time.as_ref().map(fmt_time),
                     recurrence_json,
+                    task.resurface_date.as_ref().map(fmt_date),
+                    task.series_id,
                     task.color_label.as_ref().map(|c| c.as_str()),
                     reminders_json,
                     sound_json,
@@ -1189,6 +1197,39 @@ mod tests {
         assert!(
             plain.series_id.is_none(),
             "a non-recurring task stays unmanaged"
+        );
+    }
+
+    #[tokio::test]
+    async fn update_persists_series_id_and_resurface_date() {
+        // Regression: editing a task into an on-demand recurring one — the
+        // host assigns a series_id, and the rule may carry a resurface
+        // trigger — must keep both across the write, or the idempotent
+        // spawner has nothing to dedup on (DESIGN §9.12). The UPDATE used to
+        // omit both columns and silently drop them.
+        let (a, list) = adapter_with_list();
+        let created = a.create_task(&list.id, mk_task("Edit me")).await.unwrap();
+        assert!(created.series_id.is_none());
+        assert!(created.resurface_date.is_none());
+
+        let mut edited = created.clone();
+        edited.recurrence = Some(rec(
+            RecurrenceFrequency::Weekly,
+            1,
+            RecurrenceAnchor::FromCompletion,
+            RecurrencePlacement::Backlog,
+            None,
+        ));
+        edited.series_id = Some("series-xyz".to_string());
+        edited.resurface_date = Some(NaiveDate::from_ymd_opt(2026, 6, 1).unwrap());
+        // Still Open, so this is a plain edit (no completion → no spawn).
+        a.update_task(edited).await.unwrap();
+
+        let reread = a.get_task_by_id(&created.id).unwrap().unwrap();
+        assert_eq!(reread.series_id.as_deref(), Some("series-xyz"));
+        assert_eq!(
+            reread.resurface_date,
+            Some(NaiveDate::from_ymd_opt(2026, 6, 1).unwrap())
         );
     }
 

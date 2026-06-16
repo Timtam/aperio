@@ -589,13 +589,13 @@ pub struct TaskDto {
     /// `HH:MM:SS`. Requires `deadline_date`.
     pub deadline_time: Option<String>,
     pub recurrence: Option<TaskRecurrence>,
-    /// `YYYY-MM-DD`. Backlog resurface trigger (DESIGN §9.12). Store-managed:
-    /// [`LocalStore::update_task`] does not modify it — its stored value is
-    /// preserved regardless of what the DTO carries.
+    /// `YYYY-MM-DD`. Backlog resurface trigger (DESIGN §9.12), derived by the
+    /// recurrence engine when a backlog instance is spawned. Round-trips
+    /// through [`LocalStore::update_task`].
     pub resurface_date: Option<String>,
-    /// Stable id of the recurring series this instance belongs to. Store-
-    /// managed like `resurface_date`: assigned when a recurring task is
-    /// created and preserved across updates.
+    /// Stable id of the recurring series this instance belongs to. The store
+    /// assigns it when a recurring task is created; pass it back unchanged on
+    /// update (it round-trips through [`LocalStore::update_task`]).
     pub series_id: Option<String>,
     pub parent_id: Option<String>,
     pub section_id: Option<String>,
@@ -942,12 +942,12 @@ impl LocalStore {
             .map_err(map_store_err)
     }
 
-    /// Update a task, overwriting its user-editable fields. The store-managed
-    /// `series_id` and `resurface_date` are not modified — their stored values
-    /// are preserved regardless of what the DTO carries (the recurrence engine
-    /// owns them, DESIGN §9.12). Completing a recurring task spawns its next
-    /// instance, which shows up on the next [`LocalStore::tasks`] call.
-    /// [`StoreError::NotFound`] when the id is unknown.
+    /// Update a task — a full overwrite of its mutable fields (everything but
+    /// the immutable `created_at`), so a faithful read-modify-write round-trip
+    /// preserves `series_id` and `resurface_date` by passing them back as read.
+    /// Completing a recurring task spawns its next instance, which shows up on
+    /// the next [`LocalStore::tasks`] call (DESIGN §9.12). [`StoreError::NotFound`]
+    /// when the id is unknown.
     pub fn update_task(&self, task: TaskDto) -> Result<TaskDto, StoreError> {
         let core: cal_core::Task = task.try_into()?;
         self.adapter
