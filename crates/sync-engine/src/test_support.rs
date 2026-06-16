@@ -1,26 +1,32 @@
-//! Shared in-memory test doubles for the platform seams. Compiled only
-//! under `cfg(test)`; used by the snapshot + compactor unit tests so the
-//! engine's logic can be exercised without a real SQLite or keychain. The
-//! DB-backed round-trip tests live in the desktop crate against the real
-//! `DesktopSyncStore`.
+//! In-memory test doubles for the platform seams. Compiled under
+//! `cfg(test)` for the crate's own unit tests, and under the
+//! `test-support` feature so the desktop crate's tests can reuse
+//! `FakeSecrets` (its applier tests run against the real `DesktopSyncStore`
+//! + an in-memory keychain). The DB-backed round-trip tests live in the
+//! desktop crate against the real store.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Mutex;
 
 use cal_adapter_local::{SnapshotApplyReport, SnapshotDump};
 
 use crate::whitelist::is_synced_key;
-use crate::{SecretError, SecretSlot, SecretStore, SnapshotAccount, StoreError, SyncStore};
+use crate::{
+    NewConflict, SecretError, SecretSlot, SecretStore, SnapshotAccount, StoreError, SyncStore,
+};
 
-/// In-memory [`SyncStore`]. `prefs` backs both `get_pref`/`set_pref` and
-/// the whitelisted-settings dump; `accounts` backs the account
-/// dump/upsert; `e2e` is a fixed flag. The snapshot row dump/apply is
-/// `LocalAdapter`'s job (tested in the desktop crate), so it's a no-op
-/// here.
+/// In-memory [`SyncStore`]. `prefs` backs `get_pref`/`set_pref` and the
+/// whitelisted-settings dump; `accounts` backs the account dump/upsert;
+/// `applied`/`conflicts` back the applier seam; `e2e` is a fixed flag. The
+/// snapshot row dump/apply and the remote-plugin announcements are no-ops
+/// (`LocalAdapter` / the desktop store own those — tested in the desktop
+/// crate).
 #[derive(Default)]
-pub(crate) struct FakeStore {
+pub struct FakeStore {
     pub prefs: Mutex<BTreeMap<String, String>>,
     pub accounts: Mutex<Vec<SnapshotAccount>>,
+    pub applied: Mutex<HashSet<String>>,
+    pub conflicts: Mutex<Vec<NewConflict>>,
     pub e2e: bool,
 }
 
@@ -61,18 +67,60 @@ impl SyncStore for FakeStore {
     }
 
     fn upsert_account(&self, account: &SnapshotAccount) -> Result<(), StoreError> {
-        self.accounts.lock().unwrap().push(account.clone());
+        let mut accounts = self.accounts.lock().unwrap();
+        accounts.retain(|a| a.id != account.id);
+        accounts.push(account.clone());
         Ok(())
     }
 
     fn e2e_enabled(&self) -> bool {
         self.e2e
     }
+
+    fn is_event_applied(&self, event_id: &str) -> Result<bool, StoreError> {
+        Ok(self.applied.lock().unwrap().contains(event_id))
+    }
+
+    fn mark_event_applied(&self, event_id: &str) -> Result<(), StoreError> {
+        self.applied.lock().unwrap().insert(event_id.to_string());
+        Ok(())
+    }
+
+    fn record_conflict(&self, conflict: &NewConflict) -> Result<(), StoreError> {
+        self.conflicts.lock().unwrap().push(conflict.clone());
+        Ok(())
+    }
+
+    fn delete_pref(&self, key: &str) -> Result<(), StoreError> {
+        self.prefs.lock().unwrap().remove(key);
+        Ok(())
+    }
+
+    fn delete_account(&self, id: &str) -> Result<(), StoreError> {
+        self.accounts.lock().unwrap().retain(|a| a.id != id);
+        Ok(())
+    }
+
+    fn upsert_remote_plugin(
+        &self,
+        _id: &str,
+        _name: Option<&str>,
+        _version: &str,
+        _plugin_type: Option<&str>,
+        _source: Option<&str>,
+        _announced_by_device: &str,
+    ) -> Result<(), StoreError> {
+        Ok(())
+    }
+
+    fn delete_remote_plugin(&self, _id: &str) -> Result<(), StoreError> {
+        Ok(())
+    }
 }
 
 /// In-memory [`SecretStore`] keyed by `(account_id, slot wire name)`.
 #[derive(Default)]
-pub(crate) struct FakeSecrets {
+pub struct FakeSecrets {
     map: Mutex<HashMap<(String, &'static str), String>>,
 }
 

@@ -16,42 +16,13 @@ use thiserror::Error;
 
 use crate::db::SharedConn;
 
-/// What kind of row a conflict applies to. Mirrors the
-/// per-variant dispatch in the applier — one entry per
-/// synchronisable table that can produce diff-style updates.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ConflictKind {
-    Event,
-    Task,
-    TaskList,
-    Calendar,
-    ColorLabel,
-}
-
-impl ConflictKind {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            ConflictKind::Event => "event",
-            ConflictKind::Task => "task",
-            ConflictKind::TaskList => "task_list",
-            ConflictKind::Calendar => "calendar",
-            ConflictKind::ColorLabel => "color_label",
-        }
-    }
-
-    #[allow(clippy::should_implement_trait)]
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "event" => Some(ConflictKind::Event),
-            "task" => Some(ConflictKind::Task),
-            "task_list" => Some(ConflictKind::TaskList),
-            "calendar" => Some(ConflictKind::Calendar),
-            "color_label" => Some(ConflictKind::ColorLabel),
-            _ => None,
-        }
-    }
-}
+/// `ConflictKind` (which synchronisable table a conflict belongs to) and
+/// its `as_str`/`from_str` round-trip are defined in the `sync-engine`
+/// crate — the applier, which lives there now, records conflicts with it.
+/// Re-exported here because this module owns the `sync_conflicts` table it
+/// serialises into. The stored/read shape ([`ConflictRecord`]) and the
+/// repository stay desktop-side.
+pub use sync_engine::ConflictKind;
 
 /// One pending or resolved conflict. Both `local_value` and
 /// `remote_value` are JSON-encoded — the frontend renders them
@@ -109,19 +80,11 @@ impl ResolutionChoice {
     }
 }
 
-/// Insert-side struct — same fields as [`ConflictRecord`] but
-/// without the `id` (assigned by SQLite) and the resolution
-/// columns (always start as unresolved).
-#[derive(Debug, Clone)]
-pub struct NewConflict {
-    pub row_kind: ConflictKind,
-    pub row_id: String,
-    pub field: String,
-    pub local_value: Option<String>,
-    pub remote_value: Option<String>,
-    pub remote_device_id: String,
-    pub remote_timestamp: DateTime<Utc>,
-}
+/// Insert-side shape — defined in `sync-engine` (the applier builds it
+/// there when it can't auto-merge a field). Same fields as
+/// [`ConflictRecord`] minus the SQLite-assigned `id` and the resolution
+/// columns. Re-exported so `ConflictsRepo::record` keeps its signature.
+pub use sync_engine::NewConflict;
 
 #[derive(Debug, Error)]
 pub enum ConflictsError {

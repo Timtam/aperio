@@ -24,6 +24,12 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 
+[features]
+# Exposes the in-memory test doubles (FakeStore / FakeSecrets) so the
+# desktop crate's tests can reuse them — e.g. the applier tests run against
+# the real DesktopSyncStore but an in-memory SecretStore (no OS keychain).
+test-support = []
+
 [dev-dependencies]
 tempfile = "3"
 

@@ -17,11 +17,14 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use cal_adapter_local::{LocalAdapter, SnapshotApplyReport, SnapshotDump};
+use chrono::Utc;
 use rusqlite::params;
 use sync_engine::whitelist::{is_synced_key, SYNC_WHITELIST};
-use sync_engine::{SnapshotAccount, StoreError, SyncStore};
+use sync_engine::{NewConflict, SnapshotAccount, StoreError, SyncStore};
 
+use crate::conflicts::ConflictsRepo;
 use crate::db::SharedConn;
+use crate::remote_plugins::RemotePluginsRepo;
 use crate::user_prefs::UserPrefsRepo;
 
 /// The desktop SQLite-backed [`SyncStore`].
@@ -178,6 +181,69 @@ impl SyncStore for DesktopSyncStore {
 
     fn e2e_enabled(&self) -> bool {
         crate::credential_sync::e2e_enabled(&self.db)
+    }
+
+    fn is_event_applied(&self, event_id: &str) -> Result<bool, StoreError> {
+        let conn = self.db.lock().expect("db mutex poisoned");
+        let mut stmt = conn
+            .prepare("SELECT 1 FROM sync_applied_events WHERE event_id = ?")
+            .map_err(|err| StoreError::Backend(format!("is_event_applied: {err}")))?;
+        Ok(stmt.query_row(params![event_id], |_| Ok(())).is_ok())
+    }
+
+    fn mark_event_applied(&self, event_id: &str) -> Result<(), StoreError> {
+        let conn = self.db.lock().expect("db mutex poisoned");
+        let now = Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT OR IGNORE INTO sync_applied_events
+                (event_id, applied_at) VALUES (?, ?)",
+            params![event_id, now],
+        )
+        .map_err(|err| StoreError::Backend(format!("mark_event_applied: {err}")))?;
+        Ok(())
+    }
+
+    fn record_conflict(&self, conflict: &NewConflict) -> Result<(), StoreError> {
+        ConflictsRepo::new(&self.db)
+            .record(conflict.clone())
+            .map(|_| ())
+            .map_err(|err| StoreError::Backend(format!("record_conflict: {err}")))
+    }
+
+    fn delete_pref(&self, key: &str) -> Result<(), StoreError> {
+        UserPrefsRepo::new(&self.db)
+            .delete(key)
+            .map_err(|err| StoreError::Backend(format!("delete_pref: {err}")))
+    }
+
+    fn delete_account(&self, id: &str) -> Result<(), StoreError> {
+        if id == "local" {
+            return Ok(());
+        }
+        let conn = self.db.lock().expect("db mutex poisoned");
+        conn.execute("DELETE FROM accounts WHERE id = ?", params![id])
+            .map_err(|err| StoreError::Backend(format!("delete_account: {err}")))?;
+        Ok(())
+    }
+
+    fn upsert_remote_plugin(
+        &self,
+        id: &str,
+        name: Option<&str>,
+        version: &str,
+        plugin_type: Option<&str>,
+        source: Option<&str>,
+        announced_by_device: &str,
+    ) -> Result<(), StoreError> {
+        RemotePluginsRepo::new(&self.db)
+            .upsert(id, name, version, plugin_type, source, announced_by_device)
+            .map_err(|err| StoreError::Backend(format!("upsert_remote_plugin: {err}")))
+    }
+
+    fn delete_remote_plugin(&self, id: &str) -> Result<(), StoreError> {
+        RemotePluginsRepo::new(&self.db)
+            .delete(id)
+            .map_err(|err| StoreError::Backend(format!("delete_remote_plugin: {err}")))
     }
 }
 

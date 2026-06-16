@@ -26,7 +26,7 @@ use std::collections::BTreeMap;
 
 use cal_adapter_local::{SnapshotApplyReport, SnapshotDump};
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 mod compactor;
@@ -44,8 +44,8 @@ pub use writer::EventLogWriter;
 
 pub mod whitelist;
 
-#[cfg(test)]
-mod test_support;
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support;
 
 /// `user_prefs` key holding this device's human-readable name (surfaced
 /// in `meta.json`'s device registry). Defined here — the canonical
@@ -209,6 +209,40 @@ pub trait SyncStore: Send + Sync {
     /// Whether cross-device end-to-end encryption is enabled on this
     /// device — gates whether account secrets ride along in the body.
     fn e2e_enabled(&self) -> bool;
+
+    // --- applier seam (DESIGN-sync-engine.md §3.1) -----------------------
+
+    /// Has the event with this id already been integrated? Backed by the
+    /// `sync_applied_events` idempotency table — re-fetches and
+    /// overlapping log files both resolve to `true` here and are skipped.
+    fn is_event_applied(&self, event_id: &str) -> Result<bool, StoreError>;
+    /// Record that the event with this id has been integrated, so a later
+    /// pass skips it. Idempotent (INSERT OR IGNORE).
+    fn mark_event_applied(&self, event_id: &str) -> Result<(), StoreError>;
+    /// Persist a field-level conflict the applier couldn't auto-merge,
+    /// superseding any prior unresolved conflict on the same
+    /// (kind, row, field) (DESIGN.md §19.3).
+    fn record_conflict(&self, conflict: &NewConflict) -> Result<(), StoreError>;
+    /// Delete one `user_prefs` row (the `settings.updated` apply path
+    /// encodes a JSON-null value as "remove the key").
+    fn delete_pref(&self, key: &str) -> Result<(), StoreError>;
+    /// Remove one external account row (an `account.deleted` event from
+    /// another device). The implicit `local` account is never touched.
+    fn delete_account(&self, id: &str) -> Result<(), StoreError>;
+    /// Mirror a remote plugin announcement (`plugin.installed` /
+    /// `plugin.updated`) into the local store so the Settings → Plugins
+    /// panel can surface "needed plugins" (DESIGN.md §20.8).
+    fn upsert_remote_plugin(
+        &self,
+        id: &str,
+        name: Option<&str>,
+        version: &str,
+        plugin_type: Option<&str>,
+        source: Option<&str>,
+        announced_by_device: &str,
+    ) -> Result<(), StoreError>;
+    /// Drop a remote plugin announcement (`plugin.uninstalled`).
+    fn delete_remote_plugin(&self, id: &str) -> Result<(), StoreError>;
 }
 
 // ──────────────────────────────────── clock ────────────────────────────────
@@ -269,13 +303,57 @@ pub trait SyncProgressReporter: Send + Sync {
 // ───────────────────────────────── conflicts ───────────────────────────────
 
 /// Which row kind a field-level conflict belongs to (DESIGN.md §19.3).
-/// Consumed by `SyncStore::record_conflict` (added with the applier).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// One entry per synchronisable table that produces diff-style updates —
+/// sections are full-row last-write-wins, so they never appear here.
+/// Consumed by [`SyncStore::record_conflict`]. The desktop conflict
+/// repository (and its `sync_conflicts` table) round-trips it via
+/// [`ConflictKind::as_str`] / [`ConflictKind::from_str`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ConflictKind {
     Event,
     Task,
     TaskList,
     Calendar,
     ColorLabel,
-    Section,
+}
+
+impl ConflictKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ConflictKind::Event => "event",
+            ConflictKind::Task => "task",
+            ConflictKind::TaskList => "task_list",
+            ConflictKind::Calendar => "calendar",
+            ConflictKind::ColorLabel => "color_label",
+        }
+    }
+
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "event" => Some(ConflictKind::Event),
+            "task" => Some(ConflictKind::Task),
+            "task_list" => Some(ConflictKind::TaskList),
+            "calendar" => Some(ConflictKind::Calendar),
+            "color_label" => Some(ConflictKind::ColorLabel),
+            _ => None,
+        }
+    }
+}
+
+/// Insert-side shape for a field-level conflict — the values the applier
+/// hands to [`SyncStore::record_conflict`] when it can't auto-merge a
+/// field (DESIGN.md §19.3). Both value strings are JSON-encoded. The
+/// stored/read shape (with `id`, `detected_at`, resolution columns) stays
+/// desktop-side in the conflict repository.
+#[derive(Debug, Clone)]
+pub struct NewConflict {
+    pub row_kind: ConflictKind,
+    pub row_id: String,
+    pub field: String,
+    pub local_value: Option<String>,
+    pub remote_value: Option<String>,
+    pub remote_device_id: String,
+    pub remote_timestamp: DateTime<Utc>,
 }
