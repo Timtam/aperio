@@ -923,14 +923,17 @@ mod tests {
     fn build_service_with_pending(db: SharedConn, pending_dir: PathBuf) -> OnboardingService {
         let device_id = DeviceId::from_string("dev-this".into());
         let adapter = Arc::new(LocalAdapter::new(db.clone()));
+        let store: Arc<dyn sync_engine::SyncStore> = Arc::new(
+            crate::event_log::DesktopSyncStore::new(db.clone(), Arc::clone(&adapter)),
+        );
         let applier = Arc::new(EventLogApplier::new(
-            db.clone(),
+            Arc::clone(&store),
+            Arc::new(crate::secrets::KeyringSecretStore),
             Arc::clone(&adapter),
             device_id.clone(),
         ));
-        let store = Arc::new(crate::event_log::DesktopSyncStore::new(db.clone(), adapter));
         let snapshot_builder = Arc::new(SnapshotBuilder::new(
-            store,
+            Arc::clone(&store),
             Arc::new(crate::secrets::KeyringSecretStore),
             "1.0.0-test",
         ));

@@ -29,9 +29,11 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+mod applier;
 mod compactor;
 mod snapshot;
 mod writer;
+pub use applier::{ApplyReport, EventLogApplier};
 pub use compactor::{
     CompactionReport, Compactor, DEFAULT_MAX_AGE_DAYS, DEFAULT_MAX_BYTES, DEFAULT_MAX_LOGS,
     PREF_BYTES_SINCE_SNAPSHOT, PREF_LOGS_SINCE_SNAPSHOT, PREF_MAX_AGE_DAYS, PREF_MAX_BYTES,

@@ -388,8 +388,17 @@ pub fn run() {
     // refactor every `State<'_, LocalAdapter>` command signature
     // into `State<'_, Arc<LocalAdapter>>`.
     let applier_adapter = Arc::new(LocalAdapter::new(db.shared()));
+    // The event-log applier, snapshot builder and compactor all live in the
+    // reusable `sync-engine` crate now and reach local storage through two
+    // platform seams: the desktop `SyncStore` (SQLite, via the applier's
+    // adapter) and the desktop `SecretStore` (the OS keychain). One store,
+    // shared (cloned) across all three.
+    let sync_store: Arc<dyn sync_engine::SyncStore> = Arc::new(
+        crate::event_log::DesktopSyncStore::new(db.shared(), Arc::clone(&applier_adapter)),
+    );
     let applier = Arc::new(EventLogApplier::new(
-        db.shared(),
+        Arc::clone(&sync_store),
+        Arc::new(crate::secrets::KeyringSecretStore),
         Arc::clone(&applier_adapter),
         device_id.clone(),
     ));
@@ -397,16 +406,8 @@ pub fn run() {
     // with the onboarding service (for snapshot consumption on
     // accept_remote) and with the compactor (for snapshot
     // generation during the compaction round).
-    // The snapshot builder + compactor now live in the reusable
-    // `sync-engine` crate and reach local storage through two platform
-    // seams: the desktop `SyncStore` (SQLite, via the applier's adapter)
-    // and the desktop `SecretStore` (the OS keychain). The store is shared
-    // (cloned) by the builder and the compactor.
-    let snapshot_store: Arc<dyn sync_engine::SyncStore> = Arc::new(
-        crate::event_log::DesktopSyncStore::new(db.shared(), Arc::clone(&applier_adapter)),
-    );
     let snapshot_builder = Arc::new(SnapshotBuilder::new(
-        Arc::clone(&snapshot_store),
+        Arc::clone(&sync_store),
         Arc::new(crate::secrets::KeyringSecretStore),
         env!("CARGO_PKG_VERSION"),
     ));
@@ -416,7 +417,7 @@ pub fn run() {
     // snapshot), the orchestrator, and the onboarding service.
     let pending_dir = data_dir.path.join("sync").join("log").join("pending");
     let compactor = Arc::new(Compactor::new(
-        Arc::clone(&snapshot_store),
+        Arc::clone(&sync_store),
         Arc::clone(&snapshot_builder),
         device_id.clone(),
         env!("CARGO_PKG_VERSION"),

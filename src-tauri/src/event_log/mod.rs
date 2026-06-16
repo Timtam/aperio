@@ -7,7 +7,6 @@
 //! SQLite connection) plus the rest of the event-log machinery (applier,
 //! orchestrator, compactor, snapshot, scheduler, onboarding).
 
-pub mod applier;
 pub mod desktop_store;
 pub mod onboarding;
 pub mod orchestrator;
@@ -18,7 +17,14 @@ pub mod scheduler;
 /// (the command layer, the snapshot builder) keep resolving unchanged.
 pub use sync_engine::whitelist;
 
-pub use applier::{ApplyReport, EventLogApplier};
+/// The event-log applier now lives in the reusable `sync-engine` crate;
+/// re-exported so existing `crate::event_log::{EventLogApplier, …}` paths
+/// resolve. Its DB-backed tests live in `applier_tests` (they need the
+/// real DesktopSyncStore + LocalAdapter, so they can't move with it).
+pub use sync_engine::{ApplyReport, EventLogApplier};
+
+#[cfg(test)]
+mod applier_tests;
 /// The snapshot builder lives in the reusable `sync-engine` crate; the
 /// desktop SQLite-backed `SyncStore` it runs against lives here. Both are
 /// re-exported so the existing `crate::event_log::{SnapshotBuilder, …}`

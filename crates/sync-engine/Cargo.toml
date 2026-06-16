@@ -16,6 +16,10 @@ async-trait.workspace = true
 # platform-agnostic. Only the snapshot wire types are referenced; the
 # desktop SQL stays in the SyncStore impl.
 cal-adapter-local.workspace = true
+# The applier deserialises event payloads into cal-core row types
+# (Event / Task / TaskList / Section / Calendar / ColorLabel) before
+# handing them to the adapter's `*_from_sync` upserts.
+cal-core.workspace = true
 chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true
