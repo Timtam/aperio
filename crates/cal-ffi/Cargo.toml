@@ -17,11 +17,19 @@ crate-type = ["lib", "cdylib", "staticlib"]
 
 [[bin]]
 # Keeps the bindings generator version-locked to the `uniffi` runtime the
-# library links against (Mozilla's recommended setup). Invoke with:
-#   cargo run -p cal-ffi --bin uniffi-bindgen -- \
+# library links against (Mozilla's recommended setup). Gated behind the `cli`
+# feature so the runtime library — and the Android/iOS cross-compiles — don't
+# drag in the bindgen tooling (clap, goblin, askama, …). Invoke with:
+#   cargo run -p cal-ffi --features cli --bin uniffi-bindgen -- \
 #     generate --library <cdylib> --language swift|kotlin --out-dir <dir>
 name = "uniffi-bindgen"
 path = "uniffi-bindgen.rs"
+required-features = ["cli"]
+
+[features]
+# Pulls in UniFFI's binding-generator CLI — needed only by the
+# uniffi-bindgen binary above, never by the runtime library.
+cli = ["uniffi/cli"]
 
 [dependencies]
 cal-core = { workspace = true }
@@ -30,8 +38,8 @@ cal-core = { workspace = true }
 chrono.workspace = true
 # Error type returned to the foreign side for unparseable boundary values.
 thiserror.workspace = true
-uniffi = { version = "0.31.1", features = ["cli"] }
-# `uniffi` is added via `cargo add` so the version tracks the registry latest.
+# Runtime only by default; the bindgen CLI is behind the `cli` feature above.
+uniffi = "0.31.1"
 
 [lints]
 workspace = true
