@@ -332,6 +332,115 @@ impl TryFrom<TaskRecurrence> for cal_core::TaskRecurrence {
     }
 }
 
+// ─────────────────────────────── Local store ────────────────────────────────
+//
+// The on-device data layer. Opens the app-sandbox SQLite (migrated by the
+// shared `aperio-db` runner) and serves task CRUD through the same
+// `cal_adapter_local::LocalAdapter` the desktop backend uses — engine reuse,
+// not a re-implementation. First slice: task-list create + read; tasks and
+// the rest of the surface follow.
+
+use std::sync::{Arc, Mutex};
+
+use cal_adapter_local::LocalAdapter;
+
+/// A task list as it crosses the FFI boundary. Minimal first slice —
+/// richer fields (color, sound, calendar binding) follow as the UI needs
+/// them.
+#[derive(uniffi::Record, Debug, Clone, PartialEq, Eq)]
+pub struct TaskListDto {
+    pub id: String,
+    pub name: String,
+    /// Parent project id for nested backends; `None` for a top-level list.
+    pub parent_id: Option<String>,
+    pub read_only: bool,
+}
+
+impl From<cal_core::TaskList> for TaskListDto {
+    fn from(l: cal_core::TaskList) -> Self {
+        Self {
+            id: l.id,
+            name: l.name,
+            parent_id: l.parent_id,
+            read_only: l.read_only,
+        }
+    }
+}
+
+/// Errors surfaced from the on-device store to the foreign side.
+#[derive(Debug, thiserror::Error, uniffi::Error)]
+pub enum StoreError {
+    /// Opening or migrating the database file failed.
+    #[error("could not open the local database: {message}")]
+    Open { message: String },
+    /// A read or write against the local database failed.
+    #[error("local storage error: {message}")]
+    Storage { message: String },
+    /// The requested row does not exist.
+    #[error("not found")]
+    NotFound,
+}
+
+/// The mobile app's handle to its on-device SQLite store.
+///
+/// Opens (and migrates, via the shared [`aperio_db`] runner) the database
+/// at `db_path`, then serves task CRUD through the same
+/// [`cal_adapter_local::LocalAdapter`] the desktop backend uses. The UI
+/// holds one instance per launch and passes an app-sandbox path (e.g.
+/// `<Documents>/aperio.sqlite`).
+#[derive(uniffi::Object)]
+pub struct LocalStore {
+    adapter: LocalAdapter,
+}
+
+#[uniffi::export]
+impl LocalStore {
+    /// Open the on-device database at `db_path`, creating the file and
+    /// applying any pending migrations, and bind a local adapter to it.
+    #[uniffi::constructor]
+    pub fn open(db_path: String) -> Result<Arc<Self>, StoreError> {
+        let mut conn = rusqlite::Connection::open(&db_path).map_err(|e| StoreError::Open {
+            message: e.to_string(),
+        })?;
+        conn.execute_batch(
+            "PRAGMA foreign_keys = ON;
+             PRAGMA journal_mode = WAL;
+             PRAGMA synchronous = NORMAL;",
+        )
+        .map_err(|e| StoreError::Open {
+            message: e.to_string(),
+        })?;
+        aperio_db::run(&mut conn).map_err(|e| StoreError::Open {
+            message: e.to_string(),
+        })?;
+        let shared = Arc::new(Mutex::new(conn));
+        Ok(Arc::new(Self {
+            adapter: LocalAdapter::new(shared),
+        }))
+    }
+
+    /// Create a new local, top-level task list and return it.
+    pub fn create_task_list(&self, name: String) -> Result<TaskListDto, StoreError> {
+        self.adapter
+            .create_task_list(&name, None, None, None, None)
+            .map(TaskListDto::from)
+            .map_err(|e| StoreError::Storage {
+                message: e.to_string(),
+            })
+    }
+
+    /// Fetch a task list by id; [`StoreError::NotFound`] when absent.
+    pub fn task_list(&self, id: String) -> Result<TaskListDto, StoreError> {
+        self.adapter
+            .get_task_list_by_id(&id)
+            .map_err(|e| StoreError::Storage {
+                message: e.to_string(),
+            })?
+            .map(TaskListDto::from)
+            .ok_or(StoreError::NotFound)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -416,5 +525,25 @@ mod tests {
     #[test]
     fn rrule_without_freq_is_rejected() {
         assert!(rrule_to_task_recurrence("INTERVAL=2".to_string()).is_none());
+    }
+
+    #[test]
+    fn local_store_round_trips_a_task_list() {
+        // `:memory:` gives the store its own fresh, fully-migrated DB —
+        // proving the open + aperio_db::run + LocalAdapter path end to end.
+        let store = LocalStore::open(":memory:".to_string()).unwrap();
+        let created = store.create_task_list("Groceries".to_string()).unwrap();
+        assert_eq!(created.name, "Groceries");
+        assert!(!created.read_only);
+
+        // Read it back through the same store: real persistence in SQLite.
+        let fetched = store.task_list(created.id.clone()).unwrap();
+        assert_eq!(fetched, created);
+
+        // A missing id surfaces NotFound, not a panic.
+        assert!(matches!(
+            store.task_list("does-not-exist".to_string()),
+            Err(StoreError::NotFound)
+        ));
     }
 }

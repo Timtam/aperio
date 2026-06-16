@@ -1021,8 +1021,11 @@ dependencies = [
 name = "cal-ffi"
 version = "0.1.0"
 dependencies = [
+ "aperio-db",
+ "cal-adapter-local",
  "cal-core",
  "chrono",
+ "rusqlite",
  "thiserror 1.0.69",
  "uniffi",
 ]

@@ -33,6 +33,13 @@ cli = ["uniffi/cli"]
 
 [dependencies]
 cal-core = { workspace = true }
+# The on-device local store: the migrated SQLite schema (aperio-db) + the
+# shared local calendar/task adapter (cal-adapter-local) the desktop uses,
+# so the mobile app reads and writes through the same engine, not a
+# re-implementation. `rusqlite` (bundled) opens the sandbox database file.
+aperio-db.workspace = true
+cal-adapter-local.workspace = true
+rusqlite.workspace = true
 # `NaiveDate` UNTIL values cross the boundary as ISO strings; chrono parses /
 # formats them in the conversion layer.
 chrono.workspace = true
