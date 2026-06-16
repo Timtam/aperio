@@ -10,6 +10,14 @@ name: cal-ffi iOS XCFramework
 # mobile/modules/cal-ffi/ios/ (CalFfi.xcframework + cal_ffi.swift), and commit.
 
 on:
+  # `push` runs from the branch itself (unlike workflow_dispatch, which GitHub
+  # only exposes once the workflow is on the default branch). Scoped to cal-ffi
+  # changes so it doesn't fire on every commit.
+  push:
+    branches: [feat/mobile-foundation]
+    paths:
+      - "crates/cal-ffi/**"
+      - ".github/workflows/cal-ffi-ios-xcframework.yml"
   workflow_dispatch:
 
 permissions:
