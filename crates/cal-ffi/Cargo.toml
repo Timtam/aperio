@@ -1,0 +1,32 @@
+[package]
+name = "cal-ffi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Aperio — UniFFI bindings exposing cal-core domain logic to Swift/Kotlin (mobile engine reuse)."
+
+[lib]
+name = "cal_ffi"
+# lib       -> other Rust crates and `cargo test` can use it
+# cdylib    -> Android `.so` + the artifact `uniffi-bindgen --library` reads
+# staticlib -> iOS `.a` (linked into the app later, on EAS' macOS workers)
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[[bin]]
+# Keeps the bindings generator version-locked to the `uniffi` runtime the
+# library links against (Mozilla's recommended setup). Invoke with:
+#   cargo run -p cal-ffi --bin uniffi-bindgen -- \
+#     generate --library <cdylib> --language swift|kotlin --out-dir <dir>
+name = "uniffi-bindgen"
+path = "uniffi-bindgen.rs"
+
+[dependencies]
+cal-core = { workspace = true }
+uniffi = { version = "0.31.1", features = ["cli"] }
+# `uniffi` is added via `cargo add` so the version tracks the registry latest.
+
+[lints]
+workspace = true

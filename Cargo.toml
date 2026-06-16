@@ -49,6 +49,9 @@ members = [
     "crates/vc-adapter-meet-plugin",
     "crates/vc-adapter-webex-plugin",
 
+    # Mobile engine-reuse: UniFFI wrapper exposing cal-core to Swift/Kotlin.
+    "crates/cal-ffi",
+
     # Tauri-App
     "src-tauri",
 ]
