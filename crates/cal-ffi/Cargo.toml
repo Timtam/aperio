@@ -25,6 +25,11 @@ path = "uniffi-bindgen.rs"
 
 [dependencies]
 cal-core = { workspace = true }
+# `NaiveDate` UNTIL values cross the boundary as ISO strings; chrono parses /
+# formats them in the conversion layer.
+chrono.workspace = true
+# Error type returned to the foreign side for unparseable boundary values.
+thiserror.workspace = true
 uniffi = { version = "0.31.1", features = ["cli"] }
 # `uniffi` is added via `cargo add` so the version tracks the registry latest.
 

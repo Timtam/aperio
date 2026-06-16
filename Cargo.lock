@@ -1011,6 +1011,8 @@ name = "cal-ffi"
 version = "0.1.0"
 dependencies = [
  "cal-core",
+ "chrono",
+ "thiserror 1.0.69",
  "uniffi",
 ]
 
