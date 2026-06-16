@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     # Kern-Bibliotheken
+    "crates/aperio-db",
     "crates/cal-core",
     "crates/plugin-core",
     "crates/plugin-sdk",
@@ -94,6 +95,7 @@ type_complexity = "allow"
 
 [workspace.dependencies]
 # Aperio internal crates
+aperio-db = { path = "crates/aperio-db" }
 cal-core = { path = "crates/cal-core" }
 cal-adapter-local = { path = "crates/cal-adapter-local" }
 plugin-core = { path = "crates/plugin-core" }

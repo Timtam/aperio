@@ -9,6 +9,7 @@ repository.workspace = true
 description = "Aperio — local calendar and task adapter backed by SQLite."
 
 [dependencies]
+aperio-db.workspace = true
 cal-core.workspace = true
 
 async-trait.workspace = true

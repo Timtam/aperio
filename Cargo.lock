@@ -127,6 +127,7 @@ name = "aperio"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "aperio-db",
  "async-trait",
  "base64 0.22.1",
  "cal-adapter-local",
@@ -161,6 +162,14 @@ dependencies = [
  "vc-core",
  "windows 0.61.3",
  "winreg",
+]
+
+[[package]]
+name = "aperio-db"
+version = "0.1.0"
+dependencies = [
+ "rusqlite",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -877,6 +886,7 @@ dependencies = [
 name = "cal-adapter-local"
 version = "0.1.0"
 dependencies = [
+ "aperio-db",
  "async-trait",
  "cal-core",
  "chrono",
