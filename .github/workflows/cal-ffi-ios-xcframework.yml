@@ -1,0 +1,79 @@
+name: cal-ffi iOS XCFramework
+
+# Builds the cal-ffi Rust crate into an iOS XCFramework (device + simulator)
+# plus the UniFFI Swift bindings, on a real macOS runner. Windows devs have no
+# Mac, so this is where the iOS Rust artifact is produced; the Expo app (built
+# on EAS) then just consumes the committed artifact — no Rust toolchain on EAS.
+#
+# Run it from the GitHub "Actions" tab (Run workflow) or: gh workflow run "cal-ffi iOS XCFramework"
+# Then download the "cal-ffi-ios" artifact and drop its contents into
+# mobile/modules/cal-ffi/ios/ (CalFfi.xcframework + cal_ffi.swift), and commit.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  xcframework:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # GitHub macOS runners ship Rust via rustup; we only add the iOS targets.
+      - name: Add iOS Rust targets
+        run: rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
+
+      - name: Build cal-ffi static libs (release)
+        run: |
+          cargo build -p cal-ffi --release --target aarch64-apple-ios
+          cargo build -p cal-ffi --release --target aarch64-apple-ios-sim
+          cargo build -p cal-ffi --release --target x86_64-apple-ios
+
+      # The Swift bindings are target-independent; generate them from a host
+      # (macOS) cdylib, which carries the UniFFI metadata.
+      - name: Generate UniFFI Swift bindings
+        run: |
+          cargo build -p cal-ffi --release
+          cargo run -p cal-ffi --features cli --bin uniffi-bindgen -- \
+            generate --library target/release/libcal_ffi.dylib \
+            --language swift --out-dir target/uniffi-swift
+
+      # Headers + modulemap that let Swift import the Rust C symbols. UniFFI
+      # names the module cal_ffiFFI; xcframework wants the modulemap as
+      # module.modulemap alongside the header.
+      - name: Assemble framework headers
+        run: |
+          mkdir -p target/xcf-headers
+          cp target/uniffi-swift/cal_ffiFFI.h target/xcf-headers/
+          cp target/uniffi-swift/cal_ffiFFI.modulemap target/xcf-headers/module.modulemap
+
+      # iOS simulator needs one fat lib covering both sim archs.
+      - name: Fat simulator static lib
+        run: |
+          mkdir -p target/ios-sim-release
+          lipo -create \
+            target/aarch64-apple-ios-sim/release/libcal_ffi.a \
+            target/x86_64-apple-ios/release/libcal_ffi.a \
+            -output target/ios-sim-release/libcal_ffi.a
+
+      - name: Create XCFramework
+        run: |
+          rm -rf target/CalFfi.xcframework
+          xcodebuild -create-xcframework \
+            -library target/aarch64-apple-ios/release/libcal_ffi.a -headers target/xcf-headers \
+            -library target/ios-sim-release/libcal_ffi.a -headers target/xcf-headers \
+            -output target/CalFfi.xcframework
+
+      - name: Stage artifact (XCFramework + Swift bindings)
+        run: |
+          mkdir -p out
+          cp -R target/CalFfi.xcframework out/
+          cp target/uniffi-swift/cal_ffi.swift out/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cal-ffi-ios
+          path: out/
+          if-no-files-found: error
