@@ -130,8 +130,12 @@ pub enum RecurrenceError {
     InvalidDate { date: String },
 }
 
-/// The ISO date format used for `RecurrenceEnd::OnDate` across the boundary.
+/// The ISO date format used for dates across the boundary (`RecurrenceEnd::OnDate`,
+/// task scheduling, …).
 const DATE_FMT: &str = "%Y-%m-%d";
+
+/// The clock-time format used for task `*_time` fields across the boundary.
+const TIME_FMT: &str = "%H:%M:%S";
 
 /// Serialize a [`TaskRecurrence`] into an RFC 5545 `RRULE` value (without the
 /// `RRULE:` prefix), e.g. `FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE`.
@@ -332,17 +336,212 @@ impl TryFrom<TaskRecurrence> for cal_core::TaskRecurrence {
     }
 }
 
+// ─────────────────────────── Task status & priority ─────────────────────────
+
+/// Lifecycle state of a task. Mirrors [`cal_core::TaskStatus`].
+#[derive(uniffi::Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskStatus {
+    Open,
+    InProgress,
+    Completed,
+    Cancelled,
+}
+
+impl From<cal_core::TaskStatus> for TaskStatus {
+    fn from(s: cal_core::TaskStatus) -> Self {
+        use cal_core::TaskStatus as C;
+        match s {
+            C::Open => Self::Open,
+            C::InProgress => Self::InProgress,
+            C::Completed => Self::Completed,
+            C::Cancelled => Self::Cancelled,
+        }
+    }
+}
+
+impl From<TaskStatus> for cal_core::TaskStatus {
+    fn from(s: TaskStatus) -> Self {
+        match s {
+            TaskStatus::Open => Self::Open,
+            TaskStatus::InProgress => Self::InProgress,
+            TaskStatus::Completed => Self::Completed,
+            TaskStatus::Cancelled => Self::Cancelled,
+        }
+    }
+}
+
+/// Task priority. Mirrors [`cal_core::TaskPriority`].
+#[derive(uniffi::Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskPriority {
+    Low,
+    Medium,
+    High,
+}
+
+impl From<cal_core::TaskPriority> for TaskPriority {
+    fn from(p: cal_core::TaskPriority) -> Self {
+        use cal_core::TaskPriority as C;
+        match p {
+            C::Low => Self::Low,
+            C::Medium => Self::Medium,
+            C::High => Self::High,
+        }
+    }
+}
+
+impl From<TaskPriority> for cal_core::TaskPriority {
+    fn from(p: TaskPriority) -> Self {
+        match p {
+            TaskPriority::Low => Self::Low,
+            TaskPriority::Medium => Self::Medium,
+            TaskPriority::High => Self::High,
+        }
+    }
+}
+
+// ───────────────────────────── Reminders & sound ────────────────────────────
+
+/// Where a notification sound comes from. Mirrors [`cal_core::SoundSource`].
+#[derive(uniffi::Enum, Debug, Clone, PartialEq, Eq)]
+pub enum SoundSource {
+    /// Platform default notification sound.
+    System,
+    /// Silent (visual only).
+    Silent,
+    /// User-supplied audio file, referenced by its content hash.
+    Custom { sha256: String },
+}
+
+impl From<cal_core::SoundSource> for SoundSource {
+    fn from(s: cal_core::SoundSource) -> Self {
+        use cal_core::SoundSource as C;
+        match s {
+            C::System => Self::System,
+            C::Silent => Self::Silent,
+            C::Custom { sha256 } => Self::Custom { sha256 },
+        }
+    }
+}
+
+impl From<SoundSource> for cal_core::SoundSource {
+    fn from(s: SoundSource) -> Self {
+        match s {
+            SoundSource::System => Self::System,
+            SoundSource::Silent => Self::Silent,
+            SoundSource::Custom { sha256 } => Self::Custom { sha256 },
+        }
+    }
+}
+
+/// Notification sound configuration. Mirrors [`cal_core::SoundConfig`].
+#[derive(uniffi::Record, Debug, Clone, PartialEq, Eq)]
+pub struct SoundConfig {
+    pub source: SoundSource,
+    /// Volume 0–100, independent of the system volume.
+    pub volume: u8,
+}
+
+impl From<cal_core::SoundConfig> for SoundConfig {
+    fn from(s: cal_core::SoundConfig) -> Self {
+        Self {
+            source: s.source.into(),
+            volume: s.volume,
+        }
+    }
+}
+
+impl From<SoundConfig> for cal_core::SoundConfig {
+    fn from(s: SoundConfig) -> Self {
+        Self {
+            source: s.source.into(),
+            volume: s.volume,
+        }
+    }
+}
+
+/// A reminder trigger. Mirrors [`cal_core::ReminderKind`], with the
+/// `Absolute` instant represented as an RFC 3339 string on the boundary.
+#[derive(uniffi::Enum, Debug, Clone, PartialEq, Eq)]
+pub enum ReminderKind {
+    /// Relative to the task's deadline; `minutes_before` may be negative to
+    /// fire after the reference time.
+    Relative { minutes_before: i64 },
+    /// Fixed point in time (RFC 3339, e.g. `2026-06-16T09:00:00+00:00`).
+    Absolute { at: String },
+    /// Fires on the next app start after the due time.
+    AppStart,
+    /// E-mail reminder.
+    Email { minutes_before: i64 },
+}
+
+impl From<cal_core::ReminderKind> for ReminderKind {
+    fn from(k: cal_core::ReminderKind) -> Self {
+        use cal_core::ReminderKind as C;
+        match k {
+            C::Relative { minutes_before } => Self::Relative { minutes_before },
+            C::Absolute { at } => Self::Absolute {
+                at: at.to_rfc3339(),
+            },
+            C::AppStart => Self::AppStart,
+            C::Email { minutes_before } => Self::Email { minutes_before },
+        }
+    }
+}
+
+impl TryFrom<ReminderKind> for cal_core::ReminderKind {
+    type Error = StoreError;
+
+    fn try_from(k: ReminderKind) -> Result<Self, Self::Error> {
+        Ok(match k {
+            ReminderKind::Relative { minutes_before } => Self::Relative { minutes_before },
+            ReminderKind::Absolute { at } => Self::Absolute {
+                at: parse_utc_field("reminder.at", &at)?,
+            },
+            ReminderKind::AppStart => Self::AppStart,
+            ReminderKind::Email { minutes_before } => Self::Email { minutes_before },
+        })
+    }
+}
+
+/// A reminder attached to a task. Mirrors [`cal_core::Reminder`].
+#[derive(uniffi::Record, Debug, Clone, PartialEq, Eq)]
+pub struct Reminder {
+    pub kind: ReminderKind,
+    /// Overrides the task-level sound when set.
+    pub sound: Option<SoundConfig>,
+}
+
+impl From<cal_core::Reminder> for Reminder {
+    fn from(r: cal_core::Reminder) -> Self {
+        Self {
+            kind: r.kind.into(),
+            sound: r.sound.map(SoundConfig::from),
+        }
+    }
+}
+
+impl TryFrom<Reminder> for cal_core::Reminder {
+    type Error = StoreError;
+
+    fn try_from(r: Reminder) -> Result<Self, Self::Error> {
+        Ok(Self {
+            kind: r.kind.try_into()?,
+            sound: r.sound.map(cal_core::SoundConfig::from),
+        })
+    }
+}
+
 // ─────────────────────────────── Local store ────────────────────────────────
 //
 // The on-device data layer. Opens the app-sandbox SQLite (migrated by the
 // shared `aperio-db` runner) and serves task CRUD through the same
 // `cal_adapter_local::LocalAdapter` the desktop backend uses — engine reuse,
-// not a re-implementation. First slice: task-list create + read; tasks and
-// the rest of the surface follow.
+// not a re-implementation.
 
 use std::sync::{Arc, Mutex};
 
 use cal_adapter_local::LocalAdapter;
+use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
 
 /// A task list as it crosses the FFI boundary. Minimal first slice —
 /// richer fields (color, sound, calendar binding) follow as the UI needs
@@ -367,6 +566,181 @@ impl From<cal_core::TaskList> for TaskListDto {
     }
 }
 
+/// A task as it crosses the FFI boundary — a lossless mirror of
+/// [`cal_core::Task`] for the on-device store. Dates are ISO `YYYY-MM-DD`,
+/// times are `HH:MM:SS`, and instants are RFC 3339 strings (UniFFI has no
+/// built-in date/time types). Assignees are intentionally omitted: the local
+/// store does not persist them (a sync-era, multi-user concept), so surfacing
+/// them here would be misleading.
+#[derive(uniffi::Record, Debug, Clone, PartialEq, Eq)]
+pub struct TaskDto {
+    pub id: String,
+    pub list_id: String,
+    pub title: String,
+    pub description: Option<String>,
+    pub status: TaskStatus,
+    pub priority: TaskPriority,
+    /// `YYYY-MM-DD`. The day the task is planned for.
+    pub scheduled_date: Option<String>,
+    /// `HH:MM:SS`. Requires `scheduled_date`.
+    pub scheduled_time: Option<String>,
+    /// `YYYY-MM-DD`. The day the task is due by.
+    pub deadline_date: Option<String>,
+    /// `HH:MM:SS`. Requires `deadline_date`.
+    pub deadline_time: Option<String>,
+    pub recurrence: Option<TaskRecurrence>,
+    /// `YYYY-MM-DD`. Backlog resurface trigger (DESIGN §9.12). Store-managed:
+    /// [`LocalStore::update_task`] does not modify it — its stored value is
+    /// preserved regardless of what the DTO carries.
+    pub resurface_date: Option<String>,
+    /// Stable id of the recurring series this instance belongs to. Store-
+    /// managed like `resurface_date`: assigned when a recurring task is
+    /// created and preserved across updates.
+    pub series_id: Option<String>,
+    pub parent_id: Option<String>,
+    pub section_id: Option<String>,
+    /// Global color-label id, if bound.
+    pub color_label: Option<String>,
+    pub reminders: Vec<Reminder>,
+    pub sound: Option<SoundConfig>,
+    /// RFC 3339.
+    pub created_at: String,
+    /// RFC 3339.
+    pub updated_at: String,
+    /// RFC 3339, set once the task is completed.
+    pub completed_at: Option<String>,
+    pub etag: Option<String>,
+}
+
+impl From<cal_core::Task> for TaskDto {
+    fn from(t: cal_core::Task) -> Self {
+        Self {
+            id: t.id,
+            list_id: t.list_id,
+            title: t.title,
+            description: t.description,
+            status: t.status.into(),
+            priority: t.priority.into(),
+            scheduled_date: t.scheduled_date.map(date_to_string),
+            scheduled_time: t.scheduled_time.map(time_to_string),
+            deadline_date: t.deadline_date.map(date_to_string),
+            deadline_time: t.deadline_time.map(time_to_string),
+            recurrence: t.recurrence.map(TaskRecurrence::from),
+            resurface_date: t.resurface_date.map(date_to_string),
+            series_id: t.series_id,
+            parent_id: t.parent_id,
+            section_id: t.section_id,
+            color_label: t.color_label.map(|c| c.0),
+            reminders: t.reminders.into_iter().map(Reminder::from).collect(),
+            sound: t.sound.map(SoundConfig::from),
+            created_at: utc_to_string(t.created_at),
+            updated_at: utc_to_string(t.updated_at),
+            completed_at: t.completed_at.map(utc_to_string),
+            etag: t.etag,
+        }
+    }
+}
+
+impl TryFrom<TaskDto> for cal_core::Task {
+    type Error = StoreError;
+
+    fn try_from(t: TaskDto) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: t.id,
+            list_id: t.list_id,
+            title: t.title,
+            description: t.description,
+            status: t.status.into(),
+            priority: t.priority.into(),
+            scheduled_date: opt_date_field("scheduled_date", t.scheduled_date)?,
+            scheduled_time: opt_time_field("scheduled_time", t.scheduled_time)?,
+            deadline_date: opt_date_field("deadline_date", t.deadline_date)?,
+            deadline_time: opt_time_field("deadline_time", t.deadline_time)?,
+            recurrence: t
+                .recurrence
+                .map(cal_core::TaskRecurrence::try_from)
+                .transpose()?,
+            resurface_date: opt_date_field("resurface_date", t.resurface_date)?,
+            series_id: t.series_id,
+            parent_id: t.parent_id,
+            section_id: t.section_id,
+            color_label: t.color_label.map(cal_core::ColorLabelId),
+            reminders: t
+                .reminders
+                .into_iter()
+                .map(cal_core::Reminder::try_from)
+                .collect::<Result<_, _>>()?,
+            sound: t.sound.map(cal_core::SoundConfig::from),
+            assignees: Vec::new(),
+            created_at: parse_utc_field("created_at", &t.created_at)?,
+            updated_at: parse_utc_field("updated_at", &t.updated_at)?,
+            completed_at: opt_utc_field("completed_at", t.completed_at)?,
+            etag: t.etag,
+        })
+    }
+}
+
+/// The editable shape for creating a task — a mirror of [`cal_core::NewTask`]
+/// (no id/timestamps/etag, no assignees; see [`TaskDto`] for the conventions).
+///
+/// `series_id` and `resurface_date` are deliberately omitted: they are
+/// store-managed (the local adapter assigns a `series_id` to a recurring task
+/// on create, and derives `resurface_date` when it spawns a backlog instance —
+/// DESIGN §9.12), not values a client sets.
+#[derive(uniffi::Record, Debug, Clone, PartialEq, Eq)]
+pub struct NewTaskDto {
+    pub title: String,
+    pub description: Option<String>,
+    pub status: TaskStatus,
+    pub priority: TaskPriority,
+    pub scheduled_date: Option<String>,
+    pub scheduled_time: Option<String>,
+    pub deadline_date: Option<String>,
+    pub deadline_time: Option<String>,
+    pub recurrence: Option<TaskRecurrence>,
+    pub parent_id: Option<String>,
+    pub section_id: Option<String>,
+    pub color_label: Option<String>,
+    pub reminders: Vec<Reminder>,
+    pub sound: Option<SoundConfig>,
+}
+
+impl TryFrom<NewTaskDto> for cal_core::NewTask {
+    type Error = StoreError;
+
+    fn try_from(t: NewTaskDto) -> Result<Self, Self::Error> {
+        Ok(Self {
+            title: t.title,
+            description: t.description,
+            status: t.status.into(),
+            priority: t.priority.into(),
+            scheduled_date: opt_date_field("scheduled_date", t.scheduled_date)?,
+            scheduled_time: opt_time_field("scheduled_time", t.scheduled_time)?,
+            deadline_date: opt_date_field("deadline_date", t.deadline_date)?,
+            deadline_time: opt_time_field("deadline_time", t.deadline_time)?,
+            recurrence: t
+                .recurrence
+                .map(cal_core::TaskRecurrence::try_from)
+                .transpose()?,
+            // Store-managed (see the type's docs): the adapter assigns a
+            // series_id to a recurring task on create and derives
+            // resurface_date for spawned backlog instances.
+            resurface_date: None,
+            series_id: None,
+            parent_id: t.parent_id,
+            section_id: t.section_id,
+            color_label: t.color_label.map(cal_core::ColorLabelId),
+            reminders: t
+                .reminders
+                .into_iter()
+                .map(cal_core::Reminder::try_from)
+                .collect::<Result<_, _>>()?,
+            sound: t.sound.map(cal_core::SoundConfig::from),
+            assignees: Vec::new(),
+        })
+    }
+}
+
 /// Errors surfaced from the on-device store to the foreign side.
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum StoreError {
@@ -379,6 +753,88 @@ pub enum StoreError {
     /// The requested row does not exist.
     #[error("not found")]
     NotFound,
+    /// A value coming from the foreign side could not be parsed into the
+    /// core model (a malformed date, time, datetime, recurrence rule, …) or
+    /// was otherwise rejected as invalid input.
+    #[error("invalid value for {field}: {message}")]
+    InvalidField { field: String, message: String },
+}
+
+impl From<RecurrenceError> for StoreError {
+    fn from(e: RecurrenceError) -> Self {
+        match e {
+            RecurrenceError::InvalidDate { date } => StoreError::InvalidField {
+                field: "recurrence".to_string(),
+                message: format!("invalid UNTIL date '{date}', expected YYYY-MM-DD"),
+            },
+        }
+    }
+}
+
+/// Map a core error from the adapter to the FFI store error, preserving the
+/// `NotFound` / invalid-input distinctions the UI branches on.
+fn map_store_err(e: cal_core::Error) -> StoreError {
+    match e {
+        cal_core::Error::NotFound(_) => StoreError::NotFound,
+        cal_core::Error::InvalidInput(message) => StoreError::InvalidField {
+            field: "input".to_string(),
+            message,
+        },
+        other => StoreError::Storage {
+            message: other.to_string(),
+        },
+    }
+}
+
+// ── Boundary date/time helpers ───────────────────────────────────────────────
+//
+// Dates cross as `YYYY-MM-DD`, clock times as `HH:MM:SS`, and instants as
+// RFC 3339 — the same shapes the desktop SQLite layer stores, kept consistent
+// so the formats never drift between the two backends.
+
+fn date_to_string(d: NaiveDate) -> String {
+    d.format(DATE_FMT).to_string()
+}
+
+fn time_to_string(t: NaiveTime) -> String {
+    t.format(TIME_FMT).to_string()
+}
+
+fn utc_to_string(t: DateTime<Utc>) -> String {
+    t.to_rfc3339()
+}
+
+fn opt_date_field(field: &str, s: Option<String>) -> Result<Option<NaiveDate>, StoreError> {
+    s.map(|s| {
+        NaiveDate::parse_from_str(&s, DATE_FMT).map_err(|_| StoreError::InvalidField {
+            field: field.to_string(),
+            message: format!("invalid date '{s}', expected YYYY-MM-DD"),
+        })
+    })
+    .transpose()
+}
+
+fn opt_time_field(field: &str, s: Option<String>) -> Result<Option<NaiveTime>, StoreError> {
+    s.map(|s| {
+        NaiveTime::parse_from_str(&s, TIME_FMT).map_err(|_| StoreError::InvalidField {
+            field: field.to_string(),
+            message: format!("invalid time '{s}', expected HH:MM:SS"),
+        })
+    })
+    .transpose()
+}
+
+fn parse_utc_field(field: &str, s: &str) -> Result<DateTime<Utc>, StoreError> {
+    DateTime::parse_from_rfc3339(s)
+        .map(|dt| dt.with_timezone(&Utc))
+        .map_err(|_| StoreError::InvalidField {
+            field: field.to_string(),
+            message: format!("invalid datetime '{s}', expected RFC 3339"),
+        })
+}
+
+fn opt_utc_field(field: &str, s: Option<String>) -> Result<Option<DateTime<Utc>>, StoreError> {
+    s.map(|s| parse_utc_field(field, &s)).transpose()
 }
 
 /// The mobile app's handle to its on-device SQLite store.
@@ -424,20 +880,85 @@ impl LocalStore {
         self.adapter
             .create_task_list(&name, None, None, None, None)
             .map(TaskListDto::from)
-            .map_err(|e| StoreError::Storage {
-                message: e.to_string(),
-            })
+            .map_err(map_store_err)
     }
 
     /// Fetch a task list by id; [`StoreError::NotFound`] when absent.
     pub fn task_list(&self, id: String) -> Result<TaskListDto, StoreError> {
         self.adapter
             .get_task_list_by_id(&id)
-            .map_err(|e| StoreError::Storage {
-                message: e.to_string(),
-            })?
+            .map_err(map_store_err)?
             .map(TaskListDto::from)
             .ok_or(StoreError::NotFound)
+    }
+
+    /// List all task lists, ordered by name (case-insensitive).
+    pub fn task_lists(&self) -> Result<Vec<TaskListDto>, StoreError> {
+        self.adapter
+            .list_task_lists_sync()
+            .map(|lists| lists.into_iter().map(TaskListDto::from).collect())
+            .map_err(map_store_err)
+    }
+
+    /// Rename a task list. Rejects an empty/whitespace-only name
+    /// ([`StoreError::InvalidField`]); [`StoreError::NotFound`] for an
+    /// unknown id.
+    pub fn rename_task_list(&self, id: String, new_name: String) -> Result<(), StoreError> {
+        self.adapter
+            .rename_task_list_sync(&id, &new_name)
+            .map_err(map_store_err)
+    }
+
+    /// Delete a task list; its tasks cascade away.
+    /// [`StoreError::NotFound`] when the id is unknown.
+    pub fn delete_task_list(&self, id: String) -> Result<(), StoreError> {
+        self.adapter.delete_task_list(&id).map_err(map_store_err)
+    }
+
+    /// List the tasks in a list, ordered by date then creation time.
+    pub fn tasks(&self, list_id: String) -> Result<Vec<TaskDto>, StoreError> {
+        self.adapter
+            .get_tasks_sync(&list_id)
+            .map(|tasks| tasks.into_iter().map(TaskDto::from).collect())
+            .map_err(map_store_err)
+    }
+
+    /// Fetch a single task by id; [`StoreError::NotFound`] when absent.
+    pub fn task(&self, id: String) -> Result<TaskDto, StoreError> {
+        self.adapter
+            .get_task_by_id(&id)
+            .map_err(map_store_err)?
+            .map(TaskDto::from)
+            .ok_or(StoreError::NotFound)
+    }
+
+    /// Create a task in `list_id` and return it (with its assigned id and
+    /// timestamps). A recurring task gets a stable `series_id` (DESIGN §9.12).
+    pub fn create_task(&self, list_id: String, task: NewTaskDto) -> Result<TaskDto, StoreError> {
+        let new: cal_core::NewTask = task.try_into()?;
+        self.adapter
+            .create_task_sync(&list_id, new)
+            .map(TaskDto::from)
+            .map_err(map_store_err)
+    }
+
+    /// Update a task, overwriting its user-editable fields. The store-managed
+    /// `series_id` and `resurface_date` are not modified — their stored values
+    /// are preserved regardless of what the DTO carries (the recurrence engine
+    /// owns them, DESIGN §9.12). Completing a recurring task spawns its next
+    /// instance, which shows up on the next [`LocalStore::tasks`] call.
+    /// [`StoreError::NotFound`] when the id is unknown.
+    pub fn update_task(&self, task: TaskDto) -> Result<TaskDto, StoreError> {
+        let core: cal_core::Task = task.try_into()?;
+        self.adapter
+            .update_task_sync(core)
+            .map(TaskDto::from)
+            .map_err(map_store_err)
+    }
+
+    /// Delete a task. [`StoreError::NotFound`] when the id is unknown.
+    pub fn delete_task(&self, id: String) -> Result<(), StoreError> {
+        self.adapter.delete_task_sync(&id).map_err(map_store_err)
     }
 }
 
@@ -545,5 +1066,305 @@ mod tests {
             store.task_list("does-not-exist".to_string()),
             Err(StoreError::NotFound)
         ));
+    }
+
+    /// A minimal open task with everything optional left unset.
+    fn new_task_dto(title: &str) -> NewTaskDto {
+        NewTaskDto {
+            title: title.to_string(),
+            description: None,
+            status: TaskStatus::Open,
+            priority: TaskPriority::Medium,
+            scheduled_date: None,
+            scheduled_time: None,
+            deadline_date: None,
+            deadline_time: None,
+            recurrence: None,
+            parent_id: None,
+            section_id: None,
+            color_label: None,
+            reminders: vec![],
+            sound: None,
+        }
+    }
+
+    /// A fresh in-memory store with a single empty task list.
+    fn store_with_list() -> (Arc<LocalStore>, TaskListDto) {
+        let store = LocalStore::open(":memory:".to_string()).unwrap();
+        let list = store.create_task_list("Inbox".to_string()).unwrap();
+        (store, list)
+    }
+
+    #[test]
+    fn local_store_round_trips_a_task() {
+        let (store, list) = store_with_list();
+
+        let mut nt = new_task_dto("Buy milk");
+        nt.description = Some("2% please".to_string());
+        nt.priority = TaskPriority::High;
+        let created = store.create_task(list.id.clone(), nt).unwrap();
+        assert_eq!(created.title, "Buy milk");
+        assert_eq!(created.list_id, list.id);
+        assert_eq!(created.status, TaskStatus::Open);
+        assert_eq!(created.priority, TaskPriority::High);
+        assert_eq!(created.description.as_deref(), Some("2% please"));
+
+        // The read paths agree with each other and echo the stable fields.
+        let listed = store.tasks(list.id.clone()).unwrap();
+        assert_eq!(listed.len(), 1);
+        let fetched = store.task(created.id.clone()).unwrap();
+        assert_eq!(listed[0], fetched);
+        assert_eq!(fetched.id, created.id);
+        assert_eq!(fetched.title, created.title);
+        assert_eq!(fetched.description, created.description);
+        assert_eq!(fetched.priority, created.priority);
+
+        // A missing task surfaces NotFound, not a panic.
+        assert!(matches!(
+            store.task("does-not-exist".to_string()),
+            Err(StoreError::NotFound)
+        ));
+    }
+
+    #[test]
+    fn task_dates_and_times_cross_as_strings() {
+        let (store, list) = store_with_list();
+        let mut nt = new_task_dto("Standup");
+        nt.scheduled_date = Some("2026-05-21".to_string());
+        nt.scheduled_time = Some("09:30:00".to_string());
+        nt.deadline_date = Some("2026-07-31".to_string());
+        store.create_task(list.id.clone(), nt).unwrap();
+
+        let tasks = store.tasks(list.id).unwrap();
+        let t = &tasks[0];
+        assert_eq!(t.scheduled_date.as_deref(), Some("2026-05-21"));
+        assert_eq!(t.scheduled_time.as_deref(), Some("09:30:00"));
+        assert_eq!(t.deadline_date.as_deref(), Some("2026-07-31"));
+        assert_eq!(t.deadline_time, None);
+    }
+
+    #[test]
+    fn reminders_and_sound_survive_the_round_trip() {
+        let (store, list) = store_with_list();
+        let mut nt = new_task_dto("Take meds");
+        nt.sound = Some(SoundConfig {
+            source: SoundSource::Silent,
+            volume: 50,
+        });
+        nt.reminders = vec![
+            Reminder {
+                kind: ReminderKind::Relative { minutes_before: 30 },
+                sound: None,
+            },
+            Reminder {
+                kind: ReminderKind::Absolute {
+                    at: "2026-05-19T08:00:00+00:00".to_string(),
+                },
+                sound: Some(SoundConfig {
+                    source: SoundSource::System,
+                    volume: 80,
+                }),
+            },
+        ];
+        let created = store.create_task(list.id, nt).unwrap();
+
+        // Read back through SQLite (reminders + sound ride a JSON column).
+        let fetched = store.task(created.id).unwrap();
+        assert_eq!(
+            fetched.sound,
+            Some(SoundConfig {
+                source: SoundSource::Silent,
+                volume: 50,
+            })
+        );
+        assert_eq!(fetched.reminders.len(), 2);
+        assert_eq!(
+            fetched.reminders[0].kind,
+            ReminderKind::Relative { minutes_before: 30 }
+        );
+        assert_eq!(
+            fetched.reminders[1].kind,
+            ReminderKind::Absolute {
+                at: "2026-05-19T08:00:00+00:00".to_string()
+            }
+        );
+        assert_eq!(
+            fetched.reminders[1].sound,
+            Some(SoundConfig {
+                source: SoundSource::System,
+                volume: 80,
+            })
+        );
+    }
+
+    #[test]
+    fn tasks_can_be_updated_and_deleted() {
+        let (store, list) = store_with_list();
+        let created = store
+            .create_task(list.id.clone(), new_task_dto("Draft"))
+            .unwrap();
+
+        // A full-overwrite update edits the title; the rest is preserved.
+        let mut edit = created.clone();
+        edit.title = "Final".to_string();
+        let updated = store.update_task(edit).unwrap();
+        assert_eq!(updated.title, "Final");
+        assert_eq!(store.task(created.id.clone()).unwrap().title, "Final");
+
+        // Delete removes it; a second delete is NotFound.
+        store.delete_task(created.id.clone()).unwrap();
+        assert!(store.tasks(list.id).unwrap().is_empty());
+        assert!(matches!(
+            store.delete_task(created.id).unwrap_err(),
+            StoreError::NotFound
+        ));
+    }
+
+    #[test]
+    fn completing_a_recurring_task_spawns_the_next_through_ffi() {
+        let (store, list) = store_with_list();
+        let mut nt = new_task_dto("Water plants");
+        nt.scheduled_date = Some("2026-05-19".to_string());
+        nt.recurrence = Some(TaskRecurrence {
+            frequency: RecurrenceFrequency::Daily,
+            interval: 3,
+            day_of_week: None,
+            day_of_month: None,
+            end: None,
+            anchor: RecurrenceAnchor::FromDate,
+            placement: RecurrencePlacement::Schedule,
+            fixed_dates: None,
+        });
+        let created = store.create_task(list.id.clone(), nt).unwrap();
+        assert!(
+            created.series_id.is_some(),
+            "a recurring task gets a stable series id"
+        );
+
+        // Completing it spawns the next instance (DESIGN §9.12).
+        let mut done = created.clone();
+        done.status = TaskStatus::Completed;
+        done.completed_at = Some("2026-05-19T09:00:00+00:00".to_string());
+        store.update_task(done).unwrap();
+
+        let tasks = store.tasks(list.id).unwrap();
+        assert_eq!(tasks.len(), 2, "the completed task plus a fresh instance");
+        let next = tasks
+            .iter()
+            .find(|t| t.status == TaskStatus::Open)
+            .expect("a fresh open instance was spawned");
+        assert_eq!(next.scheduled_date.as_deref(), Some("2026-05-22"));
+    }
+
+    #[test]
+    fn invalid_date_field_surfaces_invalid_field() {
+        let (store, list) = store_with_list();
+        let mut nt = new_task_dto("Bad date");
+        nt.scheduled_date = Some("21.05.2026".to_string()); // not YYYY-MM-DD
+        assert!(matches!(
+            store.create_task(list.id, nt),
+            Err(StoreError::InvalidField { .. })
+        ));
+    }
+
+    #[test]
+    fn task_lists_can_be_listed_renamed_and_deleted() {
+        let store = LocalStore::open(":memory:".to_string()).unwrap();
+        let beta = store.create_task_list("Beta".to_string()).unwrap();
+        let alpha = store.create_task_list("Alpha".to_string()).unwrap();
+
+        // Listed sorted by name, case-insensitive: Alpha before Beta.
+        let names: Vec<String> = store
+            .task_lists()
+            .unwrap()
+            .into_iter()
+            .map(|l| l.name)
+            .collect();
+        assert_eq!(names, vec!["Alpha".to_string(), "Beta".to_string()]);
+
+        // Rename, and reject an all-whitespace name.
+        store
+            .rename_task_list(alpha.id.clone(), "Gamma".to_string())
+            .unwrap();
+        assert_eq!(store.task_list(alpha.id.clone()).unwrap().name, "Gamma");
+        assert!(matches!(
+            store.rename_task_list(alpha.id, "   ".to_string()),
+            Err(StoreError::InvalidField { .. })
+        ));
+
+        // Delete, then a missing-list delete is NotFound.
+        store.delete_task_list(beta.id.clone()).unwrap();
+        assert!(matches!(
+            store.task_list(beta.id).unwrap_err(),
+            StoreError::NotFound
+        ));
+        assert_eq!(store.task_lists().unwrap().len(), 1);
+        assert!(matches!(
+            store.delete_task_list("does-not-exist".to_string()),
+            Err(StoreError::NotFound)
+        ));
+    }
+
+    #[test]
+    fn updating_a_missing_task_is_not_found() {
+        let (store, list) = store_with_list();
+        let created = store.create_task(list.id, new_task_dto("Ghost")).unwrap();
+        store.delete_task(created.id.clone()).unwrap();
+        // The DTO is well-formed, but the row is gone.
+        assert!(matches!(
+            store.update_task(created).unwrap_err(),
+            StoreError::NotFound
+        ));
+    }
+
+    #[test]
+    fn update_preserves_store_managed_series_id_and_resurface_date() {
+        let (store, list) = store_with_list();
+        // A backlog rule: completing it spawns an undated instance whose
+        // resurface_date is computed from the completion (DESIGN §9.12).
+        let mut nt = new_task_dto("Water the plant");
+        nt.recurrence = Some(TaskRecurrence {
+            frequency: RecurrenceFrequency::Weekly,
+            interval: 1,
+            day_of_week: None,
+            day_of_month: None,
+            end: None,
+            anchor: RecurrenceAnchor::FromCompletion,
+            placement: RecurrencePlacement::Backlog,
+            fixed_dates: None,
+        });
+        let created = store.create_task(list.id.clone(), nt).unwrap();
+        assert!(
+            created.series_id.is_some(),
+            "a recurring task is assigned a series id on create"
+        );
+
+        // Complete on a known day → spawns the next backlog instance.
+        let mut done = created.clone();
+        done.status = TaskStatus::Completed;
+        done.completed_at = Some("2026-05-10T09:00:00+00:00".to_string());
+        store.update_task(done).unwrap();
+
+        let spawned = store
+            .tasks(list.id.clone())
+            .unwrap()
+            .into_iter()
+            .find(|t| t.status == TaskStatus::Open)
+            .expect("a fresh backlog instance was spawned");
+        // Completed 10 May + 1 week → resurfaces 17 May; same series.
+        assert_eq!(spawned.resurface_date.as_deref(), Some("2026-05-17"));
+        let series = spawned.series_id.clone();
+        assert!(series.is_some());
+
+        // Editing an ordinary field must not disturb the store-managed
+        // series_id / resurface_date — they survive the update round-trip.
+        let mut edit = spawned.clone();
+        edit.title = "Water the fern".to_string();
+        store.update_task(edit).unwrap();
+
+        let reread = store.task(spawned.id).unwrap();
+        assert_eq!(reread.title, "Water the fern");
+        assert_eq!(reread.series_id, series);
+        assert_eq!(reread.resurface_date.as_deref(), Some("2026-05-17"));
     }
 }
