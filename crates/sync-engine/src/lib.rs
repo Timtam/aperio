@@ -31,6 +31,7 @@ use thiserror::Error;
 
 mod applier;
 mod compactor;
+mod orchestrator;
 mod snapshot;
 mod writer;
 pub use applier::{ApplyReport, EventLogApplier};
@@ -38,6 +39,9 @@ pub use compactor::{
     CompactionReport, Compactor, DEFAULT_MAX_AGE_DAYS, DEFAULT_MAX_BYTES, DEFAULT_MAX_LOGS,
     PREF_BYTES_SINCE_SNAPSHOT, PREF_LOGS_SINCE_SNAPSHOT, PREF_MAX_AGE_DAYS, PREF_MAX_BYTES,
     PREF_MAX_LOGS,
+};
+pub use orchestrator::{
+    SyncOrchestrator, SyncRoundHooks, SYNC_CURSOR_PREF_KEY, SYNC_LAST_ROUND_PREF_KEY,
 };
 pub use snapshot::{
     AperioSnapshotBody, SnapshotAccount, SnapshotApplyOutcome, SnapshotBuilder, SnapshotCredential,
@@ -54,6 +58,15 @@ pub mod test_support;
 /// engine-level sync pref — and re-exported by the desktop onboarding
 /// module, which owns the UI that sets it.
 pub const PREF_DEVICE_NAME: &str = "sync.deviceName";
+
+/// `user_prefs` key holding the configured periodic sync interval, in
+/// minutes. The orchestrator reads it for `SyncStatus`; the desktop
+/// scheduler reads it to time its loop. Canonical definition here,
+/// re-exported by the desktop scheduler.
+pub const PREF_SYNC_INTERVAL_MINUTES: &str = "sync.intervalMinutes";
+
+/// Default periodic sync interval (minutes) when the pref is unset.
+pub const DEFAULT_SYNC_INTERVAL_MINUTES: u32 = 5;
 
 // ─────────────────────────── round report / status ─────────────────────────
 // Moved verbatim from src-tauri/src/event_log/orchestrator.rs so both the

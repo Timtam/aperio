@@ -7,9 +7,9 @@
 //! SQLite connection) plus the rest of the event-log machinery (applier,
 //! orchestrator, compactor, snapshot, scheduler, onboarding).
 
+pub mod desktop_hooks;
 pub mod desktop_store;
 pub mod onboarding;
-pub mod orchestrator;
 pub mod scheduler;
 
 /// The settings sync whitelist lives in the reusable `sync-engine` crate;
@@ -25,6 +25,11 @@ pub use sync_engine::{ApplyReport, EventLogApplier};
 
 #[cfg(test)]
 mod applier_tests;
+/// The sync orchestrator + the round-coordination hooks trait now live in
+/// the reusable `sync-engine` crate; the desktop hooks impl (meta
+/// heartbeat, sound-asset sync, device-name cache, compaction audit) lives
+/// here. All re-exported so existing `crate::event_log::{…}` paths resolve.
+pub use desktop_hooks::DesktopSyncRoundHooks;
 /// The snapshot builder lives in the reusable `sync-engine` crate; the
 /// desktop SQLite-backed `SyncStore` it runs against lives here. Both are
 /// re-exported so the existing `crate::event_log::{SnapshotBuilder, …}`
@@ -34,7 +39,6 @@ pub use onboarding::{
     DeviceSummary, OnboardingReport, OnboardingService, SyncPreview, PREF_DEVICE_NAME,
     PREF_ONBOARDED,
 };
-pub use orchestrator::{SyncOrchestrator, SyncRoundReport, SyncStatus, SYNC_CURSOR_PREF_KEY};
 pub use scheduler::{
     read_interval_minutes, SyncScheduler, SyncStatusPayload, DEFAULT_SYNC_INTERVAL_MINUTES,
     PREF_SYNC_INTERVAL_MINUTES,
@@ -45,6 +49,9 @@ pub use sync_engine::{AperioSnapshotBody, SnapshotApplyOutcome, SnapshotBuilder}
 pub use sync_engine::{
     CompactionReport, Compactor, DEFAULT_MAX_AGE_DAYS, DEFAULT_MAX_BYTES, DEFAULT_MAX_LOGS,
     PREF_MAX_AGE_DAYS, PREF_MAX_BYTES, PREF_MAX_LOGS,
+};
+pub use sync_engine::{
+    SyncOrchestrator, SyncRoundHooks, SyncRoundReport, SyncStatus, SYNC_CURSOR_PREF_KEY,
 };
 
 /// The event-log writer lives in the reusable `sync-engine` crate.

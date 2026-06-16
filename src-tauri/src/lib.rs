@@ -452,13 +452,21 @@ pub fn run() {
         sounds_dir.clone(),
         env!("CARGO_PKG_VERSION"),
     ));
-    let sync_orchestrator = Arc::new(SyncOrchestrator::new(
+    // The sync round itself lives in the reusable `sync-engine` crate; the
+    // desktop coordination steps it calls back into (meta heartbeat,
+    // sound-asset sync, device-name cache, compaction audit) are bundled in
+    // the `SyncRoundHooks` impl here.
+    let round_hooks = Arc::new(crate::event_log::DesktopSyncRoundHooks::new(
         db.shared(),
-        pending_dir,
+        Arc::clone(&onboarding),
         sounds_dir,
+    ));
+    let sync_orchestrator = Arc::new(SyncOrchestrator::new(
+        Arc::clone(&sync_store),
+        pending_dir,
         device_id,
         applier,
-        Arc::clone(&onboarding),
+        round_hooks,
         Arc::clone(&compactor),
         boot_at,
     ));

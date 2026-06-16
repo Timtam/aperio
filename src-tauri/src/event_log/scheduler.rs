@@ -61,14 +61,11 @@ use crate::event_log::{SyncOrchestrator, SyncRoundReport, SyncStatus};
 use crate::sync_log::{SyncLogCounters, SyncLogRepo, SyncTrigger};
 use crate::user_prefs::UserPrefsRepo;
 
-/// `user_prefs` key for the configurable polling interval, in minutes.
-/// Defaults to [`DEFAULT_SYNC_INTERVAL_MINUTES`] — matches the value
-/// DESIGN.md §19.8 names as the standard cadence.
-pub const PREF_SYNC_INTERVAL_MINUTES: &str = "sync.intervalMinutes";
-
-/// Default interval if `PREF_SYNC_INTERVAL_MINUTES` is unset or
-/// unparseable. 5 minutes per DESIGN.md §19.8.
-pub const DEFAULT_SYNC_INTERVAL_MINUTES: u32 = 5;
+/// The sync-interval pref key + its default now live in the reusable
+/// `sync-engine` crate (the orchestrator reads them for `SyncStatus`);
+/// re-exported here because the desktop scheduler reads them to time its
+/// loop and `read_interval_minutes` resolves against them.
+pub use sync_engine::{DEFAULT_SYNC_INTERVAL_MINUTES, PREF_SYNC_INTERVAL_MINUTES};
 
 /// How long after app start the first sync round kicks off. Lets the
 /// Tauri main thread finish wiring everything up + the UI paint before
