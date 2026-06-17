@@ -5,3 +5,4 @@ export * from './types';
 export * from './taskStatus';
 export * from './taskGrouping';
 export * from './taskDay';
+export * from './taskRecurrence';
