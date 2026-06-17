@@ -81,14 +81,10 @@ export function isDeadlineChip(task: Task, dayIsoKey: string): boolean {
   );
 }
 
-/** Local `YYYY-MM-DD` for today — convenience for the caller. */
-export function todayIsoKey(): string {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
+/** Local `YYYY-MM-DD` for today — now lives in `@aperio/shared` (reused by the
+ *  mobile app); re-exported here so existing `../intl/taskDay` imports are
+ *  unchanged. */
+export { todayIsoKey } from '@aperio/shared';
 
 /**
  * Effective time-of-day at which a task should slot into the timed

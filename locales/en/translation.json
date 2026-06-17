@@ -43,7 +43,10 @@
     "noLists": "No task lists yet. Add one above.",
     "listAdded": "{{name}} added.",
     "listSelected": "{{name}} selected.",
-    "listDeselected": "{{name}} deselected."
+    "listDeselected": "{{name}} deselected.",
+    "groupExpanded": "{{name}} expanded.",
+    "groupCollapsed": "{{name}} collapsed.",
+    "groupHeaderHint": "Double-tap to expand or collapse."
   },
   "common": {
     "colorComposer": {
