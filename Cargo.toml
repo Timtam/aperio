@@ -73,6 +73,10 @@ members = [
     "crates/vc-adapter-meet-cdylib",
     "crates/vc-adapter-webex-cdylib",
 
+    # Static plugin registry: links the 17 -plugin rlibs + registers them into
+    # a PluginManager without dlopen (the mobile/iOS path).
+    "crates/host-plugins",
+
     # Mobile engine-reuse: UniFFI wrapper exposing cal-core to Swift/Kotlin.
     "crates/cal-ffi",
 

@@ -2822,6 +2822,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "host-plugins"
+version = "0.1.0"
+dependencies = [
+ "cal-adapter-caldav-plugin",
+ "cal-adapter-ews-plugin",
+ "cal-adapter-google-plugin",
+ "cal-adapter-ical-plugin",
+ "cal-adapter-microsoft-graph-plugin",
+ "cal-adapter-todoist-plugin",
+ "cal-adapter-vikunja-plugin",
+ "plugin-core",
+ "sync-adapter-dropbox-plugin",
+ "sync-adapter-ftp-plugin",
+ "sync-adapter-googledrive-plugin",
+ "sync-adapter-local-plugin",
+ "sync-adapter-sftp-plugin",
+ "sync-adapter-webdav-plugin",
+ "vc-adapter-meet-plugin",
+ "vc-adapter-teams-plugin",
+ "vc-adapter-webex-plugin",
+ "vc-adapter-zoom-plugin",
+]
+
+[[package]]
 name = "html5ever"
 version = "0.38.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
