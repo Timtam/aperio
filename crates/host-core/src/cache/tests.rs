@@ -788,7 +788,7 @@ fn folder_complete_window_round_trips_and_covers_any_range() {
     // cache-updated → re-read → refresh). Representable sentinels (year
     // 1 … 9999) round-trip and cover every realistic range.
     let store = setup();
-    let window = crate::commands::cache_swr::unbounded_window();
+    let window = super::unbounded_window();
     store
         .replace_calendar_events(ACC, CAL, window, &[])
         .unwrap();

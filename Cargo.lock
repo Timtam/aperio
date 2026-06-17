@@ -2827,12 +2827,16 @@ name = "host-core"
 version = "0.1.0"
 dependencies = [
  "aperio-db",
+ "cal-adapter-local",
+ "cal-core",
  "chrono",
  "dirs 5.0.1",
  "rusqlite",
  "serde",
+ "serde_json",
  "tempfile",
  "thiserror 1.0.69",
+ "tracing",
  "uuid",
 ]
 

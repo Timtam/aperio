@@ -6,7 +6,6 @@
 
 pub mod audio;
 pub mod bundled_plugins;
-pub mod cache;
 pub mod cache_refresh;
 pub mod commands;
 pub mod conflicts;
@@ -35,7 +34,7 @@ mod window_state;
 // `crate::paths::*` references across the backend keep resolving unchanged.
 pub use host_core::db::{DbError, DbHandle, DbResult, SharedConn};
 pub use host_core::paths::{resolve_data_dir, DataDirKind, DataDirResolution};
-pub use host_core::{accounts, db, paths};
+pub use host_core::{accounts, cache, db, paths};
 
 use cal_adapter_local::LocalAdapter;
 use contact_sync::ContactSyncScheduler;

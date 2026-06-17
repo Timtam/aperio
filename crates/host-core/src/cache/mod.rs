@@ -34,6 +34,28 @@ mod search;
 #[cfg(test)]
 mod tests;
 
+/// The "unbounded" snapshot window recorded for folder-complete containers
+/// (their cache holds the WHOLE collection, so any view range is covered).
+///
+/// It must NOT use `DateTime::<Utc>::MIN_UTC`/`MAX_UTC`: those years
+/// (−262143 / +262142) format to non-4-digit RFC 3339 strings
+/// (`-262143-…`, `+262142-…`) that `parse_from_rfc3339` rejects, so the
+/// window would fail to round-trip through the cache's text timestamps —
+/// `get_sync_state` would error, `covers` would never be true, and the read
+/// would fall into the cold path forever (a refresh → `cache-updated` →
+/// re-read → refresh loop). Year 1 … 9999 spans every realistic event and
+/// is valid RFC 3339.
+pub fn unbounded_window() -> DateRange {
+    DateRange::new(
+        Utc.with_ymd_and_hms(1, 1, 1, 0, 0, 0)
+            .single()
+            .expect("year 1"),
+        Utc.with_ymd_and_hms(9999, 12, 31, 23, 59, 59)
+            .single()
+            .expect("year 9999"),
+    )
+}
+
 /// Host-owned snapshot cache over the main SQLite database.
 #[derive(Clone)]
 pub struct CacheStore {
