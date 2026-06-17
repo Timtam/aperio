@@ -745,19 +745,19 @@ impl TryFrom<NewTaskDto> for cal_core::NewTask {
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum StoreError {
     /// Opening or migrating the database file failed.
-    #[error("could not open the local database: {message}")]
-    Open { message: String },
+    #[error("could not open the local database: {detail}")]
+    Open { detail: String },
     /// A read or write against the local database failed.
-    #[error("local storage error: {message}")]
-    Storage { message: String },
+    #[error("local storage error: {detail}")]
+    Storage { detail: String },
     /// The requested row does not exist.
     #[error("not found")]
     NotFound,
     /// A value coming from the foreign side could not be parsed into the
     /// core model (a malformed date, time, datetime, recurrence rule, …) or
     /// was otherwise rejected as invalid input.
-    #[error("invalid value for {field}: {message}")]
-    InvalidField { field: String, message: String },
+    #[error("invalid value for {field}: {detail}")]
+    InvalidField { field: String, detail: String },
 }
 
 impl From<RecurrenceError> for StoreError {
@@ -765,7 +765,7 @@ impl From<RecurrenceError> for StoreError {
         match e {
             RecurrenceError::InvalidDate { date } => StoreError::InvalidField {
                 field: "recurrence".to_string(),
-                message: format!("invalid UNTIL date '{date}', expected YYYY-MM-DD"),
+                detail: format!("invalid UNTIL date '{date}', expected YYYY-MM-DD"),
             },
         }
     }
@@ -776,12 +776,12 @@ impl From<RecurrenceError> for StoreError {
 fn map_store_err(e: cal_core::Error) -> StoreError {
     match e {
         cal_core::Error::NotFound(_) => StoreError::NotFound,
-        cal_core::Error::InvalidInput(message) => StoreError::InvalidField {
+        cal_core::Error::InvalidInput(detail) => StoreError::InvalidField {
             field: "input".to_string(),
-            message,
+            detail,
         },
         other => StoreError::Storage {
-            message: other.to_string(),
+            detail: other.to_string(),
         },
     }
 }
@@ -808,7 +808,7 @@ fn opt_date_field(field: &str, s: Option<String>) -> Result<Option<NaiveDate>, S
     s.map(|s| {
         NaiveDate::parse_from_str(&s, DATE_FMT).map_err(|_| StoreError::InvalidField {
             field: field.to_string(),
-            message: format!("invalid date '{s}', expected YYYY-MM-DD"),
+            detail: format!("invalid date '{s}', expected YYYY-MM-DD"),
         })
     })
     .transpose()
@@ -818,7 +818,7 @@ fn opt_time_field(field: &str, s: Option<String>) -> Result<Option<NaiveTime>, S
     s.map(|s| {
         NaiveTime::parse_from_str(&s, TIME_FMT).map_err(|_| StoreError::InvalidField {
             field: field.to_string(),
-            message: format!("invalid time '{s}', expected HH:MM:SS"),
+            detail: format!("invalid time '{s}', expected HH:MM:SS"),
         })
     })
     .transpose()
@@ -829,7 +829,7 @@ fn parse_utc_field(field: &str, s: &str) -> Result<DateTime<Utc>, StoreError> {
         .map(|dt| dt.with_timezone(&Utc))
         .map_err(|_| StoreError::InvalidField {
             field: field.to_string(),
-            message: format!("invalid datetime '{s}', expected RFC 3339"),
+            detail: format!("invalid datetime '{s}', expected RFC 3339"),
         })
 }
 
@@ -856,7 +856,7 @@ impl LocalStore {
     #[uniffi::constructor]
     pub fn open(db_path: String) -> Result<Arc<Self>, StoreError> {
         let mut conn = rusqlite::Connection::open(&db_path).map_err(|e| StoreError::Open {
-            message: e.to_string(),
+            detail: e.to_string(),
         })?;
         conn.execute_batch(
             "PRAGMA foreign_keys = ON;
@@ -864,10 +864,10 @@ impl LocalStore {
              PRAGMA synchronous = NORMAL;",
         )
         .map_err(|e| StoreError::Open {
-            message: e.to_string(),
+            detail: e.to_string(),
         })?;
         aperio_db::run(&mut conn).map_err(|e| StoreError::Open {
-            message: e.to_string(),
+            detail: e.to_string(),
         })?;
         let shared = Arc::new(Mutex::new(conn));
         Ok(Arc::new(Self {

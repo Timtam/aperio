@@ -2837,10 +2837,10 @@ sealed class StoreException: kotlin.Exception() {
      */
     class Open(
         
-        val `message`: kotlin.String
+        val `detail`: kotlin.String
         ) : StoreException() {
         override val message
-            get() = "message=${ `message` }"
+            get() = "detail=${ `detail` }"
     }
     
     /**
@@ -2848,10 +2848,10 @@ sealed class StoreException: kotlin.Exception() {
      */
     class Storage(
         
-        val `message`: kotlin.String
+        val `detail`: kotlin.String
         ) : StoreException() {
         override val message
-            get() = "message=${ `message` }"
+            get() = "detail=${ `detail` }"
     }
     
     /**
@@ -2872,10 +2872,10 @@ sealed class StoreException: kotlin.Exception() {
         
         val `field`: kotlin.String, 
         
-        val `message`: kotlin.String
+        val `detail`: kotlin.String
         ) : StoreException() {
         override val message
-            get() = "field=${ `field` }, message=${ `message` }"
+            get() = "field=${ `field` }, detail=${ `detail` }"
     }
     
 
@@ -2917,12 +2917,12 @@ public object FfiConverterTypeStoreError : FfiConverterRustBuffer<StoreException
             is StoreException.Open -> (
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
                 4UL
-                + FfiConverterString.allocationSize(value.`message`)
+                + FfiConverterString.allocationSize(value.`detail`)
             )
             is StoreException.Storage -> (
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
                 4UL
-                + FfiConverterString.allocationSize(value.`message`)
+                + FfiConverterString.allocationSize(value.`detail`)
             )
             is StoreException.NotFound -> (
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
@@ -2932,7 +2932,7 @@ public object FfiConverterTypeStoreError : FfiConverterRustBuffer<StoreException
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
                 4UL
                 + FfiConverterString.allocationSize(value.`field`)
-                + FfiConverterString.allocationSize(value.`message`)
+                + FfiConverterString.allocationSize(value.`detail`)
             )
         }
     }
@@ -2941,12 +2941,12 @@ public object FfiConverterTypeStoreError : FfiConverterRustBuffer<StoreException
         when(value) {
             is StoreException.Open -> {
                 buf.putInt(1)
-                FfiConverterString.write(value.`message`, buf)
+                FfiConverterString.write(value.`detail`, buf)
                 Unit
             }
             is StoreException.Storage -> {
                 buf.putInt(2)
-                FfiConverterString.write(value.`message`, buf)
+                FfiConverterString.write(value.`detail`, buf)
                 Unit
             }
             is StoreException.NotFound -> {
@@ -2956,7 +2956,7 @@ public object FfiConverterTypeStoreError : FfiConverterRustBuffer<StoreException
             is StoreException.InvalidField -> {
                 buf.putInt(4)
                 FfiConverterString.write(value.`field`, buf)
-                FfiConverterString.write(value.`message`, buf)
+                FfiConverterString.write(value.`detail`, buf)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
