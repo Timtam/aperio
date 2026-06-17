@@ -13,6 +13,9 @@ aperio-db.workspace = true
 rusqlite.workspace = true
 thiserror.workspace = true
 dirs.workspace = true
+chrono.workspace = true
+serde.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 tempfile = "3"

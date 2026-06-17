@@ -2827,10 +2827,13 @@ name = "host-core"
 version = "0.1.0"
 dependencies = [
  "aperio-db",
+ "chrono",
  "dirs 5.0.1",
  "rusqlite",
+ "serde",
  "tempfile",
  "thiserror 1.0.69",
+ "uuid",
 ]
 
 [[package]]

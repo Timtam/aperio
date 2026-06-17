@@ -12,6 +12,7 @@
 //! what it moved out so existing `crate::<mod>` references keep
 //! resolving.
 
+pub mod accounts;
 pub mod db;
 pub mod paths;
 
