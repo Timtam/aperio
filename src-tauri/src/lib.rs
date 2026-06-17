@@ -13,12 +13,10 @@ pub mod commands;
 pub mod conflicts;
 pub mod contact_sync;
 pub mod credential_sync;
-pub mod db;
 pub mod device_names;
 pub mod event_log;
 pub mod logging;
 pub mod overrides;
-mod paths;
 mod platform;
 pub mod registry;
 pub mod reminders;
@@ -32,8 +30,13 @@ pub mod tray;
 pub mod user_prefs;
 mod window_state;
 
-pub use db::{DbError, DbHandle, DbResult, SharedConn};
-pub use paths::{resolve_data_dir, DataDirKind, DataDirResolution};
+// `db` + `paths` were extracted into the shared, Tauri-free `host-core`
+// crate (so the mobile UniFFI host reuses the same SQLite handle + portable
+// path resolution). Re-exported here so existing `crate::db::*` /
+// `crate::paths::*` references across the backend keep resolving unchanged.
+pub use host_core::db::{DbError, DbHandle, DbResult, SharedConn};
+pub use host_core::paths::{resolve_data_dir, DataDirKind, DataDirResolution};
+pub use host_core::{db, paths};
 
 use cal_adapter_local::LocalAdapter;
 use contact_sync::ContactSyncScheduler;

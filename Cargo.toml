@@ -73,6 +73,10 @@ members = [
     "crates/vc-adapter-meet-cdylib",
     "crates/vc-adapter-webex-cdylib",
 
+    # Tauri-free host logic shared by the desktop backend and the mobile
+    # UniFFI host (SQLite handle, paths, accounts, secrets, registry, …).
+    "crates/host-core",
+
     # Static plugin registry: links the 17 -plugin rlibs + registers them into
     # a PluginManager without dlopen (the mobile/iOS path).
     "crates/host-plugins",
@@ -124,6 +128,7 @@ type_complexity = "allow"
 aperio-db = { path = "crates/aperio-db" }
 cal-core = { path = "crates/cal-core" }
 cal-adapter-local = { path = "crates/cal-adapter-local" }
+host-core = { path = "crates/host-core" }
 plugin-core = { path = "crates/plugin-core" }
 plugin-sdk = { path = "crates/plugin-sdk" }
 sync-core = { path = "crates/sync-core" }
