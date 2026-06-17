@@ -432,14 +432,12 @@ impl Host {
     /// creation); colour/sound are deferred (always `None` here).
     pub fn create_calendar_json(&self, request_json: String) -> Result<String, StoreError> {
         let req: CreateCalendarRequest = from_json("calendar", &request_json)?;
+        // Pass the name verbatim — the desktop `create_calendar` does not trim,
+        // and neither does LocalAdapter; trimming here would diverge the stored
+        // value from the desktop for the same input.
         let created = self
             .adapter
-            .create_calendar(
-                req.name.trim(),
-                None,
-                req.color_label.map(ColorLabelId),
-                None,
-            )
+            .create_calendar(&req.name, None, req.color_label.map(ColorLabelId), None)
             .map_err(map_store_err)?;
         self.registry.note_calendar_route(&created.id, LOCAL_ID);
         to_json(&CalendarRow::new(created, LOCAL_ID.to_string()))
@@ -859,6 +857,43 @@ mod tests {
         let reread: serde_json::Value =
             serde_json::from_str(&host.get_event_by_id_json(id).unwrap()).unwrap();
         assert_eq!(reread["title"], "New");
+    }
+
+    #[test]
+    fn moving_an_event_between_local_calendars_reroutes_it() {
+        let (_dir, host, _kc) = open_host();
+        let cal_a = make_calendar(&host);
+        let cal_b = calendar_id(
+            &host
+                .create_calendar_json(r#"{"name":"B"}"#.to_string())
+                .unwrap(),
+        );
+        let created = host
+            .create_event_json(new_event_json(&cal_a, "Movable"))
+            .unwrap();
+        let mut event: serde_json::Value = serde_json::from_str(&created).unwrap();
+        let id = event["id"].as_str().unwrap().to_string();
+
+        // A local→local move is an in-place update routed by event.calendar_id
+        // (the desktop treats it as a single SQL UPDATE).
+        event["calendar_id"] = serde_json::json!(cal_b);
+        host.update_event_json(event.to_string()).unwrap();
+
+        // B now contains the event; A no longer does.
+        let in_b: serde_json::Value =
+            serde_json::from_str(&host.get_events_json(covering_range(&cal_b)).unwrap()).unwrap();
+        assert!(in_b
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["id"] == serde_json::json!(id)));
+        let in_a: serde_json::Value =
+            serde_json::from_str(&host.get_events_json(covering_range(&cal_a)).unwrap()).unwrap();
+        assert!(in_a
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|e| e["id"] != serde_json::json!(id)));
     }
 
     #[test]

@@ -747,13 +747,21 @@ impl TryFrom<NewTaskDto> for cal_core::NewTask {
 }
 
 /// Errors surfaced from the on-device store to the foreign side.
+///
+/// The variants mirror the desktop's `CommandError` codes (the `From<
+/// cal_core::Error>` mapping in `src-tauri/src/commands/mod.rs`) so the mobile
+/// UI can branch on the same distinctions — re-auth on `Auth`, an
+/// optimistic-concurrency retry on `Conflict`, a transient banner on
+/// `Network`, etc. — instead of getting one opaque storage error. The
+/// external-adapter event paths are where the full spread becomes reachable.
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum StoreError {
     /// Opening or migrating the database file failed.
     #[error("could not open the local database: {detail}")]
     Open { detail: String },
-    /// A read or write against the local database failed.
-    #[error("local storage error: {detail}")]
+    /// A read or write against the local database (or an unclassified adapter
+    /// failure) failed.
+    #[error("storage error: {detail}")]
     Storage { detail: String },
     /// The requested row does not exist.
     #[error("not found")]
@@ -763,6 +771,26 @@ pub enum StoreError {
     /// was otherwise rejected as invalid input.
     #[error("invalid value for {field}: {detail}")]
     InvalidField { field: String, detail: String },
+    /// The adapter rejected the credentials (expired / wrong token) — the UI
+    /// surfaces the re-connect flow.
+    #[error("authentication failed: {detail}")]
+    Auth { detail: String },
+    /// The account is authenticated but not allowed to perform the operation.
+    #[error("access denied: {detail}")]
+    Forbidden { detail: String },
+    /// An ETag / precondition-failed clash (the row changed underneath us) —
+    /// the UI re-reads and retries.
+    #[error("conflict: {detail}")]
+    Conflict { detail: String },
+    /// A transient network failure reaching the provider.
+    #[error("network error: {detail}")]
+    Network { detail: String },
+    /// The provider answered with something the adapter couldn't parse.
+    #[error("protocol error: {detail}")]
+    Protocol { detail: String },
+    /// The adapter doesn't support this operation.
+    #[error("operation not supported: {detail}")]
+    Unsupported { detail: String },
 }
 
 impl From<RecurrenceError> for StoreError {
@@ -776,18 +804,26 @@ impl From<RecurrenceError> for StoreError {
     }
 }
 
-/// Map a core error from the adapter to the FFI store error, preserving the
-/// `NotFound` / invalid-input distinctions the UI branches on.
+/// Map a core error from the adapter to the FFI store error, preserving every
+/// distinction the desktop's `CommandError` keeps (the UI branches on these —
+/// re-auth, conflict-retry, network banner). Exhaustive on purpose: a new
+/// `cal_core::Error` variant forces a compile error here rather than silently
+/// collapsing into `Storage`.
 fn map_store_err(e: cal_core::Error) -> StoreError {
+    use cal_core::Error as E;
     match e {
-        cal_core::Error::NotFound(_) => StoreError::NotFound,
-        cal_core::Error::InvalidInput(detail) => StoreError::InvalidField {
+        E::NotFound(_) => StoreError::NotFound,
+        E::InvalidInput(detail) => StoreError::InvalidField {
             field: "input".to_string(),
             detail,
         },
-        other => StoreError::Storage {
-            detail: other.to_string(),
-        },
+        E::Authentication(detail) => StoreError::Auth { detail },
+        E::Forbidden(detail) => StoreError::Forbidden { detail },
+        E::Conflict(detail) => StoreError::Conflict { detail },
+        E::Network(detail) => StoreError::Network { detail },
+        E::Protocol(detail) => StoreError::Protocol { detail },
+        E::Unsupported(detail) => StoreError::Unsupported { detail },
+        E::Internal(detail) => StoreError::Storage { detail },
     }
 }
 
