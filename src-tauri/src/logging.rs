@@ -16,6 +16,7 @@
 //! `secrets.rs` — credentials are keychain-only and never logged by value).
 
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::{Duration, SystemTime};
@@ -90,6 +91,69 @@ pub fn init(data_dir: &Path) -> LogState {
         handle,
         _guard: guard,
     }
+}
+
+/// Crash file name (`aperio.log.crash`). Shares the `aperio.log` prefix so
+/// [`log_files`] picks it up — a crash therefore rides the normal log export
+/// the user sends, no special-casing needed.
+const CRASH_FILE: &str = "aperio.log.crash";
+
+/// Route Rust panics into the logs so a user hitting a hard crash has something
+/// to send.
+///
+/// Writes a self-contained record (timestamp, thread, location, message,
+/// backtrace) **synchronously** to `<logs_dir>/aperio.log.crash`. Synchronous
+/// on purpose: release builds compile with `panic = "abort"`, so the process
+/// dies the instant the hook returns — the non-blocking tracing file sink would
+/// never get a chance to flush. The crash file shares the log prefix, so
+/// [`collect`] includes it in the exported bundle automatically.
+///
+/// Also emits a `tracing::error!` (useful on the console and, in unwinding/dev
+/// builds, the rolling file) and chains to the previously-installed hook so the
+/// standard stderr message is preserved.
+///
+/// Scope: this catches Rust panics — the overwhelmingly common crash. A genuine
+/// native fault (segfault / access violation) bypasses the panic machinery and
+/// would need a separate signal / minidump handler.
+pub fn install_panic_hook(logs_dir: PathBuf) {
+    let crash_path = logs_dir.join(CRASH_FILE);
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        // Payload type is inferred here, dodging the PanicInfo/PanicHookInfo
+        // rename across Rust versions.
+        let message = info
+            .payload()
+            .downcast_ref::<&str>()
+            .map(|s| s.to_string())
+            .or_else(|| info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "<non-string panic payload>".to_string());
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+            .unwrap_or_else(|| "<unknown location>".to_string());
+        let thread = std::thread::current();
+        let thread_name = thread.name().unwrap_or("<unnamed>").to_string();
+        let backtrace = std::backtrace::Backtrace::force_capture();
+        let when = chrono::Utc::now().to_rfc3339();
+        let version = env!("CARGO_PKG_VERSION");
+
+        let report = format!(
+            "\n==== CRASH {when} ====\n\
+             aperio {version} | thread '{thread_name}'\n\
+             panicked at {location}: {message}\n\
+             {backtrace}\n\
+             ==== end crash ====\n"
+        );
+        let _ = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&crash_path)
+            .and_then(|mut f| f.write_all(report.as_bytes()));
+
+        tracing::error!(target: "panic", %location, thread = %thread_name, "panic: {message}");
+
+        previous(info);
+    }));
 }
 
 /// Last `max_lines` lines of the newest log file, for the in-app viewer.
@@ -263,6 +327,23 @@ mod tests {
         write(tmp.path(), "notes.txt", "ignore me\n");
         let out = collect(tmp.path(), false, None);
         assert_eq!(out, "older\nnewer\n");
+    }
+
+    #[test]
+    fn crash_file_is_included_in_collect() {
+        // A panic record written to `aperio.log.crash` must ride the normal
+        // log export — the prefix + '.' rule in `log_files` matches it — so a
+        // user's "send logs" carries the crash without special-casing.
+        let tmp = TempDir::new().unwrap();
+        write(tmp.path(), "aperio.log.2026-06-01", "normal log line\n");
+        write(
+            tmp.path(),
+            CRASH_FILE,
+            "==== CRASH ====\npanicked at x: boom\n",
+        );
+        let out = collect(tmp.path(), false, None);
+        assert!(out.contains("normal log line"));
+        assert!(out.contains("panicked at x: boom"));
     }
 
     #[test]

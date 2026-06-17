@@ -54,6 +54,10 @@ pub fn run() {
     // logging must be up before anything else emits a trace.
     let data_dir = resolve_data_dir();
     let log_state = logging::init(&data_dir.path);
+    // With logging up, route panics into the logs so a hard crash leaves a
+    // report the user can send (release builds are `panic = "abort"`, so this
+    // writes the crash file synchronously).
+    logging::install_panic_hook(log_state.logs_dir.clone());
 
     // Register the AUMID and pin it to this process before tauri starts
     // — toast notifications inherit it at process scope. On non-Windows
