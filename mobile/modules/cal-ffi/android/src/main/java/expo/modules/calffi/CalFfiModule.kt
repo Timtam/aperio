@@ -205,6 +205,44 @@ class CalFfiModule : Module() {
     AsyncFunction("deleteAccount") { accountId: String ->
       host.deleteAccount(accountId)
     }
+
+    // ─── Calendars + events (the on-device adapters, local + external) ───────
+    // JSON passthrough in the cal_core/desktop wire shape. Routing (local vs
+    // external account) happens Rust-side in the Host; a thrown StoreException
+    // rejects the JS promise with the typed error (NotFound / Conflict / Auth /
+    // …) the mobile api-client maps.
+
+    AsyncFunction("listCalendarsJson") {
+      host.listCalendarsJson()
+    }
+
+    AsyncFunction("createCalendarJson") { requestJson: String ->
+      host.createCalendarJson(requestJson)
+    }
+
+    AsyncFunction("deleteCalendar") { id: String ->
+      host.deleteCalendar(id)
+    }
+
+    AsyncFunction("getEventsJson") { requestJson: String ->
+      host.getEventsJson(requestJson)
+    }
+
+    AsyncFunction("getEventByIdJson") { id: String ->
+      host.getEventByIdJson(id)
+    }
+
+    AsyncFunction("createEventJson") { requestJson: String ->
+      host.createEventJson(requestJson)
+    }
+
+    AsyncFunction("updateEventJson") { eventJson: String ->
+      host.updateEventJson(eventJson)
+    }
+
+    AsyncFunction("deleteEvent") { id: String, calendarId: String?, sendCancellations: Boolean? ->
+      host.deleteEvent(id, calendarId, sendCancellations)
+    }
   }
 }
 

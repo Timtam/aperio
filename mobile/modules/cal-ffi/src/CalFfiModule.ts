@@ -95,6 +95,38 @@ declare class CalFfiModule extends NativeModule<Record<never, never>> {
   /** Delete an account: unregister its adapter, clear its secrets, drop the
    *  row. Rejects when deleting the implicit local account. */
   deleteAccount(accountId: string): Promise<void>;
+
+  // ── Calendars + events ──
+  // JSON passthrough in the cal_core/desktop wire shape; routing (local vs
+  // external account) happens Rust-side in the Host. Rejects with the typed
+  // store error (not_found / conflict / auth / …) on failure.
+
+  /** All calendars (local + external) as a JSON `CalendarRow[]`. Also primes
+   *  the Host's calendar→account route map, so call it before event ops. */
+  listCalendarsJson(): Promise<string>;
+  /** Create a local calendar from `{name, color_label?}`; returns the created
+   *  `CalendarRow` as JSON. */
+  createCalendarJson(requestJson: string): Promise<string>;
+  /** Delete a local calendar (its events cascade). */
+  deleteCalendar(id: string): Promise<void>;
+  /** Events overlapping a range, from `{calendar_id, start, end}` (RFC-3339);
+   *  returns a JSON `Event[]`. */
+  getEventsJson(requestJson: string): Promise<string>;
+  /** One local event by id as JSON (`Event` or `null`). */
+  getEventByIdJson(id: string): Promise<string>;
+  /** Create an event from `{calendar_id, …NewEvent}`; returns the created
+   *  `Event` as JSON. */
+  createEventJson(requestJson: string): Promise<string>;
+  /** Update an event in place from a JSON `Event` (its `calendar_id` selects
+   *  the route); returns the updated `Event` as JSON. */
+  updateEventJson(eventJson: string): Promise<string>;
+  /** Delete an event. `calendarId` is routing-only (null → local);
+   *  `sendCancellations` (external only) defaults to false. */
+  deleteEvent(
+    id: string,
+    calendarId: string | null,
+    sendCancellations: boolean | null,
+  ): Promise<void>;
 }
 
 export default requireNativeModule<CalFfiModule>('CalFfi');

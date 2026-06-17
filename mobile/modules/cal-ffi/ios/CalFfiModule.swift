@@ -44,5 +44,40 @@ public class CalFfiModule: Module {
     AsyncFunction("deleteAccount") { (accountId: String) in
       try self.host.deleteAccount(accountId: accountId)
     }
+
+    // ─── Calendars + events (local + external adapters) ───
+    // JSON passthrough; routing happens Rust-side. Mirrors the Android module.
+
+    AsyncFunction("listCalendarsJson") { () -> String in
+      try self.host.listCalendarsJson()
+    }
+
+    AsyncFunction("createCalendarJson") { (requestJson: String) -> String in
+      try self.host.createCalendarJson(requestJson: requestJson)
+    }
+
+    AsyncFunction("deleteCalendar") { (id: String) in
+      try self.host.deleteCalendar(id: id)
+    }
+
+    AsyncFunction("getEventsJson") { (requestJson: String) -> String in
+      try self.host.getEventsJson(requestJson: requestJson)
+    }
+
+    AsyncFunction("getEventByIdJson") { (id: String) -> String in
+      try self.host.getEventByIdJson(id: id)
+    }
+
+    AsyncFunction("createEventJson") { (requestJson: String) -> String in
+      try self.host.createEventJson(requestJson: requestJson)
+    }
+
+    AsyncFunction("updateEventJson") { (eventJson: String) -> String in
+      try self.host.updateEventJson(eventJson: eventJson)
+    }
+
+    AsyncFunction("deleteEvent") { (id: String, calendarId: String?, sendCancellations: Bool?) in
+      try self.host.deleteEvent(id: id, calendarId: calendarId, sendCancellations: sendCancellations)
+    }
   }
 }
