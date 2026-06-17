@@ -44,7 +44,7 @@ use host_core::user_prefs::UserPrefsRepo;
 use host_core::DbHandle;
 use plugin_core::shim::FfiSyncAdapter;
 use plugin_core::PluginManager;
-use sync_core::{EventPayload, IdPayload, SyncAdapter, SyncError, SyncEvent};
+use sync_core::{AccountPayload, EventPayload, IdPayload, SyncAdapter, SyncError, SyncEvent};
 use sync_engine::{EventLogWriter, SecretError, SecretSlot, SecretStore, SyncOrchestrator};
 
 /// Sync-adapter pref keys (device-local; never propagated). Match the desktop
@@ -58,6 +58,20 @@ const PLUGIN_ID_SYNC_LOCAL: &str = "com.aperio.sync-adapter-local";
 fn sync_err(e: SyncError) -> StoreError {
     StoreError::Storage {
         detail: e.to_string(),
+    }
+}
+
+/// Build the non-secret `AccountPayload` an `account.*` sync event carries
+/// (mirrors the desktop `account_payload`). Secrets never travel here — they go
+/// through the credential-sync gate (E2E only).
+fn account_payload(acc: &host_core::accounts::Account) -> AccountPayload {
+    AccountPayload {
+        id: acc.id.clone(),
+        adapter_kind: acc.adapter_kind.as_str().to_string(),
+        display_name: acc.display_name.clone(),
+        config_json: acc.config_json.clone(),
+        created_at: acc.created_at.clone(),
+        updated_at: acc.updated_at.clone(),
     }
 }
 
@@ -462,6 +476,16 @@ impl Host {
                     detail: format!("failed to store credential: {err}"),
                 });
             }
+            // E2E only: also push the secret to the user's other devices via the
+            // encrypted log so the account works there without re-entry. A no-op
+            // (gated) when E2E is off — credentials then stay device-local.
+            host_core::credential_sync::emit_credential_set(
+                &self.writer,
+                &shared,
+                &created.id,
+                slot,
+                &secret,
+            );
         }
 
         // Register the freshly created external adapter. A failure is
@@ -476,6 +500,12 @@ impl Host {
             }
         }
 
+        // Sync the new account row to other devices (non-secret metadata only;
+        // the receiver surfaces the "reconnect" wizard for the device-local
+        // secret). Mirrors the desktop create_account.
+        self.writer
+            .append(SyncEvent::AccountCreated(account_payload(&created)));
+
         to_json(&created)
     }
 
@@ -487,7 +517,11 @@ impl Host {
         let _ = self.secret_store.delete_all(&account_id);
         let shared = self.db.shared();
         let repo = AccountsRepo::new(&shared);
-        repo.delete(&account_id).map_err(acc_err)
+        repo.delete(&account_id).map_err(acc_err)?;
+        // Propagate the deletion to other devices (cascades secrets there too).
+        self.writer
+            .append(SyncEvent::AccountDeleted(IdPayload { id: account_id }));
+        Ok(())
     }
 
     // ─── Calendars ───────────────────────────────────────────────────────────
