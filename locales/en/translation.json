@@ -18,7 +18,7 @@
     "statusOpen": "open",
     "statusDone": "completed",
     "due": "due {{date}}",
-    "taskHint": "Double-tap toggles done. Swipe up or down to rename or delete.",
+    "taskHint": "Double-tap to edit. Swipe up or down for complete, rename, or delete actions.",
     "renameLabel": "Rename task",
     "renameSaveLabel": "Save rename",
     "renameCancelLabel": "Cancel rename",
@@ -32,7 +32,18 @@
     "deleted": "{{title}} deleted.",
     "renamed": "Renamed to {{title}}.",
     "addFailed": "Could not add: {{message}}",
-    "error": "Error: {{message}}"
+    "error": "Error: {{message}}",
+    "listsButtonLabel": "Task lists",
+    "editTaskLabel": "Edit task",
+    "taskTitleLabel": "Task title",
+    "taskMissing": "This task no longer exists.",
+    "saved": "{{title}} saved.",
+    "newListLabel": "New list",
+    "newListPlaceholder": "List name",
+    "noLists": "No task lists yet. Add one above.",
+    "listAdded": "{{name}} added.",
+    "listSelected": "{{name}} selected.",
+    "listDeselected": "{{name}} deselected."
   },
   "common": {
     "colorComposer": {

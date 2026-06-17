@@ -12,10 +12,17 @@ const config = getDefaultConfig(__dirname);
 // read and watch it. Deep imports like `@aperio/locales/de/translation.json`
 // resolve through the alias.
 const localesDir = path.resolve(__dirname, '..', 'locales');
-config.watchFolders = [...(config.watchFolders ?? []), localesDir];
+
+// The shared, platform-agnostic frontend domain (@aperio/shared) lives at the
+// repo root too — the task types + grouping + label helpers reused 1:1 with the
+// desktop. Same alias mechanism as @aperio/locales (NOT an npm workspace), so
+// `@aperio/shared` resolves to shared/index.ts and Metro watches the folder.
+const sharedDir = path.resolve(__dirname, '..', 'shared');
+config.watchFolders = [...(config.watchFolders ?? []), localesDir, sharedDir];
 config.resolver.extraNodeModules = {
   ...config.resolver.extraNodeModules,
   '@aperio/locales': localesDir,
+  '@aperio/shared': sharedDir,
 };
 
 module.exports = config;

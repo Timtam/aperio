@@ -18,7 +18,7 @@
     "statusOpen": "offen",
     "statusDone": "erledigt",
     "due": "fällig {{date}}",
-    "taskHint": "Doppeltippen schaltet erledigt um. Nach oben oder unten wischen für Umbenennen und Löschen.",
+    "taskHint": "Doppeltippen zum Bearbeiten. Nach oben oder unten wischen für Erledigen, Umbenennen oder Löschen.",
     "renameLabel": "Aufgabe umbenennen",
     "renameSaveLabel": "Umbenennen speichern",
     "renameCancelLabel": "Umbenennen abbrechen",
@@ -32,7 +32,18 @@
     "deleted": "{{title}} gelöscht.",
     "renamed": "Umbenannt in {{title}}.",
     "addFailed": "Konnte nicht hinzufügen: {{message}}",
-    "error": "Fehler: {{message}}"
+    "error": "Fehler: {{message}}",
+    "listsButtonLabel": "Aufgabenlisten",
+    "editTaskLabel": "Aufgabe bearbeiten",
+    "taskTitleLabel": "Aufgabentitel",
+    "taskMissing": "Diese Aufgabe existiert nicht mehr.",
+    "saved": "{{title}} gespeichert.",
+    "newListLabel": "Neue Liste",
+    "newListPlaceholder": "Listenname",
+    "noLists": "Noch keine Aufgabenlisten. Füge oben eine hinzu.",
+    "listAdded": "{{name}} hinzugefügt.",
+    "listSelected": "{{name}} ausgewählt.",
+    "listDeselected": "{{name}} abgewählt."
   },
   "common": {
     "colorComposer": {

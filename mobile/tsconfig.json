@@ -4,7 +4,9 @@
     "strict": true,
     "resolveJsonModule": true,
     "paths": {
-      "@aperio/locales/*": ["../locales/*"]
+      "@aperio/locales/*": ["../locales/*"],
+      "@aperio/shared": ["../shared/index.ts"],
+      "@aperio/shared/*": ["../shared/*"]
     }
   }
 }
