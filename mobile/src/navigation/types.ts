@@ -8,12 +8,16 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
  *   TaskEditor  — create (`taskId: null`) or edit a task; presented as a modal.
  *   Lists       — task-list catalog + selection + creation.
  *   Accounts    — connected-account list + add (non-OAuth kinds) + delete.
+ *   Events      — the selected day's events (across calendars) + day nav.
+ *   EventEditor — create (`eventId: null`) or edit an event; presented as a modal.
  */
 export type RootStackParamList = {
   Tasks: undefined;
   TaskEditor: { taskId: string | null; listId: string };
   Lists: undefined;
   Accounts: undefined;
+  Events: undefined;
+  EventEditor: { eventId: string | null; calendarId: string };
 };
 
 /** Per-screen props helper: `RootStackScreenProps<'TaskEditor'>` gives a typed

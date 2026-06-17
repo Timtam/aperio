@@ -410,6 +410,14 @@ export default function TasksScreen({
         >
           <Text style={styles.ghostButtonText}>{t('dialogs.accounts.title')}</Text>
         </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('mobile.eventsButtonLabel')}
+          onPress={() => navigation.navigate('Events')}
+          style={({ pressed }) => [styles.ghostButton, pressed && styles.rowPressed]}
+        >
+          <Text style={styles.ghostButtonText}>{t('mobile.eventsButtonLabel')}</Text>
+        </Pressable>
       </View>
 
       {loading ? (

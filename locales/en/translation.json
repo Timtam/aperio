@@ -47,7 +47,16 @@
     "groupExpanded": "{{name}} expanded.",
     "groupCollapsed": "{{name}} collapsed.",
     "groupHeaderHint": "Double-tap to expand or collapse.",
-    "invalidDateTime": "Please use YYYY-MM-DD for the date and HH:MM for the time."
+    "invalidDateTime": "Please use YYYY-MM-DD for the date and HH:MM for the time.",
+    "eventsTitle": "Calendar",
+    "eventsButtonLabel": "Calendar",
+    "prevDay": "Previous day",
+    "nextDay": "Next day",
+    "today": "Today",
+    "noEvents": "No events on this day.",
+    "eventsLoading": "Loading events …",
+    "allDay": "All day",
+    "showingDate": "Events on {{date}}"
   },
   "common": {
     "colorComposer": {

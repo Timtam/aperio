@@ -47,7 +47,16 @@
     "groupExpanded": "{{name}} ausgeklappt.",
     "groupCollapsed": "{{name}} eingeklappt.",
     "groupHeaderHint": "Doppeltippen zum Aus- oder Einklappen.",
-    "invalidDateTime": "Bitte das Datum als JJJJ-MM-TT und die Zeit als HH:MM eingeben."
+    "invalidDateTime": "Bitte das Datum als JJJJ-MM-TT und die Zeit als HH:MM eingeben.",
+    "eventsTitle": "Kalender",
+    "eventsButtonLabel": "Kalender",
+    "prevDay": "Vorheriger Tag",
+    "nextDay": "Nächster Tag",
+    "today": "Heute",
+    "noEvents": "Keine Termine an diesem Tag.",
+    "eventsLoading": "Termine werden geladen …",
+    "allDay": "Ganztägig",
+    "showingDate": "Termine am {{date}}"
   },
   "common": {
     "colorComposer": {

@@ -6,6 +6,8 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import type { RootStackParamList } from './navigation/types';
 import AccountsScreen from './screens/AccountsScreen';
+import EventEditorModal from './screens/EventEditorModal';
+import EventsScreen from './screens/EventsScreen';
 import ListsScreen from './screens/ListsScreen';
 import TaskEditorModal from './screens/TaskEditorModal';
 import TasksScreen from './screens/TasksScreen';
@@ -50,9 +52,19 @@ export default function App() {
               options={{ title: t('dialogs.accounts.title') }}
             />
             <Stack.Screen
+              name="Events"
+              component={EventsScreen}
+              options={{ title: t('mobile.eventsTitle') }}
+            />
+            <Stack.Screen
               name="TaskEditor"
               component={TaskEditorModal}
               options={{ presentation: 'modal', title: t('mobile.newTaskLabel') }}
+            />
+            <Stack.Screen
+              name="EventEditor"
+              component={EventEditorModal}
+              options={{ presentation: 'modal', title: t('dialogs.event.newTitle') }}
             />
           </Stack.Navigator>
         </TaskStoreProvider>
