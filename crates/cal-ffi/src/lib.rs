@@ -17,6 +17,11 @@
 
 uniffi::setup_scaffolding!();
 
+/// The full on-device engine handle (accounts + adapter registry over the
+/// statically-embedded plugins). Its `#[uniffi::export]` items register
+/// themselves with the scaffolding regardless of module visibility.
+mod host;
+
 // ───────────────────────────── Attendee parsing ─────────────────────────────
 
 /// A parsed attendee entry: an optional display name plus the email address.

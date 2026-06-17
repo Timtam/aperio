@@ -129,6 +129,7 @@ aperio-db = { path = "crates/aperio-db" }
 cal-core = { path = "crates/cal-core" }
 cal-adapter-local = { path = "crates/cal-adapter-local" }
 host-core = { path = "crates/host-core" }
+host-plugins = { path = "crates/host-plugins" }
 plugin-core = { path = "crates/plugin-core" }
 plugin-sdk = { path = "crates/plugin-sdk" }
 sync-core = { path = "crates/sync-core" }
