@@ -17,25 +17,32 @@
 //! adapts that bridge to the engine-side [`sync_engine::SecretStore`]
 //! the registry already routes through.
 //!
-//! ## Scope (this increment)
+//! ## Scope
 //!
-//! Account CRUD only (`accounts_json` / `create_account_json` /
-//! `delete_account`), all synchronous — opening a plugin instance is a
-//! sync call, so no async runtime is needed yet. The pre-persist
-//! credential smoke-test, the cross-device credential push, and the
-//! `AccountCreated` sync-log event (all desktop `create_account`
-//! behaviour) ride on the event-log + a tokio runtime and land with the
-//! read/write/sync phases.
+//! Account CRUD (`accounts_json` / `create_account_json` / `delete_account`,
+//! synchronous) + the calendar/event surface. The async `CalendarFeature`
+//! methods are driven by a single current-thread tokio runtime via
+//! `block_on`; account CRUD stays synchronous.
+//!
+//! Deferred to later increments (documented per method): the pre-persist
+//! credential smoke-test + cross-device credential push + `AccountCreated`
+//! sync-log event (need the event log); the SWR read cache + cache-updated
+//! callback; colour resolution, overrides, birthday calendars, cross-calendar
+//! event moves, and the external-only conveniences (free/busy, RSVP). The
+//! external-adapter event paths are wired identically to local but hit the
+//! provider live (no cache) and are exercised on-device, not in unit tests.
 
 use std::sync::Arc;
 
+use cal_adapter_local::LocalAdapter;
+use cal_core::{Calendar, CalendarFeature, ColorLabelId};
 use host_core::accounts::{AccountsRepo, AdapterKind};
-use host_core::registry::AdapterRegistry;
+use host_core::registry::{AdapterRegistry, LOCAL_ID};
 use host_core::DbHandle;
 use plugin_core::PluginManager;
 use sync_engine::{SecretError, SecretSlot, SecretStore};
 
-use crate::{from_json, to_json, StoreError};
+use crate::{from_json, map_store_err, to_json, StoreError};
 
 /// Errors the foreign keychain implementation can raise. Mirrors
 /// [`sync_engine::SecretError`] so the `NotFound` distinction the
@@ -129,12 +136,53 @@ fn default_config_json() -> String {
     "{}".into()
 }
 
+/// A calendar enriched with the owning `account_id`, matching the desktop
+/// `CalendarRow` wire shape the frontend groups by source. `Calendar`'s fields
+/// are flattened to the top level (so the JSON is `{id, name, …, account_id}`,
+/// not `{inner: {...}, account_id}`).
+///
+/// `recurrence_capabilities` is intentionally omitted in this slice (the TS
+/// field is optional and the frontend defaults to full RFC-5545 support — the
+/// same default the desktop yields for the local / unknown account); it lands
+/// with the plugin-manifest capability port.
+#[derive(serde::Serialize)]
+struct CalendarRow {
+    #[serde(flatten)]
+    inner: Calendar,
+    account_id: String,
+}
+
+impl CalendarRow {
+    fn new(inner: Calendar, account_id: String) -> Self {
+        Self { inner, account_id }
+    }
+}
+
+/// Create-calendar request (the desktop `CreateCalendarRequest` shape, minus
+/// the not-yet-wired colour object). Local calendars only.
+#[derive(serde::Deserialize)]
+struct CreateCalendarRequest {
+    name: String,
+    #[serde(default)]
+    color_label: Option<String>,
+}
+
 /// The mobile app's handle to the full on-device engine.
 #[derive(uniffi::Object)]
 pub struct Host {
     db: DbHandle,
+    /// The local calendar/task adapter — the routing branch for the implicit
+    /// `local` account, sharing the one writer connection with the registry's
+    /// external adapters (the desktop topology).
+    adapter: LocalAdapter,
     registry: Arc<AdapterRegistry>,
     secret_store: Arc<dyn SecretStore>,
+    /// Drives the async `CalendarFeature` methods via `block_on`. A
+    /// current-thread runtime: every body is synchronous SQLite (local) or an
+    /// FFI shim bounded by `spawn_blocking`, so a worker pool would be idle
+    /// weight. Exported methods stay synchronous and wrap their async work in
+    /// exactly one `self.runtime.block_on(..)`.
+    runtime: tokio::runtime::Runtime,
     // Kept alive for the lifetime of the host; the registry holds an
     // `Arc` clone and looks plugins up against it per account.
     _plugin_manager: Arc<PluginManager>,
@@ -154,6 +202,22 @@ impl Host {
         let db = DbHandle::open(&db_path).map_err(|e| StoreError::Open {
             detail: e.to_string(),
         })?;
+
+        // The local adapter shares the single writer connection with the
+        // registry's external adapters — the same topology as the desktop
+        // backend (one DbHandle, many Arc clones of its mutex).
+        let adapter = LocalAdapter::new(db.shared());
+
+        // Current-thread runtime to block_on the async CalendarFeature methods.
+        // `enable_all` gives the time + I/O drivers the external-adapter shim's
+        // HTTP needs; the runtime's blocking pool serves the shim's
+        // spawn_blocking. No worker threads — we never spawn long-lived tasks.
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| StoreError::Open {
+                detail: format!("tokio runtime: {e}"),
+            })?;
 
         // Static plugin embedding: no dlopen (iOS forbids it) — the 17
         // `-plugin` rlibs are linked into this library and registered by id.
@@ -182,8 +246,10 @@ impl Host {
 
         Ok(Arc::new(Self {
             db,
+            adapter,
             registry,
             secret_store,
+            runtime,
             _plugin_manager: plugin_manager,
         }))
     }
@@ -279,6 +345,66 @@ impl Host {
         let shared = self.db.shared();
         let repo = AccountsRepo::new(&shared);
         repo.delete(&account_id).map_err(acc_err)
+    }
+
+    // ─── Calendars ───────────────────────────────────────────────────────────
+
+    /// All calendars (local + external) as a JSON `CalendarRow[]`, and — as a
+    /// side effect — primes the registry's calendar→account route map so the
+    /// event methods can route. Mirrors the desktop `list_calendars` minus the
+    /// SWR cache, overrides, birthday calendars, and recurrence-capability
+    /// resolution (all deferred). Callers should list calendars before event
+    /// operations — the same ordering the desktop frontend honours.
+    pub fn list_calendars_json(&self) -> Result<String, StoreError> {
+        let rows = self.runtime.block_on(async {
+            let local = self.adapter.list_calendars().await.map_err(map_store_err)?;
+            for c in &local {
+                self.registry.note_calendar_route(&c.id, LOCAL_ID);
+            }
+            // `list_external_calendars` stamps external routes internally and
+            // swallows per-adapter errors so one dead account can't blank the
+            // whole list.
+            let external = self.registry.list_external_calendars().await;
+
+            let mut out: Vec<CalendarRow> = Vec::with_capacity(local.len() + external.len());
+            for c in local {
+                out.push(CalendarRow::new(c, LOCAL_ID.to_string()));
+            }
+            for c in external {
+                let acct = self
+                    .registry
+                    .account_for_calendar(&c.id)
+                    .unwrap_or_else(|| LOCAL_ID.to_string());
+                out.push(CalendarRow::new(c, acct));
+            }
+            Ok::<_, StoreError>(out)
+        })?;
+        to_json(&rows)
+    }
+
+    /// Create a local calendar; returns it as a `CalendarRow`. Stamps the new
+    /// id's route immediately so a following event op routes without a
+    /// re-list. Local-only (the adapter surface has no external-calendar
+    /// creation); colour/sound are deferred (always `None` here).
+    pub fn create_calendar_json(&self, request_json: String) -> Result<String, StoreError> {
+        let req: CreateCalendarRequest = from_json("calendar", &request_json)?;
+        let created = self
+            .adapter
+            .create_calendar(
+                req.name.trim(),
+                None,
+                req.color_label.map(ColorLabelId),
+                None,
+            )
+            .map_err(map_store_err)?;
+        self.registry.note_calendar_route(&created.id, LOCAL_ID);
+        to_json(&CalendarRow::new(created, LOCAL_ID.to_string()))
+    }
+
+    /// Delete a local calendar (its events cascade away). Mirrors the desktop
+    /// local-only `delete_calendar`.
+    pub fn delete_calendar(&self, id: String) -> Result<(), StoreError> {
+        self.adapter.delete_calendar(&id).map_err(map_store_err)
     }
 }
 
@@ -436,5 +562,76 @@ mod tests {
         let (_dir, host, _kc) = open_host();
         let err = host.delete_account("local".to_string()).unwrap_err();
         assert!(matches!(err, StoreError::InvalidField { .. }));
+    }
+
+    // ─── Calendars ───────────────────────────────────────────────────────────
+
+    fn calendar_id(created_json: &str) -> String {
+        serde_json::from_str::<serde_json::Value>(created_json).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    }
+
+    #[test]
+    fn create_calendar_returns_flattened_local_row_and_primes_route() {
+        let (_dir, host, _kc) = open_host();
+        // No color_label: a label id would need a matching color_labels row
+        // (FK), and a fresh DB defines none. The desktop only ever sends an
+        // existing label; the null case is what an unlabelled calendar carries.
+        let created = host
+            .create_calendar_json(r#"{"name":"Trips"}"#.to_string())
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_str(&created).unwrap();
+        // CalendarRow flattens Calendar: id/name at the top level, not nested.
+        assert!(v["id"].is_string());
+        assert_eq!(v["name"], "Trips");
+        assert_eq!(v["account_id"], "local");
+        // color_label is present-as-null (a bare value, never an object).
+        assert!(v["color_label"].is_null());
+        // The new calendar routes immediately (no re-list needed).
+        let id = v["id"].as_str().unwrap();
+        assert_eq!(
+            host.registry.account_for_calendar(id),
+            Some("local".to_string())
+        );
+    }
+
+    #[test]
+    fn list_calendars_includes_local_and_primes_routes() {
+        let (_dir, host, _kc) = open_host();
+        let id = calendar_id(
+            &host
+                .create_calendar_json(r#"{"name":"Personal"}"#.to_string())
+                .unwrap(),
+        );
+
+        let listed = host.list_calendars_json().unwrap();
+        let rows: serde_json::Value = serde_json::from_str(&listed).unwrap();
+        let arr = rows.as_array().unwrap();
+        // The created calendar is present, tagged local.
+        assert!(arr
+            .iter()
+            .any(|r| r["id"] == serde_json::json!(id) && r["account_id"] == "local"));
+        // Every row carries the account_id source-grouping key.
+        assert!(arr.iter().all(|r| r["account_id"].is_string()));
+        // Listing primed the route map.
+        assert_eq!(
+            host.registry.account_for_calendar(&id),
+            Some("local".to_string())
+        );
+    }
+
+    #[test]
+    fn delete_calendar_removes_it() {
+        let (_dir, host, _kc) = open_host();
+        let id = calendar_id(
+            &host
+                .create_calendar_json(r#"{"name":"Temp"}"#.to_string())
+                .unwrap(),
+        );
+        host.delete_calendar(id).unwrap();
+        let listed = host.list_calendars_json().unwrap();
+        assert!(!listed.contains("Temp"));
     }
 }
