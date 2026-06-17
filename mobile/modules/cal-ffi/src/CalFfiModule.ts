@@ -2,7 +2,7 @@ import { NativeModule, requireNativeModule } from 'expo';
 
 import { ParsedAttendee, TaskListView, TaskView } from './CalFfi.types';
 
-declare class CalFfiModule extends NativeModule<{}> {
+declare class CalFfiModule extends NativeModule<Record<never, never>> {
   /**
    * Parse an attendee entry (`"Name <email>"` or a bare address) by calling
    * the shared Rust `cal-core` parser through UniFFI. Synchronous.
