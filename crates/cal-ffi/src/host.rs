@@ -35,7 +35,7 @@
 use std::sync::Arc;
 
 use cal_adapter_local::LocalAdapter;
-use cal_core::{Calendar, CalendarFeature, ColorLabelId};
+use cal_core::{Calendar, CalendarFeature, ColorLabelId, DateRange, Event, NewEvent};
 use host_core::accounts::{AccountsRepo, AdapterKind};
 use host_core::registry::{AdapterRegistry, LOCAL_ID};
 use host_core::DbHandle;
@@ -167,6 +167,24 @@ struct CreateCalendarRequest {
     color_label: Option<String>,
 }
 
+/// Event-range read request — the desktop `get_events` payload. `start`/`end`
+/// are RFC-3339 UTC instants (chrono parses them).
+#[derive(serde::Deserialize)]
+struct EventRangeRequest {
+    calendar_id: String,
+    start: chrono::DateTime<chrono::Utc>,
+    end: chrono::DateTime<chrono::Utc>,
+}
+
+/// Create-event request — the target calendar plus a flattened `NewEvent`
+/// (the desktop `create_event` payload shape).
+#[derive(serde::Deserialize)]
+struct CreateEventRequest {
+    calendar_id: String,
+    #[serde(flatten)]
+    event: NewEvent,
+}
+
 /// The mobile app's handle to the full on-device engine.
 #[derive(uniffi::Object)]
 pub struct Host {
@@ -186,6 +204,32 @@ pub struct Host {
     // Kept alive for the lifetime of the host; the registry holds an
     // `Arc` clone and looks plugins up against it per account.
     _plugin_manager: Arc<PluginManager>,
+}
+
+impl Host {
+    /// Resolve a calendar id's owning adapter for the event methods: `None`
+    /// is the local branch (the desktop's `.unwrap_or_else(LOCAL_ID)`
+    /// fallback — an unknown id is treated as local), `Some(ext)` the external
+    /// adapter. A non-local id whose adapter isn't live is `NotFound`,
+    /// mirroring the desktop's "calendar is not routable" 404.
+    ///
+    /// Routing relies on the calendar→account map, which
+    /// [`Host::list_calendars_json`] / [`Host::create_calendar_json`] prime —
+    /// callers list calendars before event ops (the desktop invariant).
+    fn route(&self, calendar_id: &str) -> Result<Option<Arc<dyn CalendarFeature>>, StoreError> {
+        let account = self
+            .registry
+            .account_for_calendar(calendar_id)
+            .unwrap_or_else(|| LOCAL_ID.to_string());
+        if account == LOCAL_ID {
+            Ok(None)
+        } else {
+            self.registry
+                .calendar_adapter(&account)
+                .map(Some)
+                .ok_or(StoreError::NotFound)
+        }
+    }
 }
 
 #[uniffi::export]
@@ -405,6 +449,114 @@ impl Host {
     /// local-only `delete_calendar`.
     pub fn delete_calendar(&self, id: String) -> Result<(), StoreError> {
         self.adapter.delete_calendar(&id).map_err(map_store_err)
+    }
+
+    // ─── Events ──────────────────────────────────────────────────────────────
+
+    /// Events in `calendar_id` overlapping `[start, end]`, as a JSON `Event[]`.
+    /// Routes local → LocalAdapter, external → the registry adapter. Mirrors
+    /// the desktop `get_events` minus the SWR read-cache + staleness-gated
+    /// background refresh (deferred): the external branch hits the provider
+    /// live, exactly as a cache-cold desktop first read. Birthday calendars are
+    /// deferred (desktop-only) — a birthday id routes to empty.
+    ///
+    /// The local adapter currently returns rows whose stored start/end
+    /// intersect the range (RRULE occurrence expansion is its own later phase),
+    /// so a recurring master is returned only when its stored span overlaps.
+    pub fn get_events_json(&self, request_json: String) -> Result<String, StoreError> {
+        let req: EventRangeRequest = from_json("request", &request_json)?;
+        let range = DateRange::new(req.start, req.end);
+        let events = self.runtime.block_on(async {
+            match self.route(&req.calendar_id)? {
+                None => self
+                    .adapter
+                    .get_events(&req.calendar_id, range)
+                    .await
+                    .map_err(map_store_err),
+                Some(ext) => ext
+                    .get_events(&req.calendar_id, range)
+                    .await
+                    .map_err(map_store_err),
+            }
+        })?;
+        to_json(&events)
+    }
+
+    /// One local event by id as JSON (`Event` or `null`). Local-only by design
+    /// — the desktop `get_event_by_id` is the reminders-overview lookup against
+    /// the local store; external events aren't addressable by a bare id without
+    /// their calendar.
+    pub fn get_event_by_id_json(&self, id: String) -> Result<String, StoreError> {
+        let event = self.adapter.get_event_by_id(&id).map_err(map_store_err)?;
+        to_json(&event)
+    }
+
+    /// Create an event in `calendar_id` from a flattened `NewEvent`; returns
+    /// the created `Event` as JSON. Routes local/external. Mirrors the desktop
+    /// `create_event` minus colour resolution + the event-log/cache-invalidate
+    /// + reminder reschedule (deferred).
+    pub fn create_event_json(&self, request_json: String) -> Result<String, StoreError> {
+        let req: CreateEventRequest = from_json("request", &request_json)?;
+        let created = self.runtime.block_on(async {
+            match self.route(&req.calendar_id)? {
+                None => self
+                    .adapter
+                    .create_event(&req.calendar_id, req.event)
+                    .await
+                    .map_err(map_store_err),
+                Some(ext) => ext
+                    .create_event(&req.calendar_id, req.event)
+                    .await
+                    .map_err(map_store_err),
+            }
+        })?;
+        to_json(&created)
+    }
+
+    /// Update an event in place (its `calendar_id` field selects the route);
+    /// returns the updated `Event` as JSON. Mirrors the in-place branch of the
+    /// desktop `update_event`. Cross-calendar moves (the create-on-target +
+    /// best-effort-delete dance with `previous_calendar_id`) are deferred.
+    pub fn update_event_json(&self, event_json: String) -> Result<String, StoreError> {
+        let event: Event = from_json("event", &event_json)?;
+        let updated = self.runtime.block_on(async {
+            match self.route(&event.calendar_id)? {
+                None => self
+                    .adapter
+                    .update_event(event)
+                    .await
+                    .map_err(map_store_err),
+                Some(ext) => ext.update_event(event).await.map_err(map_store_err),
+            }
+        })?;
+        to_json(&updated)
+    }
+
+    /// Delete an event. `calendar_id` is routing-only (dropped before the
+    /// adapter call); omitted → assume local (desktop back-compat).
+    /// `send_cancellations` (external only) defaults to false; local has no
+    /// attendees so it never sends. Mirrors the desktop `delete_event`.
+    pub fn delete_event(
+        &self,
+        id: String,
+        calendar_id: Option<String>,
+        send_cancellations: Option<bool>,
+    ) -> Result<(), StoreError> {
+        let send = send_cancellations.unwrap_or(false);
+        self.runtime.block_on(async {
+            let route = match calendar_id.as_deref() {
+                Some(cid) => self.route(cid)?,
+                None => None,
+            };
+            match route {
+                None => self
+                    .adapter
+                    .delete_event(&id, false)
+                    .await
+                    .map_err(map_store_err),
+                Some(ext) => ext.delete_event(&id, send).await.map_err(map_store_err),
+            }
+        })
     }
 }
 
@@ -633,5 +785,118 @@ mod tests {
         host.delete_calendar(id).unwrap();
         let listed = host.list_calendars_json().unwrap();
         assert!(!listed.contains("Temp"));
+    }
+
+    // ─── Events ──────────────────────────────────────────────────────────────
+
+    fn make_calendar(host: &Host) -> String {
+        calendar_id(
+            &host
+                .create_calendar_json(r#"{"name":"Cal"}"#.to_string())
+                .unwrap(),
+        )
+    }
+
+    /// A minimal valid `CreateEventRequest` JSON (NewEvent flattened). Omits
+    /// color_hex + send_invitations (serde defaults); all other Options are
+    /// present-as-null, as `cal_core::NewEvent` requires.
+    fn new_event_json(cal: &str, title: &str) -> String {
+        format!(
+            r#"{{"calendar_id":"{cal}","title":"{title}","description":null,"location":null,"start":"2026-06-20T09:00:00Z","end":"2026-06-20T09:30:00Z","all_day":false,"recurrence":null,"color_label":null,"reminders":[],"sound":null,"attendees":[]}}"#
+        )
+    }
+
+    fn covering_range(cal: &str) -> String {
+        format!(
+            r#"{{"calendar_id":"{cal}","start":"2026-06-01T00:00:00Z","end":"2026-07-01T00:00:00Z"}}"#
+        )
+    }
+
+    #[test]
+    fn create_event_round_trips_through_get_and_get_by_id() {
+        let (_dir, host, _kc) = open_host();
+        let cal = make_calendar(&host);
+        let created = host
+            .create_event_json(new_event_json(&cal, "Standup"))
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_str(&created).unwrap();
+        assert!(v["id"].as_str().is_some_and(|s| !s.is_empty()));
+        assert_eq!(v["title"], "Standup");
+        assert!(v.get("created_at").is_some());
+        // skip_serializing_if keeps these off the wire when unset.
+        assert!(v.get("color_hex").is_none());
+        assert!(v.get("send_invitations").is_none());
+        let id = v["id"].as_str().unwrap().to_string();
+
+        // get_events over a covering range returns it.
+        let events: serde_json::Value =
+            serde_json::from_str(&host.get_events_json(covering_range(&cal)).unwrap()).unwrap();
+        assert!(events
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["id"] == serde_json::json!(id)));
+
+        // get_event_by_id returns Some(event).
+        let one: serde_json::Value =
+            serde_json::from_str(&host.get_event_by_id_json(id.clone()).unwrap()).unwrap();
+        assert_eq!(one["id"], serde_json::json!(id));
+    }
+
+    #[test]
+    fn update_event_changes_title_and_persists() {
+        let (_dir, host, _kc) = open_host();
+        let cal = make_calendar(&host);
+        let created = host.create_event_json(new_event_json(&cal, "Old")).unwrap();
+        let mut event: serde_json::Value = serde_json::from_str(&created).unwrap();
+        event["title"] = serde_json::json!("New");
+        let updated = host.update_event_json(event.to_string()).unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&updated).unwrap()["title"],
+            "New"
+        );
+        let id = event["id"].as_str().unwrap().to_string();
+        let reread: serde_json::Value =
+            serde_json::from_str(&host.get_event_by_id_json(id).unwrap()).unwrap();
+        assert_eq!(reread["title"], "New");
+    }
+
+    #[test]
+    fn delete_event_removes_it() {
+        let (_dir, host, _kc) = open_host();
+        let cal = make_calendar(&host);
+        let created = host
+            .create_event_json(new_event_json(&cal, "Doomed"))
+            .unwrap();
+        let id = serde_json::from_str::<serde_json::Value>(&created).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        host.delete_event(id.clone(), Some(cal), None).unwrap();
+        // get_event_by_id → JSON null after deletion.
+        assert_eq!(host.get_event_by_id_json(id).unwrap().trim(), "null");
+    }
+
+    #[test]
+    fn updating_a_deleted_event_is_not_found() {
+        let (_dir, host, _kc) = open_host();
+        let cal = make_calendar(&host);
+        let created = host
+            .create_event_json(new_event_json(&cal, "Ghost"))
+            .unwrap();
+        let event: serde_json::Value = serde_json::from_str(&created).unwrap();
+        let id = event["id"].as_str().unwrap().to_string();
+        host.delete_event(id, Some(cal), None).unwrap();
+        let err = host.update_event_json(event.to_string()).unwrap_err();
+        assert!(matches!(err, StoreError::NotFound));
+    }
+
+    #[test]
+    fn get_events_for_unknown_calendar_routes_local_and_returns_empty() {
+        let (_dir, host, _kc) = open_host();
+        let range = r#"{"calendar_id":"does-not-exist","start":"2026-06-01T00:00:00Z","end":"2026-07-01T00:00:00Z"}"#;
+        let events: serde_json::Value =
+            serde_json::from_str(&host.get_events_json(range.to_string()).unwrap()).unwrap();
+        assert!(events.as_array().unwrap().is_empty());
     }
 }
