@@ -37,10 +37,13 @@ use std::sync::Arc;
 use cal_adapter_local::LocalAdapter;
 use cal_core::{Calendar, CalendarFeature, ColorLabelId, DateRange, Event, NewEvent};
 use host_core::accounts::{AccountsRepo, AdapterKind};
+use host_core::event_log::OnboardingService;
 use host_core::registry::{AdapterRegistry, LOCAL_ID};
+use host_core::sync::build_orchestrator;
 use host_core::DbHandle;
 use plugin_core::PluginManager;
-use sync_engine::{SecretError, SecretSlot, SecretStore};
+use sync_core::{EventPayload, IdPayload, SyncEvent};
+use sync_engine::{EventLogWriter, SecretError, SecretSlot, SecretStore, SyncOrchestrator};
 
 use crate::{from_json, map_store_err, to_json, StoreError};
 
@@ -195,12 +198,23 @@ pub struct Host {
     adapter: LocalAdapter,
     registry: Arc<AdapterRegistry>,
     secret_store: Arc<dyn SecretStore>,
-    /// Drives the async `CalendarFeature` methods via `block_on`. A
-    /// current-thread runtime: every body is synchronous SQLite (local) or an
-    /// FFI shim bounded by `spawn_blocking`, so a worker pool would be idle
-    /// weight. Exported methods stay synchronous and wrap their async work in
-    /// exactly one `self.runtime.block_on(..)`.
+    /// Drives the async `CalendarFeature` methods + the sync orchestrator via
+    /// `block_on`. ONE worker thread (multi-thread flavour, not current-thread)
+    /// so the event-log writer's long-lived drain task keeps advancing between
+    /// our `block_on` calls — a current-thread runtime would only drive it
+    /// while we're parked in `block_on`. Exported methods stay synchronous and
+    /// wrap their async work in exactly one `self.runtime.block_on(..)`.
     runtime: tokio::runtime::Runtime,
+    /// Appends a `SyncEvent` after each LOCAL mutation so the next sync round
+    /// carries it. External-account mutations self-sync via the provider, so
+    /// they are NOT logged here (mirrors the desktop `is_local` split).
+    writer: Arc<EventLogWriter>,
+    /// Runs a sync round (push + fetch + apply). Unconfigured until
+    /// `configure_sync_adapter_json`; `sync_now` then errors "not configured".
+    orchestrator: Arc<SyncOrchestrator>,
+    // Held for the lifetime of the host (snapshot consume/produce + meta
+    // heartbeats); the onboarding command surface is a later phase.
+    _onboarding: Arc<OnboardingService>,
     // Kept alive for the lifetime of the host; the registry holds an
     // `Arc` clone and looks plugins up against it per account.
     _plugin_manager: Arc<PluginManager>,
@@ -230,6 +244,16 @@ impl Host {
                 .ok_or(StoreError::NotFound)
         }
     }
+
+    /// Whether `calendar_id` belongs to the local account (an unknown id is
+    /// treated as local, matching `route`). Drives the append-to-event-log
+    /// decision: only LOCAL mutations are logged for sync; external accounts
+    /// self-sync via their provider.
+    fn is_local_calendar(&self, calendar_id: &str) -> bool {
+        self.registry
+            .account_for_calendar(calendar_id)
+            .is_none_or(|a| a == LOCAL_ID)
+    }
 }
 
 #[uniffi::export]
@@ -252,11 +276,13 @@ impl Host {
         // backend (one DbHandle, many Arc clones of its mutex).
         let adapter = LocalAdapter::new(db.shared());
 
-        // Current-thread runtime to block_on the async CalendarFeature methods.
-        // `enable_all` gives the time + I/O drivers the external-adapter shim's
-        // HTTP needs; the runtime's blocking pool serves the shim's
-        // spawn_blocking. No worker threads — we never spawn long-lived tasks.
-        let runtime = tokio::runtime::Builder::new_current_thread()
+        // One-worker multi-thread runtime: `block_on` drives the
+        // CalendarFeature methods + sync rounds, while the event-log writer's
+        // drain task lives on the worker thread and keeps flushing appends
+        // between our calls. `enable_all` gives the time + I/O drivers the
+        // external-adapter shim's HTTP + the writer need.
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
             .enable_all()
             .build()
             .map_err(|e| StoreError::Open {
@@ -272,15 +298,18 @@ impl Host {
 
         let secret_store: Arc<dyn SecretStore> = Arc::new(BridgeSecretStore { bridge: keychain });
 
-        // Per-account plugin state (EWS sync cookies, caches) persists next
-        // to the database file.
+        // The app-sandbox data dir (where aperio.sqlite lives): per-account
+        // plugin state (EWS sync cookies) + the sync pending-log tree both hang
+        // off it. Always Some on a real device path; `.` only on a bare file
+        // name (tests pass an absolute temp path).
         let data_dir = std::path::Path::new(&db_path)
             .parent()
-            .map(|p| p.to_path_buf());
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
         let registry = Arc::new(AdapterRegistry::with_data_dir(
             Arc::clone(&plugin_manager),
             Arc::clone(&secret_store),
-            data_dir,
+            Some(data_dir.clone()),
         ));
         {
             let shared = db.shared();
@@ -288,12 +317,30 @@ impl Host {
             registry.bootstrap(&repo);
         }
 
+        // The sync graph — the SAME assembly the desktop builds
+        // (host_core::sync::build_orchestrator), over our keychain-bridged
+        // SecretStore. Built inside the runtime so the writer's drain task has
+        // a context. ONE boot_at, shared by writer + orchestrator.
+        let boot_at = chrono::Utc::now();
+        let graph = runtime.block_on(async {
+            build_orchestrator(
+                db.shared(),
+                data_dir,
+                Arc::clone(&secret_store),
+                env!("CARGO_PKG_VERSION"),
+                boot_at,
+            )
+        });
+
         Ok(Arc::new(Self {
             db,
             adapter,
             registry,
             secret_store,
             runtime,
+            writer: graph.writer,
+            orchestrator: graph.orchestrator,
+            _onboarding: graph.onboarding,
             _plugin_manager: plugin_manager,
         }))
     }
@@ -440,13 +487,23 @@ impl Host {
             .create_calendar(&req.name, None, req.color_label.map(ColorLabelId), None)
             .map_err(map_store_err)?;
         self.registry.note_calendar_route(&created.id, LOCAL_ID);
+        // Local-only → always log for sync.
+        if let Ok(fields) = serde_json::to_value(&created) {
+            self.writer.append(SyncEvent::CalendarCreated(EventPayload {
+                id: created.id.clone(),
+                fields,
+            }));
+        }
         to_json(&CalendarRow::new(created, LOCAL_ID.to_string()))
     }
 
     /// Delete a local calendar (its events cascade away). Mirrors the desktop
     /// local-only `delete_calendar`.
     pub fn delete_calendar(&self, id: String) -> Result<(), StoreError> {
-        self.adapter.delete_calendar(&id).map_err(map_store_err)
+        self.adapter.delete_calendar(&id).map_err(map_store_err)?;
+        self.writer
+            .append(SyncEvent::CalendarDeleted(IdPayload { id }));
+        Ok(())
     }
 
     // ─── Events ──────────────────────────────────────────────────────────────
@@ -491,8 +548,9 @@ impl Host {
 
     /// Create an event in `calendar_id` from a flattened `NewEvent`; returns
     /// the created `Event` as JSON. Routes local/external. Mirrors the desktop
-    /// `create_event` minus colour resolution + the event-log/cache-invalidate
-    /// + reminder reschedule (deferred).
+    /// `create_event` minus colour resolution + reminder reschedule (deferred).
+    /// A LOCAL create is logged to the event log so the next sync round carries
+    /// it; an external create self-syncs via the provider.
     pub fn create_event_json(&self, request_json: String) -> Result<String, StoreError> {
         let req: CreateEventRequest = from_json("request", &request_json)?;
         let created = self.runtime.block_on(async {
@@ -508,6 +566,14 @@ impl Host {
                     .map_err(map_store_err),
             }
         })?;
+        if self.is_local_calendar(&created.calendar_id) {
+            if let Ok(fields) = serde_json::to_value(&created) {
+                self.writer.append(SyncEvent::EventCreated(EventPayload {
+                    id: created.id.clone(),
+                    fields,
+                }));
+            }
+        }
         to_json(&created)
     }
 
@@ -527,6 +593,14 @@ impl Host {
                 Some(ext) => ext.update_event(event).await.map_err(map_store_err),
             }
         })?;
+        if self.is_local_calendar(&updated.calendar_id) {
+            if let Ok(fields) = serde_json::to_value(&updated) {
+                self.writer.append(SyncEvent::EventUpdated(EventPayload {
+                    id: updated.id.clone(),
+                    fields,
+                }));
+            }
+        }
         to_json(&updated)
     }
 
@@ -541,6 +615,10 @@ impl Host {
         send_cancellations: Option<bool>,
     ) -> Result<(), StoreError> {
         let send = send_cancellations.unwrap_or(false);
+        // Omitted calendar_id → assume local (desktop back-compat).
+        let is_local = calendar_id
+            .as_deref()
+            .is_none_or(|cid| self.is_local_calendar(cid));
         self.runtime.block_on(async {
             let route = match calendar_id.as_deref() {
                 Some(cid) => self.route(cid)?,
@@ -554,7 +632,19 @@ impl Host {
                     .map_err(map_store_err),
                 Some(ext) => ext.delete_event(&id, send).await.map_err(map_store_err),
             }
-        })
+        })?;
+        if is_local {
+            self.writer
+                .append(SyncEvent::EventDeleted(IdPayload { id }));
+        }
+        Ok(())
+    }
+
+    /// The orchestrator's status as JSON (the desktop `SyncStatus` shape:
+    /// configured / in_flight / last_synced_at / interval / e2e / …). Reads
+    /// without a sync round.
+    pub fn sync_status_json(&self) -> Result<String, StoreError> {
+        to_json(&self.orchestrator.status())
     }
 }
 
@@ -933,5 +1023,47 @@ mod tests {
         let events: serde_json::Value =
             serde_json::from_str(&host.get_events_json(range.to_string()).unwrap()).unwrap();
         assert!(events.as_array().unwrap().is_empty());
+    }
+
+    // ─── Sync (writer + status) ──────────────────────────────────────────────
+
+    #[test]
+    fn local_mutations_populate_the_pending_log_and_status_is_unconfigured() {
+        let (dir, host, _kc) = open_host();
+        // No sync adapter configured yet.
+        let status: serde_json::Value =
+            serde_json::from_str(&host.sync_status_json().unwrap()).unwrap();
+        assert_eq!(status["configured"], false);
+
+        // Two local mutations → CalendarCreated + EventCreated in the log.
+        let cal = calendar_id(
+            &host
+                .create_calendar_json(r#"{"name":"Sync me"}"#.to_string())
+                .unwrap(),
+        );
+        host.create_event_json(new_event_json(&cal, "Logged"))
+            .unwrap();
+
+        // The writer drains on the runtime worker thread; poll briefly for the
+        // pending session file to materialise (bounded so a stall fails loudly).
+        let pending = dir.path().join("sync").join("log").join("pending");
+        let mut bytes = 0u64;
+        for _ in 0..40 {
+            if let Ok(entries) = std::fs::read_dir(&pending) {
+                bytes = entries
+                    .flatten()
+                    .filter_map(|e| std::fs::metadata(e.path()).ok())
+                    .map(|m| m.len())
+                    .sum();
+            }
+            if bytes > 0 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert!(
+            bytes > 0,
+            "expected a non-empty pending log file after local mutations",
+        );
     }
 }

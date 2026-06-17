@@ -1088,6 +1088,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "sync-core",
  "sync-engine",
  "tempfile",
  "thiserror 1.0.69",

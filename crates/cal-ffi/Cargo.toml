@@ -48,6 +48,7 @@ rusqlite.workspace = true
 host-core.workspace = true
 host-plugins.workspace = true
 plugin-core.workspace = true
+sync-core.workspace = true
 sync-engine.workspace = true
 # The Host drives the async CalendarFeature methods (list/get/create/update/
 # delete events) by block_on-ing them on a current-thread runtime; account CRUD
