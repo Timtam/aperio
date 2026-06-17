@@ -4,125 +4,22 @@
 // truth; if a field changes there, mirror it here. Phase 2 will look at
 // generating these from the Rust definitions (e.g. via `specta`), at
 // which point this file becomes a starting point.
+//
+// The task domain (Task, TaskList, Section, plus the cross-cutting
+// ContainerColor / Reminder / SoundConfig / ColorLabel / recurrence-capability
+// types) now lives in the shared `@aperio/shared` package — reused by the
+// mobile app — and is re-exported here so existing `src/api/types` imports keep
+// resolving unchanged.
 
-export interface ContainerColor {
-  hex: string;
-  source: 'native' | 'custom';
-}
+import type {
+  ContainerColor,
+  RecurrenceCapabilities,
+  Reminder,
+  SoundConfig,
+  Task,
+} from '@aperio/shared';
 
-/** Which recurrence shapes the owning adapter can store. Mirrors
- *  `plugin_core::RecurrenceCapabilities`; stamped onto every
- *  Calendar by the backend (resolved from the account's plugin
- *  manifest). The EventDialog greys out options the source can't
- *  round-trip — e.g. EWS omits `"yearly"` from `interval_frequencies`
- *  because Exchange has no yearly interval. Local + unknown sources
- *  report full RFC-5545 support. */
-export interface RecurrenceCapabilities {
-  frequencies: RecurrenceFreq[];
-  interval_frequencies: RecurrenceFreq[];
-  relative_monthly: boolean;
-  relative_yearly: boolean;
-  weekly_byday: boolean;
-  /** An explicit monthly day-of-month can be stored. Vikunja repeats
-   *  monthly on the task's due-date day implicitly, so it sets this false
-   *  and the task editor disables the "day of month" field. Calendar
-   *  events always store BYMONTHDAY → default true. */
-  monthly_day_of_month: boolean;
-  count: boolean;
-  until: boolean;
-}
-
-export type RecurrenceFreq = 'daily' | 'weekly' | 'monthly' | 'yearly';
-
-/** Which task-organisation features the owning adapter supports.
- *  Mirrors `plugin_core::TaskCapabilities`; stamped onto every
- *  `TaskList` by the backend (resolved from the account's plugin
- *  manifest, or the local store's hard-coded set). The task UI gates
- *  affordances on these — e.g. only offering "add section" where
- *  `sections` is true, or cross-project drag where
- *  `move_between_projects` is true. Absent → treat as the cal-core-
- *  native default (flat lists, single-level subtasks, cross-list move).*/
-export interface TaskCapabilities {
-  nested_projects: boolean;
-  subtasks: boolean;
-  /** `null` ⇒ unlimited nesting depth. */
-  max_subtask_depth: number | null;
-  sections: boolean;
-  /** The adapter can create / rename / delete sections at the source
-   *  (Todoist sections, Vikunja kanban buckets). Gates the section
-   *  create/rename/delete controls. Coloring a section is independent —
-   *  always a local override, offered wherever `sections` is true. */
-  manageable_sections: boolean;
-  multiple_labels: boolean;
-  task_recurrence: boolean;
-  /** Which recurrence shapes the adapter can store for tasks (mirrors the
-   *  calendar side). Absent ⇒ full support. The task recurrence editor
-   *  greys out what the source can't round-trip — e.g. Vikunja drops
-   *  yearly, the weekday picker, an explicit day-of-month and the
-   *  COUNT / UNTIL end modes. */
-  recurrence?: RecurrenceCapabilities;
-  /** The source stores the "in progress" status as a distinct state.
-   *  Backends with only open/done (Google Tasks, Vikunja, Todoist) set
-   *  this false — an in_progress write reads back as open — so the UI
-   *  skips the auto-schedule-to-today a started task would trigger.
-   *  Absent → true (cal-core-native: local / CalDAV / Exchange / Graph). */
-  supports_in_progress: boolean;
-  move_between_projects: boolean;
-  /** The adapter can create new task lists (projects) at the source.
-   *  The sidebar offers "new list in this account" only where true. */
-  create_lists: boolean;
-  /** The adapter can delete task lists at the source. */
-  delete_lists: boolean;
-  /** The adapter can manage a list's membership/sharing (the sidebar's
-   *  "manage members" entry + the members dialog). Vikunja + Todoist;
-   *  flat/personal backends leave it false. */
-  manageable: boolean;
-  /** How members are added when `manageable`: directory search (Vikunja)
-   *  or raw-email invite (Todoist). Drives the members dialog's add
-   *  control. */
-  member_add_by: MemberAddMethod;
-}
-
-/** How members are added to a task list (DESIGN §9.7): pick from a user
- *  directory (Vikunja) or invite by raw email (Todoist). */
-export type MemberAddMethod = 'search' | 'email';
-
-/** A sub-grouping of tasks within one list — a Vikunja bucket or a
- *  Todoist section. Mirrors `cal_core::Section`. */
-export interface Section {
-  id: string;
-  list_id: string;
-  name: string;
-  /** Optional color-label binding. Cascades to the section's tasks that
-   *  carry no color of their own (resolution chain task → section →
-   *  list). `null` ⇒ no color. */
-  color_label: string | null;
-  /** Display order within the list; lower sorts first. */
-  order: number;
-}
-
-/** A user in the task domain — a task assignee, a member of a task
- *  list's collaborator pool, or the connected account's own identity
- *  ("me"). `id` is the provider-native user id. See DESIGN §9.7. */
-export interface TaskUser {
-  id: string;
-  name: string;
-  email: string | null;
-}
-
-/** Permission level on a task-list share (Vikunja). `null` on backends
- *  without per-share roles (Todoist). */
-export type MemberRight = 'read' | 'write' | 'admin';
-
-/** One editable membership/share of a task list (DESIGN §9.7) — the
- *  members dialog drives add/remove/role from these. Distinct from the
- *  read-only assignee pool. */
-export interface TaskListShare {
-  user: TaskUser;
-  right: MemberRight | null;
-  /** Invitation not yet accepted (Todoist email invites). */
-  pending: boolean;
-}
+export type * from '@aperio/shared';
 
 export interface Calendar {
   id: string;
@@ -156,23 +53,6 @@ export interface Calendar {
    *  host-local override instead. Routes a recolor through `update_event`
    *  (native) vs `setEventColor` (override). Absent → treat as unsupported. */
   supports_event_color?: boolean;
-}
-
-export interface SoundConfig {
-  source:
-    | { type: 'system' }
-    | { type: 'silent' }
-    | { type: 'custom'; sha256: string };
-  volume: number;
-}
-
-export interface Reminder {
-  kind:
-    | { type: 'relative'; minutes_before: number }
-    | { type: 'absolute'; at: string }
-    | { type: 'app_start' }
-    | { type: 'email'; minutes_before: number };
-  sound: SoundConfig | null;
 }
 
 export interface EventRecurrence {
@@ -257,99 +137,6 @@ export interface FreeBusySlot {
 export interface FreeBusy {
   email: string;
   slots: FreeBusySlot[];
-}
-
-export interface TaskList {
-  id: string;
-  name: string;
-  color: ContainerColor | null;
-  /** Bound color-label id — see `Calendar.color_label`. */
-  color_label: string | null;
-  default_sound: SoundConfig | null;
-  embedded_in_calendar: string | null;
-  read_only: boolean;
-  /** Account that owns this task list. Same semantics as
-   *  `Calendar.account_id` — populated by the backend's route map. */
-  account_id: string;
-  /** Parent project id for backends with nested projects (Vikunja,
-   *  Todoist). `null` for top-level lists and flat backends. Refers to
-   *  another `TaskList.id` owned by the same account. The sidebar
-   *  builds its project tree from this. */
-  parent_id: string | null;
-  /** Task-organisation capabilities of the owning adapter. Backend-
-   *  stamped alongside `account_id`; optional in the wire shape so a
-   *  consumer reading a list from a pre-capabilities snapshot still
-   *  parses. Absent → cal-core-native default. */
-  task_capabilities?: TaskCapabilities;
-}
-
-export type TaskStatus = 'open' | 'in_progress' | 'completed' | 'cancelled';
-export type TaskPriority = 'low' | 'medium' | 'high';
-
-export interface Task {
-  id: string;
-  list_id: string;
-  title: string;
-  description: string | null;
-  status: TaskStatus;
-  priority: TaskPriority;
-  /**
-   * The day the task is to be done. Was historically also where the
-   * old `deadline_type='on'` cases lived after migration 0006 — the
-   * "Geplanter Tag" and "Konkrete Deadline" of the old enum are now
-   * one and the same field.
-   */
-  scheduled_date: string | null;
-  /**
-   * Optional time-of-day on `scheduled_date`. Renders as a point
-   * marker in the day grid (no block duration). Requires
-   * `scheduled_date`; the DB enforces this via a CHECK constraint.
-   */
-  scheduled_time: string | null;
-  /**
-   * The day BY which the task must be done. The only deadline
-   * semantic that survives migration 0006 — what used to be
-   * `deadline_type='by'`. Until that day the task lives in the
-   * backlog and can be scheduled per-day via `scheduled_date`; on
-   * the deadline day, if still open, an app-start checker pins it
-   * to today.
-   */
-  deadline_date: string | null;
-  deadline_time: string | null;
-  recurrence: unknown;
-  /** DESIGN §9.12: a backlog task surfaces in the active backlog only
-   *  on/after this date (the recurrence "resurface" trigger). `null` ⇒
-   *  visible now; until then it sits in the "Zukünftig" group. */
-  resurface_date: string | null;
-  /** DESIGN §9.12: stable id of the recurring series this instance belongs
-   *  to (so shared-list clients don't double-spawn). `null` ⇒ not managed. */
-  series_id: string | null;
-  parent_id: string | null;
-  /** Section (Vikunja bucket / Todoist section) this task is filed
-   *  under within its list. `null` ⇒ ungrouped, or a backend with no
-   *  sections. Refers to a `Section.id` whose `list_id == this.list_id`. */
-  section_id: string | null;
-  color_label: string | null;
-  reminders: Reminder[];
-  sound: SoundConfig | null;
-  /** Users this task is assigned to (DESIGN §9.7). Empty ⇒ unassigned.
-   *  Only adapters that support assignment populate/accept it. */
-  assignees: TaskUser[];
-  created_at: string;
-  updated_at: string;
-  completed_at: string | null;
-  etag: string | null;
-}
-
-export interface ColorLabel {
-  id: string;
-  name: string;
-  hex: string;
-  /** `true` for a hidden "ad-hoc" one-off color composed via the custom
-   *  color picker (name = hex, deduped by hex). Excluded from the palette
-   *  UI, but resolves like any label. Optional in the wire shape so older
-   *  payloads default to a named label. */
-  ad_hoc?: boolean;
 }
 
 /** Address book — the contacts equivalent of `Calendar`/`TaskList`.

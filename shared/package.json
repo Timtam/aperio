@@ -1,0 +1,7 @@
+{
+  "name": "@aperio/shared",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Shared, platform-agnostic frontend TypeScript for Aperio — domain types and pure logic reused by the desktop frontend (Vite) and the mobile app (Expo/Metro). Starts with the task domain (types, grouping, status/label helpers); calendar hooks, settings handlers, and other reusable bits move in here over time.",
+  "//": "No runtime deps. Resolved via a path alias on each side (no bundler-specific main/exports), so imports like '@aperio/shared' work in both Vite and Metro — same mechanism as @aperio/locales."
+}

@@ -14,6 +14,12 @@ export default defineConfig({
       // Shared UI translations (also consumed by the mobile app). Kept as a
       // top-level package so both frontends draw from one source of truth.
       '@aperio/locales': fileURLToPath(new URL('./locales', import.meta.url)),
+      // Shared, platform-agnostic frontend domain (task types + grouping +
+      // label helpers; more over time). Same source of truth as the mobile
+      // app. Points at the index directly — the package has no main/exports.
+      '@aperio/shared': fileURLToPath(
+        new URL('./shared/index.ts', import.meta.url),
+      ),
     },
   },
 

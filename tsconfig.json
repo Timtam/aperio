@@ -19,9 +19,10 @@
     "allowSyntheticDefaultImports": true,
     "baseUrl": ".",
     "paths": {
-      "@aperio/locales/*": ["./locales/*"]
+      "@aperio/locales/*": ["./locales/*"],
+      "@aperio/shared": ["./shared/index.ts"]
     }
   },
-  "include": ["src", "vite.config.ts", "locales"],
+  "include": ["src", "vite.config.ts", "locales", "shared"],
   "exclude": ["node_modules", "dist", "src-tauri", "crates", "target"]
 }

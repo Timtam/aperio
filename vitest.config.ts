@@ -9,6 +9,10 @@ export default defineConfig({
     alias: {
       // Mirror vite.config.ts so the shared translations resolve under test.
       '@aperio/locales': fileURLToPath(new URL('./locales', import.meta.url)),
+      // Mirror vite.config.ts so the shared frontend domain resolves under test.
+      '@aperio/shared': fileURLToPath(
+        new URL('./shared/index.ts', import.meta.url),
+      ),
     },
   },
   test: {
