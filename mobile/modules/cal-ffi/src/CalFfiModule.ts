@@ -40,6 +40,43 @@ declare class CalFfiModule extends NativeModule<Record<never, never>> {
   rescheduleTask(taskId: string, scheduledDate: string | null): Promise<TaskView>;
   /** Delete a task. Rejects on unknown id. */
   deleteTask(taskId: string): Promise<void>;
+
+  // ── JSON bridge (the faithful tasks port) ──
+  // The full task / list / section domain crosses as a JSON string in the
+  // `cal_core` serde shape — identical to the desktop's Tauri payloads. The
+  // mobile api-client parses these into the shared `@aperio/shared` types; the
+  // bridge stays a dumb passthrough so the marshalling lives in one place.
+  // Each rejects with the store's typed error message on failure.
+
+  /** All task lists as a JSON `TaskList[]`. */
+  taskListsJson(): Promise<string>;
+  /** Create a top-level local list; returns the created `TaskList` as JSON. */
+  createTaskListJson(name: string): Promise<string>;
+  /** Set or clear a list's parent (`null` promotes to top level); returns the
+   *  updated `TaskList` as JSON. */
+  reparentTaskListJson(id: string, parentId: string | null): Promise<string>;
+  /** Tasks in a list as a JSON `Task[]`, ordered by date then creation time. */
+  tasksJson(listId: string): Promise<string>;
+  /** One task by id as JSON. Rejects (not found) when absent. */
+  taskJson(id: string): Promise<string>;
+  /** Create a task from a JSON `NewTask`; returns the created `Task` as JSON. */
+  createTaskJson(listId: string, newTaskJson: string): Promise<string>;
+  /** Update a task from a JSON `Task`; returns the updated `Task` as JSON.
+   *  Completing a recurring task spawns its next instance (DESIGN §9.12). */
+  updateTaskJson(taskJson: string): Promise<string>;
+  /** Sections of a list as a JSON `Section[]`. */
+  sectionsJson(listId: string): Promise<string>;
+  /** Create a section; returns the created `Section` as JSON. */
+  createSectionJson(
+    listId: string,
+    name: string,
+    position: number,
+    colorLabel: string | null,
+  ): Promise<string>;
+  /** Update a section from a JSON `Section`; returns it as JSON. */
+  updateSectionJson(sectionJson: string): Promise<string>;
+  /** Delete a section; its tasks fall back to ungrouped (`section_id` → null). */
+  deleteSection(id: string): Promise<void>;
 }
 
 export default requireNativeModule<CalFfiModule>('CalFfi');

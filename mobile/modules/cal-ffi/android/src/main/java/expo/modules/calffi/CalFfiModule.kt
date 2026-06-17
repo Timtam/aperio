@@ -112,6 +112,63 @@ class CalFfiModule : Module() {
     AsyncFunction("deleteTask") { taskId: String ->
       store.deleteTask(taskId)
     }
+
+    // ─── JSON bridge (the faithful tasks port) ──────────────────────────────
+    // The full task / list / section domain crosses as a JSON string in the
+    // cal_core serde shape — identical to the desktop's Tauri payloads — so
+    // this layer is a trivial passthrough: the mobile api-client parses the
+    // JSON into the shared @aperio/shared types, keeping the marshalling in
+    // one place instead of duplicating per-field mapping per platform. Each
+    // returns the JSON the Rust store produced; a thrown StoreException
+    // rejects the JS promise. Supersedes the reduced-view task functions above
+    // (kept until the navigation UI lands).
+
+    AsyncFunction("taskListsJson") {
+      store.taskListsJson()
+    }
+
+    AsyncFunction("createTaskListJson") { name: String ->
+      store.createTaskListJson(name)
+    }
+
+    AsyncFunction("reparentTaskListJson") { id: String, parentId: String? ->
+      store.reparentTaskListJson(id, parentId)
+    }
+
+    AsyncFunction("tasksJson") { listId: String ->
+      store.tasksJson(listId)
+    }
+
+    AsyncFunction("taskJson") { id: String ->
+      store.taskJson(id)
+    }
+
+    AsyncFunction("createTaskJson") { listId: String, newTaskJson: String ->
+      store.createTaskJson(listId, newTaskJson)
+    }
+
+    AsyncFunction("updateTaskJson") { taskJson: String ->
+      store.updateTaskJson(taskJson)
+    }
+
+    AsyncFunction("sectionsJson") { listId: String ->
+      store.sectionsJson(listId)
+    }
+
+    // `position` arrives from JS as a Number; the Rust signature takes a u32
+    // (Kotlin UInt), which Expo can't coerce a JS Number to directly, so take
+    // an Int and widen it here.
+    AsyncFunction("createSectionJson") { listId: String, name: String, position: Int, colorLabel: String? ->
+      store.createSectionJson(listId, name, position.toUInt(), colorLabel)
+    }
+
+    AsyncFunction("updateSectionJson") { sectionJson: String ->
+      store.updateSectionJson(sectionJson)
+    }
+
+    AsyncFunction("deleteSection") { id: String ->
+      store.deleteSection(id)
+    }
   }
 }
 
