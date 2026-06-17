@@ -549,6 +549,17 @@ public protocol HostProtocol: AnyObject, Sendable {
     func accountsJson() throws  -> String
     
     /**
+     * Configure the sync adapter from a JSON request. This slice handles
+     * `{"kind":"local","path":"…"}` (a local-filesystem sync target): open the
+     * statically-embedded local sync plugin, probe it (`test_connection`), make
+     * it the orchestrator's active adapter, and persist the choice under the
+     * `sync.adapter.*` prefs (device-local; the is_synced_key allowlist
+     * excludes them, so they never propagate). webdav/sftp/ftp + the E2E
+     * `wrap_if_encrypted` branch + the OAuth kinds follow.
+     */
+    func configureSyncAdapterJson(configJson: String) throws 
+    
+    /**
      * Create an external (or local) account: persist the row, store the
      * secret via the keychain bridge, and register the adapter so
      * subsequent reads/writes route through it. Returns the created
@@ -574,8 +585,9 @@ public protocol HostProtocol: AnyObject, Sendable {
     /**
      * Create an event in `calendar_id` from a flattened `NewEvent`; returns
      * the created `Event` as JSON. Routes local/external. Mirrors the desktop
-     * `create_event` minus colour resolution + the event-log/cache-invalidate
-     * + reminder reschedule (deferred).
+     * `create_event` minus colour resolution + reminder reschedule (deferred).
+     * A LOCAL create is logged to the event log so the next sync round carries
+     * it; an external create self-syncs via the provider.
      */
     func createEventJson(requestJson: String) throws  -> String
     
@@ -631,6 +643,26 @@ public protocol HostProtocol: AnyObject, Sendable {
      * operations — the same ordering the desktop frontend honours.
      */
     func listCalendarsJson() throws  -> String
+    
+    /**
+     * Push the local pending logs without fetching (call from RN AppState
+     * "background"). Returns the number of logs pushed.
+     */
+    func pushNow() throws  -> UInt32
+    
+    /**
+     * Run one sync round (push local pending logs, fetch + apply foreign ones,
+     * compaction audit) and return the `SyncRoundReport` as JSON. Errors with
+     * "not configured" until `configure_sync_adapter_json` has run.
+     */
+    func syncNowJson() throws  -> String
+    
+    /**
+     * The orchestrator's status as JSON (the desktop `SyncStatus` shape:
+     * configured / in_flight / last_synced_at / interval / e2e / …). Reads
+     * without a sync round.
+     */
+    func syncStatusJson() throws  -> String
     
     /**
      * Update an event in place (its `calendar_id` field selects the route);
@@ -724,6 +756,23 @@ open func accountsJson()throws  -> String  {
 }
     
     /**
+     * Configure the sync adapter from a JSON request. This slice handles
+     * `{"kind":"local","path":"…"}` (a local-filesystem sync target): open the
+     * statically-embedded local sync plugin, probe it (`test_connection`), make
+     * it the orchestrator's active adapter, and persist the choice under the
+     * `sync.adapter.*` prefs (device-local; the is_synced_key allowlist
+     * excludes them, so they never propagate). webdav/sftp/ftp + the E2E
+     * `wrap_if_encrypted` branch + the OAuth kinds follow.
+     */
+open func configureSyncAdapterJson(configJson: String)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_configure_sync_adapter_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(configJson),$0
+    )
+}
+}
+    
+    /**
      * Create an external (or local) account: persist the row, store the
      * secret via the keychain bridge, and register the adapter so
      * subsequent reads/writes route through it. Returns the created
@@ -763,8 +812,9 @@ open func createCalendarJson(requestJson: String)throws  -> String  {
     /**
      * Create an event in `calendar_id` from a flattened `NewEvent`; returns
      * the created `Event` as JSON. Routes local/external. Mirrors the desktop
-     * `create_event` minus colour resolution + the event-log/cache-invalidate
-     * + reminder reschedule (deferred).
+     * `create_event` minus colour resolution + reminder reschedule (deferred).
+     * A LOCAL create is logged to the event log so the next sync round carries
+     * it; an external create self-syncs via the provider.
      */
 open func createEventJson(requestJson: String)throws  -> String  {
     return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
@@ -863,6 +913,44 @@ open func getEventsJson(requestJson: String)throws  -> String  {
 open func listCalendarsJson()throws  -> String  {
     return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
     uniffi_cal_ffi_fn_method_host_list_calendars_json(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+    /**
+     * Push the local pending logs without fetching (call from RN AppState
+     * "background"). Returns the number of logs pushed.
+     */
+open func pushNow()throws  -> UInt32  {
+    return try  FfiConverterUInt32.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_push_now(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+    /**
+     * Run one sync round (push local pending logs, fetch + apply foreign ones,
+     * compaction audit) and return the `SyncRoundReport` as JSON. Errors with
+     * "not configured" until `configure_sync_adapter_json` has run.
+     */
+open func syncNowJson()throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_sync_now_json(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+    /**
+     * The orchestrator's status as JSON (the desktop `SyncStatus` shape:
+     * configured / in_flight / last_synced_at / interval / e2e / …). Reads
+     * without a sync round.
+     */
+open func syncStatusJson()throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_sync_status_json(
             self.uniffiCloneHandle(),$0
     )
 })
@@ -4153,13 +4241,16 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_accounts_json() != 21992) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_cal_ffi_checksum_method_host_configure_sync_adapter_json() != 51399) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_cal_ffi_checksum_method_host_create_account_json() != 61944) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_create_calendar_json() != 42147) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_cal_ffi_checksum_method_host_create_event_json() != 50491) {
+    if (uniffi_cal_ffi_checksum_method_host_create_event_json() != 14023) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_delete_account() != 32623) {
@@ -4178,6 +4269,15 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_list_calendars_json() != 49275) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_push_now() != 17383) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_sync_now_json() != 41765) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_sync_status_json() != 35684) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_update_event_json() != 27193) {

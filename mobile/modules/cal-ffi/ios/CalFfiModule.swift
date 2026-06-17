@@ -79,5 +79,23 @@ public class CalFfiModule: Module {
     AsyncFunction("deleteEvent") { (id: String, calendarId: String?, sendCancellations: Bool?) in
       try self.host.deleteEvent(id: id, calendarId: calendarId, sendCancellations: sendCancellations)
     }
+
+    // ─── Sync ───
+
+    AsyncFunction("configureSyncAdapterJson") { (configJson: String) in
+      try self.host.configureSyncAdapterJson(configJson: configJson)
+    }
+
+    AsyncFunction("syncStatusJson") { () -> String in
+      try self.host.syncStatusJson()
+    }
+
+    AsyncFunction("syncNowJson") { () -> String in
+      try self.host.syncNowJson()
+    }
+
+    AsyncFunction("pushNow") { () -> Int in
+      Int(try self.host.pushNow())
+    }
   }
 }

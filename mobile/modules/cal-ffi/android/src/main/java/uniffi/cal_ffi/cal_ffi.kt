@@ -726,6 +726,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_accounts_json(
     ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_configure_sync_adapter_json(
+    ): Short
     external fun uniffi_cal_ffi_checksum_method_host_create_account_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_create_calendar_json(
@@ -743,6 +745,12 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_cal_ffi_checksum_method_host_get_events_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_list_calendars_json(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_push_now(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_sync_now_json(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_sync_status_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_update_event_json(
     ): Short
@@ -833,6 +841,8 @@ external fun uniffi_cal_ffi_fn_constructor_host_open(`dbPath`: RustBuffer.ByValu
 ): Long
 external fun uniffi_cal_ffi_fn_method_host_accounts_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_configure_sync_adapter_json(`ptr`: Long,`configJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_cal_ffi_fn_method_host_create_account_json(`ptr`: Long,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_create_calendar_json(`ptr`: Long,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -850,6 +860,12 @@ external fun uniffi_cal_ffi_fn_method_host_get_event_by_id_json(`ptr`: Long,`id`
 external fun uniffi_cal_ffi_fn_method_host_get_events_json(`ptr`: Long,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_list_calendars_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_push_now(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Int
+external fun uniffi_cal_ffi_fn_method_host_sync_now_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_sync_status_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_update_event_json(`ptr`: Long,`eventJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1067,13 +1083,16 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_accounts_json() != 21992.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_configure_sync_adapter_json() != 51399.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_create_account_json() != 61944.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_create_calendar_json() != 42147.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_cal_ffi_checksum_method_host_create_event_json() != 50491.toShort()) {
+    if (lib.uniffi_cal_ffi_checksum_method_host_create_event_json() != 14023.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_delete_account() != 32623.toShort()) {
@@ -1092,6 +1111,15 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_list_calendars_json() != 49275.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_push_now() != 17383.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_sync_now_json() != 41765.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_sync_status_json() != 35684.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_update_event_json() != 27193.toShort()) {
@@ -1559,6 +1587,17 @@ public interface HostInterface {
     fun `accountsJson`(): kotlin.String
     
     /**
+     * Configure the sync adapter from a JSON request. This slice handles
+     * `{"kind":"local","path":"…"}` (a local-filesystem sync target): open the
+     * statically-embedded local sync plugin, probe it (`test_connection`), make
+     * it the orchestrator's active adapter, and persist the choice under the
+     * `sync.adapter.*` prefs (device-local; the is_synced_key allowlist
+     * excludes them, so they never propagate). webdav/sftp/ftp + the E2E
+     * `wrap_if_encrypted` branch + the OAuth kinds follow.
+     */
+    fun `configureSyncAdapterJson`(`configJson`: kotlin.String)
+    
+    /**
      * Create an external (or local) account: persist the row, store the
      * secret via the keychain bridge, and register the adapter so
      * subsequent reads/writes route through it. Returns the created
@@ -1584,8 +1623,9 @@ public interface HostInterface {
     /**
      * Create an event in `calendar_id` from a flattened `NewEvent`; returns
      * the created `Event` as JSON. Routes local/external. Mirrors the desktop
-     * `create_event` minus colour resolution + the event-log/cache-invalidate
-     * + reminder reschedule (deferred).
+     * `create_event` minus colour resolution + reminder reschedule (deferred).
+     * A LOCAL create is logged to the event log so the next sync round carries
+     * it; an external create self-syncs via the provider.
      */
     fun `createEventJson`(`requestJson`: kotlin.String): kotlin.String
     
@@ -1641,6 +1681,26 @@ public interface HostInterface {
      * operations — the same ordering the desktop frontend honours.
      */
     fun `listCalendarsJson`(): kotlin.String
+    
+    /**
+     * Push the local pending logs without fetching (call from RN AppState
+     * "background"). Returns the number of logs pushed.
+     */
+    fun `pushNow`(): kotlin.UInt
+    
+    /**
+     * Run one sync round (push local pending logs, fetch + apply foreign ones,
+     * compaction audit) and return the `SyncRoundReport` as JSON. Errors with
+     * "not configured" until `configure_sync_adapter_json` has run.
+     */
+    fun `syncNowJson`(): kotlin.String
+    
+    /**
+     * The orchestrator's status as JSON (the desktop `SyncStatus` shape:
+     * configured / in_flight / last_synced_at / interval / e2e / …). Reads
+     * without a sync round.
+     */
+    fun `syncStatusJson`(): kotlin.String
     
     /**
      * Update an event in place (its `calendar_id` field selects the route);
@@ -1771,6 +1831,28 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * Configure the sync adapter from a JSON request. This slice handles
+     * `{"kind":"local","path":"…"}` (a local-filesystem sync target): open the
+     * statically-embedded local sync plugin, probe it (`test_connection`), make
+     * it the orchestrator's active adapter, and persist the choice under the
+     * `sync.adapter.*` prefs (device-local; the is_synced_key allowlist
+     * excludes them, so they never propagate). webdav/sftp/ftp + the E2E
+     * `wrap_if_encrypted` branch + the OAuth kinds follow.
+     */
+    @Throws(StoreException::class)override fun `configureSyncAdapterJson`(`configJson`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_configure_sync_adapter_json(
+        it,
+        FfiConverterString.lower(`configJson`),_status)
+}
+    }
+    
+    
+
+    
+    /**
      * Create an external (or local) account: persist the row, store the
      * secret via the keychain bridge, and register the adapter so
      * subsequent reads/writes route through it. Returns the created
@@ -1820,8 +1902,9 @@ open class Host: Disposable, AutoCloseable, HostInterface
     /**
      * Create an event in `calendar_id` from a flattened `NewEvent`; returns
      * the created `Event` as JSON. Routes local/external. Mirrors the desktop
-     * `create_event` minus colour resolution + the event-log/cache-invalidate
-     * + reminder reschedule (deferred).
+     * `create_event` minus colour resolution + reminder reschedule (deferred).
+     * A LOCAL create is logged to the event log so the next sync round carries
+     * it; an external create self-syncs via the provider.
      */
     @Throws(StoreException::class)override fun `createEventJson`(`requestJson`: kotlin.String): kotlin.String {
             return FfiConverterString.lift(
@@ -1950,6 +2033,62 @@ open class Host: Disposable, AutoCloseable, HostInterface
     callWithHandle {
     uniffiRustCallWithError(StoreException) { _status ->
     UniffiLib.uniffi_cal_ffi_fn_method_host_list_calendars_json(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Push the local pending logs without fetching (call from RN AppState
+     * "background"). Returns the number of logs pushed.
+     */
+    @Throws(StoreException::class)override fun `pushNow`(): kotlin.UInt {
+            return FfiConverterUInt.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_push_now(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Run one sync round (push local pending logs, fetch + apply foreign ones,
+     * compaction audit) and return the `SyncRoundReport` as JSON. Errors with
+     * "not configured" until `configure_sync_adapter_json` has run.
+     */
+    @Throws(StoreException::class)override fun `syncNowJson`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_sync_now_json(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * The orchestrator's status as JSON (the desktop `SyncStatus` shape:
+     * configured / in_flight / last_synced_at / interval / e2e / …). Reads
+     * without a sync round.
+     */
+    @Throws(StoreException::class)override fun `syncStatusJson`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_sync_status_json(
         it,
         _status)
 }

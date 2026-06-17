@@ -127,6 +127,20 @@ declare class CalFfiModule extends NativeModule<Record<never, never>> {
     calendarId: string | null,
     sendCancellations: boolean | null,
   ): Promise<void>;
+
+  // ── Sync (full desktop peer: same engine, statically-embedded adapters) ──
+  /** Set the active sync target from a JSON `{kind, …}` (local: `{kind:"local",
+   *  path}`); persists + probes. Rejects on a bad target / unsupported kind. */
+  configureSyncAdapterJson(configJson: string): Promise<void>;
+  /** The orchestrator status as JSON (configured / in_flight / last_synced_at /
+   *  e2e_enabled / …). */
+  syncStatusJson(): Promise<string>;
+  /** Run one sync round (push + fetch + apply); returns the SyncRoundReport as
+   *  JSON. Rejects "not configured" until a target is set. */
+  syncNowJson(): Promise<string>;
+  /** Push local pending logs without fetching (RN AppState background); returns
+   *  the number of logs pushed. */
+  pushNow(): Promise<number>;
 }
 
 export default requireNativeModule<CalFfiModule>('CalFfi');

@@ -243,6 +243,26 @@ class CalFfiModule : Module() {
     AsyncFunction("deleteEvent") { id: String, calendarId: String?, sendCancellations: Boolean? ->
       host.deleteEvent(id, calendarId, sendCancellations)
     }
+
+    // ─── Sync (full desktop peer: same engine, statically-embedded adapters) ──
+    // configure sets the active sync target; sync_now runs a round + returns the
+    // report; a thrown StoreException rejects the JS promise.
+
+    AsyncFunction("configureSyncAdapterJson") { configJson: String ->
+      host.configureSyncAdapterJson(configJson)
+    }
+
+    AsyncFunction("syncStatusJson") {
+      host.syncStatusJson()
+    }
+
+    AsyncFunction("syncNowJson") {
+      host.syncNowJson()
+    }
+
+    AsyncFunction("pushNow") {
+      host.pushNow().toInt()
+    }
   }
 }
 
