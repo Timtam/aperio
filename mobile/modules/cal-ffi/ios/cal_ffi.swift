@@ -414,7 +414,13 @@ fileprivate final class UniffiHandleMap<T>: @unchecked Sendable {
 
 
 // Public interface members begin here.
-
+// Magic number for the Rust proxy to call using the same mechanism as every other method,
+// to free the callback once it's dropped by Rust.
+private let IDX_CALLBACK_FREE: Int32 = 0
+// Callback return codes
+private let UNIFFI_CALLBACK_SUCCESS: Int32 = 0
+private let UNIFFI_CALLBACK_ERROR: Int32 = 1
+private let UNIFFI_CALLBACK_UNEXPECTED_ERROR: Int32 = 2
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -444,6 +450,46 @@ fileprivate struct FfiConverterUInt32: FfiConverterPrimitive {
     }
 
     public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterInt64: FfiConverterPrimitive {
+    typealias FfiType = Int64
+    typealias SwiftType = Int64
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Int64 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: Int64, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterBool : FfiConverter {
+    typealias FfiType = Int8
+    typealias SwiftType = Bool
+
+    public static func lift(_ value: Int8) throws -> Bool {
+        return value != 0
+    }
+
+    public static func lower(_ value: Bool) -> Int8 {
+        return value ? 1 : 0
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Bool {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: Bool, into buf: inout [UInt8]) {
         writeInt(&buf, lower(value))
     }
 }
@@ -488,6 +534,1076 @@ fileprivate struct FfiConverterString: FfiConverter {
         writeBytes(&buf, value.utf8)
     }
 }
+
+
+
+
+/**
+ * The mobile app's handle to the full on-device engine.
+ */
+public protocol HostProtocol: AnyObject, Sendable {
+    
+    /**
+     * All persisted accounts as JSON (the `cal_core`/desktop wire shape).
+     */
+    func accountsJson() throws  -> String
+    
+    /**
+     * Create an external (or local) account: persist the row, store the
+     * secret via the keychain bridge, and register the adapter so
+     * subsequent reads/writes route through it. Returns the created
+     * account as JSON.
+     *
+     * Mirrors the desktop `create_account` minus the pre-persist
+     * credential smoke-test + the cross-device credential/account
+     * sync-log events (those need the event log + a tokio runtime and
+     * arrive with the read/write/sync phases). Like the desktop, a
+     * secret-store or registration failure tears the row back down so
+     * the DB, keychain, and registry never drift.
+     */
+    func createAccountJson(requestJson: String) throws  -> String
+    
+    /**
+     * Delete an account: unregister its adapter, clear its secrets, and
+     * remove the row. The local account cannot be deleted
+     * ([`StoreError::InvalidField`]).
+     */
+    func deleteAccount(accountId: String) throws 
+    
+}
+/**
+ * The mobile app's handle to the full on-device engine.
+ */
+open class Host: HostProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_cal_ffi_fn_clone_host(self.handle, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_cal_ffi_fn_free_host(handle, $0) }
+    }
+
+    
+    /**
+     * Open the on-device database at `db_path`, register every bundled
+     * adapter plugin statically, build the adapter registry over the
+     * supplied keychain bridge, and materialise adapters for the
+     * persisted accounts.
+     */
+public static func `open`(dbPath: String, keychain: KeychainBridge)throws  -> Host  {
+    return try  FfiConverterTypeHost_lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_constructor_host_open(
+        FfiConverterString.lower(dbPath),
+        FfiConverterTypeKeychainBridge_lower(keychain),$0
+    )
+})
+}
+    
+
+    
+    /**
+     * All persisted accounts as JSON (the `cal_core`/desktop wire shape).
+     */
+open func accountsJson()throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_accounts_json(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+    /**
+     * Create an external (or local) account: persist the row, store the
+     * secret via the keychain bridge, and register the adapter so
+     * subsequent reads/writes route through it. Returns the created
+     * account as JSON.
+     *
+     * Mirrors the desktop `create_account` minus the pre-persist
+     * credential smoke-test + the cross-device credential/account
+     * sync-log events (those need the event log + a tokio runtime and
+     * arrive with the read/write/sync phases). Like the desktop, a
+     * secret-store or registration failure tears the row back down so
+     * the DB, keychain, and registry never drift.
+     */
+open func createAccountJson(requestJson: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_create_account_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(requestJson),$0
+    )
+})
+}
+    
+    /**
+     * Delete an account: unregister its adapter, clear its secrets, and
+     * remove the row. The local account cannot be deleted
+     * ([`StoreError::InvalidField`]).
+     */
+open func deleteAccount(accountId: String)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_delete_account(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(accountId),$0
+    )
+}
+}
+    
+
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeHost: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = Host
+
+    public static func lift(_ handle: UInt64) throws -> Host {
+        return Host(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: Host) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Host {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: Host, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeHost_lift(_ handle: UInt64) throws -> Host {
+    return try FfiConverterTypeHost.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeHost_lower(_ value: Host) -> UInt64 {
+    return FfiConverterTypeHost.lower(value)
+}
+
+
+
+
+
+
+/**
+ * Platform credential store, implemented on the foreign side (iOS
+ * Keychain / Android Keystore). `slot` is the stable wire name from
+ * [`SecretSlot::wire_name`] (`"password"`, `"access_token"`, …) so the
+ * foreign code can key its store without depending on the Rust enum.
+ */
+public protocol KeychainBridge: AnyObject, Sendable {
+    
+    /**
+     * Persist `value` for `(account_id, slot)`, overwriting any prior.
+     */
+    func store(accountId: String, slot: String, value: String) throws 
+    
+    /**
+     * Read the value for `(account_id, slot)`; `NotFound` when absent.
+     */
+    func retrieve(accountId: String, slot: String) throws  -> String
+    
+    /**
+     * Best-effort removal; a missing entry is `Ok(())`.
+     */
+    func delete(accountId: String, slot: String) throws 
+    
+    /**
+     * Clear every slot tied to `account_id`.
+     */
+    func deleteAll(accountId: String) throws 
+    
+}
+/**
+ * Platform credential store, implemented on the foreign side (iOS
+ * Keychain / Android Keystore). `slot` is the stable wire name from
+ * [`SecretSlot::wire_name`] (`"password"`, `"access_token"`, …) so the
+ * foreign code can key its store without depending on the Rust enum.
+ */
+open class KeychainBridgeImpl: KeychainBridge, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_cal_ffi_fn_clone_keychainbridge(self.handle, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_cal_ffi_fn_free_keychainbridge(handle, $0) }
+    }
+
+    
+
+    
+    /**
+     * Persist `value` for `(account_id, slot)`, overwriting any prior.
+     */
+open func store(accountId: String, slot: String, value: String)throws   {try rustCallWithError(FfiConverterTypeKeychainError_lift) {
+    uniffi_cal_ffi_fn_method_keychainbridge_store(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(accountId),
+        FfiConverterString.lower(slot),
+        FfiConverterString.lower(value),$0
+    )
+}
+}
+    
+    /**
+     * Read the value for `(account_id, slot)`; `NotFound` when absent.
+     */
+open func retrieve(accountId: String, slot: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeKeychainError_lift) {
+    uniffi_cal_ffi_fn_method_keychainbridge_retrieve(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(accountId),
+        FfiConverterString.lower(slot),$0
+    )
+})
+}
+    
+    /**
+     * Best-effort removal; a missing entry is `Ok(())`.
+     */
+open func delete(accountId: String, slot: String)throws   {try rustCallWithError(FfiConverterTypeKeychainError_lift) {
+    uniffi_cal_ffi_fn_method_keychainbridge_delete(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(accountId),
+        FfiConverterString.lower(slot),$0
+    )
+}
+}
+    
+    /**
+     * Clear every slot tied to `account_id`.
+     */
+open func deleteAll(accountId: String)throws   {try rustCallWithError(FfiConverterTypeKeychainError_lift) {
+    uniffi_cal_ffi_fn_method_keychainbridge_delete_all(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(accountId),$0
+    )
+}
+}
+    
+
+    
+}
+
+
+
+// Put the implementation in a struct so we don't pollute the top-level namespace
+fileprivate struct UniffiCallbackInterfaceKeychainBridge {
+
+    // Create the VTable using a series of closures.
+    // Swift automatically converts these into C callback functions.
+    //
+    // Store the vtable directly.
+    static let vtable: UniffiVTableCallbackInterfaceKeychainBridge = UniffiVTableCallbackInterfaceKeychainBridge(
+        uniffiFree: { (uniffiHandle: UInt64) -> () in
+            do {
+                try FfiConverterTypeKeychainBridge.handleMap.remove(handle: uniffiHandle)
+            } catch {
+                print("Uniffi callback interface KeychainBridge: handle missing in uniffiFree")
+            }
+        },
+        uniffiClone: { (uniffiHandle: UInt64) -> UInt64 in
+            do {
+                return try FfiConverterTypeKeychainBridge.handleMap.clone(handle: uniffiHandle)
+            } catch {
+                fatalError("Uniffi callback interface KeychainBridge: handle missing in uniffiClone")
+            }
+        },
+        store: { (
+            uniffiHandle: UInt64,
+            accountId: RustBuffer,
+            slot: RustBuffer,
+            value: RustBuffer,
+            uniffiOutReturn: UnsafeMutableRawPointer,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> () in
+                guard let uniffiObj = try? FfiConverterTypeKeychainBridge.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return try uniffiObj.store(
+                     accountId: try FfiConverterString.lift(accountId),
+                     slot: try FfiConverterString.lift(slot),
+                     value: try FfiConverterString.lift(value)
+                )
+            }
+
+            
+            let writeReturn = { () }
+            uniffiTraitInterfaceCallWithError(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn,
+                lowerError: FfiConverterTypeKeychainError_lower
+            )
+        },
+        retrieve: { (
+            uniffiHandle: UInt64,
+            accountId: RustBuffer,
+            slot: RustBuffer,
+            uniffiOutReturn: UnsafeMutablePointer<RustBuffer>,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> String in
+                guard let uniffiObj = try? FfiConverterTypeKeychainBridge.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return try uniffiObj.retrieve(
+                     accountId: try FfiConverterString.lift(accountId),
+                     slot: try FfiConverterString.lift(slot)
+                )
+            }
+
+            
+            let writeReturn = { uniffiOutReturn.pointee = FfiConverterString.lower($0) }
+            uniffiTraitInterfaceCallWithError(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn,
+                lowerError: FfiConverterTypeKeychainError_lower
+            )
+        },
+        delete: { (
+            uniffiHandle: UInt64,
+            accountId: RustBuffer,
+            slot: RustBuffer,
+            uniffiOutReturn: UnsafeMutableRawPointer,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> () in
+                guard let uniffiObj = try? FfiConverterTypeKeychainBridge.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return try uniffiObj.delete(
+                     accountId: try FfiConverterString.lift(accountId),
+                     slot: try FfiConverterString.lift(slot)
+                )
+            }
+
+            
+            let writeReturn = { () }
+            uniffiTraitInterfaceCallWithError(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn,
+                lowerError: FfiConverterTypeKeychainError_lower
+            )
+        },
+        deleteAll: { (
+            uniffiHandle: UInt64,
+            accountId: RustBuffer,
+            uniffiOutReturn: UnsafeMutableRawPointer,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> () in
+                guard let uniffiObj = try? FfiConverterTypeKeychainBridge.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return try uniffiObj.deleteAll(
+                     accountId: try FfiConverterString.lift(accountId)
+                )
+            }
+
+            
+            let writeReturn = { () }
+            uniffiTraitInterfaceCallWithError(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn,
+                lowerError: FfiConverterTypeKeychainError_lower
+            )
+        }
+    )
+
+    // Rust stores this pointer for future callback invocations, so it must live
+    // for the process lifetime (not just for the init function call).
+    static let vtablePtr: UnsafePointer<UniffiVTableCallbackInterfaceKeychainBridge> = {
+        let ptr = UnsafeMutablePointer<UniffiVTableCallbackInterfaceKeychainBridge>.allocate(capacity: 1)
+        ptr.initialize(to: vtable)
+        return UnsafePointer(ptr)
+    }()
+}
+
+private func uniffiCallbackInitKeychainBridge() {
+    uniffi_cal_ffi_fn_init_callback_vtable_keychainbridge(UniffiCallbackInterfaceKeychainBridge.vtablePtr)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeKeychainBridge: FfiConverter {
+    fileprivate static let handleMap = UniffiHandleMap<KeychainBridge>()
+
+    typealias FfiType = UInt64
+    typealias SwiftType = KeychainBridge
+
+    public static func lift(_ handle: UInt64) throws -> KeychainBridge {
+        if ((handle & 1) == 0) {
+            // Rust-generated handle, construct a new class that uses the handle to implement the
+            // interface
+            return KeychainBridgeImpl(unsafeFromHandle: handle)
+        } else {
+            // Swift-generated handle, get the object from the handle map
+            return try handleMap.remove(handle: handle)
+        }
+    }
+
+    public static func lower(_ value: KeychainBridge) -> UInt64 {
+         if let rustImpl = value as? KeychainBridgeImpl {
+             // Rust-implemented object.  Clone the handle and return it
+            return rustImpl.uniffiCloneHandle()
+         } else {
+            // Swift object, generate a new vtable handle and return that.
+            return handleMap.insert(obj: value)
+         }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> KeychainBridge {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: KeychainBridge, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeKeychainBridge_lift(_ handle: UInt64) throws -> KeychainBridge {
+    return try FfiConverterTypeKeychainBridge.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeKeychainBridge_lower(_ value: KeychainBridge) -> UInt64 {
+    return FfiConverterTypeKeychainBridge.lower(value)
+}
+
+
+
+
+
+
+/**
+ * The mobile app's handle to its on-device SQLite store.
+ *
+ * Opens (and migrates, via the shared [`aperio_db`] runner) the database
+ * at `db_path`, then serves task CRUD through the same
+ * [`cal_adapter_local::LocalAdapter`] the desktop backend uses. The UI
+ * holds one instance per launch and passes an app-sandbox path (e.g.
+ * `<Documents>/aperio.sqlite`).
+ */
+public protocol LocalStoreProtocol: AnyObject, Sendable {
+    
+    /**
+     * Create a section in a list; returns the created `Section` as JSON.
+     */
+    func createSectionJson(listId: String, name: String, position: UInt32, colorLabel: String?) throws  -> String
+    
+    /**
+     * Create a task in `list_id` and return it (with its assigned id and
+     * timestamps). A recurring task gets a stable `series_id` (DESIGN §9.12).
+     */
+    func createTask(listId: String, task: NewTaskDto) throws  -> TaskDto
+    
+    /**
+     * Create a task from a JSON `cal_core::NewTask`; returns the created `Task`
+     * as JSON (a recurring task is assigned a stable series id).
+     */
+    func createTaskJson(listId: String, newTaskJson: String) throws  -> String
+    
+    /**
+     * Create a new local, top-level task list and return it.
+     */
+    func createTaskList(name: String) throws  -> TaskListDto
+    
+    /**
+     * Create a top-level local task list; returns the created `TaskList` as JSON.
+     */
+    func createTaskListJson(name: String) throws  -> String
+    
+    /**
+     * Delete a section; its tasks fall back to ungrouped (`section_id` → NULL).
+     */
+    func deleteSection(id: String) throws 
+    
+    /**
+     * Delete a task. [`StoreError::NotFound`] when the id is unknown.
+     */
+    func deleteTask(id: String) throws 
+    
+    /**
+     * Delete a task list; its tasks cascade away.
+     * [`StoreError::NotFound`] when the id is unknown.
+     */
+    func deleteTaskList(id: String) throws 
+    
+    /**
+     * Rename a task list. Rejects an empty/whitespace-only name
+     * ([`StoreError::InvalidField`]); [`StoreError::NotFound`] for an
+     * unknown id.
+     */
+    func renameTaskList(id: String, newName: String) throws 
+    
+    /**
+     * Set or clear a list's parent (`parent_id = None` promotes to top level);
+     * returns the updated `TaskList` as JSON.
+     */
+    func reparentTaskListJson(id: String, parentId: String?) throws  -> String
+    
+    /**
+     * Sections of a list as a JSON array (`cal_core::Section[]`), ordered by
+     * position then name.
+     */
+    func sectionsJson(listId: String) throws  -> String
+    
+    /**
+     * Fetch a single task by id; [`StoreError::NotFound`] when absent.
+     */
+    func task(id: String) throws  -> TaskDto
+    
+    /**
+     * One task by id as JSON; [`StoreError::NotFound`] when absent.
+     */
+    func taskJson(id: String) throws  -> String
+    
+    /**
+     * Fetch a task list by id; [`StoreError::NotFound`] when absent.
+     */
+    func taskList(id: String) throws  -> TaskListDto
+    
+    /**
+     * List all task lists, ordered by name (case-insensitive).
+     */
+    func taskLists() throws  -> [TaskListDto]
+    
+    /**
+     * All task lists as a JSON array (`cal_core::TaskList[]`).
+     */
+    func taskListsJson() throws  -> String
+    
+    /**
+     * List the tasks in a list, ordered by date then creation time.
+     */
+    func tasks(listId: String) throws  -> [TaskDto]
+    
+    /**
+     * Tasks in a list as a JSON array (`cal_core::Task[]`), ordered by date
+     * then creation time.
+     */
+    func tasksJson(listId: String) throws  -> String
+    
+    /**
+     * Update a section from a JSON `cal_core::Section`; returns it as JSON.
+     */
+    func updateSectionJson(sectionJson: String) throws  -> String
+    
+    /**
+     * Update a task — a full overwrite of its mutable fields (everything but
+     * the immutable `created_at`), so a faithful read-modify-write round-trip
+     * preserves `series_id` and `resurface_date` by passing them back as read.
+     * Completing a recurring task spawns its next instance, which shows up on
+     * the next [`LocalStore::tasks`] call (DESIGN §9.12). [`StoreError::NotFound`]
+     * when the id is unknown.
+     */
+    func updateTask(task: TaskDto) throws  -> TaskDto
+    
+    /**
+     * Update a task from a JSON `cal_core::Task`; returns the updated `Task` as
+     * JSON. Completing a recurring task spawns its next instance (DESIGN §9.12).
+     */
+    func updateTaskJson(taskJson: String) throws  -> String
+    
+}
+/**
+ * The mobile app's handle to its on-device SQLite store.
+ *
+ * Opens (and migrates, via the shared [`aperio_db`] runner) the database
+ * at `db_path`, then serves task CRUD through the same
+ * [`cal_adapter_local::LocalAdapter`] the desktop backend uses. The UI
+ * holds one instance per launch and passes an app-sandbox path (e.g.
+ * `<Documents>/aperio.sqlite`).
+ */
+open class LocalStore: LocalStoreProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_cal_ffi_fn_clone_localstore(self.handle, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_cal_ffi_fn_free_localstore(handle, $0) }
+    }
+
+    
+    /**
+     * Open the on-device database at `db_path`, creating the file and
+     * applying any pending migrations, and bind a local adapter to it.
+     */
+public static func `open`(dbPath: String)throws  -> LocalStore  {
+    return try  FfiConverterTypeLocalStore_lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_constructor_localstore_open(
+        FfiConverterString.lower(dbPath),$0
+    )
+})
+}
+    
+
+    
+    /**
+     * Create a section in a list; returns the created `Section` as JSON.
+     */
+open func createSectionJson(listId: String, name: String, position: UInt32, colorLabel: String?)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_localstore_create_section_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(listId),
+        FfiConverterString.lower(name),
+        FfiConverterUInt32.lower(position),
+        FfiConverterOptionString.lower(colorLabel),$0
+    )
+})
+}
+    
+    /**
+     * Create a task in `list_id` and return it (with its assigned id and
+     * timestamps). A recurring task gets a stable `series_id` (DESIGN §9.12).
+     */
+open func createTask(listId: String, task: NewTaskDto)throws  -> TaskDto  {
+    return try  FfiConverterTypeTaskDto_lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_localstore_create_task(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(listId),
+        FfiConverterTypeNewTaskDto_lower(task),$0
+    )
+})
+}
+    
+    /**
+     * Create a task from a JSON `cal_core::NewTask`; returns the created `Task`
+     * as JSON (a recurring task is assigned a stable series id).
+     */
+open func createTaskJson(listId: String, newTaskJson: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_localstore_create_task_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(listId),
+        FfiConverterString.lower(newTaskJson),$0
+    )
+})
+}
+    
+    /**
+     * Create a new local, top-level task list and return it.
+     */
+open func createTaskList(name: String)throws  -> TaskListDto  {
+    return try  FfiConverterTypeTaskListDto_lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_localstore_create_task_list(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(name),$0
+    )
+})
+}
+    
+    /**
+     * Create a top-level local task list; returns the created `TaskList` as JSON.
+     */
+open func createTaskListJson(name: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_localstore_create_task_list_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(name),$0
+    )
+})
+}
+    
+    /**
+     * Delete a section; its tasks fall back to ungrouped (`section_id` → NULL).
+     */
+open func deleteSection(id: String)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_localstore_delete_section(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(id),$0
+    )
+}
+}
+    
+    /**
+     * Delete a task. [`StoreError::NotFound`] when the id is unknown.
+     */
+open func deleteTask(id: String)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_localstore_delete_task(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(id),$0
+    )
+}
+}
+    
+    /**
+     * Delete a task list; its tasks cascade away.
+     * [`StoreError::NotFound`] when the id is unknown.
+     */
+open func deleteTaskList(id: String)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_localstore_delete_task_list(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(id),$0
+    )
+}
+}
+    
+    /**
+     * Rename a task list. Rejects an empty/whitespace-only name
+     * ([`StoreError::InvalidField`]); [`StoreError::NotFound`] for an
+     * unknown id.
+     */
+open func renameTaskList(id: String, newName: String)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_localstore_rename_task_list(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(id),
+        FfiConverterString.lower(newName),$0
+    )
+}
+}
+    
+    /**
+     * Set or clear a list's parent (`parent_id = None` promotes to top level);
+     * returns the updated `TaskList` as JSON.
+     */
+open func reparentTaskListJson(id: String, parentId: String?)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_localstore_reparent_task_list_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(id),
+        FfiConverterOptionString.lower(parentId),$0
+    )
+})
+}
+    
+    /**
+     * Sections of a list as a JSON array (`cal_core::Section[]`), ordered by
+     * position then name.
+     */
+open func sectionsJson(listId: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_localstore_sections_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(listId),$0
+    )
+})
+}
+    
+    /**
+     * Fetch a single task by id; [`StoreError::NotFound`] when absent.
+     */
+open func task(id: String)throws  -> TaskDto  {
+    return try  FfiConverterTypeTaskDto_lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_localstore_task(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(id),$0
+    )
+})
+}
+    
+    /**
+     * One task by id as JSON; [`StoreError::NotFound`] when absent.
+     */
+open func taskJson(id: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_localstore_task_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(id),$0
+    )
+})
+}
+    
+    /**
+     * Fetch a task list by id; [`StoreError::NotFound`] when absent.
+     */
+open func taskList(id: String)throws  -> TaskListDto  {
+    return try  FfiConverterTypeTaskListDto_lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_localstore_task_list(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(id),$0
+    )
+})
+}
+    
+    /**
+     * List all task lists, ordered by name (case-insensitive).
+     */
+open func taskLists()throws  -> [TaskListDto]  {
+    return try  FfiConverterSequenceTypeTaskListDto.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_localstore_task_lists(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+    /**
+     * All task lists as a JSON array (`cal_core::TaskList[]`).
+     */
+open func taskListsJson()throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_localstore_task_lists_json(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+    /**
+     * List the tasks in a list, ordered by date then creation time.
+     */
+open func tasks(listId: String)throws  -> [TaskDto]  {
+    return try  FfiConverterSequenceTypeTaskDto.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_localstore_tasks(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(listId),$0
+    )
+})
+}
+    
+    /**
+     * Tasks in a list as a JSON array (`cal_core::Task[]`), ordered by date
+     * then creation time.
+     */
+open func tasksJson(listId: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_localstore_tasks_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(listId),$0
+    )
+})
+}
+    
+    /**
+     * Update a section from a JSON `cal_core::Section`; returns it as JSON.
+     */
+open func updateSectionJson(sectionJson: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_localstore_update_section_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(sectionJson),$0
+    )
+})
+}
+    
+    /**
+     * Update a task — a full overwrite of its mutable fields (everything but
+     * the immutable `created_at`), so a faithful read-modify-write round-trip
+     * preserves `series_id` and `resurface_date` by passing them back as read.
+     * Completing a recurring task spawns its next instance, which shows up on
+     * the next [`LocalStore::tasks`] call (DESIGN §9.12). [`StoreError::NotFound`]
+     * when the id is unknown.
+     */
+open func updateTask(task: TaskDto)throws  -> TaskDto  {
+    return try  FfiConverterTypeTaskDto_lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_localstore_update_task(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeTaskDto_lower(task),$0
+    )
+})
+}
+    
+    /**
+     * Update a task from a JSON `cal_core::Task`; returns the updated `Task` as
+     * JSON. Completing a recurring task spawns its next instance (DESIGN §9.12).
+     */
+open func updateTaskJson(taskJson: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_localstore_update_task_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(taskJson),$0
+    )
+})
+}
+    
+
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeLocalStore: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = LocalStore
+
+    public static func lift(_ handle: UInt64) throws -> LocalStore {
+        return LocalStore(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: LocalStore) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LocalStore {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: LocalStore, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLocalStore_lift(_ handle: UInt64) throws -> LocalStore {
+    return try FfiConverterTypeLocalStore.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLocalStore_lower(_ value: LocalStore) -> UInt64 {
+    return FfiConverterTypeLocalStore.lower(value)
+}
+
+
 
 
 /**
@@ -545,6 +1661,117 @@ public func FfiConverterTypeMonthDay_lift(_ buf: RustBuffer) throws -> MonthDay 
 #endif
 public func FfiConverterTypeMonthDay_lower(_ value: MonthDay) -> RustBuffer {
     return FfiConverterTypeMonthDay.lower(value)
+}
+
+
+/**
+ * The editable shape for creating a task — a mirror of [`cal_core::NewTask`]
+ * (no id/timestamps/etag, no assignees; see [`TaskDto`] for the conventions).
+ *
+ * `series_id` and `resurface_date` are deliberately omitted: they are
+ * store-managed (the local adapter assigns a `series_id` to a recurring task
+ * on create, and derives `resurface_date` when it spawns a backlog instance —
+ * DESIGN §9.12), not values a client sets.
+ */
+public struct NewTaskDto: Equatable, Hashable {
+    public var title: String
+    public var description: String?
+    public var status: TaskStatus
+    public var priority: TaskPriority
+    public var scheduledDate: String?
+    public var scheduledTime: String?
+    public var deadlineDate: String?
+    public var deadlineTime: String?
+    public var recurrence: TaskRecurrence?
+    public var parentId: String?
+    public var sectionId: String?
+    public var colorLabel: String?
+    public var reminders: [Reminder]
+    public var sound: SoundConfig?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(title: String, description: String?, status: TaskStatus, priority: TaskPriority, scheduledDate: String?, scheduledTime: String?, deadlineDate: String?, deadlineTime: String?, recurrence: TaskRecurrence?, parentId: String?, sectionId: String?, colorLabel: String?, reminders: [Reminder], sound: SoundConfig?) {
+        self.title = title
+        self.description = description
+        self.status = status
+        self.priority = priority
+        self.scheduledDate = scheduledDate
+        self.scheduledTime = scheduledTime
+        self.deadlineDate = deadlineDate
+        self.deadlineTime = deadlineTime
+        self.recurrence = recurrence
+        self.parentId = parentId
+        self.sectionId = sectionId
+        self.colorLabel = colorLabel
+        self.reminders = reminders
+        self.sound = sound
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension NewTaskDto: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeNewTaskDto: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> NewTaskDto {
+        return
+            try NewTaskDto(
+                title: FfiConverterString.read(from: &buf), 
+                description: FfiConverterOptionString.read(from: &buf), 
+                status: FfiConverterTypeTaskStatus.read(from: &buf), 
+                priority: FfiConverterTypeTaskPriority.read(from: &buf), 
+                scheduledDate: FfiConverterOptionString.read(from: &buf), 
+                scheduledTime: FfiConverterOptionString.read(from: &buf), 
+                deadlineDate: FfiConverterOptionString.read(from: &buf), 
+                deadlineTime: FfiConverterOptionString.read(from: &buf), 
+                recurrence: FfiConverterOptionTypeTaskRecurrence.read(from: &buf), 
+                parentId: FfiConverterOptionString.read(from: &buf), 
+                sectionId: FfiConverterOptionString.read(from: &buf), 
+                colorLabel: FfiConverterOptionString.read(from: &buf), 
+                reminders: FfiConverterSequenceTypeReminder.read(from: &buf), 
+                sound: FfiConverterOptionTypeSoundConfig.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: NewTaskDto, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.title, into: &buf)
+        FfiConverterOptionString.write(value.description, into: &buf)
+        FfiConverterTypeTaskStatus.write(value.status, into: &buf)
+        FfiConverterTypeTaskPriority.write(value.priority, into: &buf)
+        FfiConverterOptionString.write(value.scheduledDate, into: &buf)
+        FfiConverterOptionString.write(value.scheduledTime, into: &buf)
+        FfiConverterOptionString.write(value.deadlineDate, into: &buf)
+        FfiConverterOptionString.write(value.deadlineTime, into: &buf)
+        FfiConverterOptionTypeTaskRecurrence.write(value.recurrence, into: &buf)
+        FfiConverterOptionString.write(value.parentId, into: &buf)
+        FfiConverterOptionString.write(value.sectionId, into: &buf)
+        FfiConverterOptionString.write(value.colorLabel, into: &buf)
+        FfiConverterSequenceTypeReminder.write(value.reminders, into: &buf)
+        FfiConverterOptionTypeSoundConfig.write(value.sound, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNewTaskDto_lift(_ buf: RustBuffer) throws -> NewTaskDto {
+    return try FfiConverterTypeNewTaskDto.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNewTaskDto_lower(_ value: NewTaskDto) -> RustBuffer {
+    return FfiConverterTypeNewTaskDto.lower(value)
 }
 
 
@@ -617,6 +1844,415 @@ public func FfiConverterTypeParsedAttendee_lift(_ buf: RustBuffer) throws -> Par
 #endif
 public func FfiConverterTypeParsedAttendee_lower(_ value: ParsedAttendee) -> RustBuffer {
     return FfiConverterTypeParsedAttendee.lower(value)
+}
+
+
+/**
+ * A reminder attached to a task. Mirrors [`cal_core::Reminder`].
+ */
+public struct Reminder: Equatable, Hashable {
+    public var kind: ReminderKind
+    /**
+     * Overrides the task-level sound when set.
+     */
+    public var sound: SoundConfig?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(kind: ReminderKind, 
+        /**
+         * Overrides the task-level sound when set.
+         */sound: SoundConfig?) {
+        self.kind = kind
+        self.sound = sound
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension Reminder: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeReminder: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Reminder {
+        return
+            try Reminder(
+                kind: FfiConverterTypeReminderKind.read(from: &buf), 
+                sound: FfiConverterOptionTypeSoundConfig.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: Reminder, into buf: inout [UInt8]) {
+        FfiConverterTypeReminderKind.write(value.kind, into: &buf)
+        FfiConverterOptionTypeSoundConfig.write(value.sound, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeReminder_lift(_ buf: RustBuffer) throws -> Reminder {
+    return try FfiConverterTypeReminder.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeReminder_lower(_ value: Reminder) -> RustBuffer {
+    return FfiConverterTypeReminder.lower(value)
+}
+
+
+/**
+ * Notification sound configuration. Mirrors [`cal_core::SoundConfig`].
+ */
+public struct SoundConfig: Equatable, Hashable {
+    public var source: SoundSource
+    /**
+     * Volume 0–100, independent of the system volume.
+     */
+    public var volume: UInt8
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(source: SoundSource, 
+        /**
+         * Volume 0–100, independent of the system volume.
+         */volume: UInt8) {
+        self.source = source
+        self.volume = volume
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension SoundConfig: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSoundConfig: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SoundConfig {
+        return
+            try SoundConfig(
+                source: FfiConverterTypeSoundSource.read(from: &buf), 
+                volume: FfiConverterUInt8.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: SoundConfig, into buf: inout [UInt8]) {
+        FfiConverterTypeSoundSource.write(value.source, into: &buf)
+        FfiConverterUInt8.write(value.volume, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSoundConfig_lift(_ buf: RustBuffer) throws -> SoundConfig {
+    return try FfiConverterTypeSoundConfig.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSoundConfig_lower(_ value: SoundConfig) -> RustBuffer {
+    return FfiConverterTypeSoundConfig.lower(value)
+}
+
+
+/**
+ * A task as it crosses the FFI boundary — a lossless mirror of
+ * [`cal_core::Task`] for the on-device store. Dates are ISO `YYYY-MM-DD`,
+ * times are `HH:MM:SS`, and instants are RFC 3339 strings (UniFFI has no
+ * built-in date/time types). Assignees are intentionally omitted: the local
+ * store does not persist them (a sync-era, multi-user concept), so surfacing
+ * them here would be misleading.
+ */
+public struct TaskDto: Equatable, Hashable {
+    public var id: String
+    public var listId: String
+    public var title: String
+    public var description: String?
+    public var status: TaskStatus
+    public var priority: TaskPriority
+    /**
+     * `YYYY-MM-DD`. The day the task is planned for.
+     */
+    public var scheduledDate: String?
+    /**
+     * `HH:MM:SS`. Requires `scheduled_date`.
+     */
+    public var scheduledTime: String?
+    /**
+     * `YYYY-MM-DD`. The day the task is due by.
+     */
+    public var deadlineDate: String?
+    /**
+     * `HH:MM:SS`. Requires `deadline_date`.
+     */
+    public var deadlineTime: String?
+    public var recurrence: TaskRecurrence?
+    /**
+     * `YYYY-MM-DD`. Backlog resurface trigger (DESIGN §9.12), derived by the
+     * recurrence engine when a backlog instance is spawned. Round-trips
+     * through [`LocalStore::update_task`].
+     */
+    public var resurfaceDate: String?
+    /**
+     * Stable id of the recurring series this instance belongs to. The store
+     * assigns it when a recurring task is created; pass it back unchanged on
+     * update (it round-trips through [`LocalStore::update_task`]).
+     */
+    public var seriesId: String?
+    public var parentId: String?
+    public var sectionId: String?
+    /**
+     * Global color-label id, if bound.
+     */
+    public var colorLabel: String?
+    public var reminders: [Reminder]
+    public var sound: SoundConfig?
+    /**
+     * RFC 3339.
+     */
+    public var createdAt: String
+    /**
+     * RFC 3339.
+     */
+    public var updatedAt: String
+    /**
+     * RFC 3339, set once the task is completed.
+     */
+    public var completedAt: String?
+    public var etag: String?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(id: String, listId: String, title: String, description: String?, status: TaskStatus, priority: TaskPriority, 
+        /**
+         * `YYYY-MM-DD`. The day the task is planned for.
+         */scheduledDate: String?, 
+        /**
+         * `HH:MM:SS`. Requires `scheduled_date`.
+         */scheduledTime: String?, 
+        /**
+         * `YYYY-MM-DD`. The day the task is due by.
+         */deadlineDate: String?, 
+        /**
+         * `HH:MM:SS`. Requires `deadline_date`.
+         */deadlineTime: String?, recurrence: TaskRecurrence?, 
+        /**
+         * `YYYY-MM-DD`. Backlog resurface trigger (DESIGN §9.12), derived by the
+         * recurrence engine when a backlog instance is spawned. Round-trips
+         * through [`LocalStore::update_task`].
+         */resurfaceDate: String?, 
+        /**
+         * Stable id of the recurring series this instance belongs to. The store
+         * assigns it when a recurring task is created; pass it back unchanged on
+         * update (it round-trips through [`LocalStore::update_task`]).
+         */seriesId: String?, parentId: String?, sectionId: String?, 
+        /**
+         * Global color-label id, if bound.
+         */colorLabel: String?, reminders: [Reminder], sound: SoundConfig?, 
+        /**
+         * RFC 3339.
+         */createdAt: String, 
+        /**
+         * RFC 3339.
+         */updatedAt: String, 
+        /**
+         * RFC 3339, set once the task is completed.
+         */completedAt: String?, etag: String?) {
+        self.id = id
+        self.listId = listId
+        self.title = title
+        self.description = description
+        self.status = status
+        self.priority = priority
+        self.scheduledDate = scheduledDate
+        self.scheduledTime = scheduledTime
+        self.deadlineDate = deadlineDate
+        self.deadlineTime = deadlineTime
+        self.recurrence = recurrence
+        self.resurfaceDate = resurfaceDate
+        self.seriesId = seriesId
+        self.parentId = parentId
+        self.sectionId = sectionId
+        self.colorLabel = colorLabel
+        self.reminders = reminders
+        self.sound = sound
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.completedAt = completedAt
+        self.etag = etag
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension TaskDto: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeTaskDto: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> TaskDto {
+        return
+            try TaskDto(
+                id: FfiConverterString.read(from: &buf), 
+                listId: FfiConverterString.read(from: &buf), 
+                title: FfiConverterString.read(from: &buf), 
+                description: FfiConverterOptionString.read(from: &buf), 
+                status: FfiConverterTypeTaskStatus.read(from: &buf), 
+                priority: FfiConverterTypeTaskPriority.read(from: &buf), 
+                scheduledDate: FfiConverterOptionString.read(from: &buf), 
+                scheduledTime: FfiConverterOptionString.read(from: &buf), 
+                deadlineDate: FfiConverterOptionString.read(from: &buf), 
+                deadlineTime: FfiConverterOptionString.read(from: &buf), 
+                recurrence: FfiConverterOptionTypeTaskRecurrence.read(from: &buf), 
+                resurfaceDate: FfiConverterOptionString.read(from: &buf), 
+                seriesId: FfiConverterOptionString.read(from: &buf), 
+                parentId: FfiConverterOptionString.read(from: &buf), 
+                sectionId: FfiConverterOptionString.read(from: &buf), 
+                colorLabel: FfiConverterOptionString.read(from: &buf), 
+                reminders: FfiConverterSequenceTypeReminder.read(from: &buf), 
+                sound: FfiConverterOptionTypeSoundConfig.read(from: &buf), 
+                createdAt: FfiConverterString.read(from: &buf), 
+                updatedAt: FfiConverterString.read(from: &buf), 
+                completedAt: FfiConverterOptionString.read(from: &buf), 
+                etag: FfiConverterOptionString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: TaskDto, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.id, into: &buf)
+        FfiConverterString.write(value.listId, into: &buf)
+        FfiConverterString.write(value.title, into: &buf)
+        FfiConverterOptionString.write(value.description, into: &buf)
+        FfiConverterTypeTaskStatus.write(value.status, into: &buf)
+        FfiConverterTypeTaskPriority.write(value.priority, into: &buf)
+        FfiConverterOptionString.write(value.scheduledDate, into: &buf)
+        FfiConverterOptionString.write(value.scheduledTime, into: &buf)
+        FfiConverterOptionString.write(value.deadlineDate, into: &buf)
+        FfiConverterOptionString.write(value.deadlineTime, into: &buf)
+        FfiConverterOptionTypeTaskRecurrence.write(value.recurrence, into: &buf)
+        FfiConverterOptionString.write(value.resurfaceDate, into: &buf)
+        FfiConverterOptionString.write(value.seriesId, into: &buf)
+        FfiConverterOptionString.write(value.parentId, into: &buf)
+        FfiConverterOptionString.write(value.sectionId, into: &buf)
+        FfiConverterOptionString.write(value.colorLabel, into: &buf)
+        FfiConverterSequenceTypeReminder.write(value.reminders, into: &buf)
+        FfiConverterOptionTypeSoundConfig.write(value.sound, into: &buf)
+        FfiConverterString.write(value.createdAt, into: &buf)
+        FfiConverterString.write(value.updatedAt, into: &buf)
+        FfiConverterOptionString.write(value.completedAt, into: &buf)
+        FfiConverterOptionString.write(value.etag, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTaskDto_lift(_ buf: RustBuffer) throws -> TaskDto {
+    return try FfiConverterTypeTaskDto.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTaskDto_lower(_ value: TaskDto) -> RustBuffer {
+    return FfiConverterTypeTaskDto.lower(value)
+}
+
+
+/**
+ * A task list as it crosses the FFI boundary. Minimal first slice —
+ * richer fields (color, sound, calendar binding) follow as the UI needs
+ * them.
+ */
+public struct TaskListDto: Equatable, Hashable {
+    public var id: String
+    public var name: String
+    /**
+     * Parent project id for nested backends; `None` for a top-level list.
+     */
+    public var parentId: String?
+    public var readOnly: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(id: String, name: String, 
+        /**
+         * Parent project id for nested backends; `None` for a top-level list.
+         */parentId: String?, readOnly: Bool) {
+        self.id = id
+        self.name = name
+        self.parentId = parentId
+        self.readOnly = readOnly
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension TaskListDto: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeTaskListDto: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> TaskListDto {
+        return
+            try TaskListDto(
+                id: FfiConverterString.read(from: &buf), 
+                name: FfiConverterString.read(from: &buf), 
+                parentId: FfiConverterOptionString.read(from: &buf), 
+                readOnly: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: TaskListDto, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.id, into: &buf)
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterOptionString.write(value.parentId, into: &buf)
+        FfiConverterBool.write(value.readOnly, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTaskListDto_lift(_ buf: RustBuffer) throws -> TaskListDto {
+    return try FfiConverterTypeTaskListDto.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTaskListDto_lower(_ value: TaskListDto) -> RustBuffer {
+    return FfiConverterTypeTaskListDto.lower(value)
 }
 
 
@@ -699,6 +2335,98 @@ public func FfiConverterTypeTaskRecurrence_lift(_ buf: RustBuffer) throws -> Tas
 #endif
 public func FfiConverterTypeTaskRecurrence_lower(_ value: TaskRecurrence) -> RustBuffer {
     return FfiConverterTypeTaskRecurrence.lower(value)
+}
+
+
+/**
+ * Errors the foreign keychain implementation can raise. Mirrors
+ * [`sync_engine::SecretError`] so the `NotFound` distinction the
+ * registry branches on (e.g. an absent optional iCal password) survives
+ * the round-trip.
+ */
+public enum KeychainError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
+
+    
+    
+    /**
+     * No secret stored for this `(account, slot)`.
+     */
+    case NotFound
+    /**
+     * The platform keychain/keystore backend failed.
+     */
+    case Backend(detail: String
+    )
+
+    
+
+    
+
+    
+    public var errorDescription: String? {
+        String(reflecting: self)
+    }
+    
+}
+
+#if compiler(>=6)
+extension KeychainError: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeKeychainError: FfiConverterRustBuffer {
+    typealias SwiftType = KeychainError
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> KeychainError {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        
+
+        
+        case 1: return .NotFound
+        case 2: return .Backend(
+            detail: try FfiConverterString.read(from: &buf)
+            )
+
+         default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: KeychainError, into buf: inout [UInt8]) {
+        switch value {
+
+        
+
+        
+        
+        case .NotFound:
+            writeInt(&buf, Int32(1))
+        
+        
+        case let .Backend(detail):
+            writeInt(&buf, Int32(2))
+            FfiConverterString.write(detail, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeKeychainError_lift(_ buf: RustBuffer) throws -> KeychainError {
+    return try FfiConverterTypeKeychainError.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeKeychainError_lower(_ value: KeychainError) -> RustBuffer {
+    return FfiConverterTypeKeychainError.lower(value)
 }
 
 // Note that we don't yet support `indirect` for enums.
@@ -1118,6 +2846,482 @@ public func FfiConverterTypeRecurrencePlacement_lower(_ value: RecurrencePlaceme
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 /**
+ * A reminder trigger. Mirrors [`cal_core::ReminderKind`], with the
+ * `Absolute` instant represented as an RFC 3339 string on the boundary.
+ */
+
+public enum ReminderKind: Equatable, Hashable {
+    
+    /**
+     * Relative to the task's deadline; `minutes_before` may be negative to
+     * fire after the reference time.
+     */
+    case relative(minutesBefore: Int64
+    )
+    /**
+     * Fixed point in time (RFC 3339, e.g. `2026-06-16T09:00:00+00:00`).
+     */
+    case absolute(at: String
+    )
+    /**
+     * Fires on the next app start after the due time.
+     */
+    case appStart
+    /**
+     * E-mail reminder.
+     */
+    case email(minutesBefore: Int64
+    )
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension ReminderKind: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeReminderKind: FfiConverterRustBuffer {
+    typealias SwiftType = ReminderKind
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ReminderKind {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .relative(minutesBefore: try FfiConverterInt64.read(from: &buf)
+        )
+        
+        case 2: return .absolute(at: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 3: return .appStart
+        
+        case 4: return .email(minutesBefore: try FfiConverterInt64.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: ReminderKind, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .relative(minutesBefore):
+            writeInt(&buf, Int32(1))
+            FfiConverterInt64.write(minutesBefore, into: &buf)
+            
+        
+        case let .absolute(at):
+            writeInt(&buf, Int32(2))
+            FfiConverterString.write(at, into: &buf)
+            
+        
+        case .appStart:
+            writeInt(&buf, Int32(3))
+        
+        
+        case let .email(minutesBefore):
+            writeInt(&buf, Int32(4))
+            FfiConverterInt64.write(minutesBefore, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeReminderKind_lift(_ buf: RustBuffer) throws -> ReminderKind {
+    return try FfiConverterTypeReminderKind.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeReminderKind_lower(_ value: ReminderKind) -> RustBuffer {
+    return FfiConverterTypeReminderKind.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * Where a notification sound comes from. Mirrors [`cal_core::SoundSource`].
+ */
+
+public enum SoundSource: Equatable, Hashable {
+    
+    /**
+     * Platform default notification sound.
+     */
+    case system
+    /**
+     * Silent (visual only).
+     */
+    case silent
+    /**
+     * User-supplied audio file, referenced by its content hash.
+     */
+    case custom(sha256: String
+    )
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension SoundSource: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSoundSource: FfiConverterRustBuffer {
+    typealias SwiftType = SoundSource
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SoundSource {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .system
+        
+        case 2: return .silent
+        
+        case 3: return .custom(sha256: try FfiConverterString.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: SoundSource, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .system:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .silent:
+            writeInt(&buf, Int32(2))
+        
+        
+        case let .custom(sha256):
+            writeInt(&buf, Int32(3))
+            FfiConverterString.write(sha256, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSoundSource_lift(_ buf: RustBuffer) throws -> SoundSource {
+    return try FfiConverterTypeSoundSource.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSoundSource_lower(_ value: SoundSource) -> RustBuffer {
+    return FfiConverterTypeSoundSource.lower(value)
+}
+
+
+
+/**
+ * Errors surfaced from the on-device store to the foreign side.
+ */
+public enum StoreError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
+
+    
+    
+    /**
+     * Opening or migrating the database file failed.
+     */
+    case Open(detail: String
+    )
+    /**
+     * A read or write against the local database failed.
+     */
+    case Storage(detail: String
+    )
+    /**
+     * The requested row does not exist.
+     */
+    case NotFound
+    /**
+     * A value coming from the foreign side could not be parsed into the
+     * core model (a malformed date, time, datetime, recurrence rule, …) or
+     * was otherwise rejected as invalid input.
+     */
+    case InvalidField(field: String, detail: String
+    )
+
+    
+
+    
+
+    
+    public var errorDescription: String? {
+        String(reflecting: self)
+    }
+    
+}
+
+#if compiler(>=6)
+extension StoreError: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeStoreError: FfiConverterRustBuffer {
+    typealias SwiftType = StoreError
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> StoreError {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        
+
+        
+        case 1: return .Open(
+            detail: try FfiConverterString.read(from: &buf)
+            )
+        case 2: return .Storage(
+            detail: try FfiConverterString.read(from: &buf)
+            )
+        case 3: return .NotFound
+        case 4: return .InvalidField(
+            field: try FfiConverterString.read(from: &buf), 
+            detail: try FfiConverterString.read(from: &buf)
+            )
+
+         default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: StoreError, into buf: inout [UInt8]) {
+        switch value {
+
+        
+
+        
+        
+        case let .Open(detail):
+            writeInt(&buf, Int32(1))
+            FfiConverterString.write(detail, into: &buf)
+            
+        
+        case let .Storage(detail):
+            writeInt(&buf, Int32(2))
+            FfiConverterString.write(detail, into: &buf)
+            
+        
+        case .NotFound:
+            writeInt(&buf, Int32(3))
+        
+        
+        case let .InvalidField(field,detail):
+            writeInt(&buf, Int32(4))
+            FfiConverterString.write(field, into: &buf)
+            FfiConverterString.write(detail, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeStoreError_lift(_ buf: RustBuffer) throws -> StoreError {
+    return try FfiConverterTypeStoreError.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeStoreError_lower(_ value: StoreError) -> RustBuffer {
+    return FfiConverterTypeStoreError.lower(value)
+}
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * Task priority. Mirrors [`cal_core::TaskPriority`].
+ */
+
+public enum TaskPriority: Equatable, Hashable {
+    
+    case low
+    case medium
+    case high
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension TaskPriority: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeTaskPriority: FfiConverterRustBuffer {
+    typealias SwiftType = TaskPriority
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> TaskPriority {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .low
+        
+        case 2: return .medium
+        
+        case 3: return .high
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: TaskPriority, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .low:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .medium:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .high:
+            writeInt(&buf, Int32(3))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTaskPriority_lift(_ buf: RustBuffer) throws -> TaskPriority {
+    return try FfiConverterTypeTaskPriority.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTaskPriority_lower(_ value: TaskPriority) -> RustBuffer {
+    return FfiConverterTypeTaskPriority.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * Lifecycle state of a task. Mirrors [`cal_core::TaskStatus`].
+ */
+
+public enum TaskStatus: Equatable, Hashable {
+    
+    case `open`
+    case inProgress
+    case completed
+    case cancelled
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension TaskStatus: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeTaskStatus: FfiConverterRustBuffer {
+    typealias SwiftType = TaskStatus
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> TaskStatus {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .`open`
+        
+        case 2: return .inProgress
+        
+        case 3: return .completed
+        
+        case 4: return .cancelled
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: TaskStatus, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .`open`:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .inProgress:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .completed:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .cancelled:
+            writeInt(&buf, Int32(4))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTaskStatus_lift(_ buf: RustBuffer) throws -> TaskStatus {
+    return try FfiConverterTypeTaskStatus.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTaskStatus_lower(_ value: TaskStatus) -> RustBuffer {
+    return FfiConverterTypeTaskStatus.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
  * A day of the week (for the weekly `BYDAY` picker). Mirrors [`cal_core::Weekday`].
  */
 
@@ -1271,6 +3475,30 @@ fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeSoundConfig: FfiConverterRustBuffer {
+    typealias SwiftType = SoundConfig?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeSoundConfig.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeSoundConfig.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionTypeTaskRecurrence: FfiConverterRustBuffer {
     typealias SwiftType = TaskRecurrence?
 
@@ -1392,6 +3620,81 @@ fileprivate struct FfiConverterSequenceTypeMonthDay: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeReminder: FfiConverterRustBuffer {
+    typealias SwiftType = [Reminder]
+
+    public static func write(_ value: [Reminder], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeReminder.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [Reminder] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [Reminder]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeReminder.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeTaskDto: FfiConverterRustBuffer {
+    typealias SwiftType = [TaskDto]
+
+    public static func write(_ value: [TaskDto], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeTaskDto.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [TaskDto] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [TaskDto]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeTaskDto.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeTaskListDto: FfiConverterRustBuffer {
+    typealias SwiftType = [TaskListDto]
+
+    public static func write(_ value: [TaskListDto], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeTaskListDto.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [TaskListDto] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [TaskListDto]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeTaskListDto.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeWeekday: FfiConverterRustBuffer {
     typealias SwiftType = [Weekday]
 
@@ -1477,7 +3780,98 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_func_task_recurrence_to_rrule() != 25991) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_cal_ffi_checksum_method_localstore_create_section_json() != 50434) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_localstore_create_task() != 59574) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_localstore_create_task_json() != 3767) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_localstore_create_task_list() != 55689) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_localstore_create_task_list_json() != 24745) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_localstore_delete_section() != 25900) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_localstore_delete_task() != 4042) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_localstore_delete_task_list() != 17797) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_localstore_rename_task_list() != 4483) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_localstore_reparent_task_list_json() != 15690) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_localstore_sections_json() != 51162) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_localstore_task() != 62167) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_localstore_task_json() != 63068) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_localstore_task_list() != 63565) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_localstore_task_lists() != 23283) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_localstore_task_lists_json() != 7313) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_localstore_tasks() != 48899) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_localstore_tasks_json() != 57199) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_localstore_update_section_json() != 20561) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_localstore_update_task() != 59854) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_localstore_update_task_json() != 53017) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_accounts_json() != 21992) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_create_account_json() != 61944) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_delete_account() != 32623) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_keychainbridge_store() != 54380) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_keychainbridge_retrieve() != 30903) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_keychainbridge_delete() != 52647) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_keychainbridge_delete_all() != 27583) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_constructor_localstore_open() != 47662) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_constructor_host_open() != 62089) {
+        return InitializationResult.apiChecksumMismatch
+    }
 
+    uniffiCallbackInitKeychainBridge()
     return InitializationResult.ok
 }()
 
