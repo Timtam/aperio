@@ -30,6 +30,7 @@ import java.nio.CharBuffer
 import java.nio.charset.CodingErrorAction
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 
 // This is a helper for safely working with byte buffers returned from the Rust code.
 // A rust-owned buffer is represented by its capacity, its current length, and a
@@ -641,6 +642,28 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_cal_ffi_checksum_func_task_recurrence_to_rrule(
     ): Short
+    external fun uniffi_cal_ffi_checksum_method_localstore_create_task(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_localstore_create_task_list(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_localstore_delete_task(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_localstore_delete_task_list(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_localstore_rename_task_list(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_localstore_task(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_localstore_task_list(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_localstore_task_lists(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_localstore_tasks(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_localstore_update_task(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_constructor_localstore_open(
+    ): Short
     external fun ffi_cal_ffi_uniffi_contract_version(
     ): Int
 
@@ -649,11 +672,42 @@ internal object IntegrityCheckingUniffiLib {
 
 internal object UniffiLib {
     
+    // The Cleaner for the whole library
+    internal val CLEANER: UniffiCleaner by lazy {
+        UniffiCleaner.create()
+    }
+    
 
     init {
         Native.register(UniffiLib::class.java, findLibraryName(componentName = "cal_ffi"))
         
     }
+    external fun uniffi_cal_ffi_fn_clone_localstore(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
+    external fun uniffi_cal_ffi_fn_free_localstore(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_cal_ffi_fn_constructor_localstore_open(`dbPath`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
+    external fun uniffi_cal_ffi_fn_method_localstore_create_task(`ptr`: Long,`listId`: RustBuffer.ByValue,`task`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_cal_ffi_fn_method_localstore_create_task_list(`ptr`: Long,`name`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_cal_ffi_fn_method_localstore_delete_task(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_cal_ffi_fn_method_localstore_delete_task_list(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_cal_ffi_fn_method_localstore_rename_task_list(`ptr`: Long,`id`: RustBuffer.ByValue,`newName`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_cal_ffi_fn_method_localstore_task(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_cal_ffi_fn_method_localstore_task_list(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_cal_ffi_fn_method_localstore_task_lists(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_cal_ffi_fn_method_localstore_tasks(`ptr`: Long,`listId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_cal_ffi_fn_method_localstore_update_task(`ptr`: Long,`task`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun uniffi_cal_ffi_fn_func_parse_attendee(`entry`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_cal_ffi_fn_func_rrule_to_task_recurrence(`rrule`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -788,6 +842,39 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_func_task_recurrence_to_rrule() != 25991.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_localstore_create_task() != 59574.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_localstore_create_task_list() != 55689.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_localstore_delete_task() != 4042.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_localstore_delete_task_list() != 17797.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_localstore_rename_task_list() != 4483.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_localstore_task() != 62167.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_localstore_task_list() != 63565.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_localstore_task_lists() != 23283.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_localstore_tasks() != 48899.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_localstore_update_task() != 59854.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_constructor_localstore_open() != 47662.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
 }
 
 /**
@@ -880,6 +967,70 @@ object UniffiWithHandle
  * @suppress
  * */
 object NoHandle
+/**
+ * The cleaner interface for Object finalization code to run.
+ * This is the entry point to any implementation that we're using.
+ *
+ * The cleaner registers objects and returns cleanables, so now we are
+ * defining a `UniffiCleaner` with a `UniffiClenaer.Cleanable` to abstract the
+ * different implmentations available at compile time.
+ *
+ * @suppress
+ */
+interface UniffiCleaner {
+    interface Cleanable {
+        fun clean()
+    }
+
+    fun register(value: Any, cleanUpTask: Runnable): UniffiCleaner.Cleanable
+
+    companion object
+}
+
+// The fallback Jna cleaner, which is available for both Android, and the JVM.
+private class UniffiJnaCleaner : UniffiCleaner {
+    private val cleaner = com.sun.jna.internal.Cleaner.getCleaner()
+
+    override fun register(value: Any, cleanUpTask: Runnable): UniffiCleaner.Cleanable =
+        UniffiJnaCleanable(cleaner.register(value, cleanUpTask))
+}
+
+private class UniffiJnaCleanable(
+    private val cleanable: com.sun.jna.internal.Cleaner.Cleanable,
+) : UniffiCleaner.Cleanable {
+    override fun clean() = cleanable.clean()
+}
+
+
+// We decide at uniffi binding generation time whether we were
+// using Android or not.
+// There are further runtime checks to chose the correct implementation
+// of the cleaner.
+private fun UniffiCleaner.Companion.create(): UniffiCleaner =
+    try {
+        // For safety's sake: if the library hasn't been run in android_cleaner = true
+        // mode, but is being run on Android, then we still need to think about
+        // Android API versions.
+        // So we check if java.lang.ref.Cleaner is there, and use that…
+        java.lang.Class.forName("java.lang.ref.Cleaner")
+        JavaLangRefCleaner()
+    } catch (e: ClassNotFoundException) {
+        // … otherwise, fallback to the JNA cleaner.
+        UniffiJnaCleaner()
+    }
+
+private class JavaLangRefCleaner : UniffiCleaner {
+    val cleaner = java.lang.ref.Cleaner.create()
+
+    override fun register(value: Any, cleanUpTask: Runnable): UniffiCleaner.Cleanable =
+        JavaLangRefCleanable(cleaner.register(value, cleanUpTask))
+}
+
+private class JavaLangRefCleanable(
+    val cleanable: java.lang.ref.Cleaner.Cleanable
+) : UniffiCleaner.Cleanable {
+    override fun clean() = cleanable.clean()
+}
 
 /**
  * @suppress
@@ -924,6 +1075,52 @@ public object FfiConverterUInt: FfiConverter<UInt, Int> {
 
     override fun write(value: UInt, buf: ByteBuffer) {
         buf.putInt(value.toInt())
+    }
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterLong: FfiConverter<Long, Long> {
+    override fun lift(value: Long): Long {
+        return value
+    }
+
+    override fun read(buf: ByteBuffer): Long {
+        return buf.getLong()
+    }
+
+    override fun lower(value: Long): Long {
+        return value
+    }
+
+    override fun allocationSize(value: Long) = 8UL
+
+    override fun write(value: Long, buf: ByteBuffer) {
+        buf.putLong(value)
+    }
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterBoolean: FfiConverter<Boolean, Byte> {
+    override fun lift(value: Byte): Boolean {
+        return value.toInt() != 0
+    }
+
+    override fun read(buf: ByteBuffer): Boolean {
+        return lift(buf.get())
+    }
+
+    override fun lower(value: Boolean): Byte {
+        return if (value) 1.toByte() else 0.toByte()
+    }
+
+    override fun allocationSize(value: Boolean) = 1UL
+
+    override fun write(value: Boolean, buf: ByteBuffer) {
+        buf.put(lower(value))
     }
 }
 
@@ -985,6 +1182,508 @@ public object FfiConverterString: FfiConverter<String, RustBuffer.ByValue> {
 }
 
 
+// This template implements a class for working with a Rust struct via a handle
+// to the live Rust struct on the other side of the FFI.
+//
+// There's some subtlety here, because we have to be careful not to operate on a Rust
+// struct after it has been dropped, and because we must expose a public API for freeing
+// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
+//
+//   * Each instance holds an opaque handle to the underlying Rust struct.
+//     Method calls need to read this handle from the object's state and pass it in to
+//     the Rust FFI.
+//
+//   * When an instance is no longer needed, its handle should be passed to a
+//     special destructor function provided by the Rust FFI, which will drop the
+//     underlying Rust struct.
+//
+//   * Given an instance, calling code is expected to call the special
+//     `destroy` method in order to free it after use, either by calling it explicitly
+//     or by using a higher-level helper like the `use` method. Failing to do so risks
+//     leaking the underlying Rust struct.
+//
+//   * We can't assume that calling code will do the right thing, and must be prepared
+//     to handle Kotlin method calls executing concurrently with or even after a call to
+//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
+//
+//   * We must never allow Rust code to operate on the underlying Rust struct after
+//     the destructor has been called, and must never call the destructor more than once.
+//     Doing so may trigger memory unsafety.
+//
+//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
+//     is implemented to call the destructor when the Kotlin object becomes unreachable.
+//     This is done in a background thread. This is not a panacea, and client code should be aware that
+//      1. the thread may starve if some there are objects that have poorly performing
+//     `drop` methods or do significant work in their `drop` methods.
+//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
+//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
+//
+// If we try to implement this with mutual exclusion on access to the handle, there is the
+// possibility of a race between a method call and a concurrent call to `destroy`:
+//
+//    * Thread A starts a method call, reads the value of the handle, but is interrupted
+//      before it can pass the handle over the FFI to Rust.
+//    * Thread B calls `destroy` and frees the underlying Rust struct.
+//    * Thread A resumes, passing the already-read handle value to Rust and triggering
+//      a use-after-free.
+//
+// One possible solution would be to use a `ReadWriteLock`, with each method call taking
+// a read lock (and thus allowed to run concurrently) and the special `destroy` method
+// taking a write lock (and thus blocking on live method calls). However, we aim not to
+// generate methods with any hidden blocking semantics, and a `destroy` method that might
+// block if called incorrectly seems to meet that bar.
+//
+// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
+// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
+// has been called. These are updated according to the following rules:
+//
+//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
+//      The initial value for the flag is false.
+//
+//    * At the start of each method call, we atomically check the counter.
+//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
+//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
+//
+//    * At the end of each method call, we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+//    * When `destroy` is called, we atomically flip the flag from false to true.
+//      If the flag was already true we silently fail.
+//      Otherwise we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
+// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
+//
+// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
+// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
+// of the underlying Rust code.
+//
+// This makes a cleaner a better alternative to _not_ calling `destroy()` as
+// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
+// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
+// thread may be starved, and the app will leak memory.
+//
+// In this case, `destroy`ing manually may be a better solution.
+//
+// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
+// with Rust peers are reclaimed:
+//
+// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
+// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
+// 3. The memory is reclaimed when the process terminates.
+//
+// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
+//
+
+
+/**
+ * The mobile app's handle to its on-device SQLite store.
+ *
+ * Opens (and migrates, via the shared [`aperio_db`] runner) the database
+ * at `db_path`, then serves task CRUD through the same
+ * [`cal_adapter_local::LocalAdapter`] the desktop backend uses. The UI
+ * holds one instance per launch and passes an app-sandbox path (e.g.
+ * `<Documents>/aperio.sqlite`).
+ */
+public interface LocalStoreInterface {
+    
+    /**
+     * Create a task in `list_id` and return it (with its assigned id and
+     * timestamps). A recurring task gets a stable `series_id` (DESIGN §9.12).
+     */
+    fun `createTask`(`listId`: kotlin.String, `task`: NewTaskDto): TaskDto
+    
+    /**
+     * Create a new local, top-level task list and return it.
+     */
+    fun `createTaskList`(`name`: kotlin.String): TaskListDto
+    
+    /**
+     * Delete a task. [`StoreError::NotFound`] when the id is unknown.
+     */
+    fun `deleteTask`(`id`: kotlin.String)
+    
+    /**
+     * Delete a task list; its tasks cascade away.
+     * [`StoreError::NotFound`] when the id is unknown.
+     */
+    fun `deleteTaskList`(`id`: kotlin.String)
+    
+    /**
+     * Rename a task list. Rejects an empty/whitespace-only name
+     * ([`StoreError::InvalidField`]); [`StoreError::NotFound`] for an
+     * unknown id.
+     */
+    fun `renameTaskList`(`id`: kotlin.String, `newName`: kotlin.String)
+    
+    /**
+     * Fetch a single task by id; [`StoreError::NotFound`] when absent.
+     */
+    fun `task`(`id`: kotlin.String): TaskDto
+    
+    /**
+     * Fetch a task list by id; [`StoreError::NotFound`] when absent.
+     */
+    fun `taskList`(`id`: kotlin.String): TaskListDto
+    
+    /**
+     * List all task lists, ordered by name (case-insensitive).
+     */
+    fun `taskLists`(): List<TaskListDto>
+    
+    /**
+     * List the tasks in a list, ordered by date then creation time.
+     */
+    fun `tasks`(`listId`: kotlin.String): List<TaskDto>
+    
+    /**
+     * Update a task — a full overwrite of its mutable fields (everything but
+     * the immutable `created_at`), so a faithful read-modify-write round-trip
+     * preserves `series_id` and `resurface_date` by passing them back as read.
+     * Completing a recurring task spawns its next instance, which shows up on
+     * the next [`LocalStore::tasks`] call (DESIGN §9.12). [`StoreError::NotFound`]
+     * when the id is unknown.
+     */
+    fun `updateTask`(`task`: TaskDto): TaskDto
+    
+    companion object
+}
+
+/**
+ * The mobile app's handle to its on-device SQLite store.
+ *
+ * Opens (and migrates, via the shared [`aperio_db`] runner) the database
+ * at `db_path`, then serves task CRUD through the same
+ * [`cal_adapter_local::LocalAdapter`] the desktop backend uses. The UI
+ * holds one instance per launch and passes an app-sandbox path (e.g.
+ * `<Documents>/aperio.sqlite`).
+ */
+open class LocalStore: Disposable, AutoCloseable, LocalStoreInterface
+{
+
+    @Suppress("UNUSED_PARAMETER")
+    /**
+     * @suppress
+     */
+    constructor(withHandle: UniffiWithHandle, handle: Long) {
+        this.handle = handle
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(handle))
+    }
+
+    /**
+     * @suppress
+     *
+     * This constructor can be used to instantiate a fake object. Only used for tests. Any
+     * attempt to actually use an object constructed this way will fail as there is no
+     * connected Rust object.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    constructor(noHandle: NoHandle) {
+        this.handle = 0
+        this.cleanable = null
+    }
+
+    protected val handle: Long
+    protected val cleanable: UniffiCleaner.Cleanable?
+
+    private val wasDestroyed = AtomicBoolean(false)
+    private val callCounter = AtomicLong(1)
+
+    override fun destroy() {
+        // Only allow a single call to this method.
+        // TODO: maybe we should log a warning if called more than once?
+        if (this.wasDestroyed.compareAndSet(false, true)) {
+            // This decrement always matches the initial count of 1 given at creation time.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        this.destroy()
+    }
+
+    internal inline fun <R> callWithHandle(block: (handle: Long) -> R): R {
+        // Check and increment the call counter, to keep the object alive.
+        // This needs a compare-and-set retry loop in case of concurrent updates.
+        do {
+            val c = this.callCounter.get()
+            if (c == 0L) {
+                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
+            }
+            if (c == Long.MAX_VALUE) {
+                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
+            }
+        } while (! this.callCounter.compareAndSet(c, c + 1L))
+        // Now we can safely do the method call without the handle being freed concurrently.
+        try {
+            return block(this.uniffiCloneHandle())
+        } finally {
+            // This decrement always matches the increment we performed above.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    // Use a static inner class instead of a closure so as not to accidentally
+    // capture `this` as part of the cleanable's action.
+    private class UniffiCleanAction(private val handle: Long) : Runnable {
+        override fun run() {
+            if (handle == 0.toLong()) {
+                // Fake object created with `NoHandle`, don't try to free.
+                return;
+            }
+            uniffiRustCall { status ->
+                UniffiLib.uniffi_cal_ffi_fn_free_localstore(handle, status)
+            }
+        }
+    }
+
+    /**
+     * @suppress
+     */
+    fun uniffiCloneHandle(): Long {
+        if (handle == 0.toLong()) {
+            throw InternalException("uniffiCloneHandle() called on NoHandle object");
+        }
+        return uniffiRustCall() { status ->
+            UniffiLib.uniffi_cal_ffi_fn_clone_localstore(handle, status)
+        }
+    }
+
+    
+    /**
+     * Create a task in `list_id` and return it (with its assigned id and
+     * timestamps). A recurring task gets a stable `series_id` (DESIGN §9.12).
+     */
+    @Throws(StoreException::class)override fun `createTask`(`listId`: kotlin.String, `task`: NewTaskDto): TaskDto {
+            return FfiConverterTypeTaskDto.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_localstore_create_task(
+        it,
+        FfiConverterString.lower(`listId`),FfiConverterTypeNewTaskDto.lower(`task`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Create a new local, top-level task list and return it.
+     */
+    @Throws(StoreException::class)override fun `createTaskList`(`name`: kotlin.String): TaskListDto {
+            return FfiConverterTypeTaskListDto.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_localstore_create_task_list(
+        it,
+        FfiConverterString.lower(`name`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Delete a task. [`StoreError::NotFound`] when the id is unknown.
+     */
+    @Throws(StoreException::class)override fun `deleteTask`(`id`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_localstore_delete_task(
+        it,
+        FfiConverterString.lower(`id`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Delete a task list; its tasks cascade away.
+     * [`StoreError::NotFound`] when the id is unknown.
+     */
+    @Throws(StoreException::class)override fun `deleteTaskList`(`id`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_localstore_delete_task_list(
+        it,
+        FfiConverterString.lower(`id`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Rename a task list. Rejects an empty/whitespace-only name
+     * ([`StoreError::InvalidField`]); [`StoreError::NotFound`] for an
+     * unknown id.
+     */
+    @Throws(StoreException::class)override fun `renameTaskList`(`id`: kotlin.String, `newName`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_localstore_rename_task_list(
+        it,
+        FfiConverterString.lower(`id`),FfiConverterString.lower(`newName`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Fetch a single task by id; [`StoreError::NotFound`] when absent.
+     */
+    @Throws(StoreException::class)override fun `task`(`id`: kotlin.String): TaskDto {
+            return FfiConverterTypeTaskDto.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_localstore_task(
+        it,
+        FfiConverterString.lower(`id`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Fetch a task list by id; [`StoreError::NotFound`] when absent.
+     */
+    @Throws(StoreException::class)override fun `taskList`(`id`: kotlin.String): TaskListDto {
+            return FfiConverterTypeTaskListDto.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_localstore_task_list(
+        it,
+        FfiConverterString.lower(`id`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * List all task lists, ordered by name (case-insensitive).
+     */
+    @Throws(StoreException::class)override fun `taskLists`(): List<TaskListDto> {
+            return FfiConverterSequenceTypeTaskListDto.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_localstore_task_lists(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * List the tasks in a list, ordered by date then creation time.
+     */
+    @Throws(StoreException::class)override fun `tasks`(`listId`: kotlin.String): List<TaskDto> {
+            return FfiConverterSequenceTypeTaskDto.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_localstore_tasks(
+        it,
+        FfiConverterString.lower(`listId`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Update a task — a full overwrite of its mutable fields (everything but
+     * the immutable `created_at`), so a faithful read-modify-write round-trip
+     * preserves `series_id` and `resurface_date` by passing them back as read.
+     * Completing a recurring task spawns its next instance, which shows up on
+     * the next [`LocalStore::tasks`] call (DESIGN §9.12). [`StoreError::NotFound`]
+     * when the id is unknown.
+     */
+    @Throws(StoreException::class)override fun `updateTask`(`task`: TaskDto): TaskDto {
+            return FfiConverterTypeTaskDto.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_localstore_update_task(
+        it,
+        FfiConverterTypeTaskDto.lower(`task`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+
+    
+
+
+    
+    companion object {
+        
+    /**
+     * Open the on-device database at `db_path`, creating the file and
+     * applying any pending migrations, and bind a local adapter to it.
+     */
+    @Throws(StoreException::class) fun `open`(`dbPath`: kotlin.String): LocalStore {
+            return FfiConverterTypeLocalStore.lift(
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_constructor_localstore_open(
+    
+        FfiConverterString.lower(`dbPath`),_status)
+}
+    )
+    }
+    
+
+        
+    }
+    
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeLocalStore: FfiConverter<LocalStore, Long> {
+    override fun lower(value: LocalStore): Long {
+        return value.uniffiCloneHandle()
+    }
+
+    override fun lift(value: Long): LocalStore {
+        return LocalStore(UniffiWithHandle, value)
+    }
+
+    override fun read(buf: ByteBuffer): LocalStore {
+        return lift(buf.getLong())
+    }
+
+    override fun allocationSize(value: LocalStore) = 8UL
+
+    override fun write(value: LocalStore, buf: ByteBuffer) {
+        buf.putLong(lower(value))
+    }
+}
+
+
 
 /**
  * A yearless calendar anchor, e.g. `{ month: 4, day: 1 }` for "April 1".
@@ -1023,6 +1722,113 @@ public object FfiConverterTypeMonthDay: FfiConverterRustBuffer<MonthDay> {
     override fun write(value: MonthDay, buf: ByteBuffer) {
             FfiConverterUByte.write(value.`month`, buf)
             FfiConverterUByte.write(value.`day`, buf)
+    }
+}
+
+
+
+/**
+ * The editable shape for creating a task — a mirror of [`cal_core::NewTask`]
+ * (no id/timestamps/etag, no assignees; see [`TaskDto`] for the conventions).
+ *
+ * `series_id` and `resurface_date` are deliberately omitted: they are
+ * store-managed (the local adapter assigns a `series_id` to a recurring task
+ * on create, and derives `resurface_date` when it spawns a backlog instance —
+ * DESIGN §9.12), not values a client sets.
+ */
+data class NewTaskDto (
+    var `title`: kotlin.String
+    , 
+    var `description`: kotlin.String?
+    , 
+    var `status`: TaskStatus
+    , 
+    var `priority`: TaskPriority
+    , 
+    var `scheduledDate`: kotlin.String?
+    , 
+    var `scheduledTime`: kotlin.String?
+    , 
+    var `deadlineDate`: kotlin.String?
+    , 
+    var `deadlineTime`: kotlin.String?
+    , 
+    var `recurrence`: TaskRecurrence?
+    , 
+    var `parentId`: kotlin.String?
+    , 
+    var `sectionId`: kotlin.String?
+    , 
+    var `colorLabel`: kotlin.String?
+    , 
+    var `reminders`: List<Reminder>
+    , 
+    var `sound`: SoundConfig?
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeNewTaskDto: FfiConverterRustBuffer<NewTaskDto> {
+    override fun read(buf: ByteBuffer): NewTaskDto {
+        return NewTaskDto(
+            FfiConverterString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterTypeTaskStatus.read(buf),
+            FfiConverterTypeTaskPriority.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalTypeTaskRecurrence.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterSequenceTypeReminder.read(buf),
+            FfiConverterOptionalTypeSoundConfig.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: NewTaskDto) = (
+            FfiConverterString.allocationSize(value.`title`) +
+            FfiConverterOptionalString.allocationSize(value.`description`) +
+            FfiConverterTypeTaskStatus.allocationSize(value.`status`) +
+            FfiConverterTypeTaskPriority.allocationSize(value.`priority`) +
+            FfiConverterOptionalString.allocationSize(value.`scheduledDate`) +
+            FfiConverterOptionalString.allocationSize(value.`scheduledTime`) +
+            FfiConverterOptionalString.allocationSize(value.`deadlineDate`) +
+            FfiConverterOptionalString.allocationSize(value.`deadlineTime`) +
+            FfiConverterOptionalTypeTaskRecurrence.allocationSize(value.`recurrence`) +
+            FfiConverterOptionalString.allocationSize(value.`parentId`) +
+            FfiConverterOptionalString.allocationSize(value.`sectionId`) +
+            FfiConverterOptionalString.allocationSize(value.`colorLabel`) +
+            FfiConverterSequenceTypeReminder.allocationSize(value.`reminders`) +
+            FfiConverterOptionalTypeSoundConfig.allocationSize(value.`sound`)
+    )
+
+    override fun write(value: NewTaskDto, buf: ByteBuffer) {
+            FfiConverterString.write(value.`title`, buf)
+            FfiConverterOptionalString.write(value.`description`, buf)
+            FfiConverterTypeTaskStatus.write(value.`status`, buf)
+            FfiConverterTypeTaskPriority.write(value.`priority`, buf)
+            FfiConverterOptionalString.write(value.`scheduledDate`, buf)
+            FfiConverterOptionalString.write(value.`scheduledTime`, buf)
+            FfiConverterOptionalString.write(value.`deadlineDate`, buf)
+            FfiConverterOptionalString.write(value.`deadlineTime`, buf)
+            FfiConverterOptionalTypeTaskRecurrence.write(value.`recurrence`, buf)
+            FfiConverterOptionalString.write(value.`parentId`, buf)
+            FfiConverterOptionalString.write(value.`sectionId`, buf)
+            FfiConverterOptionalString.write(value.`colorLabel`, buf)
+            FfiConverterSequenceTypeReminder.write(value.`reminders`, buf)
+            FfiConverterOptionalTypeSoundConfig.write(value.`sound`, buf)
     }
 }
 
@@ -1073,6 +1879,330 @@ public object FfiConverterTypeParsedAttendee: FfiConverterRustBuffer<ParsedAtten
     override fun write(value: ParsedAttendee, buf: ByteBuffer) {
             FfiConverterOptionalString.write(value.`name`, buf)
             FfiConverterString.write(value.`email`, buf)
+    }
+}
+
+
+
+/**
+ * A reminder attached to a task. Mirrors [`cal_core::Reminder`].
+ */
+data class Reminder (
+    var `kind`: ReminderKind
+    , 
+    /**
+     * Overrides the task-level sound when set.
+     */
+    var `sound`: SoundConfig?
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeReminder: FfiConverterRustBuffer<Reminder> {
+    override fun read(buf: ByteBuffer): Reminder {
+        return Reminder(
+            FfiConverterTypeReminderKind.read(buf),
+            FfiConverterOptionalTypeSoundConfig.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: Reminder) = (
+            FfiConverterTypeReminderKind.allocationSize(value.`kind`) +
+            FfiConverterOptionalTypeSoundConfig.allocationSize(value.`sound`)
+    )
+
+    override fun write(value: Reminder, buf: ByteBuffer) {
+            FfiConverterTypeReminderKind.write(value.`kind`, buf)
+            FfiConverterOptionalTypeSoundConfig.write(value.`sound`, buf)
+    }
+}
+
+
+
+/**
+ * Notification sound configuration. Mirrors [`cal_core::SoundConfig`].
+ */
+data class SoundConfig (
+    var `source`: SoundSource
+    , 
+    /**
+     * Volume 0–100, independent of the system volume.
+     */
+    var `volume`: kotlin.UByte
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeSoundConfig: FfiConverterRustBuffer<SoundConfig> {
+    override fun read(buf: ByteBuffer): SoundConfig {
+        return SoundConfig(
+            FfiConverterTypeSoundSource.read(buf),
+            FfiConverterUByte.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: SoundConfig) = (
+            FfiConverterTypeSoundSource.allocationSize(value.`source`) +
+            FfiConverterUByte.allocationSize(value.`volume`)
+    )
+
+    override fun write(value: SoundConfig, buf: ByteBuffer) {
+            FfiConverterTypeSoundSource.write(value.`source`, buf)
+            FfiConverterUByte.write(value.`volume`, buf)
+    }
+}
+
+
+
+/**
+ * A task as it crosses the FFI boundary — a lossless mirror of
+ * [`cal_core::Task`] for the on-device store. Dates are ISO `YYYY-MM-DD`,
+ * times are `HH:MM:SS`, and instants are RFC 3339 strings (UniFFI has no
+ * built-in date/time types). Assignees are intentionally omitted: the local
+ * store does not persist them (a sync-era, multi-user concept), so surfacing
+ * them here would be misleading.
+ */
+data class TaskDto (
+    var `id`: kotlin.String
+    , 
+    var `listId`: kotlin.String
+    , 
+    var `title`: kotlin.String
+    , 
+    var `description`: kotlin.String?
+    , 
+    var `status`: TaskStatus
+    , 
+    var `priority`: TaskPriority
+    , 
+    /**
+     * `YYYY-MM-DD`. The day the task is planned for.
+     */
+    var `scheduledDate`: kotlin.String?
+    , 
+    /**
+     * `HH:MM:SS`. Requires `scheduled_date`.
+     */
+    var `scheduledTime`: kotlin.String?
+    , 
+    /**
+     * `YYYY-MM-DD`. The day the task is due by.
+     */
+    var `deadlineDate`: kotlin.String?
+    , 
+    /**
+     * `HH:MM:SS`. Requires `deadline_date`.
+     */
+    var `deadlineTime`: kotlin.String?
+    , 
+    var `recurrence`: TaskRecurrence?
+    , 
+    /**
+     * `YYYY-MM-DD`. Backlog resurface trigger (DESIGN §9.12), derived by the
+     * recurrence engine when a backlog instance is spawned. Round-trips
+     * through [`LocalStore::update_task`].
+     */
+    var `resurfaceDate`: kotlin.String?
+    , 
+    /**
+     * Stable id of the recurring series this instance belongs to. The store
+     * assigns it when a recurring task is created; pass it back unchanged on
+     * update (it round-trips through [`LocalStore::update_task`]).
+     */
+    var `seriesId`: kotlin.String?
+    , 
+    var `parentId`: kotlin.String?
+    , 
+    var `sectionId`: kotlin.String?
+    , 
+    /**
+     * Global color-label id, if bound.
+     */
+    var `colorLabel`: kotlin.String?
+    , 
+    var `reminders`: List<Reminder>
+    , 
+    var `sound`: SoundConfig?
+    , 
+    /**
+     * RFC 3339.
+     */
+    var `createdAt`: kotlin.String
+    , 
+    /**
+     * RFC 3339.
+     */
+    var `updatedAt`: kotlin.String
+    , 
+    /**
+     * RFC 3339, set once the task is completed.
+     */
+    var `completedAt`: kotlin.String?
+    , 
+    var `etag`: kotlin.String?
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeTaskDto: FfiConverterRustBuffer<TaskDto> {
+    override fun read(buf: ByteBuffer): TaskDto {
+        return TaskDto(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterTypeTaskStatus.read(buf),
+            FfiConverterTypeTaskPriority.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalTypeTaskRecurrence.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterSequenceTypeReminder.read(buf),
+            FfiConverterOptionalTypeSoundConfig.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: TaskDto) = (
+            FfiConverterString.allocationSize(value.`id`) +
+            FfiConverterString.allocationSize(value.`listId`) +
+            FfiConverterString.allocationSize(value.`title`) +
+            FfiConverterOptionalString.allocationSize(value.`description`) +
+            FfiConverterTypeTaskStatus.allocationSize(value.`status`) +
+            FfiConverterTypeTaskPriority.allocationSize(value.`priority`) +
+            FfiConverterOptionalString.allocationSize(value.`scheduledDate`) +
+            FfiConverterOptionalString.allocationSize(value.`scheduledTime`) +
+            FfiConverterOptionalString.allocationSize(value.`deadlineDate`) +
+            FfiConverterOptionalString.allocationSize(value.`deadlineTime`) +
+            FfiConverterOptionalTypeTaskRecurrence.allocationSize(value.`recurrence`) +
+            FfiConverterOptionalString.allocationSize(value.`resurfaceDate`) +
+            FfiConverterOptionalString.allocationSize(value.`seriesId`) +
+            FfiConverterOptionalString.allocationSize(value.`parentId`) +
+            FfiConverterOptionalString.allocationSize(value.`sectionId`) +
+            FfiConverterOptionalString.allocationSize(value.`colorLabel`) +
+            FfiConverterSequenceTypeReminder.allocationSize(value.`reminders`) +
+            FfiConverterOptionalTypeSoundConfig.allocationSize(value.`sound`) +
+            FfiConverterString.allocationSize(value.`createdAt`) +
+            FfiConverterString.allocationSize(value.`updatedAt`) +
+            FfiConverterOptionalString.allocationSize(value.`completedAt`) +
+            FfiConverterOptionalString.allocationSize(value.`etag`)
+    )
+
+    override fun write(value: TaskDto, buf: ByteBuffer) {
+            FfiConverterString.write(value.`id`, buf)
+            FfiConverterString.write(value.`listId`, buf)
+            FfiConverterString.write(value.`title`, buf)
+            FfiConverterOptionalString.write(value.`description`, buf)
+            FfiConverterTypeTaskStatus.write(value.`status`, buf)
+            FfiConverterTypeTaskPriority.write(value.`priority`, buf)
+            FfiConverterOptionalString.write(value.`scheduledDate`, buf)
+            FfiConverterOptionalString.write(value.`scheduledTime`, buf)
+            FfiConverterOptionalString.write(value.`deadlineDate`, buf)
+            FfiConverterOptionalString.write(value.`deadlineTime`, buf)
+            FfiConverterOptionalTypeTaskRecurrence.write(value.`recurrence`, buf)
+            FfiConverterOptionalString.write(value.`resurfaceDate`, buf)
+            FfiConverterOptionalString.write(value.`seriesId`, buf)
+            FfiConverterOptionalString.write(value.`parentId`, buf)
+            FfiConverterOptionalString.write(value.`sectionId`, buf)
+            FfiConverterOptionalString.write(value.`colorLabel`, buf)
+            FfiConverterSequenceTypeReminder.write(value.`reminders`, buf)
+            FfiConverterOptionalTypeSoundConfig.write(value.`sound`, buf)
+            FfiConverterString.write(value.`createdAt`, buf)
+            FfiConverterString.write(value.`updatedAt`, buf)
+            FfiConverterOptionalString.write(value.`completedAt`, buf)
+            FfiConverterOptionalString.write(value.`etag`, buf)
+    }
+}
+
+
+
+/**
+ * A task list as it crosses the FFI boundary. Minimal first slice —
+ * richer fields (color, sound, calendar binding) follow as the UI needs
+ * them.
+ */
+data class TaskListDto (
+    var `id`: kotlin.String
+    , 
+    var `name`: kotlin.String
+    , 
+    /**
+     * Parent project id for nested backends; `None` for a top-level list.
+     */
+    var `parentId`: kotlin.String?
+    , 
+    var `readOnly`: kotlin.Boolean
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeTaskListDto: FfiConverterRustBuffer<TaskListDto> {
+    override fun read(buf: ByteBuffer): TaskListDto {
+        return TaskListDto(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterBoolean.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: TaskListDto) = (
+            FfiConverterString.allocationSize(value.`id`) +
+            FfiConverterString.allocationSize(value.`name`) +
+            FfiConverterOptionalString.allocationSize(value.`parentId`) +
+            FfiConverterBoolean.allocationSize(value.`readOnly`)
+    )
+
+    override fun write(value: TaskListDto, buf: ByteBuffer) {
+            FfiConverterString.write(value.`id`, buf)
+            FfiConverterString.write(value.`name`, buf)
+            FfiConverterOptionalString.write(value.`parentId`, buf)
+            FfiConverterBoolean.write(value.`readOnly`, buf)
     }
 }
 
@@ -1459,6 +2589,461 @@ public object FfiConverterTypeRecurrencePlacement: FfiConverterRustBuffer<Recurr
 
 
 /**
+ * A reminder trigger. Mirrors [`cal_core::ReminderKind`], with the
+ * `Absolute` instant represented as an RFC 3339 string on the boundary.
+ */
+sealed class ReminderKind {
+    
+    /**
+     * Relative to the task's deadline; `minutes_before` may be negative to
+     * fire after the reference time.
+     */
+    data class Relative(
+        val `minutesBefore`: kotlin.Long) : ReminderKind()
+        
+    {
+        
+
+        companion object
+    }
+    
+    /**
+     * Fixed point in time (RFC 3339, e.g. `2026-06-16T09:00:00+00:00`).
+     */
+    data class Absolute(
+        val `at`: kotlin.String) : ReminderKind()
+        
+    {
+        
+
+        companion object
+    }
+    
+    /**
+     * Fires on the next app start after the due time.
+     */
+    object AppStart : ReminderKind()
+    
+    
+    /**
+     * E-mail reminder.
+     */
+    data class Email(
+        val `minutesBefore`: kotlin.Long) : ReminderKind()
+        
+    {
+        
+
+        companion object
+    }
+    
+
+    
+
+    
+    
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeReminderKind : FfiConverterRustBuffer<ReminderKind>{
+    override fun read(buf: ByteBuffer): ReminderKind {
+        return when(buf.getInt()) {
+            1 -> ReminderKind.Relative(
+                FfiConverterLong.read(buf),
+                )
+            2 -> ReminderKind.Absolute(
+                FfiConverterString.read(buf),
+                )
+            3 -> ReminderKind.AppStart
+            4 -> ReminderKind.Email(
+                FfiConverterLong.read(buf),
+                )
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: ReminderKind) = when(value) {
+        is ReminderKind.Relative -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterLong.allocationSize(value.`minutesBefore`)
+            )
+        }
+        is ReminderKind.Absolute -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`at`)
+            )
+        }
+        is ReminderKind.AppStart -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is ReminderKind.Email -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterLong.allocationSize(value.`minutesBefore`)
+            )
+        }
+    }
+
+    override fun write(value: ReminderKind, buf: ByteBuffer) {
+        when(value) {
+            is ReminderKind.Relative -> {
+                buf.putInt(1)
+                FfiConverterLong.write(value.`minutesBefore`, buf)
+                Unit
+            }
+            is ReminderKind.Absolute -> {
+                buf.putInt(2)
+                FfiConverterString.write(value.`at`, buf)
+                Unit
+            }
+            is ReminderKind.AppStart -> {
+                buf.putInt(3)
+                Unit
+            }
+            is ReminderKind.Email -> {
+                buf.putInt(4)
+                FfiConverterLong.write(value.`minutesBefore`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
+/**
+ * Where a notification sound comes from. Mirrors [`cal_core::SoundSource`].
+ */
+sealed class SoundSource {
+    
+    /**
+     * Platform default notification sound.
+     */
+    object System : SoundSource()
+    
+    
+    /**
+     * Silent (visual only).
+     */
+    object Silent : SoundSource()
+    
+    
+    /**
+     * User-supplied audio file, referenced by its content hash.
+     */
+    data class Custom(
+        val `sha256`: kotlin.String) : SoundSource()
+        
+    {
+        
+
+        companion object
+    }
+    
+
+    
+
+    
+    
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeSoundSource : FfiConverterRustBuffer<SoundSource>{
+    override fun read(buf: ByteBuffer): SoundSource {
+        return when(buf.getInt()) {
+            1 -> SoundSource.System
+            2 -> SoundSource.Silent
+            3 -> SoundSource.Custom(
+                FfiConverterString.read(buf),
+                )
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: SoundSource) = when(value) {
+        is SoundSource.System -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is SoundSource.Silent -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is SoundSource.Custom -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`sha256`)
+            )
+        }
+    }
+
+    override fun write(value: SoundSource, buf: ByteBuffer) {
+        when(value) {
+            is SoundSource.System -> {
+                buf.putInt(1)
+                Unit
+            }
+            is SoundSource.Silent -> {
+                buf.putInt(2)
+                Unit
+            }
+            is SoundSource.Custom -> {
+                buf.putInt(3)
+                FfiConverterString.write(value.`sha256`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
+
+
+/**
+ * Errors surfaced from the on-device store to the foreign side.
+ */
+sealed class StoreException: kotlin.Exception() {
+    
+    /**
+     * Opening or migrating the database file failed.
+     */
+    class Open(
+        
+        val `message`: kotlin.String
+        ) : StoreException() {
+        override val message
+            get() = "message=${ `message` }"
+    }
+    
+    /**
+     * A read or write against the local database failed.
+     */
+    class Storage(
+        
+        val `message`: kotlin.String
+        ) : StoreException() {
+        override val message
+            get() = "message=${ `message` }"
+    }
+    
+    /**
+     * The requested row does not exist.
+     */
+    class NotFound(
+        ) : StoreException() {
+        override val message
+            get() = ""
+    }
+    
+    /**
+     * A value coming from the foreign side could not be parsed into the
+     * core model (a malformed date, time, datetime, recurrence rule, …) or
+     * was otherwise rejected as invalid input.
+     */
+    class InvalidField(
+        
+        val `field`: kotlin.String, 
+        
+        val `message`: kotlin.String
+        ) : StoreException() {
+        override val message
+            get() = "field=${ `field` }, message=${ `message` }"
+    }
+    
+
+    
+
+
+    companion object ErrorHandler : UniffiRustCallStatusErrorHandler<StoreException> {
+        override fun lift(error_buf: RustBuffer.ByValue): StoreException = FfiConverterTypeStoreError.lift(error_buf)
+    }
+
+    
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeStoreError : FfiConverterRustBuffer<StoreException> {
+    override fun read(buf: ByteBuffer): StoreException {
+        
+
+        return when(buf.getInt()) {
+            1 -> StoreException.Open(
+                FfiConverterString.read(buf),
+                )
+            2 -> StoreException.Storage(
+                FfiConverterString.read(buf),
+                )
+            3 -> StoreException.NotFound()
+            4 -> StoreException.InvalidField(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: StoreException): ULong {
+        return when(value) {
+            is StoreException.Open -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`message`)
+            )
+            is StoreException.Storage -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`message`)
+            )
+            is StoreException.NotFound -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+            )
+            is StoreException.InvalidField -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`field`)
+                + FfiConverterString.allocationSize(value.`message`)
+            )
+        }
+    }
+
+    override fun write(value: StoreException, buf: ByteBuffer) {
+        when(value) {
+            is StoreException.Open -> {
+                buf.putInt(1)
+                FfiConverterString.write(value.`message`, buf)
+                Unit
+            }
+            is StoreException.Storage -> {
+                buf.putInt(2)
+                FfiConverterString.write(value.`message`, buf)
+                Unit
+            }
+            is StoreException.NotFound -> {
+                buf.putInt(3)
+                Unit
+            }
+            is StoreException.InvalidField -> {
+                buf.putInt(4)
+                FfiConverterString.write(value.`field`, buf)
+                FfiConverterString.write(value.`message`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+
+}
+
+
+
+/**
+ * Task priority. Mirrors [`cal_core::TaskPriority`].
+ */
+
+enum class TaskPriority {
+    
+    LOW,
+    MEDIUM,
+    HIGH;
+
+    
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeTaskPriority: FfiConverterRustBuffer<TaskPriority> {
+    override fun read(buf: ByteBuffer) = try {
+        TaskPriority.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: TaskPriority) = 4UL
+
+    override fun write(value: TaskPriority, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+/**
+ * Lifecycle state of a task. Mirrors [`cal_core::TaskStatus`].
+ */
+
+enum class TaskStatus {
+    
+    OPEN,
+    IN_PROGRESS,
+    COMPLETED,
+    CANCELLED;
+
+    
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeTaskStatus: FfiConverterRustBuffer<TaskStatus> {
+    override fun read(buf: ByteBuffer) = try {
+        TaskStatus.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: TaskStatus) = 4UL
+
+    override fun write(value: TaskStatus, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+/**
  * A day of the week (for the weekly `BYDAY` picker). Mirrors [`cal_core::Weekday`].
  */
 
@@ -1558,6 +3143,38 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
         } else {
             buf.put(1)
             FfiConverterString.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypeSoundConfig: FfiConverterRustBuffer<SoundConfig?> {
+    override fun read(buf: ByteBuffer): SoundConfig? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeSoundConfig.read(buf)
+    }
+
+    override fun allocationSize(value: SoundConfig?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeSoundConfig.allocationSize(value)
+        }
+    }
+
+    override fun write(value: SoundConfig?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeSoundConfig.write(value, buf)
         }
     }
 }
@@ -1714,6 +3331,90 @@ public object FfiConverterSequenceTypeMonthDay: FfiConverterRustBuffer<List<Mont
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeMonthDay.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeReminder: FfiConverterRustBuffer<List<Reminder>> {
+    override fun read(buf: ByteBuffer): List<Reminder> {
+        val len = buf.getInt()
+        return List<Reminder>(len) {
+            FfiConverterTypeReminder.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<Reminder>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeReminder.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<Reminder>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeReminder.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeTaskDto: FfiConverterRustBuffer<List<TaskDto>> {
+    override fun read(buf: ByteBuffer): List<TaskDto> {
+        val len = buf.getInt()
+        return List<TaskDto>(len) {
+            FfiConverterTypeTaskDto.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<TaskDto>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeTaskDto.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<TaskDto>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeTaskDto.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeTaskListDto: FfiConverterRustBuffer<List<TaskListDto>> {
+    override fun read(buf: ByteBuffer): List<TaskListDto> {
+        val len = buf.getInt()
+        return List<TaskListDto>(len) {
+            FfiConverterTypeTaskListDto.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<TaskListDto>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeTaskListDto.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<TaskListDto>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeTaskListDto.write(it, buf)
         }
     }
 }
