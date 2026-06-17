@@ -837,6 +837,22 @@ fn opt_utc_field(field: &str, s: Option<String>) -> Result<Option<DateTime<Utc>>
     s.map(|s| parse_utc_field(field, &s)).transpose()
 }
 
+/// Serialize a value to the JSON the bridge hands to JS — the `cal_core` serde
+/// shape, identical to the desktop's Tauri payloads.
+fn to_json<T: serde::Serialize>(value: &T) -> Result<String, StoreError> {
+    serde_json::to_string(value).map_err(|e| StoreError::Storage {
+        detail: format!("serialize: {e}"),
+    })
+}
+
+/// Parse JSON from the foreign side into a `cal_core` value.
+fn from_json<T: serde::de::DeserializeOwned>(field: &str, json: &str) -> Result<T, StoreError> {
+    serde_json::from_str(json).map_err(|e| StoreError::InvalidField {
+        field: field.to_string(),
+        detail: format!("invalid JSON: {e}"),
+    })
+}
+
 /// The mobile app's handle to its on-device SQLite store.
 ///
 /// Opens (and migrates, via the shared [`aperio_db`] runner) the database
@@ -959,6 +975,131 @@ impl LocalStore {
     /// Delete a task. [`StoreError::NotFound`] when the id is unknown.
     pub fn delete_task(&self, id: String) -> Result<(), StoreError> {
         self.adapter.delete_task_sync(&id).map_err(map_store_err)
+    }
+
+    // ── JSON bridge surface (the faithful tasks port) ────────────────────────
+    //
+    // The full task/list/section domain crosses as JSON in the `cal_core` serde
+    // shape — identical to the desktop's Tauri payloads — so the hand-written
+    // mobile native module is a trivial string passthrough and the shared TS
+    // domain logic (types, grouping, labels) is reused verbatim. The typed DTO
+    // methods above stay for direct/typed consumers and the tests.
+
+    /// All task lists as a JSON array (`cal_core::TaskList[]`).
+    pub fn task_lists_json(&self) -> Result<String, StoreError> {
+        let lists = self.adapter.list_task_lists_sync().map_err(map_store_err)?;
+        to_json(&lists)
+    }
+
+    /// Create a top-level local task list; returns the created `TaskList` as JSON.
+    pub fn create_task_list_json(&self, name: String) -> Result<String, StoreError> {
+        let list = self
+            .adapter
+            .create_task_list(&name, None, None, None, None)
+            .map_err(map_store_err)?;
+        to_json(&list)
+    }
+
+    /// Set or clear a list's parent (`parent_id = None` promotes to top level);
+    /// returns the updated `TaskList` as JSON.
+    pub fn reparent_task_list_json(
+        &self,
+        id: String,
+        parent_id: Option<String>,
+    ) -> Result<String, StoreError> {
+        let list = self
+            .adapter
+            .reparent_task_list(&id, parent_id.as_deref())
+            .map_err(map_store_err)?;
+        to_json(&list)
+    }
+
+    /// Tasks in a list as a JSON array (`cal_core::Task[]`), ordered by date
+    /// then creation time.
+    pub fn tasks_json(&self, list_id: String) -> Result<String, StoreError> {
+        let tasks = self
+            .adapter
+            .get_tasks_sync(&list_id)
+            .map_err(map_store_err)?;
+        to_json(&tasks)
+    }
+
+    /// One task by id as JSON; [`StoreError::NotFound`] when absent.
+    pub fn task_json(&self, id: String) -> Result<String, StoreError> {
+        let task = self
+            .adapter
+            .get_task_by_id(&id)
+            .map_err(map_store_err)?
+            .ok_or(StoreError::NotFound)?;
+        to_json(&task)
+    }
+
+    /// Create a task from a JSON `cal_core::NewTask`; returns the created `Task`
+    /// as JSON (a recurring task is assigned a stable series id).
+    pub fn create_task_json(
+        &self,
+        list_id: String,
+        new_task_json: String,
+    ) -> Result<String, StoreError> {
+        let new: cal_core::NewTask = from_json("task", &new_task_json)?;
+        let task = self
+            .adapter
+            .create_task_sync(&list_id, new)
+            .map_err(map_store_err)?;
+        to_json(&task)
+    }
+
+    /// Update a task from a JSON `cal_core::Task`; returns the updated `Task` as
+    /// JSON. Completing a recurring task spawns its next instance (DESIGN §9.12).
+    pub fn update_task_json(&self, task_json: String) -> Result<String, StoreError> {
+        let task: cal_core::Task = from_json("task", &task_json)?;
+        let updated = self.adapter.update_task_sync(task).map_err(map_store_err)?;
+        to_json(&updated)
+    }
+
+    /// Sections of a list as a JSON array (`cal_core::Section[]`), ordered by
+    /// position then name.
+    pub fn sections_json(&self, list_id: String) -> Result<String, StoreError> {
+        let sections = self
+            .adapter
+            .list_sections_sync(&list_id)
+            .map_err(map_store_err)?;
+        to_json(&sections)
+    }
+
+    /// Create a section in a list; returns the created `Section` as JSON.
+    pub fn create_section_json(
+        &self,
+        list_id: String,
+        name: String,
+        position: u32,
+        color_label: Option<String>,
+    ) -> Result<String, StoreError> {
+        let section = self
+            .adapter
+            .create_section(
+                &list_id,
+                &name,
+                position,
+                color_label.map(cal_core::ColorLabelId),
+            )
+            .map_err(map_store_err)?;
+        to_json(&section)
+    }
+
+    /// Update a section from a JSON `cal_core::Section`; returns it as JSON.
+    pub fn update_section_json(&self, section_json: String) -> Result<String, StoreError> {
+        let section: cal_core::Section = from_json("section", &section_json)?;
+        let updated = self
+            .adapter
+            .update_section(section)
+            .map_err(map_store_err)?;
+        to_json(&updated)
+    }
+
+    /// Delete a section; its tasks fall back to ungrouped (`section_id` → NULL).
+    pub fn delete_section(&self, id: String) -> Result<(), StoreError> {
+        self.adapter.delete_section(&id).map_err(map_store_err)
     }
 }
 
@@ -1366,5 +1507,45 @@ mod tests {
         assert_eq!(reread.title, "Water the fern");
         assert_eq!(reread.series_id, series);
         assert_eq!(reread.resurface_date.as_deref(), Some("2026-05-17"));
+    }
+
+    #[test]
+    fn json_bridge_round_trips_a_task() {
+        let (store, list) = store_with_list();
+        // A minimal cal_core::NewTask in the serde shape the desktop also uses.
+        let new_json = r#"{"title":"From JSON","description":null,"status":"open","priority":"medium","scheduled_date":"2026-05-21","scheduled_time":null,"deadline_date":null,"deadline_time":null,"recurrence":null,"parent_id":null,"color_label":null,"reminders":[],"sound":null}"#;
+        let created = store
+            .create_task_json(list.id.clone(), new_json.to_string())
+            .unwrap();
+        assert!(created.contains("\"title\":\"From JSON\""));
+        assert!(created.contains("\"scheduled_date\":\"2026-05-21\""));
+
+        let listed = store.tasks_json(list.id.clone()).unwrap();
+        assert!(listed.contains("From JSON"));
+
+        // The full task round-trips back through update unchanged.
+        let updated = store.update_task_json(created).unwrap();
+        assert!(updated.contains("From JSON"));
+
+        // Malformed JSON surfaces a typed InvalidField, not a panic.
+        assert!(matches!(
+            store.create_task_json(list.id, "{not json}".to_string()),
+            Err(StoreError::InvalidField { .. })
+        ));
+    }
+
+    #[test]
+    fn json_bridge_round_trips_lists_and_sections() {
+        let store = LocalStore::open(":memory:".to_string()).unwrap();
+        let list_json = store.create_task_list_json("Project".to_string()).unwrap();
+        assert!(list_json.contains("\"name\":\"Project\""));
+        let list_id = store.task_lists().unwrap()[0].id.clone();
+
+        let section = store
+            .create_section_json(list_id.clone(), "Doing".to_string(), 0, None)
+            .unwrap();
+        assert!(section.contains("\"name\":\"Doing\""));
+        let sections = store.sections_json(list_id).unwrap();
+        assert!(sections.contains("Doing"));
     }
 }

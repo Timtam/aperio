@@ -642,9 +642,17 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_cal_ffi_checksum_func_task_recurrence_to_rrule(
     ): Short
+    external fun uniffi_cal_ffi_checksum_method_localstore_create_section_json(
+    ): Short
     external fun uniffi_cal_ffi_checksum_method_localstore_create_task(
     ): Short
+    external fun uniffi_cal_ffi_checksum_method_localstore_create_task_json(
+    ): Short
     external fun uniffi_cal_ffi_checksum_method_localstore_create_task_list(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_localstore_create_task_list_json(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_localstore_delete_section(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_localstore_delete_task(
     ): Short
@@ -652,15 +660,29 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_cal_ffi_checksum_method_localstore_rename_task_list(
     ): Short
+    external fun uniffi_cal_ffi_checksum_method_localstore_reparent_task_list_json(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_localstore_sections_json(
+    ): Short
     external fun uniffi_cal_ffi_checksum_method_localstore_task(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_localstore_task_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_localstore_task_list(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_localstore_task_lists(
     ): Short
+    external fun uniffi_cal_ffi_checksum_method_localstore_task_lists_json(
+    ): Short
     external fun uniffi_cal_ffi_checksum_method_localstore_tasks(
     ): Short
+    external fun uniffi_cal_ffi_checksum_method_localstore_tasks_json(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_localstore_update_section_json(
+    ): Short
     external fun uniffi_cal_ffi_checksum_method_localstore_update_task(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_localstore_update_task_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_constructor_localstore_open(
     ): Short
@@ -688,25 +710,47 @@ internal object UniffiLib {
     ): Unit
     external fun uniffi_cal_ffi_fn_constructor_localstore_open(`dbPath`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
+    external fun uniffi_cal_ffi_fn_method_localstore_create_section_json(`ptr`: Long,`listId`: RustBuffer.ByValue,`name`: RustBuffer.ByValue,`position`: Int,`colorLabel`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun uniffi_cal_ffi_fn_method_localstore_create_task(`ptr`: Long,`listId`: RustBuffer.ByValue,`task`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_cal_ffi_fn_method_localstore_create_task_json(`ptr`: Long,`listId`: RustBuffer.ByValue,`newTaskJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_cal_ffi_fn_method_localstore_create_task_list(`ptr`: Long,`name`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    external fun uniffi_cal_ffi_fn_method_localstore_create_task_list_json(`ptr`: Long,`name`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_cal_ffi_fn_method_localstore_delete_section(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
     external fun uniffi_cal_ffi_fn_method_localstore_delete_task(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     external fun uniffi_cal_ffi_fn_method_localstore_delete_task_list(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     external fun uniffi_cal_ffi_fn_method_localstore_rename_task_list(`ptr`: Long,`id`: RustBuffer.ByValue,`newName`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    external fun uniffi_cal_ffi_fn_method_localstore_reparent_task_list_json(`ptr`: Long,`id`: RustBuffer.ByValue,`parentId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_cal_ffi_fn_method_localstore_sections_json(`ptr`: Long,`listId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun uniffi_cal_ffi_fn_method_localstore_task(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_cal_ffi_fn_method_localstore_task_json(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_cal_ffi_fn_method_localstore_task_list(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_cal_ffi_fn_method_localstore_task_lists(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    external fun uniffi_cal_ffi_fn_method_localstore_task_lists_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun uniffi_cal_ffi_fn_method_localstore_tasks(`ptr`: Long,`listId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    external fun uniffi_cal_ffi_fn_method_localstore_tasks_json(`ptr`: Long,`listId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_cal_ffi_fn_method_localstore_update_section_json(`ptr`: Long,`sectionJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun uniffi_cal_ffi_fn_method_localstore_update_task(`ptr`: Long,`task`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_cal_ffi_fn_method_localstore_update_task_json(`ptr`: Long,`taskJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_cal_ffi_fn_func_parse_attendee(`entry`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -842,10 +886,22 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_func_task_recurrence_to_rrule() != 25991.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_localstore_create_section_json() != 50434.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_localstore_create_task() != 59574.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_localstore_create_task_json() != 3767.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_localstore_create_task_list() != 55689.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_localstore_create_task_list_json() != 24745.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_localstore_delete_section() != 25900.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_localstore_delete_task() != 4042.toShort()) {
@@ -857,7 +913,16 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_localstore_rename_task_list() != 4483.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_localstore_reparent_task_list_json() != 15690.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_localstore_sections_json() != 51162.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_localstore_task() != 62167.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_localstore_task_json() != 63068.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_localstore_task_list() != 63565.toShort()) {
@@ -866,10 +931,22 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_localstore_task_lists() != 23283.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_localstore_task_lists_json() != 7313.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_localstore_tasks() != 48899.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_localstore_tasks_json() != 57199.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_localstore_update_section_json() != 20561.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_localstore_update_task() != 59854.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_localstore_update_task_json() != 53017.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_constructor_localstore_open() != 47662.toShort()) {
@@ -1289,15 +1366,36 @@ public object FfiConverterString: FfiConverter<String, RustBuffer.ByValue> {
 public interface LocalStoreInterface {
     
     /**
+     * Create a section in a list; returns the created `Section` as JSON.
+     */
+    fun `createSectionJson`(`listId`: kotlin.String, `name`: kotlin.String, `position`: kotlin.UInt, `colorLabel`: kotlin.String?): kotlin.String
+    
+    /**
      * Create a task in `list_id` and return it (with its assigned id and
      * timestamps). A recurring task gets a stable `series_id` (DESIGN §9.12).
      */
     fun `createTask`(`listId`: kotlin.String, `task`: NewTaskDto): TaskDto
     
     /**
+     * Create a task from a JSON `cal_core::NewTask`; returns the created `Task`
+     * as JSON (a recurring task is assigned a stable series id).
+     */
+    fun `createTaskJson`(`listId`: kotlin.String, `newTaskJson`: kotlin.String): kotlin.String
+    
+    /**
      * Create a new local, top-level task list and return it.
      */
     fun `createTaskList`(`name`: kotlin.String): TaskListDto
+    
+    /**
+     * Create a top-level local task list; returns the created `TaskList` as JSON.
+     */
+    fun `createTaskListJson`(`name`: kotlin.String): kotlin.String
+    
+    /**
+     * Delete a section; its tasks fall back to ungrouped (`section_id` → NULL).
+     */
+    fun `deleteSection`(`id`: kotlin.String)
     
     /**
      * Delete a task. [`StoreError::NotFound`] when the id is unknown.
@@ -1318,9 +1416,26 @@ public interface LocalStoreInterface {
     fun `renameTaskList`(`id`: kotlin.String, `newName`: kotlin.String)
     
     /**
+     * Set or clear a list's parent (`parent_id = None` promotes to top level);
+     * returns the updated `TaskList` as JSON.
+     */
+    fun `reparentTaskListJson`(`id`: kotlin.String, `parentId`: kotlin.String?): kotlin.String
+    
+    /**
+     * Sections of a list as a JSON array (`cal_core::Section[]`), ordered by
+     * position then name.
+     */
+    fun `sectionsJson`(`listId`: kotlin.String): kotlin.String
+    
+    /**
      * Fetch a single task by id; [`StoreError::NotFound`] when absent.
      */
     fun `task`(`id`: kotlin.String): TaskDto
+    
+    /**
+     * One task by id as JSON; [`StoreError::NotFound`] when absent.
+     */
+    fun `taskJson`(`id`: kotlin.String): kotlin.String
     
     /**
      * Fetch a task list by id; [`StoreError::NotFound`] when absent.
@@ -1333,9 +1448,25 @@ public interface LocalStoreInterface {
     fun `taskLists`(): List<TaskListDto>
     
     /**
+     * All task lists as a JSON array (`cal_core::TaskList[]`).
+     */
+    fun `taskListsJson`(): kotlin.String
+    
+    /**
      * List the tasks in a list, ordered by date then creation time.
      */
     fun `tasks`(`listId`: kotlin.String): List<TaskDto>
+    
+    /**
+     * Tasks in a list as a JSON array (`cal_core::Task[]`), ordered by date
+     * then creation time.
+     */
+    fun `tasksJson`(`listId`: kotlin.String): kotlin.String
+    
+    /**
+     * Update a section from a JSON `cal_core::Section`; returns it as JSON.
+     */
+    fun `updateSectionJson`(`sectionJson`: kotlin.String): kotlin.String
     
     /**
      * Update a task — a full overwrite of its mutable fields (everything but
@@ -1346,6 +1477,12 @@ public interface LocalStoreInterface {
      * when the id is unknown.
      */
     fun `updateTask`(`task`: TaskDto): TaskDto
+    
+    /**
+     * Update a task from a JSON `cal_core::Task`; returns the updated `Task` as
+     * JSON. Completing a recurring task spawns its next instance (DESIGN §9.12).
+     */
+    fun `updateTaskJson`(`taskJson`: kotlin.String): kotlin.String
     
     companion object
 }
@@ -1457,6 +1594,23 @@ open class LocalStore: Disposable, AutoCloseable, LocalStoreInterface
 
     
     /**
+     * Create a section in a list; returns the created `Section` as JSON.
+     */
+    @Throws(StoreException::class)override fun `createSectionJson`(`listId`: kotlin.String, `name`: kotlin.String, `position`: kotlin.UInt, `colorLabel`: kotlin.String?): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_localstore_create_section_json(
+        it,
+        FfiConverterString.lower(`listId`),FfiConverterString.lower(`name`),FfiConverterUInt.lower(`position`),FfiConverterOptionalString.lower(`colorLabel`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * Create a task in `list_id` and return it (with its assigned id and
      * timestamps). A recurring task gets a stable `series_id` (DESIGN §9.12).
      */
@@ -1467,6 +1621,24 @@ open class LocalStore: Disposable, AutoCloseable, LocalStoreInterface
     UniffiLib.uniffi_cal_ffi_fn_method_localstore_create_task(
         it,
         FfiConverterString.lower(`listId`),FfiConverterTypeNewTaskDto.lower(`task`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Create a task from a JSON `cal_core::NewTask`; returns the created `Task`
+     * as JSON (a recurring task is assigned a stable series id).
+     */
+    @Throws(StoreException::class)override fun `createTaskJson`(`listId`: kotlin.String, `newTaskJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_localstore_create_task_json(
+        it,
+        FfiConverterString.lower(`listId`),FfiConverterString.lower(`newTaskJson`),_status)
 }
     }
     )
@@ -1488,6 +1660,39 @@ open class LocalStore: Disposable, AutoCloseable, LocalStoreInterface
     }
     )
     }
+    
+
+    
+    /**
+     * Create a top-level local task list; returns the created `TaskList` as JSON.
+     */
+    @Throws(StoreException::class)override fun `createTaskListJson`(`name`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_localstore_create_task_list_json(
+        it,
+        FfiConverterString.lower(`name`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Delete a section; its tasks fall back to ungrouped (`section_id` → NULL).
+     */
+    @Throws(StoreException::class)override fun `deleteSection`(`id`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_localstore_delete_section(
+        it,
+        FfiConverterString.lower(`id`),_status)
+}
+    }
+    
     
 
     
@@ -1543,6 +1748,42 @@ open class LocalStore: Disposable, AutoCloseable, LocalStoreInterface
 
     
     /**
+     * Set or clear a list's parent (`parent_id = None` promotes to top level);
+     * returns the updated `TaskList` as JSON.
+     */
+    @Throws(StoreException::class)override fun `reparentTaskListJson`(`id`: kotlin.String, `parentId`: kotlin.String?): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_localstore_reparent_task_list_json(
+        it,
+        FfiConverterString.lower(`id`),FfiConverterOptionalString.lower(`parentId`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Sections of a list as a JSON array (`cal_core::Section[]`), ordered by
+     * position then name.
+     */
+    @Throws(StoreException::class)override fun `sectionsJson`(`listId`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_localstore_sections_json(
+        it,
+        FfiConverterString.lower(`listId`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * Fetch a single task by id; [`StoreError::NotFound`] when absent.
      */
     @Throws(StoreException::class)override fun `task`(`id`: kotlin.String): TaskDto {
@@ -1550,6 +1791,23 @@ open class LocalStore: Disposable, AutoCloseable, LocalStoreInterface
     callWithHandle {
     uniffiRustCallWithError(StoreException) { _status ->
     UniffiLib.uniffi_cal_ffi_fn_method_localstore_task(
+        it,
+        FfiConverterString.lower(`id`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * One task by id as JSON; [`StoreError::NotFound`] when absent.
+     */
+    @Throws(StoreException::class)override fun `taskJson`(`id`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_localstore_task_json(
         it,
         FfiConverterString.lower(`id`),_status)
 }
@@ -1594,6 +1852,23 @@ open class LocalStore: Disposable, AutoCloseable, LocalStoreInterface
 
     
     /**
+     * All task lists as a JSON array (`cal_core::TaskList[]`).
+     */
+    @Throws(StoreException::class)override fun `taskListsJson`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_localstore_task_lists_json(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * List the tasks in a list, ordered by date then creation time.
      */
     @Throws(StoreException::class)override fun `tasks`(`listId`: kotlin.String): List<TaskDto> {
@@ -1603,6 +1878,41 @@ open class LocalStore: Disposable, AutoCloseable, LocalStoreInterface
     UniffiLib.uniffi_cal_ffi_fn_method_localstore_tasks(
         it,
         FfiConverterString.lower(`listId`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Tasks in a list as a JSON array (`cal_core::Task[]`), ordered by date
+     * then creation time.
+     */
+    @Throws(StoreException::class)override fun `tasksJson`(`listId`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_localstore_tasks_json(
+        it,
+        FfiConverterString.lower(`listId`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Update a section from a JSON `cal_core::Section`; returns it as JSON.
+     */
+    @Throws(StoreException::class)override fun `updateSectionJson`(`sectionJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_localstore_update_section_json(
+        it,
+        FfiConverterString.lower(`sectionJson`),_status)
 }
     }
     )
@@ -1625,6 +1935,24 @@ open class LocalStore: Disposable, AutoCloseable, LocalStoreInterface
     UniffiLib.uniffi_cal_ffi_fn_method_localstore_update_task(
         it,
         FfiConverterTypeTaskDto.lower(`task`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Update a task from a JSON `cal_core::Task`; returns the updated `Task` as
+     * JSON. Completing a recurring task spawns its next instance (DESIGN §9.12).
+     */
+    @Throws(StoreException::class)override fun `updateTaskJson`(`taskJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_localstore_update_task_json(
+        it,
+        FfiConverterString.lower(`taskJson`),_status)
 }
     }
     )

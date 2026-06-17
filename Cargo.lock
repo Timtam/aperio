@@ -1026,6 +1026,8 @@ dependencies = [
  "cal-core",
  "chrono",
  "rusqlite",
+ "serde",
+ "serde_json",
  "thiserror 1.0.69",
  "uniffi",
 ]

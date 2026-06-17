@@ -666,6 +666,28 @@ impl LocalAdapter {
             Some(res) => res.map(Some),
         }
     }
+
+    /// Synchronous section listing — the implementation behind the async
+    /// [`TasksFeature::list_sections`] and the FFI store.
+    pub fn list_sections_sync(&self, list_id: &str) -> cal_core::Result<Vec<Section>> {
+        let conn = self.db().lock().expect("db mutex poisoned");
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, list_id, name, position, color_label_id
+                   FROM sections
+                  WHERE list_id = ?
+                  ORDER BY position, name COLLATE NOCASE",
+            )
+            .map_err(map_sql_err)?;
+        let rows = stmt
+            .query_map(params![list_id], |row| Ok(row_to_section(row)))
+            .map_err(map_sql_err)?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r.map_err(map_sql_err)??);
+        }
+        Ok(out)
+    }
 }
 
 #[async_trait]
@@ -695,23 +717,7 @@ impl TasksFeature for LocalAdapter {
     }
 
     async fn list_sections(&self, list_id: &str) -> cal_core::Result<Vec<Section>> {
-        let conn = self.db().lock().expect("db mutex poisoned");
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, list_id, name, position, color_label_id
-                   FROM sections
-                  WHERE list_id = ?
-                  ORDER BY position, name COLLATE NOCASE",
-            )
-            .map_err(map_sql_err)?;
-        let rows = stmt
-            .query_map(params![list_id], |row| Ok(row_to_section(row)))
-            .map_err(map_sql_err)?;
-        let mut out = Vec::new();
-        for r in rows {
-            out.push(r.map_err(map_sql_err)??);
-        }
-        Ok(out)
+        self.list_sections_sync(list_id)
     }
 }
 

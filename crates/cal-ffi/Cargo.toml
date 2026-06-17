@@ -45,6 +45,11 @@ rusqlite.workspace = true
 chrono.workspace = true
 # Error type returned to the foreign side for unparseable boundary values.
 thiserror.workspace = true
+# The richer task surface crosses the FFI boundary as JSON (the cal_core serde
+# shape, identical to the desktop's Tauri payloads) so the hand-written mobile
+# bridge is a trivial string passthrough and the shared TS domain logic is reused.
+serde.workspace = true
+serde_json.workspace = true
 # Runtime only by default; the bindgen CLI is behind the `cli` feature above.
 uniffi = "0.31.1"
 
