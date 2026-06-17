@@ -273,24 +273,43 @@ macro_rules! declare_lifecycle {
 #[macro_export]
 macro_rules! declare_interactive_auth {
     (handler: $handler:path $(,)?) => {
-        /// `aperio_plugin_interactive_auth` symbol — see
-        /// `aperio_plugin.h`. The host looks this up by name via
-        /// libloading; plugins that don't export it surface as
-        /// `InteractiveAuthError::Unsupported`.
+        /// Typed twin of the `aperio_plugin_interactive_auth`
+        /// C-ABI export. Crate-mangled, so N `-plugin` rlibs can
+        /// be statically linked (the mobile path) without
+        /// colliding; the companion `*-cdylib` crate re-exports
+        /// it as `#[no_mangle]` via [`declare_cdylib_exports!`].
         ///
         /// # Safety
         ///
-        /// FFI export. `args_ptr` + `args_len` must describe a
+        /// FFI shape. `args_ptr` + `args_len` must describe a
         /// valid byte buffer the host owns for the duration of
         /// the call.
-        #[no_mangle]
-        pub unsafe extern "C" fn aperio_plugin_interactive_auth(
+        #[doc(hidden)]
+        pub unsafe extern "C" fn __aperio_interactive_auth_impl(
             args_ptr: *const u8,
             args_len: usize,
         ) -> $crate::plugin_core::ffi::PluginCallResult {
             $crate::interactive_auth::interactive_auth_with(args_ptr, args_len, |json| async move {
                 $handler(json).await
             })
+        }
+
+        /// `aperio_plugin_interactive_auth` symbol — see
+        /// `aperio_plugin.h`. The host looks this up by name via
+        /// libloading; plugins that don't export it surface as
+        /// `InteractiveAuthError::Unsupported`. Thin wrapper over
+        /// the typed twin; the `*-cdylib` split (P0c) moves this
+        /// `#[no_mangle]` into the companion cdylib crate.
+        ///
+        /// # Safety
+        ///
+        /// See [`__aperio_interactive_auth_impl`].
+        #[no_mangle]
+        pub unsafe extern "C" fn aperio_plugin_interactive_auth(
+            args_ptr: *const u8,
+            args_len: usize,
+        ) -> $crate::plugin_core::ffi::PluginCallResult {
+            __aperio_interactive_auth_impl(args_ptr, args_len)
         }
     };
 }
@@ -335,24 +354,42 @@ macro_rules! declare_interactive_auth {
 #[macro_export]
 macro_rules! declare_discover {
     (handler: $handler:path $(,)?) => {
-        /// `aperio_plugin_discover` symbol — see
-        /// `aperio_plugin.h`. The host looks this up by name via
-        /// libloading; plugins that don't export it surface as
-        /// `DiscoverError::Unsupported`.
+        /// Typed twin of the `aperio_plugin_discover` C-ABI
+        /// export. Crate-mangled (static-link safe); the
+        /// companion `*-cdylib` crate re-exports it as
+        /// `#[no_mangle]` via [`declare_cdylib_exports!`].
         ///
         /// # Safety
         ///
-        /// FFI export. `args_ptr` + `args_len` must describe a
+        /// FFI shape. `args_ptr` + `args_len` must describe a
         /// valid byte buffer the host owns for the duration of
         /// the call.
-        #[no_mangle]
-        pub unsafe extern "C" fn aperio_plugin_discover(
+        #[doc(hidden)]
+        pub unsafe extern "C" fn __aperio_discover_impl(
             args_ptr: *const u8,
             args_len: usize,
         ) -> $crate::plugin_core::ffi::PluginCallResult {
             $crate::discover::discover_with(args_ptr, args_len, |json| async move {
                 $handler(json).await
             })
+        }
+
+        /// `aperio_plugin_discover` symbol — see
+        /// `aperio_plugin.h`. The host looks this up by name via
+        /// libloading; plugins that don't export it surface as
+        /// `DiscoverError::Unsupported`. Thin wrapper over the
+        /// typed twin; the `*-cdylib` split (P0c) moves this
+        /// `#[no_mangle]` into the companion cdylib crate.
+        ///
+        /// # Safety
+        ///
+        /// See [`__aperio_discover_impl`].
+        #[no_mangle]
+        pub unsafe extern "C" fn aperio_plugin_discover(
+            args_ptr: *const u8,
+            args_len: usize,
+        ) -> $crate::plugin_core::ffi::PluginCallResult {
+            __aperio_discover_impl(args_ptr, args_len)
         }
     };
 }
@@ -556,24 +593,179 @@ macro_rules! sync_dispatch_helpers {
 #[macro_export]
 macro_rules! declare_probe_host_key {
     (handler: $handler:path $(,)?) => {
-        /// `aperio_plugin_probe_host_key` symbol — see
-        /// `aperio_plugin.h`. The host looks this up by name via
-        /// libloading; plugins that don't export it surface as
-        /// `ProbeHostKeyError::Unsupported`.
+        /// Typed twin of the `aperio_plugin_probe_host_key`
+        /// C-ABI export. Crate-mangled (static-link safe); the
+        /// companion `*-cdylib` crate re-exports it as
+        /// `#[no_mangle]` via [`declare_cdylib_exports!`].
         ///
         /// # Safety
         ///
-        /// FFI export. `args_ptr` + `args_len` must describe a
+        /// FFI shape. `args_ptr` + `args_len` must describe a
         /// valid byte buffer the host owns for the duration of
         /// the call.
-        #[no_mangle]
-        pub unsafe extern "C" fn aperio_plugin_probe_host_key(
+        #[doc(hidden)]
+        pub unsafe extern "C" fn __aperio_probe_host_key_impl(
             args_ptr: *const u8,
             args_len: usize,
         ) -> $crate::plugin_core::ffi::PluginCallResult {
             $crate::probe_host_key::probe_host_key_with(args_ptr, args_len, |json| async move {
                 $handler(json).await
             })
+        }
+
+        /// `aperio_plugin_probe_host_key` symbol — see
+        /// `aperio_plugin.h`. The host looks this up by name via
+        /// libloading; plugins that don't export it surface as
+        /// `ProbeHostKeyError::Unsupported`. Thin wrapper over the
+        /// typed twin; the `*-cdylib` split (P0c) moves this
+        /// `#[no_mangle]` into the companion cdylib crate.
+        ///
+        /// # Safety
+        ///
+        /// See [`__aperio_probe_host_key_impl`].
+        #[no_mangle]
+        pub unsafe extern "C" fn aperio_plugin_probe_host_key(
+            args_ptr: *const u8,
+            args_len: usize,
+        ) -> $crate::plugin_core::ffi::PluginCallResult {
+            __aperio_probe_host_key_impl(args_ptr, args_len)
+        }
+    };
+}
+
+/// Emit the `#[no_mangle]` C-ABI plugin exports in a thin
+/// companion `*-cdylib` crate, delegating to the crate-mangled
+/// typed accessors that live in the sibling `-plugin` rlib.
+///
+/// ## Why this exists
+///
+/// The `-plugin` crates are (becoming) `rlib`-only so the mobile
+/// build can STATICALLY link all N of them into one binary
+/// without colliding on duplicate `#[no_mangle]
+/// aperio_plugin_create` (and the optional auth symbols) — dlopen
+/// is impossible on iOS. The desktop dlopen path still needs
+/// those symbols, so each plugin gets a one-file companion
+/// `*-cdylib` crate (`crate-type = ["cdylib"]`) whose only job is
+/// this macro invocation. The symbols then live exactly once per
+/// shared library; the rlibs carry only crate-mangled twins
+/// (`build_descriptor` / `DESTROY_FN` / `__aperio_*_impl`).
+///
+/// ## Arguments (fixed order)
+///
+///   - `plugin_crate` — path to the `-plugin` rlib crate
+///     (e.g. `cal_adapter_google_plugin`). Always calls its
+///     `build_descriptor()` + `DESTROY_FN`.
+///   - `interactive_auth: yes` — also re-export the OAuth symbol
+///     (delegates to `<crate>::__aperio_interactive_auth_impl`).
+///   - `discover: yes` — also re-export the Autodiscover symbol.
+///   - `probe_host_key: yes` — also re-export the TOFU host-key
+///     probe symbol.
+///
+/// The optional auth lines, when present, must appear in that
+/// order. A plugin needs at most one of them today.
+///
+/// ## Example
+///
+/// ```ignore
+/// // cal-adapter-google-cdylib/src/lib.rs
+/// plugin_sdk::declare_cdylib_exports! {
+///     plugin_crate: cal_adapter_google_plugin,
+///     interactive_auth: yes,
+/// }
+/// ```
+#[macro_export]
+macro_rules! declare_cdylib_exports {
+    (
+        plugin_crate: $plugin:path
+        $(, interactive_auth: $ia:tt)?
+        $(, discover: $disc:tt)?
+        $(, probe_host_key: $probe:tt)?
+        $(,)?
+    ) => {
+        /// `aperio_plugin_create` (DESIGN.md §20.3) — thin
+        /// `#[no_mangle]` wrapper over the rlib's typed
+        /// `build_descriptor()`.
+        ///
+        /// # Safety
+        ///
+        /// FFI export. Called once by the host right after
+        /// `dlopen`.
+        #[no_mangle]
+        pub unsafe extern "C" fn aperio_plugin_create(
+        ) -> *mut $crate::plugin_core::AperioPlugin {
+            $plugin::build_descriptor()
+        }
+
+        /// `aperio_plugin_destroy` (DESIGN.md §20.3).
+        ///
+        /// # Safety
+        ///
+        /// `plugin` must be the pointer returned by the preceding
+        /// `aperio_plugin_create` call, not yet freed.
+        #[no_mangle]
+        pub unsafe extern "C" fn aperio_plugin_destroy(
+            plugin: *mut $crate::plugin_core::AperioPlugin,
+        ) {
+            ($plugin::DESTROY_FN)(plugin)
+        }
+
+        $($crate::declare_cdylib_exports!(@interactive_auth $plugin, $ia);)?
+        $($crate::declare_cdylib_exports!(@discover $plugin, $disc);)?
+        $($crate::declare_cdylib_exports!(@probe_host_key $plugin, $probe);)?
+    };
+
+    // ── Internal opt-in arms ─────────────────────────────────
+    (@interactive_auth $plugin:path, no) => {};
+    (@interactive_auth $plugin:path, yes) => {
+        /// `aperio_plugin_interactive_auth` — delegates to the
+        /// rlib's typed twin.
+        ///
+        /// # Safety
+        ///
+        /// FFI export. `args_ptr` + `args_len` must describe a
+        /// valid host-owned byte buffer for the call's duration.
+        #[no_mangle]
+        pub unsafe extern "C" fn aperio_plugin_interactive_auth(
+            args_ptr: *const u8,
+            args_len: usize,
+        ) -> $crate::plugin_core::ffi::PluginCallResult {
+            $plugin::__aperio_interactive_auth_impl(args_ptr, args_len)
+        }
+    };
+
+    (@discover $plugin:path, no) => {};
+    (@discover $plugin:path, yes) => {
+        /// `aperio_plugin_discover` — delegates to the rlib's
+        /// typed twin.
+        ///
+        /// # Safety
+        ///
+        /// FFI export. `args_ptr` + `args_len` must describe a
+        /// valid host-owned byte buffer for the call's duration.
+        #[no_mangle]
+        pub unsafe extern "C" fn aperio_plugin_discover(
+            args_ptr: *const u8,
+            args_len: usize,
+        ) -> $crate::plugin_core::ffi::PluginCallResult {
+            $plugin::__aperio_discover_impl(args_ptr, args_len)
+        }
+    };
+
+    (@probe_host_key $plugin:path, no) => {};
+    (@probe_host_key $plugin:path, yes) => {
+        /// `aperio_plugin_probe_host_key` — delegates to the
+        /// rlib's typed twin.
+        ///
+        /// # Safety
+        ///
+        /// FFI export. `args_ptr` + `args_len` must describe a
+        /// valid host-owned byte buffer for the call's duration.
+        #[no_mangle]
+        pub unsafe extern "C" fn aperio_plugin_probe_host_key(
+            args_ptr: *const u8,
+            args_len: usize,
+        ) -> $crate::plugin_core::ffi::PluginCallResult {
+            $plugin::__aperio_probe_host_key_impl(args_ptr, args_len)
         }
     };
 }
