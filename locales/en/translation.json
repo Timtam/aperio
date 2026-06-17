@@ -46,7 +46,8 @@
     "listDeselected": "{{name}} deselected.",
     "groupExpanded": "{{name}} expanded.",
     "groupCollapsed": "{{name}} collapsed.",
-    "groupHeaderHint": "Double-tap to expand or collapse."
+    "groupHeaderHint": "Double-tap to expand or collapse.",
+    "invalidDateTime": "Please use YYYY-MM-DD for the date and HH:MM for the time."
   },
   "common": {
     "colorComposer": {

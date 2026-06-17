@@ -46,7 +46,8 @@
     "listDeselected": "{{name}} abgewählt.",
     "groupExpanded": "{{name}} ausgeklappt.",
     "groupCollapsed": "{{name}} eingeklappt.",
-    "groupHeaderHint": "Doppeltippen zum Aus- oder Einklappen."
+    "groupHeaderHint": "Doppeltippen zum Aus- oder Einklappen.",
+    "invalidDateTime": "Bitte das Datum als JJJJ-MM-TT und die Zeit als HH:MM eingeben."
   },
   "common": {
     "colorComposer": {
