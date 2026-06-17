@@ -1,0 +1,321 @@
+import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+
+import type { Reminder } from '@aperio/shared';
+
+import { RadioGroup } from './RadioGroup';
+
+// Mobile reminders editor — faithful RN port of the desktop RemindersEditor in
+// `task` mode. The local engine supports relative / absolute / app-start
+// reminders (e-mail is adapter-side; per-reminder sound is the desktop-only
+// asset store, so sound is forced null here). Reminders cross as
+// cal_core::Reminder[] in the task JSON — no native change.
+
+type ReminderKindOption = 'relative' | 'absolute' | 'app_start';
+type RelativeUnit = 'minutes' | 'hours' | 'days';
+
+const UNIT_FACTORS: Record<RelativeUnit, number> = {
+  minutes: 1,
+  hours: 60,
+  days: 60 * 24,
+};
+
+/** Decompose `minutes_before` into the largest whole unit + amount. */
+function splitRelative(minutes: number): { amount: number; unit: RelativeUnit } {
+  if (minutes <= 0) return { amount: 0, unit: 'minutes' };
+  if (minutes % UNIT_FACTORS.days === 0) {
+    return { amount: minutes / UNIT_FACTORS.days, unit: 'days' };
+  }
+  if (minutes % UNIT_FACTORS.hours === 0) {
+    return { amount: minutes / UNIT_FACTORS.hours, unit: 'hours' };
+  }
+  return { amount: minutes, unit: 'minutes' };
+}
+
+const DEFAULT_RELATIVE: Reminder = {
+  kind: { type: 'relative', minutes_before: 15 },
+  sound: null,
+};
+
+function defaultsForKind(kind: ReminderKindOption): Reminder['kind'] {
+  switch (kind) {
+    case 'relative':
+      return { type: 'relative', minutes_before: 15 };
+    case 'absolute': {
+      // Default to the next full hour tomorrow.
+      const at = new Date();
+      at.setMinutes(0, 0, 0);
+      at.setDate(at.getDate() + 1);
+      return { type: 'absolute', at: at.toISOString() };
+    }
+    case 'app_start':
+      return { type: 'app_start' };
+  }
+}
+
+const pad = (n: number) => String(n).padStart(2, '0');
+
+function isoToDateTime(iso: string): { date: string; time: string } {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return { date: '', time: '' };
+  return {
+    date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
+    time: `${pad(d.getHours())}:${pad(d.getMinutes())}`,
+  };
+}
+
+/** Combine a local `YYYY-MM-DD` + `HH:MM` into an RFC-3339 UTC instant, or
+ *  null when the date is missing/unparseable (the row keeps its last value). */
+function dateTimeToIso(date: string, time: string): string | null {
+  if (!date.trim()) return null;
+  const d = new Date(`${date.trim()}T${(time.trim() || '00:00')}`);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString();
+}
+
+export function RemindersEditor({
+  value,
+  onChange,
+}: {
+  value: Reminder[];
+  onChange: (next: Reminder[]) => void;
+}) {
+  const { t } = useTranslation();
+  const update = (i: number, next: Reminder) => {
+    const out = value.slice();
+    out[i] = next;
+    onChange(out);
+  };
+  const remove = (i: number) => {
+    const out = value.slice();
+    out.splice(i, 1);
+    onChange(out);
+  };
+  const add = () => onChange([...value, { ...DEFAULT_RELATIVE }]);
+
+  return (
+    <View style={styles.field}>
+      <Text style={styles.label}>{t('reminders.label')}</Text>
+      {value.length === 0 ? (
+        <Text style={styles.hint} accessibilityRole="text">
+          {t('reminders.empty')}
+        </Text>
+      ) : (
+        value.map((reminder, i) => (
+          // Index key: controlled add/remove list, no reordering.
+          <ReminderRow
+            key={i}
+            value={reminder}
+            position={i + 1}
+            onChange={(next) => update(i, next)}
+            onRemove={() => remove(i)}
+          />
+        ))
+      )}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={t('reminders.add')}
+        onPress={add}
+        style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
+      >
+        <Text style={styles.ghostButtonText}>{t('reminders.add')}</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function ReminderRow({
+  value,
+  onChange,
+  onRemove,
+  position,
+}: {
+  value: Reminder;
+  onChange: (next: Reminder) => void;
+  onRemove: () => void;
+  position: number;
+}) {
+  const { t } = useTranslation();
+  // Local-store task reminders are relative/absolute/app_start; an email kind
+  // (adapter-side) would show as relative until re-picked — won't occur here.
+  const kindOption: ReminderKindOption =
+    value.kind.type === 'absolute'
+      ? 'absolute'
+      : value.kind.type === 'app_start'
+        ? 'app_start'
+        : 'relative';
+
+  return (
+    <View style={styles.row}>
+      <Text style={styles.rowLabel} accessibilityRole="text">
+        {t('reminders.rowLabel', { n: position })}
+      </Text>
+
+      <RadioGroup<ReminderKindOption>
+        label={t('reminders.kindLabel')}
+        value={kindOption}
+        options={[
+          { value: 'relative', label: t('reminders.kind.relativeTask') },
+          { value: 'absolute', label: t('reminders.kind.absolute') },
+          { value: 'app_start', label: t('reminders.kind.appStart') },
+        ]}
+        onChange={(next) => onChange({ ...value, kind: defaultsForKind(next) })}
+      />
+
+      {value.kind.type === 'relative' && (
+        <RelativeFields
+          minutes={value.kind.minutes_before}
+          onChange={(minutes) =>
+            onChange({ ...value, kind: { type: 'relative', minutes_before: minutes } })
+          }
+        />
+      )}
+
+      {value.kind.type === 'absolute' && (
+        <AbsoluteFields
+          iso={value.kind.at}
+          onChange={(iso) => onChange({ ...value, kind: { type: 'absolute', at: iso } })}
+        />
+      )}
+
+      {value.kind.type === 'app_start' && (
+        <Text style={styles.hint} accessibilityRole="text">
+          {t('reminders.appStartHint')}
+        </Text>
+      )}
+
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={t('reminders.removeAria', { n: position })}
+        onPress={onRemove}
+        style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
+      >
+        <Text style={styles.ghostButtonText}>{t('reminders.remove')}</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function RelativeFields({
+  minutes,
+  onChange,
+}: {
+  minutes: number;
+  onChange: (minutes: number) => void;
+}) {
+  const { t } = useTranslation();
+  const { amount, unit } = splitRelative(minutes);
+  return (
+    <View style={styles.relativeRow}>
+      <View style={styles.amountField}>
+        <Text style={styles.label}>{t('reminders.amountLabel')}</Text>
+        <TextInput
+          style={styles.input}
+          value={String(amount)}
+          onChangeText={(v) => {
+            const n = Math.trunc(Number(v));
+            const safe = Number.isFinite(n) && n > 0 ? n : 1;
+            onChange(safe * UNIT_FACTORS[unit]);
+          }}
+          keyboardType="number-pad"
+          accessibilityLabel={t('reminders.amountLabel')}
+        />
+      </View>
+      <RadioGroup<RelativeUnit>
+        label={t('reminders.unitLabel')}
+        value={unit}
+        options={[
+          { value: 'minutes', label: t('reminders.unit.minutes') },
+          { value: 'hours', label: t('reminders.unit.hours') },
+          { value: 'days', label: t('reminders.unit.days') },
+        ]}
+        onChange={(next) => onChange(Math.max(1, amount) * UNIT_FACTORS[next])}
+      />
+    </View>
+  );
+}
+
+function AbsoluteFields({
+  iso,
+  onChange,
+}: {
+  iso: string;
+  onChange: (iso: string) => void;
+}) {
+  const { t } = useTranslation();
+  const initial = isoToDateTime(iso);
+  const [date, setDate] = useState(initial.date);
+  const [time, setTime] = useState(initial.time);
+  const apply = (d: string, tm: string) => {
+    const next = dateTimeToIso(d, tm);
+    if (next) onChange(next);
+  };
+  return (
+    <View style={styles.field}>
+      <Text style={styles.label}>{t('reminders.absoluteAtLabel')}</Text>
+      <TextInput
+        style={styles.input}
+        value={date}
+        onChangeText={(d) => {
+          setDate(d);
+          apply(d, time);
+        }}
+        placeholder="YYYY-MM-DD"
+        accessibilityLabel={`${t('reminders.absoluteAtLabel')} – ${t('dialogs.task.fields.scheduled.date')}`}
+        autoCapitalize="none"
+        autoCorrect={false}
+      />
+      <TextInput
+        style={styles.input}
+        value={time}
+        onChangeText={(tm) => {
+          setTime(tm);
+          apply(date, tm);
+        }}
+        placeholder="HH:MM"
+        accessibilityLabel={`${t('reminders.absoluteAtLabel')} – ${t('dialogs.task.fields.scheduled.time')}`}
+        autoCapitalize="none"
+        autoCorrect={false}
+      />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  field: { gap: 6 },
+  label: { fontSize: 15, fontWeight: '600', color: '#2b3240' },
+  hint: { fontSize: 13, color: '#5b6573' },
+  row: {
+    gap: 10,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#c9d2e0',
+    backgroundColor: '#f8fafc',
+  },
+  rowLabel: { fontSize: 14, fontWeight: '700', color: '#10131a' },
+  relativeRow: { gap: 10 },
+  amountField: { gap: 6 },
+  input: {
+    fontSize: 17,
+    color: '#10131a',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#c9d2e0',
+    backgroundColor: '#ffffff',
+  },
+  ghostButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#c9d2e0',
+    backgroundColor: '#f4f7fb',
+    alignItems: 'center',
+  },
+  ghostButtonText: { fontSize: 16, fontWeight: '600', color: '#1d3a2f' },
+  pressed: { backgroundColor: '#e4ebf5' },
+});

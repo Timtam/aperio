@@ -19,6 +19,7 @@ import {
 } from 'react-native';
 
 import type {
+  Reminder,
   Task,
   TaskPriority,
   TaskRecurrenceValue,
@@ -28,6 +29,7 @@ import { TASK_RECURRENCE_DEFAULT, fromBackend, toBackend } from '@aperio/shared'
 
 import { createTask, getTaskById, updateTask } from '../api/client';
 import { RadioGroup } from '../components/RadioGroup';
+import { RemindersEditor } from '../components/RemindersEditor';
 import { TaskRecurrenceSelector } from '../components/TaskRecurrenceSelector';
 import { useTaskStore } from '../state/taskStoreContext';
 import type { RootStackScreenProps } from '../navigation/types';
@@ -52,6 +54,7 @@ interface FormState {
   deadlineTime: string;
   description: string;
   recurrence: TaskRecurrenceValue;
+  reminders: Reminder[];
 }
 
 function buildInitialState(loaded: Task | null, listId: string): FormState {
@@ -68,6 +71,7 @@ function buildInitialState(loaded: Task | null, listId: string): FormState {
       deadlineTime: '',
       description: '',
       recurrence: { ...TASK_RECURRENCE_DEFAULT },
+      reminders: [],
     };
   }
   return {
@@ -82,6 +86,7 @@ function buildInitialState(loaded: Task | null, listId: string): FormState {
     deadlineTime: loaded.deadline_time ? loaded.deadline_time.slice(0, 5) : '',
     description: loaded.description ?? '',
     recurrence: fromBackend(loaded.recurrence),
+    reminders: loaded.reminders ?? [],
   };
 }
 
@@ -325,7 +330,7 @@ export default function TaskEditorModal({
           parent_id: null,
           section_id: form.sectionId || null,
           color_label: null,
-          reminders: [],
+          reminders: form.reminders,
           assignees: [],
           sound: null,
         });
@@ -350,6 +355,7 @@ export default function TaskEditorModal({
           deadline_date: dead.date,
           deadline_time: dead.time,
           recurrence: toBackend(form.recurrence),
+          reminders: form.reminders,
           description,
           completed_at:
             form.status === 'completed'
@@ -487,6 +493,11 @@ export default function TaskEditorModal({
       <TaskRecurrenceSelector
         value={form.recurrence}
         onChange={(recurrence) => update('recurrence', recurrence)}
+      />
+
+      <RemindersEditor
+        value={form.reminders}
+        onChange={(reminders) => update('reminders', reminders)}
       />
 
       <View style={styles.buttons}>
