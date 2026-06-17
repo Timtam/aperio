@@ -76,6 +76,12 @@ impl EventLogWriter {
     /// Initialise the writer and spawn its background drain task. The drain
     /// task lives for the process lifetime; on `drop` of the last `Arc` the
     /// sender side closes and the loop exits cleanly.
+    ///
+    /// **Must be called from within a Tokio runtime context** (it starts the
+    /// drain task with `tokio::spawn`). A caller with no ambient runtime — e.g.
+    /// a desktop startup path that runs before the event loop — must enter one
+    /// first (`Handle::enter`, or wrap the call in `block_on`), or it panics
+    /// with "there is no reactor running".
     pub fn spawn(data_dir: PathBuf, device_id: DeviceId) -> Arc<Self> {
         Self::spawn_with_kick(data_dir, device_id, None, Utc::now())
     }
@@ -90,6 +96,9 @@ impl EventLogWriter {
     /// the open handle (on Windows `FILE_SHARE_DELETE` → silent event loss).
     /// Sharing one instant makes the comparison `session_at == boot_at` (never
     /// `<`), killing the race.
+    ///
+    /// Like [`Self::spawn`], **must be called from within a Tokio runtime
+    /// context** — it `tokio::spawn`s the drain task.
     pub fn spawn_with_kick(
         data_dir: PathBuf,
         device_id: DeviceId,

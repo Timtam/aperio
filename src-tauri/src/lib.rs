@@ -356,12 +356,23 @@ pub fn run() {
     // silently unlinks the open file → lost events). See
     // `EventLogWriter::spawn_with_kick`.
     let boot_at = chrono::Utc::now();
-    let event_log_writer = EventLogWriter::spawn_with_kick(
-        data_dir.path.clone(),
-        device_id.clone(),
-        Some(Arc::clone(&kick_notify)),
-        boot_at,
-    );
+    // `EventLogWriter::spawn_with_kick` starts its drain task with
+    // `tokio::spawn`, which needs an active Tokio runtime context. `run()`
+    // executes here synchronously, *before* `app.run()` drives the Tauri event
+    // loop, so no context is established yet — calling it directly panics with
+    // "there is no reactor running". Establish the context via Tauri's global
+    // runtime (the very one the app then uses) for the call; the drain task
+    // lives on that runtime for the process lifetime. (Before the sync-engine
+    // extraction this was `tauri::async_runtime::spawn`, which needs no ambient
+    // context — the platform-agnostic crate can't depend on it.)
+    let event_log_writer = tauri::async_runtime::block_on(async {
+        EventLogWriter::spawn_with_kick(
+            data_dir.path.clone(),
+            device_id.clone(),
+            Some(Arc::clone(&kick_notify)),
+            boot_at,
+        )
+    });
 
     // One-shot: existing accounts created before the Account.*
     // sync events shipped don't otherwise propagate (they pre-
