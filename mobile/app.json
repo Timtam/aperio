@@ -32,6 +32,9 @@
         "projectId": "56442678-7da3-4046-96e3-d2da1e17c487"
       }
     },
-    "owner": "tonirbarth"
+    "owner": "tonirbarth",
+    "plugins": [
+      "expo-splash-screen"
+    ]
   }
 }
