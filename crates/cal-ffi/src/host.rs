@@ -40,10 +40,26 @@ use host_core::accounts::{AccountsRepo, AdapterKind};
 use host_core::event_log::OnboardingService;
 use host_core::registry::{AdapterRegistry, LOCAL_ID};
 use host_core::sync::build_orchestrator;
+use host_core::user_prefs::UserPrefsRepo;
 use host_core::DbHandle;
+use plugin_core::shim::FfiSyncAdapter;
 use plugin_core::PluginManager;
-use sync_core::{EventPayload, IdPayload, SyncEvent};
+use sync_core::{EventPayload, IdPayload, SyncAdapter, SyncError, SyncEvent};
 use sync_engine::{EventLogWriter, SecretError, SecretSlot, SecretStore, SyncOrchestrator};
+
+/// Sync-adapter pref keys (device-local; never propagated). Match the desktop
+/// `commands::sync` keys so the same SQLite row layout serves both backends.
+const PREF_ADAPTER_KIND: &str = "sync.adapter.kind";
+const PREF_LOCAL_PATH: &str = "sync.adapter.local.path";
+/// Plugin id of the local-filesystem sync adapter (the only kind this slice
+/// configures; webdav/sftp/ftp + the OAuth kinds follow).
+const PLUGIN_ID_SYNC_LOCAL: &str = "com.aperio.sync-adapter-local";
+
+fn sync_err(e: SyncError) -> StoreError {
+    StoreError::Storage {
+        detail: e.to_string(),
+    }
+}
 
 use crate::{from_json, map_store_err, to_json, StoreError};
 
@@ -188,6 +204,16 @@ struct CreateEventRequest {
     event: NewEvent,
 }
 
+/// Configure-sync request. A subset of the desktop `SyncAdapterConfig` enum —
+/// this slice handles `kind: "local"` (path required); webdav/sftp/ftp + the
+/// OAuth kinds follow.
+#[derive(serde::Deserialize)]
+struct ConfigureSyncRequest {
+    kind: String,
+    #[serde(default)]
+    path: Option<String>,
+}
+
 /// The mobile app's handle to the full on-device engine.
 #[derive(uniffi::Object)]
 pub struct Host {
@@ -215,9 +241,9 @@ pub struct Host {
     // Held for the lifetime of the host (snapshot consume/produce + meta
     // heartbeats); the onboarding command surface is a later phase.
     _onboarding: Arc<OnboardingService>,
-    // Kept alive for the lifetime of the host; the registry holds an
-    // `Arc` clone and looks plugins up against it per account.
-    _plugin_manager: Arc<PluginManager>,
+    /// The static plugin registry — the registry holds an `Arc` clone for
+    /// per-account adapters; the Host also opens the sync-adapter plugin here.
+    plugin_manager: Arc<PluginManager>,
 }
 
 impl Host {
@@ -253,6 +279,32 @@ impl Host {
         self.registry
             .account_for_calendar(calendar_id)
             .is_none_or(|a| a == LOCAL_ID)
+    }
+
+    /// Open a statically-embedded sync-adapter plugin instance + wrap it as a
+    /// `SyncAdapter` (the desktop `open_sync_plugin` pattern). Used by
+    /// `configure_sync_adapter_json`.
+    fn open_sync_plugin(
+        &self,
+        plugin_id: &str,
+        config_json: String,
+    ) -> Result<Arc<dyn SyncAdapter>, StoreError> {
+        let plugin = self
+            .plugin_manager
+            .get(plugin_id)
+            .ok_or_else(|| StoreError::Storage {
+                detail: format!("sync plugin {plugin_id} is not loaded"),
+            })?;
+        let instance = self
+            .plugin_manager
+            .open_instance(plugin, &config_json)
+            .map_err(|e| StoreError::Storage {
+                detail: format!("open sync plugin {plugin_id}: {e}"),
+            })?;
+        let adapter = FfiSyncAdapter::new(instance).ok_or_else(|| StoreError::Storage {
+            detail: format!("plugin {plugin_id} has no SyncAdapter surface"),
+        })?;
+        Ok(Arc::new(adapter))
     }
 }
 
@@ -341,7 +393,7 @@ impl Host {
             writer: graph.writer,
             orchestrator: graph.orchestrator,
             _onboarding: graph.onboarding,
-            _plugin_manager: plugin_manager,
+            plugin_manager,
         }))
     }
 
@@ -645,6 +697,74 @@ impl Host {
     /// without a sync round.
     pub fn sync_status_json(&self) -> Result<String, StoreError> {
         to_json(&self.orchestrator.status())
+    }
+
+    /// Configure the sync adapter from a JSON request. This slice handles
+    /// `{"kind":"local","path":"…"}` (a local-filesystem sync target): open the
+    /// statically-embedded local sync plugin, probe it (`test_connection`), make
+    /// it the orchestrator's active adapter, and persist the choice under the
+    /// `sync.adapter.*` prefs (device-local; the is_synced_key allowlist
+    /// excludes them, so they never propagate). webdav/sftp/ftp + the E2E
+    /// `wrap_if_encrypted` branch + the OAuth kinds follow.
+    pub fn configure_sync_adapter_json(&self, config_json: String) -> Result<(), StoreError> {
+        let req: ConfigureSyncRequest = from_json("sync config", &config_json)?;
+        match req.kind.as_str() {
+            "local" => {
+                let path = req.path.unwrap_or_default();
+                let path = path.trim();
+                if path.is_empty() {
+                    return Err(StoreError::InvalidField {
+                        field: "path".to_string(),
+                        detail: "sync path must not be empty".to_string(),
+                    });
+                }
+                let cfg = serde_json::json!({ "remote_root": path }).to_string();
+                let adapter = self.open_sync_plugin(PLUGIN_ID_SYNC_LOCAL, cfg)?;
+                // Probe before keeping it active so a bad path fails here.
+                self.runtime
+                    .block_on(async { adapter.test_connection().await })
+                    .map_err(sync_err)?;
+                self.orchestrator.configure(adapter);
+                let shared = self.db.shared();
+                let prefs = UserPrefsRepo::new(&shared);
+                prefs
+                    .set(PREF_ADAPTER_KIND, "local")
+                    .map_err(|e| StoreError::Storage {
+                        detail: e.to_string(),
+                    })?;
+                prefs
+                    .set(PREF_LOCAL_PATH, path)
+                    .map_err(|e| StoreError::Storage {
+                        detail: e.to_string(),
+                    })?;
+                Ok(())
+            }
+            other => Err(StoreError::InvalidField {
+                field: "kind".to_string(),
+                detail: format!("sync adapter kind '{other}' is not supported yet (local only)"),
+            }),
+        }
+    }
+
+    /// Run one sync round (push local pending logs, fetch + apply foreign ones,
+    /// compaction audit) and return the `SyncRoundReport` as JSON. Errors with
+    /// "not configured" until `configure_sync_adapter_json` has run.
+    pub fn sync_now_json(&self) -> Result<String, StoreError> {
+        let report = self
+            .runtime
+            .block_on(async { self.orchestrator.sync_now().await })
+            .map_err(sync_err)?;
+        to_json(&report)
+    }
+
+    /// Push the local pending logs without fetching (call from RN AppState
+    /// "background"). Returns the number of logs pushed.
+    pub fn push_now(&self) -> Result<u32, StoreError> {
+        let pushed = self
+            .runtime
+            .block_on(async { self.orchestrator.push_now().await })
+            .map_err(sync_err)?;
+        Ok(pushed as u32)
     }
 }
 
@@ -1064,6 +1184,110 @@ mod tests {
         assert!(
             bytes > 0,
             "expected a non-empty pending log file after local mutations",
+        );
+    }
+
+    /// Open a Host at `<dir>/<name>.sqlite` with a fresh fake keychain.
+    fn open_named(dir: &tempfile::TempDir, name: &str) -> Arc<Host> {
+        Host::open(
+            dir.path()
+                .join(format!("{name}.sqlite"))
+                .to_string_lossy()
+                .into_owned(),
+            Arc::new(FakeKeychain::default()) as Arc<dyn KeychainBridge>,
+        )
+        .unwrap()
+    }
+
+    /// Poll (bounded) until the Host's pending sync dir has a non-empty log, so
+    /// the writer's async drain has flushed before we push.
+    fn wait_for_pending(dir: &tempfile::TempDir) {
+        let pending = dir.path().join("sync").join("log").join("pending");
+        for _ in 0..40 {
+            let bytes: u64 = std::fs::read_dir(&pending)
+                .map(|es| {
+                    es.flatten()
+                        .filter_map(|e| std::fs::metadata(e.path()).ok())
+                        .map(|m| m.len())
+                        .sum()
+                })
+                .unwrap_or(0);
+            if bytes > 0 {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+
+    #[test]
+    fn two_hosts_sync_an_event_through_a_local_target() {
+        // The shared local-filesystem sync target both Hosts point at.
+        let remote = tempfile::tempdir().unwrap();
+        let cfg = format!(
+            r#"{{"kind":"local","path":{}}}"#,
+            serde_json::to_string(&remote.path().to_string_lossy()).unwrap()
+        );
+
+        let dir_a = tempfile::tempdir().unwrap();
+        let host_a = open_named(&dir_a, "a");
+        let dir_b = tempfile::tempdir().unwrap();
+        let host_b = open_named(&dir_b, "b");
+
+        host_a.configure_sync_adapter_json(cfg.clone()).unwrap();
+        host_b.configure_sync_adapter_json(cfg).unwrap();
+        // Both are configured now.
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&host_a.sync_status_json().unwrap()).unwrap()
+                ["configured"],
+            true
+        );
+
+        // A creates a calendar + event (CalendarCreated + EventCreated logged).
+        let cal = calendar_id(
+            &host_a
+                .create_calendar_json(r#"{"name":"Shared"}"#.to_string())
+                .unwrap(),
+        );
+        let created = host_a
+            .create_event_json(new_event_json(&cal, "Across devices"))
+            .unwrap();
+        let event_id = serde_json::from_str::<serde_json::Value>(&created).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        // A pushes its pending logs to the shared target; B fetches + applies.
+        wait_for_pending(&dir_a);
+        host_a.sync_now_json().unwrap();
+        host_b.sync_now_json().unwrap();
+
+        // B now has the calendar (from CalendarCreated) + the event (from
+        // EventCreated) — the core mobile↔mobile parity assertion. B'd never
+        // listed calendars, so the event routes local (unknown id → local).
+        let events: serde_json::Value =
+            serde_json::from_str(&host_b.get_events_json(covering_range(&cal)).unwrap()).unwrap();
+        assert!(
+            events
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|e| e["id"] == serde_json::json!(event_id)),
+            "Host B should see A's event after a sync round; got: {events}",
+        );
+
+        // Idempotency: a second round on B applies nothing new (no panic, no dup).
+        host_b.sync_now_json().unwrap();
+        let again: serde_json::Value =
+            serde_json::from_str(&host_b.get_events_json(covering_range(&cal)).unwrap()).unwrap();
+        assert_eq!(
+            again
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|e| e["id"] == serde_json::json!(event_id))
+                .count(),
+            1,
+            "the event must appear exactly once after a repeat round",
         );
     }
 }
