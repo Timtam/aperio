@@ -14,9 +14,14 @@
 
 pub mod accounts;
 pub mod cache;
+pub mod conflicts;
 pub mod db;
+pub mod device_names;
 pub mod paths;
 pub mod registry;
+pub mod remote_plugins;
+pub mod sync_log;
+pub mod user_prefs;
 
 pub use db::{DbError, DbHandle, DbResult, SharedConn, CURRENT_SCHEMA_VERSION};
 pub use paths::{resolve_data_dir, DataDirKind, DataDirResolution};

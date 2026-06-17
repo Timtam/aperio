@@ -8,23 +8,18 @@ pub mod audio;
 pub mod bundled_plugins;
 pub mod cache_refresh;
 pub mod commands;
-pub mod conflicts;
 pub mod contact_sync;
 pub mod credential_sync;
-pub mod device_names;
 pub mod event_log;
 pub mod logging;
 pub mod overrides;
 mod platform;
 pub mod reminders;
-pub mod remote_plugins;
 pub mod secrets;
 pub mod sftp_host_keys;
 pub mod sound;
 pub mod sound_assets;
-pub mod sync_log;
 pub mod tray;
-pub mod user_prefs;
 mod window_state;
 
 // `db` + `paths` were extracted into the shared, Tauri-free `host-core`
@@ -33,7 +28,10 @@ mod window_state;
 // `crate::paths::*` references across the backend keep resolving unchanged.
 pub use host_core::db::{DbError, DbHandle, DbResult, SharedConn};
 pub use host_core::paths::{resolve_data_dir, DataDirKind, DataDirResolution};
-pub use host_core::{accounts, cache, db, paths, registry};
+pub use host_core::{
+    accounts, cache, conflicts, db, device_names, paths, registry, remote_plugins, sync_log,
+    user_prefs,
+};
 
 use cal_adapter_local::LocalAdapter;
 use contact_sync::ContactSyncScheduler;
