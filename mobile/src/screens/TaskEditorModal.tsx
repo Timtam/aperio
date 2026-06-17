@@ -18,10 +18,17 @@ import {
   View,
 } from 'react-native';
 
-import type { Task, TaskPriority, TaskStatus } from '@aperio/shared';
+import type {
+  Task,
+  TaskPriority,
+  TaskRecurrenceValue,
+  TaskStatus,
+} from '@aperio/shared';
+import { TASK_RECURRENCE_DEFAULT, fromBackend, toBackend } from '@aperio/shared';
 
 import { createTask, getTaskById, updateTask } from '../api/client';
 import { RadioGroup } from '../components/RadioGroup';
+import { TaskRecurrenceSelector } from '../components/TaskRecurrenceSelector';
 import { useTaskStore } from '../state/taskStoreContext';
 import type { RootStackScreenProps } from '../navigation/types';
 
@@ -44,6 +51,7 @@ interface FormState {
   deadlineDate: string;
   deadlineTime: string;
   description: string;
+  recurrence: TaskRecurrenceValue;
 }
 
 function buildInitialState(loaded: Task | null, listId: string): FormState {
@@ -59,6 +67,7 @@ function buildInitialState(loaded: Task | null, listId: string): FormState {
       deadlineDate: '',
       deadlineTime: '',
       description: '',
+      recurrence: { ...TASK_RECURRENCE_DEFAULT },
     };
   }
   return {
@@ -72,6 +81,7 @@ function buildInitialState(loaded: Task | null, listId: string): FormState {
     deadlineDate: loaded.deadline_date ?? '',
     deadlineTime: loaded.deadline_time ? loaded.deadline_time.slice(0, 5) : '',
     description: loaded.description ?? '',
+    recurrence: fromBackend(loaded.recurrence),
   };
 }
 
@@ -311,7 +321,7 @@ export default function TaskEditorModal({
           scheduled_time: sched.time,
           deadline_date: dead.date,
           deadline_time: dead.time,
-          recurrence: null,
+          recurrence: toBackend(form.recurrence),
           parent_id: null,
           section_id: form.sectionId || null,
           color_label: null,
@@ -339,6 +349,7 @@ export default function TaskEditorModal({
           scheduled_time: sched.time,
           deadline_date: dead.date,
           deadline_time: dead.time,
+          recurrence: toBackend(form.recurrence),
           description,
           completed_at:
             form.status === 'completed'
@@ -472,6 +483,11 @@ export default function TaskEditorModal({
           textAlignVertical="top"
         />
       </View>
+
+      <TaskRecurrenceSelector
+        value={form.recurrence}
+        onChange={(recurrence) => update('recurrence', recurrence)}
+      />
 
       <View style={styles.buttons}>
         <Pressable
