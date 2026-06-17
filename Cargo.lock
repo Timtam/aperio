@@ -757,6 +757,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "cal-adapter-caldav-cdylib"
+version = "0.1.0"
+dependencies = [
+ "cal-adapter-caldav-plugin",
+ "plugin-sdk",
+]
+
+[[package]]
 name = "cal-adapter-caldav-plugin"
 version = "0.1.0"
 dependencies = [
@@ -790,6 +798,14 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "cal-adapter-ews-cdylib"
+version = "0.1.0"
+dependencies = [
+ "cal-adapter-ews-plugin",
+ "plugin-sdk",
 ]
 
 [[package]]
@@ -831,6 +847,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "cal-adapter-google-cdylib"
+version = "0.1.0"
+dependencies = [
+ "cal-adapter-google-plugin",
+ "plugin-sdk",
+]
+
+[[package]]
 name = "cal-adapter-google-plugin"
 version = "0.1.0"
 dependencies = [
@@ -864,6 +888,14 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "cal-adapter-ical-cdylib"
+version = "0.1.0"
+dependencies = [
+ "cal-adapter-ical-plugin",
+ "plugin-sdk",
 ]
 
 [[package]]
@@ -923,6 +955,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "cal-adapter-microsoft-graph-cdylib"
+version = "0.1.0"
+dependencies = [
+ "cal-adapter-microsoft-graph-plugin",
+ "plugin-sdk",
+]
+
+[[package]]
 name = "cal-adapter-microsoft-graph-plugin"
 version = "0.1.0"
 dependencies = [
@@ -957,6 +997,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "cal-adapter-todoist-cdylib"
+version = "0.1.0"
+dependencies = [
+ "cal-adapter-todoist-plugin",
+ "plugin-sdk",
+]
+
+[[package]]
 name = "cal-adapter-todoist-plugin"
 version = "0.1.0"
 dependencies = [
@@ -986,6 +1034,14 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "cal-adapter-vikunja-cdylib"
+version = "0.1.0"
+dependencies = [
+ "cal-adapter-vikunja-plugin",
+ "plugin-sdk",
 ]
 
 [[package]]
@@ -6276,6 +6332,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "sync-adapter-dropbox-cdylib"
+version = "0.1.0"
+dependencies = [
+ "plugin-sdk",
+ "sync-adapter-dropbox-plugin",
+]
+
+[[package]]
 name = "sync-adapter-dropbox-plugin"
 version = "0.1.0"
 dependencies = [
@@ -6306,6 +6370,14 @@ dependencies = [
  "tokio",
  "tracing",
  "webpki-roots 0.26.11",
+]
+
+[[package]]
+name = "sync-adapter-ftp-cdylib"
+version = "0.1.0"
+dependencies = [
+ "plugin-sdk",
+ "sync-adapter-ftp-plugin",
 ]
 
 [[package]]
@@ -6346,6 +6418,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "sync-adapter-googledrive-cdylib"
+version = "0.1.0"
+dependencies = [
+ "plugin-sdk",
+ "sync-adapter-googledrive-plugin",
+]
+
+[[package]]
 name = "sync-adapter-googledrive-plugin"
 version = "0.1.0"
 dependencies = [
@@ -6375,6 +6455,14 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "sync-adapter-local-cdylib"
+version = "0.1.0"
+dependencies = [
+ "plugin-sdk",
+ "sync-adapter-local-plugin",
 ]
 
 [[package]]
@@ -6411,6 +6499,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "sync-adapter-sftp-cdylib"
+version = "0.1.0"
+dependencies = [
+ "plugin-sdk",
+ "sync-adapter-sftp-plugin",
+]
+
+[[package]]
 name = "sync-adapter-sftp-plugin"
 version = "0.1.0"
 dependencies = [
@@ -6443,6 +6539,14 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "sync-adapter-webdav-cdylib"
+version = "0.1.0"
+dependencies = [
+ "plugin-sdk",
+ "sync-adapter-webdav-plugin",
 ]
 
 [[package]]
@@ -7628,6 +7732,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "vc-adapter-meet-cdylib"
+version = "0.1.0"
+dependencies = [
+ "plugin-sdk",
+ "vc-adapter-meet-plugin",
+]
+
+[[package]]
 name = "vc-adapter-meet-plugin"
 version = "0.1.0"
 dependencies = [
@@ -7649,6 +7761,14 @@ dependencies = [
  "async-trait",
  "serde",
  "vc-core",
+]
+
+[[package]]
+name = "vc-adapter-teams-cdylib"
+version = "0.1.0"
+dependencies = [
+ "plugin-sdk",
+ "vc-adapter-teams-plugin",
 ]
 
 [[package]]
@@ -7676,6 +7796,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "vc-adapter-webex-cdylib"
+version = "0.1.0"
+dependencies = [
+ "plugin-sdk",
+ "vc-adapter-webex-plugin",
+]
+
+[[package]]
 name = "vc-adapter-webex-plugin"
 version = "0.1.0"
 dependencies = [
@@ -7697,6 +7825,14 @@ dependencies = [
  "async-trait",
  "serde",
  "vc-core",
+]
+
+[[package]]
+name = "vc-adapter-zoom-cdylib"
+version = "0.1.0"
+dependencies = [
+ "plugin-sdk",
+ "vc-adapter-zoom-plugin",
 ]
 
 [[package]]

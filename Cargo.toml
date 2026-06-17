@@ -51,6 +51,28 @@ members = [
     "crates/vc-adapter-meet-plugin",
     "crates/vc-adapter-webex-plugin",
 
+    # cdylib FFI shells: emit the #[no_mangle] C-ABI exports the desktop
+    # dlopen loader resolves. The -plugin crates are rlib-only so the mobile
+    # build can statically link them all into one binary (dlopen is
+    # impossible on iOS) without colliding on duplicate plugin symbols.
+    "crates/cal-adapter-caldav-cdylib",
+    "crates/cal-adapter-ical-cdylib",
+    "crates/cal-adapter-google-cdylib",
+    "crates/cal-adapter-microsoft-graph-cdylib",
+    "crates/cal-adapter-ews-cdylib",
+    "crates/cal-adapter-vikunja-cdylib",
+    "crates/cal-adapter-todoist-cdylib",
+    "crates/sync-adapter-local-cdylib",
+    "crates/sync-adapter-webdav-cdylib",
+    "crates/sync-adapter-ftp-cdylib",
+    "crates/sync-adapter-sftp-cdylib",
+    "crates/sync-adapter-dropbox-cdylib",
+    "crates/sync-adapter-googledrive-cdylib",
+    "crates/vc-adapter-zoom-cdylib",
+    "crates/vc-adapter-teams-cdylib",
+    "crates/vc-adapter-meet-cdylib",
+    "crates/vc-adapter-webex-cdylib",
+
     # Mobile engine-reuse: UniFFI wrapper exposing cal-core to Swift/Kotlin.
     "crates/cal-ffi",
 

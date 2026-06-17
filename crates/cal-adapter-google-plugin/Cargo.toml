@@ -9,7 +9,7 @@ repository.workspace = true
 description = "Aperio — Google Calendar/Tasks/Contacts adapter packaged as a plugin (DESIGN.md §20)."
 
 [lib]
-crate-type = ["cdylib", "rlib"]
+crate-type = ["rlib"]
 
 [dependencies]
 plugin-sdk.workspace = true

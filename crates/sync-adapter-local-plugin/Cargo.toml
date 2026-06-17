@@ -9,11 +9,12 @@ repository.workspace = true
 description = "Aperio — local-filesystem sync adapter packaged as a plugin (DESIGN.md §20)."
 
 [lib]
-# cdylib produces the .dll/.dylib/.so the host's PluginManager
-# dlopens at runtime; rlib is included so the crate's own
-# integration tests can call back into the FFI exports as
-# regular Rust fns without going through libloading.
-crate-type = ["cdylib", "rlib"]
+# rlib-only: the #[no_mangle] C-ABI exports the host dlopens live in the
+# companion `sync-adapter-local-cdylib` crate, so this crate (and the other
+# -plugin rlibs) can be statically linked into one binary on mobile without
+# colliding on duplicate exports. Integration tests call the typed twins
+# (build_descriptor / DESTROY_FN) directly.
+crate-type = ["rlib"]
 
 [dependencies]
 plugin-sdk.workspace = true
