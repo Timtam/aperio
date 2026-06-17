@@ -1,0 +1,7 @@
+{
+  "name": "@aperio/locales",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Shared UI translations for Aperio — consumed by the desktop frontend (Vite) and the mobile app (Expo/Metro) so both stay in one source of truth.",
+  "//": "Plain JSON per language under <lang>/translation.json (i18next resource shape). Resolved via a path alias on each side (no bundler-specific main/exports), so deep imports like '@aperio/locales/de/translation.json' work in both Vite and Metro."
+}
