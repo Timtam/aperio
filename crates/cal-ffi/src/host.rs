@@ -19,18 +19,25 @@
 //!
 //! ## Scope
 //!
-//! Account CRUD (`accounts_json` / `create_account_json` / `delete_account`,
-//! synchronous) + the calendar/event surface. The async `CalendarFeature`
-//! methods are driven by a single current-thread tokio runtime via
-//! `block_on`; account CRUD stays synchronous.
+//! Account CRUD, the calendar/event surface, and cross-device sync. The async
+//! `CalendarFeature` methods + the sync orchestrator are driven by a single
+//! one-worker multi-thread tokio runtime via `block_on` (the worker keeps the
+//! event-log writer's drain task advancing); account CRUD stays synchronous.
+//! Every LOCAL mutation (calendars, events, accounts) is logged to the shared
+//! event log so the next sync round carries it; account secrets also flow when
+//! E2E is enabled (the credential-sync gate). `configure_sync_adapter_json` +
+//! `sync_now_json` + `sync_status_json` + `push_now` make the Host a full sync
+//! peer (the local-filesystem target this slice; webdav/sftp/ftp + OAuth kinds
+//! follow).
 //!
-//! Deferred to later increments (documented per method): the pre-persist
-//! credential smoke-test + cross-device credential push + `AccountCreated`
-//! sync-log event (need the event log); the SWR read cache + cache-updated
-//! callback; colour resolution, overrides, birthday calendars, cross-calendar
-//! event moves, and the external-only conveniences (free/busy, RSVP). The
-//! external-adapter event paths are wired identically to local but hit the
-//! provider live (no cache) and are exercised on-device, not in unit tests.
+//! Deferred (documented per method): the pre-persist credential smoke-test; the
+//! SWR read cache + cache-updated callback; colour resolution, overrides,
+//! birthday calendars, cross-calendar event moves, free/busy + RSVP; the
+//! SyncProgressBridge live-progress push callback + configure restore-on-open +
+//! the E2E `wrap_if_encrypted` branch; task/list/section sync (those live on
+//! the separate `LocalStore`, which folds into this Host later). External
+//! event paths are wired like local but hit the provider live (no cache),
+//! exercised on-device, not in unit tests.
 
 use std::sync::Arc;
 
