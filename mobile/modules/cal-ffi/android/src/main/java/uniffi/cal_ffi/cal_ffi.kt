@@ -728,7 +728,23 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_create_account_json(
     ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_create_calendar_json(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_create_event_json(
+    ): Short
     external fun uniffi_cal_ffi_checksum_method_host_delete_account(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_delete_calendar(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_delete_event(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_get_event_by_id_json(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_get_events_json(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_list_calendars_json(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_update_event_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_keychainbridge_store(
     ): Short
@@ -819,8 +835,24 @@ external fun uniffi_cal_ffi_fn_method_host_accounts_json(`ptr`: Long,uniffi_out_
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_create_account_json(`ptr`: Long,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_create_calendar_json(`ptr`: Long,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_create_event_json(`ptr`: Long,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_delete_account(`ptr`: Long,`accountId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_cal_ffi_fn_method_host_delete_calendar(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_cal_ffi_fn_method_host_delete_event(`ptr`: Long,`id`: RustBuffer.ByValue,`calendarId`: RustBuffer.ByValue,`sendCancellations`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_cal_ffi_fn_method_host_get_event_by_id_json(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_get_events_json(`ptr`: Long,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_list_calendars_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_update_event_json(`ptr`: Long,`eventJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_clone_keychainbridge(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
 external fun uniffi_cal_ffi_fn_free_keychainbridge(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -1038,7 +1070,31 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_create_account_json() != 61944.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_create_calendar_json() != 42147.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_create_event_json() != 50491.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_delete_account() != 32623.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_delete_calendar() != 25740.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_delete_event() != 51601.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_get_event_by_id_json() != 43277.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_get_events_json() != 65466.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_list_calendars_json() != 49275.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_update_event_json() != 27193.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_keychainbridge_store() != 54380.toShort()) {
@@ -1518,11 +1574,81 @@ public interface HostInterface {
     fun `createAccountJson`(`requestJson`: kotlin.String): kotlin.String
     
     /**
+     * Create a local calendar; returns it as a `CalendarRow`. Stamps the new
+     * id's route immediately so a following event op routes without a
+     * re-list. Local-only (the adapter surface has no external-calendar
+     * creation); colour/sound are deferred (always `None` here).
+     */
+    fun `createCalendarJson`(`requestJson`: kotlin.String): kotlin.String
+    
+    /**
+     * Create an event in `calendar_id` from a flattened `NewEvent`; returns
+     * the created `Event` as JSON. Routes local/external. Mirrors the desktop
+     * `create_event` minus colour resolution + the event-log/cache-invalidate
+     * + reminder reschedule (deferred).
+     */
+    fun `createEventJson`(`requestJson`: kotlin.String): kotlin.String
+    
+    /**
      * Delete an account: unregister its adapter, clear its secrets, and
      * remove the row. The local account cannot be deleted
      * ([`StoreError::InvalidField`]).
      */
     fun `deleteAccount`(`accountId`: kotlin.String)
+    
+    /**
+     * Delete a local calendar (its events cascade away). Mirrors the desktop
+     * local-only `delete_calendar`.
+     */
+    fun `deleteCalendar`(`id`: kotlin.String)
+    
+    /**
+     * Delete an event. `calendar_id` is routing-only (dropped before the
+     * adapter call); omitted → assume local (desktop back-compat).
+     * `send_cancellations` (external only) defaults to false; local has no
+     * attendees so it never sends. Mirrors the desktop `delete_event`.
+     */
+    fun `deleteEvent`(`id`: kotlin.String, `calendarId`: kotlin.String?, `sendCancellations`: kotlin.Boolean?)
+    
+    /**
+     * One local event by id as JSON (`Event` or `null`). Local-only by design
+     * — the desktop `get_event_by_id` is the reminders-overview lookup against
+     * the local store; external events aren't addressable by a bare id without
+     * their calendar.
+     */
+    fun `getEventByIdJson`(`id`: kotlin.String): kotlin.String
+    
+    /**
+     * Events in `calendar_id` overlapping `[start, end]`, as a JSON `Event[]`.
+     * Routes local → LocalAdapter, external → the registry adapter. Mirrors
+     * the desktop `get_events` minus the SWR read-cache + staleness-gated
+     * background refresh (deferred): the external branch hits the provider
+     * live, exactly as a cache-cold desktop first read. Birthday calendars are
+     * deferred (desktop-only) — a birthday id routes to empty.
+     *
+     * The local adapter currently returns rows whose stored start/end
+     * intersect the range (RRULE occurrence expansion is its own later phase),
+     * so a recurring master is returned only when its stored span overlaps.
+     */
+    fun `getEventsJson`(`requestJson`: kotlin.String): kotlin.String
+    
+    /**
+     * All calendars (local + external) as a JSON `CalendarRow[]`, and — as a
+     * side effect — primes the registry's calendar→account route map so the
+     * event methods can route. Mirrors the desktop `list_calendars` minus the
+     * SWR cache, overrides, birthday calendars, and recurrence-capability
+     * resolution (all deferred). Callers should list calendars before event
+     * operations — the same ordering the desktop frontend honours.
+     */
+    fun `listCalendarsJson`(): kotlin.String
+    
+    /**
+     * Update an event in place (its `calendar_id` field selects the route);
+     * returns the updated `Event` as JSON. Mirrors the in-place branch of the
+     * desktop `update_event`. Cross-calendar moves (the create-on-target +
+     * best-effort-delete dance with `previous_calendar_id`) are deferred.
+     */
+    fun `updateEventJson`(`eventJson`: kotlin.String): kotlin.String
     
     companion object
 }
@@ -1672,6 +1798,46 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * Create a local calendar; returns it as a `CalendarRow`. Stamps the new
+     * id's route immediately so a following event op routes without a
+     * re-list. Local-only (the adapter surface has no external-calendar
+     * creation); colour/sound are deferred (always `None` here).
+     */
+    @Throws(StoreException::class)override fun `createCalendarJson`(`requestJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_create_calendar_json(
+        it,
+        FfiConverterString.lower(`requestJson`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Create an event in `calendar_id` from a flattened `NewEvent`; returns
+     * the created `Event` as JSON. Routes local/external. Mirrors the desktop
+     * `create_event` minus colour resolution + the event-log/cache-invalidate
+     * + reminder reschedule (deferred).
+     */
+    @Throws(StoreException::class)override fun `createEventJson`(`requestJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_create_event_json(
+        it,
+        FfiConverterString.lower(`requestJson`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * Delete an account: unregister its adapter, clear its secrets, and
      * remove the row. The local account cannot be deleted
      * ([`StoreError::InvalidField`]).
@@ -1686,6 +1852,130 @@ open class Host: Disposable, AutoCloseable, HostInterface
 }
     }
     
+    
+
+    
+    /**
+     * Delete a local calendar (its events cascade away). Mirrors the desktop
+     * local-only `delete_calendar`.
+     */
+    @Throws(StoreException::class)override fun `deleteCalendar`(`id`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_delete_calendar(
+        it,
+        FfiConverterString.lower(`id`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Delete an event. `calendar_id` is routing-only (dropped before the
+     * adapter call); omitted → assume local (desktop back-compat).
+     * `send_cancellations` (external only) defaults to false; local has no
+     * attendees so it never sends. Mirrors the desktop `delete_event`.
+     */
+    @Throws(StoreException::class)override fun `deleteEvent`(`id`: kotlin.String, `calendarId`: kotlin.String?, `sendCancellations`: kotlin.Boolean?)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_delete_event(
+        it,
+        FfiConverterString.lower(`id`),FfiConverterOptionalString.lower(`calendarId`),FfiConverterOptionalBoolean.lower(`sendCancellations`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * One local event by id as JSON (`Event` or `null`). Local-only by design
+     * — the desktop `get_event_by_id` is the reminders-overview lookup against
+     * the local store; external events aren't addressable by a bare id without
+     * their calendar.
+     */
+    @Throws(StoreException::class)override fun `getEventByIdJson`(`id`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_get_event_by_id_json(
+        it,
+        FfiConverterString.lower(`id`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Events in `calendar_id` overlapping `[start, end]`, as a JSON `Event[]`.
+     * Routes local → LocalAdapter, external → the registry adapter. Mirrors
+     * the desktop `get_events` minus the SWR read-cache + staleness-gated
+     * background refresh (deferred): the external branch hits the provider
+     * live, exactly as a cache-cold desktop first read. Birthday calendars are
+     * deferred (desktop-only) — a birthday id routes to empty.
+     *
+     * The local adapter currently returns rows whose stored start/end
+     * intersect the range (RRULE occurrence expansion is its own later phase),
+     * so a recurring master is returned only when its stored span overlaps.
+     */
+    @Throws(StoreException::class)override fun `getEventsJson`(`requestJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_get_events_json(
+        it,
+        FfiConverterString.lower(`requestJson`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * All calendars (local + external) as a JSON `CalendarRow[]`, and — as a
+     * side effect — primes the registry's calendar→account route map so the
+     * event methods can route. Mirrors the desktop `list_calendars` minus the
+     * SWR cache, overrides, birthday calendars, and recurrence-capability
+     * resolution (all deferred). Callers should list calendars before event
+     * operations — the same ordering the desktop frontend honours.
+     */
+    @Throws(StoreException::class)override fun `listCalendarsJson`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_list_calendars_json(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Update an event in place (its `calendar_id` field selects the route);
+     * returns the updated `Event` as JSON. Mirrors the in-place branch of the
+     * desktop `update_event`. Cross-calendar moves (the create-on-target +
+     * best-effort-delete dance with `previous_calendar_id`) are deferred.
+     */
+    @Throws(StoreException::class)override fun `updateEventJson`(`eventJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_update_event_json(
+        it,
+        FfiConverterString.lower(`eventJson`),_status)
+}
+    }
+    )
+    }
     
 
     
@@ -4181,6 +4471,13 @@ public object FfiConverterTypeSoundSource : FfiConverterRustBuffer<SoundSource>{
 
 /**
  * Errors surfaced from the on-device store to the foreign side.
+ *
+ * The variants mirror the desktop's `CommandError` codes (the `From<
+ * cal_core::Error>` mapping in `src-tauri/src/commands/mod.rs`) so the mobile
+ * UI can branch on the same distinctions — re-auth on `Auth`, an
+ * optimistic-concurrency retry on `Conflict`, a transient banner on
+ * `Network`, etc. — instead of getting one opaque storage error. The
+ * external-adapter event paths are where the full spread becomes reachable.
  */
 sealed class StoreException: kotlin.Exception() {
     
@@ -4196,7 +4493,8 @@ sealed class StoreException: kotlin.Exception() {
     }
     
     /**
-     * A read or write against the local database failed.
+     * A read or write against the local database (or an unclassified adapter
+     * failure) failed.
      */
     class Storage(
         
@@ -4230,6 +4528,74 @@ sealed class StoreException: kotlin.Exception() {
             get() = "field=${ `field` }, detail=${ `detail` }"
     }
     
+    /**
+     * The adapter rejected the credentials (expired / wrong token) — the UI
+     * surfaces the re-connect flow.
+     */
+    class Auth(
+        
+        val `detail`: kotlin.String
+        ) : StoreException() {
+        override val message
+            get() = "detail=${ `detail` }"
+    }
+    
+    /**
+     * The account is authenticated but not allowed to perform the operation.
+     */
+    class Forbidden(
+        
+        val `detail`: kotlin.String
+        ) : StoreException() {
+        override val message
+            get() = "detail=${ `detail` }"
+    }
+    
+    /**
+     * An ETag / precondition-failed clash (the row changed underneath us) —
+     * the UI re-reads and retries.
+     */
+    class Conflict(
+        
+        val `detail`: kotlin.String
+        ) : StoreException() {
+        override val message
+            get() = "detail=${ `detail` }"
+    }
+    
+    /**
+     * A transient network failure reaching the provider.
+     */
+    class Network(
+        
+        val `detail`: kotlin.String
+        ) : StoreException() {
+        override val message
+            get() = "detail=${ `detail` }"
+    }
+    
+    /**
+     * The provider answered with something the adapter couldn't parse.
+     */
+    class Protocol(
+        
+        val `detail`: kotlin.String
+        ) : StoreException() {
+        override val message
+            get() = "detail=${ `detail` }"
+    }
+    
+    /**
+     * The adapter doesn't support this operation.
+     */
+    class Unsupported(
+        
+        val `detail`: kotlin.String
+        ) : StoreException() {
+        override val message
+            get() = "detail=${ `detail` }"
+    }
+    
 
     
 
@@ -4260,6 +4626,24 @@ public object FfiConverterTypeStoreError : FfiConverterRustBuffer<StoreException
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
+            5 -> StoreException.Auth(
+                FfiConverterString.read(buf),
+                )
+            6 -> StoreException.Forbidden(
+                FfiConverterString.read(buf),
+                )
+            7 -> StoreException.Conflict(
+                FfiConverterString.read(buf),
+                )
+            8 -> StoreException.Network(
+                FfiConverterString.read(buf),
+                )
+            9 -> StoreException.Protocol(
+                FfiConverterString.read(buf),
+                )
+            10 -> StoreException.Unsupported(
+                FfiConverterString.read(buf),
+                )
             else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
         }
     }
@@ -4286,6 +4670,36 @@ public object FfiConverterTypeStoreError : FfiConverterRustBuffer<StoreException
                 + FfiConverterString.allocationSize(value.`field`)
                 + FfiConverterString.allocationSize(value.`detail`)
             )
+            is StoreException.Auth -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`detail`)
+            )
+            is StoreException.Forbidden -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`detail`)
+            )
+            is StoreException.Conflict -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`detail`)
+            )
+            is StoreException.Network -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`detail`)
+            )
+            is StoreException.Protocol -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`detail`)
+            )
+            is StoreException.Unsupported -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`detail`)
+            )
         }
     }
 
@@ -4308,6 +4722,36 @@ public object FfiConverterTypeStoreError : FfiConverterRustBuffer<StoreException
             is StoreException.InvalidField -> {
                 buf.putInt(4)
                 FfiConverterString.write(value.`field`, buf)
+                FfiConverterString.write(value.`detail`, buf)
+                Unit
+            }
+            is StoreException.Auth -> {
+                buf.putInt(5)
+                FfiConverterString.write(value.`detail`, buf)
+                Unit
+            }
+            is StoreException.Forbidden -> {
+                buf.putInt(6)
+                FfiConverterString.write(value.`detail`, buf)
+                Unit
+            }
+            is StoreException.Conflict -> {
+                buf.putInt(7)
+                FfiConverterString.write(value.`detail`, buf)
+                Unit
+            }
+            is StoreException.Network -> {
+                buf.putInt(8)
+                FfiConverterString.write(value.`detail`, buf)
+                Unit
+            }
+            is StoreException.Protocol -> {
+                buf.putInt(9)
+                FfiConverterString.write(value.`detail`, buf)
+                Unit
+            }
+            is StoreException.Unsupported -> {
+                buf.putInt(10)
                 FfiConverterString.write(value.`detail`, buf)
                 Unit
             }
@@ -4463,6 +4907,38 @@ public object FfiConverterOptionalUByte: FfiConverterRustBuffer<kotlin.UByte?> {
         } else {
             buf.put(1)
             FfiConverterUByte.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalBoolean: FfiConverterRustBuffer<kotlin.Boolean?> {
+    override fun read(buf: ByteBuffer): kotlin.Boolean? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterBoolean.read(buf)
+    }
+
+    override fun allocationSize(value: kotlin.Boolean?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterBoolean.allocationSize(value)
+        }
+    }
+
+    override fun write(value: kotlin.Boolean?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterBoolean.write(value, buf)
         }
     }
 }

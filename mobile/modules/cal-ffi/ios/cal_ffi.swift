@@ -564,11 +564,81 @@ public protocol HostProtocol: AnyObject, Sendable {
     func createAccountJson(requestJson: String) throws  -> String
     
     /**
+     * Create a local calendar; returns it as a `CalendarRow`. Stamps the new
+     * id's route immediately so a following event op routes without a
+     * re-list. Local-only (the adapter surface has no external-calendar
+     * creation); colour/sound are deferred (always `None` here).
+     */
+    func createCalendarJson(requestJson: String) throws  -> String
+    
+    /**
+     * Create an event in `calendar_id` from a flattened `NewEvent`; returns
+     * the created `Event` as JSON. Routes local/external. Mirrors the desktop
+     * `create_event` minus colour resolution + the event-log/cache-invalidate
+     * + reminder reschedule (deferred).
+     */
+    func createEventJson(requestJson: String) throws  -> String
+    
+    /**
      * Delete an account: unregister its adapter, clear its secrets, and
      * remove the row. The local account cannot be deleted
      * ([`StoreError::InvalidField`]).
      */
     func deleteAccount(accountId: String) throws 
+    
+    /**
+     * Delete a local calendar (its events cascade away). Mirrors the desktop
+     * local-only `delete_calendar`.
+     */
+    func deleteCalendar(id: String) throws 
+    
+    /**
+     * Delete an event. `calendar_id` is routing-only (dropped before the
+     * adapter call); omitted → assume local (desktop back-compat).
+     * `send_cancellations` (external only) defaults to false; local has no
+     * attendees so it never sends. Mirrors the desktop `delete_event`.
+     */
+    func deleteEvent(id: String, calendarId: String?, sendCancellations: Bool?) throws 
+    
+    /**
+     * One local event by id as JSON (`Event` or `null`). Local-only by design
+     * — the desktop `get_event_by_id` is the reminders-overview lookup against
+     * the local store; external events aren't addressable by a bare id without
+     * their calendar.
+     */
+    func getEventByIdJson(id: String) throws  -> String
+    
+    /**
+     * Events in `calendar_id` overlapping `[start, end]`, as a JSON `Event[]`.
+     * Routes local → LocalAdapter, external → the registry adapter. Mirrors
+     * the desktop `get_events` minus the SWR read-cache + staleness-gated
+     * background refresh (deferred): the external branch hits the provider
+     * live, exactly as a cache-cold desktop first read. Birthday calendars are
+     * deferred (desktop-only) — a birthday id routes to empty.
+     *
+     * The local adapter currently returns rows whose stored start/end
+     * intersect the range (RRULE occurrence expansion is its own later phase),
+     * so a recurring master is returned only when its stored span overlaps.
+     */
+    func getEventsJson(requestJson: String) throws  -> String
+    
+    /**
+     * All calendars (local + external) as a JSON `CalendarRow[]`, and — as a
+     * side effect — primes the registry's calendar→account route map so the
+     * event methods can route. Mirrors the desktop `list_calendars` minus the
+     * SWR cache, overrides, birthday calendars, and recurrence-capability
+     * resolution (all deferred). Callers should list calendars before event
+     * operations — the same ordering the desktop frontend honours.
+     */
+    func listCalendarsJson() throws  -> String
+    
+    /**
+     * Update an event in place (its `calendar_id` field selects the route);
+     * returns the updated `Event` as JSON. Mirrors the in-place branch of the
+     * desktop `update_event`. Cross-calendar moves (the create-on-target +
+     * best-effort-delete dance with `previous_calendar_id`) are deferred.
+     */
+    func updateEventJson(eventJson: String) throws  -> String
     
 }
 /**
@@ -676,6 +746,36 @@ open func createAccountJson(requestJson: String)throws  -> String  {
 }
     
     /**
+     * Create a local calendar; returns it as a `CalendarRow`. Stamps the new
+     * id's route immediately so a following event op routes without a
+     * re-list. Local-only (the adapter surface has no external-calendar
+     * creation); colour/sound are deferred (always `None` here).
+     */
+open func createCalendarJson(requestJson: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_create_calendar_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(requestJson),$0
+    )
+})
+}
+    
+    /**
+     * Create an event in `calendar_id` from a flattened `NewEvent`; returns
+     * the created `Event` as JSON. Routes local/external. Mirrors the desktop
+     * `create_event` minus colour resolution + the event-log/cache-invalidate
+     * + reminder reschedule (deferred).
+     */
+open func createEventJson(requestJson: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_create_event_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(requestJson),$0
+    )
+})
+}
+    
+    /**
      * Delete an account: unregister its adapter, clear its secrets, and
      * remove the row. The local account cannot be deleted
      * ([`StoreError::InvalidField`]).
@@ -686,6 +786,101 @@ open func deleteAccount(accountId: String)throws   {try rustCallWithError(FfiCon
         FfiConverterString.lower(accountId),$0
     )
 }
+}
+    
+    /**
+     * Delete a local calendar (its events cascade away). Mirrors the desktop
+     * local-only `delete_calendar`.
+     */
+open func deleteCalendar(id: String)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_delete_calendar(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(id),$0
+    )
+}
+}
+    
+    /**
+     * Delete an event. `calendar_id` is routing-only (dropped before the
+     * adapter call); omitted → assume local (desktop back-compat).
+     * `send_cancellations` (external only) defaults to false; local has no
+     * attendees so it never sends. Mirrors the desktop `delete_event`.
+     */
+open func deleteEvent(id: String, calendarId: String?, sendCancellations: Bool?)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_delete_event(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(id),
+        FfiConverterOptionString.lower(calendarId),
+        FfiConverterOptionBool.lower(sendCancellations),$0
+    )
+}
+}
+    
+    /**
+     * One local event by id as JSON (`Event` or `null`). Local-only by design
+     * — the desktop `get_event_by_id` is the reminders-overview lookup against
+     * the local store; external events aren't addressable by a bare id without
+     * their calendar.
+     */
+open func getEventByIdJson(id: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_get_event_by_id_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(id),$0
+    )
+})
+}
+    
+    /**
+     * Events in `calendar_id` overlapping `[start, end]`, as a JSON `Event[]`.
+     * Routes local → LocalAdapter, external → the registry adapter. Mirrors
+     * the desktop `get_events` minus the SWR read-cache + staleness-gated
+     * background refresh (deferred): the external branch hits the provider
+     * live, exactly as a cache-cold desktop first read. Birthday calendars are
+     * deferred (desktop-only) — a birthday id routes to empty.
+     *
+     * The local adapter currently returns rows whose stored start/end
+     * intersect the range (RRULE occurrence expansion is its own later phase),
+     * so a recurring master is returned only when its stored span overlaps.
+     */
+open func getEventsJson(requestJson: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_get_events_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(requestJson),$0
+    )
+})
+}
+    
+    /**
+     * All calendars (local + external) as a JSON `CalendarRow[]`, and — as a
+     * side effect — primes the registry's calendar→account route map so the
+     * event methods can route. Mirrors the desktop `list_calendars` minus the
+     * SWR cache, overrides, birthday calendars, and recurrence-capability
+     * resolution (all deferred). Callers should list calendars before event
+     * operations — the same ordering the desktop frontend honours.
+     */
+open func listCalendarsJson()throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_list_calendars_json(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+    /**
+     * Update an event in place (its `calendar_id` field selects the route);
+     * returns the updated `Event` as JSON. Mirrors the in-place branch of the
+     * desktop `update_event`. Cross-calendar moves (the create-on-target +
+     * best-effort-delete dance with `previous_calendar_id`) are deferred.
+     */
+open func updateEventJson(eventJson: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_update_event_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(eventJson),$0
+    )
+})
 }
     
 
@@ -3042,6 +3237,13 @@ public func FfiConverterTypeSoundSource_lower(_ value: SoundSource) -> RustBuffe
 
 /**
  * Errors surfaced from the on-device store to the foreign side.
+ *
+ * The variants mirror the desktop's `CommandError` codes (the `From<
+ * cal_core::Error>` mapping in `src-tauri/src/commands/mod.rs`) so the mobile
+ * UI can branch on the same distinctions — re-auth on `Auth`, an
+ * optimistic-concurrency retry on `Conflict`, a transient banner on
+ * `Network`, etc. — instead of getting one opaque storage error. The
+ * external-adapter event paths are where the full spread becomes reachable.
  */
 public enum StoreError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
 
@@ -3053,7 +3255,8 @@ public enum StoreError: Swift.Error, Equatable, Hashable, Foundation.LocalizedEr
     case Open(detail: String
     )
     /**
-     * A read or write against the local database failed.
+     * A read or write against the local database (or an unclassified adapter
+     * failure) failed.
      */
     case Storage(detail: String
     )
@@ -3067,6 +3270,38 @@ public enum StoreError: Swift.Error, Equatable, Hashable, Foundation.LocalizedEr
      * was otherwise rejected as invalid input.
      */
     case InvalidField(field: String, detail: String
+    )
+    /**
+     * The adapter rejected the credentials (expired / wrong token) — the UI
+     * surfaces the re-connect flow.
+     */
+    case Auth(detail: String
+    )
+    /**
+     * The account is authenticated but not allowed to perform the operation.
+     */
+    case Forbidden(detail: String
+    )
+    /**
+     * An ETag / precondition-failed clash (the row changed underneath us) —
+     * the UI re-reads and retries.
+     */
+    case Conflict(detail: String
+    )
+    /**
+     * A transient network failure reaching the provider.
+     */
+    case Network(detail: String
+    )
+    /**
+     * The provider answered with something the adapter couldn't parse.
+     */
+    case Protocol(detail: String
+    )
+    /**
+     * The adapter doesn't support this operation.
+     */
+    case Unsupported(detail: String
     )
 
     
@@ -3108,6 +3343,24 @@ public struct FfiConverterTypeStoreError: FfiConverterRustBuffer {
             field: try FfiConverterString.read(from: &buf), 
             detail: try FfiConverterString.read(from: &buf)
             )
+        case 5: return .Auth(
+            detail: try FfiConverterString.read(from: &buf)
+            )
+        case 6: return .Forbidden(
+            detail: try FfiConverterString.read(from: &buf)
+            )
+        case 7: return .Conflict(
+            detail: try FfiConverterString.read(from: &buf)
+            )
+        case 8: return .Network(
+            detail: try FfiConverterString.read(from: &buf)
+            )
+        case 9: return .Protocol(
+            detail: try FfiConverterString.read(from: &buf)
+            )
+        case 10: return .Unsupported(
+            detail: try FfiConverterString.read(from: &buf)
+            )
 
          default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -3137,6 +3390,36 @@ public struct FfiConverterTypeStoreError: FfiConverterRustBuffer {
         case let .InvalidField(field,detail):
             writeInt(&buf, Int32(4))
             FfiConverterString.write(field, into: &buf)
+            FfiConverterString.write(detail, into: &buf)
+            
+        
+        case let .Auth(detail):
+            writeInt(&buf, Int32(5))
+            FfiConverterString.write(detail, into: &buf)
+            
+        
+        case let .Forbidden(detail):
+            writeInt(&buf, Int32(6))
+            FfiConverterString.write(detail, into: &buf)
+            
+        
+        case let .Conflict(detail):
+            writeInt(&buf, Int32(7))
+            FfiConverterString.write(detail, into: &buf)
+            
+        
+        case let .Network(detail):
+            writeInt(&buf, Int32(8))
+            FfiConverterString.write(detail, into: &buf)
+            
+        
+        case let .Protocol(detail):
+            writeInt(&buf, Int32(9))
+            FfiConverterString.write(detail, into: &buf)
+            
+        
+        case let .Unsupported(detail):
+            writeInt(&buf, Int32(10))
             FfiConverterString.write(detail, into: &buf)
             
         }
@@ -3443,6 +3726,30 @@ fileprivate struct FfiConverterOptionUInt8: FfiConverterRustBuffer {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterUInt8.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionBool: FfiConverterRustBuffer {
+    typealias SwiftType = Bool?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterBool.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterBool.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -3849,7 +4156,31 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_create_account_json() != 61944) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_cal_ffi_checksum_method_host_create_calendar_json() != 42147) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_create_event_json() != 50491) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_cal_ffi_checksum_method_host_delete_account() != 32623) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_delete_calendar() != 25740) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_delete_event() != 51601) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_get_event_by_id_json() != 43277) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_get_events_json() != 65466) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_list_calendars_json() != 49275) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_update_event_json() != 27193) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_keychainbridge_store() != 54380) {
