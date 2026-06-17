@@ -2831,13 +2831,16 @@ dependencies = [
  "cal-core",
  "chrono",
  "dirs 5.0.1",
+ "plugin-core",
  "rusqlite",
  "serde",
  "serde_json",
+ "sync-engine",
  "tempfile",
  "thiserror 1.0.69",
  "tracing",
  "uuid",
+ "vc-core",
 ]
 
 [[package]]

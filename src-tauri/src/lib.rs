@@ -16,7 +16,6 @@ pub mod event_log;
 pub mod logging;
 pub mod overrides;
 mod platform;
-pub mod registry;
 pub mod reminders;
 pub mod remote_plugins;
 pub mod secrets;
@@ -34,7 +33,7 @@ mod window_state;
 // `crate::paths::*` references across the backend keep resolving unchanged.
 pub use host_core::db::{DbError, DbHandle, DbResult, SharedConn};
 pub use host_core::paths::{resolve_data_dir, DataDirKind, DataDirResolution};
-pub use host_core::{accounts, cache, db, paths};
+pub use host_core::{accounts, cache, db, paths, registry};
 
 use cal_adapter_local::LocalAdapter;
 use contact_sync::ContactSyncScheduler;
@@ -148,6 +147,7 @@ pub fn run() {
 
     let registry = Arc::new(AdapterRegistry::with_data_dir(
         Arc::clone(&plugin_manager),
+        Arc::new(crate::secrets::KeyringSecretStore),
         Some(data_dir.path.clone()),
     ));
     {

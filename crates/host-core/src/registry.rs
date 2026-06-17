@@ -45,11 +45,11 @@ use cal_core::{CalendarFeature, ContactsFeature, TasksFeature};
 use plugin_core::shim::{FfiCalendarAdapter, FfiContactsAdapter, FfiTasksAdapter, FfiVcAdapter};
 use plugin_core::{LoadedInstance, LoadedPlugin, PluginManager};
 use serde_json::{json, Map, Value};
+use sync_engine::{SecretSlot, SecretStore};
 use tracing::warn;
 use vc_core::VcAdapter;
 
 use crate::accounts::{Account, AccountsRepo, AdapterKind, LOCAL_ACCOUNT_ID};
-use crate::secrets::{self, SecretSlot};
 
 /// Account-id used for the implicit local adapter. Mirrors the value
 /// the `accounts` table seeds during migration 0003.
@@ -118,6 +118,12 @@ pub struct AdapterRegistry {
     /// `None` on the test path so legacy `AdapterRegistry::new`
     /// call sites keep working without plumbing a temp dir.
     data_dir: Option<std::path::PathBuf>,
+    /// Platform secret store (the injected seam). Desktop passes a
+    /// keyring-backed impl; mobile passes a Keychain/Keystore bridge.
+    /// The `register_*` builders read each account's credentials
+    /// through this instead of a hard-coded keyring call, so the
+    /// registry stays Tauri-/platform-free.
+    secret_store: Arc<dyn SecretStore>,
 }
 
 impl AdapterRegistry {
@@ -127,8 +133,8 @@ impl AdapterRegistry {
     /// bundled plugin); tests can pass an empty
     /// `PluginManager::new("0.1.0")` when they don't exercise the
     /// register / bootstrap path.
-    pub fn new(plugin_manager: Arc<PluginManager>) -> Self {
-        Self::with_data_dir(plugin_manager, None)
+    pub fn new(plugin_manager: Arc<PluginManager>, secret_store: Arc<dyn SecretStore>) -> Self {
+        Self::with_data_dir(plugin_manager, secret_store, None)
     }
 
     /// Variant that records the host's data directory so per-
@@ -138,6 +144,7 @@ impl AdapterRegistry {
     /// "no persistence" fallback.
     pub fn with_data_dir(
         plugin_manager: Arc<PluginManager>,
+        secret_store: Arc<dyn SecretStore>,
         data_dir: Option<std::path::PathBuf>,
     ) -> Self {
         Self {
@@ -148,6 +155,7 @@ impl AdapterRegistry {
             routes: Mutex::new(Routes::default()),
             plugin_manager,
             data_dir,
+            secret_store,
         }
     }
 
@@ -611,7 +619,9 @@ impl AdapterRegistry {
     }
 
     fn register_caldav(&self, account: &Account) -> Result<(), RegistryError> {
-        let secret = secrets::retrieve(&account.id, SecretSlot::Password)
+        let secret = self
+            .secret_store
+            .retrieve(&account.id, SecretSlot::Password)
             .map_err(|e| RegistryError::Secret(format!("missing password: {e}")))?;
         let plugin_config =
             merge_account_config(&account.config_json, &[("secret", Value::String(secret))])?;
@@ -627,7 +637,11 @@ impl AdapterRegistry {
     }
 
     fn register_google(&self, account: &Account) -> Result<(), RegistryError> {
-        let plugin_config = oauth_plugin_config(&account.id, &account.config_json)?;
+        let plugin_config = oauth_plugin_config(
+            self.secret_store.as_ref(),
+            &account.id,
+            &account.config_json,
+        )?;
         let instance = self.open_plugin_instance(PLUGIN_ID_GOOGLE, plugin_config)?;
         self.insert_calendar(&account.id, instance.clone())?;
         self.insert_tasks(&account.id, instance.clone())?;
@@ -636,7 +650,11 @@ impl AdapterRegistry {
     }
 
     fn register_microsoft_graph(&self, account: &Account) -> Result<(), RegistryError> {
-        let plugin_config = oauth_plugin_config(&account.id, &account.config_json)?;
+        let plugin_config = oauth_plugin_config(
+            self.secret_store.as_ref(),
+            &account.id,
+            &account.config_json,
+        )?;
         let instance = self.open_plugin_instance(PLUGIN_ID_GRAPH, plugin_config)?;
         self.insert_calendar(&account.id, instance.clone())?;
         self.insert_tasks(&account.id, instance.clone())?;
@@ -645,7 +663,9 @@ impl AdapterRegistry {
     }
 
     fn register_ews(&self, account: &Account) -> Result<(), RegistryError> {
-        let password = secrets::retrieve(&account.id, SecretSlot::Password)
+        let password = self
+            .secret_store
+            .retrieve(&account.id, SecretSlot::Password)
             .map_err(|e| RegistryError::Secret(format!("missing password: {e}")))?;
         // Splice the host-computed per-account state directory
         // into the InitConfig so the adapter can persist its
@@ -669,7 +689,9 @@ impl AdapterRegistry {
     }
 
     fn register_vikunja(&self, account: &Account) -> Result<(), RegistryError> {
-        let token = secrets::retrieve(&account.id, SecretSlot::ApiToken)
+        let token = self
+            .secret_store
+            .retrieve(&account.id, SecretSlot::ApiToken)
             .map_err(|e| RegistryError::Secret(format!("missing API token: {e}")))?;
         let plugin_config =
             merge_account_config(&account.config_json, &[("token", Value::String(token))])?;
@@ -683,7 +705,9 @@ impl AdapterRegistry {
         // account label; the plugin needs just `token`. We could
         // merge into the existing config but it's cleaner to
         // start fresh — the plugin ignores anything but `token`.
-        let token = secrets::retrieve(&account.id, SecretSlot::ApiToken)
+        let token = self
+            .secret_store
+            .retrieve(&account.id, SecretSlot::ApiToken)
             .map_err(|e| RegistryError::Secret(format!("missing API token: {e}")))?;
         let plugin_config = json!({ "token": token }).to_string();
         let instance = self.open_plugin_instance(PLUGIN_ID_TODOIST, plugin_config)?;
@@ -696,7 +720,9 @@ impl AdapterRegistry {
         // feeds are anonymous. A missing keychain entry is
         // therefore not an error; merge it as JSON null so the
         // plugin's Option<String> deserialiser is happy.
-        let password = secrets::retrieve(&account.id, SecretSlot::Password)
+        let password = self
+            .secret_store
+            .retrieve(&account.id, SecretSlot::Password)
             .ok()
             .filter(|s| !s.is_empty());
         let password_value = password.map(Value::String).unwrap_or(Value::Null);
@@ -712,7 +738,11 @@ impl AdapterRegistry {
     // ─────────────────────────────────────────────────────────────
 
     fn register_zoom(&self, account: &Account) -> Result<(), RegistryError> {
-        let plugin_config = oauth_refresh_plugin_config(&account.id, &account.config_json)?;
+        let plugin_config = oauth_refresh_plugin_config(
+            self.secret_store.as_ref(),
+            &account.id,
+            &account.config_json,
+        )?;
         let instance = self.open_plugin_instance(PLUGIN_ID_ZOOM, plugin_config)?;
         self.insert_vc(&account.id, instance)?;
         Ok(())
@@ -724,7 +754,7 @@ impl AdapterRegistry {
         // account row's `config_json` carries just `client_id`;
         // we pull the access token from whichever Graph account
         // is registered + thread it in as `access_token`.
-        let access_token = teams_shared_access_token(&account.id)?;
+        let access_token = teams_shared_access_token(self.secret_store.as_ref(), &account.id)?;
         let plugin_config = merge_account_config(
             &account.config_json,
             &[("access_token", Value::String(access_token))],
@@ -739,7 +769,9 @@ impl AdapterRegistry {
         // (same keychain slot). The account row's `config_json`
         // carries `client_id` + `client_secret`; we pull the
         // refresh token from the linked Google account.
-        let refresh_token = secrets::retrieve(&account.id, SecretSlot::RefreshToken)
+        let refresh_token = self
+            .secret_store
+            .retrieve(&account.id, SecretSlot::RefreshToken)
             .map_err(|e| RegistryError::Secret(format!("missing refresh token: {e}")))?;
         let plugin_config = merge_account_config(
             &account.config_json,
@@ -751,7 +783,11 @@ impl AdapterRegistry {
     }
 
     fn register_webex(&self, account: &Account) -> Result<(), RegistryError> {
-        let plugin_config = oauth_refresh_plugin_config(&account.id, &account.config_json)?;
+        let plugin_config = oauth_refresh_plugin_config(
+            self.secret_store.as_ref(),
+            &account.id,
+            &account.config_json,
+        )?;
         let instance = self.open_plugin_instance(PLUGIN_ID_WEBEX, plugin_config)?;
         self.insert_vc(&account.id, instance)?;
         Ok(())
@@ -798,12 +834,15 @@ fn merge_account_config(
 /// refreshes lazily on 401, so the persisted access token
 /// doesn't need to be fresh across app restarts.
 fn oauth_plugin_config(
+    secret_store: &dyn SecretStore,
     account_id: &str,
     account_config_json: &str,
 ) -> Result<String, RegistryError> {
-    let access = secrets::retrieve(account_id, SecretSlot::AccessToken)
+    let access = secret_store
+        .retrieve(account_id, SecretSlot::AccessToken)
         .map_err(|e| RegistryError::Secret(format!("missing access token: {e}")))?;
-    let refresh = secrets::retrieve(account_id, SecretSlot::RefreshToken)
+    let refresh = secret_store
+        .retrieve(account_id, SecretSlot::RefreshToken)
         .ok()
         .filter(|s| !s.is_empty());
     let refresh_value = refresh.map(Value::String).unwrap_or(Value::Null);
@@ -832,10 +871,12 @@ fn oauth_plugin_config(
 /// we just need to merge in the keychain-sourced
 /// `refresh_token`.
 fn oauth_refresh_plugin_config(
+    secret_store: &dyn SecretStore,
     account_id: &str,
     account_config_json: &str,
 ) -> Result<String, RegistryError> {
-    let refresh = secrets::retrieve(account_id, SecretSlot::RefreshToken)
+    let refresh = secret_store
+        .retrieve(account_id, SecretSlot::RefreshToken)
         .map_err(|e| RegistryError::Secret(format!("missing refresh token: {e}")))?;
     merge_account_config(
         account_config_json,
@@ -851,12 +892,17 @@ fn oauth_refresh_plugin_config(
 /// a "find the linked Graph account by config_json
 /// cross-reference" lookup once the wizard's data model is
 /// firm.
-fn teams_shared_access_token(account_id: &str) -> Result<String, RegistryError> {
-    secrets::retrieve(account_id, SecretSlot::AccessToken).map_err(|e| {
-        RegistryError::Secret(format!(
-            "missing Microsoft Graph access token (Teams shares it): {e}",
-        ))
-    })
+fn teams_shared_access_token(
+    secret_store: &dyn SecretStore,
+    account_id: &str,
+) -> Result<String, RegistryError> {
+    secret_store
+        .retrieve(account_id, SecretSlot::AccessToken)
+        .map_err(|e| {
+            RegistryError::Secret(format!(
+                "missing Microsoft Graph access token (Teams shares it): {e}",
+            ))
+        })
 }
 
 #[derive(Debug, thiserror::Error)]

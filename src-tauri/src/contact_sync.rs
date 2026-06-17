@@ -367,7 +367,8 @@ mod tests {
     /// just needs to be constructible.
     fn empty_registry() -> Arc<AdapterRegistry> {
         let mgr = Arc::new(plugin_core::PluginManager::new("0.1.0"));
-        Arc::new(AdapterRegistry::new(mgr))
+        let secrets = Arc::new(sync_engine::test_support::FakeSecrets::default());
+        Arc::new(AdapterRegistry::new(mgr, secrets))
     }
 
     #[test]
