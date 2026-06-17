@@ -56,7 +56,20 @@
     "noEvents": "Keine Termine an diesem Tag.",
     "eventsLoading": "Termine werden geladen …",
     "allDay": "Ganztägig",
-    "showingDate": "Termine am {{date}}"
+    "showingDate": "Termine am {{date}}",
+    "syncTitle": "Synchronisierung",
+    "syncButtonLabel": "Sync",
+    "syncStatusConfigured": "Sync-Ziel konfiguriert.",
+    "syncStatusNotConfigured": "Noch kein Sync-Ziel konfiguriert.",
+    "syncLastSynced": "Zuletzt synchronisiert: {{when}}",
+    "syncNever": "nie",
+    "syncPathLabel": "Pfad zum Sync-Ordner",
+    "syncPathHint": "Ein gemeinsamer Ordner, den beide Geräte erreichen (z. B. ein synchronisierter Cloud-Ordner).",
+    "syncConfigure": "Diesen Ordner verwenden",
+    "syncConfigured": "Sync-Ziel gesetzt.",
+    "syncNow": "Jetzt synchronisieren",
+    "syncing": "Synchronisiere …",
+    "syncDone": "Sync fertig: {{applied}} angewendet, {{pushed}} gesendet, {{fetched}} geholt."
   },
   "common": {
     "colorComposer": {

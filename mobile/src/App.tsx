@@ -9,6 +9,7 @@ import AccountsScreen from './screens/AccountsScreen';
 import EventEditorModal from './screens/EventEditorModal';
 import EventsScreen from './screens/EventsScreen';
 import ListsScreen from './screens/ListsScreen';
+import SyncScreen from './screens/SyncScreen';
 import TaskEditorModal from './screens/TaskEditorModal';
 import TasksScreen from './screens/TasksScreen';
 import { TaskStoreProvider } from './state/taskStore';
@@ -55,6 +56,11 @@ export default function App() {
               name="Events"
               component={EventsScreen}
               options={{ title: t('mobile.eventsTitle') }}
+            />
+            <Stack.Screen
+              name="Sync"
+              component={SyncScreen}
+              options={{ title: t('mobile.syncTitle') }}
             />
             <Stack.Screen
               name="TaskEditor"

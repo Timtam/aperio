@@ -56,7 +56,20 @@
     "noEvents": "No events on this day.",
     "eventsLoading": "Loading events …",
     "allDay": "All day",
-    "showingDate": "Events on {{date}}"
+    "showingDate": "Events on {{date}}",
+    "syncTitle": "Sync",
+    "syncButtonLabel": "Sync",
+    "syncStatusConfigured": "Sync target configured.",
+    "syncStatusNotConfigured": "No sync target configured yet.",
+    "syncLastSynced": "Last synced: {{when}}",
+    "syncNever": "never",
+    "syncPathLabel": "Sync folder path",
+    "syncPathHint": "A shared folder both devices can reach (e.g. a synced cloud folder).",
+    "syncConfigure": "Use this folder",
+    "syncConfigured": "Sync target set.",
+    "syncNow": "Sync now",
+    "syncing": "Syncing …",
+    "syncDone": "Sync done: {{applied}} applied, {{pushed}} sent, {{fetched}} fetched."
   },
   "common": {
     "colorComposer": {
