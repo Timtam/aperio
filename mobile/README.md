@@ -133,3 +133,37 @@ but you cannot inspect the raw iOS accessibility tree on Windows.
 
 > Android note: local Android builds need **JDK 17** (this machine currently
 > has JDK 8). Not needed while iOS goes through EAS.
+
+## Tasks UI (M1 — offline, Android-first)
+
+`App.tsx` is now a minimal, accessibility-first **tasks screen** backed by the
+shared Rust core: the `cal-ffi` module exposes the on-device `LocalStore`
+(SQLite migrated by the same `aperio-db` runner the desktop uses) and the
+screen lists / creates / completes / renames / deletes tasks through it —
+real offline persistence, not mock state. Each task carries custom
+accessibility actions (complete/reopen, rename, delete).
+
+Local Android dev builds (cargo-ndk `.so` + `expo-dev-client` + emulator) cost
+**no EAS quota** — iterate freely here; reserve EAS/TestFlight for the iOS
+VoiceOver pass.
+
+**After any change to `crates/cal-ffi` you must re-sync the Android bridge:**
+
+1. Regenerate the Kotlin bindings (committed at
+   `modules/cal-ffi/android/.../uniffi/cal_ffi/cal_ffi.kt`):
+   ```powershell
+   cargo build -p cal-ffi
+   cargo run -p cal-ffi --features cli --bin uniffi-bindgen -- `
+     generate --library target/debug/cal_ffi.dll --language kotlin --out-dir <tmp>
+   # copy <tmp>/uniffi/cal_ffi/cal_ffi.kt over the committed one
+   ```
+2. Rebuild the native `.so` (gitignored) for the emulator's ABI (`x86_64`) and
+   the device ABI (`arm64-v8a`) with cargo-ndk, then rebuild the dev client.
+
+The committed `cal_ffi.kt` and the local `.so` must come from the same
+`cal-ffi` source, or JNA fails to resolve symbols at call time.
+
+> iOS parity is deferred: `ios/CalFfiModule.swift` still exposes only
+> `parseAttendee`. Bringing the tasks API to iOS means regenerating the Swift
+> bindings, rebuilding the XCFramework on the macOS CI runner, and extending
+> the Swift bridge — done in the iOS/VoiceOver phase.

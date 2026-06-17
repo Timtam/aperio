@@ -1,5 +1,7 @@
 import { registerRootComponent } from 'expo';
 
+// Initialise i18next (shared translations) before the app renders.
+import './i18n';
 import App from './App';
 
 // registerRootComponent calls AppRegistry.registerComponent('main', () => App);
