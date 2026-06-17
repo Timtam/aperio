@@ -9,7 +9,6 @@ pub mod bundled_plugins;
 pub mod cache_refresh;
 pub mod commands;
 pub mod contact_sync;
-pub mod credential_sync;
 pub mod event_log;
 pub mod logging;
 pub mod overrides;
@@ -29,8 +28,8 @@ mod window_state;
 pub use host_core::db::{DbError, DbHandle, DbResult, SharedConn};
 pub use host_core::paths::{resolve_data_dir, DataDirKind, DataDirResolution};
 pub use host_core::{
-    accounts, cache, conflicts, db, device_names, paths, registry, remote_plugins, sync_log,
-    user_prefs,
+    accounts, cache, conflicts, credential_sync, db, device_names, paths, registry, remote_plugins,
+    sync_log, user_prefs,
 };
 
 use cal_adapter_local::LocalAdapter;

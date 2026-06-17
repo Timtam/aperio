@@ -196,11 +196,11 @@ const PREF_GOOGLEDRIVE_FOLDER_NAME: &str = "sync.adapter.googledrive.folderName"
 const GOOGLEDRIVE_SECRET_ACCOUNT: &str = "sync.adapter.googledrive";
 
 /// `user_prefs` key flagging whether the current sync dataset is
-/// E2E-encrypted. Mirrors the boolean in `meta.json`; lets
-/// `build_adapter_from_prefs` decide synchronously whether to wrap
-/// the adapter in `EncryptingAdapter` without needing an async
-/// `fetch_meta` round-trip.
-pub const PREF_E2E_ENABLED: &str = "sync.adapter.e2eEnabled";
+/// E2E-encrypted. Now owned by `host_core::credential_sync` (the single
+/// auditable home for the credential-sync gate, shared with the mobile
+/// host); re-exported here so existing `commands::PREF_E2E_ENABLED`
+/// references + the `pub use sync::*` surface keep resolving.
+pub use host_core::credential_sync::PREF_E2E_ENABLED;
 
 /// Pseudo-account id for the cross-device sync encryption key.
 /// Different from the WebDAV password slot so disabling sync
@@ -1881,7 +1881,11 @@ pub async fn enable_sync_encryption(
     //     without re-entry — the late-enable counterpart to the disable
     //     strip. Routes through the same E2E + slot gate as live emits, so
     //     it's safe even if state shifted underneath us.
-    crate::credential_sync::emit_all_local_credentials(&event_log, &shared);
+    crate::credential_sync::emit_all_local_credentials(
+        &event_log,
+        &shared,
+        &crate::secrets::KeyringSecretStore,
+    );
 
     Ok(report)
 }
@@ -1964,7 +1968,11 @@ pub async fn adopt_remote_encryption(
     // accounts reach the other devices without re-entry. Mirrors step 10 of
     // `enable_sync_encryption`; idempotent and routed through the same E2E +
     // slot gate as live emits.
-    crate::credential_sync::emit_all_local_credentials(&event_log, &shared);
+    crate::credential_sync::emit_all_local_credentials(
+        &event_log,
+        &shared,
+        &crate::secrets::KeyringSecretStore,
+    );
 
     Ok(())
 }

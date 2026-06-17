@@ -15,6 +15,7 @@
 pub mod accounts;
 pub mod cache;
 pub mod conflicts;
+pub mod credential_sync;
 pub mod db;
 pub mod device_names;
 pub mod paths;

@@ -13,6 +13,7 @@ aperio-db.workspace = true
 cal-core.workspace = true
 cal-adapter-local.workspace = true
 plugin-core.workspace = true
+sync-core.workspace = true
 sync-engine.workspace = true
 vc-core.workspace = true
 rusqlite.workspace = true

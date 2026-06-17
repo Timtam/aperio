@@ -26,13 +26,17 @@ use sync_core::{
     CredentialPayload, CredentialSlotPayload, EventEnvelope, LogFile, Snapshot, SyncEvent,
     SyncResult,
 };
+use sync_engine::{EventLogWriter, SecretSlot, SecretStore};
 
 use crate::accounts::AccountsRepo;
-use crate::commands::PREF_E2E_ENABLED;
 use crate::db::SharedConn;
-use crate::event_log::EventLogWriter;
-use crate::secrets::SecretSlot;
 use crate::user_prefs::UserPrefsRepo;
+
+/// User-prefs key mirroring `meta.json.e2e_enabled` — the local flag that
+/// decides whether the sync adapter wraps in `EncryptingAdapter` and whether
+/// credentials may enter the sync log. Owned here (the single auditable home
+/// for the credential-sync gate); `commands::sync` re-exports it.
+pub const PREF_E2E_ENABLED: &str = "sync.adapter.e2eEnabled";
 
 /// Whether end-to-end encryption is currently on for the sync dataset —
 /// the gate that decides if a credential may enter the sync log at all.
@@ -48,7 +52,7 @@ pub fn e2e_enabled(conn: &SharedConn) -> bool {
 /// Emit a `credential.set` event for one account secret — but ONLY when
 /// E2E is on *and* the slot is on the syncable allowlist. Otherwise it is
 /// a no-op and the secret stays device-local (keychain only). Call this
-/// right after a successful [`crate::secrets::store`].
+/// right after a successful secret-store write.
 pub fn emit_credential_set(
     event_log: &EventLogWriter,
     conn: &SharedConn,
@@ -106,7 +110,11 @@ pub fn emit_credential_cleared(
 /// is actually on and only the syncable slots are ever touched. Best
 /// effort: a missing slot is normal (not every account has every slot)
 /// and a keychain read error for one slot doesn't abort the rest.
-pub fn emit_all_local_credentials(event_log: &EventLogWriter, conn: &SharedConn) {
+pub fn emit_all_local_credentials(
+    event_log: &EventLogWriter,
+    conn: &SharedConn,
+    secrets: &dyn SecretStore,
+) {
     let accounts = match AccountsRepo::new(conn).list() {
         Ok(accounts) => accounts,
         Err(err) => {
@@ -120,7 +128,9 @@ pub fn emit_all_local_credentials(event_log: &EventLogWriter, conn: &SharedConn)
             SecretSlot::RefreshToken,
             SecretSlot::ApiToken,
         ] {
-            if let Ok(secret) = crate::secrets::retrieve(&account.id, slot) {
+            // Read through the injected platform secret store (the desktop
+            // keyring; the mobile keychain bridge) — never a hard-coded backend.
+            if let Ok(secret) = secrets.retrieve(&account.id, slot) {
                 emit_credential_set(event_log, conn, &account.id, slot, &secret);
             }
         }
