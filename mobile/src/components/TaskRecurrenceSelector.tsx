@@ -138,7 +138,6 @@ export function TaskRecurrenceSelector({
 
           {showWeekdays && (
             <View
-              accessibilityRole="radiogroup"
               accessibilityLabel={t('dialogs.task.recurrence.weekdays')}
               style={styles.field}
             >

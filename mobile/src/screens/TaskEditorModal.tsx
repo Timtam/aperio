@@ -105,25 +105,31 @@ function toStored(date: string, time: string): {
   return { date: d, time: t ? `${t}:00` : null };
 }
 
+/** True when a non-empty date is malformed in shape OR calendar value (month
+ *  13, day 32, Feb 30). Empty is valid (the slot is simply unset). Shared by
+ *  the scheduled/deadline slots and the recurrence UNTIL date. */
+function dateInvalid(date: string): boolean {
+  const d = date.trim();
+  if (!d) return false;
+  if (!DATE_RE.test(d)) return true;
+  const [y, m, day] = d.split('-').map(Number);
+  const probe = new Date(y, m - 1, day);
+  return (
+    probe.getFullYear() !== y ||
+    probe.getMonth() !== m - 1 ||
+    probe.getDate() !== day
+  );
+}
+
 /** True when a non-empty date/time slot is malformed — guards the bridge from a
  *  value the Rust serde / DB CHECK would reject, so the user gets the localized
- *  message instead of a raw bridge error. Checks SHAPE and calendar validity
- *  (month/day/hour/minute ranges), and — like `toStored` — only judges the time
+ *  message instead of a raw bridge error. Like `toStored`, only judges the time
  *  when a date is present (an orphan time is dropped, not an error). */
 function slotInvalid(date: string, time: string): boolean {
   const d = date.trim();
   const t = time.trim();
   if (d) {
-    if (!DATE_RE.test(d)) return true;
-    const [y, m, day] = d.split('-').map(Number);
-    const probe = new Date(y, m - 1, day);
-    if (
-      probe.getFullYear() !== y ||
-      probe.getMonth() !== m - 1 ||
-      probe.getDate() !== day
-    ) {
-      return true; // e.g. 2026-13-01 or 2026-02-30
-    }
+    if (dateInvalid(d)) return true;
     if (t) {
       if (!TIME_RE.test(t)) return true;
       const [hh, mm] = t.split(':').map(Number);
@@ -304,7 +310,12 @@ export default function TaskEditorModal({
     }
     if (
       slotInvalid(form.scheduledDate, form.scheduledTime) ||
-      slotInvalid(form.deadlineDate, form.deadlineTime)
+      slotInvalid(form.deadlineDate, form.deadlineTime) ||
+      // The recurrence UNTIL date is free-text too; a malformed one would fail
+      // serde at the bridge (RecurrenceEnd::OnDate is a NaiveDate).
+      (form.recurrence.freq !== 'NONE' &&
+        form.recurrence.endMode === 'UNTIL' &&
+        dateInvalid(form.recurrence.until))
     ) {
       setError(t('mobile.invalidDateTime'));
       AccessibilityInfo.announceForAccessibility(t('mobile.invalidDateTime'));

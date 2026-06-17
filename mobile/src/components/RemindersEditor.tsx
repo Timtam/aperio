@@ -165,6 +165,7 @@ function ReminderRow({
 
       {value.kind.type === 'relative' && (
         <RelativeFields
+          position={position}
           minutes={value.kind.minutes_before}
           onChange={(minutes) =>
             onChange({ ...value, kind: { type: 'relative', minutes_before: minutes } })
@@ -174,6 +175,7 @@ function ReminderRow({
 
       {value.kind.type === 'absolute' && (
         <AbsoluteFields
+          position={position}
           iso={value.kind.at}
           onChange={(iso) => onChange({ ...value, kind: { type: 'absolute', at: iso } })}
         />
@@ -198,14 +200,17 @@ function ReminderRow({
 }
 
 function RelativeFields({
+  position,
   minutes,
   onChange,
 }: {
+  position: number;
   minutes: number;
   onChange: (minutes: number) => void;
 }) {
   const { t } = useTranslation();
   const { amount, unit } = splitRelative(minutes);
+  const rowPrefix = t('reminders.rowLabel', { n: position });
   return (
     <View style={styles.relativeRow}>
       <View style={styles.amountField}>
@@ -219,7 +224,7 @@ function RelativeFields({
             onChange(safe * UNIT_FACTORS[unit]);
           }}
           keyboardType="number-pad"
-          accessibilityLabel={t('reminders.amountLabel')}
+          accessibilityLabel={`${rowPrefix} – ${t('reminders.amountLabel')}`}
         />
       </View>
       <RadioGroup<RelativeUnit>
@@ -237,9 +242,11 @@ function RelativeFields({
 }
 
 function AbsoluteFields({
+  position,
   iso,
   onChange,
 }: {
+  position: number;
   iso: string;
   onChange: (iso: string) => void;
 }) {
@@ -251,6 +258,7 @@ function AbsoluteFields({
     const next = dateTimeToIso(d, tm);
     if (next) onChange(next);
   };
+  const rowPrefix = t('reminders.rowLabel', { n: position });
   return (
     <View style={styles.field}>
       <Text style={styles.label}>{t('reminders.absoluteAtLabel')}</Text>
@@ -262,7 +270,7 @@ function AbsoluteFields({
           apply(d, time);
         }}
         placeholder="YYYY-MM-DD"
-        accessibilityLabel={`${t('reminders.absoluteAtLabel')} – ${t('dialogs.task.fields.scheduled.date')}`}
+        accessibilityLabel={`${rowPrefix} – ${t('reminders.absoluteAtLabel')} – ${t('dialogs.task.fields.scheduled.date')}`}
         autoCapitalize="none"
         autoCorrect={false}
       />
@@ -274,7 +282,7 @@ function AbsoluteFields({
           apply(date, tm);
         }}
         placeholder="HH:MM"
-        accessibilityLabel={`${t('reminders.absoluteAtLabel')} – ${t('dialogs.task.fields.scheduled.time')}`}
+        accessibilityLabel={`${rowPrefix} – ${t('reminders.absoluteAtLabel')} – ${t('dialogs.task.fields.scheduled.time')}`}
         autoCapitalize="none"
         autoCorrect={false}
       />
