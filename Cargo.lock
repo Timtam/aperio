@@ -2833,6 +2833,7 @@ name = "host-core"
 version = "0.1.0"
 dependencies = [
  "aperio-db",
+ "async-trait",
  "cal-adapter-local",
  "cal-core",
  "chrono",
@@ -2841,10 +2842,12 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "sync-adapter-local",
  "sync-core",
  "sync-engine",
  "tempfile",
  "thiserror 1.0.69",
+ "tokio",
  "tracing",
  "uuid",
  "vc-core",

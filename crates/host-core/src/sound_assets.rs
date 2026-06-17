@@ -69,7 +69,7 @@ use crate::db::SharedConn;
 /// formats the average user might import; exotic formats
 /// (`.opus`, `.wma`) would need to be added when someone hits
 /// them in the wild.
-pub(crate) const FETCH_EXTENSION_CANDIDATES: &[&str] = &["mp3", "ogg", "wav", "m4a", "aac", "flac"];
+pub const FETCH_EXTENSION_CANDIDATES: &[&str] = &["mp3", "ogg", "wav", "m4a", "aac", "flac"];
 
 /// Counts surfaced from one `sync_assets` invocation. The
 /// orchestrator folds these into nothing yet — the sync-log

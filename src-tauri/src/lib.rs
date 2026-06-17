@@ -17,7 +17,6 @@ pub mod reminders;
 pub mod secrets;
 pub mod sftp_host_keys;
 pub mod sound;
-pub mod sound_assets;
 pub mod tray;
 mod window_state;
 
@@ -29,7 +28,7 @@ pub use host_core::db::{DbError, DbHandle, DbResult, SharedConn};
 pub use host_core::paths::{resolve_data_dir, DataDirKind, DataDirResolution};
 pub use host_core::{
     accounts, cache, conflicts, credential_sync, db, device_names, paths, registry, remote_plugins,
-    sync_log, user_prefs,
+    sound_assets, sync_log, user_prefs,
 };
 
 use cal_adapter_local::LocalAdapter;

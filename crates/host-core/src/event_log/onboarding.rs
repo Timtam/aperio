@@ -928,13 +928,13 @@ mod tests {
         );
         let applier = Arc::new(EventLogApplier::new(
             Arc::clone(&store),
-            Arc::new(crate::secrets::KeyringSecretStore),
+            Arc::new(sync_engine::test_support::FakeSecrets::default()),
             Arc::clone(&adapter),
             device_id.clone(),
         ));
         let snapshot_builder = Arc::new(SnapshotBuilder::new(
             Arc::clone(&store),
-            Arc::new(crate::secrets::KeyringSecretStore),
+            Arc::new(sync_engine::test_support::FakeSecrets::default()),
             "1.0.0-test",
         ));
         OnboardingService::new(
