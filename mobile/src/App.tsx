@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import type { RootStackParamList } from './navigation/types';
+import AccountsScreen from './screens/AccountsScreen';
 import ListsScreen from './screens/ListsScreen';
 import TaskEditorModal from './screens/TaskEditorModal';
 import TasksScreen from './screens/TasksScreen';
@@ -42,6 +43,11 @@ export default function App() {
               name="Lists"
               component={ListsScreen}
               options={{ title: t('mobile.listsButtonLabel') }}
+            />
+            <Stack.Screen
+              name="Accounts"
+              component={AccountsScreen}
+              options={{ title: t('dialogs.accounts.title') }}
             />
             <Stack.Screen
               name="TaskEditor"

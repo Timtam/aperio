@@ -7,11 +7,13 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
  *   Tasks       — the grouped task list (initial route).
  *   TaskEditor  — create (`taskId: null`) or edit a task; presented as a modal.
  *   Lists       — task-list catalog + selection + creation.
+ *   Accounts    — connected-account list + add (non-OAuth kinds) + delete.
  */
 export type RootStackParamList = {
   Tasks: undefined;
   TaskEditor: { taskId: string | null; listId: string };
   Lists: undefined;
+  Accounts: undefined;
 };
 
 /** Per-screen props helper: `RootStackScreenProps<'TaskEditor'>` gives a typed

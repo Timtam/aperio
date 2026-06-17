@@ -77,6 +77,24 @@ declare class CalFfiModule extends NativeModule<Record<never, never>> {
   updateSectionJson(sectionJson: string): Promise<string>;
   /** Delete a section; its tasks fall back to ungrouped (`section_id` → null). */
   deleteSection(id: string): Promise<void>;
+
+  // ── Accounts (the full engine: external adapters + secrets) ──
+  // Backed by the Rust `Host` (statically-embedded adapter plugins + the
+  // keychain-bridged SecretStore). Same JSON-passthrough convention as the
+  // task bridge; each rejects with the store's typed error message on failure.
+
+  /** All persisted accounts as a JSON `Account[]` (the desktop wire shape). */
+  accountsJson(): Promise<string>;
+  /**
+   * Create an account from a JSON request (`adapter_kind`, `display_name`,
+   * `config_json`, optional `secret`); persists the row, stores the secret via
+   * the platform keychain, and registers the adapter. Returns the created
+   * `Account` as JSON. Rejects for OAuth kinds (a later phase) + on bad config.
+   */
+  createAccountJson(requestJson: string): Promise<string>;
+  /** Delete an account: unregister its adapter, clear its secrets, drop the
+   *  row. Rejects when deleting the implicit local account. */
+  deleteAccount(accountId: string): Promise<void>;
 }
 
 export default requireNativeModule<CalFfiModule>('CalFfi');

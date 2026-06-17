@@ -4,6 +4,7 @@ import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import java.io.File
 import java.time.Instant
+import uniffi.cal_ffi.Host
 import uniffi.cal_ffi.LocalStore
 import uniffi.cal_ffi.NewTaskDto
 import uniffi.cal_ffi.TaskDto
@@ -24,6 +25,23 @@ class CalFfiModule : Module() {
         "CalFfi: no Android application context to resolve the data directory",
       )
     LocalStore.open(File(filesDir, "aperio.sqlite").absolutePath)
+  }
+
+  // The full on-device engine: accounts + the statically-embedded adapter
+  // registry, over the SAME `aperio.sqlite` the LocalStore tasks use (WAL lets
+  // both handles share the file). Credentials route through AndroidKeychain
+  // (Keystore-backed EncryptedSharedPreferences). `by lazy` is SYNCHRONIZED, so
+  // the background `AsyncFunction` threads share one Host. The task surface
+  // folds into this Host in a later phase; for now they coexist.
+  private val host: Host by lazy {
+    val context = appContext.reactContext?.applicationContext
+      ?: throw IllegalStateException(
+        "CalFfi: no Android application context to resolve the data directory",
+      )
+    Host.open(
+      File(context.filesDir, "aperio.sqlite").absolutePath,
+      AndroidKeychain(context),
+    )
   }
 
   override fun definition() = ModuleDefinition {
@@ -168,6 +186,24 @@ class CalFfiModule : Module() {
 
     AsyncFunction("deleteSection") { id: String ->
       store.deleteSection(id)
+    }
+
+    // ─── Accounts (the full engine: external adapters + secrets) ─────────────
+    // JSON passthrough in the cal_core/desktop wire shape, same convention as
+    // the task bridge. create_account_json persists the row, stores the secret
+    // via the keychain bridge, and registers the adapter; a thrown
+    // StoreException rejects the JS promise.
+
+    AsyncFunction("accountsJson") {
+      host.accountsJson()
+    }
+
+    AsyncFunction("createAccountJson") { requestJson: String ->
+      host.createAccountJson(requestJson)
+    }
+
+    AsyncFunction("deleteAccount") { accountId: String ->
+      host.deleteAccount(accountId)
     }
   }
 }

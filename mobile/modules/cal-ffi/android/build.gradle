@@ -21,4 +21,9 @@ dependencies {
   // UniFFI's generated Kotlin bindings (uniffi/cal_ffi/cal_ffi.kt) call the
   // Rust libcal_ffi.so through JNA.
   implementation "net.java.dev.jna:jna:5.14.0@aar"
+  // Android Keystore-wrapped EncryptedSharedPreferences backs the
+  // KeychainBridge (AndroidKeychain.kt) — account credentials never sit in
+  // plaintext. The master key lives in the AndroidKeyStore (hardware-backed
+  // where available); only the encrypted prefs file touches disk.
+  implementation "androidx.security:security-crypto:1.1.0-alpha06"
 }
