@@ -36,8 +36,9 @@ declare class CalFfiModule extends NativeModule<Record<never, never>> {
   /** Update a task from a JSON `Task`; returns the updated `Task` as JSON.
    *  Completing a recurring task spawns its next instance (DESIGN §9.12). */
   updateTaskJson(taskJson: string): Promise<string>;
-  /** Delete a task. Rejects on unknown id. */
-  deleteTask(taskId: string): Promise<void>;
+  /** Delete a task. `listId` (the owning list) routes the delete to the right
+   *  account — omit/null for a local task. Rejects on unknown id. */
+  deleteTask(taskId: string, listId: string | null): Promise<void>;
   /** Sections of a list as a JSON `Section[]`. */
   sectionsJson(listId: string): Promise<string>;
   /** Create a section; returns the created `Section` as JSON. */
@@ -49,8 +50,9 @@ declare class CalFfiModule extends NativeModule<Record<never, never>> {
   ): Promise<string>;
   /** Update a section from a JSON `Section`; returns it as JSON. */
   updateSectionJson(sectionJson: string): Promise<string>;
-  /** Delete a section; its tasks fall back to ungrouped (`section_id` → null). */
-  deleteSection(id: string): Promise<void>;
+  /** Delete a section; its tasks fall back to ungrouped (`section_id` → null).
+   *  `listId` (the owning list) routes the delete — omit/null for a local list. */
+  deleteSection(id: string, listId: string | null): Promise<void>;
 
   // ── Accounts (the full engine: external adapters + secrets) ──
   // Backed by the Rust `Host` (statically-embedded adapter plugins + the

@@ -147,8 +147,13 @@ export const updateTask = async (task: Task): Promise<Task> => {
   return updated;
 };
 
-export const deleteTask = async (id: string): Promise<void> => {
-  await CalFfi.deleteTask(id);
+/** Delete a task. Pass the owning `listId` so the delete routes to the right
+ *  account (external tasks need it; local tasks ignore it). */
+export const deleteTask = async (
+  id: string,
+  listId: string | null = null,
+): Promise<void> => {
+  await CalFfi.deleteTask(id, listId);
   scheduleBackgroundPush();
 };
 
@@ -180,7 +185,12 @@ export const updateSection = async (section: Section): Promise<Section> => {
   return updated;
 };
 
-export const deleteSection = async (id: string): Promise<void> => {
-  await CalFfi.deleteSection(id);
+/** Delete a section. Pass the owning `listId` so the delete routes to the right
+ *  account (external lists need it; local lists ignore it). */
+export const deleteSection = async (
+  id: string,
+  listId: string | null = null,
+): Promise<void> => {
+  await CalFfi.deleteSection(id, listId);
   scheduleBackgroundPush();
 };

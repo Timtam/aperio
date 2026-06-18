@@ -595,21 +595,29 @@ public protocol HostProtocol: AnyObject, Sendable {
     func createEventJson(requestJson: String) throws  -> String
     
     /**
-     * Create a section in a list; returns the created `Section` as JSON and
-     * appends `SectionCreated`.
+     * Create a section in a list; returns the created `Section` as JSON, routed
+     * by `list_id`. LOCAL: store create (with position + colour) + appends
+     * `SectionCreated`. EXTERNAL: routed to the provider, which takes only
+     * `(list_id, name)` — position + colour are local-only concerns (colour is a
+     * local override) — and self-syncs (no event log).
      */
     func createSectionJson(listId: String, name: String, position: UInt32, colorLabel: String?) throws  -> String
     
     /**
      * Create a task from a JSON `cal_core::NewTask`; returns the created `Task`
-     * as JSON and appends `TaskCreated` (a recurring task is assigned a stable
-     * series id).
+     * as JSON. LOCAL: the store assigns the id (+ a series id for recurring) and
+     * `TaskCreated` is appended. EXTERNAL: routed to the provider, which assigns
+     * its own id and self-syncs (no event log). (The desktop's host-side
+     * series_id assignment + on-demand spawn for external recurring tasks are
+     * deferred — they need the SWR cache the mobile Host doesn't carry.)
      */
     func createTaskJson(listId: String, newTaskJson: String) throws  -> String
     
     /**
-     * Create a top-level local task list; returns the created `TaskList` as JSON
-     * and appends `TaskListCreated`.
+     * Create a top-level LOCAL task list; returns the created `TaskList` as JSON
+     * and appends `TaskListCreated`. (Always local: this signature carries no
+     * account/parent, so external list creation — which needs both + capability
+     * gating — is a later phase.)
      */
     func createTaskListJson(name: String) throws  -> String
     
@@ -635,18 +643,27 @@ public protocol HostProtocol: AnyObject, Sendable {
     func deleteEvent(id: String, calendarId: String?, sendCancellations: Bool?) throws 
     
     /**
-     * Delete a section (its tasks fall back to ungrouped) and append
-     * `SectionDeleted`.
+     * Delete a section (its tasks fall back to ungrouped), routed by the
+     * optional `list_id`. LOCAL (or `list_id` omitted): store delete +
+     * `SectionDeleted`. EXTERNAL: routed to the provider (which needs the
+     * `list_id` to scope the delete) and self-syncs (no event log).
      */
-    func deleteSection(id: String) throws 
+    func deleteSection(id: String, listId: String?) throws 
     
     /**
-     * Delete a task and append `TaskDeleted`.
+     * Delete a task, routed by the optional `list_id` (the desktop `delete_task`
+     * shape). LOCAL (or `list_id` omitted → local fallback): delete + append
+     * `TaskDeleted`. EXTERNAL: routed to the provider (no event log). Omitting
+     * `list_id` for an external task can't route — it falls to local and
+     * `NotFound`s; callers that listed the task pass its `list_id`.
      */
-    func deleteTask(id: String) throws 
+    func deleteTask(id: String, listId: String?) throws 
     
     /**
-     * Delete a task list (its tasks cascade away) and append `TaskListDeleted`.
+     * Delete a task list (its tasks cascade away), routed by the list's account.
+     * LOCAL: store delete + `TaskListDeleted`. EXTERNAL: routed to the provider
+     * (which `Unsupported`s unless its manifest allows list deletion) and
+     * self-syncs (no event log).
      */
     func deleteTaskList(id: String) throws 
     
@@ -684,7 +701,8 @@ public protocol HostProtocol: AnyObject, Sendable {
     
     /**
      * Push the local pending logs without fetching (call from RN AppState
-     * "background"). Returns the number of logs pushed.
+     * "background"). Returns the number of logs pushed. Records the outcome in
+     * the failure latch like `sync_now`.
      */
     func pushNow() throws  -> UInt32
     
@@ -695,21 +713,26 @@ public protocol HostProtocol: AnyObject, Sendable {
     func reparentTaskListJson(id: String, parentId: String?) throws  -> String
     
     /**
-     * Sections of a list as a JSON array (`cal_core::Section[]`).
+     * Sections of a list as a JSON array (`cal_core::Section[]`), routed to the
+     * list's owning account.
      */
     func sectionsJson(listId: String) throws  -> String
     
     /**
      * Run one sync round (push local pending logs, fetch + apply foreign ones,
      * compaction audit) and return the `SyncRoundReport` as JSON. Errors with
-     * "not configured" until `configure_sync_adapter_json` has run.
+     * "not configured" until `configure_sync_adapter_json` has run. Records the
+     * round's outcome in the failure latch (success resets it).
      */
     func syncNowJson() throws  -> String
     
     /**
      * The orchestrator's status as JSON (the desktop `SyncStatus` shape:
-     * configured / in_flight / last_synced_at / interval / e2e / …). Reads
-     * without a sync round.
+     * configured / in_flight / last_synced_at / interval / e2e / …), decorated
+     * with this host's failure latch. The orchestrator always returns
+     * `sustained_failure: false` / `last_error_code: None` (the desktop
+     * scheduler fills those in); here the `SyncProgressDriver` does, so the UI
+     * can warn on a sustained failure. Reads without a sync round.
      */
     func syncStatusJson() throws  -> String
     
@@ -719,12 +742,17 @@ public protocol HostProtocol: AnyObject, Sendable {
     func taskJson(id: String) throws  -> String
     
     /**
-     * All task lists as a JSON array (`cal_core::TaskList[]`).
+     * All task lists (local + external) as a JSON `TaskListRow[]` (the desktop
+     * wire shape: each `TaskList` flattened + its `account_id`). Primes the
+     * list→account route map for the following task/section ops, so call it
+     * before them (the desktop invariant). External accounts are fetched live;
+     * a dead account is skipped (its error swallowed), never blanking the list.
      */
     func taskListsJson() throws  -> String
     
     /**
-     * Tasks in a list as a JSON array (`cal_core::Task[]`).
+     * Tasks in a list as a JSON array (`cal_core::Task[]`), routed to the list's
+     * owning account (local store or external provider).
      */
     func tasksJson(listId: String) throws  -> String
     
@@ -737,17 +765,23 @@ public protocol HostProtocol: AnyObject, Sendable {
     func updateEventJson(eventJson: String) throws  -> String
     
     /**
-     * Update a section from a JSON `cal_core::Section`; returns it as JSON and
-     * appends `SectionUpdated`.
+     * Update a section from a JSON `cal_core::Section`; returns it as JSON,
+     * routed by the section's `list_id`. LOCAL: store update + `SectionUpdated`.
+     * EXTERNAL: routed to the provider, which renames only (`list_id`, `id`,
+     * `name`) — colour is a local override, never sent — and self-syncs.
      */
     func updateSectionJson(sectionJson: String) throws  -> String
     
     /**
      * Update a task from a JSON `cal_core::Task`; returns the updated `Task` as
-     * JSON and appends `TaskUpdated`. A list_id change is a single local SQL
-     * UPDATE (the desktop's local↔local move). Completing a recurring task
-     * spawns its next instance locally; the applier re-runs the same spawner on
-     * the peer and dedups on `series_id`, so only `TaskUpdated` need cross.
+     * JSON, routed by the task's `list_id`. LOCAL: a single SQL UPDATE (a
+     * list_id change is the desktop's local↔local move) + `TaskUpdated`;
+     * completing a recurring task spawns its next instance locally and the
+     * peer's applier re-runs the spawner deduped on `series_id`, so only
+     * `TaskUpdated` crosses. EXTERNAL: routed to the provider in place (no event
+     * log; it self-syncs). Deferred for external: cross-list moves (needs
+     * previous_list_id, which the mobile signature doesn't carry) + the
+     * on-demand next-instance spawn (cache-dependent) — documented gaps.
      */
     func updateTaskJson(taskJson: String) throws  -> String
     
@@ -908,8 +942,11 @@ open func createEventJson(requestJson: String)throws  -> String  {
 }
     
     /**
-     * Create a section in a list; returns the created `Section` as JSON and
-     * appends `SectionCreated`.
+     * Create a section in a list; returns the created `Section` as JSON, routed
+     * by `list_id`. LOCAL: store create (with position + colour) + appends
+     * `SectionCreated`. EXTERNAL: routed to the provider, which takes only
+     * `(list_id, name)` — position + colour are local-only concerns (colour is a
+     * local override) — and self-syncs (no event log).
      */
 open func createSectionJson(listId: String, name: String, position: UInt32, colorLabel: String?)throws  -> String  {
     return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
@@ -925,8 +962,11 @@ open func createSectionJson(listId: String, name: String, position: UInt32, colo
     
     /**
      * Create a task from a JSON `cal_core::NewTask`; returns the created `Task`
-     * as JSON and appends `TaskCreated` (a recurring task is assigned a stable
-     * series id).
+     * as JSON. LOCAL: the store assigns the id (+ a series id for recurring) and
+     * `TaskCreated` is appended. EXTERNAL: routed to the provider, which assigns
+     * its own id and self-syncs (no event log). (The desktop's host-side
+     * series_id assignment + on-demand spawn for external recurring tasks are
+     * deferred — they need the SWR cache the mobile Host doesn't carry.)
      */
 open func createTaskJson(listId: String, newTaskJson: String)throws  -> String  {
     return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
@@ -939,8 +979,10 @@ open func createTaskJson(listId: String, newTaskJson: String)throws  -> String  
 }
     
     /**
-     * Create a top-level local task list; returns the created `TaskList` as JSON
-     * and appends `TaskListCreated`.
+     * Create a top-level LOCAL task list; returns the created `TaskList` as JSON
+     * and appends `TaskListCreated`. (Always local: this signature carries no
+     * account/parent, so external list creation — which needs both + capability
+     * gating — is a later phase.)
      */
 open func createTaskListJson(name: String)throws  -> String  {
     return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
@@ -993,30 +1035,41 @@ open func deleteEvent(id: String, calendarId: String?, sendCancellations: Bool?)
 }
     
     /**
-     * Delete a section (its tasks fall back to ungrouped) and append
-     * `SectionDeleted`.
+     * Delete a section (its tasks fall back to ungrouped), routed by the
+     * optional `list_id`. LOCAL (or `list_id` omitted): store delete +
+     * `SectionDeleted`. EXTERNAL: routed to the provider (which needs the
+     * `list_id` to scope the delete) and self-syncs (no event log).
      */
-open func deleteSection(id: String)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+open func deleteSection(id: String, listId: String?)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
     uniffi_cal_ffi_fn_method_host_delete_section(
             self.uniffiCloneHandle(),
-        FfiConverterString.lower(id),$0
+        FfiConverterString.lower(id),
+        FfiConverterOptionString.lower(listId),$0
     )
 }
 }
     
     /**
-     * Delete a task and append `TaskDeleted`.
+     * Delete a task, routed by the optional `list_id` (the desktop `delete_task`
+     * shape). LOCAL (or `list_id` omitted → local fallback): delete + append
+     * `TaskDeleted`. EXTERNAL: routed to the provider (no event log). Omitting
+     * `list_id` for an external task can't route — it falls to local and
+     * `NotFound`s; callers that listed the task pass its `list_id`.
      */
-open func deleteTask(id: String)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+open func deleteTask(id: String, listId: String?)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
     uniffi_cal_ffi_fn_method_host_delete_task(
             self.uniffiCloneHandle(),
-        FfiConverterString.lower(id),$0
+        FfiConverterString.lower(id),
+        FfiConverterOptionString.lower(listId),$0
     )
 }
 }
     
     /**
-     * Delete a task list (its tasks cascade away) and append `TaskListDeleted`.
+     * Delete a task list (its tasks cascade away), routed by the list's account.
+     * LOCAL: store delete + `TaskListDeleted`. EXTERNAL: routed to the provider
+     * (which `Unsupported`s unless its manifest allows list deletion) and
+     * self-syncs (no event log).
      */
 open func deleteTaskList(id: String)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
     uniffi_cal_ffi_fn_method_host_delete_task_list(
@@ -1080,7 +1133,8 @@ open func listCalendarsJson()throws  -> String  {
     
     /**
      * Push the local pending logs without fetching (call from RN AppState
-     * "background"). Returns the number of logs pushed.
+     * "background"). Returns the number of logs pushed. Records the outcome in
+     * the failure latch like `sync_now`.
      */
 open func pushNow()throws  -> UInt32  {
     return try  FfiConverterUInt32.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
@@ -1105,7 +1159,8 @@ open func reparentTaskListJson(id: String, parentId: String?)throws  -> String  
 }
     
     /**
-     * Sections of a list as a JSON array (`cal_core::Section[]`).
+     * Sections of a list as a JSON array (`cal_core::Section[]`), routed to the
+     * list's owning account.
      */
 open func sectionsJson(listId: String)throws  -> String  {
     return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
@@ -1119,7 +1174,8 @@ open func sectionsJson(listId: String)throws  -> String  {
     /**
      * Run one sync round (push local pending logs, fetch + apply foreign ones,
      * compaction audit) and return the `SyncRoundReport` as JSON. Errors with
-     * "not configured" until `configure_sync_adapter_json` has run.
+     * "not configured" until `configure_sync_adapter_json` has run. Records the
+     * round's outcome in the failure latch (success resets it).
      */
 open func syncNowJson()throws  -> String  {
     return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
@@ -1131,8 +1187,11 @@ open func syncNowJson()throws  -> String  {
     
     /**
      * The orchestrator's status as JSON (the desktop `SyncStatus` shape:
-     * configured / in_flight / last_synced_at / interval / e2e / …). Reads
-     * without a sync round.
+     * configured / in_flight / last_synced_at / interval / e2e / …), decorated
+     * with this host's failure latch. The orchestrator always returns
+     * `sustained_failure: false` / `last_error_code: None` (the desktop
+     * scheduler fills those in); here the `SyncProgressDriver` does, so the UI
+     * can warn on a sustained failure. Reads without a sync round.
      */
 open func syncStatusJson()throws  -> String  {
     return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
@@ -1155,7 +1214,11 @@ open func taskJson(id: String)throws  -> String  {
 }
     
     /**
-     * All task lists as a JSON array (`cal_core::TaskList[]`).
+     * All task lists (local + external) as a JSON `TaskListRow[]` (the desktop
+     * wire shape: each `TaskList` flattened + its `account_id`). Primes the
+     * list→account route map for the following task/section ops, so call it
+     * before them (the desktop invariant). External accounts are fetched live;
+     * a dead account is skipped (its error swallowed), never blanking the list.
      */
 open func taskListsJson()throws  -> String  {
     return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
@@ -1166,7 +1229,8 @@ open func taskListsJson()throws  -> String  {
 }
     
     /**
-     * Tasks in a list as a JSON array (`cal_core::Task[]`).
+     * Tasks in a list as a JSON array (`cal_core::Task[]`), routed to the list's
+     * owning account (local store or external provider).
      */
 open func tasksJson(listId: String)throws  -> String  {
     return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
@@ -1193,8 +1257,10 @@ open func updateEventJson(eventJson: String)throws  -> String  {
 }
     
     /**
-     * Update a section from a JSON `cal_core::Section`; returns it as JSON and
-     * appends `SectionUpdated`.
+     * Update a section from a JSON `cal_core::Section`; returns it as JSON,
+     * routed by the section's `list_id`. LOCAL: store update + `SectionUpdated`.
+     * EXTERNAL: routed to the provider, which renames only (`list_id`, `id`,
+     * `name`) — colour is a local override, never sent — and self-syncs.
      */
 open func updateSectionJson(sectionJson: String)throws  -> String  {
     return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
@@ -1207,10 +1273,14 @@ open func updateSectionJson(sectionJson: String)throws  -> String  {
     
     /**
      * Update a task from a JSON `cal_core::Task`; returns the updated `Task` as
-     * JSON and appends `TaskUpdated`. A list_id change is a single local SQL
-     * UPDATE (the desktop's local↔local move). Completing a recurring task
-     * spawns its next instance locally; the applier re-runs the same spawner on
-     * the peer and dedups on `series_id`, so only `TaskUpdated` need cross.
+     * JSON, routed by the task's `list_id`. LOCAL: a single SQL UPDATE (a
+     * list_id change is the desktop's local↔local move) + `TaskUpdated`;
+     * completing a recurring task spawns its next instance locally and the
+     * peer's applier re-runs the spawner deduped on `series_id`, so only
+     * `TaskUpdated` crosses. EXTERNAL: routed to the provider in place (no event
+     * log; it self-syncs). Deferred for external: cross-list moves (needs
+     * previous_list_id, which the mobile signature doesn't carry) + the
+     * on-demand next-instance spawn (cache-dependent) — documented gaps.
      */
 open func updateTaskJson(taskJson: String)throws  -> String  {
     return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
@@ -4503,13 +4573,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_create_event_json() != 14023) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_cal_ffi_checksum_method_host_create_section_json() != 51165) {
+    if (uniffi_cal_ffi_checksum_method_host_create_section_json() != 24626) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_cal_ffi_checksum_method_host_create_task_json() != 26959) {
+    if (uniffi_cal_ffi_checksum_method_host_create_task_json() != 56944) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_cal_ffi_checksum_method_host_create_task_list_json() != 41930) {
+    if (uniffi_cal_ffi_checksum_method_host_create_task_list_json() != 25221) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_delete_account() != 32623) {
@@ -4521,13 +4591,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_delete_event() != 51601) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_cal_ffi_checksum_method_host_delete_section() != 63684) {
+    if (uniffi_cal_ffi_checksum_method_host_delete_section() != 35164) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_cal_ffi_checksum_method_host_delete_task() != 53430) {
+    if (uniffi_cal_ffi_checksum_method_host_delete_task() != 53219) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_cal_ffi_checksum_method_host_delete_task_list() != 5785) {
+    if (uniffi_cal_ffi_checksum_method_host_delete_task_list() != 53168) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_get_event_by_id_json() != 43277) {
@@ -4539,37 +4609,37 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_list_calendars_json() != 49275) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_cal_ffi_checksum_method_host_push_now() != 17383) {
+    if (uniffi_cal_ffi_checksum_method_host_push_now() != 48331) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_reparent_task_list_json() != 49367) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_cal_ffi_checksum_method_host_sections_json() != 2550) {
+    if (uniffi_cal_ffi_checksum_method_host_sections_json() != 56584) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_cal_ffi_checksum_method_host_sync_now_json() != 41765) {
+    if (uniffi_cal_ffi_checksum_method_host_sync_now_json() != 8892) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_cal_ffi_checksum_method_host_sync_status_json() != 35684) {
+    if (uniffi_cal_ffi_checksum_method_host_sync_status_json() != 5739) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_task_json() != 19358) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_cal_ffi_checksum_method_host_task_lists_json() != 48190) {
+    if (uniffi_cal_ffi_checksum_method_host_task_lists_json() != 64113) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_cal_ffi_checksum_method_host_tasks_json() != 56247) {
+    if (uniffi_cal_ffi_checksum_method_host_tasks_json() != 40630) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_update_event_json() != 27193) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_cal_ffi_checksum_method_host_update_section_json() != 7232) {
+    if (uniffi_cal_ffi_checksum_method_host_update_section_json() != 27633) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_cal_ffi_checksum_method_host_update_task_json() != 46851) {
+    if (uniffi_cal_ffi_checksum_method_host_update_task_json() != 12155) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_keychainbridge_store() != 54380) {

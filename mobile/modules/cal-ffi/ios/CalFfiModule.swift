@@ -67,8 +67,8 @@ public class CalFfiModule: Module {
       try self.host.updateTaskJson(taskJson: taskJson)
     }
 
-    AsyncFunction("deleteTask") { (taskId: String) in
-      try self.host.deleteTask(id: taskId)
+    AsyncFunction("deleteTask") { (taskId: String, listId: String?) in
+      try self.host.deleteTask(id: taskId, listId: listId)
     }
 
     AsyncFunction("sectionsJson") { (listId: String) -> String in
@@ -84,8 +84,8 @@ public class CalFfiModule: Module {
       try self.host.updateSectionJson(sectionJson: sectionJson)
     }
 
-    AsyncFunction("deleteSection") { (id: String) in
-      try self.host.deleteSection(id: id)
+    AsyncFunction("deleteSection") { (id: String, listId: String?) in
+      try self.host.deleteSection(id: id, listId: listId)
     }
 
     // ─── Accounts (the full engine: external adapters + secrets) ───

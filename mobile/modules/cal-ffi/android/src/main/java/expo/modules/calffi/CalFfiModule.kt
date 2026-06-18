@@ -82,8 +82,8 @@ class CalFfiModule : Module() {
       host.updateTaskJson(taskJson)
     }
 
-    AsyncFunction("deleteTask") { taskId: String ->
-      host.deleteTask(taskId)
+    AsyncFunction("deleteTask") { taskId: String, listId: String? ->
+      host.deleteTask(taskId, listId)
     }
 
     AsyncFunction("sectionsJson") { listId: String ->
@@ -101,8 +101,8 @@ class CalFfiModule : Module() {
       host.updateSectionJson(sectionJson)
     }
 
-    AsyncFunction("deleteSection") { id: String ->
-      host.deleteSection(id)
+    AsyncFunction("deleteSection") { id: String, listId: String? ->
+      host.deleteSection(id, listId)
     }
 
     // ─── Accounts (the full engine: external adapters + secrets) ─────────────

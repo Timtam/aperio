@@ -210,7 +210,7 @@ export default function TasksScreen({
           pendingEmptyFocus.current = true;
         }
         try {
-          await deleteTask(task.id);
+          await deleteTask(task.id, task.list_id);
           invalidateData();
           announce(t('mobile.deleted', { title: task.title }));
         } catch (err) {

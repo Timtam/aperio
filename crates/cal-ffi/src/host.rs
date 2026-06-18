@@ -992,16 +992,22 @@ impl Host {
     // `sections_json` route by the list's owning account. So a Vikunja/Todoist/
     // CalDAV-tasks account's lists + tasks + sections are now VISIBLE on mobile.
     //
-    // WRITES are LOCAL-only for now: each local mutation appends the SAME
-    // `SyncEvent` shape the desktop command layer emits (`commands::tasks`) —
-    // `EventPayload { id, to_value(&entity) }` for Created/Updated,
-    // `IdPayload { id }` for Deleted — which is what syncs them cross-device. A
-    // write against an EXTERNAL list is rejected with `Unsupported` (a clear
-    // "editing external tasks on mobile isn't supported yet" rather than a
-    // confusing local NotFound). Routing external writes to the provider (with
-    // the desktop's capability gating + cross-list moves + on-demand spawn) is
-    // the next phase. The JSON wire is the `cal_core` serde shape, identical to
-    // the desktop's Tauri payloads, so `@aperio/shared` parses both sides.
+    // WRITES route too (mirroring `commands::tasks`): a LOCAL mutation hits the
+    // store and appends the matching `SyncEvent` (`EventPayload { id,
+    // to_value(&entity) }` for Created/Updated, `IdPayload { id }` for Deleted —
+    // which is what syncs it cross-device); an EXTERNAL mutation is routed to the
+    // provider, which self-syncs, so NO event is logged. `delete_task` /
+    // `delete_section` carry an optional `list_id` for routing (the desktop
+    // `delete_task` shape). The JSON wire is the `cal_core` serde shape, so
+    // `@aperio/shared` parses both sides.
+    //
+    // Mobile-deferred (documented per method): `create_task_list` stays LOCAL
+    // (external list creation needs account + parent params this signature lacks)
+    // and `reparent_task_list` is a local-store concept (external lists →
+    // `Unsupported`); external recurring tasks get no host-side series_id +
+    // on-demand next-instance spawn (cache-dependent); cross-list MOVES aren't
+    // detected (no previous_list_id); cache-invalidation + the reminder scheduler
+    // kick are desktop-only and have no mobile analogue.
 
     /// All task lists (local + external) as a JSON `TaskListRow[]` (the desktop
     /// wire shape: each `TaskList` flattened + its `account_id`). Primes the
@@ -1039,8 +1045,10 @@ impl Host {
         to_json(&rows)
     }
 
-    /// Create a top-level local task list; returns the created `TaskList` as JSON
-    /// and appends `TaskListCreated`.
+    /// Create a top-level LOCAL task list; returns the created `TaskList` as JSON
+    /// and appends `TaskListCreated`. (Always local: this signature carries no
+    /// account/parent, so external list creation — which needs both + capability
+    /// gating — is a later phase.)
     pub fn create_task_list_json(&self, name: String) -> Result<String, StoreError> {
         let list = self
             .adapter
@@ -1078,15 +1086,23 @@ impl Host {
         to_json(&list)
     }
 
-    /// Delete a task list (its tasks cascade away) and append `TaskListDeleted`.
+    /// Delete a task list (its tasks cascade away), routed by the list's account.
+    /// LOCAL: store delete + `TaskListDeleted`. EXTERNAL: routed to the provider
+    /// (which `Unsupported`s unless its manifest allows list deletion) and
+    /// self-syncs (no event log).
     pub fn delete_task_list(&self, id: String) -> Result<(), StoreError> {
-        if !self.is_local_task_list(&id) {
-            return Err(external_tasks_readonly());
+        match self.route_task_list(&id)? {
+            None => {
+                self.adapter.delete_task_list(&id).map_err(map_store_err)?;
+                self.writer
+                    .append(SyncEvent::TaskListDeleted(IdPayload { id }));
+                Ok(())
+            }
+            Some(ext) => self
+                .runtime
+                .block_on(async { ext.delete_task_list(&id).await })
+                .map_err(map_store_err),
         }
-        self.adapter.delete_task_list(&id).map_err(map_store_err)?;
-        self.writer
-            .append(SyncEvent::TaskListDeleted(IdPayload { id }));
-        Ok(())
     }
 
     /// Tasks in a list as a JSON array (`cal_core::Task[]`), routed to the list's
@@ -1121,58 +1137,94 @@ impl Host {
     }
 
     /// Create a task from a JSON `cal_core::NewTask`; returns the created `Task`
-    /// as JSON and appends `TaskCreated` (a recurring task is assigned a stable
-    /// series id).
+    /// as JSON. LOCAL: the store assigns the id (+ a series id for recurring) and
+    /// `TaskCreated` is appended. EXTERNAL: routed to the provider, which assigns
+    /// its own id and self-syncs (no event log). (The desktop's host-side
+    /// series_id assignment + on-demand spawn for external recurring tasks are
+    /// deferred — they need the SWR cache the mobile Host doesn't carry.)
     pub fn create_task_json(
         &self,
         list_id: String,
         new_task_json: String,
     ) -> Result<String, StoreError> {
-        if !self.is_local_task_list(&list_id) {
-            return Err(external_tasks_readonly());
-        }
         let new: cal_core::NewTask = from_json("task", &new_task_json)?;
-        let task = self
-            .adapter
-            .create_task_sync(&list_id, new)
-            .map_err(map_store_err)?;
-        if let Ok(fields) = serde_json::to_value(&task) {
-            self.writer.append(SyncEvent::TaskCreated(EventPayload {
-                id: task.id.clone(),
-                fields,
-            }));
+        match self.route_task_list(&list_id)? {
+            None => {
+                let task = self
+                    .adapter
+                    .create_task_sync(&list_id, new)
+                    .map_err(map_store_err)?;
+                if let Ok(fields) = serde_json::to_value(&task) {
+                    self.writer.append(SyncEvent::TaskCreated(EventPayload {
+                        id: task.id.clone(),
+                        fields,
+                    }));
+                }
+                to_json(&task)
+            }
+            Some(ext) => {
+                let task = self
+                    .runtime
+                    .block_on(async { ext.create_task(&list_id, new).await })
+                    .map_err(map_store_err)?;
+                to_json(&task)
+            }
         }
-        to_json(&task)
     }
 
     /// Update a task from a JSON `cal_core::Task`; returns the updated `Task` as
-    /// JSON and appends `TaskUpdated`. A list_id change is a single local SQL
-    /// UPDATE (the desktop's local↔local move). Completing a recurring task
-    /// spawns its next instance locally; the applier re-runs the same spawner on
-    /// the peer and dedups on `series_id`, so only `TaskUpdated` need cross.
+    /// JSON, routed by the task's `list_id`. LOCAL: a single SQL UPDATE (a
+    /// list_id change is the desktop's local↔local move) + `TaskUpdated`;
+    /// completing a recurring task spawns its next instance locally and the
+    /// peer's applier re-runs the spawner deduped on `series_id`, so only
+    /// `TaskUpdated` crosses. EXTERNAL: routed to the provider in place (no event
+    /// log; it self-syncs). Deferred for external: cross-list moves (needs
+    /// previous_list_id, which the mobile signature doesn't carry) + the
+    /// on-demand next-instance spawn (cache-dependent) — documented gaps.
     pub fn update_task_json(&self, task_json: String) -> Result<String, StoreError> {
         let task: cal_core::Task = from_json("task", &task_json)?;
-        if !self.is_local_task_list(&task.list_id) {
-            return Err(external_tasks_readonly());
+        match self.route_task_list(&task.list_id)? {
+            None => {
+                let updated = self.adapter.update_task_sync(task).map_err(map_store_err)?;
+                if let Ok(fields) = serde_json::to_value(&updated) {
+                    self.writer.append(SyncEvent::TaskUpdated(EventPayload {
+                        id: updated.id.clone(),
+                        fields,
+                    }));
+                }
+                to_json(&updated)
+            }
+            Some(ext) => {
+                let updated = self
+                    .runtime
+                    .block_on(async { ext.update_task(task).await })
+                    .map_err(map_store_err)?;
+                to_json(&updated)
+            }
         }
-        let updated = self.adapter.update_task_sync(task).map_err(map_store_err)?;
-        if let Ok(fields) = serde_json::to_value(&updated) {
-            self.writer.append(SyncEvent::TaskUpdated(EventPayload {
-                id: updated.id.clone(),
-                fields,
-            }));
-        }
-        to_json(&updated)
     }
 
-    /// Delete a LOCAL task and append `TaskDeleted`. (No list_id is carried, so
-    /// this can't route; an external task id simply isn't in the local store and
-    /// `NotFound`s. External delete-routing lands with the rest of external task
-    /// writes, when this gains a `list_id` like the desktop `delete_task`.)
-    pub fn delete_task(&self, id: String) -> Result<(), StoreError> {
-        self.adapter.delete_task_sync(&id).map_err(map_store_err)?;
-        self.writer.append(SyncEvent::TaskDeleted(IdPayload { id }));
-        Ok(())
+    /// Delete a task, routed by the optional `list_id` (the desktop `delete_task`
+    /// shape). LOCAL (or `list_id` omitted → local fallback): delete + append
+    /// `TaskDeleted`. EXTERNAL: routed to the provider (no event log). Omitting
+    /// `list_id` for an external task can't route — it falls to local and
+    /// `NotFound`s; callers that listed the task pass its `list_id`.
+    pub fn delete_task(&self, id: String, list_id: Option<String>) -> Result<(), StoreError> {
+        let route = match list_id.as_deref() {
+            Some(lid) => self.route_task_list(lid)?,
+            None => None,
+        };
+        match route {
+            None => {
+                self.adapter.delete_task_sync(&id).map_err(map_store_err)?;
+                self.writer.append(SyncEvent::TaskDeleted(IdPayload { id }));
+                Ok(())
+            }
+            Some(ext) => self
+                .runtime
+                .block_on(async { ext.delete_task(&id).await })
+                .map_err(map_store_err),
+        }
     }
 
     /// Sections of a list as a JSON array (`cal_core::Section[]`), routed to the
@@ -1196,8 +1248,11 @@ impl Host {
         }
     }
 
-    /// Create a section in a list; returns the created `Section` as JSON and
-    /// appends `SectionCreated`.
+    /// Create a section in a list; returns the created `Section` as JSON, routed
+    /// by `list_id`. LOCAL: store create (with position + colour) + appends
+    /// `SectionCreated`. EXTERNAL: routed to the provider, which takes only
+    /// `(list_id, name)` — position + colour are local-only concerns (colour is a
+    /// local override) — and self-syncs (no event log).
     pub fn create_section_json(
         &self,
         list_id: String,
@@ -1205,51 +1260,87 @@ impl Host {
         position: u32,
         color_label: Option<String>,
     ) -> Result<String, StoreError> {
-        if !self.is_local_task_list(&list_id) {
-            return Err(external_tasks_readonly());
+        match self.route_task_list(&list_id)? {
+            None => {
+                let section = self
+                    .adapter
+                    .create_section(&list_id, &name, position, color_label.map(ColorLabelId))
+                    .map_err(map_store_err)?;
+                if let Ok(fields) = serde_json::to_value(&section) {
+                    self.writer.append(SyncEvent::SectionCreated(EventPayload {
+                        id: section.id.clone(),
+                        fields,
+                    }));
+                }
+                to_json(&section)
+            }
+            Some(ext) => {
+                let section = self
+                    .runtime
+                    .block_on(async { ext.create_section(&list_id, &name).await })
+                    .map_err(map_store_err)?;
+                to_json(&section)
+            }
         }
-        let section = self
-            .adapter
-            .create_section(&list_id, &name, position, color_label.map(ColorLabelId))
-            .map_err(map_store_err)?;
-        if let Ok(fields) = serde_json::to_value(&section) {
-            self.writer.append(SyncEvent::SectionCreated(EventPayload {
-                id: section.id.clone(),
-                fields,
-            }));
-        }
-        to_json(&section)
     }
 
-    /// Update a section from a JSON `cal_core::Section`; returns it as JSON and
-    /// appends `SectionUpdated`.
+    /// Update a section from a JSON `cal_core::Section`; returns it as JSON,
+    /// routed by the section's `list_id`. LOCAL: store update + `SectionUpdated`.
+    /// EXTERNAL: routed to the provider, which renames only (`list_id`, `id`,
+    /// `name`) — colour is a local override, never sent — and self-syncs.
     pub fn update_section_json(&self, section_json: String) -> Result<String, StoreError> {
         let section: cal_core::Section = from_json("section", &section_json)?;
-        if !self.is_local_task_list(&section.list_id) {
-            return Err(external_tasks_readonly());
+        match self.route_task_list(&section.list_id)? {
+            None => {
+                let updated = self
+                    .adapter
+                    .update_section(section)
+                    .map_err(map_store_err)?;
+                if let Ok(fields) = serde_json::to_value(&updated) {
+                    self.writer.append(SyncEvent::SectionUpdated(EventPayload {
+                        id: updated.id.clone(),
+                        fields,
+                    }));
+                }
+                to_json(&updated)
+            }
+            Some(ext) => {
+                let updated = self
+                    .runtime
+                    .block_on(async {
+                        ext.update_section(&section.list_id, &section.id, &section.name)
+                            .await
+                    })
+                    .map_err(map_store_err)?;
+                to_json(&updated)
+            }
         }
-        let updated = self
-            .adapter
-            .update_section(section)
-            .map_err(map_store_err)?;
-        if let Ok(fields) = serde_json::to_value(&updated) {
-            self.writer.append(SyncEvent::SectionUpdated(EventPayload {
-                id: updated.id.clone(),
-                fields,
-            }));
-        }
-        to_json(&updated)
     }
 
-    /// Delete a LOCAL section (its tasks fall back to ungrouped) and append
-    /// `SectionDeleted`. Like `delete_task`, no list_id is carried to route, so
-    /// an external section id `NotFound`s in the local store; external section
-    /// delete-routing lands with the rest of external task writes.
-    pub fn delete_section(&self, id: String) -> Result<(), StoreError> {
-        self.adapter.delete_section(&id).map_err(map_store_err)?;
-        self.writer
-            .append(SyncEvent::SectionDeleted(IdPayload { id }));
-        Ok(())
+    /// Delete a section (its tasks fall back to ungrouped), routed by the
+    /// optional `list_id`. LOCAL (or `list_id` omitted): store delete +
+    /// `SectionDeleted`. EXTERNAL: routed to the provider (which needs the
+    /// `list_id` to scope the delete) and self-syncs (no event log).
+    pub fn delete_section(&self, id: String, list_id: Option<String>) -> Result<(), StoreError> {
+        let route = match list_id.as_deref() {
+            Some(lid) => self.route_task_list(lid)?,
+            None => None,
+        };
+        match route {
+            None => {
+                self.adapter.delete_section(&id).map_err(map_store_err)?;
+                self.writer
+                    .append(SyncEvent::SectionDeleted(IdPayload { id }));
+                Ok(())
+            }
+            Some(ext) => {
+                // `route` is Some only when `list_id` was Some.
+                let lid = list_id.unwrap_or_default();
+                self.runtime
+                    .block_on(async { ext.delete_section(&lid, &id).await })
+                    .map_err(map_store_err)
+            }
+        }
     }
 
     /// The orchestrator's status as JSON (the desktop `SyncStatus` shape:
