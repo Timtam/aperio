@@ -404,14 +404,6 @@ export default function TasksScreen({
         </Pressable>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={t('dialogs.accounts.title')}
-          onPress={() => navigation.navigate('Accounts')}
-          style={({ pressed }) => [styles.ghostButton, pressed && styles.rowPressed]}
-        >
-          <Text style={styles.ghostButtonText}>{t('dialogs.accounts.title')}</Text>
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
           accessibilityLabel={t('mobile.eventsButtonLabel')}
           onPress={() => navigation.navigate('Events')}
           style={({ pressed }) => [styles.ghostButton, pressed && styles.rowPressed]}
@@ -420,11 +412,11 @@ export default function TasksScreen({
         </Pressable>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={t('mobile.syncButtonLabel')}
-          onPress={() => navigation.navigate('Sync')}
+          accessibilityLabel={t('dialogs.settings.title')}
+          onPress={() => navigation.navigate('Settings')}
           style={({ pressed }) => [styles.ghostButton, pressed && styles.rowPressed]}
         >
-          <Text style={styles.ghostButtonText}>{t('mobile.syncButtonLabel')}</Text>
+          <Text style={styles.ghostButtonText}>{t('dialogs.settings.title')}</Text>
         </Pressable>
       </View>
 

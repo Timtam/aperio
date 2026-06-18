@@ -10,9 +10,11 @@ import AccountsScreen from './screens/AccountsScreen';
 import EventEditorModal from './screens/EventEditorModal';
 import EventsScreen from './screens/EventsScreen';
 import ListsScreen from './screens/ListsScreen';
+import SettingsScreen from './screens/SettingsScreen';
 import SyncScreen from './screens/SyncScreen';
 import TaskEditorModal from './screens/TaskEditorModal';
 import TasksScreen from './screens/TasksScreen';
+import { useStoredLanguage } from './settings/language';
 import { TaskStoreProvider } from './state/taskStore';
 
 // Aperio mobile — navigation host for the faithful tasks port (M-series).
@@ -32,6 +34,8 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export default function App() {
   const { t } = useTranslation();
+  // Apply the stored language override (if any) over the device-locale default.
+  useStoredLanguage();
   // JS-driven sync: full round on launch + every foreground-resume, a push on
   // background, and a debounced push after each mutation (wired in the api
   // clients). The mobile stand-in for the desktop SyncScheduler.
@@ -66,6 +70,11 @@ export default function App() {
               name="Sync"
               component={SyncScreen}
               options={{ title: t('mobile.syncTitle') }}
+            />
+            <Stack.Screen
+              name="Settings"
+              component={SettingsScreen}
+              options={{ title: t('dialogs.settings.title') }}
             />
             <Stack.Screen
               name="TaskEditor"

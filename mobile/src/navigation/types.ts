@@ -11,6 +11,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
  *   Events      — the selected day's events (across calendars) + day nav.
  *   EventEditor — create (`eventId: null`) or edit an event; presented as a modal.
  *   Sync        — configure the sync target + run a round + read status.
+ *   Settings    — app-config hub: language override + links to Accounts / Sync.
  */
 export type RootStackParamList = {
   Tasks: undefined;
@@ -20,6 +21,7 @@ export type RootStackParamList = {
   Events: undefined;
   EventEditor: { eventId: string | null; calendarId: string };
   Sync: undefined;
+  Settings: undefined;
 };
 
 /** Per-screen props helper: `RootStackScreenProps<'TaskEditor'>` gives a typed
