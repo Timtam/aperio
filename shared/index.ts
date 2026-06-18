@@ -7,3 +7,4 @@ export * from './taskGrouping';
 export * from './taskDay';
 export * from './taskRecurrence';
 export * from './recurrence';
+export * from './rrule';

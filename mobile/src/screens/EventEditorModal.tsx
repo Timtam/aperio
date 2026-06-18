@@ -15,6 +15,7 @@ import type { ColorLabel, Reminder } from '@aperio/shared';
 
 import { ColorLabelSelect } from '../components/ColorLabelSelect';
 import { RadioGroup } from '../components/RadioGroup';
+import { RecurrenceSelector } from '../components/RecurrenceSelector';
 import { RemindersEditor } from '../components/RemindersEditor';
 import {
   Calendar,
@@ -50,6 +51,14 @@ function localToIso(date: string, time: string): string | null {
   if (!date.trim()) return null;
   const d = new Date(`${date.trim()}T${time.trim() || '00:00'}`);
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+/** The start `YYYY-MM-DD` as a local Date for the recurrence selector's derived
+ *  monthly/yearly options, or undefined when the field is empty/unparseable. */
+function recurrenceStartDate(date: string): Date | undefined {
+  if (!date.trim()) return undefined;
+  const d = new Date(`${date.trim()}T00:00`);
+  return Number.isNaN(d.getTime()) ? undefined : d;
 }
 
 function todayParts(): { date: string; time: string } {
@@ -92,6 +101,9 @@ export default function EventEditorModal({
   // Reminders (relative-to-start / absolute / app-start), the same Reminder[]
   // the task editor edits — round-trips through create/update_event unchanged.
   const [reminders, setReminders] = useState<Reminder[]>([]);
+  // The RRULE body (without "RRULE:"), or null = non-recurring. The series'
+  // EXDATE exceptions are preserved from the original on save.
+  const [recurrence, setRecurrence] = useState<string | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -121,6 +133,7 @@ export default function EventEditorModal({
             setDescription(ev.description ?? '');
             setColorLabel(ev.color_label ?? '');
             setReminders(ev.reminders ?? []);
+            setRecurrence(ev.recurrence?.rrule ?? null);
           }
         } else {
           // New event: default to the next full hour today, one hour long.
@@ -167,6 +180,10 @@ export default function EventEditorModal({
     // (round-trip untouched) rather than letting an empty form value drop it.
     const isLocalCal = calendars.find((c) => c.id === calId)?.account_id === 'local';
     const colorToSend = isLocalCal ? colorLabel || null : (original?.color_label ?? null);
+    // Keep the series' EXDATE exceptions when editing; a fresh rule has none.
+    const recurrenceToSend = recurrence
+      ? { rrule: recurrence, exceptions: original?.recurrence?.exceptions ?? [] }
+      : null;
     setError(null);
     setSaving(true);
     try {
@@ -184,6 +201,7 @@ export default function EventEditorModal({
           description: description.trim() || null,
           color_label: colorToSend,
           reminders,
+          recurrence: recurrenceToSend,
         });
         AccessibilityInfo.announceForAccessibility(
           t('dialogs.event.updated', { title: updated.title }),
@@ -197,7 +215,7 @@ export default function EventEditorModal({
           start,
           end,
           all_day: allDay,
-          recurrence: null,
+          recurrence: recurrenceToSend,
           color_label: colorToSend,
           reminders,
           sound: null,
@@ -227,6 +245,7 @@ export default function EventEditorModal({
     location,
     navigation,
     original,
+    recurrence,
     reminders,
     startDate,
     startTime,
@@ -388,6 +407,14 @@ export default function EventEditorModal({
           disabled={saving}
         />
       )}
+
+      {/* Recurrence — RRULE builder (freq / interval / weekly days / monthly
+          mode / end), the same subset as the desktop event dialog. */}
+      <RecurrenceSelector
+        value={recurrence}
+        onChange={setRecurrence}
+        start={recurrenceStartDate(startDate)}
+      />
 
       {/* Reminders — relative-to-start / absolute / app-start, the same editor
           as tasks (mode="event" labels the relative kind "Before start"). */}
