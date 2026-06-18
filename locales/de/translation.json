@@ -72,7 +72,13 @@
     "syncNow": "Jetzt synchronisieren",
     "syncing": "Synchronisiere …",
     "syncDone": "Sync fertig: {{applied}} angewendet, {{pushed}} gesendet, {{fetched}} geholt.",
-    "syncSustainedFailure": "Die Synchronisierung ist mehrmals in Folge fehlgeschlagen. Prüfe dein Sync-Ziel und die Verbindung; „Jetzt synchronisieren“ versucht es sofort erneut."
+    "syncSustainedFailure": "Die Synchronisierung ist mehrmals in Folge fehlgeschlagen. Prüfe dein Sync-Ziel und die Verbindung; „Jetzt synchronisieren“ versucht es sofort erneut.",
+    "oauthHeading": "Mit einem Anbieter verbinden",
+    "oauthProviderLabel": "Anbieter",
+    "oauthSignIn": "Über den Browser anmelden",
+    "oauthConnecting": "Anmeldung läuft …",
+    "oauthCancelled": "Anmeldung abgebrochen.",
+    "oauthNoCode": "Die Anmeldung hat keinen Autorisierungscode zurückgegeben. Bitte versuche es erneut."
   },
   "common": {
     "colorComposer": {

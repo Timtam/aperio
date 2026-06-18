@@ -34,7 +34,8 @@
     },
     "owner": "tonirbarth",
     "plugins": [
-      "expo-splash-screen"
+      "expo-splash-screen",
+      "expo-web-browser"
     ]
   }
 }

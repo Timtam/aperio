@@ -72,3 +72,72 @@ export const deleteAccount = async (id: string): Promise<void> => {
   await CalFfi.deleteAccount(id);
   scheduleBackgroundPush();
 };
+
+// ── OAuth (host-driven two-phase flow around a native auth session) ──────────
+// Desktop runs OAuth via the plugin's loopback+browser dance; mobile can't, so
+// the Host drives it in two phases and the JS layer opens the consent URL in a
+// native auth session. Mirrors the desktop `connect_google_account` /
+// `connect_microsoft_account` tail (the Host's complete step does the exchange +
+// row + keychain + adapter registration). See `./oauth.ts` for the orchestrator.
+
+/** The statically-embedded plugin ids the Host drives the OAuth flow for. */
+export const OAUTH_PLUGIN_IDS: Record<'google' | 'microsoft_graph', string> = {
+  google: 'com.aperio.cal-adapter-google',
+  microsoft_graph: 'com.aperio.cal-adapter-microsoft-graph',
+};
+
+/** The authorize-phase result from {@link beginOauth}: the Host built the consent
+ *  URL + PKCE verifier + CSRF state (pure, no network). The caller opens
+ *  `authorize_url` in a native auth session and replays `pkce_verifier`/`state`
+ *  into {@link completeOauth}. */
+export interface OAuthAuthorize {
+  authorize_url: string;
+  pkce_verifier: string;
+  state: string;
+}
+
+/** Begin a host-driven OAuth flow. `args` carries the provider's begin inputs —
+ *  `{client_id, redirect_uri}` (Google) / `{client_id, authority, redirect_uri}`
+ *  (Microsoft). Pure (no network): returns the authorize URL + PKCE/state. */
+export const beginOauth = async (
+  pluginId: string,
+  args: Record<string, string>,
+): Promise<OAuthAuthorize> =>
+  JSON.parse(
+    await CalFfi.beginOauthJson(pluginId, JSON.stringify(args)),
+  ) as OAuthAuthorize;
+
+/** The exchange + account-creation inputs for {@link completeOauth} — the desktop
+ *  `complete_oauth_json` request shape. `config_json` is the non-secret adapter
+ *  config persisted in the row: `{client_id, client_secret}` (Google) /
+ *  `{client_id, authority}` (Microsoft). */
+export interface CompleteOauthRequest {
+  adapter_kind: AdapterKind;
+  display_name: string;
+  config_json: string;
+  client_id: string;
+  /** Google only (PKCE public clients like Microsoft omit it). */
+  client_secret?: string | null;
+  /** Microsoft only — its v2.0 tenant slug; carried through both phases. */
+  authority?: string | null;
+  code: string;
+  pkce_verifier: string;
+  state: string;
+  returned_state: string;
+  redirect_uri: string;
+}
+
+/** Complete a host-driven OAuth flow: exchange the redirect's `code` for tokens,
+ *  then create + register the account (row + keychain tokens + adapter
+ *  registration, all Rust-side). Returns the created `Account`. The exchange hits
+ *  the provider's token endpoint. */
+export const completeOauth = async (
+  pluginId: string,
+  request: CompleteOauthRequest,
+): Promise<Account> => {
+  const created = JSON.parse(
+    await CalFfi.completeOauthJson(pluginId, JSON.stringify(request)),
+  ) as Account;
+  scheduleBackgroundPush();
+  return created;
+};

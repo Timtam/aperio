@@ -19,16 +19,18 @@ import {
   deleteAccount,
   listAccounts,
 } from '../api/accounts';
+import OAuthConnectForm from './OAuthConnectForm';
 
-// Accounts management — list + add (non-OAuth kinds) + delete, over the Rust
-// Host (statically-embedded adapter plugins + the keychain-bridged SecretStore).
-// OAuth kinds (Google / Microsoft / the VC adapters) need the interactive
-// browser flow and arrive in a later phase, so they're not offered here.
+// Accounts management — list + add (credential kinds) + connect (OAuth kinds via
+// the browser sign-in flow) + delete, over the Rust Host (statically-embedded
+// adapter plugins + the keychain-bridged SecretStore). The non-OAuth kinds use
+// the inline credential form below; Google / Microsoft use the host-driven
+// native auth session (see OAuthConnectForm).
 //
 // Accessibility: every control is an addressable element with an explicit
 // label; the kind picker is a RadioGroup; deletes are reachable both as a
 // visible button and a custom accessibility action; results are announced and
-// screen-reader focus is moved to the new row after a create.
+// screen-reader focus is moved to the new row after a create/connect.
 
 interface ConfigField {
   jsonKey: string;
@@ -200,6 +202,26 @@ export default function AccountsScreen() {
     [announce, load, t],
   );
 
+  // OAuth (browser sign-in) outcomes — the form handles the begin/exchange dance
+  // and the account creation; the screen owns the list, focus, and error display.
+  const onOAuthConnected = useCallback(
+    async (account: Account) => {
+      setError(null);
+      await load();
+      pendingFocusId.current = account.id;
+      announce(t('dialogs.accounts.created', { name: account.display_name }));
+    },
+    [announce, load, t],
+  );
+
+  const onOAuthError = useCallback(
+    (message: string) => {
+      setError(message);
+      announce(message);
+    },
+    [announce],
+  );
+
   return (
     <ScrollView
       style={styles.screen}
@@ -334,6 +356,13 @@ export default function AccountsScreen() {
       >
         <Text style={styles.addButtonText}>{t('dialogs.accounts.add')}</Text>
       </Pressable>
+
+      {/* Connect a provider (browser sign-in) */}
+      <OAuthConnectForm
+        announce={announce}
+        onConnected={(account) => void onOAuthConnected(account)}
+        onError={onOAuthError}
+      />
     </ScrollView>
   );
 }

@@ -72,7 +72,13 @@
     "syncNow": "Sync now",
     "syncing": "Syncing …",
     "syncDone": "Sync done: {{applied}} applied, {{pushed}} sent, {{fetched}} fetched.",
-    "syncSustainedFailure": "Sync has failed several times in a row. Check your sync target and connection; \"Sync now\" retries immediately."
+    "syncSustainedFailure": "Sync has failed several times in a row. Check your sync target and connection; \"Sync now\" retries immediately.",
+    "oauthHeading": "Connect with a provider",
+    "oauthProviderLabel": "Provider",
+    "oauthSignIn": "Sign in via browser",
+    "oauthConnecting": "Signing in …",
+    "oauthCancelled": "Sign-in cancelled.",
+    "oauthNoCode": "The sign-in did not return an authorization code. Please try again."
   },
   "common": {
     "colorComposer": {
