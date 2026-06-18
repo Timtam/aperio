@@ -216,6 +216,10 @@ public class CalFfiModule: Module {
       try self.host.setEventColor(eventId: eventId, calendarId: calendarId, colorLabelId: colorLabelId)
     }
 
+    AsyncFunction("searchJson") { (query: String, filtersJson: String) -> String in
+      try self.host.searchJson(query: query, filtersJson: filtersJson)
+    }
+
     // ─── Contacts ───
     // JSON passthrough, routed Rust-side. Mirrors the Android module.
 

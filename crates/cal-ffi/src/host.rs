@@ -44,7 +44,7 @@ use std::sync::{Arc, Mutex};
 
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
-use cal_adapter_local::LocalAdapter;
+use cal_adapter_local::{LocalAdapter, SearchFilters};
 use cal_core::{
     Calendar, CalendarFeature, ColorLabelId, ContactList, ContactsFeature, DateRange, Event,
     NewEvent, TaskList, TasksFeature,
@@ -1793,6 +1793,25 @@ impl Host {
     pub fn get_event_by_id_json(&self, id: String) -> Result<String, StoreError> {
         let event = self.adapter.get_event_by_id(&id).map_err(map_store_err)?;
         to_json(&event)
+    }
+
+    /// Local full-text search (FTS5) over events + tasks, as a JSON
+    /// `SearchResults { events, tasks }`. Mirrors the desktop `search` command's
+    /// LOCAL half — the engine already lives in `cal-adapter-local`. The external
+    /// snapshot-cache half needs the SWR cache the mobile host lacks, so it's
+    /// omitted (a known parity gap). `filters_json` is a JSON `SearchFilters`, or
+    /// `""` for no filters (default = both kinds, no restrictions).
+    pub fn search_json(&self, query: String, filters_json: String) -> Result<String, StoreError> {
+        let filters: SearchFilters = if filters_json.trim().is_empty() {
+            SearchFilters::default()
+        } else {
+            from_json("filters", &filters_json)?
+        };
+        let results = self
+            .adapter
+            .search(&query, &filters)
+            .map_err(map_store_err)?;
+        to_json(&results)
     }
 
     /// Create an event in `calendar_id` from a flattened `NewEvent`; returns
@@ -5501,6 +5520,55 @@ mod tests {
             .find(|s| s["id"] == serde_json::json!(section_id))
             .unwrap();
         assert_eq!(cleared["color_label"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn search_finds_local_events_and_tasks() {
+        let (_dir, host, _kc) = open_host();
+        // A task whose title matches.
+        let list: serde_json::Value =
+            serde_json::from_str(&host.create_task_list_json("Work".to_string()).unwrap()).unwrap();
+        let list_id = list["id"].as_str().unwrap().to_string();
+        let new_task = r#"{"title":"Quarterly planning","description":null,"status":"open","priority":"medium","scheduled_date":null,"scheduled_time":null,"deadline_date":null,"deadline_time":null,"recurrence":null,"parent_id":null,"color_label":null,"reminders":[],"sound":null}"#;
+        host.create_task_json(list_id, new_task.to_string())
+            .unwrap();
+        // An event whose title matches.
+        let cal: serde_json::Value = serde_json::from_str(
+            &host
+                .create_calendar_json(serde_json::json!({"name": "Personal"}).to_string())
+                .unwrap(),
+        )
+        .unwrap();
+        let cal_id = cal["id"].as_str().unwrap().to_string();
+        host.create_event_json(new_event_json(&cal_id, "Planning offsite"))
+            .unwrap();
+
+        let results: serde_json::Value = serde_json::from_str(
+            &host
+                .search_json("planning".to_string(), String::new())
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(results["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| t["title"] == serde_json::json!("Quarterly planning")));
+        assert!(results["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["title"] == serde_json::json!("Planning offsite")));
+
+        // A non-matching query returns nothing (+ empty query is short-circuited).
+        let empty: serde_json::Value = serde_json::from_str(
+            &host
+                .search_json("zzznomatch".to_string(), String::new())
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(empty["tasks"].as_array().unwrap().is_empty());
+        assert!(empty["events"].as_array().unwrap().is_empty());
     }
 
     #[test]

@@ -244,6 +244,10 @@ class CalFfiModule : Module() {
       host.setEventColor(eventId, calendarId, colorLabelId)
     }
 
+    AsyncFunction("searchJson") { query: String, filtersJson: String ->
+      host.searchJson(query, filtersJson)
+    }
+
     // ─── Contacts (local address book + external CardDAV/Google/EWS providers) ─
     // JSON passthrough, routed Rust-side; contacts are NOT on the sync event log
     // (local = device-local, external = provider-synced).

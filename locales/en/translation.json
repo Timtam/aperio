@@ -1460,6 +1460,7 @@
       "title": "Search",
       "field": "Search events and tasks",
       "placeholder": "Type to search …",
+      "prompt": "Type above to search your events and tasks.",
       "results": "Search results",
       "searching": "Searching …",
       "resultCount_zero": "No results",

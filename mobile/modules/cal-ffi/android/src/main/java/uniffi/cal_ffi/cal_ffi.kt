@@ -814,6 +814,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_reparent_task_list_json(
     ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_search_json(
+    ): Short
     external fun uniffi_cal_ffi_checksum_method_host_sections_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_set_container_color_label(
@@ -1022,6 +1024,8 @@ external fun uniffi_cal_ffi_fn_method_host_push_now(`ptr`: Long,uniffi_out_err: 
 external fun uniffi_cal_ffi_fn_method_host_rename_container(`ptr`: Long,`containerId`: RustBuffer.ByValue,`kind`: RustBuffer.ByValue,`name`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_reparent_task_list_json(`ptr`: Long,`id`: RustBuffer.ByValue,`parentId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_search_json(`ptr`: Long,`query`: RustBuffer.ByValue,`filtersJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_sections_json(`ptr`: Long,`listId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1401,6 +1405,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_reparent_task_list_json() != 49367.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_search_json() != 52768.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_sections_json() != 56584.toShort()) {
@@ -2324,6 +2331,16 @@ public interface HostInterface {
      * returns the updated `TaskList` as JSON and appends `TaskListUpdated`.
      */
     fun `reparentTaskListJson`(`id`: kotlin.String, `parentId`: kotlin.String?): kotlin.String
+    
+    /**
+     * Local full-text search (FTS5) over events + tasks, as a JSON
+     * `SearchResults { events, tasks }`. Mirrors the desktop `search` command's
+     * LOCAL half — the engine already lives in `cal-adapter-local`. The external
+     * snapshot-cache half needs the SWR cache the mobile host lacks, so it's
+     * omitted (a known parity gap). `filters_json` is a JSON `SearchFilters`, or
+     * `""` for no filters (default = both kinds, no restrictions).
+     */
+    fun `searchJson`(`query`: kotlin.String, `filtersJson`: kotlin.String): kotlin.String
     
     /**
      * Sections of a list as a JSON array (`cal_core::Section[]`), routed to the
@@ -3504,6 +3521,28 @@ open class Host: Disposable, AutoCloseable, HostInterface
     UniffiLib.uniffi_cal_ffi_fn_method_host_reparent_task_list_json(
         it,
         FfiConverterString.lower(`id`),FfiConverterOptionalString.lower(`parentId`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Local full-text search (FTS5) over events + tasks, as a JSON
+     * `SearchResults { events, tasks }`. Mirrors the desktop `search` command's
+     * LOCAL half — the engine already lives in `cal-adapter-local`. The external
+     * snapshot-cache half needs the SWR cache the mobile host lacks, so it's
+     * omitted (a known parity gap). `filters_json` is a JSON `SearchFilters`, or
+     * `""` for no filters (default = both kinds, no restrictions).
+     */
+    @Throws(StoreException::class)override fun `searchJson`(`query`: kotlin.String, `filtersJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_search_json(
+        it,
+        FfiConverterString.lower(`query`),FfiConverterString.lower(`filtersJson`),_status)
 }
     }
     )

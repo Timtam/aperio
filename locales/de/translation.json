@@ -1460,6 +1460,7 @@
       "title": "Suche",
       "field": "Termine und Aufgaben durchsuchen",
       "placeholder": "Begriff eingeben …",
+      "prompt": "Tippe oben, um deine Termine und Aufgaben zu durchsuchen.",
       "results": "Suchergebnisse",
       "searching": "Wird gesucht …",
       "resultCount_zero": "Keine Ergebnisse",

@@ -959,6 +959,16 @@ public protocol HostProtocol: AnyObject, Sendable {
     func reparentTaskListJson(id: String, parentId: String?) throws  -> String
     
     /**
+     * Local full-text search (FTS5) over events + tasks, as a JSON
+     * `SearchResults { events, tasks }`. Mirrors the desktop `search` command's
+     * LOCAL half — the engine already lives in `cal-adapter-local`. The external
+     * snapshot-cache half needs the SWR cache the mobile host lacks, so it's
+     * omitted (a known parity gap). `filters_json` is a JSON `SearchFilters`, or
+     * `""` for no filters (default = both kinds, no restrictions).
+     */
+    func searchJson(query: String, filtersJson: String) throws  -> String
+    
+    /**
      * Sections of a list as a JSON array (`cal_core::Section[]`), routed to the
      * list's owning account.
      */
@@ -1900,6 +1910,24 @@ open func reparentTaskListJson(id: String, parentId: String?)throws  -> String  
             self.uniffiCloneHandle(),
         FfiConverterString.lower(id),
         FfiConverterOptionString.lower(parentId),$0
+    )
+})
+}
+    
+    /**
+     * Local full-text search (FTS5) over events + tasks, as a JSON
+     * `SearchResults { events, tasks }`. Mirrors the desktop `search` command's
+     * LOCAL half — the engine already lives in `cal-adapter-local`. The external
+     * snapshot-cache half needs the SWR cache the mobile host lacks, so it's
+     * omitted (a known parity gap). `filters_json` is a JSON `SearchFilters`, or
+     * `""` for no filters (default = both kinds, no restrictions).
+     */
+open func searchJson(query: String, filtersJson: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_search_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(query),
+        FfiConverterString.lower(filtersJson),$0
     )
 })
 }
@@ -5567,6 +5595,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_reparent_task_list_json() != 49367) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_search_json() != 52768) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_sections_json() != 56584) {

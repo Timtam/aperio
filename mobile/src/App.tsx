@@ -21,6 +21,7 @@ import EventsScreen from './screens/EventsScreen';
 import ListEditorModal from './screens/ListEditorModal';
 import ListsScreen from './screens/ListsScreen';
 import RemindersScreen from './screens/RemindersScreen';
+import SearchScreen from './screens/SearchScreen';
 import SettingsScreen from './screens/SettingsScreen';
 import SyncScreen from './screens/SyncScreen';
 import TaskEditorModal from './screens/TaskEditorModal';
@@ -67,6 +68,11 @@ function TasksStackNav() {
         component={TaskEditorModal}
         options={{ presentation: 'modal', title: t('mobile.newTaskLabel') }}
       />
+      <TasksStack.Screen
+        name="Search"
+        component={SearchScreen}
+        options={{ presentation: 'modal', title: t('dialogs.search.title') }}
+      />
     </TasksStack.Navigator>
   );
 }
@@ -99,6 +105,11 @@ function CalendarStackNav() {
         name="EventEditor"
         component={EventEditorModal}
         options={{ presentation: 'modal', title: t('dialogs.event.newTitle') }}
+      />
+      <CalendarStack.Screen
+        name="Search"
+        component={SearchScreen}
+        options={{ presentation: 'modal', title: t('dialogs.search.title') }}
       />
     </CalendarStack.Navigator>
   );

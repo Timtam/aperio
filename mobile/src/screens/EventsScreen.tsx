@@ -317,6 +317,14 @@ export default function EventsScreen({ navigation, route }: RootStackScreenProps
         </Pressable>
         <Pressable
           accessibilityRole="button"
+          accessibilityLabel={t('dialogs.search.title')}
+          onPress={() => navigation.navigate('Search')}
+          style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
+        >
+          <Text style={styles.ghostButtonText}>{t('toolbar.search')}</Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
           accessibilityState={{ disabled: firstCalendarId == null }}
           accessibilityLabel={t('toolbar.newEvent')}
           disabled={firstCalendarId == null}

@@ -184,6 +184,14 @@ declare class CalFfiModule extends NativeModule<Record<never, never>> {
     colorLabelId: string | null,
   ): Promise<void>;
 
+  // ── Search ──
+  /**
+   * Local full-text search over events + tasks; returns a JSON
+   * `SearchResults { events, tasks }`. `filtersJson` is a JSON `SearchFilters`
+   * or `''` for no filters.
+   */
+  searchJson(query: string, filtersJson: string): Promise<string>;
+
   // ── Contacts ──
   // JSON passthrough in the cal_core/desktop wire shape; routing (local vs
   // external account) happens Rust-side. Contacts are NOT on the sync event log.

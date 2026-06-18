@@ -460,6 +460,14 @@ export default function TasksScreen({
         >
           <Text style={styles.ghostButtonText}>{t('mobile.listsButtonLabel')}</Text>
         </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('dialogs.search.title')}
+          onPress={() => navigation.navigate('Search')}
+          style={({ pressed }) => [styles.ghostButton, pressed && styles.rowPressed]}
+        >
+          <Text style={styles.ghostButtonText}>{t('toolbar.search')}</Text>
+        </Pressable>
         {/* Calendar / Contacts / Settings are now bottom tabs, not toolbar
             buttons — the Tasks toolbar keeps only its own actions (Add + Lists). */}
       </View>
