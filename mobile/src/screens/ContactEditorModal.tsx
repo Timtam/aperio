@@ -5,6 +5,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -23,13 +24,15 @@ import { RadioGroup } from '../components/RadioGroup';
 import { useListFocusManager } from '../a11y/useListFocusManager';
 import type { RootStackScreenProps } from '../navigation/types';
 
-// Create / edit a contact. Screen-reader-first: every field is a labelled stop;
-// the address book is a radio group (no native select); emails + phone numbers
-// are comma-separated single fields (matching the desktop ContactDialog), which
-// is far less fiddly for a keyboard/SR user than per-value add/remove rows.
-// Postal addresses ARE editable (a dynamic list of structured rows, matching the
-// desktop ContactDialog; empty rows drop on save) + birthday. Photo + group
-// members still round-trip untouched (their pickers are deferred).
+// Create / edit a contact OR a distribution list (group). Screen-reader-first:
+// every field is a labelled stop; the address book is a radio group (no native
+// select); emails + phone numbers are comma-separated single fields (matching
+// the desktop ContactDialog), far less fiddly for a keyboard/SR user than
+// per-value rows. Postal addresses ARE editable (a dynamic list of structured
+// rows; empty rows drop on save) + birthday. A "distribution list" switch turns
+// the person fields into a members editor (one "Name <email>" / bare email per
+// line), exactly like the desktop. Photo still round-trips untouched (the picker
+// needs the not-yet-bridged photo methods).
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -41,6 +44,42 @@ function splitList(raw: string): string[] {
     .split(',')
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
+}
+
+/** One member of a distribution list (the cal_core GroupMember shape). */
+interface GroupMember {
+  name: string | null;
+  email: string;
+}
+
+/** Parse the members textarea into structured records — one per line, either
+ *  "Name <email>" (CN kept) or a bare email; lines without an "@" are skipped
+ *  (a member needs an email). Ported verbatim from the desktop ContactDialog. */
+function parseMembers(raw: string): GroupMember[] {
+  const out: GroupMember[] = [];
+  for (const line of raw.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const angle = trimmed.match(/^(.*?)\s*<\s*([^>]+?)\s*>\s*$/);
+    if (angle) {
+      const email = angle[2].trim();
+      if (email.includes('@')) out.push({ name: angle[1].trim() || null, email });
+      continue;
+    }
+    if (trimmed.includes('@')) out.push({ name: null, email: trimmed });
+  }
+  return out;
+}
+
+/** Members → the editable textarea text ("Name <email>" / bare email per line). */
+function formatMembers(members: unknown[] | null): string {
+  if (members == null) return '';
+  return members
+    .map((m) => {
+      const r = m as Partial<GroupMember>;
+      return r.name ? `${r.name} <${r.email ?? ''}>` : (r.email ?? '');
+    })
+    .join('\n');
 }
 
 /** Editable address row — all fields are strings (`''` = empty) so they bind to
@@ -117,6 +156,10 @@ export default function ContactEditorModal({
   const [birthday, setBirthday] = useState('');
   const [addresses, setAddresses] = useState<AddressRow[]>([]);
   const [notes, setNotes] = useState('');
+  // A distribution list (group) vs a person; when on, the person fields give way
+  // to a members editor. `members != null` marks a group on the wire.
+  const [isGroup, setIsGroup] = useState(false);
+  const [membersText, setMembersText] = useState('');
   const addressFocus = useListFocusManager(addresses.length);
   /** The loaded contact (edit mode) — kept whole so un-edited fields
    *  (addresses, members, photo, etag, birthday, timestamps) round-trip. */
@@ -151,6 +194,8 @@ export default function ContactEditorModal({
           setBirthday(found.birthday ?? '');
           setAddresses((found.addresses ?? []).map(toRow));
           setNotes(found.notes ?? '');
+          setIsGroup(found.members !== null);
+          setMembersText(formatMembers(found.members));
           setSelectedListId(found.list_id);
         }
       } catch (err) {
@@ -182,36 +227,44 @@ export default function ContactEditorModal({
     const org = organization.trim() || null;
     const note = notes.trim() || null;
     const birthdayValue = birthday.trim() || null;
-    const emails = splitList(emailsText);
-    const phones = splitList(phonesText);
-    const cleanedAddresses = sanitiseAddresses(addresses);
+    // A group carries members (and no person fields); a person carries the
+    // person fields and members: null. `members != null` is the wire marker.
+    const members = isGroup ? parseMembers(membersText) : null;
+    const emails = isGroup ? [] : splitList(emailsText);
+    const phones = isGroup ? [] : splitList(phonesText);
+    const cleanedAddresses = isGroup ? [] : sanitiseAddresses(addresses);
+    const personGiven = isGroup ? null : given;
+    const personFamily = isGroup ? null : family;
+    const personOrg = isGroup ? null : org;
+    const personBirthday = isGroup ? null : birthdayValue;
     try {
       if (editing && original) {
         await updateContact({
           ...original,
           list_id: selectedListId,
           display_name: name,
-          given_name: given,
-          family_name: family,
-          organization: org,
+          given_name: personGiven,
+          family_name: personFamily,
+          organization: personOrg,
           emails,
           phone_numbers: phones,
-          birthday: birthdayValue,
+          birthday: personBirthday,
           addresses: cleanedAddresses,
           notes: note,
+          members,
         });
       } else {
         await createContact(selectedListId, {
           display_name: name,
-          given_name: given,
-          family_name: family,
-          organization: org,
+          given_name: personGiven,
+          family_name: personFamily,
+          organization: personOrg,
           emails,
           phone_numbers: phones,
-          birthday: birthdayValue,
+          birthday: personBirthday,
           notes: note,
           addresses: cleanedAddresses,
-          members: null,
+          members,
           photo: null,
         });
       }
@@ -233,6 +286,8 @@ export default function ContactEditorModal({
     emailsText,
     familyName,
     givenName,
+    isGroup,
+    membersText,
     navigation,
     notes,
     organization,
@@ -285,7 +340,51 @@ export default function ContactEditorModal({
         />
       </Field>
 
-      <Field label={t('dialogs.contact.givenNameLabel')}>
+      {/* Distribution-list switch: turns the person fields into a members
+          editor (the wire marks a group by members != null). One switch node
+          for SR (the Pressable owns role/checked/label/tap; the inner Switch is
+          the visual indicator, hidden + non-interactive). */}
+      <Pressable
+        accessibilityRole="switch"
+        accessibilityState={{ checked: isGroup }}
+        accessibilityLabel={t('dialogs.contact.isGroupLabel')}
+        onPress={() => setIsGroup((v) => !v)}
+        style={({ pressed }) => [styles.switchRow, pressed && styles.pressed]}
+      >
+        <Text style={styles.switchLabel} importantForAccessibility="no">
+          {t('dialogs.contact.isGroupLabel')}
+        </Text>
+        <View pointerEvents="none">
+          <Switch
+            value={isGroup}
+            trackColor={{ false: '#c9d2e0', true: '#1d4ed8' }}
+            importantForAccessibility="no"
+            accessibilityElementsHidden
+          />
+        </View>
+      </Pressable>
+
+      {isGroup && (
+        <Field
+          label={t('dialogs.contact.membersLabel')}
+          hint={t('dialogs.contact.membersHint')}
+        >
+          <TextInput
+            style={[styles.input, styles.multiline]}
+            value={membersText}
+            onChangeText={setMembersText}
+            placeholder={t('dialogs.contact.membersPlaceholder')}
+            accessibilityLabel={t('dialogs.contact.membersLabel')}
+            autoCapitalize="none"
+            autoCorrect={false}
+            multiline
+          />
+        </Field>
+      )}
+
+      {!isGroup && (
+        <>
+          <Field label={t('dialogs.contact.givenNameLabel')}>
         <TextInput
           style={styles.input}
           value={givenName}
@@ -462,6 +561,8 @@ export default function ContactEditorModal({
           </Text>
         </Pressable>
       </View>
+        </>
+      )}
 
       <Field label={t('dialogs.contact.notesLabel')}>
         <TextInput
@@ -540,6 +641,19 @@ const styles = StyleSheet.create({
     backgroundColor: '#f8fafc',
   },
   multiline: { minHeight: 88, textAlignVertical: 'top' },
+  switchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#c9d2e0',
+    backgroundColor: '#f8fafc',
+  },
+  switchLabel: { flex: 1, fontSize: 16, color: '#10131a' },
   addressRow: {
     gap: 6,
     padding: 12,
