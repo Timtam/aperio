@@ -9,6 +9,7 @@ import type {
   TaskRecurrenceValue,
 } from '@aperio/shared';
 
+import { useListFocusManager } from '../a11y/useListFocusManager';
 import { RadioGroup } from './RadioGroup';
 
 // Mobile recurrence editor — faithful RN port of the desktop
@@ -254,10 +255,20 @@ function FixedDatesEditor({
   onChange: (next: TaskFixedDate[]) => void;
 }) {
   const { t } = useTranslation();
+  // Move SR focus to the new/sibling row after add/remove (RN won't on its own).
+  const { registerRow, registerAdd, onAdd, onRemove } = useListFocusManager(
+    value.length,
+  );
   const setAt = (i: number, patch: Partial<TaskFixedDate>) =>
     onChange(value.map((d, j) => (j === i ? { ...d, ...patch } : d)));
-  const removeAt = (i: number) => onChange(value.filter((_, j) => j !== i));
-  const add = () => onChange([...value, { month: 1, day: 1 }]);
+  const removeAt = (i: number) => {
+    onRemove(i);
+    onChange(value.filter((_, j) => j !== i));
+  };
+  const add = () => {
+    onAdd();
+    onChange([...value, { month: 1, day: 1 }]);
+  };
 
   return (
     <View style={styles.field}>
@@ -269,6 +280,7 @@ function FixedDatesEditor({
         // reordering, so position is a stable identity.
         <View key={i} style={styles.fixedRow}>
           <TextInput
+            ref={registerRow(i)}
             style={[styles.input, styles.fixedInput]}
             value={String(d.month)}
             onChangeText={(v) => setAt(i, { month: clampInt(v, 1, 12) })}
@@ -295,6 +307,7 @@ function FixedDatesEditor({
         </View>
       ))}
       <Pressable
+        ref={registerAdd}
         accessibilityRole="button"
         accessibilityLabel={t('dialogs.task.recurrence.fixedDateAdd')}
         onPress={add}

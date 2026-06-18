@@ -4,6 +4,7 @@ import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import type { Reminder } from '@aperio/shared';
 
+import { useListFocusManager, type RowRefCallback } from '../a11y/useListFocusManager';
 import { RadioGroup } from './RadioGroup';
 
 // Mobile reminders editor — faithful RN port of the desktop RemindersEditor in
@@ -82,17 +83,25 @@ export function RemindersEditor({
   onChange: (next: Reminder[]) => void;
 }) {
   const { t } = useTranslation();
+  // Move SR focus to the new/sibling row after add/remove (RN won't on its own).
+  const { registerRow, registerAdd, onAdd, onRemove } = useListFocusManager(
+    value.length,
+  );
   const update = (i: number, next: Reminder) => {
     const out = value.slice();
     out[i] = next;
     onChange(out);
   };
   const remove = (i: number) => {
+    onRemove(i);
     const out = value.slice();
     out.splice(i, 1);
     onChange(out);
   };
-  const add = () => onChange([...value, { ...DEFAULT_RELATIVE }]);
+  const add = () => {
+    onAdd();
+    onChange([...value, { ...DEFAULT_RELATIVE }]);
+  };
 
   return (
     <View style={styles.field}>
@@ -108,12 +117,14 @@ export function RemindersEditor({
             key={i}
             value={reminder}
             position={i + 1}
+            rowRef={registerRow(i)}
             onChange={(next) => update(i, next)}
             onRemove={() => remove(i)}
           />
         ))
       )}
       <Pressable
+        ref={registerAdd}
         accessibilityRole="button"
         accessibilityLabel={t('reminders.add')}
         onPress={add}
@@ -130,11 +141,14 @@ function ReminderRow({
   onChange,
   onRemove,
   position,
+  rowRef,
 }: {
   value: Reminder;
   onChange: (next: Reminder) => void;
   onRemove: () => void;
   position: number;
+  /** Focus target for the SR focus manager (the row's label). */
+  rowRef: RowRefCallback;
 }) {
   const { t } = useTranslation();
   // Local-store task reminders are relative/absolute/app_start; an email kind
@@ -148,7 +162,7 @@ function ReminderRow({
 
   return (
     <View style={styles.row}>
-      <Text style={styles.rowLabel} accessibilityRole="text">
+      <Text ref={rowRef} style={styles.rowLabel} accessibilityRole="text">
         {t('reminders.rowLabel', { n: position })}
       </Text>
 
