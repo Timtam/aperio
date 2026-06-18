@@ -658,23 +658,96 @@ plugin_sdk::declare_lifecycle! {
 // `TokenSet` as JSON bytes the host can persist into the
 // keychain.
 
+// The handler supports the desktop "full" loopback dance (no `phase`, the
+// historical contract — backward compatible) AND a host-driven split for
+// mobile: `phase:"authorize"` returns {authorize_url, pkce_verifier, state} for
+// the host to open in a native auth session; `phase:"exchange"` swaps the
+// returned code for tokens. The host holds verifier/state between the two
+// calls (the adapter is stateless across phases).
 #[derive(Debug, serde::Deserialize)]
 struct InteractiveAuthArgs {
     client_id: String,
-    client_secret: String,
+    /// Required for "full" + "exchange"; absent in "authorize".
+    #[serde(default)]
+    client_secret: Option<String>,
+    /// `"authorize"` | `"exchange"` | absent/`"full"` (desktop loopback).
+    #[serde(default)]
+    phase: Option<String>,
+    /// authorize + exchange: the caller-supplied redirect URI (mobile scheme).
+    #[serde(default)]
+    redirect_uri: Option<String>,
+    /// exchange: the auth code + the verifier/state from the authorize phase.
+    #[serde(default)]
+    code: Option<String>,
+    #[serde(default)]
+    pkce_verifier: Option<String>,
+    #[serde(default)]
+    state: Option<String>,
+    #[serde(default)]
+    returned_state: Option<String>,
 }
 
 async fn plugin_interactive_auth(args_json: String) -> Result<Vec<u8>, String> {
     let args: InteractiveAuthArgs = serde_json::from_str(&args_json)
         .map_err(|e| format!("malformed interactive_auth args: {e}"))?;
-    if args.client_id.trim().is_empty() || args.client_secret.trim().is_empty() {
-        return Err("client_id and client_secret must not be empty".to_string());
+    let client_id = args.client_id.trim();
+    if client_id.is_empty() {
+        return Err("client_id must not be empty".to_string());
     }
-    let tokens =
-        GoogleAdapter::authenticate_interactive(args.client_id.trim(), args.client_secret.trim())
+    match args.phase.as_deref() {
+        Some("authorize") => {
+            let redirect_uri = args
+                .redirect_uri
+                .ok_or_else(|| "redirect_uri is required in the authorize phase".to_string())?;
+            let authz = GoogleAdapter::oauth_authorize(client_id, &redirect_uri)
+                .map_err(|e| format!("Google authorize: {e}"))?;
+            serde_json::to_vec(&authz).map_err(|e| format!("serialise authorize response: {e}"))
+        }
+        Some("exchange") => {
+            let secret = args
+                .client_secret
+                .ok_or_else(|| "client_secret is required in the exchange phase".to_string())?;
+            let code = args
+                .code
+                .ok_or_else(|| "code is required in the exchange phase".to_string())?;
+            let verifier = args
+                .pkce_verifier
+                .ok_or_else(|| "pkce_verifier is required in the exchange phase".to_string())?;
+            let redirect_uri = args
+                .redirect_uri
+                .ok_or_else(|| "redirect_uri is required in the exchange phase".to_string())?;
+            // CSRF: the redirect's `state` must match the one issued at authorize.
+            match (args.state.as_deref(), args.returned_state.as_deref()) {
+                (Some(issued), Some(returned)) if issued != returned => {
+                    return Err("OAuth state mismatch (possible CSRF) — aborting".to_string());
+                }
+                _ => {}
+            }
+            let tokens = GoogleAdapter::oauth_exchange(
+                client_id,
+                secret.trim(),
+                code.trim(),
+                verifier.trim(),
+                &redirect_uri,
+            )
             .await
-            .map_err(|e| format!("Google OAuth: {e}"))?;
-    serde_json::to_vec(&tokens).map_err(|e| format!("serialise TokenSet: {e}"))
+            .map_err(|e| format!("Google exchange: {e}"))?;
+            serde_json::to_vec(&tokens).map_err(|e| format!("serialise TokenSet: {e}"))
+        }
+        None | Some("full") => {
+            let secret = args
+                .client_secret
+                .ok_or_else(|| "client_secret must not be empty".to_string())?;
+            if secret.trim().is_empty() {
+                return Err("client_id and client_secret must not be empty".to_string());
+            }
+            let tokens = GoogleAdapter::authenticate_interactive(client_id, secret.trim())
+                .await
+                .map_err(|e| format!("Google OAuth: {e}"))?;
+            serde_json::to_vec(&tokens).map_err(|e| format!("serialise TokenSet: {e}"))
+        }
+        Some(other) => Err(format!("unknown interactive_auth phase: {other}")),
+    }
 }
 
 plugin_sdk::declare_interactive_auth! {
