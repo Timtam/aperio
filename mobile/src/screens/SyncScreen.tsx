@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
+  Alert,
   findNodeHandle,
   Pressable,
   ScrollView,
@@ -446,30 +447,52 @@ export default function SyncScreen() {
     }
   }, [announce, refresh, t]);
 
-  // Enable E2E on the configured target (§19.7) — irreversible without the
-  // passphrase. Mints + stores the device-local key and encrypts from here on.
-  const enableE2e = useCallback(async () => {
+  // The async work behind enabling E2E (§19.7): mint + store the device-local
+  // key and encrypt from here on. Split out from the confirmation gate so the
+  // irreversible step only runs after the user confirms the warning dialog.
+  const runEnableE2e = useCallback(
+    async (pp: string) => {
+      setError(null);
+      setBusy(true);
+      try {
+        await enableSyncEncryption(pp);
+        setE2ePassphrase('');
+        await refresh();
+        announce(t('dialogs.settings.sync.e2eActive'));
+      } catch (err) {
+        const message = errorMessage(err);
+        setError(message);
+        announce(t('mobile.error', { message }));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [announce, refresh, t],
+  );
+
+  // Enable E2E on the configured target — irreversible without the passphrase,
+  // so we gate the mint behind an explicit confirmation (the Alert is
+  // screen-reader-accessible and moves focus to itself, restating the warning).
+  const enableE2e = useCallback(() => {
     const pp = e2ePassphrase.trim();
     if (pp.length === 0) {
       setError(t('dialogs.settings.sync.e2ePassphraseRequired'));
       announce(t('dialogs.settings.sync.e2ePassphraseRequired'));
       return;
     }
-    setError(null);
-    setBusy(true);
-    try {
-      await enableSyncEncryption(pp);
-      setE2ePassphrase('');
-      await refresh();
-      announce(t('dialogs.settings.sync.e2eActive'));
-    } catch (err) {
-      const message = errorMessage(err);
-      setError(message);
-      announce(t('mobile.error', { message }));
-    } finally {
-      setBusy(false);
-    }
-  }, [announce, e2ePassphrase, refresh, t]);
+    Alert.alert(
+      t('dialogs.settings.sync.e2eEnableLabel'),
+      t('dialogs.settings.sync.e2eIrreversibleWarning'),
+      [
+        { text: t('dialogs.confirm.cancel'), style: 'cancel' },
+        {
+          text: t('dialogs.settings.sync.e2eEnableConfirm'),
+          style: 'destructive',
+          onPress: () => void runEnableE2e(pp),
+        },
+      ],
+    );
+  }, [announce, e2ePassphrase, runEnableE2e, t]);
 
   const lastSynced =
     status?.last_synced_at != null
@@ -540,7 +563,11 @@ export default function SyncScreen() {
       {/* End-to-end encryption (§19.7) — only meaningful once a target is set. */}
       {status?.configured &&
         (status.e2e_enabled ? (
-          <Text style={styles.status} accessibilityRole="text">
+          <Text
+            style={styles.status}
+            accessibilityRole="text"
+            accessibilityLiveRegion="polite"
+          >
             {t('dialogs.settings.sync.e2eActive')}
           </Text>
         ) : (
@@ -571,7 +598,7 @@ export default function SyncScreen() {
               accessibilityState={{ disabled: busy }}
               accessibilityLabel={t('dialogs.settings.sync.e2eEnableLabel')}
               disabled={busy}
-              onPress={() => void enableE2e()}
+              onPress={enableE2e}
               style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
             >
               <Text style={styles.ghostButtonText}>

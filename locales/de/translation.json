@@ -738,6 +738,7 @@
         "e2eEnableHint": "Alle Log-Dateien und Snapshots werden mit AES-256-GCM verschlüsselt, bevor sie das Gerät verlassen. Der Speicher sieht nur verschlüsselte Blobs.",
         "e2ePassphrase": "Passwort",
         "e2eIrreversibleWarning": "Achtung: Ohne dieses Passwort sind die Daten nicht wiederherstellbar. Notiere es an einem sicheren Ort.",
+        "e2eEnableConfirm": "Jetzt verschlüsseln",
         "e2ePassphraseRequired": "Bitte zuerst ein Passwort eingeben.",
         "e2eRemoteRequiresPassphrase": "Dieser Datensatz ist verschlüsselt. Gib das Passwort ein, um die Daten dieses Geräts freizuschalten.",
         "passphraseChangeTitle": "Passphrase ändern",

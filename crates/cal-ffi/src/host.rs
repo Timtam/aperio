@@ -519,6 +519,47 @@ impl Host {
             .is_none_or(|a| a == LOCAL_ID)
     }
 
+    /// E2E gate for a freshly-built sync adapter, run between `test_connection`
+    /// and `orchestrator.configure` in every configure arm (mirrors the desktop
+    /// `configure_sync_adapter`, src-tauri/src/commands/sync.rs). Inspect the
+    /// target's `meta.json`: when it's an end-to-end-encrypted dataset, wrap the
+    /// adapter in `EncryptingAdapter` with this device's data key. We do NOT
+    /// re-derive the key here (that needs the passphrase) — if the target is
+    /// encrypted but this device holds no key, we REFUSE rather than configure a
+    /// plaintext adapter against an encrypted dataset (which would push readable
+    /// logs into it and corrupt/leak the dataset). The passphrase-join flow is
+    /// the only way to obtain the key for a foreign encrypted target. Keeps
+    /// `PREF_E2E_ENABLED` in step with what the target actually is, so the next
+    /// boot's restore wraps (or doesn't) to match.
+    fn wrap_for_target(
+        &self,
+        adapter: Arc<dyn SyncAdapter>,
+    ) -> Result<Arc<dyn SyncAdapter>, StoreError> {
+        let meta = self
+            .runtime
+            .block_on(async { adapter.fetch_meta().await })
+            .map_err(sync_err)?;
+        let e2e_target = meta.as_ref().map(|m| m.e2e_enabled).unwrap_or(false);
+        let shared = self.db.shared();
+        let prefs = UserPrefsRepo::new(&shared);
+        if e2e_target {
+            let key = load_e2e_key(self.secret_store.as_ref()).ok_or_else(|| StoreError::Auth {
+                detail: "this sync target is end-to-end encrypted; join it with the \
+                         passphrase on this device before configuring it"
+                    .to_string(),
+            })?;
+            prefs
+                .set(host_core::credential_sync::PREF_E2E_ENABLED, "true")
+                .map_err(storage_err)?;
+            Ok(wrap_if_encrypted(adapter, Some(key)))
+        } else {
+            // Plaintext target: clear any stale "encrypted" flag from a prior
+            // target so boot-time restore doesn't wrap a plaintext adapter.
+            let _ = prefs.delete(host_core::credential_sync::PREF_E2E_ENABLED);
+            Ok(adapter)
+        }
+    }
+
     /// Task-list twin of [`Host::route`]: `None` is the local branch (the
     /// `LocalAdapter`), `Some(ext)` an external task provider. An unknown id is
     /// treated as local (the desktop `account_for_task_list().unwrap_or(LOCAL)`
@@ -1748,6 +1789,24 @@ impl Host {
             field: "sync".to_string(),
             detail: "configure a sync target before enabling encryption".to_string(),
         })?;
+        // Refuse to "start a fresh encrypted dataset" on a target that already
+        // holds data: adopt_local overwrites `meta.json`, which would orphan the
+        // existing dataset and strand every other device pointed at it. Joining
+        // an existing dataset is the passphrase-join path (a later phase), NOT
+        // this one. Probing here also surfaces an unreachable target before we
+        // burn CPU deriving the Argon2 KEK below.
+        let existing = self
+            .runtime
+            .block_on(async { plain.fetch_meta().await })
+            .map_err(sync_err)?;
+        if existing.is_some() {
+            return Err(StoreError::Unsupported {
+                detail: "this sync target already has data; enabling encryption from \
+                         mobile is only supported on a fresh target — enable it on the \
+                         desktop, then join here with the passphrase"
+                    .to_string(),
+            });
+        }
         // Mint v2 material: fresh DEK + a KEK from the passphrase + fresh params;
         // wrap the DEK and record it in the params written to meta.json.
         let mut params = EncryptionParams::fresh();
@@ -1769,6 +1828,13 @@ impl Host {
         self.orchestrator.configure(adapter);
         // Persist the key FIRST, then the flag — so a failure can't leave the
         // flag set with no key (which would refuse to sync on the next boot).
+        // The reverse window (adopt_local wrote the encrypted meta, but
+        // store_e2e_key fails before the key lands) self-heals: the next
+        // configure runs `wrap_for_target`, sees the E2E meta, and — if the key
+        // is present — re-wraps + sets the flag; if the key never landed the
+        // dataset is unrecoverable, the same failure mode as the desktop, which
+        // is why the key write is the very next step after adopt. Faithful to
+        // the desktop `enable_sync_encryption` ordering.
         store_e2e_key(self.secret_store.as_ref(), &dek)?;
         prefs
             .set(host_core::credential_sync::PREF_E2E_ENABLED, "true")
@@ -1978,6 +2044,7 @@ impl Host {
                 self.runtime
                     .block_on(async { adapter.test_connection().await })
                     .map_err(sync_err)?;
+                let adapter = self.wrap_for_target(adapter)?;
                 self.orchestrator.configure(adapter);
                 let shared = self.db.shared();
                 let prefs = UserPrefsRepo::new(&shared);
@@ -2027,6 +2094,7 @@ impl Host {
                 self.runtime
                     .block_on(async { adapter.test_connection().await })
                     .map_err(sync_err)?;
+                let adapter = self.wrap_for_target(adapter)?;
                 self.orchestrator.configure(adapter);
                 let shared = self.db.shared();
                 let prefs = UserPrefsRepo::new(&shared);
@@ -2100,6 +2168,7 @@ impl Host {
                 self.runtime
                     .block_on(async { adapter.test_connection().await })
                     .map_err(sync_err)?;
+                let adapter = self.wrap_for_target(adapter)?;
                 self.orchestrator.configure(adapter);
                 let shared = self.db.shared();
                 let prefs = UserPrefsRepo::new(&shared);
@@ -2153,6 +2222,7 @@ impl Host {
                 self.runtime
                     .block_on(async { adapter.test_connection().await })
                     .map_err(sync_err)?;
+                let adapter = self.wrap_for_target(adapter)?;
                 self.orchestrator.configure(adapter);
                 let shared = self.db.shared();
                 let prefs = UserPrefsRepo::new(&shared);
@@ -2207,6 +2277,7 @@ impl Host {
                 self.runtime
                     .block_on(async { adapter.test_connection().await })
                     .map_err(sync_err)?;
+                let adapter = self.wrap_for_target(adapter)?;
                 self.orchestrator.configure(adapter);
                 let shared = self.db.shared();
                 let prefs = UserPrefsRepo::new(&shared);
@@ -2335,6 +2406,7 @@ impl Host {
                 self.runtime
                     .block_on(async { adapter.test_connection().await })
                     .map_err(sync_err)?;
+                let adapter = self.wrap_for_target(adapter)?;
                 self.orchestrator.configure(adapter);
                 let prefs = UserPrefsRepo::new(&shared);
                 prefs.set(PREF_ADAPTER_KIND, "sftp").map_err(storage_err)?;
@@ -3615,6 +3687,117 @@ mod tests {
         assert_eq!(status2["e2e_enabled"], serde_json::json!(true));
         // Decrypts the previously-pushed (own) logs without error.
         host2.sync_now_json().unwrap();
+    }
+
+    #[test]
+    fn reconfiguring_an_e2e_target_keeps_it_encrypted() {
+        use std::fs;
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir
+            .path()
+            .join("aperio.sqlite")
+            .to_string_lossy()
+            .into_owned();
+        let remote = tempfile::tempdir().unwrap();
+        let cfg = format!(
+            r#"{{"kind":"local","path":{}}}"#,
+            serde_json::to_string(&remote.path().to_string_lossy()).unwrap()
+        );
+        let kc = Arc::new(FakeKeychain::default());
+        const TITLE1: &str = "FirstSecretMeeting";
+        const TITLE2: &str = "SecondSecretMeeting";
+
+        let host = Host::open(db_path, kc as Arc<dyn KeychainBridge>).unwrap();
+        host.configure_sync_adapter_json(cfg.clone()).unwrap();
+        let cal = calendar_id(
+            &host
+                .create_calendar_json(r#"{"name":"Secret"}"#.to_string())
+                .unwrap(),
+        );
+        host.create_event_json(new_event_json(&cal, TITLE1))
+            .unwrap();
+        host.enable_sync_encryption_json("correct horse battery".to_string())
+            .unwrap();
+        wait_for_pending(&dir);
+        host.sync_now_json().unwrap();
+
+        // Re-point at the SAME (now-encrypted) target — the regression guard:
+        // wrap_for_target must read the target meta, see it's E2E, and re-wrap
+        // with the device-local key. Before the fix this configured a PLAINTEXT
+        // adapter, leaking every subsequent log into the encrypted dataset.
+        host.configure_sync_adapter_json(cfg).unwrap();
+        let status: serde_json::Value =
+            serde_json::from_str(&host.sync_status_json().unwrap()).unwrap();
+        assert_eq!(
+            status["e2e_enabled"],
+            serde_json::json!(true),
+            "reconfiguring an encrypted target must keep it encrypted"
+        );
+
+        // A fresh event pushed AFTER the reconfigure must also be ciphertext.
+        host.create_event_json(new_event_json(&cal, TITLE2))
+            .unwrap();
+        wait_for_pending(&dir);
+        host.sync_now_json().unwrap();
+
+        fn collect(dir: &std::path::Path, out: &mut Vec<u8>) {
+            for entry in fs::read_dir(dir).unwrap().flatten() {
+                let p = entry.path();
+                if p.is_dir() {
+                    collect(&p, &mut *out);
+                } else if let Ok(bytes) = fs::read(&p) {
+                    out.extend_from_slice(&bytes);
+                }
+            }
+        }
+        let mut all = Vec::new();
+        collect(remote.path(), &mut all);
+        for title in [TITLE1, TITLE2] {
+            assert!(
+                !all.windows(title.len()).any(|w| w == title.as_bytes()),
+                "{title} leaked in plaintext on the E2E target after a reconfigure",
+            );
+        }
+    }
+
+    #[test]
+    fn enable_e2e_refuses_a_populated_target() {
+        let remote = tempfile::tempdir().unwrap();
+        let cfg = format!(
+            r#"{{"kind":"local","path":{}}}"#,
+            serde_json::to_string(&remote.path().to_string_lossy()).unwrap()
+        );
+
+        // Device A seeds the target with a plaintext dataset (writes meta.json +
+        // logs) so the target is no longer "fresh".
+        let dir_a = tempfile::tempdir().unwrap();
+        let host_a = open_named(&dir_a, "a");
+        host_a.configure_sync_adapter_json(cfg.clone()).unwrap();
+        let cal = calendar_id(
+            &host_a
+                .create_calendar_json(r#"{"name":"Shared"}"#.to_string())
+                .unwrap(),
+        );
+        host_a
+            .create_event_json(new_event_json(&cal, "Standup"))
+            .unwrap();
+        wait_for_pending(&dir_a);
+        host_a.sync_now_json().unwrap();
+
+        // Device B points at the same populated target — plaintext, so the
+        // configure succeeds — and tries to "start a fresh encrypted dataset".
+        // adopt_local would overwrite meta.json and orphan device A's data, so
+        // it must be refused; joining via the passphrase is the only way in.
+        let dir_b = tempfile::tempdir().unwrap();
+        let host_b = open_named(&dir_b, "b");
+        host_b.configure_sync_adapter_json(cfg).unwrap();
+        let err = host_b
+            .enable_sync_encryption_json("correct horse battery".to_string())
+            .unwrap_err();
+        assert!(
+            matches!(err, StoreError::Unsupported { .. }),
+            "enabling E2E on a populated target must be refused; got: {err:?}"
+        );
     }
 
     #[test]
