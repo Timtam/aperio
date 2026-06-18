@@ -83,6 +83,15 @@ export default function SyncScreen() {
   const [preview, setPreview] = useState<SyncPreview | null>(null);
   const [joinPassphrase, setJoinPassphrase] = useState(''); // join-existing E2E passphrase
   const [joinDeviceName, setJoinDeviceName] = useState(''); // optional name for meta.json
+  // Latest preview, readable inside the invalidation effect WITHOUT making
+  // `preview` a dep (which would re-run + clear it in a loop). Lets the effect
+  // announce "the check is now stale" only when one was actually showing.
+  const previewRef = useRef<SyncPreview | null>(null);
+  previewRef.current = preview;
+  // The join-panel title — SR focus lands here when the panel appears (mirrors
+  // the SFTP trust panel) so the blind user reaches the passphrase/Adopt controls
+  // instead of being stranded on the "Check existing dataset" button.
+  const joinPanelRef = useRef<Text>(null);
   // When set, the §19.5 trust panel is showing the probed fingerprint awaiting
   // the user's explicit accept (first-use or key-change) before connect.
   const [pendingTrust, setPendingTrust] = useState<HostKeyPreview | null>(null);
@@ -240,13 +249,29 @@ export default function SyncScreen() {
     }
   }, [announce, buildConfig, refresh, t]);
 
-  // A stale preview (from a different kind/target) would mislead — drop it when
-  // the kind changes so the join panel never reflects the wrong target.
+  // A stale preview would mislead — the join panel renders entirely from the
+  // probed `preview`, but `joinTarget` joins the CURRENT `buildConfig()`. So
+  // drop the preview whenever ANY field feeding the config changes (not just the
+  // kind), forcing a re-check against the new target; announce it so the blind
+  // user learns the previous result no longer applies. The backend re-derives
+  // anyway, but this keeps the panel + the join atomic w.r.t. the live config.
   useEffect(() => {
+    if (previewRef.current != null) {
+      announce(t('mobile.syncPreviewStale'));
+    }
     setPreview(null);
     setJoinPassphrase('');
     setJoinDeviceName('');
-  }, [kind]);
+  }, [kind, path, url, host, port, ftpPath, mode, user, password, announce, t]);
+
+  // Move SR focus onto the join panel when it appears (the §19.11 onboarding
+  // twin of the trust-panel focus handling) so the blind user lands on the new
+  // controls rather than hunting downward from the Check button.
+  useEffect(() => {
+    if (preview?.kind !== 'existing') return;
+    const tag = joinPanelRef.current ? findNodeHandle(joinPanelRef.current) : null;
+    if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
+  }, [preview]);
 
   // Render the known-devices list for the §19.11 preview, marking this device.
   const summariseDevices = useCallback(
@@ -1217,7 +1242,7 @@ export default function SyncScreen() {
 
           {preview?.kind === 'existing' && (
             <View style={styles.field}>
-              <Text style={styles.label} accessibilityRole="header">
+              <Text ref={joinPanelRef} style={styles.label} accessibilityRole="header">
                 {t('dialogs.settings.sync.previewAcceptTitle')}
               </Text>
               <Text

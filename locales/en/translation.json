@@ -81,6 +81,7 @@
     "oauthNoCode": "The sign-in did not return an authorization code. Please try again.",
     "sftpFieldsRequired": "Please enter the host, username and path.",
     "syncFieldsRequired": "Please fill in the required fields first.",
+    "syncPreviewStale": "Target changed — check the dataset again before joining.",
     "sftpTrustCancelled": "Cancelled. The pinned host key was left unchanged."
   },
   "common": {
