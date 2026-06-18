@@ -952,9 +952,11 @@ public protocol HostProtocol: AnyObject, Sendable {
      * the sync event); an EXTERNAL container's rename is pushed to its provider
      * first and, only if the provider declares it `Unsupported`, falls back to a
      * host-local name override (cleared on a successful provider rename so the
-     * source name stays the single truth). A contact list has no source-rename
-     * path, so it always lands as an override. `kind` is `"calendar"` |
-     * `"task_list"` | `"contact_list"`.
+     * source name stays the single truth). A contact list renames its own row
+     * at the source instead — the local store or the provider (every adapter
+     * implements `rename_contact_list`); contacts aren't event-logged, so there
+     * is no sync event or override. `kind` is `"calendar"` | `"task_list"` |
+     * `"contact_list"`.
      */
     func renameContainer(containerId: String, kind: String, name: String) throws 
     
@@ -1918,9 +1920,11 @@ open func pushNow()throws  -> UInt32  {
      * the sync event); an EXTERNAL container's rename is pushed to its provider
      * first and, only if the provider declares it `Unsupported`, falls back to a
      * host-local name override (cleared on a successful provider rename so the
-     * source name stays the single truth). A contact list has no source-rename
-     * path, so it always lands as an override. `kind` is `"calendar"` |
-     * `"task_list"` | `"contact_list"`.
+     * source name stays the single truth). A contact list renames its own row
+     * at the source instead — the local store or the provider (every adapter
+     * implements `rename_contact_list`); contacts aren't event-logged, so there
+     * is no sync event or override. `kind` is `"calendar"` | `"task_list"` |
+     * `"contact_list"`.
      */
 open func renameContainer(containerId: String, kind: String, name: String)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
     uniffi_cal_ffi_fn_method_host_rename_container(
@@ -5653,7 +5657,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_push_now() != 48331) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_cal_ffi_checksum_method_host_rename_container() != 61596) {
+    if (uniffi_cal_ffi_checksum_method_host_rename_container() != 11246) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_reparent_task_list_json() != 49367) {

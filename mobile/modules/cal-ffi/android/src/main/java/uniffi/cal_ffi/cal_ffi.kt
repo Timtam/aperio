@@ -1416,7 +1416,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_push_now() != 48331.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_cal_ffi_checksum_method_host_rename_container() != 61596.toShort()) {
+    if (lib.uniffi_cal_ffi_checksum_method_host_rename_container() != 11246.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_reparent_task_list_json() != 49367.toShort()) {
@@ -2347,9 +2347,11 @@ public interface HostInterface {
      * the sync event); an EXTERNAL container's rename is pushed to its provider
      * first and, only if the provider declares it `Unsupported`, falls back to a
      * host-local name override (cleared on a successful provider rename so the
-     * source name stays the single truth). A contact list has no source-rename
-     * path, so it always lands as an override. `kind` is `"calendar"` |
-     * `"task_list"` | `"contact_list"`.
+     * source name stays the single truth). A contact list renames its own row
+     * at the source instead — the local store or the provider (every adapter
+     * implements `rename_contact_list`); contacts aren't event-logged, so there
+     * is no sync event or override. `kind` is `"calendar"` | `"task_list"` |
+     * `"contact_list"`.
      */
     fun `renameContainer`(`containerId`: kotlin.String, `kind`: kotlin.String, `name`: kotlin.String)
     
@@ -3552,9 +3554,11 @@ open class Host: Disposable, AutoCloseable, HostInterface
      * the sync event); an EXTERNAL container's rename is pushed to its provider
      * first and, only if the provider declares it `Unsupported`, falls back to a
      * host-local name override (cleared on a successful provider rename so the
-     * source name stays the single truth). A contact list has no source-rename
-     * path, so it always lands as an override. `kind` is `"calendar"` |
-     * `"task_list"` | `"contact_list"`.
+     * source name stays the single truth). A contact list renames its own row
+     * at the source instead — the local store or the provider (every adapter
+     * implements `rename_contact_list`); contacts aren't event-logged, so there
+     * is no sync event or override. `kind` is `"calendar"` | `"task_list"` |
+     * `"contact_list"`.
      */
     @Throws(StoreException::class)override fun `renameContainer`(`containerId`: kotlin.String, `kind`: kotlin.String, `name`: kotlin.String)
         = 
