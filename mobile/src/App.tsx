@@ -7,6 +7,8 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useSyncTriggers } from './api/syncTriggers';
 import type { RootStackParamList } from './navigation/types';
 import AccountsScreen from './screens/AccountsScreen';
+import ContactEditorModal from './screens/ContactEditorModal';
+import ContactsScreen from './screens/ContactsScreen';
 import EventEditorModal from './screens/EventEditorModal';
 import EventsScreen from './screens/EventsScreen';
 import ListsScreen from './screens/ListsScreen';
@@ -80,6 +82,16 @@ export default function App() {
               name="Settings"
               component={SettingsScreen}
               options={{ title: t('dialogs.settings.title') }}
+            />
+            <Stack.Screen
+              name="Contacts"
+              component={ContactsScreen}
+              options={{ title: t('sidebar.contactLists') }}
+            />
+            <Stack.Screen
+              name="ContactEditor"
+              component={ContactEditorModal}
+              options={{ presentation: 'modal', title: t('dialogs.contact.createTitle') }}
             />
             <Stack.Screen
               name="TaskEditor"

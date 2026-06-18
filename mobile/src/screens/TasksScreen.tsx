@@ -412,6 +412,14 @@ export default function TasksScreen({
         </Pressable>
         <Pressable
           accessibilityRole="button"
+          accessibilityLabel={t('sidebar.contactLists')}
+          onPress={() => navigation.navigate('Contacts')}
+          style={({ pressed }) => [styles.ghostButton, pressed && styles.rowPressed]}
+        >
+          <Text style={styles.ghostButtonText}>{t('sidebar.contactLists')}</Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
           accessibilityLabel={t('dialogs.settings.title')}
           onPress={() => navigation.navigate('Settings')}
           style={({ pressed }) => [styles.ghostButton, pressed && styles.rowPressed]}

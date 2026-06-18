@@ -54,6 +54,8 @@
     "nextDay": "Nächster Tag",
     "today": "Heute",
     "noEvents": "Keine Termine an diesem Tag.",
+    "noContacts": "Noch keine Kontakte.",
+    "contactHint": "Doppeltippen zum Bearbeiten. Nach oben oder unten wischen zum Löschen.",
     "eventsLoading": "Termine werden geladen …",
     "allDay": "Ganztägig",
     "showingDate": "Termine am {{date}}",

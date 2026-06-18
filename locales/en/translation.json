@@ -54,6 +54,8 @@
     "nextDay": "Next day",
     "today": "Today",
     "noEvents": "No events on this day.",
+    "noContacts": "No contacts yet.",
+    "contactHint": "Double-tap to edit. Swipe up or down to delete.",
     "eventsLoading": "Loading events …",
     "allDay": "All day",
     "showingDate": "Events on {{date}}",
