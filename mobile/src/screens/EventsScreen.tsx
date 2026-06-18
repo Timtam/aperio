@@ -8,6 +8,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 
@@ -60,6 +61,9 @@ export default function EventsScreen({ navigation }: RootStackScreenProps<'Event
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // "Jump to date" field (YYYY-MM-DD) — navigate straight to a far-off day
+  // instead of stepping prev/next.
+  const [jumpText, setJumpText] = useState('');
 
   // Lookup tables for resolving each event's rendered colour (event label →
   // unmapped native colour → owning calendar's colour), rebuilt only when the
@@ -161,6 +165,20 @@ export default function EventsScreen({ navigation }: RootStackScreenProps<'Event
     setDay(new Date(now.getFullYear(), now.getMonth(), now.getDate()));
   }, []);
 
+  const jumpToDate = useCallback(() => {
+    const raw = jumpText.trim();
+    if (raw === '') return;
+    const parsed = new Date(`${raw}T00:00`);
+    if (Number.isNaN(parsed.getTime())) {
+      setError(t('dialogs.event.dateInvalid'));
+      announce(t('dialogs.event.dateInvalid'));
+      return;
+    }
+    setError(null);
+    setJumpText('');
+    setDay(new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate()));
+  }, [announce, jumpText, t]);
+
   const firstCalendarId = calendars[0]?.id ?? null;
 
   const addEvent = useCallback(() => {
@@ -240,6 +258,30 @@ export default function EventsScreen({ navigation }: RootStackScreenProps<'Event
           style={({ pressed }) => [styles.navButton, pressed && styles.pressed]}
         >
           <Text style={styles.navButtonText}>›</Text>
+        </Pressable>
+      </View>
+
+      {/* Jump straight to a date (YYYY-MM-DD) — submit on the field or the
+          button; an unparseable date surfaces the inline error. */}
+      <View style={styles.jumpBar}>
+        <TextInput
+          style={styles.jumpInput}
+          value={jumpText}
+          onChangeText={setJumpText}
+          placeholder="YYYY-MM-DD"
+          accessibilityLabel={t('mobile.jumpToDate')}
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="go"
+          onSubmitEditing={jumpToDate}
+        />
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('mobile.jumpToDateAction')}
+          onPress={jumpToDate}
+          style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
+        >
+          <Text style={styles.ghostButtonText}>{t('mobile.jumpToDateAction')}</Text>
         </Pressable>
       </View>
 
@@ -383,6 +425,24 @@ const styles = StyleSheet.create({
     backgroundColor: '#f4f7fb',
   },
   navButtonText: { fontSize: 26, color: '#10131a', lineHeight: 30 },
+  jumpBar: {
+    flexDirection: 'row',
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingTop: 12,
+    alignItems: 'center',
+  },
+  jumpInput: {
+    flex: 1,
+    fontSize: 16,
+    color: '#10131a',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#c9d2e0',
+    backgroundColor: '#f8fafc',
+  },
   actionBar: { flexDirection: 'row', gap: 10, padding: 12, alignItems: 'center' },
   ghostButton: {
     paddingVertical: 12,
