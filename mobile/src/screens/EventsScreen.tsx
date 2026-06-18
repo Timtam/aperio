@@ -23,6 +23,7 @@ import {
   listCalendars,
 } from '../api/calendar';
 import { listColorLabels } from '../api/colorLabels';
+import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
 import { resolveEventColor } from '../intl/eventColor';
 import type { RootStackScreenProps } from '../navigation/types';
 
@@ -48,13 +49,16 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-export default function EventsScreen({ navigation }: RootStackScreenProps<'Events'>) {
+export default function EventsScreen({ navigation, route }: RootStackScreenProps<'Events'>) {
   const { t, i18n } = useTranslation();
 
   // The selected day at local midnight (date-only semantics for the heading).
+  // Seeded from the Day⇄Agenda switcher's `anchor` param so switching keeps the
+  // date, else today.
   const [day, setDay] = useState(() => {
-    const now = new Date();
-    return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const seed = route.params?.anchor ? new Date(route.params.anchor) : new Date();
+    const base = Number.isNaN(seed.getTime()) ? new Date() : seed;
+    return new Date(base.getFullYear(), base.getMonth(), base.getDate());
   });
   const [calendars, setCalendars] = useState<Calendar[]>([]);
   const [colorLabels, setColorLabels] = useState<ColorLabel[]>([]);
@@ -238,6 +242,12 @@ export default function EventsScreen({ navigation }: RootStackScreenProps<'Event
 
   return (
     <View style={styles.screen}>
+      <CalendarViewSwitcher
+        active="day"
+        onDay={() => {}}
+        onAgenda={() => navigation.navigate('Agenda', { anchor: day.toISOString() })}
+      />
+
       {/* Day navigation */}
       <View style={styles.dayBar}>
         <Pressable

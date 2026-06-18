@@ -13,6 +13,7 @@ import AccountsScreen from './screens/AccountsScreen';
 import ContactEditorModal from './screens/ContactEditorModal';
 import ColorLabelsScreen from './screens/ColorLabelsScreen';
 import ContactsScreen from './screens/ContactsScreen';
+import AgendaScreen from './screens/AgendaScreen';
 import EventEditorModal from './screens/EventEditorModal';
 import EventsScreen from './screens/EventsScreen';
 import ListEditorModal from './screens/ListEditorModal';
@@ -76,6 +77,11 @@ function CalendarStackNav() {
         name="Events"
         component={EventsScreen}
         options={{ title: t('mobile.eventsTitle') }}
+      />
+      <CalendarStack.Screen
+        name="Agenda"
+        component={AgendaScreen}
+        options={{ title: t('views.agenda.title') }}
       />
       <CalendarStack.Screen
         name="EventEditor"

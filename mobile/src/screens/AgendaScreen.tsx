@@ -1,0 +1,529 @@
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
+import {
+  AccessibilityInfo,
+  Alert,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+
+import type { ColorLabel, DayOccurrence, MultiDayInfo } from '@aperio/shared';
+import { expandAll, expandToDayOccurrences, localDateKey, seriesIdOf } from '@aperio/shared';
+
+import {
+  Calendar,
+  CalendarEvent,
+  deleteEvent as apiDeleteEvent,
+  getEvents,
+  listCalendars,
+} from '../api/calendar';
+import { listColorLabels } from '../api/colorLabels';
+import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
+import { resolveEventColor } from '../intl/eventColor';
+import type { RootStackScreenProps } from '../navigation/types';
+
+// Accessible Agenda view — a flat ~30-day-forward list of events grouped by
+// day, the screen-reader-natural sibling of the day view (EventsScreen). Same
+// engine pipeline (listCalendars + palette + getEvents per calendar + expandAll
+// recurrence), then expandToDayOccurrences spreads multi-day all-day events
+// into one row per covered day (shared with desktop). Each day gets an
+// accessible header row; the full day is also folded into every event row's
+// label so a row read in isolation still announces its date.
+
+const AGENDA_DAYS = 30;
+
+/** Local-midnight clone of `date`. */
+function localMidnight(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function addDays(date: Date, days: number): Date {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function addMonths(date: Date, months: number): Date {
+  const next = new Date(date);
+  next.setMonth(next.getMonth() + months);
+  return next;
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+export default function AgendaScreen({
+  route,
+  navigation,
+}: RootStackScreenProps<'Agenda'>) {
+  const { t, i18n } = useTranslation();
+
+  // Window anchor (local midnight); seeded from the switcher's `anchor` param so
+  // switching Day⇄Agenda keeps the selected date, else today.
+  const [anchor, setAnchor] = useState(() => {
+    const seed = route.params?.anchor ? new Date(route.params.anchor) : new Date();
+    return localMidnight(Number.isNaN(seed.getTime()) ? new Date() : seed);
+  });
+  const [calendars, setCalendars] = useState<Calendar[]>([]);
+  const [colorLabels, setColorLabels] = useState<ColorLabel[]>([]);
+  const [occurrences, setOccurrences] = useState<DayOccurrence<CalendarEvent>[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [jumpText, setJumpText] = useState('');
+
+  const announce = useCallback(
+    (message: string) => AccessibilityInfo.announceForAccessibility(message),
+    [],
+  );
+
+  const calendarsById = useMemo(
+    () => new Map(calendars.map((c) => [c.id, c])),
+    [calendars],
+  );
+  const labelsById = useMemo(
+    () => new Map(colorLabels.map((l) => [l.id, l])),
+    [colorLabels],
+  );
+
+  // The visible window: anchor 00:00 → end of (anchor + 30 days).
+  const range = useMemo(() => {
+    const start = localMidnight(anchor);
+    const end = addDays(start, AGENDA_DAYS);
+    end.setHours(23, 59, 59, 999);
+    return { start, end };
+  }, [anchor]);
+
+  const fmtFullDate = useCallback(
+    (d: Date) =>
+      d.toLocaleDateString(i18n.language, {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      }),
+    [i18n.language],
+  );
+  const fmtShortDate = useCallback(
+    (d: Date) =>
+      d.toLocaleDateString(i18n.language, { year: 'numeric', month: 'short', day: 'numeric' }),
+    [i18n.language],
+  );
+  const timeLabel = useCallback(
+    (ev: CalendarEvent): string => {
+      if (ev.all_day) return t('views.allDay');
+      const fmt = (iso: string) =>
+        new Date(iso).toLocaleTimeString(i18n.language, { hour: '2-digit', minute: '2-digit' });
+      return `${fmt(ev.start)}–${fmt(ev.end)}`;
+    },
+    [i18n.language, t],
+  );
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [cals, labels] = await Promise.all([
+        listCalendars(),
+        listColorLabels().catch(() => [] as ColorLabel[]),
+      ]);
+      setCalendars(cals);
+      setColorLabels(labels);
+      const startIso = range.start.toISOString();
+      const endIso = range.end.toISOString();
+      const perCalendar = await Promise.all(
+        cals.map((c) =>
+          getEvents({ calendar_id: c.id, start: startIso, end: endIso }).catch(() => []),
+        ),
+      );
+      // Expand recurring series across the whole window first, then spread
+      // multi-day all-day events into one occurrence per covered day.
+      const expanded = expandAll(perCalendar.flat(), { start: range.start, end: range.end });
+      setOccurrences(expandToDayOccurrences(expanded, range));
+    } catch (err) {
+      const message = errorMessage(err);
+      setError(message);
+      announce(t('mobile.error', { message }));
+    } finally {
+      setLoading(false);
+    }
+  }, [announce, range, t]);
+
+  // Reload when the window changes or the screen regains focus (after the editor).
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => void load());
+    void load();
+    return unsubscribe;
+  }, [navigation, load]);
+
+  // Per-day event counts for the accessible day-header labels.
+  const dayCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const occ of occurrences) {
+      const k = localDateKey(occ.day);
+      counts.set(k, (counts.get(k) ?? 0) + 1);
+    }
+    return counts;
+  }, [occurrences]);
+
+  const readOnlyIds = useMemo(
+    () => new Set(calendars.filter((c) => c.read_only).map((c) => c.id)),
+    [calendars],
+  );
+
+  const goToday = useCallback(() => setAnchor(localMidnight(new Date())), []);
+
+  const jumpToDate = useCallback(() => {
+    const raw = jumpText.trim();
+    if (raw === '') return;
+    const parsed = new Date(`${raw}T00:00`);
+    if (Number.isNaN(parsed.getTime())) {
+      setError(t('dialogs.event.dateInvalid'));
+      announce(t('dialogs.event.dateInvalid'));
+      return;
+    }
+    setError(null);
+    setJumpText('');
+    setAnchor(localMidnight(parsed));
+  }, [announce, jumpText, t]);
+
+  const editEvent = useCallback(
+    (ev: CalendarEvent) =>
+      navigation.navigate('EventEditor', {
+        eventId: seriesIdOf(ev),
+        calendarId: ev.calendar_id,
+      }),
+    [navigation],
+  );
+
+  const removeEvent = useCallback(
+    (ev: CalendarEvent) => {
+      Alert.alert(
+        t('dialogs.confirm.deleteEventTitle'),
+        t('dialogs.confirm.deleteEventMessage', { title: ev.title }),
+        [
+          { text: t('mobile.cancel'), style: 'cancel' },
+          {
+            text: t('dialogs.event.delete'),
+            style: 'destructive',
+            onPress: () => {
+              void (async () => {
+                try {
+                  await apiDeleteEvent(seriesIdOf(ev), ev.calendar_id, false);
+                  announce(t('dialogs.event.deleted', { title: ev.title }));
+                  await load();
+                } catch (err) {
+                  const message = errorMessage(err);
+                  setError(message);
+                  announce(t('mobile.error', { message }));
+                }
+              })();
+            },
+          },
+        ],
+      );
+    },
+    [announce, load, t],
+  );
+
+  const rowLabel = useCallback(
+    (ev: CalendarEvent, day: Date, span: MultiDayInfo | null): string => {
+      let label = t('views.agenda.eventLabel', {
+        day: fmtFullDate(day),
+        title: ev.title,
+        time: timeLabel(ev),
+        calendar: calendarsById.get(ev.calendar_id)?.name ?? '—',
+      });
+      if (span) {
+        label += t('views.multiDaySuffix', { day: span.dayIndex, total: span.totalDays });
+      }
+      const colour = resolveEventColor(ev, calendarsById, labelsById);
+      if (colour.labelName) {
+        label += t('mobile.colorLabelSuffix', { name: colour.labelName });
+      }
+      return label;
+    },
+    [calendarsById, fmtFullDate, labelsById, t, timeLabel],
+  );
+
+  // Switcher: Day ⇄ Agenda, carrying the anchor so the date survives the switch.
+  const onDay = useCallback(
+    () => navigation.navigate('Events', { anchor: anchor.toISOString() }),
+    [anchor, navigation],
+  );
+
+  return (
+    <View style={styles.screen}>
+      <CalendarViewSwitcher active="agenda" onDay={onDay} onAgenda={() => {}} />
+
+      <View style={styles.navBar}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('toolbar.prev')}
+          onPress={() => setAnchor((a) => localMidnight(addMonths(a, -1)))}
+          style={({ pressed }) => [styles.navButton, pressed && styles.pressed]}
+        >
+          <Text style={styles.navButtonText} importantForAccessibility="no">‹</Text>
+        </Pressable>
+        <Text style={styles.rangeHeading} accessibilityRole="header">
+          {`${fmtShortDate(range.start)} – ${fmtShortDate(localMidnight(addDays(anchor, AGENDA_DAYS)))}`}
+        </Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('toolbar.next')}
+          onPress={() => setAnchor((a) => localMidnight(addMonths(a, 1)))}
+          style={({ pressed }) => [styles.navButton, pressed && styles.pressed]}
+        >
+          <Text style={styles.navButtonText} importantForAccessibility="no">›</Text>
+        </Pressable>
+      </View>
+
+      <View style={styles.actionBar}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('mobile.today')}
+          onPress={goToday}
+          style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
+        >
+          <Text style={styles.ghostButtonText}>{t('mobile.today')}</Text>
+        </Pressable>
+        <TextInput
+          style={styles.jumpInput}
+          value={jumpText}
+          onChangeText={setJumpText}
+          placeholder="YYYY-MM-DD"
+          accessibilityLabel={t('mobile.jumpToDate')}
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="go"
+          onSubmitEditing={jumpToDate}
+        />
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('mobile.jumpToDateAction')}
+          onPress={jumpToDate}
+          style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
+        >
+          <Text style={styles.ghostButtonText}>{t('mobile.jumpToDateAction')}</Text>
+        </Pressable>
+      </View>
+
+      {error != null && (
+        <Text style={styles.error} accessibilityRole="text" accessibilityLiveRegion="assertive">
+          {error}
+        </Text>
+      )}
+
+      {loading ? (
+        <Text style={styles.muted} accessibilityLabel={t('views.loading')}>
+          {t('views.loading')}
+        </Text>
+      ) : occurrences.length === 0 ? (
+        <Text style={styles.muted}>{t('views.agenda.empty')}</Text>
+      ) : (
+        <ScrollView
+          accessibilityRole="list"
+          accessibilityLabel={t('views.agenda.eventList')}
+          contentContainerStyle={styles.list}
+          keyboardShouldPersistTaps="handled"
+        >
+          {(() => {
+            let prevKey: string | null = null;
+            const rows: ReactNode[] = [];
+            for (const occ of occurrences) {
+              const key = localDateKey(occ.day);
+              if (key !== prevKey) {
+                prevKey = key;
+                rows.push(
+                  <Text
+                    key={`h-${key}`}
+                    accessibilityRole="header"
+                    accessibilityLabel={t('views.agenda.dayLabel', {
+                      day: fmtFullDate(occ.day),
+                      count: dayCounts.get(key) ?? 0,
+                    })}
+                    style={styles.dayHeader}
+                  >
+                    {fmtFullDate(occ.day)}
+                  </Text>,
+                );
+              }
+              rows.push(renderRow(occ, key));
+            }
+            return rows;
+          })()}
+        </ScrollView>
+      )}
+    </View>
+  );
+
+  function renderRow(occ: DayOccurrence<CalendarEvent>, dayKey: string) {
+    const ev = occ.ev;
+    const rowKey = `${ev.id}@${dayKey}`;
+    const hex = resolveEventColor(ev, calendarsById, labelsById).hex;
+    const dot =
+      hex != null ? (
+        <View
+          accessible={false}
+          importantForAccessibility="no"
+          style={[styles.colorDot, { backgroundColor: hex }]}
+        />
+      ) : null;
+    const badge = occ.span
+      ? ` ${t('views.multiDayCompact', { day: occ.span.dayIndex, total: occ.span.totalDays })}`
+      : '';
+    if (readOnlyIds.has(ev.calendar_id)) {
+      return (
+        <View
+          key={rowKey}
+          accessible
+          accessibilityRole="text"
+          accessibilityLabel={rowLabel(ev, occ.day, occ.span)}
+          style={styles.row}
+        >
+          {dot}
+          <View style={styles.rowText}>
+            <Text style={styles.eventTitle} importantForAccessibility="no">
+              {ev.title}
+              {badge}
+            </Text>
+            <Text style={styles.eventTime} importantForAccessibility="no">
+              {timeLabel(ev)}
+            </Text>
+          </View>
+        </View>
+      );
+    }
+    return (
+      <View
+        key={rowKey}
+        accessible
+        accessibilityRole="button"
+        accessibilityLabel={rowLabel(ev, occ.day, occ.span)}
+        accessibilityHint={t('mobile.taskHint')}
+        accessibilityActions={[
+          { name: 'activate', label: t('mobile.editTaskLabel') },
+          { name: 'delete', label: t('dialogs.event.delete') },
+        ]}
+        onAccessibilityAction={(e) => {
+          if (e.nativeEvent.actionName === 'delete') removeEvent(ev);
+          else editEvent(ev);
+        }}
+        style={styles.row}
+      >
+        {dot}
+        <Pressable accessible={false} onPress={() => editEvent(ev)} style={styles.rowText}>
+          <Text style={styles.eventTitle} importantForAccessibility="no">
+            {ev.title}
+            {badge}
+          </Text>
+          <Text style={styles.eventTime} importantForAccessibility="no">
+            {timeLabel(ev)}
+          </Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`${t('dialogs.event.delete')}: ${ev.title}`}
+          onPress={() => removeEvent(ev)}
+          style={({ pressed }) => [styles.deleteButton, pressed && styles.pressed]}
+        >
+          <Text style={styles.deleteButtonText}>{t('dialogs.event.delete')}</Text>
+        </Pressable>
+      </View>
+    );
+  }
+}
+
+const styles = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: '#ffffff' },
+  navBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingTop: 12,
+  },
+  rangeHeading: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#10131a',
+    textAlign: 'center',
+  },
+  navButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#c9d2e0',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f4f7fb',
+  },
+  navButtonText: { fontSize: 26, color: '#10131a', lineHeight: 30 },
+  actionBar: { flexDirection: 'row', gap: 10, padding: 12, alignItems: 'center' },
+  ghostButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#c9d2e0',
+    backgroundColor: '#f4f7fb',
+  },
+  ghostButtonText: { fontSize: 16, fontWeight: '600', color: '#1d3a2f' },
+  jumpInput: {
+    flex: 1,
+    fontSize: 16,
+    color: '#10131a',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#c9d2e0',
+    backgroundColor: '#f8fafc',
+  },
+  list: { gap: 10, padding: 16 },
+  dayHeader: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#2b3240',
+    marginTop: 8,
+    marginBottom: 2,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#c9d2e0',
+    backgroundColor: '#f4f7fb',
+  },
+  rowText: { flex: 1, gap: 2 },
+  colorDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.18)',
+  },
+  eventTitle: { fontSize: 18, fontWeight: '600', color: '#10131a' },
+  eventTime: { fontSize: 14, color: '#5b6573' },
+  deleteButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#d9b3b0',
+    backgroundColor: '#fbeceb',
+  },
+  deleteButtonText: { fontSize: 15, fontWeight: '600', color: '#b42318' },
+  pressed: { opacity: 0.7 },
+  muted: { fontSize: 15, color: '#5b6573', padding: 16 },
+  error: { fontSize: 15, fontWeight: '600', color: '#b42318', paddingHorizontal: 16 },
+});

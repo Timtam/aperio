@@ -9,6 +9,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
  *   Lists       — task-list catalog + selection + creation.
  *   Accounts    — connected-account list + add (non-OAuth kinds) + delete.
  *   Events      — the selected day's events (across calendars) + day nav.
+ *   Agenda      — a ~30-day forward list of events grouped by day.
  *   EventEditor — create (`eventId: null`) or edit an event; presented as a modal.
  *   Sync        — configure the sync target + run a round + read status.
  *   Settings    — app-config hub: language override + links to Accounts / Sync.
@@ -22,7 +23,10 @@ export type RootStackParamList = {
   Lists: undefined;
   ListEditor: { listId: string };
   Accounts: undefined;
-  Events: undefined;
+  // `anchor` (ISO instant) seeds the initial day/window when arriving from the
+  // Day⇄Agenda switcher, so switching views keeps the selected date.
+  Events: { anchor?: string } | undefined;
+  Agenda: { anchor?: string } | undefined;
   EventEditor: { eventId: string | null; calendarId: string };
   Sync: undefined;
   Settings: undefined;

@@ -8,3 +8,5 @@ export * from './taskDay';
 export * from './taskRecurrence';
 export * from './recurrence';
 export * from './rrule';
+export * from './dateKey';
+export * from './multiDay';
