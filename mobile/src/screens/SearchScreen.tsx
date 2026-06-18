@@ -10,7 +10,8 @@ import {
 } from 'react-native';
 
 import { Calendar, listCalendars } from '../api/calendar';
-import { search, SearchResults } from '../api/search';
+import { search, SearchFilters, SearchKind, SearchResults } from '../api/search';
+import { RadioGroup } from '../components/RadioGroup';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useTaskStore } from '../state/taskStoreContext';
 
@@ -38,6 +39,13 @@ export default function SearchScreen({ navigation }: RootStackScreenProps<'Searc
   const [results, setResults] = useState<SearchResults>(EMPTY);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Filters (kind + date range — the simple, high-value subset; calendar/list
+  // multi-selects are a later refinement). Hidden behind a toggle so the result
+  // list stays prominent.
+  const [showFilters, setShowFilters] = useState(false);
+  const [kind, setKind] = useState<SearchKind>('both');
+  const [since, setSince] = useState('');
+  const [until, setUntil] = useState('');
 
   // Calendars (for the event row's calendar name); best-effort.
   useEffect(() => {
@@ -72,11 +80,24 @@ export default function SearchScreen({ navigation }: RootStackScreenProps<'Searc
       (allDay ? dateOnly : dateTime).format(new Date(iso));
   }, [i18n.language]);
 
-  // Debounced search with a stale-result guard (the latest query wins).
-  const lastQuery = useRef('');
+  // The active filter set; identity stable so the search effect only re-runs
+  // when a filter actually changes. The desktop sends the date range as
+  // start-of-day / end-of-day UTC instants.
+  const filters = useMemo<SearchFilters>(
+    () => ({
+      kind,
+      since: since.trim() ? `${since.trim()}T00:00:00Z` : null,
+      until: until.trim() ? `${until.trim()}T23:59:59Z` : null,
+    }),
+    [kind, since, until],
+  );
+
+  // Debounced search with a request-token stale-result guard (the latest
+  // query+filters wins, so a slow earlier call can't overwrite newer results).
+  const reqToken = useRef(0);
   useEffect(() => {
     const q = query.trim();
-    lastQuery.current = q;
+    const token = (reqToken.current += 1);
     if (q === '') {
       setResults(EMPTY);
       setLoading(false);
@@ -87,21 +108,21 @@ export default function SearchScreen({ navigation }: RootStackScreenProps<'Searc
     const handle = setTimeout(() => {
       void (async () => {
         try {
-          const r = await search(q);
-          if (lastQuery.current !== q) return;
+          const r = await search(q, filters);
+          if (reqToken.current !== token) return;
           setResults(r);
           setError(null);
         } catch (err) {
-          if (lastQuery.current !== q) return;
+          if (reqToken.current !== token) return;
           setError(errorMessage(err));
           setResults(EMPTY);
         } finally {
-          if (lastQuery.current === q) setLoading(false);
+          if (reqToken.current === token) setLoading(false);
         }
       })();
     }, DEBOUNCE_MS);
     return () => clearTimeout(handle);
-  }, [query]);
+  }, [query, filters]);
 
   const total = results.events.length + results.tasks.length;
   const hasQuery = query.trim() !== '';
@@ -131,6 +152,59 @@ export default function SearchScreen({ navigation }: RootStackScreenProps<'Searc
         returnKeyType="search"
         clearButtonMode="while-editing"
       />
+
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ expanded: showFilters }}
+        accessibilityLabel={t('dialogs.search.filtersTitle')}
+        onPress={() => setShowFilters((v) => !v)}
+        style={({ pressed }) => [styles.filtersToggle, pressed && styles.pressed]}
+      >
+        <Text style={styles.filtersToggleText} importantForAccessibility="no">
+          {showFilters ? '▾' : '▸'} {t('dialogs.search.filtersTitle')}
+        </Text>
+      </Pressable>
+
+      {showFilters && (
+        <View style={styles.filters}>
+          <RadioGroup<SearchKind>
+            label={t('dialogs.search.kindLabel')}
+            value={kind}
+            options={[
+              { value: 'both', label: t('dialogs.search.kind.both') },
+              { value: 'events', label: t('dialogs.search.kind.events') },
+              { value: 'tasks', label: t('dialogs.search.kind.tasks') },
+            ]}
+            onChange={setKind}
+          />
+          <View style={styles.rangeRow}>
+            <View style={styles.rangeField}>
+              <Text style={styles.rangeLabel}>{t('dialogs.search.sinceLabel')}</Text>
+              <TextInput
+                style={styles.rangeInput}
+                value={since}
+                onChangeText={setSince}
+                placeholder="YYYY-MM-DD"
+                accessibilityLabel={`${t('dialogs.search.rangeLabel')}, ${t('dialogs.search.sinceLabel')}`}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
+            <View style={styles.rangeField}>
+              <Text style={styles.rangeLabel}>{t('dialogs.search.untilLabel')}</Text>
+              <TextInput
+                style={styles.rangeInput}
+                value={until}
+                onChangeText={setUntil}
+                placeholder="YYYY-MM-DD"
+                accessibilityLabel={`${t('dialogs.search.rangeLabel')}, ${t('dialogs.search.untilLabel')}`}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
+          </View>
+        </View>
+      )}
 
       {hasQuery && (
         <Text style={styles.status} accessibilityRole="text" accessibilityLiveRegion="polite">
@@ -248,6 +322,22 @@ const styles = StyleSheet.create({
     borderColor: '#c9d2e0',
     backgroundColor: '#f8fafc',
   },
+  filtersToggle: { paddingHorizontal: 16, paddingBottom: 8 },
+  filtersToggleText: { fontSize: 15, fontWeight: '600', color: '#1d4ed8' },
+  filters: { paddingHorizontal: 16, paddingBottom: 8, gap: 10 },
+  rangeRow: { flexDirection: 'row', gap: 10 },
+  rangeField: { flex: 1, gap: 4 },
+  rangeLabel: { fontSize: 14, fontWeight: '600', color: '#2b3240' },
+  rangeInput: {
+    fontSize: 16,
+    color: '#10131a',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#c9d2e0',
+    backgroundColor: '#f8fafc',
+  },
   status: { fontSize: 14, color: '#5b6573', paddingHorizontal: 16, paddingBottom: 4 },
   error: { fontSize: 15, fontWeight: '600', color: '#b42318', paddingHorizontal: 16 },
   muted: { fontSize: 15, color: '#5b6573', padding: 16 },
@@ -261,6 +351,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#f4f7fb',
   },
   rowPressed: { backgroundColor: '#e4ebf5' },
+  pressed: { opacity: 0.7 },
   rowTitle: { fontSize: 17, fontWeight: '600', color: '#10131a' },
   rowSecondary: { fontSize: 14, color: '#5b6573', marginTop: 2 },
 });
