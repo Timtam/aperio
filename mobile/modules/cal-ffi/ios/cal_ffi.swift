@@ -790,6 +790,13 @@ public protocol HostProtocol: AnyObject, Sendable {
     func deleteTaskList(id: String) throws 
     
     /**
+     * Delete a user preference. A whitelisted key appends `SettingsUpdated` with
+     * a null value (the applier reads null as "remove the row"), keeping the
+     * wire shape uniform with set.
+     */
+    func deleteUserPref(key: String) throws 
+    
+    /**
      * Disable end-to-end encryption on the configured dataset (§19.7) — the
      * in-place downgrade. Verify `passphrase`, then rewrite every log + snapshot
      * as PLAINTEXT (decrypting via the data key, stripping the `credential.*`
@@ -859,6 +866,11 @@ public protocol HostProtocol: AnyObject, Sendable {
     func getEventsJson(requestJson: String) throws  -> String
     
     /**
+     * Read a user preference, or `None` when unset.
+     */
+    func getUserPref(key: String) throws  -> String?
+    
+    /**
      * All calendars (local + external) as a JSON `CalendarRow[]`, and — as a
      * side effect — primes the registry's calendar→account route map so the
      * event methods can route. Mirrors the desktop `list_calendars` minus the
@@ -914,6 +926,13 @@ public protocol HostProtocol: AnyObject, Sendable {
      * list's owning account.
      */
     func sectionsJson(listId: String) throws  -> String
+    
+    /**
+     * Upsert a user preference. A whitelisted key also appends `SettingsUpdated`
+     * (wire value = the stored string parsed as JSON, else wrapped as a JSON
+     * string — same round-trip as the desktop).
+     */
+    func setUserPref(key: String, value: String) throws 
     
     /**
      * Run one sync round (push local pending logs, fetch + apply foreign ones,
@@ -1512,6 +1531,19 @@ open func deleteTaskList(id: String)throws   {try rustCallWithError(FfiConverter
 }
     
     /**
+     * Delete a user preference. A whitelisted key appends `SettingsUpdated` with
+     * a null value (the applier reads null as "remove the row"), keeping the
+     * wire shape uniform with set.
+     */
+open func deleteUserPref(key: String)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_delete_user_pref(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(key),$0
+    )
+}
+}
+    
+    /**
      * Disable end-to-end encryption on the configured dataset (§19.7) — the
      * in-place downgrade. Verify `passphrase`, then rewrite every log + snapshot
      * as PLAINTEXT (decrypting via the data key, stripping the `credential.*`
@@ -1623,6 +1655,18 @@ open func getEventsJson(requestJson: String)throws  -> String  {
 }
     
     /**
+     * Read a user preference, or `None` when unset.
+     */
+open func getUserPref(key: String)throws  -> String?  {
+    return try  FfiConverterOptionString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_get_user_pref(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(key),$0
+    )
+})
+}
+    
+    /**
      * All calendars (local + external) as a JSON `CalendarRow[]`, and — as a
      * side effect — primes the registry's calendar→account route map so the
      * event methods can route. Mirrors the desktop `list_calendars` minus the
@@ -1725,6 +1769,20 @@ open func sectionsJson(listId: String)throws  -> String  {
         FfiConverterString.lower(listId),$0
     )
 })
+}
+    
+    /**
+     * Upsert a user preference. A whitelisted key also appends `SettingsUpdated`
+     * (wire value = the stored string parsed as JSON, else wrapped as a JSON
+     * string — same round-trip as the desktop).
+     */
+open func setUserPref(key: String, value: String)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_set_user_pref(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(key),
+        FfiConverterString.lower(value),$0
+    )
+}
 }
     
     /**
@@ -5240,6 +5298,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_delete_task_list() != 53168) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_cal_ffi_checksum_method_host_delete_user_pref() != 13418) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_cal_ffi_checksum_method_host_disable_sync_encryption_json() != 18838) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -5256,6 +5317,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_get_events_json() != 9599) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_get_user_pref() != 20426) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_list_calendars_json() != 49275) {
@@ -5277,6 +5341,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_sections_json() != 56584) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_set_user_pref() != 9799) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_sync_now_json() != 8892) {

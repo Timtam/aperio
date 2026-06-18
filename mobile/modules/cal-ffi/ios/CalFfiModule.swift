@@ -165,6 +165,19 @@ public class CalFfiModule: Module {
       try self.host.upcomingRemindersJson(horizonMinutes: UInt32(horizonMinutes))
     }
 
+    // ─── User preferences (generic key/value; synced-key whitelist) ───
+    AsyncFunction("getUserPref") { (key: String) -> String? in
+      try self.host.getUserPref(key: key)
+    }
+
+    AsyncFunction("setUserPref") { (key: String, value: String) in
+      try self.host.setUserPref(key: key, value: value)
+    }
+
+    AsyncFunction("deleteUserPref") { (key: String) in
+      try self.host.deleteUserPref(key: key)
+    }
+
     // ─── Contacts ───
     // JSON passthrough, routed Rust-side. Mirrors the Android module.
 

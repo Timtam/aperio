@@ -62,7 +62,8 @@ use plugin_core::shim::FfiSyncAdapter;
 use plugin_core::PluginManager;
 use sync_core::{
     derive_key, fresh_data_key, resolve_data_key, wrap_key, AccountPayload, EncryptingAdapter,
-    EncryptionParams, EventPayload, IdPayload, SyncAdapter, SyncError, SyncEvent, KEY_LEN,
+    EncryptionParams, EventPayload, IdPayload, SettingsPayload, SyncAdapter, SyncError, SyncEvent,
+    KEY_LEN,
 };
 use sync_engine::{EventLogWriter, SecretError, SecretSlot, SecretStore, SyncOrchestrator};
 
@@ -3006,6 +3007,59 @@ impl Host {
         to_json(&dtos)
     }
 
+    // ── User preferences (generic key/value; synced-key whitelist) ────────────
+    //
+    // Opaque string values (the JS layer serialises JSON for structured prefs).
+    // A write/delete against a §19.2.1 whitelisted key (locale, week-start,
+    // appearance, sound config, default reminders, …) appends a `SettingsUpdated`
+    // event so the change syncs to the user's other devices; local-only keys
+    // (sidebar state, device id, …) don't. Mirrors the desktop user_prefs
+    // commands; the substrate for the synced settings panels.
+
+    /// Read a user preference, or `None` when unset.
+    pub fn get_user_pref(&self, key: String) -> Result<Option<String>, StoreError> {
+        let shared = self.db.shared();
+        UserPrefsRepo::new(&shared).get(&key).map_err(storage_err)
+    }
+
+    /// Upsert a user preference. A whitelisted key also appends `SettingsUpdated`
+    /// (wire value = the stored string parsed as JSON, else wrapped as a JSON
+    /// string — same round-trip as the desktop).
+    pub fn set_user_pref(&self, key: String, value: String) -> Result<(), StoreError> {
+        let shared = self.db.shared();
+        UserPrefsRepo::new(&shared)
+            .set(&key, &value)
+            .map_err(storage_err)?;
+        if sync_engine::whitelist::is_synced_key(&key) {
+            let payload_value = serde_json::from_str(&value)
+                .unwrap_or_else(|_| serde_json::Value::String(value.clone()));
+            self.writer
+                .append(SyncEvent::SettingsUpdated(SettingsPayload {
+                    key,
+                    value: payload_value,
+                }));
+        }
+        Ok(())
+    }
+
+    /// Delete a user preference. A whitelisted key appends `SettingsUpdated` with
+    /// a null value (the applier reads null as "remove the row"), keeping the
+    /// wire shape uniform with set.
+    pub fn delete_user_pref(&self, key: String) -> Result<(), StoreError> {
+        let shared = self.db.shared();
+        UserPrefsRepo::new(&shared)
+            .delete(&key)
+            .map_err(storage_err)?;
+        if sync_engine::whitelist::is_synced_key(&key) {
+            self.writer
+                .append(SyncEvent::SettingsUpdated(SettingsPayload {
+                    key,
+                    value: serde_json::Value::Null,
+                }));
+        }
+        Ok(())
+    }
+
     // ── Contacts (JSON bridge, routed) ────────────────────────────────────────
     //
     // Address books + contacts, routed local (the device SQLite store) vs
@@ -4687,6 +4741,59 @@ mod tests {
             host.adopt_remote_encryption_json("pp".to_string()).unwrap_err(),
             StoreError::InvalidField { ref field, .. } if field == "sync"
         ));
+    }
+
+    #[test]
+    fn user_prefs_round_trip_locally() {
+        let (_dir, host, _kc) = open_host();
+        assert_eq!(host.get_user_pref("locale".to_string()).unwrap(), None);
+        host.set_user_pref("locale".to_string(), "de".to_string())
+            .unwrap();
+        assert_eq!(
+            host.get_user_pref("locale".to_string()).unwrap(),
+            Some("de".to_string())
+        );
+        host.delete_user_pref("locale".to_string()).unwrap();
+        assert_eq!(host.get_user_pref("locale".to_string()).unwrap(), None);
+    }
+
+    #[test]
+    fn a_whitelisted_pref_syncs_across_devices_but_a_local_only_one_does_not() {
+        let remote = tempfile::tempdir().unwrap();
+        let cfg = format!(
+            r#"{{"kind":"local","path":{}}}"#,
+            serde_json::to_string(&remote.path().to_string_lossy()).unwrap()
+        );
+        let dir_a = tempfile::tempdir().unwrap();
+        let host_a = open_named(&dir_a, "a");
+        let dir_b = tempfile::tempdir().unwrap();
+        let host_b = open_named(&dir_b, "b");
+        host_a.configure_sync_adapter_json(cfg.clone()).unwrap();
+        host_b.configure_sync_adapter_json(cfg).unwrap();
+
+        // `locale` is on the §19.2.1 sync whitelist; `sidebar.expansion` is not.
+        host_a
+            .set_user_pref("locale".to_string(), "de".to_string())
+            .unwrap();
+        host_a
+            .set_user_pref("sidebar.expansion".to_string(), "open".to_string())
+            .unwrap();
+        wait_for_pending(&dir_a);
+        host_a.sync_now_json().unwrap();
+        host_b.sync_now_json().unwrap();
+
+        assert_eq!(
+            host_b.get_user_pref("locale".to_string()).unwrap(),
+            Some("de".to_string()),
+            "a whitelisted pref must reach the other device",
+        );
+        assert_eq!(
+            host_b
+                .get_user_pref("sidebar.expansion".to_string())
+                .unwrap(),
+            None,
+            "a local-only pref must NOT propagate",
+        );
     }
 
     #[test]

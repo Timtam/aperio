@@ -776,6 +776,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_delete_task_list(
     ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_delete_user_pref(
+    ): Short
     external fun uniffi_cal_ffi_checksum_method_host_disable_sync_encryption_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_discover_json(
@@ -787,6 +789,8 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_cal_ffi_checksum_method_host_get_event_by_id_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_get_events_json(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_get_user_pref(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_list_calendars_json(
     ): Short
@@ -801,6 +805,8 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_cal_ffi_checksum_method_host_reparent_task_list_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_sections_json(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_set_user_pref(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_sync_now_json(
     ): Short
@@ -961,6 +967,8 @@ external fun uniffi_cal_ffi_fn_method_host_delete_task(`ptr`: Long,`id`: RustBuf
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_delete_task_list(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_cal_ffi_fn_method_host_delete_user_pref(`ptr`: Long,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_cal_ffi_fn_method_host_disable_sync_encryption_json(`ptr`: Long,`passphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_discover_json(`ptr`: Long,`pluginId`: RustBuffer.ByValue,`argsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -972,6 +980,8 @@ external fun uniffi_cal_ffi_fn_method_host_forget_sftp_host_key(`ptr`: Long,`hos
 external fun uniffi_cal_ffi_fn_method_host_get_event_by_id_json(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_get_events_json(`ptr`: Long,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_get_user_pref(`ptr`: Long,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_list_calendars_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -987,6 +997,8 @@ external fun uniffi_cal_ffi_fn_method_host_reparent_task_list_json(`ptr`: Long,`
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_sections_json(`ptr`: Long,`listId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_set_user_pref(`ptr`: Long,`key`: RustBuffer.ByValue,`value`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_cal_ffi_fn_method_host_sync_now_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_sync_status_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -1298,6 +1310,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_delete_task_list() != 53168.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_delete_user_pref() != 13418.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_disable_sync_encryption_json() != 18838.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1314,6 +1329,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_get_events_json() != 9599.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_get_user_pref() != 20426.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_list_calendars_json() != 49275.toShort()) {
@@ -1335,6 +1353,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_sections_json() != 56584.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_set_user_pref() != 9799.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_sync_now_json() != 8892.toShort()) {
@@ -2073,6 +2094,13 @@ public interface HostInterface {
     fun `deleteTaskList`(`id`: kotlin.String)
     
     /**
+     * Delete a user preference. A whitelisted key appends `SettingsUpdated` with
+     * a null value (the applier reads null as "remove the row"), keeping the
+     * wire shape uniform with set.
+     */
+    fun `deleteUserPref`(`key`: kotlin.String)
+    
+    /**
      * Disable end-to-end encryption on the configured dataset (§19.7) — the
      * in-place downgrade. Verify `passphrase`, then rewrite every log + snapshot
      * as PLAINTEXT (decrypting via the data key, stripping the `credential.*`
@@ -2142,6 +2170,11 @@ public interface HostInterface {
     fun `getEventsJson`(`requestJson`: kotlin.String): kotlin.String
     
     /**
+     * Read a user preference, or `None` when unset.
+     */
+    fun `getUserPref`(`key`: kotlin.String): kotlin.String?
+    
+    /**
      * All calendars (local + external) as a JSON `CalendarRow[]`, and — as a
      * side effect — primes the registry's calendar→account route map so the
      * event methods can route. Mirrors the desktop `list_calendars` minus the
@@ -2197,6 +2230,13 @@ public interface HostInterface {
      * list's owning account.
      */
     fun `sectionsJson`(`listId`: kotlin.String): kotlin.String
+    
+    /**
+     * Upsert a user preference. A whitelisted key also appends `SettingsUpdated`
+     * (wire value = the stored string parsed as JSON, else wrapped as a JSON
+     * string — same round-trip as the desktop).
+     */
+    fun `setUserPref`(`key`: kotlin.String, `value`: kotlin.String)
     
     /**
      * Run one sync round (push local pending logs, fetch + apply foreign ones,
@@ -2942,6 +2982,24 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * Delete a user preference. A whitelisted key appends `SettingsUpdated` with
+     * a null value (the applier reads null as "remove the row"), keeping the
+     * wire shape uniform with set.
+     */
+    @Throws(StoreException::class)override fun `deleteUserPref`(`key`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_delete_user_pref(
+        it,
+        FfiConverterString.lower(`key`),_status)
+}
+    }
+    
+    
+
+    
+    /**
      * Disable end-to-end encryption on the configured dataset (§19.7) — the
      * in-place downgrade. Verify `passphrase`, then rewrite every log + snapshot
      * as PLAINTEXT (decrypting via the data key, stripping the `credential.*`
@@ -3074,6 +3132,23 @@ open class Host: Disposable, AutoCloseable, HostInterface
     UniffiLib.uniffi_cal_ffi_fn_method_host_get_events_json(
         it,
         FfiConverterString.lower(`requestJson`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Read a user preference, or `None` when unset.
+     */
+    @Throws(StoreException::class)override fun `getUserPref`(`key`: kotlin.String): kotlin.String? {
+            return FfiConverterOptionalString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_get_user_pref(
+        it,
+        FfiConverterString.lower(`key`),_status)
 }
     }
     )
@@ -3219,6 +3294,24 @@ open class Host: Disposable, AutoCloseable, HostInterface
     }
     )
     }
+    
+
+    
+    /**
+     * Upsert a user preference. A whitelisted key also appends `SettingsUpdated`
+     * (wire value = the stored string parsed as JSON, else wrapped as a JSON
+     * string — same round-trip as the desktop).
+     */
+    @Throws(StoreException::class)override fun `setUserPref`(`key`: kotlin.String, `value`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_set_user_pref(
+        it,
+        FfiConverterString.lower(`key`),FfiConverterString.lower(`value`),_status)
+}
+    }
+    
     
 
     

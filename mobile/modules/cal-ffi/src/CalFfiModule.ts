@@ -124,6 +124,15 @@ declare class CalFfiModule extends NativeModule<Record<never, never>> {
    *  sorted ascending — for scheduling ahead-of-time OS local notifications. */
   upcomingRemindersJson(horizonMinutes: number): Promise<string>;
 
+  // ── User preferences (generic key/value; synced-key whitelist) ──
+  /** Read a user preference (opaque string), or null when unset. */
+  getUserPref(key: string): Promise<string | null>;
+  /** Upsert a user preference. A whitelisted key (locale, week-start, appearance,
+   *  sound, default reminders, …) also syncs to the user's other devices. */
+  setUserPref(key: string, value: string): Promise<void>;
+  /** Delete a user preference (a whitelisted key also syncs the deletion). */
+  deleteUserPref(key: string): Promise<void>;
+
   // ── Contacts ──
   // JSON passthrough in the cal_core/desktop wire shape; routing (local vs
   // external account) happens Rust-side. Contacts are NOT on the sync event log.

@@ -190,6 +190,22 @@ class CalFfiModule : Module() {
       host.upcomingRemindersJson(horizonMinutes.toUInt())
     }
 
+    // ─── User preferences (generic key/value; synced-key whitelist) ───────────
+    // Opaque string values; a whitelisted key change appends a SettingsUpdated
+    // sync event Rust-side so it propagates across devices.
+
+    AsyncFunction("getUserPref") { key: String ->
+      host.getUserPref(key)
+    }
+
+    AsyncFunction("setUserPref") { key: String, value: String ->
+      host.setUserPref(key, value)
+    }
+
+    AsyncFunction("deleteUserPref") { key: String ->
+      host.deleteUserPref(key)
+    }
+
     // ─── Contacts (local address book + external CardDAV/Google/EWS providers) ─
     // JSON passthrough, routed Rust-side; contacts are NOT on the sync event log
     // (local = device-local, external = provider-synced).
