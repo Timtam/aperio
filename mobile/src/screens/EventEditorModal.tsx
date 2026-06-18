@@ -26,6 +26,7 @@ import {
   updateEvent,
 } from '../api/calendar';
 import { listColorLabels } from '../api/colorLabels';
+import { setEventColor } from '../api/containerColor';
 import type { RootStackScreenProps } from '../navigation/types';
 
 // Create / edit a calendar event. Screen-reader-first: every control is an
@@ -175,11 +176,14 @@ export default function EventEditorModal({
       setError(t('dialogs.event.endBeforeStart'));
       return;
     }
-    // Colour: a LOCAL event carries the chosen label on its own row; for an
-    // external event the picker is hidden, so preserve whatever it loaded
-    // (round-trip untouched) rather than letting an empty form value drop it.
-    const isLocalCal = calendars.find((c) => c.id === calId)?.account_id === 'local';
-    const colorToSend = isLocalCal ? colorLabel || null : (original?.color_label ?? null);
+    // Colour: the event carries the chosen label on the event itself — for a
+    // LOCAL event it rides its row; for a colour-CAPABLE external calendar the
+    // provider stores it as native COLOR; a non-capable provider ignores it,
+    // and the colour lives as a host-local override (set after the save below).
+    const cal = calendars.find((c) => c.id === calId);
+    const isLocalCal = cal?.account_id === 'local';
+    const colorCapable = isLocalCal || (cal?.supports_event_color ?? false);
+    const colorToSend = colorLabel || null;
     // Keep the series' EXDATE exceptions when editing; a fresh rule has none.
     const recurrenceToSend = recurrence
       ? { rrule: recurrence, exceptions: original?.recurrence?.exceptions ?? [] }
@@ -203,6 +207,12 @@ export default function EventEditorModal({
           reminders,
           recurrence: recurrenceToSend,
         });
+        // External calendar: a capable provider now stores the colour natively
+        // (clear any stale override so the native value wins); a non-capable one
+        // ignores it, so keep it as a host-local override. Local rides the row.
+        if (!isLocalCal) {
+          await setEventColor(updated.id, calId, colorCapable ? null : colorToSend);
+        }
         AccessibilityInfo.announceForAccessibility(
           t('dialogs.event.updated', { title: updated.title }),
         );
@@ -221,6 +231,9 @@ export default function EventEditorModal({
           sound: null,
           attendees: [],
         });
+        if (!isLocalCal) {
+          await setEventColor(created.id, calId, colorCapable ? null : colorToSend);
+        }
         AccessibilityInfo.announceForAccessibility(
           t('dialogs.event.created', { title: created.title }),
         );
@@ -399,14 +412,14 @@ export default function EventEditorModal({
       {/* Colour label — local calendars only (an external event's colour is a
           host-local override, deferred). Shows real swatches for sighted users
           + the name for SR; binds the event's own color_label. */}
-      {calendars.find((c) => c.id === calId)?.account_id === 'local' && (
-        <ColorLabelSelect
-          value={colorLabel}
-          labels={colorLabels}
-          onChange={setColorLabel}
-          disabled={saving}
-        />
-      )}
+      {/* Colour — every calendar: local + colour-capable external store it on
+          the event; a non-capable external keeps it as a host-local override. */}
+      <ColorLabelSelect
+        value={colorLabel}
+        labels={colorLabels}
+        onChange={setColorLabel}
+        disabled={saving}
+      />
 
       {/* Recurrence — RRULE builder (freq / interval / weekly days / monthly
           mode / end), the same subset as the desktop event dialog. */}

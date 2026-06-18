@@ -45,3 +45,15 @@ export const setSectionColor = async (
   await CalFfi.setSectionColor(sectionId, listId, colorLabelId);
   scheduleBackgroundPush();
 };
+
+/** Set (or clear, with `null`) an external EVENT's host-local colour override.
+ *  A no-op for local / colour-capable calendars (the colour rides the event
+ *  there). `eventId` is the series master id; `calendarId` routes the call. */
+export const setEventColor = async (
+  eventId: string,
+  calendarId: string,
+  colorLabelId: string | null,
+): Promise<void> => {
+  await CalFfi.setEventColor(eventId, calendarId, colorLabelId);
+  scheduleBackgroundPush();
+};
