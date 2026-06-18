@@ -263,6 +263,17 @@ export default function TaskEditorModal({
     ],
     [sectionsByList, form.listId, t],
   );
+  // Gate affordances on the selected list's adapter capabilities so we never
+  // offer a control whose value the backend would silently drop on save (e.g.
+  // recurrence on a backend without task recurrence, sections on a flat one).
+  // Absent caps default permissive (cal-core-native) — matches the prior
+  // always-show behaviour; the Host now stamps real caps on every list.
+  const caps = useMemo(
+    () => taskLists.find((l) => l.id === form.listId)?.task_capabilities,
+    [taskLists, form.listId],
+  );
+  const canRecur = caps?.task_recurrence ?? true;
+  const canSection = caps?.sections ?? true;
   const statusOptions = useMemo(
     () => [
       { value: 'open' as const, label: t('dialogs.task.status.open') },
@@ -312,8 +323,10 @@ export default function TaskEditorModal({
       slotInvalid(form.scheduledDate, form.scheduledTime) ||
       slotInvalid(form.deadlineDate, form.deadlineTime) ||
       // The recurrence UNTIL date is free-text too; a malformed one would fail
-      // serde at the bridge (RecurrenceEnd::OnDate is a NaiveDate).
-      (form.recurrence.freq !== 'NONE' &&
+      // serde at the bridge (RecurrenceEnd::OnDate is a NaiveDate). Skipped when
+      // the list can't store recurrence (the rule is dropped on save anyway).
+      (canRecur &&
+        form.recurrence.freq !== 'NONE' &&
         form.recurrence.endMode === 'UNTIL' &&
         dateInvalid(form.recurrence.until))
     ) {
@@ -337,9 +350,9 @@ export default function TaskEditorModal({
           scheduled_time: sched.time,
           deadline_date: dead.date,
           deadline_time: dead.time,
-          recurrence: toBackend(form.recurrence),
+          recurrence: canRecur ? toBackend(form.recurrence) : null,
           parent_id: null,
-          section_id: form.sectionId || null,
+          section_id: canSection ? form.sectionId || null : null,
           color_label: null,
           reminders: form.reminders,
           assignees: [],
@@ -356,16 +369,19 @@ export default function TaskEditorModal({
           ...loaded,
           title,
           list_id: form.listId,
-          // A cross-list move drops the section (it belonged to the old list).
+          // A cross-list move drops the section (it belonged to the old list);
+          // a list with no sections drops it too.
           section_id:
-            form.listId !== loaded.list_id ? null : form.sectionId || null,
+            !canSection || form.listId !== loaded.list_id
+              ? null
+              : form.sectionId || null,
           status: form.status,
           priority: form.priority,
           scheduled_date: sched.date,
           scheduled_time: sched.time,
           deadline_date: dead.date,
           deadline_time: dead.time,
-          recurrence: toBackend(form.recurrence),
+          recurrence: canRecur ? toBackend(form.recurrence) : null,
           reminders: form.reminders,
           description,
           completed_at:
@@ -385,7 +401,7 @@ export default function TaskEditorModal({
       setError(message);
       AccessibilityInfo.announceForAccessibility(t('mobile.error', { message }));
     }
-  }, [form, loaded, navigation, t, taskId]);
+  }, [canRecur, canSection, form, loaded, navigation, t, taskId]);
 
   return (
     <ScrollView
@@ -431,12 +447,14 @@ export default function TaskEditorModal({
         </Text>
       )}
 
-      <RadioGroup<string>
-        label={t('dialogs.task.fields.section')}
-        value={form.sectionId}
-        options={sectionOptions}
-        onChange={(v) => update('sectionId', v)}
-      />
+      {canSection && (
+        <RadioGroup<string>
+          label={t('dialogs.task.fields.section')}
+          value={form.sectionId}
+          options={sectionOptions}
+          onChange={(v) => update('sectionId', v)}
+        />
+      )}
 
       <RadioGroup<TaskStatus>
         label={t('dialogs.task.fields.status')}
@@ -501,10 +519,12 @@ export default function TaskEditorModal({
         />
       </View>
 
-      <TaskRecurrenceSelector
-        value={form.recurrence}
-        onChange={(recurrence) => update('recurrence', recurrence)}
-      />
+      {canRecur && (
+        <TaskRecurrenceSelector
+          value={form.recurrence}
+          onChange={(recurrence) => update('recurrence', recurrence)}
+        />
+      )}
 
       <RemindersEditor
         value={form.reminders}

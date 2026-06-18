@@ -75,6 +75,27 @@ impl AdapterKind {
         }
     }
 
+    /// The canonical reverse-DNS plugin id that serves this kind, or `None`
+    /// for kinds with no plugin (just `Local`, which is host-internal). The one
+    /// shared source of the kind→plugin map for both desktop + mobile (e.g. to
+    /// resolve an account's manifest capabilities or its plugin-loaded status).
+    pub fn plugin_id(self) -> Option<&'static str> {
+        Some(match self {
+            AdapterKind::Local => return None,
+            AdapterKind::Caldav => "com.aperio.cal-adapter-caldav",
+            AdapterKind::Ical => "com.aperio.cal-adapter-ical",
+            AdapterKind::Google => "com.aperio.cal-adapter-google",
+            AdapterKind::MicrosoftGraph => "com.aperio.cal-adapter-microsoft-graph",
+            AdapterKind::Ews => "com.aperio.cal-adapter-ews",
+            AdapterKind::Vikunja => "com.aperio.cal-adapter-vikunja",
+            AdapterKind::Todoist => "com.aperio.cal-adapter-todoist",
+            AdapterKind::Zoom => "com.aperio.vc-adapter-zoom",
+            AdapterKind::Teams => "com.aperio.vc-adapter-teams",
+            AdapterKind::Meet => "com.aperio.vc-adapter-meet",
+            AdapterKind::Webex => "com.aperio.vc-adapter-webex",
+        })
+    }
+
     pub fn parse(s: &str) -> Option<Self> {
         Some(match s {
             "local" => AdapterKind::Local,

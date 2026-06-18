@@ -57,6 +57,7 @@ use host_core::sftp_host_keys::UserPrefsHostKeyVerifier;
 use host_core::sync::build_orchestrator;
 use host_core::user_prefs::UserPrefsRepo;
 use host_core::DbHandle;
+use plugin_core::manifest::TaskCapabilities;
 use plugin_core::shim::FfiSyncAdapter;
 use plugin_core::PluginManager;
 use sync_core::{
@@ -1032,6 +1033,27 @@ impl Host {
                 .ok_or(StoreError::NotFound)
         }
     }
+
+    /// Resolve an account's task capabilities from its plugin manifest (mirrors
+    /// the desktop `task_caps_for_account`): the local store reports its own
+    /// caps; an account whose plugin we can't resolve falls back to the
+    /// permissive cal-core-native default.
+    fn task_caps_for_account(
+        &self,
+        account_id: &str,
+        account_kinds: &std::collections::HashMap<String, AdapterKind>,
+    ) -> TaskCapabilities {
+        if account_id == LOCAL_ID {
+            return local_task_capabilities();
+        }
+        let Some(plugin_id) = account_kinds.get(account_id).and_then(|k| k.plugin_id()) else {
+            return TaskCapabilities::default();
+        };
+        self.plugin_manager
+            .get_including_disabled(plugin_id)
+            .map(|p| p.manifest.tasks.clone())
+            .unwrap_or_default()
+    }
 }
 
 /// A contact list enriched with its owning `account_id` — mirrors the desktop
@@ -1044,15 +1066,32 @@ struct ContactListRow {
     account_id: String,
 }
 
-/// A task list enriched with its owning `account_id` — the desktop `TaskListRow`
-/// wire shape. `task_capabilities` is intentionally omitted here (the mobile UI
-/// doesn't consume it yet → the shared `TaskList` type has it optional, and
-/// cal-core's default applies); it joins when the capabilities surface is ported.
+/// A task list enriched with its owning `account_id` + the adapter's
+/// `task_capabilities` — the desktop `TaskListRow` wire shape. The mobile UI
+/// gates affordances (recurrence, sections, …) on the capabilities, so an
+/// external list that can't store a recurrence rule no longer offers it then
+/// silently drops it on save.
 #[derive(serde::Serialize)]
 struct TaskListRow {
     #[serde(flatten)]
     inner: TaskList,
     account_id: String,
+    task_capabilities: TaskCapabilities,
+}
+
+/// The local SQLite store's task capabilities — it has no manifest, so hard-code
+/// what it actually supports (nested lists + sections, on top of the cal-core
+/// default's subtasks/recurrence/cross-list-move). Mirrors the desktop
+/// `local_task_capabilities`.
+fn local_task_capabilities() -> TaskCapabilities {
+    TaskCapabilities {
+        nested_projects: true,
+        sections: true,
+        manageable_sections: true,
+        create_lists: true,
+        delete_lists: true,
+        ..TaskCapabilities::default()
+    }
 }
 
 /// Open a statically-embedded sync-adapter plugin instance + wrap it as a
@@ -1820,11 +1859,27 @@ impl Host {
             .runtime
             .block_on(async { self.registry.list_external_task_lists().await });
 
+        // Snapshot account_id → adapter_kind once so the per-row capability
+        // lookup is a cheap map hit (mirrors the desktop). A read failure
+        // degrades to "every account looks local" → permissive caps.
+        let shared = self.db.shared();
+        let account_kinds: std::collections::HashMap<String, AdapterKind> =
+            AccountsRepo::new(&shared)
+                .list()
+                .map(|accounts| {
+                    accounts
+                        .into_iter()
+                        .map(|a| (a.id, a.adapter_kind))
+                        .collect()
+                })
+                .unwrap_or_default();
+
         let mut rows: Vec<TaskListRow> = Vec::with_capacity(local.len() + external.len());
         for l in local {
             rows.push(TaskListRow {
                 inner: l,
                 account_id: LOCAL_ID.to_string(),
+                task_capabilities: local_task_capabilities(),
             });
         }
         for l in external {
@@ -1832,9 +1887,11 @@ impl Host {
                 .registry
                 .account_for_task_list(&l.id)
                 .unwrap_or_else(|| LOCAL_ID.to_string());
+            let task_capabilities = self.task_caps_for_account(&account_id, &account_kinds);
             rows.push(TaskListRow {
                 inner: l,
                 account_id,
+                task_capabilities,
             });
         }
         to_json(&rows)
@@ -4847,6 +4904,13 @@ mod tests {
                 .all(|l| l["account_id"] == serde_json::json!("local") && l["id"].is_string()),
             "every local list should be tagged account_id=local; got {lists}",
         );
+        // Each row carries the adapter's task_capabilities so the UI can gate
+        // affordances; the local store reports sections + nesting + recurrence.
+        let caps = &arr[0]["task_capabilities"];
+        assert_eq!(caps["sections"], serde_json::json!(true), "got {lists}");
+        assert_eq!(caps["manageable_sections"], serde_json::json!(true));
+        assert_eq!(caps["nested_projects"], serde_json::json!(true));
+        assert_eq!(caps["task_recurrence"], serde_json::json!(true));
     }
 
     #[test]
