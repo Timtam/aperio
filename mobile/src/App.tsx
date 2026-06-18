@@ -1,3 +1,4 @@
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
@@ -5,7 +6,9 @@ import { useTranslation } from 'react-i18next';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { useSyncTriggers } from './api/syncTriggers';
-import type { RootStackParamList } from './navigation/types';
+import type { RootStackParamList, RootTabParamList } from './navigation/types';
+import { useReminderTriggers } from './reminders/scheduler';
+import { useStoredLanguage } from './settings/language';
 import AccountsScreen from './screens/AccountsScreen';
 import ContactEditorModal from './screens/ContactEditorModal';
 import ContactsScreen from './screens/ContactsScreen';
@@ -16,24 +19,105 @@ import SettingsScreen from './screens/SettingsScreen';
 import SyncScreen from './screens/SyncScreen';
 import TaskEditorModal from './screens/TaskEditorModal';
 import TasksScreen from './screens/TasksScreen';
-import { useReminderTriggers } from './reminders/scheduler';
-import { useStoredLanguage } from './settings/language';
 import { TaskStoreProvider } from './state/taskStore';
 
-// Aperio mobile — navigation host for the faithful tasks port (M-series).
+// Aperio mobile — navigation host (the faithful desktop port).
 //
-// Provider order (per the React Navigation 7 docs for Expo SDK 56):
-// SafeAreaProvider > NavigationContainer > TaskStoreProvider > Navigator. The
-// store sits inside the container so screens and the store both see navigation,
-// and wraps the navigator so every screen consumes the one store.
-//
-// We use a native-stack: its header title is announced by TalkBack/VoiceOver
-// (so screen titles come from i18n), and it needs no gesture-handler. The
-// editor is presented as a modal. The UI is rebuilt per platform; every string
-// comes from i18next (@aperio/locales), every domain type from @aperio/shared,
-// and persistence runs through the shared Rust core via the cal-ffi bridge.
+// A bottom-tab shell is the primary nav — the mobile equivalent of the desktop
+// sidebar, and the predictable, screen-reader-friendly home for the primary
+// views: Tasks, Calendar, Contacts, Settings. Each tab is a native-stack so
+// drill-downs (Lists) and modal editors (TaskEditor / EventEditor /
+// ContactEditor) push within their tab. Tab headers + titles come from i18next
+// (@aperio/locales); every domain type from @aperio/shared; persistence through
+// the shared Rust core via the cal-ffi bridge.
 
-const Stack = createNativeStackNavigator<RootStackParamList>();
+const Tab = createBottomTabNavigator<RootTabParamList>();
+const TasksStack = createNativeStackNavigator<RootStackParamList>();
+const CalendarStack = createNativeStackNavigator<RootStackParamList>();
+const ContactsStack = createNativeStackNavigator<RootStackParamList>();
+const SettingsStack = createNativeStackNavigator<RootStackParamList>();
+
+function TasksStackNav() {
+  const { t } = useTranslation();
+  return (
+    <TasksStack.Navigator initialRouteName="Tasks">
+      <TasksStack.Screen
+        name="Tasks"
+        component={TasksScreen}
+        options={{ title: t('views.tasks.title') }}
+      />
+      <TasksStack.Screen
+        name="Lists"
+        component={ListsScreen}
+        options={{ title: t('mobile.listsButtonLabel') }}
+      />
+      <TasksStack.Screen
+        name="TaskEditor"
+        component={TaskEditorModal}
+        options={{ presentation: 'modal', title: t('mobile.newTaskLabel') }}
+      />
+    </TasksStack.Navigator>
+  );
+}
+
+function CalendarStackNav() {
+  const { t } = useTranslation();
+  return (
+    <CalendarStack.Navigator initialRouteName="Events">
+      <CalendarStack.Screen
+        name="Events"
+        component={EventsScreen}
+        options={{ title: t('mobile.eventsTitle') }}
+      />
+      <CalendarStack.Screen
+        name="EventEditor"
+        component={EventEditorModal}
+        options={{ presentation: 'modal', title: t('dialogs.event.newTitle') }}
+      />
+    </CalendarStack.Navigator>
+  );
+}
+
+function ContactsStackNav() {
+  const { t } = useTranslation();
+  return (
+    <ContactsStack.Navigator initialRouteName="Contacts">
+      <ContactsStack.Screen
+        name="Contacts"
+        component={ContactsScreen}
+        options={{ title: t('sidebar.contactLists') }}
+      />
+      <ContactsStack.Screen
+        name="ContactEditor"
+        component={ContactEditorModal}
+        options={{ presentation: 'modal', title: t('dialogs.contact.createTitle') }}
+      />
+    </ContactsStack.Navigator>
+  );
+}
+
+function SettingsStackNav() {
+  const { t } = useTranslation();
+  return (
+    <SettingsStack.Navigator initialRouteName="Settings">
+      <SettingsStack.Screen
+        name="Settings"
+        component={SettingsScreen}
+        options={{ title: t('dialogs.settings.title') }}
+      />
+      <SettingsStack.Screen
+        name="Accounts"
+        component={AccountsScreen}
+        options={{ title: t('dialogs.accounts.title') }}
+      />
+      <SettingsStack.Screen
+        name="Sync"
+        component={SyncScreen}
+        options={{ title: t('mobile.syncTitle') }}
+      />
+    </SettingsStack.Navigator>
+  );
+}
 
 export default function App() {
   const { t } = useTranslation();
@@ -52,58 +136,28 @@ export default function App() {
       <StatusBar style="auto" />
       <NavigationContainer>
         <TaskStoreProvider>
-          <Stack.Navigator initialRouteName="Tasks">
-            <Stack.Screen
-              name="Tasks"
-              component={TasksScreen}
-              options={{ title: t('views.tasks.title') }}
+          <Tab.Navigator initialRouteName="TasksTab">
+            <Tab.Screen
+              name="TasksTab"
+              component={TasksStackNav}
+              options={{ headerShown: false, title: t('views.tasks.title') }}
             />
-            <Stack.Screen
-              name="Lists"
-              component={ListsScreen}
-              options={{ title: t('mobile.listsButtonLabel') }}
+            <Tab.Screen
+              name="CalendarTab"
+              component={CalendarStackNav}
+              options={{ headerShown: false, title: t('mobile.eventsButtonLabel') }}
             />
-            <Stack.Screen
-              name="Accounts"
-              component={AccountsScreen}
-              options={{ title: t('dialogs.accounts.title') }}
+            <Tab.Screen
+              name="ContactsTab"
+              component={ContactsStackNav}
+              options={{ headerShown: false, title: t('sidebar.contactLists') }}
             />
-            <Stack.Screen
-              name="Events"
-              component={EventsScreen}
-              options={{ title: t('mobile.eventsTitle') }}
+            <Tab.Screen
+              name="SettingsTab"
+              component={SettingsStackNav}
+              options={{ headerShown: false, title: t('dialogs.settings.title') }}
             />
-            <Stack.Screen
-              name="Sync"
-              component={SyncScreen}
-              options={{ title: t('mobile.syncTitle') }}
-            />
-            <Stack.Screen
-              name="Settings"
-              component={SettingsScreen}
-              options={{ title: t('dialogs.settings.title') }}
-            />
-            <Stack.Screen
-              name="Contacts"
-              component={ContactsScreen}
-              options={{ title: t('sidebar.contactLists') }}
-            />
-            <Stack.Screen
-              name="ContactEditor"
-              component={ContactEditorModal}
-              options={{ presentation: 'modal', title: t('dialogs.contact.createTitle') }}
-            />
-            <Stack.Screen
-              name="TaskEditor"
-              component={TaskEditorModal}
-              options={{ presentation: 'modal', title: t('mobile.newTaskLabel') }}
-            />
-            <Stack.Screen
-              name="EventEditor"
-              component={EventEditorModal}
-              options={{ presentation: 'modal', title: t('dialogs.event.newTitle') }}
-            />
-          </Stack.Navigator>
+          </Tab.Navigator>
         </TaskStoreProvider>
       </NavigationContainer>
     </SafeAreaProvider>

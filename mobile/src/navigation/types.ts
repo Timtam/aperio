@@ -28,6 +28,25 @@ export type RootStackParamList = {
   ContactEditor: { contactId: string | null; listId: string };
 };
 
+/**
+ * The bottom-tab shell — the primary navigation (the mobile equivalent of the
+ * desktop sidebar). Each tab hosts a native-stack over a subset of
+ * `RootStackParamList`:
+ *   TasksTab     — Tasks → Lists → TaskEditor (modal).
+ *   CalendarTab  — Events → EventEditor (modal).
+ *   ContactsTab  — Contacts → ContactEditor (modal).
+ *   SettingsTab  — Settings → Accounts / Sync.
+ * Cross-navigator `navigation.navigate('SomeScreen')` still resolves via the
+ * global augmentation below (React Navigation finds the route in whichever
+ * nested stack registers it + switches tabs as needed).
+ */
+export type RootTabParamList = {
+  TasksTab: undefined;
+  CalendarTab: undefined;
+  ContactsTab: undefined;
+  SettingsTab: undefined;
+};
+
 /** Per-screen props helper: `RootStackScreenProps<'TaskEditor'>` gives a typed
  *  `route.params` + `navigation`. */
 export type RootStackScreenProps<T extends keyof RootStackParamList> =
