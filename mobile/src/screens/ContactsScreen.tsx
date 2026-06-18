@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
@@ -17,30 +17,23 @@ import {
   deleteContact as apiDeleteContact,
   getContacts,
   listContactLists,
+  searchContacts,
 } from '../api/contacts';
 import type { RootStackScreenProps } from '../navigation/types';
 
 // Accessible address-book view — a linear, screen-reader-first list of every
 // contact across all address books (local + external providers), grouped under
-// each book's name, with create / edit / delete + a client-side search filter
-// over the loaded contacts. Contacts read/write through the Host's on-device
-// adapters; they are NOT on the sync event log.
+// each book's name, with create / edit / delete. Browsing lists the loaded
+// contacts grouped by book; searching runs a real cross-account Host search
+// (local FTS + each provider's search, incl. directories like the GAL) so a hit
+// in an account whose page wasn't loaded — or a directory-only contact — still
+// surfaces. Contacts read/write through the Host's on-device adapters; they are
+// NOT on the sync event log.
+
+const SEARCH_DEBOUNCE_MS = 250;
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
-}
-
-/** Does the contact match the (lowercased) query across name / org / email /
- *  phone — the fields a user searches by? */
-function matchesQuery(c: Contact, q: string): boolean {
-  return (
-    c.display_name.toLowerCase().includes(q) ||
-    (c.organization ?? '').toLowerCase().includes(q) ||
-    (c.given_name ?? '').toLowerCase().includes(q) ||
-    (c.family_name ?? '').toLowerCase().includes(q) ||
-    c.emails.some((e) => e.toLowerCase().includes(q)) ||
-    c.phone_numbers.some((p) => p.toLowerCase().includes(q))
-  );
 }
 
 /** A contact paired with its owning list, for grouped rendering. */
@@ -58,24 +51,72 @@ export default function ContactsScreen({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  // Host search results (flat Contact[]) while a query is active; null = not
+  // searching (browse the loaded groups).
+  const [searchResults, setSearchResults] = useState<Contact[] | null>(null);
 
-  const trimmedQuery = query.trim().toLowerCase();
-  // Client-side filter over the loaded contacts: keep only matching contacts,
-  // drop emptied groups. Empty query → everything.
-  const filteredGroups = useMemo(() => {
-    if (trimmedQuery.length === 0) return groups;
-    return groups
-      .map((g) => ({
-        list: g.list,
-        contacts: g.contacts.filter((c) => matchesQuery(c, trimmedQuery)),
-      }))
-      .filter((g) => g.contacts.length > 0);
-  }, [groups, trimmedQuery]);
+  const trimmedQuery = query.trim();
+  const searching = trimmedQuery.length > 0;
 
   const announce = useCallback(
     (message: string) => AccessibilityInfo.announceForAccessibility(message),
     [],
   );
+
+  // Debounced cross-account Host search with a request-token stale guard (the
+  // latest query wins). Empty query → clear results + browse the loaded groups.
+  const searchToken = useRef(0);
+  useEffect(() => {
+    const token = (searchToken.current += 1);
+    if (trimmedQuery === '') {
+      setSearchResults(null);
+      return;
+    }
+    const handle = setTimeout(() => {
+      void (async () => {
+        try {
+          const hits = await searchContacts(trimmedQuery);
+          if (searchToken.current === token) setSearchResults(hits);
+        } catch {
+          if (searchToken.current === token) setSearchResults([]);
+        }
+      })();
+    }, SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(handle);
+  }, [trimmedQuery]);
+
+  // The book name for a contact's owning list (from the loaded lists), or its
+  // raw list id as a last resort (a directory contact's book may not be loaded).
+  const bookName = useCallback(
+    (listId: string) => groups.find((g) => g.list.id === listId)?.list.name ?? listId,
+    [groups],
+  );
+
+  // What the list renders: the loaded groups when browsing, else the Host search
+  // results grouped by their owning book (search supersets the loaded set, incl.
+  // directories), so the grouped renderer is shared.
+  const displayGroups = useMemo<Group[]>(() => {
+    if (!searching || searchResults == null) return groups;
+    const byList = new Map<string, Contact[]>();
+    for (const c of searchResults) {
+      const arr = byList.get(c.list_id);
+      if (arr) arr.push(c);
+      else byList.set(c.list_id, [c]);
+    }
+    return Array.from(byList.entries()).map(([listId, contacts]) => ({
+      list:
+        groups.find((g) => g.list.id === listId)?.list ??
+        ({
+          id: listId,
+          name: bookName(listId),
+          color: null,
+          color_label: null,
+          read_only: true,
+          account_id: '',
+        } as ContactList),
+      contacts,
+    }));
+  }, [bookName, groups, searchResults, searching]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -163,11 +204,9 @@ export default function ContactsScreen({
     c.organization ?? c.emails[0] ?? c.phone_numbers[0] ?? '';
 
   const total = groups.reduce((n, g) => n + g.contacts.length, 0);
-  const filteredTotal = filteredGroups.reduce(
-    (n, g) => n + g.contacts.length,
-    0,
-  );
-  const searching = trimmedQuery.length > 0;
+  // Search is in flight until the debounced call resolves (results still null).
+  const searchPending = searching && searchResults == null;
+  const searchTotal = searchResults?.length ?? 0;
 
   return (
     <View style={styles.screen}>
@@ -214,7 +253,9 @@ export default function ContactsScreen({
               accessibilityRole="text"
               accessibilityLiveRegion="polite"
             >
-              {t('views.contacts.searchResults', { count: filteredTotal })}
+              {searchPending
+                ? t('views.contacts.searching')
+                : t('views.contacts.searchResults', { count: searchTotal })}
             </Text>
           )}
         </View>
@@ -232,7 +273,7 @@ export default function ContactsScreen({
         </Text>
       ) : total === 0 ? (
         <Text style={styles.muted}>{t('mobile.noContacts')}</Text>
-      ) : searching && filteredTotal === 0 ? (
+      ) : searching && !searchPending && searchTotal === 0 ? (
         <Text
           style={styles.muted}
           accessibilityRole="text"
@@ -246,7 +287,7 @@ export default function ContactsScreen({
           contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
         >
-          {filteredGroups.map((g) => (
+          {displayGroups.map((g) => (
             <View key={g.list.id} style={styles.group}>
               <Text style={styles.groupHeading} accessibilityRole="header">
                 {g.list.name}

@@ -93,6 +93,11 @@ export const deleteContactList = (id: string): Promise<void> =>
 export const getContacts = async (listId: string): Promise<Contact[]> =>
   JSON.parse(await CalFfi.contactsJson(listId)) as Contact[];
 
+/** Cross-account contact search (local FTS + each external provider's search,
+ *  incl. directories like the GAL). Local hits first. Read-only — no push. */
+export const searchContacts = async (query: string): Promise<Contact[]> =>
+  JSON.parse(await CalFfi.searchContactsJson(query)) as Contact[];
+
 export const createContact = async (
   listId: string,
   contact: NewContact,

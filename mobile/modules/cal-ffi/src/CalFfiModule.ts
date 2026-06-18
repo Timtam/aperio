@@ -201,6 +201,11 @@ declare class CalFfiModule extends NativeModule<Record<never, never>> {
    * or `''` for no filters.
    */
   searchJson(query: string, filtersJson: string): Promise<string>;
+  /**
+   * Cross-account contact search (local FTS + each external provider's search);
+   * returns a JSON `Contact[]`, local hits first.
+   */
+  searchContactsJson(query: string): Promise<string>;
 
   // ── Contacts ──
   // JSON passthrough in the cal_core/desktop wire shape; routing (local vs

@@ -264,6 +264,10 @@ class CalFfiModule : Module() {
       host.searchJson(query, filtersJson)
     }
 
+    AsyncFunction("searchContactsJson") { query: String ->
+      host.searchContactsJson(query)
+    }
+
     // ─── Contacts (local address book + external CardDAV/Google/EWS providers) ─
     // JSON passthrough, routed Rust-side; contacts are NOT on the sync event log
     // (local = device-local, external = provider-synced).

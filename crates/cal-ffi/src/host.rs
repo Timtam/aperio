@@ -1966,6 +1966,24 @@ impl Host {
         to_json(&results)
     }
 
+    /// Cross-account contact search: local hits first, then external (each
+    /// adapter caps its own result; external errors are swallowed per-adapter).
+    /// Returns a JSON `Contact[]`. Mirrors the desktop `search_contacts` — for
+    /// the ContactsScreen filter + the attendee typeahead.
+    pub fn search_contacts_json(&self, query: String) -> Result<String, StoreError> {
+        let contacts = self
+            .runtime
+            .block_on(async {
+                let local = self.adapter.search_contacts(&query).await?;
+                let mut external = self.registry.search_external_contacts(&query).await;
+                let mut out = local;
+                out.append(&mut external);
+                Ok::<_, cal_core::Error>(out)
+            })
+            .map_err(map_store_err)?;
+        to_json(&contacts)
+    }
+
     /// Create an event in `calendar_id` from a flattened `NewEvent`; returns
     /// the created `Event` as JSON. Routes local/external. Mirrors the desktop
     /// `create_event` minus colour resolution + reminder reschedule (deferred).
@@ -4378,6 +4396,43 @@ mod tests {
             host.rename_account_json(account_id, "   ".to_string()).unwrap_err(),
             StoreError::InvalidField { ref field, .. } if field == "name"
         ));
+    }
+
+    #[test]
+    fn search_contacts_finds_a_local_contact() {
+        let (_dir, host, _kc) = open_host();
+        let books: serde_json::Value =
+            serde_json::from_str(&host.contact_lists_json().unwrap()).unwrap();
+        let list_id = books.as_array().unwrap()[0]["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let contact = r#"{
+            "display_name": "Alice Example",
+            "given_name": "Alice",
+            "family_name": "Example",
+            "organization": null,
+            "emails": ["alice@example.com"],
+            "phone_numbers": [],
+            "birthday": null,
+            "notes": null,
+            "addresses": [],
+            "members": null,
+            "photo": null
+        }"#;
+        host.create_contact_json(list_id, contact.to_string())
+            .unwrap();
+
+        let results: serde_json::Value =
+            serde_json::from_str(&host.search_contacts_json("Alice".to_string()).unwrap()).unwrap();
+        assert!(
+            results
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|c| c["display_name"] == "Alice Example"),
+            "the local contact is found by name",
+        );
     }
 
     #[test]

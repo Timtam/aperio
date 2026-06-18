@@ -992,6 +992,14 @@ public protocol HostProtocol: AnyObject, Sendable {
     func resumeStaleDeviceJson() throws  -> String
     
     /**
+     * Cross-account contact search: local hits first, then external (each
+     * adapter caps its own result; external errors are swallowed per-adapter).
+     * Returns a JSON `Contact[]`. Mirrors the desktop `search_contacts` — for
+     * the ContactsScreen filter + the attendee typeahead.
+     */
+    func searchContactsJson(query: String) throws  -> String
+    
+    /**
      * Local full-text search (FTS5) over events + tasks, as a JSON
      * `SearchResults { events, tasks }`. Mirrors the desktop `search` command's
      * LOCAL half — the engine already lives in `cal-adapter-local`. The external
@@ -2008,6 +2016,21 @@ open func resumeStaleDeviceJson()throws  -> String  {
     return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
     uniffi_cal_ffi_fn_method_host_resume_stale_device_json(
             self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+    /**
+     * Cross-account contact search: local hits first, then external (each
+     * adapter caps its own result; external errors are swallowed per-adapter).
+     * Returns a JSON `Contact[]`. Mirrors the desktop `search_contacts` — for
+     * the ContactsScreen filter + the attendee typeahead.
+     */
+open func searchContactsJson(query: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_search_contacts_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(query),$0
     )
 })
 }
@@ -5716,6 +5739,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_resume_stale_device_json() != 29568) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_search_contacts_json() != 56276) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_search_json() != 52768) {

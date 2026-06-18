@@ -236,6 +236,10 @@ public class CalFfiModule: Module {
       try self.host.searchJson(query: query, filtersJson: filtersJson)
     }
 
+    AsyncFunction("searchContactsJson") { (query: String) -> String in
+      try self.host.searchContactsJson(query: query)
+    }
+
     // ─── Contacts ───
     // JSON passthrough, routed Rust-side. Mirrors the Android module.
 

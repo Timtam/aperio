@@ -822,6 +822,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_resume_stale_device_json(
     ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_search_contacts_json(
+    ): Short
     external fun uniffi_cal_ffi_checksum_method_host_search_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_sections_json(
@@ -1042,6 +1044,8 @@ external fun uniffi_cal_ffi_fn_method_host_reparent_task_list_json(`ptr`: Long,`
 external fun uniffi_cal_ffi_fn_method_host_resolve_sync_conflict(`ptr`: Long,`id`: Long,`choice`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_resume_stale_device_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_search_contacts_json(`ptr`: Long,`query`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_search_json(`ptr`: Long,`query`: RustBuffer.ByValue,`filtersJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1437,6 +1441,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_resume_stale_device_json() != 29568.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_search_contacts_json() != 56276.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_search_json() != 52768.toShort()) {
@@ -2399,6 +2406,14 @@ public interface HostInterface {
      * OnboardingReport JSON. Rejects when no sync target is configured.
      */
     fun `resumeStaleDeviceJson`(): kotlin.String
+    
+    /**
+     * Cross-account contact search: local hits first, then external (each
+     * adapter caps its own result; external errors are swallowed per-adapter).
+     * Returns a JSON `Contact[]`. Mirrors the desktop `search_contacts` — for
+     * the ContactsScreen filter + the attendee typeahead.
+     */
+    fun `searchContactsJson`(`query`: kotlin.String): kotlin.String
     
     /**
      * Local full-text search (FTS5) over events + tasks, as a JSON
@@ -3674,6 +3689,26 @@ open class Host: Disposable, AutoCloseable, HostInterface
     UniffiLib.uniffi_cal_ffi_fn_method_host_resume_stale_device_json(
         it,
         _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Cross-account contact search: local hits first, then external (each
+     * adapter caps its own result; external errors are swallowed per-adapter).
+     * Returns a JSON `Contact[]`. Mirrors the desktop `search_contacts` — for
+     * the ContactsScreen filter + the attendee typeahead.
+     */
+    @Throws(StoreException::class)override fun `searchContactsJson`(`query`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_search_contacts_json(
+        it,
+        FfiConverterString.lower(`query`),_status)
 }
     }
     )
