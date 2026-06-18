@@ -221,5 +221,14 @@ class CalFfiModule : Module() {
     AsyncFunction("deleteContactList") { id: String ->
       host.deleteContactList(id)
     }
+
+    // ─── OAuth (host-driven; mobile opens authorize_url in a native session) ──
+    // beginOauthJson runs the pure authorize phase (no network) → returns
+    // {authorize_url, pkce_verifier, state}. complete (network exchange + account
+    // creation) follows in a later phase.
+
+    AsyncFunction("beginOauthJson") { pluginId: String, argsJson: String ->
+      host.beginOauthJson(pluginId, argsJson)
+    }
   }
 }

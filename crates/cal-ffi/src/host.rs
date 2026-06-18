@@ -1799,6 +1799,58 @@ impl Host {
     pub fn delete_contact_list(&self, id: String) -> Result<(), StoreError> {
         self.adapter.delete_contact_list(&id).map_err(map_store_err)
     }
+
+    // ── OAuth (host-driven, for mobile native auth sessions) ──────────────────
+    //
+    // Desktop runs OAuth via the plugin's loopback+browser dance; mobile can't,
+    // so the host drives it in two phases around a native auth session. These
+    // call the statically-embedded plugin's `interactive_auth` with a `phase`
+    // discriminator (the auth-fn is carried by `register_static_with_auth`).
+    // `begin` is pure (builds the authorize URL + PKCE — no network); the mobile
+    // layer opens that URL, captures the `aperio://` redirect, and calls
+    // `complete` (the network token exchange). The host holds the
+    // pkce_verifier/state opaquely between the two calls. Wiring the returned
+    // tokens into an account row (AccountsRepo + keychain + AccountCreated) is
+    // the follow-on `complete_oauth_json` step.
+
+    /// Begin a host-driven OAuth flow for `plugin_id` (e.g.
+    /// `com.aperio.cal-adapter-google`). `args_json` carries the provider's
+    /// begin inputs — `{client_id, redirect_uri}` (Google) /
+    /// `{client_id, authority, redirect_uri}` (Microsoft); the `phase:"authorize"`
+    /// discriminator is injected here. Returns the plugin's
+    /// `{authorize_url, pkce_verifier, state}` JSON. The caller opens
+    /// `authorize_url` in a native auth session and keeps `pkce_verifier` +
+    /// `state` for the matching `complete` call.
+    pub fn begin_oauth_json(
+        &self,
+        plugin_id: String,
+        args_json: String,
+    ) -> Result<String, StoreError> {
+        let mut args: serde_json::Value = from_json("oauth begin", &args_json)?;
+        let obj = args
+            .as_object_mut()
+            .ok_or_else(|| StoreError::InvalidField {
+                field: "args".to_string(),
+                detail: "OAuth begin args must be a JSON object".to_string(),
+            })?;
+        obj.insert(
+            "phase".to_string(),
+            serde_json::Value::String("authorize".to_string()),
+        );
+        let bytes = self
+            .runtime
+            .block_on(async {
+                self.plugin_manager
+                    .interactive_auth(&plugin_id, &args.to_string())
+                    .await
+            })
+            .map_err(|e| StoreError::Auth {
+                detail: e.to_string(),
+            })?;
+        String::from_utf8(bytes).map_err(|e| StoreError::Protocol {
+            detail: format!("authorize response was not UTF-8: {e}"),
+        })
+    }
 }
 
 /// Map an accounts-repo error to the FFI store error, preserving the
@@ -2598,6 +2650,32 @@ mod tests {
                 .all(|r| r["item_id"] != serde_json::json!(task_id)),
             "a tomorrow reminder must be outside a 30-minute horizon; got: {narrow}",
         );
+    }
+
+    #[test]
+    fn begin_google_oauth_returns_an_authorize_url() {
+        // End-to-end over the static embedding: the Host calls the bundled
+        // Google plugin's interactive_auth(phase=authorize) — which only works
+        // because register_static_with_auth carried the auth fn (8f313cb) — and
+        // gets back a real consent URL. No network (the authorize phase is pure).
+        let (_dir, host, _kc) = open_host();
+        let args = r#"{"client_id":"abc.apps.googleusercontent.com","redirect_uri":"aperio://oauth-callback"}"#;
+        let out = host
+            .begin_oauth_json(
+                "com.aperio.cal-adapter-google".to_string(),
+                args.to_string(),
+            )
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let url = v["authorize_url"].as_str().unwrap();
+        assert!(url.contains("accounts.google.com"), "got: {url}");
+        assert!(url.contains("abc.apps.googleusercontent.com"), "got: {url}");
+        assert!(
+            url.contains("aperio%3A%2F%2Foauth-callback"),
+            "redirect must be in the URL: {url}"
+        );
+        assert_eq!(v["pkce_verifier"].as_str().unwrap().len(), 43);
+        assert!(v["state"].as_str().is_some());
     }
 
     #[test]

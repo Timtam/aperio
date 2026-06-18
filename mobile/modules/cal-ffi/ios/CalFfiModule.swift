@@ -195,5 +195,11 @@ public class CalFfiModule: Module {
     AsyncFunction("deleteContactList") { (id: String) in
       try self.host.deleteContactList(id: id)
     }
+
+    // ─── OAuth (host-driven; mobile opens authorize_url in a native session) ──
+
+    AsyncFunction("beginOauthJson") { (pluginId: String, argsJson: String) -> String in
+      try self.host.beginOauthJson(pluginId: pluginId, argsJson: argsJson)
+    }
   }
 }

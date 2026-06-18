@@ -549,6 +549,18 @@ public protocol HostProtocol: AnyObject, Sendable {
     func accountsJson() throws  -> String
     
     /**
+     * Begin a host-driven OAuth flow for `plugin_id` (e.g.
+     * `com.aperio.cal-adapter-google`). `args_json` carries the provider's
+     * begin inputs — `{client_id, redirect_uri}` (Google) /
+     * `{client_id, authority, redirect_uri}` (Microsoft); the `phase:"authorize"`
+     * discriminator is injected here. Returns the plugin's
+     * `{authorize_url, pkce_verifier, state}` JSON. The caller opens
+     * `authorize_url` in a native auth session and keeps `pkce_verifier` +
+     * `state` for the matching `complete` call.
+     */
+    func beginOauthJson(pluginId: String, argsJson: String) throws  -> String
+    
+    /**
      * Configure the sync adapter from a JSON request. Handles the `local`
      * (filesystem path), `webdav` (URL + user + password), and `ftp`
      * (host/port/user/path/mode + password) kinds: open the matching
@@ -923,6 +935,26 @@ open func accountsJson()throws  -> String  {
     return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
     uniffi_cal_ffi_fn_method_host_accounts_json(
             self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+    /**
+     * Begin a host-driven OAuth flow for `plugin_id` (e.g.
+     * `com.aperio.cal-adapter-google`). `args_json` carries the provider's
+     * begin inputs — `{client_id, redirect_uri}` (Google) /
+     * `{client_id, authority, redirect_uri}` (Microsoft); the `phase:"authorize"`
+     * discriminator is injected here. Returns the plugin's
+     * `{authorize_url, pkce_verifier, state}` JSON. The caller opens
+     * `authorize_url` in a native auth session and keeps `pkce_verifier` +
+     * `state` for the matching `complete` call.
+     */
+open func beginOauthJson(pluginId: String, argsJson: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_begin_oauth_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(pluginId),
+        FfiConverterString.lower(argsJson),$0
     )
 })
 }
@@ -4732,6 +4764,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_accounts_json() != 21992) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_begin_oauth_json() != 10684) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_configure_sync_adapter_json() != 4122) {

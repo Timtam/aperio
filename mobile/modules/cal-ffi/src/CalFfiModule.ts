@@ -143,6 +143,14 @@ declare class CalFfiModule extends NativeModule<Record<never, never>> {
   createContactListJson(name: string): Promise<string>;
   /** Delete a local address book (the seeded default can't be deleted). */
   deleteContactList(id: string): Promise<void>;
+
+  // ── OAuth (host-driven; mobile opens authorize_url in a native session) ──
+  /** Begin OAuth for an account plugin (e.g. `com.aperio.cal-adapter-google`).
+   *  `argsJson` carries `{client_id, redirect_uri[, authority]}`. Returns the
+   *  plugin's `{authorize_url, pkce_verifier, state}` JSON — the pure authorize
+   *  phase (no network). The caller opens `authorize_url` in a native auth
+   *  session and keeps the verifier/state for the matching exchange. */
+  beginOauthJson(pluginId: string, argsJson: string): Promise<string>;
 }
 
 export default requireNativeModule<CalFfiModule>('CalFfi');

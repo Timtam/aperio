@@ -726,6 +726,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_accounts_json(
     ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_begin_oauth_json(
+    ): Short
     external fun uniffi_cal_ffi_checksum_method_host_configure_sync_adapter_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_contact_lists_json(
@@ -882,6 +884,8 @@ external fun uniffi_cal_ffi_fn_free_host(`handle`: Long,uniffi_out_err: UniffiRu
 external fun uniffi_cal_ffi_fn_constructor_host_open(`dbPath`: RustBuffer.ByValue,`keychain`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
 external fun uniffi_cal_ffi_fn_method_host_accounts_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_begin_oauth_json(`ptr`: Long,`pluginId`: RustBuffer.ByValue,`argsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_configure_sync_adapter_json(`ptr`: Long,`configJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
@@ -1165,6 +1169,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_accounts_json() != 21992.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_begin_oauth_json() != 10684.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_configure_sync_adapter_json() != 4122.toShort()) {
@@ -1734,6 +1741,18 @@ public interface HostInterface {
     fun `accountsJson`(): kotlin.String
     
     /**
+     * Begin a host-driven OAuth flow for `plugin_id` (e.g.
+     * `com.aperio.cal-adapter-google`). `args_json` carries the provider's
+     * begin inputs — `{client_id, redirect_uri}` (Google) /
+     * `{client_id, authority, redirect_uri}` (Microsoft); the `phase:"authorize"`
+     * discriminator is injected here. Returns the plugin's
+     * `{authorize_url, pkce_verifier, state}` JSON. The caller opens
+     * `authorize_url` in a native auth session and keeps `pkce_verifier` +
+     * `state` for the matching `complete` call.
+     */
+    fun `beginOauthJson`(`pluginId`: kotlin.String, `argsJson`: kotlin.String): kotlin.String
+    
+    /**
      * Configure the sync adapter from a JSON request. Handles the `local`
      * (filesystem path), `webdav` (URL + user + password), and `ftp`
      * (host/port/user/path/mode + password) kinds: open the matching
@@ -2142,6 +2161,30 @@ open class Host: Disposable, AutoCloseable, HostInterface
     UniffiLib.uniffi_cal_ffi_fn_method_host_accounts_json(
         it,
         _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Begin a host-driven OAuth flow for `plugin_id` (e.g.
+     * `com.aperio.cal-adapter-google`). `args_json` carries the provider's
+     * begin inputs — `{client_id, redirect_uri}` (Google) /
+     * `{client_id, authority, redirect_uri}` (Microsoft); the `phase:"authorize"`
+     * discriminator is injected here. Returns the plugin's
+     * `{authorize_url, pkce_verifier, state}` JSON. The caller opens
+     * `authorize_url` in a native auth session and keeps `pkce_verifier` +
+     * `state` for the matching `complete` call.
+     */
+    @Throws(StoreException::class)override fun `beginOauthJson`(`pluginId`: kotlin.String, `argsJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_begin_oauth_json(
+        it,
+        FfiConverterString.lower(`pluginId`),FfiConverterString.lower(`argsJson`),_status)
 }
     }
     )
