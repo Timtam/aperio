@@ -883,6 +883,194 @@ impl Host {
         Ok(())
     }
 
+    // ── Tasks / lists / sections (JSON bridge, sync-logged) ───────────────────
+    //
+    // The faithful tasks port now lives on the Host (folded in from the original
+    // `LocalStore`), so every LOCAL task/list/section mutation appends the SAME
+    // `SyncEvent` shape the desktop command layer emits (`commands::tasks`) —
+    // `EventPayload { id, fields: to_value(&entity) }` for Created/Updated,
+    // `IdPayload { id }` for Deleted. That's what makes tasks sync cross-device.
+    // The JSON wire is the `cal_core` serde shape, identical to the desktop's
+    // Tauri payloads, so `@aperio/shared` parses both sides.
+    //
+    // This slice is LOCAL-only (every call hits the one `LocalAdapter`, so every
+    // success IS a local mutation → append unconditionally). External task-list
+    // routing (the desktop `account_for_task_list` split + cross-list moves +
+    // the external on-demand spawn) follows in its own phase, like the event
+    // `route()` already does.
+
+    /// All task lists as a JSON array (`cal_core::TaskList[]`).
+    pub fn task_lists_json(&self) -> Result<String, StoreError> {
+        let lists = self.adapter.list_task_lists_sync().map_err(map_store_err)?;
+        to_json(&lists)
+    }
+
+    /// Create a top-level local task list; returns the created `TaskList` as JSON
+    /// and appends `TaskListCreated`.
+    pub fn create_task_list_json(&self, name: String) -> Result<String, StoreError> {
+        let list = self
+            .adapter
+            .create_task_list(&name, None, None, None, None)
+            .map_err(map_store_err)?;
+        if let Ok(fields) = serde_json::to_value(&list) {
+            self.writer.append(SyncEvent::TaskListCreated(EventPayload {
+                id: list.id.clone(),
+                fields,
+            }));
+        }
+        to_json(&list)
+    }
+
+    /// Set or clear a list's parent (`parent_id = None` promotes to top level);
+    /// returns the updated `TaskList` as JSON and appends `TaskListUpdated`.
+    pub fn reparent_task_list_json(
+        &self,
+        id: String,
+        parent_id: Option<String>,
+    ) -> Result<String, StoreError> {
+        let list = self
+            .adapter
+            .reparent_task_list(&id, parent_id.as_deref())
+            .map_err(map_store_err)?;
+        if let Ok(fields) = serde_json::to_value(&list) {
+            self.writer.append(SyncEvent::TaskListUpdated(EventPayload {
+                id: list.id.clone(),
+                fields,
+            }));
+        }
+        to_json(&list)
+    }
+
+    /// Delete a task list (its tasks cascade away) and append `TaskListDeleted`.
+    pub fn delete_task_list(&self, id: String) -> Result<(), StoreError> {
+        self.adapter.delete_task_list(&id).map_err(map_store_err)?;
+        self.writer
+            .append(SyncEvent::TaskListDeleted(IdPayload { id }));
+        Ok(())
+    }
+
+    /// Tasks in a list as a JSON array (`cal_core::Task[]`).
+    pub fn tasks_json(&self, list_id: String) -> Result<String, StoreError> {
+        let tasks = self
+            .adapter
+            .get_tasks_sync(&list_id)
+            .map_err(map_store_err)?;
+        to_json(&tasks)
+    }
+
+    /// One task by id as JSON; [`StoreError::NotFound`] when absent.
+    pub fn task_json(&self, id: String) -> Result<String, StoreError> {
+        let task = self
+            .adapter
+            .get_task_by_id(&id)
+            .map_err(map_store_err)?
+            .ok_or(StoreError::NotFound)?;
+        to_json(&task)
+    }
+
+    /// Create a task from a JSON `cal_core::NewTask`; returns the created `Task`
+    /// as JSON and appends `TaskCreated` (a recurring task is assigned a stable
+    /// series id).
+    pub fn create_task_json(
+        &self,
+        list_id: String,
+        new_task_json: String,
+    ) -> Result<String, StoreError> {
+        let new: cal_core::NewTask = from_json("task", &new_task_json)?;
+        let task = self
+            .adapter
+            .create_task_sync(&list_id, new)
+            .map_err(map_store_err)?;
+        if let Ok(fields) = serde_json::to_value(&task) {
+            self.writer.append(SyncEvent::TaskCreated(EventPayload {
+                id: task.id.clone(),
+                fields,
+            }));
+        }
+        to_json(&task)
+    }
+
+    /// Update a task from a JSON `cal_core::Task`; returns the updated `Task` as
+    /// JSON and appends `TaskUpdated`. A list_id change is a single local SQL
+    /// UPDATE (the desktop's local↔local move). Completing a recurring task
+    /// spawns its next instance locally; the applier re-runs the same spawner on
+    /// the peer and dedups on `series_id`, so only `TaskUpdated` need cross.
+    pub fn update_task_json(&self, task_json: String) -> Result<String, StoreError> {
+        let task: cal_core::Task = from_json("task", &task_json)?;
+        let updated = self.adapter.update_task_sync(task).map_err(map_store_err)?;
+        if let Ok(fields) = serde_json::to_value(&updated) {
+            self.writer.append(SyncEvent::TaskUpdated(EventPayload {
+                id: updated.id.clone(),
+                fields,
+            }));
+        }
+        to_json(&updated)
+    }
+
+    /// Delete a task and append `TaskDeleted`.
+    pub fn delete_task(&self, id: String) -> Result<(), StoreError> {
+        self.adapter.delete_task_sync(&id).map_err(map_store_err)?;
+        self.writer.append(SyncEvent::TaskDeleted(IdPayload { id }));
+        Ok(())
+    }
+
+    /// Sections of a list as a JSON array (`cal_core::Section[]`).
+    pub fn sections_json(&self, list_id: String) -> Result<String, StoreError> {
+        let sections = self
+            .adapter
+            .list_sections_sync(&list_id)
+            .map_err(map_store_err)?;
+        to_json(&sections)
+    }
+
+    /// Create a section in a list; returns the created `Section` as JSON and
+    /// appends `SectionCreated`.
+    pub fn create_section_json(
+        &self,
+        list_id: String,
+        name: String,
+        position: u32,
+        color_label: Option<String>,
+    ) -> Result<String, StoreError> {
+        let section = self
+            .adapter
+            .create_section(&list_id, &name, position, color_label.map(ColorLabelId))
+            .map_err(map_store_err)?;
+        if let Ok(fields) = serde_json::to_value(&section) {
+            self.writer.append(SyncEvent::SectionCreated(EventPayload {
+                id: section.id.clone(),
+                fields,
+            }));
+        }
+        to_json(&section)
+    }
+
+    /// Update a section from a JSON `cal_core::Section`; returns it as JSON and
+    /// appends `SectionUpdated`.
+    pub fn update_section_json(&self, section_json: String) -> Result<String, StoreError> {
+        let section: cal_core::Section = from_json("section", &section_json)?;
+        let updated = self
+            .adapter
+            .update_section(section)
+            .map_err(map_store_err)?;
+        if let Ok(fields) = serde_json::to_value(&updated) {
+            self.writer.append(SyncEvent::SectionUpdated(EventPayload {
+                id: updated.id.clone(),
+                fields,
+            }));
+        }
+        to_json(&updated)
+    }
+
+    /// Delete a section (its tasks fall back to ungrouped) and append
+    /// `SectionDeleted`.
+    pub fn delete_section(&self, id: String) -> Result<(), StoreError> {
+        self.adapter.delete_section(&id).map_err(map_store_err)?;
+        self.writer
+            .append(SyncEvent::SectionDeleted(IdPayload { id }));
+        Ok(())
+    }
+
     /// The orchestrator's status as JSON (the desktop `SyncStatus` shape:
     /// configured / in_flight / last_synced_at / interval / e2e / …). Reads
     /// without a sync round.
@@ -1612,6 +1800,83 @@ mod tests {
                 .count(),
             1,
             "the event must appear exactly once after a repeat round",
+        );
+    }
+
+    #[test]
+    fn two_hosts_sync_a_task_through_a_local_target() {
+        // The same mobile↔mobile parity assertion as the event capstone, but for
+        // the task surface — proves task/list mutations append to the sync log
+        // and round-trip through a shared local-filesystem target.
+        let remote = tempfile::tempdir().unwrap();
+        let cfg = format!(
+            r#"{{"kind":"local","path":{}}}"#,
+            serde_json::to_string(&remote.path().to_string_lossy()).unwrap()
+        );
+
+        let dir_a = tempfile::tempdir().unwrap();
+        let host_a = open_named(&dir_a, "a");
+        let dir_b = tempfile::tempdir().unwrap();
+        let host_b = open_named(&dir_b, "b");
+
+        host_a.configure_sync_adapter_json(cfg.clone()).unwrap();
+        host_b.configure_sync_adapter_json(cfg).unwrap();
+
+        // A creates a list (TaskListCreated) + a task in it (TaskCreated).
+        let list = host_a.create_task_list_json("Shared".to_string()).unwrap();
+        let list_id = serde_json::from_str::<serde_json::Value>(&list).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let new_task = r#"{"title":"Across devices","description":null,"status":"open","priority":"medium","scheduled_date":null,"scheduled_time":null,"deadline_date":null,"deadline_time":null,"recurrence":null,"parent_id":null,"color_label":null,"reminders":[],"sound":null}"#;
+        let created = host_a
+            .create_task_json(list_id.clone(), new_task.to_string())
+            .unwrap();
+        let task_id = serde_json::from_str::<serde_json::Value>(&created).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        // A pushes its pending logs; B fetches + applies (list before task, in
+        // append order, so the task's FK to its list is satisfied).
+        wait_for_pending(&dir_a);
+        host_a.sync_now_json().unwrap();
+        host_b.sync_now_json().unwrap();
+
+        let lists: serde_json::Value =
+            serde_json::from_str(&host_b.task_lists_json().unwrap()).unwrap();
+        assert!(
+            lists
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|l| l["id"] == serde_json::json!(list_id)),
+            "Host B should see A's task list after a sync round; got: {lists}",
+        );
+        let tasks: serde_json::Value =
+            serde_json::from_str(&host_b.tasks_json(list_id.clone()).unwrap()).unwrap();
+        assert!(
+            tasks
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|t| t["id"] == serde_json::json!(task_id)),
+            "Host B should see A's task after a sync round; got: {tasks}",
+        );
+
+        // Idempotency: a repeat round adds no duplicate.
+        host_b.sync_now_json().unwrap();
+        let again: serde_json::Value =
+            serde_json::from_str(&host_b.tasks_json(list_id).unwrap()).unwrap();
+        assert_eq!(
+            again
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|t| t["id"] == serde_json::json!(task_id))
+                .count(),
+            1,
+            "the task must appear exactly once after a repeat round",
         );
     }
 
