@@ -21,3 +21,15 @@ export const setContainerColorLabel = async (
   await CalFfi.setContainerColorLabel(containerId, kind, colorLabelId);
   scheduleBackgroundPush();
 };
+
+/** Rename a LOCAL container (calendar / task list). The new name rides the
+ *  container's own row + Updated sync event. External containers + contact
+ *  lists (provider/override path) reject — the UI only offers it for local. */
+export const renameContainer = async (
+  containerId: string,
+  kind: ContainerKind,
+  name: string,
+): Promise<void> => {
+  await CalFfi.renameContainer(containerId, kind, name);
+  scheduleBackgroundPush();
+};

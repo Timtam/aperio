@@ -60,6 +60,8 @@
     "today": "Heute",
     "jumpToDate": "Zu Datum springen (JJJJ-MM-TT)",
     "jumpToDateAction": "Zum Datum",
+    "renameListLabel": "Liste umbenennen",
+    "listRenamed": "Liste umbenannt in „{{name}}“.",
     "noEvents": "Keine Termine an diesem Tag.",
     "noContacts": "Noch keine Kontakte.",
     "contactHint": "Doppeltippen zum Bearbeiten. Nach oben oder unten wischen zum Löschen.",

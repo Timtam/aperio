@@ -232,6 +232,10 @@ class CalFfiModule : Module() {
       host.setContainerColorLabel(containerId, kind, colorLabelId)
     }
 
+    AsyncFunction("renameContainer") { containerId: String, kind: String, name: String ->
+      host.renameContainer(containerId, kind, name)
+    }
+
     // ─── Contacts (local address book + external CardDAV/Google/EWS providers) ─
     // JSON passthrough, routed Rust-side; contacts are NOT on the sync event log
     // (local = device-local, external = provider-synced).

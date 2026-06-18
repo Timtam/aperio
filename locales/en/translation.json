@@ -60,6 +60,8 @@
     "today": "Today",
     "jumpToDate": "Jump to date (YYYY-MM-DD)",
     "jumpToDateAction": "Go to date",
+    "renameListLabel": "Rename list",
+    "listRenamed": "List renamed to \"{{name}}\".",
     "noEvents": "No events on this day.",
     "noContacts": "No contacts yet.",
     "contactHint": "Double-tap to edit. Swipe up or down to delete.",

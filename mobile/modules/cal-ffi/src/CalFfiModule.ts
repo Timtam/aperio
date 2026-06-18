@@ -156,6 +156,13 @@ declare class CalFfiModule extends NativeModule<Record<never, never>> {
     kind: string,
     colorLabelId: string | null,
   ): Promise<void>;
+  /**
+   * Rename a LOCAL container. `kind` is `'calendar' | 'task_list' |
+   * 'contact_list'`. Only local calendars / task lists are supported (the new
+   * name rides their synced row); external containers + contact-list renames
+   * (override path) reject until that lands.
+   */
+  renameContainer(containerId: string, kind: string, name: string): Promise<void>;
 
   // ── Contacts ──
   // JSON passthrough in the cal_core/desktop wire shape; routing (local vs

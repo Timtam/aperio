@@ -19,7 +19,7 @@ import {
   reparentTaskList,
   updateSection,
 } from '../api/client';
-import { setContainerColorLabel } from '../api/containerColor';
+import { renameContainer, setContainerColorLabel } from '../api/containerColor';
 import { ColorLabelSelect } from '../components/ColorLabelSelect';
 import { RadioGroup } from '../components/RadioGroup';
 import type { RootStackScreenProps } from '../navigation/types';
@@ -79,6 +79,8 @@ export default function ListEditorModal({
   );
 
   const [newSectionName, setNewSectionName] = useState('');
+  // The list's own name, edited in place (local lists only).
+  const [renameText, setRenameText] = useState(() => list?.name ?? '');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
   // The section being edited also carries its colour ('' = none); only LOCAL
@@ -198,6 +200,27 @@ export default function ListEditorModal({
     },
     [announce, busy, colorLabels, invalidateData, list, listId, refreshTaskLists, t],
   );
+
+  // Rename this LOCAL list — the new name rides its own synced row.
+  const renameList = useCallback(async () => {
+    if (busy) return;
+    const name = renameText.trim();
+    if (name.length === 0 || name === list?.name) return;
+    setError(null);
+    setBusy(true);
+    try {
+      await renameContainer(listId, 'task_list', name);
+      await refreshTaskLists();
+      invalidateData();
+      announce(t('mobile.listRenamed', { name }));
+    } catch (err) {
+      const message = errorMessage(err);
+      setError(message);
+      announce(t('mobile.error', { message }));
+    } finally {
+      setBusy(false);
+    }
+  }, [announce, busy, invalidateData, list, listId, refreshTaskLists, renameText, t]);
 
   const focus = useListFocusManager(sections.length);
 
@@ -378,6 +401,37 @@ export default function ListEditorModal({
         >
           {error}
         </Text>
+      )}
+
+      {/* Rename — local lists only (an external list's name is provider-owned /
+          a host-local override, deferred). The new name rides its synced row. */}
+      {isLocal && (
+        <>
+          <Text style={styles.heading} accessibilityRole="header">
+            {t('mobile.renameListLabel')}
+          </Text>
+          <View style={styles.addRow}>
+            <TextInput
+              style={styles.input}
+              value={renameText}
+              onChangeText={setRenameText}
+              accessibilityLabel={t('mobile.renameListLabel')}
+              editable={!busy}
+              returnKeyType="done"
+              onSubmitEditing={() => void renameList()}
+            />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ disabled: busy }}
+              accessibilityLabel={t('mobile.rename')}
+              disabled={busy}
+              onPress={() => void renameList()}
+              style={({ pressed }) => [styles.addButton, pressed && styles.pressed]}
+            >
+              <Text style={styles.addButtonText}>{t('mobile.rename')}</Text>
+            </Pressable>
+          </View>
+        </>
       )}
 
       {/* Reparent — local lists only (the backend rejects external reparent),

@@ -217,6 +217,18 @@ fn external_color_override_unsupported() -> StoreError {
     }
 }
 
+/// Renaming an external container routes to its provider, and a contact-list
+/// rename / a host-local name override both go through the desktop-only
+/// `OverridesRepo` — not yet extracted into host-core, so mobile can only
+/// rename a LOCAL calendar / task list (its own synced row) for now.
+fn external_rename_unsupported() -> StoreError {
+    StoreError::Unsupported {
+        detail: "renaming an external container or a contact list \
+                 is not supported on mobile yet"
+            .to_string(),
+    }
+}
+
 /// Consecutive-failure count at which sync is reported as `sustained_failure`.
 /// Matches the desktop `SyncScheduler` latch threshold.
 const SUSTAINED_FAILURE_THRESHOLD: u32 = 3;
@@ -3213,6 +3225,71 @@ impl Host {
         }
     }
 
+    /// Rename a LOCAL calendar / task list (DESIGN §6.5). Mirrors the desktop
+    /// set_container_name LOCAL branch: rename the container's own (synced) row
+    /// and emit CalendarUpdated / TaskListUpdated so other devices follow.
+    /// `kind` is `"calendar"` | `"task_list"` | `"contact_list"`. An external
+    /// container renames via its provider, and a contact-list rename / host-local
+    /// name override both go through the desktop-only OverridesRepo — so those
+    /// return `Unsupported` until that path lands on mobile.
+    pub fn rename_container(
+        &self,
+        container_id: String,
+        kind: String,
+        name: String,
+    ) -> Result<(), StoreError> {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return Err(StoreError::InvalidField {
+                field: "name".to_string(),
+                detail: "name must not be empty".to_string(),
+            });
+        }
+        match kind.as_str() {
+            "calendar" => {
+                if !self.is_local_calendar(&container_id) {
+                    return Err(external_rename_unsupported());
+                }
+                if let Some(mut cal) = self
+                    .adapter
+                    .get_calendar_by_id(&container_id)
+                    .map_err(map_store_err)?
+                {
+                    cal.name = trimmed.to_string();
+                    let updated = self.adapter.update_calendar(cal).map_err(map_store_err)?;
+                    if let Ok(fields) = serde_json::to_value(&updated) {
+                        self.writer.append(SyncEvent::CalendarUpdated(EventPayload {
+                            id: updated.id.clone(),
+                            fields,
+                        }));
+                    }
+                }
+                Ok(())
+            }
+            "task_list" => {
+                if !self.is_local_task_list(&container_id) {
+                    return Err(external_rename_unsupported());
+                }
+                if let Some(mut list) = self
+                    .adapter
+                    .get_task_list_by_id(&container_id)
+                    .map_err(map_store_err)?
+                {
+                    list.name = trimmed.to_string();
+                    let updated = self.adapter.update_task_list(list).map_err(map_store_err)?;
+                    if let Ok(fields) = serde_json::to_value(&updated) {
+                        self.writer.append(SyncEvent::TaskListUpdated(EventPayload {
+                            id: updated.id.clone(),
+                            fields,
+                        }));
+                    }
+                }
+                Ok(())
+            }
+            _ => Err(external_rename_unsupported()),
+        }
+    }
+
     // ── Contacts (JSON bridge, routed) ────────────────────────────────────────
     //
     // Address books + contacts, routed local (the device SQLite store) vs
@@ -5038,6 +5115,71 @@ mod tests {
                 "whatever".to_string(),
                 "contact_list".to_string(),
                 Some(label_id),
+            )
+            .unwrap_err(),
+            StoreError::Unsupported { .. }
+        ));
+    }
+
+    #[test]
+    fn rename_container_renames_local_list_and_calendar() {
+        let (_dir, host, _kc) = open_host();
+
+        // Local task list.
+        let list: serde_json::Value =
+            serde_json::from_str(&host.create_task_list_json("Inbox".to_string()).unwrap())
+                .unwrap();
+        let list_id = list["id"].as_str().unwrap().to_string();
+        let _ = host.task_lists_json().unwrap(); // prime the route map
+        host.rename_container(
+            list_id.clone(),
+            "task_list".to_string(),
+            "  Errands  ".to_string(),
+        )
+        .unwrap();
+        let lists: serde_json::Value =
+            serde_json::from_str(&host.task_lists_json().unwrap()).unwrap();
+        let renamed = lists
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|l| l["id"] == serde_json::json!(list_id))
+            .unwrap();
+        assert_eq!(renamed["name"], "Errands", "name is trimmed + persisted");
+
+        // Local calendar.
+        let cal: serde_json::Value = serde_json::from_str(
+            &host
+                .create_calendar_json(serde_json::json!({"name": "Personal"}).to_string())
+                .unwrap(),
+        )
+        .unwrap();
+        let cal_id = cal["id"].as_str().unwrap().to_string();
+        host.rename_container(cal_id.clone(), "calendar".to_string(), "Work".to_string())
+            .unwrap();
+        let cals: serde_json::Value =
+            serde_json::from_str(&host.list_calendars_json().unwrap()).unwrap();
+        let renamed_cal = cals
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["id"] == serde_json::json!(cal_id))
+            .unwrap();
+        assert_eq!(renamed_cal["name"], "Work");
+
+        // Empty name → InvalidField.
+        assert!(matches!(
+            host.rename_container(list_id, "task_list".to_string(), "   ".to_string())
+                .unwrap_err(),
+            StoreError::InvalidField { ref field, .. } if field == "name"
+        ));
+
+        // Contact lists rename via the OverridesRepo path → Unsupported.
+        assert!(matches!(
+            host.rename_container(
+                "whatever".to_string(),
+                "contact_list".to_string(),
+                "X".to_string()
             )
             .unwrap_err(),
             StoreError::Unsupported { .. }

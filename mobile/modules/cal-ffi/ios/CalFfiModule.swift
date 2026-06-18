@@ -204,6 +204,10 @@ public class CalFfiModule: Module {
       try self.host.setContainerColorLabel(containerId: containerId, kind: kind, colorLabelId: colorLabelId)
     }
 
+    AsyncFunction("renameContainer") { (containerId: String, kind: String, name: String) in
+      try self.host.renameContainer(containerId: containerId, kind: kind, name: name)
+    }
+
     // ─── Contacts ───
     // JSON passthrough, routed Rust-side. Mirrors the Android module.
 

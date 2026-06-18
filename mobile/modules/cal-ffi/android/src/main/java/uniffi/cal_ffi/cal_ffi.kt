@@ -810,6 +810,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_push_now(
     ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_rename_container(
+    ): Short
     external fun uniffi_cal_ffi_checksum_method_host_reparent_task_list_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_sections_json(
@@ -1013,6 +1015,8 @@ external fun uniffi_cal_ffi_fn_method_host_preview_sync_target_json(`ptr`: Long,
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_push_now(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Int
+external fun uniffi_cal_ffi_fn_method_host_rename_container(`ptr`: Long,`containerId`: RustBuffer.ByValue,`kind`: RustBuffer.ByValue,`name`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_cal_ffi_fn_method_host_reparent_task_list_json(`ptr`: Long,`id`: RustBuffer.ByValue,`parentId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_sections_json(`ptr`: Long,`listId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1383,6 +1387,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_push_now() != 48331.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_rename_container() != 32771.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_reparent_task_list_json() != 49367.toShort()) {
@@ -2285,6 +2292,17 @@ public interface HostInterface {
      * the failure latch like `sync_now`.
      */
     fun `pushNow`(): kotlin.UInt
+    
+    /**
+     * Rename a LOCAL calendar / task list (DESIGN §6.5). Mirrors the desktop
+     * set_container_name LOCAL branch: rename the container's own (synced) row
+     * and emit CalendarUpdated / TaskListUpdated so other devices follow.
+     * `kind` is `"calendar"` | `"task_list"` | `"contact_list"`. An external
+     * container renames via its provider, and a contact-list rename / host-local
+     * name override both go through the desktop-only OverridesRepo — so those
+     * return `Unsupported` until that path lands on mobile.
+     */
+    fun `renameContainer`(`containerId`: kotlin.String, `kind`: kotlin.String, `name`: kotlin.String)
     
     /**
      * Set or clear a list's parent (`parent_id = None` promotes to top level);
@@ -3415,6 +3433,28 @@ open class Host: Disposable, AutoCloseable, HostInterface
     }
     )
     }
+    
+
+    
+    /**
+     * Rename a LOCAL calendar / task list (DESIGN §6.5). Mirrors the desktop
+     * set_container_name LOCAL branch: rename the container's own (synced) row
+     * and emit CalendarUpdated / TaskListUpdated so other devices follow.
+     * `kind` is `"calendar"` | `"task_list"` | `"contact_list"`. An external
+     * container renames via its provider, and a contact-list rename / host-local
+     * name override both go through the desktop-only OverridesRepo — so those
+     * return `Unsupported` until that path lands on mobile.
+     */
+    @Throws(StoreException::class)override fun `renameContainer`(`containerId`: kotlin.String, `kind`: kotlin.String, `name`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_rename_container(
+        it,
+        FfiConverterString.lower(`containerId`),FfiConverterString.lower(`kind`),FfiConverterString.lower(`name`),_status)
+}
+    }
+    
     
 
     
