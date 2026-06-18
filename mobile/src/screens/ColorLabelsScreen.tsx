@@ -184,16 +184,26 @@ export default function ColorLabelsScreen() {
         autoCapitalize="sentences"
       />
       <Text style={styles.label}>{t('dialogs.colorLabels.fields.color')}</Text>
-      <TextInput
-        style={styles.input}
-        value={newHex}
-        onChangeText={setNewHex}
-        accessibilityLabel={t('dialogs.colorLabels.fields.color')}
-        placeholder="#RRGGBB"
-        editable={!busy}
-        autoCapitalize="none"
-        autoCorrect={false}
-      />
+      <View style={styles.hexRow}>
+        <TextInput
+          style={[styles.input, styles.hexInput]}
+          value={newHex}
+          onChangeText={setNewHex}
+          accessibilityLabel={t('dialogs.colorLabels.fields.color')}
+          placeholder="#RRGGBB"
+          editable={!busy}
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+        {/* Live preview of the entered colour (sighted users); the swatch is
+            decorative so it carries no screen-reader label. */}
+        {normaliseHex(newHex) != null && (
+          <View
+            accessible={false}
+            style={[styles.swatch, { backgroundColor: normaliseHex(newHex) as string }]}
+          />
+        )}
+      </View>
       <Pressable
         ref={focus.registerAdd}
         accessibilityRole="button"
@@ -234,18 +244,26 @@ export default function ColorLabelsScreen() {
               <Text style={styles.label}>
                 {t('dialogs.colorLabels.colorLabel', { name: label.name })}
               </Text>
-              <TextInput
-                style={styles.input}
-                value={editHex}
-                onChangeText={setEditHex}
-                accessibilityLabel={t('dialogs.colorLabels.colorLabel', {
-                  name: label.name,
-                })}
-                placeholder="#RRGGBB"
-                editable={!busy}
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
+              <View style={styles.hexRow}>
+                <TextInput
+                  style={[styles.input, styles.hexInput]}
+                  value={editHex}
+                  onChangeText={setEditHex}
+                  accessibilityLabel={t('dialogs.colorLabels.colorLabel', {
+                    name: label.name,
+                  })}
+                  placeholder="#RRGGBB"
+                  editable={!busy}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                {normaliseHex(editHex) != null && (
+                  <View
+                    accessible={false}
+                    style={[styles.swatch, { backgroundColor: normaliseHex(editHex) as string }]}
+                  />
+                )}
+              </View>
               <View style={styles.rowButtons}>
                 <Pressable
                   accessibilityRole="button"
@@ -269,19 +287,24 @@ export default function ColorLabelsScreen() {
             </View>
           ) : (
             <View key={label.id} style={styles.labelRow}>
-              <Text
+              <View
                 ref={focus.registerRow(index)}
-                style={styles.labelName}
+                accessible
                 accessibilityRole="text"
                 accessibilityLabel={t('dialogs.colorLabels.optionLabel', {
                   name: label.name,
                   hex: label.hex,
                 })}
+                style={styles.labelInfo}
               >
-                {/* Decorative swatch (aria-hidden via the row's own label) + name. */}
-                <Text style={[styles.swatch, { color: label.hex }]}>{'■ '}</Text>
-                {label.name}
-              </Text>
+                {/* Real colour swatch for sighted users; the name + hex ride the
+                    row's accessibilityLabel for screen-reader users. */}
+                <View
+                  style={[styles.swatch, { backgroundColor: label.hex }]}
+                  accessible={false}
+                />
+                <Text style={styles.labelName}>{label.name}</Text>
+              </View>
               <Pressable
                 accessibilityRole="button"
                 accessibilityState={{ disabled: busy }}
@@ -328,6 +351,8 @@ const styles = StyleSheet.create({
   error: { fontSize: 15, fontWeight: '600', color: '#b42318' },
   muted: { fontSize: 15, color: '#5b6573' },
   field: { gap: 6 },
+  hexRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  hexInput: { flex: 1 },
   input: {
     fontSize: 17,
     color: '#10131a',
@@ -346,8 +371,17 @@ const styles = StyleSheet.create({
   },
   addButtonText: { fontSize: 16, fontWeight: '700', color: '#ffffff' },
   labelRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 },
+  labelInfo: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
   labelName: { flex: 1, fontSize: 17, color: '#10131a' },
-  swatch: { fontSize: 17 },
+  // A real colour swatch (a coloured box) for sighted users. The subtle border
+  // keeps white / very light swatches visible on the white background.
+  swatch: {
+    width: 22,
+    height: 22,
+    borderRadius: 5,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.18)',
+  },
   rowButtons: { flexDirection: 'row', gap: 10 },
   smallButton: {
     paddingVertical: 10,

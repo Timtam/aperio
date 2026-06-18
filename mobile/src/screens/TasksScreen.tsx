@@ -343,6 +343,11 @@ export default function TasksScreen({
   const renderTask = (entry: Entry) => {
     const task = entry.task;
     const done = task.status === 'completed';
+    // The task's bound colour (for sighted users — a coloured dot on the row).
+    // Screen-reader users get the label name in taskLabel() instead.
+    const taskHex = task.color_label
+      ? colorLabels.find((l) => l.id === task.color_label)?.hex
+      : undefined;
     const actions = [
       { name: 'toggle', label: done ? t('mobile.reopen') : t('mobile.complete') },
       { name: 'edit', label: t('mobile.rename') },
@@ -381,6 +386,13 @@ export default function TasksScreen({
         <Text style={styles.taskCheck} importantForAccessibility="no">
           {statusMarker(task.status)}
         </Text>
+        {taskHex != null && (
+          <View
+            accessible={false}
+            importantForAccessibility="no"
+            style={[styles.colorDot, { backgroundColor: taskHex }]}
+          />
+        )}
         <View style={styles.taskBody}>
           <Text
             style={[styles.taskTitle, done && styles.taskTitleDone]}
@@ -533,6 +545,14 @@ const styles = StyleSheet.create({
   },
   rowPressed: { backgroundColor: '#e4ebf5' },
   taskCheck: { fontSize: 20, width: 26, textAlign: 'center', color: '#10131a' },
+  // A small colour dot for the task's bound colour label (sighted users).
+  colorDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.18)',
+  },
   taskBody: { flex: 1 },
   taskTitle: { fontSize: 18, color: '#10131a' },
   taskTitleDone: { textDecorationLine: 'line-through', color: '#5b6573' },
