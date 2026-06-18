@@ -68,6 +68,7 @@
     "calendarRenamed": "Calendar renamed to \"{{name}}\".",
     "deleteCalendarMessage": "Delete \"{{name}}\"? Its events are removed too.",
     "manageCalendar": "Manage",
+    "duplicate": "Duplicate",
     "noEvents": "No events on this day.",
     "noContacts": "No contacts yet.",
     "contactHint": "Double-tap to edit. Swipe up or down to delete.",

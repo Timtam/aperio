@@ -26,7 +26,7 @@ import {
   subtaskProgressSuffix,
 } from '@aperio/shared';
 
-import { deleteTask, updateTask } from '../api/client';
+import { deleteTask, duplicateTask, updateTask } from '../api/client';
 import { useCurrentDayKey } from '../hooks/useCurrentDayKey';
 import { describeDue } from '../intl/describeDue';
 import { resolveTaskColor, sectionColorMap } from '../intl/taskColor';
@@ -256,6 +256,23 @@ export default function TasksScreen({
     [announce, entries, invalidateData, t],
   );
 
+  // Duplicate a task (flat copy in the same list); land SR focus on the copy
+  // once the refetch remounts the list.
+  const duplicate = useCallback(
+    async (task: Task) => {
+      try {
+        const created = await duplicateTask(task);
+        pendingFocusId.current = created.id;
+        invalidateData();
+        announce(t('actions.duplicated', { title: task.title }));
+      } catch (err) {
+        pendingFocusId.current = null;
+        announce(t('mobile.error', { message: errorMessage(err) }));
+      }
+    },
+    [announce, invalidateData, t],
+  );
+
   // Toggle a group header (sentinel/synthetic id) or a subtask parent (task id).
   const toggleCollapsed = useCallback(
     (id: string, title: string) => {
@@ -297,12 +314,15 @@ export default function TasksScreen({
         case 'delete':
           void removeTask(task);
           break;
+        case 'duplicate':
+          void duplicate(task);
+          break;
         case 'toggleCollapse':
           toggleCollapsed(task.id, task.title);
           break;
       }
     },
-    [openEditor, removeTask, toggleCollapsed, toggleDone],
+    [duplicate, openEditor, removeTask, toggleCollapsed, toggleDone],
   );
 
   const taskLabel = (task: Task, colourName: string | null): string => {
@@ -364,6 +384,7 @@ export default function TasksScreen({
       { name: 'toggle', label: done ? t('mobile.reopen') : t('mobile.complete') },
       { name: 'edit', label: t('mobile.rename') },
       { name: 'delete', label: t('mobile.delete') },
+      { name: 'duplicate', label: t('mobile.duplicate') },
     ];
     if (entry.hasChildren) {
       actions.push({

@@ -135,6 +135,30 @@ export const createTask = async (request: CreateTaskRequest): Promise<Task> => {
   return created;
 };
 
+/** Duplicate a task as a new top-level task in the same list (no subtree),
+ *  keeping its section / colour / recurrence / reminders / dates. Mirrors the
+ *  desktop duplicateTask (Ctrl+D); `parent_id` is reset so the copy stands
+ *  alone. Returns the created copy. */
+export const duplicateTask = async (task: Task): Promise<Task> =>
+  createTask({
+    list_id: task.list_id,
+    title: task.title,
+    description: task.description,
+    status: task.status,
+    priority: task.priority,
+    scheduled_date: task.scheduled_date,
+    scheduled_time: task.scheduled_time,
+    deadline_date: task.deadline_date,
+    deadline_time: task.deadline_time,
+    recurrence: task.recurrence,
+    parent_id: null,
+    section_id: task.section_id,
+    color_label: task.color_label,
+    reminders: task.reminders,
+    assignees: task.assignees,
+    sound: task.sound,
+  });
+
 /** Full-overwrite update. Send the task exactly as read so the store-managed
  *  `series_id` / `resurface_date` round-trip. Completing a recurring task
  *  spawns its next instance (visible on the next fetch) — callers must refetch

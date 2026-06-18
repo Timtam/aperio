@@ -68,6 +68,7 @@
     "calendarRenamed": "Kalender umbenannt in „{{name}}“.",
     "deleteCalendarMessage": "„{{name}}“ löschen? Die zugehörigen Termine werden ebenfalls entfernt.",
     "manageCalendar": "Verwalten",
+    "duplicate": "Duplizieren",
     "noEvents": "Keine Termine an diesem Tag.",
     "noContacts": "Noch keine Kontakte.",
     "contactHint": "Doppeltippen zum Bearbeiten. Nach oben oder unten wischen zum Löschen.",
