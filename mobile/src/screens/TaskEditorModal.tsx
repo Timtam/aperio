@@ -27,12 +27,13 @@ import type {
 } from '@aperio/shared';
 import { TASK_RECURRENCE_DEFAULT, fromBackend, toBackend } from '@aperio/shared';
 
-import { createTask, getTaskById, updateTask } from '../api/client';
+import { createTask, getTaskById, getTasks, updateTask } from '../api/client';
 import { ColorLabelSelect } from '../components/ColorLabelSelect';
 import { RadioGroup } from '../components/RadioGroup';
 import { RemindersEditor } from '../components/RemindersEditor';
 import { TaskRecurrenceSelector } from '../components/TaskRecurrenceSelector';
 import { useTaskStore } from '../state/taskStoreContext';
+import { recomputeAncestors } from '../state/taskToggle';
 import type { RootStackScreenProps } from '../navigation/types';
 
 // The rich task editor — a faithful RN port of the desktop TaskDialog, sub-4
@@ -352,7 +353,7 @@ export default function TaskEditorModal({
     setError(null);
     try {
       if (taskId == null) {
-        await createTask({
+        const created = await createTask({
           list_id: form.listId,
           title,
           description,
@@ -370,6 +371,12 @@ export default function TaskEditorModal({
           assignees: [],
           sound: null,
         });
+        // Adding a subtask can change the parent's derived status (e.g. an open
+        // child re-opens a completed parent). Recompute ancestors against the
+        // owning list's post-create snapshot, honouring the coupling knob.
+        if (parentId != null) {
+          await recomputeAncestors(parentId, await getTasks(created.list_id));
+        }
         AccessibilityInfo.announceForAccessibility(
           t('mobile.added', { title }),
         );

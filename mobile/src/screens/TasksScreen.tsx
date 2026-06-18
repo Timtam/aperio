@@ -31,7 +31,7 @@ import { useCurrentDayKey } from '../hooks/useCurrentDayKey';
 import { describeDue } from '../intl/describeDue';
 import { resolveTaskColor, sectionColorMap } from '../intl/taskColor';
 import { useTaskStore } from '../state/taskStoreContext';
-import { applyTaskToggle, statusAnnounce } from '../state/taskToggle';
+import { applyTaskToggle, recomputeAncestors, statusAnnounce } from '../state/taskToggle';
 import { useTasks } from '../state/useTasks';
 import type { RootStackScreenProps } from '../navigation/types';
 
@@ -240,6 +240,15 @@ export default function TasksScreen({
         }
         try {
           await deleteTask(task.id, task.list_id);
+          // A subtask's removal can change the parent's derived status (e.g. the
+          // last open child gone → parent completes). Recompute ancestors against
+          // the post-deletion snapshot, honouring the coupling knob.
+          if (task.parent_id != null) {
+            await recomputeAncestors(
+              task.parent_id,
+              tasks.filter((t) => t.id !== task.id),
+            );
+          }
           invalidateData();
           announce(t('mobile.deleted', { title: task.title }));
         } catch (err) {
@@ -263,7 +272,7 @@ export default function TasksScreen({
         ],
       );
     },
-    [announce, entries, invalidateData, t],
+    [announce, entries, invalidateData, t, tasks],
   );
 
   // Duplicate a task (flat copy in the same list); land SR focus on the copy

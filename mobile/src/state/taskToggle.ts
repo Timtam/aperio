@@ -1,8 +1,53 @@
-import { planStatusCascade, todayIsoKey } from '@aperio/shared';
-import type { Task, TaskList, TaskStatus } from '@aperio/shared';
+import { planAncestorRecompute, planStatusCascade, todayIsoKey } from '@aperio/shared';
+import type { StatusWrite, Task, TaskList, TaskStatus } from '@aperio/shared';
 
 import { updateTask } from '../api/client';
 import { canStoreInProgress, nextCheckoffStatus, readTaskBehaviour } from './taskBehaviour';
+
+/** Apply each planned status write via update_task against `snapshot` (the task
+ *  set the planner saw). Preserves an existing completion time, stamps a fresh
+ *  one only on a newly-completed task, and honours the planner's auto-date
+ *  companion (`scheduledDate !== undefined` = overwrite, else leave). Shared by
+ *  the check-off cascade and the ancestor recompute. */
+export async function applyStatusWrites(
+  writes: StatusWrite[],
+  snapshot: Task[],
+): Promise<void> {
+  if (writes.length === 0) return;
+  const byId = new Map(snapshot.map((t) => [t.id, t]));
+  const nowIso = new Date().toISOString();
+  for (const w of writes) {
+    const target = byId.get(w.taskId);
+    if (target == null) continue;
+    await updateTask({
+      ...target,
+      status: w.status,
+      completed_at: w.status === 'completed' ? (target.completed_at ?? nowIso) : null,
+      scheduled_date:
+        w.scheduledDate !== undefined ? w.scheduledDate : target.scheduled_date,
+    });
+  }
+}
+
+/**
+ * Recompute a parent's (and further ancestors') status after a subtask was
+ * created or deleted, honouring the synced cascade-coupling + auto-date knobs —
+ * the mobile twin of the desktop TaskDialog's applyAncestorWrites. `snapshot`
+ * must already reflect the mutation (the created task present / the deleted task
+ * removed). A no-op when coupling is off.
+ */
+export async function recomputeAncestors(
+  parentId: string,
+  snapshot: Task[],
+): Promise<void> {
+  const behaviour = await readTaskBehaviour();
+  if (!behaviour.cascadeEnabled) return;
+  const writes = planAncestorRecompute(parentId, snapshot, {
+    cascadeEnabled: behaviour.cascadeEnabled,
+    ...(behaviour.autoDate ? { todayKey: todayIsoKey() } : {}),
+  });
+  await applyStatusWrites(writes, snapshot);
+}
 
 // The one shared check-off path for every task surface (TasksScreen + the
 // WeekScreen calendar chips) — the mobile twin of the desktop
@@ -38,22 +83,7 @@ export async function applyTaskToggle(
     ...(behaviour.autoDate && canInProgress ? { todayKey: todayIsoKey() } : {}),
   });
   if (writes.length === 0) return null;
-  const byId = new Map(allTasks.map((t) => [t.id, t]));
-  const nowIso = new Date().toISOString();
-  for (const w of writes) {
-    const target = byId.get(w.taskId);
-    if (target == null) continue;
-    await updateTask({
-      ...target,
-      status: w.status,
-      // Preserve an existing completion time; stamp a fresh one only when this
-      // write newly completes the task. `undefined` scheduledDate means "leave
-      // the date alone"; a string is the auto-date companion write.
-      completed_at: w.status === 'completed' ? (target.completed_at ?? nowIso) : null,
-      scheduled_date:
-        w.scheduledDate !== undefined ? w.scheduledDate : target.scheduled_date,
-    });
-  }
+  await applyStatusWrites(writes, allTasks);
   return nextStatus;
 }
 
