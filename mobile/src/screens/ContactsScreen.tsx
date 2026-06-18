@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
@@ -7,6 +7,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 
@@ -21,11 +22,25 @@ import type { RootStackScreenProps } from '../navigation/types';
 
 // Accessible address-book view — a linear, screen-reader-first list of every
 // contact across all address books (local + external providers), grouped under
-// each book's name, with create / edit / delete. Contacts read/write through
-// the Host's on-device adapters; they are NOT on the sync event log.
+// each book's name, with create / edit / delete + a client-side search filter
+// over the loaded contacts. Contacts read/write through the Host's on-device
+// adapters; they are NOT on the sync event log.
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/** Does the contact match the (lowercased) query across name / org / email /
+ *  phone — the fields a user searches by? */
+function matchesQuery(c: Contact, q: string): boolean {
+  return (
+    c.display_name.toLowerCase().includes(q) ||
+    (c.organization ?? '').toLowerCase().includes(q) ||
+    (c.given_name ?? '').toLowerCase().includes(q) ||
+    (c.family_name ?? '').toLowerCase().includes(q) ||
+    c.emails.some((e) => e.toLowerCase().includes(q)) ||
+    c.phone_numbers.some((p) => p.toLowerCase().includes(q))
+  );
 }
 
 /** A contact paired with its owning list, for grouped rendering. */
@@ -42,6 +57,20 @@ export default function ContactsScreen({
   const [groups, setGroups] = useState<Group[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+
+  const trimmedQuery = query.trim().toLowerCase();
+  // Client-side filter over the loaded contacts: keep only matching contacts,
+  // drop emptied groups. Empty query → everything.
+  const filteredGroups = useMemo(() => {
+    if (trimmedQuery.length === 0) return groups;
+    return groups
+      .map((g) => ({
+        list: g.list,
+        contacts: g.contacts.filter((c) => matchesQuery(c, trimmedQuery)),
+      }))
+      .filter((g) => g.contacts.length > 0);
+  }, [groups, trimmedQuery]);
 
   const announce = useCallback(
     (message: string) => AccessibilityInfo.announceForAccessibility(message),
@@ -134,6 +163,11 @@ export default function ContactsScreen({
     c.organization ?? c.emails[0] ?? c.phone_numbers[0] ?? '';
 
   const total = groups.reduce((n, g) => n + g.contacts.length, 0);
+  const filteredTotal = filteredGroups.reduce(
+    (n, g) => n + g.contacts.length,
+    0,
+  );
+  const searching = trimmedQuery.length > 0;
 
   return (
     <View style={styles.screen}>
@@ -154,6 +188,30 @@ export default function ContactsScreen({
         </Pressable>
       </View>
 
+      {!loading && total > 0 && (
+        <View style={styles.searchBar}>
+          <TextInput
+            style={styles.searchInput}
+            value={query}
+            onChangeText={setQuery}
+            placeholder={t('views.contacts.searchPlaceholder')}
+            accessibilityLabel={t('views.contacts.searchLabel')}
+            autoCapitalize="none"
+            autoCorrect={false}
+            clearButtonMode="while-editing"
+          />
+          {searching && (
+            <Text
+              style={styles.searchCount}
+              accessibilityRole="text"
+              accessibilityLiveRegion="polite"
+            >
+              {t('views.contacts.searchResults', { count: filteredTotal })}
+            </Text>
+          )}
+        </View>
+      )}
+
       {error != null && (
         <Text style={styles.error} accessibilityRole="text" accessibilityLiveRegion="assertive">
           {error}
@@ -166,13 +224,21 @@ export default function ContactsScreen({
         </Text>
       ) : total === 0 ? (
         <Text style={styles.muted}>{t('mobile.noContacts')}</Text>
+      ) : searching && filteredTotal === 0 ? (
+        <Text
+          style={styles.muted}
+          accessibilityRole="text"
+          accessibilityLiveRegion="polite"
+        >
+          {t('views.contacts.searchEmpty', { query: query.trim() })}
+        </Text>
       ) : (
         <ScrollView
           accessibilityRole="list"
           contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
         >
-          {groups.map((g) => (
+          {filteredGroups.map((g) => (
             <View key={g.list.id} style={styles.group}>
               <Text style={styles.groupHeading} accessibilityRole="header">
                 {g.list.name}
@@ -231,6 +297,18 @@ export default function ContactsScreen({
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#ffffff' },
   actionBar: { flexDirection: 'row', gap: 10, padding: 12, alignItems: 'center' },
+  searchBar: { paddingHorizontal: 12, paddingBottom: 8, gap: 6 },
+  searchInput: {
+    fontSize: 17,
+    color: '#10131a',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#c9d2e0',
+    backgroundColor: '#f8fafc',
+  },
+  searchCount: { fontSize: 13, color: '#5b6573' },
   primaryButton: {
     flex: 1,
     paddingVertical: 12,
