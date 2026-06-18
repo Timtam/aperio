@@ -52,7 +52,11 @@ use cal_core::{
 use host_core::accounts::{AccountsRepo, AdapterKind};
 use host_core::db::SharedConn;
 use host_core::event_log::OnboardingService;
-use host_core::overrides::{ContainerKind, OverridesError, OverridesRepo};
+use host_core::overrides::{
+    apply_color_to_calendars, apply_color_to_contact_lists, apply_color_to_events,
+    apply_color_to_sections, apply_color_to_task_lists, apply_to_calendars, apply_to_task_lists,
+    ContainerKind, OverridesError, OverridesRepo,
+};
 use host_core::registry::{AdapterRegistry, LOCAL_ID};
 use host_core::sftp_host_keys::UserPrefsHostKeyVerifier;
 use host_core::sync::build_orchestrator;
@@ -1613,7 +1617,8 @@ impl Host {
     /// resolution (all deferred). Callers should list calendars before event
     /// operations — the same ordering the desktop frontend honours.
     pub fn list_calendars_json(&self) -> Result<String, StoreError> {
-        let rows = self.runtime.block_on(async {
+        // Fetch real calendars (+ their accounts) and the synthetic birthday rows.
+        let (mut calendars, accounts, birthday_rows) = self.runtime.block_on(async {
             let local = self.adapter.list_calendars().await.map_err(map_store_err)?;
             for c in &local {
                 self.registry.note_calendar_route(&c.id, LOCAL_ID);
@@ -1623,16 +1628,19 @@ impl Host {
             // whole list.
             let external = self.registry.list_external_calendars().await;
 
-            let mut out: Vec<CalendarRow> = Vec::with_capacity(local.len() + external.len());
+            let mut calendars: Vec<Calendar> = Vec::with_capacity(local.len() + external.len());
+            let mut accounts: Vec<String> = Vec::with_capacity(local.len() + external.len());
             for c in local {
-                out.push(CalendarRow::new(c, LOCAL_ID.to_string()));
+                accounts.push(LOCAL_ID.to_string());
+                calendars.push(c);
             }
             for c in external {
-                let acct = self
-                    .registry
-                    .account_for_calendar(&c.id)
-                    .unwrap_or_else(|| LOCAL_ID.to_string());
-                out.push(CalendarRow::new(c, acct));
+                accounts.push(
+                    self.registry
+                        .account_for_calendar(&c.id)
+                        .unwrap_or_else(|| LOCAL_ID.to_string()),
+                );
+                calendars.push(c);
             }
 
             // Synthetic, read-only birthday calendars (§10.3) from the LOCAL
@@ -1640,7 +1648,9 @@ impl Host {
             // birthday layers need the snapshot contact cache the mobile host
             // doesn't have yet, so the local books are the ported subset; the
             // events are synthesised on demand in get_events_json. Stamp each
-            // id's route as local so a stray lookup resolves locally.
+            // id's route as local so a stray lookup resolves locally. (No
+            // overrides apply to synthetic calendars.)
+            let mut birthday_rows: Vec<CalendarRow> = Vec::new();
             if let Ok(contact_lists) = self.adapter.list_contact_lists().await {
                 for list in contact_lists {
                     let has_birthday = self
@@ -1652,12 +1662,29 @@ impl Host {
                     if has_birthday {
                         let cal = host_core::birthdays::synthesise_calendar(&list.id, &list.name);
                         self.registry.note_calendar_route(&cal.id, LOCAL_ID);
-                        out.push(CalendarRow::new(cal, LOCAL_ID.to_string()));
+                        birthday_rows.push(CalendarRow::new(cal, LOCAL_ID.to_string()));
                     }
                 }
             }
-            Ok::<_, StoreError>(out)
+            Ok::<_, StoreError>((calendars, accounts, birthday_rows))
         })?;
+
+        // Stamp host-local name + colour overrides (external containers + local
+        // contact lists; a local calendar carries its own binding + has no
+        // override row, so this no-ops for it).
+        {
+            let shared = self.db.shared();
+            let repo = OverridesRepo::new(&shared);
+            apply_to_calendars(&repo, &mut calendars);
+            apply_color_to_calendars(&repo, &mut calendars);
+        }
+
+        let mut rows: Vec<CalendarRow> = calendars
+            .into_iter()
+            .zip(accounts)
+            .map(|(c, account)| CalendarRow::new(c, account))
+            .collect();
+        rows.extend(birthday_rows);
         to_json(&rows)
     }
 
@@ -1710,7 +1737,11 @@ impl Host {
     pub fn get_events_json(&self, request_json: String) -> Result<String, StoreError> {
         let req: EventRangeRequest = from_json("request", &request_json)?;
         let range = DateRange::new(req.start, req.end);
-        let events = self.runtime.block_on(async {
+        // Only EXTERNAL events get the host-local colour stamp (local events carry
+        // their own binding; synthetic birthday events need none).
+        let is_external = !host_core::birthdays::is_birthday_calendar_id(&req.calendar_id)
+            && self.route(&req.calendar_id)?.is_some();
+        let mut events = self.runtime.block_on(async {
             // Birthday calendars are synthesised, not stored: derive their
             // events from the underlying LOCAL contact list's birthdays. (The
             // mobile host has no external contact cache, so only local birthday
@@ -1737,6 +1768,21 @@ impl Host {
                     .map_err(map_store_err),
             }
         })?;
+        if is_external {
+            // Map a colour-capable provider's native color_hex back to a label
+            // FIRST, then stamp host-local overrides (which skip native-coloured
+            // events) — the desktop ordering so a provider colour always wins.
+            for ev in events.iter_mut() {
+                if let Some(hex) = ev.color_hex.clone() {
+                    if let Ok(Some(label)) = self.adapter.match_hex_to_label(&hex) {
+                        ev.color_label = Some(ColorLabelId(label));
+                    }
+                }
+            }
+            let shared = self.db.shared();
+            let repo = OverridesRepo::new(&shared);
+            apply_color_to_events(&repo, &mut events);
+        }
         to_json(&events)
     }
 
@@ -1900,13 +1946,15 @@ impl Host {
                 })
                 .unwrap_or_default();
 
-        let mut rows: Vec<TaskListRow> = Vec::with_capacity(local.len() + external.len());
+        // Collect the lists + their per-row metadata, stamp host-local overrides
+        // on the lists, then wrap. apply_* no-ops for local lists (own binding,
+        // no override row).
+        let mut lists: Vec<TaskList> = Vec::with_capacity(local.len() + external.len());
+        let mut meta: Vec<(String, TaskCapabilities)> =
+            Vec::with_capacity(local.len() + external.len());
         for l in local {
-            rows.push(TaskListRow {
-                inner: l,
-                account_id: LOCAL_ID.to_string(),
-                task_capabilities: local_task_capabilities(),
-            });
+            meta.push((LOCAL_ID.to_string(), local_task_capabilities()));
+            lists.push(l);
         }
         for l in external {
             let account_id = self
@@ -1914,12 +1962,25 @@ impl Host {
                 .account_for_task_list(&l.id)
                 .unwrap_or_else(|| LOCAL_ID.to_string());
             let task_capabilities = self.task_caps_for_account(&account_id, &account_kinds);
-            rows.push(TaskListRow {
-                inner: l,
+            meta.push((account_id, task_capabilities));
+            lists.push(l);
+        }
+
+        {
+            let repo = OverridesRepo::new(&shared);
+            apply_to_task_lists(&repo, &mut lists);
+            apply_color_to_task_lists(&repo, &mut lists);
+        }
+
+        let rows: Vec<TaskListRow> = lists
+            .into_iter()
+            .zip(meta)
+            .map(|(inner, (account_id, task_capabilities))| TaskListRow {
+                inner,
                 account_id,
                 task_capabilities,
-            });
-        }
+            })
+            .collect();
         to_json(&rows)
     }
 
@@ -2117,10 +2178,16 @@ impl Host {
                 to_json(&sections)
             }
             Some(ext) => {
-                let sections = self
+                let mut sections = self
                     .runtime
                     .block_on(async { ext.list_sections(&list_id).await })
                     .map_err(map_store_err)?;
+                // External sections have no provider colour field — stamp any
+                // host-local colour overrides. (Local sections carry their own
+                // synced binding, handled by the None arm.)
+                let shared = self.db.shared();
+                let repo = OverridesRepo::new(&shared);
+                apply_color_to_sections(&repo, &mut sections);
                 to_json(&sections)
             }
         }
@@ -3447,23 +3514,33 @@ impl Host {
         for l in &local {
             self.registry.note_contact_list_route(&l.id, LOCAL_ID);
         }
-        let mut rows: Vec<ContactListRow> = Vec::with_capacity(local.len() + external.len());
+        // Collect the lists + accounts, stamp host-local colour overrides, then
+        // wrap. Contact lists bind colour ONLY via overrides (even local ones —
+        // they aren't event-log-synced), so this applies to every row.
+        let mut lists: Vec<ContactList> = Vec::with_capacity(local.len() + external.len());
+        let mut accounts: Vec<String> = Vec::with_capacity(local.len() + external.len());
         for l in local {
-            rows.push(ContactListRow {
-                inner: l,
-                account_id: LOCAL_ID.to_string(),
-            });
+            accounts.push(LOCAL_ID.to_string());
+            lists.push(l);
         }
         for l in external {
-            let account_id = self
-                .registry
-                .account_for_contact_list(&l.id)
-                .unwrap_or_else(|| LOCAL_ID.to_string());
-            rows.push(ContactListRow {
-                inner: l,
-                account_id,
-            });
+            accounts.push(
+                self.registry
+                    .account_for_contact_list(&l.id)
+                    .unwrap_or_else(|| LOCAL_ID.to_string()),
+            );
+            lists.push(l);
         }
+        {
+            let shared = self.db.shared();
+            let repo = OverridesRepo::new(&shared);
+            apply_color_to_contact_lists(&repo, &mut lists);
+        }
+        let rows: Vec<ContactListRow> = lists
+            .into_iter()
+            .zip(accounts)
+            .map(|(inner, account_id)| ContactListRow { inner, account_id })
+            .collect();
         to_json(&rows)
     }
 
