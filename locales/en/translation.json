@@ -41,6 +41,8 @@
     "newListLabel": "New list",
     "newListPlaceholder": "List name",
     "noLists": "No task lists yet. Add one above.",
+    "manageList": "Manage list",
+    "sectionsHeading": "Sections",
     "listAdded": "{{name}} added.",
     "listSelected": "{{name}} selected.",
     "listDeselected": "{{name}} deselected.",

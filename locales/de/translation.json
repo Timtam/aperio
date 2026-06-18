@@ -41,6 +41,8 @@
     "newListLabel": "Neue Liste",
     "newListPlaceholder": "Listenname",
     "noLists": "Noch keine Aufgabenlisten. Füge oben eine hinzu.",
+    "manageList": "Liste verwalten",
+    "sectionsHeading": "Abschnitte",
     "listAdded": "{{name}} hinzugefügt.",
     "listSelected": "{{name}} ausgewählt.",
     "listDeselected": "{{name}} abgewählt.",

@@ -20,6 +20,7 @@ export type RootStackParamList = {
   Tasks: undefined;
   TaskEditor: { taskId: string | null; listId: string };
   Lists: undefined;
+  ListEditor: { listId: string };
   Accounts: undefined;
   Events: undefined;
   EventEditor: { eventId: string | null; calendarId: string };

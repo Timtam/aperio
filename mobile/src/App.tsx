@@ -14,6 +14,7 @@ import ContactEditorModal from './screens/ContactEditorModal';
 import ContactsScreen from './screens/ContactsScreen';
 import EventEditorModal from './screens/EventEditorModal';
 import EventsScreen from './screens/EventsScreen';
+import ListEditorModal from './screens/ListEditorModal';
 import ListsScreen from './screens/ListsScreen';
 import RemindersScreen from './screens/RemindersScreen';
 import SettingsScreen from './screens/SettingsScreen';
@@ -51,6 +52,11 @@ function TasksStackNav() {
         name="Lists"
         component={ListsScreen}
         options={{ title: t('mobile.listsButtonLabel') }}
+      />
+      <TasksStack.Screen
+        name="ListEditor"
+        component={ListEditorModal}
+        options={{ presentation: 'modal', title: t('mobile.manageList') }}
       />
       <TasksStack.Screen
         name="TaskEditor"

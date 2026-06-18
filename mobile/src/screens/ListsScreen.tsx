@@ -1,3 +1,4 @@
+import { useNavigation } from '@react-navigation/native';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -16,13 +17,16 @@ import type { TaskList } from '@aperio/shared';
 import { createTaskList } from '../api/client';
 import { useTaskStore } from '../state/taskStoreContext';
 
-// Task-list management — a minimal-but-real stub (sub-5 fleshes it out:
-// rename / delete / reparent, sections management, colour labels, sharing).
-// It proves the catalog read, the selection Set + reconciler, and list
-// creation feeding back into the store.
+// Task-list catalog: read the lists, toggle which are shown (the selection Set +
+// reconciler), and create a top-level local list. Each LOCAL list opens a
+// ListEditor modal (reparent / sections management / delete) via "Manage";
+// external lists are provider-managed (writes Unsupported on mobile) so they
+// only toggle. List rename is a container-override (deferred with the rest of
+// the overrides system, like colour labels + sharing).
 
 export default function ListsScreen() {
   const { t } = useTranslation();
+  const navigation = useNavigation();
   const { taskLists, selectedTaskListIds, toggleTaskList, refreshTaskLists } =
     useTaskStore();
 
@@ -115,22 +119,43 @@ export default function ListsScreen() {
         >
           {taskLists.map((list) => {
             const selected = selectedTaskListIds.has(list.id);
+            // External task lists are managed by their provider (writes are
+            // Unsupported on mobile), so only local lists get a "Manage" entry.
+            const isLocal = list.account_id === 'local';
             return (
-              <Pressable
-                key={list.id}
-                ref={(node) => {
-                  rowTags.current[list.id] = node ? findNodeHandle(node) : null;
-                }}
-                accessible
-                accessibilityRole="checkbox"
-                accessibilityState={{ checked: selected }}
-                accessibilityLabel={list.name}
-                onPress={() => onToggle(list)}
-                style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
-              >
-                <Text style={styles.check}>{selected ? '☑' : '☐'}</Text>
-                <Text style={styles.listName}>{list.name}</Text>
-              </Pressable>
+              <View key={list.id} style={styles.row}>
+                <Pressable
+                  ref={(node) => {
+                    rowTags.current[list.id] = node ? findNodeHandle(node) : null;
+                  }}
+                  accessible
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: selected }}
+                  accessibilityLabel={list.name}
+                  onPress={() => onToggle(list)}
+                  style={({ pressed }) => [styles.rowToggle, pressed && styles.rowPressed]}
+                >
+                  <Text style={styles.check}>{selected ? '☑' : '☐'}</Text>
+                  <Text style={styles.listName}>{list.name}</Text>
+                </Pressable>
+                {isLocal && (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`${t('mobile.manageList')}: ${list.name}`}
+                    onPress={() =>
+                      navigation.navigate('ListEditor', { listId: list.id })
+                    }
+                    style={({ pressed }) => [
+                      styles.manageButton,
+                      pressed && styles.rowPressed,
+                    ]}
+                  >
+                    <Text style={styles.manageButtonText}>
+                      {t('mobile.manageList')}
+                    </Text>
+                  </Pressable>
+                )}
+              </View>
             );
           })}
         </ScrollView>
@@ -170,14 +195,32 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
-    padding: 16,
+    gap: 10,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#c9d2e0',
     backgroundColor: '#f4f7fb',
   },
+  rowToggle: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 6,
+  },
   rowPressed: { backgroundColor: '#e4ebf5' },
+  manageButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#c9d2e0',
+    backgroundColor: '#ffffff',
+  },
+  manageButtonText: { fontSize: 15, fontWeight: '600', color: '#1d4ed8' },
   check: { fontSize: 22, width: 26, textAlign: 'center', color: '#10131a' },
   listName: { flex: 1, fontSize: 18, color: '#10131a' },
   muted: { fontSize: 15, color: '#5b6573', padding: 16 },
