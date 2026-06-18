@@ -33,8 +33,8 @@
 //! Deferred (documented per method): the pre-persist credential smoke-test; the
 //! SWR read cache + cache-updated callback; colour resolution, overrides,
 //! birthday calendars, cross-calendar event moves, free/busy + RSVP; the
-//! SyncProgressBridge live-progress push callback + configure restore-on-open +
-//! the E2E `wrap_if_encrypted` branch; task/list/section sync (those live on
+//! SyncProgressBridge live-progress push callback + the E2E `wrap_if_encrypted`
+//! branch; task/list/section sync (those live on
 //! the separate `LocalStore`, which folds into this Host later). External
 //! event paths are wired like local but hit the provider live (no cache),
 //! exercised on-device, not in unit tests.
@@ -301,32 +301,31 @@ impl Host {
             .account_for_calendar(calendar_id)
             .is_none_or(|a| a == LOCAL_ID)
     }
+}
 
-    /// Open a statically-embedded sync-adapter plugin instance + wrap it as a
-    /// `SyncAdapter` (the desktop `open_sync_plugin` pattern). Used by
-    /// `configure_sync_adapter_json`.
-    fn open_sync_plugin(
-        &self,
-        plugin_id: &str,
-        config_json: String,
-    ) -> Result<Arc<dyn SyncAdapter>, StoreError> {
-        let plugin = self
-            .plugin_manager
-            .get(plugin_id)
-            .ok_or_else(|| StoreError::Storage {
-                detail: format!("sync plugin {plugin_id} is not loaded"),
-            })?;
-        let instance = self
-            .plugin_manager
-            .open_instance(plugin, &config_json)
-            .map_err(|e| StoreError::Storage {
-                detail: format!("open sync plugin {plugin_id}: {e}"),
-            })?;
-        let adapter = FfiSyncAdapter::new(instance).ok_or_else(|| StoreError::Storage {
-            detail: format!("plugin {plugin_id} has no SyncAdapter surface"),
+/// Open a statically-embedded sync-adapter plugin instance + wrap it as a
+/// `SyncAdapter` (the desktop `open_sync_plugin` pattern). Free fn so both
+/// `configure_sync_adapter_json` and the restore-on-open path (which runs
+/// before `Host` exists) can call it.
+fn open_sync_plugin(
+    plugin_manager: &PluginManager,
+    plugin_id: &str,
+    config_json: String,
+) -> Result<Arc<dyn SyncAdapter>, StoreError> {
+    let plugin = plugin_manager
+        .get(plugin_id)
+        .ok_or_else(|| StoreError::Storage {
+            detail: format!("sync plugin {plugin_id} is not loaded"),
         })?;
-        Ok(Arc::new(adapter))
-    }
+    let instance = plugin_manager
+        .open_instance(plugin, &config_json)
+        .map_err(|e| StoreError::Storage {
+            detail: format!("open sync plugin {plugin_id}: {e}"),
+        })?;
+    let adapter = FfiSyncAdapter::new(instance).ok_or_else(|| StoreError::Storage {
+        detail: format!("plugin {plugin_id} has no SyncAdapter surface"),
+    })?;
+    Ok(Arc::new(adapter))
 }
 
 #[uniffi::export]
@@ -404,6 +403,31 @@ impl Host {
                 boot_at,
             )
         });
+
+        // Restore a previously-configured sync adapter so `sync_now` works
+        // without a re-configure step (the desktop's build_adapter_from_prefs).
+        // Best-effort: a missing/unbuildable adapter just leaves sync
+        // unconfigured (the user re-configures from the Sync screen). Only the
+        // local kind here; webdav/sftp/ftp restore lands with their configure.
+        {
+            let shared = db.shared();
+            let prefs = UserPrefsRepo::new(&shared);
+            if matches!(
+                prefs.get(PREF_ADAPTER_KIND).ok().flatten().as_deref(),
+                Some("local")
+            ) {
+                if let Some(path) = prefs.get(PREF_LOCAL_PATH).ok().flatten() {
+                    if !path.trim().is_empty() {
+                        let cfg = serde_json::json!({ "remote_root": path.trim() }).to_string();
+                        if let Ok(adapter) =
+                            open_sync_plugin(&plugin_manager, PLUGIN_ID_SYNC_LOCAL, cfg)
+                        {
+                            graph.orchestrator.configure(adapter);
+                        }
+                    }
+                }
+            }
+        }
 
         Ok(Arc::new(Self {
             db,
@@ -760,7 +784,7 @@ impl Host {
                     });
                 }
                 let cfg = serde_json::json!({ "remote_root": path }).to_string();
-                let adapter = self.open_sync_plugin(PLUGIN_ID_SYNC_LOCAL, cfg)?;
+                let adapter = open_sync_plugin(&self.plugin_manager, PLUGIN_ID_SYNC_LOCAL, cfg)?;
                 // Probe before keeping it active so a bad path fails here.
                 self.runtime
                     .block_on(async { adapter.test_connection().await })
@@ -1329,6 +1353,49 @@ mod tests {
                 .count(),
             1,
             "the event must appear exactly once after a repeat round",
+        );
+    }
+
+    #[test]
+    fn configured_local_target_is_restored_on_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir
+            .path()
+            .join("aperio.sqlite")
+            .to_string_lossy()
+            .into_owned();
+        let remote = tempfile::tempdir().unwrap();
+        let cfg = format!(
+            r#"{{"kind":"local","path":{}}}"#,
+            serde_json::to_string(&remote.path().to_string_lossy()).unwrap()
+        );
+
+        // Configure on a first Host, then drop it.
+        {
+            let host = Host::open(
+                db_path.clone(),
+                Arc::new(FakeKeychain::default()) as Arc<dyn KeychainBridge>,
+            )
+            .unwrap();
+            host.configure_sync_adapter_json(cfg).unwrap();
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(&host.sync_status_json().unwrap())
+                    .unwrap()["configured"],
+                true
+            );
+        }
+
+        // Reopening at the same db path restores the target from prefs.
+        let host2 = Host::open(
+            db_path,
+            Arc::new(FakeKeychain::default()) as Arc<dyn KeychainBridge>,
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&host2.sync_status_json().unwrap()).unwrap()
+                ["configured"],
+            true,
+            "the local sync target should be restored on reopen",
         );
     }
 }
