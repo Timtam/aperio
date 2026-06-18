@@ -575,16 +575,32 @@ public protocol HostProtocol: AnyObject, Sendable {
     func completeOauthJson(pluginId: String, requestJson: String) throws  -> String
     
     /**
-     * Configure the sync adapter from a JSON request. Handles the `local`
-     * (filesystem path), `webdav` (URL + user + password), and `ftp`
-     * (host/port/user/path/mode + password) kinds: open the matching
-     * statically-embedded sync plugin, probe it (`test_connection`), make it
-     * the orchestrator's active adapter, and persist the choice under the
-     * `sync.adapter.*` prefs (device-local; the is_synced_key allowlist
-     * excludes them, so they never propagate). The credential goes to the
-     * keychain via the platform `SecretStore`; an omitted/empty password reuses
-     * the stored one. SFTP (host-key trust flow) + the E2E `wrap_if_encrypted`
-     * branch + the OAuth kinds (Dropbox / Google Drive) follow.
+     * Complete a host-driven OAuth flow for a SYNC adapter (`plugin_id` =
+     * `com.aperio.sync-adapter-dropbox` / `…-googledrive`): exchange the
+     * redirect's `code` (+ the `pkce_verifier`/`state` from
+     * [`Self::begin_oauth_json`]) for tokens via the plugin (`phase:"exchange"`,
+     * the network step + CSRF check), then store the refresh token in the
+     * adapter's keychain slot (a fixed pseudo-account, one per kind — NOT an
+     * account row; sync credentials are managed independently). Unlike the
+     * account OAuth this creates NO account + appends NO event; the caller
+     * follows with [`Self::configure_sync_adapter_json`] to activate the target.
+     * Mirrors the desktop `connect_dropbox_oauth` / `connect_googledrive_oauth`.
+     */
+    func completeSyncOauthJson(pluginId: String, requestJson: String) throws 
+    
+    /**
+     * Configure the sync adapter from a JSON request. Handles `local`
+     * (filesystem path), `webdav` (URL + user + password), `ftp`
+     * (host/port/user/path/mode + password), and the OAuth kinds `dropbox`
+     * (client_id [+ secret] + path) / `googledrive` (client_id + secret +
+     * folder_name): open the matching statically-embedded sync plugin, probe it
+     * (`test_connection`), make it the orchestrator's active adapter, and
+     * persist the choice under the `sync.adapter.*` prefs (device-local; the
+     * is_synced_key allowlist excludes them, so they never propagate). The
+     * credential goes to the keychain via the platform `SecretStore`; an
+     * omitted/empty password reuses the stored one. The OAuth kinds read the
+     * refresh token stored by a prior [`Self::complete_sync_oauth_json`]. SFTP
+     * (host-key trust flow) + the E2E `wrap_if_encrypted` branch follow.
      */
     func configureSyncAdapterJson(configJson: String) throws 
     
@@ -1008,16 +1024,39 @@ open func completeOauthJson(pluginId: String, requestJson: String)throws  -> Str
 }
     
     /**
-     * Configure the sync adapter from a JSON request. Handles the `local`
-     * (filesystem path), `webdav` (URL + user + password), and `ftp`
-     * (host/port/user/path/mode + password) kinds: open the matching
-     * statically-embedded sync plugin, probe it (`test_connection`), make it
-     * the orchestrator's active adapter, and persist the choice under the
-     * `sync.adapter.*` prefs (device-local; the is_synced_key allowlist
-     * excludes them, so they never propagate). The credential goes to the
-     * keychain via the platform `SecretStore`; an omitted/empty password reuses
-     * the stored one. SFTP (host-key trust flow) + the E2E `wrap_if_encrypted`
-     * branch + the OAuth kinds (Dropbox / Google Drive) follow.
+     * Complete a host-driven OAuth flow for a SYNC adapter (`plugin_id` =
+     * `com.aperio.sync-adapter-dropbox` / `…-googledrive`): exchange the
+     * redirect's `code` (+ the `pkce_verifier`/`state` from
+     * [`Self::begin_oauth_json`]) for tokens via the plugin (`phase:"exchange"`,
+     * the network step + CSRF check), then store the refresh token in the
+     * adapter's keychain slot (a fixed pseudo-account, one per kind — NOT an
+     * account row; sync credentials are managed independently). Unlike the
+     * account OAuth this creates NO account + appends NO event; the caller
+     * follows with [`Self::configure_sync_adapter_json`] to activate the target.
+     * Mirrors the desktop `connect_dropbox_oauth` / `connect_googledrive_oauth`.
+     */
+open func completeSyncOauthJson(pluginId: String, requestJson: String)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_complete_sync_oauth_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(pluginId),
+        FfiConverterString.lower(requestJson),$0
+    )
+}
+}
+    
+    /**
+     * Configure the sync adapter from a JSON request. Handles `local`
+     * (filesystem path), `webdav` (URL + user + password), `ftp`
+     * (host/port/user/path/mode + password), and the OAuth kinds `dropbox`
+     * (client_id [+ secret] + path) / `googledrive` (client_id + secret +
+     * folder_name): open the matching statically-embedded sync plugin, probe it
+     * (`test_connection`), make it the orchestrator's active adapter, and
+     * persist the choice under the `sync.adapter.*` prefs (device-local; the
+     * is_synced_key allowlist excludes them, so they never propagate). The
+     * credential goes to the keychain via the platform `SecretStore`; an
+     * omitted/empty password reuses the stored one. The OAuth kinds read the
+     * refresh token stored by a prior [`Self::complete_sync_oauth_json`]. SFTP
+     * (host-key trust flow) + the E2E `wrap_if_encrypted` branch follow.
      */
 open func configureSyncAdapterJson(configJson: String)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
     uniffi_cal_ffi_fn_method_host_configure_sync_adapter_json(
@@ -4840,7 +4879,10 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_complete_oauth_json() != 7847) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_cal_ffi_checksum_method_host_configure_sync_adapter_json() != 4122) {
+    if (uniffi_cal_ffi_checksum_method_host_complete_sync_oauth_json() != 1805) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_configure_sync_adapter_json() != 50127) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_contact_lists_json() != 57501) {

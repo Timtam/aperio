@@ -18,15 +18,17 @@ import {
   SyncAdapterConfig,
   SyncStatus,
 } from '../api/sync';
+import { connectSyncOAuth } from '../api/oauth';
 import { RadioGroup } from '../components/RadioGroup';
 
 // Cross-device sync — a full desktop peer (same engine, statically-embedded
-// adapters). This screen exposes the password-only targets: a local shared
-// folder, WebDAV (Nextcloud/ownCloud), and FTPS. SFTP (host-key trust flow) +
-// the OAuth kinds follow. Screen-reader-first: the kind is a radio group, every
-// field is its own labelled stop, status is a live region, results announced.
+// adapters). This screen exposes the password targets (a local shared folder,
+// WebDAV, FTPS) and the OAuth targets (Dropbox, Google Drive — BYO client-id,
+// browser sign-in). SFTP (host-key trust flow) follows. Screen-reader-first: the
+// kind is a radio group, every field is its own labelled stop, status is a live
+// region, results announced.
 
-type SyncKind = 'local' | 'webdav' | 'ftp';
+type SyncKind = 'local' | 'webdav' | 'ftp' | 'dropbox' | 'googledrive';
 type FtpMode = 'explicit' | 'implicit' | 'plain';
 
 function errorMessage(err: unknown): string {
@@ -51,6 +53,12 @@ export default function SyncScreen() {
   const [mode, setMode] = useState<FtpMode>('explicit'); // ftp
   const [user, setUser] = useState(''); // webdav + ftp
   const [password, setPassword] = useState(''); // webdav + ftp
+  const [oauthClientId, setOauthClientId] = useState(''); // dropbox + googledrive
+  const [oauthClientSecret, setOauthClientSecret] = useState(''); // dropbox(opt)+gdrive
+  const [dropboxPath, setDropboxPath] = useState(''); // dropbox
+  const [folderName, setFolderName] = useState(''); // googledrive
+
+  const isOAuthKind = kind === 'dropbox' || kind === 'googledrive';
 
   const announce = useCallback(
     (message: string) => AccessibilityInfo.announceForAccessibility(message),
@@ -79,6 +87,14 @@ export default function SyncScreen() {
       { value: 'local' as const, label: t('dialogs.settings.sync.adapterKindLocal') },
       { value: 'webdav' as const, label: t('dialogs.settings.sync.adapterKindWebdav') },
       { value: 'ftp' as const, label: t('dialogs.settings.sync.adapterKindFtp') },
+      {
+        value: 'dropbox' as const,
+        label: t('dialogs.settings.sync.adapterKindDropbox'),
+      },
+      {
+        value: 'googledrive' as const,
+        label: t('dialogs.settings.sync.adapterKindGoogledrive'),
+      },
     ],
     [t],
   );
@@ -107,7 +123,9 @@ export default function SyncScreen() {
         ? { kind: 'webdav', url: u, user: user.trim(), password }
         : { kind: 'webdav', url: u, user: user.trim() };
     }
-    // ftp
+    // The OAuth kinds (dropbox/googledrive) build their config inside the sign-in
+    // flow, not here — buildConfig serves only the generic "Use this target".
+    if (kind !== 'ftp') return null;
     const h = host.trim();
     const us = user.trim();
     if (h.length === 0 || us.length === 0) return null;
@@ -147,6 +165,72 @@ export default function SyncScreen() {
     }
   }, [announce, buildConfig, refresh, t]);
 
+  // Dropbox / Google Drive: sign in via the browser (begin → native auth session
+  // → store the refresh token), then activate the target in one step.
+  const connectOauthTarget = useCallback(async () => {
+    if (kind !== 'dropbox' && kind !== 'googledrive') return;
+    const id = oauthClientId.trim();
+    const secret = oauthClientSecret.trim();
+    if (id.length === 0) {
+      setError(t('dialogs.accounts.clientIdRequired'));
+      announce(t('dialogs.accounts.clientIdRequired'));
+      return;
+    }
+    if (kind === 'googledrive' && secret.length === 0) {
+      setError(t('dialogs.accounts.clientSecretRequired'));
+      announce(t('dialogs.accounts.clientSecretRequired'));
+      return;
+    }
+    setError(null);
+    setBusy(true);
+    announce(t('mobile.oauthConnecting'));
+    try {
+      const result = await connectSyncOAuth({
+        provider: kind,
+        clientId: id,
+        clientSecret: secret.length > 0 ? secret : undefined,
+      });
+      if (result.kind === 'cancelled') {
+        announce(t('mobile.oauthCancelled'));
+        return;
+      }
+      // Signed in (refresh token stored) → activate the target.
+      const config: SyncAdapterConfig =
+        kind === 'dropbox'
+          ? {
+              kind: 'dropbox',
+              client_id: id,
+              client_secret: secret.length > 0 ? secret : undefined,
+              path: dropboxPath.trim() || undefined,
+            }
+          : {
+              kind: 'googledrive',
+              client_id: id,
+              client_secret: secret,
+              folder_name: folderName.trim() || undefined,
+            };
+      await configureSyncAdapter(config);
+      await refresh();
+      announce(t('mobile.syncConfigured'));
+    } catch (err) {
+      const raw = errorMessage(err);
+      const message = raw === 'OAUTH_NO_CODE' ? t('mobile.oauthNoCode') : raw;
+      setError(message);
+      announce(t('mobile.error', { message }));
+    } finally {
+      setBusy(false);
+    }
+  }, [
+    announce,
+    dropboxPath,
+    folderName,
+    kind,
+    oauthClientId,
+    oauthClientSecret,
+    refresh,
+    t,
+  ]);
+
   const runSync = useCallback(async () => {
     setError(null);
     setBusy(true);
@@ -174,6 +258,16 @@ export default function SyncScreen() {
     status?.last_synced_at != null
       ? new Date(status.last_synced_at).toLocaleString()
       : t('mobile.syncNever');
+
+  // OAuth sign-in button labels (only used when isOAuthKind; cheap t() calls).
+  const oauthSignInLabel =
+    kind === 'dropbox'
+      ? t('dialogs.settings.sync.adapterDropboxSignIn')
+      : t('dialogs.settings.sync.adapterGoogledriveSignIn');
+  const oauthSigningInLabel =
+    kind === 'dropbox'
+      ? t('dialogs.settings.sync.adapterDropboxSigningIn')
+      : t('dialogs.settings.sync.adapterGoogledriveSigningIn');
 
   return (
     <ScrollView
@@ -371,16 +465,130 @@ export default function SyncScreen() {
         </>
       )}
 
-      <Pressable
-        accessibilityRole="button"
-        accessibilityState={{ disabled: busy }}
-        accessibilityLabel={t('mobile.syncConfigure')}
-        disabled={busy}
-        onPress={() => void configure()}
-        style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
-      >
-        <Text style={styles.ghostButtonText}>{t('mobile.syncConfigure')}</Text>
-      </Pressable>
+      {isOAuthKind && (
+        <>
+          <Text style={styles.hint} accessibilityRole="text">
+            {kind === 'dropbox'
+              ? t('dialogs.settings.sync.adapterDropboxIntro')
+              : t('dialogs.settings.sync.adapterGoogledriveIntro')}
+          </Text>
+          <View style={styles.field}>
+            <Text style={styles.label}>
+              {kind === 'dropbox'
+                ? t('dialogs.settings.sync.adapterDropboxClientId')
+                : t('dialogs.settings.sync.adapterGoogledriveClientId')}
+            </Text>
+            <Text style={styles.hint} accessibilityRole="text">
+              {kind === 'dropbox'
+                ? t('dialogs.settings.sync.adapterDropboxClientIdHint')
+                : t('dialogs.settings.sync.adapterGoogledriveClientIdHint')}
+            </Text>
+            <TextInput
+              style={styles.input}
+              value={oauthClientId}
+              onChangeText={setOauthClientId}
+              accessibilityLabel={
+                kind === 'dropbox'
+                  ? t('dialogs.settings.sync.adapterDropboxClientId')
+                  : t('dialogs.settings.sync.adapterGoogledriveClientId')
+              }
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>
+              {kind === 'dropbox'
+                ? t('dialogs.settings.sync.adapterDropboxClientSecret')
+                : t('dialogs.settings.sync.adapterGoogledriveClientSecret')}
+            </Text>
+            <Text style={styles.hint} accessibilityRole="text">
+              {kind === 'dropbox'
+                ? t('dialogs.settings.sync.adapterDropboxClientSecretHint')
+                : t('dialogs.settings.sync.adapterGoogledriveClientSecretHint')}
+            </Text>
+            <TextInput
+              style={styles.input}
+              value={oauthClientSecret}
+              onChangeText={setOauthClientSecret}
+              accessibilityLabel={
+                kind === 'dropbox'
+                  ? t('dialogs.settings.sync.adapterDropboxClientSecret')
+                  : t('dialogs.settings.sync.adapterGoogledriveClientSecret')
+              }
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          </View>
+          {kind === 'dropbox' ? (
+            <View style={styles.field}>
+              <Text style={styles.label}>
+                {t('dialogs.settings.sync.adapterDropboxPath')}
+              </Text>
+              <Text style={styles.hint} accessibilityRole="text">
+                {t('dialogs.settings.sync.adapterDropboxPathHint')}
+              </Text>
+              <TextInput
+                style={styles.input}
+                value={dropboxPath}
+                onChangeText={setDropboxPath}
+                accessibilityLabel={t('dialogs.settings.sync.adapterDropboxPath')}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
+          ) : (
+            <View style={styles.field}>
+              <Text style={styles.label}>
+                {t('dialogs.settings.sync.adapterGoogledriveFolderName')}
+              </Text>
+              <Text style={styles.hint} accessibilityRole="text">
+                {t('dialogs.settings.sync.adapterGoogledriveFolderNameHint')}
+              </Text>
+              <TextInput
+                style={styles.input}
+                value={folderName}
+                onChangeText={setFolderName}
+                accessibilityLabel={t(
+                  'dialogs.settings.sync.adapterGoogledriveFolderName',
+                )}
+                autoCorrect={false}
+              />
+            </View>
+          )}
+        </>
+      )}
+
+      {isOAuthKind ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ disabled: busy, busy }}
+          accessibilityLabel={oauthSignInLabel}
+          disabled={busy}
+          onPress={() => void connectOauthTarget()}
+          style={({ pressed }) => [
+            styles.primaryButton,
+            pressed && styles.primaryPressed,
+            busy && styles.primaryDisabled,
+          ]}
+        >
+          <Text style={styles.primaryButtonText}>
+            {busy ? oauthSigningInLabel : oauthSignInLabel}
+          </Text>
+        </Pressable>
+      ) : (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ disabled: busy }}
+          accessibilityLabel={t('mobile.syncConfigure')}
+          disabled={busy}
+          onPress={() => void configure()}
+          style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
+        >
+          <Text style={styles.ghostButtonText}>{t('mobile.syncConfigure')}</Text>
+        </Pressable>
+      )}
     </ScrollView>
   );
 }

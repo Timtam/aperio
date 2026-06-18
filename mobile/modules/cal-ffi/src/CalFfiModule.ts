@@ -165,6 +165,15 @@ declare class CalFfiModule extends NativeModule<Record<never, never>> {
    *  Autodiscover, so it rejects with the plugin's actionable message on
    *  failure — the caller can then fall back to a manually-entered endpoint. */
   discoverJson(pluginId: string, argsJson: string): Promise<string>;
+
+  // ── Sync-target OAuth (Dropbox / Google Drive) ──
+  /** Complete a host-driven OAuth flow for a SYNC adapter (`pluginId` =
+   *  `com.aperio.sync-adapter-dropbox` / `…-googledrive`): exchange the
+   *  redirect's code for tokens, then store the refresh token in the adapter's
+   *  keychain slot. `requestJson` carries `{client_id, client_secret?, code,
+   *  pkce_verifier, state, returned_state, redirect_uri}`. No account is created;
+   *  the caller follows with `configureSyncAdapterJson` to activate the target. */
+  completeSyncOauthJson(pluginId: string, requestJson: string): Promise<void>;
 }
 
 export default requireNativeModule<CalFfiModule>('CalFfi');

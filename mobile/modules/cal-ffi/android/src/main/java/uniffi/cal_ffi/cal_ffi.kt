@@ -730,6 +730,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_complete_oauth_json(
     ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_complete_sync_oauth_json(
+    ): Short
     external fun uniffi_cal_ffi_checksum_method_host_configure_sync_adapter_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_contact_lists_json(
@@ -893,6 +895,8 @@ external fun uniffi_cal_ffi_fn_method_host_begin_oauth_json(`ptr`: Long,`pluginI
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_complete_oauth_json(`ptr`: Long,`pluginId`: RustBuffer.ByValue,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_complete_sync_oauth_json(`ptr`: Long,`pluginId`: RustBuffer.ByValue,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_cal_ffi_fn_method_host_configure_sync_adapter_json(`ptr`: Long,`configJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_contact_lists_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -1185,7 +1189,10 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_complete_oauth_json() != 7847.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_cal_ffi_checksum_method_host_configure_sync_adapter_json() != 4122.toShort()) {
+    if (lib.uniffi_cal_ffi_checksum_method_host_complete_sync_oauth_json() != 1805.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_configure_sync_adapter_json() != 50127.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_contact_lists_json() != 57501.toShort()) {
@@ -1781,16 +1788,32 @@ public interface HostInterface {
     fun `completeOauthJson`(`pluginId`: kotlin.String, `requestJson`: kotlin.String): kotlin.String
     
     /**
-     * Configure the sync adapter from a JSON request. Handles the `local`
-     * (filesystem path), `webdav` (URL + user + password), and `ftp`
-     * (host/port/user/path/mode + password) kinds: open the matching
-     * statically-embedded sync plugin, probe it (`test_connection`), make it
-     * the orchestrator's active adapter, and persist the choice under the
-     * `sync.adapter.*` prefs (device-local; the is_synced_key allowlist
-     * excludes them, so they never propagate). The credential goes to the
-     * keychain via the platform `SecretStore`; an omitted/empty password reuses
-     * the stored one. SFTP (host-key trust flow) + the E2E `wrap_if_encrypted`
-     * branch + the OAuth kinds (Dropbox / Google Drive) follow.
+     * Complete a host-driven OAuth flow for a SYNC adapter (`plugin_id` =
+     * `com.aperio.sync-adapter-dropbox` / `…-googledrive`): exchange the
+     * redirect's `code` (+ the `pkce_verifier`/`state` from
+     * [`Self::begin_oauth_json`]) for tokens via the plugin (`phase:"exchange"`,
+     * the network step + CSRF check), then store the refresh token in the
+     * adapter's keychain slot (a fixed pseudo-account, one per kind — NOT an
+     * account row; sync credentials are managed independently). Unlike the
+     * account OAuth this creates NO account + appends NO event; the caller
+     * follows with [`Self::configure_sync_adapter_json`] to activate the target.
+     * Mirrors the desktop `connect_dropbox_oauth` / `connect_googledrive_oauth`.
+     */
+    fun `completeSyncOauthJson`(`pluginId`: kotlin.String, `requestJson`: kotlin.String)
+    
+    /**
+     * Configure the sync adapter from a JSON request. Handles `local`
+     * (filesystem path), `webdav` (URL + user + password), `ftp`
+     * (host/port/user/path/mode + password), and the OAuth kinds `dropbox`
+     * (client_id [+ secret] + path) / `googledrive` (client_id + secret +
+     * folder_name): open the matching statically-embedded sync plugin, probe it
+     * (`test_connection`), make it the orchestrator's active adapter, and
+     * persist the choice under the `sync.adapter.*` prefs (device-local; the
+     * is_synced_key allowlist excludes them, so they never propagate). The
+     * credential goes to the keychain via the platform `SecretStore`; an
+     * omitted/empty password reuses the stored one. The OAuth kinds read the
+     * refresh token stored by a prior [`Self::complete_sync_oauth_json`]. SFTP
+     * (host-key trust flow) + the E2E `wrap_if_encrypted` branch follow.
      */
     fun `configureSyncAdapterJson`(`configJson`: kotlin.String)
     
@@ -2259,16 +2282,43 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
-     * Configure the sync adapter from a JSON request. Handles the `local`
-     * (filesystem path), `webdav` (URL + user + password), and `ftp`
-     * (host/port/user/path/mode + password) kinds: open the matching
-     * statically-embedded sync plugin, probe it (`test_connection`), make it
-     * the orchestrator's active adapter, and persist the choice under the
-     * `sync.adapter.*` prefs (device-local; the is_synced_key allowlist
-     * excludes them, so they never propagate). The credential goes to the
-     * keychain via the platform `SecretStore`; an omitted/empty password reuses
-     * the stored one. SFTP (host-key trust flow) + the E2E `wrap_if_encrypted`
-     * branch + the OAuth kinds (Dropbox / Google Drive) follow.
+     * Complete a host-driven OAuth flow for a SYNC adapter (`plugin_id` =
+     * `com.aperio.sync-adapter-dropbox` / `…-googledrive`): exchange the
+     * redirect's `code` (+ the `pkce_verifier`/`state` from
+     * [`Self::begin_oauth_json`]) for tokens via the plugin (`phase:"exchange"`,
+     * the network step + CSRF check), then store the refresh token in the
+     * adapter's keychain slot (a fixed pseudo-account, one per kind — NOT an
+     * account row; sync credentials are managed independently). Unlike the
+     * account OAuth this creates NO account + appends NO event; the caller
+     * follows with [`Self::configure_sync_adapter_json`] to activate the target.
+     * Mirrors the desktop `connect_dropbox_oauth` / `connect_googledrive_oauth`.
+     */
+    @Throws(StoreException::class)override fun `completeSyncOauthJson`(`pluginId`: kotlin.String, `requestJson`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_complete_sync_oauth_json(
+        it,
+        FfiConverterString.lower(`pluginId`),FfiConverterString.lower(`requestJson`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Configure the sync adapter from a JSON request. Handles `local`
+     * (filesystem path), `webdav` (URL + user + password), `ftp`
+     * (host/port/user/path/mode + password), and the OAuth kinds `dropbox`
+     * (client_id [+ secret] + path) / `googledrive` (client_id + secret +
+     * folder_name): open the matching statically-embedded sync plugin, probe it
+     * (`test_connection`), make it the orchestrator's active adapter, and
+     * persist the choice under the `sync.adapter.*` prefs (device-local; the
+     * is_synced_key allowlist excludes them, so they never propagate). The
+     * credential goes to the keychain via the platform `SecretStore`; an
+     * omitted/empty password reuses the stored one. The OAuth kinds read the
+     * refresh token stored by a prior [`Self::complete_sync_oauth_json`]. SFTP
+     * (host-key trust flow) + the E2E `wrap_if_encrypted` branch follow.
      */
     @Throws(StoreException::class)override fun `configureSyncAdapterJson`(`configJson`: kotlin.String)
         = 

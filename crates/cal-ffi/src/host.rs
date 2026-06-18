@@ -76,12 +76,25 @@ const PREF_FTP_USER: &str = "sync.adapter.ftp.user";
 const PREF_FTP_PATH: &str = "sync.adapter.ftp.path";
 const PREF_FTP_MODE: &str = "sync.adapter.ftp.mode";
 const FTP_SECRET_ACCOUNT: &str = "sync.adapter.ftp";
+/// Dropbox / Google Drive OAuth sync-adapter keys. client_id (+ Google's
+/// secret) + the dataset path/folder are device-local prefs; the refresh token
+/// lives in the keychain under a fixed pseudo-account (one managed slot per
+/// adapter kind, divorced from any user account row — same keying as desktop).
+const PREF_DROPBOX_CLIENT_ID: &str = "sync.adapter.dropbox.clientId";
+const PREF_DROPBOX_CLIENT_SECRET: &str = "sync.adapter.dropbox.clientSecret";
+const PREF_DROPBOX_PATH: &str = "sync.adapter.dropbox.path";
+const DROPBOX_SECRET_ACCOUNT: &str = "sync.adapter.dropbox";
+const PREF_GOOGLEDRIVE_CLIENT_ID: &str = "sync.adapter.googledrive.clientId";
+const PREF_GOOGLEDRIVE_CLIENT_SECRET: &str = "sync.adapter.googledrive.clientSecret";
+const PREF_GOOGLEDRIVE_FOLDER_NAME: &str = "sync.adapter.googledrive.folderName";
+const GOOGLEDRIVE_SECRET_ACCOUNT: &str = "sync.adapter.googledrive";
 /// Plugin ids of the statically-embedded sync adapters this host configures.
-/// SFTP (needs the §19.5 host-key trust flow) + the OAuth kinds (Dropbox /
-/// Google Drive) follow in their own phases.
+/// SFTP (needs the §19.5 host-key trust flow) follows in its own phase.
 const PLUGIN_ID_SYNC_LOCAL: &str = "com.aperio.sync-adapter-local";
 const PLUGIN_ID_WEBDAV: &str = "com.aperio.sync-adapter-webdav";
 const PLUGIN_ID_FTP: &str = "com.aperio.sync-adapter-ftp";
+const PLUGIN_ID_DROPBOX: &str = "com.aperio.sync-adapter-dropbox";
+const PLUGIN_ID_GOOGLEDRIVE: &str = "com.aperio.sync-adapter-googledrive";
 
 fn sync_err(e: SyncError) -> StoreError {
     StoreError::Storage {
@@ -310,11 +323,15 @@ struct CreateEventRequest {
 ///                reuses the stored keychain secret).
 ///   - `ftp`    → `host` + `port` + `user` + `path` + `mode` + `password`
 ///                (same password-reuse contract).
-/// SFTP (host-key trust flow) + the OAuth kinds (Dropbox / Google Drive) follow.
+///   - `dropbox` / `googledrive` → `client_id` (+ Google's `client_secret`) +
+///                the dataset `path`/`folder_name`; the refresh token must
+///                already be in the keychain (run `complete_sync_oauth_json`
+///                after the native auth session first).
+/// SFTP (host-key trust flow) follows in its own phase.
 #[derive(serde::Deserialize)]
 struct ConfigureSyncRequest {
     kind: String,
-    /// `local` filesystem path / `ftp` remote path.
+    /// `local` filesystem path / `ftp` remote path / `dropbox` base path.
     #[serde(default)]
     path: Option<String>,
     /// `webdav` collection URL.
@@ -336,6 +353,15 @@ struct ConfigureSyncRequest {
     /// `ftp` TLS mode: `"explicit"` (default), `"implicit"`, or `"plain"`.
     #[serde(default)]
     mode: Option<String>,
+    /// `dropbox` / `googledrive` OAuth client id.
+    #[serde(default)]
+    client_id: Option<String>,
+    /// `dropbox` (optional, PKCE public app) / `googledrive` (required) secret.
+    #[serde(default)]
+    client_secret: Option<String>,
+    /// `googledrive` dataset folder name.
+    #[serde(default)]
+    folder_name: Option<String>,
 }
 
 /// The mobile app's handle to the full on-device engine.
@@ -594,6 +620,66 @@ fn restore_adapter_from_prefs(
             })
             .to_string();
             open_sync_plugin(plugin_manager, PLUGIN_ID_FTP, cfg).ok()
+        }
+        "dropbox" => {
+            let client_id = prefs.get(PREF_DROPBOX_CLIENT_ID).ok().flatten()?;
+            if client_id.trim().is_empty() {
+                return None;
+            }
+            let client_secret = prefs
+                .get(PREF_DROPBOX_CLIENT_SECRET)
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            let base_path = prefs
+                .get(PREF_DROPBOX_PATH)
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            // No refresh token → the connection is incomplete (sign-in needed);
+            // don't restore, leaving sync unconfigured until the user re-connects.
+            let refresh_token = secret_store
+                .retrieve(DROPBOX_SECRET_ACCOUNT, SecretSlot::RefreshToken)
+                .ok()?;
+            let cfg = serde_json::json!({
+                "client_id": client_id.trim(),
+                "client_secret": client_secret.trim(),
+                "base_path": base_path.trim(),
+                "refresh_token": refresh_token,
+            })
+            .to_string();
+            open_sync_plugin(plugin_manager, PLUGIN_ID_DROPBOX, cfg).ok()
+        }
+        "googledrive" => {
+            let client_id = prefs.get(PREF_GOOGLEDRIVE_CLIENT_ID).ok().flatten()?;
+            if client_id.trim().is_empty() {
+                return None;
+            }
+            let client_secret = prefs
+                .get(PREF_GOOGLEDRIVE_CLIENT_SECRET)
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            // Google requires the secret at every token call — incomplete without it.
+            if client_secret.trim().is_empty() {
+                return None;
+            }
+            let folder_name = prefs
+                .get(PREF_GOOGLEDRIVE_FOLDER_NAME)
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            let refresh_token = secret_store
+                .retrieve(GOOGLEDRIVE_SECRET_ACCOUNT, SecretSlot::RefreshToken)
+                .ok()?;
+            let cfg = serde_json::json!({
+                "client_id": client_id.trim(),
+                "client_secret": client_secret.trim(),
+                "folder_name": folder_name.trim(),
+                "refresh_token": refresh_token,
+            })
+            .to_string();
+            open_sync_plugin(plugin_manager, PLUGIN_ID_GOOGLEDRIVE, cfg).ok()
         }
         _ => None,
     }
@@ -1402,16 +1488,83 @@ impl Host {
         Ok(value.to_string())
     }
 
-    /// Configure the sync adapter from a JSON request. Handles the `local`
-    /// (filesystem path), `webdav` (URL + user + password), and `ftp`
-    /// (host/port/user/path/mode + password) kinds: open the matching
-    /// statically-embedded sync plugin, probe it (`test_connection`), make it
-    /// the orchestrator's active adapter, and persist the choice under the
-    /// `sync.adapter.*` prefs (device-local; the is_synced_key allowlist
-    /// excludes them, so they never propagate). The credential goes to the
-    /// keychain via the platform `SecretStore`; an omitted/empty password reuses
-    /// the stored one. SFTP (host-key trust flow) + the E2E `wrap_if_encrypted`
-    /// branch + the OAuth kinds (Dropbox / Google Drive) follow.
+    /// Complete a host-driven OAuth flow for a SYNC adapter (`plugin_id` =
+    /// `com.aperio.sync-adapter-dropbox` / `…-googledrive`): exchange the
+    /// redirect's `code` (+ the `pkce_verifier`/`state` from
+    /// [`Self::begin_oauth_json`]) for tokens via the plugin (`phase:"exchange"`,
+    /// the network step + CSRF check), then store the refresh token in the
+    /// adapter's keychain slot (a fixed pseudo-account, one per kind — NOT an
+    /// account row; sync credentials are managed independently). Unlike the
+    /// account OAuth this creates NO account + appends NO event; the caller
+    /// follows with [`Self::configure_sync_adapter_json`] to activate the target.
+    /// Mirrors the desktop `connect_dropbox_oauth` / `connect_googledrive_oauth`.
+    pub fn complete_sync_oauth_json(
+        &self,
+        plugin_id: String,
+        request_json: String,
+    ) -> Result<(), StoreError> {
+        let secret_account = match plugin_id.as_str() {
+            PLUGIN_ID_DROPBOX => DROPBOX_SECRET_ACCOUNT,
+            PLUGIN_ID_GOOGLEDRIVE => GOOGLEDRIVE_SECRET_ACCOUNT,
+            other => {
+                return Err(StoreError::InvalidField {
+                    field: "plugin_id".to_string(),
+                    detail: format!("'{other}' is not an OAuth sync adapter"),
+                });
+            }
+        };
+        let req: CompleteSyncOAuthRequest = from_json("sync oauth complete", &request_json)?;
+        let exchange_args = serde_json::json!({
+            "phase": "exchange",
+            "client_id": req.client_id,
+            "client_secret": req.client_secret,
+            "code": req.code,
+            "pkce_verifier": req.pkce_verifier,
+            "state": req.state,
+            "returned_state": req.returned_state,
+            "redirect_uri": req.redirect_uri,
+        });
+        let bytes = self
+            .runtime
+            .block_on(async {
+                self.plugin_manager
+                    .interactive_auth(&plugin_id, &exchange_args.to_string())
+                    .await
+            })
+            .map_err(|e| StoreError::Auth {
+                detail: e.to_string(),
+            })?;
+        let tokens: OAuthTokenJson =
+            serde_json::from_slice(&bytes).map_err(|e| StoreError::Protocol {
+                detail: format!("token blob: {e}"),
+            })?;
+        // The sync adapter re-mints access tokens from the refresh token, so the
+        // refresh token is the credential we persist; its absence means offline
+        // access wasn't granted and the target can't be kept alive.
+        let refresh = tokens.refresh_token.ok_or_else(|| StoreError::Protocol {
+            detail: "the provider returned no refresh token (offline access not granted)"
+                .to_string(),
+        })?;
+        self.secret_store
+            .store(secret_account, SecretSlot::RefreshToken, &refresh)
+            .map_err(|e| StoreError::Storage {
+                detail: format!("store refresh token: {e}"),
+            })?;
+        Ok(())
+    }
+
+    /// Configure the sync adapter from a JSON request. Handles `local`
+    /// (filesystem path), `webdav` (URL + user + password), `ftp`
+    /// (host/port/user/path/mode + password), and the OAuth kinds `dropbox`
+    /// (client_id [+ secret] + path) / `googledrive` (client_id + secret +
+    /// folder_name): open the matching statically-embedded sync plugin, probe it
+    /// (`test_connection`), make it the orchestrator's active adapter, and
+    /// persist the choice under the `sync.adapter.*` prefs (device-local; the
+    /// is_synced_key allowlist excludes them, so they never propagate). The
+    /// credential goes to the keychain via the platform `SecretStore`; an
+    /// omitted/empty password reuses the stored one. The OAuth kinds read the
+    /// refresh token stored by a prior [`Self::complete_sync_oauth_json`]. SFTP
+    /// (host-key trust flow) + the E2E `wrap_if_encrypted` branch follow.
     pub fn configure_sync_adapter_json(&self, config_json: String) -> Result<(), StoreError> {
         let req: ConfigureSyncRequest = from_json("sync config", &config_json)?;
         match req.kind.as_str() {
@@ -1572,11 +1725,115 @@ impl Host {
                 }
                 Ok(())
             }
+            "dropbox" => {
+                let client_id = req.client_id.unwrap_or_default();
+                let client_id = client_id.trim();
+                if client_id.is_empty() {
+                    return Err(StoreError::InvalidField {
+                        field: "client_id".to_string(),
+                        detail: "Dropbox client_id must not be empty".to_string(),
+                    });
+                }
+                let client_secret = req.client_secret.unwrap_or_default();
+                let client_secret = client_secret.trim();
+                let path = req.path.unwrap_or_default();
+                let path = path.trim();
+                // The refresh token must already be in the keychain from a prior
+                // `complete_sync_oauth_json` (the native auth session) — Dropbox
+                // sync owns one managed slot, divorced from any account row.
+                let refresh_token = self
+                    .secret_store
+                    .retrieve(DROPBOX_SECRET_ACCOUNT, SecretSlot::RefreshToken)
+                    .map_err(|_| StoreError::Auth {
+                        detail: "Dropbox sign-in required — no refresh token stored".to_string(),
+                    })?;
+                let cfg = serde_json::json!({
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "base_path": path,
+                    "refresh_token": refresh_token,
+                })
+                .to_string();
+                let adapter = open_sync_plugin(&self.plugin_manager, PLUGIN_ID_DROPBOX, cfg)?;
+                self.runtime
+                    .block_on(async { adapter.test_connection().await })
+                    .map_err(sync_err)?;
+                self.orchestrator.configure(adapter);
+                let shared = self.db.shared();
+                let prefs = UserPrefsRepo::new(&shared);
+                prefs
+                    .set(PREF_ADAPTER_KIND, "dropbox")
+                    .map_err(storage_err)?;
+                prefs
+                    .set(PREF_DROPBOX_CLIENT_ID, client_id)
+                    .map_err(storage_err)?;
+                prefs
+                    .set(PREF_DROPBOX_CLIENT_SECRET, client_secret)
+                    .map_err(storage_err)?;
+                prefs.set(PREF_DROPBOX_PATH, path).map_err(storage_err)?;
+                Ok(())
+            }
+            "googledrive" => {
+                let client_id = req.client_id.unwrap_or_default();
+                let client_id = client_id.trim();
+                if client_id.is_empty() {
+                    return Err(StoreError::InvalidField {
+                        field: "client_id".to_string(),
+                        detail: "Google Drive client_id must not be empty".to_string(),
+                    });
+                }
+                let client_secret = req.client_secret.unwrap_or_default();
+                let client_secret = client_secret.trim();
+                // Google's token endpoint rejects exchanges without the secret,
+                // so it's required here too (unlike Dropbox's optional secret).
+                if client_secret.is_empty() {
+                    return Err(StoreError::InvalidField {
+                        field: "client_secret".to_string(),
+                        detail: "Google Drive client_secret must not be empty".to_string(),
+                    });
+                }
+                let folder_name = req.folder_name.unwrap_or_default();
+                let folder_name = folder_name.trim();
+                let refresh_token = self
+                    .secret_store
+                    .retrieve(GOOGLEDRIVE_SECRET_ACCOUNT, SecretSlot::RefreshToken)
+                    .map_err(|_| StoreError::Auth {
+                        detail: "Google Drive sign-in required — no refresh token stored"
+                            .to_string(),
+                    })?;
+                let cfg = serde_json::json!({
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "folder_name": folder_name,
+                    "refresh_token": refresh_token,
+                })
+                .to_string();
+                let adapter = open_sync_plugin(&self.plugin_manager, PLUGIN_ID_GOOGLEDRIVE, cfg)?;
+                self.runtime
+                    .block_on(async { adapter.test_connection().await })
+                    .map_err(sync_err)?;
+                self.orchestrator.configure(adapter);
+                let shared = self.db.shared();
+                let prefs = UserPrefsRepo::new(&shared);
+                prefs
+                    .set(PREF_ADAPTER_KIND, "googledrive")
+                    .map_err(storage_err)?;
+                prefs
+                    .set(PREF_GOOGLEDRIVE_CLIENT_ID, client_id)
+                    .map_err(storage_err)?;
+                prefs
+                    .set(PREF_GOOGLEDRIVE_CLIENT_SECRET, client_secret)
+                    .map_err(storage_err)?;
+                prefs
+                    .set(PREF_GOOGLEDRIVE_FOLDER_NAME, folder_name)
+                    .map_err(storage_err)?;
+                Ok(())
+            }
             other => Err(StoreError::InvalidField {
                 field: "kind".to_string(),
                 detail: format!(
                     "sync adapter kind '{other}' is not supported yet \
-                     (local, webdav, ftp)"
+                     (local, webdav, ftp, dropbox, googledrive)"
                 ),
             }),
         }
@@ -2053,6 +2310,22 @@ struct OAuthTokenJson {
     access_token: String,
     #[serde(default)]
     refresh_token: Option<String>,
+}
+
+/// Request body for [`Host::complete_sync_oauth_json`] — the token-exchange
+/// inputs forwarded to the sync plugin's `phase:"exchange"`. No account fields
+/// (sync OAuth stores only the refresh token in the adapter's keychain slot).
+#[derive(serde::Deserialize)]
+struct CompleteSyncOAuthRequest {
+    client_id: String,
+    /// Dropbox: optional (PKCE public app). Google Drive: required.
+    #[serde(default)]
+    client_secret: Option<String>,
+    code: String,
+    pkce_verifier: String,
+    state: String,
+    returned_state: String,
+    redirect_uri: String,
 }
 
 /// Map an accounts-repo error to the FFI store error, preserving the
@@ -2763,9 +3036,11 @@ mod tests {
 
     #[test]
     fn unsupported_sync_kind_is_rejected() {
+        // sftp still needs the §19.5 host-key trust flow, so it's not yet a
+        // configurable kind (dropbox/googledrive now are).
         let (_dir, host, _kc) = open_host();
         let err = host
-            .configure_sync_adapter_json(r#"{"kind":"dropbox"}"#.to_string())
+            .configure_sync_adapter_json(r#"{"kind":"sftp"}"#.to_string())
             .unwrap_err();
         assert!(
             matches!(&err, StoreError::InvalidField { field, .. } if field == "kind"),
@@ -2993,6 +3268,64 @@ mod tests {
             "drive scope must be present: {url}"
         );
         assert_eq!(v["pkce_verifier"].as_str().unwrap().len(), 43);
+    }
+
+    #[test]
+    fn complete_sync_oauth_rejects_a_csrf_state_mismatch() {
+        // The Dropbox plugin's exchange phase runs the CSRF check before the
+        // network token POST, so a mismatched state aborts with no network (and
+        // no refresh token is stored, since the store runs only after exchange).
+        let (_dir, host, _kc) = open_host();
+        let req = r#"{"client_id":"dbx","code":"c","pkce_verifier":"v","state":"AAAA","returned_state":"BBBB","redirect_uri":"aperio://oauth-callback"}"#;
+        let err = host
+            .complete_sync_oauth_json(
+                "com.aperio.sync-adapter-dropbox".to_string(),
+                req.to_string(),
+            )
+            .unwrap_err();
+        assert!(matches!(err, StoreError::Auth { .. }), "got: {err:?}");
+    }
+
+    #[test]
+    fn complete_sync_oauth_rejects_a_non_oauth_plugin() {
+        let (_dir, host, _kc) = open_host();
+        let req = r#"{"client_id":"x","code":"c","pkce_verifier":"v","state":"s","returned_state":"s","redirect_uri":"aperio://oauth-callback"}"#;
+        let err = host
+            .complete_sync_oauth_json(
+                "com.aperio.sync-adapter-webdav".to_string(),
+                req.to_string(),
+            )
+            .unwrap_err();
+        assert!(
+            matches!(err, StoreError::InvalidField { ref field, .. } if field == "plugin_id"),
+            "got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn configure_dropbox_without_a_token_is_an_auth_error() {
+        // No stored refresh token → configure fails fast at the keychain read,
+        // before any network, prompting a sign-in.
+        let (_dir, host, _kc) = open_host();
+        let cfg = r#"{"kind":"dropbox","client_id":"dbx","path":"/Apps/Aperio"}"#;
+        let err = host
+            .configure_sync_adapter_json(cfg.to_string())
+            .unwrap_err();
+        assert!(matches!(err, StoreError::Auth { .. }), "got: {err:?}");
+    }
+
+    #[test]
+    fn configure_googledrive_rejects_an_empty_client_secret() {
+        let (_dir, host, _kc) = open_host();
+        let cfg =
+            r#"{"kind":"googledrive","client_id":"gd","client_secret":"","folder_name":"Aperio"}"#;
+        let err = host
+            .configure_sync_adapter_json(cfg.to_string())
+            .unwrap_err();
+        assert!(
+            matches!(err, StoreError::InvalidField { ref field, .. } if field == "client_secret"),
+            "got: {err:?}"
+        );
     }
 
     #[test]

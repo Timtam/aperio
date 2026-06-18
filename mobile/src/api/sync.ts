@@ -6,9 +6,11 @@
 import CalFfi from '../../modules/cal-ffi';
 
 /** The active sync target. Mirrors the desktop `SyncAdapterConfig` enum; the
- *  password-only network kinds (webdav, ftp) join the local-filesystem kind.
- *  SFTP (host-key trust flow) + the OAuth kinds (Dropbox / Google Drive) follow.
- *  `password` is optional on re-edit: omit/empty to reuse the stored secret. */
+ *  password-only network kinds (webdav, ftp) + the OAuth kinds (dropbox,
+ *  googledrive) join the local-filesystem kind. SFTP (host-key trust flow)
+ *  follows. `password` is optional on re-edit: omit/empty to reuse the stored
+ *  secret. The OAuth kinds require a prior {@link completeSyncOauth} (the refresh
+ *  token is read from the keychain at configure time). */
 export type SyncAdapterConfig =
   | { kind: 'local'; path: string }
   | { kind: 'webdav'; url: string; user: string; password?: string }
@@ -21,7 +23,42 @@ export type SyncAdapterConfig =
       /** TLS handshake timing: `'explicit'` (default), `'implicit'`, `'plain'`. */
       mode?: 'explicit' | 'implicit' | 'plain';
       password?: string;
+    }
+  | { kind: 'dropbox'; client_id: string; client_secret?: string; path?: string }
+  | {
+      kind: 'googledrive';
+      client_id: string;
+      client_secret: string;
+      folder_name?: string;
     };
+
+/** The statically-embedded sync-adapter plugin ids the Host drives OAuth for. */
+export const SYNC_OAUTH_PLUGIN_IDS: Record<'dropbox' | 'googledrive', string> = {
+  dropbox: 'com.aperio.sync-adapter-dropbox',
+  googledrive: 'com.aperio.sync-adapter-googledrive',
+};
+
+/** Token-exchange inputs for {@link completeSyncOauth} (the redirect's code +
+ *  the PKCE verifier/state from `beginOauth`). */
+export interface CompleteSyncOauthRequest {
+  client_id: string;
+  /** Dropbox: optional (PKCE public app). Google Drive: required. */
+  client_secret?: string | null;
+  code: string;
+  pkce_verifier: string;
+  state: string;
+  returned_state: string;
+  redirect_uri: string;
+}
+
+/** Complete a sync-target OAuth: exchange the redirect's code for tokens, then
+ *  store the refresh token in the adapter's keychain slot (no account is
+ *  created). Follow with {@link configureSyncAdapter} to activate the target. */
+export const completeSyncOauth = (
+  pluginId: string,
+  request: CompleteSyncOauthRequest,
+): Promise<void> =>
+  CalFfi.completeSyncOauthJson(pluginId, JSON.stringify(request));
 
 /** Read-only engine state (the desktop `SyncStatus` shape). */
 export interface SyncStatus {

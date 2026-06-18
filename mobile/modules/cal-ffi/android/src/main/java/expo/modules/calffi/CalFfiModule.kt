@@ -243,5 +243,14 @@ class CalFfiModule : Module() {
     AsyncFunction("discoverJson") { pluginId: String, argsJson: String ->
       host.discoverJson(pluginId, argsJson)
     }
+
+    // ─── Sync-target OAuth (Dropbox / Google Drive) ───────────────────────────
+    // completeSyncOauthJson exchanges the redirect's code for tokens (network)
+    // and stores the refresh token in the adapter's keychain slot; the JS layer
+    // then calls configureSyncAdapterJson({kind:"dropbox"|"googledrive", …}).
+
+    AsyncFunction("completeSyncOauthJson") { pluginId: String, requestJson: String ->
+      host.completeSyncOauthJson(pluginId, requestJson)
+    }
   }
 }

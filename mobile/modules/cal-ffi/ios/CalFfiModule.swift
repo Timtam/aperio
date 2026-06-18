@@ -211,5 +211,11 @@ public class CalFfiModule: Module {
     AsyncFunction("discoverJson") { (pluginId: String, argsJson: String) -> String in
       try self.host.discoverJson(pluginId: pluginId, argsJson: argsJson)
     }
+
+    // ─── Sync-target OAuth (Dropbox / Google Drive) ───────────────────────────
+
+    AsyncFunction("completeSyncOauthJson") { (pluginId: String, requestJson: String) in
+      try self.host.completeSyncOauthJson(pluginId: pluginId, requestJson: requestJson)
+    }
   }
 }
