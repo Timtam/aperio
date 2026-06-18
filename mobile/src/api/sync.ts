@@ -5,9 +5,23 @@
 
 import CalFfi from '../../modules/cal-ffi';
 
-/** The active sync target. This slice supports the local-filesystem kind;
- *  webdav/sftp/ftp + the OAuth kinds follow (matching the desktop enum). */
-export type SyncAdapterConfig = { kind: 'local'; path: string };
+/** The active sync target. Mirrors the desktop `SyncAdapterConfig` enum; the
+ *  password-only network kinds (webdav, ftp) join the local-filesystem kind.
+ *  SFTP (host-key trust flow) + the OAuth kinds (Dropbox / Google Drive) follow.
+ *  `password` is optional on re-edit: omit/empty to reuse the stored secret. */
+export type SyncAdapterConfig =
+  | { kind: 'local'; path: string }
+  | { kind: 'webdav'; url: string; user: string; password?: string }
+  | {
+      kind: 'ftp';
+      host: string;
+      port?: number;
+      user: string;
+      path?: string;
+      /** TLS handshake timing: `'explicit'` (default), `'implicit'`, `'plain'`. */
+      mode?: 'explicit' | 'implicit' | 'plain';
+      password?: string;
+    };
 
 /** Read-only engine state (the desktop `SyncStatus` shape). */
 export interface SyncStatus {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
@@ -14,13 +14,19 @@ import {
   configureSyncAdapter,
   syncNow,
   syncStatus,
+  SyncAdapterConfig,
   SyncStatus,
 } from '../api/sync';
+import { RadioGroup } from '../components/RadioGroup';
 
 // Cross-device sync — a full desktop peer (same engine, statically-embedded
-// adapters). This slice exposes the local-filesystem target (a shared folder
-// both devices reach); webdav/sftp + OAuth kinds follow. Screen-reader-first:
-// status is a live region, every control is labelled, results are announced.
+// adapters). This screen exposes the password-only targets: a local shared
+// folder, WebDAV (Nextcloud/ownCloud), and FTPS. SFTP (host-key trust flow) +
+// the OAuth kinds follow. Screen-reader-first: the kind is a radio group, every
+// field is its own labelled stop, status is a live region, results announced.
+
+type SyncKind = 'local' | 'webdav' | 'ftp';
+type FtpMode = 'explicit' | 'implicit' | 'plain';
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -30,9 +36,20 @@ export default function SyncScreen() {
   const { t } = useTranslation();
 
   const [status, setStatus] = useState<SyncStatus | null>(null);
-  const [path, setPath] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Which target to configure, plus the per-kind fields. `user`/`password` are
+  // shared by WebDAV + FTP (only the active kind's fields are shown).
+  const [kind, setKind] = useState<SyncKind>('local');
+  const [path, setPath] = useState(''); // local
+  const [url, setUrl] = useState(''); // webdav
+  const [host, setHost] = useState(''); // ftp
+  const [port, setPort] = useState(''); // ftp (blank → mode default)
+  const [ftpPath, setFtpPath] = useState(''); // ftp
+  const [mode, setMode] = useState<FtpMode>('explicit'); // ftp
+  const [user, setUser] = useState(''); // webdav + ftp
+  const [password, setPassword] = useState(''); // webdav + ftp
 
   const announce = useCallback(
     (message: string) => AccessibilityInfo.announceForAccessibility(message),
@@ -51,13 +68,68 @@ export default function SyncScreen() {
     void refresh();
   }, [refresh]);
 
+  const kindOptions = useMemo(
+    () => [
+      { value: 'local' as const, label: t('dialogs.settings.sync.adapterKindLocal') },
+      { value: 'webdav' as const, label: t('dialogs.settings.sync.adapterKindWebdav') },
+      { value: 'ftp' as const, label: t('dialogs.settings.sync.adapterKindFtp') },
+    ],
+    [t],
+  );
+
+  const ftpModeOptions = useMemo(
+    () => [
+      { value: 'explicit' as const, label: t('dialogs.settings.sync.adapterFtpModeExplicit') },
+      { value: 'implicit' as const, label: t('dialogs.settings.sync.adapterFtpModeImplicit') },
+      { value: 'plain' as const, label: t('dialogs.settings.sync.adapterFtpModePlain') },
+    ],
+    [t],
+  );
+
+  // Build the wire config for the active kind, or null when a required field is
+  // blank (the configure button stays a no-op rather than erroring). Optional
+  // password is omitted when blank so the Rust side reuses the keychain secret.
+  const buildConfig = useCallback((): SyncAdapterConfig | null => {
+    if (kind === 'local') {
+      const p = path.trim();
+      return p.length > 0 ? { kind: 'local', path: p } : null;
+    }
+    if (kind === 'webdav') {
+      const u = url.trim();
+      if (u.length === 0) return null;
+      return password.length > 0
+        ? { kind: 'webdav', url: u, user: user.trim(), password }
+        : { kind: 'webdav', url: u, user: user.trim() };
+    }
+    // ftp
+    const h = host.trim();
+    const us = user.trim();
+    if (h.length === 0 || us.length === 0) return null;
+    const parsed = Number(port.trim());
+    const portNum =
+      port.trim().length > 0 && Number.isInteger(parsed) && parsed > 0
+        ? parsed
+        : mode === 'implicit'
+          ? 990
+          : 21;
+    const base = {
+      kind: 'ftp' as const,
+      host: h,
+      port: portNum,
+      user: us,
+      path: ftpPath.trim(),
+      mode,
+    };
+    return password.length > 0 ? { ...base, password } : base;
+  }, [kind, path, url, host, port, ftpPath, mode, user, password]);
+
   const configure = useCallback(async () => {
-    const trimmed = path.trim();
-    if (trimmed.length === 0) return;
+    const config = buildConfig();
+    if (config == null) return;
     setError(null);
     setBusy(true);
     try {
-      await configureSyncAdapter({ kind: 'local', path: trimmed });
+      await configureSyncAdapter(config);
       await refresh();
       announce(t('mobile.syncConfigured'));
     } catch (err) {
@@ -67,7 +139,7 @@ export default function SyncScreen() {
     } finally {
       setBusy(false);
     }
-  }, [announce, path, refresh, t]);
+  }, [announce, buildConfig, refresh, t]);
 
   const runSync = useCallback(async () => {
     setError(null);
@@ -138,20 +210,150 @@ export default function SyncScreen() {
         </Pressable>
       )}
 
-      <View style={styles.field}>
-        <Text style={styles.label}>{t('mobile.syncPathLabel')}</Text>
-        <Text style={styles.hint} accessibilityRole="text">
-          {t('mobile.syncPathHint')}
-        </Text>
-        <TextInput
-          style={styles.input}
-          value={path}
-          onChangeText={setPath}
-          accessibilityLabel={t('mobile.syncPathLabel')}
-          autoCapitalize="none"
-          autoCorrect={false}
-        />
-      </View>
+      <RadioGroup<SyncKind>
+        label={t('dialogs.settings.sync.adapterKind')}
+        value={kind}
+        options={kindOptions}
+        onChange={setKind}
+        disabled={busy}
+      />
+
+      {kind === 'local' && (
+        <View style={styles.field}>
+          <Text style={styles.label}>{t('mobile.syncPathLabel')}</Text>
+          <Text style={styles.hint} accessibilityRole="text">
+            {t('mobile.syncPathHint')}
+          </Text>
+          <TextInput
+            style={styles.input}
+            value={path}
+            onChangeText={setPath}
+            accessibilityLabel={t('mobile.syncPathLabel')}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+        </View>
+      )}
+
+      {kind === 'webdav' && (
+        <>
+          <View style={styles.field}>
+            <Text style={styles.label}>{t('dialogs.settings.sync.adapterWebdavUrl')}</Text>
+            <Text style={styles.hint} accessibilityRole="text">
+              {t('dialogs.settings.sync.adapterWebdavUrlHint')}
+            </Text>
+            <TextInput
+              style={styles.input}
+              value={url}
+              onChangeText={setUrl}
+              accessibilityLabel={t('dialogs.settings.sync.adapterWebdavUrl')}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="url"
+            />
+          </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>{t('dialogs.settings.sync.adapterWebdavUser')}</Text>
+            <TextInput
+              style={styles.input}
+              value={user}
+              onChangeText={setUser}
+              accessibilityLabel={t('dialogs.settings.sync.adapterWebdavUser')}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>{t('dialogs.settings.sync.adapterWebdavPassword')}</Text>
+            <Text style={styles.hint} accessibilityRole="text">
+              {t('dialogs.settings.sync.adapterWebdavPasswordHint')}
+            </Text>
+            <TextInput
+              style={styles.input}
+              value={password}
+              onChangeText={setPassword}
+              accessibilityLabel={t('dialogs.settings.sync.adapterWebdavPassword')}
+              autoCapitalize="none"
+              autoCorrect={false}
+              secureTextEntry
+            />
+          </View>
+        </>
+      )}
+
+      {kind === 'ftp' && (
+        <>
+          <View style={styles.field}>
+            <Text style={styles.label}>{t('dialogs.settings.sync.adapterFtpHost')}</Text>
+            <TextInput
+              style={styles.input}
+              value={host}
+              onChangeText={setHost}
+              accessibilityLabel={t('dialogs.settings.sync.adapterFtpHost')}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>{t('dialogs.settings.sync.adapterFtpPort')}</Text>
+            <TextInput
+              style={styles.input}
+              value={port}
+              onChangeText={setPort}
+              accessibilityLabel={t('dialogs.settings.sync.adapterFtpPort')}
+              keyboardType="number-pad"
+              autoCorrect={false}
+            />
+          </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>{t('dialogs.settings.sync.adapterFtpUser')}</Text>
+            <TextInput
+              style={styles.input}
+              value={user}
+              onChangeText={setUser}
+              accessibilityLabel={t('dialogs.settings.sync.adapterFtpUser')}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>{t('dialogs.settings.sync.adapterFtpPassword')}</Text>
+            <TextInput
+              style={styles.input}
+              value={password}
+              onChangeText={setPassword}
+              accessibilityLabel={t('dialogs.settings.sync.adapterFtpPassword')}
+              autoCapitalize="none"
+              autoCorrect={false}
+              secureTextEntry
+            />
+          </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>{t('dialogs.settings.sync.adapterFtpPath')}</Text>
+            <Text style={styles.hint} accessibilityRole="text">
+              {t('dialogs.settings.sync.adapterFtpPathHint')}
+            </Text>
+            <TextInput
+              style={styles.input}
+              value={ftpPath}
+              onChangeText={setFtpPath}
+              accessibilityLabel={t('dialogs.settings.sync.adapterFtpPath')}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          </View>
+          <RadioGroup<FtpMode>
+            label={t('dialogs.settings.sync.adapterFtpMode')}
+            value={mode}
+            options={ftpModeOptions}
+            onChange={setMode}
+            disabled={busy}
+          />
+          <Text style={styles.hint} accessibilityRole="text">
+            {t('dialogs.settings.sync.adapterFtpModeHint')}
+          </Text>
+        </>
+      )}
 
       <Pressable
         accessibilityRole="button"

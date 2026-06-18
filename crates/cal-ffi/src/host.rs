@@ -58,11 +58,36 @@ use sync_engine::{EventLogWriter, SecretError, SecretSlot, SecretStore, SyncOrch
 /// `commands::sync` keys so the same SQLite row layout serves both backends.
 const PREF_ADAPTER_KIND: &str = "sync.adapter.kind";
 const PREF_LOCAL_PATH: &str = "sync.adapter.local.path";
-/// Plugin id of the local-filesystem sync adapter (the only kind this slice
-/// configures; webdav/sftp/ftp + the OAuth kinds follow).
+/// WebDAV adapter config keys. The URL + user are device-local prefs (never
+/// propagated); the password lives in the keychain under a fixed pseudo-account
+/// so the adapter owns one managed slot independent of any user account row.
+const PREF_WEBDAV_URL: &str = "sync.adapter.webdav.url";
+const PREF_WEBDAV_USER: &str = "sync.adapter.webdav.user";
+const WEBDAV_SECRET_ACCOUNT: &str = "sync.adapter.webdav";
+/// FTPS adapter config keys. Same device-local / never-synced guarantee as the
+/// WebDAV pair; the password lives in the keychain under FTP_SECRET_ACCOUNT.
+const PREF_FTP_HOST: &str = "sync.adapter.ftp.host";
+const PREF_FTP_PORT: &str = "sync.adapter.ftp.port";
+const PREF_FTP_USER: &str = "sync.adapter.ftp.user";
+const PREF_FTP_PATH: &str = "sync.adapter.ftp.path";
+const PREF_FTP_MODE: &str = "sync.adapter.ftp.mode";
+const FTP_SECRET_ACCOUNT: &str = "sync.adapter.ftp";
+/// Plugin ids of the statically-embedded sync adapters this host configures.
+/// SFTP (needs the §19.5 host-key trust flow) + the OAuth kinds (Dropbox /
+/// Google Drive) follow in their own phases.
 const PLUGIN_ID_SYNC_LOCAL: &str = "com.aperio.sync-adapter-local";
+const PLUGIN_ID_WEBDAV: &str = "com.aperio.sync-adapter-webdav";
+const PLUGIN_ID_FTP: &str = "com.aperio.sync-adapter-ftp";
 
 fn sync_err(e: SyncError) -> StoreError {
+    StoreError::Storage {
+        detail: e.to_string(),
+    }
+}
+
+/// Map any `Display` write error (user_prefs set, keychain store) raised while
+/// persisting a sync-adapter config into the generic storage error.
+fn storage_err(e: impl std::fmt::Display) -> StoreError {
     StoreError::Storage {
         detail: e.to_string(),
     }
@@ -225,14 +250,39 @@ struct CreateEventRequest {
     event: NewEvent,
 }
 
-/// Configure-sync request. A subset of the desktop `SyncAdapterConfig` enum —
-/// this slice handles `kind: "local"` (path required); webdav/sftp/ftp + the
-/// OAuth kinds follow.
+/// Configure-sync request — a flattened mirror of the desktop `SyncAdapterConfig`
+/// enum. Each kind reads its own subset of the optional fields:
+///   - `local`  → `path` (filesystem path).
+///   - `webdav` → `url` + `user` + `password` (password optional; omit/empty
+///                reuses the stored keychain secret).
+///   - `ftp`    → `host` + `port` + `user` + `path` + `mode` + `password`
+///                (same password-reuse contract).
+/// SFTP (host-key trust flow) + the OAuth kinds (Dropbox / Google Drive) follow.
 #[derive(serde::Deserialize)]
 struct ConfigureSyncRequest {
     kind: String,
+    /// `local` filesystem path / `ftp` remote path.
     #[serde(default)]
     path: Option<String>,
+    /// `webdav` collection URL.
+    #[serde(default)]
+    url: Option<String>,
+    /// `webdav` / `ftp` username.
+    #[serde(default)]
+    user: Option<String>,
+    /// `webdav` / `ftp` password. Omitted or empty reuses the keychain secret
+    /// so URL/host edits don't require re-typing.
+    #[serde(default)]
+    password: Option<String>,
+    /// `ftp` host.
+    #[serde(default)]
+    host: Option<String>,
+    /// `ftp` port (defaults to 21 — explicit FTPS).
+    #[serde(default)]
+    port: Option<u16>,
+    /// `ftp` TLS mode: `"explicit"` (default), `"implicit"`, or `"plain"`.
+    #[serde(default)]
+    mode: Option<String>,
 }
 
 /// The mobile app's handle to the full on-device engine.
@@ -328,6 +378,93 @@ fn open_sync_plugin(
     Ok(Arc::new(adapter))
 }
 
+/// Reconstruct the configured sync adapter from `user_prefs` — the mobile twin
+/// of the desktop `build_adapter_from_prefs`. Runs in [`Host::open`] before
+/// `Self` exists, so it takes the plugin manager + secret store by reference.
+/// Best-effort: a missing/blank field or an open failure yields `None`, leaving
+/// sync unconfigured until the user re-configures from the Sync screen. Only the
+/// kinds this host can configure are restored (`local` / `webdav` / `ftp`).
+fn restore_adapter_from_prefs(
+    prefs: &UserPrefsRepo,
+    plugin_manager: &PluginManager,
+    secret_store: &dyn SecretStore,
+) -> Option<Arc<dyn SyncAdapter>> {
+    let kind = prefs.get(PREF_ADAPTER_KIND).ok().flatten()?;
+    match kind.as_str() {
+        "local" => {
+            let path = prefs.get(PREF_LOCAL_PATH).ok().flatten()?;
+            if path.trim().is_empty() {
+                return None;
+            }
+            let cfg = serde_json::json!({ "remote_root": path.trim() }).to_string();
+            open_sync_plugin(plugin_manager, PLUGIN_ID_SYNC_LOCAL, cfg).ok()
+        }
+        "webdav" => {
+            let url = prefs.get(PREF_WEBDAV_URL).ok().flatten()?;
+            if url.trim().is_empty() {
+                return None;
+            }
+            let user = prefs
+                .get(PREF_WEBDAV_USER)
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            // Missing keychain entry → empty password (the WebDAV adapter
+            // treats that as "no auth", matching the desktop restore path).
+            let password = secret_store
+                .retrieve(WEBDAV_SECRET_ACCOUNT, SecretSlot::Password)
+                .ok()
+                .unwrap_or_default();
+            let cfg = serde_json::json!({
+                "url": url.trim(),
+                "user": user.trim(),
+                "password": password,
+            })
+            .to_string();
+            open_sync_plugin(plugin_manager, PLUGIN_ID_WEBDAV, cfg).ok()
+        }
+        "ftp" => {
+            let host = prefs.get(PREF_FTP_HOST).ok().flatten()?;
+            if host.trim().is_empty() {
+                return None;
+            }
+            let port = prefs
+                .get(PREF_FTP_PORT)
+                .ok()
+                .flatten()
+                .and_then(|s| s.parse::<u16>().ok())
+                .unwrap_or(21);
+            let user = prefs.get(PREF_FTP_USER).ok().flatten()?;
+            if user.trim().is_empty() {
+                return None;
+            }
+            let path = prefs.get(PREF_FTP_PATH).ok().flatten().unwrap_or_default();
+            let mode = prefs
+                .get(PREF_FTP_MODE)
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| "explicit".to_string());
+            // FTP has no anonymous path in our model — a missing password
+            // means the config is incomplete, so don't restore (the desktop
+            // `?`-shortcuts here too).
+            let password = secret_store
+                .retrieve(FTP_SECRET_ACCOUNT, SecretSlot::Password)
+                .ok()?;
+            let cfg = serde_json::json!({
+                "host": host.trim(),
+                "port": port,
+                "user": user.trim(),
+                "password": password,
+                "path": path.trim(),
+                "mode": mode,
+            })
+            .to_string();
+            open_sync_plugin(plugin_manager, PLUGIN_ID_FTP, cfg).ok()
+        }
+        _ => None,
+    }
+}
+
 #[uniffi::export]
 impl Host {
     /// Open the on-device database at `db_path`, register every bundled
@@ -407,25 +544,14 @@ impl Host {
         // Restore a previously-configured sync adapter so `sync_now` works
         // without a re-configure step (the desktop's build_adapter_from_prefs).
         // Best-effort: a missing/unbuildable adapter just leaves sync
-        // unconfigured (the user re-configures from the Sync screen). Only the
-        // local kind here; webdav/sftp/ftp restore lands with their configure.
+        // unconfigured (the user re-configures from the Sync screen).
         {
             let shared = db.shared();
             let prefs = UserPrefsRepo::new(&shared);
-            if matches!(
-                prefs.get(PREF_ADAPTER_KIND).ok().flatten().as_deref(),
-                Some("local")
-            ) {
-                if let Some(path) = prefs.get(PREF_LOCAL_PATH).ok().flatten() {
-                    if !path.trim().is_empty() {
-                        let cfg = serde_json::json!({ "remote_root": path.trim() }).to_string();
-                        if let Ok(adapter) =
-                            open_sync_plugin(&plugin_manager, PLUGIN_ID_SYNC_LOCAL, cfg)
-                        {
-                            graph.orchestrator.configure(adapter);
-                        }
-                    }
-                }
+            if let Some(adapter) =
+                restore_adapter_from_prefs(&prefs, &plugin_manager, secret_store.as_ref())
+            {
+                graph.orchestrator.configure(adapter);
             }
         }
 
@@ -764,13 +890,16 @@ impl Host {
         to_json(&self.orchestrator.status())
     }
 
-    /// Configure the sync adapter from a JSON request. This slice handles
-    /// `{"kind":"local","path":"…"}` (a local-filesystem sync target): open the
-    /// statically-embedded local sync plugin, probe it (`test_connection`), make
-    /// it the orchestrator's active adapter, and persist the choice under the
+    /// Configure the sync adapter from a JSON request. Handles the `local`
+    /// (filesystem path), `webdav` (URL + user + password), and `ftp`
+    /// (host/port/user/path/mode + password) kinds: open the matching
+    /// statically-embedded sync plugin, probe it (`test_connection`), make it
+    /// the orchestrator's active adapter, and persist the choice under the
     /// `sync.adapter.*` prefs (device-local; the is_synced_key allowlist
-    /// excludes them, so they never propagate). webdav/sftp/ftp + the E2E
-    /// `wrap_if_encrypted` branch + the OAuth kinds follow.
+    /// excludes them, so they never propagate). The credential goes to the
+    /// keychain via the platform `SecretStore`; an omitted/empty password reuses
+    /// the stored one. SFTP (host-key trust flow) + the E2E `wrap_if_encrypted`
+    /// branch + the OAuth kinds (Dropbox / Google Drive) follow.
     pub fn configure_sync_adapter_json(&self, config_json: String) -> Result<(), StoreError> {
         let req: ConfigureSyncRequest = from_json("sync config", &config_json)?;
         match req.kind.as_str() {
@@ -804,9 +933,139 @@ impl Host {
                     })?;
                 Ok(())
             }
+            "webdav" => {
+                let url = req.url.unwrap_or_default();
+                let url = url.trim();
+                if url.is_empty() {
+                    return Err(StoreError::InvalidField {
+                        field: "url".to_string(),
+                        detail: "WebDAV URL must not be empty".to_string(),
+                    });
+                }
+                let user = req.user.unwrap_or_default();
+                let user = user.trim();
+                // Resolve the password: a non-empty request value wins (fresh
+                // connect / re-typed in Settings); otherwise reuse the stored
+                // keychain secret so URL-only edits don't require re-typing.
+                // Empty == "no auth" (the desktop `build_adapter` contract).
+                let resolved_password = match req.password.as_deref().map(str::trim) {
+                    Some(p) if !p.is_empty() => Some(p.to_string()),
+                    _ => self
+                        .secret_store
+                        .retrieve(WEBDAV_SECRET_ACCOUNT, SecretSlot::Password)
+                        .ok(),
+                };
+                let cfg = serde_json::json!({
+                    "url": url,
+                    "user": user,
+                    "password": resolved_password.unwrap_or_default(),
+                })
+                .to_string();
+                let adapter = open_sync_plugin(&self.plugin_manager, PLUGIN_ID_WEBDAV, cfg)?;
+                // Probe before keeping it active so bad creds / a bad URL fail
+                // here rather than on the first silent sync round.
+                self.runtime
+                    .block_on(async { adapter.test_connection().await })
+                    .map_err(sync_err)?;
+                self.orchestrator.configure(adapter);
+                let shared = self.db.shared();
+                let prefs = UserPrefsRepo::new(&shared);
+                prefs
+                    .set(PREF_ADAPTER_KIND, "webdav")
+                    .map_err(storage_err)?;
+                prefs.set(PREF_WEBDAV_URL, url).map_err(storage_err)?;
+                prefs.set(PREF_WEBDAV_USER, user).map_err(storage_err)?;
+                // Only overwrite the keychain when the request carries a
+                // non-empty password — URL/user edits keep the prior secret.
+                if let Some(pw) = req.password.as_deref().map(str::trim) {
+                    if !pw.is_empty() {
+                        self.secret_store
+                            .store(WEBDAV_SECRET_ACCOUNT, SecretSlot::Password, pw)
+                            .map_err(storage_err)?;
+                    }
+                }
+                Ok(())
+            }
+            "ftp" => {
+                let host = req.host.unwrap_or_default();
+                let host = host.trim();
+                if host.is_empty() {
+                    return Err(StoreError::InvalidField {
+                        field: "host".to_string(),
+                        detail: "FTP host must not be empty".to_string(),
+                    });
+                }
+                let user = req.user.unwrap_or_default();
+                let user = user.trim();
+                if user.is_empty() {
+                    return Err(StoreError::InvalidField {
+                        field: "user".to_string(),
+                        detail: "FTP user must not be empty".to_string(),
+                    });
+                }
+                let port = req.port.unwrap_or(21);
+                let path = req.path.unwrap_or_default();
+                let path = path.trim();
+                let mode = req.mode.unwrap_or_else(|| "explicit".to_string());
+                let mode = mode.trim();
+                // The plugin re-validates + falls back to "explicit", but we
+                // reject obviously-wrong modes here for a clear field error.
+                if !matches!(mode, "implicit" | "explicit" | "plain") {
+                    return Err(StoreError::InvalidField {
+                        field: "mode".to_string(),
+                        detail: format!("unknown FTPS mode: {mode}"),
+                    });
+                }
+                // Same reuse contract as WebDAV, but FTP has no anonymous path
+                // in our model: a missing keychain secret is an auth error.
+                let resolved_password = match req.password.as_deref().map(str::trim) {
+                    Some(p) if !p.is_empty() => p.to_string(),
+                    _ => self
+                        .secret_store
+                        .retrieve(FTP_SECRET_ACCOUNT, SecretSlot::Password)
+                        .map_err(|_| StoreError::Auth {
+                            detail: "no FTP password configured".to_string(),
+                        })?,
+                };
+                let cfg = serde_json::json!({
+                    "host": host,
+                    "port": port,
+                    "user": user,
+                    "password": resolved_password,
+                    "path": path,
+                    "mode": mode,
+                })
+                .to_string();
+                let adapter = open_sync_plugin(&self.plugin_manager, PLUGIN_ID_FTP, cfg)?;
+                self.runtime
+                    .block_on(async { adapter.test_connection().await })
+                    .map_err(sync_err)?;
+                self.orchestrator.configure(adapter);
+                let shared = self.db.shared();
+                let prefs = UserPrefsRepo::new(&shared);
+                prefs.set(PREF_ADAPTER_KIND, "ftp").map_err(storage_err)?;
+                prefs.set(PREF_FTP_HOST, host).map_err(storage_err)?;
+                prefs
+                    .set(PREF_FTP_PORT, &port.to_string())
+                    .map_err(storage_err)?;
+                prefs.set(PREF_FTP_USER, user).map_err(storage_err)?;
+                prefs.set(PREF_FTP_PATH, path).map_err(storage_err)?;
+                prefs.set(PREF_FTP_MODE, mode).map_err(storage_err)?;
+                if let Some(pw) = req.password.as_deref().map(str::trim) {
+                    if !pw.is_empty() {
+                        self.secret_store
+                            .store(FTP_SECRET_ACCOUNT, SecretSlot::Password, pw)
+                            .map_err(storage_err)?;
+                    }
+                }
+                Ok(())
+            }
             other => Err(StoreError::InvalidField {
                 field: "kind".to_string(),
-                detail: format!("sync adapter kind '{other}' is not supported yet (local only)"),
+                detail: format!(
+                    "sync adapter kind '{other}' is not supported yet \
+                     (local, webdav, ftp)"
+                ),
             }),
         }
     }
@@ -1396,6 +1655,63 @@ mod tests {
                 ["configured"],
             true,
             "the local sync target should be restored on reopen",
+        );
+    }
+
+    // Full webdav/ftp configure round-trips need a live server (test_connection
+    // probes it), so they're an on-device / integration concern. Here we cover
+    // the CI-safe validation branches that return BEFORE any network contact.
+
+    #[test]
+    fn webdav_configure_rejects_empty_url() {
+        let (_dir, host, _kc) = open_host();
+        let err = host
+            .configure_sync_adapter_json(r#"{"kind":"webdav","url":"  ","user":"a"}"#.to_string())
+            .unwrap_err();
+        assert!(
+            matches!(&err, StoreError::InvalidField { field, .. } if field == "url"),
+            "got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn ftp_configure_rejects_empty_host() {
+        let (_dir, host, _kc) = open_host();
+        let err = host
+            .configure_sync_adapter_json(r#"{"kind":"ftp","host":"","user":"a"}"#.to_string())
+            .unwrap_err();
+        assert!(
+            matches!(&err, StoreError::InvalidField { field, .. } if field == "host"),
+            "got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn ftp_configure_rejects_unknown_mode() {
+        let (_dir, host, _kc) = open_host();
+        // host + user are present, so validation reaches the mode check and
+        // returns before opening the plugin / probing a server.
+        let err = host
+            .configure_sync_adapter_json(
+                r#"{"kind":"ftp","host":"ftp.example.invalid","user":"a","mode":"bogus"}"#
+                    .to_string(),
+            )
+            .unwrap_err();
+        assert!(
+            matches!(&err, StoreError::InvalidField { field, .. } if field == "mode"),
+            "got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn unsupported_sync_kind_is_rejected() {
+        let (_dir, host, _kc) = open_host();
+        let err = host
+            .configure_sync_adapter_json(r#"{"kind":"dropbox"}"#.to_string())
+            .unwrap_err();
+        assert!(
+            matches!(&err, StoreError::InvalidField { field, .. } if field == "kind"),
+            "got: {err:?}"
         );
     }
 }
