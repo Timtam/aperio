@@ -18,7 +18,6 @@ import type {
   Section,
   Task,
   TaskList,
-  TaskStatus,
 } from '@aperio/shared';
 import {
   assigneeSuffix,
@@ -29,7 +28,6 @@ import {
   localDateKey,
   mergeDayItems,
   multiDayInfo,
-  planStatusCascade,
   prioritySuffix,
   seriesIdOf,
   statusI18nKey,
@@ -50,13 +48,13 @@ import {
   getSections,
   getTasks,
   listTaskLists,
-  updateTask,
 } from '../api/client';
 import { listColorLabels } from '../api/colorLabels';
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
 import { resolveEventColor } from '../intl/eventColor';
 import { resolveTaskColor, sectionColorMap } from '../intl/taskColor';
 import { readWeekStart, type WeekStart } from '../settings/weekStart';
+import { applyTaskToggle, statusAnnounce } from '../state/taskToggle';
 import type { RootStackScreenProps } from '../navigation/types';
 
 // Accessible Week view — the screen-reader-first port of the desktop WeekView.
@@ -387,40 +385,23 @@ export default function WeekScreen({ navigation, route }: RootStackScreenProps<'
     [navigation],
   );
 
-  // Toggle a task done/open, cascading status to its subtree (shared planner),
-  // then reload. Completing a task slips it out of the week (completed tasks are
-  // hidden); reopening keeps it. Like the other calendar screens, focus is not
-  // forcibly restored across the reload.
+  // Check off a task via the shared toggle path (honours the synced
+  // task-behaviour knobs: mode, status coupling, auto-date), then reload.
+  // Completing a task slips it out of the week (completed tasks are hidden);
+  // reopening keeps it. Like the other calendar screens, focus is not forcibly
+  // restored across the reload.
   const toggleTask = useCallback(
     async (task: Task) => {
-      const done = task.status === 'completed';
-      const newStatus: TaskStatus = done ? 'open' : 'completed';
-      const writes = planStatusCascade(task.id, newStatus, tasks);
-      const byId = new Map(tasks.map((tk) => [tk.id, tk]));
-      const nowIso = new Date().toISOString();
       try {
-        for (const w of writes) {
-          const target = byId.get(w.taskId);
-          if (target == null) continue;
-          await updateTask({
-            ...target,
-            status: w.status,
-            completed_at:
-              w.status === 'completed' ? (target.completed_at ?? nowIso) : null,
-            scheduled_date: w.scheduledDate ?? target.scheduled_date,
-          });
-        }
-        announce(
-          done
-            ? t('mobile.reopened', { title: task.title })
-            : t('mobile.completed', { title: task.title }),
-        );
+        const next = await applyTaskToggle(task, listsById.get(task.list_id), tasks);
+        if (next == null) return;
+        announce(statusAnnounce(t, next, task.title));
         await load();
       } catch (err) {
         announce(t('mobile.error', { message: errorMessage(err) }));
       }
     },
-    [announce, load, t, tasks],
+    [announce, listsById, load, t, tasks],
   );
 
   const removeTask = useCallback(

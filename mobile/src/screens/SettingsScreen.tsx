@@ -89,6 +89,14 @@ export default function SettingsScreen({
       <View style={styles.links}>
         <Pressable
           accessibilityRole="button"
+          accessibilityLabel={t('dialogs.settings.tabs.tasks')}
+          onPress={() => navigation.navigate('TaskSettings')}
+          style={({ pressed }) => [styles.link, pressed && styles.pressed]}
+        >
+          <Text style={styles.linkText}>{t('dialogs.settings.tabs.tasks')}</Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
           accessibilityLabel={t('dialogs.accounts.title')}
           onPress={() => navigation.navigate('Accounts')}
           style={({ pressed }) => [styles.link, pressed && styles.pressed]}

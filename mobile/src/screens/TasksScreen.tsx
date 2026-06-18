@@ -14,24 +14,24 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import type { Entry, Task, TaskStatus } from '@aperio/shared';
+import type { Entry, Task } from '@aperio/shared';
 import {
   assigneeSuffix,
   buildEntries,
   DEFERRED_GROUP_ID,
   DONE_GROUP_ID,
-  planStatusCascade,
   prioritySuffix,
   statusI18nKey,
   statusMarker,
   subtaskProgressSuffix,
 } from '@aperio/shared';
 
-import { deleteTask, duplicateTask, updateTask } from '../api/client';
+import { deleteTask, duplicateTask } from '../api/client';
 import { useCurrentDayKey } from '../hooks/useCurrentDayKey';
 import { describeDue } from '../intl/describeDue';
 import { resolveTaskColor, sectionColorMap } from '../intl/taskColor';
 import { useTaskStore } from '../state/taskStoreContext';
+import { applyTaskToggle, statusAnnounce } from '../state/taskToggle';
 import { useTasks } from '../state/useTasks';
 import type { RootStackScreenProps } from '../navigation/types';
 
@@ -202,46 +202,29 @@ export default function TasksScreen({
 
   const toggleDone = useCallback(
     async (task: Task) => {
-      const done = task.status === 'completed';
-      const newStatus: TaskStatus = done ? 'open' : 'completed';
-      // Keep SR focus sensible after the refetch remounts the list: reopening
-      // makes the task visible again (focus it); completing slips it into the
-      // (collapsed) Done group, so focus a surviving sibling — or the Done
-      // header itself when it was the only visible task.
-      pendingFocusId.current = done
-        ? task.id
-        : (focusTargetAfterRemoving(entries, task.id) ?? DONE_GROUP_ID);
-      // Couple parent/subtask status: completing cascades DOWN to descendants,
-      // and every change recomputes ancestors UP (shared planner; auto-date is
-      // a task-behaviour setting, deferred → no todayKey). Apply each write as a
-      // full-overwrite update, then refetch once.
-      const writes = planStatusCascade(task.id, newStatus, tasks);
-      const byId = new Map(tasks.map((tk) => [tk.id, tk]));
-      const nowIso = new Date().toISOString();
+      // The check-off honours the synced task-behaviour knobs (mode, status
+      // coupling, auto-date) via the shared toggle path; it returns the new
+      // status (or null if nothing changed).
       try {
-        for (const w of writes) {
-          const target = byId.get(w.taskId);
-          if (target == null) continue;
-          await updateTask({
-            ...target,
-            status: w.status,
-            completed_at:
-              w.status === 'completed' ? (target.completed_at ?? nowIso) : null,
-            scheduled_date: w.scheduledDate ?? target.scheduled_date,
-          });
-        }
+        const next = await applyTaskToggle(task, taskListById.get(task.list_id), tasks);
+        if (next == null) return;
+        // Keep SR focus sensible after the refetch remounts the list: a task
+        // that became completed slips into the (collapsed) Done group, so land
+        // focus on a surviving sibling — or the Done header when it was the
+        // only visible task; otherwise the row stays visible, so keep focus on
+        // it. Set just before the refetch so the pending-focus effect picks it.
+        pendingFocusId.current =
+          next === 'completed'
+            ? (focusTargetAfterRemoving(entries, task.id) ?? DONE_GROUP_ID)
+            : task.id;
         invalidateData();
-        announce(
-          done
-            ? t('mobile.reopened', { title: task.title })
-            : t('mobile.completed', { title: task.title }),
-        );
+        announce(statusAnnounce(t, next, task.title));
       } catch (err) {
         pendingFocusId.current = null;
         announce(t('mobile.error', { message: errorMessage(err) }));
       }
     },
-    [announce, entries, invalidateData, t, tasks],
+    [announce, entries, invalidateData, t, tasks, taskListById],
   );
 
   const removeTask = useCallback(

@@ -36,6 +36,7 @@ export type RootStackParamList = {
   CalendarEditor: { calendarId: string };
   Sync: undefined;
   Settings: undefined;
+  TaskSettings: undefined;
   ColorLabels: undefined;
   Contacts: undefined;
   ContactEditor: { contactId: string | null; listId: string };

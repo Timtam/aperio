@@ -26,6 +26,7 @@ import SearchScreen from './screens/SearchScreen';
 import SettingsScreen from './screens/SettingsScreen';
 import SyncScreen from './screens/SyncScreen';
 import TaskEditorModal from './screens/TaskEditorModal';
+import TaskSettingsScreen from './screens/TaskSettingsScreen';
 import TasksScreen from './screens/TasksScreen';
 import WeekScreen from './screens/WeekScreen';
 import { TaskStoreProvider } from './state/taskStore';
@@ -187,6 +188,11 @@ function SettingsStackNav() {
         name="ColorLabels"
         component={ColorLabelsScreen}
         options={{ title: t('dialogs.colorLabels.title') }}
+      />
+      <SettingsStack.Screen
+        name="TaskSettings"
+        component={TaskSettingsScreen}
+        options={{ title: t('dialogs.settings.tabs.tasks') }}
       />
     </SettingsStack.Navigator>
   );
