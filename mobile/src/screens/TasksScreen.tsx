@@ -14,12 +14,13 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import type { Entry, Task } from '@aperio/shared';
+import type { Entry, Task, TaskStatus } from '@aperio/shared';
 import {
   assigneeSuffix,
   buildEntries,
   DEFERRED_GROUP_ID,
   DONE_GROUP_ID,
+  planStatusCascade,
   prioritySuffix,
   statusI18nKey,
   statusMarker,
@@ -202,6 +203,7 @@ export default function TasksScreen({
   const toggleDone = useCallback(
     async (task: Task) => {
       const done = task.status === 'completed';
+      const newStatus: TaskStatus = done ? 'open' : 'completed';
       // Keep SR focus sensible after the refetch remounts the list: reopening
       // makes the task visible again (focus it); completing slips it into the
       // (collapsed) Done group, so focus a surviving sibling — or the Done
@@ -209,12 +211,25 @@ export default function TasksScreen({
       pendingFocusId.current = done
         ? task.id
         : (focusTargetAfterRemoving(entries, task.id) ?? DONE_GROUP_ID);
+      // Couple parent/subtask status: completing cascades DOWN to descendants,
+      // and every change recomputes ancestors UP (shared planner; auto-date is
+      // a task-behaviour setting, deferred → no todayKey). Apply each write as a
+      // full-overwrite update, then refetch once.
+      const writes = planStatusCascade(task.id, newStatus, tasks);
+      const byId = new Map(tasks.map((tk) => [tk.id, tk]));
+      const nowIso = new Date().toISOString();
       try {
-        await updateTask({
-          ...task,
-          status: done ? 'open' : 'completed',
-          completed_at: done ? null : new Date().toISOString(),
-        });
+        for (const w of writes) {
+          const target = byId.get(w.taskId);
+          if (target == null) continue;
+          await updateTask({
+            ...target,
+            status: w.status,
+            completed_at:
+              w.status === 'completed' ? (target.completed_at ?? nowIso) : null,
+            scheduled_date: w.scheduledDate ?? target.scheduled_date,
+          });
+        }
         invalidateData();
         announce(
           done
@@ -226,7 +241,7 @@ export default function TasksScreen({
         announce(t('mobile.error', { message: errorMessage(err) }));
       }
     },
-    [announce, entries, invalidateData, t],
+    [announce, entries, invalidateData, t, tasks],
   );
 
   const removeTask = useCallback(

@@ -10,3 +10,4 @@ export * from './recurrence';
 export * from './rrule';
 export * from './dateKey';
 export * from './multiDay';
+export * from './taskCascade';
