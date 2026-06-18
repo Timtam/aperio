@@ -941,13 +941,14 @@ public protocol HostProtocol: AnyObject, Sendable {
     func pushNow() throws  -> UInt32
     
     /**
-     * Rename a LOCAL calendar / task list (DESIGN §6.5). Mirrors the desktop
-     * set_container_name LOCAL branch: rename the container's own (synced) row
-     * and emit CalendarUpdated / TaskListUpdated so other devices follow.
-     * `kind` is `"calendar"` | `"task_list"` | `"contact_list"`. An external
-     * container renames via its provider, and a contact-list rename / host-local
-     * name override both go through the desktop-only OverridesRepo — so those
-     * return `Unsupported` until that path lands on mobile.
+     * Rename a container (DESIGN §6.5). Mirrors the desktop `set_container_name`:
+     * a LOCAL calendar / task list is renamed on its own (synced) row (+ emits
+     * the sync event); an EXTERNAL container's rename is pushed to its provider
+     * first and, only if the provider declares it `Unsupported`, falls back to a
+     * host-local name override (cleared on a successful provider rename so the
+     * source name stays the single truth). A contact list has no source-rename
+     * path, so it always lands as an override. `kind` is `"calendar"` |
+     * `"task_list"` | `"contact_list"`.
      */
     func renameContainer(containerId: String, kind: String, name: String) throws 
     
@@ -964,16 +965,35 @@ public protocol HostProtocol: AnyObject, Sendable {
     func sectionsJson(listId: String) throws  -> String
     
     /**
-     * Set or clear a LOCAL calendar / task list's bound colour label (DESIGN
-     * §8.2). Mirrors the desktop `set_container_color_label` LOCAL branch: the
-     * binding rides the container's own (synced) row, so we update it and emit
-     * the matching sync event so other devices follow. `kind` is `"calendar"`
-     * | `"task_list"` | `"contact_list"`; `color_label_id` `None` clears it.
-     * An external container (or any contact list) binds via the host-local
-     * `OverridesRepo` on the desktop — desktop-only for now, so those branches
-     * return `Unsupported` until that repo is extracted into host-core.
+     * Set or clear a container's bound colour label (DESIGN §8.2). Mirrors the
+     * desktop `set_container_color_label`: a LOCAL calendar / task list carries
+     * the binding on its own (synced) row (update + emit the matching sync
+     * event); an EXTERNAL container — and EVERY contact list, even local ones —
+     * stores a host-local `OverridesRepo` colour override (the read paths stamp
+     * it back on). `kind` is `"calendar"` | `"task_list"` | `"contact_list"`;
+     * `color_label_id` `None` clears it.
      */
     func setContainerColorLabel(containerId: String, kind: String, colorLabelId: String?) throws 
+    
+    /**
+     * Set or clear an EVENT's colour override (DESIGN §8.2). A LOCAL event — and
+     * a colour-capable external calendar — carry the colour natively through
+     * `update_event` (the frontend routes those there), so this is a no-op for
+     * local; a non-colour-capable EXTERNAL event stores a host-local
+     * `OverridesRepo` override. `event_id` is the series master id. (Mobile has
+     * no read cache to check `supports_event_color`, so it gates on locality
+     * only — `apply_color_to_events` skips events carrying a native colour, so a
+     * stray override can never shadow a provider colour.)
+     */
+    func setEventColor(eventId: String, calendarId: String, colorLabelId: String?) throws 
+    
+    /**
+     * Set or clear a SECTION's colour label (DESIGN §8.2). Routed by the owning
+     * list's account: a LOCAL section carries the binding on its own (synced)
+     * row (+ `SectionUpdated`); an EXTERNAL section (Todoist / Vikunja — no
+     * provider colour field) stores a host-local `OverridesRepo` override.
+     */
+    func setSectionColor(sectionId: String, listId: String, colorLabelId: String?) throws 
     
     /**
      * Upsert a user preference. A whitelisted key also appends `SettingsUpdated`
@@ -1851,13 +1871,14 @@ open func pushNow()throws  -> UInt32  {
 }
     
     /**
-     * Rename a LOCAL calendar / task list (DESIGN §6.5). Mirrors the desktop
-     * set_container_name LOCAL branch: rename the container's own (synced) row
-     * and emit CalendarUpdated / TaskListUpdated so other devices follow.
-     * `kind` is `"calendar"` | `"task_list"` | `"contact_list"`. An external
-     * container renames via its provider, and a contact-list rename / host-local
-     * name override both go through the desktop-only OverridesRepo — so those
-     * return `Unsupported` until that path lands on mobile.
+     * Rename a container (DESIGN §6.5). Mirrors the desktop `set_container_name`:
+     * a LOCAL calendar / task list is renamed on its own (synced) row (+ emits
+     * the sync event); an EXTERNAL container's rename is pushed to its provider
+     * first and, only if the provider declares it `Unsupported`, falls back to a
+     * host-local name override (cleared on a successful provider rename so the
+     * source name stays the single truth). A contact list has no source-rename
+     * path, so it always lands as an override. `kind` is `"calendar"` |
+     * `"task_list"` | `"contact_list"`.
      */
 open func renameContainer(containerId: String, kind: String, name: String)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
     uniffi_cal_ffi_fn_method_host_rename_container(
@@ -1897,20 +1918,55 @@ open func sectionsJson(listId: String)throws  -> String  {
 }
     
     /**
-     * Set or clear a LOCAL calendar / task list's bound colour label (DESIGN
-     * §8.2). Mirrors the desktop `set_container_color_label` LOCAL branch: the
-     * binding rides the container's own (synced) row, so we update it and emit
-     * the matching sync event so other devices follow. `kind` is `"calendar"`
-     * | `"task_list"` | `"contact_list"`; `color_label_id` `None` clears it.
-     * An external container (or any contact list) binds via the host-local
-     * `OverridesRepo` on the desktop — desktop-only for now, so those branches
-     * return `Unsupported` until that repo is extracted into host-core.
+     * Set or clear a container's bound colour label (DESIGN §8.2). Mirrors the
+     * desktop `set_container_color_label`: a LOCAL calendar / task list carries
+     * the binding on its own (synced) row (update + emit the matching sync
+     * event); an EXTERNAL container — and EVERY contact list, even local ones —
+     * stores a host-local `OverridesRepo` colour override (the read paths stamp
+     * it back on). `kind` is `"calendar"` | `"task_list"` | `"contact_list"`;
+     * `color_label_id` `None` clears it.
      */
 open func setContainerColorLabel(containerId: String, kind: String, colorLabelId: String?)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
     uniffi_cal_ffi_fn_method_host_set_container_color_label(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(containerId),
         FfiConverterString.lower(kind),
+        FfiConverterOptionString.lower(colorLabelId),$0
+    )
+}
+}
+    
+    /**
+     * Set or clear an EVENT's colour override (DESIGN §8.2). A LOCAL event — and
+     * a colour-capable external calendar — carry the colour natively through
+     * `update_event` (the frontend routes those there), so this is a no-op for
+     * local; a non-colour-capable EXTERNAL event stores a host-local
+     * `OverridesRepo` override. `event_id` is the series master id. (Mobile has
+     * no read cache to check `supports_event_color`, so it gates on locality
+     * only — `apply_color_to_events` skips events carrying a native colour, so a
+     * stray override can never shadow a provider colour.)
+     */
+open func setEventColor(eventId: String, calendarId: String, colorLabelId: String?)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_set_event_color(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(eventId),
+        FfiConverterString.lower(calendarId),
+        FfiConverterOptionString.lower(colorLabelId),$0
+    )
+}
+}
+    
+    /**
+     * Set or clear a SECTION's colour label (DESIGN §8.2). Routed by the owning
+     * list's account: a LOCAL section carries the binding on its own (synced)
+     * row (+ `SectionUpdated`); an EXTERNAL section (Todoist / Vikunja — no
+     * provider colour field) stores a host-local `OverridesRepo` override.
+     */
+open func setSectionColor(sectionId: String, listId: String, colorLabelId: String?)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_set_section_color(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(sectionId),
+        FfiConverterString.lower(listId),
         FfiConverterOptionString.lower(colorLabelId),$0
     )
 }
@@ -5507,7 +5563,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_push_now() != 48331) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_cal_ffi_checksum_method_host_rename_container() != 32771) {
+    if (uniffi_cal_ffi_checksum_method_host_rename_container() != 61596) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_reparent_task_list_json() != 49367) {
@@ -5516,7 +5572,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_sections_json() != 56584) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_cal_ffi_checksum_method_host_set_container_color_label() != 2468) {
+    if (uniffi_cal_ffi_checksum_method_host_set_container_color_label() != 32220) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_set_event_color() != 36971) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_set_section_color() != 14381) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_set_user_pref() != 9799) {

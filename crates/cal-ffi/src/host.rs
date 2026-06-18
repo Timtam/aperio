@@ -52,6 +52,7 @@ use cal_core::{
 use host_core::accounts::{AccountsRepo, AdapterKind};
 use host_core::db::SharedConn;
 use host_core::event_log::OnboardingService;
+use host_core::overrides::{ContainerKind, OverridesError, OverridesRepo};
 use host_core::registry::{AdapterRegistry, LOCAL_ID};
 use host_core::sftp_host_keys::UserPrefsHostKeyVerifier;
 use host_core::sync::build_orchestrator;
@@ -205,28 +206,28 @@ fn external_reparent_unsupported() -> StoreError {
     }
 }
 
-/// An external container's colour binding (and a contact list's, even a local
-/// one) lives in the host-local `OverridesRepo` on the desktop, which is not
-/// yet extracted into host-core — so mobile can only bind a LOCAL calendar /
-/// task list's colour (carried on its own synced row) for now.
-fn external_color_override_unsupported() -> StoreError {
-    StoreError::Unsupported {
-        detail: "setting a colour label on an external container or a contact list \
-                 is not supported on mobile yet"
-            .to_string(),
+/// Map an `OverridesRepo` failure into the bridge's `StoreError` (the generic
+/// `map_store_err` only covers `cal_core::Error`). An empty name is the one
+/// user-facing validation; everything else is a SQLite-layer failure.
+fn map_overrides_err(e: OverridesError) -> StoreError {
+    match e {
+        OverridesError::EmptyName => StoreError::InvalidField {
+            field: "name".to_string(),
+            detail: "name must not be empty".to_string(),
+        },
+        OverridesError::Sqlite(err) => StoreError::Storage {
+            detail: err.to_string(),
+        },
     }
 }
 
-/// Renaming an external container routes to its provider, and a contact-list
-/// rename / a host-local name override both go through the desktop-only
-/// `OverridesRepo` — not yet extracted into host-core, so mobile can only
-/// rename a LOCAL calendar / task list (its own synced row) for now.
-fn external_rename_unsupported() -> StoreError {
-    StoreError::Unsupported {
-        detail: "renaming an external container or a contact list \
-                 is not supported on mobile yet"
-            .to_string(),
-    }
+/// Parse the FFI `kind` string into a `ContainerKind`, or a clear
+/// `InvalidField` for an unknown value (the FFI can't cheaply share the enum).
+fn parse_container_kind(kind: &str) -> Result<ContainerKind, StoreError> {
+    ContainerKind::parse(kind).ok_or_else(|| StoreError::InvalidField {
+        field: "kind".to_string(),
+        detail: format!("unknown container kind '{kind}'"),
+    })
 }
 
 /// Consecutive-failure count at which sync is reported as `sustained_failure`.
@@ -3163,32 +3164,27 @@ impl Host {
         Ok(())
     }
 
-    /// Set or clear a LOCAL calendar / task list's bound colour label (DESIGN
-    /// §8.2). Mirrors the desktop `set_container_color_label` LOCAL branch: the
-    /// binding rides the container's own (synced) row, so we update it and emit
-    /// the matching sync event so other devices follow. `kind` is `"calendar"`
-    /// | `"task_list"` | `"contact_list"`; `color_label_id` `None` clears it.
-    /// An external container (or any contact list) binds via the host-local
-    /// `OverridesRepo` on the desktop — desktop-only for now, so those branches
-    /// return `Unsupported` until that repo is extracted into host-core.
+    /// Set or clear a container's bound colour label (DESIGN §8.2). Mirrors the
+    /// desktop `set_container_color_label`: a LOCAL calendar / task list carries
+    /// the binding on its own (synced) row (update + emit the matching sync
+    /// event); an EXTERNAL container — and EVERY contact list, even local ones —
+    /// stores a host-local `OverridesRepo` colour override (the read paths stamp
+    /// it back on). `kind` is `"calendar"` | `"task_list"` | `"contact_list"`;
+    /// `color_label_id` `None` clears it.
     pub fn set_container_color_label(
         &self,
         container_id: String,
         kind: String,
         color_label_id: Option<String>,
     ) -> Result<(), StoreError> {
-        let label = color_label_id.map(ColorLabelId);
         match kind.as_str() {
-            "calendar" => {
-                if !self.is_local_calendar(&container_id) {
-                    return Err(external_color_override_unsupported());
-                }
+            "calendar" if self.is_local_calendar(&container_id) => {
                 if let Some(mut cal) = self
                     .adapter
                     .get_calendar_by_id(&container_id)
                     .map_err(map_store_err)?
                 {
-                    cal.color_label = label;
+                    cal.color_label = color_label_id.map(ColorLabelId);
                     let updated = self.adapter.update_calendar(cal).map_err(map_store_err)?;
                     if let Ok(fields) = serde_json::to_value(&updated) {
                         self.writer.append(SyncEvent::CalendarUpdated(EventPayload {
@@ -3199,16 +3195,13 @@ impl Host {
                 }
                 Ok(())
             }
-            "task_list" => {
-                if !self.is_local_task_list(&container_id) {
-                    return Err(external_color_override_unsupported());
-                }
+            "task_list" if self.is_local_task_list(&container_id) => {
                 if let Some(mut list) = self
                     .adapter
                     .get_task_list_by_id(&container_id)
                     .map_err(map_store_err)?
                 {
-                    list.color_label = label;
+                    list.color_label = color_label_id.map(ColorLabelId);
                     let updated = self.adapter.update_task_list(list).map_err(map_store_err)?;
                     if let Ok(fields) = serde_json::to_value(&updated) {
                         self.writer.append(SyncEvent::TaskListUpdated(EventPayload {
@@ -3219,19 +3212,33 @@ impl Host {
                 }
                 Ok(())
             }
-            // Contact lists (even local ones) + every external container bind via
-            // the host-local OverridesRepo, which mobile can't store yet.
-            _ => Err(external_color_override_unsupported()),
+            // External calendar / task list, or any contact list → host-local
+            // colour override (the read paths stamp it back).
+            _ => {
+                let ck = parse_container_kind(&kind)?;
+                let shared = self.db.shared();
+                let repo = OverridesRepo::new(&shared);
+                match color_label_id {
+                    Some(id) => repo
+                        .set_color_label(&container_id, ck, &id)
+                        .map_err(map_overrides_err)?,
+                    None => repo
+                        .clear_color_label(&container_id, ck)
+                        .map_err(map_overrides_err)?,
+                }
+                Ok(())
+            }
         }
     }
 
-    /// Rename a LOCAL calendar / task list (DESIGN §6.5). Mirrors the desktop
-    /// set_container_name LOCAL branch: rename the container's own (synced) row
-    /// and emit CalendarUpdated / TaskListUpdated so other devices follow.
-    /// `kind` is `"calendar"` | `"task_list"` | `"contact_list"`. An external
-    /// container renames via its provider, and a contact-list rename / host-local
-    /// name override both go through the desktop-only OverridesRepo — so those
-    /// return `Unsupported` until that path lands on mobile.
+    /// Rename a container (DESIGN §6.5). Mirrors the desktop `set_container_name`:
+    /// a LOCAL calendar / task list is renamed on its own (synced) row (+ emits
+    /// the sync event); an EXTERNAL container's rename is pushed to its provider
+    /// first and, only if the provider declares it `Unsupported`, falls back to a
+    /// host-local name override (cleared on a successful provider rename so the
+    /// source name stays the single truth). A contact list has no source-rename
+    /// path, so it always lands as an override. `kind` is `"calendar"` |
+    /// `"task_list"` | `"contact_list"`.
     pub fn rename_container(
         &self,
         container_id: String,
@@ -3246,10 +3253,7 @@ impl Host {
             });
         }
         match kind.as_str() {
-            "calendar" => {
-                if !self.is_local_calendar(&container_id) {
-                    return Err(external_rename_unsupported());
-                }
+            "calendar" if self.is_local_calendar(&container_id) => {
                 if let Some(mut cal) = self
                     .adapter
                     .get_calendar_by_id(&container_id)
@@ -3266,10 +3270,7 @@ impl Host {
                 }
                 Ok(())
             }
-            "task_list" => {
-                if !self.is_local_task_list(&container_id) {
-                    return Err(external_rename_unsupported());
-                }
+            "task_list" if self.is_local_task_list(&container_id) => {
                 if let Some(mut list) = self
                     .adapter
                     .get_task_list_by_id(&container_id)
@@ -3286,8 +3287,137 @@ impl Host {
                 }
                 Ok(())
             }
-            _ => Err(external_rename_unsupported()),
+            // External container (or a contact list): push to the provider first,
+            // override only on Unsupported.
+            _ => {
+                let ck = parse_container_kind(&kind)?;
+                // Address books have no provider rename path AND the name-override
+                // table excludes them (CHECK kind IN ('calendar','task_list')), so
+                // a contact-list rename is genuinely unsupported.
+                if matches!(ck, ContainerKind::ContactList) {
+                    return Err(StoreError::Unsupported {
+                        detail: "renaming address books is not supported".to_string(),
+                    });
+                }
+                let account = match ck {
+                    ContainerKind::Calendar => self.registry.account_for_calendar(&container_id),
+                    ContainerKind::TaskList => self.registry.account_for_task_list(&container_id),
+                    ContainerKind::ContactList => {
+                        self.registry.account_for_contact_list(&container_id)
+                    }
+                }
+                .unwrap_or_else(|| LOCAL_ID.to_string());
+                let push_result: cal_core::Result<()> = self.runtime.block_on(async {
+                    match ck {
+                        ContainerKind::Calendar => match self.registry.calendar_adapter(&account) {
+                            Some(ext) => ext.rename_calendar(&container_id, trimmed).await,
+                            None => Err(cal_core::Error::NotFound(format!(
+                                "no adapter registered for account '{account}'"
+                            ))),
+                        },
+                        ContainerKind::TaskList => match self.registry.task_adapter(&account) {
+                            Some(ext) => ext.rename_task_list(&container_id, trimmed).await,
+                            None => Err(cal_core::Error::NotFound(format!(
+                                "no adapter registered for account '{account}'"
+                            ))),
+                        },
+                        // Address books have no source-rename path.
+                        ContainerKind::ContactList => Err(cal_core::Error::Unsupported(
+                            "renaming address books is not supported".to_string(),
+                        )),
+                    }
+                });
+                let shared = self.db.shared();
+                let repo = OverridesRepo::new(&shared);
+                match push_result {
+                    // Source accepted it — drop any stale override (non-fatal).
+                    Ok(()) => {
+                        let _ = repo.clear(&container_id, ck);
+                        Ok(())
+                    }
+                    // Read-only source — the new name can only live as an override.
+                    Err(cal_core::Error::Unsupported(_)) => {
+                        repo.set(&container_id, ck, trimmed)
+                            .map_err(map_overrides_err)?;
+                        Ok(())
+                    }
+                    Err(other) => Err(map_store_err(other)),
+                }
+            }
         }
+    }
+
+    /// Set or clear a SECTION's colour label (DESIGN §8.2). Routed by the owning
+    /// list's account: a LOCAL section carries the binding on its own (synced)
+    /// row (+ `SectionUpdated`); an EXTERNAL section (Todoist / Vikunja — no
+    /// provider colour field) stores a host-local `OverridesRepo` override.
+    pub fn set_section_color(
+        &self,
+        section_id: String,
+        list_id: String,
+        color_label_id: Option<String>,
+    ) -> Result<(), StoreError> {
+        if self.is_local_task_list(&list_id) {
+            if let Some(mut section) = self
+                .adapter
+                .get_section_by_id(&section_id)
+                .map_err(map_store_err)?
+            {
+                section.color_label = color_label_id.map(ColorLabelId);
+                let updated = self
+                    .adapter
+                    .update_section(section)
+                    .map_err(map_store_err)?;
+                if let Ok(fields) = serde_json::to_value(&updated) {
+                    self.writer.append(SyncEvent::SectionUpdated(EventPayload {
+                        id: updated.id.clone(),
+                        fields,
+                    }));
+                }
+            }
+            return Ok(());
+        }
+        let shared = self.db.shared();
+        let repo = OverridesRepo::new(&shared);
+        match color_label_id {
+            Some(id) => repo
+                .set_section_color_label(&section_id, &id)
+                .map_err(map_overrides_err)?,
+            None => repo
+                .clear_section_color_label(&section_id)
+                .map_err(map_overrides_err)?,
+        }
+        Ok(())
+    }
+
+    /// Set or clear an EVENT's colour override (DESIGN §8.2). A LOCAL event — and
+    /// a colour-capable external calendar — carry the colour natively through
+    /// `update_event` (the frontend routes those there), so this is a no-op for
+    /// local; a non-colour-capable EXTERNAL event stores a host-local
+    /// `OverridesRepo` override. `event_id` is the series master id. (Mobile has
+    /// no read cache to check `supports_event_color`, so it gates on locality
+    /// only — `apply_color_to_events` skips events carrying a native colour, so a
+    /// stray override can never shadow a provider colour.)
+    pub fn set_event_color(
+        &self,
+        event_id: String,
+        calendar_id: String,
+        color_label_id: Option<String>,
+    ) -> Result<(), StoreError> {
+        if self.is_local_calendar(&calendar_id) {
+            return Ok(());
+        }
+        let shared = self.db.shared();
+        let repo = OverridesRepo::new(&shared);
+        match color_label_id {
+            Some(id) => repo
+                .set_event_color_label(&event_id, &id)
+                .map_err(map_overrides_err)?,
+            None => repo
+                .clear_event_color_label(&event_id)
+                .map_err(map_overrides_err)?,
+        }
+        Ok(())
     }
 
     // ── Contacts (JSON bridge, routed) ────────────────────────────────────────
@@ -5108,17 +5238,14 @@ mod tests {
             .unwrap();
         assert_eq!(bound_cal["color_label"], serde_json::json!(label_id));
 
-        // A contact list (even local) binds via the host-local OverridesRepo,
-        // which mobile can't store yet → Unsupported.
-        assert!(matches!(
-            host.set_container_color_label(
-                "whatever".to_string(),
-                "contact_list".to_string(),
-                Some(label_id),
-            )
-            .unwrap_err(),
-            StoreError::Unsupported { .. }
-        ));
+        // A contact list (even local) now binds its colour via a host-local
+        // override (covered in depth by contact_list_colour_and_rename_*).
+        host.set_container_color_label(
+            "whatever".to_string(),
+            "contact_list".to_string(),
+            Some(label_id),
+        )
+        .unwrap();
     }
 
     #[test]
@@ -5184,6 +5311,119 @@ mod tests {
             .unwrap_err(),
             StoreError::Unsupported { .. }
         ));
+    }
+
+    #[test]
+    fn contact_list_colour_and_rename_use_host_local_overrides() {
+        let (_dir, host, _kc) = open_host();
+        let label: serde_json::Value = serde_json::from_str(
+            &host
+                .create_color_label_json("Work".to_string(), "#e53935".to_string())
+                .unwrap(),
+        )
+        .unwrap();
+        let label_id = label["id"].as_str().unwrap().to_string();
+
+        // A contact list always binds its colour via the override (never a row),
+        // even though it's local.
+        host.set_container_color_label(
+            "contacts:work".to_string(),
+            "contact_list".to_string(),
+            Some(label_id.clone()),
+        )
+        .unwrap();
+        {
+            let shared = host.db.shared();
+            let repo = OverridesRepo::new(&shared);
+            assert!(repo
+                .list_color_overrides()
+                .unwrap()
+                .iter()
+                .any(|o| o.container_id == "contacts:work" && o.color_label_id == label_id));
+        }
+        // Clearing removes the override row.
+        host.set_container_color_label(
+            "contacts:work".to_string(),
+            "contact_list".to_string(),
+            None,
+        )
+        .unwrap();
+        {
+            let shared = host.db.shared();
+            let repo = OverridesRepo::new(&shared);
+            assert!(repo
+                .list_color_overrides()
+                .unwrap()
+                .iter()
+                .all(|o| o.container_id != "contacts:work"));
+        }
+
+        // Renaming a contact list is unsupported (no provider path + the
+        // name-override table excludes contact lists).
+        assert!(matches!(
+            host.rename_container(
+                "contacts:work".to_string(),
+                "contact_list".to_string(),
+                "Team".to_string()
+            )
+            .unwrap_err(),
+            StoreError::Unsupported { .. }
+        ));
+
+        // An unknown kind is rejected.
+        assert!(matches!(
+            host.set_container_color_label("x".to_string(), "bogus".to_string(), None)
+                .unwrap_err(),
+            StoreError::InvalidField { ref field, .. } if field == "kind"
+        ));
+    }
+
+    #[test]
+    fn set_section_color_binds_a_local_section_row() {
+        let (_dir, host, _kc) = open_host();
+        let label: serde_json::Value = serde_json::from_str(
+            &host
+                .create_color_label_json("Doing".to_string(), "#34a853".to_string())
+                .unwrap(),
+        )
+        .unwrap();
+        let label_id = label["id"].as_str().unwrap().to_string();
+        let list: serde_json::Value =
+            serde_json::from_str(&host.create_task_list_json("Inbox".to_string()).unwrap())
+                .unwrap();
+        let list_id = list["id"].as_str().unwrap().to_string();
+        let _ = host.task_lists_json().unwrap();
+        let section: serde_json::Value = serde_json::from_str(
+            &host
+                .create_section_json(list_id.clone(), "Today".to_string(), 0, None)
+                .unwrap(),
+        )
+        .unwrap();
+        let section_id = section["id"].as_str().unwrap().to_string();
+
+        host.set_section_color(section_id.clone(), list_id.clone(), Some(label_id.clone()))
+            .unwrap();
+        let sections: serde_json::Value =
+            serde_json::from_str(&host.sections_json(list_id.clone()).unwrap()).unwrap();
+        let bound = sections
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["id"] == serde_json::json!(section_id))
+            .unwrap();
+        assert_eq!(bound["color_label"], serde_json::json!(label_id));
+
+        host.set_section_color(section_id.clone(), list_id.clone(), None)
+            .unwrap();
+        let sections: serde_json::Value =
+            serde_json::from_str(&host.sections_json(list_id).unwrap()).unwrap();
+        let cleared = sections
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["id"] == serde_json::json!(section_id))
+            .unwrap();
+        assert_eq!(cleared["color_label"], serde_json::Value::Null);
     }
 
     #[test]

@@ -818,6 +818,10 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_set_container_color_label(
     ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_set_event_color(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_set_section_color(
+    ): Short
     external fun uniffi_cal_ffi_checksum_method_host_set_user_pref(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_sync_now_json(
@@ -1022,6 +1026,10 @@ external fun uniffi_cal_ffi_fn_method_host_reparent_task_list_json(`ptr`: Long,`
 external fun uniffi_cal_ffi_fn_method_host_sections_json(`ptr`: Long,`listId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_set_container_color_label(`ptr`: Long,`containerId`: RustBuffer.ByValue,`kind`: RustBuffer.ByValue,`colorLabelId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_cal_ffi_fn_method_host_set_event_color(`ptr`: Long,`eventId`: RustBuffer.ByValue,`calendarId`: RustBuffer.ByValue,`colorLabelId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_cal_ffi_fn_method_host_set_section_color(`ptr`: Long,`sectionId`: RustBuffer.ByValue,`listId`: RustBuffer.ByValue,`colorLabelId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_set_user_pref(`ptr`: Long,`key`: RustBuffer.ByValue,`value`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
@@ -1389,7 +1397,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_push_now() != 48331.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_cal_ffi_checksum_method_host_rename_container() != 32771.toShort()) {
+    if (lib.uniffi_cal_ffi_checksum_method_host_rename_container() != 61596.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_reparent_task_list_json() != 49367.toShort()) {
@@ -1398,7 +1406,13 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_sections_json() != 56584.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_cal_ffi_checksum_method_host_set_container_color_label() != 2468.toShort()) {
+    if (lib.uniffi_cal_ffi_checksum_method_host_set_container_color_label() != 32220.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_set_event_color() != 36971.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_set_section_color() != 14381.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_set_user_pref() != 9799.toShort()) {
@@ -2294,13 +2308,14 @@ public interface HostInterface {
     fun `pushNow`(): kotlin.UInt
     
     /**
-     * Rename a LOCAL calendar / task list (DESIGN §6.5). Mirrors the desktop
-     * set_container_name LOCAL branch: rename the container's own (synced) row
-     * and emit CalendarUpdated / TaskListUpdated so other devices follow.
-     * `kind` is `"calendar"` | `"task_list"` | `"contact_list"`. An external
-     * container renames via its provider, and a contact-list rename / host-local
-     * name override both go through the desktop-only OverridesRepo — so those
-     * return `Unsupported` until that path lands on mobile.
+     * Rename a container (DESIGN §6.5). Mirrors the desktop `set_container_name`:
+     * a LOCAL calendar / task list is renamed on its own (synced) row (+ emits
+     * the sync event); an EXTERNAL container's rename is pushed to its provider
+     * first and, only if the provider declares it `Unsupported`, falls back to a
+     * host-local name override (cleared on a successful provider rename so the
+     * source name stays the single truth). A contact list has no source-rename
+     * path, so it always lands as an override. `kind` is `"calendar"` |
+     * `"task_list"` | `"contact_list"`.
      */
     fun `renameContainer`(`containerId`: kotlin.String, `kind`: kotlin.String, `name`: kotlin.String)
     
@@ -2317,16 +2332,35 @@ public interface HostInterface {
     fun `sectionsJson`(`listId`: kotlin.String): kotlin.String
     
     /**
-     * Set or clear a LOCAL calendar / task list's bound colour label (DESIGN
-     * §8.2). Mirrors the desktop `set_container_color_label` LOCAL branch: the
-     * binding rides the container's own (synced) row, so we update it and emit
-     * the matching sync event so other devices follow. `kind` is `"calendar"`
-     * | `"task_list"` | `"contact_list"`; `color_label_id` `None` clears it.
-     * An external container (or any contact list) binds via the host-local
-     * `OverridesRepo` on the desktop — desktop-only for now, so those branches
-     * return `Unsupported` until that repo is extracted into host-core.
+     * Set or clear a container's bound colour label (DESIGN §8.2). Mirrors the
+     * desktop `set_container_color_label`: a LOCAL calendar / task list carries
+     * the binding on its own (synced) row (update + emit the matching sync
+     * event); an EXTERNAL container — and EVERY contact list, even local ones —
+     * stores a host-local `OverridesRepo` colour override (the read paths stamp
+     * it back on). `kind` is `"calendar"` | `"task_list"` | `"contact_list"`;
+     * `color_label_id` `None` clears it.
      */
     fun `setContainerColorLabel`(`containerId`: kotlin.String, `kind`: kotlin.String, `colorLabelId`: kotlin.String?)
+    
+    /**
+     * Set or clear an EVENT's colour override (DESIGN §8.2). A LOCAL event — and
+     * a colour-capable external calendar — carry the colour natively through
+     * `update_event` (the frontend routes those there), so this is a no-op for
+     * local; a non-colour-capable EXTERNAL event stores a host-local
+     * `OverridesRepo` override. `event_id` is the series master id. (Mobile has
+     * no read cache to check `supports_event_color`, so it gates on locality
+     * only — `apply_color_to_events` skips events carrying a native colour, so a
+     * stray override can never shadow a provider colour.)
+     */
+    fun `setEventColor`(`eventId`: kotlin.String, `calendarId`: kotlin.String, `colorLabelId`: kotlin.String?)
+    
+    /**
+     * Set or clear a SECTION's colour label (DESIGN §8.2). Routed by the owning
+     * list's account: a LOCAL section carries the binding on its own (synced)
+     * row (+ `SectionUpdated`); an EXTERNAL section (Todoist / Vikunja — no
+     * provider colour field) stores a host-local `OverridesRepo` override.
+     */
+    fun `setSectionColor`(`sectionId`: kotlin.String, `listId`: kotlin.String, `colorLabelId`: kotlin.String?)
     
     /**
      * Upsert a user preference. A whitelisted key also appends `SettingsUpdated`
@@ -3437,13 +3471,14 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
-     * Rename a LOCAL calendar / task list (DESIGN §6.5). Mirrors the desktop
-     * set_container_name LOCAL branch: rename the container's own (synced) row
-     * and emit CalendarUpdated / TaskListUpdated so other devices follow.
-     * `kind` is `"calendar"` | `"task_list"` | `"contact_list"`. An external
-     * container renames via its provider, and a contact-list rename / host-local
-     * name override both go through the desktop-only OverridesRepo — so those
-     * return `Unsupported` until that path lands on mobile.
+     * Rename a container (DESIGN §6.5). Mirrors the desktop `set_container_name`:
+     * a LOCAL calendar / task list is renamed on its own (synced) row (+ emits
+     * the sync event); an EXTERNAL container's rename is pushed to its provider
+     * first and, only if the provider declares it `Unsupported`, falls back to a
+     * host-local name override (cleared on a successful provider rename so the
+     * source name stays the single truth). A contact list has no source-rename
+     * path, so it always lands as an override. `kind` is `"calendar"` |
+     * `"task_list"` | `"contact_list"`.
      */
     @Throws(StoreException::class)override fun `renameContainer`(`containerId`: kotlin.String, `kind`: kotlin.String, `name`: kotlin.String)
         = 
@@ -3495,14 +3530,13 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
-     * Set or clear a LOCAL calendar / task list's bound colour label (DESIGN
-     * §8.2). Mirrors the desktop `set_container_color_label` LOCAL branch: the
-     * binding rides the container's own (synced) row, so we update it and emit
-     * the matching sync event so other devices follow. `kind` is `"calendar"`
-     * | `"task_list"` | `"contact_list"`; `color_label_id` `None` clears it.
-     * An external container (or any contact list) binds via the host-local
-     * `OverridesRepo` on the desktop — desktop-only for now, so those branches
-     * return `Unsupported` until that repo is extracted into host-core.
+     * Set or clear a container's bound colour label (DESIGN §8.2). Mirrors the
+     * desktop `set_container_color_label`: a LOCAL calendar / task list carries
+     * the binding on its own (synced) row (update + emit the matching sync
+     * event); an EXTERNAL container — and EVERY contact list, even local ones —
+     * stores a host-local `OverridesRepo` colour override (the read paths stamp
+     * it back on). `kind` is `"calendar"` | `"task_list"` | `"contact_list"`;
+     * `color_label_id` `None` clears it.
      */
     @Throws(StoreException::class)override fun `setContainerColorLabel`(`containerId`: kotlin.String, `kind`: kotlin.String, `colorLabelId`: kotlin.String?)
         = 
@@ -3511,6 +3545,48 @@ open class Host: Disposable, AutoCloseable, HostInterface
     UniffiLib.uniffi_cal_ffi_fn_method_host_set_container_color_label(
         it,
         FfiConverterString.lower(`containerId`),FfiConverterString.lower(`kind`),FfiConverterOptionalString.lower(`colorLabelId`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Set or clear an EVENT's colour override (DESIGN §8.2). A LOCAL event — and
+     * a colour-capable external calendar — carry the colour natively through
+     * `update_event` (the frontend routes those there), so this is a no-op for
+     * local; a non-colour-capable EXTERNAL event stores a host-local
+     * `OverridesRepo` override. `event_id` is the series master id. (Mobile has
+     * no read cache to check `supports_event_color`, so it gates on locality
+     * only — `apply_color_to_events` skips events carrying a native colour, so a
+     * stray override can never shadow a provider colour.)
+     */
+    @Throws(StoreException::class)override fun `setEventColor`(`eventId`: kotlin.String, `calendarId`: kotlin.String, `colorLabelId`: kotlin.String?)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_set_event_color(
+        it,
+        FfiConverterString.lower(`eventId`),FfiConverterString.lower(`calendarId`),FfiConverterOptionalString.lower(`colorLabelId`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Set or clear a SECTION's colour label (DESIGN §8.2). Routed by the owning
+     * list's account: a LOCAL section carries the binding on its own (synced)
+     * row (+ `SectionUpdated`); an EXTERNAL section (Todoist / Vikunja — no
+     * provider colour field) stores a host-local `OverridesRepo` override.
+     */
+    @Throws(StoreException::class)override fun `setSectionColor`(`sectionId`: kotlin.String, `listId`: kotlin.String, `colorLabelId`: kotlin.String?)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_set_section_color(
+        it,
+        FfiConverterString.lower(`sectionId`),FfiConverterString.lower(`listId`),FfiConverterOptionalString.lower(`colorLabelId`),_status)
 }
     }
     

@@ -163,6 +163,26 @@ declare class CalFfiModule extends NativeModule<Record<never, never>> {
    * (override path) reject until that lands.
    */
   renameContainer(containerId: string, kind: string, name: string): Promise<void>;
+  /**
+   * Set (or clear, with `null`) a SECTION's colour label. Routed by the owning
+   * list's account: a local section carries it on its row, an external section
+   * via a host-local override.
+   */
+  setSectionColor(
+    sectionId: string,
+    listId: string,
+    colorLabelId: string | null,
+  ): Promise<void>;
+  /**
+   * Set (or clear, with `null`) an external EVENT's host-local colour override.
+   * A no-op for local / colour-capable calendars (the colour rides update_event
+   * there). `eventId` is the series master id.
+   */
+  setEventColor(
+    eventId: string,
+    calendarId: string,
+    colorLabelId: string | null,
+  ): Promise<void>;
 
   // ── Contacts ──
   // JSON passthrough in the cal_core/desktop wire shape; routing (local vs
