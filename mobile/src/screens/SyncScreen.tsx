@@ -674,15 +674,20 @@ export default function SyncScreen() {
       await adoptRemoteEncryption(adoptPp);
       setAdoptPp('');
       announce(t('dialogs.settings.sync.adoptRemoteE2eOk'));
-      // Now that we can decrypt, run a round; refresh clears the latched code.
+      // Now that we can decrypt, run a round to pull the dataset.
       await syncNow();
-      await refresh();
     } catch (err) {
       const message = errorMessage(err);
       setError(message);
       announce(t('mobile.error', { message }));
     } finally {
       setBusy(false);
+      // Always re-read status, even if the post-adopt round threw: the adopt
+      // itself already succeeded (E2E is on), so the banner — gated on the
+      // latched code — must reflect the NEW truth (a transient round error
+      // overwrote the latch) and drop, rather than re-prompting for a
+      // passphrase the user already entered. refresh swallows its own errors.
+      await refresh();
     }
   }, [adoptPp, announce, refresh, t]);
 

@@ -1863,27 +1863,38 @@ pub async fn enable_sync_encryption(
         report.snapshot_rewritten = true;
     }
 
-    // 7. Commit the enable atomically by overwriting meta.json.
-    //    meta.json is always plaintext (§19.7), so pushing via
-    //    the plain adapter is correct and avoids the wrapper
-    //    second-guessing the bytes.
-    let mut updated = meta_before;
-    updated.e2e_enabled = true;
-    updated.e2e_params = Some(e2e_params);
-    plain.push_meta(&updated).await.map_err(sync_err)?;
-
-    // 8. Swap the orchestrator over to the encrypting adapter so
-    //    subsequent rounds in this process wrap pushes with the
-    //    DEK + decrypt pulls with the same.
-    orchestrator.configure(Arc::clone(&encrypting));
-
-    // 9. Persist local state: stash the DEK in the keychain so
-    //    the next boot's `build_adapter_from_prefs` can rebuild
-    //    the wrapper, and flip the pref that drives that branch.
+    // 7. Flip this device's local E2E state + swap the orchestrator onto the
+    //    encrypting adapter BEFORE publishing the encrypted meta.json. Once the
+    //    remote meta says e2e_enabled, a concurrent scheduler round
+    //    (`sync_now`, which doesn't take this command's lock) must see both:
+    //      (a) PREF_E2E_ENABLED already true — so the §19.7 sync_now encryption
+    //          gate (`meta.e2e_enabled && !store.e2e_enabled()`) PASSES instead
+    //          of mis-latching `encryption_required` on the very device that is
+    //          enabling, which would pop the "adopt encryption" prompt for a
+    //          passphrase the user just set; and
+    //      (b) an already-encrypting orchestrator — so the round can't push
+    //          plaintext into the now-encrypted dataset.
+    //    The re-encrypt loop above ran while meta still said plaintext, so a
+    //    round overlapping it pushes plaintext into a still-plaintext dataset
+    //    (harmless). meta.json itself is always plaintext (§19.7), so it's
+    //    pushed via the plain adapter (the wrapper would second-guess the bytes).
     let shared = db.shared();
     let prefs = UserPrefsRepo::new(&shared);
     store_e2e_key(&dek)?;
     prefs.set(PREF_E2E_ENABLED, "true").map_err(internal)?;
+    orchestrator.configure(Arc::clone(&encrypting));
+
+    // 8. Commit the enable: overwrite meta.json (the single atomic commit). If
+    //    it fails, roll the local state back so this device isn't left wrapping
+    //    against a still-plaintext remote (which would fail every later round).
+    let mut updated = meta_before;
+    updated.e2e_enabled = true;
+    updated.e2e_params = Some(e2e_params);
+    if let Err(err) = plain.push_meta(&updated).await {
+        let _ = prefs.delete(PREF_E2E_ENABLED);
+        orchestrator.configure(Arc::clone(&plain));
+        return Err(sync_err(err));
+    }
 
     // 10. E2E is now on. Push every existing local account secret into the
     //     (now-encrypted) log so the user's OTHER devices pick them up
