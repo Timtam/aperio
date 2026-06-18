@@ -165,6 +165,10 @@ class CalFfiModule : Module() {
       host.deleteEvent(id, calendarId, sendCancellations)
     }
 
+    AsyncFunction("addEventExdateJson") { id: String, occurrence: String, calendarId: String? ->
+      host.addEventExdateJson(id, occurrence, calendarId)
+    }
+
     // ─── Sync (full desktop peer: same engine, statically-embedded adapters) ──
     // configure sets the active sync target; sync_now runs a round + returns the
     // report; a thrown StoreException rejects the JS promise.

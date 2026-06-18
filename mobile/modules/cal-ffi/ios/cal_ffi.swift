@@ -563,6 +563,17 @@ public protocol HostProtocol: AnyObject, Sendable {
     func accountsJson() throws  -> String
     
     /**
+     * Append one occurrence's date to a recurring event's EXDATE list so the
+     * expansion engine skips it — the "delete / edit THIS occurrence only" flow
+     * (the master row's start/title/… are untouched). `occurrence` is the
+     * occurrence's RFC-3339 instant; `calendar_id` routes (omitted → local). A
+     * LOCAL event re-reads + logs EventUpdated so the exclusion syncs; an
+     * external event self-syncs via the provider. Mirrors the desktop
+     * `add_event_exdate` (minus its cache-invalidate + scheduler bits).
+     */
+    func addEventExdateJson(id: String, occurrence: String, calendarId: String?) throws 
+    
+    /**
      * Adopt encryption a PEER turned on (§19.7): this device was syncing the
      * dataset in PLAINTEXT, a peer enabled E2E, and the next round failed with
      * `encryption_required` (the orchestrator's encryption gate). Pure unlock —
@@ -1262,6 +1273,25 @@ open func accountsJson()throws  -> String  {
             self.uniffiCloneHandle(),$0
     )
 })
+}
+    
+    /**
+     * Append one occurrence's date to a recurring event's EXDATE list so the
+     * expansion engine skips it — the "delete / edit THIS occurrence only" flow
+     * (the master row's start/title/… are untouched). `occurrence` is the
+     * occurrence's RFC-3339 instant; `calendar_id` routes (omitted → local). A
+     * LOCAL event re-reads + logs EventUpdated so the exclusion syncs; an
+     * external event self-syncs via the provider. Mirrors the desktop
+     * `add_event_exdate` (minus its cache-invalidate + scheduler bits).
+     */
+open func addEventExdateJson(id: String, occurrence: String, calendarId: String?)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_add_event_exdate_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(id),
+        FfiConverterString.lower(occurrence),
+        FfiConverterOptionString.lower(calendarId),$0
+    )
+}
 }
     
     /**
@@ -5598,6 +5628,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_accounts_json() != 21992) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_add_event_exdate_json() != 10745) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_adopt_remote_encryption_json() != 12036) {

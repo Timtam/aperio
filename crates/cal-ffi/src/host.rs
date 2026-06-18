@@ -2078,6 +2078,54 @@ impl Host {
         Ok(())
     }
 
+    /// Append one occurrence's date to a recurring event's EXDATE list so the
+    /// expansion engine skips it — the "delete / edit THIS occurrence only" flow
+    /// (the master row's start/title/… are untouched). `occurrence` is the
+    /// occurrence's RFC-3339 instant; `calendar_id` routes (omitted → local). A
+    /// LOCAL event re-reads + logs EventUpdated so the exclusion syncs; an
+    /// external event self-syncs via the provider. Mirrors the desktop
+    /// `add_event_exdate` (minus its cache-invalidate + scheduler bits).
+    pub fn add_event_exdate_json(
+        &self,
+        id: String,
+        occurrence: String,
+        calendar_id: Option<String>,
+    ) -> Result<(), StoreError> {
+        let occ = chrono::DateTime::parse_from_rfc3339(occurrence.trim())
+            .map_err(|e| StoreError::InvalidField {
+                field: "occurrence".to_string(),
+                detail: format!("not an RFC-3339 instant: {e}"),
+            })?
+            .with_timezone(&chrono::Utc);
+        let route = match calendar_id.as_deref() {
+            Some(cid) => self.route(cid)?,
+            None => None,
+        };
+        match route {
+            None => {
+                // LocalAdapter's sync inherent add_event_exdate rewrites the
+                // master row's recurrence.exceptions; re-read + log so it syncs.
+                self.adapter
+                    .add_event_exdate(&id, occ)
+                    .map_err(map_store_err)?;
+                if let Ok(Some(refreshed)) = self.adapter.get_event_by_id(&id) {
+                    if let Ok(fields) = serde_json::to_value(&refreshed) {
+                        self.writer.append(SyncEvent::EventUpdated(EventPayload {
+                            id: id.clone(),
+                            fields,
+                        }));
+                    }
+                }
+            }
+            Some(ext) => {
+                self.runtime
+                    .block_on(async { ext.add_event_exdate(&id, occ).await })
+                    .map_err(map_store_err)?;
+            }
+        }
+        Ok(())
+    }
+
     // ── Tasks / lists / sections (JSON bridge, sync-logged) ───────────────────
     //
     // The faithful tasks port lives on the Host (folded in from the original
@@ -4433,6 +4481,56 @@ mod tests {
                 .any(|c| c["display_name"] == "Alice Example"),
             "the local contact is found by name",
         );
+    }
+
+    #[test]
+    fn add_event_exdate_appends_an_exception_to_a_local_series() {
+        let (_dir, host, _kc) = open_host();
+        let cal: serde_json::Value = serde_json::from_str(
+            &host
+                .create_calendar_json(serde_json::json!({"name": "Cal"}).to_string())
+                .unwrap(),
+        )
+        .unwrap();
+        let cal_id = cal["id"].as_str().unwrap().to_string();
+        let new_event = serde_json::json!({
+            "calendar_id": cal_id,
+            "title": "Standup",
+            "description": null,
+            "location": null,
+            "start": "2026-06-01T09:00:00Z",
+            "end": "2026-06-01T09:15:00Z",
+            "all_day": false,
+            "recurrence": { "rrule": "FREQ=DAILY", "exceptions": [] },
+            "color_label": null,
+            "reminders": [],
+            "sound": null,
+            "attendees": []
+        });
+        let created: serde_json::Value =
+            serde_json::from_str(&host.create_event_json(new_event.to_string()).unwrap()).unwrap();
+        let id = created["id"].as_str().unwrap().to_string();
+
+        host.add_event_exdate_json(id.clone(), "2026-06-02T09:00:00Z".to_string(), Some(cal_id))
+            .unwrap();
+
+        let refreshed: serde_json::Value =
+            serde_json::from_str(&host.get_event_by_id_json(id).unwrap()).unwrap();
+        assert_eq!(
+            refreshed["recurrence"]["exceptions"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1,
+            "the excluded occurrence is appended to the master's exceptions",
+        );
+
+        // A non-RFC-3339 occurrence is rejected.
+        assert!(matches!(
+            host.add_event_exdate_json("x".to_string(), "nope".to_string(), None)
+                .unwrap_err(),
+            StoreError::InvalidField { ref field, .. } if field == "occurrence"
+        ));
     }
 
     #[test]

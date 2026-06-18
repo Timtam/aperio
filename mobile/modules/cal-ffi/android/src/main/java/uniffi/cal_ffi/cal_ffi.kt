@@ -728,6 +728,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_accounts_json(
     ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_add_event_exdate_json(
+    ): Short
     external fun uniffi_cal_ffi_checksum_method_host_adopt_remote_encryption_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_begin_oauth_json(
@@ -951,6 +953,8 @@ external fun uniffi_cal_ffi_fn_method_host_accept_remote_dataset_json(`ptr`: Lon
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_accounts_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_add_event_exdate_json(`ptr`: Long,`id`: RustBuffer.ByValue,`occurrence`: RustBuffer.ByValue,`calendarId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_cal_ffi_fn_method_host_adopt_remote_encryption_json(`ptr`: Long,`passphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_begin_oauth_json(`ptr`: Long,`pluginId`: RustBuffer.ByValue,`argsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1300,6 +1304,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_accounts_json() != 21992.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_add_event_exdate_json() != 10745.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_adopt_remote_encryption_json() != 12036.toShort()) {
@@ -1977,6 +1984,17 @@ public interface HostInterface {
      * All persisted accounts as JSON (the `cal_core`/desktop wire shape).
      */
     fun `accountsJson`(): kotlin.String
+    
+    /**
+     * Append one occurrence's date to a recurring event's EXDATE list so the
+     * expansion engine skips it — the "delete / edit THIS occurrence only" flow
+     * (the master row's start/title/… are untouched). `occurrence` is the
+     * occurrence's RFC-3339 instant; `calendar_id` routes (omitted → local). A
+     * LOCAL event re-reads + logs EventUpdated so the exclusion syncs; an
+     * external event self-syncs via the provider. Mirrors the desktop
+     * `add_event_exdate` (minus its cache-invalidate + scheduler bits).
+     */
+    fun `addEventExdateJson`(`id`: kotlin.String, `occurrence`: kotlin.String, `calendarId`: kotlin.String?)
     
     /**
      * Adopt encryption a PEER turned on (§19.7): this device was syncing the
@@ -2717,6 +2735,28 @@ open class Host: Disposable, AutoCloseable, HostInterface
     }
     )
     }
+    
+
+    
+    /**
+     * Append one occurrence's date to a recurring event's EXDATE list so the
+     * expansion engine skips it — the "delete / edit THIS occurrence only" flow
+     * (the master row's start/title/… are untouched). `occurrence` is the
+     * occurrence's RFC-3339 instant; `calendar_id` routes (omitted → local). A
+     * LOCAL event re-reads + logs EventUpdated so the exclusion syncs; an
+     * external event self-syncs via the provider. Mirrors the desktop
+     * `add_event_exdate` (minus its cache-invalidate + scheduler bits).
+     */
+    @Throws(StoreException::class)override fun `addEventExdateJson`(`id`: kotlin.String, `occurrence`: kotlin.String, `calendarId`: kotlin.String?)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_add_event_exdate_json(
+        it,
+        FfiConverterString.lower(`id`),FfiConverterString.lower(`occurrence`),FfiConverterOptionalString.lower(`calendarId`),_status)
+}
+    }
+    
     
 
     

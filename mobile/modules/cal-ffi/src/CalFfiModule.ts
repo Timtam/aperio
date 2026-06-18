@@ -106,6 +106,14 @@ declare class CalFfiModule extends NativeModule<Record<never, never>> {
     calendarId: string | null,
     sendCancellations: boolean | null,
   ): Promise<void>;
+  /** Exclude ONE occurrence of a recurring event (append its RFC-3339 instant to
+   *  the master's EXDATE) — the "this occurrence only" delete/edit primitive.
+   *  `calendarId` routes (null → local). */
+  addEventExdateJson(
+    id: string,
+    occurrence: string,
+    calendarId: string | null,
+  ): Promise<void>;
 
   // ── Sync (full desktop peer: same engine, statically-embedded adapters) ──
   /** Set the active sync target from a JSON `{kind, …}` (local: `{kind:"local",

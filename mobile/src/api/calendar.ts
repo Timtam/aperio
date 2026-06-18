@@ -174,6 +174,19 @@ export const deleteEvent = async (
   scheduleBackgroundPush();
 };
 
+/** Exclude ONE occurrence of a recurring event — append `occurrence` (its
+ *  RFC-3339 instant) to the series master's EXDATE so the expansion engine skips
+ *  it (the "delete / edit this occurrence only" flow). `calendarId` routes
+ *  (null → local). A local change syncs (EventUpdated). */
+export const addEventExdate = async (
+  id: string,
+  occurrence: string,
+  calendarId: string | null = null,
+): Promise<void> => {
+  await CalFfi.addEventExdateJson(id, occurrence, calendarId);
+  scheduleBackgroundPush();
+};
+
 /** Parse a free-form attendee entry ("Name <email>" or a bare email) into its
  *  name + email via the shared cal-core parser (synchronous). The parser only
  *  splits on the bracket pair — it does NOT validate, so a bare non-email string
