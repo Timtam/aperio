@@ -173,3 +173,9 @@ export const deleteEvent = async (
   await CalFfi.deleteEvent(id, calendarId, sendCancellations);
   scheduleBackgroundPush();
 };
+
+/** Parse a free-form attendee entry ("Name <email>" or a bare email) into its
+ *  name + email via the shared cal-core parser (synchronous). An entry with no
+ *  recognisable email yields an empty `email` — callers treat that as invalid. */
+export const parseAttendee = (entry: string): { name: string | null; email: string } =>
+  CalFfi.parseAttendee(entry);

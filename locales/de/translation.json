@@ -1057,7 +1057,9 @@
         "removeLabel": "{{name}} entfernen",
         "added": "{{name}} hinzugefügt.",
         "removed": "{{name}} entfernt.",
-        "alreadyOnList": "Steht bereits auf der Teilnehmerliste."
+        "alreadyOnList": "Steht bereits auf der Teilnehmerliste.",
+        "add": "Teilnehmer hinzufügen",
+        "invalid": "Gib eine gültige E-Mail-Adresse ein."
       },
       "availability": {
         "check": "Verfügbarkeit prüfen",

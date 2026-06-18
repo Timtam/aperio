@@ -13,6 +13,7 @@ import {
 
 import type { ColorLabel, Reminder } from '@aperio/shared';
 
+import { AttendeesEditor } from '../components/AttendeesEditor';
 import { ColorLabelSelect } from '../components/ColorLabelSelect';
 import { RadioGroup } from '../components/RadioGroup';
 import { RecurrenceSelector } from '../components/RecurrenceSelector';
@@ -105,6 +106,10 @@ export default function EventEditorModal({
   // The RRULE body (without "RRULE:"), or null = non-recurring. The series'
   // EXDATE exceptions are preserved from the original on save.
   const [recurrence, setRecurrence] = useState<string | null>(null);
+  // Free-form attendee strings ("Name <email>" / bare email) + whether to send
+  // invitations (only meaningful on an external calendar with attendees).
+  const [attendees, setAttendees] = useState<string[]>([]);
+  const [notifyAttendees, setNotifyAttendees] = useState(true);
 
   useEffect(() => {
     void (async () => {
@@ -135,6 +140,7 @@ export default function EventEditorModal({
             setColorLabel(ev.color_label ?? '');
             setReminders(ev.reminders ?? []);
             setRecurrence(ev.recurrence?.rrule ?? null);
+            setAttendees(ev.attendees ?? []);
           }
         } else {
           // New event: default to the next full hour today, one hour long.
@@ -184,6 +190,10 @@ export default function EventEditorModal({
     const isLocalCal = cal?.account_id === 'local';
     const colorCapable = isLocalCal || (cal?.supports_event_color ?? false);
     const colorToSend = colorLabel || null;
+    // Invitations only go out from an external calendar that has attendees, with
+    // the toggle on (a local calendar has no provider to send through). Mirrors
+    // the desktop's send_invitations gating.
+    const sendInvitations = !isLocalCal && attendees.length > 0 && notifyAttendees;
     // Keep the series' EXDATE exceptions when editing; a fresh rule has none.
     const recurrenceToSend = recurrence
       ? { rrule: recurrence, exceptions: original?.recurrence?.exceptions ?? [] }
@@ -206,6 +216,8 @@ export default function EventEditorModal({
           color_label: colorToSend,
           reminders,
           recurrence: recurrenceToSend,
+          attendees,
+          send_invitations: sendInvitations,
         });
         // External calendar: a capable provider now stores the colour natively
         // (clear any stale override so the native value wins); a non-capable one
@@ -229,7 +241,8 @@ export default function EventEditorModal({
           color_label: colorToSend,
           reminders,
           sound: null,
-          attendees: [],
+          attendees,
+          send_invitations: sendInvitations,
         });
         if (!isLocalCal) {
           await setEventColor(created.id, calId, colorCapable ? null : colorToSend);
@@ -248,6 +261,7 @@ export default function EventEditorModal({
     }
   }, [
     allDay,
+    attendees,
     calId,
     calendars,
     colorLabel,
@@ -257,6 +271,7 @@ export default function EventEditorModal({
     endTime,
     location,
     navigation,
+    notifyAttendees,
     original,
     recurrence,
     reminders,
@@ -431,6 +446,19 @@ export default function EventEditorModal({
       {/* Reminders — relative-to-start / absolute / app-start, the same editor
           as tasks (mode="event" labels the relative kind "Before start"). */}
       <RemindersEditor mode="event" value={reminders} onChange={setReminders} />
+
+      {/* Attendees — free-form people; the notify switch shows only for an
+          external calendar with attendees (a local calendar can't invite). */}
+      <AttendeesEditor
+        value={attendees}
+        onChange={setAttendees}
+        notify={notifyAttendees}
+        onNotifyChange={setNotifyAttendees}
+        showNotify={
+          attendees.length > 0 &&
+          (calendars.find((c) => c.id === calId)?.account_id ?? 'local') !== 'local'
+        }
+      />
 
       <Pressable
         accessibilityRole="button"
