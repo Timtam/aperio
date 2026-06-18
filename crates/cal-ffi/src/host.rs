@@ -1875,7 +1875,11 @@ impl Host {
         let exchange_args = serde_json::json!({
             "phase": "exchange",
             "client_id": req.client_id,
+            // Google needs the secret; Microsoft is a PKCE public client and
+            // ignores it. authority selects Microsoft's v2.0 tenant (null for
+            // Google, which ignores the field).
             "client_secret": req.client_secret,
+            "authority": req.authority,
             "code": req.code,
             "pkce_verifier": req.pkce_verifier,
             "state": req.state,
@@ -1968,6 +1972,10 @@ struct CompleteOAuthRequest {
     client_id: String,
     #[serde(default)]
     client_secret: Option<String>,
+    /// Microsoft's v2.0 tenant slug (`common` / `organizations` / a GUID).
+    /// Absent for Google (which has no authority concept).
+    #[serde(default)]
+    authority: Option<String>,
     code: String,
     pkce_verifier: String,
     state: String,
@@ -2800,6 +2808,37 @@ mod tests {
         let url = v["authorize_url"].as_str().unwrap();
         assert!(url.contains("accounts.google.com"), "got: {url}");
         assert!(url.contains("abc.apps.googleusercontent.com"), "got: {url}");
+        assert!(
+            url.contains("aperio%3A%2F%2Foauth-callback"),
+            "redirect must be in the URL: {url}"
+        );
+        assert_eq!(v["pkce_verifier"].as_str().unwrap().len(), 43);
+        assert!(v["state"].as_str().is_some());
+    }
+
+    #[test]
+    fn begin_microsoft_oauth_returns_an_authorize_url() {
+        // Same static-embedding path as the Google case, for the Microsoft
+        // plugin's authorize phase: a real v2.0 consent URL with the pinned
+        // authority + the mobile redirect, no network.
+        let (_dir, host, _kc) = open_host();
+        let args = r#"{"client_id":"11111111-2222-3333-4444-555555555555","authority":"common","redirect_uri":"aperio://oauth-callback"}"#;
+        let out = host
+            .begin_oauth_json(
+                "com.aperio.cal-adapter-microsoft-graph".to_string(),
+                args.to_string(),
+            )
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let url = v["authorize_url"].as_str().unwrap();
+        assert!(
+            url.contains("login.microsoftonline.com/common/oauth2/v2.0/authorize"),
+            "got: {url}"
+        );
+        assert!(
+            url.contains("11111111-2222-3333-4444-555555555555"),
+            "got: {url}"
+        );
         assert!(
             url.contains("aperio%3A%2F%2Foauth-callback"),
             "redirect must be in the URL: {url}"

@@ -122,6 +122,49 @@ impl MicrosoftGraphAdapter {
         auth::run_default(client_id, authority, &http).await
     }
 
+    /// Host-driven OAuth **authorize** phase (mobile): build the consent URL +
+    /// PKCE verifier + CSRF state for a caller-supplied `redirect_uri` (e.g.
+    /// `aperio://oauth-callback`). Pure — the host opens the URL in a native
+    /// auth session, then calls [`Self::oauth_exchange`] with the returned code
+    /// + this verifier/state. (Desktop instead uses the loopback
+    /// [`Self::authenticate_interactive`].) `authority` selects the v2.0 tenant
+    /// endpoint — pass the same value through to [`Self::oauth_exchange`].
+    pub fn oauth_authorize(
+        client_id: &str,
+        authority: &str,
+        redirect_uri: &str,
+    ) -> GraphResult<auth::AuthorizeResponse> {
+        auth::authorize(client_id, redirect_uri, &auth::authorize_url(authority))
+    }
+
+    /// Host-driven OAuth **exchange** phase (mobile): swap the authorization
+    /// `code` for tokens. `redirect_uri` + `authority` must match the authorize
+    /// call; the caller validates the CSRF state (returned vs. issued) before
+    /// calling. No `client_secret` — Microsoft's v2.0 endpoint takes PKCE-only
+    /// public-client exchanges.
+    pub async fn oauth_exchange(
+        client_id: &str,
+        authority: &str,
+        code: &str,
+        verifier: &str,
+        redirect_uri: &str,
+    ) -> GraphResult<TokenSet> {
+        let http = reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(30))
+            .build()
+            .map_err(|e| GraphError::Io(e.to_string()))?;
+        auth::exchange_code(
+            &http,
+            &auth::token_url(authority),
+            client_id,
+            code,
+            verifier,
+            redirect_uri,
+        )
+        .await
+    }
+
     pub async fn current_tokens(&self) -> TokenSet {
         self.state.tokens.lock().await.clone()
     }

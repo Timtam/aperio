@@ -81,28 +81,59 @@ pub fn token_url(authority: &str) -> String {
     format!("https://login.microsoftonline.com/{authority}/oauth2/v2.0/token")
 }
 
+/// The host-drivable **authorize** phase: build the consent URL + the PKCE
+/// verifier + the CSRF `state`. Pure (no I/O) — the CALLER opens the URL and
+/// captures the redirect: the desktop loopback (via [`run`]) or, on mobile, a
+/// native auth session. The caller then hands `code` + the returned `state` +
+/// this `pkce_verifier` to [`exchange_code`]. `redirect_uri` is caller-supplied
+/// (`http://127.0.0.1:{port}` for the loopback, `aperio://oauth-callback` for a
+/// native session) and MUST match the one used at exchange. `auth_url` is the
+/// v2.0 authorize endpoint for the chosen authority (see [`authorize_url`]).
+pub fn authorize(
+    client_id: &str,
+    redirect_uri: &str,
+    auth_url: &str,
+) -> GraphResult<AuthorizeResponse> {
+    if client_id.trim().is_empty() {
+        return Err(GraphError::Config("client_id must not be empty".into()));
+    }
+    let (verifier, challenge) = generate_pkce();
+    let state = generate_state();
+    let url = build_auth_url(auth_url, client_id, redirect_uri, &challenge, &state)?;
+    Ok(AuthorizeResponse {
+        authorize_url: url.to_string(),
+        pkce_verifier: verifier,
+        state,
+    })
+}
+
+/// Output of [`authorize`]. The host keeps `pkce_verifier` + `state` opaque
+/// between the two phases (the adapter holds no cross-phase state) and replays
+/// them into [`exchange_code`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthorizeResponse {
+    pub authorize_url: String,
+    pub pkce_verifier: String,
+    pub state: String,
+}
+
 /// Run the full PKCE dance against the given OAuth endpoints.
 /// `authority_url` and `token_endpoint` are exposed for testing —
-/// production callers use [`run_default`].
+/// production callers use [`run_default`]. The desktop path; mobile drives
+/// [`authorize`] + [`exchange_code`] around a native auth session instead.
 pub async fn run(
     client_id: &str,
     authority_url: &str,
     token_endpoint: &str,
     http: &reqwest::Client,
 ) -> GraphResult<TokenSet> {
-    if client_id.trim().is_empty() {
-        return Err(GraphError::Config("client_id must not be empty".into()));
-    }
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let port = listener.local_addr()?.port();
     let redirect_uri = format!("http://127.0.0.1:{port}");
 
-    let (verifier, challenge) = generate_pkce();
-    let state = generate_state();
-
-    let auth = build_auth_url(authority_url, client_id, &redirect_uri, &challenge, &state)?;
-    debug!(url = %auth, "opening Microsoft consent screen");
-    if let Err(e) = open::that(auth.as_str()) {
+    let authz = authorize(client_id, &redirect_uri, authority_url)?;
+    debug!(url = %authz.authorize_url, "opening Microsoft consent screen");
+    if let Err(e) = open::that(authz.authorize_url.as_str()) {
         warn!(
             ?e,
             "failed to launch browser; user must copy the URL manually"
@@ -110,7 +141,7 @@ pub async fn run(
     }
 
     let (code, returned_state) = wait_for_redirect(listener).await?;
-    if returned_state != state {
+    if returned_state != authz.state {
         return Err(GraphError::Csrf);
     }
 
@@ -119,7 +150,7 @@ pub async fn run(
         token_endpoint,
         client_id,
         &code,
-        &verifier,
+        &authz.pkce_verifier,
         &redirect_uri,
     )
     .await
@@ -280,7 +311,13 @@ async fn wait_for_redirect(listener: TcpListener) -> GraphResult<(String, String
     ))
 }
 
-async fn exchange_code(
+/// The **exchange** phase: POST the authorization `code` + the PKCE `verifier`
+/// (from [`authorize`]) to the token endpoint and parse the [`TokenSet`].
+/// `redirect_uri` must match the one used at authorize. The CSRF `state` check
+/// (returned vs. issued) is the caller's responsibility — [`run`] does it; the
+/// mobile host does it before calling this. No `client_secret`: Microsoft's
+/// v2.0 endpoint takes PKCE-only public-client exchanges.
+pub async fn exchange_code(
     http: &reqwest::Client,
     token_endpoint: &str,
     client_id: &str,
@@ -419,6 +456,47 @@ mod tests {
             Some("select_account")
         );
         assert!(!pairs.contains_key("client_secret"));
+    }
+
+    #[test]
+    fn authorize_builds_url_with_pkce_and_state() {
+        let authz = authorize(
+            "my-client",
+            "aperio://oauth-callback",
+            &authorize_url("common"),
+        )
+        .unwrap();
+        // 32-byte verifier → 43 base64url chars; 16-byte state → 32 hex chars.
+        assert_eq!(authz.pkce_verifier.len(), 43);
+        assert_eq!(authz.state.len(), 32);
+        let url = url::Url::parse(&authz.authorize_url).unwrap();
+        let pairs: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
+        assert_eq!(
+            pairs.get("redirect_uri").map(String::as_str),
+            Some("aperio://oauth-callback"),
+        );
+        assert_eq!(
+            pairs.get("state").map(String::as_str),
+            Some(authz.state.as_str())
+        );
+        // The challenge is the SHA-256 of the returned verifier (consistent so a
+        // later exchange validates).
+        let expected_challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(Sha256::digest(authz.pkce_verifier.as_bytes()));
+        assert_eq!(
+            pairs.get("code_challenge").map(String::as_str),
+            Some(expected_challenge.as_str()),
+        );
+        // PKCE public client — no secret leaks into the authorize URL.
+        assert!(!pairs.contains_key("client_secret"));
+    }
+
+    #[test]
+    fn authorize_rejects_an_empty_client_id() {
+        assert!(matches!(
+            authorize("", "aperio://oauth-callback", &authorize_url("common")),
+            Err(GraphError::Config(_)),
+        ));
     }
 
     #[tokio::test]
