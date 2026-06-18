@@ -72,6 +72,14 @@ export default function SettingsScreen({
         >
           <Text style={styles.linkText}>{t('mobile.syncTitle')}</Text>
         </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('dialogs.reminders.title')}
+          onPress={() => navigation.navigate('Reminders')}
+          style={({ pressed }) => [styles.link, pressed && styles.pressed]}
+        >
+          <Text style={styles.linkText}>{t('dialogs.reminders.title')}</Text>
+        </Pressable>
       </View>
     </ScrollView>
   );

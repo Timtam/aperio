@@ -15,6 +15,7 @@ import ContactsScreen from './screens/ContactsScreen';
 import EventEditorModal from './screens/EventEditorModal';
 import EventsScreen from './screens/EventsScreen';
 import ListsScreen from './screens/ListsScreen';
+import RemindersScreen from './screens/RemindersScreen';
 import SettingsScreen from './screens/SettingsScreen';
 import SyncScreen from './screens/SyncScreen';
 import TaskEditorModal from './screens/TaskEditorModal';
@@ -114,6 +115,11 @@ function SettingsStackNav() {
         name="Sync"
         component={SyncScreen}
         options={{ title: t('mobile.syncTitle') }}
+      />
+      <SettingsStack.Screen
+        name="Reminders"
+        component={RemindersScreen}
+        options={{ title: t('dialogs.reminders.title') }}
       />
     </SettingsStack.Navigator>
   );

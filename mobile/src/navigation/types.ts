@@ -14,6 +14,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
  *   Settings    — app-config hub: language override + links to Accounts / Sync.
  *   Contacts    — address books + their contacts; add / edit / delete.
  *   ContactEditor — create (`contactId: null`) or edit a contact; modal.
+ *   Reminders   — read-only overview of upcoming reminder triggers.
  */
 export type RootStackParamList = {
   Tasks: undefined;
@@ -26,6 +27,7 @@ export type RootStackParamList = {
   Settings: undefined;
   Contacts: undefined;
   ContactEditor: { contactId: string | null; listId: string };
+  Reminders: undefined;
 };
 
 /**
