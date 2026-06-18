@@ -575,6 +575,20 @@ public protocol HostProtocol: AnyObject, Sendable {
     func beginOauthJson(pluginId: String, argsJson: String) throws  -> String
     
     /**
+     * Rotate the dataset's E2E passphrase (§19.7): verify `old_passphrase`
+     * against the dataset's `meta.json` params (recovering the UNCHANGED data
+     * key), then mint a fresh KEK from `new_passphrase` over a freshly-rotated
+     * salt and re-wrap the same data key, pushing the updated `meta.json`. The
+     * data key never changes, so every already-onboarded device keeps working
+     * (its keychain DEK is untouched) — only devices that JOIN from here on need
+     * the new passphrase. The `meta.json` push is the single committing step.
+     * Mirrors the desktop `change_sync_passphrase`, incl. the silent v1→v2
+     * migration (the re-wrap writes `wrapped_data_key` even on a legacy dataset
+     * that lacked it).
+     */
+    func changeSyncPassphraseJson(oldPassphrase: String, newPassphrase: String) throws 
+    
+    /**
      * Complete a host-driven OAuth flow: exchange the redirect's `code` (+ the
      * `pkce_verifier`/`state` from [`Self::begin_oauth_json`]) for tokens via
      * the plugin (`phase:"exchange"`, the network step), then create the
@@ -1090,6 +1104,27 @@ open func beginOauthJson(pluginId: String, argsJson: String)throws  -> String  {
         FfiConverterString.lower(argsJson),$0
     )
 })
+}
+    
+    /**
+     * Rotate the dataset's E2E passphrase (§19.7): verify `old_passphrase`
+     * against the dataset's `meta.json` params (recovering the UNCHANGED data
+     * key), then mint a fresh KEK from `new_passphrase` over a freshly-rotated
+     * salt and re-wrap the same data key, pushing the updated `meta.json`. The
+     * data key never changes, so every already-onboarded device keeps working
+     * (its keychain DEK is untouched) — only devices that JOIN from here on need
+     * the new passphrase. The `meta.json` push is the single committing step.
+     * Mirrors the desktop `change_sync_passphrase`, incl. the silent v1→v2
+     * migration (the re-wrap writes `wrapped_data_key` even on a legacy dataset
+     * that lacked it).
+     */
+open func changeSyncPassphraseJson(oldPassphrase: String, newPassphrase: String)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_change_sync_passphrase_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(oldPassphrase),
+        FfiConverterString.lower(newPassphrase),$0
+    )
+}
 }
     
     /**
@@ -5063,6 +5098,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_begin_oauth_json() != 10684) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_change_sync_passphrase_json() != 15380) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_complete_oauth_json() != 7847) {

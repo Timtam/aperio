@@ -182,6 +182,14 @@ declare class CalFfiModule extends NativeModule<Record<never, never>> {
    *  second device joins via {@link acceptRemoteDatasetJson} + the passphrase.
    *  Returns the OnboardingReport JSON. */
   enableSyncEncryptionJson(passphrase: string): Promise<string>;
+  /** Rotate the E2E passphrase: verify `oldPassphrase`, re-wrap the SAME data
+   *  key under a fresh `newPassphrase` KEK + salt, push the updated `meta.json`.
+   *  The data key is unchanged, so already-onboarded devices keep working; only
+   *  future joins need the new passphrase. Rejects a non-encrypted target. */
+  changeSyncPassphraseJson(
+    oldPassphrase: string,
+    newPassphrase: string,
+  ): Promise<void>;
 
   // ── Onboarding: preview + join an existing dataset (§19.11) ──
   /** Probe a sync target WITHOUT committing: build the adapter from `configJson`,

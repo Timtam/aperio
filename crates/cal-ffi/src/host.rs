@@ -2356,6 +2356,83 @@ impl Host {
         to_json(&report)
     }
 
+    /// Rotate the dataset's E2E passphrase (§19.7): verify `old_passphrase`
+    /// against the dataset's `meta.json` params (recovering the UNCHANGED data
+    /// key), then mint a fresh KEK from `new_passphrase` over a freshly-rotated
+    /// salt and re-wrap the same data key, pushing the updated `meta.json`. The
+    /// data key never changes, so every already-onboarded device keeps working
+    /// (its keychain DEK is untouched) — only devices that JOIN from here on need
+    /// the new passphrase. The `meta.json` push is the single committing step.
+    /// Mirrors the desktop `change_sync_passphrase`, incl. the silent v1→v2
+    /// migration (the re-wrap writes `wrapped_data_key` even on a legacy dataset
+    /// that lacked it).
+    pub fn change_sync_passphrase_json(
+        &self,
+        old_passphrase: String,
+        new_passphrase: String,
+    ) -> Result<(), StoreError> {
+        let new_pp = new_passphrase.trim();
+        if new_pp.is_empty() {
+            return Err(StoreError::InvalidField {
+                field: "new_passphrase".to_string(),
+                detail: "new passphrase must not be empty".to_string(),
+            });
+        }
+        let old_pp = old_passphrase.trim();
+        if old_pp.is_empty() {
+            return Err(StoreError::InvalidField {
+                field: "old_passphrase".to_string(),
+                detail: "current passphrase must not be empty".to_string(),
+            });
+        }
+        let adapter =
+            self.orchestrator
+                .adapter_handle()
+                .ok_or_else(|| StoreError::InvalidField {
+                    field: "sync".to_string(),
+                    detail: "no sync adapter is configured".to_string(),
+                })?;
+        // meta.json is always plaintext (§19.7), so fetch_meta passes through the
+        // encrypting wrapper unchanged.
+        let meta = self
+            .runtime
+            .block_on(async { adapter.fetch_meta().await })
+            .map_err(sync_err)?
+            .ok_or(StoreError::NotFound)?;
+        if !meta.e2e_enabled {
+            return Err(StoreError::InvalidField {
+                field: "e2e".to_string(),
+                detail: "this sync target is not encrypted; nothing to rotate".to_string(),
+            });
+        }
+        let current_params = meta.e2e_params.clone().ok_or_else(|| StoreError::Storage {
+            detail: "meta.json says e2e but carries no params".to_string(),
+        })?;
+        // Verify the old passphrase + recover the data key (v1: the passphrase
+        // IS the key; v2: a KEK that unwraps the stored DEK). A wrong passphrase
+        // fails here, before anything is written.
+        let dek = resolve_data_key(old_pp, &current_params).map_err(sync_err)?;
+        // Defence in depth: re-assert the recovered DEK in the keychain so the
+        // next boot loads the right key even if the slot had drifted.
+        store_e2e_key(self.secret_store.as_ref(), &dek)?;
+        // Fresh salt → a precomputed table against the old wrap is worthless;
+        // re-wrap the SAME DEK with the new-passphrase KEK.
+        let mut new_params = current_params;
+        new_params.rotate_salt();
+        new_params.wrapped_data_key = None;
+        let new_kek = derive_key(new_pp, &new_params).map_err(sync_err)?;
+        let new_wrap = wrap_key(&new_kek, &dek).map_err(sync_err)?;
+        new_params.wrapped_data_key = Some(new_wrap);
+        let mut updated = meta;
+        updated.e2e_params = Some(new_params);
+        // The single committing step: once this lands, the new passphrase is
+        // authoritative for future joins.
+        self.runtime
+            .block_on(async { adapter.push_meta(&updated).await })
+            .map_err(sync_err)?;
+        Ok(())
+    }
+
     /// Complete a host-driven OAuth flow for a SYNC adapter (`plugin_id` =
     /// `com.aperio.sync-adapter-dropbox` / `…-googledrive`): exchange the
     /// redirect's `code` (+ the `pkce_verifier`/`state` from
@@ -4019,6 +4096,87 @@ mod tests {
         );
         // A follow-up round decrypts its own + A's logs without error.
         host_b.sync_now_json().unwrap();
+    }
+
+    #[test]
+    fn changing_the_passphrase_lets_a_new_device_join_with_the_new_one_only() {
+        const OLD: &str = "old correct horse";
+        const NEW: &str = "new battery staple";
+        let remote = tempfile::tempdir().unwrap();
+        let cfg = format!(
+            r#"{{"kind":"local","path":{}}}"#,
+            serde_json::to_string(&remote.path().to_string_lossy()).unwrap()
+        );
+
+        // Device A adopts a fresh E2E dataset with the OLD passphrase + pushes.
+        let dir_a = tempfile::tempdir().unwrap();
+        let host_a = open_named(&dir_a, "a");
+        host_a.configure_sync_adapter_json(cfg.clone()).unwrap();
+        let cal = calendar_id(
+            &host_a
+                .create_calendar_json(r#"{"name":"Shared"}"#.to_string())
+                .unwrap(),
+        );
+        let created = host_a
+            .create_event_json(new_event_json(&cal, "Rotate me"))
+            .unwrap();
+        let event_id = serde_json::from_str::<serde_json::Value>(&created).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        host_a.enable_sync_encryption_json(OLD.to_string()).unwrap();
+        wait_for_pending(&dir_a);
+        host_a.sync_now_json().unwrap();
+
+        // Rotate the passphrase; A keeps working (its keychain DEK is unchanged).
+        host_a
+            .change_sync_passphrase_json(OLD.to_string(), NEW.to_string())
+            .unwrap();
+        host_a.sync_now_json().unwrap();
+
+        // The OLD passphrase no longer unwraps the (re-wrapped) key.
+        let dir_old = tempfile::tempdir().unwrap();
+        let host_old = open_named(&dir_old, "old");
+        assert!(
+            host_old
+                .accept_remote_dataset_json(cfg.clone(), None, Some(OLD.to_string()))
+                .is_err(),
+            "joining with the rotated-away passphrase must fail",
+        );
+
+        // The NEW passphrase joins and decrypts A's event.
+        let dir_b = tempfile::tempdir().unwrap();
+        let host_b = open_named(&dir_b, "b");
+        host_b
+            .accept_remote_dataset_json(cfg, Some("Phone B".to_string()), Some(NEW.to_string()))
+            .unwrap();
+        let events: serde_json::Value =
+            serde_json::from_str(&host_b.get_events_json(covering_range(&cal)).unwrap()).unwrap();
+        assert!(
+            events
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|e| e["id"] == serde_json::json!(event_id)),
+            "the new device must decrypt A's event after the passphrase change; got: {events}",
+        );
+    }
+
+    #[test]
+    fn change_passphrase_rejects_empty_and_unconfigured() {
+        let (_dir, host, _kc) = open_host();
+        // Empty new passphrase is rejected before touching the adapter.
+        assert!(matches!(
+            host.change_sync_passphrase_json("old".to_string(), "  ".to_string())
+                .unwrap_err(),
+            StoreError::InvalidField { ref field, .. } if field == "new_passphrase"
+        ));
+        // No sync target configured → InvalidField{field:"sync"}.
+        assert!(matches!(
+            host.change_sync_passphrase_json("old".to_string(), "new".to_string())
+                .unwrap_err(),
+            StoreError::InvalidField { ref field, .. } if field == "sync"
+        ));
     }
 
     #[test]

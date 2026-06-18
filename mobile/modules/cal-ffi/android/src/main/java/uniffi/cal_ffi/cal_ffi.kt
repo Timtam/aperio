@@ -730,6 +730,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_begin_oauth_json(
     ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_change_sync_passphrase_json(
+    ): Short
     external fun uniffi_cal_ffi_checksum_method_host_complete_oauth_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_complete_sync_oauth_json(
@@ -909,6 +911,8 @@ external fun uniffi_cal_ffi_fn_method_host_accounts_json(`ptr`: Long,uniffi_out_
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_begin_oauth_json(`ptr`: Long,`pluginId`: RustBuffer.ByValue,`argsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_change_sync_passphrase_json(`ptr`: Long,`oldPassphrase`: RustBuffer.ByValue,`newPassphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_cal_ffi_fn_method_host_complete_oauth_json(`ptr`: Long,`pluginId`: RustBuffer.ByValue,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_complete_sync_oauth_json(`ptr`: Long,`pluginId`: RustBuffer.ByValue,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1215,6 +1219,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_begin_oauth_json() != 10684.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_change_sync_passphrase_json() != 15380.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_complete_oauth_json() != 7847.toShort()) {
@@ -1837,6 +1844,20 @@ public interface HostInterface {
     fun `beginOauthJson`(`pluginId`: kotlin.String, `argsJson`: kotlin.String): kotlin.String
     
     /**
+     * Rotate the dataset's E2E passphrase (§19.7): verify `old_passphrase`
+     * against the dataset's `meta.json` params (recovering the UNCHANGED data
+     * key), then mint a fresh KEK from `new_passphrase` over a freshly-rotated
+     * salt and re-wrap the same data key, pushing the updated `meta.json`. The
+     * data key never changes, so every already-onboarded device keeps working
+     * (its keychain DEK is untouched) — only devices that JOIN from here on need
+     * the new passphrase. The `meta.json` push is the single committing step.
+     * Mirrors the desktop `change_sync_passphrase`, incl. the silent v1→v2
+     * migration (the re-wrap writes `wrapped_data_key` even on a legacy dataset
+     * that lacked it).
+     */
+    fun `changeSyncPassphraseJson`(`oldPassphrase`: kotlin.String, `newPassphrase`: kotlin.String)
+    
+    /**
      * Complete a host-driven OAuth flow: exchange the redirect's `code` (+ the
      * `pkce_verifier`/`state` from [`Self::begin_oauth_json`]) for tokens via
      * the plugin (`phase:"exchange"`, the network step), then create the
@@ -2395,6 +2416,31 @@ open class Host: Disposable, AutoCloseable, HostInterface
     }
     )
     }
+    
+
+    
+    /**
+     * Rotate the dataset's E2E passphrase (§19.7): verify `old_passphrase`
+     * against the dataset's `meta.json` params (recovering the UNCHANGED data
+     * key), then mint a fresh KEK from `new_passphrase` over a freshly-rotated
+     * salt and re-wrap the same data key, pushing the updated `meta.json`. The
+     * data key never changes, so every already-onboarded device keeps working
+     * (its keychain DEK is untouched) — only devices that JOIN from here on need
+     * the new passphrase. The `meta.json` push is the single committing step.
+     * Mirrors the desktop `change_sync_passphrase`, incl. the silent v1→v2
+     * migration (the re-wrap writes `wrapped_data_key` even on a legacy dataset
+     * that lacked it).
+     */
+    @Throws(StoreException::class)override fun `changeSyncPassphraseJson`(`oldPassphrase`: kotlin.String, `newPassphrase`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_change_sync_passphrase_json(
+        it,
+        FfiConverterString.lower(`oldPassphrase`),FfiConverterString.lower(`newPassphrase`),_status)
+}
+    }
+    
     
 
     

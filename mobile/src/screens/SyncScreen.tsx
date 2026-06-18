@@ -15,6 +15,7 @@ import {
 
 import {
   acceptRemoteDataset,
+  changeSyncPassphrase,
   configureSyncAdapter,
   enableSyncEncryption,
   forgetSftpHostKey,
@@ -78,6 +79,8 @@ export default function SyncScreen() {
   const [sftpKeyPath, setSftpKeyPath] = useState(''); // sftp key-auth
   const [sftpKeyPassphrase, setSftpKeyPassphrase] = useState(''); // sftp key-auth
   const [e2ePassphrase, setE2ePassphrase] = useState(''); // enable-E2E passphrase
+  const [changeOldPp, setChangeOldPp] = useState(''); // rotate: current passphrase
+  const [changeNewPp, setChangeNewPp] = useState(''); // rotate: new passphrase
   // §19.11 onboarding: the result of probing the entered target (null until the
   // user taps "Check existing dataset"). When `existing`, the join panel shows.
   const [preview, setPreview] = useState<SyncPreview | null>(null);
@@ -616,6 +619,39 @@ export default function SyncScreen() {
     );
   }, [announce, e2ePassphrase, runEnableE2e, t]);
 
+  // Rotate the E2E passphrase (§19.7) — not destructive: the data key is
+  // re-wrapped, not changed, so this device + every other already-onboarded one
+  // keep working; only future joins use the new passphrase. No confirmation gate
+  // (nothing is lost), matching the desktop.
+  const changePassphrase = useCallback(async () => {
+    const oldP = changeOldPp.trim();
+    const newP = changeNewPp.trim();
+    if (oldP.length === 0 || newP.length === 0) {
+      setError(t('dialogs.settings.sync.passphraseChangeErrorEmpty'));
+      announce(t('dialogs.settings.sync.passphraseChangeErrorEmpty'));
+      return;
+    }
+    if (oldP === newP) {
+      setError(t('dialogs.settings.sync.passphraseChangeErrorSame'));
+      announce(t('dialogs.settings.sync.passphraseChangeErrorSame'));
+      return;
+    }
+    setError(null);
+    setBusy(true);
+    try {
+      await changeSyncPassphrase(changeOldPp, changeNewPp);
+      setChangeOldPp('');
+      setChangeNewPp('');
+      announce(t('dialogs.settings.sync.passphraseChangeOk'));
+    } catch (err) {
+      const message = errorMessage(err);
+      setError(message);
+      announce(t('mobile.error', { message }));
+    } finally {
+      setBusy(false);
+    }
+  }, [announce, changeNewPp, changeOldPp, t]);
+
   const lastSynced =
     status?.last_synced_at != null
       ? new Date(status.last_synced_at).toLocaleString()
@@ -685,13 +721,63 @@ export default function SyncScreen() {
       {/* End-to-end encryption (§19.7) — only meaningful once a target is set. */}
       {status?.configured &&
         (status.e2e_enabled ? (
-          <Text
-            style={styles.status}
-            accessibilityRole="text"
-            accessibilityLiveRegion="polite"
-          >
-            {t('dialogs.settings.sync.e2eActive')}
-          </Text>
+          <>
+            <Text
+              style={styles.status}
+              accessibilityRole="text"
+              accessibilityLiveRegion="polite"
+            >
+              {t('dialogs.settings.sync.e2eActive')}
+            </Text>
+            {/* Rotate the passphrase — data unchanged; future joins use the new
+                one. Not destructive, so no confirmation gate. */}
+            <View style={styles.field}>
+              <Text style={styles.label} accessibilityRole="header">
+                {t('dialogs.settings.sync.passphraseChangeTitle')}
+              </Text>
+              <Text style={styles.hint} accessibilityRole="text">
+                {t('dialogs.settings.sync.passphraseChangeHint')}
+              </Text>
+              <Text style={styles.label}>
+                {t('dialogs.settings.sync.passphraseChangeOld')}
+              </Text>
+              <TextInput
+                style={styles.input}
+                value={changeOldPp}
+                onChangeText={setChangeOldPp}
+                accessibilityLabel={t('dialogs.settings.sync.passphraseChangeOld')}
+                secureTextEntry
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              <Text style={styles.label}>
+                {t('dialogs.settings.sync.passphraseChangeNew')}
+              </Text>
+              <TextInput
+                style={styles.input}
+                value={changeNewPp}
+                onChangeText={setChangeNewPp}
+                accessibilityLabel={t('dialogs.settings.sync.passphraseChangeNew')}
+                secureTextEntry
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ disabled: busy }}
+                accessibilityLabel={t('dialogs.settings.sync.passphraseChangeAction')}
+                disabled={busy}
+                onPress={() => void changePassphrase()}
+                style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
+              >
+                <Text style={styles.ghostButtonText}>
+                  {busy
+                    ? t('dialogs.settings.sync.passphraseChangeRunning')
+                    : t('dialogs.settings.sync.passphraseChangeAction')}
+                </Text>
+              </Pressable>
+            </View>
+          </>
         ) : (
           <View style={styles.field}>
             <Text style={styles.label} accessibilityRole="header">

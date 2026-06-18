@@ -224,6 +224,11 @@ public class CalFfiModule: Module {
       try self.host.enableSyncEncryptionJson(passphrase: passphrase)
     }
 
+    AsyncFunction("changeSyncPassphraseJson") { (oldPassphrase: String, newPassphrase: String) in
+      try self.host.changeSyncPassphraseJson(
+        oldPassphrase: oldPassphrase, newPassphrase: newPassphrase)
+    }
+
     // ─── Onboarding: preview + join an existing dataset (§19.11) ──────────────
 
     AsyncFunction("previewSyncTargetJson") { (configJson: String) -> String in

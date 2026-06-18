@@ -161,6 +161,18 @@ export const enableSyncEncryption = async (passphrase: string): Promise<void> =>
   await CalFfi.enableSyncEncryptionJson(passphrase);
 };
 
+/** Rotate the E2E passphrase on the configured (encrypted) target: verify the
+ *  current passphrase, re-wrap the SAME data key under a fresh new-passphrase
+ *  key, and push the updated dataset metadata. The data itself is untouched —
+ *  devices already syncing keep working; only devices that JOIN from here on
+ *  need the new passphrase. Rejects when the target isn't encrypted. */
+export const changeSyncPassphrase = async (
+  oldPassphrase: string,
+  newPassphrase: string,
+): Promise<void> => {
+  await CalFfi.changeSyncPassphraseJson(oldPassphrase, newPassphrase);
+};
+
 /** One device row in an Existing {@link SyncPreview} (the desktop
  *  `DeviceSummary`). */
 export interface SyncDeviceSummary {

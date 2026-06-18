@@ -261,6 +261,12 @@ class CalFfiModule : Module() {
       host.enableSyncEncryptionJson(passphrase)
     }
 
+    // changeSyncPassphraseJson rotates the E2E passphrase (re-wraps the same
+    // data key; existing devices keep working, future joins need the new one).
+    AsyncFunction("changeSyncPassphraseJson") { oldPassphrase: String, newPassphrase: String ->
+      host.changeSyncPassphraseJson(oldPassphrase, newPassphrase)
+    }
+
     // ─── Onboarding: preview + join an existing dataset (§19.11) ──────────────
     // previewSyncTargetJson reads the target's meta.json WITHOUT committing →
     // {kind: empty | existing, …}. acceptRemoteDatasetJson joins an existing
