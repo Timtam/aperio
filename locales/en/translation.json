@@ -69,7 +69,8 @@
     "syncConfigured": "Sync target set.",
     "syncNow": "Sync now",
     "syncing": "Syncing …",
-    "syncDone": "Sync done: {{applied}} applied, {{pushed}} sent, {{fetched}} fetched."
+    "syncDone": "Sync done: {{applied}} applied, {{pushed}} sent, {{fetched}} fetched.",
+    "syncSustainedFailure": "Sync has failed several times in a row. Check your sync target and connection; \"Sync now\" retries immediately."
   },
   "common": {
     "colorComposer": {

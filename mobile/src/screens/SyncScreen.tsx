@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
+import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
@@ -64,9 +65,14 @@ export default function SyncScreen() {
     }
   }, []);
 
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
+  // Refresh on every focus (not just mount) so a background-triggered round's
+  // result — including the sustained-failure latch — shows when the user opens
+  // this screen.
+  useFocusEffect(
+    useCallback(() => {
+      void refresh();
+    }, [refresh]),
+  );
 
   const kindOptions = useMemo(
     () => [
@@ -188,6 +194,16 @@ export default function SyncScreen() {
       {error != null && (
         <Text style={styles.error} accessibilityRole="text" accessibilityLiveRegion="assertive">
           {error}
+        </Text>
+      )}
+
+      {status?.sustained_failure === true && (
+        <Text
+          style={styles.warning}
+          accessibilityRole="text"
+          accessibilityLiveRegion="assertive"
+        >
+          {t('mobile.syncSustainedFailure')}
         </Text>
       )}
 
@@ -407,4 +423,12 @@ const styles = StyleSheet.create({
   ghostButtonText: { fontSize: 16, fontWeight: '600', color: '#1d3a2f' },
   pressed: { opacity: 0.7 },
   error: { fontSize: 15, fontWeight: '600', color: '#b42318' },
+  warning: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#92400e',
+    backgroundColor: '#fef3c7',
+    padding: 12,
+    borderRadius: 10,
+  },
 });

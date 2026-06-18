@@ -69,7 +69,8 @@
     "syncConfigured": "Sync-Ziel gesetzt.",
     "syncNow": "Jetzt synchronisieren",
     "syncing": "Synchronisiere …",
-    "syncDone": "Sync fertig: {{applied}} angewendet, {{pushed}} gesendet, {{fetched}} geholt."
+    "syncDone": "Sync fertig: {{applied}} angewendet, {{pushed}} gesendet, {{fetched}} geholt.",
+    "syncSustainedFailure": "Die Synchronisierung ist mehrmals in Folge fehlgeschlagen. Prüfe dein Sync-Ziel und die Verbindung; „Jetzt synchronisieren“ versucht es sofort erneut."
   },
   "common": {
     "colorComposer": {

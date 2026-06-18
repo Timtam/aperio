@@ -39,7 +39,8 @@
 //! event paths are wired like local but hit the provider live (no cache),
 //! exercised on-device, not in unit tests.
 
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
 
 use cal_adapter_local::LocalAdapter;
 use cal_core::{Calendar, CalendarFeature, ColorLabelId, DateRange, Event, NewEvent};
@@ -90,6 +91,46 @@ fn sync_err(e: SyncError) -> StoreError {
 fn storage_err(e: impl std::fmt::Display) -> StoreError {
     StoreError::Storage {
         detail: e.to_string(),
+    }
+}
+
+/// Consecutive-failure count at which sync is reported as `sustained_failure`.
+/// Matches the desktop `SyncScheduler` latch threshold.
+const SUSTAINED_FAILURE_THRESHOLD: u32 = 3;
+
+/// The mobile failure latch. The orchestrator's `SyncStatus` always reports
+/// `sustained_failure: false` / `last_error_code: None` — on the desktop the
+/// `SyncScheduler` decorates those across rounds, but mobile has no scheduler.
+/// This tiny driver does the same job: `sync_now`/`push_now` record each round's
+/// outcome and `sync_status_json` reads the latch to decorate the status, so a
+/// blind user learns when sync has been failing repeatedly (not just once).
+#[derive(Default)]
+struct SyncProgressDriver {
+    consecutive_failures: AtomicU32,
+    last_error_code: Mutex<Option<String>>,
+}
+
+impl SyncProgressDriver {
+    /// A clean round resets the latch.
+    fn record_success(&self) {
+        self.consecutive_failures.store(0, Ordering::Relaxed);
+        *self.last_error_code.lock().expect("latch poison") = None;
+    }
+
+    /// A failed round bumps the streak and latches the stable error code.
+    fn record_failure(&self, code: &str) {
+        self.consecutive_failures.fetch_add(1, Ordering::Relaxed);
+        *self.last_error_code.lock().expect("latch poison") = Some(code.to_string());
+    }
+
+    /// Whether the failure streak has reached the sustained threshold.
+    fn sustained(&self) -> bool {
+        self.consecutive_failures.load(Ordering::Relaxed) >= SUSTAINED_FAILURE_THRESHOLD
+    }
+
+    /// The most recently latched error code (cleared on success).
+    fn last_code(&self) -> Option<String> {
+        self.last_error_code.lock().expect("latch poison").clone()
     }
 }
 
@@ -315,6 +356,9 @@ pub struct Host {
     /// The static plugin registry — the registry holds an `Arc` clone for
     /// per-account adapters; the Host also opens the sync-adapter plugin here.
     plugin_manager: Arc<PluginManager>,
+    /// Failure latch for `sustained_failure` / `last_error_code` in the sync
+    /// status (the desktop scheduler's job; mobile has no scheduler).
+    progress: SyncProgressDriver,
 }
 
 impl Host {
@@ -565,6 +609,7 @@ impl Host {
             orchestrator: graph.orchestrator,
             _onboarding: graph.onboarding,
             plugin_manager,
+            progress: SyncProgressDriver::default(),
         }))
     }
 
@@ -1072,10 +1117,27 @@ impl Host {
     }
 
     /// The orchestrator's status as JSON (the desktop `SyncStatus` shape:
-    /// configured / in_flight / last_synced_at / interval / e2e / …). Reads
-    /// without a sync round.
+    /// configured / in_flight / last_synced_at / interval / e2e / …), decorated
+    /// with this host's failure latch. The orchestrator always returns
+    /// `sustained_failure: false` / `last_error_code: None` (the desktop
+    /// scheduler fills those in); here the `SyncProgressDriver` does, so the UI
+    /// can warn on a sustained failure. Reads without a sync round.
     pub fn sync_status_json(&self) -> Result<String, StoreError> {
-        to_json(&self.orchestrator.status())
+        let mut value = serde_json::to_value(self.orchestrator.status()).map_err(storage_err)?;
+        if let Some(obj) = value.as_object_mut() {
+            obj.insert(
+                "sustained_failure".to_string(),
+                serde_json::Value::Bool(self.progress.sustained()),
+            );
+            obj.insert(
+                "last_error_code".to_string(),
+                match self.progress.last_code() {
+                    Some(code) => serde_json::Value::String(code),
+                    None => serde_json::Value::Null,
+                },
+            );
+        }
+        Ok(value.to_string())
     }
 
     /// Configure the sync adapter from a JSON request. Handles the `local`
@@ -1260,23 +1322,41 @@ impl Host {
 
     /// Run one sync round (push local pending logs, fetch + apply foreign ones,
     /// compaction audit) and return the `SyncRoundReport` as JSON. Errors with
-    /// "not configured" until `configure_sync_adapter_json` has run.
+    /// "not configured" until `configure_sync_adapter_json` has run. Records the
+    /// round's outcome in the failure latch (success resets it).
     pub fn sync_now_json(&self) -> Result<String, StoreError> {
-        let report = self
+        match self
             .runtime
             .block_on(async { self.orchestrator.sync_now().await })
-            .map_err(sync_err)?;
-        to_json(&report)
+        {
+            Ok(report) => {
+                self.progress.record_success();
+                to_json(&report)
+            }
+            Err(e) => {
+                self.progress.record_failure(e.code());
+                Err(sync_err(e))
+            }
+        }
     }
 
     /// Push the local pending logs without fetching (call from RN AppState
-    /// "background"). Returns the number of logs pushed.
+    /// "background"). Returns the number of logs pushed. Records the outcome in
+    /// the failure latch like `sync_now`.
     pub fn push_now(&self) -> Result<u32, StoreError> {
-        let pushed = self
+        match self
             .runtime
             .block_on(async { self.orchestrator.push_now().await })
-            .map_err(sync_err)?;
-        Ok(pushed as u32)
+        {
+            Ok(pushed) => {
+                self.progress.record_success();
+                Ok(pushed as u32)
+            }
+            Err(e) => {
+                self.progress.record_failure(e.code());
+                Err(sync_err(e))
+            }
+        }
     }
 }
 
@@ -1978,5 +2058,39 @@ mod tests {
             matches!(&err, StoreError::InvalidField { field, .. } if field == "kind"),
             "got: {err:?}"
         );
+    }
+
+    #[test]
+    fn sync_progress_driver_latches_after_three_failures_and_resets() {
+        let driver = SyncProgressDriver::default();
+        assert!(!driver.sustained());
+        assert_eq!(driver.last_code(), None);
+
+        driver.record_failure("network");
+        driver.record_failure("network");
+        assert!(!driver.sustained(), "two failures is below the threshold");
+        assert_eq!(driver.last_code().as_deref(), Some("network"));
+
+        driver.record_failure("io");
+        assert!(
+            driver.sustained(),
+            "three consecutive failures latch sustained"
+        );
+        assert_eq!(driver.last_code().as_deref(), Some("io"));
+
+        // A clean round clears both the streak and the latched code.
+        driver.record_success();
+        assert!(!driver.sustained());
+        assert_eq!(driver.last_code(), None);
+    }
+
+    #[test]
+    fn fresh_host_status_reports_no_sustained_failure() {
+        let (_dir, host, _kc) = open_host();
+        let status: serde_json::Value =
+            serde_json::from_str(&host.sync_status_json().unwrap()).unwrap();
+        // The decorated fields are present and clear on a fresh host.
+        assert_eq!(status["sustained_failure"], serde_json::json!(false));
+        assert_eq!(status["last_error_code"], serde_json::Value::Null);
     }
 }
