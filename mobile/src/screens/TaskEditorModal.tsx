@@ -28,6 +28,7 @@ import type {
 import { TASK_RECURRENCE_DEFAULT, fromBackend, toBackend } from '@aperio/shared';
 
 import { createTask, getTaskById, updateTask } from '../api/client';
+import { ColorLabelSelect } from '../components/ColorLabelSelect';
 import { RadioGroup } from '../components/RadioGroup';
 import { RemindersEditor } from '../components/RemindersEditor';
 import { TaskRecurrenceSelector } from '../components/TaskRecurrenceSelector';
@@ -55,6 +56,7 @@ interface FormState {
   description: string;
   recurrence: TaskRecurrenceValue;
   reminders: Reminder[];
+  colorLabel: string; // '' = no colour
 }
 
 function buildInitialState(loaded: Task | null, listId: string): FormState {
@@ -72,6 +74,7 @@ function buildInitialState(loaded: Task | null, listId: string): FormState {
       description: '',
       recurrence: { ...TASK_RECURRENCE_DEFAULT },
       reminders: [],
+      colorLabel: '',
     };
   }
   return {
@@ -87,6 +90,7 @@ function buildInitialState(loaded: Task | null, listId: string): FormState {
     description: loaded.description ?? '',
     recurrence: fromBackend(loaded.recurrence),
     reminders: loaded.reminders ?? [],
+    colorLabel: loaded.color_label ?? '',
   };
 }
 
@@ -145,7 +149,8 @@ export default function TaskEditorModal({
 }: RootStackScreenProps<'TaskEditor'>) {
   const { t, i18n } = useTranslation();
   const { taskId, listId } = route.params;
-  const { taskLists, sectionsByList, loadSections, invalidateData } = useTaskStore();
+  const { taskLists, sectionsByList, loadSections, colorLabels, invalidateData } =
+    useTaskStore();
 
   const [form, setForm] = useState<FormState>(() =>
     buildInitialState(null, listId),
@@ -274,6 +279,12 @@ export default function TaskEditorModal({
   );
   const canRecur = caps?.task_recurrence ?? true;
   const canSection = caps?.sections ?? true;
+  // Colour binds to a LOCAL task on its own row; on an external task it would be
+  // a host-local override (a later increment), so only offer it for local lists.
+  const isLocalList = useMemo(
+    () => taskLists.find((l) => l.id === form.listId)?.account_id === 'local',
+    [taskLists, form.listId],
+  );
   const statusOptions = useMemo(
     () => [
       { value: 'open' as const, label: t('dialogs.task.status.open') },
@@ -353,7 +364,7 @@ export default function TaskEditorModal({
           recurrence: canRecur ? toBackend(form.recurrence) : null,
           parent_id: null,
           section_id: canSection ? form.sectionId || null : null,
-          color_label: null,
+          color_label: isLocalList ? form.colorLabel || null : null,
           reminders: form.reminders,
           assignees: [],
           sound: null,
@@ -384,6 +395,9 @@ export default function TaskEditorModal({
           recurrence: canRecur ? toBackend(form.recurrence) : null,
           reminders: form.reminders,
           description,
+          // Local task: the picker drives the colour; external: leave the
+          // (override-stamped) value untouched (external colour = later).
+          color_label: isLocalList ? form.colorLabel || null : loaded.color_label,
           completed_at:
             form.status === 'completed'
               ? (loaded.completed_at ?? new Date().toISOString())
@@ -401,7 +415,7 @@ export default function TaskEditorModal({
       setError(message);
       AccessibilityInfo.announceForAccessibility(t('mobile.error', { message }));
     }
-  }, [canRecur, canSection, form, loaded, navigation, t, taskId]);
+  }, [canRecur, canSection, isLocalList, form, loaded, navigation, t, taskId]);
 
   return (
     <ScrollView
@@ -453,6 +467,14 @@ export default function TaskEditorModal({
           value={form.sectionId}
           options={sectionOptions}
           onChange={(v) => update('sectionId', v)}
+        />
+      )}
+
+      {isLocalList && (
+        <ColorLabelSelect
+          value={form.colorLabel}
+          labels={colorLabels}
+          onChange={(v) => update('colorLabel', v)}
         />
       )}
 

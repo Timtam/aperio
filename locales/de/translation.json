@@ -45,6 +45,7 @@
     "sectionsHeading": "Abschnitte",
     "edit": "Bearbeiten",
     "colorHexInvalid": "Gib eine Farbe als #RRGGBB ein.",
+    "colorLabelSuffix": ", Farbe {{name}}",
     "listAdded": "{{name}} hinzugefügt.",
     "listSelected": "{{name}} ausgewählt.",
     "listDeselected": "{{name}} abgewählt.",

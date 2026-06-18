@@ -45,6 +45,7 @@
     "sectionsHeading": "Sections",
     "edit": "Edit",
     "colorHexInvalid": "Enter a colour as #RRGGBB.",
+    "colorLabelSuffix": ", colour {{name}}",
     "listAdded": "{{name}} added.",
     "listSelected": "{{name}} selected.",
     "listDeselected": "{{name}} deselected.",

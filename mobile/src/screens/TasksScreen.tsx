@@ -52,8 +52,14 @@ export default function TasksScreen({
 }: RootStackScreenProps<'Tasks'>) {
   const { t, i18n } = useTranslation();
   const { tasks, loading, taskListById } = useTasks();
-  const { selectedTaskListIds, taskLists, sectionsByList, loadSections, invalidateData } =
-    useTaskStore();
+  const {
+    selectedTaskListIds,
+    taskLists,
+    sectionsByList,
+    loadSections,
+    colorLabels,
+    invalidateData,
+  } = useTaskStore();
 
   // The shared helpers + buildEntries take a plain (key, vars) => string; adapt
   // i18next's t (whose overload union isn't directly assignable).
@@ -286,8 +292,8 @@ export default function TasksScreen({
     [openEditor, removeTask, toggleCollapsed, toggleDone],
   );
 
-  const taskLabel = (task: Task): string =>
-    t('views.tasks.optionLabel', {
+  const taskLabel = (task: Task): string => {
+    const base = t('views.tasks.optionLabel', {
       title: task.title,
       state: t(statusI18nKey(task.status)),
       priority: prioritySuffix(tr, task.priority),
@@ -295,6 +301,13 @@ export default function TasksScreen({
       due: describeDue(task, tr, today, formatDate),
       assignee: assigneeSuffix(tr, task.assignees),
     });
+    // A bound colour is meaningless to a screen reader as a colour, so announce
+    // its label NAME instead (resolved from the palette).
+    const colour = task.color_label
+      ? colorLabels.find((l) => l.id === task.color_label)?.name
+      : undefined;
+    return colour ? `${base}${t('mobile.colorLabelSuffix', { name: colour })}` : base;
+  };
 
   const renderHeader = (entry: Entry) => {
     const id = entry.task.id;

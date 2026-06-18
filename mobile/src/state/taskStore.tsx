@@ -8,8 +8,9 @@ import {
 } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import type { Section, TaskList } from '@aperio/shared';
+import type { ColorLabel, Section, TaskList } from '@aperio/shared';
 
+import { listColorLabels } from '../api/colorLabels';
 import { getSections, listTaskLists } from '../api/client';
 import { TaskStoreContext } from './taskStoreContext';
 import {
@@ -39,6 +40,10 @@ export interface TaskStoreState {
    *  2b (the flat list doesn't group yet); the grouped screen (sub-3) fills it. */
   sectionsByList: Record<string, Section[]>;
   loadSections: (listId: string) => Promise<Section[]>;
+  /** The app-wide colour-label palette (named + ad-hoc), so editors can offer a
+   *  picker and rows can resolve a `color_label` id → its name. */
+  colorLabels: ColorLabel[];
+  refreshColorLabels: () => Promise<void>;
   taskListsLoading: boolean;
   /** Bumped on every mutation; `useTasks` keys its cache on it (full refetch). */
   dataVersion: number;
@@ -72,6 +77,7 @@ export function TaskStoreProvider({ children }: { children: ReactNode }) {
     Record<string, Section[]>
   >({});
   const [taskListsLoading, setTaskListsLoading] = useState(true);
+  const [colorLabels, setColorLabels] = useState<ColorLabel[]>([]);
   const [dataVersion, setDataVersion] = useState(0);
 
   // Selection persistence is hydrated asynchronously (AsyncStorage), unlike the
@@ -92,6 +98,10 @@ export function TaskStoreProvider({ children }: { children: ReactNode }) {
     const secs = await getSections(listId);
     setSectionsByList((prev) => ({ ...prev, [listId]: secs }));
     return secs;
+  }, []);
+
+  const refreshColorLabels = useCallback(async () => {
+    setColorLabels(await listColorLabels());
   }, []);
 
   const toggleTaskList = useCallback((id: string) => {
@@ -120,6 +130,9 @@ export function TaskStoreProvider({ children }: { children: ReactNode }) {
       hydrated.current = true;
       try {
         await refreshTaskLists();
+        // Best-effort — the palette is non-critical; a failure just means rows
+        // render without colour-label names until the next refresh.
+        await refreshColorLabels().catch(() => {});
       } finally {
         if (!cancelled) setTaskListsLoading(false);
       }
@@ -127,7 +140,7 @@ export function TaskStoreProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [refreshTaskLists]);
+  }, [refreshTaskLists, refreshColorLabels]);
 
   // Persist selection + known together, but only after hydration so the empty
   // initial state never freezes over real stored data.
@@ -147,6 +160,8 @@ export function TaskStoreProvider({ children }: { children: ReactNode }) {
       refreshTaskLists,
       sectionsByList,
       loadSections,
+      colorLabels,
+      refreshColorLabels,
       taskListsLoading,
       dataVersion,
       invalidateData,
@@ -158,6 +173,8 @@ export function TaskStoreProvider({ children }: { children: ReactNode }) {
       refreshTaskLists,
       sectionsByList,
       loadSections,
+      colorLabels,
+      refreshColorLabels,
       taskListsLoading,
       dataVersion,
       invalidateData,
