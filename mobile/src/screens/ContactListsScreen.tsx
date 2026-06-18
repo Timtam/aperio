@@ -12,23 +12,27 @@ import {
   View,
 } from 'react-native';
 
-import { renameContainer } from '../api/containerColor';
+import type { ColorLabel } from '@aperio/shared';
+
+import { listColorLabels } from '../api/colorLabels';
+import { renameContainer, setContainerColorLabel } from '../api/containerColor';
 import {
   ContactList,
   createContactList,
   deleteContactList,
   listContactLists,
 } from '../api/contacts';
+import { ColorLabelSelect } from '../components/ColorLabelSelect';
 import type { RootStackScreenProps } from '../navigation/types';
 
-// Address-book management — create a (local) address book and delete an existing
-// one. The mobile parallel of the Tasks ListsScreen, reached from ContactsScreen
-// (which itself shows all books' contacts but offers no book-level management).
-// Screen-reader-first: a name field + Add, then a list of books; a writable book
-// carries a context-labelled Delete (read-only/provider books are informational
-// — no delete affordance). Create always makes a LOCAL book (the bridge takes
-// the name only); rename + colour are deferred with the host-local overrides /
-// the rename_contact_list bridge.
+// Address-book management — create, rename, recolour, and delete address books.
+// The mobile parallel of the Tasks ListsScreen, reached from ContactsScreen
+// (which shows all books' contacts but offers no book-level management).
+// Screen-reader-first: a name field + Add, then a list of books. "Edit" opens an
+// in-place panel — a name field (writable books only; rename writes to the
+// source) + a colour picker (ALL books, even read-only/provider ones: a contact
+// list's colour is a host-local override, not a provider write). Delete is
+// writable-only. Create makes a LOCAL book (the bridge takes the name only).
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -40,12 +44,15 @@ export default function ContactListsScreen({
   const { t } = useTranslation();
 
   const [lists, setLists] = useState<ContactList[]>([]);
+  const [colorLabels, setColorLabels] = useState<ColorLabel[]>([]);
   const [newName, setNewName] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // The book currently being renamed in place (id) + its draft name.
+  // The book being edited in place (id) + its draft name + draft colour-label id
+  // ('' = no colour).
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
+  const [editColor, setEditColor] = useState('');
 
   const rowTags = useRef<Record<string, number | null>>({});
   const pendingFocusId = useRef<string | null>(null);
@@ -59,7 +66,12 @@ export default function ContactListsScreen({
     setLoading(true);
     setError(null);
     try {
-      setLists(await listContactLists());
+      const [books, labels] = await Promise.all([
+        listContactLists(),
+        listColorLabels().catch(() => [] as ColorLabel[]),
+      ]);
+      setLists(books);
+      setColorLabels(labels);
     } catch (err) {
       const message = errorMessage(err);
       setError(message);
@@ -76,8 +88,8 @@ export default function ContactListsScreen({
     return unsubscribe;
   }, [navigation, load]);
 
-  // After a create, move screen-reader focus to the new row once the refreshed
-  // list re-renders.
+  // After a create/edit, move screen-reader focus to the affected row once the
+  // refreshed list re-renders.
   useEffect(() => {
     if (pendingFocusId.current == null) return;
     const id = pendingFocusId.current;
@@ -85,6 +97,19 @@ export default function ContactListsScreen({
     const tag = rowTags.current[id];
     if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
   }, [lists]);
+
+  /** The book's resolved colour hex (bound label's live hex, else native), or
+   *  undefined — a swatch for sighted users. */
+  const colorHex = useCallback(
+    (book: ContactList): string | undefined => {
+      if (book.color_label) {
+        const label = colorLabels.find((l) => l.id === book.color_label);
+        if (label) return label.hex;
+      }
+      return book.color?.hex ?? undefined;
+    },
+    [colorLabels],
+  );
 
   const addBook = useCallback(async () => {
     const name = newName.trim();
@@ -107,31 +132,44 @@ export default function ContactListsScreen({
     }
   }, [announce, load, newName, t]);
 
-  const startRename = useCallback((book: ContactList) => {
+  const startEdit = useCallback((book: ContactList) => {
     setEditingId(book.id);
     setEditName(book.name);
+    setEditColor(book.color_label ?? '');
   }, []);
 
-  const cancelRename = useCallback(() => {
+  const cancelEdit = useCallback(() => {
     setEditingId(null);
     setEditName('');
+    setEditColor('');
   }, []);
 
-  const saveRename = useCallback(
+  const saveEdit = useCallback(
     async (book: ContactList) => {
-      const name = editName.trim();
-      if (name.length === 0) {
+      const wantName = editName.trim();
+      // Rename only applies to writable books (it writes to the source); a colour
+      // change applies to any book (a host-local override).
+      const renaming = !book.read_only && wantName !== book.name;
+      if (renaming && wantName.length === 0) {
         setError(t('sidebar.contactListNameRequired'));
         announce(t('sidebar.contactListNameRequired'));
         return;
       }
+      const nextColor = editColor === '' ? null : editColor;
+      const recolouring = nextColor !== (book.color_label ?? null);
+      if (!renaming && !recolouring) {
+        cancelEdit();
+        return;
+      }
       setError(null);
       try {
-        await renameContainer(book.id, 'contact_list', name);
+        if (renaming) await renameContainer(book.id, 'contact_list', wantName);
+        if (recolouring) await setContainerColorLabel(book.id, 'contact_list', nextColor);
         setEditingId(null);
-        setEditName('');
         pendingFocusId.current = book.id;
-        announce(t('sidebar.contactListRenamed', { name }));
+        // The colour picker already spoke its selection; only the rename needs an
+        // explicit confirmation announce.
+        if (renaming) announce(t('sidebar.contactListRenamed', { name: wantName }));
         await load();
       } catch (err) {
         const message = errorMessage(err);
@@ -139,7 +177,7 @@ export default function ContactListsScreen({
         announce(t('mobile.error', { message }));
       }
     },
-    [announce, editName, load, t],
+    [announce, cancelEdit, editColor, editName, load, t],
   );
 
   const removeBook = useCallback(
@@ -214,32 +252,41 @@ export default function ContactListsScreen({
         >
           {lists.map((book) =>
             editingId === book.id ? (
-              <View key={book.id} style={styles.row}>
-                <TextInput
-                  style={styles.editInput}
-                  value={editName}
-                  onChangeText={setEditName}
-                  accessibilityLabel={t('mobile.rename')}
-                  autoFocus
-                  returnKeyType="done"
-                  onSubmitEditing={() => void saveRename(book)}
+              <View key={book.id} style={styles.editPanel}>
+                {!book.read_only && (
+                  <TextInput
+                    style={styles.editInput}
+                    value={editName}
+                    onChangeText={setEditName}
+                    accessibilityLabel={t('mobile.rename')}
+                    autoFocus
+                    returnKeyType="done"
+                    onSubmitEditing={() => void saveEdit(book)}
+                  />
+                )}
+                <ColorLabelSelect
+                  value={editColor}
+                  labels={colorLabels}
+                  onChange={setEditColor}
                 />
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={t('mobile.save')}
-                  onPress={() => void saveRename(book)}
-                  style={({ pressed }) => [styles.smallButton, pressed && styles.pressed]}
-                >
-                  <Text style={styles.smallButtonText}>{t('mobile.save')}</Text>
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={t('mobile.cancel')}
-                  onPress={cancelRename}
-                  style={({ pressed }) => [styles.smallButton, pressed && styles.pressed]}
-                >
-                  <Text style={styles.smallButtonText}>{t('mobile.cancel')}</Text>
-                </Pressable>
+                <View style={styles.editActions}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={t('mobile.save')}
+                    onPress={() => void saveEdit(book)}
+                    style={({ pressed }) => [styles.smallButton, pressed && styles.pressed]}
+                  >
+                    <Text style={styles.smallButtonText}>{t('mobile.save')}</Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={t('mobile.cancel')}
+                    onPress={cancelEdit}
+                    style={({ pressed }) => [styles.smallButton, pressed && styles.pressed]}
+                  >
+                    <Text style={styles.smallButtonText}>{t('mobile.cancel')}</Text>
+                  </Pressable>
+                </View>
               </View>
             ) : (
               <View key={book.id} style={styles.row}>
@@ -252,29 +299,34 @@ export default function ContactListsScreen({
                   accessibilityLabel={book.name}
                   style={styles.rowText}
                 >
+                  {colorHex(book) != null && (
+                    <View
+                      accessible={false}
+                      importantForAccessibility="no"
+                      style={[styles.colorDot, { backgroundColor: colorHex(book) }]}
+                    />
+                  )}
                   <Text style={styles.bookName} importantForAccessibility="no">
                     {book.name}
                   </Text>
                 </View>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`${t('mobile.edit')}: ${book.name}`}
+                  onPress={() => startEdit(book)}
+                  style={({ pressed }) => [styles.smallButton, pressed && styles.pressed]}
+                >
+                  <Text style={styles.smallButtonText}>{t('mobile.edit')}</Text>
+                </Pressable>
                 {!book.read_only && (
-                  <>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={`${t('mobile.rename')}: ${book.name}`}
-                      onPress={() => startRename(book)}
-                      style={({ pressed }) => [styles.smallButton, pressed && styles.pressed]}
-                    >
-                      <Text style={styles.smallButtonText}>{t('mobile.rename')}</Text>
-                    </Pressable>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={`${t('mobile.delete')}: ${book.name}`}
-                      onPress={() => removeBook(book)}
-                      style={({ pressed }) => [styles.deleteButton, pressed && styles.pressed]}
-                    >
-                      <Text style={styles.deleteButtonText}>{t('mobile.delete')}</Text>
-                    </Pressable>
-                  </>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`${t('mobile.delete')}: ${book.name}`}
+                    onPress={() => removeBook(book)}
+                    style={({ pressed }) => [styles.deleteButton, pressed && styles.pressed]}
+                  >
+                    <Text style={styles.deleteButtonText}>{t('mobile.delete')}</Text>
+                  </Pressable>
                 )}
               </View>
             ),
@@ -319,22 +371,37 @@ const styles = StyleSheet.create({
     borderColor: '#c9d2e0',
     backgroundColor: '#f4f7fb',
   },
-  rowText: { flex: 1 },
-  bookName: { fontSize: 18, fontWeight: '600', color: '#10131a' },
+  rowText: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  bookName: { flex: 1, fontSize: 18, fontWeight: '600', color: '#10131a' },
+  colorDot: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.18)',
+  },
+  editPanel: {
+    gap: 10,
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#1d4ed8',
+    backgroundColor: '#f8fafc',
+  },
   editInput: {
-    flex: 1,
     fontSize: 17,
     color: '#10131a',
     paddingVertical: 10,
     paddingHorizontal: 12,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#1d4ed8',
+    borderColor: '#c9d2e0',
     backgroundColor: '#ffffff',
   },
+  editActions: { flexDirection: 'row', gap: 10 },
   smallButton: {
     paddingVertical: 10,
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
     borderRadius: 10,
     borderWidth: 1,
     borderColor: '#c9d2e0',
