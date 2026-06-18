@@ -205,5 +205,11 @@ public class CalFfiModule: Module {
     AsyncFunction("completeOauthJson") { (pluginId: String, requestJson: String) -> String in
       try self.host.completeOauthJson(pluginId: pluginId, requestJson: requestJson)
     }
+
+    // ─── Discovery (EWS Autodiscover; host-driven, like the desktop) ──────────
+
+    AsyncFunction("discoverJson") { (pluginId: String, argsJson: String) -> String in
+      try self.host.discoverJson(pluginId: pluginId, argsJson: argsJson)
+    }
   }
 }

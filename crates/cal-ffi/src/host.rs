@@ -1852,6 +1852,39 @@ impl Host {
         })
     }
 
+    /// Run a plugin's endpoint **discovery** (e.g. EWS Autodiscover for
+    /// `com.aperio.cal-adapter-ews`). `args_json` carries the provider's discover
+    /// inputs — `{email, password}` for EWS. Returns the plugin's discovered
+    /// endpoints as JSON (`{ews_url, account_email}` for EWS) for the caller to
+    /// pre-fill the account form. Mirrors the desktop `discover_ews_endpoint`
+    /// command; the network call hits the provider's Autodiscover, so a failure
+    /// surfaces the plugin's own actionable message ("HTTP 401", "no endpoint for
+    /// …") and the UI can fall back to a manually-entered endpoint.
+    pub fn discover_json(
+        &self,
+        plugin_id: String,
+        args_json: String,
+    ) -> Result<String, StoreError> {
+        let args: serde_json::Value = from_json("discover", &args_json)?;
+        if !args.is_object() {
+            return Err(StoreError::InvalidField {
+                field: "args".to_string(),
+                detail: "discover args must be a JSON object".to_string(),
+            });
+        }
+        let bytes = self
+            .runtime
+            .block_on(async {
+                self.plugin_manager
+                    .discover(&plugin_id, &args.to_string())
+                    .await
+            })
+            .map_err(map_discover_err)?;
+        String::from_utf8(bytes).map_err(|e| StoreError::Protocol {
+            detail: format!("discover response was not UTF-8: {e}"),
+        })
+    }
+
     /// Complete a host-driven OAuth flow: exchange the redirect's `code` (+ the
     /// `pkce_verifier`/`state` from [`Self::begin_oauth_json`]) for tokens via
     /// the plugin (`phase:"exchange"`, the network step), then create the
@@ -2039,6 +2072,24 @@ fn acc_err(e: host_core::accounts::AccountsError) -> StoreError {
         AccountsError::Sqlite(e) => StoreError::Storage {
             detail: e.to_string(),
         },
+    }
+}
+
+/// Map a plugin discover error to the FFI store error. On mobile every plugin is
+/// statically embedded, so `PluginMissing` shouldn't occur for a real id;
+/// `Unsupported` and the plugin's own failure message (the actionable text, e.g.
+/// "Autodiscover HTTP 401" / "no endpoint for …") still need to reach the UI so
+/// it can fall back to a manually-entered endpoint.
+fn map_discover_err(e: plugin_core::manager::DiscoverError) -> StoreError {
+    use plugin_core::manager::DiscoverError as D;
+    match e {
+        D::PluginMissing(id) => StoreError::Unsupported {
+            detail: format!("plugin {id} is not loaded"),
+        },
+        D::Unsupported(id) => StoreError::Unsupported {
+            detail: format!("plugin {id} does not support discovery"),
+        },
+        D::Plugin(msg) => StoreError::Protocol { detail: msg },
     }
 }
 
@@ -2894,6 +2945,40 @@ mod tests {
             host.accounts_json().unwrap(),
             before,
             "a failed exchange must not create an account",
+        );
+    }
+
+    #[test]
+    fn discover_json_validates_at_the_plugin_without_network() {
+        // The EWS plugin's discover handler rejects an empty email BEFORE it
+        // builds the HTTP client, so this exercises the full static chain
+        // (register! discover arm → EWS plugin → cal-ffi) with no network and
+        // surfaces the plugin's actionable message as a Protocol error.
+        let (_dir, host, _kc) = open_host();
+        let err = host
+            .discover_json(
+                "com.aperio.cal-adapter-ews".to_string(),
+                r#"{"email":"","password":"x"}"#.to_string(),
+            )
+            .unwrap_err();
+        assert!(
+            matches!(err, StoreError::Protocol { ref detail } if detail.contains("email")),
+            "got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn discover_json_unknown_plugin_is_unsupported() {
+        let (_dir, host, _kc) = open_host();
+        let err = host
+            .discover_json(
+                "com.aperio.nonexistent-plugin".to_string(),
+                r#"{"email":"a@b.com","password":"x"}"#.to_string(),
+            )
+            .unwrap_err();
+        assert!(
+            matches!(err, StoreError::Unsupported { .. }),
+            "got: {err:?}"
         );
     }
 

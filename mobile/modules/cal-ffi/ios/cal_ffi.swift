@@ -734,6 +734,18 @@ public protocol HostProtocol: AnyObject, Sendable {
     func deleteTaskList(id: String) throws 
     
     /**
+     * Run a plugin's endpoint **discovery** (e.g. EWS Autodiscover for
+     * `com.aperio.cal-adapter-ews`). `args_json` carries the provider's discover
+     * inputs — `{email, password}` for EWS. Returns the plugin's discovered
+     * endpoints as JSON (`{ews_url, account_email}` for EWS) for the caller to
+     * pre-fill the account form. Mirrors the desktop `discover_ews_endpoint`
+     * command; the network call hits the provider's Autodiscover, so a failure
+     * surfaces the plugin's own actionable message ("HTTP 401", "no endpoint for
+     * …") and the UI can fall back to a manually-entered endpoint.
+     */
+    func discoverJson(pluginId: String, argsJson: String) throws  -> String
+    
+    /**
      * One local event by id as JSON (`Event` or `null`). Local-only by design
      * — the desktop `get_event_by_id` is the reminders-overview lookup against
      * the local store; external events aren't addressable by a bare id without
@@ -1285,6 +1297,26 @@ open func deleteTaskList(id: String)throws   {try rustCallWithError(FfiConverter
         FfiConverterString.lower(id),$0
     )
 }
+}
+    
+    /**
+     * Run a plugin's endpoint **discovery** (e.g. EWS Autodiscover for
+     * `com.aperio.cal-adapter-ews`). `args_json` carries the provider's discover
+     * inputs — `{email, password}` for EWS. Returns the plugin's discovered
+     * endpoints as JSON (`{ews_url, account_email}` for EWS) for the caller to
+     * pre-fill the account form. Mirrors the desktop `discover_ews_endpoint`
+     * command; the network call hits the provider's Autodiscover, so a failure
+     * surfaces the plugin's own actionable message ("HTTP 401", "no endpoint for
+     * …") and the UI can fall back to a manually-entered endpoint.
+     */
+open func discoverJson(pluginId: String, argsJson: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_discover_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(pluginId),
+        FfiConverterString.lower(argsJson),$0
+    )
+})
 }
     
     /**
@@ -4863,6 +4895,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_delete_task_list() != 53168) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_discover_json() != 25945) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_get_event_by_id_json() != 43277) {

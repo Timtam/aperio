@@ -234,5 +234,14 @@ class CalFfiModule : Module() {
     AsyncFunction("completeOauthJson") { pluginId: String, requestJson: String ->
       host.completeOauthJson(pluginId, requestJson)
     }
+
+    // ─── Discovery (EWS Autodiscover; host-driven, like the desktop) ──────────
+    // discoverJson runs a plugin's endpoint discovery (EWS: {email, password} →
+    // {ews_url, account_email}); the network call hits the provider, so a thrown
+    // StoreException rejects the JS promise with the plugin's actionable message.
+
+    AsyncFunction("discoverJson") { pluginId: String, argsJson: String ->
+      host.discoverJson(pluginId, argsJson)
+    }
   }
 }

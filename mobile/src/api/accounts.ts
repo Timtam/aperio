@@ -73,6 +73,30 @@ export const deleteAccount = async (id: string): Promise<void> => {
   scheduleBackgroundPush();
 };
 
+// ── Discovery (EWS Autodiscover) ─────────────────────────────────────────────
+
+/** The EWS plugin id the Host drives discovery for. */
+const PLUGIN_ID_EWS = 'com.aperio.cal-adapter-ews';
+
+/** Discovered EWS endpoints (the desktop `DiscoveredEndpoints` wire shape). */
+export interface DiscoveredEndpoints {
+  ews_url: string;
+  /** The (possibly redirected) account email Autodiscover resolved. */
+  account_email: string;
+}
+
+/** Resolve an EWS account's endpoint from email + password via Microsoft
+ *  Autodiscover (the desktop "Discover URL" flow). Returns the endpoint +
+ *  account email to pre-fill the form; rejects with the plugin's actionable
+ *  message on failure (so the UI can fall back to a manually-entered endpoint). */
+export const discoverEwsEndpoint = async (
+  email: string,
+  password: string,
+): Promise<DiscoveredEndpoints> =>
+  JSON.parse(
+    await CalFfi.discoverJson(PLUGIN_ID_EWS, JSON.stringify({ email, password })),
+  ) as DiscoveredEndpoints;
+
 // ── OAuth (host-driven two-phase flow around a native auth session) ──────────
 // Desktop runs OAuth via the plugin's loopback+browser dance; mobile can't, so
 // the Host drives it in two phases and the JS layer opens the consent URL in a

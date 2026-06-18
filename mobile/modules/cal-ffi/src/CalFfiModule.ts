@@ -157,6 +157,14 @@ declare class CalFfiModule extends NativeModule<Record<never, never>> {
    *  pkce_verifier, state, returned_state, redirect_uri}`. Returns the created
    *  `Account` as JSON. */
   completeOauthJson(pluginId: string, requestJson: string): Promise<string>;
+
+  // ── Discovery (EWS Autodiscover; host-driven) ──
+  /** Run a plugin's endpoint discovery. `argsJson` carries `{email, password}`
+   *  (EWS); returns the discovered endpoints as JSON (`{ews_url, account_email}`
+   *  for EWS) to pre-fill the account form. The network call hits the provider's
+   *  Autodiscover, so it rejects with the plugin's actionable message on
+   *  failure — the caller can then fall back to a manually-entered endpoint. */
+  discoverJson(pluginId: string, argsJson: string): Promise<string>;
 }
 
 export default requireNativeModule<CalFfiModule>('CalFfi');

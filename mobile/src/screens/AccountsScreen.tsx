@@ -17,6 +17,7 @@ import {
   AdapterKind,
   createAccount,
   deleteAccount,
+  discoverEwsEndpoint,
   listAccounts,
 } from '../api/accounts';
 import OAuthConnectForm from './OAuthConnectForm';
@@ -103,6 +104,7 @@ export default function AccountsScreen() {
   const [config, setConfig] = useState<Record<string, string>>({});
   const [secret, setSecret] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [discovering, setDiscovering] = useState(false);
 
   const rowTags = useRef<Record<string, number | null>>({});
   const pendingFocusId = useRef<string | null>(null);
@@ -185,6 +187,42 @@ export default function AccountsScreen() {
       setSubmitting(false);
     }
   }, [announce, config, displayName, form, kind, load, resetForm, secret, t]);
+
+  // EWS Autodiscover: derive the endpoint from the email + password (the EWS
+  // form's username field holds the email) and pre-fill the endpoint + username,
+  // mirroring the desktop "Discover URL" button. Network call → the typed plugin
+  // message surfaces on failure so the user can enter the endpoint manually.
+  const discover = useCallback(async () => {
+    const email = (config.username ?? '').trim();
+    const password = secret.trim();
+    if (email.length === 0) {
+      setError(t('dialogs.accounts.ewsDiscoverNeedsEmail'));
+      announce(t('dialogs.accounts.ewsDiscoverNeedsEmail'));
+      return;
+    }
+    if (password.length === 0) {
+      setError(t('dialogs.accounts.ewsDiscoverNeedsPassword'));
+      announce(t('dialogs.accounts.ewsDiscoverNeedsPassword'));
+      return;
+    }
+    setError(null);
+    setDiscovering(true);
+    try {
+      const result = await discoverEwsEndpoint(email, password);
+      setConfig((c) => ({
+        ...c,
+        endpoint: result.ews_url,
+        username: result.account_email,
+      }));
+      announce(t('dialogs.accounts.ewsDiscoverOk', { url: result.ews_url }));
+    } catch (err) {
+      const message = errorMessage(err);
+      setError(message);
+      announce(t('mobile.error', { message }));
+    } finally {
+      setDiscovering(false);
+    }
+  }, [announce, config, secret, t]);
 
   const remove = useCallback(
     async (account: Account) => {
@@ -335,6 +373,28 @@ export default function AccountsScreen() {
         </View>
       )}
 
+      {kind === 'ews' && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ disabled: discovering, busy: discovering }}
+          accessibilityLabel={t('dialogs.accounts.ewsDiscover')}
+          accessibilityHint={t('dialogs.accounts.ewsDiscoverSrHint')}
+          disabled={discovering}
+          onPress={() => void discover()}
+          style={({ pressed }) => [
+            styles.discoverButton,
+            pressed && styles.pressed,
+            discovering && styles.discoverButtonDisabled,
+          ]}
+        >
+          <Text style={styles.discoverButtonText}>
+            {discovering
+              ? t('dialogs.accounts.ewsDiscovering')
+              : t('dialogs.accounts.ewsDiscover')}
+          </Text>
+        </Pressable>
+      )}
+
       <Pressable
         accessibilityRole="button"
         accessibilityState={{ disabled: submitting }}
@@ -407,6 +467,17 @@ const styles = StyleSheet.create({
   addButtonPressed: { backgroundColor: '#1740a8' },
   addButtonDisabled: { backgroundColor: '#9aa9c9' },
   addButtonText: { fontSize: 16, fontWeight: '700', color: '#ffffff' },
+  discoverButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#c9d2e0',
+    backgroundColor: '#f4f7fb',
+    alignItems: 'center',
+  },
+  discoverButtonDisabled: { opacity: 0.5 },
+  discoverButtonText: { fontSize: 15, fontWeight: '600', color: '#1d3a2f' },
   muted: { fontSize: 15, color: '#5b6573' },
   error: { fontSize: 15, fontWeight: '600', color: '#b42318' },
 });

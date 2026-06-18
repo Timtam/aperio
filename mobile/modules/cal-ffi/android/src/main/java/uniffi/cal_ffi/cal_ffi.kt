@@ -768,6 +768,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_delete_task_list(
     ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_discover_json(
+    ): Short
     external fun uniffi_cal_ffi_checksum_method_host_get_event_by_id_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_get_events_json(
@@ -929,6 +931,8 @@ external fun uniffi_cal_ffi_fn_method_host_delete_task(`ptr`: Long,`id`: RustBuf
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_delete_task_list(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_cal_ffi_fn_method_host_discover_json(`ptr`: Long,`pluginId`: RustBuffer.ByValue,`argsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_get_event_by_id_json(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_get_events_json(`ptr`: Long,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1236,6 +1240,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_delete_task_list() != 53168.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_discover_json() != 25945.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_get_event_by_id_json() != 43277.toShort()) {
@@ -1933,6 +1940,18 @@ public interface HostInterface {
     fun `deleteTaskList`(`id`: kotlin.String)
     
     /**
+     * Run a plugin's endpoint **discovery** (e.g. EWS Autodiscover for
+     * `com.aperio.cal-adapter-ews`). `args_json` carries the provider's discover
+     * inputs — `{email, password}` for EWS. Returns the plugin's discovered
+     * endpoints as JSON (`{ews_url, account_email}` for EWS) for the caller to
+     * pre-fill the account form. Mirrors the desktop `discover_ews_endpoint`
+     * command; the network call hits the provider's Autodiscover, so a failure
+     * surfaces the plugin's own actionable message ("HTTP 401", "no endpoint for
+     * …") and the UI can fall back to a manually-entered endpoint.
+     */
+    fun `discoverJson`(`pluginId`: kotlin.String, `argsJson`: kotlin.String): kotlin.String
+    
+    /**
      * One local event by id as JSON (`Event` or `null`). Local-only by design
      * — the desktop `get_event_by_id` is the reminders-overview lookup against
      * the local store; external events aren't addressable by a bare id without
@@ -2614,6 +2633,30 @@ open class Host: Disposable, AutoCloseable, HostInterface
 }
     }
     
+    
+
+    
+    /**
+     * Run a plugin's endpoint **discovery** (e.g. EWS Autodiscover for
+     * `com.aperio.cal-adapter-ews`). `args_json` carries the provider's discover
+     * inputs — `{email, password}` for EWS. Returns the plugin's discovered
+     * endpoints as JSON (`{ews_url, account_email}` for EWS) for the caller to
+     * pre-fill the account form. Mirrors the desktop `discover_ews_endpoint`
+     * command; the network call hits the provider's Autodiscover, so a failure
+     * surfaces the plugin's own actionable message ("HTTP 401", "no endpoint for
+     * …") and the UI can fall back to a manually-entered endpoint.
+     */
+    @Throws(StoreException::class)override fun `discoverJson`(`pluginId`: kotlin.String, `argsJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_discover_json(
+        it,
+        FfiConverterString.lower(`pluginId`),FfiConverterString.lower(`argsJson`),_status)
+}
+    }
+    )
+    }
     
 
     
