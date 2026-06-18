@@ -1,24 +1,25 @@
 import { useTranslation } from 'react-i18next';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-// Day ⇄ Agenda view switch — the mobile analogue of the desktop toolbar's view
-// switcher (Day and Agenda are sibling calendar views, not separate tabs). Two
-// buttons carrying accessibilityState.selected (TalkBack/VoiceOver announce
-// "selected") + a visible selected style for sighted users.
+// Day ⇄ Week ⇄ Agenda view switch — the mobile analogue of the desktop toolbar's
+// view switcher (sibling calendar views, not separate tabs). Buttons carry
+// accessibilityState.selected (TalkBack/VoiceOver announce "selected") + a
+// visible selected style for sighted users. Pressing the active view is a no-op.
+
+export type CalendarViewKind = 'day' | 'week' | 'agenda';
 
 export function CalendarViewSwitcher({
   active,
-  onDay,
-  onAgenda,
+  onSelect,
 }: {
-  active: 'day' | 'agenda';
-  onDay: () => void;
-  onAgenda: () => void;
+  active: CalendarViewKind;
+  onSelect: (view: CalendarViewKind) => void;
 }) {
   const { t } = useTranslation();
-  const options: { key: 'day' | 'agenda'; label: string; onPress: () => void }[] = [
-    { key: 'day', label: t('toolbar.views.day'), onPress: onDay },
-    { key: 'agenda', label: t('toolbar.views.agenda'), onPress: onAgenda },
+  const options: { key: CalendarViewKind; label: string }[] = [
+    { key: 'day', label: t('toolbar.views.day') },
+    { key: 'week', label: t('toolbar.views.week') },
+    { key: 'agenda', label: t('toolbar.views.agenda') },
   ];
   return (
     <View
@@ -34,7 +35,9 @@ export function CalendarViewSwitcher({
             accessibilityRole="button"
             accessibilityState={{ selected }}
             accessibilityLabel={opt.label}
-            onPress={opt.onPress}
+            onPress={() => {
+              if (!selected) onSelect(opt.key);
+            }}
             style={({ pressed }) => [
               styles.button,
               selected && styles.buttonSelected,

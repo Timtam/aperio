@@ -1595,6 +1595,7 @@
       "title": "Week view",
       "kw": "Week {{week}}",
       "gridLabel": "Week grid",
+      "empty": "Nothing scheduled this week.",
       "dayAnnounce_one": "{{day}}, 1 item",
       "dayAnnounce_other": "{{day}}, {{count}} items",
       "eventLabel": "Event: {{title}}, {{time}}, calendar: {{calendar}}",

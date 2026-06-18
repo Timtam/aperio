@@ -250,16 +250,19 @@ export default function AgendaScreen({
     [calendarsById, fmtFullDate, labelsById, t, timeLabel],
   );
 
-  // Switcher: Day ⇄ Agenda, carrying the anchor so the date survives the switch.
-  // replace (not push): sibling views swap in place, keeping the stack flat.
-  const onDay = useCallback(
-    () => navigation.replace('Events', { anchor: anchor.toISOString() }),
-    [anchor, navigation],
-  );
-
   return (
     <View style={styles.screen}>
-      <CalendarViewSwitcher active="agenda" onDay={onDay} onAgenda={() => {}} />
+      {/* Day ⇄ Week ⇄ Agenda, carrying the anchor so the date survives the
+          switch. replace (not push): sibling views swap in place, keeping the
+          stack flat. Pressing the active view is suppressed by the switcher. */}
+      <CalendarViewSwitcher
+        active="agenda"
+        onSelect={(v) =>
+          navigation.replace(v === 'day' ? 'Events' : 'Week', {
+            anchor: anchor.toISOString(),
+          })
+        }
+      />
 
       <View style={styles.navBar}>
         <Pressable

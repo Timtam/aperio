@@ -1595,6 +1595,7 @@
       "title": "Wochenansicht",
       "kw": "KW {{week}}",
       "gridLabel": "Wochenraster",
+      "empty": "Diese Woche ist nichts geplant.",
       "dayAnnounce_one": "{{day}}, 1 Eintrag",
       "dayAnnounce_other": "{{day}}, {{count}} Einträge",
       "eventLabel": "Termin: {{title}}, {{time}}, Kalender: {{calendar}}",
