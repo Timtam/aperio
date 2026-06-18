@@ -81,6 +81,9 @@ export default function ListEditorModal({
   const [newSectionName, setNewSectionName] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
+  // The section being edited also carries its colour ('' = none); only LOCAL
+  // sections store it on their row (external = override, deferred).
+  const [editingColor, setEditingColor] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -252,7 +255,10 @@ export default function ListEditorModal({
     setError(null);
     setBusy(true);
     try {
-      await updateSection({ ...section, name });
+      // Name + colour in one write. The colour rides the section's own row for
+      // a LOCAL section; for an external section the picker is hidden and the
+      // Host's external update_section ignores colour anyway (name only).
+      await updateSection({ ...section, name, color_label: editingColor || null });
       pendingRenameFocus.current = renameIndex.current;
       setEditingId(null);
       await loadSections(listId);
@@ -265,7 +271,18 @@ export default function ListEditorModal({
     } finally {
       setBusy(false);
     }
-  }, [announce, busy, editingId, editingName, invalidateData, listId, loadSections, sections, t]);
+  }, [
+    announce,
+    busy,
+    editingColor,
+    editingId,
+    editingName,
+    invalidateData,
+    listId,
+    loadSections,
+    sections,
+    t,
+  ]);
 
   const cancelRename = useCallback(() => {
     pendingRenameFocus.current = renameIndex.current;
@@ -426,9 +443,14 @@ export default function ListEditorModal({
               {t('dialogs.task.noSection')}
             </Text>
           ) : (
-            sections.map((section, index) =>
-              editingId === section.id ? (
-                <View key={section.id} style={styles.sectionRow}>
+            sections.map((section, index) => {
+              // The section's bound colour (LOCAL only) — a swatch for sighted
+              // users + the name on the row's accessible label.
+              const colour = section.color_label
+                ? colorLabels.find((l) => l.id === section.color_label)
+                : undefined;
+              return editingId === section.id ? (
+                <View key={section.id} style={styles.sectionEditPanel}>
                   <TextInput
                     style={styles.input}
                     value={editingName}
@@ -439,52 +461,80 @@ export default function ListEditorModal({
                     returnKeyType="done"
                     onSubmitEditing={() => void saveRename()}
                   />
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityState={{ disabled: busy }}
-                    accessibilityLabel={t('dialogs.task.section.save')}
-                    disabled={busy}
-                    onPress={() => void saveRename()}
-                    style={({ pressed }) => [styles.smallButton, pressed && styles.pressed]}
-                  >
-                    <Text style={styles.smallButtonText}>
-                      {t('dialogs.task.section.save')}
-                    </Text>
-                  </Pressable>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={t('dialogs.task.section.cancel')}
-                    onPress={cancelRename}
-                    style={({ pressed }) => [styles.smallButton, pressed && styles.pressed]}
-                  >
-                    <Text style={styles.smallButtonText}>
-                      {t('dialogs.task.section.cancel')}
-                    </Text>
-                  </Pressable>
+                  {/* Colour — LOCAL sections only (external = override, deferred). */}
+                  {isLocal && (
+                    <ColorLabelSelect
+                      value={editingColor}
+                      labels={colorLabels}
+                      onChange={setEditingColor}
+                      disabled={busy}
+                    />
+                  )}
+                  <View style={styles.editButtons}>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityState={{ disabled: busy }}
+                      accessibilityLabel={t('dialogs.task.section.save')}
+                      disabled={busy}
+                      onPress={() => void saveRename()}
+                      style={({ pressed }) => [styles.smallButton, pressed && styles.pressed]}
+                    >
+                      <Text style={styles.smallButtonText}>
+                        {t('dialogs.task.section.save')}
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={t('dialogs.task.section.cancel')}
+                      onPress={cancelRename}
+                      style={({ pressed }) => [styles.smallButton, pressed && styles.pressed]}
+                    >
+                      <Text style={styles.smallButtonText}>
+                        {t('dialogs.task.section.cancel')}
+                      </Text>
+                    </Pressable>
+                  </View>
                 </View>
               ) : (
                 <View key={section.id} style={styles.sectionRow}>
+                  {colour != null && (
+                    <View
+                      accessible={false}
+                      importantForAccessibility="no"
+                      style={[styles.colorDot, { backgroundColor: colour.hex }]}
+                    />
+                  )}
                   <Text
                     ref={focus.registerRow(index)}
                     style={styles.sectionName}
                     accessibilityRole="text"
+                    accessibilityLabel={
+                      colour != null
+                        ? `${section.name}${t('mobile.colorLabelSuffix', { name: colour.name })}`
+                        : undefined
+                    }
                   >
                     {section.name}
                   </Text>
+                  {/* Edit covers name + colour for a local section; an external
+                      section (manageable_sections) can only be renamed. */}
                   <Pressable
                     accessibilityRole="button"
                     accessibilityState={{ disabled: busy }}
-                    accessibilityLabel={`${t('dialogs.task.section.rename')}: ${section.name}`}
+                    accessibilityLabel={`${
+                      isLocal ? t('mobile.edit') : t('dialogs.task.section.rename')
+                    }: ${section.name}`}
                     disabled={busy}
                     onPress={() => {
                       renameIndex.current = index;
                       setEditingId(section.id);
                       setEditingName(section.name);
+                      setEditingColor(section.color_label ?? '');
                     }}
                     style={({ pressed }) => [styles.smallButton, pressed && styles.pressed]}
                   >
                     <Text style={styles.smallButtonText}>
-                      {t('dialogs.task.section.rename')}
+                      {isLocal ? t('mobile.edit') : t('dialogs.task.section.rename')}
                     </Text>
                   </Pressable>
                   <Pressable
@@ -502,8 +552,8 @@ export default function ListEditorModal({
                     </Text>
                   </Pressable>
                 </View>
-              ),
-            )
+              );
+            })
           )}
         </>
       )}
@@ -558,6 +608,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
     paddingVertical: 8,
+  },
+  // Edit mode stacks the name field, the colour picker and the buttons.
+  sectionEditPanel: { gap: 10, paddingVertical: 8 },
+  editButtons: { flexDirection: 'row', gap: 10 },
+  // The section's bound colour (sighted users); subtle border keeps light
+  // colours visible. Matches the task/event/list row dot.
+  colorDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.18)',
   },
   sectionName: { flex: 1, fontSize: 17, color: '#10131a' },
   smallButton: {
