@@ -202,8 +202,9 @@ export default function AccountsScreen() {
     [announce, load, t],
   );
 
-  // OAuth (browser sign-in) outcomes — the form handles the begin/exchange dance
-  // and the account creation; the screen owns the list, focus, and error display.
+  // OAuth (browser sign-in) success — the form owns the begin/exchange dance, its
+  // own validation/error region, and the cancel announcement; the screen only
+  // reloads the list, moves SR focus to the new row, and announces the result.
   const onOAuthConnected = useCallback(
     async (account: Account) => {
       setError(null);
@@ -212,14 +213,6 @@ export default function AccountsScreen() {
       announce(t('dialogs.accounts.created', { name: account.display_name }));
     },
     [announce, load, t],
-  );
-
-  const onOAuthError = useCallback(
-    (message: string) => {
-      setError(message);
-      announce(message);
-    },
-    [announce],
   );
 
   return (
@@ -358,11 +351,7 @@ export default function AccountsScreen() {
       </Pressable>
 
       {/* Connect a provider (browser sign-in) */}
-      <OAuthConnectForm
-        announce={announce}
-        onConnected={(account) => void onOAuthConnected(account)}
-        onError={onOAuthError}
-      />
+      <OAuthConnectForm onConnected={(account) => void onOAuthConnected(account)} />
     </ScrollView>
   );
 }

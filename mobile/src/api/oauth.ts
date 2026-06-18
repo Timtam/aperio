@@ -78,6 +78,13 @@ export async function connectOAuthAccount(
   const params = Linking.parse(result.url).queryParams ?? {};
   const errorParam = firstString(params.error);
   if (errorParam != null) {
+    // The user declining consent is a cancellation, not a failure — surface it
+    // like a browser dismiss (gentle + localised), not a raw English error token.
+    // (consent_required/interaction_required are prompt=none signals, not used
+    // here, so they stay genuine errors.)
+    if (errorParam === 'access_denied' || errorParam === 'user_cancelled') {
+      return { kind: 'cancelled' };
+    }
     throw new Error(errorParam);
   }
   const code = firstString(params.code);

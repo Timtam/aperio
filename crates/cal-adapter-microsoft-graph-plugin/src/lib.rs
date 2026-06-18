@@ -705,6 +705,19 @@ struct InteractiveAuthArgs {
     returned_state: Option<String>,
 }
 
+/// Validate the OAuth CSRF `state`: the redirect's returned state must be
+/// present, non-empty, and equal to the one issued at authorize. Fails CLOSED —
+/// a missing or empty value on either side is rejected, since this guards the
+/// token exchange + account creation.
+fn verify_oauth_state(issued: Option<&str>, returned: Option<&str>) -> Result<(), String> {
+    let issued = issued.unwrap_or_default().trim();
+    let returned = returned.unwrap_or_default().trim();
+    if issued.is_empty() || returned.is_empty() || issued != returned {
+        return Err("OAuth state mismatch (possible CSRF) — aborting".to_string());
+    }
+    Ok(())
+}
+
 async fn plugin_interactive_auth(args_json: String) -> Result<Vec<u8>, String> {
     let args: InteractiveAuthArgs = serde_json::from_str(&args_json)
         .map_err(|e| format!("malformed interactive_auth args: {e}"))?;
@@ -739,13 +752,10 @@ async fn plugin_interactive_auth(args_json: String) -> Result<Vec<u8>, String> {
             let redirect_uri = args
                 .redirect_uri
                 .ok_or_else(|| "redirect_uri is required in the exchange phase".to_string())?;
-            // CSRF: the redirect's `state` must match the one issued at authorize.
-            match (args.state.as_deref(), args.returned_state.as_deref()) {
-                (Some(issued), Some(returned)) if issued != returned => {
-                    return Err("OAuth state mismatch (possible CSRF) — aborting".to_string());
-                }
-                _ => {}
-            }
+            // CSRF: the redirect's `state` must equal the one issued at authorize.
+            // Fail CLOSED — this guards token minting + account creation, so a
+            // missing/empty state on either side aborts (see verify_oauth_state).
+            verify_oauth_state(args.state.as_deref(), args.returned_state.as_deref())?;
             let tokens = MicrosoftGraphAdapter::oauth_exchange(
                 client_id,
                 authority,

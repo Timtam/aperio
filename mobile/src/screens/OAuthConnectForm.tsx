@@ -1,6 +1,14 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  AccessibilityInfo,
+  findNodeHandle,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 
 import { RadioGroup } from '../components/RadioGroup';
 import { Account } from '../api/accounts';
@@ -13,7 +21,10 @@ import { connectOAuthAccount, type OAuthProvider } from '../api/oauth';
 //
 // BYO client-id: the user pastes their own OAuth client credentials. Screen-
 // reader-first — every field is a labelled element, the provider + Microsoft
-// account-type are RadioGroups, and outcomes are announced by the parent.
+// account-type are RadioGroups, the form owns its own error region (announced +
+// SR-focused so a blind user can re-read it without hunting), and after the
+// native auth session closes SR focus is moved to a known element (the new
+// account row on success, via the parent; the sign-in button on cancel).
 
 type Authority = 'common' | 'consumers' | 'organizations';
 
@@ -22,19 +33,11 @@ function errorMessage(err: unknown): string {
 }
 
 interface OAuthConnectFormProps {
-  /** Announce intermediate (non-terminal) SR messages — "Signing in …", cancel. */
-  announce: (message: string) => void;
   /** A connect succeeded — the parent reloads the list, moves focus, announces. */
   onConnected: (account: Account) => void;
-  /** A connect failed — the parent shows + announces the (already-localised) message. */
-  onError: (message: string) => void;
 }
 
-export default function OAuthConnectForm({
-  announce,
-  onConnected,
-  onError,
-}: OAuthConnectFormProps) {
+export default function OAuthConnectForm({ onConnected }: OAuthConnectFormProps) {
   const { t } = useTranslation();
 
   const [provider, setProvider] = useState<OAuthProvider>('google');
@@ -43,35 +46,55 @@ export default function OAuthConnectForm({
   const [clientSecret, setClientSecret] = useState('');
   const [authority, setAuthority] = useState<Authority>('common');
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const buttonRef = useRef<View>(null);
+  const errorRef = useRef<Text>(null);
 
   const isMicrosoft = provider === 'microsoft_graph';
+
+  // The native auth session dismissing leaves RN screen-reader focus undefined,
+  // so move it deliberately: to the error region when one appears (so it can be
+  // re-read), else to the sign-in button on a cancel.
+  useEffect(() => {
+    if (error == null) return;
+    const tag = errorRef.current ? findNodeHandle(errorRef.current) : null;
+    if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
+  }, [error]);
+
+  const focusButton = useCallback(() => {
+    const tag = buttonRef.current ? findNodeHandle(buttonRef.current) : null;
+    if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
+  }, []);
 
   const onChangeProvider = useCallback((next: OAuthProvider) => {
     setProvider(next);
     setClientId('');
     setClientSecret('');
     setAuthority('common');
+    setError(null);
   }, []);
 
   const connect = useCallback(async () => {
     const name = displayName.trim();
     const id = clientId.trim();
     const secret = clientSecret.trim();
+    setError(null);
     if (name.length === 0) {
-      onError(t('dialogs.accounts.nameRequired'));
+      setError(t('dialogs.accounts.nameRequired'));
       return;
     }
     if (id.length === 0) {
-      onError(t('dialogs.accounts.clientIdRequired'));
+      setError(t('dialogs.accounts.clientIdRequired'));
       return;
     }
     if (!isMicrosoft && secret.length === 0) {
-      onError(t('dialogs.accounts.clientSecretRequired'));
+      setError(t('dialogs.accounts.clientSecretRequired'));
       return;
     }
 
     setSubmitting(true);
-    announce(t('mobile.oauthConnecting'));
+    AccessibilityInfo.announceForAccessibility(t('mobile.oauthConnecting'));
     try {
       const result = await connectOAuthAccount({
         provider,
@@ -81,7 +104,8 @@ export default function OAuthConnectForm({
         authority: isMicrosoft ? authority : undefined,
       });
       if (result.kind === 'cancelled') {
-        announce(t('mobile.oauthCancelled'));
+        AccessibilityInfo.announceForAccessibility(t('mobile.oauthCancelled'));
+        focusButton();
         return;
       }
       setDisplayName('');
@@ -90,19 +114,22 @@ export default function OAuthConnectForm({
       onConnected(result.account);
     } catch (err) {
       const raw = errorMessage(err);
-      onError(raw === 'OAUTH_NO_CODE' ? t('mobile.oauthNoCode') : raw);
+      setError(
+        raw === 'OAUTH_NO_CODE'
+          ? t('mobile.oauthNoCode')
+          : t('mobile.error', { message: raw }),
+      );
     } finally {
       setSubmitting(false);
     }
   }, [
-    announce,
     authority,
     clientId,
     clientSecret,
     displayName,
+    focusButton,
     isMicrosoft,
     onConnected,
-    onError,
     provider,
     t,
   ]);
@@ -214,7 +241,20 @@ export default function OAuthConnectForm({
           : t('dialogs.accounts.googleFlowHint')}
       </Text>
 
+      {error != null && (
+        <Text
+          ref={errorRef}
+          accessible
+          accessibilityRole="text"
+          accessibilityLiveRegion="assertive"
+          style={styles.error}
+        >
+          {error}
+        </Text>
+      )}
+
       <Pressable
+        ref={buttonRef}
         accessibilityRole="button"
         accessibilityState={{ disabled: submitting, busy: submitting }}
         accessibilityLabel={t('mobile.oauthSignIn')}
@@ -240,6 +280,7 @@ const styles = StyleSheet.create({
   field: { gap: 6 },
   label: { fontSize: 15, fontWeight: '600', color: '#2b3240' },
   hint: { fontSize: 13, color: '#5b6573' },
+  error: { fontSize: 15, fontWeight: '600', color: '#b42318' },
   input: {
     fontSize: 17,
     color: '#10131a',

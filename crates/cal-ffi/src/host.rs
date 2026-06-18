@@ -1869,6 +1869,37 @@ impl Host {
     ) -> Result<String, StoreError> {
         let req: CompleteOAuthRequest = from_json("oauth complete", &request_json)?;
 
+        // 0. Enforce the same non-empty invariants the desktop connect_* commands
+        //    check server-side, so the engine boundary holds regardless of caller
+        //    (not only when the UI form happens to validate first).
+        if req.display_name.trim().is_empty() {
+            return Err(StoreError::InvalidField {
+                field: "display_name".to_string(),
+                detail: "display name must not be empty".to_string(),
+            });
+        }
+        if req.client_id.trim().is_empty() {
+            return Err(StoreError::InvalidField {
+                field: "client_id".to_string(),
+                detail: "client_id must not be empty".to_string(),
+            });
+        }
+        // Google's token endpoint requires the secret; Microsoft (a PKCE public
+        // client) carries none, so only gate it for Google.
+        if matches!(req.adapter_kind, AdapterKind::Google)
+            && req
+                .client_secret
+                .as_deref()
+                .map(str::trim)
+                .unwrap_or("")
+                .is_empty()
+        {
+            return Err(StoreError::InvalidField {
+                field: "client_secret".to_string(),
+                detail: "client_secret must not be empty".to_string(),
+            });
+        }
+
         // 1. Exchange the code for tokens FIRST — so a failed exchange never
         //    leaves an orphaned account row. The plugin's exchange phase does
         //    the CSRF (state) check.
@@ -2863,6 +2894,43 @@ mod tests {
             host.accounts_json().unwrap(),
             before,
             "a failed exchange must not create an account",
+        );
+    }
+
+    #[test]
+    fn complete_oauth_rejects_a_csrf_state_mismatch_without_creating_an_account() {
+        // The plugin's exchange phase runs the CSRF (state) check BEFORE the
+        // network token POST, so a mismatched issued-vs-returned state aborts with
+        // no network and no orphan account row. Guards the fail-closed check.
+        let (_dir, host, _kc) = open_host();
+        let before = host.accounts_json().unwrap();
+        let req = r#"{"adapter_kind":"google","display_name":"G","config_json":"{}","client_id":"x","client_secret":"y","code":"c","pkce_verifier":"v","state":"AAAA","returned_state":"BBBB","redirect_uri":"aperio://oauth-callback"}"#;
+        let err = host
+            .complete_oauth_json("com.aperio.cal-adapter-google".to_string(), req.to_string())
+            .unwrap_err();
+        assert!(matches!(err, StoreError::Auth { .. }), "got: {err:?}");
+        assert!(
+            err.to_string().contains("CSRF") || err.to_string().contains("state mismatch"),
+            "expected a CSRF state-mismatch error, got: {err}"
+        );
+        assert_eq!(
+            host.accounts_json().unwrap(),
+            before,
+            "a CSRF-rejected exchange must not create an account",
+        );
+    }
+
+    #[test]
+    fn complete_oauth_rejects_an_empty_display_name() {
+        // The host enforces the desktop's non-empty guards regardless of caller.
+        let (_dir, host, _kc) = open_host();
+        let req = r#"{"adapter_kind":"google","display_name":"  ","config_json":"{}","client_id":"x","client_secret":"y","code":"c","pkce_verifier":"v","state":"s","returned_state":"s","redirect_uri":"aperio://oauth-callback"}"#;
+        let err = host
+            .complete_oauth_json("com.aperio.cal-adapter-google".to_string(), req.to_string())
+            .unwrap_err();
+        assert!(
+            matches!(err, StoreError::InvalidField { ref field, .. } if field == "display_name"),
+            "got: {err:?}"
         );
     }
 
