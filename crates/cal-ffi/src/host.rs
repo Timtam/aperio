@@ -43,7 +43,9 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
 use cal_adapter_local::LocalAdapter;
-use cal_core::{Calendar, CalendarFeature, ColorLabelId, DateRange, Event, NewEvent};
+use cal_core::{
+    Calendar, CalendarFeature, ColorLabelId, DateRange, Event, NewEvent, TaskList, TasksFeature,
+};
 use host_core::accounts::{AccountsRepo, AdapterKind};
 use host_core::event_log::OnboardingService;
 use host_core::registry::{AdapterRegistry, LOCAL_ID};
@@ -91,6 +93,15 @@ fn sync_err(e: SyncError) -> StoreError {
 fn storage_err(e: impl std::fmt::Display) -> StoreError {
     StoreError::Storage {
         detail: e.to_string(),
+    }
+}
+
+/// Error for a write attempted against an external task list. Reads route to the
+/// provider, but external task WRITES on mobile are a later phase, so a clear
+/// `Unsupported` beats a confusing local NotFound.
+fn external_tasks_readonly() -> StoreError {
+    StoreError::Unsupported {
+        detail: "editing tasks from external accounts on mobile is not supported yet".to_string(),
     }
 }
 
@@ -395,6 +406,50 @@ impl Host {
             .account_for_calendar(calendar_id)
             .is_none_or(|a| a == LOCAL_ID)
     }
+
+    /// Task-list twin of [`Host::route`]: `None` is the local branch (the
+    /// `LocalAdapter`), `Some(ext)` an external task provider. An unknown id is
+    /// treated as local (the desktop `account_for_task_list().unwrap_or(LOCAL)`
+    /// fallback); a non-local id whose adapter isn't live is `NotFound`.
+    ///
+    /// Routing relies on the list→account map, which [`Host::task_lists_json`]
+    /// primes — callers list task lists before task/section ops (the desktop
+    /// invariant).
+    fn route_task_list(&self, list_id: &str) -> Result<Option<Arc<dyn TasksFeature>>, StoreError> {
+        let account = self
+            .registry
+            .account_for_task_list(list_id)
+            .unwrap_or_else(|| LOCAL_ID.to_string());
+        if account == LOCAL_ID {
+            Ok(None)
+        } else {
+            self.registry
+                .task_adapter(&account)
+                .map(Some)
+                .ok_or(StoreError::NotFound)
+        }
+    }
+
+    /// Whether `list_id` belongs to the local account (unknown → local, matching
+    /// `route_task_list`). Gates the append-to-event-log decision for task/list/
+    /// section mutations: only LOCAL ones are logged for sync; external
+    /// providers self-sync.
+    fn is_local_task_list(&self, list_id: &str) -> bool {
+        self.registry
+            .account_for_task_list(list_id)
+            .is_none_or(|a| a == LOCAL_ID)
+    }
+}
+
+/// A task list enriched with its owning `account_id` — the desktop `TaskListRow`
+/// wire shape. `task_capabilities` is intentionally omitted here (the mobile UI
+/// doesn't consume it yet → the shared `TaskList` type has it optional, and
+/// cal-core's default applies); it joins when the capabilities surface is ported.
+#[derive(serde::Serialize)]
+struct TaskListRow {
+    #[serde(flatten)]
+    inner: TaskList,
+    account_id: String,
 }
 
 /// Open a statically-embedded sync-adapter plugin instance + wrap it as a
@@ -930,24 +985,58 @@ impl Host {
 
     // ── Tasks / lists / sections (JSON bridge, sync-logged) ───────────────────
     //
-    // The faithful tasks port now lives on the Host (folded in from the original
-    // `LocalStore`), so every LOCAL task/list/section mutation appends the SAME
-    // `SyncEvent` shape the desktop command layer emits (`commands::tasks`) —
-    // `EventPayload { id, fields: to_value(&entity) }` for Created/Updated,
-    // `IdPayload { id }` for Deleted. That's what makes tasks sync cross-device.
-    // The JSON wire is the `cal_core` serde shape, identical to the desktop's
-    // Tauri payloads, so `@aperio/shared` parses both sides.
+    // The faithful tasks port lives on the Host (folded in from the original
+    // `LocalStore`). READS route local + external (the desktop
+    // `account_for_task_list` split, like the event `route()`): `task_lists_json`
+    // merges local lists with every external task account's, `tasks_json` /
+    // `sections_json` route by the list's owning account. So a Vikunja/Todoist/
+    // CalDAV-tasks account's lists + tasks + sections are now VISIBLE on mobile.
     //
-    // This slice is LOCAL-only (every call hits the one `LocalAdapter`, so every
-    // success IS a local mutation → append unconditionally). External task-list
-    // routing (the desktop `account_for_task_list` split + cross-list moves +
-    // the external on-demand spawn) follows in its own phase, like the event
-    // `route()` already does.
+    // WRITES are LOCAL-only for now: each local mutation appends the SAME
+    // `SyncEvent` shape the desktop command layer emits (`commands::tasks`) —
+    // `EventPayload { id, to_value(&entity) }` for Created/Updated,
+    // `IdPayload { id }` for Deleted — which is what syncs them cross-device. A
+    // write against an EXTERNAL list is rejected with `Unsupported` (a clear
+    // "editing external tasks on mobile isn't supported yet" rather than a
+    // confusing local NotFound). Routing external writes to the provider (with
+    // the desktop's capability gating + cross-list moves + on-demand spawn) is
+    // the next phase. The JSON wire is the `cal_core` serde shape, identical to
+    // the desktop's Tauri payloads, so `@aperio/shared` parses both sides.
 
-    /// All task lists as a JSON array (`cal_core::TaskList[]`).
+    /// All task lists (local + external) as a JSON `TaskListRow[]` (the desktop
+    /// wire shape: each `TaskList` flattened + its `account_id`). Primes the
+    /// list→account route map for the following task/section ops, so call it
+    /// before them (the desktop invariant). External accounts are fetched live;
+    /// a dead account is skipped (its error swallowed), never blanking the list.
     pub fn task_lists_json(&self) -> Result<String, StoreError> {
-        let lists = self.adapter.list_task_lists_sync().map_err(map_store_err)?;
-        to_json(&lists)
+        let local = self.adapter.list_task_lists_sync().map_err(map_store_err)?;
+        for l in &local {
+            self.registry.note_task_list_route(&l.id, LOCAL_ID);
+        }
+        // `list_external_task_lists` stamps external routes internally + swallows
+        // per-adapter errors (mirrors `list_external_calendars`).
+        let external = self
+            .runtime
+            .block_on(async { self.registry.list_external_task_lists().await });
+
+        let mut rows: Vec<TaskListRow> = Vec::with_capacity(local.len() + external.len());
+        for l in local {
+            rows.push(TaskListRow {
+                inner: l,
+                account_id: LOCAL_ID.to_string(),
+            });
+        }
+        for l in external {
+            let account_id = self
+                .registry
+                .account_for_task_list(&l.id)
+                .unwrap_or_else(|| LOCAL_ID.to_string());
+            rows.push(TaskListRow {
+                inner: l,
+                account_id,
+            });
+        }
+        to_json(&rows)
     }
 
     /// Create a top-level local task list; returns the created `TaskList` as JSON
@@ -973,6 +1062,9 @@ impl Host {
         id: String,
         parent_id: Option<String>,
     ) -> Result<String, StoreError> {
+        if !self.is_local_task_list(&id) {
+            return Err(external_tasks_readonly());
+        }
         let list = self
             .adapter
             .reparent_task_list(&id, parent_id.as_deref())
@@ -988,19 +1080,34 @@ impl Host {
 
     /// Delete a task list (its tasks cascade away) and append `TaskListDeleted`.
     pub fn delete_task_list(&self, id: String) -> Result<(), StoreError> {
+        if !self.is_local_task_list(&id) {
+            return Err(external_tasks_readonly());
+        }
         self.adapter.delete_task_list(&id).map_err(map_store_err)?;
         self.writer
             .append(SyncEvent::TaskListDeleted(IdPayload { id }));
         Ok(())
     }
 
-    /// Tasks in a list as a JSON array (`cal_core::Task[]`).
+    /// Tasks in a list as a JSON array (`cal_core::Task[]`), routed to the list's
+    /// owning account (local store or external provider).
     pub fn tasks_json(&self, list_id: String) -> Result<String, StoreError> {
-        let tasks = self
-            .adapter
-            .get_tasks_sync(&list_id)
-            .map_err(map_store_err)?;
-        to_json(&tasks)
+        match self.route_task_list(&list_id)? {
+            None => {
+                let tasks = self
+                    .adapter
+                    .get_tasks_sync(&list_id)
+                    .map_err(map_store_err)?;
+                to_json(&tasks)
+            }
+            Some(ext) => {
+                let tasks = self
+                    .runtime
+                    .block_on(async { ext.get_tasks(&list_id).await })
+                    .map_err(map_store_err)?;
+                to_json(&tasks)
+            }
+        }
     }
 
     /// One task by id as JSON; [`StoreError::NotFound`] when absent.
@@ -1021,6 +1128,9 @@ impl Host {
         list_id: String,
         new_task_json: String,
     ) -> Result<String, StoreError> {
+        if !self.is_local_task_list(&list_id) {
+            return Err(external_tasks_readonly());
+        }
         let new: cal_core::NewTask = from_json("task", &new_task_json)?;
         let task = self
             .adapter
@@ -1042,6 +1152,9 @@ impl Host {
     /// the peer and dedups on `series_id`, so only `TaskUpdated` need cross.
     pub fn update_task_json(&self, task_json: String) -> Result<String, StoreError> {
         let task: cal_core::Task = from_json("task", &task_json)?;
+        if !self.is_local_task_list(&task.list_id) {
+            return Err(external_tasks_readonly());
+        }
         let updated = self.adapter.update_task_sync(task).map_err(map_store_err)?;
         if let Ok(fields) = serde_json::to_value(&updated) {
             self.writer.append(SyncEvent::TaskUpdated(EventPayload {
@@ -1052,20 +1165,35 @@ impl Host {
         to_json(&updated)
     }
 
-    /// Delete a task and append `TaskDeleted`.
+    /// Delete a LOCAL task and append `TaskDeleted`. (No list_id is carried, so
+    /// this can't route; an external task id simply isn't in the local store and
+    /// `NotFound`s. External delete-routing lands with the rest of external task
+    /// writes, when this gains a `list_id` like the desktop `delete_task`.)
     pub fn delete_task(&self, id: String) -> Result<(), StoreError> {
         self.adapter.delete_task_sync(&id).map_err(map_store_err)?;
         self.writer.append(SyncEvent::TaskDeleted(IdPayload { id }));
         Ok(())
     }
 
-    /// Sections of a list as a JSON array (`cal_core::Section[]`).
+    /// Sections of a list as a JSON array (`cal_core::Section[]`), routed to the
+    /// list's owning account.
     pub fn sections_json(&self, list_id: String) -> Result<String, StoreError> {
-        let sections = self
-            .adapter
-            .list_sections_sync(&list_id)
-            .map_err(map_store_err)?;
-        to_json(&sections)
+        match self.route_task_list(&list_id)? {
+            None => {
+                let sections = self
+                    .adapter
+                    .list_sections_sync(&list_id)
+                    .map_err(map_store_err)?;
+                to_json(&sections)
+            }
+            Some(ext) => {
+                let sections = self
+                    .runtime
+                    .block_on(async { ext.list_sections(&list_id).await })
+                    .map_err(map_store_err)?;
+                to_json(&sections)
+            }
+        }
     }
 
     /// Create a section in a list; returns the created `Section` as JSON and
@@ -1077,6 +1205,9 @@ impl Host {
         position: u32,
         color_label: Option<String>,
     ) -> Result<String, StoreError> {
+        if !self.is_local_task_list(&list_id) {
+            return Err(external_tasks_readonly());
+        }
         let section = self
             .adapter
             .create_section(&list_id, &name, position, color_label.map(ColorLabelId))
@@ -1094,6 +1225,9 @@ impl Host {
     /// appends `SectionUpdated`.
     pub fn update_section_json(&self, section_json: String) -> Result<String, StoreError> {
         let section: cal_core::Section = from_json("section", &section_json)?;
+        if !self.is_local_task_list(&section.list_id) {
+            return Err(external_tasks_readonly());
+        }
         let updated = self
             .adapter
             .update_section(section)
@@ -1107,8 +1241,10 @@ impl Host {
         to_json(&updated)
     }
 
-    /// Delete a section (its tasks fall back to ungrouped) and append
-    /// `SectionDeleted`.
+    /// Delete a LOCAL section (its tasks fall back to ungrouped) and append
+    /// `SectionDeleted`. Like `delete_task`, no list_id is carried to route, so
+    /// an external section id `NotFound`s in the local store; external section
+    /// delete-routing lands with the rest of external task writes.
     pub fn delete_section(&self, id: String) -> Result<(), StoreError> {
         self.adapter.delete_section(&id).map_err(map_store_err)?;
         self.writer
@@ -2092,5 +2228,22 @@ mod tests {
         // The decorated fields are present and clear on a fresh host.
         assert_eq!(status["sustained_failure"], serde_json::json!(false));
         assert_eq!(status["last_error_code"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn task_lists_json_tags_local_lists_with_their_account() {
+        let (_dir, host, _kc) = open_host();
+        host.create_task_list_json("Mine".to_string()).unwrap();
+        let lists: serde_json::Value =
+            serde_json::from_str(&host.task_lists_json().unwrap()).unwrap();
+        let arr = lists.as_array().unwrap();
+        assert!(!arr.is_empty(), "the created list should be listed");
+        // The TaskListRow shape carries account_id; with no external accounts
+        // every list is local. (`id`/`name` stay top-level via the flatten.)
+        assert!(
+            arr.iter()
+                .all(|l| l["account_id"] == serde_json::json!("local") && l["id"].is_string()),
+            "every local list should be tagged account_id=local; got {lists}",
+        );
     }
 }
