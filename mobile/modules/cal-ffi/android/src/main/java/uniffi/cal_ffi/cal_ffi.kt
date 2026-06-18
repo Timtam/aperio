@@ -734,11 +734,23 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_create_event_json(
     ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_create_section_json(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_create_task_json(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_create_task_list_json(
+    ): Short
     external fun uniffi_cal_ffi_checksum_method_host_delete_account(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_delete_calendar(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_delete_event(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_delete_section(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_delete_task(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_delete_task_list(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_get_event_by_id_json(
     ): Short
@@ -748,11 +760,25 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_push_now(
     ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_reparent_task_list_json(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_sections_json(
+    ): Short
     external fun uniffi_cal_ffi_checksum_method_host_sync_now_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_sync_status_json(
     ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_task_json(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_task_lists_json(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_tasks_json(
+    ): Short
     external fun uniffi_cal_ffi_checksum_method_host_update_event_json(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_update_section_json(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_update_task_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_keychainbridge_store(
     ): Short
@@ -849,11 +875,23 @@ external fun uniffi_cal_ffi_fn_method_host_create_calendar_json(`ptr`: Long,`req
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_create_event_json(`ptr`: Long,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_create_section_json(`ptr`: Long,`listId`: RustBuffer.ByValue,`name`: RustBuffer.ByValue,`position`: Int,`colorLabel`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_create_task_json(`ptr`: Long,`listId`: RustBuffer.ByValue,`newTaskJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_create_task_list_json(`ptr`: Long,`name`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_delete_account(`ptr`: Long,`accountId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_delete_calendar(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_delete_event(`ptr`: Long,`id`: RustBuffer.ByValue,`calendarId`: RustBuffer.ByValue,`sendCancellations`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_cal_ffi_fn_method_host_delete_section(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_cal_ffi_fn_method_host_delete_task(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_cal_ffi_fn_method_host_delete_task_list(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_get_event_by_id_json(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -863,11 +901,25 @@ external fun uniffi_cal_ffi_fn_method_host_list_calendars_json(`ptr`: Long,uniff
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_push_now(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Int
+external fun uniffi_cal_ffi_fn_method_host_reparent_task_list_json(`ptr`: Long,`id`: RustBuffer.ByValue,`parentId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_sections_json(`ptr`: Long,`listId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_sync_now_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_sync_status_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_task_json(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_task_lists_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_tasks_json(`ptr`: Long,`listId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_update_event_json(`ptr`: Long,`eventJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_update_section_json(`ptr`: Long,`sectionJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_update_task_json(`ptr`: Long,`taskJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_clone_keychainbridge(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
@@ -1083,7 +1135,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_accounts_json() != 21992.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_cal_ffi_checksum_method_host_configure_sync_adapter_json() != 51399.toShort()) {
+    if (lib.uniffi_cal_ffi_checksum_method_host_configure_sync_adapter_json() != 4122.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_create_account_json() != 61944.toShort()) {
@@ -1095,6 +1147,15 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_create_event_json() != 14023.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_create_section_json() != 51165.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_create_task_json() != 26959.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_create_task_list_json() != 41930.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_delete_account() != 32623.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1102,6 +1163,15 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_delete_event() != 51601.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_delete_section() != 63684.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_delete_task() != 53430.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_delete_task_list() != 5785.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_get_event_by_id_json() != 43277.toShort()) {
@@ -1116,13 +1186,34 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_push_now() != 17383.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_reparent_task_list_json() != 49367.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_sections_json() != 2550.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_sync_now_json() != 41765.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_sync_status_json() != 35684.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_task_json() != 19358.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_task_lists_json() != 48190.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_tasks_json() != 56247.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_update_event_json() != 27193.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_update_section_json() != 7232.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_update_task_json() != 46851.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_keychainbridge_store() != 54380.toShort()) {
@@ -1587,13 +1678,16 @@ public interface HostInterface {
     fun `accountsJson`(): kotlin.String
     
     /**
-     * Configure the sync adapter from a JSON request. This slice handles
-     * `{"kind":"local","path":"…"}` (a local-filesystem sync target): open the
-     * statically-embedded local sync plugin, probe it (`test_connection`), make
-     * it the orchestrator's active adapter, and persist the choice under the
+     * Configure the sync adapter from a JSON request. Handles the `local`
+     * (filesystem path), `webdav` (URL + user + password), and `ftp`
+     * (host/port/user/path/mode + password) kinds: open the matching
+     * statically-embedded sync plugin, probe it (`test_connection`), make it
+     * the orchestrator's active adapter, and persist the choice under the
      * `sync.adapter.*` prefs (device-local; the is_synced_key allowlist
-     * excludes them, so they never propagate). webdav/sftp/ftp + the E2E
-     * `wrap_if_encrypted` branch + the OAuth kinds follow.
+     * excludes them, so they never propagate). The credential goes to the
+     * keychain via the platform `SecretStore`; an omitted/empty password reuses
+     * the stored one. SFTP (host-key trust flow) + the E2E `wrap_if_encrypted`
+     * branch + the OAuth kinds (Dropbox / Google Drive) follow.
      */
     fun `configureSyncAdapterJson`(`configJson`: kotlin.String)
     
@@ -1630,6 +1724,25 @@ public interface HostInterface {
     fun `createEventJson`(`requestJson`: kotlin.String): kotlin.String
     
     /**
+     * Create a section in a list; returns the created `Section` as JSON and
+     * appends `SectionCreated`.
+     */
+    fun `createSectionJson`(`listId`: kotlin.String, `name`: kotlin.String, `position`: kotlin.UInt, `colorLabel`: kotlin.String?): kotlin.String
+    
+    /**
+     * Create a task from a JSON `cal_core::NewTask`; returns the created `Task`
+     * as JSON and appends `TaskCreated` (a recurring task is assigned a stable
+     * series id).
+     */
+    fun `createTaskJson`(`listId`: kotlin.String, `newTaskJson`: kotlin.String): kotlin.String
+    
+    /**
+     * Create a top-level local task list; returns the created `TaskList` as JSON
+     * and appends `TaskListCreated`.
+     */
+    fun `createTaskListJson`(`name`: kotlin.String): kotlin.String
+    
+    /**
      * Delete an account: unregister its adapter, clear its secrets, and
      * remove the row. The local account cannot be deleted
      * ([`StoreError::InvalidField`]).
@@ -1649,6 +1762,22 @@ public interface HostInterface {
      * attendees so it never sends. Mirrors the desktop `delete_event`.
      */
     fun `deleteEvent`(`id`: kotlin.String, `calendarId`: kotlin.String?, `sendCancellations`: kotlin.Boolean?)
+    
+    /**
+     * Delete a section (its tasks fall back to ungrouped) and append
+     * `SectionDeleted`.
+     */
+    fun `deleteSection`(`id`: kotlin.String)
+    
+    /**
+     * Delete a task and append `TaskDeleted`.
+     */
+    fun `deleteTask`(`id`: kotlin.String)
+    
+    /**
+     * Delete a task list (its tasks cascade away) and append `TaskListDeleted`.
+     */
+    fun `deleteTaskList`(`id`: kotlin.String)
     
     /**
      * One local event by id as JSON (`Event` or `null`). Local-only by design
@@ -1689,6 +1818,17 @@ public interface HostInterface {
     fun `pushNow`(): kotlin.UInt
     
     /**
+     * Set or clear a list's parent (`parent_id = None` promotes to top level);
+     * returns the updated `TaskList` as JSON and appends `TaskListUpdated`.
+     */
+    fun `reparentTaskListJson`(`id`: kotlin.String, `parentId`: kotlin.String?): kotlin.String
+    
+    /**
+     * Sections of a list as a JSON array (`cal_core::Section[]`).
+     */
+    fun `sectionsJson`(`listId`: kotlin.String): kotlin.String
+    
+    /**
      * Run one sync round (push local pending logs, fetch + apply foreign ones,
      * compaction audit) and return the `SyncRoundReport` as JSON. Errors with
      * "not configured" until `configure_sync_adapter_json` has run.
@@ -1703,12 +1843,42 @@ public interface HostInterface {
     fun `syncStatusJson`(): kotlin.String
     
     /**
+     * One task by id as JSON; [`StoreError::NotFound`] when absent.
+     */
+    fun `taskJson`(`id`: kotlin.String): kotlin.String
+    
+    /**
+     * All task lists as a JSON array (`cal_core::TaskList[]`).
+     */
+    fun `taskListsJson`(): kotlin.String
+    
+    /**
+     * Tasks in a list as a JSON array (`cal_core::Task[]`).
+     */
+    fun `tasksJson`(`listId`: kotlin.String): kotlin.String
+    
+    /**
      * Update an event in place (its `calendar_id` field selects the route);
      * returns the updated `Event` as JSON. Mirrors the in-place branch of the
      * desktop `update_event`. Cross-calendar moves (the create-on-target +
      * best-effort-delete dance with `previous_calendar_id`) are deferred.
      */
     fun `updateEventJson`(`eventJson`: kotlin.String): kotlin.String
+    
+    /**
+     * Update a section from a JSON `cal_core::Section`; returns it as JSON and
+     * appends `SectionUpdated`.
+     */
+    fun `updateSectionJson`(`sectionJson`: kotlin.String): kotlin.String
+    
+    /**
+     * Update a task from a JSON `cal_core::Task`; returns the updated `Task` as
+     * JSON and appends `TaskUpdated`. A list_id change is a single local SQL
+     * UPDATE (the desktop's local↔local move). Completing a recurring task
+     * spawns its next instance locally; the applier re-runs the same spawner on
+     * the peer and dedups on `series_id`, so only `TaskUpdated` need cross.
+     */
+    fun `updateTaskJson`(`taskJson`: kotlin.String): kotlin.String
     
     companion object
 }
@@ -1831,13 +2001,16 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
-     * Configure the sync adapter from a JSON request. This slice handles
-     * `{"kind":"local","path":"…"}` (a local-filesystem sync target): open the
-     * statically-embedded local sync plugin, probe it (`test_connection`), make
-     * it the orchestrator's active adapter, and persist the choice under the
+     * Configure the sync adapter from a JSON request. Handles the `local`
+     * (filesystem path), `webdav` (URL + user + password), and `ftp`
+     * (host/port/user/path/mode + password) kinds: open the matching
+     * statically-embedded sync plugin, probe it (`test_connection`), make it
+     * the orchestrator's active adapter, and persist the choice under the
      * `sync.adapter.*` prefs (device-local; the is_synced_key allowlist
-     * excludes them, so they never propagate). webdav/sftp/ftp + the E2E
-     * `wrap_if_encrypted` branch + the OAuth kinds follow.
+     * excludes them, so they never propagate). The credential goes to the
+     * keychain via the platform `SecretStore`; an omitted/empty password reuses
+     * the stored one. SFTP (host-key trust flow) + the E2E `wrap_if_encrypted`
+     * branch + the OAuth kinds (Dropbox / Google Drive) follow.
      */
     @Throws(StoreException::class)override fun `configureSyncAdapterJson`(`configJson`: kotlin.String)
         = 
@@ -1921,6 +2094,61 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * Create a section in a list; returns the created `Section` as JSON and
+     * appends `SectionCreated`.
+     */
+    @Throws(StoreException::class)override fun `createSectionJson`(`listId`: kotlin.String, `name`: kotlin.String, `position`: kotlin.UInt, `colorLabel`: kotlin.String?): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_create_section_json(
+        it,
+        FfiConverterString.lower(`listId`),FfiConverterString.lower(`name`),FfiConverterUInt.lower(`position`),FfiConverterOptionalString.lower(`colorLabel`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Create a task from a JSON `cal_core::NewTask`; returns the created `Task`
+     * as JSON and appends `TaskCreated` (a recurring task is assigned a stable
+     * series id).
+     */
+    @Throws(StoreException::class)override fun `createTaskJson`(`listId`: kotlin.String, `newTaskJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_create_task_json(
+        it,
+        FfiConverterString.lower(`listId`),FfiConverterString.lower(`newTaskJson`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Create a top-level local task list; returns the created `TaskList` as JSON
+     * and appends `TaskListCreated`.
+     */
+    @Throws(StoreException::class)override fun `createTaskListJson`(`name`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_create_task_list_json(
+        it,
+        FfiConverterString.lower(`name`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * Delete an account: unregister its adapter, clear its secrets, and
      * remove the row. The local account cannot be deleted
      * ([`StoreError::InvalidField`]).
@@ -1968,6 +2196,55 @@ open class Host: Disposable, AutoCloseable, HostInterface
     UniffiLib.uniffi_cal_ffi_fn_method_host_delete_event(
         it,
         FfiConverterString.lower(`id`),FfiConverterOptionalString.lower(`calendarId`),FfiConverterOptionalBoolean.lower(`sendCancellations`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Delete a section (its tasks fall back to ungrouped) and append
+     * `SectionDeleted`.
+     */
+    @Throws(StoreException::class)override fun `deleteSection`(`id`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_delete_section(
+        it,
+        FfiConverterString.lower(`id`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Delete a task and append `TaskDeleted`.
+     */
+    @Throws(StoreException::class)override fun `deleteTask`(`id`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_delete_task(
+        it,
+        FfiConverterString.lower(`id`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Delete a task list (its tasks cascade away) and append `TaskListDeleted`.
+     */
+    @Throws(StoreException::class)override fun `deleteTaskList`(`id`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_delete_task_list(
+        it,
+        FfiConverterString.lower(`id`),_status)
 }
     }
     
@@ -2061,6 +2338,41 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * Set or clear a list's parent (`parent_id = None` promotes to top level);
+     * returns the updated `TaskList` as JSON and appends `TaskListUpdated`.
+     */
+    @Throws(StoreException::class)override fun `reparentTaskListJson`(`id`: kotlin.String, `parentId`: kotlin.String?): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_reparent_task_list_json(
+        it,
+        FfiConverterString.lower(`id`),FfiConverterOptionalString.lower(`parentId`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Sections of a list as a JSON array (`cal_core::Section[]`).
+     */
+    @Throws(StoreException::class)override fun `sectionsJson`(`listId`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_sections_json(
+        it,
+        FfiConverterString.lower(`listId`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * Run one sync round (push local pending logs, fetch + apply foreign ones,
      * compaction audit) and return the `SyncRoundReport` as JSON. Errors with
      * "not configured" until `configure_sync_adapter_json` has run.
@@ -2099,6 +2411,57 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * One task by id as JSON; [`StoreError::NotFound`] when absent.
+     */
+    @Throws(StoreException::class)override fun `taskJson`(`id`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_task_json(
+        it,
+        FfiConverterString.lower(`id`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * All task lists as a JSON array (`cal_core::TaskList[]`).
+     */
+    @Throws(StoreException::class)override fun `taskListsJson`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_task_lists_json(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Tasks in a list as a JSON array (`cal_core::Task[]`).
+     */
+    @Throws(StoreException::class)override fun `tasksJson`(`listId`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_tasks_json(
+        it,
+        FfiConverterString.lower(`listId`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * Update an event in place (its `calendar_id` field selects the route);
      * returns the updated `Event` as JSON. Mirrors the in-place branch of the
      * desktop `update_event`. Cross-calendar moves (the create-on-target +
@@ -2111,6 +2474,45 @@ open class Host: Disposable, AutoCloseable, HostInterface
     UniffiLib.uniffi_cal_ffi_fn_method_host_update_event_json(
         it,
         FfiConverterString.lower(`eventJson`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Update a section from a JSON `cal_core::Section`; returns it as JSON and
+     * appends `SectionUpdated`.
+     */
+    @Throws(StoreException::class)override fun `updateSectionJson`(`sectionJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_update_section_json(
+        it,
+        FfiConverterString.lower(`sectionJson`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Update a task from a JSON `cal_core::Task`; returns the updated `Task` as
+     * JSON and appends `TaskUpdated`. A list_id change is a single local SQL
+     * UPDATE (the desktop's local↔local move). Completing a recurring task
+     * spawns its next instance locally; the applier re-runs the same spawner on
+     * the peer and dedups on `series_id`, so only `TaskUpdated` need cross.
+     */
+    @Throws(StoreException::class)override fun `updateTaskJson`(`taskJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_update_task_json(
+        it,
+        FfiConverterString.lower(`taskJson`),_status)
 }
     }
     )

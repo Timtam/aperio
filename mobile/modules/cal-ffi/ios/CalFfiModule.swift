@@ -29,6 +29,65 @@ public class CalFfiModule: Module {
       return ["name": parsed.name, "email": parsed.email]
     }
 
+    // ─── Tasks / lists / sections (JSON bridge, sync-logged) ───
+    // The full task / list / section domain crosses as a JSON string in the
+    // cal_core serde shape — identical to the desktop's Tauri payloads — so this
+    // layer is a trivial passthrough; each Host mutation appends the matching
+    // SyncEvent. Mirrors the Android module.
+
+    AsyncFunction("taskListsJson") { () -> String in
+      try self.host.taskListsJson()
+    }
+
+    AsyncFunction("createTaskListJson") { (name: String) -> String in
+      try self.host.createTaskListJson(name: name)
+    }
+
+    AsyncFunction("reparentTaskListJson") { (id: String, parentId: String?) -> String in
+      try self.host.reparentTaskListJson(id: id, parentId: parentId)
+    }
+
+    AsyncFunction("deleteTaskList") { (id: String) in
+      try self.host.deleteTaskList(id: id)
+    }
+
+    AsyncFunction("tasksJson") { (listId: String) -> String in
+      try self.host.tasksJson(listId: listId)
+    }
+
+    AsyncFunction("taskJson") { (id: String) -> String in
+      try self.host.taskJson(id: id)
+    }
+
+    AsyncFunction("createTaskJson") { (listId: String, newTaskJson: String) -> String in
+      try self.host.createTaskJson(listId: listId, newTaskJson: newTaskJson)
+    }
+
+    AsyncFunction("updateTaskJson") { (taskJson: String) -> String in
+      try self.host.updateTaskJson(taskJson: taskJson)
+    }
+
+    AsyncFunction("deleteTask") { (taskId: String) in
+      try self.host.deleteTask(id: taskId)
+    }
+
+    AsyncFunction("sectionsJson") { (listId: String) -> String in
+      try self.host.sectionsJson(listId: listId)
+    }
+
+    AsyncFunction("createSectionJson") { (listId: String, name: String, position: Int, colorLabel: String?) -> String in
+      try self.host.createSectionJson(
+        listId: listId, name: name, position: UInt32(position), colorLabel: colorLabel)
+    }
+
+    AsyncFunction("updateSectionJson") { (sectionJson: String) -> String in
+      try self.host.updateSectionJson(sectionJson: sectionJson)
+    }
+
+    AsyncFunction("deleteSection") { (id: String) in
+      try self.host.deleteSection(id: id)
+    }
+
     // ─── Accounts (the full engine: external adapters + secrets) ───
     // JSON passthrough in the cal_core/desktop wire shape; a thrown StoreError
     // rejects the JS promise. Mirrors the Android module.

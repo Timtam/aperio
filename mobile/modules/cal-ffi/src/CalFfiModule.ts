@@ -1,6 +1,6 @@
 import { NativeModule, requireNativeModule } from 'expo';
 
-import { ParsedAttendee, TaskListView, TaskView } from './CalFfi.types';
+import { ParsedAttendee } from './CalFfi.types';
 
 declare class CalFfiModule extends NativeModule<Record<never, never>> {
   /**
@@ -9,44 +9,14 @@ declare class CalFfiModule extends NativeModule<Record<never, never>> {
    */
   parseAttendee(entry: string): ParsedAttendee;
 
-  // ── Task lists ──
-  /** All task lists, ordered by name (case-insensitive). */
-  taskLists(): Promise<TaskListView[]>;
-  /** Create a top-level, local task list. */
-  createTaskList(name: string): Promise<TaskListView>;
-  /** Rename a list. Rejects on an empty/whitespace name or unknown id. */
-  renameTaskList(id: string, name: string): Promise<void>;
-  /** Delete a list (its tasks cascade away). Rejects on unknown id. */
-  deleteTaskList(id: string): Promise<void>;
-
-  // ── Tasks ──
-  /** Tasks in a list, ordered by date then creation time. */
-  tasks(listId: string): Promise<TaskView[]>;
-  /**
-   * Create a task in `listId`. `scheduledDate` is `YYYY-MM-DD` or `null`;
-   * an unparseable date rejects with an "invalid value" error from the store.
-   */
-  createTask(
-    listId: string,
-    title: string,
-    description: string | null,
-    scheduledDate: string | null,
-  ): Promise<TaskView>;
-  /** Mark a task completed (`done = true`) or reopen it (`done = false`). */
-  setTaskDone(taskId: string, done: boolean): Promise<TaskView>;
-  /** Change a task's title. */
-  renameTask(taskId: string, title: string): Promise<TaskView>;
-  /** Set or clear (`null`) a task's scheduled date (`YYYY-MM-DD`). */
-  rescheduleTask(taskId: string, scheduledDate: string | null): Promise<TaskView>;
-  /** Delete a task. Rejects on unknown id. */
-  deleteTask(taskId: string): Promise<void>;
-
-  // ── JSON bridge (the faithful tasks port) ──
+  // ── Tasks / lists / sections (JSON bridge, sync-logged) ──
   // The full task / list / section domain crosses as a JSON string in the
-  // `cal_core` serde shape — identical to the desktop's Tauri payloads. The
-  // mobile api-client parses these into the shared `@aperio/shared` types; the
-  // bridge stays a dumb passthrough so the marshalling lives in one place.
-  // Each rejects with the store's typed error message on failure.
+  // `cal_core` serde shape — identical to the desktop's Tauri payloads. Backed
+  // by the Rust `Host`, so every local mutation appends to the sync log and
+  // round-trips between devices. The mobile api-client parses these into the
+  // shared `@aperio/shared` types; the bridge stays a dumb passthrough so the
+  // marshalling lives in one place. Each rejects with the store's typed error
+  // message on failure.
 
   /** All task lists as a JSON `TaskList[]`. */
   taskListsJson(): Promise<string>;
@@ -55,6 +25,8 @@ declare class CalFfiModule extends NativeModule<Record<never, never>> {
   /** Set or clear a list's parent (`null` promotes to top level); returns the
    *  updated `TaskList` as JSON. */
   reparentTaskListJson(id: string, parentId: string | null): Promise<string>;
+  /** Delete a list (its tasks cascade away). Rejects on unknown id. */
+  deleteTaskList(id: string): Promise<void>;
   /** Tasks in a list as a JSON `Task[]`, ordered by date then creation time. */
   tasksJson(listId: string): Promise<string>;
   /** One task by id as JSON. Rejects (not found) when absent. */
@@ -64,6 +36,8 @@ declare class CalFfiModule extends NativeModule<Record<never, never>> {
   /** Update a task from a JSON `Task`; returns the updated `Task` as JSON.
    *  Completing a recurring task spawns its next instance (DESIGN §9.12). */
   updateTaskJson(taskJson: string): Promise<string>;
+  /** Delete a task. Rejects on unknown id. */
+  deleteTask(taskId: string): Promise<void>;
   /** Sections of a list as a JSON `Section[]`. */
   sectionsJson(listId: string): Promise<string>;
   /** Create a section; returns the created `Section` as JSON. */
