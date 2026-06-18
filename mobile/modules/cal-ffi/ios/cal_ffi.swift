@@ -762,6 +762,12 @@ public protocol HostProtocol: AnyObject, Sendable {
     func discoverJson(pluginId: String, argsJson: String) throws  -> String
     
     /**
+     * Drop the pinned SFTP fingerprint for `host_port` (the "forget pin"
+     * gesture; the next connect re-runs the first-use trust dialog).
+     */
+    func forgetSftpHostKey(hostPort: String) throws 
+    
+    /**
      * One local event by id as JSON (`Event` or `null`). Local-only by design
      * — the desktop `get_event_by_id` is the reminders-overview lookup against
      * the local store; external events aren't addressable by a bare id without
@@ -792,6 +798,23 @@ public protocol HostProtocol: AnyObject, Sendable {
      * operations — the same ordering the desktop frontend honours.
      */
     func listCalendarsJson() throws  -> String
+    
+    /**
+     * The currently-pinned SFTP fingerprint for `host_port`, or `None`. Lets the
+     * UI show "Pinned: SHA256:…" + the forget gesture without probing the server.
+     */
+    func pinnedSftpHostKey(hostPort: String) throws  -> String?
+    
+    /**
+     * Probe an SFTP server's SHA256 host-key fingerprint WITHOUT pinning it, and
+     * classify it against the device's pin store (§19.5 TOFU). `args_json`
+     * carries `{host, port}`; returns `{host_port, fingerprint, status}` where
+     * `status` is `{kind:"new"}` (nothing pinned) / `{kind:"unchanged"}` /
+     * `{kind:"changed", stored}`. The UI shows the trust dialog accordingly,
+     * then calls [`Self::trust_sftp_host_key`] before configuring. Mirrors the
+     * desktop `preview_sftp_host_key`; the SSH probe is verified on-device.
+     */
+    func previewSftpHostKeyJson(argsJson: String) throws  -> String
     
     /**
      * Push the local pending logs without fetching (call from RN AppState
@@ -849,6 +872,14 @@ public protocol HostProtocol: AnyObject, Sendable {
      * owning account (local store or external provider).
      */
     func tasksJson(listId: String) throws  -> String
+    
+    /**
+     * Pin a user-confirmed SFTP host-key fingerprint for `host_port` (§19.5 —
+     * always an explicit user gesture, for first-use AND key-change). The UI
+     * calls this after the trust dialog, then configures. Mirrors the desktop
+     * `trust_sftp_host_key`.
+     */
+    func trustSftpHostKey(hostPort: String, fingerprint: String) throws 
     
     /**
      * Upcoming reminder triggers within `horizon_minutes` from now, as a JSON
@@ -1359,6 +1390,18 @@ open func discoverJson(pluginId: String, argsJson: String)throws  -> String  {
 }
     
     /**
+     * Drop the pinned SFTP fingerprint for `host_port` (the "forget pin"
+     * gesture; the next connect re-runs the first-use trust dialog).
+     */
+open func forgetSftpHostKey(hostPort: String)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_forget_sftp_host_key(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(hostPort),$0
+    )
+}
+}
+    
+    /**
      * One local event by id as JSON (`Event` or `null`). Local-only by design
      * — the desktop `get_event_by_id` is the reminders-overview lookup against
      * the local store; external events aren't addressable by a bare id without
@@ -1406,6 +1449,37 @@ open func listCalendarsJson()throws  -> String  {
     return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
     uniffi_cal_ffi_fn_method_host_list_calendars_json(
             self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+    /**
+     * The currently-pinned SFTP fingerprint for `host_port`, or `None`. Lets the
+     * UI show "Pinned: SHA256:…" + the forget gesture without probing the server.
+     */
+open func pinnedSftpHostKey(hostPort: String)throws  -> String?  {
+    return try  FfiConverterOptionString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_pinned_sftp_host_key(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(hostPort),$0
+    )
+})
+}
+    
+    /**
+     * Probe an SFTP server's SHA256 host-key fingerprint WITHOUT pinning it, and
+     * classify it against the device's pin store (§19.5 TOFU). `args_json`
+     * carries `{host, port}`; returns `{host_port, fingerprint, status}` where
+     * `status` is `{kind:"new"}` (nothing pinned) / `{kind:"unchanged"}` /
+     * `{kind:"changed", stored}`. The UI shows the trust dialog accordingly,
+     * then calls [`Self::trust_sftp_host_key`] before configuring. Mirrors the
+     * desktop `preview_sftp_host_key`; the SSH probe is verified on-device.
+     */
+open func previewSftpHostKeyJson(argsJson: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_preview_sftp_host_key_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(argsJson),$0
     )
 })
 }
@@ -1518,6 +1592,21 @@ open func tasksJson(listId: String)throws  -> String  {
         FfiConverterString.lower(listId),$0
     )
 })
+}
+    
+    /**
+     * Pin a user-confirmed SFTP host-key fingerprint for `host_port` (§19.5 —
+     * always an explicit user gesture, for first-use AND key-change). The UI
+     * calls this after the trust dialog, then configures. Mirrors the desktop
+     * `trust_sftp_host_key`.
+     */
+open func trustSftpHostKey(hostPort: String, fingerprint: String)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_trust_sftp_host_key(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(hostPort),
+        FfiConverterString.lower(fingerprint),$0
+    )
+}
 }
     
     /**
@@ -4942,6 +5031,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_discover_json() != 25945) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_cal_ffi_checksum_method_host_forget_sftp_host_key() != 61915) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_cal_ffi_checksum_method_host_get_event_by_id_json() != 43277) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -4949,6 +5041,12 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_list_calendars_json() != 49275) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_pinned_sftp_host_key() != 44107) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_preview_sftp_host_key_json() != 14030) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_push_now() != 48331) {
@@ -4973,6 +5071,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_tasks_json() != 40630) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_trust_sftp_host_key() != 43040) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_upcoming_reminders_json() != 5664) {

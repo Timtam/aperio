@@ -772,11 +772,17 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_discover_json(
     ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_forget_sftp_host_key(
+    ): Short
     external fun uniffi_cal_ffi_checksum_method_host_get_event_by_id_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_get_events_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_list_calendars_json(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_pinned_sftp_host_key(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_preview_sftp_host_key_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_push_now(
     ): Short
@@ -793,6 +799,8 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_cal_ffi_checksum_method_host_task_lists_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_tasks_json(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_trust_sftp_host_key(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_upcoming_reminders_json(
     ): Short
@@ -937,11 +945,17 @@ external fun uniffi_cal_ffi_fn_method_host_delete_task_list(`ptr`: Long,`id`: Ru
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_discover_json(`ptr`: Long,`pluginId`: RustBuffer.ByValue,`argsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_forget_sftp_host_key(`ptr`: Long,`hostPort`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_cal_ffi_fn_method_host_get_event_by_id_json(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_get_events_json(`ptr`: Long,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_list_calendars_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_pinned_sftp_host_key(`ptr`: Long,`hostPort`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_preview_sftp_host_key_json(`ptr`: Long,`argsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_push_now(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Int
@@ -959,6 +973,8 @@ external fun uniffi_cal_ffi_fn_method_host_task_lists_json(`ptr`: Long,uniffi_ou
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_tasks_json(`ptr`: Long,`listId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_trust_sftp_host_key(`ptr`: Long,`hostPort`: RustBuffer.ByValue,`fingerprint`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_cal_ffi_fn_method_host_upcoming_reminders_json(`ptr`: Long,`horizonMinutes`: Int,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_update_contact_json(`ptr`: Long,`contactJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1252,6 +1268,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_discover_json() != 25945.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_forget_sftp_host_key() != 61915.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_get_event_by_id_json() != 43277.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1259,6 +1278,12 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_list_calendars_json() != 49275.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_pinned_sftp_host_key() != 44107.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_preview_sftp_host_key_json() != 14030.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_push_now() != 48331.toShort()) {
@@ -1283,6 +1308,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_tasks_json() != 40630.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_trust_sftp_host_key() != 43040.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_upcoming_reminders_json() != 5664.toShort()) {
@@ -1975,6 +2003,12 @@ public interface HostInterface {
     fun `discoverJson`(`pluginId`: kotlin.String, `argsJson`: kotlin.String): kotlin.String
     
     /**
+     * Drop the pinned SFTP fingerprint for `host_port` (the "forget pin"
+     * gesture; the next connect re-runs the first-use trust dialog).
+     */
+    fun `forgetSftpHostKey`(`hostPort`: kotlin.String)
+    
+    /**
      * One local event by id as JSON (`Event` or `null`). Local-only by design
      * — the desktop `get_event_by_id` is the reminders-overview lookup against
      * the local store; external events aren't addressable by a bare id without
@@ -2005,6 +2039,23 @@ public interface HostInterface {
      * operations — the same ordering the desktop frontend honours.
      */
     fun `listCalendarsJson`(): kotlin.String
+    
+    /**
+     * The currently-pinned SFTP fingerprint for `host_port`, or `None`. Lets the
+     * UI show "Pinned: SHA256:…" + the forget gesture without probing the server.
+     */
+    fun `pinnedSftpHostKey`(`hostPort`: kotlin.String): kotlin.String?
+    
+    /**
+     * Probe an SFTP server's SHA256 host-key fingerprint WITHOUT pinning it, and
+     * classify it against the device's pin store (§19.5 TOFU). `args_json`
+     * carries `{host, port}`; returns `{host_port, fingerprint, status}` where
+     * `status` is `{kind:"new"}` (nothing pinned) / `{kind:"unchanged"}` /
+     * `{kind:"changed", stored}`. The UI shows the trust dialog accordingly,
+     * then calls [`Self::trust_sftp_host_key`] before configuring. Mirrors the
+     * desktop `preview_sftp_host_key`; the SSH probe is verified on-device.
+     */
+    fun `previewSftpHostKeyJson`(`argsJson`: kotlin.String): kotlin.String
     
     /**
      * Push the local pending logs without fetching (call from RN AppState
@@ -2062,6 +2113,14 @@ public interface HostInterface {
      * owning account (local store or external provider).
      */
     fun `tasksJson`(`listId`: kotlin.String): kotlin.String
+    
+    /**
+     * Pin a user-confirmed SFTP host-key fingerprint for `host_port` (§19.5 —
+     * always an explicit user gesture, for first-use AND key-change). The UI
+     * calls this after the trust dialog, then configures. Mirrors the desktop
+     * `trust_sftp_host_key`.
+     */
+    fun `trustSftpHostKey`(`hostPort`: kotlin.String, `fingerprint`: kotlin.String)
     
     /**
      * Upcoming reminder triggers within `horizon_minutes` from now, as a JSON
@@ -2711,6 +2770,23 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * Drop the pinned SFTP fingerprint for `host_port` (the "forget pin"
+     * gesture; the next connect re-runs the first-use trust dialog).
+     */
+    @Throws(StoreException::class)override fun `forgetSftpHostKey`(`hostPort`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_forget_sftp_host_key(
+        it,
+        FfiConverterString.lower(`hostPort`),_status)
+}
+    }
+    
+    
+
+    
+    /**
      * One local event by id as JSON (`Event` or `null`). Local-only by design
      * — the desktop `get_event_by_id` is the reminders-overview lookup against
      * the local store; external events aren't addressable by a bare id without
@@ -2771,6 +2847,47 @@ open class Host: Disposable, AutoCloseable, HostInterface
     UniffiLib.uniffi_cal_ffi_fn_method_host_list_calendars_json(
         it,
         _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * The currently-pinned SFTP fingerprint for `host_port`, or `None`. Lets the
+     * UI show "Pinned: SHA256:…" + the forget gesture without probing the server.
+     */
+    @Throws(StoreException::class)override fun `pinnedSftpHostKey`(`hostPort`: kotlin.String): kotlin.String? {
+            return FfiConverterOptionalString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_pinned_sftp_host_key(
+        it,
+        FfiConverterString.lower(`hostPort`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Probe an SFTP server's SHA256 host-key fingerprint WITHOUT pinning it, and
+     * classify it against the device's pin store (§19.5 TOFU). `args_json`
+     * carries `{host, port}`; returns `{host_port, fingerprint, status}` where
+     * `status` is `{kind:"new"}` (nothing pinned) / `{kind:"unchanged"}` /
+     * `{kind:"changed", stored}`. The UI shows the trust dialog accordingly,
+     * then calls [`Self::trust_sftp_host_key`] before configuring. Mirrors the
+     * desktop `preview_sftp_host_key`; the SSH probe is verified on-device.
+     */
+    @Throws(StoreException::class)override fun `previewSftpHostKeyJson`(`argsJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_preview_sftp_host_key_json(
+        it,
+        FfiConverterString.lower(`argsJson`),_status)
 }
     }
     )
@@ -2928,6 +3045,25 @@ open class Host: Disposable, AutoCloseable, HostInterface
     }
     )
     }
+    
+
+    
+    /**
+     * Pin a user-confirmed SFTP host-key fingerprint for `host_port` (§19.5 —
+     * always an explicit user gesture, for first-use AND key-change). The UI
+     * calls this after the trust dialog, then configures. Mirrors the desktop
+     * `trust_sftp_host_key`.
+     */
+    @Throws(StoreException::class)override fun `trustSftpHostKey`(`hostPort`: kotlin.String, `fingerprint`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_trust_sftp_host_key(
+        it,
+        FfiConverterString.lower(`hostPort`),FfiConverterString.lower(`fingerprint`),_status)
+}
+    }
+    
     
 
     

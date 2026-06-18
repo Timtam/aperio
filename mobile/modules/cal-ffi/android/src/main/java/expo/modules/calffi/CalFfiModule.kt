@@ -252,5 +252,26 @@ class CalFfiModule : Module() {
     AsyncFunction("completeSyncOauthJson") { pluginId: String, requestJson: String ->
       host.completeSyncOauthJson(pluginId, requestJson)
     }
+
+    // ─── SFTP host-key trust (§19.5 TOFU) ─────────────────────────────────────
+    // previewSftpHostKeyJson probes the server's fingerprint (network) + compares
+    // it to the device pin store → {host_port, fingerprint, status}; trust/forget/
+    // pinned manage the pin (no network). The JS layer shows the trust dialog.
+
+    AsyncFunction("previewSftpHostKeyJson") { argsJson: String ->
+      host.previewSftpHostKeyJson(argsJson)
+    }
+
+    AsyncFunction("trustSftpHostKey") { hostPort: String, fingerprint: String ->
+      host.trustSftpHostKey(hostPort, fingerprint)
+    }
+
+    AsyncFunction("forgetSftpHostKey") { hostPort: String ->
+      host.forgetSftpHostKey(hostPort)
+    }
+
+    AsyncFunction("pinnedSftpHostKey") { hostPort: String ->
+      host.pinnedSftpHostKey(hostPort)
+    }
   }
 }

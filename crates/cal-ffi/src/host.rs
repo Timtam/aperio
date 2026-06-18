@@ -48,8 +48,10 @@ use cal_core::{
     NewEvent, TaskList, TasksFeature,
 };
 use host_core::accounts::{AccountsRepo, AdapterKind};
+use host_core::db::SharedConn;
 use host_core::event_log::OnboardingService;
 use host_core::registry::{AdapterRegistry, LOCAL_ID};
+use host_core::sftp_host_keys::UserPrefsHostKeyVerifier;
 use host_core::sync::build_orchestrator;
 use host_core::user_prefs::UserPrefsRepo;
 use host_core::DbHandle;
@@ -88,13 +90,27 @@ const PREF_GOOGLEDRIVE_CLIENT_ID: &str = "sync.adapter.googledrive.clientId";
 const PREF_GOOGLEDRIVE_CLIENT_SECRET: &str = "sync.adapter.googledrive.clientSecret";
 const PREF_GOOGLEDRIVE_FOLDER_NAME: &str = "sync.adapter.googledrive.folderName";
 const GOOGLEDRIVE_SECRET_ACCOUNT: &str = "sync.adapter.googledrive";
+/// SFTP adapter keys. host/port/user/path/auth-method/key-path are device-local
+/// prefs; the password (or SSH-key passphrase) lives in the keychain under one
+/// of two pseudo-accounts so switching auth methods doesn't clobber the other
+/// family's stored credential. The trusted host-key fingerprint is NOT here —
+/// it's in the shared host-core `UserPrefsHostKeyVerifier` (user_prefs
+/// `sync.adapter.sftp.knownHosts.<host:port>`, device-local, §19.5 TOFU).
+const PREF_SFTP_HOST: &str = "sync.adapter.sftp.host";
+const PREF_SFTP_PORT: &str = "sync.adapter.sftp.port";
+const PREF_SFTP_USER: &str = "sync.adapter.sftp.user";
+const PREF_SFTP_PATH: &str = "sync.adapter.sftp.path";
+const PREF_SFTP_AUTH_METHOD: &str = "sync.adapter.sftp.authMethod";
+const PREF_SFTP_KEY_PATH: &str = "sync.adapter.sftp.keyPath";
+const SFTP_SECRET_ACCOUNT: &str = "sync.adapter.sftp";
+const SFTP_KEY_SECRET_ACCOUNT: &str = "sync.adapter.sftp.key";
 /// Plugin ids of the statically-embedded sync adapters this host configures.
-/// SFTP (needs the §19.5 host-key trust flow) follows in its own phase.
 const PLUGIN_ID_SYNC_LOCAL: &str = "com.aperio.sync-adapter-local";
 const PLUGIN_ID_WEBDAV: &str = "com.aperio.sync-adapter-webdav";
 const PLUGIN_ID_FTP: &str = "com.aperio.sync-adapter-ftp";
 const PLUGIN_ID_DROPBOX: &str = "com.aperio.sync-adapter-dropbox";
 const PLUGIN_ID_GOOGLEDRIVE: &str = "com.aperio.sync-adapter-googledrive";
+const PLUGIN_ID_SFTP: &str = "com.aperio.sync-adapter-sftp";
 
 fn sync_err(e: SyncError) -> StoreError {
     StoreError::Storage {
@@ -362,6 +378,16 @@ struct ConfigureSyncRequest {
     /// `googledrive` dataset folder name.
     #[serde(default)]
     folder_name: Option<String>,
+    /// `sftp` auth method: `"password"` (default) or `"key"`.
+    #[serde(default)]
+    auth_method: Option<String>,
+    /// `sftp` key-auth: path to the private key file (on the device).
+    #[serde(default)]
+    key_path: Option<String>,
+    /// `sftp` key-auth: the key's passphrase. Omitted/empty reuses the stored
+    /// keychain secret (same contract as `password`).
+    #[serde(default)]
+    key_passphrase: Option<String>,
 }
 
 /// The mobile app's handle to the full on-device engine.
@@ -542,9 +568,12 @@ fn open_sync_plugin(
 /// of the desktop `build_adapter_from_prefs`. Runs in [`Host::open`] before
 /// `Self` exists, so it takes the plugin manager + secret store by reference.
 /// Best-effort: a missing/blank field or an open failure yields `None`, leaving
-/// sync unconfigured until the user re-configures from the Sync screen. Only the
-/// kinds this host can configure are restored (`local` / `webdav` / `ftp`).
+/// sync unconfigured until the user re-configures from the Sync screen. Restores
+/// every kind this host can configure (`local`/`webdav`/`ftp`/`dropbox`/
+/// `googledrive`/`sftp`). `shared` is taken alongside `prefs` so the `sftp` arm
+/// can read the pinned host-key fingerprint via the shared verifier.
 fn restore_adapter_from_prefs(
+    shared: &SharedConn,
     prefs: &UserPrefsRepo,
     plugin_manager: &PluginManager,
     secret_store: &dyn SecretStore,
@@ -681,6 +710,74 @@ fn restore_adapter_from_prefs(
             .to_string();
             open_sync_plugin(plugin_manager, PLUGIN_ID_GOOGLEDRIVE, cfg).ok()
         }
+        "sftp" => {
+            let host = prefs.get(PREF_SFTP_HOST).ok().flatten()?;
+            if host.trim().is_empty() {
+                return None;
+            }
+            let port = prefs
+                .get(PREF_SFTP_PORT)
+                .ok()
+                .flatten()
+                .and_then(|s| s.parse::<u16>().ok())
+                .unwrap_or(22);
+            let user = prefs.get(PREF_SFTP_USER).ok().flatten()?;
+            if user.trim().is_empty() {
+                return None;
+            }
+            let path = prefs.get(PREF_SFTP_PATH).ok().flatten()?;
+            if path.trim().is_empty() {
+                return None;
+            }
+            let auth_method = prefs
+                .get(PREF_SFTP_AUTH_METHOD)
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| "password".to_string());
+            let (password, key_path, key_passphrase) = match auth_method.as_str() {
+                "password" => {
+                    // No stored password → incomplete; don't restore.
+                    let pw = secret_store
+                        .retrieve(SFTP_SECRET_ACCOUNT, SecretSlot::Password)
+                        .ok()?;
+                    (pw, String::new(), String::new())
+                }
+                "key" => {
+                    let kp = prefs
+                        .get(PREF_SFTP_KEY_PATH)
+                        .ok()
+                        .flatten()
+                        .unwrap_or_default();
+                    if kp.trim().is_empty() {
+                        return None;
+                    }
+                    // A missing passphrase is fine (unencrypted key) → empty.
+                    let pass = secret_store
+                        .retrieve(SFTP_KEY_SECRET_ACCOUNT, SecretSlot::Password)
+                        .ok()
+                        .unwrap_or_default();
+                    (String::new(), kp.trim().to_string(), pass)
+                }
+                _ => return None,
+            };
+            let host_port = format!("{}:{port}", host.trim());
+            let pinned_fp = UserPrefsHostKeyVerifier::new(shared.clone())
+                .peek(&host_port)
+                .unwrap_or_default();
+            let cfg = serde_json::json!({
+                "host": host.trim(),
+                "port": port,
+                "user": user.trim(),
+                "path": path.trim(),
+                "auth_method": auth_method,
+                "password": password,
+                "key_path": key_path,
+                "key_passphrase": key_passphrase,
+                "pinned_fingerprint": pinned_fp,
+            })
+            .to_string();
+            open_sync_plugin(plugin_manager, PLUGIN_ID_SFTP, cfg).ok()
+        }
         _ => None,
     }
 }
@@ -769,7 +866,7 @@ impl Host {
             let shared = db.shared();
             let prefs = UserPrefsRepo::new(&shared);
             if let Some(adapter) =
-                restore_adapter_from_prefs(&prefs, &plugin_manager, secret_store.as_ref())
+                restore_adapter_from_prefs(&shared, &prefs, &plugin_manager, secret_store.as_ref())
             {
                 graph.orchestrator.configure(adapter);
             }
@@ -1553,6 +1650,113 @@ impl Host {
         Ok(())
     }
 
+    /// Probe an SFTP server's SHA256 host-key fingerprint WITHOUT pinning it, and
+    /// classify it against the device's pin store (§19.5 TOFU). `args_json`
+    /// carries `{host, port}`; returns `{host_port, fingerprint, status}` where
+    /// `status` is `{kind:"new"}` (nothing pinned) / `{kind:"unchanged"}` /
+    /// `{kind:"changed", stored}`. The UI shows the trust dialog accordingly,
+    /// then calls [`Self::trust_sftp_host_key`] before configuring. Mirrors the
+    /// desktop `preview_sftp_host_key`; the SSH probe is verified on-device.
+    pub fn preview_sftp_host_key_json(&self, args_json: String) -> Result<String, StoreError> {
+        #[derive(serde::Deserialize)]
+        struct PreviewArgs {
+            host: String,
+            #[serde(default = "default_ssh_port")]
+            port: u16,
+        }
+        fn default_ssh_port() -> u16 {
+            22
+        }
+        let args: PreviewArgs = from_json("sftp preview", &args_json)?;
+        let host = args.host.trim();
+        if host.is_empty() {
+            return Err(StoreError::InvalidField {
+                field: "host".to_string(),
+                detail: "SFTP host must not be empty".to_string(),
+            });
+        }
+        let probe_args = serde_json::json!({ "host": host, "port": args.port });
+        let bytes = self
+            .runtime
+            .block_on(async {
+                self.plugin_manager
+                    .probe_host_key(PLUGIN_ID_SFTP, &probe_args.to_string())
+                    .await
+            })
+            .map_err(map_probe_err)?;
+        #[derive(serde::Deserialize)]
+        struct ProbeResult {
+            fingerprint: String,
+        }
+        let probe: ProbeResult =
+            serde_json::from_slice(&bytes).map_err(|e| StoreError::Protocol {
+                detail: format!("host-key probe blob: {e}"),
+            })?;
+        let host_port = format!("{host}:{}", args.port);
+        let status = match UserPrefsHostKeyVerifier::new(self.db.shared()).peek(&host_port) {
+            None => serde_json::json!({ "kind": "new" }),
+            Some(ref s) if *s == probe.fingerprint => serde_json::json!({ "kind": "unchanged" }),
+            Some(s) => serde_json::json!({ "kind": "changed", "stored": s }),
+        };
+        Ok(serde_json::json!({
+            "host_port": host_port,
+            "fingerprint": probe.fingerprint,
+            "status": status,
+        })
+        .to_string())
+    }
+
+    /// Pin a user-confirmed SFTP host-key fingerprint for `host_port` (§19.5 —
+    /// always an explicit user gesture, for first-use AND key-change). The UI
+    /// calls this after the trust dialog, then configures. Mirrors the desktop
+    /// `trust_sftp_host_key`.
+    pub fn trust_sftp_host_key(
+        &self,
+        host_port: String,
+        fingerprint: String,
+    ) -> Result<(), StoreError> {
+        let host_port = host_port.trim();
+        let fingerprint = fingerprint.trim();
+        if host_port.is_empty() {
+            return Err(StoreError::InvalidField {
+                field: "host_port".to_string(),
+                detail: "host_port must not be empty".to_string(),
+            });
+        }
+        if fingerprint.is_empty() {
+            return Err(StoreError::InvalidField {
+                field: "fingerprint".to_string(),
+                detail: "fingerprint must not be empty".to_string(),
+            });
+        }
+        UserPrefsHostKeyVerifier::new(self.db.shared()).record(host_port, fingerprint);
+        Ok(())
+    }
+
+    /// Drop the pinned SFTP fingerprint for `host_port` (the "forget pin"
+    /// gesture; the next connect re-runs the first-use trust dialog).
+    pub fn forget_sftp_host_key(&self, host_port: String) -> Result<(), StoreError> {
+        let host_port = host_port.trim();
+        if host_port.is_empty() {
+            return Err(StoreError::InvalidField {
+                field: "host_port".to_string(),
+                detail: "host_port must not be empty".to_string(),
+            });
+        }
+        UserPrefsHostKeyVerifier::new(self.db.shared()).forget(host_port);
+        Ok(())
+    }
+
+    /// The currently-pinned SFTP fingerprint for `host_port`, or `None`. Lets the
+    /// UI show "Pinned: SHA256:…" + the forget gesture without probing the server.
+    pub fn pinned_sftp_host_key(&self, host_port: String) -> Result<Option<String>, StoreError> {
+        let host_port = host_port.trim();
+        if host_port.is_empty() {
+            return Ok(None);
+        }
+        Ok(UserPrefsHostKeyVerifier::new(self.db.shared()).peek(host_port))
+    }
+
     /// Configure the sync adapter from a JSON request. Handles `local`
     /// (filesystem path), `webdav` (URL + user + password), `ftp`
     /// (host/port/user/path/mode + password), and the OAuth kinds `dropbox`
@@ -1829,11 +2033,141 @@ impl Host {
                     .map_err(storage_err)?;
                 Ok(())
             }
+            "sftp" => {
+                let host = req.host.unwrap_or_default();
+                let host = host.trim();
+                if host.is_empty() {
+                    return Err(StoreError::InvalidField {
+                        field: "host".to_string(),
+                        detail: "SFTP host must not be empty".to_string(),
+                    });
+                }
+                let user = req.user.unwrap_or_default();
+                let user = user.trim();
+                if user.is_empty() {
+                    return Err(StoreError::InvalidField {
+                        field: "user".to_string(),
+                        detail: "SFTP user must not be empty".to_string(),
+                    });
+                }
+                let port = req.port.unwrap_or(22);
+                let path = req.path.unwrap_or_default();
+                let path = path.trim();
+                if path.is_empty() {
+                    return Err(StoreError::InvalidField {
+                        field: "path".to_string(),
+                        detail: "SFTP path must not be empty".to_string(),
+                    });
+                }
+                let auth_method = req.auth_method.unwrap_or_else(|| "password".to_string());
+                let auth_method = auth_method.trim();
+                // Resolve the auth credentials with the same keychain-reuse
+                // contract as WebDAV/FTP (a non-empty request value wins, else the
+                // stored secret). Password + key passphrase live in separate slots
+                // so switching methods doesn't clobber either.
+                let (resolved_password, resolved_key_path, resolved_key_passphrase) =
+                    match auth_method {
+                        "password" => {
+                            let pw = match req.password.as_deref().map(str::trim) {
+                                Some(p) if !p.is_empty() => p.to_string(),
+                                _ => self
+                                    .secret_store
+                                    .retrieve(SFTP_SECRET_ACCOUNT, SecretSlot::Password)
+                                    .map_err(|_| StoreError::Auth {
+                                        detail: "no SFTP password configured".to_string(),
+                                    })?,
+                            };
+                            (pw, String::new(), String::new())
+                        }
+                        "key" => {
+                            let kp = req
+                                .key_path
+                                .as_deref()
+                                .map(str::trim)
+                                .filter(|s| !s.is_empty())
+                                .ok_or_else(|| StoreError::InvalidField {
+                                    field: "key_path".to_string(),
+                                    detail: "SSH key path must not be empty".to_string(),
+                                })?
+                                .to_string();
+                            let pass = match req.key_passphrase.as_deref().map(str::trim) {
+                                Some(p) if !p.is_empty() => p.to_string(),
+                                _ => self
+                                    .secret_store
+                                    .retrieve(SFTP_KEY_SECRET_ACCOUNT, SecretSlot::Password)
+                                    .ok()
+                                    .unwrap_or_default(),
+                            };
+                            (String::new(), kp, pass)
+                        }
+                        other => {
+                            return Err(StoreError::InvalidField {
+                                field: "auth_method".to_string(),
+                                detail: format!("unknown SFTP auth method: {other}"),
+                            });
+                        }
+                    };
+                let shared = self.db.shared();
+                // The user-pinned host fingerprint (§19.5 trust dialog) locks the
+                // handshake to that exact key. Empty → silent TOFU; the UI only
+                // configures after the trust dialog, so a real connect has a pin.
+                let host_port = format!("{host}:{port}");
+                let pinned_fp = UserPrefsHostKeyVerifier::new(shared.clone())
+                    .peek(&host_port)
+                    .unwrap_or_default();
+                let cfg = serde_json::json!({
+                    "host": host,
+                    "port": port,
+                    "user": user,
+                    "path": path,
+                    "auth_method": auth_method,
+                    "password": resolved_password,
+                    "key_path": resolved_key_path,
+                    "key_passphrase": resolved_key_passphrase,
+                    "pinned_fingerprint": pinned_fp,
+                })
+                .to_string();
+                let adapter = open_sync_plugin(&self.plugin_manager, PLUGIN_ID_SFTP, cfg)?;
+                self.runtime
+                    .block_on(async { adapter.test_connection().await })
+                    .map_err(sync_err)?;
+                self.orchestrator.configure(adapter);
+                let prefs = UserPrefsRepo::new(&shared);
+                prefs.set(PREF_ADAPTER_KIND, "sftp").map_err(storage_err)?;
+                prefs.set(PREF_SFTP_HOST, host).map_err(storage_err)?;
+                prefs
+                    .set(PREF_SFTP_PORT, &port.to_string())
+                    .map_err(storage_err)?;
+                prefs.set(PREF_SFTP_USER, user).map_err(storage_err)?;
+                prefs.set(PREF_SFTP_PATH, path).map_err(storage_err)?;
+                prefs
+                    .set(PREF_SFTP_AUTH_METHOD, auth_method)
+                    .map_err(storage_err)?;
+                if auth_method == "key" {
+                    prefs
+                        .set(PREF_SFTP_KEY_PATH, &resolved_key_path)
+                        .map_err(storage_err)?;
+                    if let Some(pp) = req.key_passphrase.as_deref().map(str::trim) {
+                        if !pp.is_empty() {
+                            self.secret_store
+                                .store(SFTP_KEY_SECRET_ACCOUNT, SecretSlot::Password, pp)
+                                .map_err(storage_err)?;
+                        }
+                    }
+                } else if let Some(pw) = req.password.as_deref().map(str::trim) {
+                    if !pw.is_empty() {
+                        self.secret_store
+                            .store(SFTP_SECRET_ACCOUNT, SecretSlot::Password, pw)
+                            .map_err(storage_err)?;
+                    }
+                }
+                Ok(())
+            }
             other => Err(StoreError::InvalidField {
                 field: "kind".to_string(),
                 detail: format!(
-                    "sync adapter kind '{other}' is not supported yet \
-                     (local, webdav, ftp, dropbox, googledrive)"
+                    "sync adapter kind '{other}' is not supported \
+                     (local, webdav, ftp, dropbox, googledrive, sftp)"
                 ),
             }),
         }
@@ -2363,6 +2697,22 @@ fn map_discover_err(e: plugin_core::manager::DiscoverError) -> StoreError {
             detail: format!("plugin {id} does not support discovery"),
         },
         D::Plugin(msg) => StoreError::Protocol { detail: msg },
+    }
+}
+
+/// Map a plugin host-key-probe error to the FFI store error. A failed probe
+/// (DNS / connect / SSH handshake) carries the plugin's own message so the UI
+/// can show why the fingerprint couldn't be fetched and offer a retry.
+fn map_probe_err(e: plugin_core::manager::ProbeHostKeyError) -> StoreError {
+    use plugin_core::manager::ProbeHostKeyError as P;
+    match e {
+        P::PluginMissing(id) => StoreError::Unsupported {
+            detail: format!("plugin {id} is not loaded"),
+        },
+        P::Unsupported(id) => StoreError::Unsupported {
+            detail: format!("plugin {id} does not support host-key probing"),
+        },
+        P::Plugin(msg) => StoreError::Network { detail: msg },
     }
 }
 
@@ -3036,16 +3386,92 @@ mod tests {
 
     #[test]
     fn unsupported_sync_kind_is_rejected() {
-        // sftp still needs the §19.5 host-key trust flow, so it's not yet a
-        // configurable kind (dropbox/googledrive now are).
+        // Every real kind is now configurable (local/webdav/ftp/dropbox/
+        // googledrive/sftp); a bogus kind still errors on the field.
         let (_dir, host, _kc) = open_host();
         let err = host
-            .configure_sync_adapter_json(r#"{"kind":"sftp"}"#.to_string())
+            .configure_sync_adapter_json(r#"{"kind":"icloud"}"#.to_string())
             .unwrap_err();
         assert!(
             matches!(&err, StoreError::InvalidField { field, .. } if field == "kind"),
             "got: {err:?}"
         );
+    }
+
+    #[test]
+    fn sftp_host_key_trust_round_trips_through_the_host() {
+        // The pin store is the shared host-core verifier over user_prefs — no
+        // network. trust → pinned → forget round-trips.
+        let (_dir, host, _kc) = open_host();
+        assert_eq!(
+            host.pinned_sftp_host_key("nas:22".to_string()).unwrap(),
+            None
+        );
+        host.trust_sftp_host_key("nas:22".to_string(), "SHA256:abc".to_string())
+            .unwrap();
+        assert_eq!(
+            host.pinned_sftp_host_key("nas:22".to_string()).unwrap(),
+            Some("SHA256:abc".to_string())
+        );
+        host.forget_sftp_host_key("nas:22".to_string()).unwrap();
+        assert_eq!(
+            host.pinned_sftp_host_key("nas:22".to_string()).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn trust_sftp_host_key_rejects_empty_fingerprint() {
+        let (_dir, host, _kc) = open_host();
+        let err = host
+            .trust_sftp_host_key("nas:22".to_string(), "  ".to_string())
+            .unwrap_err();
+        assert!(
+            matches!(err, StoreError::InvalidField { ref field, .. } if field == "fingerprint"),
+            "got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn configure_sftp_rejects_empty_host() {
+        let (_dir, host, _kc) = open_host();
+        let err = host
+            .configure_sync_adapter_json(
+                r#"{"kind":"sftp","host":"","user":"u","path":"/p"}"#.to_string(),
+            )
+            .unwrap_err();
+        assert!(
+            matches!(err, StoreError::InvalidField { ref field, .. } if field == "host"),
+            "got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn configure_sftp_key_auth_requires_a_key_path() {
+        // key auth with no key_path fails fast (before any network), no keychain.
+        let (_dir, host, _kc) = open_host();
+        let err = host
+            .configure_sync_adapter_json(
+                r#"{"kind":"sftp","host":"nas","user":"u","path":"/p","auth_method":"key"}"#
+                    .to_string(),
+            )
+            .unwrap_err();
+        assert!(
+            matches!(err, StoreError::InvalidField { ref field, .. } if field == "key_path"),
+            "got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn configure_sftp_password_auth_without_a_secret_is_auth_error() {
+        // No password in the request + none stored → Auth, before any network.
+        let (_dir, host, _kc) = open_host();
+        let err = host
+            .configure_sync_adapter_json(
+                r#"{"kind":"sftp","host":"nas","user":"u","path":"/p"}"#.to_string(),
+            )
+            .unwrap_err();
+        assert!(matches!(err, StoreError::Auth { .. }), "got: {err:?}");
     }
 
     #[test]

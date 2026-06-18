@@ -217,5 +217,23 @@ public class CalFfiModule: Module {
     AsyncFunction("completeSyncOauthJson") { (pluginId: String, requestJson: String) in
       try self.host.completeSyncOauthJson(pluginId: pluginId, requestJson: requestJson)
     }
+
+    // ─── SFTP host-key trust (§19.5 TOFU) ─────────────────────────────────────
+
+    AsyncFunction("previewSftpHostKeyJson") { (argsJson: String) -> String in
+      try self.host.previewSftpHostKeyJson(argsJson: argsJson)
+    }
+
+    AsyncFunction("trustSftpHostKey") { (hostPort: String, fingerprint: String) in
+      try self.host.trustSftpHostKey(hostPort: hostPort, fingerprint: fingerprint)
+    }
+
+    AsyncFunction("forgetSftpHostKey") { (hostPort: String) in
+      try self.host.forgetSftpHostKey(hostPort: hostPort)
+    }
+
+    AsyncFunction("pinnedSftpHostKey") { (hostPort: String) -> String? in
+      try self.host.pinnedSftpHostKey(hostPort: hostPort)
+    }
   }
 }

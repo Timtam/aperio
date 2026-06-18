@@ -174,6 +174,19 @@ declare class CalFfiModule extends NativeModule<Record<never, never>> {
    *  pkce_verifier, state, returned_state, redirect_uri}`. No account is created;
    *  the caller follows with `configureSyncAdapterJson` to activate the target. */
   completeSyncOauthJson(pluginId: string, requestJson: string): Promise<void>;
+
+  // ── SFTP host-key trust (§19.5 TOFU) ──
+  /** Probe an SFTP server's SHA256 host-key fingerprint (network) and classify
+   *  it against the device pin store. `argsJson` carries `{host, port}`; returns
+   *  `{host_port, fingerprint, status}` JSON (status: `{kind:"new"|"unchanged"}`
+   *  or `{kind:"changed", stored}`). The caller shows the trust dialog. */
+  previewSftpHostKeyJson(argsJson: string): Promise<string>;
+  /** Pin a user-confirmed fingerprint for `hostPort` (first-use or key-change). */
+  trustSftpHostKey(hostPort: string, fingerprint: string): Promise<void>;
+  /** Drop the pinned fingerprint for `hostPort` (next connect re-prompts). */
+  forgetSftpHostKey(hostPort: string): Promise<void>;
+  /** The pinned fingerprint for `hostPort`, or null. No network. */
+  pinnedSftpHostKey(hostPort: string): Promise<string | null>;
 }
 
 export default requireNativeModule<CalFfiModule>('CalFfi');
