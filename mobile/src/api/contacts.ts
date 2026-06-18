@@ -23,8 +23,22 @@ export interface ContactList {
   account_id: string;
 }
 
-/** A persisted contact (the cal_core `Contact` wire shape). The rich fields
- *  (addresses / members / photo) cross opaquely until the editor covers them. */
+/** One postal address on a contact (the cal_core `ContactAddress` shape). Every
+ *  field is optional; an all-empty address is dropped on save. `label` is
+ *  free-form — the conventional slots are `"home"`/`"work"`/`"other"`. (The
+ *  Rust side skip-serializes `None`, so a field can be absent on read; treat
+ *  missing as empty.) */
+export interface ContactAddress {
+  label: string | null;
+  street: string | null;
+  city: string | null;
+  region: string | null;
+  postal_code: string | null;
+  country: string | null;
+}
+
+/** A persisted contact (the cal_core `Contact` wire shape). `members` / `photo`
+ *  still cross opaquely (the group + photo editors are deferred). */
 export interface Contact {
   id: string;
   list_id: string;
@@ -34,12 +48,13 @@ export interface Contact {
   organization: string | null;
   emails: string[];
   phone_numbers: string[];
+  /** ISO `YYYY-MM-DD`, or null. */
   birthday: string | null;
   notes: string | null;
   /** `null` ⇒ a person; an array (even empty) ⇒ a group / distribution list. */
   members: unknown[] | null;
   has_photo: boolean;
-  addresses: unknown[];
+  addresses: ContactAddress[];
   created_at: string;
   updated_at: string;
   etag: string | null;
@@ -55,7 +70,7 @@ export interface NewContact {
   phone_numbers: string[];
   birthday: string | null;
   notes: string | null;
-  addresses: unknown[];
+  addresses: ContactAddress[];
   members: unknown[] | null;
   photo: unknown | null;
 }
