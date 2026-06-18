@@ -29,6 +29,7 @@ import {
 import { deleteTask, updateTask } from '../api/client';
 import { useCurrentDayKey } from '../hooks/useCurrentDayKey';
 import { describeDue } from '../intl/describeDue';
+import { resolveTaskColor, sectionColorMap } from '../intl/taskColor';
 import { useTaskStore } from '../state/taskStoreContext';
 import { useTasks } from '../state/useTasks';
 import type { RootStackScreenProps } from '../navigation/types';
@@ -139,6 +140,18 @@ export default function TasksScreen({
   const entries = useMemo(
     () => buildEntries(tasks, taskListById, tr, collapsed, sectionsByList, today).entries,
     [tasks, taskListById, tr, collapsed, sectionsByList, today],
+  );
+
+  // Colour resolution (task own → section → list), matching the desktop. The
+  // palette + every section's bound hex feed resolveTaskColor; recolouring a
+  // label recolours every task that inherits it, with no per-task write.
+  const labelsById = useMemo(
+    () => new Map(colorLabels.map((l) => [l.id, l])),
+    [colorLabels],
+  );
+  const sectionColorById = useMemo(
+    () => sectionColorMap(Object.values(sectionsByList).flat(), labelsById),
+    [sectionsByList, labelsById],
   );
 
   // Restore focus to a sibling row after a mutation refetch remounts the list.
@@ -292,7 +305,7 @@ export default function TasksScreen({
     [openEditor, removeTask, toggleCollapsed, toggleDone],
   );
 
-  const taskLabel = (task: Task): string => {
+  const taskLabel = (task: Task, colourName: string | null): string => {
     const base = t('views.tasks.optionLabel', {
       title: task.title,
       state: t(statusI18nKey(task.status)),
@@ -302,11 +315,11 @@ export default function TasksScreen({
       assignee: assigneeSuffix(tr, task.assignees),
     });
     // A bound colour is meaningless to a screen reader as a colour, so announce
-    // its label NAME instead (resolved from the palette).
-    const colour = task.color_label
-      ? colorLabels.find((l) => l.id === task.color_label)?.name
-      : undefined;
-    return colour ? `${base}${t('mobile.colorLabelSuffix', { name: colour })}` : base;
+    // its label NAME instead — only the task's OWN explicit label is named (an
+    // inherited section/list tint is a grouping cue, not a per-task signal).
+    return colourName
+      ? `${base}${t('mobile.colorLabelSuffix', { name: colourName })}`
+      : base;
   };
 
   const renderHeader = (entry: Entry) => {
@@ -343,11 +356,10 @@ export default function TasksScreen({
   const renderTask = (entry: Entry) => {
     const task = entry.task;
     const done = task.status === 'completed';
-    // The task's bound colour (for sighted users — a coloured dot on the row).
-    // Screen-reader users get the label name in taskLabel() instead.
-    const taskHex = task.color_label
-      ? colorLabels.find((l) => l.id === task.color_label)?.hex
-      : undefined;
+    // The task's resolved colour (own label → section → list) — a coloured dot
+    // for sighted users; SR users get the OWN label's name in taskLabel().
+    const resolved = resolveTaskColor(task, taskListById, labelsById, sectionColorById);
+    const taskHex = resolved.hex ?? undefined;
     const actions = [
       { name: 'toggle', label: done ? t('mobile.reopen') : t('mobile.complete') },
       { name: 'edit', label: t('mobile.rename') },
@@ -369,7 +381,7 @@ export default function TasksScreen({
         }}
         accessible
         accessibilityRole="button"
-        accessibilityLabel={taskLabel(task)}
+        accessibilityLabel={taskLabel(task, resolved.labelName)}
         accessibilityHint={t('mobile.taskHint')}
         accessibilityState={
           entry.hasChildren ? { expanded: !collapsed.has(task.id) } : undefined
