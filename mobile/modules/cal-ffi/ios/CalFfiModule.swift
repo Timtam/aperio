@@ -201,5 +201,9 @@ public class CalFfiModule: Module {
     AsyncFunction("beginOauthJson") { (pluginId: String, argsJson: String) -> String in
       try self.host.beginOauthJson(pluginId: pluginId, argsJson: argsJson)
     }
+
+    AsyncFunction("completeOauthJson") { (pluginId: String, requestJson: String) -> String in
+      try self.host.completeOauthJson(pluginId: pluginId, requestJson: requestJson)
+    }
   }
 }

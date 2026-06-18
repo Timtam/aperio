@@ -151,6 +151,12 @@ declare class CalFfiModule extends NativeModule<Record<never, never>> {
    *  phase (no network). The caller opens `authorize_url` in a native auth
    *  session and keeps the verifier/state for the matching exchange. */
   beginOauthJson(pluginId: string, argsJson: string): Promise<string>;
+  /** Complete OAuth: exchange the redirect's code (+ pkce_verifier/state from
+   *  begin) for tokens, then create + register the account. `requestJson` carries
+   *  `{adapter_kind, display_name, config_json, client_id, client_secret?, code,
+   *  pkce_verifier, state, returned_state, redirect_uri}`. Returns the created
+   *  `Account` as JSON. */
+  completeOauthJson(pluginId: string, requestJson: string): Promise<string>;
 }
 
 export default requireNativeModule<CalFfiModule>('CalFfi');

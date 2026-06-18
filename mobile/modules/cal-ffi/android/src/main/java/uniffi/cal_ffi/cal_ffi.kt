@@ -728,6 +728,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_begin_oauth_json(
     ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_complete_oauth_json(
+    ): Short
     external fun uniffi_cal_ffi_checksum_method_host_configure_sync_adapter_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_contact_lists_json(
@@ -886,6 +888,8 @@ external fun uniffi_cal_ffi_fn_constructor_host_open(`dbPath`: RustBuffer.ByValu
 external fun uniffi_cal_ffi_fn_method_host_accounts_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_begin_oauth_json(`ptr`: Long,`pluginId`: RustBuffer.ByValue,`argsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_complete_oauth_json(`ptr`: Long,`pluginId`: RustBuffer.ByValue,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_configure_sync_adapter_json(`ptr`: Long,`configJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
@@ -1172,6 +1176,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_begin_oauth_json() != 10684.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_complete_oauth_json() != 7847.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_configure_sync_adapter_json() != 4122.toShort()) {
@@ -1753,6 +1760,20 @@ public interface HostInterface {
     fun `beginOauthJson`(`pluginId`: kotlin.String, `argsJson`: kotlin.String): kotlin.String
     
     /**
+     * Complete a host-driven OAuth flow: exchange the redirect's `code` (+ the
+     * `pkce_verifier`/`state` from [`Self::begin_oauth_json`]) for tokens via
+     * the plugin (`phase:"exchange"`, the network step), then create the
+     * account — persist the row (with the non-secret `config_json`), store the
+     * access + refresh tokens via the keychain bridge (refresh is the durable,
+     * cross-device-syncable credential), register the adapter, and append
+     * `AccountCreated`. Mirrors the desktop `connect_*_account` tail + the
+     * `create_account_json` row/secret/registry/teardown discipline. Returns the
+     * created account as JSON. (The exchange itself is verified on-device — it
+     * hits the provider's token endpoint.)
+     */
+    fun `completeOauthJson`(`pluginId`: kotlin.String, `requestJson`: kotlin.String): kotlin.String
+    
+    /**
      * Configure the sync adapter from a JSON request. Handles the `local`
      * (filesystem path), `webdav` (URL + user + password), and `ftp`
      * (host/port/user/path/mode + password) kinds: open the matching
@@ -2185,6 +2206,32 @@ open class Host: Disposable, AutoCloseable, HostInterface
     UniffiLib.uniffi_cal_ffi_fn_method_host_begin_oauth_json(
         it,
         FfiConverterString.lower(`pluginId`),FfiConverterString.lower(`argsJson`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Complete a host-driven OAuth flow: exchange the redirect's `code` (+ the
+     * `pkce_verifier`/`state` from [`Self::begin_oauth_json`]) for tokens via
+     * the plugin (`phase:"exchange"`, the network step), then create the
+     * account — persist the row (with the non-secret `config_json`), store the
+     * access + refresh tokens via the keychain bridge (refresh is the durable,
+     * cross-device-syncable credential), register the adapter, and append
+     * `AccountCreated`. Mirrors the desktop `connect_*_account` tail + the
+     * `create_account_json` row/secret/registry/teardown discipline. Returns the
+     * created account as JSON. (The exchange itself is verified on-device — it
+     * hits the provider's token endpoint.)
+     */
+    @Throws(StoreException::class)override fun `completeOauthJson`(`pluginId`: kotlin.String, `requestJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_complete_oauth_json(
+        it,
+        FfiConverterString.lower(`pluginId`),FfiConverterString.lower(`requestJson`),_status)
 }
     }
     )

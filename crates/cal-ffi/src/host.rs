@@ -1851,6 +1851,136 @@ impl Host {
             detail: format!("authorize response was not UTF-8: {e}"),
         })
     }
+
+    /// Complete a host-driven OAuth flow: exchange the redirect's `code` (+ the
+    /// `pkce_verifier`/`state` from [`Self::begin_oauth_json`]) for tokens via
+    /// the plugin (`phase:"exchange"`, the network step), then create the
+    /// account — persist the row (with the non-secret `config_json`), store the
+    /// access + refresh tokens via the keychain bridge (refresh is the durable,
+    /// cross-device-syncable credential), register the adapter, and append
+    /// `AccountCreated`. Mirrors the desktop `connect_*_account` tail + the
+    /// `create_account_json` row/secret/registry/teardown discipline. Returns the
+    /// created account as JSON. (The exchange itself is verified on-device — it
+    /// hits the provider's token endpoint.)
+    pub fn complete_oauth_json(
+        &self,
+        plugin_id: String,
+        request_json: String,
+    ) -> Result<String, StoreError> {
+        let req: CompleteOAuthRequest = from_json("oauth complete", &request_json)?;
+
+        // 1. Exchange the code for tokens FIRST — so a failed exchange never
+        //    leaves an orphaned account row. The plugin's exchange phase does
+        //    the CSRF (state) check.
+        let exchange_args = serde_json::json!({
+            "phase": "exchange",
+            "client_id": req.client_id,
+            "client_secret": req.client_secret,
+            "code": req.code,
+            "pkce_verifier": req.pkce_verifier,
+            "state": req.state,
+            "returned_state": req.returned_state,
+            "redirect_uri": req.redirect_uri,
+        });
+        let bytes = self
+            .runtime
+            .block_on(async {
+                self.plugin_manager
+                    .interactive_auth(&plugin_id, &exchange_args.to_string())
+                    .await
+            })
+            .map_err(|e| StoreError::Auth {
+                detail: e.to_string(),
+            })?;
+        let tokens: OAuthTokenJson =
+            serde_json::from_slice(&bytes).map_err(|e| StoreError::Protocol {
+                detail: format!("token blob: {e}"),
+            })?;
+
+        // 2. Persist the account row with the non-secret adapter config.
+        let shared = self.db.shared();
+        let repo = AccountsRepo::new(&shared);
+        let created = repo
+            .create(req.adapter_kind, req.display_name.trim(), &req.config_json)
+            .map_err(acc_err)?;
+
+        // 3. Store the tokens (device-local keychain). The access token is
+        //    ephemeral (re-minted from the refresh token) so it's NOT synced;
+        //    the refresh token IS the durable credential, pushed to the user's
+        //    other devices via the E2E credential log. Tear the row down on a
+        //    keychain failure so DB/keychain/registry never drift.
+        if let Err(err) =
+            self.secret_store
+                .store(&created.id, SecretSlot::AccessToken, &tokens.access_token)
+        {
+            let _ = repo.delete(&created.id);
+            return Err(StoreError::Storage {
+                detail: format!("store access token: {err}"),
+            });
+        }
+        if let Some(refresh) = tokens.refresh_token.as_deref() {
+            if let Err(err) =
+                self.secret_store
+                    .store(&created.id, SecretSlot::RefreshToken, refresh)
+            {
+                let _ = self.secret_store.delete_all(&created.id);
+                let _ = repo.delete(&created.id);
+                return Err(StoreError::Storage {
+                    detail: format!("store refresh token: {err}"),
+                });
+            }
+            host_core::credential_sync::emit_credential_set(
+                &self.writer,
+                &shared,
+                &created.id,
+                SecretSlot::RefreshToken,
+                refresh,
+            );
+        }
+
+        // 4. Register the freshly-created adapter. Fatal on failure — drop
+        //    secrets + row.
+        if let Err(err) = self.registry.register(&created) {
+            let _ = self.secret_store.delete_all(&created.id);
+            let _ = repo.delete(&created.id);
+            return Err(StoreError::Storage {
+                detail: format!("adapter registration failed: {err}"),
+            });
+        }
+
+        // 5. Sync the new account row (non-secret metadata) to other devices.
+        self.writer
+            .append(SyncEvent::AccountCreated(account_payload(&created)));
+
+        to_json(&created)
+    }
+}
+
+/// Request body for [`Host::complete_oauth_json`]. The `config_json` is the
+/// non-secret adapter config the registry reads back (`{client_id, client_secret}`
+/// for Google, `{client_id, authority}` for Microsoft); the remaining fields are
+/// the token-exchange inputs forwarded to the plugin's `phase:"exchange"`.
+#[derive(serde::Deserialize)]
+struct CompleteOAuthRequest {
+    adapter_kind: AdapterKind,
+    display_name: String,
+    config_json: String,
+    client_id: String,
+    #[serde(default)]
+    client_secret: Option<String>,
+    code: String,
+    pkce_verifier: String,
+    state: String,
+    returned_state: String,
+    redirect_uri: String,
+}
+
+/// The bits of the plugin's token response the host needs to persist.
+#[derive(serde::Deserialize)]
+struct OAuthTokenJson {
+    access_token: String,
+    #[serde(default)]
+    refresh_token: Option<String>,
 }
 
 /// Map an accounts-repo error to the FFI store error, preserving the
@@ -2676,6 +2806,25 @@ mod tests {
         );
         assert_eq!(v["pkce_verifier"].as_str().unwrap().len(), 43);
         assert!(v["state"].as_str().is_some());
+    }
+
+    #[test]
+    fn complete_oauth_unknown_plugin_errors_without_creating_an_account() {
+        // The exchange runs FIRST and fails fast (PluginMissing → Auth) with no
+        // network, so no orphan account row is left behind. (The happy path —
+        // a real token exchange — is verified on-device.)
+        let (_dir, host, _kc) = open_host();
+        let before = host.accounts_json().unwrap();
+        let req = r#"{"adapter_kind":"google","display_name":"G","config_json":"{}","client_id":"x","client_secret":"y","code":"c","pkce_verifier":"v","state":"s","returned_state":"s","redirect_uri":"aperio://oauth-callback"}"#;
+        let err = host
+            .complete_oauth_json("com.aperio.nonexistent-plugin".to_string(), req.to_string())
+            .unwrap_err();
+        assert!(matches!(err, StoreError::Auth { .. }), "got: {err:?}");
+        assert_eq!(
+            host.accounts_json().unwrap(),
+            before,
+            "a failed exchange must not create an account",
+        );
     }
 
     #[test]

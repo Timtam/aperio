@@ -561,6 +561,20 @@ public protocol HostProtocol: AnyObject, Sendable {
     func beginOauthJson(pluginId: String, argsJson: String) throws  -> String
     
     /**
+     * Complete a host-driven OAuth flow: exchange the redirect's `code` (+ the
+     * `pkce_verifier`/`state` from [`Self::begin_oauth_json`]) for tokens via
+     * the plugin (`phase:"exchange"`, the network step), then create the
+     * account — persist the row (with the non-secret `config_json`), store the
+     * access + refresh tokens via the keychain bridge (refresh is the durable,
+     * cross-device-syncable credential), register the adapter, and append
+     * `AccountCreated`. Mirrors the desktop `connect_*_account` tail + the
+     * `create_account_json` row/secret/registry/teardown discipline. Returns the
+     * created account as JSON. (The exchange itself is verified on-device — it
+     * hits the provider's token endpoint.)
+     */
+    func completeOauthJson(pluginId: String, requestJson: String) throws  -> String
+    
+    /**
      * Configure the sync adapter from a JSON request. Handles the `local`
      * (filesystem path), `webdav` (URL + user + password), and `ftp`
      * (host/port/user/path/mode + password) kinds: open the matching
@@ -955,6 +969,28 @@ open func beginOauthJson(pluginId: String, argsJson: String)throws  -> String  {
             self.uniffiCloneHandle(),
         FfiConverterString.lower(pluginId),
         FfiConverterString.lower(argsJson),$0
+    )
+})
+}
+    
+    /**
+     * Complete a host-driven OAuth flow: exchange the redirect's `code` (+ the
+     * `pkce_verifier`/`state` from [`Self::begin_oauth_json`]) for tokens via
+     * the plugin (`phase:"exchange"`, the network step), then create the
+     * account — persist the row (with the non-secret `config_json`), store the
+     * access + refresh tokens via the keychain bridge (refresh is the durable,
+     * cross-device-syncable credential), register the adapter, and append
+     * `AccountCreated`. Mirrors the desktop `connect_*_account` tail + the
+     * `create_account_json` row/secret/registry/teardown discipline. Returns the
+     * created account as JSON. (The exchange itself is verified on-device — it
+     * hits the provider's token endpoint.)
+     */
+open func completeOauthJson(pluginId: String, requestJson: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_complete_oauth_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(pluginId),
+        FfiConverterString.lower(requestJson),$0
     )
 })
 }
@@ -4767,6 +4803,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_begin_oauth_json() != 10684) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_complete_oauth_json() != 7847) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_configure_sync_adapter_json() != 4122) {
