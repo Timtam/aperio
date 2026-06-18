@@ -73,6 +73,13 @@ function TasksStackNav() {
         component={SearchScreen}
         options={{ presentation: 'modal', title: t('dialogs.search.title') }}
       />
+      {/* Search lists BOTH kinds, so an event hit must open its editor on THIS
+          stack (else navigate() bubbles to the Calendar tab + strands Search). */}
+      <TasksStack.Screen
+        name="EventEditor"
+        component={EventEditorModal}
+        options={{ presentation: 'modal', title: t('dialogs.event.newTitle') }}
+      />
     </TasksStack.Navigator>
   );
 }
@@ -110,6 +117,13 @@ function CalendarStackNav() {
         name="Search"
         component={SearchScreen}
         options={{ presentation: 'modal', title: t('dialogs.search.title') }}
+      />
+      {/* Search lists BOTH kinds, so a task hit must open its editor on THIS
+          stack (else navigate() bubbles to the Tasks tab + strands Search). */}
+      <CalendarStack.Screen
+        name="TaskEditor"
+        component={TaskEditorModal}
+        options={{ presentation: 'modal', title: t('mobile.newTaskLabel') }}
       />
     </CalendarStack.Navigator>
   );
