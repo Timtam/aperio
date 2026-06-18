@@ -244,15 +244,16 @@ export default function EventsScreen({ navigation, route }: RootStackScreenProps
     <View style={styles.screen}>
       <CalendarViewSwitcher
         active="day"
-        // replace (not push): Day/Week/Agenda are sibling views, so swap in
-        // place — keeps the stack flat (no duplicate back-stack entries) while
-        // the fresh mount still picks up the anchor date from params. Pressing
-        // the active view is suppressed by the switcher, so this only fires for
-        // Week / Agenda.
+        // replace (not push): the calendar views are siblings, so swap in place
+        // — keeps the stack flat (no duplicate back-stack entries) while the
+        // fresh mount still picks up the anchor date from params. Pressing the
+        // active view is suppressed by the switcher, so this only fires for
+        // Week / Month / Agenda.
         onSelect={(v) =>
-          navigation.replace(v === 'week' ? 'Week' : 'Agenda', {
-            anchor: day.toISOString(),
-          })
+          navigation.replace(
+            v === 'week' ? 'Week' : v === 'month' ? 'Month' : 'Agenda',
+            { anchor: day.toISOString() },
+          )
         }
       />
 

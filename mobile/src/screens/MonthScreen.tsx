@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
@@ -11,58 +11,28 @@ import {
 
 import { CalendarDayList } from '../components/CalendarDayList';
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
-import { readWeekStart, type WeekStart } from '../settings/weekStart';
 import type { RootStackScreenProps } from '../navigation/types';
 
-// Accessible Week view — the screen-reader-first port of the desktop WeekView.
-// The desktop's 7-column aria-activedescendant grid has no TalkBack/VoiceOver
-// analogue; the faithful mobile equivalent is the shared linear CalendarDayList
-// (one accessible section per day). This screen owns only the week chrome: the
-// Day/Week/Month/Agenda switcher, the ISO-week header + prev/next-week nav, and
-// today / jump-to-date. The week starts on the synced `view.weekStart` pref
-// (Monday by default); the header shows the ISO-8601 week number (always
-// Monday-based, regardless of the visual start day).
+// Accessible Month view — the screen-reader-first port of the desktop MonthView.
+// The desktop's 6-week grid is a visual layout; the faithful SR equivalent is
+// the shared linear CalendarDayList scoped to the calendar month (the 1st to the
+// last, no adjacent-month padding — padding only serves a visual grid). This
+// screen owns the month chrome: the Day/Week/Month/Agenda switcher, the month
+// header + prev/next-month nav, and today / jump-to-date. (Unlike Week, the
+// month-days list needs no week-start — there's no week grouping or padding.)
 
 /** Local-midnight clone of `date`. */
 function localMidnight(date: Date): Date {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }
 
-function addDays(date: Date, days: number): Date {
-  const next = new Date(date);
-  next.setDate(next.getDate() + days);
-  return next;
-}
-
-/** Local-midnight start of `date`'s week for the given visual start day —
- *  matches date-fns `startOfWeek(date, { weekStartsOn })` (the desktop's). */
-function startOfWeekLocal(date: Date, weekStartsOn: WeekStart): Date {
-  const d = localMidnight(date);
-  const diff = (d.getDay() - weekStartsOn + 7) % 7;
-  d.setDate(d.getDate() - diff);
-  return d;
-}
-
-/** Standard ISO-8601 week number (1–53) — the week is the one containing its
- *  Thursday; week 1 is the week with the year's first Thursday. */
-function isoWeekNumber(date: Date): number {
-  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-  const dayNum = (d.getUTCDay() + 6) % 7; // Mon=0 … Sun=6
-  d.setUTCDate(d.getUTCDate() - dayNum + 3); // Thursday of this ISO week
-  const firstThursday = new Date(Date.UTC(d.getUTCFullYear(), 0, 4));
-  const firstDayNum = (firstThursday.getUTCDay() + 6) % 7;
-  firstThursday.setUTCDate(firstThursday.getUTCDate() - firstDayNum + 3);
-  return 1 + Math.round((d.getTime() - firstThursday.getTime()) / 604800000);
-}
-
-export default function WeekScreen({ navigation, route }: RootStackScreenProps<'Week'>) {
+export default function MonthScreen({ navigation, route }: RootStackScreenProps<'Month'>) {
   const { t, i18n } = useTranslation();
 
   const [anchor, setAnchor] = useState(() => {
     const seed = route.params?.anchor ? new Date(route.params.anchor) : new Date();
     return localMidnight(Number.isNaN(seed.getTime()) ? new Date() : seed);
   });
-  const [weekStart, setWeekStart] = useState<WeekStart>(1);
   const [jumpText, setJumpText] = useState('');
   const [jumpError, setJumpError] = useState<string | null>(null);
 
@@ -71,35 +41,28 @@ export default function WeekScreen({ navigation, route }: RootStackScreenProps<'
     [],
   );
 
-  // Read the synced week-start pref on mount + whenever the screen regains focus
-  // (it can change in Settings on this or another device).
-  useEffect(() => {
-    const read = () => void readWeekStart().then(setWeekStart);
-    const unsubscribe = navigation.addListener('focus', read);
-    read();
-    return unsubscribe;
-  }, [navigation]);
-
-  // The seven visible days (local midnights) + the fetch range covering them.
+  // Every day of the anchor's calendar month (1st → last) + the covering range.
   const { days, range } = useMemo(() => {
-    const start = startOfWeekLocal(anchor, weekStart);
-    const ds = Array.from({ length: 7 }, (_, i) => addDays(start, i));
-    const end = new Date(ds[6]);
-    end.setHours(23, 59, 59, 999);
-    return { days: ds, range: { start: ds[0], end } };
-  }, [anchor, weekStart]);
+    const y = anchor.getFullYear();
+    const m = anchor.getMonth();
+    const daysInMonth = new Date(y, m + 1, 0).getDate();
+    const ds = Array.from({ length: daysInMonth }, (_, i) => new Date(y, m, i + 1));
+    const end = new Date(y, m, daysInMonth, 23, 59, 59, 999);
+    return { days: ds, range: { start: new Date(y, m, 1), end } };
+  }, [anchor]);
 
-  const fmtShortDate = useCallback(
-    (d: Date) =>
-      d.toLocaleDateString(i18n.language, { year: 'numeric', month: 'short', day: 'numeric' }),
-    [i18n.language],
+  const monthLabel = useMemo(
+    () => anchor.toLocaleDateString(i18n.language, { month: 'long', year: 'numeric' }),
+    [anchor, i18n.language],
   );
 
-  // ISO week of the visual week's 4th day — Monday-based regardless of the
-  // visual start (matches the desktop header).
-  const isoWeek = useMemo(() => isoWeekNumber(addDays(days[0], 3)), [days]);
-
   const goToday = useCallback(() => setAnchor(localMidnight(new Date())), []);
+
+  const stepMonth = useCallback(
+    (delta: number) =>
+      setAnchor((a) => new Date(a.getFullYear(), a.getMonth() + delta, 1)),
+    [],
+  );
 
   const jumpToDate = useCallback(() => {
     const raw = jumpText.trim();
@@ -118,12 +81,10 @@ export default function WeekScreen({ navigation, route }: RootStackScreenProps<'
   return (
     <View style={styles.screen}>
       <CalendarViewSwitcher
-        active="week"
-        // replace (not push): sibling views swap in place, keeping the stack
-        // flat; the anchor rides along so the date survives the switch.
+        active="month"
         onSelect={(v) =>
           navigation.replace(
-            v === 'day' ? 'Events' : v === 'month' ? 'Month' : 'Agenda',
+            v === 'day' ? 'Events' : v === 'week' ? 'Week' : 'Agenda',
             { anchor: anchor.toISOString() },
           )
         }
@@ -133,18 +94,18 @@ export default function WeekScreen({ navigation, route }: RootStackScreenProps<'
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={t('toolbar.prev')}
-          onPress={() => setAnchor((a) => localMidnight(addDays(a, -7)))}
+          onPress={() => stepMonth(-1)}
           style={({ pressed }) => [styles.navButton, pressed && styles.pressed]}
         >
           <Text style={styles.navButtonText} importantForAccessibility="no">‹</Text>
         </Pressable>
         <Text style={styles.rangeHeading} accessibilityRole="header">
-          {`${t('views.week.kw', { week: isoWeek })} · ${fmtShortDate(days[0])} – ${fmtShortDate(days[6])}`}
+          {monthLabel}
         </Text>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={t('toolbar.next')}
-          onPress={() => setAnchor((a) => localMidnight(addDays(a, 7)))}
+          onPress={() => stepMonth(1)}
           style={({ pressed }) => [styles.navButton, pressed && styles.pressed]}
         >
           <Text style={styles.navButtonText} importantForAccessibility="no">›</Text>
@@ -191,9 +152,9 @@ export default function WeekScreen({ navigation, route }: RootStackScreenProps<'
         navigation={navigation}
         days={days}
         range={range}
-        gridLabel={t('views.week.gridLabel')}
-        emptyText={t('views.week.empty')}
-        dayAnnounceKey="views.week.dayAnnounce"
+        gridLabel={t('views.month.gridLabel')}
+        emptyText={t('views.month.empty')}
+        dayAnnounceKey="views.month.dayAnnounce"
       />
     </View>
   );

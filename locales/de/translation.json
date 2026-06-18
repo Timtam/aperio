@@ -1621,6 +1621,7 @@
     "month": {
       "title": "Monatsansicht",
       "gridLabel": "Monatsraster",
+      "empty": "Diesen Monat ist nichts geplant.",
       "kwShort": "KW",
       "dayAnnounce_one": "{{day}}, 1 Eintrag",
       "dayAnnounce_other": "{{day}}, {{count}} Einträge",

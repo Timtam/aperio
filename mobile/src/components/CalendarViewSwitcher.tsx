@@ -1,12 +1,12 @@
 import { useTranslation } from 'react-i18next';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-// Day ⇄ Week ⇄ Agenda view switch — the mobile analogue of the desktop toolbar's
-// view switcher (sibling calendar views, not separate tabs). Buttons carry
-// accessibilityState.selected (TalkBack/VoiceOver announce "selected") + a
+// Day ⇄ Week ⇄ Month ⇄ Agenda view switch — the mobile analogue of the desktop
+// toolbar's view switcher (sibling calendar views, not separate tabs). Buttons
+// carry accessibilityState.selected (TalkBack/VoiceOver announce "selected") + a
 // visible selected style for sighted users. Pressing the active view is a no-op.
 
-export type CalendarViewKind = 'day' | 'week' | 'agenda';
+export type CalendarViewKind = 'day' | 'week' | 'month' | 'agenda';
 
 export function CalendarViewSwitcher({
   active,
@@ -19,6 +19,7 @@ export function CalendarViewSwitcher({
   const options: { key: CalendarViewKind; label: string }[] = [
     { key: 'day', label: t('toolbar.views.day') },
     { key: 'week', label: t('toolbar.views.week') },
+    { key: 'month', label: t('toolbar.views.month') },
     { key: 'agenda', label: t('toolbar.views.agenda') },
   ];
   return (

@@ -22,6 +22,7 @@ import EventEditorModal from './screens/EventEditorModal';
 import EventsScreen from './screens/EventsScreen';
 import ListEditorModal from './screens/ListEditorModal';
 import ListsScreen from './screens/ListsScreen';
+import MonthScreen from './screens/MonthScreen';
 import RemindersScreen from './screens/RemindersScreen';
 import SearchScreen from './screens/SearchScreen';
 import SettingsScreen from './screens/SettingsScreen';
@@ -101,6 +102,11 @@ function CalendarStackNav() {
         name="Week"
         component={WeekScreen}
         options={{ title: t('views.week.title') }}
+      />
+      <CalendarStack.Screen
+        name="Month"
+        component={MonthScreen}
+        options={{ title: t('views.month.title') }}
       />
       <CalendarStack.Screen
         name="Agenda"

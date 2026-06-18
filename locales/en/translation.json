@@ -1621,6 +1621,7 @@
     "month": {
       "title": "Month view",
       "gridLabel": "Month grid",
+      "empty": "Nothing scheduled this month.",
       "kwShort": "Wk",
       "dayAnnounce_one": "{{day}}, 1 item",
       "dayAnnounce_other": "{{day}}, {{count}} items",
