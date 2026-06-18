@@ -245,7 +245,10 @@ export default function EventsScreen({ navigation, route }: RootStackScreenProps
       <CalendarViewSwitcher
         active="day"
         onDay={() => {}}
-        onAgenda={() => navigation.navigate('Agenda', { anchor: day.toISOString() })}
+        // replace (not push): Day/Agenda are sibling views, so swap in place —
+        // keeps the stack flat (no duplicate back-stack entries) while the fresh
+        // mount still picks up the anchor date from params.
+        onAgenda={() => navigation.replace('Agenda', { anchor: day.toISOString() })}
       />
 
       {/* Day navigation */}

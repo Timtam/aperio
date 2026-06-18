@@ -251,8 +251,9 @@ export default function AgendaScreen({
   );
 
   // Switcher: Day ⇄ Agenda, carrying the anchor so the date survives the switch.
+  // replace (not push): sibling views swap in place, keeping the stack flat.
   const onDay = useCallback(
-    () => navigation.navigate('Events', { anchor: anchor.toISOString() }),
+    () => navigation.replace('Events', { anchor: anchor.toISOString() }),
     [anchor, navigation],
   );
 
