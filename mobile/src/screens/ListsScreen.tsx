@@ -20,16 +20,17 @@ import { useTaskStore } from '../state/taskStoreContext';
 // Task-list catalog: read the lists, toggle which are shown (the selection Set +
 // reconciler), and create a top-level local list. A "Manage" entry opens the
 // ListEditor modal: local lists can be reparented / have their sections managed
-// / be deleted; external lists are provider-managed, so on mobile only their
-// SECTION management routes through (reparent + delete a LIST are local-only) —
-// hence external lists get "Manage" only when their adapter reports
-// manageable_sections. List rename is a container-override (deferred with the
-// rest of the overrides system, like colour labels + sharing).
+// / recoloured / be deleted; external lists are provider-managed, so on mobile
+// only their SECTION management routes through (reparent + delete + recolour a
+// LIST are local-only) — hence external lists get "Manage" only when their
+// adapter reports manageable_sections. Each row shows the list's bound colour
+// as a real swatch for sighted users (name rides the accessible label). List
+// rename is a container name-override (deferred with the overrides system).
 
 export default function ListsScreen() {
   const { t } = useTranslation();
   const navigation = useNavigation();
-  const { taskLists, selectedTaskListIds, toggleTaskList, refreshTaskLists } =
+  const { taskLists, selectedTaskListIds, toggleTaskList, refreshTaskLists, colorLabels } =
     useTaskStore();
 
   const [newName, setNewName] = useState('');
@@ -129,6 +130,14 @@ export default function ListsScreen() {
             const isLocal = list.account_id === 'local';
             const canManage =
               isLocal || (list.task_capabilities?.manageable_sections ?? false);
+            // The list's bound colour: a swatch for sighted users + the name on
+            // the accessible label so colour isn't the only signal.
+            const colour = list.color_label
+              ? colorLabels.find((l) => l.id === list.color_label)
+              : undefined;
+            const label = colour
+              ? `${list.name}${t('mobile.colorLabelSuffix', { name: colour.name })}`
+              : list.name;
             return (
               <View key={list.id} style={styles.row}>
                 <Pressable
@@ -138,12 +147,23 @@ export default function ListsScreen() {
                   accessible
                   accessibilityRole="checkbox"
                   accessibilityState={{ checked: selected }}
-                  accessibilityLabel={list.name}
+                  accessibilityLabel={label}
                   onPress={() => onToggle(list)}
                   style={({ pressed }) => [styles.rowToggle, pressed && styles.rowPressed]}
                 >
-                  <Text style={styles.check}>{selected ? '☑' : '☐'}</Text>
-                  <Text style={styles.listName}>{list.name}</Text>
+                  <Text style={styles.check} importantForAccessibility="no">
+                    {selected ? '☑' : '☐'}
+                  </Text>
+                  {colour != null && (
+                    <View
+                      accessible={false}
+                      importantForAccessibility="no"
+                      style={[styles.colorDot, { backgroundColor: colour.hex }]}
+                    />
+                  )}
+                  <Text style={styles.listName} importantForAccessibility="no">
+                    {list.name}
+                  </Text>
                 </Pressable>
                 {canManage && (
                   <Pressable
@@ -229,6 +249,15 @@ const styles = StyleSheet.create({
   },
   manageButtonText: { fontSize: 15, fontWeight: '600', color: '#1d4ed8' },
   check: { fontSize: 22, width: 26, textAlign: 'center', color: '#10131a' },
+  // The list's bound colour (sighted users); subtle border keeps light colours
+  // visible on the card. Matches the task/event row dot.
+  colorDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.18)',
+  },
   listName: { flex: 1, fontSize: 18, color: '#10131a' },
   muted: { fontSize: 15, color: '#5b6573', padding: 16 },
   error: { fontSize: 15, fontWeight: '600', color: '#b42318', paddingHorizontal: 16 },

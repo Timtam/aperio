@@ -953,6 +953,18 @@ public protocol HostProtocol: AnyObject, Sendable {
     func sectionsJson(listId: String) throws  -> String
     
     /**
+     * Set or clear a LOCAL calendar / task list's bound colour label (DESIGN
+     * §8.2). Mirrors the desktop `set_container_color_label` LOCAL branch: the
+     * binding rides the container's own (synced) row, so we update it and emit
+     * the matching sync event so other devices follow. `kind` is `"calendar"`
+     * | `"task_list"` | `"contact_list"`; `color_label_id` `None` clears it.
+     * An external container (or any contact list) binds via the host-local
+     * `OverridesRepo` on the desktop — desktop-only for now, so those branches
+     * return `Unsupported` until that repo is extracted into host-core.
+     */
+    func setContainerColorLabel(containerId: String, kind: String, colorLabelId: String?) throws 
+    
+    /**
      * Upsert a user preference. A whitelisted key also appends `SettingsUpdated`
      * (wire value = the stored string parsed as JSON, else wrapped as a JSON
      * string — same round-trip as the desktop).
@@ -1852,6 +1864,26 @@ open func sectionsJson(listId: String)throws  -> String  {
         FfiConverterString.lower(listId),$0
     )
 })
+}
+    
+    /**
+     * Set or clear a LOCAL calendar / task list's bound colour label (DESIGN
+     * §8.2). Mirrors the desktop `set_container_color_label` LOCAL branch: the
+     * binding rides the container's own (synced) row, so we update it and emit
+     * the matching sync event so other devices follow. `kind` is `"calendar"`
+     * | `"task_list"` | `"contact_list"`; `color_label_id` `None` clears it.
+     * An external container (or any contact list) binds via the host-local
+     * `OverridesRepo` on the desktop — desktop-only for now, so those branches
+     * return `Unsupported` until that repo is extracted into host-core.
+     */
+open func setContainerColorLabel(containerId: String, kind: String, colorLabelId: String?)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_set_container_color_label(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(containerId),
+        FfiConverterString.lower(kind),
+        FfiConverterOptionString.lower(colorLabelId),$0
+    )
+}
 }
     
     /**
@@ -5449,6 +5481,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_sections_json() != 56584) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_set_container_color_label() != 2468) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_set_user_pref() != 9799) {

@@ -19,6 +19,8 @@ import {
   reparentTaskList,
   updateSection,
 } from '../api/client';
+import { setContainerColorLabel } from '../api/containerColor';
+import { ColorLabelSelect } from '../components/ColorLabelSelect';
 import { RadioGroup } from '../components/RadioGroup';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useTaskStore } from '../state/taskStoreContext';
@@ -63,6 +65,7 @@ export default function ListEditorModal({
     invalidateData,
     loadSections,
     sectionsByList,
+    colorLabels,
   } = useTaskStore();
 
   const list = taskLists.find((l) => l.id === listId);
@@ -160,6 +163,37 @@ export default function ListEditorModal({
       }
     },
     [announce, busy, invalidateData, list, listId, refreshTaskLists, t, taskLists],
+  );
+
+  // Bind (or clear) this LOCAL list's colour label — rides its own synced row.
+  // The picker fires per selection, like the parent picker above.
+  const setColour = useCallback(
+    async (colorLabelId: string) => {
+      if (busy) return;
+      setError(null);
+      setBusy(true);
+      try {
+        await setContainerColorLabel(listId, 'task_list', colorLabelId || null);
+        await refreshTaskLists();
+        invalidateData();
+        const name = list?.name ?? '';
+        const colour = colorLabelId
+          ? colorLabels.find((l) => l.id === colorLabelId)?.name
+          : undefined;
+        announce(
+          colour != null
+            ? t('sidebar.menu.colorSetAnnouncement', { name, color: colour })
+            : t('sidebar.menu.colorClearedAnnouncement', { name }),
+        );
+      } catch (err) {
+        const message = errorMessage(err);
+        setError(message);
+        announce(t('mobile.error', { message }));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [announce, busy, colorLabels, invalidateData, list, listId, refreshTaskLists, t],
   );
 
   const focus = useListFocusManager(sections.length);
@@ -337,6 +371,18 @@ export default function ListEditorModal({
           value={currentParent}
           options={parentOptions}
           onChange={(v) => void reparent(v)}
+          disabled={busy}
+        />
+      )}
+
+      {/* Colour — local lists only (an external list's colour is a host-local
+          override, deferred). Real swatches for sighted users + the name for
+          SR; binds the list's own color_label. */}
+      {isLocal && (
+        <ColorLabelSelect
+          value={list.color_label ?? ''}
+          labels={colorLabels}
+          onChange={(id) => void setColour(id)}
           disabled={busy}
         />
       )}

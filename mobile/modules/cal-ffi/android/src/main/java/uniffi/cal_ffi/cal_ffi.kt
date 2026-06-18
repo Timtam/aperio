@@ -814,6 +814,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_sections_json(
     ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_set_container_color_label(
+    ): Short
     external fun uniffi_cal_ffi_checksum_method_host_set_user_pref(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_sync_now_json(
@@ -1015,6 +1017,8 @@ external fun uniffi_cal_ffi_fn_method_host_reparent_task_list_json(`ptr`: Long,`
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_sections_json(`ptr`: Long,`listId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_set_container_color_label(`ptr`: Long,`containerId`: RustBuffer.ByValue,`kind`: RustBuffer.ByValue,`colorLabelId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_cal_ffi_fn_method_host_set_user_pref(`ptr`: Long,`key`: RustBuffer.ByValue,`value`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_sync_now_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -1385,6 +1389,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_sections_json() != 56584.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_set_container_color_label() != 2468.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_set_user_pref() != 9799.toShort()) {
@@ -2290,6 +2297,18 @@ public interface HostInterface {
      * list's owning account.
      */
     fun `sectionsJson`(`listId`: kotlin.String): kotlin.String
+    
+    /**
+     * Set or clear a LOCAL calendar / task list's bound colour label (DESIGN
+     * §8.2). Mirrors the desktop `set_container_color_label` LOCAL branch: the
+     * binding rides the container's own (synced) row, so we update it and emit
+     * the matching sync event so other devices follow. `kind` is `"calendar"`
+     * | `"task_list"` | `"contact_list"`; `color_label_id` `None` clears it.
+     * An external container (or any contact list) binds via the host-local
+     * `OverridesRepo` on the desktop — desktop-only for now, so those branches
+     * return `Unsupported` until that repo is extracted into host-core.
+     */
+    fun `setContainerColorLabel`(`containerId`: kotlin.String, `kind`: kotlin.String, `colorLabelId`: kotlin.String?)
     
     /**
      * Upsert a user preference. A whitelisted key also appends `SettingsUpdated`
@@ -3432,6 +3451,29 @@ open class Host: Disposable, AutoCloseable, HostInterface
     }
     )
     }
+    
+
+    
+    /**
+     * Set or clear a LOCAL calendar / task list's bound colour label (DESIGN
+     * §8.2). Mirrors the desktop `set_container_color_label` LOCAL branch: the
+     * binding rides the container's own (synced) row, so we update it and emit
+     * the matching sync event so other devices follow. `kind` is `"calendar"`
+     * | `"task_list"` | `"contact_list"`; `color_label_id` `None` clears it.
+     * An external container (or any contact list) binds via the host-local
+     * `OverridesRepo` on the desktop — desktop-only for now, so those branches
+     * return `Unsupported` until that repo is extracted into host-core.
+     */
+    @Throws(StoreException::class)override fun `setContainerColorLabel`(`containerId`: kotlin.String, `kind`: kotlin.String, `colorLabelId`: kotlin.String?)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_set_container_color_label(
+        it,
+        FfiConverterString.lower(`containerId`),FfiConverterString.lower(`kind`),FfiConverterOptionalString.lower(`colorLabelId`),_status)
+}
+    }
+    
     
 
     

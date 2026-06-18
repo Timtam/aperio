@@ -200,6 +200,10 @@ public class CalFfiModule: Module {
       try self.host.deleteColorLabel(id: id)
     }
 
+    AsyncFunction("setContainerColorLabel") { (containerId: String, kind: String, colorLabelId: String?) in
+      try self.host.setContainerColorLabel(containerId: containerId, kind: kind, colorLabelId: colorLabelId)
+    }
+
     // ─── Contacts ───
     // JSON passthrough, routed Rust-side. Mirrors the Android module.
 

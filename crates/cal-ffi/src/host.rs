@@ -205,6 +205,18 @@ fn external_reparent_unsupported() -> StoreError {
     }
 }
 
+/// An external container's colour binding (and a contact list's, even a local
+/// one) lives in the host-local `OverridesRepo` on the desktop, which is not
+/// yet extracted into host-core — so mobile can only bind a LOCAL calendar /
+/// task list's colour (carried on its own synced row) for now.
+fn external_color_override_unsupported() -> StoreError {
+    StoreError::Unsupported {
+        detail: "setting a colour label on an external container or a contact list \
+                 is not supported on mobile yet"
+            .to_string(),
+    }
+}
+
 /// Consecutive-failure count at which sync is reported as `sustained_failure`.
 /// Matches the desktop `SyncScheduler` latch threshold.
 const SUSTAINED_FAILURE_THRESHOLD: u32 = 3;
@@ -3139,6 +3151,68 @@ impl Host {
         Ok(())
     }
 
+    /// Set or clear a LOCAL calendar / task list's bound colour label (DESIGN
+    /// §8.2). Mirrors the desktop `set_container_color_label` LOCAL branch: the
+    /// binding rides the container's own (synced) row, so we update it and emit
+    /// the matching sync event so other devices follow. `kind` is `"calendar"`
+    /// | `"task_list"` | `"contact_list"`; `color_label_id` `None` clears it.
+    /// An external container (or any contact list) binds via the host-local
+    /// `OverridesRepo` on the desktop — desktop-only for now, so those branches
+    /// return `Unsupported` until that repo is extracted into host-core.
+    pub fn set_container_color_label(
+        &self,
+        container_id: String,
+        kind: String,
+        color_label_id: Option<String>,
+    ) -> Result<(), StoreError> {
+        let label = color_label_id.map(ColorLabelId);
+        match kind.as_str() {
+            "calendar" => {
+                if !self.is_local_calendar(&container_id) {
+                    return Err(external_color_override_unsupported());
+                }
+                if let Some(mut cal) = self
+                    .adapter
+                    .get_calendar_by_id(&container_id)
+                    .map_err(map_store_err)?
+                {
+                    cal.color_label = label;
+                    let updated = self.adapter.update_calendar(cal).map_err(map_store_err)?;
+                    if let Ok(fields) = serde_json::to_value(&updated) {
+                        self.writer.append(SyncEvent::CalendarUpdated(EventPayload {
+                            id: updated.id.clone(),
+                            fields,
+                        }));
+                    }
+                }
+                Ok(())
+            }
+            "task_list" => {
+                if !self.is_local_task_list(&container_id) {
+                    return Err(external_color_override_unsupported());
+                }
+                if let Some(mut list) = self
+                    .adapter
+                    .get_task_list_by_id(&container_id)
+                    .map_err(map_store_err)?
+                {
+                    list.color_label = label;
+                    let updated = self.adapter.update_task_list(list).map_err(map_store_err)?;
+                    if let Ok(fields) = serde_json::to_value(&updated) {
+                        self.writer.append(SyncEvent::TaskListUpdated(EventPayload {
+                            id: updated.id.clone(),
+                            fields,
+                        }));
+                    }
+                }
+                Ok(())
+            }
+            // Contact lists (even local ones) + every external container bind via
+            // the host-local OverridesRepo, which mobile can't store yet.
+            _ => Err(external_color_override_unsupported()),
+        }
+    }
+
     // ── Contacts (JSON bridge, routed) ────────────────────────────────────────
     //
     // Address books + contacts, routed local (the device SQLite store) vs
@@ -4882,6 +4956,92 @@ mod tests {
                 .any(|l| l["id"] == serde_json::json!(id)),
             "the deleted label must be gone",
         );
+    }
+
+    #[test]
+    fn set_container_color_label_binds_local_list_and_calendar() {
+        let (_dir, host, _kc) = open_host();
+        // A named label to bind.
+        let label: serde_json::Value = serde_json::from_str(
+            &host
+                .create_color_label_json("Work".to_string(), "#e53935".to_string())
+                .unwrap(),
+        )
+        .unwrap();
+        let label_id = label["id"].as_str().unwrap().to_string();
+
+        // ── Local task list ──
+        let list: serde_json::Value =
+            serde_json::from_str(&host.create_task_list_json("Inbox".to_string()).unwrap())
+                .unwrap();
+        let list_id = list["id"].as_str().unwrap().to_string();
+        // Prime the route map so is_local_task_list resolves.
+        let _ = host.task_lists_json().unwrap();
+
+        host.set_container_color_label(
+            list_id.clone(),
+            "task_list".to_string(),
+            Some(label_id.clone()),
+        )
+        .unwrap();
+        let lists: serde_json::Value =
+            serde_json::from_str(&host.task_lists_json().unwrap()).unwrap();
+        let bound = lists
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|l| l["id"] == serde_json::json!(list_id))
+            .unwrap();
+        assert_eq!(bound["color_label"], serde_json::json!(label_id));
+
+        // Clearing it (None) drops the binding.
+        host.set_container_color_label(list_id.clone(), "task_list".to_string(), None)
+            .unwrap();
+        let lists: serde_json::Value =
+            serde_json::from_str(&host.task_lists_json().unwrap()).unwrap();
+        let cleared = lists
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|l| l["id"] == serde_json::json!(list_id))
+            .unwrap();
+        assert_eq!(cleared["color_label"], serde_json::Value::Null);
+
+        // ── Local calendar ──
+        let cal: serde_json::Value = serde_json::from_str(
+            &host
+                .create_calendar_json(serde_json::json!({"name": "Personal"}).to_string())
+                .unwrap(),
+        )
+        .unwrap();
+        let cal_id = cal["id"].as_str().unwrap().to_string();
+        host.set_container_color_label(
+            cal_id.clone(),
+            "calendar".to_string(),
+            Some(label_id.clone()),
+        )
+        .unwrap();
+        let cals: serde_json::Value =
+            serde_json::from_str(&host.list_calendars_json().unwrap()).unwrap();
+        let bound_cal = cals
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["id"] == serde_json::json!(cal_id))
+            .unwrap();
+        assert_eq!(bound_cal["color_label"], serde_json::json!(label_id));
+
+        // A contact list (even local) binds via the host-local OverridesRepo,
+        // which mobile can't store yet → Unsupported.
+        assert!(matches!(
+            host.set_container_color_label(
+                "whatever".to_string(),
+                "contact_list".to_string(),
+                Some(label_id),
+            )
+            .unwrap_err(),
+            StoreError::Unsupported { .. }
+        ));
     }
 
     #[test]

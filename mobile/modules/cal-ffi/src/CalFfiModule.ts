@@ -144,6 +144,18 @@ declare class CalFfiModule extends NativeModule<Record<never, never>> {
   updateColorLabelJson(labelJson: string): Promise<string>;
   /** Delete a colour label by id. */
   deleteColorLabel(id: string): Promise<void>;
+  /**
+   * Set (or clear, with `null`) a LOCAL container's bound colour label. `kind`
+   * is `'calendar' | 'task_list' | 'contact_list'`. Only local calendars / task
+   * lists are supported (the binding rides their synced row); external
+   * containers + contact lists (host-local overrides) reject until that path
+   * lands.
+   */
+  setContainerColorLabel(
+    containerId: string,
+    kind: string,
+    colorLabelId: string | null,
+  ): Promise<void>;
 
   // ── Contacts ──
   // JSON passthrough in the cal_core/desktop wire shape; routing (local vs

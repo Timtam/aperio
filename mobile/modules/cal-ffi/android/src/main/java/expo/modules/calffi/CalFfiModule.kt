@@ -228,6 +228,10 @@ class CalFfiModule : Module() {
       host.deleteColorLabel(id)
     }
 
+    AsyncFunction("setContainerColorLabel") { containerId: String, kind: String, colorLabelId: String? ->
+      host.setContainerColorLabel(containerId, kind, colorLabelId)
+    }
+
     // ─── Contacts (local address book + external CardDAV/Google/EWS providers) ─
     // JSON passthrough, routed Rust-side; contacts are NOT on the sync event log
     // (local = device-local, external = provider-synced).
