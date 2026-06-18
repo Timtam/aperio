@@ -1,8 +1,9 @@
 import { useFocusEffect } from '@react-navigation/native';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
+  findNodeHandle,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -13,8 +14,12 @@ import {
 
 import {
   configureSyncAdapter,
+  forgetSftpHostKey,
+  previewSftpHostKey,
+  trustSftpHostKey,
   syncNow,
   syncStatus,
+  HostKeyPreview,
   SyncAdapterConfig,
   SyncStatus,
 } from '../api/sync';
@@ -23,13 +28,14 @@ import { RadioGroup } from '../components/RadioGroup';
 
 // Cross-device sync — a full desktop peer (same engine, statically-embedded
 // adapters). This screen exposes the password targets (a local shared folder,
-// WebDAV, FTPS) and the OAuth targets (Dropbox, Google Drive — BYO client-id,
-// browser sign-in). SFTP (host-key trust flow) follows. Screen-reader-first: the
-// kind is a radio group, every field is its own labelled stop, status is a live
-// region, results announced.
+// WebDAV, FTPS), the OAuth targets (Dropbox, Google Drive — BYO client-id,
+// browser sign-in), and SFTP (SSH server, with the §19.5 host-key TOFU trust
+// flow). Screen-reader-first: the kind is a radio group, every field is its own
+// labelled stop, the trust panel is an assertive live region, results announced.
 
-type SyncKind = 'local' | 'webdav' | 'ftp' | 'dropbox' | 'googledrive';
+type SyncKind = 'local' | 'webdav' | 'ftp' | 'dropbox' | 'googledrive' | 'sftp';
 type FtpMode = 'explicit' | 'implicit' | 'plain';
+type SftpAuth = 'password' | 'key';
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -57,8 +63,22 @@ export default function SyncScreen() {
   const [oauthClientSecret, setOauthClientSecret] = useState(''); // dropbox(opt)+gdrive
   const [dropboxPath, setDropboxPath] = useState(''); // dropbox
   const [folderName, setFolderName] = useState(''); // googledrive
+  const [sftpHost, setSftpHost] = useState(''); // sftp
+  const [sftpPort, setSftpPort] = useState(''); // sftp (blank → 22)
+  const [sftpUser, setSftpUser] = useState(''); // sftp
+  const [sftpPath, setSftpPath] = useState(''); // sftp
+  const [sftpAuth, setSftpAuth] = useState<SftpAuth>('password'); // sftp
+  const [sftpPassword, setSftpPassword] = useState(''); // sftp password-auth
+  const [sftpKeyPath, setSftpKeyPath] = useState(''); // sftp key-auth
+  const [sftpKeyPassphrase, setSftpKeyPassphrase] = useState(''); // sftp key-auth
+  // When set, the §19.5 trust panel is showing the probed fingerprint awaiting
+  // the user's explicit accept (first-use or key-change) before connect.
+  const [pendingTrust, setPendingTrust] = useState<HostKeyPreview | null>(null);
+  const trustRef = useRef<View>(null);
 
   const isOAuthKind = kind === 'dropbox' || kind === 'googledrive';
+  const isSftp = kind === 'sftp';
+  const sftpPortNum = sftpPort.trim().length > 0 ? Number(sftpPort.trim()) : 22;
 
   const announce = useCallback(
     (message: string) => AccessibilityInfo.announceForAccessibility(message),
@@ -82,6 +102,15 @@ export default function SyncScreen() {
     }, [refresh]),
   );
 
+  // Move screen-reader focus onto the trust panel when it appears so the blind
+  // user lands on the fingerprint they must verify (not stranded after the
+  // probe). The panel is also an assertive live region.
+  useEffect(() => {
+    if (pendingTrust == null) return;
+    const tag = trustRef.current ? findNodeHandle(trustRef.current) : null;
+    if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
+  }, [pendingTrust]);
+
   const kindOptions = useMemo(
     () => [
       { value: 'local' as const, label: t('dialogs.settings.sync.adapterKindLocal') },
@@ -95,6 +124,18 @@ export default function SyncScreen() {
         value: 'googledrive' as const,
         label: t('dialogs.settings.sync.adapterKindGoogledrive'),
       },
+      { value: 'sftp' as const, label: t('dialogs.settings.sync.adapterKindSftp') },
+    ],
+    [t],
+  );
+
+  const sftpAuthOptions = useMemo(
+    () => [
+      {
+        value: 'password' as const,
+        label: t('dialogs.settings.sync.adapterSftpAuthPassword'),
+      },
+      { value: 'key' as const, label: t('dialogs.settings.sync.adapterSftpAuthKey') },
     ],
     [t],
   );
@@ -230,6 +271,123 @@ export default function SyncScreen() {
     refresh,
     t,
   ]);
+
+  // Build the SFTP wire config from the fields, or null when a required field
+  // (host/user/path, or key_path under key auth) is blank — the connect button
+  // is then a no-op, matching the other kinds' "Use this target".
+  const buildSftpConfig = useCallback((): Extract<
+    SyncAdapterConfig,
+    { kind: 'sftp' }
+  > | null => {
+    const host = sftpHost.trim();
+    const user = sftpUser.trim();
+    const path = sftpPath.trim();
+    if (host.length === 0 || user.length === 0 || path.length === 0) return null;
+    const base = {
+      kind: 'sftp' as const,
+      host,
+      port: sftpPortNum,
+      user,
+      path,
+      auth_method: sftpAuth,
+    };
+    if (sftpAuth === 'key') {
+      const keyPath = sftpKeyPath.trim();
+      if (keyPath.length === 0) return null;
+      return sftpKeyPassphrase.length > 0
+        ? { ...base, key_path: keyPath, key_passphrase: sftpKeyPassphrase }
+        : { ...base, key_path: keyPath };
+    }
+    return sftpPassword.length > 0 ? { ...base, password: sftpPassword } : base;
+  }, [
+    sftpHost,
+    sftpUser,
+    sftpPath,
+    sftpPortNum,
+    sftpAuth,
+    sftpKeyPath,
+    sftpKeyPassphrase,
+    sftpPassword,
+  ]);
+
+  // Activate the SFTP target (the pin is already recorded). Throws on a configure
+  // failure so the caller surfaces it.
+  const activateSftp = useCallback(async () => {
+    const config = buildSftpConfig();
+    if (config == null) return;
+    await configureSyncAdapter(config);
+    await refresh();
+    announce(t('mobile.syncConfigured'));
+  }, [announce, buildSftpConfig, refresh, t]);
+
+  // SFTP connect: probe the host key FIRST (§19.5). Unchanged pin → connect
+  // straight away; new/changed → surface the trust panel for explicit accept.
+  const connectSftp = useCallback(async () => {
+    const config = buildSftpConfig();
+    if (config == null) return;
+    setError(null);
+    setPendingTrust(null);
+    setBusy(true);
+    try {
+      const preview = await previewSftpHostKey(config.host, config.port ?? 22);
+      if (preview.status.kind === 'unchanged') {
+        await activateSftp();
+      } else {
+        setPendingTrust(preview);
+        const title =
+          preview.status.kind === 'changed'
+            ? t('dialogs.settings.sync.sftpTrustChangedTitle')
+            : t('dialogs.settings.sync.sftpTrustNewTitle');
+        announce(
+          `${title} ${t('dialogs.settings.sync.sftpTrustPresentedLabel')}: ${preview.fingerprint}`,
+        );
+      }
+    } catch (err) {
+      const message = errorMessage(err);
+      setError(message);
+      announce(t('mobile.error', { message }));
+    } finally {
+      setBusy(false);
+    }
+  }, [activateSftp, announce, buildSftpConfig, t]);
+
+  // The user accepted the fingerprint in the trust panel: pin it, then connect.
+  const confirmTrust = useCallback(async () => {
+    if (pendingTrust == null) return;
+    setError(null);
+    setBusy(true);
+    try {
+      await trustSftpHostKey(pendingTrust.host_port, pendingTrust.fingerprint);
+      setPendingTrust(null);
+      await activateSftp();
+    } catch (err) {
+      const message = errorMessage(err);
+      setError(message);
+      announce(t('mobile.error', { message }));
+    } finally {
+      setBusy(false);
+    }
+  }, [activateSftp, announce, pendingTrust, t]);
+
+  const cancelTrust = useCallback(() => {
+    setPendingTrust(null);
+    announce(t('mobile.oauthCancelled'));
+  }, [announce, t]);
+
+  // Drop the pinned fingerprint for the entered host (the next connect re-runs
+  // the trust dialog). Useful when the user knows the server's key rotated.
+  const forgetPin = useCallback(async () => {
+    const host = sftpHost.trim();
+    if (host.length === 0) return;
+    try {
+      await forgetSftpHostKey(`${host}:${sftpPortNum}`);
+      announce(t('dialogs.settings.sync.sftpForgetPinDone'));
+    } catch (err) {
+      const message = errorMessage(err);
+      setError(message);
+      announce(t('mobile.error', { message }));
+    }
+  }, [announce, sftpHost, sftpPortNum, t]);
 
   const runSync = useCallback(async () => {
     setError(null);
@@ -560,6 +718,209 @@ export default function SyncScreen() {
         </>
       )}
 
+      {isSftp && (
+        <>
+          <View style={styles.field}>
+            <Text style={styles.label}>{t('dialogs.settings.sync.adapterSftpHost')}</Text>
+            <TextInput
+              style={styles.input}
+              value={sftpHost}
+              onChangeText={setSftpHost}
+              accessibilityLabel={t('dialogs.settings.sync.adapterSftpHost')}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>{t('dialogs.settings.sync.adapterSftpPort')}</Text>
+            <Text style={styles.hint} accessibilityRole="text">
+              {t('dialogs.settings.sync.adapterSftpPortHint')}
+            </Text>
+            <TextInput
+              style={styles.input}
+              value={sftpPort}
+              onChangeText={setSftpPort}
+              accessibilityLabel={t('dialogs.settings.sync.adapterSftpPort')}
+              keyboardType="number-pad"
+              autoCorrect={false}
+            />
+          </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>{t('dialogs.settings.sync.adapterSftpUser')}</Text>
+            <TextInput
+              style={styles.input}
+              value={sftpUser}
+              onChangeText={setSftpUser}
+              accessibilityLabel={t('dialogs.settings.sync.adapterSftpUser')}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>{t('dialogs.settings.sync.adapterSftpPath')}</Text>
+            <Text style={styles.hint} accessibilityRole="text">
+              {t('dialogs.settings.sync.adapterSftpPathHint')}
+            </Text>
+            <TextInput
+              style={styles.input}
+              value={sftpPath}
+              onChangeText={setSftpPath}
+              accessibilityLabel={t('dialogs.settings.sync.adapterSftpPath')}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          </View>
+          <RadioGroup<SftpAuth>
+            label={t('dialogs.settings.sync.adapterSftpAuthMethod')}
+            value={sftpAuth}
+            options={sftpAuthOptions}
+            onChange={setSftpAuth}
+            disabled={busy}
+          />
+          {sftpAuth === 'password' ? (
+            <View style={styles.field}>
+              <Text style={styles.label}>
+                {t('dialogs.settings.sync.adapterSftpPassword')}
+              </Text>
+              <Text style={styles.hint} accessibilityRole="text">
+                {t('dialogs.settings.sync.adapterSftpPasswordHint')}
+              </Text>
+              <TextInput
+                style={styles.input}
+                value={sftpPassword}
+                onChangeText={setSftpPassword}
+                accessibilityLabel={t('dialogs.settings.sync.adapterSftpPassword')}
+                secureTextEntry
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
+          ) : (
+            <>
+              <View style={styles.field}>
+                <Text style={styles.label}>
+                  {t('dialogs.settings.sync.adapterSftpKeyPath')}
+                </Text>
+                <Text style={styles.hint} accessibilityRole="text">
+                  {t('dialogs.settings.sync.adapterSftpKeyPathHint')}
+                </Text>
+                <TextInput
+                  style={styles.input}
+                  value={sftpKeyPath}
+                  onChangeText={setSftpKeyPath}
+                  accessibilityLabel={t('dialogs.settings.sync.adapterSftpKeyPath')}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+              </View>
+              <View style={styles.field}>
+                <Text style={styles.label}>
+                  {t('dialogs.settings.sync.adapterSftpKeyPassphrase')}
+                </Text>
+                <Text style={styles.hint} accessibilityRole="text">
+                  {t('dialogs.settings.sync.adapterSftpKeyPassphraseHint')}
+                </Text>
+                <TextInput
+                  style={styles.input}
+                  value={sftpKeyPassphrase}
+                  onChangeText={setSftpKeyPassphrase}
+                  accessibilityLabel={t('dialogs.settings.sync.adapterSftpKeyPassphrase')}
+                  secureTextEntry
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+              </View>
+            </>
+          )}
+          <Text style={styles.hint} accessibilityRole="text">
+            {t('dialogs.settings.sync.sftpPinHint')}
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ disabled: busy }}
+            accessibilityLabel={t('dialogs.settings.sync.sftpForgetPin')}
+            disabled={busy}
+            onPress={() => void forgetPin()}
+            style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.ghostButtonText}>
+              {t('dialogs.settings.sync.sftpForgetPin')}
+            </Text>
+          </Pressable>
+        </>
+      )}
+
+      {pendingTrust != null && (
+        <View
+          ref={trustRef}
+          accessible
+          accessibilityRole="text"
+          accessibilityLiveRegion="assertive"
+          style={styles.trustPanel}
+        >
+          <Text style={styles.trustTitle} accessibilityRole="header">
+            {pendingTrust.status.kind === 'changed'
+              ? t('dialogs.settings.sync.sftpTrustChangedTitle')
+              : t('dialogs.settings.sync.sftpTrustNewTitle')}
+          </Text>
+          <Text style={styles.trustBody}>
+            {pendingTrust.status.kind === 'changed'
+              ? t('dialogs.settings.sync.sftpTrustChangedBody')
+              : t('dialogs.settings.sync.sftpTrustNewBody')}
+          </Text>
+          <Text style={styles.trustField}>
+            {t('dialogs.settings.sync.sftpTrustHostLabel')}: {pendingTrust.host_port}
+          </Text>
+          {pendingTrust.status.kind === 'changed' && (
+            <Text style={styles.trustField}>
+              {t('dialogs.settings.sync.sftpTrustStoredLabel')}:{' '}
+              {pendingTrust.status.stored}
+            </Text>
+          )}
+          <Text style={styles.trustField}>
+            {t('dialogs.settings.sync.sftpTrustPresentedLabel')}:{' '}
+            {pendingTrust.fingerprint}
+          </Text>
+          <Text style={styles.hint}>
+            {t('dialogs.settings.sync.sftpTrustVerifyHint')}
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ disabled: busy, busy }}
+            accessibilityLabel={
+              pendingTrust.status.kind === 'changed'
+                ? t('dialogs.settings.sync.sftpTrustAcceptChanged')
+                : t('dialogs.settings.sync.sftpTrustAcceptNew')
+            }
+            disabled={busy}
+            onPress={() => void confirmTrust()}
+            style={({ pressed }) => [
+              styles.primaryButton,
+              pressed && styles.primaryPressed,
+              busy && styles.primaryDisabled,
+            ]}
+          >
+            <Text style={styles.primaryButtonText}>
+              {pendingTrust.status.kind === 'changed'
+                ? t('dialogs.settings.sync.sftpTrustAcceptChanged')
+                : t('dialogs.settings.sync.sftpTrustAcceptNew')}
+            </Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ disabled: busy }}
+            accessibilityLabel={t('dialogs.settings.sync.sftpTrustCancel')}
+            disabled={busy}
+            onPress={cancelTrust}
+            style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.ghostButtonText}>
+              {t('dialogs.settings.sync.sftpTrustCancel')}
+            </Text>
+          </Pressable>
+        </View>
+      )}
+
       {isOAuthKind ? (
         <Pressable
           accessibilityRole="button"
@@ -575,6 +936,23 @@ export default function SyncScreen() {
         >
           <Text style={styles.primaryButtonText}>
             {busy ? oauthSigningInLabel : oauthSignInLabel}
+          </Text>
+        </Pressable>
+      ) : isSftp ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ disabled: busy, busy }}
+          accessibilityLabel={t('mobile.syncConfigure')}
+          disabled={busy}
+          onPress={() => void connectSftp()}
+          style={({ pressed }) => [
+            styles.primaryButton,
+            pressed && styles.primaryPressed,
+            busy && styles.primaryDisabled,
+          ]}
+        >
+          <Text style={styles.primaryButtonText}>
+            {busy ? t('mobile.syncing') : t('mobile.syncConfigure')}
           </Text>
         </Pressable>
       ) : (
@@ -639,4 +1017,17 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 10,
   },
+  trustPanel: {
+    gap: 8,
+    padding: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#d9b3b0',
+    backgroundColor: '#fbeceb',
+  },
+  trustTitle: { fontSize: 17, fontWeight: '700', color: '#10131a' },
+  trustBody: { fontSize: 14, color: '#2b3240' },
+  // Monospace so the fingerprint reads character-by-character (and a SR user can
+  // compare it exactly against the out-of-band value).
+  trustField: { fontSize: 14, color: '#10131a', fontFamily: 'monospace' },
 });

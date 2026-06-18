@@ -30,7 +30,58 @@ export type SyncAdapterConfig =
       client_id: string;
       client_secret: string;
       folder_name?: string;
+    }
+  | {
+      kind: 'sftp';
+      host: string;
+      port?: number;
+      user: string;
+      path: string;
+      /** `'password'` (default) or `'key'` (SSH private key). */
+      auth_method?: 'password' | 'key';
+      /** password-auth: omit/empty to reuse the stored secret. */
+      password?: string;
+      /** key-auth: path to the private key file on the device. */
+      key_path?: string;
+      /** key-auth: the key's passphrase; omit/empty to reuse the stored one. */
+      key_passphrase?: string;
     };
+
+/** §19.5 host-key preview: the freshly-probed SFTP fingerprint + how it relates
+ *  to the device's pin store. The UI shows the trust dialog per `status`. */
+export interface HostKeyPreview {
+  host_port: string;
+  fingerprint: string;
+  status:
+    | { kind: 'new' }
+    | { kind: 'unchanged' }
+    | { kind: 'changed'; stored: string };
+}
+
+/** Probe an SFTP server's SHA256 host-key fingerprint and classify it against
+ *  the device's pin store (network). On `new`/`changed` show the §19.5 trust
+ *  dialog, then {@link trustSftpHostKey}; on `unchanged` configure directly. */
+export const previewSftpHostKey = async (
+  host: string,
+  port: number,
+): Promise<HostKeyPreview> =>
+  JSON.parse(
+    await CalFfi.previewSftpHostKeyJson(JSON.stringify({ host, port })),
+  ) as HostKeyPreview;
+
+/** Pin a user-confirmed fingerprint for `hostPort` (first-use or key-change). */
+export const trustSftpHostKey = (
+  hostPort: string,
+  fingerprint: string,
+): Promise<void> => CalFfi.trustSftpHostKey(hostPort, fingerprint);
+
+/** Drop the pinned fingerprint for `hostPort` (the next connect re-prompts). */
+export const forgetSftpHostKey = (hostPort: string): Promise<void> =>
+  CalFfi.forgetSftpHostKey(hostPort);
+
+/** The pinned fingerprint for `hostPort`, or null. No network. */
+export const pinnedSftpHostKey = (hostPort: string): Promise<string | null> =>
+  CalFfi.pinnedSftpHostKey(hostPort);
 
 /** The statically-embedded sync-adapter plugin ids the Host drives OAuth for. */
 export const SYNC_OAUTH_PLUGIN_IDS: Record<'dropbox' | 'googledrive', string> = {
