@@ -762,6 +762,19 @@ public protocol HostProtocol: AnyObject, Sendable {
     func discoverJson(pluginId: String, argsJson: String) throws  -> String
     
     /**
+     * Enable end-to-end encryption on the configured sync target (§19.7). Mints
+     * a fresh v2 key (a random data key wrapped by a passphrase-derived KEK,
+     * recorded in the plaintext `meta.json`), writes the encrypted dataset via
+     * `adopt_local`, stores the data key device-locally, and flips
+     * `PREF_E2E_ENABLED`. From here every sync round encrypts. This is the
+     * "start a fresh encrypted dataset" path (mirrors the desktop adopt_local
+     * with E2E); a second device JOINS via the passphrase (a later phase), and
+     * re-encrypting an already-populated plaintext dataset (desktop
+     * `enable_sync_encryption`) is deferred. Returns the OnboardingReport JSON.
+     */
+    func enableSyncEncryptionJson(passphrase: String) throws  -> String
+    
+    /**
      * Drop the pinned SFTP fingerprint for `host_port` (the "forget pin"
      * gesture; the next connect re-runs the first-use trust dialog).
      */
@@ -780,8 +793,9 @@ public protocol HostProtocol: AnyObject, Sendable {
      * Routes local → LocalAdapter, external → the registry adapter. Mirrors
      * the desktop `get_events` minus the SWR read-cache + staleness-gated
      * background refresh (deferred): the external branch hits the provider
-     * live, exactly as a cache-cold desktop first read. Birthday calendars are
-     * deferred (desktop-only) — a birthday id routes to empty.
+     * live, exactly as a cache-cold desktop first read. A synthetic birthday
+     * calendar id is intercepted first and its all-day events are synthesised
+     * on the fly from the LOCAL contacts' birthdays (§10.3).
      *
      * The local adapter currently returns rows whose stored start/end
      * intersect the range (RRULE occurrence expansion is its own later phase),
@@ -1390,6 +1404,26 @@ open func discoverJson(pluginId: String, argsJson: String)throws  -> String  {
 }
     
     /**
+     * Enable end-to-end encryption on the configured sync target (§19.7). Mints
+     * a fresh v2 key (a random data key wrapped by a passphrase-derived KEK,
+     * recorded in the plaintext `meta.json`), writes the encrypted dataset via
+     * `adopt_local`, stores the data key device-locally, and flips
+     * `PREF_E2E_ENABLED`. From here every sync round encrypts. This is the
+     * "start a fresh encrypted dataset" path (mirrors the desktop adopt_local
+     * with E2E); a second device JOINS via the passphrase (a later phase), and
+     * re-encrypting an already-populated plaintext dataset (desktop
+     * `enable_sync_encryption`) is deferred. Returns the OnboardingReport JSON.
+     */
+open func enableSyncEncryptionJson(passphrase: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_enable_sync_encryption_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(passphrase),$0
+    )
+})
+}
+    
+    /**
      * Drop the pinned SFTP fingerprint for `host_port` (the "forget pin"
      * gesture; the next connect re-runs the first-use trust dialog).
      */
@@ -1421,8 +1455,9 @@ open func getEventByIdJson(id: String)throws  -> String  {
      * Routes local → LocalAdapter, external → the registry adapter. Mirrors
      * the desktop `get_events` minus the SWR read-cache + staleness-gated
      * background refresh (deferred): the external branch hits the provider
-     * live, exactly as a cache-cold desktop first read. Birthday calendars are
-     * deferred (desktop-only) — a birthday id routes to empty.
+     * live, exactly as a cache-cold desktop first read. A synthetic birthday
+     * calendar id is intercepted first and its all-day events are synthesised
+     * on the fly from the LOCAL contacts' birthdays (§10.3).
      *
      * The local adapter currently returns rows whose stored start/end
      * intersect the range (RRULE occurrence expansion is its own later phase),
@@ -5031,13 +5066,16 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_discover_json() != 25945) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_cal_ffi_checksum_method_host_enable_sync_encryption_json() != 46210) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_cal_ffi_checksum_method_host_forget_sftp_host_key() != 61915) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_get_event_by_id_json() != 43277) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_cal_ffi_checksum_method_host_get_events_json() != 65466) {
+    if (uniffi_cal_ffi_checksum_method_host_get_events_json() != 9599) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_list_calendars_json() != 49275) {

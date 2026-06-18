@@ -253,6 +253,14 @@ class CalFfiModule : Module() {
       host.completeSyncOauthJson(pluginId, requestJson)
     }
 
+    // ─── E2E sync encryption (§19.7) ──────────────────────────────────────────
+    // enableSyncEncryptionJson turns on E2E for the configured target (mint key,
+    // write the encrypted dataset, encrypt every subsequent round).
+
+    AsyncFunction("enableSyncEncryptionJson") { passphrase: String ->
+      host.enableSyncEncryptionJson(passphrase)
+    }
+
     // ─── SFTP host-key trust (§19.5 TOFU) ─────────────────────────────────────
     // previewSftpHostKeyJson probes the server's fingerprint (network) + compares
     // it to the device pin store → {host_port, fingerprint, status}; trust/forget/

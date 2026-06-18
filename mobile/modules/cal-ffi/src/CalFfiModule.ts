@@ -175,6 +175,14 @@ declare class CalFfiModule extends NativeModule<Record<never, never>> {
    *  the caller follows with `configureSyncAdapterJson` to activate the target. */
   completeSyncOauthJson(pluginId: string, requestJson: string): Promise<void>;
 
+  // ── E2E sync encryption (§19.7) ──
+  /** Enable end-to-end encryption on the configured sync target: mint a fresh
+   *  passphrase-protected key, write the encrypted dataset (`adopt_local`), and
+   *  encrypt every subsequent round. The key is device-local (never synced) — a
+   *  second device joins via the passphrase (a later phase). Returns the
+   *  OnboardingReport JSON. */
+  enableSyncEncryptionJson(passphrase: string): Promise<string>;
+
   // ── SFTP host-key trust (§19.5 TOFU) ──
   /** Probe an SFTP server's SHA256 host-key fingerprint (network) and classify
    *  it against the device pin store. `argsJson` carries `{host, port}`; returns

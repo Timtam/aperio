@@ -42,6 +42,8 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
 use cal_adapter_local::LocalAdapter;
 use cal_core::{
     Calendar, CalendarFeature, ColorLabelId, ContactList, ContactsFeature, DateRange, Event,
@@ -57,7 +59,10 @@ use host_core::user_prefs::UserPrefsRepo;
 use host_core::DbHandle;
 use plugin_core::shim::FfiSyncAdapter;
 use plugin_core::PluginManager;
-use sync_core::{AccountPayload, EventPayload, IdPayload, SyncAdapter, SyncError, SyncEvent};
+use sync_core::{
+    derive_key, fresh_data_key, wrap_key, AccountPayload, EncryptingAdapter, EncryptionParams,
+    EventPayload, IdPayload, SyncAdapter, SyncError, SyncEvent, KEY_LEN,
+};
 use sync_engine::{EventLogWriter, SecretError, SecretSlot, SecretStore, SyncOrchestrator};
 
 /// Sync-adapter pref keys (device-local; never propagated). Match the desktop
@@ -111,6 +116,11 @@ const PLUGIN_ID_FTP: &str = "com.aperio.sync-adapter-ftp";
 const PLUGIN_ID_DROPBOX: &str = "com.aperio.sync-adapter-dropbox";
 const PLUGIN_ID_GOOGLEDRIVE: &str = "com.aperio.sync-adapter-googledrive";
 const PLUGIN_ID_SFTP: &str = "com.aperio.sync-adapter-sftp";
+/// Fixed keychain pseudo-account holding the E2E data key (base64) under
+/// `SecretSlot::SyncEncryptionKey`. Device-local by design — the key is NEVER
+/// synced (syncing it would defeat E2E), so a joining device derives it from a
+/// passphrase via the onboarding flow. Matches the desktop's `E2E_SECRET_ACCOUNT`.
+const E2E_SECRET_ACCOUNT: &str = "sync.adapter.e2e";
 
 fn sync_err(e: SyncError) -> StoreError {
     StoreError::Storage {
@@ -123,6 +133,54 @@ fn sync_err(e: SyncError) -> StoreError {
 fn storage_err(e: impl std::fmt::Display) -> StoreError {
     StoreError::Storage {
         detail: e.to_string(),
+    }
+}
+
+// ── E2E sync encryption (§19.7) ──────────────────────────────────────────────
+//
+// The data key (DEK) is a 32-byte AES-256 key kept device-local in the keychain
+// (base64 under E2E_SECRET_ACCOUNT / SyncEncryptionKey) — NEVER synced. A
+// SyncAdapter is wrapped in `EncryptingAdapter` when the dataset is E2E. The
+// crypto + the onboarding key-derivation are the shared sync-core/host-core code
+// the desktop uses (faithful reuse, no bespoke crypto here).
+
+/// Read the device-local E2E data key from the keychain (base64-decoded), or
+/// `None` when absent / malformed.
+fn load_e2e_key(secret_store: &dyn SecretStore) -> Option<[u8; KEY_LEN]> {
+    let raw = secret_store
+        .retrieve(E2E_SECRET_ACCOUNT, SecretSlot::SyncEncryptionKey)
+        .ok()?;
+    let bytes = BASE64.decode(raw.trim()).ok()?;
+    if bytes.len() != KEY_LEN {
+        return None;
+    }
+    let mut out = [0u8; KEY_LEN];
+    out.copy_from_slice(&bytes);
+    Some(out)
+}
+
+/// Persist the E2E data key (base64) in the device-local keychain slot.
+fn store_e2e_key(secret_store: &dyn SecretStore, key: &[u8; KEY_LEN]) -> Result<(), StoreError> {
+    secret_store
+        .store(
+            E2E_SECRET_ACCOUNT,
+            SecretSlot::SyncEncryptionKey,
+            &BASE64.encode(key),
+        )
+        .map_err(|e| StoreError::Storage {
+            detail: format!("store E2E key: {e}"),
+        })
+}
+
+/// Wrap `plain` in an `EncryptingAdapter` when a key is present; otherwise pass
+/// it through untouched. Mirrors the desktop `wrap_if_encrypted`.
+fn wrap_if_encrypted(
+    plain: Arc<dyn SyncAdapter>,
+    key: Option<[u8; KEY_LEN]>,
+) -> Arc<dyn SyncAdapter> {
+    match key {
+        Some(k) => Arc::new(EncryptingAdapter::new(plain, k)),
+        None => plain,
     }
 }
 
@@ -414,9 +472,10 @@ pub struct Host {
     /// Runs a sync round (push + fetch + apply). Unconfigured until
     /// `configure_sync_adapter_json`; `sync_now` then errors "not configured".
     orchestrator: Arc<SyncOrchestrator>,
-    // Held for the lifetime of the host (snapshot consume/produce + meta
-    // heartbeats); the onboarding command surface is a later phase.
-    _onboarding: Arc<OnboardingService>,
+    /// The onboarding engine (snapshot consume/produce + meta heartbeats) —
+    /// drives the E2E establishment (`enable_sync_encryption_json` adopts a fresh
+    /// encrypted dataset; join-existing is a later phase).
+    onboarding: Arc<OnboardingService>,
     /// The static plugin registry — the registry holds an `Arc` clone for
     /// per-account adapters; the Host also opens the sync-adapter plugin here.
     plugin_manager: Arc<PluginManager>,
@@ -875,10 +934,24 @@ impl Host {
         {
             let shared = db.shared();
             let prefs = UserPrefsRepo::new(&shared);
-            if let Some(adapter) =
+            if let Some(plain) =
                 restore_adapter_from_prefs(&shared, &prefs, &plugin_manager, secret_store.as_ref())
             {
-                graph.orchestrator.configure(adapter);
+                // §19.7: if the dataset is E2E, wrap with the device-local key.
+                // When the flag is set but the key is missing (keychain wiped /
+                // fresh OS install with the same data dir), DON'T configure — we
+                // must never push plaintext to an encrypted target; the user
+                // re-enters the passphrase to re-establish the key.
+                let configured: Option<Arc<dyn SyncAdapter>> =
+                    if host_core::credential_sync::e2e_enabled(&shared) {
+                        load_e2e_key(secret_store.as_ref())
+                            .map(|key| wrap_if_encrypted(plain, Some(key)))
+                    } else {
+                        Some(plain)
+                    };
+                if let Some(adapter) = configured {
+                    graph.orchestrator.configure(adapter);
+                }
             }
         }
 
@@ -890,7 +963,7 @@ impl Host {
             runtime,
             writer: graph.writer,
             orchestrator: graph.orchestrator,
-            _onboarding: graph.onboarding,
+            onboarding: graph.onboarding,
             plugin_manager,
             progress: SyncProgressDriver::default(),
         }))
@@ -1628,8 +1701,79 @@ impl Host {
                     None => serde_json::Value::Null,
                 },
             );
+            // E2E is transparent above the orchestrator, so report it from the
+            // device-local pref (the source of truth the wrap path consults).
+            obj.insert(
+                "e2e_enabled".to_string(),
+                serde_json::Value::Bool(host_core::credential_sync::e2e_enabled(&self.db.shared())),
+            );
         }
         Ok(value.to_string())
+    }
+
+    /// Enable end-to-end encryption on the configured sync target (§19.7). Mints
+    /// a fresh v2 key (a random data key wrapped by a passphrase-derived KEK,
+    /// recorded in the plaintext `meta.json`), writes the encrypted dataset via
+    /// `adopt_local`, stores the data key device-locally, and flips
+    /// `PREF_E2E_ENABLED`. From here every sync round encrypts. This is the
+    /// "start a fresh encrypted dataset" path (mirrors the desktop adopt_local
+    /// with E2E); a second device JOINS via the passphrase (a later phase), and
+    /// re-encrypting an already-populated plaintext dataset (desktop
+    /// `enable_sync_encryption`) is deferred. Returns the OnboardingReport JSON.
+    pub fn enable_sync_encryption_json(&self, passphrase: String) -> Result<String, StoreError> {
+        let pp = passphrase.trim();
+        if pp.is_empty() {
+            return Err(StoreError::InvalidField {
+                field: "passphrase".to_string(),
+                detail: "passphrase must not be empty".to_string(),
+            });
+        }
+        let shared = self.db.shared();
+        if host_core::credential_sync::e2e_enabled(&shared) {
+            return Err(StoreError::InvalidField {
+                field: "e2e".to_string(),
+                detail: "end-to-end encryption is already enabled".to_string(),
+            });
+        }
+        // Rebuild the currently-configured (plaintext) adapter from prefs — E2E
+        // is still off here, so restore returns it unwrapped.
+        let prefs = UserPrefsRepo::new(&shared);
+        let plain = restore_adapter_from_prefs(
+            &shared,
+            &prefs,
+            &self.plugin_manager,
+            self.secret_store.as_ref(),
+        )
+        .ok_or_else(|| StoreError::InvalidField {
+            field: "sync".to_string(),
+            detail: "configure a sync target before enabling encryption".to_string(),
+        })?;
+        // Mint v2 material: fresh DEK + a KEK from the passphrase + fresh params;
+        // wrap the DEK and record it in the params written to meta.json.
+        let mut params = EncryptionParams::fresh();
+        let kek = derive_key(pp, &params).map_err(sync_err)?;
+        let dek = fresh_data_key();
+        let wrapped = wrap_key(&kek, &dek).map_err(sync_err)?;
+        params.wrapped_data_key = Some(wrapped);
+        let adapter = wrap_if_encrypted(plain, Some(dek));
+        // adopt_local writes the fresh E2E meta.json + adopts this device; the
+        // pending logs then push encrypted on the next round.
+        let report = self
+            .runtime
+            .block_on(async {
+                self.onboarding
+                    .adopt_local(adapter.as_ref(), None, Some(params))
+                    .await
+            })
+            .map_err(sync_err)?;
+        self.orchestrator.configure(adapter);
+        // Persist the key FIRST, then the flag — so a failure can't leave the
+        // flag set with no key (which would refuse to sync on the next boot).
+        store_e2e_key(self.secret_store.as_ref(), &dek)?;
+        prefs
+            .set(host_core::credential_sync::PREF_E2E_ENABLED, "true")
+            .map_err(storage_err)?;
+        to_json(&report)
     }
 
     /// Complete a host-driven OAuth flow for a SYNC adapter (`plugin_id` =
@@ -3396,6 +3540,92 @@ mod tests {
                 ["configured"],
             true,
             "the local sync target should be restored on reopen",
+        );
+    }
+
+    #[test]
+    fn enabling_e2e_encrypts_pushed_logs_and_restores_on_reopen() {
+        use std::fs;
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir
+            .path()
+            .join("aperio.sqlite")
+            .to_string_lossy()
+            .into_owned();
+        let remote = tempfile::tempdir().unwrap();
+        let cfg = format!(
+            r#"{{"kind":"local","path":{}}}"#,
+            serde_json::to_string(&remote.path().to_string_lossy()).unwrap()
+        );
+        // One shared in-memory keychain so the E2E key survives the reopen below
+        // (a fresh FakeKeychain would lose it — exercising a different path).
+        let kc = Arc::new(FakeKeychain::default());
+        const TITLE: &str = "TopSecretRendezvous";
+
+        {
+            let host = Host::open(db_path.clone(), kc.clone() as Arc<dyn KeychainBridge>).unwrap();
+            host.configure_sync_adapter_json(cfg.clone()).unwrap();
+            let cal = calendar_id(
+                &host
+                    .create_calendar_json(r#"{"name":"Secret"}"#.to_string())
+                    .unwrap(),
+            );
+            host.create_event_json(new_event_json(&cal, TITLE)).unwrap();
+            // Turn on E2E, then push the pending logs (now encrypted).
+            host.enable_sync_encryption_json("correct horse battery".to_string())
+                .unwrap();
+            let status: serde_json::Value =
+                serde_json::from_str(&host.sync_status_json().unwrap()).unwrap();
+            assert_eq!(status["e2e_enabled"], serde_json::json!(true));
+            wait_for_pending(&dir);
+            host.sync_now_json().unwrap();
+        }
+
+        // Nothing the sync pushed may carry the event title in plaintext — every
+        // log + snapshot body is AES-GCM ciphertext (only meta.json stays plain,
+        // and it holds no event data).
+        fn collect(dir: &std::path::Path, out: &mut Vec<u8>) {
+            for entry in fs::read_dir(dir).unwrap().flatten() {
+                let p = entry.path();
+                if p.is_dir() {
+                    collect(&p, &mut *out);
+                } else if let Ok(bytes) = fs::read(&p) {
+                    out.extend_from_slice(&bytes);
+                }
+            }
+        }
+        let mut all = Vec::new();
+        collect(remote.path(), &mut all);
+        assert!(!all.is_empty(), "the sync push should have written files");
+        assert!(
+            !all.windows(TITLE.len()).any(|w| w == TITLE.as_bytes()),
+            "the event title must never appear in plaintext on an E2E target",
+        );
+
+        // Reopen with the SAME db + keychain: restore re-wraps with the stored
+        // key, and a fetch round decrypts its own logs without error.
+        let host2 = Host::open(db_path, kc as Arc<dyn KeychainBridge>).unwrap();
+        let status2: serde_json::Value =
+            serde_json::from_str(&host2.sync_status_json().unwrap()).unwrap();
+        assert_eq!(
+            status2["configured"],
+            serde_json::json!(true),
+            "the E2E target should be restored on reopen"
+        );
+        assert_eq!(status2["e2e_enabled"], serde_json::json!(true));
+        // Decrypts the previously-pushed (own) logs without error.
+        host2.sync_now_json().unwrap();
+    }
+
+    #[test]
+    fn enable_e2e_rejects_an_empty_passphrase() {
+        let (_dir, host, _kc) = open_host();
+        let err = host
+            .enable_sync_encryption_json("   ".to_string())
+            .unwrap_err();
+        assert!(
+            matches!(err, StoreError::InvalidField { ref field, .. } if field == "passphrase"),
+            "got: {err:?}"
         );
     }
 

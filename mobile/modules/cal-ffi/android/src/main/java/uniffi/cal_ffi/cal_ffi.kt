@@ -772,6 +772,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_discover_json(
     ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_enable_sync_encryption_json(
+    ): Short
     external fun uniffi_cal_ffi_checksum_method_host_forget_sftp_host_key(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_get_event_by_id_json(
@@ -944,6 +946,8 @@ external fun uniffi_cal_ffi_fn_method_host_delete_task(`ptr`: Long,`id`: RustBuf
 external fun uniffi_cal_ffi_fn_method_host_delete_task_list(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_discover_json(`ptr`: Long,`pluginId`: RustBuffer.ByValue,`argsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_enable_sync_encryption_json(`ptr`: Long,`passphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_forget_sftp_host_key(`ptr`: Long,`hostPort`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
@@ -1268,13 +1272,16 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_discover_json() != 25945.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_enable_sync_encryption_json() != 46210.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_forget_sftp_host_key() != 61915.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_get_event_by_id_json() != 43277.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_cal_ffi_checksum_method_host_get_events_json() != 65466.toShort()) {
+    if (lib.uniffi_cal_ffi_checksum_method_host_get_events_json() != 9599.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_list_calendars_json() != 49275.toShort()) {
@@ -2003,6 +2010,19 @@ public interface HostInterface {
     fun `discoverJson`(`pluginId`: kotlin.String, `argsJson`: kotlin.String): kotlin.String
     
     /**
+     * Enable end-to-end encryption on the configured sync target (§19.7). Mints
+     * a fresh v2 key (a random data key wrapped by a passphrase-derived KEK,
+     * recorded in the plaintext `meta.json`), writes the encrypted dataset via
+     * `adopt_local`, stores the data key device-locally, and flips
+     * `PREF_E2E_ENABLED`. From here every sync round encrypts. This is the
+     * "start a fresh encrypted dataset" path (mirrors the desktop adopt_local
+     * with E2E); a second device JOINS via the passphrase (a later phase), and
+     * re-encrypting an already-populated plaintext dataset (desktop
+     * `enable_sync_encryption`) is deferred. Returns the OnboardingReport JSON.
+     */
+    fun `enableSyncEncryptionJson`(`passphrase`: kotlin.String): kotlin.String
+    
+    /**
      * Drop the pinned SFTP fingerprint for `host_port` (the "forget pin"
      * gesture; the next connect re-runs the first-use trust dialog).
      */
@@ -2021,8 +2041,9 @@ public interface HostInterface {
      * Routes local → LocalAdapter, external → the registry adapter. Mirrors
      * the desktop `get_events` minus the SWR read-cache + staleness-gated
      * background refresh (deferred): the external branch hits the provider
-     * live, exactly as a cache-cold desktop first read. Birthday calendars are
-     * deferred (desktop-only) — a birthday id routes to empty.
+     * live, exactly as a cache-cold desktop first read. A synthetic birthday
+     * calendar id is intercepted first and its all-day events are synthesised
+     * on the fly from the LOCAL contacts' birthdays (§10.3).
      *
      * The local adapter currently returns rows whose stored start/end
      * intersect the range (RRULE occurrence expansion is its own later phase),
@@ -2770,6 +2791,31 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * Enable end-to-end encryption on the configured sync target (§19.7). Mints
+     * a fresh v2 key (a random data key wrapped by a passphrase-derived KEK,
+     * recorded in the plaintext `meta.json`), writes the encrypted dataset via
+     * `adopt_local`, stores the data key device-locally, and flips
+     * `PREF_E2E_ENABLED`. From here every sync round encrypts. This is the
+     * "start a fresh encrypted dataset" path (mirrors the desktop adopt_local
+     * with E2E); a second device JOINS via the passphrase (a later phase), and
+     * re-encrypting an already-populated plaintext dataset (desktop
+     * `enable_sync_encryption`) is deferred. Returns the OnboardingReport JSON.
+     */
+    @Throws(StoreException::class)override fun `enableSyncEncryptionJson`(`passphrase`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_enable_sync_encryption_json(
+        it,
+        FfiConverterString.lower(`passphrase`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * Drop the pinned SFTP fingerprint for `host_port` (the "forget pin"
      * gesture; the next connect re-runs the first-use trust dialog).
      */
@@ -2811,8 +2857,9 @@ open class Host: Disposable, AutoCloseable, HostInterface
      * Routes local → LocalAdapter, external → the registry adapter. Mirrors
      * the desktop `get_events` minus the SWR read-cache + staleness-gated
      * background refresh (deferred): the external branch hits the provider
-     * live, exactly as a cache-cold desktop first read. Birthday calendars are
-     * deferred (desktop-only) — a birthday id routes to empty.
+     * live, exactly as a cache-cold desktop first read. A synthetic birthday
+     * calendar id is intercepted first and its all-day events are synthesised
+     * on the fly from the LOCAL contacts' birthdays (§10.3).
      *
      * The local adapter currently returns rows whose stored start/end
      * intersect the range (RRULE occurrence expansion is its own later phase),

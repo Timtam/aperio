@@ -218,6 +218,12 @@ public class CalFfiModule: Module {
       try self.host.completeSyncOauthJson(pluginId: pluginId, requestJson: requestJson)
     }
 
+    // ─── E2E sync encryption (§19.7) ──────────────────────────────────────────
+
+    AsyncFunction("enableSyncEncryptionJson") { (passphrase: String) -> String in
+      try self.host.enableSyncEncryptionJson(passphrase: passphrase)
+    }
+
     // ─── SFTP host-key trust (§19.5 TOFU) ─────────────────────────────────────
 
     AsyncFunction("previewSftpHostKeyJson") { (argsJson: String) -> String in

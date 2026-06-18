@@ -14,6 +14,7 @@ import {
 
 import {
   configureSyncAdapter,
+  enableSyncEncryption,
   forgetSftpHostKey,
   previewSftpHostKey,
   trustSftpHostKey,
@@ -71,6 +72,7 @@ export default function SyncScreen() {
   const [sftpPassword, setSftpPassword] = useState(''); // sftp password-auth
   const [sftpKeyPath, setSftpKeyPath] = useState(''); // sftp key-auth
   const [sftpKeyPassphrase, setSftpKeyPassphrase] = useState(''); // sftp key-auth
+  const [e2ePassphrase, setE2ePassphrase] = useState(''); // enable-E2E passphrase
   // When set, the §19.5 trust panel is showing the probed fingerprint awaiting
   // the user's explicit accept (first-use or key-change) before connect.
   const [pendingTrust, setPendingTrust] = useState<HostKeyPreview | null>(null);
@@ -444,6 +446,31 @@ export default function SyncScreen() {
     }
   }, [announce, refresh, t]);
 
+  // Enable E2E on the configured target (§19.7) — irreversible without the
+  // passphrase. Mints + stores the device-local key and encrypts from here on.
+  const enableE2e = useCallback(async () => {
+    const pp = e2ePassphrase.trim();
+    if (pp.length === 0) {
+      setError(t('dialogs.settings.sync.e2ePassphraseRequired'));
+      announce(t('dialogs.settings.sync.e2ePassphraseRequired'));
+      return;
+    }
+    setError(null);
+    setBusy(true);
+    try {
+      await enableSyncEncryption(pp);
+      setE2ePassphrase('');
+      await refresh();
+      announce(t('dialogs.settings.sync.e2eActive'));
+    } catch (err) {
+      const message = errorMessage(err);
+      setError(message);
+      announce(t('mobile.error', { message }));
+    } finally {
+      setBusy(false);
+    }
+  }, [announce, e2ePassphrase, refresh, t]);
+
   const lastSynced =
     status?.last_synced_at != null
       ? new Date(status.last_synced_at).toLocaleString()
@@ -509,6 +536,50 @@ export default function SyncScreen() {
           </Text>
         </Pressable>
       )}
+
+      {/* End-to-end encryption (§19.7) — only meaningful once a target is set. */}
+      {status?.configured &&
+        (status.e2e_enabled ? (
+          <Text style={styles.status} accessibilityRole="text">
+            {t('dialogs.settings.sync.e2eActive')}
+          </Text>
+        ) : (
+          <View style={styles.field}>
+            <Text style={styles.label} accessibilityRole="header">
+              {t('dialogs.settings.sync.e2eEnableLabel')}
+            </Text>
+            <Text style={styles.hint} accessibilityRole="text">
+              {t('dialogs.settings.sync.e2eEnableHint')}
+            </Text>
+            <Text style={styles.warning} accessibilityRole="text">
+              {t('dialogs.settings.sync.e2eIrreversibleWarning')}
+            </Text>
+            <Text style={styles.label}>
+              {t('dialogs.settings.sync.e2ePassphrase')}
+            </Text>
+            <TextInput
+              style={styles.input}
+              value={e2ePassphrase}
+              onChangeText={setE2ePassphrase}
+              accessibilityLabel={t('dialogs.settings.sync.e2ePassphrase')}
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ disabled: busy }}
+              accessibilityLabel={t('dialogs.settings.sync.e2eEnableLabel')}
+              disabled={busy}
+              onPress={() => void enableE2e()}
+              style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
+            >
+              <Text style={styles.ghostButtonText}>
+                {t('dialogs.settings.sync.e2eEnableLabel')}
+              </Text>
+            </Pressable>
+          </View>
+        ))}
 
       <RadioGroup<SyncKind>
         label={t('dialogs.settings.sync.adapterKind')}

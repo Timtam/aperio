@@ -1079,6 +1079,7 @@ name = "cal-ffi"
 version = "0.1.0"
 dependencies = [
  "aperio-db",
+ "base64 0.22.1",
  "cal-adapter-local",
  "cal-core",
  "chrono",

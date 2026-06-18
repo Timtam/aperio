@@ -152,3 +152,11 @@ export const syncNow = async (): Promise<SyncRoundReport> =>
 
 /** Push local pending logs without fetching (call on app background). */
 export const pushNow = (): Promise<number> => CalFfi.pushNow();
+
+/** Enable end-to-end encryption (§19.7) on the configured sync target: mint a
+ *  fresh passphrase-protected key, write the encrypted dataset, and encrypt
+ *  every subsequent round. The key is device-local (never synced). Irreversible
+ *  without the passphrase — losing it means losing the data. */
+export const enableSyncEncryption = async (passphrase: string): Promise<void> => {
+  await CalFfi.enableSyncEncryptionJson(passphrase);
+};
