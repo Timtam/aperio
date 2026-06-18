@@ -23,6 +23,7 @@ pub mod paths;
 pub mod registry;
 pub mod reminders;
 pub mod remote_plugins;
+pub mod sftp_host_keys;
 pub mod sound;
 pub mod sound_assets;
 pub mod sync;
