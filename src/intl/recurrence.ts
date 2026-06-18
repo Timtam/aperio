@@ -1,153 +1,18 @@
-import { RRule, rrulestr } from 'rrule';
+// Event recurrence expansion now lives in @aperio/shared (generic over a
+// minimal event shape) so the desktop + mobile apps share one implementation.
+// This module re-exports it unchanged, plus the desktop-typed `ExpandedEvent`
+// alias, so every existing `../intl/recurrence` import keeps working.
+import type { ExpandedOccurrence } from '@aperio/shared';
 
-import type { CalendarEvent, EventRecurrence } from '../api/types';
+import type { CalendarEvent } from '../api/types';
 
-/**
- * Expand a recurring event into all of its occurrences inside `range`.
- *
- * Returns the original event unchanged when there is no recurrence
- * rule. Otherwise produces one `CalendarEvent` per occurrence whose
- * `start` and `end` match the occurrence time and whose `id` is suffixed
- * with the occurrence start in ISO form so React keys stay unique.
- * The original `id` is preserved as `series_id` on the synthetic events
- * so the dialog layer can locate the underlying row when the user edits
- * a recurring event.
- *
- * `EXDATE` entries from the recurrence model are honoured: rrule.js
- * filters them out of the occurrence list.
- *
- * Time-zone caveat: `event.start` is RFC 3339 (UTC). rrule.js works in
- * `Date` objects whose underlying instant is taken from `dtstart`. We
- * construct the dtstart from the UTC string and expand within the
- * supplied range — the result Date objects are UTC instants which we
- * re-serialise via toISOString().
- */
-export interface ExpandedEvent extends CalendarEvent {
-  series_id: string;
-  occurrence_start: string;
-}
+export {
+  expandEvent,
+  expandAll,
+  isExpandedOccurrence,
+  seriesIdOf,
+  occurrenceIsoOf,
+} from '@aperio/shared';
 
-export function expandEvent(
-  event: CalendarEvent,
-  range: { start: Date; end: Date },
-): (CalendarEvent | ExpandedEvent)[] {
-  if (!event.recurrence?.rrule) {
-    return [event];
-  }
-
-  const dtstart = new Date(event.start);
-  const dtend = new Date(event.end);
-  const duration = dtend.getTime() - dtstart.getTime();
-
-  let rule: RRule;
-  try {
-    rule = buildRule(event.recurrence, dtstart);
-  } catch (err) {
-    // Bad rule string — fall back to showing the master event at its
-    // stored start so the user can still see and edit it.
-    // eslint-disable-next-line no-console
-    console.warn('failed to parse RRULE', event.recurrence.rrule, err);
-    return [event];
-  }
-
-  // `between` is start-exclusive by default; pass `inc = true` so the
-  // range boundaries are inclusive — events that start exactly on the
-  // range boundary should still appear.
-  const occurrences = rule.between(range.start, range.end, true);
-
-  if (occurrences.length === 0) {
-    return [];
-  }
-
-  const exceptions = new Set(
-    event.recurrence.exceptions.map((iso) => new Date(iso).getTime()),
-  );
-
-  return occurrences
-    .filter((d) => !exceptions.has(d.getTime()))
-    .map<ExpandedEvent>((occStart) => {
-      const occEnd = new Date(occStart.getTime() + duration);
-      return {
-        ...event,
-        id: `${event.id}@${occStart.toISOString()}`,
-        series_id: event.id,
-        occurrence_start: occStart.toISOString(),
-        start: occStart.toISOString(),
-        end: occEnd.toISOString(),
-      };
-    });
-}
-
-function buildRule(recurrence: EventRecurrence, dtstart: Date): RRule {
-  // rrulestr accepts a full RFC 5545 "RRULE:..." block. If the stored
-  // string is just the rule body (FREQ=...;BYDAY=...) we prepend the
-  // RRULE: marker so the parser is happy either way.
-  const body = recurrence.rrule.trim();
-  const text = body.toUpperCase().startsWith('RRULE:') ? body : `RRULE:${body}`;
-  const rule = rrulestr(text, { dtstart }) as RRule;
-  return rule;
-}
-
-/**
- * Convenience: walk an array of events and flat-map them through
- * `expandEvent`, then sort the result chronologically.
- *
- * Returns the same shape (`CalendarEvent[]`) since `ExpandedEvent` is
- * assignment-compatible with `CalendarEvent` — callers don't need to
- * special-case occurrences unless they want to find the underlying
- * series (in which case they read `series_id` off the augmented type).
- */
-export function expandAll(
-  events: CalendarEvent[],
-  range: { start: Date; end: Date },
-): CalendarEvent[] {
-  const out = events.flatMap((ev) => expandEvent(ev, range));
-  out.sort((a, b) => a.start.localeCompare(b.start));
-  return out;
-}
-
-/** Type guard: distinguishes a synthetic occurrence from a regular event. */
-export function isExpandedOccurrence(
-  event: CalendarEvent,
-): event is ExpandedEvent {
-  return 'series_id' in event && typeof event.series_id === 'string';
-}
-
-/**
- * Underlying series id for an event row.
- *
- * For expanded occurrences (the synthetic per-instance copies that
- * `expandEvent` produces), returns the master's `series_id`. For
- * master rows — recurring or not — returns `event.id` unchanged.
- *
- * Replaces the old `event.id.split('@')[0]` shortcut that was
- * scattered across the views. That shortcut broke for Aperio-
- * created CalDAV events: their UIDs themselves contain `@aperio`
- * (see `create_event` in `cal-adapter-caldav`), so an expanded
- * occurrence id like `550e8400-...@aperio@2025-12-25T...` would
- * be `split('@')` into three parts and the `[0]` index would
- * drop the `@aperio` half of the master UID. The walker on the
- * backend then couldn't find a resource at the wrong URL and
- * surfaced a "not found" / "occurrence error" to the user.
- *
- * Keying off the `series_id` field is the canonical fix: the
- * expander attaches it as a separate property, and the type
- * guard `isExpandedOccurrence` proves it's there before we read
- * it.
- */
-export function seriesIdOf(event: CalendarEvent): string {
-  return isExpandedOccurrence(event) ? event.series_id : event.id;
-}
-
-/**
- * Occurrence-start ISO string for an expanded occurrence, or
- * `null` for a master row.
- *
- * Drives the "delete only this occurrence" path which needs the
- * occurrence's wall-clock start to append onto the master's
- * EXDATE list. Master rows have nothing to append — caller
- * should fall back to deleting the whole row instead.
- */
-export function occurrenceIsoOf(event: CalendarEvent): string | null {
-  return isExpandedOccurrence(event) ? event.occurrence_start : null;
-}
+/** An expanded per-occurrence copy of the desktop `CalendarEvent`. */
+export type ExpandedEvent = ExpandedOccurrence<CalendarEvent>;

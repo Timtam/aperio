@@ -11,6 +11,8 @@ import {
   View,
 } from 'react-native';
 
+import { expandAll, seriesIdOf } from '@aperio/shared';
+
 import {
   Calendar,
   CalendarEvent,
@@ -91,7 +93,15 @@ export default function EventsScreen({ navigation }: RootStackScreenProps<'Event
       const perCalendar = await Promise.all(
         cals.map((c) => getEvents({ calendar_id: c.id, start, end }).catch(() => [])),
       );
-      const merged = perCalendar.flat().sort((a, b) => a.start.localeCompare(b.start));
+      // The backend returns the stored MASTER row for a recurring event, not
+      // its per-day occurrences — so expand each series into the occurrences
+      // that fall inside this day's range (rrule + EXDATE, shared with desktop)
+      // and sort. Without this a recurring event is invisible on every day
+      // after its first.
+      const merged = expandAll(perCalendar.flat(), {
+        start: new Date(start),
+        end: new Date(end),
+      });
       setEvents(merged);
     } catch (err) {
       const message = errorMessage(err);
@@ -122,9 +132,15 @@ export default function EventsScreen({ navigation }: RootStackScreenProps<'Event
     navigation.navigate('EventEditor', { eventId: null, calendarId: firstCalendarId });
   }, [firstCalendarId, navigation]);
 
+  // Editing an occurrence edits its underlying SERIES — the expanded row's id
+  // is synthetic (`master@iso`), so resolve the real master id via seriesIdOf.
+  // (Per-occurrence scope — "this occurrence only" — is a later increment.)
   const editEvent = useCallback(
     (ev: CalendarEvent) =>
-      navigation.navigate('EventEditor', { eventId: ev.id, calendarId: ev.calendar_id }),
+      navigation.navigate('EventEditor', {
+        eventId: seriesIdOf(ev),
+        calendarId: ev.calendar_id,
+      }),
     [navigation],
   );
 
@@ -141,7 +157,9 @@ export default function EventsScreen({ navigation }: RootStackScreenProps<'Event
             onPress: () => {
               void (async () => {
                 try {
-                  await apiDeleteEvent(ev.id, ev.calendar_id, false);
+                  // Delete the underlying series (real master id), not the
+                  // synthetic occurrence id.
+                  await apiDeleteEvent(seriesIdOf(ev), ev.calendar_id, false);
                   announce(t('dialogs.event.deleted', { title: ev.title }));
                   await load();
                 } catch (err) {
