@@ -13,6 +13,7 @@
 //! resolving.
 
 pub mod accounts;
+pub mod birthdays;
 pub mod cache;
 pub mod conflicts;
 pub mod credential_sync;

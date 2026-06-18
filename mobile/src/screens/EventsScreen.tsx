@@ -158,6 +158,12 @@ export default function EventsScreen({ navigation }: RootStackScreenProps<'Event
     [announce, load, t],
   );
 
+  // Events in a read-only calendar (synthetic birthday layers, iCal feeds) are
+  // informational — no edit/delete (the adapter would reject a write anyway).
+  const readOnlyIds = new Set(
+    calendars.filter((c) => c.read_only).map((c) => c.id),
+  );
+
   return (
     <View style={styles.screen}>
       {/* Day navigation */}
@@ -226,44 +232,63 @@ export default function EventsScreen({ navigation }: RootStackScreenProps<'Event
           contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
         >
-          {events.map((ev) => (
-            <View
-              key={ev.id}
-              ref={(node) => {
-                rowTags.current[ev.id] = node ? findNodeHandle(node) : null;
-              }}
-              accessible
-              accessibilityRole="button"
-              accessibilityLabel={`${ev.title}, ${timeLabel(ev)}`}
-              accessibilityHint={t('mobile.taskHint')}
-              accessibilityActions={[
-                { name: 'activate', label: t('mobile.editTaskLabel') },
-                { name: 'delete', label: t('dialogs.event.delete') },
-              ]}
-              onAccessibilityAction={(e) => {
-                if (e.nativeEvent.actionName === 'delete') removeEvent(ev);
-                else editEvent(ev);
-              }}
-              style={styles.row}
-            >
-              <Pressable
-                accessible={false}
-                onPress={() => editEvent(ev)}
-                style={styles.rowText}
+          {events.map((ev) =>
+            readOnlyIds.has(ev.calendar_id) ? (
+              // Read-only calendar (a synthetic birthday layer or an iCal feed):
+              // its events can't be edited or deleted, so the row is purely
+              // informational — no edit/delete affordances, no "double-tap to
+              // edit" hint that would mislead a screen-reader user.
+              <View
+                key={ev.id}
+                accessible
+                accessibilityRole="text"
+                accessibilityLabel={`${ev.title}, ${timeLabel(ev)}`}
+                style={styles.row}
               >
-                <Text style={styles.eventTitle}>{ev.title}</Text>
-                <Text style={styles.eventTime}>{timeLabel(ev)}</Text>
-              </Pressable>
-              <Pressable
+                <View style={styles.rowText}>
+                  <Text style={styles.eventTitle}>{ev.title}</Text>
+                  <Text style={styles.eventTime}>{timeLabel(ev)}</Text>
+                </View>
+              </View>
+            ) : (
+              <View
+                key={ev.id}
+                ref={(node) => {
+                  rowTags.current[ev.id] = node ? findNodeHandle(node) : null;
+                }}
+                accessible
                 accessibilityRole="button"
-                accessibilityLabel={`${t('dialogs.event.delete')}: ${ev.title}`}
-                onPress={() => removeEvent(ev)}
-                style={({ pressed }) => [styles.deleteButton, pressed && styles.pressed]}
+                accessibilityLabel={`${ev.title}, ${timeLabel(ev)}`}
+                accessibilityHint={t('mobile.taskHint')}
+                accessibilityActions={[
+                  { name: 'activate', label: t('mobile.editTaskLabel') },
+                  { name: 'delete', label: t('dialogs.event.delete') },
+                ]}
+                onAccessibilityAction={(e) => {
+                  if (e.nativeEvent.actionName === 'delete') removeEvent(ev);
+                  else editEvent(ev);
+                }}
+                style={styles.row}
               >
-                <Text style={styles.deleteButtonText}>{t('dialogs.event.delete')}</Text>
-              </Pressable>
-            </View>
-          ))}
+                <Pressable
+                  accessible={false}
+                  onPress={() => editEvent(ev)}
+                  style={styles.rowText}
+                >
+                  <Text style={styles.eventTitle}>{ev.title}</Text>
+                  <Text style={styles.eventTime}>{timeLabel(ev)}</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`${t('dialogs.event.delete')}: ${ev.title}`}
+                  onPress={() => removeEvent(ev)}
+                  style={({ pressed }) => [styles.deleteButton, pressed && styles.pressed]}
+                >
+                  <Text style={styles.deleteButtonText}>{t('dialogs.event.delete')}</Text>
+                </Pressable>
+              </View>
+            ),
+          )}
         </ScrollView>
       )}
     </View>

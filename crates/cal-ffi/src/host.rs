@@ -1039,6 +1039,28 @@ impl Host {
                     .unwrap_or_else(|| LOCAL_ID.to_string());
                 out.push(CalendarRow::new(c, acct));
             }
+
+            // Synthetic, read-only birthday calendars (§10.3) from the LOCAL
+            // address book — one per contact list that has ≥1 birthday. External
+            // birthday layers need the snapshot contact cache the mobile host
+            // doesn't have yet, so the local books are the ported subset; the
+            // events are synthesised on demand in get_events_json. Stamp each
+            // id's route as local so a stray lookup resolves locally.
+            if let Ok(contact_lists) = self.adapter.list_contact_lists().await {
+                for list in contact_lists {
+                    let has_birthday = self
+                        .adapter
+                        .get_contacts(&list.id)
+                        .await
+                        .map(|cs| cs.iter().any(|c| c.birthday.is_some()))
+                        .unwrap_or(false);
+                    if has_birthday {
+                        let cal = host_core::birthdays::synthesise_calendar(&list.id, &list.name);
+                        self.registry.note_calendar_route(&cal.id, LOCAL_ID);
+                        out.push(CalendarRow::new(cal, LOCAL_ID.to_string()));
+                    }
+                }
+            }
             Ok::<_, StoreError>(out)
         })?;
         to_json(&rows)
@@ -1083,8 +1105,9 @@ impl Host {
     /// Routes local → LocalAdapter, external → the registry adapter. Mirrors
     /// the desktop `get_events` minus the SWR read-cache + staleness-gated
     /// background refresh (deferred): the external branch hits the provider
-    /// live, exactly as a cache-cold desktop first read. Birthday calendars are
-    /// deferred (desktop-only) — a birthday id routes to empty.
+    /// live, exactly as a cache-cold desktop first read. A synthetic birthday
+    /// calendar id is intercepted first and its all-day events are synthesised
+    /// on the fly from the LOCAL contacts' birthdays (§10.3).
     ///
     /// The local adapter currently returns rows whose stored start/end
     /// intersect the range (RRULE occurrence expansion is its own later phase),
@@ -1093,6 +1116,20 @@ impl Host {
         let req: EventRangeRequest = from_json("request", &request_json)?;
         let range = DateRange::new(req.start, req.end);
         let events = self.runtime.block_on(async {
+            // Birthday calendars are synthesised, not stored: derive their
+            // events from the underlying LOCAL contact list's birthdays. (The
+            // mobile host has no external contact cache, so only local birthday
+            // layers exist — see list_calendars_json.)
+            if host_core::birthdays::is_birthday_calendar_id(&req.calendar_id) {
+                let list_id = host_core::birthdays::underlying_contact_list_id(&req.calendar_id)
+                    .unwrap_or_default();
+                let contacts = self.adapter.get_contacts(list_id).await.unwrap_or_default();
+                return Ok::<_, StoreError>(host_core::birthdays::events_for_contacts(
+                    contacts,
+                    &req.calendar_id,
+                    range,
+                ));
+            }
             match self.route(&req.calendar_id)? {
                 None => self
                     .adapter
@@ -3865,6 +3902,50 @@ mod tests {
             matches!(err, StoreError::InvalidField { ref field, .. } if field == "display_name"),
             "got: {err:?}"
         );
+    }
+
+    #[test]
+    fn birthday_calendar_synthesises_a_local_contacts_birthday() {
+        let (_dir, host, _kc) = open_host();
+        // The seeded local address book (migration 0007).
+        let lists: serde_json::Value =
+            serde_json::from_str(&host.contact_lists_json().unwrap()).unwrap();
+        let list_id = lists.as_array().unwrap()[0]["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        // A contact with a June birthday (so the existing covering_range hits it).
+        let new_contact = r#"{"display_name":"Ada Lovelace","given_name":null,"family_name":null,"organization":null,"emails":[],"phone_numbers":[],"birthday":"1990-06-15","notes":null,"addresses":[],"members":null,"photo":null}"#;
+        host.create_contact_json(list_id.clone(), new_contact.to_string())
+            .unwrap();
+
+        // list_calendars now surfaces a synthetic, read-only birthday calendar.
+        let cals: serde_json::Value =
+            serde_json::from_str(&host.list_calendars_json().unwrap()).unwrap();
+        let bday = cals
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| {
+                c["id"]
+                    .as_str()
+                    .is_some_and(|s| s.starts_with("aperio-birthdays:"))
+            })
+            .expect("a birthday calendar should appear once a contact has a birthday");
+        assert_eq!(bday["read_only"], serde_json::json!(true));
+        let bday_id = bday["id"].as_str().unwrap().to_string();
+
+        // get_events synthesises the all-day birthday occurrence in range.
+        let events: serde_json::Value =
+            serde_json::from_str(&host.get_events_json(covering_range(&bday_id)).unwrap()).unwrap();
+        let arr = events.as_array().unwrap();
+        assert_eq!(
+            arr.len(),
+            1,
+            "one birthday occurrence in June; got: {events}"
+        );
+        assert_eq!(arr[0]["title"], serde_json::json!("Ada Lovelace"));
+        assert_eq!(arr[0]["all_day"], serde_json::json!(true));
     }
 
     #[test]
