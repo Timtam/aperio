@@ -309,6 +309,14 @@ export default function EventsScreen({ navigation, route }: RootStackScreenProps
         </Pressable>
         <Pressable
           accessibilityRole="button"
+          accessibilityLabel={t('mobile.calendarsButtonLabel')}
+          onPress={() => navigation.navigate('Calendars')}
+          style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
+        >
+          <Text style={styles.ghostButtonText}>{t('mobile.calendarsButtonLabel')}</Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
           accessibilityState={{ disabled: firstCalendarId == null }}
           accessibilityLabel={t('toolbar.newEvent')}
           disabled={firstCalendarId == null}

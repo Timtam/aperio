@@ -28,6 +28,8 @@ export type RootStackParamList = {
   Events: { anchor?: string } | undefined;
   Agenda: { anchor?: string } | undefined;
   EventEditor: { eventId: string | null; calendarId: string };
+  Calendars: undefined;
+  CalendarEditor: { calendarId: string };
   Sync: undefined;
   Settings: undefined;
   ColorLabels: undefined;
