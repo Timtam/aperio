@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Pressable,
@@ -9,11 +17,23 @@ import {
   View,
 } from 'react-native';
 
+import { statusI18nKey, type TaskStatus } from '@aperio/shared';
+
 import { Calendar, listCalendars } from '../api/calendar';
-import { search, SearchFilters, SearchKind, SearchResults } from '../api/search';
+import {
+  search,
+  EventTypeFilter,
+  SearchFilters,
+  SearchKind,
+  SearchResults,
+} from '../api/search';
+import { CheckboxGroup } from '../components/CheckboxGroup';
 import { RadioGroup } from '../components/RadioGroup';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useTaskStore } from '../state/taskStoreContext';
+
+/** The selectable task statuses, in the desktop's order. */
+const TASK_STATUSES: TaskStatus[] = ['open', 'in_progress', 'completed', 'cancelled'];
 
 // Global local search — a faithful port of the desktop SearchDialog's core flow
 // (events + tasks, FTS via the Host's search_json). Screen-reader-first: a
@@ -46,6 +66,25 @@ export default function SearchScreen({ navigation }: RootStackScreenProps<'Searc
   const [kind, setKind] = useState<SearchKind>('both');
   const [since, setSince] = useState('');
   const [until, setUntil] = useState('');
+  // Container + type/status narrowing (the backend treats empty sets / 'any' as
+  // no restriction). Calendars + event-type apply to events; lists + statuses to
+  // tasks — each shown only for the relevant `kind`.
+  const [calendarIds, setCalendarIds] = useState<Set<string>>(new Set());
+  const [listIds, setListIds] = useState<Set<string>>(new Set());
+  const [eventType, setEventType] = useState<EventTypeFilter>('any');
+  const [taskStatuses, setTaskStatuses] = useState<Set<string>>(new Set());
+
+  // Toggle one id in a Set-valued filter (a fresh Set so the memo dep changes).
+  const toggleIn = useCallback(
+    (setter: Dispatch<SetStateAction<Set<string>>>) => (id: string) =>
+      setter((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      }),
+    [],
+  );
 
   // Calendars (for the event row's calendar name); best-effort.
   useEffect(() => {
@@ -86,10 +125,14 @@ export default function SearchScreen({ navigation }: RootStackScreenProps<'Searc
   const filters = useMemo<SearchFilters>(
     () => ({
       kind,
+      calendar_ids: [...calendarIds],
+      list_ids: [...listIds],
       since: since.trim() ? `${since.trim()}T00:00:00Z` : null,
       until: until.trim() ? `${until.trim()}T23:59:59Z` : null,
+      event_type: eventType,
+      task_statuses: [...taskStatuses],
     }),
-    [kind, since, until],
+    [kind, calendarIds, listIds, since, until, eventType, taskStatuses],
   );
 
   // Debounced search with a request-token stale-result guard (the latest
@@ -203,6 +246,52 @@ export default function SearchScreen({ navigation }: RootStackScreenProps<'Searc
               />
             </View>
           </View>
+
+          {/* Event-only filters (hidden when searching tasks only). */}
+          {kind !== 'tasks' && calendars.length > 0 && (
+            <CheckboxGroup
+              label={t('dialogs.search.calendarsLabel')}
+              hint={t('dialogs.search.containersHint')}
+              options={calendars.map((c) => ({ value: c.id, label: c.name }))}
+              selected={calendarIds}
+              onToggle={toggleIn(setCalendarIds)}
+            />
+          )}
+          {kind !== 'tasks' && (
+            <RadioGroup<EventTypeFilter>
+              label={t('dialogs.search.eventTypeLabel')}
+              value={eventType}
+              options={[
+                { value: 'any', label: t('dialogs.search.eventType.any') },
+                { value: 'single', label: t('dialogs.search.eventType.single') },
+                { value: 'recurring', label: t('dialogs.search.eventType.recurring') },
+                { value: 'all_day', label: t('dialogs.search.eventType.all_day') },
+              ]}
+              onChange={setEventType}
+            />
+          )}
+
+          {/* Task-only filters (hidden when searching events only). */}
+          {kind !== 'events' && taskLists.length > 0 && (
+            <CheckboxGroup
+              label={t('dialogs.search.listsLabel')}
+              hint={t('dialogs.search.containersHint')}
+              options={taskLists.map((l) => ({ value: l.id, label: l.name }))}
+              selected={listIds}
+              onToggle={toggleIn(setListIds)}
+            />
+          )}
+          {kind !== 'events' && (
+            <CheckboxGroup
+              label={t('dialogs.search.taskStatusLabel')}
+              options={TASK_STATUSES.map((s) => ({
+                value: s,
+                label: t(statusI18nKey(s)),
+              }))}
+              selected={taskStatuses}
+              onToggle={toggleIn(setTaskStatuses)}
+            />
+          )}
         </View>
       )}
 
