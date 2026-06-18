@@ -354,6 +354,8 @@
       "listLabel": "Address book",
       "listRequired": "Please pick an address book.",
       "displayNameRequired": "Please enter a display name.",
+      "loadFailed": "This contact could not be loaded.",
+      "readOnlyHint": "This contact is in a read-only address book and cannot be edited.",
       "close": "Close",
       "cancel": "Cancel",
       "delete": "Delete",

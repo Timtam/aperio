@@ -354,6 +354,8 @@
       "listLabel": "Kontaktbuch",
       "listRequired": "Bitte wähle ein Kontaktbuch.",
       "displayNameRequired": "Bitte gib einen Anzeigenamen ein.",
+      "loadFailed": "Dieser Kontakt konnte nicht geladen werden.",
+      "readOnlyHint": "Dieser Kontakt liegt in einem schreibgeschützten Adressbuch und kann nicht bearbeitet werden.",
       "close": "Schließen",
       "cancel": "Abbrechen",
       "delete": "Löschen",

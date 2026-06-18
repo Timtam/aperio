@@ -183,7 +183,13 @@ export default function ContactEditorModal({
         setLists(all.filter((l) => !l.read_only || l.id === listId));
         if (editing) {
           const found = (await getContacts(listId)).find((c) => c.id === contactId);
-          if (cancelled || !found) return;
+          if (cancelled) return;
+          // A miss (e.g. a directory hit the re-enumeration didn't return) must
+          // NOT leave a silent blank form that would save as a junk create.
+          if (!found) {
+            setError(t('dialogs.contact.loadFailed'));
+            return;
+          }
           setOriginal(found);
           setDisplayName(found.display_name);
           setGivenName(found.given_name ?? '');
@@ -205,12 +211,18 @@ export default function ContactEditorModal({
     return () => {
       cancelled = true;
     };
-  }, [contactId, editing, listId]);
+  }, [contactId, editing, listId, t]);
 
   const listOptions = useMemo(
     () => lists.map((l) => ({ value: l.id, label: l.name })),
     [lists],
   );
+
+  // A read-only address book (e.g. a directory / GAL): the contact is view-only
+  // — disable the structural controls + hide Save (the desktop ContactDialog
+  // disables the whole form for read-only books).
+  const viewOnly =
+    editing && (lists.find((l) => l.id === selectedListId)?.read_only ?? false);
 
   const save = useCallback(async () => {
     const name = displayName.trim();
@@ -238,7 +250,13 @@ export default function ContactEditorModal({
     const personOrg = isGroup ? null : org;
     const personBirthday = isGroup ? null : birthdayValue;
     try {
-      if (editing && original) {
+      if (editing) {
+        if (original == null) {
+          // The contact never loaded (a missed directory hit) — refuse to save
+          // (it would otherwise fall through to a junk create).
+          setError(t('dialogs.contact.loadFailed'));
+          return;
+        }
         await updateContact({
           ...original,
           list_id: selectedListId,
@@ -331,6 +349,12 @@ export default function ContactEditorModal({
         </Text>
       )}
 
+      {viewOnly && (
+        <Text style={styles.readOnlyBanner} accessibilityRole="text">
+          {t('dialogs.contact.readOnlyHint')}
+        </Text>
+      )}
+
       <Field label={t('dialogs.contact.displayNameLabel')}>
         <TextInput
           style={styles.input}
@@ -346,8 +370,9 @@ export default function ContactEditorModal({
           the visual indicator, hidden + non-interactive). */}
       <Pressable
         accessibilityRole="switch"
-        accessibilityState={{ checked: isGroup }}
+        accessibilityState={{ checked: isGroup, disabled: viewOnly }}
         accessibilityLabel={t('dialogs.contact.isGroupLabel')}
+        disabled={viewOnly}
         onPress={() => setIsGroup((v) => !v)}
         style={({ pressed }) => [styles.switchRow, pressed && styles.pressed]}
       >
@@ -580,24 +605,26 @@ export default function ContactEditorModal({
           value={selectedListId}
           options={listOptions}
           onChange={setSelectedListId}
-          disabled={busy}
+          disabled={busy || viewOnly}
         />
       )}
 
-      <Pressable
-        accessibilityRole="button"
-        accessibilityState={{ disabled: busy }}
-        accessibilityLabel={t('mobile.save')}
-        disabled={busy}
-        onPress={() => void save()}
-        style={({ pressed }) => [
-          styles.primaryButton,
-          pressed && styles.primaryPressed,
-          busy && styles.primaryDisabled,
-        ]}
-      >
-        <Text style={styles.primaryButtonText}>{t('mobile.save')}</Text>
-      </Pressable>
+      {!viewOnly && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ disabled: busy }}
+          accessibilityLabel={t('mobile.save')}
+          disabled={busy}
+          onPress={() => void save()}
+          style={({ pressed }) => [
+            styles.primaryButton,
+            pressed && styles.primaryPressed,
+            busy && styles.primaryDisabled,
+          ]}
+        >
+          <Text style={styles.primaryButtonText}>{t('mobile.save')}</Text>
+        </Pressable>
+      )}
     </ScrollView>
   );
 }
@@ -696,4 +723,14 @@ const styles = StyleSheet.create({
   primaryDisabled: { backgroundColor: '#9aa9c9' },
   primaryButtonText: { fontSize: 16, fontWeight: '700', color: '#ffffff' },
   error: { fontSize: 15, fontWeight: '600', color: '#b42318' },
+  readOnlyBanner: {
+    fontSize: 14,
+    color: '#5b6573',
+    fontWeight: '600',
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#c9d2e0',
+    backgroundColor: '#eef2f8',
+  },
 });

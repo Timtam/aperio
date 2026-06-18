@@ -54,6 +54,10 @@ export default function ContactsScreen({
   // Host search results (flat Contact[]) while a query is active; null = not
   // searching (browse the loaded groups).
   const [searchResults, setSearchResults] = useState<Contact[] | null>(null);
+  // Bumped to re-run an active search after a mutation (delete) or on focus
+  // (the editor returned) — the search effect keys on it, so the overlay never
+  // shows a stale/deleted row.
+  const [refreshNonce, setRefreshNonce] = useState(0);
 
   const trimmedQuery = query.trim();
   const searching = trimmedQuery.length > 0;
@@ -83,7 +87,7 @@ export default function ContactsScreen({
       })();
     }, SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(handle);
-  }, [trimmedQuery]);
+  }, [trimmedQuery, refreshNonce]);
 
   // The book name for a contact's owning list (from the loaded lists), or its
   // raw list id as a last resort (a directory contact's book may not be loaded).
@@ -141,9 +145,15 @@ export default function ContactsScreen({
     }
   }, [announce, t]);
 
-  // Reload on mount + whenever the screen regains focus (after the editor).
+  // Reload on mount + whenever the screen regains focus (after the editor). On
+  // focus also re-run any active search so an edit made in the editor is
+  // reflected in the overlay, not just the browse groups.
   useEffect(() => {
-    const unsubscribe = navigation.addListener('focus', () => void load());
+    const onFocus = () => {
+      void load();
+      setRefreshNonce((n) => n + 1);
+    };
+    const unsubscribe = navigation.addListener('focus', onFocus);
     void load();
     return unsubscribe;
   }, [navigation, load]);
@@ -185,6 +195,9 @@ export default function ContactsScreen({
                   await apiDeleteContact(c.id, c.list_id);
                   announce(t('dialogs.contact.deleted', { name: c.display_name }));
                   await load();
+                  // Re-run any active search so the deleted row leaves the
+                  // overlay (load() only refreshes the browse groups).
+                  setRefreshNonce((n) => n + 1);
                 } catch (err) {
                   const message = errorMessage(err);
                   setError(message);
@@ -235,7 +248,10 @@ export default function ContactsScreen({
         </Pressable>
       </View>
 
-      {!loading && total > 0 && (
+      {/* Search is a SUPERSET of browse (local FTS + every provider, incl.
+          directories), so the bar shows whenever any book exists — even if
+          browse loaded zero contacts (a throttled directory, a transient error).*/}
+      {!loading && groups.length > 0 && (
         <View style={styles.searchBar}>
           <TextInput
             style={styles.searchInput}
@@ -247,7 +263,9 @@ export default function ContactsScreen({
             autoCorrect={false}
             clearButtonMode="while-editing"
           />
-          {searching && (
+          {/* Announce "searching"/"N results" — but NOT "0 results" (the empty
+              placeholder below is the single polite announcer for no hits). */}
+          {searching && (searchPending || searchTotal > 0) && (
             <Text
               style={styles.searchCount}
               accessibilityRole="text"
@@ -271,7 +289,7 @@ export default function ContactsScreen({
         <Text style={styles.muted} accessibilityLabel={t('mobile.loading')}>
           {t('mobile.loading')}
         </Text>
-      ) : total === 0 ? (
+      ) : !searching && total === 0 ? (
         <Text style={styles.muted}>{t('mobile.noContacts')}</Text>
       ) : searching && !searchPending && searchTotal === 0 ? (
         <Text
@@ -304,12 +322,17 @@ export default function ContactsScreen({
                       subtitle(c) ? `${c.display_name}, ${subtitle(c)}` : c.display_name
                     }
                     accessibilityHint={t('mobile.contactHint')}
-                    accessibilityActions={[
-                      { name: 'activate', label: t('dialogs.contact.editTitle') },
-                      { name: 'delete', label: t('dialogs.contact.delete') },
-                    ]}
+                    accessibilityActions={
+                      g.list.read_only
+                        ? [{ name: 'activate', label: t('dialogs.contact.editTitle') }]
+                        : [
+                            { name: 'activate', label: t('dialogs.contact.editTitle') },
+                            { name: 'delete', label: t('dialogs.contact.delete') },
+                          ]
+                    }
                     onAccessibilityAction={(e) => {
-                      if (e.nativeEvent.actionName === 'delete') removeContact(c);
+                      if (e.nativeEvent.actionName === 'delete' && !g.list.read_only)
+                        removeContact(c);
                       else editContact(c);
                     }}
                     style={styles.row}
@@ -324,14 +347,17 @@ export default function ContactsScreen({
                         <Text style={styles.contactSub}>{subtitle(c)}</Text>
                       )}
                     </Pressable>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={`${t('dialogs.contact.delete')}: ${c.display_name}`}
-                      onPress={() => removeContact(c)}
-                      style={({ pressed }) => [styles.deleteButton, pressed && styles.pressed]}
-                    >
-                      <Text style={styles.deleteButtonText}>{t('dialogs.contact.delete')}</Text>
-                    </Pressable>
+                    {/* Read-only book (a directory / GAL): view-only — no delete. */}
+                    {!g.list.read_only && (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={`${t('dialogs.contact.delete')}: ${c.display_name}`}
+                        onPress={() => removeContact(c)}
+                        style={({ pressed }) => [styles.deleteButton, pressed && styles.pressed]}
+                      >
+                        <Text style={styles.deleteButtonText}>{t('dialogs.contact.delete')}</Text>
+                      </Pressable>
+                    )}
                   </View>
                 ))
               )}
