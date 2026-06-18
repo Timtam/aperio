@@ -69,6 +69,7 @@
     "deleteCalendarMessage": "„{{name}}“ löschen? Die zugehörigen Termine werden ebenfalls entfernt.",
     "manageCalendar": "Verwalten",
     "duplicate": "Duplizieren",
+    "addSubtask": "Unteraufgabe hinzufügen",
     "noEvents": "Keine Termine an diesem Tag.",
     "noContacts": "Noch keine Kontakte.",
     "contactHint": "Doppeltippen zum Bearbeiten. Nach oben oder unten wischen zum Löschen.",

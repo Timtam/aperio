@@ -187,6 +187,18 @@ export default function TasksScreen({
     navigation.navigate('TaskEditor', { taskId: null, listId: targetListId });
   }, [navigation, targetListId]);
 
+  // Create a child task under `task` (same list, locked). buildEntries nests it
+  // by parent_id, which round-trips through create.
+  const addSubtask = useCallback(
+    (task: Task) =>
+      navigation.navigate('TaskEditor', {
+        taskId: null,
+        listId: task.list_id,
+        parentId: task.id,
+      }),
+    [navigation],
+  );
+
   const toggleDone = useCallback(
     async (task: Task) => {
       const done = task.status === 'completed';
@@ -317,12 +329,15 @@ export default function TasksScreen({
         case 'duplicate':
           void duplicate(task);
           break;
+        case 'addSubtask':
+          addSubtask(task);
+          break;
         case 'toggleCollapse':
           toggleCollapsed(task.id, task.title);
           break;
       }
     },
-    [duplicate, openEditor, removeTask, toggleCollapsed, toggleDone],
+    [addSubtask, duplicate, openEditor, removeTask, toggleCollapsed, toggleDone],
   );
 
   const taskLabel = (task: Task, colourName: string | null): string => {
@@ -386,6 +401,11 @@ export default function TasksScreen({
       { name: 'delete', label: t('mobile.delete') },
       { name: 'duplicate', label: t('mobile.duplicate') },
     ];
+    // Subtasks ride parent_id on the local store; offer "Add subtask" only for
+    // local lists (external subtask support is provider-dependent — deferred).
+    if (taskListById.get(task.list_id)?.account_id === 'local') {
+      actions.push({ name: 'addSubtask', label: t('mobile.addSubtask') });
+    }
     if (entry.hasChildren) {
       actions.push({
         name: 'toggleCollapse',

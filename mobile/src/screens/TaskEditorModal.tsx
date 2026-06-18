@@ -148,7 +148,7 @@ export default function TaskEditorModal({
   navigation,
 }: RootStackScreenProps<'TaskEditor'>) {
   const { t, i18n } = useTranslation();
-  const { taskId, listId } = route.params;
+  const { taskId, listId, parentId } = route.params;
   const { taskLists, sectionsByList, loadSections, colorLabels, invalidateData } =
     useTaskStore();
 
@@ -303,8 +303,9 @@ export default function TaskEditorModal({
     [t],
   );
 
-  // A subtask must stay in its parent's list (the bridge has no list-move hint).
-  const listLocked = loaded?.parent_id != null;
+  // A subtask must stay in its parent's list (the bridge has no list-move hint)
+  // — both when editing an existing subtask and when creating a new one.
+  const listLocked = loaded?.parent_id != null || parentId != null;
   const blocked = taskId != null && loaded == null;
 
   const completedLine = useMemo(() => {
@@ -362,7 +363,7 @@ export default function TaskEditorModal({
           deadline_date: dead.date,
           deadline_time: dead.time,
           recurrence: canRecur ? toBackend(form.recurrence) : null,
-          parent_id: null,
+          parent_id: parentId ?? null,
           section_id: canSection ? form.sectionId || null : null,
           color_label: isLocalList ? form.colorLabel || null : null,
           reminders: form.reminders,
@@ -415,7 +416,7 @@ export default function TaskEditorModal({
       setError(message);
       AccessibilityInfo.announceForAccessibility(t('mobile.error', { message }));
     }
-  }, [canRecur, canSection, isLocalList, form, loaded, navigation, t, taskId]);
+  }, [canRecur, canSection, isLocalList, form, loaded, navigation, parentId, t, taskId]);
 
   return (
     <ScrollView

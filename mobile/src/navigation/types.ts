@@ -19,7 +19,9 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
  */
 export type RootStackParamList = {
   Tasks: undefined;
-  TaskEditor: { taskId: string | null; listId: string };
+  // `parentId` (when creating) nests the new task under that parent — its list
+  // is then locked to the parent's.
+  TaskEditor: { taskId: string | null; listId: string; parentId?: string | null };
   Lists: undefined;
   ListEditor: { listId: string };
   Accounts: undefined;

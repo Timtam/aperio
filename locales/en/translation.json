@@ -69,6 +69,7 @@
     "deleteCalendarMessage": "Delete \"{{name}}\"? Its events are removed too.",
     "manageCalendar": "Manage",
     "duplicate": "Duplicate",
+    "addSubtask": "Add subtask",
     "noEvents": "No events on this day.",
     "noContacts": "No contacts yet.",
     "contactHint": "Double-tap to edit. Swipe up or down to delete.",
