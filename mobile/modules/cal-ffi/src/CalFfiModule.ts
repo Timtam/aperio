@@ -123,6 +123,26 @@ declare class CalFfiModule extends NativeModule<Record<never, never>> {
    *  now, as a JSON array of `{item_id, item_kind, title, body, trigger_at}`
    *  sorted ascending — for scheduling ahead-of-time OS local notifications. */
   upcomingRemindersJson(horizonMinutes: number): Promise<string>;
+
+  // ── Contacts ──
+  // JSON passthrough in the cal_core/desktop wire shape; routing (local vs
+  // external account) happens Rust-side. Contacts are NOT on the sync event log.
+  /** All address books (local + external) as a JSON `ContactListRow[]`. Primes
+   *  the route map — call before contact ops. */
+  contactListsJson(): Promise<string>;
+  /** Contacts in a list as a JSON `Contact[]`, routed to the owning account. */
+  contactsJson(listId: string): Promise<string>;
+  /** Create a contact from a JSON `NewContact`; returns the created `Contact`. */
+  createContactJson(listId: string, contactJson: string): Promise<string>;
+  /** Update a contact from a JSON `Contact` (its `list_id` routes); returns it. */
+  updateContactJson(contactJson: string): Promise<string>;
+  /** Delete a contact. `listId` (the owning list) routes the delete — omit/null
+   *  for a local contact. */
+  deleteContact(id: string, listId: string | null): Promise<void>;
+  /** Create a local address book; returns the created `ContactListRow` as JSON. */
+  createContactListJson(name: string): Promise<string>;
+  /** Delete a local address book (the seeded default can't be deleted). */
+  deleteContactList(id: string): Promise<void>;
 }
 
 export default requireNativeModule<CalFfiModule>('CalFfi');

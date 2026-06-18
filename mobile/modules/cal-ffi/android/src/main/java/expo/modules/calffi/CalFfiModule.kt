@@ -189,5 +189,37 @@ class CalFfiModule : Module() {
     AsyncFunction("upcomingRemindersJson") { horizonMinutes: Int ->
       host.upcomingRemindersJson(horizonMinutes.toUInt())
     }
+
+    // ─── Contacts (local address book + external CardDAV/Google/EWS providers) ─
+    // JSON passthrough, routed Rust-side; contacts are NOT on the sync event log
+    // (local = device-local, external = provider-synced).
+
+    AsyncFunction("contactListsJson") {
+      host.contactListsJson()
+    }
+
+    AsyncFunction("contactsJson") { listId: String ->
+      host.contactsJson(listId)
+    }
+
+    AsyncFunction("createContactJson") { listId: String, contactJson: String ->
+      host.createContactJson(listId, contactJson)
+    }
+
+    AsyncFunction("updateContactJson") { contactJson: String ->
+      host.updateContactJson(contactJson)
+    }
+
+    AsyncFunction("deleteContact") { id: String, listId: String? ->
+      host.deleteContact(id, listId)
+    }
+
+    AsyncFunction("createContactListJson") { name: String ->
+      host.createContactListJson(name)
+    }
+
+    AsyncFunction("deleteContactList") { id: String ->
+      host.deleteContactList(id)
+    }
   }
 }

@@ -728,9 +728,17 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_configure_sync_adapter_json(
     ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_contact_lists_json(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_contacts_json(
+    ): Short
     external fun uniffi_cal_ffi_checksum_method_host_create_account_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_create_calendar_json(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_create_contact_json(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_create_contact_list_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_create_event_json(
     ): Short
@@ -743,6 +751,10 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_cal_ffi_checksum_method_host_delete_account(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_delete_calendar(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_delete_contact(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_delete_contact_list(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_delete_event(
     ): Short
@@ -775,6 +787,8 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_cal_ffi_checksum_method_host_tasks_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_upcoming_reminders_json(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_update_contact_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_update_event_json(
     ): Short
@@ -871,9 +885,17 @@ external fun uniffi_cal_ffi_fn_method_host_accounts_json(`ptr`: Long,uniffi_out_
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_configure_sync_adapter_json(`ptr`: Long,`configJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_cal_ffi_fn_method_host_contact_lists_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_contacts_json(`ptr`: Long,`listId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_create_account_json(`ptr`: Long,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_create_calendar_json(`ptr`: Long,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_create_contact_json(`ptr`: Long,`listId`: RustBuffer.ByValue,`contactJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_create_contact_list_json(`ptr`: Long,`name`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_create_event_json(`ptr`: Long,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -886,6 +908,10 @@ external fun uniffi_cal_ffi_fn_method_host_create_task_list_json(`ptr`: Long,`na
 external fun uniffi_cal_ffi_fn_method_host_delete_account(`ptr`: Long,`accountId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_delete_calendar(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_cal_ffi_fn_method_host_delete_contact(`ptr`: Long,`id`: RustBuffer.ByValue,`listId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_cal_ffi_fn_method_host_delete_contact_list(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_delete_event(`ptr`: Long,`id`: RustBuffer.ByValue,`calendarId`: RustBuffer.ByValue,`sendCancellations`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
@@ -918,6 +944,8 @@ external fun uniffi_cal_ffi_fn_method_host_task_lists_json(`ptr`: Long,uniffi_ou
 external fun uniffi_cal_ffi_fn_method_host_tasks_json(`ptr`: Long,`listId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_upcoming_reminders_json(`ptr`: Long,`horizonMinutes`: Int,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_update_contact_json(`ptr`: Long,`contactJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_update_event_json(`ptr`: Long,`eventJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1142,10 +1170,22 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_configure_sync_adapter_json() != 4122.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_contact_lists_json() != 57501.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_contacts_json() != 57178.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_create_account_json() != 61944.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_create_calendar_json() != 42147.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_create_contact_json() != 54386.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_create_contact_list_json() != 45100.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_create_event_json() != 14023.toShort()) {
@@ -1164,6 +1204,12 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_delete_calendar() != 25740.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_delete_contact() != 48838.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_delete_contact_list() != 52777.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_delete_event() != 51601.toShort()) {
@@ -1212,6 +1258,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_upcoming_reminders_json() != 5664.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_update_contact_json() != 31223.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_update_event_json() != 27193.toShort()) {
@@ -1699,6 +1748,20 @@ public interface HostInterface {
     fun `configureSyncAdapterJson`(`configJson`: kotlin.String)
     
     /**
+     * All contact lists (local + external) as a JSON `ContactListRow[]` (each
+     * `ContactList` flattened + its `account_id`). Fetches external live (errors
+     * swallowed per-adapter) + primes the list→account route map for the
+     * following contact ops — call it first.
+     */
+    fun `contactListsJson`(): kotlin.String
+    
+    /**
+     * Contacts in a list as a JSON `Contact[]`, routed to the list's owning
+     * account (local store or external provider).
+     */
+    fun `contactsJson`(`listId`: kotlin.String): kotlin.String
+    
+    /**
      * Create an external (or local) account: persist the row, store the
      * secret via the keychain bridge, and register the adapter so
      * subsequent reads/writes route through it. Returns the created
@@ -1720,6 +1783,19 @@ public interface HostInterface {
      * creation); colour/sound are deferred (always `None` here).
      */
     fun `createCalendarJson`(`requestJson`: kotlin.String): kotlin.String
+    
+    /**
+     * Create a contact from a JSON `cal_core::NewContact`; returns the created
+     * `Contact` as JSON. Routed by `list_id` (local store or external provider).
+     */
+    fun `createContactJson`(`listId`: kotlin.String, `contactJson`: kotlin.String): kotlin.String
+    
+    /**
+     * Create a top-level LOCAL address book; returns it as a `ContactListRow`.
+     * Local-only: external contact-list creation isn't a `ContactsFeature`
+     * capability (the desktop `create_contact_list` is local-only too).
+     */
+    fun `createContactListJson`(`name`: kotlin.String): kotlin.String
     
     /**
      * Create an event in `calendar_id` from a flattened `NewEvent`; returns
@@ -1769,6 +1845,19 @@ public interface HostInterface {
      * local-only `delete_calendar`.
      */
     fun `deleteCalendar`(`id`: kotlin.String)
+    
+    /**
+     * Delete a contact, routed by the optional `list_id` (omit → local). Callers
+     * that listed the contact pass its `list_id` so an external delete reaches
+     * the right provider (the desktop `delete_contact` shape).
+     */
+    fun `deleteContact`(`id`: kotlin.String, `listId`: kotlin.String?)
+    
+    /**
+     * Delete a LOCAL address book. Local-only (the inherent store method, which
+     * forbids deleting the seeded default list); matches the desktop.
+     */
+    fun `deleteContactList`(`id`: kotlin.String)
     
     /**
      * Delete an event. `calendar_id` is routing-only (dropped before the
@@ -1904,6 +1993,12 @@ public interface HostInterface {
      * dedup key `(item_id, trigger_at)`.
      */
     fun `upcomingRemindersJson`(`horizonMinutes`: kotlin.UInt): kotlin.String
+    
+    /**
+     * Update a contact from a JSON `cal_core::Contact`; returns the updated
+     * `Contact` as JSON. Routed by the contact's `list_id`.
+     */
+    fun `updateContactJson`(`contactJson`: kotlin.String): kotlin.String
     
     /**
      * Update an event in place (its `calendar_id` field selects the route);
@@ -2080,6 +2175,44 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * All contact lists (local + external) as a JSON `ContactListRow[]` (each
+     * `ContactList` flattened + its `account_id`). Fetches external live (errors
+     * swallowed per-adapter) + primes the list→account route map for the
+     * following contact ops — call it first.
+     */
+    @Throws(StoreException::class)override fun `contactListsJson`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_contact_lists_json(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Contacts in a list as a JSON `Contact[]`, routed to the list's owning
+     * account (local store or external provider).
+     */
+    @Throws(StoreException::class)override fun `contactsJson`(`listId`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_contacts_json(
+        it,
+        FfiConverterString.lower(`listId`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * Create an external (or local) account: persist the row, store the
      * secret via the keychain bridge, and register the adapter so
      * subsequent reads/writes route through it. Returns the created
@@ -2119,6 +2252,43 @@ open class Host: Disposable, AutoCloseable, HostInterface
     UniffiLib.uniffi_cal_ffi_fn_method_host_create_calendar_json(
         it,
         FfiConverterString.lower(`requestJson`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Create a contact from a JSON `cal_core::NewContact`; returns the created
+     * `Contact` as JSON. Routed by `list_id` (local store or external provider).
+     */
+    @Throws(StoreException::class)override fun `createContactJson`(`listId`: kotlin.String, `contactJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_create_contact_json(
+        it,
+        FfiConverterString.lower(`listId`),FfiConverterString.lower(`contactJson`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Create a top-level LOCAL address book; returns it as a `ContactListRow`.
+     * Local-only: external contact-list creation isn't a `ContactsFeature`
+     * capability (the desktop `create_contact_list` is local-only too).
+     */
+    @Throws(StoreException::class)override fun `createContactListJson`(`name`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_create_contact_list_json(
+        it,
+        FfiConverterString.lower(`name`),_status)
 }
     }
     )
@@ -2237,6 +2407,41 @@ open class Host: Disposable, AutoCloseable, HostInterface
     callWithHandle {
     uniffiRustCallWithError(StoreException) { _status ->
     UniffiLib.uniffi_cal_ffi_fn_method_host_delete_calendar(
+        it,
+        FfiConverterString.lower(`id`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Delete a contact, routed by the optional `list_id` (omit → local). Callers
+     * that listed the contact pass its `list_id` so an external delete reaches
+     * the right provider (the desktop `delete_contact` shape).
+     */
+    @Throws(StoreException::class)override fun `deleteContact`(`id`: kotlin.String, `listId`: kotlin.String?)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_delete_contact(
+        it,
+        FfiConverterString.lower(`id`),FfiConverterOptionalString.lower(`listId`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Delete a LOCAL address book. Local-only (the inherent store method, which
+     * forbids deleting the seeded default list); matches the desktop.
+     */
+    @Throws(StoreException::class)override fun `deleteContactList`(`id`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_delete_contact_list(
         it,
         FfiConverterString.lower(`id`),_status)
 }
@@ -2561,6 +2766,24 @@ open class Host: Disposable, AutoCloseable, HostInterface
     UniffiLib.uniffi_cal_ffi_fn_method_host_upcoming_reminders_json(
         it,
         FfiConverterUInt.lower(`horizonMinutes`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Update a contact from a JSON `cal_core::Contact`; returns the updated
+     * `Contact` as JSON. Routed by the contact's `list_id`.
+     */
+    @Throws(StoreException::class)override fun `updateContactJson`(`contactJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_update_contact_json(
+        it,
+        FfiConverterString.lower(`contactJson`),_status)
 }
     }
     )

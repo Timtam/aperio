@@ -164,5 +164,36 @@ public class CalFfiModule: Module {
     AsyncFunction("upcomingRemindersJson") { (horizonMinutes: Int) -> String in
       try self.host.upcomingRemindersJson(horizonMinutes: UInt32(horizonMinutes))
     }
+
+    // ─── Contacts ───
+    // JSON passthrough, routed Rust-side. Mirrors the Android module.
+
+    AsyncFunction("contactListsJson") { () -> String in
+      try self.host.contactListsJson()
+    }
+
+    AsyncFunction("contactsJson") { (listId: String) -> String in
+      try self.host.contactsJson(listId: listId)
+    }
+
+    AsyncFunction("createContactJson") { (listId: String, contactJson: String) -> String in
+      try self.host.createContactJson(listId: listId, contactJson: contactJson)
+    }
+
+    AsyncFunction("updateContactJson") { (contactJson: String) -> String in
+      try self.host.updateContactJson(contactJson: contactJson)
+    }
+
+    AsyncFunction("deleteContact") { (id: String, listId: String?) in
+      try self.host.deleteContact(id: id, listId: listId)
+    }
+
+    AsyncFunction("createContactListJson") { (name: String) -> String in
+      try self.host.createContactListJson(name: name)
+    }
+
+    AsyncFunction("deleteContactList") { (id: String) in
+      try self.host.deleteContactList(id: id)
+    }
   }
 }

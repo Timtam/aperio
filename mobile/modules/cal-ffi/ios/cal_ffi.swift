@@ -563,6 +563,20 @@ public protocol HostProtocol: AnyObject, Sendable {
     func configureSyncAdapterJson(configJson: String) throws 
     
     /**
+     * All contact lists (local + external) as a JSON `ContactListRow[]` (each
+     * `ContactList` flattened + its `account_id`). Fetches external live (errors
+     * swallowed per-adapter) + primes the list→account route map for the
+     * following contact ops — call it first.
+     */
+    func contactListsJson() throws  -> String
+    
+    /**
+     * Contacts in a list as a JSON `Contact[]`, routed to the list's owning
+     * account (local store or external provider).
+     */
+    func contactsJson(listId: String) throws  -> String
+    
+    /**
      * Create an external (or local) account: persist the row, store the
      * secret via the keychain bridge, and register the adapter so
      * subsequent reads/writes route through it. Returns the created
@@ -584,6 +598,19 @@ public protocol HostProtocol: AnyObject, Sendable {
      * creation); colour/sound are deferred (always `None` here).
      */
     func createCalendarJson(requestJson: String) throws  -> String
+    
+    /**
+     * Create a contact from a JSON `cal_core::NewContact`; returns the created
+     * `Contact` as JSON. Routed by `list_id` (local store or external provider).
+     */
+    func createContactJson(listId: String, contactJson: String) throws  -> String
+    
+    /**
+     * Create a top-level LOCAL address book; returns it as a `ContactListRow`.
+     * Local-only: external contact-list creation isn't a `ContactsFeature`
+     * capability (the desktop `create_contact_list` is local-only too).
+     */
+    func createContactListJson(name: String) throws  -> String
     
     /**
      * Create an event in `calendar_id` from a flattened `NewEvent`; returns
@@ -633,6 +660,19 @@ public protocol HostProtocol: AnyObject, Sendable {
      * local-only `delete_calendar`.
      */
     func deleteCalendar(id: String) throws 
+    
+    /**
+     * Delete a contact, routed by the optional `list_id` (omit → local). Callers
+     * that listed the contact pass its `list_id` so an external delete reaches
+     * the right provider (the desktop `delete_contact` shape).
+     */
+    func deleteContact(id: String, listId: String?) throws 
+    
+    /**
+     * Delete a LOCAL address book. Local-only (the inherent store method, which
+     * forbids deleting the seeded default list); matches the desktop.
+     */
+    func deleteContactList(id: String) throws 
     
     /**
      * Delete an event. `calendar_id` is routing-only (dropped before the
@@ -770,6 +810,12 @@ public protocol HostProtocol: AnyObject, Sendable {
     func upcomingRemindersJson(horizonMinutes: UInt32) throws  -> String
     
     /**
+     * Update a contact from a JSON `cal_core::Contact`; returns the updated
+     * `Contact` as JSON. Routed by the contact's `list_id`.
+     */
+    func updateContactJson(contactJson: String) throws  -> String
+    
+    /**
      * Update an event in place (its `calendar_id` field selects the route);
      * returns the updated `Event` as JSON. Mirrors the in-place branch of the
      * desktop `update_event`. Cross-calendar moves (the create-on-target +
@@ -902,6 +948,33 @@ open func configureSyncAdapterJson(configJson: String)throws   {try rustCallWith
 }
     
     /**
+     * All contact lists (local + external) as a JSON `ContactListRow[]` (each
+     * `ContactList` flattened + its `account_id`). Fetches external live (errors
+     * swallowed per-adapter) + primes the list→account route map for the
+     * following contact ops — call it first.
+     */
+open func contactListsJson()throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_contact_lists_json(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+    /**
+     * Contacts in a list as a JSON `Contact[]`, routed to the list's owning
+     * account (local store or external provider).
+     */
+open func contactsJson(listId: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_contacts_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(listId),$0
+    )
+})
+}
+    
+    /**
      * Create an external (or local) account: persist the row, store the
      * secret via the keychain bridge, and register the adapter so
      * subsequent reads/writes route through it. Returns the created
@@ -934,6 +1007,34 @@ open func createCalendarJson(requestJson: String)throws  -> String  {
     uniffi_cal_ffi_fn_method_host_create_calendar_json(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(requestJson),$0
+    )
+})
+}
+    
+    /**
+     * Create a contact from a JSON `cal_core::NewContact`; returns the created
+     * `Contact` as JSON. Routed by `list_id` (local store or external provider).
+     */
+open func createContactJson(listId: String, contactJson: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_create_contact_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(listId),
+        FfiConverterString.lower(contactJson),$0
+    )
+})
+}
+    
+    /**
+     * Create a top-level LOCAL address book; returns it as a `ContactListRow`.
+     * Local-only: external contact-list creation isn't a `ContactsFeature`
+     * capability (the desktop `create_contact_list` is local-only too).
+     */
+open func createContactListJson(name: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_create_contact_list_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(name),$0
     )
 })
 }
@@ -1025,6 +1126,32 @@ open func deleteAccount(accountId: String)throws   {try rustCallWithError(FfiCon
      */
 open func deleteCalendar(id: String)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
     uniffi_cal_ffi_fn_method_host_delete_calendar(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(id),$0
+    )
+}
+}
+    
+    /**
+     * Delete a contact, routed by the optional `list_id` (omit → local). Callers
+     * that listed the contact pass its `list_id` so an external delete reaches
+     * the right provider (the desktop `delete_contact` shape).
+     */
+open func deleteContact(id: String, listId: String?)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_delete_contact(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(id),
+        FfiConverterOptionString.lower(listId),$0
+    )
+}
+}
+    
+    /**
+     * Delete a LOCAL address book. Local-only (the inherent store method, which
+     * forbids deleting the seeded default list); matches the desktop.
+     */
+open func deleteContactList(id: String)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_delete_contact_list(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(id),$0
     )
@@ -1270,6 +1397,19 @@ open func upcomingRemindersJson(horizonMinutes: UInt32)throws  -> String  {
     uniffi_cal_ffi_fn_method_host_upcoming_reminders_json(
             self.uniffiCloneHandle(),
         FfiConverterUInt32.lower(horizonMinutes),$0
+    )
+})
+}
+    
+    /**
+     * Update a contact from a JSON `cal_core::Contact`; returns the updated
+     * `Contact` as JSON. Routed by the contact's `list_id`.
+     */
+open func updateContactJson(contactJson: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_update_contact_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(contactJson),$0
     )
 })
 }
@@ -4597,10 +4737,22 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_configure_sync_adapter_json() != 4122) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_cal_ffi_checksum_method_host_contact_lists_json() != 57501) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_contacts_json() != 57178) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_cal_ffi_checksum_method_host_create_account_json() != 61944) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_create_calendar_json() != 42147) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_create_contact_json() != 54386) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_create_contact_list_json() != 45100) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_create_event_json() != 14023) {
@@ -4619,6 +4771,12 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_delete_calendar() != 25740) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_delete_contact() != 48838) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_delete_contact_list() != 52777) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_delete_event() != 51601) {
@@ -4667,6 +4825,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_upcoming_reminders_json() != 5664) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_update_contact_json() != 31223) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_update_event_json() != 27193) {

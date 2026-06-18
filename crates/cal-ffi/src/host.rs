@@ -44,7 +44,8 @@ use std::sync::{Arc, Mutex};
 
 use cal_adapter_local::LocalAdapter;
 use cal_core::{
-    Calendar, CalendarFeature, ColorLabelId, DateRange, Event, NewEvent, TaskList, TasksFeature,
+    Calendar, CalendarFeature, ColorLabelId, ContactList, ContactsFeature, DateRange, Event,
+    NewEvent, TaskList, TasksFeature,
 };
 use host_core::accounts::{AccountsRepo, AdapterKind};
 use host_core::event_log::OnboardingService;
@@ -439,6 +440,40 @@ impl Host {
             .account_for_task_list(list_id)
             .is_none_or(|a| a == LOCAL_ID)
     }
+
+    /// Contacts twin of [`Host::route_task_list`]: `None` is the local address
+    /// book, `Some(ext)` an external contacts provider. Unknown id → local;
+    /// a non-local id whose adapter isn't live is `NotFound`. Contacts are NOT
+    /// event-logged (no `Contact*` SyncEvent), so there's no is_local gate —
+    /// local contacts are device-local, external ones self-sync via the provider.
+    /// [`Host::contact_lists_json`] primes the list→account route map.
+    fn route_contact_list(
+        &self,
+        list_id: &str,
+    ) -> Result<Option<Arc<dyn ContactsFeature>>, StoreError> {
+        let account = self
+            .registry
+            .account_for_contact_list(list_id)
+            .unwrap_or_else(|| LOCAL_ID.to_string());
+        if account == LOCAL_ID {
+            Ok(None)
+        } else {
+            self.registry
+                .contact_adapter(&account)
+                .map(Some)
+                .ok_or(StoreError::NotFound)
+        }
+    }
+}
+
+/// A contact list enriched with its owning `account_id` — mirrors the desktop
+/// wire shape (and `TaskListRow`). Lets the UI tell local (deletable) from
+/// external (provider-managed) address books.
+#[derive(serde::Serialize)]
+struct ContactListRow {
+    #[serde(flatten)]
+    inner: ContactList,
+    account_id: String,
 }
 
 /// A task list enriched with its owning `account_id` — the desktop `TaskListRow`
@@ -1624,6 +1659,146 @@ impl Host {
             .collect();
         to_json(&dtos)
     }
+
+    // ── Contacts (JSON bridge, routed) ────────────────────────────────────────
+    //
+    // Address books + contacts, routed local (the device SQLite store) vs
+    // external (CardDAV / Google / EWS providers) by `route_contact_list`.
+    // Contacts are NOT on the sync event log (no `Contact*` SyncEvent) — local
+    // contacts are device-local; external ones self-sync via their provider — so
+    // no `writer.append` here (unlike tasks/events). All the read/write adapter
+    // methods are async `ContactsFeature`, driven via `block_on`; contact-LIST
+    // create/delete are local-only inherent (sync) methods. The JSON wire is the
+    // `cal_core` serde shape. (Photo bytes + search + the rich address/member
+    // fields are a later phase; the first mobile screen covers name/emails/
+    // phones/org.)
+
+    /// All contact lists (local + external) as a JSON `ContactListRow[]` (each
+    /// `ContactList` flattened + its `account_id`). Fetches external live (errors
+    /// swallowed per-adapter) + primes the list→account route map for the
+    /// following contact ops — call it first.
+    pub fn contact_lists_json(&self) -> Result<String, StoreError> {
+        let (local, external) = self.runtime.block_on(async {
+            let local = self.adapter.list_contact_lists().await;
+            let external = self.registry.list_external_contact_lists().await;
+            (local, external)
+        });
+        let local = local.map_err(map_store_err)?;
+        for l in &local {
+            self.registry.note_contact_list_route(&l.id, LOCAL_ID);
+        }
+        let mut rows: Vec<ContactListRow> = Vec::with_capacity(local.len() + external.len());
+        for l in local {
+            rows.push(ContactListRow {
+                inner: l,
+                account_id: LOCAL_ID.to_string(),
+            });
+        }
+        for l in external {
+            let account_id = self
+                .registry
+                .account_for_contact_list(&l.id)
+                .unwrap_or_else(|| LOCAL_ID.to_string());
+            rows.push(ContactListRow {
+                inner: l,
+                account_id,
+            });
+        }
+        to_json(&rows)
+    }
+
+    /// Contacts in a list as a JSON `Contact[]`, routed to the list's owning
+    /// account (local store or external provider).
+    pub fn contacts_json(&self, list_id: String) -> Result<String, StoreError> {
+        let route = self.route_contact_list(&list_id)?;
+        let contacts = self
+            .runtime
+            .block_on(async {
+                match route {
+                    None => self.adapter.get_contacts(&list_id).await,
+                    Some(ext) => ext.get_contacts(&list_id).await,
+                }
+            })
+            .map_err(map_store_err)?;
+        to_json(&contacts)
+    }
+
+    /// Create a contact from a JSON `cal_core::NewContact`; returns the created
+    /// `Contact` as JSON. Routed by `list_id` (local store or external provider).
+    pub fn create_contact_json(
+        &self,
+        list_id: String,
+        contact_json: String,
+    ) -> Result<String, StoreError> {
+        let new: cal_core::NewContact = from_json("contact", &contact_json)?;
+        let route = self.route_contact_list(&list_id)?;
+        let contact = self
+            .runtime
+            .block_on(async {
+                match route {
+                    None => self.adapter.create_contact(&list_id, new).await,
+                    Some(ext) => ext.create_contact(&list_id, new).await,
+                }
+            })
+            .map_err(map_store_err)?;
+        to_json(&contact)
+    }
+
+    /// Update a contact from a JSON `cal_core::Contact`; returns the updated
+    /// `Contact` as JSON. Routed by the contact's `list_id`.
+    pub fn update_contact_json(&self, contact_json: String) -> Result<String, StoreError> {
+        let contact: cal_core::Contact = from_json("contact", &contact_json)?;
+        let route = self.route_contact_list(&contact.list_id)?;
+        let updated = self
+            .runtime
+            .block_on(async {
+                match route {
+                    None => self.adapter.update_contact(contact).await,
+                    Some(ext) => ext.update_contact(contact).await,
+                }
+            })
+            .map_err(map_store_err)?;
+        to_json(&updated)
+    }
+
+    /// Delete a contact, routed by the optional `list_id` (omit → local). Callers
+    /// that listed the contact pass its `list_id` so an external delete reaches
+    /// the right provider (the desktop `delete_contact` shape).
+    pub fn delete_contact(&self, id: String, list_id: Option<String>) -> Result<(), StoreError> {
+        let route = match list_id.as_deref() {
+            Some(lid) => self.route_contact_list(lid)?,
+            None => None,
+        };
+        self.runtime
+            .block_on(async {
+                match route {
+                    None => self.adapter.delete_contact(&id).await,
+                    Some(ext) => ext.delete_contact(&id).await,
+                }
+            })
+            .map_err(map_store_err)
+    }
+
+    /// Create a top-level LOCAL address book; returns it as a `ContactListRow`.
+    /// Local-only: external contact-list creation isn't a `ContactsFeature`
+    /// capability (the desktop `create_contact_list` is local-only too).
+    pub fn create_contact_list_json(&self, name: String) -> Result<String, StoreError> {
+        let list = self
+            .adapter
+            .create_contact_list(&name, None, None)
+            .map_err(map_store_err)?;
+        self.registry.note_contact_list_route(&list.id, LOCAL_ID);
+        to_json(&ContactListRow {
+            inner: list,
+            account_id: LOCAL_ID.to_string(),
+        })
+    }
+
+    /// Delete a LOCAL address book. Local-only (the inherent store method, which
+    /// forbids deleting the seeded default list); matches the desktop.
+    pub fn delete_contact_list(&self, id: String) -> Result<(), StoreError> {
+        self.adapter.delete_contact_list(&id).map_err(map_store_err)
+    }
 }
 
 /// Map an accounts-repo error to the FFI store error, preserving the
@@ -2422,6 +2597,60 @@ mod tests {
                 .iter()
                 .all(|r| r["item_id"] != serde_json::json!(task_id)),
             "a tomorrow reminder must be outside a 30-minute horizon; got: {narrow}",
+        );
+    }
+
+    #[test]
+    fn contacts_round_trip_through_the_local_address_book() {
+        let (_dir, host, _kc) = open_host();
+        // Migration 0007 seeds the default local address book.
+        let lists: serde_json::Value =
+            serde_json::from_str(&host.contact_lists_json().unwrap()).unwrap();
+        let arr = lists.as_array().unwrap();
+        assert!(!arr.is_empty(), "the seeded local address book should list");
+        let list_id = arr[0]["id"].as_str().unwrap().to_string();
+        assert_eq!(arr[0]["account_id"], serde_json::json!("local"));
+
+        // Create a contact (every NewContact field supplied so serde can't trip
+        // on a missing one regardless of per-field defaults).
+        let new_contact = r#"{"display_name":"Ada Lovelace","given_name":"Ada","family_name":"Lovelace","organization":null,"emails":["ada@example.com"],"phone_numbers":["+44 20 7946 0000"],"birthday":null,"notes":null,"addresses":[],"members":null,"photo":null}"#;
+        let created = host
+            .create_contact_json(list_id.clone(), new_contact.to_string())
+            .unwrap();
+        let mut contact: serde_json::Value = serde_json::from_str(&created).unwrap();
+        let contact_id = contact["id"].as_str().unwrap().to_string();
+        assert_eq!(contact["display_name"], "Ada Lovelace");
+
+        // It shows up in the list's contacts.
+        let listed: serde_json::Value =
+            serde_json::from_str(&host.contacts_json(list_id.clone()).unwrap()).unwrap();
+        assert!(
+            listed
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|c| c["id"] == serde_json::json!(contact_id)),
+            "the created contact should be listed; got: {listed}",
+        );
+
+        // Update (full read-modify-write round-trip).
+        contact["display_name"] = serde_json::json!("Augusta Ada King");
+        let updated: serde_json::Value =
+            serde_json::from_str(&host.update_contact_json(contact.to_string()).unwrap()).unwrap();
+        assert_eq!(updated["display_name"], "Augusta Ada King");
+
+        // Delete (routed by the owning list).
+        host.delete_contact(contact_id.clone(), Some(list_id.clone()))
+            .unwrap();
+        let after: serde_json::Value =
+            serde_json::from_str(&host.contacts_json(list_id).unwrap()).unwrap();
+        assert!(
+            after
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|c| c["id"] != serde_json::json!(contact_id)),
+            "the contact should be gone after delete; got: {after}",
         );
     }
 }
