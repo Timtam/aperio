@@ -190,10 +190,13 @@ export default function EventEditorModal({
     const isLocalCal = cal?.account_id === 'local';
     const colorCapable = isLocalCal || (cal?.supports_event_color ?? false);
     const colorToSend = colorLabel || null;
-    // Invitations only go out from an external calendar that has attendees, with
-    // the toggle on (a local calendar has no provider to send through). Mirrors
-    // the desktop's send_invitations gating.
-    const sendInvitations = !isLocalCal && attendees.length > 0 && notifyAttendees;
+    // Invitations only go out when the target calendar advertises RFC-6638
+    // scheduling (a local calendar, an iCal feed, or a CalDAV/iCloud account
+    // whose scheduling probe failed all report supports_scheduling=false) AND
+    // there are attendees AND the toggle is on. Mirrors the desktop's
+    // supports_scheduling gating.
+    const sendInvitations =
+      (cal?.supports_scheduling ?? false) && attendees.length > 0 && notifyAttendees;
     // Keep the series' EXDATE exceptions when editing; a fresh rule has none.
     const recurrenceToSend = recurrence
       ? { rrule: recurrence, exceptions: original?.recurrence?.exceptions ?? [] }
@@ -447,8 +450,9 @@ export default function EventEditorModal({
           as tasks (mode="event" labels the relative kind "Before start"). */}
       <RemindersEditor mode="event" value={reminders} onChange={setReminders} />
 
-      {/* Attendees — free-form people; the notify switch shows only for an
-          external calendar with attendees (a local calendar can't invite). */}
+      {/* Attendees — free-form people; the notify switch shows only when the
+          target calendar can actually invite (advertises RFC-6638 scheduling)
+          and there are attendees, matching the desktop's gating. */}
       <AttendeesEditor
         value={attendees}
         onChange={setAttendees}
@@ -456,7 +460,7 @@ export default function EventEditorModal({
         onNotifyChange={setNotifyAttendees}
         showNotify={
           attendees.length > 0 &&
-          (calendars.find((c) => c.id === calId)?.account_id ?? 'local') !== 'local'
+          (calendars.find((c) => c.id === calId)?.supports_scheduling ?? false)
         }
       />
 

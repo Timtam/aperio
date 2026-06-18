@@ -73,6 +73,11 @@ export function useSyncStatus(): SyncStatusInfo {
 
   const tone = toneOf(status, conflictCount);
   const isAuthError = tone === 'error' && status?.last_error_code === 'auth';
+  // A peer turned on E2E (§19.7): the round fails with `encryption_required`.
+  // It lands in the 'error' tone, but the fix is "enter the dataset passphrase"
+  // (the Sync-screen adopt banner), NOT a network/credential check — so it gets
+  // its own actionable label instead of the misleading "No connection".
+  const isAdoptRequired = tone === 'error' && status?.last_error_code === 'encryption_required';
 
   const label = (() => {
     switch (tone) {
@@ -85,9 +90,11 @@ export function useSyncStatus(): SyncStatusInfo {
       case 'error':
         return isAuthError
           ? t('syncStatus.authFailed')
-          : status?.sustained_failure
-            ? t('syncStatus.sustainedFailure')
-            : t('syncStatus.noConnection');
+          : isAdoptRequired
+            ? t('syncStatus.adoptEncryptionRequired')
+            : status?.sustained_failure
+              ? t('syncStatus.sustainedFailure')
+              : t('syncStatus.noConnection');
       case 'uploading':
         return t('syncStatus.uploading');
       case 'synced':

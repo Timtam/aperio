@@ -175,7 +175,8 @@ export const deleteEvent = async (
 };
 
 /** Parse a free-form attendee entry ("Name <email>" or a bare email) into its
- *  name + email via the shared cal-core parser (synchronous). An entry with no
- *  recognisable email yields an empty `email` — callers treat that as invalid. */
+ *  name + email via the shared cal-core parser (synchronous). The parser only
+ *  splits on the bracket pair — it does NOT validate, so a bare non-email string
+ *  comes back whole as `email`; callers do their own email-shape check. */
 export const parseAttendee = (entry: string): { name: string | null; email: string } =>
   CalFfi.parseAttendee(entry);

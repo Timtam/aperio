@@ -233,6 +233,7 @@
     "conflict_other": "{{count}} conflicts",
     "noConnection": "No connection",
     "authFailed": "Sign-in failed",
+    "adoptEncryptionRequired": "Encryption set up — enter passphrase",
     "sustainedFailure": "Repeatedly failing",
     "off": "Sync off",
     "schemaTooOld": "Update required",

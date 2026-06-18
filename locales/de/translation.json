@@ -233,6 +233,7 @@
     "conflict_other": "{{count}} Konflikte",
     "noConnection": "Keine Verbindung",
     "authFailed": "Anmeldung fehlgeschlagen",
+    "adoptEncryptionRequired": "Verschlüsselung aktiviert — Passwort eingeben",
     "sustainedFailure": "Dauerhaft fehlgeschlagen",
     "off": "Sync deaktiviert",
     "schemaTooOld": "Update erforderlich",

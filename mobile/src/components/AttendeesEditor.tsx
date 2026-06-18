@@ -16,11 +16,17 @@ import { parseAttendee } from '../api/calendar';
 // Event attendees editor — the mobile analogue of the desktop AttendeePicker,
 // minus the contacts typeahead (that needs the not-yet-bridged contact search).
 // Attendees are free-form "Name <email>" / bare-email strings (the wire shape);
-// each new entry is validated + de-duplicated by its parsed email via the shared
-// cal-core parser. Screen-reader-first: a labelled add field + button, a list of
-// removable attendees with SR focus moved on add/remove, and a "notify
-// attendees" switch shown only when invitations are meaningful (external
-// calendar + at least one attendee), matching the desktop's gating.
+// the shared cal-core parser extracts the email (the CN in "Name <email>", else
+// the whole entry — it does NOT validate), so each new entry is then checked for
+// an email shape here and de-duplicated by that email. Screen-reader-first: a
+// labelled add field + button, a list of removable attendees with SR focus moved
+// on add/remove, and a "notify attendees" switch shown only when the calendar
+// can actually invite (RFC-6638 scheduling), matching the desktop's gating.
+
+/** A pragmatic "looks like an email" check (cal-core's parser does no
+ *  validation). Stricter than the desktop picker, which accepts any non-empty
+ *  string — but the UI promises a valid address, so we hold to that. */
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function emailOf(entry: string): string {
   try {
@@ -55,7 +61,7 @@ export function AttendeesEditor({
     const entry = input.trim();
     if (entry === '') return;
     const email = emailOf(entry);
-    if (email === '') {
+    if (!EMAIL_RE.test(email)) {
       setError(t('dialogs.event.attendees.invalid'));
       AccessibilityInfo.announceForAccessibility(t('dialogs.event.attendees.invalid'));
       return;
