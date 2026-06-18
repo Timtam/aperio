@@ -18,6 +18,7 @@ import {
   adoptRemoteEncryption,
   changeSyncPassphrase,
   configureSyncAdapter,
+  disableSyncEncryption,
   enableSyncEncryption,
   forgetSftpHostKey,
   previewSftpHostKey,
@@ -657,6 +658,56 @@ export default function SyncScreen() {
     }
   }, [announce, changeNewPp, changeOldPp, t]);
 
+  // The async half of disabling E2E — rewrites the whole dataset as plaintext.
+  const runDisableE2e = useCallback(
+    async (pp: string) => {
+      setError(null);
+      setBusy(true);
+      try {
+        const report = await disableSyncEncryption(pp);
+        setChangeOldPp('');
+        setChangeNewPp('');
+        announce(
+          t('dialogs.settings.sync.disableE2eOkAnnouncement', {
+            logs: report.logs_rewritten,
+          }),
+        );
+      } catch (err) {
+        const message = errorMessage(err);
+        setError(message);
+        announce(t('mobile.error', { message }));
+      } finally {
+        setBusy(false);
+        await refresh();
+      }
+    },
+    [announce, refresh, t],
+  );
+
+  // Disable E2E — destructive for the cluster (every OTHER device must
+  // re-onboard), so gate it behind a confirmation. Reuses the change-passphrase
+  // "current passphrase" field as the verification input (desktop parity).
+  const disableE2e = useCallback(() => {
+    const pp = changeOldPp.trim();
+    if (pp.length === 0) {
+      setError(t('dialogs.settings.sync.disableE2eErrorNeedsPassphrase'));
+      announce(t('dialogs.settings.sync.disableE2eErrorNeedsPassphrase'));
+      return;
+    }
+    Alert.alert(
+      t('dialogs.settings.sync.disableE2eAction'),
+      t('dialogs.settings.sync.disableE2eConfirm'),
+      [
+        { text: t('dialogs.confirm.cancel'), style: 'cancel' },
+        {
+          text: t('dialogs.settings.sync.disableE2eAction'),
+          style: 'destructive',
+          onPress: () => void runDisableE2e(pp),
+        },
+      ],
+    );
+  }, [announce, changeOldPp, runDisableE2e, t]);
+
   // Adopt encryption a peer turned on (§19.7): a round failed with
   // `encryption_required`; the user supplies the dataset passphrase, we unlock +
   // switch to encrypted mode, then run a round (now decryptable) and refresh —
@@ -871,6 +922,32 @@ export default function SyncScreen() {
                   {busy
                     ? t('dialogs.settings.sync.passphraseChangeRunning')
                     : t('dialogs.settings.sync.passphraseChangeAction')}
+                </Text>
+              </Pressable>
+            </View>
+
+            {/* Disable E2E — rewrites the dataset as plaintext (verified with
+                the "current passphrase" field above). Cluster-destructive, so
+                gated behind a confirmation in the handler. */}
+            <View style={styles.field}>
+              <Text style={styles.label} accessibilityRole="header">
+                {t('dialogs.settings.sync.disableE2eAction')}
+              </Text>
+              <Text style={styles.hint} accessibilityRole="text">
+                {t('dialogs.settings.sync.disableE2eHint')}
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ disabled: busy }}
+                accessibilityLabel={t('dialogs.settings.sync.disableE2eAction')}
+                disabled={busy}
+                onPress={disableE2e}
+                style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
+              >
+                <Text style={styles.ghostButtonText}>
+                  {busy
+                    ? t('dialogs.settings.sync.disableE2eRunning')
+                    : t('dialogs.settings.sync.disableE2eAction')}
                 </Text>
               </Pressable>
             </View>

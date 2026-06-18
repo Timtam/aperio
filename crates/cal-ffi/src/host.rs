@@ -172,6 +172,12 @@ fn store_e2e_key(secret_store: &dyn SecretStore, key: &[u8; KEY_LEN]) -> Result<
         })
 }
 
+/// Drop the device-local E2E data key from the keychain (best-effort) — used by
+/// the disable-encryption downgrade. Mirrors the desktop `delete_e2e_key`.
+fn delete_e2e_key(secret_store: &dyn SecretStore) {
+    let _ = secret_store.delete(E2E_SECRET_ACCOUNT, SecretSlot::SyncEncryptionKey);
+}
+
 /// Wrap `plain` in an `EncryptingAdapter` when a key is present; otherwise pass
 /// it through untouched. Mirrors the desktop `wrap_if_encrypted`.
 fn wrap_if_encrypted(
@@ -2159,14 +2165,17 @@ impl Host {
     }
 
     /// Enable end-to-end encryption on the configured sync target (§19.7). Mints
-    /// a fresh v2 key (a random data key wrapped by a passphrase-derived KEK,
-    /// recorded in the plaintext `meta.json`), writes the encrypted dataset via
-    /// `adopt_local`, stores the data key device-locally, and flips
-    /// `PREF_E2E_ENABLED`. From here every sync round encrypts. This is the
-    /// "start a fresh encrypted dataset" path (mirrors the desktop adopt_local
-    /// with E2E); a second device JOINS via the passphrase (a later phase), and
-    /// re-encrypting an already-populated plaintext dataset (desktop
-    /// `enable_sync_encryption`) is deferred. Returns the OnboardingReport JSON.
+    /// fresh v2 key material (a random data key wrapped by a passphrase-derived
+    /// KEK, recorded in the plaintext `meta.json`), then branches on the target:
+    /// a FRESH target (no `meta.json`) takes the `adopt_local` path (start an
+    /// encrypted dataset); an already-populated PLAINTEXT target is RE-ENCRYPTED
+    /// in place — every existing log + snapshot is rewritten as ciphertext before
+    /// the `meta.json` flip (mirrors the desktop `enable_sync_encryption`).
+    /// Either way the data key is stored device-locally and `PREF_E2E_ENABLED`
+    /// flips. Other devices must then JOIN with the passphrase
+    /// ([`Self::accept_remote_dataset_json`]) or adopt
+    /// ([`Self::adopt_remote_encryption_json`]). Returns a JSON report. Rejects an
+    /// already-encrypted target + an empty passphrase.
     pub fn enable_sync_encryption_json(&self, passphrase: String) -> Result<String, StoreError> {
         let pp = passphrase.trim();
         if pp.is_empty() {
@@ -2195,57 +2204,217 @@ impl Host {
             field: "sync".to_string(),
             detail: "configure a sync target before enabling encryption".to_string(),
         })?;
-        // Refuse to "start a fresh encrypted dataset" on a target that already
-        // holds data: adopt_local overwrites `meta.json`, which would orphan the
-        // existing dataset and strand every other device pointed at it. Joining
-        // an existing dataset is the passphrase-join path (a later phase), NOT
-        // this one. Probing here also surfaces an unreachable target before we
-        // burn CPU deriving the Argon2 KEK below.
-        let existing = self
-            .runtime
-            .block_on(async { plain.fetch_meta().await })
-            .map_err(sync_err)?;
-        if existing.is_some() {
-            return Err(StoreError::Unsupported {
-                detail: "this sync target already has data; enabling encryption from \
-                         mobile is only supported on a fresh target — enable it on the \
-                         desktop, then join here with the passphrase"
-                    .to_string(),
-            });
-        }
-        // Mint v2 material: fresh DEK + a KEK from the passphrase + fresh params;
-        // wrap the DEK and record it in the params written to meta.json.
+        // Mint v2 material (both paths need it): fresh DEK + a KEK from the
+        // passphrase + fresh params; wrap the DEK and record it in the params
+        // written to meta.json.
         let mut params = EncryptionParams::fresh();
         let kek = derive_key(pp, &params).map_err(sync_err)?;
         let dek = fresh_data_key();
         let wrapped = wrap_key(&kek, &dek).map_err(sync_err)?;
         params.wrapped_data_key = Some(wrapped);
-        let adapter = wrap_if_encrypted(plain, Some(dek));
-        // adopt_local writes the fresh E2E meta.json + adopts this device; the
-        // pending logs then push encrypted on the next round.
-        let report = self
+        // Probe the target to choose the path (also surfaces an unreachable
+        // target before we touch any state).
+        let meta = self
             .runtime
+            .block_on(async { plain.fetch_meta().await })
+            .map_err(sync_err)?;
+        match meta {
+            // A dataset that already declares encryption — another device beat us
+            // to it. Joining/adopting is the right path, not re-keying.
+            Some(m) if m.e2e_enabled => Err(StoreError::Conflict {
+                detail: "this sync target is already encrypted; join it with the \
+                         passphrase instead"
+                    .to_string(),
+            }),
+            // FRESH target: adopt a brand-new encrypted dataset. adopt_local
+            // writes the E2E meta.json + adopts this device; the pending logs
+            // push encrypted on the next round. (No concurrent scheduler on
+            // mobile, so the key-after-adopt order is crash-safest: a failure
+            // leaves neither key nor flag set.)
+            None => {
+                let adapter = wrap_if_encrypted(plain, Some(dek));
+                let report = self
+                    .runtime
+                    .block_on(async {
+                        self.onboarding
+                            .adopt_local(adapter.as_ref(), None, Some(params))
+                            .await
+                    })
+                    .map_err(sync_err)?;
+                self.orchestrator.configure(adapter);
+                store_e2e_key(self.secret_store.as_ref(), &dek)?;
+                prefs
+                    .set(host_core::credential_sync::PREF_E2E_ENABLED, "true")
+                    .map_err(storage_err)?;
+                to_json(&report)
+            }
+            // POPULATED PLAINTEXT target: re-encrypt every existing log + snapshot
+            // in place, then flip meta.json (mirrors desktop enable_sync_encryption).
+            Some(meta_before) => {
+                let encrypting = wrap_if_encrypted(Arc::clone(&plain), Some(dek));
+                let mut logs_rewritten = 0usize;
+                let mut snapshot_rewritten = false;
+                self.runtime
+                    .block_on(async {
+                        // Fetch each plaintext log via `plain`, push it back
+                        // ciphertext via `encrypting` (same path → overwrite).
+                        let logs = plain
+                            .fetch_new_logs(&sync_core::DeviceCursor::epoch())
+                            .await?;
+                        for log in &logs {
+                            encrypting.push_log(log).await?;
+                            logs_rewritten += 1;
+                        }
+                        if let Some(snapshot) = plain.fetch_snapshot().await? {
+                            encrypting.push_snapshot(&snapshot).await?;
+                            snapshot_rewritten = true;
+                        }
+                        Ok::<(), SyncError>(())
+                    })
+                    .map_err(sync_err)?;
+                // Flip local state + swap the orchestrator to encrypting BEFORE
+                // publishing the encrypted meta — same ordering rationale as the
+                // desktop (a concurrent round must never see "meta encrypted +
+                // not-encrypting locally"). Roll back on a meta-push failure.
+                store_e2e_key(self.secret_store.as_ref(), &dek)?;
+                prefs
+                    .set(host_core::credential_sync::PREF_E2E_ENABLED, "true")
+                    .map_err(storage_err)?;
+                self.orchestrator.configure(Arc::clone(&encrypting));
+                let mut updated = meta_before;
+                updated.e2e_enabled = true;
+                updated.e2e_params = Some(params);
+                if let Err(err) = self
+                    .runtime
+                    .block_on(async { plain.push_meta(&updated).await })
+                {
+                    let _ = prefs.delete(host_core::credential_sync::PREF_E2E_ENABLED);
+                    self.orchestrator.configure(plain);
+                    return Err(sync_err(err));
+                }
+                // E2E is on: push pre-encryption local account secrets into the
+                // now-encrypted log so the user's other devices pick them up.
+                host_core::credential_sync::emit_all_local_credentials(
+                    &self.writer,
+                    &shared,
+                    self.secret_store.as_ref(),
+                );
+                to_json(&serde_json::json!({
+                    "logs_rewritten": logs_rewritten,
+                    "snapshot_rewritten": snapshot_rewritten,
+                }))
+            }
+        }
+    }
+
+    /// Disable end-to-end encryption on the configured dataset (§19.7) — the
+    /// in-place downgrade. Verify `passphrase`, then rewrite every log + snapshot
+    /// as PLAINTEXT (decrypting via the data key, stripping the `credential.*`
+    /// events/blocks so secrets never reach the now-plaintext storage), flip
+    /// `meta.json` to `e2e_enabled = false`, swap the orchestrator to the plain
+    /// adapter, and drop the device-local key. Other devices must re-onboard
+    /// afterwards (their local state still says encrypted). Mirrors the desktop
+    /// `disable_sync_encryption`. Returns `{logs_rewritten, snapshot_rewritten}`.
+    pub fn disable_sync_encryption_json(&self, passphrase: String) -> Result<String, StoreError> {
+        let pp = passphrase.trim();
+        if pp.is_empty() {
+            return Err(StoreError::InvalidField {
+                field: "passphrase".to_string(),
+                detail: "passphrase must not be empty".to_string(),
+            });
+        }
+        // The active adapter is the encrypting one (E2E is on). Reads decrypt
+        // through it; meta.json is plaintext either way.
+        let encrypting =
+            self.orchestrator
+                .adapter_handle()
+                .ok_or_else(|| StoreError::InvalidField {
+                    field: "sync".to_string(),
+                    detail: "no sync adapter is configured".to_string(),
+                })?;
+        let meta_before = self
+            .runtime
+            .block_on(async { encrypting.fetch_meta().await })
+            .map_err(sync_err)?
+            .ok_or(StoreError::NotFound)?;
+        if !meta_before.e2e_enabled {
+            return Err(StoreError::InvalidField {
+                field: "e2e".to_string(),
+                detail: "this sync target is not encrypted; nothing to disable".to_string(),
+            });
+        }
+        let params = meta_before
+            .e2e_params
+            .clone()
+            .ok_or_else(|| StoreError::Storage {
+                detail: "meta.json says e2e but carries no params".to_string(),
+            })?;
+        // Verify the passphrase + recover the key (wrong passphrase fails here).
+        let verified_dek = resolve_data_key(pp, &params).map_err(sync_err)?;
+        let shared = self.db.shared();
+        let prefs = UserPrefsRepo::new(&shared);
+        // Clear the local E2E flag FIRST: it gates credential emits (so none can
+        // leak mid-downgrade) and makes `restore_adapter_from_prefs` rebuild a
+        // genuinely PLAIN adapter below. The orchestrator still holds the
+        // encrypting adapter, so the flush stays encrypted.
+        let _ = prefs.delete(host_core::credential_sync::PREF_E2E_ENABLED);
+        // Flush pending logs via the still-encrypting orchestrator so anything
+        // queued just before the flag-clear goes up ciphertext (then gets
+        // rewritten plaintext below) rather than plaintext after the swap.
+        self.runtime
+            .block_on(async { self.orchestrator.push_now().await })
+            .map_err(sync_err)?;
+        // Rebuild the now-genuinely-plain adapter (pref cleared above).
+        let plain = restore_adapter_from_prefs(
+            &shared,
+            &prefs,
+            &self.plugin_manager,
+            self.secret_store.as_ref(),
+        )
+        .ok_or_else(|| StoreError::Storage {
+            detail: "couldn't rebuild the underlying plain adapter".to_string(),
+        })?;
+        let mut logs_rewritten = 0usize;
+        let mut snapshot_rewritten = false;
+        self.runtime
             .block_on(async {
-                self.onboarding
-                    .adopt_local(adapter.as_ref(), None, Some(params))
-                    .await
+                // Fetch RAW via plain + decrypt ourselves with a plaintext
+                // fallback (so a retried/interrupted downgrade is idempotent),
+                // strip credential events, push plaintext (same path → overwrite).
+                let raw_logs = plain
+                    .fetch_new_logs(&sync_core::DeviceCursor::epoch())
+                    .await?;
+                for raw in raw_logs {
+                    let log =
+                        host_core::credential_sync::downgrade_log_to_plaintext(&verified_dek, raw);
+                    let stripped = host_core::credential_sync::strip_credential_events(&log)?;
+                    plain.push_log(&stripped).await?;
+                    logs_rewritten += 1;
+                }
+                // The snapshot can carry account secrets in its credentials
+                // block — strip them before the plaintext re-upload.
+                if let Some(mut snapshot) = encrypting.fetch_snapshot().await? {
+                    host_core::credential_sync::strip_credentials_from_snapshot(&mut snapshot);
+                    plain.push_snapshot(&snapshot).await?;
+                    snapshot_rewritten = true;
+                }
+                Ok::<(), SyncError>(())
             })
             .map_err(sync_err)?;
-        self.orchestrator.configure(adapter);
-        // Persist the key FIRST, then the flag — so a failure can't leave the
-        // flag set with no key (which would refuse to sync on the next boot).
-        // The reverse window (adopt_local wrote the encrypted meta, but
-        // store_e2e_key fails before the key lands) self-heals: the next
-        // configure runs `wrap_for_target`, sees the E2E meta, and — if the key
-        // is present — re-wraps + sets the flag; if the key never landed the
-        // dataset is unrecoverable, the same failure mode as the desktop, which
-        // is why the key write is the very next step after adopt. Faithful to
-        // the desktop `enable_sync_encryption` ordering.
-        store_e2e_key(self.secret_store.as_ref(), &dek)?;
-        prefs
-            .set(host_core::credential_sync::PREF_E2E_ENABLED, "true")
-            .map_err(storage_err)?;
-        to_json(&report)
+        // Commit the downgrade by overwriting meta.json (plaintext, e2e off).
+        let mut updated = meta_before;
+        updated.e2e_enabled = false;
+        updated.e2e_params = None;
+        self.runtime
+            .block_on(async { plain.push_meta(&updated).await })
+            .map_err(sync_err)?;
+        // Swap to the plain adapter + drop the device-local key.
+        self.orchestrator.configure(plain);
+        delete_e2e_key(self.secret_store.as_ref());
+        to_json(&serde_json::json!({
+            "logs_rewritten": logs_rewritten,
+            "snapshot_rewritten": snapshot_rewritten,
+        }))
     }
 
     /// Probe a sync target WITHOUT committing to it (§19.11 onboarding): build
@@ -4010,43 +4179,164 @@ mod tests {
     }
 
     #[test]
-    fn enable_e2e_refuses_a_populated_target() {
+    fn enable_e2e_reencrypts_an_already_populated_plaintext_target() {
+        use std::fs;
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir
+            .path()
+            .join("aperio.sqlite")
+            .to_string_lossy()
+            .into_owned();
         let remote = tempfile::tempdir().unwrap();
         let cfg = format!(
             r#"{{"kind":"local","path":{}}}"#,
             serde_json::to_string(&remote.path().to_string_lossy()).unwrap()
         );
+        let kc = Arc::new(FakeKeychain::default());
+        const TITLE: &str = "PopulatedPlaintextSecret";
 
-        // Device A seeds the target with a plaintext dataset (writes meta.json +
-        // logs) so the target is no longer "fresh".
-        let dir_a = tempfile::tempdir().unwrap();
-        let host_a = open_named(&dir_a, "a");
-        host_a.configure_sync_adapter_json(cfg.clone()).unwrap();
+        let host = Host::open(db_path, kc as Arc<dyn KeychainBridge>).unwrap();
+        host.configure_sync_adapter_json(cfg.clone()).unwrap();
         let cal = calendar_id(
-            &host_a
-                .create_calendar_json(r#"{"name":"Shared"}"#.to_string())
+            &host
+                .create_calendar_json(r#"{"name":"Diary"}"#.to_string())
                 .unwrap(),
         );
-        host_a
-            .create_event_json(new_event_json(&cal, "Standup"))
-            .unwrap();
-        wait_for_pending(&dir_a);
-        host_a.sync_now_json().unwrap();
+        host.create_event_json(new_event_json(&cal, TITLE)).unwrap();
+        // Sync FIRST → the event lands on the remote as PLAINTEXT.
+        wait_for_pending(&dir);
+        host.sync_now_json().unwrap();
 
-        // Device B points at the same populated target — plaintext, so the
-        // configure succeeds — and tries to "start a fresh encrypted dataset".
-        // adopt_local would overwrite meta.json and orphan device A's data, so
-        // it must be refused; joining via the passphrase is the only way in.
-        let dir_b = tempfile::tempdir().unwrap();
-        let host_b = open_named(&dir_b, "b");
-        host_b.configure_sync_adapter_json(cfg).unwrap();
-        let err = host_b
-            .enable_sync_encryption_json("correct horse battery".to_string())
-            .unwrap_err();
+        fn collect(dir: &std::path::Path, out: &mut Vec<u8>) {
+            for entry in fs::read_dir(dir).unwrap().flatten() {
+                let p = entry.path();
+                if p.is_dir() {
+                    collect(&p, &mut *out);
+                } else if let Ok(bytes) = fs::read(&p) {
+                    out.extend_from_slice(&bytes);
+                }
+            }
+        }
+        let mut before = Vec::new();
+        collect(remote.path(), &mut before);
         assert!(
-            matches!(err, StoreError::Unsupported { .. }),
-            "enabling E2E on a populated target must be refused; got: {err:?}"
+            before.windows(TITLE.len()).any(|w| w == TITLE.as_bytes()),
+            "precondition: the title is plaintext on the remote before enabling",
         );
+
+        // Enable on the now-POPULATED plaintext target → re-encrypt in place.
+        let report: serde_json::Value = serde_json::from_str(
+            &host
+                .enable_sync_encryption_json("correct horse battery".to_string())
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(
+            report["logs_rewritten"].as_u64().unwrap() >= 1,
+            "at least the event log must be rewritten as ciphertext; got: {report}",
+        );
+        let status: serde_json::Value =
+            serde_json::from_str(&host.sync_status_json().unwrap()).unwrap();
+        assert_eq!(status["e2e_enabled"], serde_json::json!(true));
+
+        // The previously-plaintext title must now be ciphertext everywhere.
+        let mut after = Vec::new();
+        collect(remote.path(), &mut after);
+        assert!(
+            !after.windows(TITLE.len()).any(|w| w == TITLE.as_bytes()),
+            "the title must no longer appear in plaintext after re-encrypting",
+        );
+    }
+
+    #[test]
+    fn disable_e2e_rewrites_the_dataset_back_to_plaintext() {
+        use std::fs;
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir
+            .path()
+            .join("aperio.sqlite")
+            .to_string_lossy()
+            .into_owned();
+        let remote = tempfile::tempdir().unwrap();
+        let cfg = format!(
+            r#"{{"kind":"local","path":{}}}"#,
+            serde_json::to_string(&remote.path().to_string_lossy()).unwrap()
+        );
+        let kc = Arc::new(FakeKeychain::default());
+        const TITLE: &str = "DowngradeMeBackToPlaintext";
+
+        let host = Host::open(db_path, kc as Arc<dyn KeychainBridge>).unwrap();
+        host.configure_sync_adapter_json(cfg.clone()).unwrap();
+        let cal = calendar_id(
+            &host
+                .create_calendar_json(r#"{"name":"Diary"}"#.to_string())
+                .unwrap(),
+        );
+        host.create_event_json(new_event_json(&cal, TITLE)).unwrap();
+        // Enable E2E (fresh adopt) + push → ciphertext on the remote.
+        host.enable_sync_encryption_json("correct horse battery".to_string())
+            .unwrap();
+        wait_for_pending(&dir);
+        host.sync_now_json().unwrap();
+
+        fn collect(dir: &std::path::Path, out: &mut Vec<u8>) {
+            for entry in fs::read_dir(dir).unwrap().flatten() {
+                let p = entry.path();
+                if p.is_dir() {
+                    collect(&p, &mut *out);
+                } else if let Ok(bytes) = fs::read(&p) {
+                    out.extend_from_slice(&bytes);
+                }
+            }
+        }
+        let mut encrypted = Vec::new();
+        collect(remote.path(), &mut encrypted);
+        assert!(
+            !encrypted
+                .windows(TITLE.len())
+                .any(|w| w == TITLE.as_bytes()),
+            "precondition: the title is ciphertext on the remote while E2E is on",
+        );
+
+        // Disable with the passphrase → rewrite the dataset as plaintext.
+        let report: serde_json::Value = serde_json::from_str(
+            &host
+                .disable_sync_encryption_json("correct horse battery".to_string())
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(
+            report["logs_rewritten"].as_u64().unwrap() >= 1,
+            "got: {report}"
+        );
+        let status: serde_json::Value =
+            serde_json::from_str(&host.sync_status_json().unwrap()).unwrap();
+        assert_eq!(status["e2e_enabled"], serde_json::json!(false));
+
+        // The title is readable plaintext on the remote again.
+        let mut plain = Vec::new();
+        collect(remote.path(), &mut plain);
+        assert!(
+            plain.windows(TITLE.len()).any(|w| w == TITLE.as_bytes()),
+            "the title must be plaintext on the remote after disabling",
+        );
+        // A follow-up round still works on the now-plaintext dataset.
+        host.sync_now_json().unwrap();
+    }
+
+    #[test]
+    fn disable_e2e_rejects_empty_and_unencrypted() {
+        let (_dir, host, _kc) = open_host();
+        // Empty passphrase rejected before touching the adapter.
+        assert!(matches!(
+            host.disable_sync_encryption_json("   ".to_string()).unwrap_err(),
+            StoreError::InvalidField { ref field, .. } if field == "passphrase"
+        ));
+        // No sync target configured → InvalidField{field:"sync"}.
+        assert!(matches!(
+            host.disable_sync_encryption_json("pp".to_string()).unwrap_err(),
+            StoreError::InvalidField { ref field, .. } if field == "sync"
+        ));
     }
 
     #[test]

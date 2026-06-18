@@ -776,6 +776,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_delete_task_list(
     ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_disable_sync_encryption_json(
+    ): Short
     external fun uniffi_cal_ffi_checksum_method_host_discover_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_enable_sync_encryption_json(
@@ -959,6 +961,8 @@ external fun uniffi_cal_ffi_fn_method_host_delete_task(`ptr`: Long,`id`: RustBuf
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_delete_task_list(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_cal_ffi_fn_method_host_disable_sync_encryption_json(`ptr`: Long,`passphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_discover_json(`ptr`: Long,`pluginId`: RustBuffer.ByValue,`argsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_enable_sync_encryption_json(`ptr`: Long,`passphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1294,10 +1298,13 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_delete_task_list() != 53168.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_disable_sync_encryption_json() != 18838.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_discover_json() != 25945.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_cal_ffi_checksum_method_host_enable_sync_encryption_json() != 46210.toShort()) {
+    if (lib.uniffi_cal_ffi_checksum_method_host_enable_sync_encryption_json() != 14292.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_forget_sftp_host_key() != 61915.toShort()) {
@@ -2066,6 +2073,18 @@ public interface HostInterface {
     fun `deleteTaskList`(`id`: kotlin.String)
     
     /**
+     * Disable end-to-end encryption on the configured dataset (§19.7) — the
+     * in-place downgrade. Verify `passphrase`, then rewrite every log + snapshot
+     * as PLAINTEXT (decrypting via the data key, stripping the `credential.*`
+     * events/blocks so secrets never reach the now-plaintext storage), flip
+     * `meta.json` to `e2e_enabled = false`, swap the orchestrator to the plain
+     * adapter, and drop the device-local key. Other devices must re-onboard
+     * afterwards (their local state still says encrypted). Mirrors the desktop
+     * `disable_sync_encryption`. Returns `{logs_rewritten, snapshot_rewritten}`.
+     */
+    fun `disableSyncEncryptionJson`(`passphrase`: kotlin.String): kotlin.String
+    
+    /**
      * Run a plugin's endpoint **discovery** (e.g. EWS Autodiscover for
      * `com.aperio.cal-adapter-ews`). `args_json` carries the provider's discover
      * inputs — `{email, password}` for EWS. Returns the plugin's discovered
@@ -2079,14 +2098,17 @@ public interface HostInterface {
     
     /**
      * Enable end-to-end encryption on the configured sync target (§19.7). Mints
-     * a fresh v2 key (a random data key wrapped by a passphrase-derived KEK,
-     * recorded in the plaintext `meta.json`), writes the encrypted dataset via
-     * `adopt_local`, stores the data key device-locally, and flips
-     * `PREF_E2E_ENABLED`. From here every sync round encrypts. This is the
-     * "start a fresh encrypted dataset" path (mirrors the desktop adopt_local
-     * with E2E); a second device JOINS via the passphrase (a later phase), and
-     * re-encrypting an already-populated plaintext dataset (desktop
-     * `enable_sync_encryption`) is deferred. Returns the OnboardingReport JSON.
+     * fresh v2 key material (a random data key wrapped by a passphrase-derived
+     * KEK, recorded in the plaintext `meta.json`), then branches on the target:
+     * a FRESH target (no `meta.json`) takes the `adopt_local` path (start an
+     * encrypted dataset); an already-populated PLAINTEXT target is RE-ENCRYPTED
+     * in place — every existing log + snapshot is rewritten as ciphertext before
+     * the `meta.json` flip (mirrors the desktop `enable_sync_encryption`).
+     * Either way the data key is stored device-locally and `PREF_E2E_ENABLED`
+     * flips. Other devices must then JOIN with the passphrase
+     * ([`Self::accept_remote_dataset_json`]) or adopt
+     * ([`Self::adopt_remote_encryption_json`]). Returns a JSON report. Rejects an
+     * already-encrypted target + an empty passphrase.
      */
     fun `enableSyncEncryptionJson`(`passphrase`: kotlin.String): kotlin.String
     
@@ -2920,6 +2942,30 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * Disable end-to-end encryption on the configured dataset (§19.7) — the
+     * in-place downgrade. Verify `passphrase`, then rewrite every log + snapshot
+     * as PLAINTEXT (decrypting via the data key, stripping the `credential.*`
+     * events/blocks so secrets never reach the now-plaintext storage), flip
+     * `meta.json` to `e2e_enabled = false`, swap the orchestrator to the plain
+     * adapter, and drop the device-local key. Other devices must re-onboard
+     * afterwards (their local state still says encrypted). Mirrors the desktop
+     * `disable_sync_encryption`. Returns `{logs_rewritten, snapshot_rewritten}`.
+     */
+    @Throws(StoreException::class)override fun `disableSyncEncryptionJson`(`passphrase`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_disable_sync_encryption_json(
+        it,
+        FfiConverterString.lower(`passphrase`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * Run a plugin's endpoint **discovery** (e.g. EWS Autodiscover for
      * `com.aperio.cal-adapter-ews`). `args_json` carries the provider's discover
      * inputs — `{email, password}` for EWS. Returns the plugin's discovered
@@ -2945,14 +2991,17 @@ open class Host: Disposable, AutoCloseable, HostInterface
     
     /**
      * Enable end-to-end encryption on the configured sync target (§19.7). Mints
-     * a fresh v2 key (a random data key wrapped by a passphrase-derived KEK,
-     * recorded in the plaintext `meta.json`), writes the encrypted dataset via
-     * `adopt_local`, stores the data key device-locally, and flips
-     * `PREF_E2E_ENABLED`. From here every sync round encrypts. This is the
-     * "start a fresh encrypted dataset" path (mirrors the desktop adopt_local
-     * with E2E); a second device JOINS via the passphrase (a later phase), and
-     * re-encrypting an already-populated plaintext dataset (desktop
-     * `enable_sync_encryption`) is deferred. Returns the OnboardingReport JSON.
+     * fresh v2 key material (a random data key wrapped by a passphrase-derived
+     * KEK, recorded in the plaintext `meta.json`), then branches on the target:
+     * a FRESH target (no `meta.json`) takes the `adopt_local` path (start an
+     * encrypted dataset); an already-populated PLAINTEXT target is RE-ENCRYPTED
+     * in place — every existing log + snapshot is rewritten as ciphertext before
+     * the `meta.json` flip (mirrors the desktop `enable_sync_encryption`).
+     * Either way the data key is stored device-locally and `PREF_E2E_ENABLED`
+     * flips. Other devices must then JOIN with the passphrase
+     * ([`Self::accept_remote_dataset_json`]) or adopt
+     * ([`Self::adopt_remote_encryption_json`]). Returns a JSON report. Rejects an
+     * already-encrypted target + an empty passphrase.
      */
     @Throws(StoreException::class)override fun `enableSyncEncryptionJson`(`passphrase`: kotlin.String): kotlin.String {
             return FfiConverterString.lift(

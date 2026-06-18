@@ -186,6 +186,11 @@ declare class CalFfiModule extends NativeModule<Record<never, never>> {
    *  key under a fresh `newPassphrase` KEK + salt, push the updated `meta.json`.
    *  The data key is unchanged, so already-onboarded devices keep working; only
    *  future joins need the new passphrase. Rejects a non-encrypted target. */
+  /** Disable E2E (§19.7): rewrite every log + snapshot as plaintext (stripping
+   *  credential events/blocks), flip the meta to plaintext, and drop the device
+   *  key. Other devices must re-onboard afterwards. Returns the
+   *  `{logs_rewritten, snapshot_rewritten}` report as JSON. */
+  disableSyncEncryptionJson(passphrase: string): Promise<string>;
   changeSyncPassphraseJson(
     oldPassphrase: string,
     newPassphrase: string,

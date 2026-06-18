@@ -224,6 +224,10 @@ public class CalFfiModule: Module {
       try self.host.enableSyncEncryptionJson(passphrase: passphrase)
     }
 
+    AsyncFunction("disableSyncEncryptionJson") { (passphrase: String) -> String in
+      try self.host.disableSyncEncryptionJson(passphrase: passphrase)
+    }
+
     AsyncFunction("changeSyncPassphraseJson") { (oldPassphrase: String, newPassphrase: String) in
       try self.host.changeSyncPassphraseJson(
         oldPassphrase: oldPassphrase, newPassphrase: newPassphrase)

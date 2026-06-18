@@ -261,6 +261,12 @@ class CalFfiModule : Module() {
       host.enableSyncEncryptionJson(passphrase)
     }
 
+    // disableSyncEncryptionJson turns E2E OFF: rewrites every log + snapshot as
+    // plaintext, flips the meta, drops the device key (other devices re-onboard).
+    AsyncFunction("disableSyncEncryptionJson") { passphrase: String ->
+      host.disableSyncEncryptionJson(passphrase)
+    }
+
     // changeSyncPassphraseJson rotates the E2E passphrase (re-wraps the same
     // data key; existing devices keep working, future joins need the new one).
     AsyncFunction("changeSyncPassphraseJson") { oldPassphrase: String, newPassphrase: String ->

@@ -173,6 +173,24 @@ export const adoptRemoteEncryption = async (passphrase: string): Promise<void> =
   await CalFfi.adoptRemoteEncryptionJson(passphrase);
 };
 
+/** Counters from {@link disableSyncEncryption} (the desktop `DisableE2eReport`):
+ *  how much of the dataset was rewritten as plaintext. */
+export interface DisableE2eReport {
+  logs_rewritten: number;
+  snapshot_rewritten: boolean;
+}
+
+/** Disable E2E on the configured (encrypted) target: verify the passphrase, then
+ *  rewrite every log + snapshot as plaintext (stripping account secrets), flip
+ *  the dataset metadata to plaintext, and drop this device's key. Irreversible
+ *  for the cluster — every OTHER device must re-onboard afterwards. */
+export const disableSyncEncryption = async (
+  passphrase: string,
+): Promise<DisableE2eReport> =>
+  JSON.parse(
+    await CalFfi.disableSyncEncryptionJson(passphrase),
+  ) as DisableE2eReport;
+
 /** Rotate the E2E passphrase on the configured (encrypted) target: verify the
  *  current passphrase, re-wrap the SAME data key under a fresh new-passphrase
  *  key, and push the updated dataset metadata. The data itself is untouched —
