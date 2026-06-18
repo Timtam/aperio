@@ -53,10 +53,10 @@ import {
   updateTask,
 } from '../api/client';
 import { listColorLabels } from '../api/colorLabels';
-import { getUserPref } from '../api/prefs';
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
 import { resolveEventColor } from '../intl/eventColor';
 import { resolveTaskColor, sectionColorMap } from '../intl/taskColor';
+import { readWeekStart, type WeekStart } from '../settings/weekStart';
 import type { RootStackScreenProps } from '../navigation/types';
 
 // Accessible Week view — the screen-reader-first port of the desktop WeekView.
@@ -73,10 +73,6 @@ import type { RootStackScreenProps } from '../navigation/types';
 // spreading), and filterTasksOnDay/mergeDayItems/taskTimeOnDay (which tasks land
 // on which day, at which time). Both audiences: coloured dots for sighted users,
 // the bound label's NAME folded into every accessible label (WCAG 1.4.1).
-
-/** Which weekday a week visually starts on (0 = Sunday … 6 = Saturday). */
-type WeekStart = 0 | 1 | 2 | 3 | 4 | 5 | 6;
-const WEEK_START_PREF = 'view.weekStart';
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -112,13 +108,6 @@ function isoWeekNumber(date: Date): number {
   const firstDayNum = (firstThursday.getUTCDay() + 6) % 7;
   firstThursday.setUTCDate(firstThursday.getUTCDate() - firstDayNum + 3);
   return 1 + Math.round((d.getTime() - firstThursday.getTime()) / 604800000);
-}
-
-/** Parse the stored `view.weekStart` pref (`"0".."6"`) → a {@link WeekStart},
- *  defaulting to Monday (ISO) when unset or out of range. */
-function parseWeekStart(stored: string | null): WeekStart {
-  const n = stored == null ? NaN : Number(stored);
-  return Number.isInteger(n) && n >= 0 && n <= 6 ? (n as WeekStart) : 1;
 }
 
 interface DayBucket {
@@ -160,11 +149,7 @@ export default function WeekScreen({ navigation, route }: RootStackScreenProps<'
   // Read the synced week-start pref on mount + whenever the screen regains focus
   // (it can change in Settings on this or another device).
   useEffect(() => {
-    const read = () => {
-      void getUserPref(WEEK_START_PREF)
-        .then((raw) => setWeekStart(parseWeekStart(raw)))
-        .catch(() => {});
-    };
+    const read = () => void readWeekStart().then(setWeekStart);
     const unsubscribe = navigation.addListener('focus', read);
     read();
     return unsubscribe;

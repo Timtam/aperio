@@ -1,6 +1,6 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-export interface RadioOption<T extends string> {
+export interface RadioOption<T extends string | number> {
   value: T;
   label: string;
 }
@@ -13,7 +13,7 @@ export interface RadioOption<T extends string> {
  * activation, so no manual announce is needed). Used for status, priority, the
  * task-list picker and the section picker.
  */
-export function RadioGroup<T extends string>({
+export function RadioGroup<T extends string | number>({
   label,
   value,
   options,

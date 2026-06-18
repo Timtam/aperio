@@ -1,5 +1,5 @@
 import { useFocusEffect } from '@react-navigation/native';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
@@ -11,6 +11,7 @@ import {
   writeLanguageChoice,
   type LanguageChoice,
 } from '../settings/language';
+import { readWeekStart, writeWeekStart, type WeekStart } from '../settings/weekStart';
 
 // Settings hub — the app-config home, reachable from the Tasks toolbar. Houses
 // the language override (the one piece of real config that has mobile backing
@@ -21,14 +22,17 @@ import {
 export default function SettingsScreen({
   navigation,
 }: RootStackScreenProps<'Settings'>) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [language, setLanguage] = useState<LanguageChoice>('system');
+  const [weekStart, setWeekStart] = useState<WeekStart>(1);
 
-  // Reflect the stored choice whenever the screen is focused (it may have been
-  // applied on launch before this screen mounted).
+  // Reflect the stored choices whenever the screen is focused (they may have
+  // been applied on launch — or changed on another device — before this screen
+  // mounted).
   useFocusEffect(
     useCallback(() => {
       void readLanguageChoice().then(setLanguage);
+      void readWeekStart().then(setWeekStart);
     }, []),
   );
 
@@ -37,6 +41,21 @@ export default function SettingsScreen({
     void writeLanguageChoice(next);
     void applyLanguageChoice(next);
   }, []);
+
+  const onWeekStartChange = useCallback((next: WeekStart) => {
+    setWeekStart(next);
+    void writeWeekStart(next);
+  }, []);
+
+  // Localized full weekday names for the picker. 7 Jan 2024 is a Sunday (index
+  // 0 = date-fns/`view.weekStart` value 0), so option d maps to that weekday.
+  const weekdayOptions = useMemo(() => {
+    const fmt = new Intl.DateTimeFormat(i18n.language, { weekday: 'long' });
+    return Array.from({ length: 7 }, (_, d) => ({
+      value: d as WeekStart,
+      label: fmt.format(new Date(2024, 0, 7 + d)),
+    }));
+  }, [i18n.language]);
 
   return (
     <ScrollView
@@ -54,6 +73,18 @@ export default function SettingsScreen({
         ]}
         onChange={onLanguageChange}
       />
+
+      <View style={styles.section}>
+        <RadioGroup<WeekStart>
+          label={t('dialogs.settings.general.weekStartLabel')}
+          value={weekStart}
+          options={weekdayOptions}
+          onChange={onWeekStartChange}
+        />
+        <Text style={styles.hint} accessibilityRole="text">
+          {t('dialogs.settings.general.weekStartHint')}
+        </Text>
+      </View>
 
       <View style={styles.links}>
         <Pressable
@@ -96,6 +127,8 @@ export default function SettingsScreen({
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#ffffff' },
   content: { padding: 16, gap: 20 },
+  section: { gap: 8 },
+  hint: { fontSize: 14, color: '#5b6573', lineHeight: 20 },
   links: { gap: 12 },
   link: {
     paddingVertical: 14,
