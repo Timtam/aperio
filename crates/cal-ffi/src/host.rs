@@ -1606,7 +1606,12 @@ impl Host {
         let mut seen = std::collections::HashSet::new();
         let dtos: Vec<serde_json::Value> = triggers
             .into_iter()
-            .filter(|t| seen.insert((t.item_id.clone(), t.trigger_at)))
+            // Strictly future: a trigger at exactly `now` can't be scheduled as a
+            // future OS notification (and `enumerate_triggers` includes the
+            // `>= now` boundary), so drop it — honouring the "future-only"
+            // contract + matching the JS scheduler's `> now` gate. Dedup after,
+            // so an excluded boundary trigger doesn't consume a `seen` slot.
+            .filter(|t| t.trigger_at > now && seen.insert((t.item_id.clone(), t.trigger_at)))
             .map(|t| {
                 serde_json::json!({
                     "item_id": t.item_id,
