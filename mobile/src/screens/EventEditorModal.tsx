@@ -409,11 +409,10 @@ export default function EventEditorModal({
         />
       </View>
 
-      {/* Colour label — local calendars only (an external event's colour is a
-          host-local override, deferred). Shows real swatches for sighted users
-          + the name for SR; binds the event's own color_label. */}
-      {/* Colour — every calendar: local + colour-capable external store it on
-          the event; a non-capable external keeps it as a host-local override. */}
+      {/* Colour — every calendar: a local or colour-capable external calendar
+          stores it on the event (color_label); a non-capable external event
+          keeps it as a host-local override (setEventColor on save). Real
+          swatches for sighted users + the label name for SR. */}
       <ColorLabelSelect
         value={colorLabel}
         labels={colorLabels}
