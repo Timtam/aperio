@@ -22,9 +22,10 @@ export const setContainerColorLabel = async (
   scheduleBackgroundPush();
 };
 
-/** Rename a container (calendar / task list). A local container's new name rides
- *  its own row + Updated sync event; an external one's rename is pushed to its
- *  provider (else a host-local name override). Contact lists are unsupported. */
+/** Rename a container. A local calendar / task list's new name rides its own row
+ *  + Updated sync event; an external one's rename is pushed to its provider
+ *  (else a host-local name override). A contact list (local or external) renames
+ *  its own row at the source — contacts aren't event-logged, so no sync event. */
 export const renameContainer = async (
   containerId: string,
   kind: ContainerKind,

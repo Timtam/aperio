@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 
+import { renameContainer } from '../api/containerColor';
 import {
   ContactList,
   createContactList,
@@ -42,6 +43,9 @@ export default function ContactListsScreen({
   const [newName, setNewName] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // The book currently being renamed in place (id) + its draft name.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
 
   const rowTags = useRef<Record<string, number | null>>({});
   const pendingFocusId = useRef<string | null>(null);
@@ -102,6 +106,41 @@ export default function ContactListsScreen({
       announce(t('mobile.error', { message }));
     }
   }, [announce, load, newName, t]);
+
+  const startRename = useCallback((book: ContactList) => {
+    setEditingId(book.id);
+    setEditName(book.name);
+  }, []);
+
+  const cancelRename = useCallback(() => {
+    setEditingId(null);
+    setEditName('');
+  }, []);
+
+  const saveRename = useCallback(
+    async (book: ContactList) => {
+      const name = editName.trim();
+      if (name.length === 0) {
+        setError(t('sidebar.contactListNameRequired'));
+        announce(t('sidebar.contactListNameRequired'));
+        return;
+      }
+      setError(null);
+      try {
+        await renameContainer(book.id, 'contact_list', name);
+        setEditingId(null);
+        setEditName('');
+        pendingFocusId.current = book.id;
+        announce(t('sidebar.contactListRenamed', { name }));
+        await load();
+      } catch (err) {
+        const message = errorMessage(err);
+        setError(message);
+        announce(t('mobile.error', { message }));
+      }
+    },
+    [announce, editName, load, t],
+  );
 
   const removeBook = useCallback(
     (book: ContactList) => {
@@ -173,33 +212,73 @@ export default function ContactListsScreen({
           contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
         >
-          {lists.map((book) => (
-            <View key={book.id} style={styles.row}>
-              <View
-                ref={(node) => {
-                  rowTags.current[book.id] = node ? findNodeHandle(node) : null;
-                }}
-                accessible
-                accessibilityRole="text"
-                accessibilityLabel={book.name}
-                style={styles.rowText}
-              >
-                <Text style={styles.bookName} importantForAccessibility="no">
-                  {book.name}
-                </Text>
-              </View>
-              {!book.read_only && (
+          {lists.map((book) =>
+            editingId === book.id ? (
+              <View key={book.id} style={styles.row}>
+                <TextInput
+                  style={styles.editInput}
+                  value={editName}
+                  onChangeText={setEditName}
+                  accessibilityLabel={t('mobile.rename')}
+                  autoFocus
+                  returnKeyType="done"
+                  onSubmitEditing={() => void saveRename(book)}
+                />
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel={`${t('mobile.delete')}: ${book.name}`}
-                  onPress={() => removeBook(book)}
-                  style={({ pressed }) => [styles.deleteButton, pressed && styles.pressed]}
+                  accessibilityLabel={t('mobile.save')}
+                  onPress={() => void saveRename(book)}
+                  style={({ pressed }) => [styles.smallButton, pressed && styles.pressed]}
                 >
-                  <Text style={styles.deleteButtonText}>{t('mobile.delete')}</Text>
+                  <Text style={styles.smallButtonText}>{t('mobile.save')}</Text>
                 </Pressable>
-              )}
-            </View>
-          ))}
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={t('mobile.cancel')}
+                  onPress={cancelRename}
+                  style={({ pressed }) => [styles.smallButton, pressed && styles.pressed]}
+                >
+                  <Text style={styles.smallButtonText}>{t('mobile.cancel')}</Text>
+                </Pressable>
+              </View>
+            ) : (
+              <View key={book.id} style={styles.row}>
+                <View
+                  ref={(node) => {
+                    rowTags.current[book.id] = node ? findNodeHandle(node) : null;
+                  }}
+                  accessible
+                  accessibilityRole="text"
+                  accessibilityLabel={book.name}
+                  style={styles.rowText}
+                >
+                  <Text style={styles.bookName} importantForAccessibility="no">
+                    {book.name}
+                  </Text>
+                </View>
+                {!book.read_only && (
+                  <>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`${t('mobile.rename')}: ${book.name}`}
+                      onPress={() => startRename(book)}
+                      style={({ pressed }) => [styles.smallButton, pressed && styles.pressed]}
+                    >
+                      <Text style={styles.smallButtonText}>{t('mobile.rename')}</Text>
+                    </Pressable>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`${t('mobile.delete')}: ${book.name}`}
+                      onPress={() => removeBook(book)}
+                      style={({ pressed }) => [styles.deleteButton, pressed && styles.pressed]}
+                    >
+                      <Text style={styles.deleteButtonText}>{t('mobile.delete')}</Text>
+                    </Pressable>
+                  </>
+                )}
+              </View>
+            ),
+          )}
         </ScrollView>
       )}
     </View>
@@ -242,6 +321,26 @@ const styles = StyleSheet.create({
   },
   rowText: { flex: 1 },
   bookName: { fontSize: 18, fontWeight: '600', color: '#10131a' },
+  editInput: {
+    flex: 1,
+    fontSize: 17,
+    color: '#10131a',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#1d4ed8',
+    backgroundColor: '#ffffff',
+  },
+  smallButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#c9d2e0',
+    backgroundColor: '#f4f7fb',
+  },
+  smallButtonText: { fontSize: 15, fontWeight: '600', color: '#1d4ed8' },
   deleteButton: {
     paddingVertical: 10,
     paddingHorizontal: 14,

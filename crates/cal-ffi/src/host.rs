@@ -3509,9 +3509,11 @@ impl Host {
     /// the sync event); an EXTERNAL container's rename is pushed to its provider
     /// first and, only if the provider declares it `Unsupported`, falls back to a
     /// host-local name override (cleared on a successful provider rename so the
-    /// source name stays the single truth). A contact list has no source-rename
-    /// path, so it always lands as an override. `kind` is `"calendar"` |
-    /// `"task_list"` | `"contact_list"`.
+    /// source name stays the single truth). A contact list renames its own row
+    /// at the source instead — the local store or the provider (every adapter
+    /// implements `rename_contact_list`); contacts aren't event-logged, so there
+    /// is no sync event or override. `kind` is `"calendar"` | `"task_list"` |
+    /// `"contact_list"`.
     pub fn rename_container(
         &self,
         container_id: String,
@@ -3560,18 +3562,30 @@ impl Host {
                 }
                 Ok(())
             }
-            // External container (or a contact list): push to the provider first,
-            // override only on Unsupported.
+            // Address book (local or external): rename its own row at the source.
+            // Routed by list id — the local store, else the provider adapter; both
+            // implement `rename_contact_list`. Contacts aren't event-logged, so no
+            // sync event / override (the source name is the single truth, seen on
+            // the next read on every device).
+            "contact_list" => {
+                let route = self.route_contact_list(&container_id)?;
+                self.runtime
+                    .block_on(async {
+                        match route {
+                            None => {
+                                self.adapter
+                                    .rename_contact_list(&container_id, trimmed)
+                                    .await
+                            }
+                            Some(ext) => ext.rename_contact_list(&container_id, trimmed).await,
+                        }
+                    })
+                    .map_err(map_store_err)
+            }
+            // External calendar / task list: push to the provider first, override
+            // only on Unsupported.
             _ => {
                 let ck = parse_container_kind(&kind)?;
-                // Address books have no provider rename path AND the name-override
-                // table excludes them (CHECK kind IN ('calendar','task_list')), so
-                // a contact-list rename is genuinely unsupported.
-                if matches!(ck, ContainerKind::ContactList) {
-                    return Err(StoreError::Unsupported {
-                        detail: "renaming address books is not supported".to_string(),
-                    });
-                }
                 let account = match ck {
                     ContainerKind::Calendar => self.registry.account_for_calendar(&container_id),
                     ContainerKind::TaskList => self.registry.account_for_task_list(&container_id),
@@ -5584,7 +5598,31 @@ mod tests {
             StoreError::InvalidField { ref field, .. } if field == "name"
         ));
 
-        // Contact lists rename via the OverridesRepo path → Unsupported.
+        // A local address book renames its own row (no override / sync event).
+        let book: serde_json::Value = serde_json::from_str(
+            &host
+                .create_contact_list_json("Friends".to_string())
+                .unwrap(),
+        )
+        .unwrap();
+        let book_id = book["id"].as_str().unwrap().to_string();
+        host.rename_container(
+            book_id.clone(),
+            "contact_list".to_string(),
+            "Family".to_string(),
+        )
+        .unwrap();
+        let books: serde_json::Value =
+            serde_json::from_str(&host.contact_lists_json().unwrap()).unwrap();
+        let renamed_book = books
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|b| b["id"] == serde_json::json!(book_id))
+            .unwrap();
+        assert_eq!(renamed_book["name"], "Family");
+
+        // An unknown local book id → NotFound (nothing renamed).
         assert!(matches!(
             host.rename_container(
                 "whatever".to_string(),
@@ -5592,12 +5630,12 @@ mod tests {
                 "X".to_string()
             )
             .unwrap_err(),
-            StoreError::Unsupported { .. }
+            StoreError::NotFound
         ));
     }
 
     #[test]
-    fn contact_list_colour_and_rename_use_host_local_overrides() {
+    fn contact_list_colour_uses_host_local_override() {
         let (_dir, host, _kc) = open_host();
         let label: serde_json::Value = serde_json::from_str(
             &host
@@ -5641,17 +5679,8 @@ mod tests {
                 .all(|o| o.container_id != "contacts:work"));
         }
 
-        // Renaming a contact list is unsupported (no provider path + the
-        // name-override table excludes contact lists).
-        assert!(matches!(
-            host.rename_container(
-                "contacts:work".to_string(),
-                "contact_list".to_string(),
-                "Team".to_string()
-            )
-            .unwrap_err(),
-            StoreError::Unsupported { .. }
-        ));
+        // (Renaming a contact list now updates its own row, not an override —
+        // covered by rename_container_renames_local_list_and_calendar.)
 
         // An unknown kind is rejected.
         assert!(matches!(

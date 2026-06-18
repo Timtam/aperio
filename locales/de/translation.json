@@ -1527,6 +1527,7 @@
     "taskListCreated": "Aufgabenliste „{{name}}\" wurde angelegt.",
     "contactListCreated": "Kontaktbuch „{{name}}\" wurde angelegt.",
     "contactListDeleted": "Kontaktbuch „{{name}}\" wurde gelöscht.",
+    "contactListRenamed": "Kontaktbuch in „{{name}}\" umbenannt.",
     "contactListNameRequired": "Kontaktbuch-Namen darf nicht leer sein — Umbenennen verworfen.",
     "deleteCalendar": "Kalender „{{name}}\" löschen",
     "renameButton": "„{{name}}\" umbenennen",

@@ -1527,6 +1527,7 @@
     "taskListCreated": "Task list \"{{name}}\" created.",
     "contactListCreated": "Address book \"{{name}}\" created.",
     "contactListDeleted": "Address book \"{{name}}\" deleted.",
+    "contactListRenamed": "Address book renamed to \"{{name}}\".",
     "contactListNameRequired": "Address book name must not be empty — rename cancelled.",
     "deleteCalendar": "Delete calendar \"{{name}}\"",
     "renameButton": "Rename \"{{name}}\"",
