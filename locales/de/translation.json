@@ -80,6 +80,7 @@
     "oauthCancelled": "Anmeldung abgebrochen.",
     "oauthNoCode": "Die Anmeldung hat keinen Autorisierungscode zurückgegeben. Bitte versuche es erneut.",
     "sftpFieldsRequired": "Bitte Host, Benutzername und Pfad eingeben.",
+    "syncFieldsRequired": "Bitte zuerst die erforderlichen Felder ausfüllen.",
     "sftpTrustCancelled": "Abgebrochen. Der angeheftete Hostschlüssel bleibt unverändert."
   },
   "common": {

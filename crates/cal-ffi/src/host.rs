@@ -60,8 +60,8 @@ use host_core::DbHandle;
 use plugin_core::shim::FfiSyncAdapter;
 use plugin_core::PluginManager;
 use sync_core::{
-    derive_key, fresh_data_key, wrap_key, AccountPayload, EncryptingAdapter, EncryptionParams,
-    EventPayload, IdPayload, SyncAdapter, SyncError, SyncEvent, KEY_LEN,
+    derive_key, fresh_data_key, resolve_data_key, wrap_key, AccountPayload, EncryptingAdapter,
+    EncryptionParams, EventPayload, IdPayload, SyncAdapter, SyncError, SyncEvent, KEY_LEN,
 };
 use sync_engine::{EventLogWriter, SecretError, SecretSlot, SecretStore, SyncOrchestrator};
 
@@ -558,6 +558,412 @@ impl Host {
             let _ = prefs.delete(host_core::credential_sync::PREF_E2E_ENABLED);
             Ok(adapter)
         }
+    }
+
+    /// Build the PLAIN (unwrapped) sync adapter described by `req` — the mobile
+    /// twin of the desktop `build_adapter`. Validates the per-kind fields,
+    /// resolves credentials (a non-empty inline value wins, else the stored
+    /// keychain secret — the keychain-reuse contract), constructs the plugin
+    /// init config, and opens the matching statically-embedded sync plugin.
+    /// Does NOT probe, persist, or activate: the callers
+    /// ([`Self::configure_sync_adapter_json`], [`Self::preview_sync_target_json`],
+    /// [`Self::accept_remote_dataset_json`]) layer those on, so the one builder
+    /// is shared across the configure + onboarding flows (no drift in the
+    /// security-sensitive SFTP host-key gate).
+    fn build_plain_sync_adapter(
+        &self,
+        req: &ConfigureSyncRequest,
+    ) -> Result<Arc<dyn SyncAdapter>, StoreError> {
+        match req.kind.as_str() {
+            "local" => {
+                let path = req.path.as_deref().unwrap_or_default().trim();
+                if path.is_empty() {
+                    return Err(StoreError::InvalidField {
+                        field: "path".to_string(),
+                        detail: "sync path must not be empty".to_string(),
+                    });
+                }
+                let cfg = serde_json::json!({ "remote_root": path }).to_string();
+                open_sync_plugin(&self.plugin_manager, PLUGIN_ID_SYNC_LOCAL, cfg)
+            }
+            "webdav" => {
+                let url = req.url.as_deref().unwrap_or_default().trim();
+                if url.is_empty() {
+                    return Err(StoreError::InvalidField {
+                        field: "url".to_string(),
+                        detail: "WebDAV URL must not be empty".to_string(),
+                    });
+                }
+                let user = req.user.as_deref().unwrap_or_default().trim();
+                // Resolve the password: a non-empty request value wins (fresh
+                // connect / re-typed in Settings); otherwise reuse the stored
+                // keychain secret so URL-only edits don't require re-typing.
+                // Empty == "no auth" (the desktop `build_adapter` contract).
+                let resolved_password = match req.password.as_deref().map(str::trim) {
+                    Some(p) if !p.is_empty() => Some(p.to_string()),
+                    _ => self
+                        .secret_store
+                        .retrieve(WEBDAV_SECRET_ACCOUNT, SecretSlot::Password)
+                        .ok(),
+                };
+                let cfg = serde_json::json!({
+                    "url": url,
+                    "user": user,
+                    "password": resolved_password.unwrap_or_default(),
+                })
+                .to_string();
+                open_sync_plugin(&self.plugin_manager, PLUGIN_ID_WEBDAV, cfg)
+            }
+            "ftp" => {
+                let host = req.host.as_deref().unwrap_or_default().trim();
+                if host.is_empty() {
+                    return Err(StoreError::InvalidField {
+                        field: "host".to_string(),
+                        detail: "FTP host must not be empty".to_string(),
+                    });
+                }
+                let user = req.user.as_deref().unwrap_or_default().trim();
+                if user.is_empty() {
+                    return Err(StoreError::InvalidField {
+                        field: "user".to_string(),
+                        detail: "FTP user must not be empty".to_string(),
+                    });
+                }
+                let port = req.port.unwrap_or(21);
+                let path = req.path.as_deref().unwrap_or_default().trim();
+                let mode = req.mode.as_deref().unwrap_or("explicit").trim();
+                // The plugin re-validates + falls back to "explicit", but we
+                // reject obviously-wrong modes here for a clear field error.
+                if !matches!(mode, "implicit" | "explicit" | "plain") {
+                    return Err(StoreError::InvalidField {
+                        field: "mode".to_string(),
+                        detail: format!("unknown FTPS mode: {mode}"),
+                    });
+                }
+                // Same reuse contract as WebDAV, but FTP has no anonymous path
+                // in our model: a missing keychain secret is an auth error.
+                let resolved_password = match req.password.as_deref().map(str::trim) {
+                    Some(p) if !p.is_empty() => p.to_string(),
+                    _ => self
+                        .secret_store
+                        .retrieve(FTP_SECRET_ACCOUNT, SecretSlot::Password)
+                        .map_err(|_| StoreError::Auth {
+                            detail: "no FTP password configured".to_string(),
+                        })?,
+                };
+                let cfg = serde_json::json!({
+                    "host": host,
+                    "port": port,
+                    "user": user,
+                    "password": resolved_password,
+                    "path": path,
+                    "mode": mode,
+                })
+                .to_string();
+                open_sync_plugin(&self.plugin_manager, PLUGIN_ID_FTP, cfg)
+            }
+            "dropbox" => {
+                let client_id = req.client_id.as_deref().unwrap_or_default().trim();
+                if client_id.is_empty() {
+                    return Err(StoreError::InvalidField {
+                        field: "client_id".to_string(),
+                        detail: "Dropbox client_id must not be empty".to_string(),
+                    });
+                }
+                let client_secret = req.client_secret.as_deref().unwrap_or_default().trim();
+                let path = req.path.as_deref().unwrap_or_default().trim();
+                // The refresh token must already be in the keychain from a prior
+                // `complete_sync_oauth_json` (the native auth session) — Dropbox
+                // sync owns one managed slot, divorced from any account row.
+                let refresh_token = self
+                    .secret_store
+                    .retrieve(DROPBOX_SECRET_ACCOUNT, SecretSlot::RefreshToken)
+                    .map_err(|_| StoreError::Auth {
+                        detail: "Dropbox sign-in required — no refresh token stored".to_string(),
+                    })?;
+                let cfg = serde_json::json!({
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "base_path": path,
+                    "refresh_token": refresh_token,
+                })
+                .to_string();
+                open_sync_plugin(&self.plugin_manager, PLUGIN_ID_DROPBOX, cfg)
+            }
+            "googledrive" => {
+                let client_id = req.client_id.as_deref().unwrap_or_default().trim();
+                if client_id.is_empty() {
+                    return Err(StoreError::InvalidField {
+                        field: "client_id".to_string(),
+                        detail: "Google Drive client_id must not be empty".to_string(),
+                    });
+                }
+                let client_secret = req.client_secret.as_deref().unwrap_or_default().trim();
+                // Google's token endpoint rejects exchanges without the secret,
+                // so it's required here too (unlike Dropbox's optional secret).
+                if client_secret.is_empty() {
+                    return Err(StoreError::InvalidField {
+                        field: "client_secret".to_string(),
+                        detail: "Google Drive client_secret must not be empty".to_string(),
+                    });
+                }
+                let folder_name = req.folder_name.as_deref().unwrap_or_default().trim();
+                let refresh_token = self
+                    .secret_store
+                    .retrieve(GOOGLEDRIVE_SECRET_ACCOUNT, SecretSlot::RefreshToken)
+                    .map_err(|_| StoreError::Auth {
+                        detail: "Google Drive sign-in required — no refresh token stored"
+                            .to_string(),
+                    })?;
+                let cfg = serde_json::json!({
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "folder_name": folder_name,
+                    "refresh_token": refresh_token,
+                })
+                .to_string();
+                open_sync_plugin(&self.plugin_manager, PLUGIN_ID_GOOGLEDRIVE, cfg)
+            }
+            "sftp" => {
+                let host = req.host.as_deref().unwrap_or_default().trim();
+                if host.is_empty() {
+                    return Err(StoreError::InvalidField {
+                        field: "host".to_string(),
+                        detail: "SFTP host must not be empty".to_string(),
+                    });
+                }
+                let user = req.user.as_deref().unwrap_or_default().trim();
+                if user.is_empty() {
+                    return Err(StoreError::InvalidField {
+                        field: "user".to_string(),
+                        detail: "SFTP user must not be empty".to_string(),
+                    });
+                }
+                let port = req.port.unwrap_or(22);
+                let path = req.path.as_deref().unwrap_or_default().trim();
+                if path.is_empty() {
+                    return Err(StoreError::InvalidField {
+                        field: "path".to_string(),
+                        detail: "SFTP path must not be empty".to_string(),
+                    });
+                }
+                let auth_method = req.auth_method.as_deref().unwrap_or("password").trim();
+                // Resolve the auth credentials with the same keychain-reuse
+                // contract as WebDAV/FTP. Password + key passphrase live in
+                // separate slots so switching methods doesn't clobber either.
+                let (resolved_password, resolved_key_path, resolved_key_passphrase) =
+                    match auth_method {
+                        "password" => {
+                            let pw = match req.password.as_deref().map(str::trim) {
+                                Some(p) if !p.is_empty() => p.to_string(),
+                                _ => self
+                                    .secret_store
+                                    .retrieve(SFTP_SECRET_ACCOUNT, SecretSlot::Password)
+                                    .map_err(|_| StoreError::Auth {
+                                        detail: "no SFTP password configured".to_string(),
+                                    })?,
+                            };
+                            (pw, String::new(), String::new())
+                        }
+                        "key" => {
+                            let kp = req
+                                .key_path
+                                .as_deref()
+                                .map(str::trim)
+                                .filter(|s| !s.is_empty())
+                                .ok_or_else(|| StoreError::InvalidField {
+                                    field: "key_path".to_string(),
+                                    detail: "SSH key path must not be empty".to_string(),
+                                })?
+                                .to_string();
+                            let pass = match req.key_passphrase.as_deref().map(str::trim) {
+                                Some(p) if !p.is_empty() => p.to_string(),
+                                _ => self
+                                    .secret_store
+                                    .retrieve(SFTP_KEY_SECRET_ACCOUNT, SecretSlot::Password)
+                                    .ok()
+                                    .unwrap_or_default(),
+                            };
+                            (String::new(), kp, pass)
+                        }
+                        other => {
+                            return Err(StoreError::InvalidField {
+                                field: "auth_method".to_string(),
+                                detail: format!("unknown SFTP auth method: {other}"),
+                            });
+                        }
+                    };
+                // The user-pinned host fingerprint (§19.5 trust dialog) locks the
+                // handshake to that exact key.
+                let host_port = format!("{host}:{port}");
+                let pinned_fp = UserPrefsHostKeyVerifier::new(self.db.shared())
+                    .peek(&host_port)
+                    .unwrap_or_default();
+                // Enforce §19.5 in the BACKEND, not only the UI: refuse to
+                // configure (and thus connect) an SFTP target whose host key isn't
+                // pinned yet — an empty pin = silent TOFU (accept any key = MITM
+                // exposure). The legitimate flow always trusts via
+                // `trust_sftp_host_key` first, so this rejects only the unsafe
+                // paths (a direct/refactored caller bypassing the trust dialog).
+                if pinned_fp.trim().is_empty() {
+                    return Err(StoreError::InvalidField {
+                        field: "pinned_fingerprint".to_string(),
+                        detail: "SFTP host key not trusted yet — preview + trust \
+                                 the host key first (§19.5)"
+                            .to_string(),
+                    });
+                }
+                let cfg = serde_json::json!({
+                    "host": host,
+                    "port": port,
+                    "user": user,
+                    "path": path,
+                    "auth_method": auth_method,
+                    "password": resolved_password,
+                    "key_path": resolved_key_path,
+                    "key_passphrase": resolved_key_passphrase,
+                    "pinned_fingerprint": pinned_fp,
+                })
+                .to_string();
+                open_sync_plugin(&self.plugin_manager, PLUGIN_ID_SFTP, cfg)
+            }
+            other => Err(StoreError::InvalidField {
+                field: "kind".to_string(),
+                detail: format!(
+                    "sync adapter kind '{other}' is not supported \
+                     (local, webdav, ftp, dropbox, googledrive, sftp)"
+                ),
+            }),
+        }
+    }
+
+    /// Persist the device-local `sync.adapter.*` prefs + keychain secrets for a
+    /// configured/joined target. The persist half of the old configure arms,
+    /// split out so [`Self::configure_sync_adapter_json`] +
+    /// [`Self::accept_remote_dataset_json`] persist identically. Re-derives the
+    /// trimmed field values from `req` (cheap; the matching
+    /// [`Self::build_plain_sync_adapter`] already validated them). Only a
+    /// non-empty inline secret is written — an omitted/empty one keeps the
+    /// stored keychain entry (the reuse contract). The `_` arm is unreachable
+    /// (the builder rejects unknown kinds before this runs).
+    fn persist_sync_config(&self, req: &ConfigureSyncRequest) -> Result<(), StoreError> {
+        let shared = self.db.shared();
+        let prefs = UserPrefsRepo::new(&shared);
+        match req.kind.as_str() {
+            "local" => {
+                let path = req.path.as_deref().unwrap_or_default().trim();
+                prefs.set(PREF_ADAPTER_KIND, "local").map_err(storage_err)?;
+                prefs.set(PREF_LOCAL_PATH, path).map_err(storage_err)?;
+            }
+            "webdav" => {
+                let url = req.url.as_deref().unwrap_or_default().trim();
+                let user = req.user.as_deref().unwrap_or_default().trim();
+                prefs
+                    .set(PREF_ADAPTER_KIND, "webdav")
+                    .map_err(storage_err)?;
+                prefs.set(PREF_WEBDAV_URL, url).map_err(storage_err)?;
+                prefs.set(PREF_WEBDAV_USER, user).map_err(storage_err)?;
+                if let Some(pw) = req.password.as_deref().map(str::trim) {
+                    if !pw.is_empty() {
+                        self.secret_store
+                            .store(WEBDAV_SECRET_ACCOUNT, SecretSlot::Password, pw)
+                            .map_err(storage_err)?;
+                    }
+                }
+            }
+            "ftp" => {
+                let host = req.host.as_deref().unwrap_or_default().trim();
+                let user = req.user.as_deref().unwrap_or_default().trim();
+                let port = req.port.unwrap_or(21);
+                let path = req.path.as_deref().unwrap_or_default().trim();
+                let mode = req.mode.as_deref().unwrap_or("explicit").trim();
+                prefs.set(PREF_ADAPTER_KIND, "ftp").map_err(storage_err)?;
+                prefs.set(PREF_FTP_HOST, host).map_err(storage_err)?;
+                prefs
+                    .set(PREF_FTP_PORT, &port.to_string())
+                    .map_err(storage_err)?;
+                prefs.set(PREF_FTP_USER, user).map_err(storage_err)?;
+                prefs.set(PREF_FTP_PATH, path).map_err(storage_err)?;
+                prefs.set(PREF_FTP_MODE, mode).map_err(storage_err)?;
+                if let Some(pw) = req.password.as_deref().map(str::trim) {
+                    if !pw.is_empty() {
+                        self.secret_store
+                            .store(FTP_SECRET_ACCOUNT, SecretSlot::Password, pw)
+                            .map_err(storage_err)?;
+                    }
+                }
+            }
+            "dropbox" => {
+                let client_id = req.client_id.as_deref().unwrap_or_default().trim();
+                let client_secret = req.client_secret.as_deref().unwrap_or_default().trim();
+                let path = req.path.as_deref().unwrap_or_default().trim();
+                prefs
+                    .set(PREF_ADAPTER_KIND, "dropbox")
+                    .map_err(storage_err)?;
+                prefs
+                    .set(PREF_DROPBOX_CLIENT_ID, client_id)
+                    .map_err(storage_err)?;
+                prefs
+                    .set(PREF_DROPBOX_CLIENT_SECRET, client_secret)
+                    .map_err(storage_err)?;
+                prefs.set(PREF_DROPBOX_PATH, path).map_err(storage_err)?;
+            }
+            "googledrive" => {
+                let client_id = req.client_id.as_deref().unwrap_or_default().trim();
+                let client_secret = req.client_secret.as_deref().unwrap_or_default().trim();
+                let folder_name = req.folder_name.as_deref().unwrap_or_default().trim();
+                prefs
+                    .set(PREF_ADAPTER_KIND, "googledrive")
+                    .map_err(storage_err)?;
+                prefs
+                    .set(PREF_GOOGLEDRIVE_CLIENT_ID, client_id)
+                    .map_err(storage_err)?;
+                prefs
+                    .set(PREF_GOOGLEDRIVE_CLIENT_SECRET, client_secret)
+                    .map_err(storage_err)?;
+                prefs
+                    .set(PREF_GOOGLEDRIVE_FOLDER_NAME, folder_name)
+                    .map_err(storage_err)?;
+            }
+            "sftp" => {
+                let host = req.host.as_deref().unwrap_or_default().trim();
+                let user = req.user.as_deref().unwrap_or_default().trim();
+                let port = req.port.unwrap_or(22);
+                let path = req.path.as_deref().unwrap_or_default().trim();
+                let auth_method = req.auth_method.as_deref().unwrap_or("password").trim();
+                prefs.set(PREF_ADAPTER_KIND, "sftp").map_err(storage_err)?;
+                prefs.set(PREF_SFTP_HOST, host).map_err(storage_err)?;
+                prefs
+                    .set(PREF_SFTP_PORT, &port.to_string())
+                    .map_err(storage_err)?;
+                prefs.set(PREF_SFTP_USER, user).map_err(storage_err)?;
+                prefs.set(PREF_SFTP_PATH, path).map_err(storage_err)?;
+                prefs
+                    .set(PREF_SFTP_AUTH_METHOD, auth_method)
+                    .map_err(storage_err)?;
+                if auth_method == "key" {
+                    let key_path = req.key_path.as_deref().unwrap_or_default().trim();
+                    prefs
+                        .set(PREF_SFTP_KEY_PATH, key_path)
+                        .map_err(storage_err)?;
+                    if let Some(pp) = req.key_passphrase.as_deref().map(str::trim) {
+                        if !pp.is_empty() {
+                            self.secret_store
+                                .store(SFTP_KEY_SECRET_ACCOUNT, SecretSlot::Password, pp)
+                                .map_err(storage_err)?;
+                        }
+                    }
+                } else if let Some(pw) = req.password.as_deref().map(str::trim) {
+                    if !pw.is_empty() {
+                        self.secret_store
+                            .store(SFTP_SECRET_ACCOUNT, SecretSlot::Password, pw)
+                            .map_err(storage_err)?;
+                    }
+                }
+            }
+            _ => {}
+        }
+        Ok(())
     }
 
     /// Task-list twin of [`Host::route`]: `None` is the local branch (the
@@ -1842,6 +2248,114 @@ impl Host {
         to_json(&report)
     }
 
+    /// Probe a sync target WITHOUT committing to it (§19.11 onboarding): build
+    /// the adapter from `config_json`, read its `meta.json`, and return a
+    /// `SyncPreview` JSON — `{"kind":"empty"}` for a fresh target, or
+    /// `{"kind":"existing", e2e_enabled, devices, …}` for one that already holds
+    /// a dataset. Side-effect-free (nothing is persisted or activated), so the UI
+    /// can offer "join this dataset" vs "start fresh (overwrites)" and let the
+    /// user back out. Mirrors the desktop `preview_sync_target`.
+    pub fn preview_sync_target_json(&self, config_json: String) -> Result<String, StoreError> {
+        let req: ConfigureSyncRequest = from_json("sync config", &config_json)?;
+        let adapter = self.build_plain_sync_adapter(&req)?;
+        let preview = self
+            .runtime
+            .block_on(async { self.onboarding.preview(adapter.as_ref()).await })
+            .map_err(sync_err)?;
+        to_json(&preview)
+    }
+
+    /// Join an EXISTING remote dataset (§19.11 "Datensatz übernehmen"): build the
+    /// adapter and — when the target is end-to-end encrypted — derive the data
+    /// key from `passphrase` + the dataset's `meta.json` params BEFORE pulling
+    /// (the applier needs decrypted bytes), wrap the adapter, pull + apply the
+    /// remote snapshot + logs, register this device in `meta.json`, then activate
+    /// + persist the target (storing the derived E2E key device-locally). This is
+    /// how a SECOND device obtains the key for a foreign encrypted dataset —
+    /// [`Self::wrap_for_target`] deliberately REFUSES to configure one without it,
+    /// so this passphrase-join is the only way in. Mirrors the desktop
+    /// `accept_remote_dataset`. Returns the OnboardingReport JSON.
+    pub fn accept_remote_dataset_json(
+        &self,
+        config_json: String,
+        device_name: Option<String>,
+        passphrase: Option<String>,
+    ) -> Result<String, StoreError> {
+        let req: ConfigureSyncRequest = from_json("sync config", &config_json)?;
+        let plain = self.build_plain_sync_adapter(&req)?;
+        self.runtime
+            .block_on(async { plain.test_connection().await })
+            .map_err(sync_err)?;
+        // Peek at meta.json: an encrypted dataset needs its key derived from the
+        // passphrase + the dataset's params BEFORE accept_remote reads any
+        // snapshot/log (the applier needs plaintext bytes).
+        let meta = self
+            .runtime
+            .block_on(async { plain.fetch_meta().await })
+            .map_err(sync_err)?;
+        let e2e_active = meta.as_ref().map(|m| m.e2e_enabled).unwrap_or(false);
+        let key: Option<[u8; KEY_LEN]> = if e2e_active {
+            let pp = passphrase
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| StoreError::Auth {
+                    detail: "this dataset is encrypted; a passphrase is required".to_string(),
+                })?;
+            let params = meta
+                .as_ref()
+                .and_then(|m| m.e2e_params.clone())
+                .ok_or_else(|| StoreError::Storage {
+                    detail: "meta.json says e2e but carries no params".to_string(),
+                })?;
+            // resolve_data_key handles both v1 (the passphrase IS the DEK) and v2
+            // (a passphrase-derived KEK unwraps the stored DEK) layouts; a wrong
+            // passphrase surfaces here as an Auth error.
+            Some(resolve_data_key(pp, &params).map_err(sync_err)?)
+        } else {
+            None
+        };
+        let adapter = wrap_if_encrypted(plain, key);
+        let shared = self.db.shared();
+        let prefs = UserPrefsRepo::new(&shared);
+        // Flip the local E2E flag BEFORE applying: the snapshot's credential
+        // restore is gated on PREF_E2E_ENABLED (never write synced secrets on a
+        // plaintext-mode device), so joining an E2E dataset must set it first or
+        // every account's password is silently dropped. Reverted on failure.
+        if e2e_active {
+            prefs
+                .set(host_core::credential_sync::PREF_E2E_ENABLED, "true")
+                .map_err(storage_err)?;
+        }
+        let trimmed = device_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let report = match self.runtime.block_on(async {
+            self.onboarding
+                .accept_remote(adapter.as_ref(), trimmed)
+                .await
+        }) {
+            Ok(report) => report,
+            Err(err) => {
+                if e2e_active {
+                    let _ = prefs.delete(host_core::credential_sync::PREF_E2E_ENABLED);
+                }
+                return Err(sync_err(err));
+            }
+        };
+        // Commit the rest of the choice now that onboarding has succeeded.
+        self.orchestrator.configure(adapter);
+        self.persist_sync_config(&req)?;
+        if let Some(k) = key {
+            store_e2e_key(self.secret_store.as_ref(), &k)?;
+        } else {
+            // Joining a plaintext dataset clears any stale flag.
+            let _ = prefs.delete(host_core::credential_sync::PREF_E2E_ENABLED);
+        }
+        to_json(&report)
+    }
+
     /// Complete a host-driven OAuth flow for a SYNC adapter (`plugin_id` =
     /// `com.aperio.sync-adapter-dropbox` / `…-googledrive`): exchange the
     /// redirect's `code` (+ the `pkce_verifier`/`state` from
@@ -2014,439 +2528,29 @@ impl Host {
         Ok(UserPrefsHostKeyVerifier::new(self.db.shared()).peek(host_port))
     }
 
-    /// Configure the sync adapter from a JSON request. Handles `local`
-    /// (filesystem path), `webdav` (URL + user + password), `ftp`
-    /// (host/port/user/path/mode + password), and the OAuth kinds `dropbox`
-    /// (client_id [+ secret] + path) / `googledrive` (client_id + secret +
-    /// folder_name): open the matching statically-embedded sync plugin, probe it
-    /// (`test_connection`), make it the orchestrator's active adapter, and
-    /// persist the choice under the `sync.adapter.*` prefs (device-local; the
-    /// is_synced_key allowlist excludes them, so they never propagate). The
-    /// credential goes to the keychain via the platform `SecretStore`; an
-    /// omitted/empty password reuses the stored one. The OAuth kinds read the
-    /// refresh token stored by a prior [`Self::complete_sync_oauth_json`]. SFTP
-    /// (host-key trust flow) + the E2E `wrap_if_encrypted` branch follow.
+    /// Configure the sync adapter from a JSON request (`local`/`webdav`/`ftp`/
+    /// `dropbox`/`googledrive`/`sftp`): build the plain adapter via
+    /// [`Self::build_plain_sync_adapter`], probe it (`test_connection`), apply
+    /// the E2E gate ([`Self::wrap_for_target`] — wrap an encrypted target with
+    /// the device-local key or refuse), make it the orchestrator's active
+    /// adapter, then persist the choice ([`Self::persist_sync_config`] — the
+    /// `sync.adapter.*` prefs are device-local; the is_synced_key allowlist
+    /// excludes them, so they never propagate; secrets go to the keychain). This
+    /// is the "start fresh / overwrite" path; joining an existing dataset is
+    /// [`Self::accept_remote_dataset_json`].
     pub fn configure_sync_adapter_json(&self, config_json: String) -> Result<(), StoreError> {
         let req: ConfigureSyncRequest = from_json("sync config", &config_json)?;
-        match req.kind.as_str() {
-            "local" => {
-                let path = req.path.unwrap_or_default();
-                let path = path.trim();
-                if path.is_empty() {
-                    return Err(StoreError::InvalidField {
-                        field: "path".to_string(),
-                        detail: "sync path must not be empty".to_string(),
-                    });
-                }
-                let cfg = serde_json::json!({ "remote_root": path }).to_string();
-                let adapter = open_sync_plugin(&self.plugin_manager, PLUGIN_ID_SYNC_LOCAL, cfg)?;
-                // Probe before keeping it active so a bad path fails here.
-                self.runtime
-                    .block_on(async { adapter.test_connection().await })
-                    .map_err(sync_err)?;
-                let adapter = self.wrap_for_target(adapter)?;
-                self.orchestrator.configure(adapter);
-                let shared = self.db.shared();
-                let prefs = UserPrefsRepo::new(&shared);
-                prefs
-                    .set(PREF_ADAPTER_KIND, "local")
-                    .map_err(|e| StoreError::Storage {
-                        detail: e.to_string(),
-                    })?;
-                prefs
-                    .set(PREF_LOCAL_PATH, path)
-                    .map_err(|e| StoreError::Storage {
-                        detail: e.to_string(),
-                    })?;
-                Ok(())
-            }
-            "webdav" => {
-                let url = req.url.unwrap_or_default();
-                let url = url.trim();
-                if url.is_empty() {
-                    return Err(StoreError::InvalidField {
-                        field: "url".to_string(),
-                        detail: "WebDAV URL must not be empty".to_string(),
-                    });
-                }
-                let user = req.user.unwrap_or_default();
-                let user = user.trim();
-                // Resolve the password: a non-empty request value wins (fresh
-                // connect / re-typed in Settings); otherwise reuse the stored
-                // keychain secret so URL-only edits don't require re-typing.
-                // Empty == "no auth" (the desktop `build_adapter` contract).
-                let resolved_password = match req.password.as_deref().map(str::trim) {
-                    Some(p) if !p.is_empty() => Some(p.to_string()),
-                    _ => self
-                        .secret_store
-                        .retrieve(WEBDAV_SECRET_ACCOUNT, SecretSlot::Password)
-                        .ok(),
-                };
-                let cfg = serde_json::json!({
-                    "url": url,
-                    "user": user,
-                    "password": resolved_password.unwrap_or_default(),
-                })
-                .to_string();
-                let adapter = open_sync_plugin(&self.plugin_manager, PLUGIN_ID_WEBDAV, cfg)?;
-                // Probe before keeping it active so bad creds / a bad URL fail
-                // here rather than on the first silent sync round.
-                self.runtime
-                    .block_on(async { adapter.test_connection().await })
-                    .map_err(sync_err)?;
-                let adapter = self.wrap_for_target(adapter)?;
-                self.orchestrator.configure(adapter);
-                let shared = self.db.shared();
-                let prefs = UserPrefsRepo::new(&shared);
-                prefs
-                    .set(PREF_ADAPTER_KIND, "webdav")
-                    .map_err(storage_err)?;
-                prefs.set(PREF_WEBDAV_URL, url).map_err(storage_err)?;
-                prefs.set(PREF_WEBDAV_USER, user).map_err(storage_err)?;
-                // Only overwrite the keychain when the request carries a
-                // non-empty password — URL/user edits keep the prior secret.
-                if let Some(pw) = req.password.as_deref().map(str::trim) {
-                    if !pw.is_empty() {
-                        self.secret_store
-                            .store(WEBDAV_SECRET_ACCOUNT, SecretSlot::Password, pw)
-                            .map_err(storage_err)?;
-                    }
-                }
-                Ok(())
-            }
-            "ftp" => {
-                let host = req.host.unwrap_or_default();
-                let host = host.trim();
-                if host.is_empty() {
-                    return Err(StoreError::InvalidField {
-                        field: "host".to_string(),
-                        detail: "FTP host must not be empty".to_string(),
-                    });
-                }
-                let user = req.user.unwrap_or_default();
-                let user = user.trim();
-                if user.is_empty() {
-                    return Err(StoreError::InvalidField {
-                        field: "user".to_string(),
-                        detail: "FTP user must not be empty".to_string(),
-                    });
-                }
-                let port = req.port.unwrap_or(21);
-                let path = req.path.unwrap_or_default();
-                let path = path.trim();
-                let mode = req.mode.unwrap_or_else(|| "explicit".to_string());
-                let mode = mode.trim();
-                // The plugin re-validates + falls back to "explicit", but we
-                // reject obviously-wrong modes here for a clear field error.
-                if !matches!(mode, "implicit" | "explicit" | "plain") {
-                    return Err(StoreError::InvalidField {
-                        field: "mode".to_string(),
-                        detail: format!("unknown FTPS mode: {mode}"),
-                    });
-                }
-                // Same reuse contract as WebDAV, but FTP has no anonymous path
-                // in our model: a missing keychain secret is an auth error.
-                let resolved_password = match req.password.as_deref().map(str::trim) {
-                    Some(p) if !p.is_empty() => p.to_string(),
-                    _ => self
-                        .secret_store
-                        .retrieve(FTP_SECRET_ACCOUNT, SecretSlot::Password)
-                        .map_err(|_| StoreError::Auth {
-                            detail: "no FTP password configured".to_string(),
-                        })?,
-                };
-                let cfg = serde_json::json!({
-                    "host": host,
-                    "port": port,
-                    "user": user,
-                    "password": resolved_password,
-                    "path": path,
-                    "mode": mode,
-                })
-                .to_string();
-                let adapter = open_sync_plugin(&self.plugin_manager, PLUGIN_ID_FTP, cfg)?;
-                self.runtime
-                    .block_on(async { adapter.test_connection().await })
-                    .map_err(sync_err)?;
-                let adapter = self.wrap_for_target(adapter)?;
-                self.orchestrator.configure(adapter);
-                let shared = self.db.shared();
-                let prefs = UserPrefsRepo::new(&shared);
-                prefs.set(PREF_ADAPTER_KIND, "ftp").map_err(storage_err)?;
-                prefs.set(PREF_FTP_HOST, host).map_err(storage_err)?;
-                prefs
-                    .set(PREF_FTP_PORT, &port.to_string())
-                    .map_err(storage_err)?;
-                prefs.set(PREF_FTP_USER, user).map_err(storage_err)?;
-                prefs.set(PREF_FTP_PATH, path).map_err(storage_err)?;
-                prefs.set(PREF_FTP_MODE, mode).map_err(storage_err)?;
-                if let Some(pw) = req.password.as_deref().map(str::trim) {
-                    if !pw.is_empty() {
-                        self.secret_store
-                            .store(FTP_SECRET_ACCOUNT, SecretSlot::Password, pw)
-                            .map_err(storage_err)?;
-                    }
-                }
-                Ok(())
-            }
-            "dropbox" => {
-                let client_id = req.client_id.unwrap_or_default();
-                let client_id = client_id.trim();
-                if client_id.is_empty() {
-                    return Err(StoreError::InvalidField {
-                        field: "client_id".to_string(),
-                        detail: "Dropbox client_id must not be empty".to_string(),
-                    });
-                }
-                let client_secret = req.client_secret.unwrap_or_default();
-                let client_secret = client_secret.trim();
-                let path = req.path.unwrap_or_default();
-                let path = path.trim();
-                // The refresh token must already be in the keychain from a prior
-                // `complete_sync_oauth_json` (the native auth session) — Dropbox
-                // sync owns one managed slot, divorced from any account row.
-                let refresh_token = self
-                    .secret_store
-                    .retrieve(DROPBOX_SECRET_ACCOUNT, SecretSlot::RefreshToken)
-                    .map_err(|_| StoreError::Auth {
-                        detail: "Dropbox sign-in required — no refresh token stored".to_string(),
-                    })?;
-                let cfg = serde_json::json!({
-                    "client_id": client_id,
-                    "client_secret": client_secret,
-                    "base_path": path,
-                    "refresh_token": refresh_token,
-                })
-                .to_string();
-                let adapter = open_sync_plugin(&self.plugin_manager, PLUGIN_ID_DROPBOX, cfg)?;
-                self.runtime
-                    .block_on(async { adapter.test_connection().await })
-                    .map_err(sync_err)?;
-                let adapter = self.wrap_for_target(adapter)?;
-                self.orchestrator.configure(adapter);
-                let shared = self.db.shared();
-                let prefs = UserPrefsRepo::new(&shared);
-                prefs
-                    .set(PREF_ADAPTER_KIND, "dropbox")
-                    .map_err(storage_err)?;
-                prefs
-                    .set(PREF_DROPBOX_CLIENT_ID, client_id)
-                    .map_err(storage_err)?;
-                prefs
-                    .set(PREF_DROPBOX_CLIENT_SECRET, client_secret)
-                    .map_err(storage_err)?;
-                prefs.set(PREF_DROPBOX_PATH, path).map_err(storage_err)?;
-                Ok(())
-            }
-            "googledrive" => {
-                let client_id = req.client_id.unwrap_or_default();
-                let client_id = client_id.trim();
-                if client_id.is_empty() {
-                    return Err(StoreError::InvalidField {
-                        field: "client_id".to_string(),
-                        detail: "Google Drive client_id must not be empty".to_string(),
-                    });
-                }
-                let client_secret = req.client_secret.unwrap_or_default();
-                let client_secret = client_secret.trim();
-                // Google's token endpoint rejects exchanges without the secret,
-                // so it's required here too (unlike Dropbox's optional secret).
-                if client_secret.is_empty() {
-                    return Err(StoreError::InvalidField {
-                        field: "client_secret".to_string(),
-                        detail: "Google Drive client_secret must not be empty".to_string(),
-                    });
-                }
-                let folder_name = req.folder_name.unwrap_or_default();
-                let folder_name = folder_name.trim();
-                let refresh_token = self
-                    .secret_store
-                    .retrieve(GOOGLEDRIVE_SECRET_ACCOUNT, SecretSlot::RefreshToken)
-                    .map_err(|_| StoreError::Auth {
-                        detail: "Google Drive sign-in required — no refresh token stored"
-                            .to_string(),
-                    })?;
-                let cfg = serde_json::json!({
-                    "client_id": client_id,
-                    "client_secret": client_secret,
-                    "folder_name": folder_name,
-                    "refresh_token": refresh_token,
-                })
-                .to_string();
-                let adapter = open_sync_plugin(&self.plugin_manager, PLUGIN_ID_GOOGLEDRIVE, cfg)?;
-                self.runtime
-                    .block_on(async { adapter.test_connection().await })
-                    .map_err(sync_err)?;
-                let adapter = self.wrap_for_target(adapter)?;
-                self.orchestrator.configure(adapter);
-                let shared = self.db.shared();
-                let prefs = UserPrefsRepo::new(&shared);
-                prefs
-                    .set(PREF_ADAPTER_KIND, "googledrive")
-                    .map_err(storage_err)?;
-                prefs
-                    .set(PREF_GOOGLEDRIVE_CLIENT_ID, client_id)
-                    .map_err(storage_err)?;
-                prefs
-                    .set(PREF_GOOGLEDRIVE_CLIENT_SECRET, client_secret)
-                    .map_err(storage_err)?;
-                prefs
-                    .set(PREF_GOOGLEDRIVE_FOLDER_NAME, folder_name)
-                    .map_err(storage_err)?;
-                Ok(())
-            }
-            "sftp" => {
-                let host = req.host.unwrap_or_default();
-                let host = host.trim();
-                if host.is_empty() {
-                    return Err(StoreError::InvalidField {
-                        field: "host".to_string(),
-                        detail: "SFTP host must not be empty".to_string(),
-                    });
-                }
-                let user = req.user.unwrap_or_default();
-                let user = user.trim();
-                if user.is_empty() {
-                    return Err(StoreError::InvalidField {
-                        field: "user".to_string(),
-                        detail: "SFTP user must not be empty".to_string(),
-                    });
-                }
-                let port = req.port.unwrap_or(22);
-                let path = req.path.unwrap_or_default();
-                let path = path.trim();
-                if path.is_empty() {
-                    return Err(StoreError::InvalidField {
-                        field: "path".to_string(),
-                        detail: "SFTP path must not be empty".to_string(),
-                    });
-                }
-                let auth_method = req.auth_method.unwrap_or_else(|| "password".to_string());
-                let auth_method = auth_method.trim();
-                // Resolve the auth credentials with the same keychain-reuse
-                // contract as WebDAV/FTP (a non-empty request value wins, else the
-                // stored secret). Password + key passphrase live in separate slots
-                // so switching methods doesn't clobber either.
-                let (resolved_password, resolved_key_path, resolved_key_passphrase) =
-                    match auth_method {
-                        "password" => {
-                            let pw = match req.password.as_deref().map(str::trim) {
-                                Some(p) if !p.is_empty() => p.to_string(),
-                                _ => self
-                                    .secret_store
-                                    .retrieve(SFTP_SECRET_ACCOUNT, SecretSlot::Password)
-                                    .map_err(|_| StoreError::Auth {
-                                        detail: "no SFTP password configured".to_string(),
-                                    })?,
-                            };
-                            (pw, String::new(), String::new())
-                        }
-                        "key" => {
-                            let kp = req
-                                .key_path
-                                .as_deref()
-                                .map(str::trim)
-                                .filter(|s| !s.is_empty())
-                                .ok_or_else(|| StoreError::InvalidField {
-                                    field: "key_path".to_string(),
-                                    detail: "SSH key path must not be empty".to_string(),
-                                })?
-                                .to_string();
-                            let pass = match req.key_passphrase.as_deref().map(str::trim) {
-                                Some(p) if !p.is_empty() => p.to_string(),
-                                _ => self
-                                    .secret_store
-                                    .retrieve(SFTP_KEY_SECRET_ACCOUNT, SecretSlot::Password)
-                                    .ok()
-                                    .unwrap_or_default(),
-                            };
-                            (String::new(), kp, pass)
-                        }
-                        other => {
-                            return Err(StoreError::InvalidField {
-                                field: "auth_method".to_string(),
-                                detail: format!("unknown SFTP auth method: {other}"),
-                            });
-                        }
-                    };
-                let shared = self.db.shared();
-                // The user-pinned host fingerprint (§19.5 trust dialog) locks the
-                // handshake to that exact key.
-                let host_port = format!("{host}:{port}");
-                let pinned_fp = UserPrefsHostKeyVerifier::new(shared.clone())
-                    .peek(&host_port)
-                    .unwrap_or_default();
-                // Enforce §19.5 in the BACKEND, not only the UI: refuse to
-                // configure (and thus connect) an SFTP target whose host key isn't
-                // pinned yet — an empty pin = silent TOFU (accept any key = MITM
-                // exposure). The legitimate flow always trusts via
-                // `trust_sftp_host_key` first, so this rejects only the unsafe
-                // paths (a direct/refactored caller bypassing the trust dialog).
-                if pinned_fp.trim().is_empty() {
-                    return Err(StoreError::InvalidField {
-                        field: "pinned_fingerprint".to_string(),
-                        detail: "SFTP host key not trusted yet — preview + trust \
-                                 the host key first (§19.5)"
-                            .to_string(),
-                    });
-                }
-                let cfg = serde_json::json!({
-                    "host": host,
-                    "port": port,
-                    "user": user,
-                    "path": path,
-                    "auth_method": auth_method,
-                    "password": resolved_password,
-                    "key_path": resolved_key_path,
-                    "key_passphrase": resolved_key_passphrase,
-                    "pinned_fingerprint": pinned_fp,
-                })
-                .to_string();
-                let adapter = open_sync_plugin(&self.plugin_manager, PLUGIN_ID_SFTP, cfg)?;
-                self.runtime
-                    .block_on(async { adapter.test_connection().await })
-                    .map_err(sync_err)?;
-                let adapter = self.wrap_for_target(adapter)?;
-                self.orchestrator.configure(adapter);
-                let prefs = UserPrefsRepo::new(&shared);
-                prefs.set(PREF_ADAPTER_KIND, "sftp").map_err(storage_err)?;
-                prefs.set(PREF_SFTP_HOST, host).map_err(storage_err)?;
-                prefs
-                    .set(PREF_SFTP_PORT, &port.to_string())
-                    .map_err(storage_err)?;
-                prefs.set(PREF_SFTP_USER, user).map_err(storage_err)?;
-                prefs.set(PREF_SFTP_PATH, path).map_err(storage_err)?;
-                prefs
-                    .set(PREF_SFTP_AUTH_METHOD, auth_method)
-                    .map_err(storage_err)?;
-                if auth_method == "key" {
-                    prefs
-                        .set(PREF_SFTP_KEY_PATH, &resolved_key_path)
-                        .map_err(storage_err)?;
-                    if let Some(pp) = req.key_passphrase.as_deref().map(str::trim) {
-                        if !pp.is_empty() {
-                            self.secret_store
-                                .store(SFTP_KEY_SECRET_ACCOUNT, SecretSlot::Password, pp)
-                                .map_err(storage_err)?;
-                        }
-                    }
-                } else if let Some(pw) = req.password.as_deref().map(str::trim) {
-                    if !pw.is_empty() {
-                        self.secret_store
-                            .store(SFTP_SECRET_ACCOUNT, SecretSlot::Password, pw)
-                            .map_err(storage_err)?;
-                    }
-                }
-                Ok(())
-            }
-            other => Err(StoreError::InvalidField {
-                field: "kind".to_string(),
-                detail: format!(
-                    "sync adapter kind '{other}' is not supported \
-                     (local, webdav, ftp, dropbox, googledrive, sftp)"
-                ),
-            }),
-        }
+        let adapter = self.build_plain_sync_adapter(&req)?;
+        // Probe before keeping it active so a bad path/creds/URL fails here
+        // rather than on the first silent sync round.
+        self.runtime
+            .block_on(async { adapter.test_connection().await })
+            .map_err(sync_err)?;
+        // E2E gate: wrap (or refuse) per the target's meta before activating.
+        let adapter = self.wrap_for_target(adapter)?;
+        self.orchestrator.configure(adapter);
+        self.persist_sync_config(&req)?;
+        Ok(())
     }
 
     /// Run one sync round (push local pending logs, fetch + apply foreign ones,
@@ -3798,6 +3902,123 @@ mod tests {
             matches!(err, StoreError::Unsupported { .. }),
             "enabling E2E on a populated target must be refused; got: {err:?}"
         );
+    }
+
+    #[test]
+    fn preview_reports_empty_then_existing_for_an_e2e_dataset() {
+        let remote = tempfile::tempdir().unwrap();
+        let cfg = format!(
+            r#"{{"kind":"local","path":{}}}"#,
+            serde_json::to_string(&remote.path().to_string_lossy()).unwrap()
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let host = Host::open(
+            dir.path().join("a.sqlite").to_string_lossy().into_owned(),
+            Arc::new(FakeKeychain::default()) as Arc<dyn KeychainBridge>,
+        )
+        .unwrap();
+
+        // A pristine target previews as Empty (no meta.json yet).
+        let pv: serde_json::Value =
+            serde_json::from_str(&host.preview_sync_target_json(cfg.clone()).unwrap()).unwrap();
+        assert_eq!(pv["kind"], serde_json::json!("empty"));
+
+        // Adopt a fresh E2E dataset, then push so meta.json lands.
+        host.configure_sync_adapter_json(cfg.clone()).unwrap();
+        let cal = calendar_id(
+            &host
+                .create_calendar_json(r#"{"name":"Secret"}"#.to_string())
+                .unwrap(),
+        );
+        host.create_event_json(new_event_json(&cal, "JoinSecret"))
+            .unwrap();
+        host.enable_sync_encryption_json("correct horse battery".to_string())
+            .unwrap();
+        wait_for_pending(&dir);
+        host.sync_now_json().unwrap();
+
+        // Now it previews as Existing + encrypted (side-effect-free probe).
+        let pv2: serde_json::Value =
+            serde_json::from_str(&host.preview_sync_target_json(cfg).unwrap()).unwrap();
+        assert_eq!(pv2["kind"], serde_json::json!("existing"));
+        assert_eq!(pv2["e2e_enabled"], serde_json::json!(true));
+    }
+
+    #[test]
+    fn second_device_joins_an_encrypted_dataset_via_passphrase() {
+        const PASSPHRASE: &str = "correct horse battery";
+        let remote = tempfile::tempdir().unwrap();
+        let cfg = format!(
+            r#"{{"kind":"local","path":{}}}"#,
+            serde_json::to_string(&remote.path().to_string_lossy()).unwrap()
+        );
+
+        // Device A adopts a fresh E2E dataset, creates a calendar + event, pushes.
+        let dir_a = tempfile::tempdir().unwrap();
+        let host_a = open_named(&dir_a, "a");
+        host_a.configure_sync_adapter_json(cfg.clone()).unwrap();
+        let cal = calendar_id(
+            &host_a
+                .create_calendar_json(r#"{"name":"Shared"}"#.to_string())
+                .unwrap(),
+        );
+        let created = host_a
+            .create_event_json(new_event_json(&cal, "Across encrypted devices"))
+            .unwrap();
+        let event_id = serde_json::from_str::<serde_json::Value>(&created).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        host_a
+            .enable_sync_encryption_json(PASSPHRASE.to_string())
+            .unwrap();
+        wait_for_pending(&dir_a);
+        host_a.sync_now_json().unwrap();
+
+        // A wrong passphrase is rejected before any data is applied.
+        let dir_wrong = tempfile::tempdir().unwrap();
+        let host_wrong = open_named(&dir_wrong, "wrong");
+        assert!(
+            host_wrong
+                .accept_remote_dataset_json(
+                    cfg.clone(),
+                    Some("Wrong".to_string()),
+                    Some("not the passphrase".to_string()),
+                )
+                .is_err(),
+            "joining with the wrong passphrase must fail",
+        );
+
+        // Device B joins with the correct passphrase: it derives the key from
+        // meta.json, applies the (decrypted) snapshot + logs, and sees A's event.
+        let dir_b = tempfile::tempdir().unwrap();
+        let host_b = open_named(&dir_b, "b");
+        host_b
+            .accept_remote_dataset_json(
+                cfg,
+                Some("Phone B".to_string()),
+                Some(PASSPHRASE.to_string()),
+            )
+            .unwrap();
+        let status: serde_json::Value =
+            serde_json::from_str(&host_b.sync_status_json().unwrap()).unwrap();
+        assert_eq!(
+            status["e2e_enabled"],
+            serde_json::json!(true),
+            "the joined device must be in E2E mode"
+        );
+        let events: serde_json::Value =
+            serde_json::from_str(&host_b.get_events_json(covering_range(&cal)).unwrap()).unwrap();
+        assert!(
+            events
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|e| e["id"] == serde_json::json!(event_id)),
+            "Host B should see A's event after joining the encrypted dataset; got: {events}",
+        );
+        // A follow-up round decrypts its own + A's logs without error.
+        host_b.sync_now_json().unwrap();
     }
 
     #[test]

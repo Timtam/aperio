@@ -224,6 +224,17 @@ public class CalFfiModule: Module {
       try self.host.enableSyncEncryptionJson(passphrase: passphrase)
     }
 
+    // ─── Onboarding: preview + join an existing dataset (§19.11) ──────────────
+
+    AsyncFunction("previewSyncTargetJson") { (configJson: String) -> String in
+      try self.host.previewSyncTargetJson(configJson: configJson)
+    }
+
+    AsyncFunction("acceptRemoteDatasetJson") { (configJson: String, deviceName: String?, passphrase: String?) -> String in
+      try self.host.acceptRemoteDatasetJson(
+        configJson: configJson, deviceName: deviceName, passphrase: passphrase)
+    }
+
     // ─── SFTP host-key trust (§19.5 TOFU) ─────────────────────────────────────
 
     AsyncFunction("previewSftpHostKeyJson") { (argsJson: String) -> String in

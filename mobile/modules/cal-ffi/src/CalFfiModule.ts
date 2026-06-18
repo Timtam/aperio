@@ -179,9 +179,27 @@ declare class CalFfiModule extends NativeModule<Record<never, never>> {
   /** Enable end-to-end encryption on the configured sync target: mint a fresh
    *  passphrase-protected key, write the encrypted dataset (`adopt_local`), and
    *  encrypt every subsequent round. The key is device-local (never synced) — a
-   *  second device joins via the passphrase (a later phase). Returns the
-   *  OnboardingReport JSON. */
+   *  second device joins via {@link acceptRemoteDatasetJson} + the passphrase.
+   *  Returns the OnboardingReport JSON. */
   enableSyncEncryptionJson(passphrase: string): Promise<string>;
+
+  // ── Onboarding: preview + join an existing dataset (§19.11) ──
+  /** Probe a sync target WITHOUT committing: build the adapter from `configJson`,
+   *  read its `meta.json`, and return a `SyncPreview` JSON — `{kind:"empty"}` for
+   *  a fresh target or `{kind:"existing", e2e_enabled, devices, …}` for one that
+   *  already holds a dataset. Side-effect-free; the caller offers join vs
+   *  overwrite. */
+  previewSyncTargetJson(configJson: string): Promise<string>;
+  /** Join an EXISTING remote dataset: build the adapter, derive the E2E key from
+   *  `passphrase` + the dataset's meta params when it's encrypted, pull + apply
+   *  the snapshot + logs, register this device, then activate + persist (storing
+   *  the derived key device-locally). The only way a second device obtains the
+   *  key for a foreign encrypted dataset. Returns the OnboardingReport JSON. */
+  acceptRemoteDatasetJson(
+    configJson: string,
+    deviceName: string | null,
+    passphrase: string | null,
+  ): Promise<string>;
 
   // ── SFTP host-key trust (§19.5 TOFU) ──
   /** Probe an SFTP server's SHA256 host-key fingerprint (network) and classify

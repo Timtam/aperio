@@ -160,3 +160,78 @@ export const pushNow = (): Promise<number> => CalFfi.pushNow();
 export const enableSyncEncryption = async (passphrase: string): Promise<void> => {
   await CalFfi.enableSyncEncryptionJson(passphrase);
 };
+
+/** One device row in an Existing {@link SyncPreview} (the desktop
+ *  `DeviceSummary`). */
+export interface SyncDeviceSummary {
+  id: string;
+  name: string | null;
+  last_seen_log: string;
+  app_version: string;
+  stale: boolean;
+  is_this_device: boolean;
+}
+
+/** How the running build relates to a dataset's version requirements (the
+ *  desktop `Compatibility`). Anything but `ok` gates the join. */
+export type SyncCompatibility =
+  | { kind: 'ok' }
+  | { kind: 'app_too_old'; required: string; running: string }
+  | { kind: 'schema_ahead'; remote: number; local: number };
+
+/** Outcome of probing a target ({@link previewSyncTarget}) — the desktop
+ *  `SyncPreview`. `empty` = you're the first device (offer "start fresh");
+ *  `existing` = a dataset is already there (offer "join" — pass the passphrase
+ *  when `e2e_enabled`). */
+export type SyncPreview =
+  | { kind: 'empty' }
+  | {
+      kind: 'existing';
+      schema_version: number;
+      min_app_version: string;
+      snapshot_timestamp: string | null;
+      e2e_enabled: boolean;
+      devices: SyncDeviceSummary[];
+      compatibility: SyncCompatibility;
+    };
+
+/** Outcome of joining a dataset ({@link acceptRemoteDataset}) — the desktop
+ *  `OnboardingReport` (no push counts; onboarding adopts, never pushes). */
+export interface OnboardingReport {
+  fetched_logs: number;
+  applied: number;
+  skipped_own: number;
+  skipped_already_applied: number;
+  skipped_unsupported: number;
+  apply_failures: number;
+  remote_was_empty: boolean;
+  device_count: number;
+}
+
+/** Probe a target WITHOUT committing: returns Empty (fresh) or Existing (a
+ *  dataset is already present). Side-effect-free — render the join-vs-overwrite
+ *  choice from `kind`, and require a passphrase before joining when
+ *  `e2e_enabled`. */
+export const previewSyncTarget = async (
+  config: SyncAdapterConfig,
+): Promise<SyncPreview> =>
+  JSON.parse(
+    await CalFfi.previewSyncTargetJson(JSON.stringify(config)),
+  ) as SyncPreview;
+
+/** Join an EXISTING dataset: pull + apply its snapshot + logs, register this
+ *  device, then activate + persist the target. Pass `passphrase` when the
+ *  dataset is end-to-end encrypted — it's how this device derives the key (a
+ *  fresh device can't read an encrypted target any other way). */
+export const acceptRemoteDataset = async (
+  config: SyncAdapterConfig,
+  deviceName: string | null,
+  passphrase: string | null,
+): Promise<OnboardingReport> =>
+  JSON.parse(
+    await CalFfi.acceptRemoteDatasetJson(
+      JSON.stringify(config),
+      deviceName,
+      passphrase,
+    ),
+  ) as OnboardingReport;

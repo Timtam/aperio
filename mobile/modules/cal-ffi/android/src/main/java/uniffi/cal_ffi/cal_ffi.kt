@@ -724,6 +724,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_cal_ffi_checksum_method_localstore_update_task_json(
     ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_accept_remote_dataset_json(
+    ): Short
     external fun uniffi_cal_ffi_checksum_method_host_accounts_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_begin_oauth_json(
@@ -785,6 +787,8 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_cal_ffi_checksum_method_host_pinned_sftp_host_key(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_preview_sftp_host_key_json(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_preview_sync_target_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_push_now(
     ): Short
@@ -899,6 +903,8 @@ external fun uniffi_cal_ffi_fn_free_host(`handle`: Long,uniffi_out_err: UniffiRu
 ): Unit
 external fun uniffi_cal_ffi_fn_constructor_host_open(`dbPath`: RustBuffer.ByValue,`keychain`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
+external fun uniffi_cal_ffi_fn_method_host_accept_remote_dataset_json(`ptr`: Long,`configJson`: RustBuffer.ByValue,`deviceName`: RustBuffer.ByValue,`passphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_accounts_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_begin_oauth_json(`ptr`: Long,`pluginId`: RustBuffer.ByValue,`argsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -960,6 +966,8 @@ external fun uniffi_cal_ffi_fn_method_host_list_calendars_json(`ptr`: Long,uniff
 external fun uniffi_cal_ffi_fn_method_host_pinned_sftp_host_key(`ptr`: Long,`hostPort`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_preview_sftp_host_key_json(`ptr`: Long,`argsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_preview_sync_target_json(`ptr`: Long,`configJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_push_now(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Int
@@ -1200,6 +1208,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_localstore_update_task_json() != 53017.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_accept_remote_dataset_json() != 45743.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_accounts_json() != 21992.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1212,7 +1223,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_complete_sync_oauth_json() != 1805.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_cal_ffi_checksum_method_host_configure_sync_adapter_json() != 50127.toShort()) {
+    if (lib.uniffi_cal_ffi_checksum_method_host_configure_sync_adapter_json() != 45284.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_contact_lists_json() != 57501.toShort()) {
@@ -1291,6 +1302,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_preview_sftp_host_key_json() != 14030.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_preview_sync_target_json() != 3107.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_push_now() != 48331.toShort()) {
@@ -1792,6 +1806,20 @@ public object FfiConverterString: FfiConverter<String, RustBuffer.ByValue> {
 public interface HostInterface {
     
     /**
+     * Join an EXISTING remote dataset (§19.11 "Datensatz übernehmen"): build the
+     * adapter and — when the target is end-to-end encrypted — derive the data
+     * key from `passphrase` + the dataset's `meta.json` params BEFORE pulling
+     * (the applier needs decrypted bytes), wrap the adapter, pull + apply the
+     * remote snapshot + logs, register this device in `meta.json`, then activate
+     * + persist the target (storing the derived E2E key device-locally). This is
+     * how a SECOND device obtains the key for a foreign encrypted dataset —
+     * [`Self::wrap_for_target`] deliberately REFUSES to configure one without it,
+     * so this passphrase-join is the only way in. Mirrors the desktop
+     * `accept_remote_dataset`. Returns the OnboardingReport JSON.
+     */
+    fun `acceptRemoteDatasetJson`(`configJson`: kotlin.String, `deviceName`: kotlin.String?, `passphrase`: kotlin.String?): kotlin.String
+    
+    /**
      * All persisted accounts as JSON (the `cal_core`/desktop wire shape).
      */
     fun `accountsJson`(): kotlin.String
@@ -1837,18 +1865,16 @@ public interface HostInterface {
     fun `completeSyncOauthJson`(`pluginId`: kotlin.String, `requestJson`: kotlin.String)
     
     /**
-     * Configure the sync adapter from a JSON request. Handles `local`
-     * (filesystem path), `webdav` (URL + user + password), `ftp`
-     * (host/port/user/path/mode + password), and the OAuth kinds `dropbox`
-     * (client_id [+ secret] + path) / `googledrive` (client_id + secret +
-     * folder_name): open the matching statically-embedded sync plugin, probe it
-     * (`test_connection`), make it the orchestrator's active adapter, and
-     * persist the choice under the `sync.adapter.*` prefs (device-local; the
-     * is_synced_key allowlist excludes them, so they never propagate). The
-     * credential goes to the keychain via the platform `SecretStore`; an
-     * omitted/empty password reuses the stored one. The OAuth kinds read the
-     * refresh token stored by a prior [`Self::complete_sync_oauth_json`]. SFTP
-     * (host-key trust flow) + the E2E `wrap_if_encrypted` branch follow.
+     * Configure the sync adapter from a JSON request (`local`/`webdav`/`ftp`/
+     * `dropbox`/`googledrive`/`sftp`): build the plain adapter via
+     * [`Self::build_plain_sync_adapter`], probe it (`test_connection`), apply
+     * the E2E gate ([`Self::wrap_for_target`] — wrap an encrypted target with
+     * the device-local key or refuse), make it the orchestrator's active
+     * adapter, then persist the choice ([`Self::persist_sync_config`] — the
+     * `sync.adapter.*` prefs are device-local; the is_synced_key allowlist
+     * excludes them, so they never propagate; secrets go to the keychain). This
+     * is the "start fresh / overwrite" path; joining an existing dataset is
+     * [`Self::accept_remote_dataset_json`].
      */
     fun `configureSyncAdapterJson`(`configJson`: kotlin.String)
     
@@ -2079,6 +2105,17 @@ public interface HostInterface {
     fun `previewSftpHostKeyJson`(`argsJson`: kotlin.String): kotlin.String
     
     /**
+     * Probe a sync target WITHOUT committing to it (§19.11 onboarding): build
+     * the adapter from `config_json`, read its `meta.json`, and return a
+     * `SyncPreview` JSON — `{"kind":"empty"}` for a fresh target, or
+     * `{"kind":"existing", e2e_enabled, devices, …}` for one that already holds
+     * a dataset. Side-effect-free (nothing is persisted or activated), so the UI
+     * can offer "join this dataset" vs "start fresh (overwrites)" and let the
+     * user back out. Mirrors the desktop `preview_sync_target`.
+     */
+    fun `previewSyncTargetJson`(`configJson`: kotlin.String): kotlin.String
+    
+    /**
      * Push the local pending logs without fetching (call from RN AppState
      * "background"). Returns the number of logs pushed. Records the outcome in
      * the failure latch like `sync_now`.
@@ -2295,6 +2332,32 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * Join an EXISTING remote dataset (§19.11 "Datensatz übernehmen"): build the
+     * adapter and — when the target is end-to-end encrypted — derive the data
+     * key from `passphrase` + the dataset's `meta.json` params BEFORE pulling
+     * (the applier needs decrypted bytes), wrap the adapter, pull + apply the
+     * remote snapshot + logs, register this device in `meta.json`, then activate
+     * + persist the target (storing the derived E2E key device-locally). This is
+     * how a SECOND device obtains the key for a foreign encrypted dataset —
+     * [`Self::wrap_for_target`] deliberately REFUSES to configure one without it,
+     * so this passphrase-join is the only way in. Mirrors the desktop
+     * `accept_remote_dataset`. Returns the OnboardingReport JSON.
+     */
+    @Throws(StoreException::class)override fun `acceptRemoteDatasetJson`(`configJson`: kotlin.String, `deviceName`: kotlin.String?, `passphrase`: kotlin.String?): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_accept_remote_dataset_json(
+        it,
+        FfiConverterString.lower(`configJson`),FfiConverterOptionalString.lower(`deviceName`),FfiConverterOptionalString.lower(`passphrase`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * All persisted accounts as JSON (the `cal_core`/desktop wire shape).
      */
     @Throws(StoreException::class)override fun `accountsJson`(): kotlin.String {
@@ -2387,18 +2450,16 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
-     * Configure the sync adapter from a JSON request. Handles `local`
-     * (filesystem path), `webdav` (URL + user + password), `ftp`
-     * (host/port/user/path/mode + password), and the OAuth kinds `dropbox`
-     * (client_id [+ secret] + path) / `googledrive` (client_id + secret +
-     * folder_name): open the matching statically-embedded sync plugin, probe it
-     * (`test_connection`), make it the orchestrator's active adapter, and
-     * persist the choice under the `sync.adapter.*` prefs (device-local; the
-     * is_synced_key allowlist excludes them, so they never propagate). The
-     * credential goes to the keychain via the platform `SecretStore`; an
-     * omitted/empty password reuses the stored one. The OAuth kinds read the
-     * refresh token stored by a prior [`Self::complete_sync_oauth_json`]. SFTP
-     * (host-key trust flow) + the E2E `wrap_if_encrypted` branch follow.
+     * Configure the sync adapter from a JSON request (`local`/`webdav`/`ftp`/
+     * `dropbox`/`googledrive`/`sftp`): build the plain adapter via
+     * [`Self::build_plain_sync_adapter`], probe it (`test_connection`), apply
+     * the E2E gate ([`Self::wrap_for_target`] — wrap an encrypted target with
+     * the device-local key or refuse), make it the orchestrator's active
+     * adapter, then persist the choice ([`Self::persist_sync_config`] — the
+     * `sync.adapter.*` prefs are device-local; the is_synced_key allowlist
+     * excludes them, so they never propagate; secrets go to the keychain). This
+     * is the "start fresh / overwrite" path; joining an existing dataset is
+     * [`Self::accept_remote_dataset_json`].
      */
     @Throws(StoreException::class)override fun `configureSyncAdapterJson`(`configJson`: kotlin.String)
         = 
@@ -2935,6 +2996,29 @@ open class Host: Disposable, AutoCloseable, HostInterface
     UniffiLib.uniffi_cal_ffi_fn_method_host_preview_sftp_host_key_json(
         it,
         FfiConverterString.lower(`argsJson`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Probe a sync target WITHOUT committing to it (§19.11 onboarding): build
+     * the adapter from `config_json`, read its `meta.json`, and return a
+     * `SyncPreview` JSON — `{"kind":"empty"}` for a fresh target, or
+     * `{"kind":"existing", e2e_enabled, devices, …}` for one that already holds
+     * a dataset. Side-effect-free (nothing is persisted or activated), so the UI
+     * can offer "join this dataset" vs "start fresh (overwrites)" and let the
+     * user back out. Mirrors the desktop `preview_sync_target`.
+     */
+    @Throws(StoreException::class)override fun `previewSyncTargetJson`(`configJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_preview_sync_target_json(
+        it,
+        FfiConverterString.lower(`configJson`),_status)
 }
     }
     )

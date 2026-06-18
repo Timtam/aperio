@@ -261,6 +261,19 @@ class CalFfiModule : Module() {
       host.enableSyncEncryptionJson(passphrase)
     }
 
+    // ─── Onboarding: preview + join an existing dataset (§19.11) ──────────────
+    // previewSyncTargetJson reads the target's meta.json WITHOUT committing →
+    // {kind: empty | existing, …}. acceptRemoteDatasetJson joins an existing
+    // dataset (deriving the E2E key from the passphrase when it's encrypted).
+
+    AsyncFunction("previewSyncTargetJson") { configJson: String ->
+      host.previewSyncTargetJson(configJson)
+    }
+
+    AsyncFunction("acceptRemoteDatasetJson") { configJson: String, deviceName: String?, passphrase: String? ->
+      host.acceptRemoteDatasetJson(configJson, deviceName, passphrase)
+    }
+
     // ─── SFTP host-key trust (§19.5 TOFU) ─────────────────────────────────────
     // previewSftpHostKeyJson probes the server's fingerprint (network) + compares
     // it to the device pin store → {host_port, fingerprint, status}; trust/forget/

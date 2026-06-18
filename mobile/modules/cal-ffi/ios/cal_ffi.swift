@@ -544,6 +544,20 @@ fileprivate struct FfiConverterString: FfiConverter {
 public protocol HostProtocol: AnyObject, Sendable {
     
     /**
+     * Join an EXISTING remote dataset (§19.11 "Datensatz übernehmen"): build the
+     * adapter and — when the target is end-to-end encrypted — derive the data
+     * key from `passphrase` + the dataset's `meta.json` params BEFORE pulling
+     * (the applier needs decrypted bytes), wrap the adapter, pull + apply the
+     * remote snapshot + logs, register this device in `meta.json`, then activate
+     * + persist the target (storing the derived E2E key device-locally). This is
+     * how a SECOND device obtains the key for a foreign encrypted dataset —
+     * [`Self::wrap_for_target`] deliberately REFUSES to configure one without it,
+     * so this passphrase-join is the only way in. Mirrors the desktop
+     * `accept_remote_dataset`. Returns the OnboardingReport JSON.
+     */
+    func acceptRemoteDatasetJson(configJson: String, deviceName: String?, passphrase: String?) throws  -> String
+    
+    /**
      * All persisted accounts as JSON (the `cal_core`/desktop wire shape).
      */
     func accountsJson() throws  -> String
@@ -589,18 +603,16 @@ public protocol HostProtocol: AnyObject, Sendable {
     func completeSyncOauthJson(pluginId: String, requestJson: String) throws 
     
     /**
-     * Configure the sync adapter from a JSON request. Handles `local`
-     * (filesystem path), `webdav` (URL + user + password), `ftp`
-     * (host/port/user/path/mode + password), and the OAuth kinds `dropbox`
-     * (client_id [+ secret] + path) / `googledrive` (client_id + secret +
-     * folder_name): open the matching statically-embedded sync plugin, probe it
-     * (`test_connection`), make it the orchestrator's active adapter, and
-     * persist the choice under the `sync.adapter.*` prefs (device-local; the
-     * is_synced_key allowlist excludes them, so they never propagate). The
-     * credential goes to the keychain via the platform `SecretStore`; an
-     * omitted/empty password reuses the stored one. The OAuth kinds read the
-     * refresh token stored by a prior [`Self::complete_sync_oauth_json`]. SFTP
-     * (host-key trust flow) + the E2E `wrap_if_encrypted` branch follow.
+     * Configure the sync adapter from a JSON request (`local`/`webdav`/`ftp`/
+     * `dropbox`/`googledrive`/`sftp`): build the plain adapter via
+     * [`Self::build_plain_sync_adapter`], probe it (`test_connection`), apply
+     * the E2E gate ([`Self::wrap_for_target`] — wrap an encrypted target with
+     * the device-local key or refuse), make it the orchestrator's active
+     * adapter, then persist the choice ([`Self::persist_sync_config`] — the
+     * `sync.adapter.*` prefs are device-local; the is_synced_key allowlist
+     * excludes them, so they never propagate; secrets go to the keychain). This
+     * is the "start fresh / overwrite" path; joining an existing dataset is
+     * [`Self::accept_remote_dataset_json`].
      */
     func configureSyncAdapterJson(configJson: String) throws 
     
@@ -831,6 +843,17 @@ public protocol HostProtocol: AnyObject, Sendable {
     func previewSftpHostKeyJson(argsJson: String) throws  -> String
     
     /**
+     * Probe a sync target WITHOUT committing to it (§19.11 onboarding): build
+     * the adapter from `config_json`, read its `meta.json`, and return a
+     * `SyncPreview` JSON — `{"kind":"empty"}` for a fresh target, or
+     * `{"kind":"existing", e2e_enabled, devices, …}` for one that already holds
+     * a dataset. Side-effect-free (nothing is persisted or activated), so the UI
+     * can offer "join this dataset" vs "start fresh (overwrites)" and let the
+     * user back out. Mirrors the desktop `preview_sync_target`.
+     */
+    func previewSyncTargetJson(configJson: String) throws  -> String
+    
+    /**
      * Push the local pending logs without fetching (call from RN AppState
      * "background"). Returns the number of logs pushed. Records the outcome in
      * the failure latch like `sync_now`.
@@ -1016,6 +1039,29 @@ public static func `open`(dbPath: String, keychain: KeychainBridge)throws  -> Ho
 
     
     /**
+     * Join an EXISTING remote dataset (§19.11 "Datensatz übernehmen"): build the
+     * adapter and — when the target is end-to-end encrypted — derive the data
+     * key from `passphrase` + the dataset's `meta.json` params BEFORE pulling
+     * (the applier needs decrypted bytes), wrap the adapter, pull + apply the
+     * remote snapshot + logs, register this device in `meta.json`, then activate
+     * + persist the target (storing the derived E2E key device-locally). This is
+     * how a SECOND device obtains the key for a foreign encrypted dataset —
+     * [`Self::wrap_for_target`] deliberately REFUSES to configure one without it,
+     * so this passphrase-join is the only way in. Mirrors the desktop
+     * `accept_remote_dataset`. Returns the OnboardingReport JSON.
+     */
+open func acceptRemoteDatasetJson(configJson: String, deviceName: String?, passphrase: String?)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_accept_remote_dataset_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(configJson),
+        FfiConverterOptionString.lower(deviceName),
+        FfiConverterOptionString.lower(passphrase),$0
+    )
+})
+}
+    
+    /**
      * All persisted accounts as JSON (the `cal_core`/desktop wire shape).
      */
 open func accountsJson()throws  -> String  {
@@ -1090,18 +1136,16 @@ open func completeSyncOauthJson(pluginId: String, requestJson: String)throws   {
 }
     
     /**
-     * Configure the sync adapter from a JSON request. Handles `local`
-     * (filesystem path), `webdav` (URL + user + password), `ftp`
-     * (host/port/user/path/mode + password), and the OAuth kinds `dropbox`
-     * (client_id [+ secret] + path) / `googledrive` (client_id + secret +
-     * folder_name): open the matching statically-embedded sync plugin, probe it
-     * (`test_connection`), make it the orchestrator's active adapter, and
-     * persist the choice under the `sync.adapter.*` prefs (device-local; the
-     * is_synced_key allowlist excludes them, so they never propagate). The
-     * credential goes to the keychain via the platform `SecretStore`; an
-     * omitted/empty password reuses the stored one. The OAuth kinds read the
-     * refresh token stored by a prior [`Self::complete_sync_oauth_json`]. SFTP
-     * (host-key trust flow) + the E2E `wrap_if_encrypted` branch follow.
+     * Configure the sync adapter from a JSON request (`local`/`webdav`/`ftp`/
+     * `dropbox`/`googledrive`/`sftp`): build the plain adapter via
+     * [`Self::build_plain_sync_adapter`], probe it (`test_connection`), apply
+     * the E2E gate ([`Self::wrap_for_target`] — wrap an encrypted target with
+     * the device-local key or refuse), make it the orchestrator's active
+     * adapter, then persist the choice ([`Self::persist_sync_config`] — the
+     * `sync.adapter.*` prefs are device-local; the is_synced_key allowlist
+     * excludes them, so they never propagate; secrets go to the keychain). This
+     * is the "start fresh / overwrite" path; joining an existing dataset is
+     * [`Self::accept_remote_dataset_json`].
      */
 open func configureSyncAdapterJson(configJson: String)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
     uniffi_cal_ffi_fn_method_host_configure_sync_adapter_json(
@@ -1515,6 +1559,24 @@ open func previewSftpHostKeyJson(argsJson: String)throws  -> String  {
     uniffi_cal_ffi_fn_method_host_preview_sftp_host_key_json(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(argsJson),$0
+    )
+})
+}
+    
+    /**
+     * Probe a sync target WITHOUT committing to it (§19.11 onboarding): build
+     * the adapter from `config_json`, read its `meta.json`, and return a
+     * `SyncPreview` JSON — `{"kind":"empty"}` for a fresh target, or
+     * `{"kind":"existing", e2e_enabled, devices, …}` for one that already holds
+     * a dataset. Side-effect-free (nothing is persisted or activated), so the UI
+     * can offer "join this dataset" vs "start fresh (overwrites)" and let the
+     * user back out. Mirrors the desktop `preview_sync_target`.
+     */
+open func previewSyncTargetJson(configJson: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_preview_sync_target_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(configJson),$0
     )
 })
 }
@@ -4994,6 +5056,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_localstore_update_task_json() != 53017) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_cal_ffi_checksum_method_host_accept_remote_dataset_json() != 45743) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_cal_ffi_checksum_method_host_accounts_json() != 21992) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -5006,7 +5071,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_complete_sync_oauth_json() != 1805) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_cal_ffi_checksum_method_host_configure_sync_adapter_json() != 50127) {
+    if (uniffi_cal_ffi_checksum_method_host_configure_sync_adapter_json() != 45284) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_contact_lists_json() != 57501) {
@@ -5085,6 +5150,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_preview_sftp_host_key_json() != 14030) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_preview_sync_target_json() != 3107) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_push_now() != 48331) {
