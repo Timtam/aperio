@@ -484,10 +484,19 @@ fn build_adapter(
             // Look up the user-pinned host fingerprint from the
             // §19.5 trust dialog state so the plugin's in-memory
             // verifier locks the handshake to that exact key.
-            // Empty fingerprint → silent TOFU; the frontend only
-            // calls connect after the trust dialog so this should
-            // never happen in production.
             let pinned_fp = pinned_sftp_fingerprint(db, trimmed_host, *port);
+            // Enforce §19.5 in the backend, not only the UI: an empty pin =
+            // silent TOFU (accept any host key = MITM exposure). The frontend
+            // always trusts the fingerprint before connecting, so this rejects
+            // only an unsafe path (a caller reaching build_adapter without a pin).
+            if pinned_fp.trim().is_empty() {
+                return Err(CommandError {
+                    code: "invalid_input",
+                    message: "SFTP host key not trusted yet — verify + accept the \
+                              host fingerprint first (§19.5)"
+                        .into(),
+                });
+            }
             let cfg = serde_json::json!({
                 "host": trimmed_host,
                 "port": *port,
@@ -2067,6 +2076,13 @@ pub fn build_adapter_from_prefs(
                 }
             };
             let pinned_fp = pinned_sftp_fingerprint(db, host.trim(), port);
+            // §19.5: never restore an SFTP target with no pinned host key — that
+            // would silently TOFU (accept whatever key the network presents) on
+            // the next sync round. Leave sync unconfigured until the user
+            // re-trusts via the trust dialog.
+            if pinned_fp.trim().is_empty() {
+                return None;
+            }
             let cfg = serde_json::json!({
                 "host": host.trim(),
                 "port": port,

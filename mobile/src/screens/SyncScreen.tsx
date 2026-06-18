@@ -74,11 +74,33 @@ export default function SyncScreen() {
   // When set, the §19.5 trust panel is showing the probed fingerprint awaiting
   // the user's explicit accept (first-use or key-change) before connect.
   const [pendingTrust, setPendingTrust] = useState<HostKeyPreview | null>(null);
-  const trustRef = useRef<View>(null);
+  // The trust panel's title — SR focus lands here when the panel appears (each
+  // child, incl. the Accept/Cancel buttons, stays its own a11y node). The connect
+  // button is where focus returns after the panel closes (accept/cancel).
+  const trustRef = useRef<Text>(null);
+  const sftpConnectRef = useRef<View>(null);
+
+  const focusSftpConnect = useCallback(() => {
+    const tag = sftpConnectRef.current
+      ? findNodeHandle(sftpConnectRef.current)
+      : null;
+    if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
+  }, []);
 
   const isOAuthKind = kind === 'dropbox' || kind === 'googledrive';
   const isSftp = kind === 'sftp';
-  const sftpPortNum = sftpPort.trim().length > 0 ? Number(sftpPort.trim()) : 22;
+  // Sanitize the port (matching the FTP field + the desktop guard): a
+  // non-numeric / out-of-range entry falls back to 22 so it never reaches the
+  // bridge as NaN (which would break the host:port pin key + give an opaque
+  // error). Used identically for preview, configure, and forget.
+  const sftpPortParsed = Number(sftpPort.trim());
+  const sftpPortNum =
+    sftpPort.trim().length > 0 &&
+    Number.isInteger(sftpPortParsed) &&
+    sftpPortParsed > 0 &&
+    sftpPortParsed <= 65535
+      ? sftpPortParsed
+      : 22;
 
   const announce = useCallback(
     (message: string) => AccessibilityInfo.announceForAccessibility(message),
@@ -324,7 +346,13 @@ export default function SyncScreen() {
   // straight away; new/changed → surface the trust panel for explicit accept.
   const connectSftp = useCallback(async () => {
     const config = buildSftpConfig();
-    if (config == null) return;
+    if (config == null) {
+      // A blind user pressing the only action button needs feedback, not a
+      // silent no-op — say which fields are missing.
+      setError(t('mobile.sftpFieldsRequired'));
+      announce(t('mobile.sftpFieldsRequired'));
+      return;
+    }
     setError(null);
     setPendingTrust(null);
     setBusy(true);
@@ -359,6 +387,9 @@ export default function SyncScreen() {
     try {
       await trustSftpHostKey(pendingTrust.host_port, pendingTrust.fingerprint);
       setPendingTrust(null);
+      // The focused trust panel just unmounted — return SR focus to the connect
+      // button so the user isn't stranded after the security decision.
+      focusSftpConnect();
       await activateSftp();
     } catch (err) {
       const message = errorMessage(err);
@@ -367,12 +398,13 @@ export default function SyncScreen() {
     } finally {
       setBusy(false);
     }
-  }, [activateSftp, announce, pendingTrust, t]);
+  }, [activateSftp, announce, focusSftpConnect, pendingTrust, t]);
 
   const cancelTrust = useCallback(() => {
     setPendingTrust(null);
-    announce(t('mobile.oauthCancelled'));
-  }, [announce, t]);
+    focusSftpConnect();
+    announce(t('mobile.sftpTrustCancelled'));
+  }, [announce, focusSftpConnect, t]);
 
   // Drop the pinned fingerprint for the entered host (the next connect re-runs
   // the trust dialog). Useful when the user knows the server's key rotated.
@@ -727,6 +759,7 @@ export default function SyncScreen() {
               value={sftpHost}
               onChangeText={setSftpHost}
               accessibilityLabel={t('dialogs.settings.sync.adapterSftpHost')}
+              editable={pendingTrust == null}
               autoCapitalize="none"
               autoCorrect={false}
             />
@@ -741,6 +774,7 @@ export default function SyncScreen() {
               value={sftpPort}
               onChangeText={setSftpPort}
               accessibilityLabel={t('dialogs.settings.sync.adapterSftpPort')}
+              editable={pendingTrust == null}
               keyboardType="number-pad"
               autoCorrect={false}
             />
@@ -752,6 +786,7 @@ export default function SyncScreen() {
               value={sftpUser}
               onChangeText={setSftpUser}
               accessibilityLabel={t('dialogs.settings.sync.adapterSftpUser')}
+              editable={pendingTrust == null}
               autoCapitalize="none"
               autoCorrect={false}
             />
@@ -766,6 +801,7 @@ export default function SyncScreen() {
               value={sftpPath}
               onChangeText={setSftpPath}
               accessibilityLabel={t('dialogs.settings.sync.adapterSftpPath')}
+              editable={pendingTrust == null}
               autoCapitalize="none"
               autoCorrect={false}
             />
@@ -851,14 +887,12 @@ export default function SyncScreen() {
       )}
 
       {pendingTrust != null && (
-        <View
-          ref={trustRef}
-          accessible
-          accessibilityRole="text"
-          accessibilityLiveRegion="assertive"
-          style={styles.trustPanel}
-        >
-          <Text style={styles.trustTitle} accessibilityRole="header">
+        // NOT `accessible` on the container — that would collapse the whole
+        // subtree (incl. the Accept/Cancel buttons) into one node, leaving a
+        // screen-reader user able to read the fingerprint but unable to act on
+        // it. Each child stays its own a11y node; focus lands on the title.
+        <View accessibilityLiveRegion="assertive" style={styles.trustPanel}>
+          <Text ref={trustRef} style={styles.trustTitle} accessibilityRole="header">
             {pendingTrust.status.kind === 'changed'
               ? t('dialogs.settings.sync.sftpTrustChangedTitle')
               : t('dialogs.settings.sync.sftpTrustNewTitle')}
@@ -940,9 +974,10 @@ export default function SyncScreen() {
         </Pressable>
       ) : isSftp ? (
         <Pressable
+          ref={sftpConnectRef}
           accessibilityRole="button"
           accessibilityState={{ disabled: busy, busy }}
-          accessibilityLabel={t('mobile.syncConfigure')}
+          accessibilityLabel={t('dialogs.settings.sync.adapterConfigure')}
           disabled={busy}
           onPress={() => void connectSftp()}
           style={({ pressed }) => [
@@ -952,7 +987,9 @@ export default function SyncScreen() {
           ]}
         >
           <Text style={styles.primaryButtonText}>
-            {busy ? t('mobile.syncing') : t('mobile.syncConfigure')}
+            {busy
+              ? t('dialogs.settings.sync.adapterConnecting')
+              : t('dialogs.settings.sync.adapterConfigure')}
           </Text>
         </Pressable>
       ) : (

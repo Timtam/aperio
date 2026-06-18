@@ -78,7 +78,9 @@
     "oauthSignIn": "Sign in via browser",
     "oauthConnecting": "Signing in …",
     "oauthCancelled": "Sign-in cancelled.",
-    "oauthNoCode": "The sign-in did not return an authorization code. Please try again."
+    "oauthNoCode": "The sign-in did not return an authorization code. Please try again.",
+    "sftpFieldsRequired": "Please enter the host, username and path.",
+    "sftpTrustCancelled": "Cancelled. The pinned host key was left unchanged."
   },
   "common": {
     "colorComposer": {

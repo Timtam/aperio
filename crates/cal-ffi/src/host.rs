@@ -735,13 +735,6 @@ fn restore_adapter_from_prefs(
                 .flatten()
                 .unwrap_or_else(|| "password".to_string());
             let (password, key_path, key_passphrase) = match auth_method.as_str() {
-                "password" => {
-                    // No stored password → incomplete; don't restore.
-                    let pw = secret_store
-                        .retrieve(SFTP_SECRET_ACCOUNT, SecretSlot::Password)
-                        .ok()?;
-                    (pw, String::new(), String::new())
-                }
                 "key" => {
                     let kp = prefs
                         .get(PREF_SFTP_KEY_PATH)
@@ -758,12 +751,29 @@ fn restore_adapter_from_prefs(
                         .unwrap_or_default();
                     (String::new(), kp.trim().to_string(), pass)
                 }
-                _ => return None,
+                // "password" + any unknown value both resolve as password auth —
+                // forward-compat parity with the desktop build_adapter_from_prefs
+                // restore arm (a future auth method an older Aperio doesn't know
+                // still restores as password rather than silently dropping sync).
+                // No stored password → incomplete; don't restore.
+                _ => {
+                    let pw = secret_store
+                        .retrieve(SFTP_SECRET_ACCOUNT, SecretSlot::Password)
+                        .ok()?;
+                    (pw, String::new(), String::new())
+                }
             };
             let host_port = format!("{}:{port}", host.trim());
             let pinned_fp = UserPrefsHostKeyVerifier::new(shared.clone())
                 .peek(&host_port)
                 .unwrap_or_default();
+            // §19.5: never restore an SFTP target with no pinned host key — that
+            // would silently TOFU (accept whatever key the network presents) on
+            // the next sync. Leave sync unconfigured until the user re-trusts via
+            // the Sync screen.
+            if pinned_fp.trim().is_empty() {
+                return None;
+            }
             let cfg = serde_json::json!({
                 "host": host.trim(),
                 "port": port,
@@ -2109,12 +2119,25 @@ impl Host {
                     };
                 let shared = self.db.shared();
                 // The user-pinned host fingerprint (§19.5 trust dialog) locks the
-                // handshake to that exact key. Empty → silent TOFU; the UI only
-                // configures after the trust dialog, so a real connect has a pin.
+                // handshake to that exact key.
                 let host_port = format!("{host}:{port}");
                 let pinned_fp = UserPrefsHostKeyVerifier::new(shared.clone())
                     .peek(&host_port)
                     .unwrap_or_default();
+                // Enforce §19.5 in the BACKEND, not only the UI: refuse to
+                // configure (and thus connect) an SFTP target whose host key isn't
+                // pinned yet — an empty pin = silent TOFU (accept any key = MITM
+                // exposure). The legitimate flow always trusts via
+                // `trust_sftp_host_key` first, so this rejects only the unsafe
+                // paths (a direct/refactored caller bypassing the trust dialog).
+                if pinned_fp.trim().is_empty() {
+                    return Err(StoreError::InvalidField {
+                        field: "pinned_fingerprint".to_string(),
+                        detail: "SFTP host key not trusted yet — preview + trust \
+                                 the host key first (§19.5)"
+                            .to_string(),
+                    });
+                }
                 let cfg = serde_json::json!({
                     "host": host,
                     "port": port,
@@ -3472,6 +3495,25 @@ mod tests {
             )
             .unwrap_err();
         assert!(matches!(err, StoreError::Auth { .. }), "got: {err:?}");
+    }
+
+    #[test]
+    fn configure_sftp_without_a_trusted_pin_is_rejected() {
+        // §19.5 backend guard: with a password supplied (so credential resolution
+        // passes) but no pinned host key, configure must REJECT rather than
+        // silently TOFU — before any network. Closes the MITM hole the UI-only
+        // invariant left open.
+        let (_dir, host, _kc) = open_host();
+        let err = host
+            .configure_sync_adapter_json(
+                r#"{"kind":"sftp","host":"nas","user":"u","path":"/p","password":"pw"}"#
+                    .to_string(),
+            )
+            .unwrap_err();
+        assert!(
+            matches!(err, StoreError::InvalidField { ref field, .. } if field == "pinned_fingerprint"),
+            "got: {err:?}"
+        );
     }
 
     #[test]

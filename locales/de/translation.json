@@ -78,7 +78,9 @@
     "oauthSignIn": "Über den Browser anmelden",
     "oauthConnecting": "Anmeldung läuft …",
     "oauthCancelled": "Anmeldung abgebrochen.",
-    "oauthNoCode": "Die Anmeldung hat keinen Autorisierungscode zurückgegeben. Bitte versuche es erneut."
+    "oauthNoCode": "Die Anmeldung hat keinen Autorisierungscode zurückgegeben. Bitte versuche es erneut.",
+    "sftpFieldsRequired": "Bitte Host, Benutzername und Pfad eingeben.",
+    "sftpTrustCancelled": "Abgebrochen. Der angeheftete Hostschlüssel bleibt unverändert."
   },
   "common": {
     "colorComposer": {
