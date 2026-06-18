@@ -403,36 +403,33 @@ export default function ListEditorModal({
         </Text>
       )}
 
-      {/* Rename — local lists only (an external list's name is provider-owned /
-          a host-local override, deferred). The new name rides its synced row. */}
-      {isLocal && (
-        <>
-          <Text style={styles.heading} accessibilityRole="header">
-            {t('mobile.renameListLabel')}
-          </Text>
-          <View style={styles.addRow}>
-            <TextInput
-              style={styles.input}
-              value={renameText}
-              onChangeText={setRenameText}
-              accessibilityLabel={t('mobile.renameListLabel')}
-              editable={!busy}
-              returnKeyType="done"
-              onSubmitEditing={() => void renameList()}
-            />
-            <Pressable
-              accessibilityRole="button"
-              accessibilityState={{ disabled: busy }}
-              accessibilityLabel={t('mobile.rename')}
-              disabled={busy}
-              onPress={() => void renameList()}
-              style={({ pressed }) => [styles.addButton, pressed && styles.pressed]}
-            >
-              <Text style={styles.addButtonText}>{t('mobile.rename')}</Text>
-            </Pressable>
-          </View>
-        </>
-      )}
+      {/* Rename — every list. A local list renames its own synced row; an
+          external list pushes the rename to its provider (falling back to a
+          host-local name override). */}
+      <Text style={styles.heading} accessibilityRole="header">
+        {t('mobile.renameListLabel')}
+      </Text>
+      <View style={styles.addRow}>
+        <TextInput
+          style={styles.input}
+          value={renameText}
+          onChangeText={setRenameText}
+          accessibilityLabel={t('mobile.renameListLabel')}
+          editable={!busy}
+          returnKeyType="done"
+          onSubmitEditing={() => void renameList()}
+        />
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ disabled: busy }}
+          accessibilityLabel={t('mobile.rename')}
+          disabled={busy}
+          onPress={() => void renameList()}
+          style={({ pressed }) => [styles.addButton, pressed && styles.pressed]}
+        >
+          <Text style={styles.addButtonText}>{t('mobile.rename')}</Text>
+        </Pressable>
+      </View>
 
       {/* Reparent — local lists only (the backend rejects external reparent),
           and only when there's at least one other list to nest under. */}
@@ -446,17 +443,15 @@ export default function ListEditorModal({
         />
       )}
 
-      {/* Colour — local lists only (an external list's colour is a host-local
-          override, deferred). Real swatches for sighted users + the name for
-          SR; binds the list's own color_label. */}
-      {isLocal && (
-        <ColorLabelSelect
-          value={list.color_label ?? ''}
-          labels={colorLabels}
-          onChange={(id) => void setColour(id)}
-          disabled={busy}
-        />
-      )}
+      {/* Colour — every list. A local list binds it on its own synced row; an
+          external list stores a host-local colour override (the read path stamps
+          it back). Real swatches for sighted users + the name for SR. */}
+      <ColorLabelSelect
+        value={list.color_label ?? ''}
+        labels={colorLabels}
+        onChange={(id) => void setColour(id)}
+        disabled={busy}
+      />
 
       {/* Sections — local lists, or external lists whose provider can manage
           sections at the source. */}

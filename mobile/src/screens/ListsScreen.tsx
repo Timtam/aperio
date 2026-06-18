@@ -122,14 +122,10 @@ export default function ListsScreen() {
         >
           {taskLists.map((list) => {
             const selected = selectedTaskListIds.has(list.id);
-            // "Manage" opens the editor. Local lists can always be managed
-            // (reparent + sections + delete). External lists are managed by
-            // their provider — only reparent/delete are local-only on mobile,
-            // while SECTION management routes to the provider — so an external
-            // list gets a "Manage" entry when its adapter can manage sections.
-            const isLocal = list.account_id === 'local';
-            const canManage =
-              isLocal || (list.task_capabilities?.manageable_sections ?? false);
+            // Every list is manageable now (the editor gates each control): a
+            // local list reparents / deletes / binds colour+name on its own row;
+            // an external list can be recoloured + renamed (host-local override /
+            // provider rename) and its sections managed when the adapter allows.
             // The list's bound colour: a swatch for sighted users + the name on
             // the accessible label so colour isn't the only signal.
             const colour = list.color_label
@@ -165,23 +161,14 @@ export default function ListsScreen() {
                     {list.name}
                   </Text>
                 </Pressable>
-                {canManage && (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={`${t('mobile.manageList')}: ${list.name}`}
-                    onPress={() =>
-                      navigation.navigate('ListEditor', { listId: list.id })
-                    }
-                    style={({ pressed }) => [
-                      styles.manageButton,
-                      pressed && styles.rowPressed,
-                    ]}
-                  >
-                    <Text style={styles.manageButtonText}>
-                      {t('mobile.manageList')}
-                    </Text>
-                  </Pressable>
-                )}
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`${t('mobile.manageList')}: ${list.name}`}
+                  onPress={() => navigation.navigate('ListEditor', { listId: list.id })}
+                  style={({ pressed }) => [styles.manageButton, pressed && styles.rowPressed]}
+                >
+                  <Text style={styles.manageButtonText}>{t('mobile.manageList')}</Text>
+                </Pressable>
               </View>
             );
           })}

@@ -19,12 +19,14 @@ import { renameContainer, setContainerColorLabel } from '../api/containerColor';
 import { ColorLabelSelect } from '../components/ColorLabelSelect';
 import type { RootStackScreenProps } from '../navigation/types';
 
-// Manage a single LOCAL calendar: rename it, bind a colour label, or delete it
-// (its events cascade away). Mirrors ListEditorModal's interaction patterns
-// (rename field + immediate-effect colour picker + confirmed delete), trimmed —
-// calendars have no sections or parent. External calendars are provider-managed
-// (rename/colour are host-local overrides, deferred), so this screen only ever
-// opens for local calendars (CalendarsScreen gates the Manage entry).
+// Manage a single calendar: rename it, bind a colour label, or (local only)
+// delete it. Mirrors ListEditorModal's interaction patterns (rename field +
+// immediate-effect colour picker + confirmed delete), trimmed — calendars have
+// no sections or parent. A LOCAL calendar carries its name/colour on its own
+// synced row; an EXTERNAL calendar's rename is pushed to its provider (falling
+// back to a host-local name override) and its colour is a host-local override —
+// both handled Rust-side, so this screen opens for every calendar (delete stays
+// local-only, since an external calendar is provider-owned).
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -179,19 +181,6 @@ export default function CalendarEditorModal({
     );
   }
 
-  if (!isLocal) {
-    // Defensive: CalendarsScreen only offers Manage for local calendars, but if
-    // an external one is reached, it's provider-managed (rename/colour are
-    // host-local overrides not yet on mobile) — show the name read-only.
-    return (
-      <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-        <Text style={styles.title} accessibilityRole="header">
-          {calendar.name}
-        </Text>
-      </ScrollView>
-    );
-  }
-
   return (
     <ScrollView
       style={styles.screen}
@@ -242,19 +231,22 @@ export default function CalendarEditorModal({
         disabled={busy}
       />
 
-      {/* Delete (its events cascade away) — confirmed. */}
-      <Pressable
-        accessibilityRole="button"
-        accessibilityState={{ disabled: busy }}
-        accessibilityLabel={t('sidebar.deleteCalendar', { name: calendar.name })}
-        disabled={busy}
-        onPress={removeCalendar}
-        style={({ pressed }) => [styles.deleteButton, pressed && styles.pressed]}
-      >
-        <Text style={styles.deleteButtonText}>
-          {t('sidebar.deleteCalendar', { name: calendar.name })}
-        </Text>
-      </Pressable>
+      {/* Delete (its events cascade away) — local calendars only; an external
+          calendar is provider-owned, so it can't be deleted from here. */}
+      {isLocal && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ disabled: busy }}
+          accessibilityLabel={t('sidebar.deleteCalendar', { name: calendar.name })}
+          disabled={busy}
+          onPress={removeCalendar}
+          style={({ pressed }) => [styles.deleteButton, pressed && styles.pressed]}
+        >
+          <Text style={styles.deleteButtonText}>
+            {t('sidebar.deleteCalendar', { name: calendar.name })}
+          </Text>
+        </Pressable>
+      )}
     </ScrollView>
   );
 }

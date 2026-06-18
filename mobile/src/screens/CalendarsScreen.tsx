@@ -182,16 +182,17 @@ export default function CalendarsScreen({
                     {accountLabel}
                   </Text>
                 </View>
-                {isLocal && (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={`${t('mobile.manageCalendar')}: ${cal.name}`}
-                    onPress={() => navigation.navigate('CalendarEditor', { calendarId: cal.id })}
-                    style={({ pressed }) => [styles.manageButton, pressed && styles.rowPressed]}
-                  >
-                    <Text style={styles.manageButtonText}>{t('mobile.manageCalendar')}</Text>
-                  </Pressable>
-                )}
+                {/* Every calendar is manageable now: a local calendar carries
+                    its colour/name on its row; an external one stores a
+                    host-local colour/name override (delete stays local-only). */}
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`${t('mobile.manageCalendar')}: ${cal.name}`}
+                  onPress={() => navigation.navigate('CalendarEditor', { calendarId: cal.id })}
+                  style={({ pressed }) => [styles.manageButton, pressed && styles.rowPressed]}
+                >
+                  <Text style={styles.manageButtonText}>{t('mobile.manageCalendar')}</Text>
+                </Pressable>
               </View>
             );
           })}
