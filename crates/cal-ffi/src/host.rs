@@ -2433,6 +2433,74 @@ impl Host {
         Ok(())
     }
 
+    /// Adopt encryption a PEER turned on (§19.7): this device was syncing the
+    /// dataset in PLAINTEXT, a peer enabled E2E, and the next round failed with
+    /// `encryption_required` (the orchestrator's encryption gate). Pure unlock —
+    /// derive the dataset's data key from `passphrase` + the `meta.json` params,
+    /// swap the orchestrator onto an encrypting adapter, flip the local E2E pref,
+    /// store the key device-locally, and re-emit any pre-encryption account
+    /// secrets into the now-encrypted log so the other devices pick them up. No
+    /// re-encryption / device registration (the enabling device already did
+    /// those). After this, the next `sync_now` passes the gate and applies the
+    /// dataset decrypted. Mirrors the desktop `adopt_remote_encryption`.
+    pub fn adopt_remote_encryption_json(&self, passphrase: String) -> Result<(), StoreError> {
+        let pp = passphrase.trim();
+        if pp.is_empty() {
+            return Err(StoreError::InvalidField {
+                field: "passphrase".to_string(),
+                detail: "passphrase must not be empty".to_string(),
+            });
+        }
+        // The configured adapter is plain (we're here precisely because local
+        // e2e is off). meta.json is always plaintext, so fetch_meta passes
+        // through unchanged.
+        let plain = self
+            .orchestrator
+            .adapter_handle()
+            .ok_or_else(|| StoreError::InvalidField {
+                field: "sync".to_string(),
+                detail: "no sync adapter is configured".to_string(),
+            })?;
+        let meta = self
+            .runtime
+            .block_on(async { plain.fetch_meta().await })
+            .map_err(sync_err)?
+            .ok_or(StoreError::NotFound)?;
+        if !meta.e2e_enabled {
+            return Err(StoreError::InvalidField {
+                field: "e2e".to_string(),
+                detail: "this sync target is not encrypted; nothing to adopt".to_string(),
+            });
+        }
+        let params = meta.e2e_params.clone().ok_or_else(|| StoreError::Storage {
+            detail: "meta.json says e2e but carries no params".to_string(),
+        })?;
+        // Verify the passphrase + recover the dataset key (a wrong passphrase
+        // fails here, before any state changes).
+        let dek = resolve_data_key(pp, &params).map_err(sync_err)?;
+        let encrypting = wrap_if_encrypted(plain, Some(dek));
+        let shared = self.db.shared();
+        let prefs = UserPrefsRepo::new(&shared);
+        // Store the key, flip the pref, then swap the adapter — the same order
+        // as the desktop so the next-boot restore wraps to match.
+        store_e2e_key(self.secret_store.as_ref(), &dek)?;
+        prefs
+            .set(host_core::credential_sync::PREF_E2E_ENABLED, "true")
+            .map_err(storage_err)?;
+        self.orchestrator.configure(encrypting);
+        // E2E is now on for this device too. Push any local account secret that
+        // predates the encryption (created while syncing in plaintext, so it
+        // never got a `credential.set`) into the now-encrypted log so those
+        // accounts reach the other devices without re-entry. Idempotent + gated
+        // on the E2E pref we just set.
+        host_core::credential_sync::emit_all_local_credentials(
+            &self.writer,
+            &shared,
+            self.secret_store.as_ref(),
+        );
+        Ok(())
+    }
+
     /// Complete a host-driven OAuth flow for a SYNC adapter (`plugin_id` =
     /// `com.aperio.sync-adapter-dropbox` / `…-googledrive`): exchange the
     /// redirect's `code` (+ the `pkce_verifier`/`state` from
@@ -4175,6 +4243,97 @@ mod tests {
         assert!(matches!(
             host.change_sync_passphrase_json("old".to_string(), "new".to_string())
                 .unwrap_err(),
+            StoreError::InvalidField { ref field, .. } if field == "sync"
+        ));
+    }
+
+    #[test]
+    fn a_plaintext_device_adopts_encryption_a_peer_turned_on() {
+        const PASS: &str = "correct horse battery";
+        let remote = tempfile::tempdir().unwrap();
+        let cfg = format!(
+            r#"{{"kind":"local","path":{}}}"#,
+            serde_json::to_string(&remote.path().to_string_lossy()).unwrap()
+        );
+
+        // Device A configures the target and creates a calendar + event.
+        let dir_a = tempfile::tempdir().unwrap();
+        let host_a = open_named(&dir_a, "a");
+        host_a.configure_sync_adapter_json(cfg.clone()).unwrap();
+        let cal = calendar_id(
+            &host_a
+                .create_calendar_json(r#"{"name":"Shared"}"#.to_string())
+                .unwrap(),
+        );
+        let created = host_a
+            .create_event_json(new_event_json(&cal, "Adopt me"))
+            .unwrap();
+        let event_id = serde_json::from_str::<serde_json::Value>(&created).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        // Device B configures the SAME target in PLAINTEXT (no round yet).
+        let dir_b = tempfile::tempdir().unwrap();
+        let host_b = open_named(&dir_b, "b");
+        host_b.configure_sync_adapter_json(cfg.clone()).unwrap();
+
+        // A turns on E2E + pushes the (now-encrypted) dataset.
+        host_a
+            .enable_sync_encryption_json(PASS.to_string())
+            .unwrap();
+        wait_for_pending(&dir_a);
+        host_a.sync_now_json().unwrap();
+
+        // B's next round hits the encryption gate: the target is encrypted but B
+        // is still plaintext → EncryptionRequired, latched as the error code.
+        assert!(
+            host_b.sync_now_json().is_err(),
+            "a plaintext device must refuse a round against an encrypted target",
+        );
+        let status: serde_json::Value =
+            serde_json::from_str(&host_b.sync_status_json().unwrap()).unwrap();
+        assert_eq!(
+            status["last_error_code"],
+            serde_json::json!("encryption_required"),
+            "the gate must latch encryption_required for the adopt banner; got: {status}",
+        );
+
+        // B adopts encryption with the passphrase, then a round succeeds and B
+        // sees A's event decrypted.
+        host_b
+            .adopt_remote_encryption_json(PASS.to_string())
+            .unwrap();
+        host_b.sync_now_json().unwrap();
+        let after: serde_json::Value =
+            serde_json::from_str(&host_b.sync_status_json().unwrap()).unwrap();
+        assert_eq!(after["e2e_enabled"], serde_json::json!(true));
+        assert_eq!(
+            after["last_error_code"],
+            serde_json::json!(null),
+            "a successful round must clear the latch"
+        );
+        let events: serde_json::Value =
+            serde_json::from_str(&host_b.get_events_json(covering_range(&cal)).unwrap()).unwrap();
+        assert!(
+            events
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|e| e["id"] == serde_json::json!(event_id)),
+            "B must decrypt A's event after adopting encryption; got: {events}",
+        );
+    }
+
+    #[test]
+    fn adopt_remote_encryption_rejects_empty_and_unconfigured() {
+        let (_dir, host, _kc) = open_host();
+        assert!(matches!(
+            host.adopt_remote_encryption_json("  ".to_string()).unwrap_err(),
+            StoreError::InvalidField { ref field, .. } if field == "passphrase"
+        ));
+        assert!(matches!(
+            host.adopt_remote_encryption_json("pp".to_string()).unwrap_err(),
             StoreError::InvalidField { ref field, .. } if field == "sync"
         ));
     }

@@ -728,6 +728,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_accounts_json(
     ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_adopt_remote_encryption_json(
+    ): Short
     external fun uniffi_cal_ffi_checksum_method_host_begin_oauth_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_change_sync_passphrase_json(
@@ -909,6 +911,8 @@ external fun uniffi_cal_ffi_fn_method_host_accept_remote_dataset_json(`ptr`: Lon
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_accounts_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_adopt_remote_encryption_json(`ptr`: Long,`passphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_cal_ffi_fn_method_host_begin_oauth_json(`ptr`: Long,`pluginId`: RustBuffer.ByValue,`argsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_change_sync_passphrase_json(`ptr`: Long,`oldPassphrase`: RustBuffer.ByValue,`newPassphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1216,6 +1220,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_accounts_json() != 21992.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_adopt_remote_encryption_json() != 12036.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_begin_oauth_json() != 10684.toShort()) {
@@ -1832,6 +1839,20 @@ public interface HostInterface {
     fun `accountsJson`(): kotlin.String
     
     /**
+     * Adopt encryption a PEER turned on (§19.7): this device was syncing the
+     * dataset in PLAINTEXT, a peer enabled E2E, and the next round failed with
+     * `encryption_required` (the orchestrator's encryption gate). Pure unlock —
+     * derive the dataset's data key from `passphrase` + the `meta.json` params,
+     * swap the orchestrator onto an encrypting adapter, flip the local E2E pref,
+     * store the key device-locally, and re-emit any pre-encryption account
+     * secrets into the now-encrypted log so the other devices pick them up. No
+     * re-encryption / device registration (the enabling device already did
+     * those). After this, the next `sync_now` passes the gate and applies the
+     * dataset decrypted. Mirrors the desktop `adopt_remote_encryption`.
+     */
+    fun `adoptRemoteEncryptionJson`(`passphrase`: kotlin.String)
+    
+    /**
      * Begin a host-driven OAuth flow for `plugin_id` (e.g.
      * `com.aperio.cal-adapter-google`). `args_json` carries the provider's
      * begin inputs — `{client_id, redirect_uri}` (Google) /
@@ -2392,6 +2413,31 @@ open class Host: Disposable, AutoCloseable, HostInterface
     }
     )
     }
+    
+
+    
+    /**
+     * Adopt encryption a PEER turned on (§19.7): this device was syncing the
+     * dataset in PLAINTEXT, a peer enabled E2E, and the next round failed with
+     * `encryption_required` (the orchestrator's encryption gate). Pure unlock —
+     * derive the dataset's data key from `passphrase` + the `meta.json` params,
+     * swap the orchestrator onto an encrypting adapter, flip the local E2E pref,
+     * store the key device-locally, and re-emit any pre-encryption account
+     * secrets into the now-encrypted log so the other devices pick them up. No
+     * re-encryption / device registration (the enabling device already did
+     * those). After this, the next `sync_now` passes the gate and applies the
+     * dataset decrypted. Mirrors the desktop `adopt_remote_encryption`.
+     */
+    @Throws(StoreException::class)override fun `adoptRemoteEncryptionJson`(`passphrase`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_adopt_remote_encryption_json(
+        it,
+        FfiConverterString.lower(`passphrase`),_status)
+}
+    }
+    
     
 
     

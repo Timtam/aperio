@@ -15,6 +15,7 @@ import {
 
 import {
   acceptRemoteDataset,
+  adoptRemoteEncryption,
   changeSyncPassphrase,
   configureSyncAdapter,
   enableSyncEncryption,
@@ -81,6 +82,10 @@ export default function SyncScreen() {
   const [e2ePassphrase, setE2ePassphrase] = useState(''); // enable-E2E passphrase
   const [changeOldPp, setChangeOldPp] = useState(''); // rotate: current passphrase
   const [changeNewPp, setChangeNewPp] = useState(''); // rotate: new passphrase
+  const [adoptPp, setAdoptPp] = useState(''); // adopt peer-enabled E2E passphrase
+  // The adopt banner's title — SR focus lands here when it appears so the blind
+  // user reaches the passphrase prompt after the round failed.
+  const adoptBannerRef = useRef<Text>(null);
   // §19.11 onboarding: the result of probing the entered target (null until the
   // user taps "Check existing dataset"). When `existing`, the join panel shows.
   const [preview, setPreview] = useState<SyncPreview | null>(null);
@@ -652,6 +657,46 @@ export default function SyncScreen() {
     }
   }, [announce, changeNewPp, changeOldPp, t]);
 
+  // Adopt encryption a peer turned on (§19.7): a round failed with
+  // `encryption_required`; the user supplies the dataset passphrase, we unlock +
+  // switch to encrypted mode, then run a round (now decryptable) and refresh —
+  // which clears the latch and removes this banner.
+  const adoptEncryption = useCallback(async () => {
+    const pp = adoptPp.trim();
+    if (pp.length === 0) {
+      setError(t('dialogs.settings.sync.e2ePassphraseRequired'));
+      announce(t('dialogs.settings.sync.e2ePassphraseRequired'));
+      return;
+    }
+    setError(null);
+    setBusy(true);
+    try {
+      await adoptRemoteEncryption(adoptPp);
+      setAdoptPp('');
+      announce(t('dialogs.settings.sync.adoptRemoteE2eOk'));
+      // Now that we can decrypt, run a round; refresh clears the latched code.
+      await syncNow();
+      await refresh();
+    } catch (err) {
+      const message = errorMessage(err);
+      setError(message);
+      announce(t('mobile.error', { message }));
+    } finally {
+      setBusy(false);
+    }
+  }, [adoptPp, announce, refresh, t]);
+
+  // Move SR focus onto the adopt banner when it appears (a round just failed
+  // with encryption_required), so the blind user lands on the passphrase prompt.
+  const adoptRequired = status?.last_error_code === 'encryption_required';
+  useEffect(() => {
+    if (!adoptRequired) return;
+    const tag = adoptBannerRef.current
+      ? findNodeHandle(adoptBannerRef.current)
+      : null;
+    if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
+  }, [adoptRequired]);
+
   const lastSynced =
     status?.last_synced_at != null
       ? new Date(status.last_synced_at).toLocaleString()
@@ -697,6 +742,53 @@ export default function SyncScreen() {
         >
           {t('mobile.syncSustainedFailure')}
         </Text>
+      )}
+
+      {/* §19.7 — another device turned encryption on; a round failed with
+          encryption_required. Prompt for the dataset passphrase to adopt it. */}
+      {adoptRequired && (
+        <View style={styles.field}>
+          <Text
+            ref={adoptBannerRef}
+            style={styles.label}
+            accessibilityRole="header"
+          >
+            {t('dialogs.settings.sync.adoptRemoteE2eTitle')}
+          </Text>
+          <Text style={styles.hint} accessibilityRole="text">
+            {t('dialogs.settings.sync.adoptRemoteE2eHint')}
+          </Text>
+          <Text style={styles.label}>
+            {t('dialogs.settings.sync.adoptRemoteE2ePassphraseLabel')}
+          </Text>
+          <TextInput
+            style={styles.input}
+            value={adoptPp}
+            onChangeText={setAdoptPp}
+            accessibilityLabel={t('dialogs.settings.sync.adoptRemoteE2ePassphraseLabel')}
+            secureTextEntry
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ disabled: busy, busy }}
+            accessibilityLabel={t('dialogs.settings.sync.adoptRemoteE2eAction')}
+            disabled={busy}
+            onPress={() => void adoptEncryption()}
+            style={({ pressed }) => [
+              styles.primaryButton,
+              pressed && styles.primaryPressed,
+              busy && styles.primaryDisabled,
+            ]}
+          >
+            <Text style={styles.primaryButtonText}>
+              {busy
+                ? t('dialogs.settings.sync.adoptRemoteE2eRunning')
+                : t('dialogs.settings.sync.adoptRemoteE2eAction')}
+            </Text>
+          </Pressable>
+        </View>
       )}
 
       {status?.configured && (

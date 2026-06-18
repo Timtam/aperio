@@ -122,6 +122,10 @@ export interface SyncStatus {
   min_app_version_required: string | null;
   sustained_failure: boolean;
   stale_device_since: string | null;
+  /** The latched error code from the last failed round (the desktop
+   *  `last_error_code`). `'encryption_required'` means a peer turned on E2E and
+   *  this device must {@link adoptRemoteEncryption} with the passphrase. */
+  last_error_code: string | null;
 }
 
 /** Outcome of one sync round (the desktop `SyncRoundReport` shape). */
@@ -159,6 +163,14 @@ export const pushNow = (): Promise<number> => CalFfi.pushNow();
  *  without the passphrase — losing it means losing the data. */
 export const enableSyncEncryption = async (passphrase: string): Promise<void> => {
   await CalFfi.enableSyncEncryptionJson(passphrase);
+};
+
+/** Adopt encryption a PEER turned on (§19.7): when a sync round fails because
+ *  another device enabled E2E (status `last_error_code === 'encryption_required'`),
+ *  call this with the dataset passphrase to derive the key, switch this device to
+ *  encrypted mode, and unblock syncing. Mirrors the desktop `adopt_remote_encryption`. */
+export const adoptRemoteEncryption = async (passphrase: string): Promise<void> => {
+  await CalFfi.adoptRemoteEncryptionJson(passphrase);
 };
 
 /** Rotate the E2E passphrase on the configured (encrypted) target: verify the

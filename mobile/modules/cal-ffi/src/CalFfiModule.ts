@@ -190,6 +190,12 @@ declare class CalFfiModule extends NativeModule<Record<never, never>> {
     oldPassphrase: string,
     newPassphrase: string,
   ): Promise<void>;
+  /** Adopt encryption a peer turned on (§19.7): this device synced the dataset
+   *  in plaintext, a peer enabled E2E, and the next round failed with
+   *  `encryption_required`. Derives the key from `passphrase` + meta params,
+   *  swaps to an encrypting adapter, flips the local pref, and re-emits local
+   *  account secrets. The following round then applies the dataset decrypted. */
+  adoptRemoteEncryptionJson(passphrase: string): Promise<void>;
 
   // ── Onboarding: preview + join an existing dataset (§19.11) ──
   /** Probe a sync target WITHOUT committing: build the adapter from `configJson`,

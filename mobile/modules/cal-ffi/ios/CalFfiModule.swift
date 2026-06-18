@@ -229,6 +229,10 @@ public class CalFfiModule: Module {
         oldPassphrase: oldPassphrase, newPassphrase: newPassphrase)
     }
 
+    AsyncFunction("adoptRemoteEncryptionJson") { (passphrase: String) in
+      try self.host.adoptRemoteEncryptionJson(passphrase: passphrase)
+    }
+
     // ─── Onboarding: preview + join an existing dataset (§19.11) ──────────────
 
     AsyncFunction("previewSyncTargetJson") { (configJson: String) -> String in

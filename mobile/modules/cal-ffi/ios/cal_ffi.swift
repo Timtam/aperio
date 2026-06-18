@@ -563,6 +563,20 @@ public protocol HostProtocol: AnyObject, Sendable {
     func accountsJson() throws  -> String
     
     /**
+     * Adopt encryption a PEER turned on (§19.7): this device was syncing the
+     * dataset in PLAINTEXT, a peer enabled E2E, and the next round failed with
+     * `encryption_required` (the orchestrator's encryption gate). Pure unlock —
+     * derive the dataset's data key from `passphrase` + the `meta.json` params,
+     * swap the orchestrator onto an encrypting adapter, flip the local E2E pref,
+     * store the key device-locally, and re-emit any pre-encryption account
+     * secrets into the now-encrypted log so the other devices pick them up. No
+     * re-encryption / device registration (the enabling device already did
+     * those). After this, the next `sync_now` passes the gate and applies the
+     * dataset decrypted. Mirrors the desktop `adopt_remote_encryption`.
+     */
+    func adoptRemoteEncryptionJson(passphrase: String) throws 
+    
+    /**
      * Begin a host-driven OAuth flow for `plugin_id` (e.g.
      * `com.aperio.cal-adapter-google`). `args_json` carries the provider's
      * begin inputs — `{client_id, redirect_uri}` (Google) /
@@ -1084,6 +1098,26 @@ open func accountsJson()throws  -> String  {
             self.uniffiCloneHandle(),$0
     )
 })
+}
+    
+    /**
+     * Adopt encryption a PEER turned on (§19.7): this device was syncing the
+     * dataset in PLAINTEXT, a peer enabled E2E, and the next round failed with
+     * `encryption_required` (the orchestrator's encryption gate). Pure unlock —
+     * derive the dataset's data key from `passphrase` + the `meta.json` params,
+     * swap the orchestrator onto an encrypting adapter, flip the local E2E pref,
+     * store the key device-locally, and re-emit any pre-encryption account
+     * secrets into the now-encrypted log so the other devices pick them up. No
+     * re-encryption / device registration (the enabling device already did
+     * those). After this, the next `sync_now` passes the gate and applies the
+     * dataset decrypted. Mirrors the desktop `adopt_remote_encryption`.
+     */
+open func adoptRemoteEncryptionJson(passphrase: String)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_adopt_remote_encryption_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(passphrase),$0
+    )
+}
 }
     
     /**
@@ -5095,6 +5129,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_accounts_json() != 21992) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_adopt_remote_encryption_json() != 12036) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_begin_oauth_json() != 10684) {
