@@ -11,6 +11,9 @@ import {
   View,
 } from 'react-native';
 
+import type { ColorLabel } from '@aperio/shared';
+
+import { ColorLabelSelect } from '../components/ColorLabelSelect';
 import { RadioGroup } from '../components/RadioGroup';
 import {
   Calendar,
@@ -20,6 +23,7 @@ import {
   listCalendars,
   updateEvent,
 } from '../api/calendar';
+import { listColorLabels } from '../api/colorLabels';
 import type { RootStackScreenProps } from '../navigation/types';
 
 // Create / edit a calendar event. Screen-reader-first: every control is an
@@ -68,6 +72,7 @@ export default function EventEditorModal({
   const [error, setError] = useState<string | null>(null);
 
   const [calendars, setCalendars] = useState<Calendar[]>([]);
+  const [colorLabels, setColorLabels] = useState<ColorLabel[]>([]);
   const [original, setOriginal] = useState<CalendarEvent | null>(null);
 
   const [title, setTitle] = useState('');
@@ -79,12 +84,22 @@ export default function EventEditorModal({
   const [endTime, setEndTime] = useState('');
   const [location, setLocation] = useState('');
   const [description, setDescription] = useState('');
+  // The bound colour-label id ('' = none). Only LOCAL events carry it on their
+  // own row; on an external calendar the colour is a host-local override (the
+  // OverridesRepo path, deferred on mobile), so the picker is gated to local.
+  const [colorLabel, setColorLabel] = useState('');
 
   useEffect(() => {
     void (async () => {
       try {
-        const cals = await listCalendars();
+        // The palette feeds the colour picker (best-effort — a failure just
+        // hides the picker's named options, never blocks the editor).
+        const [cals, labels] = await Promise.all([
+          listCalendars(),
+          listColorLabels().catch(() => [] as ColorLabel[]),
+        ]);
         setCalendars(cals);
+        setColorLabels(labels);
         if (editing && eventId != null) {
           const ev = await getEventById(eventId);
           if (ev != null) {
@@ -100,6 +115,7 @@ export default function EventEditorModal({
             setEndTime(e.time);
             setLocation(ev.location ?? '');
             setDescription(ev.description ?? '');
+            setColorLabel(ev.color_label ?? '');
           }
         } else {
           // New event: default to the next full hour today, one hour long.
@@ -141,6 +157,11 @@ export default function EventEditorModal({
       setError(t('dialogs.event.endBeforeStart'));
       return;
     }
+    // Colour: a LOCAL event carries the chosen label on its own row; for an
+    // external event the picker is hidden, so preserve whatever it loaded
+    // (round-trip untouched) rather than letting an empty form value drop it.
+    const isLocalCal = calendars.find((c) => c.id === calId)?.account_id === 'local';
+    const colorToSend = isLocalCal ? colorLabel || null : (original?.color_label ?? null);
     setError(null);
     setSaving(true);
     try {
@@ -156,6 +177,7 @@ export default function EventEditorModal({
           end,
           location: location.trim() || null,
           description: description.trim() || null,
+          color_label: colorToSend,
         });
         AccessibilityInfo.announceForAccessibility(
           t('dialogs.event.updated', { title: updated.title }),
@@ -170,7 +192,7 @@ export default function EventEditorModal({
           end,
           all_day: allDay,
           recurrence: null,
-          color_label: null,
+          color_label: colorToSend,
           reminders: [],
           sound: null,
           attendees: [],
@@ -190,6 +212,8 @@ export default function EventEditorModal({
   }, [
     allDay,
     calId,
+    calendars,
+    colorLabel,
     description,
     editing,
     endDate,
@@ -345,6 +369,18 @@ export default function EventEditorModal({
           multiline
         />
       </View>
+
+      {/* Colour label — local calendars only (an external event's colour is a
+          host-local override, deferred). Shows real swatches for sighted users
+          + the name for SR; binds the event's own color_label. */}
+      {calendars.find((c) => c.id === calId)?.account_id === 'local' && (
+        <ColorLabelSelect
+          value={colorLabel}
+          labels={colorLabels}
+          onChange={setColorLabel}
+          disabled={saving}
+        />
+      )}
 
       <Pressable
         accessibilityRole="button"
