@@ -81,5 +81,17 @@ export function useListFocusManager(count: number) {
     [count],
   );
 
-  return { registerRow, registerAdd, onAdd, onRemove };
+  /** Move SR focus to row `i` directly (the count is unchanged, so the
+   *  count-keyed effect won't fire). For in-place edits like an inline rename
+   *  that swap a row's control without adding/removing a row: call it once the
+   *  row has re-rendered (e.g. from an effect keyed on the edit flag) so the
+   *  re-registered ref is current. */
+  const focusRow = useCallback(
+    (i: number) => {
+      focusNode(rowRefs.current.get(i));
+    },
+    [focusNode],
+  );
+
+  return { registerRow, registerAdd, onAdd, onRemove, focusRow };
 }

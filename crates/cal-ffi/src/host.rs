@@ -190,12 +190,16 @@ fn wrap_if_encrypted(
     }
 }
 
-/// Error for a write attempted against an external task list. Reads route to the
-/// provider, but external task WRITES on mobile are a later phase, so a clear
-/// `Unsupported` beats a confusing local NotFound.
-fn external_tasks_readonly() -> StoreError {
+/// Error for an external task list operation that mobile keeps local-only.
+/// Task + section CONTENT writes (create/update/delete task, create/update/
+/// delete section) DO route to the provider; only re-parenting an external list
+/// stays unsupported (nesting is provider-specific + needs move semantics the
+/// mobile signature doesn't carry). A clear `Unsupported` beats a confusing
+/// local NotFound.
+fn external_reparent_unsupported() -> StoreError {
     StoreError::Unsupported {
-        detail: "editing tasks from external accounts on mobile is not supported yet".to_string(),
+        detail: "reparenting a task list from an external account is not supported on mobile yet"
+            .to_string(),
     }
 }
 
@@ -1862,7 +1866,7 @@ impl Host {
         parent_id: Option<String>,
     ) -> Result<String, StoreError> {
         if !self.is_local_task_list(&id) {
-            return Err(external_tasks_readonly());
+            return Err(external_reparent_unsupported());
         }
         let list = self
             .adapter

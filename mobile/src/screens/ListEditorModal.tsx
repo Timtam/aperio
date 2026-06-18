@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
@@ -11,14 +11,11 @@ import {
   View,
 } from 'react-native';
 
-import type { Section } from '@aperio/shared';
-
 import { useListFocusManager } from '../a11y/useListFocusManager';
 import {
   createSection,
   deleteSection,
   deleteTaskList,
-  getSections,
   reparentTaskList,
   updateSection,
 } from '../api/client';
@@ -26,18 +23,27 @@ import { RadioGroup } from '../components/RadioGroup';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useTaskStore } from '../state/taskStoreContext';
 
-// Manage a single LOCAL task list (the sub-5 piece of the tasks port): reparent
-// it (nest under another list / promote to top level), manage its sections
-// (create / rename / delete), and delete the list. External lists are managed by
-// their provider (writes are Unsupported on mobile), so the Tasks screen only
-// surfaces "Manage" for local lists. Renaming a LIST is a container-override on
-// the desktop (deferred on mobile with the rest of the overrides system), so it
-// is intentionally absent here; SECTION rename is a plain field update and is
-// included.
+// Manage a single task list (the sub-5 piece of the tasks port): reparent it
+// (nest under another list / promote to top level), manage its sections (create
+// / rename / delete), and delete the list.
+//
+// Capability gating (matches the desktop, which gates affordances on
+// task_capabilities):
+//   - Reparent + delete a LIST route only to the LOCAL store on mobile
+//     (reparent_task_list rejects external lists; create/delete list are
+//     local-only), so those two are shown only for the local account.
+//   - SECTIONS create/rename/delete ROUTE to the owning provider, so they're
+//     offered for local lists (the local store supports sections) and for
+//     external lists whose adapter reports `manageable_sections`.
+// Renaming a LIST is a container-override on the desktop (deferred on mobile
+// with the rest of the overrides system, like colour labels + sharing), so it's
+// intentionally absent.
 //
 // Screen-reader-first: the parent picker is an accessible RadioGroup (selecting
 // an option reparents immediately); each section is its own row with Rename +
-// Delete; add/remove move SR focus via useListFocusManager; results announced.
+// Delete; add/remove/rename move SR focus via useListFocusManager; section
+// mutations refresh the SHARED store cache so the grouped Tasks screen regroups;
+// results announced.
 
 const TOP_LEVEL = '__top__';
 
@@ -51,37 +57,54 @@ export default function ListEditorModal({
 }: RootStackScreenProps<'ListEditor'>) {
   const { listId } = route.params;
   const { t } = useTranslation();
-  const { taskLists, refreshTaskLists, invalidateData } = useTaskStore();
+  const {
+    taskLists,
+    refreshTaskLists,
+    invalidateData,
+    loadSections,
+    sectionsByList,
+  } = useTaskStore();
 
   const list = taskLists.find((l) => l.id === listId);
+  // Sections live in the SHARED store cache (the same `sectionsByList` the Tasks
+  // screen groups by), so mutating them here regroups there. Never a private
+  // copy — that was the bug a private copy reintroduces. Memoised so its
+  // identity is stable across renders (the callbacks below depend on it).
+  const sections = useMemo(
+    () => sectionsByList[listId] ?? [],
+    [sectionsByList, listId],
+  );
 
-  const [sections, setSections] = useState<Section[]>([]);
   const [newSectionName, setNewSectionName] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Index of the row currently being renamed, so SR focus can be restored to it
+  // on Save/Cancel (a rename doesn't change the row count, so the focus
+  // manager's count-keyed effect won't fire on its own).
+  const renameIndex = useRef<number | null>(null);
+  const pendingRenameFocus = useRef<number | null>(null);
+
   const announce = useCallback(
     (message: string) => AccessibilityInfo.announceForAccessibility(message),
     [],
   );
 
-  const loadSections = useCallback(async () => {
-    try {
-      setSections(await getSections(listId));
-    } catch (err) {
-      setError(errorMessage(err));
-    }
-  }, [listId]);
-
+  // Load (refresh) this list's sections into the shared store on open.
   useEffect(() => {
-    void loadSections();
-  }, [loadSections]);
+    void loadSections(listId).catch((err) => setError(errorMessage(err)));
+  }, [listId, loadSections]);
+
+  const isLocal = list?.account_id === 'local';
+  const canReparent = isLocal;
+  const canDeleteList = isLocal;
+  const canManageSections =
+    isLocal || (list?.task_capabilities?.manageable_sections ?? false);
 
   // Eligible parents = every OTHER local list that isn't a descendant of this
-  // one (a list can't be nested under itself or its own child — that would make
-  // a cycle). Plus the "top level" sentinel.
+  // one (no cycles). Plus the "top level" sentinel.
   const parentOptions = useMemo(() => {
     const childrenOf = new Map<string | null, string[]>();
     for (const l of taskLists) {
@@ -111,6 +134,7 @@ export default function ListEditorModal({
 
   const reparent = useCallback(
     async (value: string) => {
+      if (busy) return;
       const parentId = value === TOP_LEVEL ? null : value;
       setError(null);
       setBusy(true);
@@ -135,12 +159,24 @@ export default function ListEditorModal({
         setBusy(false);
       }
     },
-    [announce, invalidateData, list, listId, refreshTaskLists, t, taskLists],
+    [announce, busy, invalidateData, list, listId, refreshTaskLists, t, taskLists],
   );
 
   const focus = useListFocusManager(sections.length);
 
+  // Restore SR focus to the renamed row once it reverts from the TextInput back
+  // to its name Text (editingId cleared) — the count is unchanged so the focus
+  // manager's own effect won't fire.
+  useEffect(() => {
+    if (editingId !== null) return;
+    const i = pendingRenameFocus.current;
+    if (i == null) return;
+    pendingRenameFocus.current = null;
+    focus.focusRow(i);
+  }, [editingId, focus]);
+
   const addSection = useCallback(async () => {
+    if (busy) return;
     const name = newSectionName.trim();
     if (name.length === 0) return;
     setError(null);
@@ -151,7 +187,7 @@ export default function ListEditorModal({
       focus.onAdd();
       await createSection({ list_id: listId, name, position });
       setNewSectionName('');
-      await loadSections();
+      await loadSections(listId);
       invalidateData();
       announce(t('dialogs.task.section.created', { name }));
     } catch (err) {
@@ -161,9 +197,20 @@ export default function ListEditorModal({
     } finally {
       setBusy(false);
     }
-  }, [announce, focus, invalidateData, listId, loadSections, newSectionName, sections, t]);
+  }, [
+    announce,
+    busy,
+    focus,
+    invalidateData,
+    listId,
+    loadSections,
+    newSectionName,
+    sections,
+    t,
+  ]);
 
   const saveRename = useCallback(async () => {
+    if (busy) return;
     const section = sections.find((s) => s.id === editingId);
     if (section == null) return;
     const name = editingName.trim();
@@ -172,8 +219,9 @@ export default function ListEditorModal({
     setBusy(true);
     try {
       await updateSection({ ...section, name });
+      pendingRenameFocus.current = renameIndex.current;
       setEditingId(null);
-      await loadSections();
+      await loadSections(listId);
       invalidateData();
       announce(t('dialogs.task.section.renamed', { name }));
     } catch (err) {
@@ -183,20 +231,26 @@ export default function ListEditorModal({
     } finally {
       setBusy(false);
     }
-  }, [announce, editingId, editingName, invalidateData, loadSections, sections, t]);
+  }, [announce, busy, editingId, editingName, invalidateData, listId, loadSections, sections, t]);
+
+  const cancelRename = useCallback(() => {
+    pendingRenameFocus.current = renameIndex.current;
+    setEditingId(null);
+  }, []);
 
   const removeSection = useCallback(
-    async (section: Section, index: number) => {
+    async (sectionId: string, sectionName: string, index: number) => {
+      if (busy) return;
       setError(null);
       setBusy(true);
       try {
         // Deleting a section is non-destructive to its tasks (they fall back to
         // ungrouped), so no confirmation — just a clear announcement.
         focus.onRemove(index);
-        await deleteSection(section.id, listId);
-        await loadSections();
+        await deleteSection(sectionId, listId);
+        await loadSections(listId);
         invalidateData();
-        announce(t('dialogs.task.section.deleted', { name: section.name }));
+        announce(t('dialogs.task.section.deleted', { name: sectionName }));
       } catch (err) {
         const message = errorMessage(err);
         setError(message);
@@ -205,11 +259,11 @@ export default function ListEditorModal({
         setBusy(false);
       }
     },
-    [announce, focus, invalidateData, listId, loadSections, t],
+    [announce, busy, focus, invalidateData, listId, loadSections, t],
   );
 
   const removeList = useCallback(() => {
-    if (list == null) return;
+    if (list == null || busy) return;
     Alert.alert(
       t('dialogs.confirm.deleteTaskListTitle'),
       t('dialogs.confirm.deleteTaskListMessage', { name: list.name }),
@@ -239,7 +293,7 @@ export default function ListEditorModal({
         },
       ],
     );
-  }, [announce, invalidateData, list, listId, navigation, refreshTaskLists, t]);
+  }, [announce, busy, invalidateData, list, listId, navigation, refreshTaskLists, t]);
 
   if (list == null) {
     // The list was deleted (e.g. from another device's sync) while this modal
@@ -275,9 +329,9 @@ export default function ListEditorModal({
         </Text>
       )}
 
-      {/* Reparent — only meaningful when there's at least one other list to nest
-          under (besides the always-present "top level" option). */}
-      {parentOptions.length > 1 && (
+      {/* Reparent — local lists only (the backend rejects external reparent),
+          and only when there's at least one other list to nest under. */}
+      {canReparent && parentOptions.length > 1 && (
         <RadioGroup
           label={t('sidebar.menu.moveUnder')}
           value={currentParent}
@@ -287,130 +341,142 @@ export default function ListEditorModal({
         />
       )}
 
-      {/* Sections */}
-      <Text style={styles.heading} accessibilityRole="header">
-        {t('mobile.sectionsHeading')}
-      </Text>
-
-      <View style={styles.addRow}>
-        <TextInput
-          style={styles.input}
-          value={newSectionName}
-          onChangeText={setNewSectionName}
-          placeholder={t('dialogs.task.section.namePlaceholder')}
-          accessibilityLabel={t('dialogs.task.section.newLabel')}
-          returnKeyType="done"
-          onSubmitEditing={() => void addSection()}
-        />
-        <Pressable
-          ref={focus.registerAdd}
-          accessibilityRole="button"
-          accessibilityState={{ disabled: busy }}
-          accessibilityLabel={t('dialogs.task.section.addAction')}
-          disabled={busy}
-          onPress={() => void addSection()}
-          style={({ pressed }) => [styles.addButton, pressed && styles.pressed]}
-        >
-          <Text style={styles.addButtonText}>
-            {t('dialogs.task.section.create')}
+      {/* Sections — local lists, or external lists whose provider can manage
+          sections at the source. */}
+      {canManageSections && (
+        <>
+          <Text style={styles.heading} accessibilityRole="header">
+            {t('mobile.sectionsHeading')}
           </Text>
-        </Pressable>
-      </View>
 
-      {sections.length === 0 ? (
-        <Text style={styles.muted} accessibilityRole="text">
-          {t('dialogs.task.noSection')}
-        </Text>
-      ) : (
-        sections.map((section, index) =>
-          editingId === section.id ? (
-            <View key={section.id} style={styles.sectionRow}>
-              <TextInput
-                style={styles.input}
-                value={editingName}
-                onChangeText={setEditingName}
-                accessibilityLabel={t('dialogs.task.section.renameLabel')}
-                autoFocus
-                returnKeyType="done"
-                onSubmitEditing={() => void saveRename()}
-              />
-              <Pressable
-                accessibilityRole="button"
-                accessibilityState={{ disabled: busy }}
-                accessibilityLabel={t('dialogs.task.section.save')}
-                disabled={busy}
-                onPress={() => void saveRename()}
-                style={({ pressed }) => [styles.smallButton, pressed && styles.pressed]}
-              >
-                <Text style={styles.smallButtonText}>
-                  {t('dialogs.task.section.save')}
-                </Text>
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={t('dialogs.task.section.cancel')}
-                onPress={() => setEditingId(null)}
-                style={({ pressed }) => [styles.smallButton, pressed && styles.pressed]}
-              >
-                <Text style={styles.smallButtonText}>
-                  {t('dialogs.task.section.cancel')}
-                </Text>
-              </Pressable>
-            </View>
-          ) : (
-            <View key={section.id} style={styles.sectionRow}>
-              <Text
-                ref={focus.registerRow(index)}
-                style={styles.sectionName}
-                accessibilityRole="text"
-              >
-                {section.name}
+          <View style={styles.addRow}>
+            <TextInput
+              style={styles.input}
+              value={newSectionName}
+              onChangeText={setNewSectionName}
+              placeholder={t('dialogs.task.section.namePlaceholder')}
+              accessibilityLabel={t('dialogs.task.section.newLabel')}
+              editable={!busy}
+              returnKeyType="done"
+              onSubmitEditing={() => void addSection()}
+            />
+            <Pressable
+              ref={focus.registerAdd}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: busy }}
+              accessibilityLabel={t('dialogs.task.section.addAction')}
+              disabled={busy}
+              onPress={() => void addSection()}
+              style={({ pressed }) => [styles.addButton, pressed && styles.pressed]}
+            >
+              <Text style={styles.addButtonText}>
+                {t('dialogs.task.section.create')}
               </Text>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityState={{ disabled: busy }}
-                accessibilityLabel={`${t('dialogs.task.section.rename')}: ${section.name}`}
-                disabled={busy}
-                onPress={() => {
-                  setEditingId(section.id);
-                  setEditingName(section.name);
-                }}
-                style={({ pressed }) => [styles.smallButton, pressed && styles.pressed]}
-              >
-                <Text style={styles.smallButtonText}>
-                  {t('dialogs.task.section.rename')}
-                </Text>
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityState={{ disabled: busy }}
-                accessibilityLabel={`${t('dialogs.task.section.delete')}: ${section.name}`}
-                disabled={busy}
-                onPress={() => void removeSection(section, index)}
-                style={({ pressed }) => [styles.smallButton, pressed && styles.pressed]}
-              >
-                <Text style={styles.smallButtonText}>
-                  {t('dialogs.task.section.delete')}
-                </Text>
-              </Pressable>
-            </View>
-          ),
-        )
+            </Pressable>
+          </View>
+
+          {sections.length === 0 ? (
+            <Text style={styles.muted} accessibilityRole="text">
+              {t('dialogs.task.noSection')}
+            </Text>
+          ) : (
+            sections.map((section, index) =>
+              editingId === section.id ? (
+                <View key={section.id} style={styles.sectionRow}>
+                  <TextInput
+                    style={styles.input}
+                    value={editingName}
+                    onChangeText={setEditingName}
+                    accessibilityLabel={t('dialogs.task.section.renameLabel')}
+                    editable={!busy}
+                    autoFocus
+                    returnKeyType="done"
+                    onSubmitEditing={() => void saveRename()}
+                  />
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: busy }}
+                    accessibilityLabel={t('dialogs.task.section.save')}
+                    disabled={busy}
+                    onPress={() => void saveRename()}
+                    style={({ pressed }) => [styles.smallButton, pressed && styles.pressed]}
+                  >
+                    <Text style={styles.smallButtonText}>
+                      {t('dialogs.task.section.save')}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={t('dialogs.task.section.cancel')}
+                    onPress={cancelRename}
+                    style={({ pressed }) => [styles.smallButton, pressed && styles.pressed]}
+                  >
+                    <Text style={styles.smallButtonText}>
+                      {t('dialogs.task.section.cancel')}
+                    </Text>
+                  </Pressable>
+                </View>
+              ) : (
+                <View key={section.id} style={styles.sectionRow}>
+                  <Text
+                    ref={focus.registerRow(index)}
+                    style={styles.sectionName}
+                    accessibilityRole="text"
+                  >
+                    {section.name}
+                  </Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: busy }}
+                    accessibilityLabel={`${t('dialogs.task.section.rename')}: ${section.name}`}
+                    disabled={busy}
+                    onPress={() => {
+                      renameIndex.current = index;
+                      setEditingId(section.id);
+                      setEditingName(section.name);
+                    }}
+                    style={({ pressed }) => [styles.smallButton, pressed && styles.pressed]}
+                  >
+                    <Text style={styles.smallButtonText}>
+                      {t('dialogs.task.section.rename')}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: busy }}
+                    accessibilityLabel={`${t('dialogs.task.section.delete')}: ${section.name}`}
+                    disabled={busy}
+                    onPress={() =>
+                      void removeSection(section.id, section.name, index)
+                    }
+                    style={({ pressed }) => [styles.smallButton, pressed && styles.pressed]}
+                  >
+                    <Text style={styles.smallButtonText}>
+                      {t('dialogs.task.section.delete')}
+                    </Text>
+                  </Pressable>
+                </View>
+              ),
+            )
+          )}
+        </>
       )}
 
-      {/* Delete the whole list (its tasks cascade away) — confirmed. */}
-      <Pressable
-        accessibilityRole="button"
-        accessibilityState={{ disabled: busy }}
-        accessibilityLabel={t('dialogs.confirm.deleteTaskListTitle')}
-        disabled={busy}
-        onPress={removeList}
-        style={({ pressed }) => [styles.deleteButton, pressed && styles.pressed]}
-      >
-        <Text style={styles.deleteButtonText}>
-          {t('dialogs.confirm.deleteTaskListTitle')}
-        </Text>
-      </Pressable>
+      {/* Delete the whole list (local only; its tasks cascade away) — confirmed. */}
+      {canDeleteList && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ disabled: busy }}
+          accessibilityLabel={t('dialogs.confirm.deleteTaskListTitle')}
+          disabled={busy}
+          onPress={removeList}
+          style={({ pressed }) => [styles.deleteButton, pressed && styles.pressed]}
+        >
+          <Text style={styles.deleteButtonText}>
+            {t('dialogs.confirm.deleteTaskListTitle')}
+          </Text>
+        </Pressable>
+      )}
     </ScrollView>
   );
 }

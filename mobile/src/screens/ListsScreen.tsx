@@ -18,11 +18,13 @@ import { createTaskList } from '../api/client';
 import { useTaskStore } from '../state/taskStoreContext';
 
 // Task-list catalog: read the lists, toggle which are shown (the selection Set +
-// reconciler), and create a top-level local list. Each LOCAL list opens a
-// ListEditor modal (reparent / sections management / delete) via "Manage";
-// external lists are provider-managed (writes Unsupported on mobile) so they
-// only toggle. List rename is a container-override (deferred with the rest of
-// the overrides system, like colour labels + sharing).
+// reconciler), and create a top-level local list. A "Manage" entry opens the
+// ListEditor modal: local lists can be reparented / have their sections managed
+// / be deleted; external lists are provider-managed, so on mobile only their
+// SECTION management routes through (reparent + delete a LIST are local-only) —
+// hence external lists get "Manage" only when their adapter reports
+// manageable_sections. List rename is a container-override (deferred with the
+// rest of the overrides system, like colour labels + sharing).
 
 export default function ListsScreen() {
   const { t } = useTranslation();
@@ -119,9 +121,14 @@ export default function ListsScreen() {
         >
           {taskLists.map((list) => {
             const selected = selectedTaskListIds.has(list.id);
-            // External task lists are managed by their provider (writes are
-            // Unsupported on mobile), so only local lists get a "Manage" entry.
+            // "Manage" opens the editor. Local lists can always be managed
+            // (reparent + sections + delete). External lists are managed by
+            // their provider — only reparent/delete are local-only on mobile,
+            // while SECTION management routes to the provider — so an external
+            // list gets a "Manage" entry when its adapter can manage sections.
             const isLocal = list.account_id === 'local';
+            const canManage =
+              isLocal || (list.task_capabilities?.manageable_sections ?? false);
             return (
               <View key={list.id} style={styles.row}>
                 <Pressable
@@ -138,7 +145,7 @@ export default function ListsScreen() {
                   <Text style={styles.check}>{selected ? '☑' : '☐'}</Text>
                   <Text style={styles.listName}>{list.name}</Text>
                 </Pressable>
-                {isLocal && (
+                {canManage && (
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel={`${t('mobile.manageList')}: ${list.name}`}
