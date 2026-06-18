@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
@@ -55,10 +55,8 @@ import {
 import { listColorLabels } from '../api/colorLabels';
 import { getUserPref } from '../api/prefs';
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
-import { describeDue } from '../intl/describeDue';
 import { resolveEventColor } from '../intl/eventColor';
 import { resolveTaskColor, sectionColorMap } from '../intl/taskColor';
-import { useCurrentDayKey } from '../hooks/useCurrentDayKey';
 import type { RootStackScreenProps } from '../navigation/types';
 
 // Accessible Week view — the screen-reader-first port of the desktop WeekView.
@@ -150,7 +148,6 @@ export default function WeekScreen({ navigation, route }: RootStackScreenProps<'
   const [error, setError] = useState<string | null>(null);
   const [jumpText, setJumpText] = useState('');
 
-  const today = useCurrentDayKey();
   const tr = useCallback(
     (key: string, vars?: Record<string, unknown>): string => t(key, vars) as string,
     [t],
@@ -244,7 +241,14 @@ export default function WeekScreen({ navigation, route }: RootStackScreenProps<'
     [fmtTime, t],
   );
 
+  // A request-epoch guard: the latest load wins. Changing the week-start pref
+  // (read async on mount) recomputes `range` and re-fires load while an earlier
+  // fetch may still be in flight; without this, a slow earlier resolution could
+  // overwrite the newer week's data and leave events mismatched against the day
+  // headers (which derive synchronously from `weekStart`).
+  const reqToken = useRef(0);
   const load = useCallback(async () => {
+    const token = (reqToken.current += 1);
     setLoading(true);
     setError(null);
     try {
@@ -256,9 +260,6 @@ export default function WeekScreen({ navigation, route }: RootStackScreenProps<'
         listColorLabels().catch(() => [] as ColorLabel[]),
         listTaskLists().catch(() => [] as TaskList[]),
       ]);
-      setCalendars(cals);
-      setColorLabels(labels);
-      setTaskLists(lists);
       const startIso = range.start.toISOString();
       const endIso = range.end.toISOString();
       const [perCalendar, perList, perListSections] = await Promise.all([
@@ -270,17 +271,24 @@ export default function WeekScreen({ navigation, route }: RootStackScreenProps<'
         Promise.all(lists.map((l) => getTasks(l.id).catch(() => [] as Task[]))),
         Promise.all(lists.map((l) => getSections(l.id).catch(() => [] as Section[]))),
       ]);
+      // A newer load superseded this one (e.g. the week-start pref resolved, or
+      // the week changed) — drop these stale results.
+      if (reqToken.current !== token) return;
+      setCalendars(cals);
+      setColorLabels(labels);
+      setTaskLists(lists);
       // Expand recurring series across the whole week so an event recurring
       // mid-week isn't invisible after its first occurrence (rrule + EXDATE).
       setEvents(expandAll(perCalendar.flat(), { start: range.start, end: range.end }));
       setTasks(perList.flat());
       setSections(perListSections.flat());
     } catch (err) {
+      if (reqToken.current !== token) return;
       const message = errorMessage(err);
       setError(message);
       announce(t('mobile.error', { message }));
     } finally {
-      setLoading(false);
+      if (reqToken.current === token) setLoading(false);
     }
   }, [announce, range, t]);
 
@@ -461,7 +469,7 @@ export default function WeekScreen({ navigation, route }: RootStackScreenProps<'
   // ── Accessible labels ──────────────────────────────────────────────────────
 
   const eventLabel = useCallback(
-    (ev: CalendarEvent, day: Date, span: MultiDayInfo | null): string => {
+    (ev: CalendarEvent, span: MultiDayInfo | null): string => {
       let label = t('views.week.eventLabel', {
         title: ev.title,
         time: eventTimeLabel(ev),
@@ -655,7 +663,7 @@ export default function WeekScreen({ navigation, route }: RootStackScreenProps<'
           key={rowKey}
           accessible
           accessibilityRole="text"
-          accessibilityLabel={eventLabel(ev, day, span)}
+          accessibilityLabel={eventLabel(ev, span)}
           style={styles.row}
         >
           {dot}
@@ -676,7 +684,7 @@ export default function WeekScreen({ navigation, route }: RootStackScreenProps<'
         key={rowKey}
         accessible
         accessibilityRole="button"
-        accessibilityLabel={eventLabel(ev, day, span)}
+        accessibilityLabel={eventLabel(ev, span)}
         accessibilityHint={t('mobile.taskHint')}
         accessibilityActions={[
           { name: 'activate', label: t('mobile.editTaskLabel') },
@@ -714,6 +722,15 @@ export default function WeekScreen({ navigation, route }: RootStackScreenProps<'
     const done = task.status === 'completed';
     const resolved = resolveTaskColor(task, listsById, labelsById, sectionColorById);
     const hex = resolved.hex;
+    // Day-aware visible meta (the row's reason for being on THIS day): its time
+    // if timed here, else a "due"/"planned" marker for this day. (Task-level
+    // describeDue would show the scheduled day on a deadline-day row.)
+    const time = taskTimeOnDay(task, key);
+    const meta = time
+      ? fmtTime(buildTimeDate(key, time))
+      : isDeadlineChip(task, key)
+        ? t('views.tasks.dueDeadline', { date: fmtDateOnly(key) })
+        : t('views.tasks.dueScheduled', { date: fmtDateOnly(key) });
     return (
       <View
         key={`t-${task.id}@${key}`}
@@ -752,7 +769,7 @@ export default function WeekScreen({ navigation, route }: RootStackScreenProps<'
             {task.title}
           </Text>
           <Text style={styles.itemMeta} importantForAccessibility="no">
-            {describeDue(task, tr, today, fmtDateOnly)}
+            {meta}
           </Text>
         </Pressable>
       </View>
