@@ -180,5 +180,14 @@ class CalFfiModule : Module() {
     AsyncFunction("pushNow") {
       host.pushNow().toInt()
     }
+
+    // ─── Reminders ────────────────────────────────────────────────────────────
+    // Upcoming reminder triggers (local + external) within a horizon, for the JS
+    // layer to schedule as expo-notifications. `horizonMinutes` arrives as a JS
+    // Number → widen the Int to the Rust u32.
+
+    AsyncFunction("upcomingRemindersJson") { horizonMinutes: Int ->
+      host.upcomingRemindersJson(horizonMinutes.toUInt())
+    }
   }
 }

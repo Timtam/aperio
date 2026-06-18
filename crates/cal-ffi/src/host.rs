@@ -1585,6 +1585,40 @@ impl Host {
             }
         }
     }
+
+    /// Upcoming reminder triggers within `horizon_minutes` from now, as a JSON
+    /// array of `{item_id, item_kind, title, body, trigger_at}` sorted ascending
+    /// by trigger time, for the mobile layer to register as ahead-of-time OS
+    /// local notifications. Combines local + external sources through the SAME
+    /// `host_core::reminders` enumeration the desktop scheduler uses (one source
+    /// of truth for what fires when). Only future triggers are returned (a past
+    /// notification can't be scheduled); duplicates (an item surfacing from both
+    /// local SQLite and an external adapter) are collapsed, matching the desktop
+    /// dedup key `(item_id, trigger_at)`.
+    pub fn upcoming_reminders_json(&self, horizon_minutes: u32) -> Result<String, StoreError> {
+        let now = chrono::Utc::now();
+        let latest = now + chrono::Duration::minutes(i64::from(horizon_minutes));
+        let shared = self.db.shared();
+        let mut triggers = self.runtime.block_on(async {
+            host_core::reminders::enumerate_triggers(&shared, &self.registry, now, latest).await
+        });
+        triggers.sort_by_key(|t| t.trigger_at);
+        let mut seen = std::collections::HashSet::new();
+        let dtos: Vec<serde_json::Value> = triggers
+            .into_iter()
+            .filter(|t| seen.insert((t.item_id.clone(), t.trigger_at)))
+            .map(|t| {
+                serde_json::json!({
+                    "item_id": t.item_id,
+                    "item_kind": t.item_kind,
+                    "title": t.title,
+                    "body": t.body,
+                    "trigger_at": t.trigger_at.to_rfc3339(),
+                })
+            })
+            .collect();
+        to_json(&dtos)
+    }
 }
 
 /// Map an accounts-repo error to the FFI store error, preserving the
@@ -2335,6 +2369,54 @@ mod tests {
             arr.iter()
                 .all(|l| l["account_id"] == serde_json::json!("local") && l["id"].is_string()),
             "every local list should be tagged account_id=local; got {lists}",
+        );
+    }
+
+    #[test]
+    fn upcoming_reminders_surface_a_local_task_and_respect_the_horizon() {
+        let (_dir, host, _kc) = open_host();
+        let list = host.create_task_list_json("R".to_string()).unwrap();
+        let list_id = serde_json::from_str::<serde_json::Value>(&list).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        // A task scheduled tomorrow at noon with a reminder 15 min before — its
+        // trigger is comfortably in the future and within a 7-day horizon, but
+        // outside a 30-minute one. (Local-time noon avoids DST edges.)
+        let tomorrow = (chrono::Local::now() + chrono::Duration::days(1))
+            .format("%Y-%m-%d")
+            .to_string();
+        let new_task = format!(
+            r#"{{"title":"Ring me","description":null,"status":"open","priority":"medium","scheduled_date":"{tomorrow}","scheduled_time":"12:00:00","deadline_date":null,"deadline_time":null,"recurrence":null,"parent_id":null,"color_label":null,"reminders":[{{"kind":{{"type":"relative","minutes_before":15}},"sound":null}}],"sound":null}}"#
+        );
+        let created = host.create_task_json(list_id, new_task).unwrap();
+        let task_id = serde_json::from_str::<serde_json::Value>(&created).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        // 7-day horizon includes it (tagged item_kind="task").
+        let wide: serde_json::Value =
+            serde_json::from_str(&host.upcoming_reminders_json(10_080).unwrap()).unwrap();
+        assert!(
+            wide.as_array().unwrap().iter().any(|r| {
+                r["item_id"] == serde_json::json!(task_id)
+                    && r["item_kind"] == serde_json::json!("task")
+                    && r["trigger_at"].is_string()
+            }),
+            "the tomorrow reminder should be within a 7-day horizon; got: {wide}",
+        );
+
+        // 30-minute horizon excludes it (a tomorrow trigger is >24h out).
+        let narrow: serde_json::Value =
+            serde_json::from_str(&host.upcoming_reminders_json(30).unwrap()).unwrap();
+        assert!(
+            narrow
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|r| r["item_id"] != serde_json::json!(task_id)),
+            "a tomorrow reminder must be outside a 30-minute horizon; got: {narrow}",
         );
     }
 }

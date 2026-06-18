@@ -757,6 +757,19 @@ public protocol HostProtocol: AnyObject, Sendable {
     func tasksJson(listId: String) throws  -> String
     
     /**
+     * Upcoming reminder triggers within `horizon_minutes` from now, as a JSON
+     * array of `{item_id, item_kind, title, body, trigger_at}` sorted ascending
+     * by trigger time, for the mobile layer to register as ahead-of-time OS
+     * local notifications. Combines local + external sources through the SAME
+     * `host_core::reminders` enumeration the desktop scheduler uses (one source
+     * of truth for what fires when). Only future triggers are returned (a past
+     * notification can't be scheduled); duplicates (an item surfacing from both
+     * local SQLite and an external adapter) are collapsed, matching the desktop
+     * dedup key `(item_id, trigger_at)`.
+     */
+    func upcomingRemindersJson(horizonMinutes: UInt32) throws  -> String
+    
+    /**
      * Update an event in place (its `calendar_id` field selects the route);
      * returns the updated `Event` as JSON. Mirrors the in-place branch of the
      * desktop `update_event`. Cross-calendar moves (the create-on-target +
@@ -1237,6 +1250,26 @@ open func tasksJson(listId: String)throws  -> String  {
     uniffi_cal_ffi_fn_method_host_tasks_json(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(listId),$0
+    )
+})
+}
+    
+    /**
+     * Upcoming reminder triggers within `horizon_minutes` from now, as a JSON
+     * array of `{item_id, item_kind, title, body, trigger_at}` sorted ascending
+     * by trigger time, for the mobile layer to register as ahead-of-time OS
+     * local notifications. Combines local + external sources through the SAME
+     * `host_core::reminders` enumeration the desktop scheduler uses (one source
+     * of truth for what fires when). Only future triggers are returned (a past
+     * notification can't be scheduled); duplicates (an item surfacing from both
+     * local SQLite and an external adapter) are collapsed, matching the desktop
+     * dedup key `(item_id, trigger_at)`.
+     */
+open func upcomingRemindersJson(horizonMinutes: UInt32)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_upcoming_reminders_json(
+            self.uniffiCloneHandle(),
+        FfiConverterUInt32.lower(horizonMinutes),$0
     )
 })
 }
@@ -4631,6 +4664,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_tasks_json() != 40630) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_upcoming_reminders_json() != 5664) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_update_event_json() != 27193) {

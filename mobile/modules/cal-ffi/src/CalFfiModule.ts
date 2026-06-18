@@ -117,6 +117,12 @@ declare class CalFfiModule extends NativeModule<Record<never, never>> {
   /** Push local pending logs without fetching (RN AppState background); returns
    *  the number of logs pushed. */
   pushNow(): Promise<number>;
+
+  // ── Reminders ──
+  /** Upcoming reminder triggers (local + external) within `horizonMinutes` from
+   *  now, as a JSON array of `{item_id, item_kind, title, body, trigger_at}`
+   *  sorted ascending — for scheduling ahead-of-time OS local notifications. */
+  upcomingRemindersJson(horizonMinutes: number): Promise<string>;
 }
 
 export default requireNativeModule<CalFfiModule>('CalFfi');

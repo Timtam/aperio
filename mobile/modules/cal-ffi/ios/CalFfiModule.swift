@@ -156,5 +156,13 @@ public class CalFfiModule: Module {
     AsyncFunction("pushNow") { () -> Int in
       Int(try self.host.pushNow())
     }
+
+    // ─── Reminders ───
+    // Upcoming reminder triggers (local + external) within a horizon, for the JS
+    // layer to schedule as expo-notifications.
+
+    AsyncFunction("upcomingRemindersJson") { (horizonMinutes: Int) -> String in
+      try self.host.upcomingRemindersJson(horizonMinutes: UInt32(horizonMinutes))
+    }
   }
 }

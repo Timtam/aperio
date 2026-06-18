@@ -774,6 +774,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_tasks_json(
     ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_upcoming_reminders_json(
+    ): Short
     external fun uniffi_cal_ffi_checksum_method_host_update_event_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_update_section_json(
@@ -914,6 +916,8 @@ external fun uniffi_cal_ffi_fn_method_host_task_json(`ptr`: Long,`id`: RustBuffe
 external fun uniffi_cal_ffi_fn_method_host_task_lists_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_tasks_json(`ptr`: Long,`listId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_upcoming_reminders_json(`ptr`: Long,`horizonMinutes`: Int,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_update_event_json(`ptr`: Long,`eventJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1205,6 +1209,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_tasks_json() != 40630.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_upcoming_reminders_json() != 5664.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_update_event_json() != 27193.toShort()) {
@@ -1886,6 +1893,19 @@ public interface HostInterface {
     fun `tasksJson`(`listId`: kotlin.String): kotlin.String
     
     /**
+     * Upcoming reminder triggers within `horizon_minutes` from now, as a JSON
+     * array of `{item_id, item_kind, title, body, trigger_at}` sorted ascending
+     * by trigger time, for the mobile layer to register as ahead-of-time OS
+     * local notifications. Combines local + external sources through the SAME
+     * `host_core::reminders` enumeration the desktop scheduler uses (one source
+     * of truth for what fires when). Only future triggers are returned (a past
+     * notification can't be scheduled); duplicates (an item surfacing from both
+     * local SQLite and an external adapter) are collapsed, matching the desktop
+     * dedup key `(item_id, trigger_at)`.
+     */
+    fun `upcomingRemindersJson`(`horizonMinutes`: kotlin.UInt): kotlin.String
+    
+    /**
      * Update an event in place (its `calendar_id` field selects the route);
      * returns the updated `Event` as JSON. Mirrors the in-place branch of the
      * desktop `update_event`. Cross-calendar moves (the create-on-target +
@@ -2516,6 +2536,31 @@ open class Host: Disposable, AutoCloseable, HostInterface
     UniffiLib.uniffi_cal_ffi_fn_method_host_tasks_json(
         it,
         FfiConverterString.lower(`listId`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Upcoming reminder triggers within `horizon_minutes` from now, as a JSON
+     * array of `{item_id, item_kind, title, body, trigger_at}` sorted ascending
+     * by trigger time, for the mobile layer to register as ahead-of-time OS
+     * local notifications. Combines local + external sources through the SAME
+     * `host_core::reminders` enumeration the desktop scheduler uses (one source
+     * of truth for what fires when). Only future triggers are returned (a past
+     * notification can't be scheduled); duplicates (an item surfacing from both
+     * local SQLite and an external adapter) are collapsed, matching the desktop
+     * dedup key `(item_id, trigger_at)`.
+     */
+    @Throws(StoreException::class)override fun `upcomingRemindersJson`(`horizonMinutes`: kotlin.UInt): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_upcoming_reminders_json(
+        it,
+        FfiConverterUInt.lower(`horizonMinutes`),_status)
 }
     }
     )
