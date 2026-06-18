@@ -78,9 +78,13 @@ function dateTimeToIso(date: string, time: string): string | null {
 export function RemindersEditor({
   value,
   onChange,
+  mode = 'task',
 }: {
   value: Reminder[];
   onChange: (next: Reminder[]) => void;
+  /** Whether the relative reminder anchors on a task's due date ("Before due")
+   *  or an event's start ("Before start"). Mirrors the desktop editor's mode. */
+  mode?: 'event' | 'task';
 }) {
   const { t } = useTranslation();
   // Move SR focus to the new/sibling row after add/remove (RN won't on its own).
@@ -116,6 +120,7 @@ export function RemindersEditor({
           <ReminderRow
             key={i}
             value={reminder}
+            mode={mode}
             position={i + 1}
             rowRef={registerRow(i)}
             onChange={(next) => update(i, next)}
@@ -140,12 +145,14 @@ function ReminderRow({
   value,
   onChange,
   onRemove,
+  mode,
   position,
   rowRef,
 }: {
   value: Reminder;
   onChange: (next: Reminder) => void;
   onRemove: () => void;
+  mode: 'event' | 'task';
   position: number;
   /** Focus target for the SR focus manager (the row's label). */
   rowRef: RowRefCallback;
@@ -170,7 +177,14 @@ function ReminderRow({
         label={t('reminders.kindLabel')}
         value={kindOption}
         options={[
-          { value: 'relative', label: t('reminders.kind.relativeTask') },
+          {
+            value: 'relative',
+            label: t(
+              mode === 'event'
+                ? 'reminders.kind.relativeEvent'
+                : 'reminders.kind.relativeTask',
+            ),
+          },
           { value: 'absolute', label: t('reminders.kind.absolute') },
           { value: 'app_start', label: t('reminders.kind.appStart') },
         ]}

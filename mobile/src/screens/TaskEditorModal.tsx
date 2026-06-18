@@ -549,6 +549,7 @@ export default function TaskEditorModal({
       )}
 
       <RemindersEditor
+        mode="task"
         value={form.reminders}
         onChange={(reminders) => update('reminders', reminders)}
       />

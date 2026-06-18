@@ -11,10 +11,11 @@ import {
   View,
 } from 'react-native';
 
-import type { ColorLabel } from '@aperio/shared';
+import type { ColorLabel, Reminder } from '@aperio/shared';
 
 import { ColorLabelSelect } from '../components/ColorLabelSelect';
 import { RadioGroup } from '../components/RadioGroup';
+import { RemindersEditor } from '../components/RemindersEditor';
 import {
   Calendar,
   CalendarEvent,
@@ -88,6 +89,9 @@ export default function EventEditorModal({
   // own row; on an external calendar the colour is a host-local override (the
   // OverridesRepo path, deferred on mobile), so the picker is gated to local.
   const [colorLabel, setColorLabel] = useState('');
+  // Reminders (relative-to-start / absolute / app-start), the same Reminder[]
+  // the task editor edits — round-trips through create/update_event unchanged.
+  const [reminders, setReminders] = useState<Reminder[]>([]);
 
   useEffect(() => {
     void (async () => {
@@ -116,6 +120,7 @@ export default function EventEditorModal({
             setLocation(ev.location ?? '');
             setDescription(ev.description ?? '');
             setColorLabel(ev.color_label ?? '');
+            setReminders(ev.reminders ?? []);
           }
         } else {
           // New event: default to the next full hour today, one hour long.
@@ -178,6 +183,7 @@ export default function EventEditorModal({
           location: location.trim() || null,
           description: description.trim() || null,
           color_label: colorToSend,
+          reminders,
         });
         AccessibilityInfo.announceForAccessibility(
           t('dialogs.event.updated', { title: updated.title }),
@@ -193,7 +199,7 @@ export default function EventEditorModal({
           all_day: allDay,
           recurrence: null,
           color_label: colorToSend,
-          reminders: [],
+          reminders,
           sound: null,
           attendees: [],
         });
@@ -221,6 +227,7 @@ export default function EventEditorModal({
     location,
     navigation,
     original,
+    reminders,
     startDate,
     startTime,
     t,
@@ -381,6 +388,10 @@ export default function EventEditorModal({
           disabled={saving}
         />
       )}
+
+      {/* Reminders — relative-to-start / absolute / app-start, the same editor
+          as tasks (mode="event" labels the relative kind "Before start"). */}
+      <RemindersEditor mode="event" value={reminders} onChange={setReminders} />
 
       <Pressable
         accessibilityRole="button"
