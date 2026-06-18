@@ -19,7 +19,11 @@ import {
   reparentTaskList,
   updateSection,
 } from '../api/client';
-import { renameContainer, setContainerColorLabel } from '../api/containerColor';
+import {
+  renameContainer,
+  setContainerColorLabel,
+  setSectionColor,
+} from '../api/containerColor';
 import { ColorLabelSelect } from '../components/ColorLabelSelect';
 import { RadioGroup } from '../components/RadioGroup';
 import type { RootStackScreenProps } from '../navigation/types';
@@ -278,10 +282,11 @@ export default function ListEditorModal({
     setError(null);
     setBusy(true);
     try {
-      // Name + colour in one write. The colour rides the section's own row for
-      // a LOCAL section; for an external section the picker is hidden and the
-      // Host's external update_section ignores colour anyway (name only).
-      await updateSection({ ...section, name, color_label: editingColor || null });
+      // Name via update_section (renames the row / pushes to the provider);
+      // colour via set_section_color, which routes local → row, external →
+      // host-local override (update_section ignores colour for external).
+      await updateSection({ ...section, name });
+      await setSectionColor(section.id, listId, editingColor || null);
       pendingRenameFocus.current = renameIndex.current;
       setEditingId(null);
       await loadSections(listId);
@@ -510,15 +515,15 @@ export default function ListEditorModal({
                     returnKeyType="done"
                     onSubmitEditing={() => void saveRename()}
                   />
-                  {/* Colour — LOCAL sections only (external = override, deferred). */}
-                  {isLocal && (
-                    <ColorLabelSelect
-                      value={editingColor}
-                      labels={colorLabels}
-                      onChange={setEditingColor}
-                      disabled={busy}
-                    />
-                  )}
+                  {/* Colour — every section: a local section binds it on its
+                      row, an external one via a host-local override (set on
+                      Save through set_section_color). */}
+                  <ColorLabelSelect
+                    value={editingColor}
+                    labels={colorLabels}
+                    onChange={setEditingColor}
+                    disabled={busy}
+                  />
                   <View style={styles.editButtons}>
                     <Pressable
                       accessibilityRole="button"

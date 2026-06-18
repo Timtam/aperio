@@ -22,14 +22,26 @@ export const setContainerColorLabel = async (
   scheduleBackgroundPush();
 };
 
-/** Rename a LOCAL container (calendar / task list). The new name rides the
- *  container's own row + Updated sync event. External containers + contact
- *  lists (provider/override path) reject — the UI only offers it for local. */
+/** Rename a container (calendar / task list). A local container's new name rides
+ *  its own row + Updated sync event; an external one's rename is pushed to its
+ *  provider (else a host-local name override). Contact lists are unsupported. */
 export const renameContainer = async (
   containerId: string,
   kind: ContainerKind,
   name: string,
 ): Promise<void> => {
   await CalFfi.renameContainer(containerId, kind, name);
+  scheduleBackgroundPush();
+};
+
+/** Set (or clear, with `null`) a SECTION's colour label. A local section binds
+ *  it on its own row (+ sync event); an external section stores a host-local
+ *  override. `listId` routes the call. */
+export const setSectionColor = async (
+  sectionId: string,
+  listId: string,
+  colorLabelId: string | null,
+): Promise<void> => {
+  await CalFfi.setSectionColor(sectionId, listId, colorLabelId);
   scheduleBackgroundPush();
 };
