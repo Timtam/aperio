@@ -4,6 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useTranslation } from 'react-i18next';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { useSyncTriggers } from './api/syncTriggers';
 import type { RootStackParamList } from './navigation/types';
 import AccountsScreen from './screens/AccountsScreen';
 import EventEditorModal from './screens/EventEditorModal';
@@ -31,6 +32,10 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export default function App() {
   const { t } = useTranslation();
+  // JS-driven sync: full round on launch + every foreground-resume, a push on
+  // background, and a debounced push after each mutation (wired in the api
+  // clients). The mobile stand-in for the desktop SyncScheduler.
+  useSyncTriggers();
   return (
     <SafeAreaProvider>
       <StatusBar style="auto" />

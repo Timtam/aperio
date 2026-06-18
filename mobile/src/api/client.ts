@@ -15,6 +15,8 @@
 import CalFfi from '../../modules/cal-ffi';
 import type { Section, Task, TaskList } from '@aperio/shared';
 
+import { scheduleBackgroundPush } from './syncTriggers';
+
 export interface CreateTaskListRequest {
   name: string;
   /** Account to create the list in. Local store ignores it (always local). */
@@ -62,17 +64,29 @@ export const listTaskLists = async (): Promise<TaskList[]> =>
  *  alone (the full request type is kept for desktop call-site parity). */
 export const createTaskList = async (
   request: CreateTaskListRequest,
-): Promise<TaskList> =>
-  JSON.parse(await CalFfi.createTaskListJson(request.name)) as TaskList;
+): Promise<TaskList> => {
+  const created = JSON.parse(
+    await CalFfi.createTaskListJson(request.name),
+  ) as TaskList;
+  scheduleBackgroundPush();
+  return created;
+};
 
 export const reparentTaskList = async (
   id: string,
   parentId: string | null,
-): Promise<TaskList> =>
-  JSON.parse(await CalFfi.reparentTaskListJson(id, parentId)) as TaskList;
+): Promise<TaskList> => {
+  const updated = JSON.parse(
+    await CalFfi.reparentTaskListJson(id, parentId),
+  ) as TaskList;
+  scheduleBackgroundPush();
+  return updated;
+};
 
-export const deleteTaskList = (id: string): Promise<void> =>
-  CalFfi.deleteTaskList(id);
+export const deleteTaskList = async (id: string): Promise<void> => {
+  await CalFfi.deleteTaskList(id);
+  scheduleBackgroundPush();
+};
 
 // ── Tasks ────────────────────────────────────────────────────────────────────
 
@@ -114,19 +128,29 @@ export const createTask = async (request: CreateTaskRequest): Promise<Task> => {
     sound: request.sound,
     assignees: [],
   };
-  return JSON.parse(
+  const created = JSON.parse(
     await CalFfi.createTaskJson(request.list_id, JSON.stringify(newTask)),
   ) as Task;
+  scheduleBackgroundPush();
+  return created;
 };
 
 /** Full-overwrite update. Send the task exactly as read so the store-managed
  *  `series_id` / `resurface_date` round-trip. Completing a recurring task
  *  spawns its next instance (visible on the next fetch) — callers must refetch
  *  (bump dataVersion), never optimistically splice. */
-export const updateTask = async (task: Task): Promise<Task> =>
-  JSON.parse(await CalFfi.updateTaskJson(JSON.stringify(task))) as Task;
+export const updateTask = async (task: Task): Promise<Task> => {
+  const updated = JSON.parse(
+    await CalFfi.updateTaskJson(JSON.stringify(task)),
+  ) as Task;
+  scheduleBackgroundPush();
+  return updated;
+};
 
-export const deleteTask = (id: string): Promise<void> => CalFfi.deleteTask(id);
+export const deleteTask = async (id: string): Promise<void> => {
+  await CalFfi.deleteTask(id);
+  scheduleBackgroundPush();
+};
 
 // ── Sections ─────────────────────────────────────────────────────────────────
 
@@ -135,8 +159,8 @@ export const getSections = async (list_id: string): Promise<Section[]> =>
 
 export const createSection = async (
   request: CreateSectionRequest,
-): Promise<Section> =>
-  JSON.parse(
+): Promise<Section> => {
+  const created = JSON.parse(
     await CalFfi.createSectionJson(
       request.list_id,
       request.name,
@@ -144,9 +168,19 @@ export const createSection = async (
       request.color_label ?? null,
     ),
   ) as Section;
+  scheduleBackgroundPush();
+  return created;
+};
 
-export const updateSection = async (section: Section): Promise<Section> =>
-  JSON.parse(await CalFfi.updateSectionJson(JSON.stringify(section))) as Section;
+export const updateSection = async (section: Section): Promise<Section> => {
+  const updated = JSON.parse(
+    await CalFfi.updateSectionJson(JSON.stringify(section)),
+  ) as Section;
+  scheduleBackgroundPush();
+  return updated;
+};
 
-export const deleteSection = (id: string): Promise<void> =>
-  CalFfi.deleteSection(id);
+export const deleteSection = async (id: string): Promise<void> => {
+  await CalFfi.deleteSection(id);
+  scheduleBackgroundPush();
+};

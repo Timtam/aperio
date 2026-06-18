@@ -10,6 +10,8 @@
 
 import CalFfi from '../../modules/cal-ffi';
 
+import { scheduleBackgroundPush } from './syncTriggers';
+
 /** Adapter kinds the engine knows. Snake_case to match the Rust serde form. */
 export type AdapterKind =
   | 'local'
@@ -56,10 +58,17 @@ export const listAccounts = async (): Promise<Account[]> =>
  *  kinds (a later phase) and on bad config / registration failure. */
 export const createAccount = async (
   request: CreateAccountRequest,
-): Promise<Account> =>
-  JSON.parse(await CalFfi.createAccountJson(JSON.stringify(request))) as Account;
+): Promise<Account> => {
+  const created = JSON.parse(
+    await CalFfi.createAccountJson(JSON.stringify(request)),
+  ) as Account;
+  scheduleBackgroundPush();
+  return created;
+};
 
 /** Delete an account (unregister adapter + clear secrets + drop row). Rejects
  *  when deleting the implicit local account. */
-export const deleteAccount = (id: string): Promise<void> =>
-  CalFfi.deleteAccount(id);
+export const deleteAccount = async (id: string): Promise<void> => {
+  await CalFfi.deleteAccount(id);
+  scheduleBackgroundPush();
+};

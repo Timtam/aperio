@@ -17,6 +17,8 @@ import type {
   SoundConfig,
 } from '@aperio/shared';
 
+import { scheduleBackgroundPush } from './syncTriggers';
+
 /** RRULE recurrence + UTC EXDATE instants (the cal_core `EventRecurrence`). */
 export interface EventRecurrence {
   rrule: string;
@@ -116,11 +118,18 @@ export const listCalendars = async (): Promise<Calendar[]> =>
 
 export const createCalendar = async (
   request: CreateCalendarRequest,
-): Promise<Calendar> =>
-  JSON.parse(await CalFfi.createCalendarJson(JSON.stringify(request))) as Calendar;
+): Promise<Calendar> => {
+  const created = JSON.parse(
+    await CalFfi.createCalendarJson(JSON.stringify(request)),
+  ) as Calendar;
+  scheduleBackgroundPush();
+  return created;
+};
 
-export const deleteCalendar = (id: string): Promise<void> =>
-  CalFfi.deleteCalendar(id);
+export const deleteCalendar = async (id: string): Promise<void> => {
+  await CalFfi.deleteCalendar(id);
+  scheduleBackgroundPush();
+};
 
 // ── Events ───────────────────────────────────────────────────────────────────
 
@@ -137,17 +146,30 @@ export const getEventById = async (id: string): Promise<CalendarEvent | null> =>
  *  flattened — the desktop create_event payload shape. */
 export const createEvent = async (
   request: { calendar_id: string } & NewEvent,
-): Promise<CalendarEvent> =>
-  JSON.parse(await CalFfi.createEventJson(JSON.stringify(request))) as CalendarEvent;
+): Promise<CalendarEvent> => {
+  const created = JSON.parse(
+    await CalFfi.createEventJson(JSON.stringify(request)),
+  ) as CalendarEvent;
+  scheduleBackgroundPush();
+  return created;
+};
 
 /** Full-overwrite update; the event's `calendar_id` selects the route. */
 export const updateEvent = async (
   event: CalendarEvent,
-): Promise<CalendarEvent> =>
-  JSON.parse(await CalFfi.updateEventJson(JSON.stringify(event))) as CalendarEvent;
+): Promise<CalendarEvent> => {
+  const updated = JSON.parse(
+    await CalFfi.updateEventJson(JSON.stringify(event)),
+  ) as CalendarEvent;
+  scheduleBackgroundPush();
+  return updated;
+};
 
-export const deleteEvent = (
+export const deleteEvent = async (
   id: string,
   calendarId: string | null = null,
   sendCancellations: boolean | null = null,
-): Promise<void> => CalFfi.deleteEvent(id, calendarId, sendCancellations);
+): Promise<void> => {
+  await CalFfi.deleteEvent(id, calendarId, sendCancellations);
+  scheduleBackgroundPush();
+};
