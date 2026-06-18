@@ -297,6 +297,10 @@ declare class CalFfiModule extends NativeModule<Record<never, never>> {
     deviceName: string | null,
     passphrase: string | null,
   ): Promise<string>;
+  /** Resume a STALE device (§19.10): re-onboard from the configured target +
+   *  clear the latched stale flag. Returns the OnboardingReport JSON. Rejects
+   *  when no target is configured. */
+  resumeStaleDeviceJson(): Promise<string>;
 
   // ── SFTP host-key trust (§19.5 TOFU) ──
   /** Probe an SFTP server's SHA256 host-key fingerprint (network) and classify

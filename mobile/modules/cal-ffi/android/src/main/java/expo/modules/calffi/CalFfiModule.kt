@@ -367,6 +367,10 @@ class CalFfiModule : Module() {
       host.acceptRemoteDatasetJson(configJson, deviceName, passphrase)
     }
 
+    AsyncFunction("resumeStaleDeviceJson") {
+      host.resumeStaleDeviceJson()
+    }
+
     // ─── SFTP host-key trust (§19.5 TOFU) ─────────────────────────────────────
     // previewSftpHostKeyJson probes the server's fingerprint (network) + compares
     // it to the device pin store → {host_port, fingerprint, status}; trust/forget/

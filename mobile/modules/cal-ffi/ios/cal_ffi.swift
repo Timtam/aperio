@@ -982,6 +982,16 @@ public protocol HostProtocol: AnyObject, Sendable {
     func resolveSyncConflict(id: Int64, choice: String) throws 
     
     /**
+     * Resume a device flagged STALE (§19.10): it fell so far behind the dataset
+     * that incremental sync can't safely catch up, so re-onboard from the
+     * configured target, then drop the latched stale flag (subsequent rounds run
+     * normally + the status clears). Mirrors the desktop `resume_stale_device`
+     * minus its Tauri status-emit — the mobile status hook polls. Returns the
+     * OnboardingReport JSON. Rejects when no sync target is configured.
+     */
+    func resumeStaleDeviceJson() throws  -> String
+    
+    /**
      * Local full-text search (FTS5) over events + tasks, as a JSON
      * `SearchResults { events, tasks }`. Mirrors the desktop `search` command's
      * LOCAL half — the engine already lives in `cal-adapter-local`. The external
@@ -1984,6 +1994,22 @@ open func resolveSyncConflict(id: Int64, choice: String)throws   {try rustCallWi
         FfiConverterString.lower(choice),$0
     )
 }
+}
+    
+    /**
+     * Resume a device flagged STALE (§19.10): it fell so far behind the dataset
+     * that incremental sync can't safely catch up, so re-onboard from the
+     * configured target, then drop the latched stale flag (subsequent rounds run
+     * normally + the status clears). Mirrors the desktop `resume_stale_device`
+     * minus its Tauri status-emit — the mobile status hook polls. Returns the
+     * OnboardingReport JSON. Rejects when no sync target is configured.
+     */
+open func resumeStaleDeviceJson()throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_resume_stale_device_json(
+            self.uniffiCloneHandle(),$0
+    )
+})
 }
     
     /**
@@ -5687,6 +5713,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_resolve_sync_conflict() != 25566) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_resume_stale_device_json() != 29568) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_search_json() != 52768) {

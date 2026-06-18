@@ -2759,6 +2759,27 @@ impl Host {
         to_json(&preview)
     }
 
+    /// Resume a device flagged STALE (§19.10): it fell so far behind the dataset
+    /// that incremental sync can't safely catch up, so re-onboard from the
+    /// configured target, then drop the latched stale flag (subsequent rounds run
+    /// normally + the status clears). Mirrors the desktop `resume_stale_device`
+    /// minus its Tauri status-emit — the mobile status hook polls. Returns the
+    /// OnboardingReport JSON. Rejects when no sync target is configured.
+    pub fn resume_stale_device_json(&self) -> Result<String, StoreError> {
+        let adapter =
+            self.orchestrator
+                .adapter_handle()
+                .ok_or_else(|| StoreError::Unsupported {
+                    detail: "no sync adapter configured".to_string(),
+                })?;
+        let report = self
+            .runtime
+            .block_on(async { self.onboarding.resume_from_stale(adapter.as_ref()).await })
+            .map_err(sync_err)?;
+        self.orchestrator.clear_stale_device();
+        to_json(&report)
+    }
+
     /// Join an EXISTING remote dataset (§19.11 "Datensatz übernehmen"): build the
     /// adapter and — when the target is end-to-end encrypted — derive the data
     /// key from `passphrase` + the dataset's `meta.json` params BEFORE pulling

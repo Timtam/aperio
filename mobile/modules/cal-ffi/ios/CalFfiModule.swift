@@ -319,6 +319,10 @@ public class CalFfiModule: Module {
         configJson: configJson, deviceName: deviceName, passphrase: passphrase)
     }
 
+    AsyncFunction("resumeStaleDeviceJson") { () -> String in
+      try self.host.resumeStaleDeviceJson()
+    }
+
     // ─── SFTP host-key trust (§19.5 TOFU) ─────────────────────────────────────
 
     AsyncFunction("previewSftpHostKeyJson") { (argsJson: String) -> String in

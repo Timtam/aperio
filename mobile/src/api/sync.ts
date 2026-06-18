@@ -182,6 +182,12 @@ export interface SyncConflict {
 /** Count of unresolved conflicts (the entry-point badge). */
 export const syncConflictCount = (): Promise<number> => CalFfi.syncConflictCount();
 
+/** Resume a device flagged stale (`status.stale_device_since` set): re-onboard
+ *  from the configured target + clear the stale flag. Returns the
+ *  OnboardingReport; rejects when no target is configured. */
+export const resumeStaleDevice = async (): Promise<OnboardingReport> =>
+  JSON.parse(await CalFfi.resumeStaleDeviceJson()) as OnboardingReport;
+
 /** Every unresolved conflict. */
 export const listSyncConflicts = async (): Promise<SyncConflict[]> =>
   JSON.parse(await CalFfi.listSyncConflictsJson()) as SyncConflict[];

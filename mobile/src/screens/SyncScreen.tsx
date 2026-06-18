@@ -23,6 +23,7 @@ import {
   forgetSftpHostKey,
   previewSftpHostKey,
   previewSyncTarget,
+  resumeStaleDevice,
   trustSftpHostKey,
   syncConflictCount,
   syncNow,
@@ -746,6 +747,25 @@ export default function SyncScreen() {
     }
   }, [adoptPp, announce, refresh, t]);
 
+  // §19.10 — this device fell so far behind the dataset got compacted; re-onboard
+  // (full snapshot) + clear the stale flag. Local offline edits stay in the push
+  // queue and go out next round.
+  const resumeStale = useCallback(async () => {
+    setError(null);
+    setBusy(true);
+    try {
+      const report = await resumeStaleDevice();
+      announce(t('syncStaleResume.doneAnnouncement', { applied: report.applied }));
+    } catch (err) {
+      const message = errorMessage(err);
+      setError(message);
+      announce(`${t('syncStaleResume.errorPrefix')}: ${message}`);
+    } finally {
+      setBusy(false);
+      await refresh();
+    }
+  }, [announce, refresh, t]);
+
   // Move SR focus onto the adopt banner when it appears (a round just failed
   // with encryption_required), so the blind user lands on the passphrase prompt.
   const adoptRequired = status?.last_error_code === 'encryption_required';
@@ -821,6 +841,35 @@ export default function SyncScreen() {
               ? `${t('syncStatus.announceSchemaTooOld')} (${status.min_app_version_required})`
               : t('syncStatus.announceSchemaTooOld')}
           </Text>
+        </View>
+      )}
+
+      {/* §19.10 — this device went stale (offline past the compaction window).
+          Offer a full re-onboard; local offline edits stay queued. */}
+      {status?.stale_device_since != null && (
+        <View style={styles.field}>
+          <Text style={styles.label} accessibilityRole="header">
+            {t('syncStaleResume.title')}
+          </Text>
+          <Text style={styles.hint} accessibilityRole="text">
+            {t('syncStaleResume.mergeHint')}
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ disabled: busy, busy }}
+            accessibilityLabel={t('syncStaleResume.actionContinue')}
+            disabled={busy}
+            onPress={() => void resumeStale()}
+            style={({ pressed }) => [
+              styles.primaryButton,
+              pressed && styles.primaryPressed,
+              busy && styles.primaryDisabled,
+            ]}
+          >
+            <Text style={styles.primaryButtonText}>
+              {busy ? t('syncStaleResume.applying') : t('syncStaleResume.actionContinue')}
+            </Text>
+          </Pressable>
         </View>
       )}
 
