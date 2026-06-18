@@ -83,6 +83,7 @@ export default function SyncScreen() {
   const [e2ePassphrase, setE2ePassphrase] = useState(''); // enable-E2E passphrase
   const [changeOldPp, setChangeOldPp] = useState(''); // rotate: current passphrase
   const [changeNewPp, setChangeNewPp] = useState(''); // rotate: new passphrase
+  const [disablePp, setDisablePp] = useState(''); // disable: current passphrase (own field)
   const [adoptPp, setAdoptPp] = useState(''); // adopt peer-enabled E2E passphrase
   // The adopt banner's title — SR focus lands here when it appears so the blind
   // user reaches the passphrase prompt after the round failed.
@@ -665,8 +666,7 @@ export default function SyncScreen() {
       setBusy(true);
       try {
         const report = await disableSyncEncryption(pp);
-        setChangeOldPp('');
-        setChangeNewPp('');
+        setDisablePp('');
         announce(
           t('dialogs.settings.sync.disableE2eOkAnnouncement', {
             logs: report.logs_rewritten,
@@ -688,7 +688,7 @@ export default function SyncScreen() {
   // re-onboard), so gate it behind a confirmation. Reuses the change-passphrase
   // "current passphrase" field as the verification input (desktop parity).
   const disableE2e = useCallback(() => {
-    const pp = changeOldPp.trim();
+    const pp = disablePp.trim();
     if (pp.length === 0) {
       setError(t('dialogs.settings.sync.disableE2eErrorNeedsPassphrase'));
       announce(t('dialogs.settings.sync.disableE2eErrorNeedsPassphrase'));
@@ -706,7 +706,7 @@ export default function SyncScreen() {
         },
       ],
     );
-  }, [announce, changeOldPp, runDisableE2e, t]);
+  }, [announce, disablePp, runDisableE2e, t]);
 
   // Adopt encryption a peer turned on (§19.7): a round failed with
   // `encryption_required`; the user supplies the dataset passphrase, we unlock +
@@ -926,9 +926,11 @@ export default function SyncScreen() {
               </Pressable>
             </View>
 
-            {/* Disable E2E — rewrites the dataset as plaintext (verified with
-                the "current passphrase" field above). Cluster-destructive, so
-                gated behind a confirmation in the handler. */}
+            {/* Disable E2E — rewrites the dataset as plaintext. Cluster-
+                destructive, so it has its OWN passphrase field (a blind user
+                navigating linearly shouldn't have to discover that a field in
+                the change-passphrase section above gates this action) and a
+                confirmation in the handler. */}
             <View style={styles.field}>
               <Text style={styles.label} accessibilityRole="header">
                 {t('dialogs.settings.sync.disableE2eAction')}
@@ -936,6 +938,18 @@ export default function SyncScreen() {
               <Text style={styles.hint} accessibilityRole="text">
                 {t('dialogs.settings.sync.disableE2eHint')}
               </Text>
+              <Text style={styles.label}>
+                {t('dialogs.settings.sync.passphraseChangeOld')}
+              </Text>
+              <TextInput
+                style={styles.input}
+                value={disablePp}
+                onChangeText={setDisablePp}
+                accessibilityLabel={t('dialogs.settings.sync.passphraseChangeOld')}
+                secureTextEntry
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
               <Pressable
                 accessibilityRole="button"
                 accessibilityState={{ disabled: busy }}
