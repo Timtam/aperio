@@ -69,8 +69,47 @@ pub struct TokenSet {
     pub expires_at: DateTime<Utc>,
 }
 
+/// The host-drivable **authorize** phase: build the consent URL + the PKCE
+/// verifier + the CSRF `state`. Pure (no I/O) — the CALLER opens the URL and
+/// captures the redirect: the desktop loopback (via [`run`]) or, on mobile, a
+/// native auth session. The caller then hands `code` + the returned `state` +
+/// this `pkce_verifier` to [`exchange_code`]. `redirect_uri` is caller-supplied
+/// (`http://127.0.0.1:{port}` for the loopback, `aperio://oauth-callback` for a
+/// native session) and MUST match the one used at exchange. Google requires the
+/// `client_secret` only at the [`exchange_code`] step, not here.
+pub fn authorize(
+    client_id: &str,
+    redirect_uri: &str,
+    auth_url: &str,
+) -> GoogleDriveResult<AuthorizeResponse> {
+    if client_id.trim().is_empty() {
+        return Err(GoogleDriveError::Config(
+            "client_id must not be empty".into(),
+        ));
+    }
+    let (verifier, challenge) = generate_pkce();
+    let state = generate_state();
+    let url = build_auth_url(auth_url, client_id, redirect_uri, &challenge, &state)?;
+    Ok(AuthorizeResponse {
+        authorize_url: url.to_string(),
+        pkce_verifier: verifier,
+        state,
+    })
+}
+
+/// Output of [`authorize`]. The host keeps `pkce_verifier` + `state` opaque
+/// between the two phases (the adapter holds no cross-phase state) and replays
+/// them into [`exchange_code`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthorizeResponse {
+    pub authorize_url: String,
+    pub pkce_verifier: String,
+    pub state: String,
+}
+
 /// Run the full OAuth dance: spawn loopback listener, open
-/// browser, wait for redirect, exchange code for tokens.
+/// browser, wait for redirect, exchange code for tokens. The desktop path;
+/// mobile drives [`authorize`] + [`exchange_code`] around a native auth session.
 pub async fn run(
     client_id: &str,
     client_secret: &str,
@@ -111,12 +150,9 @@ pub async fn run_against(
     let port = listener.local_addr()?.port();
     let redirect_uri = format!("http://127.0.0.1:{port}");
 
-    let (verifier, challenge) = generate_pkce();
-    let state = generate_state();
-
-    let auth = build_auth_url(auth_url, client_id, &redirect_uri, &challenge, &state)?;
-    debug!(url = %auth, "opening Google Drive consent screen");
-    if let Err(e) = open::that(auth.as_str()) {
+    let authz = authorize(client_id, &redirect_uri, auth_url)?;
+    debug!(url = %authz.authorize_url, "opening Google Drive consent screen");
+    if let Err(e) = open::that(authz.authorize_url.as_str()) {
         warn!(
             ?e,
             "failed to launch browser; user must copy the URL manually"
@@ -124,7 +160,7 @@ pub async fn run_against(
     }
 
     let (code, returned_state) = wait_for_redirect(listener).await?;
-    if returned_state != state {
+    if returned_state != authz.state {
         return Err(GoogleDriveError::Csrf);
     }
 
@@ -134,7 +170,7 @@ pub async fn run_against(
         client_id,
         client_secret,
         &code,
-        &verifier,
+        &authz.pkce_verifier,
         &redirect_uri,
     )
     .await
@@ -284,7 +320,12 @@ async fn wait_for_redirect(listener: TcpListener) -> GoogleDriveResult<(String, 
     ))
 }
 
-async fn exchange_code(
+/// The **exchange** phase: POST the authorization `code` + the PKCE `verifier`
+/// (from [`authorize`]) to the token endpoint and parse the [`TokenSet`].
+/// `redirect_uri` must match the one used at authorize; the caller validates the
+/// CSRF `state` (returned vs. issued) before calling. Google requires a
+/// non-empty `client_secret` here.
+pub async fn exchange_code(
     http: &reqwest::Client,
     token_url: &str,
     client_id: &str,
@@ -403,5 +444,36 @@ mod tests {
         assert!(s.contains("code_challenge_method=S256"));
         assert!(s.contains("access_type=offline"));
         assert!(s.contains("prompt=consent"));
+    }
+
+    #[test]
+    fn authorize_builds_url_with_pkce_and_state() {
+        let authz = authorize("client-x", "aperio://oauth-callback", GOOGLE_AUTH_URL).unwrap();
+        assert_eq!(authz.pkce_verifier.len(), 43);
+        assert_eq!(authz.state.len(), 32);
+        let url = url::Url::parse(&authz.authorize_url).unwrap();
+        let pairs: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
+        assert_eq!(
+            pairs.get("redirect_uri").map(String::as_str),
+            Some("aperio://oauth-callback"),
+        );
+        assert!(pairs
+            .get("scope")
+            .map(|s| s.contains("drive.file"))
+            .unwrap_or(false));
+        let expected = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(Sha256::digest(authz.pkce_verifier.as_bytes()));
+        assert_eq!(
+            pairs.get("code_challenge").map(String::as_str),
+            Some(expected.as_str())
+        );
+    }
+
+    #[test]
+    fn authorize_rejects_an_empty_client_id() {
+        assert!(matches!(
+            authorize("", "aperio://oauth-callback", GOOGLE_AUTH_URL),
+            Err(GoogleDriveError::Config(_)),
+        ));
     }
 }

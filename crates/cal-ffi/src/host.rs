@@ -2949,6 +2949,53 @@ mod tests {
     }
 
     #[test]
+    fn begin_dropbox_oauth_returns_an_authorize_url() {
+        // The sync-adapter plugins' interactive_auth is also wired into
+        // host-plugins, so begin_oauth_json drives the Dropbox plugin's authorize
+        // phase through the static embedding (no network).
+        let (_dir, host, _kc) = open_host();
+        let args = r#"{"client_id":"dbx-client","redirect_uri":"aperio://oauth-callback"}"#;
+        let out = host
+            .begin_oauth_json(
+                "com.aperio.sync-adapter-dropbox".to_string(),
+                args.to_string(),
+            )
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let url = v["authorize_url"].as_str().unwrap();
+        assert!(url.contains("dropbox.com/oauth2/authorize"), "got: {url}");
+        assert!(
+            url.contains("aperio%3A%2F%2Foauth-callback"),
+            "redirect must be in the URL: {url}"
+        );
+        assert_eq!(v["pkce_verifier"].as_str().unwrap().len(), 43);
+        assert!(v["state"].as_str().is_some());
+    }
+
+    #[test]
+    fn begin_googledrive_oauth_returns_an_authorize_url() {
+        let (_dir, host, _kc) = open_host();
+        let args = r#"{"client_id":"gd-client","redirect_uri":"aperio://oauth-callback"}"#;
+        let out = host
+            .begin_oauth_json(
+                "com.aperio.sync-adapter-googledrive".to_string(),
+                args.to_string(),
+            )
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let url = v["authorize_url"].as_str().unwrap();
+        assert!(
+            url.contains("accounts.google.com/o/oauth2/v2/auth"),
+            "got: {url}"
+        );
+        assert!(
+            url.contains("drive.file"),
+            "drive scope must be present: {url}"
+        );
+        assert_eq!(v["pkce_verifier"].as_str().unwrap().len(), 43);
+    }
+
+    #[test]
     fn discover_json_validates_at_the_plugin_without_network() {
         // The EWS plugin's discover handler rejects an empty email BEFORE it
         // builds the HTTP client, so this exercises the full static chain
