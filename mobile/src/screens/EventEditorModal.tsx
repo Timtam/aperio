@@ -5,6 +5,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -243,6 +244,10 @@ export default function EventEditorModal({
         />
       )}
 
+      {/* One switch node for SR (the Pressable carries role + checked + label and
+          handles the tap); the inner Switch is the real visual toggle for
+          sighted users, hidden from SR and non-interactive so the row stays a
+          single accessible control. */}
       <Pressable
         accessibilityRole="switch"
         accessibilityState={{ checked: allDay }}
@@ -250,8 +255,20 @@ export default function EventEditorModal({
         onPress={() => setAllDay((v) => !v)}
         style={({ pressed }) => [styles.switchRow, pressed && styles.pressed]}
       >
-        <Text style={styles.switchLabel}>{t('dialogs.event.fields.allDay')}</Text>
-        <Text style={styles.switchState}>{allDay ? '☑' : '☐'}</Text>
+        <Text style={styles.switchLabel} importantForAccessibility="no">
+          {t('dialogs.event.fields.allDay')}
+        </Text>
+        {/* The Switch is purely the visual indicator — the wrapping View's
+            pointerEvents:'none' routes the tap to the Pressable (the one toggle
+            owner), and it's hidden from SR so the row is a single switch node. */}
+        <View style={styles.switchVisual}>
+          <Switch
+            value={allDay}
+            trackColor={{ false: '#c9d2e0', true: '#1d4ed8' }}
+            importantForAccessibility="no"
+            accessibilityElementsHidden
+          />
+        </View>
       </Pressable>
 
       <View style={styles.field}>
@@ -374,7 +391,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#f8fafc',
   },
   switchLabel: { fontSize: 16, fontWeight: '600', color: '#2b3240' },
-  switchState: { fontSize: 22, color: '#10131a' },
+  switchVisual: { pointerEvents: 'none' },
   primaryButton: {
     marginTop: 8,
     paddingVertical: 14,

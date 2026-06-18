@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
@@ -11,6 +11,7 @@ import {
   View,
 } from 'react-native';
 
+import type { ColorLabel } from '@aperio/shared';
 import { expandAll, seriesIdOf } from '@aperio/shared';
 
 import {
@@ -20,6 +21,8 @@ import {
   getEvents,
   listCalendars,
 } from '../api/calendar';
+import { listColorLabels } from '../api/colorLabels';
+import { resolveEventColor } from '../intl/eventColor';
 import type { RootStackScreenProps } from '../navigation/types';
 
 // Accessible day view — the screen-reader-first equivalent of the desktop
@@ -53,9 +56,22 @@ export default function EventsScreen({ navigation }: RootStackScreenProps<'Event
     return new Date(now.getFullYear(), now.getMonth(), now.getDate());
   });
   const [calendars, setCalendars] = useState<Calendar[]>([]);
+  const [colorLabels, setColorLabels] = useState<ColorLabel[]>([]);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Lookup tables for resolving each event's rendered colour (event label →
+  // unmapped native colour → owning calendar's colour), rebuilt only when the
+  // calendar set or palette changes.
+  const calendarsById = useMemo(
+    () => new Map(calendars.map((c) => [c.id, c])),
+    [calendars],
+  );
+  const labelsById = useMemo(
+    () => new Map(colorLabels.map((l) => [l.id, l])),
+    [colorLabels],
+  );
 
   const rowTags = useRef<Record<string, number | null>>({});
 
@@ -81,14 +97,34 @@ export default function EventsScreen({ navigation }: RootStackScreenProps<'Event
     [i18n.language, t],
   );
 
+  // The event's rendered colour (a dot for sighted users) + the bound label's
+  // name (appended to the accessible label so colour isn't the only signal —
+  // only the event's OWN explicit label is named, matching the desktop).
+  const eventLabel = useCallback(
+    (ev: CalendarEvent): string => {
+      const base = `${ev.title}, ${timeLabel(ev)}`;
+      const { labelName } = resolveEventColor(ev, calendarsById, labelsById);
+      return labelName
+        ? `${base}${t('mobile.colorLabelSuffix', { name: labelName })}`
+        : base;
+    },
+    [calendarsById, labelsById, t, timeLabel],
+  );
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       // listCalendars also primes the Host's route map, so it must run before
-      // getEvents (which routes by calendar id).
-      const cals = await listCalendars();
+      // getEvents (which routes by calendar id). The palette is fetched in
+      // parallel — it feeds the per-event colour dot (best-effort; a failure
+      // just drops the colour cue, never the events).
+      const [cals, labels] = await Promise.all([
+        listCalendars(),
+        listColorLabels().catch(() => [] as ColorLabel[]),
+      ]);
       setCalendars(cals);
+      setColorLabels(labels);
       const { start, end } = dayRangeUtc(day);
       const perCalendar = await Promise.all(
         cals.map((c) => getEvents({ calendar_id: c.id, start, end }).catch(() => [])),
@@ -250,8 +286,19 @@ export default function EventsScreen({ navigation }: RootStackScreenProps<'Event
           contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
         >
-          {events.map((ev) =>
-            readOnlyIds.has(ev.calendar_id) ? (
+          {events.map((ev) => {
+            // The event's resolved colour: a small dot for sighted users (the
+            // name rides the accessible label). Decorative → hidden from SR.
+            const hex = resolveEventColor(ev, calendarsById, labelsById).hex;
+            const dot =
+              hex != null ? (
+                <View
+                  accessible={false}
+                  importantForAccessibility="no"
+                  style={[styles.colorDot, { backgroundColor: hex }]}
+                />
+              ) : null;
+            return readOnlyIds.has(ev.calendar_id) ? (
               // Read-only calendar (a synthetic birthday layer or an iCal feed):
               // its events can't be edited or deleted, so the row is purely
               // informational — no edit/delete affordances, no "double-tap to
@@ -260,9 +307,10 @@ export default function EventsScreen({ navigation }: RootStackScreenProps<'Event
                 key={ev.id}
                 accessible
                 accessibilityRole="text"
-                accessibilityLabel={`${ev.title}, ${timeLabel(ev)}`}
+                accessibilityLabel={eventLabel(ev)}
                 style={styles.row}
               >
+                {dot}
                 <View style={styles.rowText}>
                   <Text style={styles.eventTitle}>{ev.title}</Text>
                   <Text style={styles.eventTime}>{timeLabel(ev)}</Text>
@@ -276,7 +324,7 @@ export default function EventsScreen({ navigation }: RootStackScreenProps<'Event
                 }}
                 accessible
                 accessibilityRole="button"
-                accessibilityLabel={`${ev.title}, ${timeLabel(ev)}`}
+                accessibilityLabel={eventLabel(ev)}
                 accessibilityHint={t('mobile.taskHint')}
                 accessibilityActions={[
                   { name: 'activate', label: t('mobile.editTaskLabel') },
@@ -288,6 +336,7 @@ export default function EventsScreen({ navigation }: RootStackScreenProps<'Event
                 }}
                 style={styles.row}
               >
+                {dot}
                 <Pressable
                   accessible={false}
                   onPress={() => editEvent(ev)}
@@ -305,8 +354,8 @@ export default function EventsScreen({ navigation }: RootStackScreenProps<'Event
                   <Text style={styles.deleteButtonText}>{t('dialogs.event.delete')}</Text>
                 </Pressable>
               </View>
-            ),
-          )}
+            );
+          })}
         </ScrollView>
       )}
     </View>
@@ -366,6 +415,15 @@ const styles = StyleSheet.create({
     backgroundColor: '#f4f7fb',
   },
   rowText: { flex: 1, gap: 2 },
+  // A small colour dot for the event's resolved colour (sighted users); the
+  // subtle border keeps light colours visible on the card. Matches TasksScreen.
+  colorDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.18)',
+  },
   eventTitle: { fontSize: 18, fontWeight: '600', color: '#10131a' },
   eventTime: { fontSize: 14, color: '#5b6573' },
   deleteButton: {

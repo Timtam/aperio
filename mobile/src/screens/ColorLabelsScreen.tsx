@@ -22,11 +22,12 @@ import {
 
 // Manage the app-wide colour-label palette (§8). Colour labels are named hex
 // colours any event / task / calendar / list can bind to; they live in local
-// SQLite and sync across devices. Screen-reader-first: the colour is an
-// accessible hex TEXT field (a visual swatch would be useless to a blind user —
-// it's rendered only as decoration); each label is its own row with rename/
-// recolour (inline) + delete; add/remove move SR focus via useListFocusManager.
-// Ad-hoc one-off colours are hidden here (they're composed inline elsewhere).
+// SQLite and sync across devices. Serves both audiences: sighted users see a
+// real colour SWATCH (a coloured View) next to the name and a live preview of
+// the entered hex; screen-reader users get the name + hex via the row's
+// accessibilityLabel and edit the colour as a hex TEXT field. Each label is its
+// own row with rename/recolour (inline) + delete; add/remove move SR focus via
+// useListFocusManager. Ad-hoc one-off colours are hidden here (composed inline).
 
 /** `#rrggbb` (case-insensitive). */
 function normaliseHex(input: string): string | null {
@@ -297,13 +298,21 @@ export default function ColorLabelsScreen() {
                 })}
                 style={styles.labelInfo}
               >
-                {/* Real colour swatch for sighted users; the name + hex ride the
-                    row's accessibilityLabel for screen-reader users. */}
+                {/* Real colour swatch + the exact hex (monospace) for sighted
+                    users — the desktop palette manager shows the hex too, so two
+                    similar colours are tellable apart without entering Edit. The
+                    name + hex ride the row's accessibilityLabel for SR users, so
+                    these stay importantForAccessibility="no". */}
                 <View
                   style={[styles.swatch, { backgroundColor: label.hex }]}
                   accessible={false}
                 />
-                <Text style={styles.labelName}>{label.name}</Text>
+                <Text style={styles.labelName} importantForAccessibility="no">
+                  {label.name}
+                </Text>
+                <Text style={styles.hexValue} importantForAccessibility="no">
+                  {label.hex}
+                </Text>
               </View>
               <Pressable
                 accessibilityRole="button"
@@ -373,6 +382,9 @@ const styles = StyleSheet.create({
   labelRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 },
   labelInfo: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
   labelName: { flex: 1, fontSize: 17, color: '#10131a' },
+  // The exact stored hex, monospace + muted (matches the SyncScreen fingerprint
+  // convention) so a sighted user can read off / compare colours at a glance.
+  hexValue: { fontSize: 14, color: '#5b6573', fontFamily: 'monospace' },
   // A real colour swatch (a coloured box) for sighted users. The subtle border
   // keeps white / very light swatches visible on the white background.
   swatch: {
