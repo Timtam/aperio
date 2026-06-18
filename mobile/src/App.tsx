@@ -14,6 +14,7 @@ import SettingsScreen from './screens/SettingsScreen';
 import SyncScreen from './screens/SyncScreen';
 import TaskEditorModal from './screens/TaskEditorModal';
 import TasksScreen from './screens/TasksScreen';
+import { useReminderTriggers } from './reminders/scheduler';
 import { useStoredLanguage } from './settings/language';
 import { TaskStoreProvider } from './state/taskStore';
 
@@ -40,6 +41,10 @@ export default function App() {
   // background, and a debounced push after each mutation (wired in the api
   // clients). The mobile stand-in for the desktop SyncScheduler.
   useSyncTriggers();
+  // Schedule reminders as ahead-of-time OS notifications (reschedule on launch +
+  // foreground + after mutations). The mobile stand-in for the desktop reminder
+  // worker; triggers come from the shared core via cal-ffi.
+  useReminderTriggers();
   return (
     <SafeAreaProvider>
       <StatusBar style="auto" />

@@ -2840,6 +2840,7 @@ dependencies = [
  "chrono",
  "dirs 5.0.1",
  "plugin-core",
+ "rrule",
  "rusqlite",
  "serde",
  "serde_json",

@@ -18,6 +18,7 @@
 import { useEffect } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 
+import { refreshRemindersSoon } from '../reminders/scheduler';
 import { pushNow, syncNow } from './sync';
 
 /** Debounce window for the post-mutation push (matches the desktop scheduler's
@@ -35,6 +36,9 @@ export function scheduleBackgroundPush(): void {
     pushTimer = null;
     void pushNow().catch(() => undefined);
   }, MUTATION_PUSH_DEBOUNCE_MS);
+  // A local mutation may have added/changed/removed a reminder — roll the
+  // scheduled OS notifications forward too (debounced, best-effort).
+  refreshRemindersSoon();
 }
 
 /** Flush any pending debounced push immediately (used when backgrounding, so we
