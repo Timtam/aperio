@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
-  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -17,13 +16,13 @@ import { expandAll, expandToDayOccurrences, localDateKey, seriesIdOf } from '@ap
 import {
   Calendar,
   CalendarEvent,
-  deleteEvent as apiDeleteEvent,
   getEvents,
   listCalendars,
 } from '../api/calendar';
 import { listColorLabels } from '../api/colorLabels';
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
 import { resolveEventColor } from '../intl/eventColor';
+import { confirmDeleteEvent } from '../state/eventDeleteScope';
 import type { RootStackScreenProps } from '../navigation/types';
 
 // Accessible Agenda view — a flat ~30-day-forward list of events grouped by
@@ -200,33 +199,22 @@ export default function AgendaScreen({
     [navigation],
   );
 
+  // Delete with recurrence scope: an occurrence offers "this occurrence" (exdate)
+  // vs "whole series"; a single event a plain delete (shared helper).
   const removeEvent = useCallback(
-    (ev: CalendarEvent) => {
-      Alert.alert(
-        t('dialogs.confirm.deleteEventTitle'),
-        t('dialogs.confirm.deleteEventMessage', { title: ev.title }),
-        [
-          { text: t('mobile.cancel'), style: 'cancel' },
-          {
-            text: t('dialogs.event.delete'),
-            style: 'destructive',
-            onPress: () => {
-              void (async () => {
-                try {
-                  await apiDeleteEvent(seriesIdOf(ev), ev.calendar_id, false);
-                  announce(t('dialogs.event.deleted', { title: ev.title }));
-                  await load();
-                } catch (err) {
-                  const message = errorMessage(err);
-                  setError(message);
-                  announce(t('mobile.error', { message }));
-                }
-              })();
-            },
-          },
-        ],
-      );
-    },
+    (ev: CalendarEvent) =>
+      confirmDeleteEvent(
+        ev,
+        t,
+        (message) => {
+          announce(message);
+          void load();
+        },
+        (message) => {
+          setError(message);
+          announce(t('mobile.error', { message }));
+        },
+      ),
     [announce, load, t],
   );
 

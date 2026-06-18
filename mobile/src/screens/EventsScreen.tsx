@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
-  Alert,
   findNodeHandle,
   Pressable,
   ScrollView,
@@ -18,13 +17,13 @@ import { expandAll, seriesIdOf } from '@aperio/shared';
 import {
   Calendar,
   CalendarEvent,
-  deleteEvent as apiDeleteEvent,
   getEvents,
   listCalendars,
 } from '../api/calendar';
 import { listColorLabels } from '../api/colorLabels';
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
 import { resolveEventColor } from '../intl/eventColor';
+import { confirmDeleteEvent } from '../state/eventDeleteScope';
 import type { RootStackScreenProps } from '../navigation/types';
 
 // Accessible day view — the screen-reader-first equivalent of the desktop
@@ -202,35 +201,22 @@ export default function EventsScreen({ navigation, route }: RootStackScreenProps
     [navigation],
   );
 
+  // Delete with recurrence scope: an occurrence offers "this occurrence" (exdate)
+  // vs "whole series"; a single event a plain delete (shared helper).
   const removeEvent = useCallback(
-    (ev: CalendarEvent) => {
-      Alert.alert(
-        t('dialogs.confirm.deleteEventTitle'),
-        t('dialogs.confirm.deleteEventMessage', { title: ev.title }),
-        [
-          { text: t('mobile.cancel'), style: 'cancel' },
-          {
-            text: t('dialogs.event.delete'),
-            style: 'destructive',
-            onPress: () => {
-              void (async () => {
-                try {
-                  // Delete the underlying series (real master id), not the
-                  // synthetic occurrence id.
-                  await apiDeleteEvent(seriesIdOf(ev), ev.calendar_id, false);
-                  announce(t('dialogs.event.deleted', { title: ev.title }));
-                  await load();
-                } catch (err) {
-                  const message = errorMessage(err);
-                  setError(message);
-                  announce(t('mobile.error', { message }));
-                }
-              })();
-            },
-          },
-        ],
-      );
-    },
+    (ev: CalendarEvent) =>
+      confirmDeleteEvent(
+        ev,
+        t,
+        (message) => {
+          announce(message);
+          void load();
+        },
+        (message) => {
+          setError(message);
+          announce(t('mobile.error', { message }));
+        },
+      ),
     [announce, load, t],
   );
 
