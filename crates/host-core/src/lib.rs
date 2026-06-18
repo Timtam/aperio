@@ -21,6 +21,7 @@ pub mod device_names;
 pub mod event_log;
 pub mod paths;
 pub mod registry;
+pub mod reminders;
 pub mod remote_plugins;
 pub mod sound;
 pub mod sound_assets;
