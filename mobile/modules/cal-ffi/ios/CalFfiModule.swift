@@ -104,6 +104,10 @@ public class CalFfiModule: Module {
       try self.host.deleteAccount(accountId: accountId)
     }
 
+    AsyncFunction("renameAccountJson") { (id: String, newName: String) -> String in
+      try self.host.renameAccountJson(id: id, newName: newName)
+    }
+
     // ─── Calendars + events (local + external adapters) ───
     // JSON passthrough; routing happens Rust-side. Mirrors the Android module.
 

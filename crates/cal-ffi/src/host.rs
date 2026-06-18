@@ -1741,6 +1741,25 @@ impl Host {
         Ok(())
     }
 
+    /// Rename an account's display name. Persists the row + syncs the change
+    /// (non-secret metadata only). Mirrors the desktop `rename_account`.
+    pub fn rename_account_json(&self, id: String, new_name: String) -> Result<String, StoreError> {
+        let trimmed = new_name.trim();
+        if trimmed.is_empty() {
+            return Err(StoreError::InvalidField {
+                field: "name".to_string(),
+                detail: "account name must not be empty".to_string(),
+            });
+        }
+        let shared = self.db.shared();
+        let account = AccountsRepo::new(&shared)
+            .rename(&id, trimmed)
+            .map_err(acc_err)?;
+        self.writer
+            .append(SyncEvent::AccountUpdated(account_payload(&account)));
+        to_json(&account)
+    }
+
     // ─── Calendars ───────────────────────────────────────────────────────────
 
     /// All calendars (local + external) as a JSON `CalendarRow[]`, and — as a
@@ -4309,6 +4328,35 @@ mod tests {
         let req = r#"{"adapter_kind":"google","display_name":"G"}"#;
         let err = host.create_account_json(req.to_string()).unwrap_err();
         assert!(matches!(err, StoreError::InvalidField { .. }));
+    }
+
+    #[test]
+    fn rename_account_trims_and_persists_and_rejects_empty() {
+        let (_dir, host, _kc) = open_host();
+        let req = r#"{
+            "adapter_kind": "caldav",
+            "display_name": "Old Name",
+            "config_json": "{\"server_url\":\"https://dav.example.invalid/\",\"username\":\"a\",\"auth_kind\":\"basic\"}",
+            "secret": "pw"
+        }"#;
+        let created = host.create_account_json(req.to_string()).unwrap();
+        let id: serde_json::Value = serde_json::from_str(&created).unwrap();
+        let account_id = id["id"].as_str().unwrap().to_string();
+
+        let renamed = host
+            .rename_account_json(account_id.clone(), "  New Name  ".to_string())
+            .unwrap();
+        assert!(
+            renamed.contains("\"display_name\":\"New Name\""),
+            "name is trimmed + persisted",
+        );
+        assert!(host.accounts_json().unwrap().contains("New Name"));
+
+        // Empty name → InvalidField.
+        assert!(matches!(
+            host.rename_account_json(account_id, "   ".to_string()).unwrap_err(),
+            StoreError::InvalidField { ref field, .. } if field == "name"
+        ));
     }
 
     #[test]

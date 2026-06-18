@@ -73,6 +73,19 @@ export const deleteAccount = async (id: string): Promise<void> => {
   scheduleBackgroundPush();
 };
 
+/** Rename an account's display name (syncs the change). Rejects on an empty
+ *  name / unknown id; returns the updated `Account`. */
+export const renameAccount = async (
+  id: string,
+  newName: string,
+): Promise<Account> => {
+  const updated = JSON.parse(
+    await CalFfi.renameAccountJson(id, newName),
+  ) as Account;
+  scheduleBackgroundPush();
+  return updated;
+};
+
 // ── Discovery (EWS Autodiscover) ─────────────────────────────────────────────
 
 /** The EWS plugin id the Host drives discovery for. */

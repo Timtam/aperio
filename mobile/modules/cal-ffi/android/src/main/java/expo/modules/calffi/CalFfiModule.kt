@@ -123,6 +123,10 @@ class CalFfiModule : Module() {
       host.deleteAccount(accountId)
     }
 
+    AsyncFunction("renameAccountJson") { id: String, newName: String ->
+      host.renameAccountJson(id, newName)
+    }
+
     // ─── Calendars + events (the on-device adapters, local + external) ───────
     // JSON passthrough in the cal_core/desktop wire shape. Routing (local vs
     // external account) happens Rust-side in the Host; a thrown StoreException

@@ -812,6 +812,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_push_now(
     ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_rename_account_json(
+    ): Short
     external fun uniffi_cal_ffi_checksum_method_host_rename_container(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_reparent_task_list_json(
@@ -1029,6 +1031,8 @@ external fun uniffi_cal_ffi_fn_method_host_preview_sync_target_json(`ptr`: Long,
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_push_now(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Int
+external fun uniffi_cal_ffi_fn_method_host_rename_account_json(`ptr`: Long,`id`: RustBuffer.ByValue,`newName`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_rename_container(`ptr`: Long,`containerId`: RustBuffer.ByValue,`kind`: RustBuffer.ByValue,`name`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_reparent_task_list_json(`ptr`: Long,`id`: RustBuffer.ByValue,`parentId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1414,6 +1418,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_push_now() != 48331.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_rename_account_json() != 49761.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_rename_container() != 11246.toShort()) {
@@ -2340,6 +2347,12 @@ public interface HostInterface {
      * the failure latch like `sync_now`.
      */
     fun `pushNow`(): kotlin.UInt
+    
+    /**
+     * Rename an account's display name. Persists the row + syncs the change
+     * (non-secret metadata only). Mirrors the desktop `rename_account`.
+     */
+    fun `renameAccountJson`(`id`: kotlin.String, `newName`: kotlin.String): kotlin.String
     
     /**
      * Rename a container (DESIGN §6.5). Mirrors the desktop `set_container_name`:
@@ -3541,6 +3554,24 @@ open class Host: Disposable, AutoCloseable, HostInterface
     UniffiLib.uniffi_cal_ffi_fn_method_host_push_now(
         it,
         _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Rename an account's display name. Persists the row + syncs the change
+     * (non-secret metadata only). Mirrors the desktop `rename_account`.
+     */
+    @Throws(StoreException::class)override fun `renameAccountJson`(`id`: kotlin.String, `newName`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_rename_account_json(
+        it,
+        FfiConverterString.lower(`id`),FfiConverterString.lower(`newName`),_status)
 }
     }
     )

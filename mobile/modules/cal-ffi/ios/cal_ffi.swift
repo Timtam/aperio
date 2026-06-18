@@ -947,6 +947,12 @@ public protocol HostProtocol: AnyObject, Sendable {
     func pushNow() throws  -> UInt32
     
     /**
+     * Rename an account's display name. Persists the row + syncs the change
+     * (non-secret metadata only). Mirrors the desktop `rename_account`.
+     */
+    func renameAccountJson(id: String, newName: String) throws  -> String
+    
+    /**
      * Rename a container (DESIGN §6.5). Mirrors the desktop `set_container_name`:
      * a LOCAL calendar / task list is renamed on its own (synced) row (+ emits
      * the sync event); an EXTERNAL container's rename is pushed to its provider
@@ -1910,6 +1916,20 @@ open func pushNow()throws  -> UInt32  {
     return try  FfiConverterUInt32.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
     uniffi_cal_ffi_fn_method_host_push_now(
             self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+    /**
+     * Rename an account's display name. Persists the row + syncs the change
+     * (non-secret metadata only). Mirrors the desktop `rename_account`.
+     */
+open func renameAccountJson(id: String, newName: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_rename_account_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(id),
+        FfiConverterString.lower(newName),$0
     )
 })
 }
@@ -5655,6 +5675,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_push_now() != 48331) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_rename_account_json() != 49761) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_rename_container() != 11246) {

@@ -71,6 +71,9 @@ declare class CalFfiModule extends NativeModule<Record<never, never>> {
   /** Delete an account: unregister its adapter, clear its secrets, drop the
    *  row. Rejects when deleting the implicit local account. */
   deleteAccount(accountId: string): Promise<void>;
+  /** Rename an account's display name; returns the updated `Account` as JSON.
+   *  Rejects on an empty name / unknown id. */
+  renameAccountJson(id: string, newName: string): Promise<string>;
 
   // ── Calendars + events ──
   // JSON passthrough in the cal_core/desktop wire shape; routing (local vs

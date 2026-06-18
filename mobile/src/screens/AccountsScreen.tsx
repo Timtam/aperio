@@ -19,6 +19,7 @@ import {
   deleteAccount,
   discoverEwsEndpoint,
   listAccounts,
+  renameAccount,
 } from '../api/accounts';
 import OAuthConnectForm from './OAuthConnectForm';
 
@@ -97,6 +98,9 @@ export default function AccountsScreen() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Inline account rename (id being edited + its draft name).
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
 
   // Add-form state.
   const [kind, setKind] = useState<keyof typeof KIND_FORMS>('caldav');
@@ -240,6 +244,40 @@ export default function AccountsScreen() {
     [announce, load, t],
   );
 
+  const startRename = useCallback((account: Account) => {
+    setEditingId(account.id);
+    setEditName(account.display_name);
+  }, []);
+
+  const cancelRename = useCallback(() => {
+    setEditingId(null);
+    setEditName('');
+  }, []);
+
+  const saveRename = useCallback(
+    async (account: Account) => {
+      const name = editName.trim();
+      if (name.length === 0) {
+        setError(t('dialogs.accounts.nameRequired'));
+        announce(t('dialogs.accounts.nameRequired'));
+        return;
+      }
+      setError(null);
+      try {
+        await renameAccount(account.id, name);
+        setEditingId(null);
+        pendingFocusId.current = account.id;
+        await load();
+        announce(t('dialogs.accounts.renamed', { name }));
+      } catch (err) {
+        const message = errorMessage(err);
+        setError(message);
+        announce(t('mobile.error', { message }));
+      }
+    },
+    [announce, editName, load, t],
+  );
+
   // OAuth (browser sign-in) success — the form owns the begin/exchange dance, its
   // own validation/error region, and the cancel announcement; the screen only
   // reloads the list, moves SR focus to the new row, and announces the result.
@@ -281,6 +319,39 @@ export default function AccountsScreen() {
           {accounts.map((account) => {
             const isLocal = account.adapter_kind === 'local';
             const kindName = t(`dialogs.accounts.kindName.${account.adapter_kind}`);
+            if (editingId === account.id) {
+              return (
+                <View key={account.id} style={styles.row}>
+                  <TextInput
+                    style={styles.editInput}
+                    value={editName}
+                    onChangeText={setEditName}
+                    accessibilityLabel={t('dialogs.accounts.renameLabel', {
+                      name: account.display_name,
+                    })}
+                    autoFocus
+                    returnKeyType="done"
+                    onSubmitEditing={() => void saveRename(account)}
+                  />
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={t('mobile.save')}
+                    onPress={() => void saveRename(account)}
+                    style={({ pressed }) => [styles.smallButton, pressed && styles.pressed]}
+                  >
+                    <Text style={styles.smallButtonText}>{t('mobile.save')}</Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={t('mobile.cancel')}
+                    onPress={cancelRename}
+                    style={({ pressed }) => [styles.smallButton, pressed && styles.pressed]}
+                  >
+                    <Text style={styles.smallButtonText}>{t('mobile.cancel')}</Text>
+                  </Pressable>
+                </View>
+              );
+            }
             return (
               <View
                 key={account.id}
@@ -291,10 +362,16 @@ export default function AccountsScreen() {
                 accessibilityRole="text"
                 accessibilityLabel={`${account.display_name}, ${kindName}`}
                 accessibilityActions={
-                  isLocal ? undefined : [{ name: 'delete', label: t('dialogs.accounts.delete') }]
+                  isLocal
+                    ? undefined
+                    : [
+                        { name: 'rename', label: t('mobile.rename') },
+                        { name: 'delete', label: t('dialogs.accounts.delete') },
+                      ]
                 }
                 onAccessibilityAction={(e) => {
                   if (e.nativeEvent.actionName === 'delete') void remove(account);
+                  else if (e.nativeEvent.actionName === 'rename') startRename(account);
                 }}
                 style={styles.row}
               >
@@ -303,14 +380,26 @@ export default function AccountsScreen() {
                   <Text style={styles.accountKind}>{kindName}</Text>
                 </View>
                 {!isLocal && (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={`${t('dialogs.accounts.delete')}: ${account.display_name}`}
-                    onPress={() => void remove(account)}
-                    style={({ pressed }) => [styles.deleteButton, pressed && styles.pressed]}
-                  >
-                    <Text style={styles.deleteButtonText}>{t('dialogs.accounts.delete')}</Text>
-                  </Pressable>
+                  <>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={t('dialogs.accounts.renameLabel', {
+                        name: account.display_name,
+                      })}
+                      onPress={() => startRename(account)}
+                      style={({ pressed }) => [styles.smallButton, pressed && styles.pressed]}
+                    >
+                      <Text style={styles.smallButtonText}>{t('mobile.rename')}</Text>
+                    </Pressable>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`${t('dialogs.accounts.delete')}: ${account.display_name}`}
+                      onPress={() => void remove(account)}
+                      style={({ pressed }) => [styles.deleteButton, pressed && styles.pressed]}
+                    >
+                      <Text style={styles.deleteButtonText}>{t('dialogs.accounts.delete')}</Text>
+                    </Pressable>
+                  </>
                 )}
               </View>
             );
@@ -444,6 +533,26 @@ const styles = StyleSheet.create({
     backgroundColor: '#fbeceb',
   },
   deleteButtonText: { fontSize: 15, fontWeight: '600', color: '#b42318' },
+  editInput: {
+    flex: 1,
+    fontSize: 17,
+    color: '#10131a',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#1d4ed8',
+    backgroundColor: '#ffffff',
+  },
+  smallButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#c9d2e0',
+    backgroundColor: '#f4f7fb',
+  },
+  smallButtonText: { fontSize: 15, fontWeight: '600', color: '#1d4ed8' },
   pressed: { opacity: 0.7 },
   field: { gap: 6 },
   label: { fontSize: 15, fontWeight: '600', color: '#2b3240' },
