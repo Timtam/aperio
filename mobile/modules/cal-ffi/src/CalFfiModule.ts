@@ -117,6 +117,13 @@ declare class CalFfiModule extends NativeModule<Record<never, never>> {
   /** Push local pending logs without fetching (RN AppState background); returns
    *  the number of logs pushed. */
   pushNow(): Promise<number>;
+  /** Count of unresolved sync conflicts (the badge). */
+  syncConflictCount(): Promise<number>;
+  /** Every unresolved conflict as a JSON `ConflictRecord[]`. */
+  listSyncConflictsJson(): Promise<string>;
+  /** Resolve conflict `id`: `choice` is `'keep_local' | 'take_remote' |
+   *  'save_both'` (save_both rejects — not supported yet). */
+  resolveSyncConflict(id: number, choice: string): Promise<void>;
 
   // ── Reminders ──
   /** Upcoming reminder triggers (local + external) within `horizonMinutes` from

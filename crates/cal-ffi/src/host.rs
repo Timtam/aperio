@@ -50,6 +50,9 @@ use cal_core::{
     NewEvent, TaskList, TasksFeature,
 };
 use host_core::accounts::{AccountsRepo, AdapterKind};
+use host_core::conflicts::{
+    ConflictKind, ConflictRecord, ConflictsError, ConflictsRepo, ResolutionChoice,
+};
 use host_core::db::SharedConn;
 use host_core::event_log::OnboardingService;
 use host_core::overrides::{
@@ -208,6 +211,41 @@ fn external_reparent_unsupported() -> StoreError {
         detail: "reparenting a task list from an external account is not supported on mobile yet"
             .to_string(),
     }
+}
+
+/// Map a `ConflictsRepo` failure into the bridge's `StoreError`: a missing row
+/// is `NotFound`, a bad kind/resolution is an `InvalidField`, the rest SQLite.
+fn map_conflicts_err(e: ConflictsError) -> StoreError {
+    match e {
+        ConflictsError::NotFound(_) => StoreError::NotFound,
+        ConflictsError::Sqlite(err) => StoreError::Storage {
+            detail: err.to_string(),
+        },
+        other => StoreError::InvalidField {
+            field: "conflict".to_string(),
+            detail: other.to_string(),
+        },
+    }
+}
+
+/// Generic single-field patch via serde — round-trips the row through `Value`,
+/// overwrites the one field with the (JSON-decoded) remote value, deserialises
+/// back. Mirrors the desktop `patch_field` so every `apply_take_remote` branch
+/// stays boilerplate-free.
+fn patch_field<T>(row: &mut T, field: &str, value: &serde_json::Value) -> Result<(), StoreError>
+where
+    T: serde::Serialize + serde::de::DeserializeOwned,
+{
+    let mut serialised = serde_json::to_value(&*row).map_err(|err| StoreError::Storage {
+        detail: format!("serialise row for patch: {err}"),
+    })?;
+    if let Some(obj) = serialised.as_object_mut() {
+        obj.insert(field.to_string(), value.clone());
+    }
+    *row = serde_json::from_value(serialised).map_err(|err| StoreError::Storage {
+        detail: format!("deserialise patched row: {err}"),
+    })?;
+    Ok(())
 }
 
 /// Map an `OverridesRepo` failure into the bridge's `StoreError` (the generic
@@ -1083,6 +1121,101 @@ impl Host {
             .get_including_disabled(plugin_id)
             .map(|p| p.manifest.tasks.clone())
             .unwrap_or_default()
+    }
+
+    /// Apply the `TakeRemote` conflict resolution: write the stored
+    /// `remote_value` into the local row + emit the matching `*Updated`
+    /// SyncEvent so other devices converge. Mirrors the desktop
+    /// `apply_take_remote` (against `self.adapter` + `self.writer`).
+    fn apply_take_remote(&self, record: &ConflictRecord) -> Result<(), StoreError> {
+        // `remote_value` is JSON-encoded — Null when the remote cleared the field.
+        let remote_value: serde_json::Value = match &record.remote_value {
+            Some(raw) => serde_json::from_str(raw).map_err(|err| StoreError::Storage {
+                detail: format!("decode remote value: {err}"),
+            })?,
+            None => serde_json::Value::Null,
+        };
+        match record.row_kind {
+            ConflictKind::Event => {
+                let mut row = self
+                    .adapter
+                    .get_event_by_id(&record.row_id)
+                    .map_err(map_store_err)?
+                    .ok_or(StoreError::NotFound)?;
+                patch_field(&mut row, &record.field, &remote_value)?;
+                row.updated_at = chrono::Utc::now();
+                self.adapter
+                    .upsert_event_from_sync(&row)
+                    .map_err(map_store_err)?;
+                self.writer.append(SyncEvent::EventUpdated(EventPayload {
+                    id: row.id.clone(),
+                    fields: serde_json::to_value(&row).unwrap_or_default(),
+                }));
+            }
+            ConflictKind::Task => {
+                let mut row = self
+                    .adapter
+                    .get_task_by_id(&record.row_id)
+                    .map_err(map_store_err)?
+                    .ok_or(StoreError::NotFound)?;
+                patch_field(&mut row, &record.field, &remote_value)?;
+                row.updated_at = chrono::Utc::now();
+                self.adapter
+                    .upsert_task_from_sync(&row)
+                    .map_err(map_store_err)?;
+                self.writer.append(SyncEvent::TaskUpdated(EventPayload {
+                    id: row.id.clone(),
+                    fields: serde_json::to_value(&row).unwrap_or_default(),
+                }));
+            }
+            ConflictKind::TaskList => {
+                let mut row = self
+                    .adapter
+                    .get_task_list_by_id(&record.row_id)
+                    .map_err(map_store_err)?
+                    .ok_or(StoreError::NotFound)?;
+                patch_field(&mut row, &record.field, &remote_value)?;
+                self.adapter
+                    .upsert_task_list_from_sync(&row)
+                    .map_err(map_store_err)?;
+                self.writer.append(SyncEvent::TaskListUpdated(EventPayload {
+                    id: row.id.clone(),
+                    fields: serde_json::to_value(&row).unwrap_or_default(),
+                }));
+            }
+            ConflictKind::Calendar => {
+                let mut row = self
+                    .adapter
+                    .get_calendar_by_id(&record.row_id)
+                    .map_err(map_store_err)?
+                    .ok_or(StoreError::NotFound)?;
+                patch_field(&mut row, &record.field, &remote_value)?;
+                self.adapter
+                    .upsert_calendar_from_sync(&row)
+                    .map_err(map_store_err)?;
+                self.writer.append(SyncEvent::CalendarUpdated(EventPayload {
+                    id: row.id.clone(),
+                    fields: serde_json::to_value(&row).unwrap_or_default(),
+                }));
+            }
+            ConflictKind::ColorLabel => {
+                let mut row = self
+                    .adapter
+                    .get_color_label_by_id(&record.row_id)
+                    .map_err(map_store_err)?
+                    .ok_or(StoreError::NotFound)?;
+                patch_field(&mut row, &record.field, &remote_value)?;
+                self.adapter
+                    .upsert_color_label_from_sync(&row)
+                    .map_err(map_store_err)?;
+                self.writer
+                    .append(SyncEvent::ColorLabelUpdated(EventPayload {
+                        id: row.id.0.clone(),
+                        fields: serde_json::to_value(&row).unwrap_or_default(),
+                    }));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -3077,6 +3210,60 @@ impl Host {
                 Err(sync_err(e))
             }
         }
+    }
+
+    // ─── Sync conflicts ────────────────────────────────────────────────────────
+    //
+    // Field-level conflicts the sync applier recorded (a field edited differently
+    // on two devices). Mirrors the desktop list/count/resolve commands; the
+    // ConflictsRepo lives in host-core. No Tauri event bus on mobile → the UI
+    // re-fetches after each resolve.
+
+    /// Count of unresolved conflicts — the cheap badge query.
+    pub fn sync_conflict_count(&self) -> Result<u32, StoreError> {
+        let shared = self.db.shared();
+        let repo = ConflictsRepo::new(&shared);
+        Ok(repo.unresolved_count().map_err(map_conflicts_err)? as u32)
+    }
+
+    /// Every unresolved conflict as a JSON `ConflictRecord[]` (the desktop
+    /// `SyncConflict` wire shape).
+    pub fn list_sync_conflicts_json(&self) -> Result<String, StoreError> {
+        let shared = self.db.shared();
+        let repo = ConflictsRepo::new(&shared);
+        let records = repo.list_unresolved().map_err(map_conflicts_err)?;
+        to_json(&records)
+    }
+
+    /// Apply the user's resolution for conflict `id`. `choice` is `"keep_local"`
+    /// | `"take_remote"` | `"save_both"`. `keep_local` is pure bookkeeping (the
+    /// merge already kept the local value); `take_remote` writes the remote value
+    /// into the row + emits the `*Updated` event; `save_both` is not supported
+    /// yet (matches desktop).
+    pub fn resolve_sync_conflict(&self, id: i64, choice: String) -> Result<(), StoreError> {
+        let parsed =
+            ResolutionChoice::from_str(&choice).ok_or_else(|| StoreError::InvalidField {
+                field: "choice".to_string(),
+                detail: format!("unknown resolution choice '{choice}'"),
+            })?;
+        let shared = self.db.shared();
+        let repo = ConflictsRepo::new(&shared);
+        let record = repo.get(id).map_err(map_conflicts_err)?;
+        match parsed {
+            ResolutionChoice::KeepLocal => {
+                repo.mark_resolved(id, parsed).map_err(map_conflicts_err)?;
+            }
+            ResolutionChoice::TakeRemote => {
+                self.apply_take_remote(&record)?;
+                repo.mark_resolved(id, parsed).map_err(map_conflicts_err)?;
+            }
+            ResolutionChoice::SaveBoth => {
+                return Err(StoreError::Unsupported {
+                    detail: "saving both versions is not supported yet".to_string(),
+                });
+            }
+        }
+        Ok(())
     }
 
     /// Upcoming reminder triggers within `horizon_minutes` from now, as a JSON
@@ -5569,6 +5756,85 @@ mod tests {
         .unwrap();
         assert!(empty["tasks"].as_array().unwrap().is_empty());
         assert!(empty["events"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn resolve_sync_conflict_take_remote_patches_the_row() {
+        let (_dir, host, _kc) = open_host();
+        // A local task titled "Local".
+        let list: serde_json::Value =
+            serde_json::from_str(&host.create_task_list_json("Work".to_string()).unwrap()).unwrap();
+        let list_id = list["id"].as_str().unwrap().to_string();
+        let new_task = r#"{"title":"Local","description":null,"status":"open","priority":"medium","scheduled_date":null,"scheduled_time":null,"deadline_date":null,"deadline_time":null,"recurrence":null,"parent_id":null,"color_label":null,"reminders":[],"sound":null}"#;
+        let created: serde_json::Value = serde_json::from_str(
+            &host
+                .create_task_json(list_id.clone(), new_task.to_string())
+                .unwrap(),
+        )
+        .unwrap();
+        let task_id = created["id"].as_str().unwrap().to_string();
+
+        // Record a field-level conflict on `title` (as the sync applier would).
+        let conflict_id = {
+            let shared = host.db.shared();
+            let repo = ConflictsRepo::new(&shared);
+            repo.record(host_core::conflicts::NewConflict {
+                row_kind: ConflictKind::Task,
+                row_id: task_id.clone(),
+                field: "title".to_string(),
+                local_value: Some(serde_json::to_string("Local").unwrap()),
+                remote_value: Some(serde_json::to_string("Remote").unwrap()),
+                remote_device_id: "device-2".to_string(),
+                remote_timestamp: chrono::Utc::now(),
+            })
+            .unwrap()
+        };
+
+        // It lists + counts.
+        assert_eq!(host.sync_conflict_count().unwrap(), 1);
+        let listed: serde_json::Value =
+            serde_json::from_str(&host.list_sync_conflicts_json().unwrap()).unwrap();
+        assert_eq!(listed.as_array().unwrap().len(), 1);
+        assert_eq!(listed[0]["field"], serde_json::json!("title"));
+
+        // take_remote writes the remote value into the row + resolves the conflict.
+        host.resolve_sync_conflict(conflict_id, "take_remote".to_string())
+            .unwrap();
+        let tasks: serde_json::Value =
+            serde_json::from_str(&host.tasks_json(list_id).unwrap()).unwrap();
+        let patched = tasks
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["id"] == serde_json::json!(task_id))
+            .unwrap();
+        assert_eq!(
+            patched["title"],
+            serde_json::json!("Remote"),
+            "title took the remote value"
+        );
+        assert_eq!(host.sync_conflict_count().unwrap(), 0, "conflict resolved");
+
+        // save_both is not supported.
+        let another = {
+            let shared = host.db.shared();
+            let repo = ConflictsRepo::new(&shared);
+            repo.record(host_core::conflicts::NewConflict {
+                row_kind: ConflictKind::Task,
+                row_id: task_id,
+                field: "description".to_string(),
+                local_value: None,
+                remote_value: Some(serde_json::to_string("note").unwrap()),
+                remote_device_id: "device-2".to_string(),
+                remote_timestamp: chrono::Utc::now(),
+            })
+            .unwrap()
+        };
+        assert!(matches!(
+            host.resolve_sync_conflict(another, "save_both".to_string())
+                .unwrap_err(),
+            StoreError::Unsupported { .. }
+        ));
     }
 
     #[test]

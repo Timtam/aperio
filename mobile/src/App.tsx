@@ -12,6 +12,7 @@ import { useStoredLanguage } from './settings/language';
 import AccountsScreen from './screens/AccountsScreen';
 import ContactEditorModal from './screens/ContactEditorModal';
 import ColorLabelsScreen from './screens/ColorLabelsScreen';
+import ConflictsScreen from './screens/ConflictsScreen';
 import ContactsScreen from './screens/ContactsScreen';
 import AgendaScreen from './screens/AgendaScreen';
 import CalendarEditorModal from './screens/CalendarEditorModal';
@@ -165,6 +166,11 @@ function SettingsStackNav() {
         name="Sync"
         component={SyncScreen}
         options={{ title: t('mobile.syncTitle') }}
+      />
+      <SettingsStack.Screen
+        name="Conflicts"
+        component={ConflictsScreen}
+        options={{ title: t('dialogs.syncConflicts.title') }}
       />
       <SettingsStack.Screen
         name="Reminders"

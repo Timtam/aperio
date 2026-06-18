@@ -906,6 +906,12 @@ public protocol HostProtocol: AnyObject, Sendable {
     func listColorLabelsJson() throws  -> String
     
     /**
+     * Every unresolved conflict as a JSON `ConflictRecord[]` (the desktop
+     * `SyncConflict` wire shape).
+     */
+    func listSyncConflictsJson() throws  -> String
+    
+    /**
      * The currently-pinned SFTP fingerprint for `host_port`, or `None`. Lets the
      * UI show "Pinned: SHA256:…" + the forget gesture without probing the server.
      */
@@ -957,6 +963,15 @@ public protocol HostProtocol: AnyObject, Sendable {
      * returns the updated `TaskList` as JSON and appends `TaskListUpdated`.
      */
     func reparentTaskListJson(id: String, parentId: String?) throws  -> String
+    
+    /**
+     * Apply the user's resolution for conflict `id`. `choice` is `"keep_local"`
+     * | `"take_remote"` | `"save_both"`. `keep_local` is pure bookkeeping (the
+     * merge already kept the local value); `take_remote` writes the remote value
+     * into the row + emits the `*Updated` event; `save_both` is not supported
+     * yet (matches desktop).
+     */
+    func resolveSyncConflict(id: Int64, choice: String) throws 
     
     /**
      * Local full-text search (FTS5) over events + tasks, as a JSON
@@ -1011,6 +1026,11 @@ public protocol HostProtocol: AnyObject, Sendable {
      * string — same round-trip as the desktop).
      */
     func setUserPref(key: String, value: String) throws 
+    
+    /**
+     * Count of unresolved conflicts — the cheap badge query.
+     */
+    func syncConflictCount() throws  -> UInt32
     
     /**
      * Run one sync round (push local pending logs, fetch + apply foreign ones,
@@ -1819,6 +1839,18 @@ open func listColorLabelsJson()throws  -> String  {
 }
     
     /**
+     * Every unresolved conflict as a JSON `ConflictRecord[]` (the desktop
+     * `SyncConflict` wire shape).
+     */
+open func listSyncConflictsJson()throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_list_sync_conflicts_json(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+    /**
      * The currently-pinned SFTP fingerprint for `host_port`, or `None`. Lets the
      * UI show "Pinned: SHA256:…" + the forget gesture without probing the server.
      */
@@ -1912,6 +1944,22 @@ open func reparentTaskListJson(id: String, parentId: String?)throws  -> String  
         FfiConverterOptionString.lower(parentId),$0
     )
 })
+}
+    
+    /**
+     * Apply the user's resolution for conflict `id`. `choice` is `"keep_local"`
+     * | `"take_remote"` | `"save_both"`. `keep_local` is pure bookkeeping (the
+     * merge already kept the local value); `take_remote` writes the remote value
+     * into the row + emits the `*Updated` event; `save_both` is not supported
+     * yet (matches desktop).
+     */
+open func resolveSyncConflict(id: Int64, choice: String)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_resolve_sync_conflict(
+            self.uniffiCloneHandle(),
+        FfiConverterInt64.lower(id),
+        FfiConverterString.lower(choice),$0
+    )
+}
 }
     
     /**
@@ -2012,6 +2060,17 @@ open func setUserPref(key: String, value: String)throws   {try rustCallWithError
         FfiConverterString.lower(value),$0
     )
 }
+}
+    
+    /**
+     * Count of unresolved conflicts — the cheap badge query.
+     */
+open func syncConflictCount()throws  -> UInt32  {
+    return try  FfiConverterUInt32.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_sync_conflict_count(
+            self.uniffiCloneHandle(),$0
+    )
+})
 }
     
     /**
@@ -5579,6 +5638,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_list_color_labels_json() != 37435) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_cal_ffi_checksum_method_host_list_sync_conflicts_json() != 46993) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_cal_ffi_checksum_method_host_pinned_sftp_host_key() != 44107) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -5597,6 +5659,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_reparent_task_list_json() != 49367) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_cal_ffi_checksum_method_host_resolve_sync_conflict() != 25566) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_cal_ffi_checksum_method_host_search_json() != 52768) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -5613,6 +5678,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_set_user_pref() != 9799) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_sync_conflict_count() != 12817) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_sync_now_json() != 8892) {

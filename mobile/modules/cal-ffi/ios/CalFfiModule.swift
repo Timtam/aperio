@@ -157,6 +157,18 @@ public class CalFfiModule: Module {
       Int(try self.host.pushNow())
     }
 
+    AsyncFunction("syncConflictCount") { () -> Int in
+      Int(try self.host.syncConflictCount())
+    }
+
+    AsyncFunction("listSyncConflictsJson") { () -> String in
+      try self.host.listSyncConflictsJson()
+    }
+
+    AsyncFunction("resolveSyncConflict") { (id: Int, choice: String) in
+      try self.host.resolveSyncConflict(id: Int64(id), choice: choice)
+    }
+
     // ─── Reminders ───
     // Upcoming reminder triggers (local + external) within a horizon, for the JS
     // layer to schedule as expo-notifications.

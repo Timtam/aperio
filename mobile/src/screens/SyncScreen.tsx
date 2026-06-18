@@ -1,4 +1,4 @@
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -24,6 +24,7 @@ import {
   previewSftpHostKey,
   previewSyncTarget,
   trustSftpHostKey,
+  syncConflictCount,
   syncNow,
   syncStatus,
   HostKeyPreview,
@@ -52,8 +53,10 @@ function errorMessage(err: unknown): string {
 
 export default function SyncScreen() {
   const { t } = useTranslation();
+  const navigation = useNavigation();
 
   const [status, setStatus] = useState<SyncStatus | null>(null);
+  const [conflictCount, setConflictCount] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -141,6 +144,7 @@ export default function SyncScreen() {
   const refresh = useCallback(async () => {
     try {
       setStatus(await syncStatus());
+      setConflictCount(await syncConflictCount().catch(() => 0));
     } catch (err) {
       setError(errorMessage(err));
     }
@@ -862,6 +866,24 @@ export default function SyncScreen() {
         >
           <Text style={styles.primaryButtonText}>
             {busy ? t('mobile.syncing') : t('mobile.syncNow')}
+          </Text>
+        </Pressable>
+      )}
+
+      {/* Unresolved sync conflicts → the resolution screen. Shown only when
+          there are any; the count is announced via the polite live region. */}
+      {conflictCount > 0 && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`${t('syncStatus.openConflicts')}, ${t('syncStatus.conflict', {
+            count: conflictCount,
+          })}`}
+          accessibilityLiveRegion="polite"
+          onPress={() => navigation.navigate('Conflicts')}
+          style={({ pressed }) => [styles.conflictsButton, pressed && styles.pressed]}
+        >
+          <Text style={styles.conflictsButtonText}>
+            {t('syncStatus.openConflicts')} ({conflictCount})
           </Text>
         </Pressable>
       )}
@@ -1648,6 +1670,15 @@ const styles = StyleSheet.create({
   primaryPressed: { backgroundColor: '#1740a8' },
   primaryDisabled: { backgroundColor: '#9aa9c9' },
   primaryButtonText: { fontSize: 16, fontWeight: '700', color: '#ffffff' },
+  conflictsButton: {
+    paddingVertical: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#f0c2bd',
+    backgroundColor: '#fdecea',
+    alignItems: 'center',
+  },
+  conflictsButtonText: { fontSize: 16, fontWeight: '700', color: '#b42318' },
   ghostButton: {
     paddingVertical: 12,
     paddingHorizontal: 18,

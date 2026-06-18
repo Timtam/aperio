@@ -802,6 +802,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_list_color_labels_json(
     ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_list_sync_conflicts_json(
+    ): Short
     external fun uniffi_cal_ffi_checksum_method_host_pinned_sftp_host_key(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_preview_sftp_host_key_json(
@@ -814,6 +816,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_reparent_task_list_json(
     ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_resolve_sync_conflict(
+    ): Short
     external fun uniffi_cal_ffi_checksum_method_host_search_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_sections_json(
@@ -825,6 +829,8 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_cal_ffi_checksum_method_host_set_section_color(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_set_user_pref(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_sync_conflict_count(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_sync_now_json(
     ): Short
@@ -1013,6 +1019,8 @@ external fun uniffi_cal_ffi_fn_method_host_list_calendars_json(`ptr`: Long,uniff
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_list_color_labels_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_list_sync_conflicts_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_pinned_sftp_host_key(`ptr`: Long,`hostPort`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_preview_sftp_host_key_json(`ptr`: Long,`argsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1025,6 +1033,8 @@ external fun uniffi_cal_ffi_fn_method_host_rename_container(`ptr`: Long,`contain
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_reparent_task_list_json(`ptr`: Long,`id`: RustBuffer.ByValue,`parentId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_resolve_sync_conflict(`ptr`: Long,`id`: Long,`choice`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_cal_ffi_fn_method_host_search_json(`ptr`: Long,`query`: RustBuffer.ByValue,`filtersJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_sections_json(`ptr`: Long,`listId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1037,6 +1047,8 @@ external fun uniffi_cal_ffi_fn_method_host_set_section_color(`ptr`: Long,`sectio
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_set_user_pref(`ptr`: Long,`key`: RustBuffer.ByValue,`value`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_cal_ffi_fn_method_host_sync_conflict_count(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Int
 external fun uniffi_cal_ffi_fn_method_host_sync_now_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_sync_status_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -1389,6 +1401,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_list_color_labels_json() != 37435.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_list_sync_conflicts_json() != 46993.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_pinned_sftp_host_key() != 44107.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1407,6 +1422,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_reparent_task_list_json() != 49367.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_resolve_sync_conflict() != 25566.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_search_json() != 52768.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1423,6 +1441,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_set_user_pref() != 9799.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_sync_conflict_count() != 12817.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_sync_now_json() != 8892.toShort()) {
@@ -2280,6 +2301,12 @@ public interface HostInterface {
     fun `listColorLabelsJson`(): kotlin.String
     
     /**
+     * Every unresolved conflict as a JSON `ConflictRecord[]` (the desktop
+     * `SyncConflict` wire shape).
+     */
+    fun `listSyncConflictsJson`(): kotlin.String
+    
+    /**
      * The currently-pinned SFTP fingerprint for `host_port`, or `None`. Lets the
      * UI show "Pinned: SHA256:…" + the forget gesture without probing the server.
      */
@@ -2331,6 +2358,15 @@ public interface HostInterface {
      * returns the updated `TaskList` as JSON and appends `TaskListUpdated`.
      */
     fun `reparentTaskListJson`(`id`: kotlin.String, `parentId`: kotlin.String?): kotlin.String
+    
+    /**
+     * Apply the user's resolution for conflict `id`. `choice` is `"keep_local"`
+     * | `"take_remote"` | `"save_both"`. `keep_local` is pure bookkeeping (the
+     * merge already kept the local value); `take_remote` writes the remote value
+     * into the row + emits the `*Updated` event; `save_both` is not supported
+     * yet (matches desktop).
+     */
+    fun `resolveSyncConflict`(`id`: kotlin.Long, `choice`: kotlin.String)
     
     /**
      * Local full-text search (FTS5) over events + tasks, as a JSON
@@ -2385,6 +2421,11 @@ public interface HostInterface {
      * string — same round-trip as the desktop).
      */
     fun `setUserPref`(`key`: kotlin.String, `value`: kotlin.String)
+    
+    /**
+     * Count of unresolved conflicts — the cheap badge query.
+     */
+    fun `syncConflictCount`(): kotlin.UInt
     
     /**
      * Run one sync round (push local pending logs, fetch + apply foreign ones,
@@ -3405,6 +3446,24 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * Every unresolved conflict as a JSON `ConflictRecord[]` (the desktop
+     * `SyncConflict` wire shape).
+     */
+    @Throws(StoreException::class)override fun `listSyncConflictsJson`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_list_sync_conflicts_json(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * The currently-pinned SFTP fingerprint for `host_port`, or `None`. Lets the
      * UI show "Pinned: SHA256:…" + the forget gesture without probing the server.
      */
@@ -3529,6 +3588,26 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * Apply the user's resolution for conflict `id`. `choice` is `"keep_local"`
+     * | `"take_remote"` | `"save_both"`. `keep_local` is pure bookkeeping (the
+     * merge already kept the local value); `take_remote` writes the remote value
+     * into the row + emits the `*Updated` event; `save_both` is not supported
+     * yet (matches desktop).
+     */
+    @Throws(StoreException::class)override fun `resolveSyncConflict`(`id`: kotlin.Long, `choice`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_resolve_sync_conflict(
+        it,
+        FfiConverterLong.lower(`id`),FfiConverterString.lower(`choice`),_status)
+}
+    }
+    
+    
+
+    
+    /**
      * Local full-text search (FTS5) over events + tasks, as a JSON
      * `SearchResults { events, tasks }`. Mirrors the desktop `search` command's
      * LOCAL half — the engine already lives in `cal-adapter-local`. The external
@@ -3647,6 +3726,23 @@ open class Host: Disposable, AutoCloseable, HostInterface
 }
     }
     
+    
+
+    
+    /**
+     * Count of unresolved conflicts — the cheap badge query.
+     */
+    @Throws(StoreException::class)override fun `syncConflictCount`(): kotlin.UInt {
+            return FfiConverterUInt.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_sync_conflict_count(
+        it,
+        _status)
+}
+    }
+    )
+    }
     
 
     

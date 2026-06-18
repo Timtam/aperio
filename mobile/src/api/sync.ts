@@ -157,6 +157,42 @@ export const syncNow = async (): Promise<SyncRoundReport> =>
 /** Push local pending logs without fetching (call on app background). */
 export const pushNow = (): Promise<number> => CalFfi.pushNow();
 
+// ── Sync conflicts ──
+// Field-level conflicts the applier recorded (a field edited differently on two
+// devices). The values are JSON-encoded scalars — decode with JSON.parse for
+// display. Resolution is per-device bookkeeping + (take_remote) a local write.
+
+export type SyncResolutionChoice = 'keep_local' | 'take_remote' | 'save_both';
+
+export interface SyncConflict {
+  id: number;
+  detected_at: string;
+  row_kind: 'event' | 'task' | 'task_list' | 'calendar' | 'color_label';
+  row_id: string;
+  field: string;
+  local_value: string | null;
+  remote_value: string | null;
+  remote_device_id: string;
+  remote_timestamp: string;
+  resolved: boolean;
+  resolution: SyncResolutionChoice | null;
+  resolved_at: string | null;
+}
+
+/** Count of unresolved conflicts (the entry-point badge). */
+export const syncConflictCount = (): Promise<number> => CalFfi.syncConflictCount();
+
+/** Every unresolved conflict. */
+export const listSyncConflicts = async (): Promise<SyncConflict[]> =>
+  JSON.parse(await CalFfi.listSyncConflictsJson()) as SyncConflict[];
+
+/** Apply a resolution. `take_remote` writes the remote value + emits an update
+ *  SyncEvent (carried out on the next push/round); `save_both` rejects. */
+export const resolveSyncConflict = (
+  id: number,
+  choice: SyncResolutionChoice,
+): Promise<void> => CalFfi.resolveSyncConflict(id, choice);
+
 /** Enable end-to-end encryption (§19.7) on the configured sync target: mint a
  *  fresh passphrase-protected key, write the encrypted dataset, and encrypt
  *  every subsequent round. The key is device-local (never synced). Irreversible

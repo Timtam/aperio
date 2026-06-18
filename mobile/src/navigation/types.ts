@@ -39,6 +39,7 @@ export type RootStackParamList = {
   ContactEditor: { contactId: string | null; listId: string };
   Reminders: undefined;
   Search: undefined;
+  Conflicts: undefined;
 };
 
 /**
