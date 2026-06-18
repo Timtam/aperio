@@ -804,6 +804,26 @@ export default function SyncScreen() {
         </Text>
       )}
 
+      {/* §19.9 — the dataset was written by a newer Aperio; this build can't
+          apply it. A blocking notice (the running-dataset twin of the desktop
+          SyncSchemaTooOldDialog) telling the user to update. */}
+      {status?.schema_too_old === true && (
+        <View style={styles.field}>
+          <Text style={styles.label} accessibilityRole="header">
+            {t('syncStatus.schemaTooOld')}
+          </Text>
+          <Text
+            style={styles.warning}
+            accessibilityRole="text"
+            accessibilityLiveRegion="assertive"
+          >
+            {status.min_app_version_required != null
+              ? `${t('syncStatus.announceSchemaTooOld')} (${status.min_app_version_required})`
+              : t('syncStatus.announceSchemaTooOld')}
+          </Text>
+        </View>
+      )}
+
       {/* §19.7 — another device turned encryption on; a round failed with
           encryption_required. Prompt for the dataset passphrase to adopt it. */}
       {adoptRequired && (

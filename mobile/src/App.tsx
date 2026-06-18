@@ -9,6 +9,7 @@ import { useSyncTriggers } from './api/syncTriggers';
 import type { RootStackParamList, RootTabParamList } from './navigation/types';
 import { useReminderTriggers } from './reminders/scheduler';
 import { useStoredLanguage } from './settings/language';
+import { useSyncStatus } from './state/useSyncStatus';
 import AccountsScreen from './screens/AccountsScreen';
 import ContactEditorModal from './screens/ContactEditorModal';
 import ColorLabelsScreen from './screens/ColorLabelsScreen';
@@ -222,6 +223,10 @@ export default function App() {
   // foreground + after mutations). The mobile stand-in for the desktop reminder
   // worker; triggers come from the shared core via cal-ffi.
   useReminderTriggers();
+  // App-wide sync status: a Settings-tab badge for sighted users + spoken
+  // announcements of attention-class transitions (conflict / failure /
+  // schema-too-old) for screen-reader users. The data is already bridged.
+  const sync = useSyncStatus();
   return (
     <SafeAreaProvider>
       <StatusBar style="auto" />
@@ -246,7 +251,18 @@ export default function App() {
             <Tab.Screen
               name="SettingsTab"
               component={SettingsStackNav}
-              options={{ headerShown: false, title: t('dialogs.settings.title') }}
+              options={{
+                headerShown: false,
+                title: t('dialogs.settings.title'),
+                // Flag sync issues on the Settings tab (Sync lives under it):
+                // a badge for sighted users + the state folded into the tab's
+                // accessible label so a screen-reader user hears it on the tab.
+                tabBarBadge: sync.badge,
+                tabBarAccessibilityLabel:
+                  sync.badge != null
+                    ? `${t('dialogs.settings.title')}, ${t('syncStatus.label')}: ${sync.label}`
+                    : undefined,
+              }}
             />
           </Tab.Navigator>
         </TaskStoreProvider>
