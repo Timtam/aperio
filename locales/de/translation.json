@@ -63,6 +63,7 @@
     "renameListLabel": "Liste umbenennen",
     "listRenamed": "Liste umbenannt in „{{name}}“.",
     "calendarsButtonLabel": "Kalender",
+    "noCalendars": "Noch keine Kalender. Lege oben einen an.",
     "renameCalendarLabel": "Kalender umbenennen",
     "calendarRenamed": "Kalender umbenannt in „{{name}}“.",
     "deleteCalendarMessage": "„{{name}}“ löschen? Die zugehörigen Termine werden ebenfalls entfernt.",

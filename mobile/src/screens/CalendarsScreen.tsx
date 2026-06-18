@@ -137,7 +137,7 @@ export default function CalendarsScreen({
       )}
 
       {calendars.length === 0 ? (
-        <Text style={styles.muted}>{t('views.agenda.empty')}</Text>
+        <Text style={styles.muted}>{t('mobile.noCalendars')}</Text>
       ) : (
         <ScrollView
           accessibilityRole="list"

@@ -173,7 +173,7 @@ export default function CalendarEditorModal({
     return (
       <View style={styles.screen}>
         <Text style={styles.muted} accessibilityRole="text">
-          {t('views.agenda.empty')}
+          {t('mobile.noCalendars')}
         </Text>
       </View>
     );

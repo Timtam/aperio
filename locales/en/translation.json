@@ -63,6 +63,7 @@
     "renameListLabel": "Rename list",
     "listRenamed": "List renamed to \"{{name}}\".",
     "calendarsButtonLabel": "Calendars",
+    "noCalendars": "No calendars yet. Add one above.",
     "renameCalendarLabel": "Rename calendar",
     "calendarRenamed": "Calendar renamed to \"{{name}}\".",
     "deleteCalendarMessage": "Delete \"{{name}}\"? Its events are removed too.",
