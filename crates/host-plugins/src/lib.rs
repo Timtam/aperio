@@ -39,7 +39,15 @@ use plugin_core::{manager::PluginManager, manifest::PluginManifest, PluginResult
 #[cfg(feature = "static")]
 pub fn register_all_static(manager: &PluginManager) -> PluginResult<()> {
     /// Parse one crate's embedded `plugin.json` + register its
-    /// statically-linked descriptor.
+    /// statically-linked descriptor. The optional third token wires the
+    /// crate's auth hook (the crate-mangled typed twin `__aperio_*_impl`,
+    /// which P0 left `pub` in each auth-capable `-plugin` crate) through
+    /// `register_static_with_auth`, so OAuth / Autodiscover / TOFU adapters
+    /// expose their handler when statically embedded:
+    ///   `register!(crate, "path")`                    — no auth hook
+    ///   `register!(crate, "path", interactive_auth)`  — OAuth (Google/MS/…)
+    ///   `register!(crate, "path", discover)`          — Autodiscover (EWS)
+    ///   `register!(crate, "path", probe_host_key)`    — TOFU (SFTP)
     macro_rules! register {
         ($plugin_crate:ident, $manifest_path:literal) => {{
             let manifest = PluginManifest::from_bytes(include_bytes!($manifest_path))?;
@@ -48,6 +56,42 @@ pub fn register_all_static(manager: &PluginManager) -> PluginResult<()> {
             // and pairs it with `DESTROY_FN` for teardown on drop.
             let descriptor = unsafe { $plugin_crate::build_descriptor() };
             manager.register_static(manifest, descriptor, $plugin_crate::DESTROY_FN)?;
+        }};
+        ($plugin_crate:ident, $manifest_path:literal, interactive_auth) => {{
+            let manifest = PluginManifest::from_bytes(include_bytes!($manifest_path))?;
+            let descriptor = unsafe { $plugin_crate::build_descriptor() };
+            manager.register_static_with_auth(
+                manifest,
+                descriptor,
+                $plugin_crate::DESTROY_FN,
+                Some($plugin_crate::__aperio_interactive_auth_impl),
+                None,
+                None,
+            )?;
+        }};
+        ($plugin_crate:ident, $manifest_path:literal, discover) => {{
+            let manifest = PluginManifest::from_bytes(include_bytes!($manifest_path))?;
+            let descriptor = unsafe { $plugin_crate::build_descriptor() };
+            manager.register_static_with_auth(
+                manifest,
+                descriptor,
+                $plugin_crate::DESTROY_FN,
+                None,
+                Some($plugin_crate::__aperio_discover_impl),
+                None,
+            )?;
+        }};
+        ($plugin_crate:ident, $manifest_path:literal, probe_host_key) => {{
+            let manifest = PluginManifest::from_bytes(include_bytes!($manifest_path))?;
+            let descriptor = unsafe { $plugin_crate::build_descriptor() };
+            manager.register_static_with_auth(
+                manifest,
+                descriptor,
+                $plugin_crate::DESTROY_FN,
+                None,
+                None,
+                Some($plugin_crate::__aperio_probe_host_key_impl),
+            )?;
         }};
     }
 
@@ -62,15 +106,18 @@ pub fn register_all_static(manager: &PluginManager) -> PluginResult<()> {
     );
     register!(
         cal_adapter_google_plugin,
-        "../../cal-adapter-google-plugin/plugin.json"
+        "../../cal-adapter-google-plugin/plugin.json",
+        interactive_auth
     );
     register!(
         cal_adapter_microsoft_graph_plugin,
-        "../../cal-adapter-microsoft-graph-plugin/plugin.json"
+        "../../cal-adapter-microsoft-graph-plugin/plugin.json",
+        interactive_auth
     );
     register!(
         cal_adapter_ews_plugin,
-        "../../cal-adapter-ews-plugin/plugin.json"
+        "../../cal-adapter-ews-plugin/plugin.json",
+        discover
     );
     register!(
         cal_adapter_vikunja_plugin,
@@ -96,15 +143,18 @@ pub fn register_all_static(manager: &PluginManager) -> PluginResult<()> {
     );
     register!(
         sync_adapter_sftp_plugin,
-        "../../sync-adapter-sftp-plugin/plugin.json"
+        "../../sync-adapter-sftp-plugin/plugin.json",
+        probe_host_key
     );
     register!(
         sync_adapter_dropbox_plugin,
-        "../../sync-adapter-dropbox-plugin/plugin.json"
+        "../../sync-adapter-dropbox-plugin/plugin.json",
+        interactive_auth
     );
     register!(
         sync_adapter_googledrive_plugin,
-        "../../sync-adapter-googledrive-plugin/plugin.json"
+        "../../sync-adapter-googledrive-plugin/plugin.json",
+        interactive_auth
     );
 
     // Video-conferencing adapters.
