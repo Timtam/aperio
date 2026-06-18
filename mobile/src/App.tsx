@@ -13,6 +13,7 @@ import AccountsScreen from './screens/AccountsScreen';
 import ContactEditorModal from './screens/ContactEditorModal';
 import ColorLabelsScreen from './screens/ColorLabelsScreen';
 import ConflictsScreen from './screens/ConflictsScreen';
+import ContactListsScreen from './screens/ContactListsScreen';
 import ContactsScreen from './screens/ContactsScreen';
 import AgendaScreen from './screens/AgendaScreen';
 import CalendarEditorModal from './screens/CalendarEditorModal';
@@ -145,6 +146,11 @@ function ContactsStackNav() {
         name="Contacts"
         component={ContactsScreen}
         options={{ title: t('sidebar.contactLists') }}
+      />
+      <ContactsStack.Screen
+        name="ContactLists"
+        component={ContactListsScreen}
+        options={{ title: t('mobile.manageContactLists') }}
       />
       <ContactsStack.Screen
         name="ContactEditor"

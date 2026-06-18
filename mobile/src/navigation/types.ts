@@ -39,6 +39,7 @@ export type RootStackParamList = {
   TaskSettings: undefined;
   ColorLabels: undefined;
   Contacts: undefined;
+  ContactLists: undefined;
   ContactEditor: { contactId: string | null; listId: string };
   Reminders: undefined;
   Search: undefined;

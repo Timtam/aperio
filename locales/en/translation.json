@@ -42,6 +42,7 @@
     "newListPlaceholder": "List name",
     "noLists": "No task lists yet. Add one above.",
     "manageList": "Manage list",
+    "manageContactLists": "Address books",
     "sectionsHeading": "Sections",
     "edit": "Edit",
     "colorHexInvalid": "Enter a colour as #RRGGBB.",
@@ -883,7 +884,9 @@
       "deleteTaskMessage": "Delete \"{{title}}\"? This cannot be undone.",
       "deleteTaskListTitle": "Delete list",
       "deleteTaskListMessage": "Delete \"{{name}}\" and all of its tasks? This cannot be undone.",
-      "deleteTaskListMessageExternal": "Delete \"{{name}}\" and all of its tasks from {{account}}? The list is removed at the source for every device, and this cannot be undone."
+      "deleteTaskListMessageExternal": "Delete \"{{name}}\" and all of its tasks from {{account}}? The list is removed at the source for every device, and this cannot be undone.",
+      "deleteContactListTitle": "Delete address book",
+      "deleteContactListMessage": "Delete \"{{name}}\" and all of its contacts? This cannot be undone."
     },
     "plan": {
       "title": "Schedule \"{{title}}\"",

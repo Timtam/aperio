@@ -186,6 +186,14 @@ export default function ContactsScreen({
         >
           <Text style={styles.primaryButtonText}>{t('dialogs.contact.createTitle')}</Text>
         </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('mobile.manageContactLists')}
+          onPress={() => navigation.navigate('ContactLists')}
+          style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
+        >
+          <Text style={styles.ghostButtonText}>{t('mobile.manageContactLists')}</Text>
+        </Pressable>
       </View>
 
       {!loading && total > 0 && (
@@ -319,6 +327,15 @@ const styles = StyleSheet.create({
   primaryPressed: { backgroundColor: '#1740a8' },
   primaryDisabled: { backgroundColor: '#9aa9c9' },
   primaryButtonText: { fontSize: 16, fontWeight: '700', color: '#ffffff' },
+  ghostButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#c9d2e0',
+    backgroundColor: '#f4f7fb',
+  },
+  ghostButtonText: { fontSize: 16, fontWeight: '600', color: '#1d3a2f' },
   list: { gap: 18, padding: 16 },
   group: { gap: 10 },
   groupHeading: { fontSize: 16, fontWeight: '700', color: '#2b3240' },
