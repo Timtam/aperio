@@ -80,6 +80,14 @@ export default function SettingsScreen({
         >
           <Text style={styles.linkText}>{t('dialogs.reminders.title')}</Text>
         </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('dialogs.colorLabels.title')}
+          onPress={() => navigation.navigate('ColorLabels')}
+          style={({ pressed }) => [styles.link, pressed && styles.pressed]}
+        >
+          <Text style={styles.linkText}>{t('dialogs.colorLabels.title')}</Text>
+        </Pressable>
       </View>
     </ScrollView>
   );

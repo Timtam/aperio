@@ -26,6 +26,7 @@ export type RootStackParamList = {
   EventEditor: { eventId: string | null; calendarId: string };
   Sync: undefined;
   Settings: undefined;
+  ColorLabels: undefined;
   Contacts: undefined;
   ContactEditor: { contactId: string | null; listId: string };
   Reminders: undefined;

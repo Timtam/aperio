@@ -11,6 +11,7 @@ import { useReminderTriggers } from './reminders/scheduler';
 import { useStoredLanguage } from './settings/language';
 import AccountsScreen from './screens/AccountsScreen';
 import ContactEditorModal from './screens/ContactEditorModal';
+import ColorLabelsScreen from './screens/ColorLabelsScreen';
 import ContactsScreen from './screens/ContactsScreen';
 import EventEditorModal from './screens/EventEditorModal';
 import EventsScreen from './screens/EventsScreen';
@@ -126,6 +127,11 @@ function SettingsStackNav() {
         name="Reminders"
         component={RemindersScreen}
         options={{ title: t('dialogs.reminders.title') }}
+      />
+      <SettingsStack.Screen
+        name="ColorLabels"
+        component={ColorLabelsScreen}
+        options={{ title: t('dialogs.colorLabels.title') }}
       />
     </SettingsStack.Navigator>
   );

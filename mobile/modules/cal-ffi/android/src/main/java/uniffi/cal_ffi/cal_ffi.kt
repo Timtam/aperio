@@ -748,6 +748,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_create_calendar_json(
     ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_create_color_label_json(
+    ): Short
     external fun uniffi_cal_ffi_checksum_method_host_create_contact_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_create_contact_list_json(
@@ -763,6 +765,8 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_cal_ffi_checksum_method_host_delete_account(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_delete_calendar(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_delete_color_label(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_delete_contact(
     ): Short
@@ -790,9 +794,13 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_get_events_json(
     ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_get_or_create_ad_hoc_color_label_json(
+    ): Short
     external fun uniffi_cal_ffi_checksum_method_host_get_user_pref(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_list_calendars_json(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_list_color_labels_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_pinned_sftp_host_key(
     ): Short
@@ -821,6 +829,8 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_cal_ffi_checksum_method_host_trust_sftp_host_key(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_upcoming_reminders_json(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_update_color_label_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_update_contact_json(
     ): Short
@@ -939,6 +949,8 @@ external fun uniffi_cal_ffi_fn_method_host_create_account_json(`ptr`: Long,`requ
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_create_calendar_json(`ptr`: Long,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_create_color_label_json(`ptr`: Long,`name`: RustBuffer.ByValue,`hex`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_create_contact_json(`ptr`: Long,`listId`: RustBuffer.ByValue,`contactJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_create_contact_list_json(`ptr`: Long,`name`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -954,6 +966,8 @@ external fun uniffi_cal_ffi_fn_method_host_create_task_list_json(`ptr`: Long,`na
 external fun uniffi_cal_ffi_fn_method_host_delete_account(`ptr`: Long,`accountId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_delete_calendar(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_cal_ffi_fn_method_host_delete_color_label(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_delete_contact(`ptr`: Long,`id`: RustBuffer.ByValue,`listId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
@@ -981,9 +995,13 @@ external fun uniffi_cal_ffi_fn_method_host_get_event_by_id_json(`ptr`: Long,`id`
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_get_events_json(`ptr`: Long,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_get_or_create_ad_hoc_color_label_json(`ptr`: Long,`hex`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_get_user_pref(`ptr`: Long,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_list_calendars_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_list_color_labels_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_pinned_sftp_host_key(`ptr`: Long,`hostPort`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1012,6 +1030,8 @@ external fun uniffi_cal_ffi_fn_method_host_tasks_json(`ptr`: Long,`listId`: Rust
 external fun uniffi_cal_ffi_fn_method_host_trust_sftp_host_key(`ptr`: Long,`hostPort`: RustBuffer.ByValue,`fingerprint`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_upcoming_reminders_json(`ptr`: Long,`horizonMinutes`: Int,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_cal_ffi_fn_method_host_update_color_label_json(`ptr`: Long,`labelJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_update_contact_json(`ptr`: Long,`contactJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1268,6 +1288,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_create_calendar_json() != 42147.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_create_color_label_json() != 16194.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_create_contact_json() != 54386.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1290,6 +1313,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_delete_calendar() != 25740.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_delete_color_label() != 11587.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_delete_contact() != 48838.toShort()) {
@@ -1331,10 +1357,16 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_get_events_json() != 9599.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_get_or_create_ad_hoc_color_label_json() != 25209.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_get_user_pref() != 20426.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_list_calendars_json() != 49275.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_list_color_labels_json() != 37435.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_pinned_sftp_host_key() != 44107.toShort()) {
@@ -1377,6 +1409,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_upcoming_reminders_json() != 5664.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_update_color_label_json() != 28724.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_update_contact_json() != 31223.toShort()) {
@@ -1986,6 +2021,12 @@ public interface HostInterface {
     fun `createCalendarJson`(`requestJson`: kotlin.String): kotlin.String
     
     /**
+     * Create a named colour label from `{name, hex}`; returns the created
+     * `ColorLabel` as JSON and appends `ColorLabelCreated`.
+     */
+    fun `createColorLabelJson`(`name`: kotlin.String, `hex`: kotlin.String): kotlin.String
+    
+    /**
      * Create a contact from a JSON `cal_core::NewContact`; returns the created
      * `Contact` as JSON. Routed by `list_id` (local store or external provider).
      */
@@ -2046,6 +2087,12 @@ public interface HostInterface {
      * local-only `delete_calendar`.
      */
     fun `deleteCalendar`(`id`: kotlin.String)
+    
+    /**
+     * Delete a colour label by id; appends `ColorLabelDeleted`. (Entities still
+     * referencing it resolve to no colour, matching the desktop.)
+     */
+    fun `deleteColorLabel`(`id`: kotlin.String)
     
     /**
      * Delete a contact, routed by the optional `list_id` (omit → local). Callers
@@ -2170,6 +2217,14 @@ public interface HostInterface {
     fun `getEventsJson`(`requestJson`: kotlin.String): kotlin.String
     
     /**
+     * Resolve a one-off `hex` to a hidden ad-hoc colour label (dedup by hex),
+     * creating one when needed; appends `ColorLabelCreated` only on a genuine
+     * create (re-picking the same colour doesn't spam the log). The custom
+     * colour picker calls this; named colours go through `create_color_label`.
+     */
+    fun `getOrCreateAdHocColorLabelJson`(`hex`: kotlin.String): kotlin.String
+    
+    /**
      * Read a user preference, or `None` when unset.
      */
     fun `getUserPref`(`key`: kotlin.String): kotlin.String?
@@ -2183,6 +2238,11 @@ public interface HostInterface {
      * operations — the same ordering the desktop frontend honours.
      */
     fun `listCalendarsJson`(): kotlin.String
+    
+    /**
+     * All colour labels (named + ad-hoc) as a JSON `ColorLabel[]`.
+     */
+    fun `listColorLabelsJson`(): kotlin.String
     
     /**
      * The currently-pinned SFTP fingerprint for `host_port`, or `None`. Lets the
@@ -2296,6 +2356,12 @@ public interface HostInterface {
      * dedup key `(item_id, trigger_at)`.
      */
     fun `upcomingRemindersJson`(`horizonMinutes`: kotlin.UInt): kotlin.String
+    
+    /**
+     * Update a colour label from a JSON `ColorLabel`; returns it and appends
+     * `ColorLabelUpdated`.
+     */
+    fun `updateColorLabelJson`(`labelJson`: kotlin.String): kotlin.String
     
     /**
      * Update a contact from a JSON `cal_core::Contact`; returns the updated
@@ -2714,6 +2780,24 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * Create a named colour label from `{name, hex}`; returns the created
+     * `ColorLabel` as JSON and appends `ColorLabelCreated`.
+     */
+    @Throws(StoreException::class)override fun `createColorLabelJson`(`name`: kotlin.String, `hex`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_create_color_label_json(
+        it,
+        FfiConverterString.lower(`name`),FfiConverterString.lower(`hex`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * Create a contact from a JSON `cal_core::NewContact`; returns the created
      * `Contact` as JSON. Routed by `list_id` (local store or external provider).
      */
@@ -2861,6 +2945,23 @@ open class Host: Disposable, AutoCloseable, HostInterface
     callWithHandle {
     uniffiRustCallWithError(StoreException) { _status ->
     UniffiLib.uniffi_cal_ffi_fn_method_host_delete_calendar(
+        it,
+        FfiConverterString.lower(`id`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Delete a colour label by id; appends `ColorLabelDeleted`. (Entities still
+     * referencing it resolve to no colour, matching the desktop.)
+     */
+    @Throws(StoreException::class)override fun `deleteColorLabel`(`id`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_delete_color_label(
         it,
         FfiConverterString.lower(`id`),_status)
 }
@@ -3140,6 +3241,26 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * Resolve a one-off `hex` to a hidden ad-hoc colour label (dedup by hex),
+     * creating one when needed; appends `ColorLabelCreated` only on a genuine
+     * create (re-picking the same colour doesn't spam the log). The custom
+     * colour picker calls this; named colours go through `create_color_label`.
+     */
+    @Throws(StoreException::class)override fun `getOrCreateAdHocColorLabelJson`(`hex`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_get_or_create_ad_hoc_color_label_json(
+        it,
+        FfiConverterString.lower(`hex`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * Read a user preference, or `None` when unset.
      */
     @Throws(StoreException::class)override fun `getUserPref`(`key`: kotlin.String): kotlin.String? {
@@ -3169,6 +3290,23 @@ open class Host: Disposable, AutoCloseable, HostInterface
     callWithHandle {
     uniffiRustCallWithError(StoreException) { _status ->
     UniffiLib.uniffi_cal_ffi_fn_method_host_list_calendars_json(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * All colour labels (named + ad-hoc) as a JSON `ColorLabel[]`.
+     */
+    @Throws(StoreException::class)override fun `listColorLabelsJson`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_list_color_labels_json(
         it,
         _status)
 }
@@ -3450,6 +3588,24 @@ open class Host: Disposable, AutoCloseable, HostInterface
     UniffiLib.uniffi_cal_ffi_fn_method_host_upcoming_reminders_json(
         it,
         FfiConverterUInt.lower(`horizonMinutes`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Update a colour label from a JSON `ColorLabel`; returns it and appends
+     * `ColorLabelUpdated`.
+     */
+    @Throws(StoreException::class)override fun `updateColorLabelJson`(`labelJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_update_color_label_json(
+        it,
+        FfiConverterString.lower(`labelJson`),_status)
 }
     }
     )

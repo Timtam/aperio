@@ -206,6 +206,28 @@ class CalFfiModule : Module() {
       host.deleteUserPref(key)
     }
 
+    // ─── Colour labels (app-wide palette; local-only, always synced) ──────────
+
+    AsyncFunction("listColorLabelsJson") { ->
+      host.listColorLabelsJson()
+    }
+
+    AsyncFunction("createColorLabelJson") { name: String, hex: String ->
+      host.createColorLabelJson(name, hex)
+    }
+
+    AsyncFunction("getOrCreateAdHocColorLabelJson") { hex: String ->
+      host.getOrCreateAdHocColorLabelJson(hex)
+    }
+
+    AsyncFunction("updateColorLabelJson") { labelJson: String ->
+      host.updateColorLabelJson(labelJson)
+    }
+
+    AsyncFunction("deleteColorLabel") { id: String ->
+      host.deleteColorLabel(id)
+    }
+
     // ─── Contacts (local address book + external CardDAV/Google/EWS providers) ─
     // JSON passthrough, routed Rust-side; contacts are NOT on the sync event log
     // (local = device-local, external = provider-synced).

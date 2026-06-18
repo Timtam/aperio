@@ -3060,6 +3060,85 @@ impl Host {
         Ok(())
     }
 
+    // ── Colour labels (app-wide palette; local-only, always synced) ───────────
+    //
+    // Colour labels live ONLY in local SQLite (§8 — no external provider has the
+    // concept), so every mutation is LOCAL and unconditionally appends a sync
+    // event (no account routing). Mirrors the desktop color_labels commands.
+
+    /// All colour labels (named + ad-hoc) as a JSON `ColorLabel[]`.
+    pub fn list_color_labels_json(&self) -> Result<String, StoreError> {
+        let labels = self.adapter.list_color_labels().map_err(map_store_err)?;
+        to_json(&labels)
+    }
+
+    /// Create a named colour label from `{name, hex}`; returns the created
+    /// `ColorLabel` as JSON and appends `ColorLabelCreated`.
+    pub fn create_color_label_json(&self, name: String, hex: String) -> Result<String, StoreError> {
+        let label = self
+            .adapter
+            .create_color_label(&name, &hex)
+            .map_err(map_store_err)?;
+        if let Ok(fields) = serde_json::to_value(&label) {
+            self.writer
+                .append(SyncEvent::ColorLabelCreated(EventPayload {
+                    id: label.id.as_str().to_string(),
+                    fields,
+                }));
+        }
+        to_json(&label)
+    }
+
+    /// Resolve a one-off `hex` to a hidden ad-hoc colour label (dedup by hex),
+    /// creating one when needed; appends `ColorLabelCreated` only on a genuine
+    /// create (re-picking the same colour doesn't spam the log). The custom
+    /// colour picker calls this; named colours go through `create_color_label`.
+    pub fn get_or_create_ad_hoc_color_label_json(&self, hex: String) -> Result<String, StoreError> {
+        let (label, created) = self
+            .adapter
+            .get_or_create_ad_hoc_color_label(&hex)
+            .map_err(map_store_err)?;
+        if created {
+            if let Ok(fields) = serde_json::to_value(&label) {
+                self.writer
+                    .append(SyncEvent::ColorLabelCreated(EventPayload {
+                        id: label.id.as_str().to_string(),
+                        fields,
+                    }));
+            }
+        }
+        to_json(&label)
+    }
+
+    /// Update a colour label from a JSON `ColorLabel`; returns it and appends
+    /// `ColorLabelUpdated`.
+    pub fn update_color_label_json(&self, label_json: String) -> Result<String, StoreError> {
+        let label: cal_core::ColorLabel = from_json("color label", &label_json)?;
+        let updated = self
+            .adapter
+            .update_color_label(label)
+            .map_err(map_store_err)?;
+        if let Ok(fields) = serde_json::to_value(&updated) {
+            self.writer
+                .append(SyncEvent::ColorLabelUpdated(EventPayload {
+                    id: updated.id.as_str().to_string(),
+                    fields,
+                }));
+        }
+        to_json(&updated)
+    }
+
+    /// Delete a colour label by id; appends `ColorLabelDeleted`. (Entities still
+    /// referencing it resolve to no colour, matching the desktop.)
+    pub fn delete_color_label(&self, id: String) -> Result<(), StoreError> {
+        self.adapter
+            .delete_color_label(&id)
+            .map_err(map_store_err)?;
+        self.writer
+            .append(SyncEvent::ColorLabelDeleted(IdPayload { id }));
+        Ok(())
+    }
+
     // ── Contacts (JSON bridge, routed) ────────────────────────────────────────
     //
     // Address books + contacts, routed local (the device SQLite store) vs
@@ -4741,6 +4820,68 @@ mod tests {
             host.adopt_remote_encryption_json("pp".to_string()).unwrap_err(),
             StoreError::InvalidField { ref field, .. } if field == "sync"
         ));
+    }
+
+    #[test]
+    fn color_labels_crud_round_trips() {
+        let (_dir, host, _kc) = open_host();
+        // Create a named label.
+        let created: serde_json::Value = serde_json::from_str(
+            &host
+                .create_color_label_json("Work".to_string(), "#e53935".to_string())
+                .unwrap(),
+        )
+        .unwrap();
+        let id = created["id"].as_str().unwrap().to_string();
+        assert_eq!(created["name"], "Work");
+        assert_eq!(created["hex"], "#e53935");
+        assert_eq!(created["ad_hoc"], serde_json::json!(false));
+        // It shows in the list.
+        let list: serde_json::Value =
+            serde_json::from_str(&host.list_color_labels_json().unwrap()).unwrap();
+        assert!(list
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|l| l["id"] == serde_json::json!(id)),);
+        // Rename + recolour.
+        let payload =
+            serde_json::json!({"id": id, "name": "Job", "hex": "#43a047", "ad_hoc": false})
+                .to_string();
+        let after: serde_json::Value =
+            serde_json::from_str(&host.update_color_label_json(payload).unwrap()).unwrap();
+        assert_eq!(after["name"], "Job");
+        assert_eq!(after["hex"], "#43a047");
+        // Ad-hoc dedups by hex.
+        let ad1: serde_json::Value = serde_json::from_str(
+            &host
+                .get_or_create_ad_hoc_color_label_json("#123456".to_string())
+                .unwrap(),
+        )
+        .unwrap();
+        let ad2: serde_json::Value = serde_json::from_str(
+            &host
+                .get_or_create_ad_hoc_color_label_json("#123456".to_string())
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            ad1["id"], ad2["id"],
+            "same hex must dedup to one ad-hoc label"
+        );
+        assert_eq!(ad1["ad_hoc"], serde_json::json!(true));
+        // Delete the named one.
+        host.delete_color_label(id.clone()).unwrap();
+        let list2: serde_json::Value =
+            serde_json::from_str(&host.list_color_labels_json().unwrap()).unwrap();
+        assert!(
+            !list2
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|l| l["id"] == serde_json::json!(id)),
+            "the deleted label must be gone",
+        );
     }
 
     #[test]

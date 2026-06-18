@@ -682,6 +682,12 @@ public protocol HostProtocol: AnyObject, Sendable {
     func createCalendarJson(requestJson: String) throws  -> String
     
     /**
+     * Create a named colour label from `{name, hex}`; returns the created
+     * `ColorLabel` as JSON and appends `ColorLabelCreated`.
+     */
+    func createColorLabelJson(name: String, hex: String) throws  -> String
+    
+    /**
      * Create a contact from a JSON `cal_core::NewContact`; returns the created
      * `Contact` as JSON. Routed by `list_id` (local store or external provider).
      */
@@ -742,6 +748,12 @@ public protocol HostProtocol: AnyObject, Sendable {
      * local-only `delete_calendar`.
      */
     func deleteCalendar(id: String) throws 
+    
+    /**
+     * Delete a colour label by id; appends `ColorLabelDeleted`. (Entities still
+     * referencing it resolve to no colour, matching the desktop.)
+     */
+    func deleteColorLabel(id: String) throws 
     
     /**
      * Delete a contact, routed by the optional `list_id` (omit → local). Callers
@@ -866,6 +878,14 @@ public protocol HostProtocol: AnyObject, Sendable {
     func getEventsJson(requestJson: String) throws  -> String
     
     /**
+     * Resolve a one-off `hex` to a hidden ad-hoc colour label (dedup by hex),
+     * creating one when needed; appends `ColorLabelCreated` only on a genuine
+     * create (re-picking the same colour doesn't spam the log). The custom
+     * colour picker calls this; named colours go through `create_color_label`.
+     */
+    func getOrCreateAdHocColorLabelJson(hex: String) throws  -> String
+    
+    /**
      * Read a user preference, or `None` when unset.
      */
     func getUserPref(key: String) throws  -> String?
@@ -879,6 +899,11 @@ public protocol HostProtocol: AnyObject, Sendable {
      * operations — the same ordering the desktop frontend honours.
      */
     func listCalendarsJson() throws  -> String
+    
+    /**
+     * All colour labels (named + ad-hoc) as a JSON `ColorLabel[]`.
+     */
+    func listColorLabelsJson() throws  -> String
     
     /**
      * The currently-pinned SFTP fingerprint for `host_port`, or `None`. Lets the
@@ -992,6 +1017,12 @@ public protocol HostProtocol: AnyObject, Sendable {
      * dedup key `(item_id, trigger_at)`.
      */
     func upcomingRemindersJson(horizonMinutes: UInt32) throws  -> String
+    
+    /**
+     * Update a colour label from a JSON `ColorLabel`; returns it and appends
+     * `ColorLabelUpdated`.
+     */
+    func updateColorLabelJson(labelJson: String) throws  -> String
     
     /**
      * Update a contact from a JSON `cal_core::Contact`; returns the updated
@@ -1323,6 +1354,20 @@ open func createCalendarJson(requestJson: String)throws  -> String  {
 }
     
     /**
+     * Create a named colour label from `{name, hex}`; returns the created
+     * `ColorLabel` as JSON and appends `ColorLabelCreated`.
+     */
+open func createColorLabelJson(name: String, hex: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_create_color_label_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(name),
+        FfiConverterString.lower(hex),$0
+    )
+})
+}
+    
+    /**
      * Create a contact from a JSON `cal_core::NewContact`; returns the created
      * `Contact` as JSON. Routed by `list_id` (local store or external provider).
      */
@@ -1437,6 +1482,18 @@ open func deleteAccount(accountId: String)throws   {try rustCallWithError(FfiCon
      */
 open func deleteCalendar(id: String)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
     uniffi_cal_ffi_fn_method_host_delete_calendar(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(id),$0
+    )
+}
+}
+    
+    /**
+     * Delete a colour label by id; appends `ColorLabelDeleted`. (Entities still
+     * referencing it resolve to no colour, matching the desktop.)
+     */
+open func deleteColorLabel(id: String)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_delete_color_label(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(id),$0
     )
@@ -1655,6 +1712,21 @@ open func getEventsJson(requestJson: String)throws  -> String  {
 }
     
     /**
+     * Resolve a one-off `hex` to a hidden ad-hoc colour label (dedup by hex),
+     * creating one when needed; appends `ColorLabelCreated` only on a genuine
+     * create (re-picking the same colour doesn't spam the log). The custom
+     * colour picker calls this; named colours go through `create_color_label`.
+     */
+open func getOrCreateAdHocColorLabelJson(hex: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_get_or_create_ad_hoc_color_label_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(hex),$0
+    )
+})
+}
+    
+    /**
      * Read a user preference, or `None` when unset.
      */
 open func getUserPref(key: String)throws  -> String?  {
@@ -1677,6 +1749,17 @@ open func getUserPref(key: String)throws  -> String?  {
 open func listCalendarsJson()throws  -> String  {
     return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
     uniffi_cal_ffi_fn_method_host_list_calendars_json(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+    /**
+     * All colour labels (named + ad-hoc) as a JSON `ColorLabel[]`.
+     */
+open func listColorLabelsJson()throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_list_color_labels_json(
             self.uniffiCloneHandle(),$0
     )
 })
@@ -1886,6 +1969,19 @@ open func upcomingRemindersJson(horizonMinutes: UInt32)throws  -> String  {
     uniffi_cal_ffi_fn_method_host_upcoming_reminders_json(
             self.uniffiCloneHandle(),
         FfiConverterUInt32.lower(horizonMinutes),$0
+    )
+})
+}
+    
+    /**
+     * Update a colour label from a JSON `ColorLabel`; returns it and appends
+     * `ColorLabelUpdated`.
+     */
+open func updateColorLabelJson(labelJson: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_update_color_label_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(labelJson),$0
     )
 })
 }
@@ -5256,6 +5352,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_create_calendar_json() != 42147) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_cal_ffi_checksum_method_host_create_color_label_json() != 16194) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_cal_ffi_checksum_method_host_create_contact_json() != 54386) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -5278,6 +5377,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_delete_calendar() != 25740) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_delete_color_label() != 11587) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_delete_contact() != 48838) {
@@ -5319,10 +5421,16 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_get_events_json() != 9599) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_cal_ffi_checksum_method_host_get_or_create_ad_hoc_color_label_json() != 25209) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_cal_ffi_checksum_method_host_get_user_pref() != 20426) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_list_calendars_json() != 49275) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_list_color_labels_json() != 37435) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_pinned_sftp_host_key() != 44107) {
@@ -5365,6 +5473,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_upcoming_reminders_json() != 5664) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_update_color_label_json() != 28724) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_update_contact_json() != 31223) {

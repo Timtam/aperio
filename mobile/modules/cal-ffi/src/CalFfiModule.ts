@@ -133,6 +133,18 @@ declare class CalFfiModule extends NativeModule<Record<never, never>> {
   /** Delete a user preference (a whitelisted key also syncs the deletion). */
   deleteUserPref(key: string): Promise<void>;
 
+  // ── Colour labels (app-wide palette; local-only, always synced) ──
+  /** All colour labels (named + ad-hoc) as a JSON `ColorLabel[]`. */
+  listColorLabelsJson(): Promise<string>;
+  /** Create a named colour label; returns the created `ColorLabel` JSON. */
+  createColorLabelJson(name: string, hex: string): Promise<string>;
+  /** Resolve a one-off hex to a (deduped) ad-hoc colour label; returns it. */
+  getOrCreateAdHocColorLabelJson(hex: string): Promise<string>;
+  /** Update a colour label from a JSON `ColorLabel`; returns the updated one. */
+  updateColorLabelJson(labelJson: string): Promise<string>;
+  /** Delete a colour label by id. */
+  deleteColorLabel(id: string): Promise<void>;
+
   // ── Contacts ──
   // JSON passthrough in the cal_core/desktop wire shape; routing (local vs
   // external account) happens Rust-side. Contacts are NOT on the sync event log.

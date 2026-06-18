@@ -178,6 +178,28 @@ public class CalFfiModule: Module {
       try self.host.deleteUserPref(key: key)
     }
 
+    // ─── Colour labels (app-wide palette; local-only, always synced) ───
+
+    AsyncFunction("listColorLabelsJson") { () -> String in
+      try self.host.listColorLabelsJson()
+    }
+
+    AsyncFunction("createColorLabelJson") { (name: String, hex: String) -> String in
+      try self.host.createColorLabelJson(name: name, hex: hex)
+    }
+
+    AsyncFunction("getOrCreateAdHocColorLabelJson") { (hex: String) -> String in
+      try self.host.getOrCreateAdHocColorLabelJson(hex: hex)
+    }
+
+    AsyncFunction("updateColorLabelJson") { (labelJson: String) -> String in
+      try self.host.updateColorLabelJson(labelJson: labelJson)
+    }
+
+    AsyncFunction("deleteColorLabel") { (id: String) in
+      try self.host.deleteColorLabel(id: id)
+    }
+
     // ─── Contacts ───
     // JSON passthrough, routed Rust-side. Mirrors the Android module.
 

@@ -43,6 +43,8 @@
     "noLists": "Noch keine Aufgabenlisten. Füge oben eine hinzu.",
     "manageList": "Liste verwalten",
     "sectionsHeading": "Abschnitte",
+    "edit": "Bearbeiten",
+    "colorHexInvalid": "Gib eine Farbe als #RRGGBB ein.",
     "listAdded": "{{name}} hinzugefügt.",
     "listSelected": "{{name}} ausgewählt.",
     "listDeselected": "{{name}} abgewählt.",
