@@ -21,6 +21,7 @@ pub mod credential_sync;
 pub mod db;
 pub mod device_names;
 pub mod event_log;
+pub mod logging;
 pub mod overrides;
 pub mod paths;
 pub mod registry;
