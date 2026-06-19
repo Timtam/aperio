@@ -2037,12 +2037,14 @@ impl Host {
 
     // ─── Calendars ───────────────────────────────────────────────────────────
 
-    /// All calendars (local + external) as a JSON `CalendarRow[]`, and — as a
-    /// side effect — primes the registry's calendar→account route map so the
-    /// event methods can route. Mirrors the desktop `list_calendars` minus the
-    /// SWR cache, overrides, birthday calendars, and recurrence-capability
-    /// resolution (all deferred). Callers should list calendars before event
-    /// operations — the same ordering the desktop frontend honours.
+    /// All calendars (local + external + synthetic birthday layers) as a JSON
+    /// `CalendarRow[]`, and — as a side effect — primes the registry's
+    /// calendar→account route map so the event methods can route. External
+    /// calendars go through the SWR cache; birthday layers cover local AND
+    /// external contacts (external from the snapshot cache); host-local colour +
+    /// name overrides are stamped. Mirrors the desktop `list_calendars` (minus
+    /// recurrence-capability resolution, deferred). Callers should list calendars
+    /// before event operations — the same ordering the desktop frontend honours.
     pub fn list_calendars_json(&self) -> Result<String, StoreError> {
         // Fetch real calendars (+ their accounts) and the synthetic birthday rows.
         let (mut calendars, accounts, birthday_rows) = self.runtime.block_on(async {
@@ -2109,28 +2111,22 @@ impl Host {
                 }
             }
 
-            // Synthetic, read-only birthday calendars (§10.3) from the LOCAL
-            // address book — one per contact list that has ≥1 birthday. External
-            // birthday layers need the snapshot contact cache the mobile host
-            // doesn't have yet, so the local books are the ported subset; the
-            // events are synthesised on demand in get_events_json. Stamp each
-            // id's route as local so a stray lookup resolves locally. (No
-            // overrides apply to synthetic calendars.)
+            // Synthetic, read-only birthday calendars (§10.3) — one per contact
+            // list (LOCAL + EXTERNAL) that has ≥1 birthday. The shared
+            // orchestration reads local contacts in-process + external ones from
+            // the snapshot cache (never a network fetch). Events are synthesised
+            // on demand in get_events_json. Stamp each id's route so a later
+            // lookup resolves; no overrides apply to synthetic calendars.
             let mut birthday_rows: Vec<CalendarRow> = Vec::new();
-            if let Ok(contact_lists) = self.adapter.list_contact_lists().await {
-                for list in contact_lists {
-                    let has_birthday = self
-                        .adapter
-                        .get_contacts(&list.id)
-                        .await
-                        .map(|cs| cs.iter().any(|c| c.birthday.is_some()))
-                        .unwrap_or(false);
-                    if has_birthday {
-                        let cal = host_core::birthdays::synthesise_calendar(&list.id, &list.name);
-                        self.registry.note_calendar_route(&cal.id, LOCAL_ID);
-                        birthday_rows.push(CalendarRow::new(cal, LOCAL_ID.to_string()));
-                    }
-                }
+            for (cal, account_id) in host_core::birthdays::list_birthday_calendars(
+                &self.adapter,
+                &self.registry,
+                &self.cache,
+            )
+            .await
+            {
+                self.registry.note_calendar_route(&cal.id, &account_id);
+                birthday_rows.push(CalendarRow::new(cal, account_id));
             }
             Ok::<_, StoreError>((calendars, accounts, birthday_rows))
         })?;
@@ -2190,12 +2186,12 @@ impl Host {
     // ─── Events ──────────────────────────────────────────────────────────────
 
     /// Events in `calendar_id` overlapping `[start, end]`, as a JSON `Event[]`.
-    /// Routes local → LocalAdapter, external → the registry adapter. Mirrors
-    /// the desktop `get_events` minus the SWR read-cache + staleness-gated
-    /// background refresh (deferred): the external branch hits the provider
-    /// live, exactly as a cache-cold desktop first read. A synthetic birthday
-    /// calendar id is intercepted first and its all-day events are synthesised
-    /// on the fly from the LOCAL contacts' birthdays (§10.3).
+    /// A synthetic birthday calendar id is intercepted first (§10.3 — its all-day
+    /// events are synthesised from the underlying contact list's birthdays,
+    /// local in-process + external from the snapshot cache). A LOCAL calendar is
+    /// a direct read; an EXTERNAL one is stale-while-revalidate (serve the cached
+    /// snapshot + background-refresh, with a cold-fallback live read), mirroring
+    /// the desktop `get_events`.
     ///
     /// The local adapter currently returns rows whose stored start/end
     /// intersect the range (RRULE occurrence expansion is its own later phase),
@@ -2205,16 +2201,23 @@ impl Host {
         let range = DateRange::new(req.start, req.end);
 
         // Birthday calendars are synthesised, not stored: derive their events
-        // from the underlying LOCAL contact list's birthdays. (No cache — the
-        // mobile host has no external contact cache, so only local birthday
-        // layers exist — see list_calendars_json.)
+        // from the underlying contact list's birthdays — LOCAL contacts read
+        // in-process, EXTERNAL ones from the snapshot cache (never a network
+        // fetch), via the shared orchestration.
         if host_core::birthdays::is_birthday_calendar_id(&req.calendar_id) {
-            let events = self.runtime.block_on(async {
-                let list_id = host_core::birthdays::underlying_contact_list_id(&req.calendar_id)
-                    .unwrap_or_default();
-                let contacts = self.adapter.get_contacts(list_id).await.unwrap_or_default();
-                host_core::birthdays::events_for_contacts(contacts, &req.calendar_id, range)
-            });
+            let events = self
+                .runtime
+                .block_on(async {
+                    host_core::birthdays::synthesise_birthday_events(
+                        &self.adapter,
+                        &self.registry,
+                        &self.cache,
+                        &req.calendar_id,
+                        range,
+                    )
+                    .await
+                })
+                .unwrap_or_default();
             return to_json(&events);
         }
 

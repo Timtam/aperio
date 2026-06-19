@@ -140,7 +140,7 @@ pub async fn list_calendars(
     // here too so subsequent `get_events` calls reach the right
     // contacts adapter via the same registry mechanism real
     // calendars use.
-    let birthday_rows = list_birthday_calendars(&adapter, &registry, &cache).await;
+    let birthday_rows = list_birthday_calendars(&*adapter, &registry, &cache).await;
     for (cal, account_id) in &birthday_rows {
         registry.note_calendar_route(&cal.id, account_id);
     }
@@ -358,7 +358,7 @@ pub async fn get_events(
     // regular adapter path.
     if is_birthday_calendar_id(&request.calendar_id) {
         if let Some(events) =
-            synthesise_birthday_events(&adapter, &registry, &cache, &request.calendar_id, range)
+            synthesise_birthday_events(&*adapter, &registry, &cache, &request.calendar_id, range)
                 .await
         {
             return Ok(events);

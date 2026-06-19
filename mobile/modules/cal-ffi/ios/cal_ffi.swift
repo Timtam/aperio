@@ -1160,12 +1160,12 @@ public protocol HostProtocol: AnyObject, Sendable {
     
     /**
      * Events in `calendar_id` overlapping `[start, end]`, as a JSON `Event[]`.
-     * Routes local → LocalAdapter, external → the registry adapter. Mirrors
-     * the desktop `get_events` minus the SWR read-cache + staleness-gated
-     * background refresh (deferred): the external branch hits the provider
-     * live, exactly as a cache-cold desktop first read. A synthetic birthday
-     * calendar id is intercepted first and its all-day events are synthesised
-     * on the fly from the LOCAL contacts' birthdays (§10.3).
+     * A synthetic birthday calendar id is intercepted first (§10.3 — its all-day
+     * events are synthesised from the underlying contact list's birthdays,
+     * local in-process + external from the snapshot cache). A LOCAL calendar is
+     * a direct read; an EXTERNAL one is stale-while-revalidate (serve the cached
+     * snapshot + background-refresh, with a cold-fallback live read), mirroring
+     * the desktop `get_events`.
      *
      * The local adapter currently returns rows whose stored start/end
      * intersect the range (RRULE occurrence expansion is its own later phase),
@@ -1198,12 +1198,14 @@ public protocol HostProtocol: AnyObject, Sendable {
     func listAccountsMissingCredentialsJson() throws  -> String
     
     /**
-     * All calendars (local + external) as a JSON `CalendarRow[]`, and — as a
-     * side effect — primes the registry's calendar→account route map so the
-     * event methods can route. Mirrors the desktop `list_calendars` minus the
-     * SWR cache, overrides, birthday calendars, and recurrence-capability
-     * resolution (all deferred). Callers should list calendars before event
-     * operations — the same ordering the desktop frontend honours.
+     * All calendars (local + external + synthetic birthday layers) as a JSON
+     * `CalendarRow[]`, and — as a side effect — primes the registry's
+     * calendar→account route map so the event methods can route. External
+     * calendars go through the SWR cache; birthday layers cover local AND
+     * external contacts (external from the snapshot cache); host-local colour +
+     * name overrides are stamped. Mirrors the desktop `list_calendars` (minus
+     * recurrence-capability resolution, deferred). Callers should list calendars
+     * before event operations — the same ordering the desktop frontend honours.
      */
     func listCalendarsJson() throws  -> String
     
@@ -2249,12 +2251,12 @@ open func getEventByIdJson(id: String)throws  -> String  {
     
     /**
      * Events in `calendar_id` overlapping `[start, end]`, as a JSON `Event[]`.
-     * Routes local → LocalAdapter, external → the registry adapter. Mirrors
-     * the desktop `get_events` minus the SWR read-cache + staleness-gated
-     * background refresh (deferred): the external branch hits the provider
-     * live, exactly as a cache-cold desktop first read. A synthetic birthday
-     * calendar id is intercepted first and its all-day events are synthesised
-     * on the fly from the LOCAL contacts' birthdays (§10.3).
+     * A synthetic birthday calendar id is intercepted first (§10.3 — its all-day
+     * events are synthesised from the underlying contact list's birthdays,
+     * local in-process + external from the snapshot cache). A LOCAL calendar is
+     * a direct read; an EXTERNAL one is stale-while-revalidate (serve the cached
+     * snapshot + background-refresh, with a cold-fallback live read), mirroring
+     * the desktop `get_events`.
      *
      * The local adapter currently returns rows whose stored start/end
      * intersect the range (RRULE occurrence expansion is its own later phase),
@@ -2314,12 +2316,14 @@ open func listAccountsMissingCredentialsJson()throws  -> String  {
 }
     
     /**
-     * All calendars (local + external) as a JSON `CalendarRow[]`, and — as a
-     * side effect — primes the registry's calendar→account route map so the
-     * event methods can route. Mirrors the desktop `list_calendars` minus the
-     * SWR cache, overrides, birthday calendars, and recurrence-capability
-     * resolution (all deferred). Callers should list calendars before event
-     * operations — the same ordering the desktop frontend honours.
+     * All calendars (local + external + synthetic birthday layers) as a JSON
+     * `CalendarRow[]`, and — as a side effect — primes the registry's
+     * calendar→account route map so the event methods can route. External
+     * calendars go through the SWR cache; birthday layers cover local AND
+     * external contacts (external from the snapshot cache); host-local colour +
+     * name overrides are stamped. Mirrors the desktop `list_calendars` (minus
+     * recurrence-capability resolution, deferred). Callers should list calendars
+     * before event operations — the same ordering the desktop frontend honours.
      */
 open func listCalendarsJson()throws  -> String  {
     return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
@@ -6316,7 +6320,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_get_event_by_id_json() != 43277) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_cal_ffi_checksum_method_host_get_events_json() != 9599) {
+    if (uniffi_cal_ffi_checksum_method_host_get_events_json() != 18958) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_get_or_create_ad_hoc_color_label_json() != 25209) {
@@ -6328,7 +6332,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_list_accounts_missing_credentials_json() != 60783) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_cal_ffi_checksum_method_host_list_calendars_json() != 49275) {
+    if (uniffi_cal_ffi_checksum_method_host_list_calendars_json() != 16827) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_list_color_labels_json() != 37435) {

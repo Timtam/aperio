@@ -13,12 +13,18 @@
 //!     range — yearly expansion in-place, no RRULE master).
 //!
 //! The ORCHESTRATION (walking local + external contact books, reading the
-//! snapshot cache) stays platform-side: desktop `commands::birthdays` uses the
-//! `CacheStore`; the mobile Host synthesises from the local address book only
-//! (it has no contact cache yet).
+//! snapshot cache) now lives here too — `list_birthday_calendars` /
+//! `synthesise_birthday_events` — so desktop AND the mobile Host both surface
+//! birthday layers for local AND external contacts (external read from the
+//! snapshot cache). The desktop `commands::birthdays` is a thin re-export.
 
-use cal_core::{Calendar, ColorSource, Contact, ContainerColor, DateRange, Event};
+use std::sync::Arc;
+
+use cal_core::{Calendar, ColorSource, Contact, ContactsFeature, ContainerColor, DateRange, Event};
 use chrono::{Datelike, NaiveDate, TimeZone, Utc};
+
+use crate::cache::CacheStore;
+use crate::registry::{AdapterRegistry, LOCAL_ID};
 
 /// Prefix every synthesised birthday calendar id carries. The `aperio-` prefix
 /// makes these unambiguously synthesised (every real adapter mints opaque ids
@@ -147,6 +153,113 @@ fn birthday_description(occurrence_year: i32, birthday: &NaiveDate) -> Option<St
         return None;
     }
     Some(age.to_string())
+}
+
+// ── Orchestration (local address book + the external snapshot cache) ─────────
+//
+// Walking the contact books + reading the cache is shared by both hosts: the
+// desktop `commands::birthdays` and the mobile cal-ffi Host. External contacts
+// are read from the host SNAPSHOT CACHE, never the adapter — a birthday layer
+// must never trigger a network fetch from inside `list_calendars` (the EWS GAL
+// alone would block for tens of seconds); it reflects whatever is cached and
+// updates on the next listing once a contacts background refresh repopulates.
+// `local` is a `&dyn ContactsFeature` so this stays adapter-agnostic.
+
+/// Walk every contact list (local + registered external adapters) and emit a
+/// synthetic birthday calendar for each one that has at least one contact with
+/// a birthday set. Returns `(calendar, account_id)` pairs so the caller can
+/// stamp the registry's account-routing alongside the listing.
+pub async fn list_birthday_calendars(
+    local: &dyn ContactsFeature,
+    registry: &Arc<AdapterRegistry>,
+    cache: &Arc<CacheStore>,
+) -> Vec<(Calendar, String)> {
+    let mut out = Vec::new();
+
+    // Local adapter — in-process SQLite, cheap to read directly.
+    if let Ok(lists) = local.list_contact_lists().await {
+        for list in lists {
+            if list_has_birthdays(local, &list.id).await {
+                out.push((
+                    synthesise_calendar(&list.id, &list.name),
+                    LOCAL_ID.to_string(),
+                ));
+            }
+        }
+    }
+
+    // External contact accounts — read the cached lists + contacts only.
+    for (account_id, _adapter) in registry.snapshot_contact_adapters() {
+        let lists = cache.read_contact_lists(&account_id).unwrap_or_default();
+        for list in lists {
+            let contacts = cache
+                .read_contacts(&account_id, &list.id)
+                .unwrap_or_default();
+            if contacts.iter().any(|c| c.birthday.is_some()) {
+                out.push((
+                    synthesise_calendar(&list.id, &list.name),
+                    account_id.clone(),
+                ));
+            }
+        }
+    }
+    out
+}
+
+/// Compute the birthday events within `range` for the underlying contact list of
+/// `synthesised_calendar_id`. `None` when the id isn't a birthday calendar (the
+/// caller falls back to the regular adapter path); `Some(vec)` otherwise (an
+/// empty vec = "the list exists but has no cached contacts").
+pub async fn synthesise_birthday_events(
+    local: &dyn ContactsFeature,
+    registry: &Arc<AdapterRegistry>,
+    cache: &Arc<CacheStore>,
+    synthesised_calendar_id: &str,
+    range: DateRange,
+) -> Option<Vec<Event>> {
+    let list_id = underlying_contact_list_id(synthesised_calendar_id)?;
+    // Ids are unique across local + external adapters, so the list id alone says
+    // where to look. Local adapter first (in-process), then the snapshot CACHE
+    // for external books — never the adapter (no network fetch on render).
+    if let Ok(contacts) = local.get_contacts(list_id).await {
+        if !contacts.is_empty() {
+            return Some(events_for_contacts(
+                contacts,
+                synthesised_calendar_id,
+                range,
+            ));
+        }
+    }
+    let accounts: Vec<String> = registry
+        .account_for_contact_list(list_id)
+        .map(|a| vec![a])
+        .unwrap_or_else(|| {
+            registry
+                .snapshot_contact_adapters()
+                .into_iter()
+                .map(|(account_id, _adapter)| account_id)
+                .collect()
+        });
+    for account_id in accounts {
+        let contacts = cache
+            .read_contacts(&account_id, list_id)
+            .unwrap_or_default();
+        if !contacts.is_empty() {
+            return Some(events_for_contacts(
+                contacts,
+                synthesised_calendar_id,
+                range,
+            ));
+        }
+    }
+    Some(Vec::new())
+}
+
+async fn list_has_birthdays(local: &dyn ContactsFeature, list_id: &str) -> bool {
+    match local.get_contacts(list_id).await {
+        Ok(contacts) => contacts.iter().any(|c| c.birthday.is_some()),
+        Err(_) => false,
+    }
 }
 
 #[cfg(test)]
