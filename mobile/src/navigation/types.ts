@@ -67,6 +67,9 @@ export type RootStackParamList = {
   Contacts: undefined;
   ContactLists: undefined;
   ContactEditor: { contactId: string | null; listId: string };
+  // Contacts sync + privacy settings (§10.5/§10.6): manual sync, interval,
+  // include-read-only-directories, clear cache, provider privacy policies.
+  ContactSettings: undefined;
   Reminders: undefined;
   Search: undefined;
   Conflicts: undefined;

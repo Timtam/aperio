@@ -130,6 +130,14 @@ export default function SettingsScreen({
         </Pressable>
         <Pressable
           accessibilityRole="button"
+          accessibilityLabel={t('dialogs.settings.tabs.contacts')}
+          onPress={() => navigation.navigate('ContactSettings')}
+          style={({ pressed }) => [styles.link, pressed && styles.pressed]}
+        >
+          <Text style={styles.linkText}>{t('dialogs.settings.tabs.contacts')}</Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
           accessibilityLabel={t('mobile.syncTitle')}
           onPress={() => navigation.navigate('Sync')}
           style={({ pressed }) => [styles.link, pressed && styles.pressed]}

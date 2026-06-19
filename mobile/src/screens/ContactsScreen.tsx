@@ -254,6 +254,14 @@ export default function ContactsScreen({
         >
           <Text style={styles.ghostButtonText}>{t('mobile.manageContactLists')}</Text>
         </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('dialogs.settings.tabs.contacts')}
+          onPress={() => navigation.navigate('ContactSettings')}
+          style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
+        >
+          <Text style={styles.ghostButtonText}>{t('dialogs.settings.tabs.contacts')}</Text>
+        </Pressable>
       </View>
 
       {/* Search is a SUPERSET of browse (local FTS + every provider, incl.

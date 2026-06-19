@@ -20,6 +20,7 @@ import ColorLabelsScreen from './screens/ColorLabelsScreen';
 import ConflictsScreen from './screens/ConflictsScreen';
 import ContactListsScreen from './screens/ContactListsScreen';
 import ContactsScreen from './screens/ContactsScreen';
+import ContactsSettingsScreen from './screens/ContactsSettingsScreen';
 import AgendaScreen from './screens/AgendaScreen';
 import CalendarEditorModal from './screens/CalendarEditorModal';
 import CalendarsScreen from './screens/CalendarsScreen';
@@ -188,6 +189,11 @@ function ContactsStackNav() {
         component={ContactEditorModal}
         options={{ presentation: 'modal', title: t('dialogs.contact.createTitle') }}
       />
+      <ContactsStack.Screen
+        name="ContactSettings"
+        component={ContactsSettingsScreen}
+        options={{ title: t('dialogs.settings.tabs.contacts') }}
+      />
     </ContactsStack.Navigator>
   );
 }
@@ -230,6 +236,13 @@ function SettingsStackNav() {
         name="TaskSettings"
         component={TaskSettingsScreen}
         options={{ title: t('dialogs.settings.tabs.tasks') }}
+      />
+      {/* Cross-registered (also on the Contacts stack) so opening it from the
+          Settings tab stays on this stack rather than switching tabs. */}
+      <SettingsStack.Screen
+        name="ContactSettings"
+        component={ContactsSettingsScreen}
+        options={{ title: t('dialogs.settings.tabs.contacts') }}
       />
     </SettingsStack.Navigator>
   );
