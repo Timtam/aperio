@@ -780,6 +780,12 @@ public protocol HostProtocol: AnyObject, Sendable {
     func deleteContactList(id: String) throws 
     
     /**
+     * Remove a contact's avatar (other fields untouched), routed by the
+     * optional `list_id`. Mirrors the desktop `delete_contact_photo`.
+     */
+    func deleteContactPhoto(id: String, listId: String?) throws 
+    
+    /**
      * Delete an event. `calendar_id` is routing-only (dropped before the
      * adapter call); omitted → assume local (desktop back-compat).
      * `send_cancellations` (external only) defaults to false; local has no
@@ -864,6 +870,14 @@ public protocol HostProtocol: AnyObject, Sendable {
      * gesture; the next connect re-runs the first-use trust dialog).
      */
     func forgetSftpHostKey(hostPort: String) throws 
+    
+    /**
+     * A contact's avatar as JSON `Option<ContactPhoto>` — `{content_type,
+     * data:<base64>}` or `null` when the contact has no photo — routed by the
+     * optional `list_id` (omit → local). The listing's `has_photo` flag drives
+     * whether the UI calls this. Mirrors the desktop `get_contact_photo`.
+     */
+    func getContactPhotoJson(id: String, listId: String?) throws  -> String
     
     /**
      * One local event by id as JSON (`Event` or `null`). Local-only by design
@@ -1048,6 +1062,14 @@ public protocol HostProtocol: AnyObject, Sendable {
      * Mirrors the desktop `set_account_secret`.
      */
     func setAccountSecret(accountId: String, secret: String) throws 
+    
+    /**
+     * Set (or replace) a contact's avatar from a JSON `ContactPhoto`
+     * (`{content_type, data:<base64>}`), routed by the optional `list_id`. An
+     * adapter that doesn't model photos surfaces `Unsupported`. Mirrors the
+     * desktop `set_contact_photo`.
+     */
+    func setContactPhotoJson(id: String, listId: String?, photoJson: String) throws 
     
     /**
      * Set or clear a container's bound colour label (DESIGN §8.2). Mirrors the
@@ -1702,6 +1724,19 @@ open func deleteContactList(id: String)throws   {try rustCallWithError(FfiConver
 }
     
     /**
+     * Remove a contact's avatar (other fields untouched), routed by the
+     * optional `list_id`. Mirrors the desktop `delete_contact_photo`.
+     */
+open func deleteContactPhoto(id: String, listId: String?)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_delete_contact_photo(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(id),
+        FfiConverterOptionString.lower(listId),$0
+    )
+}
+}
+    
+    /**
      * Delete an event. `calendar_id` is routing-only (dropped before the
      * adapter call); omitted → assume local (desktop back-compat).
      * `send_cancellations` (external only) defaults to false; local has no
@@ -1847,6 +1882,22 @@ open func forgetSftpHostKey(hostPort: String)throws   {try rustCallWithError(Ffi
         FfiConverterString.lower(hostPort),$0
     )
 }
+}
+    
+    /**
+     * A contact's avatar as JSON `Option<ContactPhoto>` — `{content_type,
+     * data:<base64>}` or `null` when the contact has no photo — routed by the
+     * optional `list_id` (omit → local). The listing's `has_photo` flag drives
+     * whether the UI calls this. Mirrors the desktop `get_contact_photo`.
+     */
+open func getContactPhotoJson(id: String, listId: String?)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_get_contact_photo_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(id),
+        FfiConverterOptionString.lower(listId),$0
+    )
+})
 }
     
     /**
@@ -2174,6 +2225,22 @@ open func setAccountSecret(accountId: String, secret: String)throws   {try rustC
             self.uniffiCloneHandle(),
         FfiConverterString.lower(accountId),
         FfiConverterString.lower(secret),$0
+    )
+}
+}
+    
+    /**
+     * Set (or replace) a contact's avatar from a JSON `ContactPhoto`
+     * (`{content_type, data:<base64>}`), routed by the optional `list_id`. An
+     * adapter that doesn't model photos surfaces `Unsupported`. Mirrors the
+     * desktop `set_contact_photo`.
+     */
+open func setContactPhotoJson(id: String, listId: String?, photoJson: String)throws   {try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_set_contact_photo_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(id),
+        FfiConverterOptionString.lower(listId),
+        FfiConverterString.lower(photoJson),$0
     )
 }
 }
@@ -5806,6 +5873,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_cal_ffi_checksum_method_host_delete_contact_list() != 52777) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_cal_ffi_checksum_method_host_delete_contact_photo() != 41374) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_cal_ffi_checksum_method_host_delete_event() != 51601) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -5831,6 +5901,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_forget_sftp_host_key() != 61915) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_get_contact_photo_json() != 13811) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_get_event_by_id_json() != 43277) {
@@ -5894,6 +5967,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_set_account_secret() != 44502) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_set_contact_photo_json() != 21774) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_set_container_color_label() != 32220) {

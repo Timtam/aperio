@@ -253,6 +253,18 @@ declare class CalFfiModule extends NativeModule<Record<never, never>> {
   /** Delete a contact. `listId` (the owning list) routes the delete — omit/null
    *  for a local contact. */
   deleteContact(id: string, listId: string | null): Promise<void>;
+  /** A contact's avatar as JSON `Option<ContactPhoto>` (`{content_type,
+   *  data:<base64>}` or `null`), routed by `listId` (null → local). */
+  getContactPhotoJson(id: string, listId: string | null): Promise<string>;
+  /** Set/replace a contact's avatar from a JSON `ContactPhoto`
+   *  (`{content_type, data:<base64>}`), routed by `listId`. */
+  setContactPhotoJson(
+    id: string,
+    listId: string | null,
+    photoJson: string,
+  ): Promise<void>;
+  /** Remove a contact's avatar, routed by `listId`. */
+  deleteContactPhoto(id: string, listId: string | null): Promise<void>;
   /** Create a local address book; returns the created `ContactListRow` as JSON. */
   createContactListJson(name: string): Promise<string>;
   /** Delete a local address book (the seeded default can't be deleted). */

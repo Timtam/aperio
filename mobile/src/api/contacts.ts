@@ -114,3 +114,37 @@ export const deleteContact = (
   id: string,
   listId: string | null = null,
 ): Promise<void> => CalFfi.deleteContact(id, listId);
+
+// ── Contact photos ───────────────────────────────────────────────────────────
+
+/** A contact avatar — its MIME type + the raw bytes as base64 (the cal_core
+ *  `ContactPhoto` wire shape; `data` is base64-encoded on both directions). */
+export interface ContactPhoto {
+  content_type: string;
+  /** Base64-encoded image bytes. */
+  data: string;
+}
+
+/** The contact's avatar, or `null` when it has none. Call only when the
+ *  contact's `has_photo` is true (a no-photo contact returns `null`, not an
+ *  error). Routed by the owning `listId`. */
+export const getContactPhoto = async (
+  id: string,
+  listId: string | null = null,
+): Promise<ContactPhoto | null> =>
+  JSON.parse(await CalFfi.getContactPhotoJson(id, listId)) as ContactPhoto | null;
+
+/** Set (or replace) a contact's avatar. `data` is base64 image bytes. Routed by
+ *  `listId`. Rejects (Unsupported) on a provider that doesn't model photos. */
+export const setContactPhoto = (
+  id: string,
+  photo: ContactPhoto,
+  listId: string | null = null,
+): Promise<void> =>
+  CalFfi.setContactPhotoJson(id, listId, JSON.stringify(photo));
+
+/** Remove a contact's avatar (other fields untouched). Routed by `listId`. */
+export const deleteContactPhoto = (
+  id: string,
+  listId: string | null = null,
+): Promise<void> => CalFfi.deleteContactPhoto(id, listId);

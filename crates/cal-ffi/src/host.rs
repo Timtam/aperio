@@ -4283,6 +4283,77 @@ impl Host {
             .map_err(map_store_err)
     }
 
+    /// A contact's avatar as JSON `Option<ContactPhoto>` — `{content_type,
+    /// data:<base64>}` or `null` when the contact has no photo — routed by the
+    /// optional `list_id` (omit → local). The listing's `has_photo` flag drives
+    /// whether the UI calls this. Mirrors the desktop `get_contact_photo`.
+    pub fn get_contact_photo_json(
+        &self,
+        id: String,
+        list_id: Option<String>,
+    ) -> Result<String, StoreError> {
+        let route = match list_id.as_deref() {
+            Some(lid) => self.route_contact_list(lid)?,
+            None => None,
+        };
+        let photo = self
+            .runtime
+            .block_on(async {
+                match route {
+                    None => self.adapter.get_contact_photo(&id).await,
+                    Some(ext) => ext.get_contact_photo(&id).await,
+                }
+            })
+            .map_err(map_store_err)?;
+        to_json(&photo)
+    }
+
+    /// Set (or replace) a contact's avatar from a JSON `ContactPhoto`
+    /// (`{content_type, data:<base64>}`), routed by the optional `list_id`. An
+    /// adapter that doesn't model photos surfaces `Unsupported`. Mirrors the
+    /// desktop `set_contact_photo`.
+    pub fn set_contact_photo_json(
+        &self,
+        id: String,
+        list_id: Option<String>,
+        photo_json: String,
+    ) -> Result<(), StoreError> {
+        let photo: cal_core::ContactPhoto = from_json("photo", &photo_json)?;
+        let route = match list_id.as_deref() {
+            Some(lid) => self.route_contact_list(lid)?,
+            None => None,
+        };
+        self.runtime
+            .block_on(async {
+                match route {
+                    None => self.adapter.set_contact_photo(&id, photo).await,
+                    Some(ext) => ext.set_contact_photo(&id, photo).await,
+                }
+            })
+            .map_err(map_store_err)
+    }
+
+    /// Remove a contact's avatar (other fields untouched), routed by the
+    /// optional `list_id`. Mirrors the desktop `delete_contact_photo`.
+    pub fn delete_contact_photo(
+        &self,
+        id: String,
+        list_id: Option<String>,
+    ) -> Result<(), StoreError> {
+        let route = match list_id.as_deref() {
+            Some(lid) => self.route_contact_list(lid)?,
+            None => None,
+        };
+        self.runtime
+            .block_on(async {
+                match route {
+                    None => self.adapter.delete_contact_photo(&id).await,
+                    Some(ext) => ext.delete_contact_photo(&id).await,
+                }
+            })
+            .map_err(map_store_err)
+    }
+
     /// Create a top-level LOCAL address book; returns it as a `ContactListRow`.
     /// Local-only: external contact-list creation isn't a `ContactsFeature`
     /// capability (the desktop `create_contact_list` is local-only too).
@@ -4896,6 +4967,68 @@ mod tests {
                 .iter()
                 .any(|c| c["display_name"] == "Alice Example"),
             "the local contact is found by name",
+        );
+    }
+
+    #[test]
+    fn contact_photo_round_trips_set_get_and_delete() {
+        let (_dir, host, _kc) = open_host();
+        let books: serde_json::Value =
+            serde_json::from_str(&host.contact_lists_json().unwrap()).unwrap();
+        let list_id = books.as_array().unwrap()[0]["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let contact = r#"{
+            "display_name": "Bob Example",
+            "given_name": "Bob",
+            "family_name": "Example",
+            "organization": null,
+            "emails": [],
+            "phone_numbers": [],
+            "birthday": null,
+            "notes": null,
+            "addresses": [],
+            "members": null,
+            "photo": null
+        }"#;
+        let created: serde_json::Value = serde_json::from_str(
+            &host
+                .create_contact_json(list_id.clone(), contact.to_string())
+                .unwrap(),
+        )
+        .unwrap();
+        let contact_id = created["id"].as_str().unwrap().to_string();
+        // No photo initially.
+        assert_eq!(created["has_photo"], serde_json::json!(false));
+        assert_eq!(
+            host.get_contact_photo_json(contact_id.clone(), Some(list_id.clone()))
+                .unwrap()
+                .trim(),
+            "null"
+        );
+
+        // Set a photo (data is base64 on the wire: "aGVsbG8=" = b"hello").
+        let photo = r#"{"content_type":"image/png","data":"aGVsbG8="}"#;
+        host.set_contact_photo_json(contact_id.clone(), Some(list_id.clone()), photo.to_string())
+            .unwrap();
+        let got: serde_json::Value = serde_json::from_str(
+            &host
+                .get_contact_photo_json(contact_id.clone(), Some(list_id.clone()))
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(got["content_type"], "image/png");
+        assert_eq!(got["data"], "aGVsbG8=", "the bytes round-trip as base64");
+
+        // Delete it → back to null.
+        host.delete_contact_photo(contact_id.clone(), Some(list_id.clone()))
+            .unwrap();
+        assert_eq!(
+            host.get_contact_photo_json(contact_id, Some(list_id))
+                .unwrap()
+                .trim(),
+            "null"
         );
     }
 

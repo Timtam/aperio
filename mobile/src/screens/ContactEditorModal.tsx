@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -15,7 +16,10 @@ import {
   Contact,
   ContactAddress,
   ContactList,
+  ContactPhoto,
   createContact,
+  deleteContactPhoto,
+  getContactPhoto,
   getContacts,
   listContactLists,
   updateContact,
@@ -32,8 +36,9 @@ import { useTheme, useThemedStyles, type ThemeColors } from '../theme';
 // per-value rows. Postal addresses ARE editable (a dynamic list of structured
 // rows; empty rows drop on save) + birthday. A "distribution list" switch turns
 // the person fields into a members editor (one "Name <email>" / bare email per
-// line), exactly like the desktop. Photo still round-trips untouched (the picker
-// needs the not-yet-bridged photo methods).
+// line), exactly like the desktop. An existing contact's avatar is shown (a real
+// image for sighted users + an accessible alt) and can be removed; setting a NEW
+// photo from the device library (the image picker) is a follow-up.
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -163,6 +168,9 @@ export default function ContactEditorModal({
   // to a members editor. `members != null` marks a group on the wire.
   const [isGroup, setIsGroup] = useState(false);
   const [membersText, setMembersText] = useState('');
+  // An existing contact's avatar (fetched when has_photo), or null. Display +
+  // remove only — setting a new photo needs the device image picker (follow-up).
+  const [photo, setPhoto] = useState<ContactPhoto | null>(null);
   const addressFocus = useListFocusManager(addresses.length);
   /** The loaded contact (edit mode) — kept whole so un-edited fields
    *  (addresses, members, photo, etag, birthday, timestamps) round-trip. */
@@ -206,6 +214,16 @@ export default function ContactEditorModal({
           setIsGroup(found.members !== null);
           setMembersText(formatMembers(found.members));
           setSelectedListId(found.list_id);
+          // Fetch the avatar lazily (only when the row says it has one). A load
+          // failure is non-fatal — leave it null, the editor still works.
+          if (found.has_photo) {
+            try {
+              const p = await getContactPhoto(found.id, found.list_id);
+              if (!cancelled) setPhoto(p);
+            } catch {
+              /* photoLoadFailed — non-fatal; the section shows "no photo". */
+            }
+          }
         }
       } catch (err) {
         if (!cancelled) setError(errorMessage(err));
@@ -318,6 +336,24 @@ export default function ContactEditorModal({
     t,
   ]);
 
+  const removePhoto = useCallback(async () => {
+    if (original == null) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await deleteContactPhoto(original.id, original.list_id);
+      setPhoto(null);
+      setOriginal({ ...original, has_photo: false });
+      announce(t('dialogs.contact.photoRemoved', { name: original.display_name }));
+    } catch (err) {
+      const message = errorMessage(err);
+      setError(message);
+      announce(t('mobile.error', { message }));
+    } finally {
+      setBusy(false);
+    }
+  }, [announce, original, t]);
+
   const addAddress = useCallback(() => {
     addressFocus.onAdd();
     setAddresses((rows) => [...rows, { ...EMPTY_ADDRESS }]);
@@ -366,6 +402,53 @@ export default function ContactEditorModal({
           accessibilityLabel={t('dialogs.contact.displayNameLabel')}
         />
       </Field>
+
+      {/* Photo — existing contacts only. A real image for sighted users carrying
+          an accessible alt; removable (setting a new one needs the image
+          picker, a follow-up). */}
+      {editing && (
+        <View style={styles.field}>
+          <Text style={styles.label} accessibilityRole="header">
+            {t('dialogs.contact.photoSectionLabel')}
+          </Text>
+          {photo != null ? (
+            <>
+              <Image
+                source={{ uri: `data:${photo.content_type};base64,${photo.data}` }}
+                style={styles.photo}
+                accessible
+                accessibilityRole="image"
+                accessibilityLabel={t('dialogs.contact.photoAltSet', {
+                  name: original?.display_name ?? displayName,
+                })}
+              />
+              {!viewOnly && (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityState={{ disabled: busy }}
+                  accessibilityLabel={t('dialogs.contact.photoRemove')}
+                  disabled={busy}
+                  onPress={() => void removePhoto()}
+                  style={({ pressed }) => [styles.removeButton, pressed && styles.pressed]}
+                >
+                  <Text style={styles.removeButtonText}>
+                    {t('dialogs.contact.photoRemove')}
+                  </Text>
+                </Pressable>
+              )}
+            </>
+          ) : (
+            <Text
+              style={styles.hint}
+              accessibilityLabel={t('dialogs.contact.photoAltNone', {
+                name: original?.display_name ?? displayName,
+              })}
+            >
+              {t('dialogs.contact.photoNone')}
+            </Text>
+          )}
+        </View>
+      )}
 
       {/* Distribution-list switch: turns the person fields into a members
           editor (the wire marks a group by members != null). One switch node
@@ -673,6 +756,14 @@ const makeStyles = (c: ThemeColors) =>
       backgroundColor: c.surface,
     },
     multiline: { minHeight: 88, textAlignVertical: 'top' },
+    photo: {
+      width: 96,
+      height: 96,
+      borderRadius: 48,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surfaceAlt,
+    },
     switchRow: {
       flexDirection: 'row',
       alignItems: 'center',

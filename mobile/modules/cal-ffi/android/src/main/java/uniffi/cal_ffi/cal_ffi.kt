@@ -774,6 +774,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_delete_contact_list(
     ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_delete_contact_photo(
+    ): Short
     external fun uniffi_cal_ffi_checksum_method_host_delete_event(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_delete_section(
@@ -791,6 +793,8 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_cal_ffi_checksum_method_host_enable_sync_encryption_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_forget_sftp_host_key(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_get_contact_photo_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_get_event_by_id_json(
     ): Short
@@ -833,6 +837,8 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_cal_ffi_checksum_method_host_sections_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_set_account_secret(
+    ): Short
+    external fun uniffi_cal_ffi_checksum_method_host_set_contact_photo_json(
     ): Short
     external fun uniffi_cal_ffi_checksum_method_host_set_container_color_label(
     ): Short
@@ -1003,6 +1009,8 @@ external fun uniffi_cal_ffi_fn_method_host_delete_contact(`ptr`: Long,`id`: Rust
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_delete_contact_list(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_cal_ffi_fn_method_host_delete_contact_photo(`ptr`: Long,`id`: RustBuffer.ByValue,`listId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_cal_ffi_fn_method_host_delete_event(`ptr`: Long,`id`: RustBuffer.ByValue,`calendarId`: RustBuffer.ByValue,`sendCancellations`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_delete_section(`ptr`: Long,`id`: RustBuffer.ByValue,`listId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1021,6 +1029,8 @@ external fun uniffi_cal_ffi_fn_method_host_enable_sync_encryption_json(`ptr`: Lo
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_forget_sftp_host_key(`ptr`: Long,`hostPort`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_cal_ffi_fn_method_host_get_contact_photo_json(`ptr`: Long,`id`: RustBuffer.ByValue,`listId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_get_event_by_id_json(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_get_events_json(`ptr`: Long,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1062,6 +1072,8 @@ external fun uniffi_cal_ffi_fn_method_host_search_json(`ptr`: Long,`query`: Rust
 external fun uniffi_cal_ffi_fn_method_host_sections_json(`ptr`: Long,`listId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_set_account_secret(`ptr`: Long,`accountId`: RustBuffer.ByValue,`secret`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_cal_ffi_fn_method_host_set_contact_photo_json(`ptr`: Long,`id`: RustBuffer.ByValue,`listId`: RustBuffer.ByValue,`photoJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_set_container_color_label(`ptr`: Long,`containerId`: RustBuffer.ByValue,`kind`: RustBuffer.ByValue,`colorLabelId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
@@ -1383,6 +1395,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_cal_ffi_checksum_method_host_delete_contact_list() != 52777.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_cal_ffi_checksum_method_host_delete_contact_photo() != 41374.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_cal_ffi_checksum_method_host_delete_event() != 51601.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1408,6 +1423,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_forget_sftp_host_key() != 61915.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_get_contact_photo_json() != 13811.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_get_event_by_id_json() != 43277.toShort()) {
@@ -1471,6 +1489,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_set_account_secret() != 44502.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_set_contact_photo_json() != 21774.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_set_container_color_label() != 32220.toShort()) {
@@ -2217,6 +2238,12 @@ public interface HostInterface {
     fun `deleteContactList`(`id`: kotlin.String)
     
     /**
+     * Remove a contact's avatar (other fields untouched), routed by the
+     * optional `list_id`. Mirrors the desktop `delete_contact_photo`.
+     */
+    fun `deleteContactPhoto`(`id`: kotlin.String, `listId`: kotlin.String?)
+    
+    /**
      * Delete an event. `calendar_id` is routing-only (dropped before the
      * adapter call); omitted → assume local (desktop back-compat).
      * `send_cancellations` (external only) defaults to false; local has no
@@ -2301,6 +2328,14 @@ public interface HostInterface {
      * gesture; the next connect re-runs the first-use trust dialog).
      */
     fun `forgetSftpHostKey`(`hostPort`: kotlin.String)
+    
+    /**
+     * A contact's avatar as JSON `Option<ContactPhoto>` — `{content_type,
+     * data:<base64>}` or `null` when the contact has no photo — routed by the
+     * optional `list_id` (omit → local). The listing's `has_photo` flag drives
+     * whether the UI calls this. Mirrors the desktop `get_contact_photo`.
+     */
+    fun `getContactPhotoJson`(`id`: kotlin.String, `listId`: kotlin.String?): kotlin.String
     
     /**
      * One local event by id as JSON (`Event` or `null`). Local-only by design
@@ -2485,6 +2520,14 @@ public interface HostInterface {
      * Mirrors the desktop `set_account_secret`.
      */
     fun `setAccountSecret`(`accountId`: kotlin.String, `secret`: kotlin.String)
+    
+    /**
+     * Set (or replace) a contact's avatar from a JSON `ContactPhoto`
+     * (`{content_type, data:<base64>}`), routed by the optional `list_id`. An
+     * adapter that doesn't model photos surfaces `Unsupported`. Mirrors the
+     * desktop `set_contact_photo`.
+     */
+    fun `setContactPhotoJson`(`id`: kotlin.String, `listId`: kotlin.String?, `photoJson`: kotlin.String)
     
     /**
      * Set or clear a container's bound colour label (DESIGN §8.2). Mirrors the
@@ -3282,6 +3325,23 @@ open class Host: Disposable, AutoCloseable, HostInterface
 
     
     /**
+     * Remove a contact's avatar (other fields untouched), routed by the
+     * optional `list_id`. Mirrors the desktop `delete_contact_photo`.
+     */
+    @Throws(StoreException::class)override fun `deleteContactPhoto`(`id`: kotlin.String, `listId`: kotlin.String?)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_delete_contact_photo(
+        it,
+        FfiConverterString.lower(`id`),FfiConverterOptionalString.lower(`listId`),_status)
+}
+    }
+    
+    
+
+    
+    /**
      * Delete an event. `calendar_id` is routing-only (dropped before the
      * adapter call); omitted → assume local (desktop back-compat).
      * `send_cancellations` (external only) defaults to false; local has no
@@ -3466,6 +3526,26 @@ open class Host: Disposable, AutoCloseable, HostInterface
 }
     }
     
+    
+
+    
+    /**
+     * A contact's avatar as JSON `Option<ContactPhoto>` — `{content_type,
+     * data:<base64>}` or `null` when the contact has no photo — routed by the
+     * optional `list_id` (omit → local). The listing's `has_photo` flag drives
+     * whether the UI calls this. Mirrors the desktop `get_contact_photo`.
+     */
+    @Throws(StoreException::class)override fun `getContactPhotoJson`(`id`: kotlin.String, `listId`: kotlin.String?): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_get_contact_photo_json(
+        it,
+        FfiConverterString.lower(`id`),FfiConverterOptionalString.lower(`listId`),_status)
+}
+    }
+    )
+    }
     
 
     
@@ -3896,6 +3976,25 @@ open class Host: Disposable, AutoCloseable, HostInterface
     UniffiLib.uniffi_cal_ffi_fn_method_host_set_account_secret(
         it,
         FfiConverterString.lower(`accountId`),FfiConverterString.lower(`secret`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Set (or replace) a contact's avatar from a JSON `ContactPhoto`
+     * (`{content_type, data:<base64>}`), routed by the optional `list_id`. An
+     * adapter that doesn't model photos surfaces `Unsupported`. Mirrors the
+     * desktop `set_contact_photo`.
+     */
+    @Throws(StoreException::class)override fun `setContactPhotoJson`(`id`: kotlin.String, `listId`: kotlin.String?, `photoJson`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_set_contact_photo_json(
+        it,
+        FfiConverterString.lower(`id`),FfiConverterOptionalString.lower(`listId`),FfiConverterString.lower(`photoJson`),_status)
 }
     }
     

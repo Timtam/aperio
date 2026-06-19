@@ -275,6 +275,18 @@ public class CalFfiModule: Module {
       try self.host.deleteContact(id: id, listId: listId)
     }
 
+    AsyncFunction("getContactPhotoJson") { (id: String, listId: String?) -> String in
+      try self.host.getContactPhotoJson(id: id, listId: listId)
+    }
+
+    AsyncFunction("setContactPhotoJson") { (id: String, listId: String?, photoJson: String) in
+      try self.host.setContactPhotoJson(id: id, listId: listId, photoJson: photoJson)
+    }
+
+    AsyncFunction("deleteContactPhoto") { (id: String, listId: String?) in
+      try self.host.deleteContactPhoto(id: id, listId: listId)
+    }
+
     AsyncFunction("createContactListJson") { (name: String) -> String in
       try self.host.createContactListJson(name: name)
     }
