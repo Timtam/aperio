@@ -24,7 +24,9 @@ import {
   renameAccount,
   setAccountSecret,
 } from '../api/accounts';
+import { getUserPref, setUserPref } from '../api/prefs';
 import { reconnectOAuthAccount } from '../api/oauth';
+import ContactsPrivacyNoticeModal from '../components/ContactsPrivacyNoticeModal';
 import OAuthConnectForm from './OAuthConnectForm';
 
 // Accounts management — list + add (credential kinds) + connect (OAuth kinds via
@@ -98,6 +100,19 @@ const OFFERED_KINDS = Object.keys(KIND_FORMS) as (keyof typeof KIND_FORMS)[];
 const isOAuthKind = (kind: AdapterKind): boolean =>
   kind === 'google' || kind === 'microsoft_graph';
 
+/** Adapter kinds whose ContactsFeature pulls remote address-book data — the
+ *  ones that trigger the one-shot privacy notice on first connect. Mirrors the
+ *  desktop CONTACTS_CAPABLE_KINDS. */
+const CONTACTS_CAPABLE_KINDS: ReadonlySet<AdapterKind> = new Set<AdapterKind>([
+  'google',
+  'microsoft_graph',
+  'ews',
+  'caldav',
+]);
+
+/** Frontend-only flag: once acknowledged, the privacy notice never re-appears. */
+const PREF_PRIVACY_NOTICE_ACK = 'contacts.privacyNoticeAcknowledged';
+
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
@@ -119,6 +134,9 @@ export default function AccountsScreen() {
   // Inline credential repair (id being repaired + the new secret draft).
   const [repairId, setRepairId] = useState<string | null>(null);
   const [repairSecret, setRepairSecret] = useState('');
+  // The one-shot contacts privacy notice: the kind of the just-connected
+  // contacts-capable account (null = closed). Frontend-only gating.
+  const [privacyNoticeFor, setPrivacyNoticeFor] = useState<AdapterKind | null>(null);
 
   // Add-form state.
   const [kind, setKind] = useState<keyof typeof KIND_FORMS>('caldav');
@@ -135,6 +153,25 @@ export default function AccountsScreen() {
     (message: string) => AccessibilityInfo.announceForAccessibility(message),
     [],
   );
+
+  // After connecting a contacts-capable account, show the one-shot privacy
+  // notice unless it's already been acknowledged (frontend-only pref). Mirrors
+  // the desktop AccountsPanel gate.
+  const maybeShowPrivacyNotice = useCallback(async (connectedKind: AdapterKind) => {
+    if (!CONTACTS_CAPABLE_KINDS.has(connectedKind)) return;
+    try {
+      const ack = await getUserPref(PREF_PRIVACY_NOTICE_ACK);
+      if (ack !== 'true') setPrivacyNoticeFor(connectedKind);
+    } catch {
+      // Pref read failed — err on showing the notice (privacy-forward).
+      setPrivacyNoticeFor(connectedKind);
+    }
+  }, []);
+
+  const acknowledgePrivacyNotice = useCallback(() => {
+    void setUserPref(PREF_PRIVACY_NOTICE_ACK, 'true').catch(() => {});
+    setPrivacyNoticeFor(null);
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -206,6 +243,7 @@ export default function AccountsScreen() {
       await load();
       pendingFocusId.current = created.id;
       announce(t('dialogs.accounts.created', { name }));
+      await maybeShowPrivacyNotice(kind);
     } catch (err) {
       const message = errorMessage(err);
       setError(message);
@@ -213,7 +251,7 @@ export default function AccountsScreen() {
     } finally {
       setSubmitting(false);
     }
-  }, [announce, config, displayName, form, kind, load, resetForm, secret, t]);
+  }, [announce, config, displayName, form, kind, load, maybeShowPrivacyNotice, resetForm, secret, t]);
 
   // EWS Autodiscover: derive the endpoint from the email + password (the EWS
   // form's username field holds the email) and pre-fill the endpoint + username,
@@ -372,11 +410,13 @@ export default function AccountsScreen() {
       await load();
       pendingFocusId.current = account.id;
       announce(t('dialogs.accounts.created', { name: account.display_name }));
+      await maybeShowPrivacyNotice(account.adapter_kind);
     },
-    [announce, load, t],
+    [announce, load, maybeShowPrivacyNotice, t],
   );
 
   return (
+    <>
     <ScrollView
       style={styles.screen}
       contentContainerStyle={styles.content}
@@ -657,6 +697,12 @@ export default function AccountsScreen() {
       {/* Connect a provider (browser sign-in) */}
       <OAuthConnectForm onConnected={(account) => void onOAuthConnected(account)} />
     </ScrollView>
+    {/* One-shot contacts privacy notice (app-modal; overlays the screen). */}
+    <ContactsPrivacyNoticeModal
+      adapterKind={privacyNoticeFor}
+      onAcknowledge={acknowledgePrivacyNotice}
+    />
+    </>
   );
 }
 
