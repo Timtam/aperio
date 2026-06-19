@@ -4,6 +4,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import type { ColorLabel } from '@aperio/shared';
 
+import { selectableRole } from '../a11y/roles';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
 /**
@@ -50,7 +51,7 @@ export function ColorLabelSelect({
           <Pressable
             key={opt.value || '__none__'}
             accessible
-            accessibilityRole="radio"
+            accessibilityRole={selectableRole('radio')}
             accessibilityState={{ selected, disabled: !!disabled }}
             accessibilityLabel={opt.label}
             disabled={disabled}

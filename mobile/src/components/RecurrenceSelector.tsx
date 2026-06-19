@@ -11,6 +11,7 @@ import {
 } from '@aperio/shared';
 import type { EndMode, Freq, MonthlyOption, ParsedRule } from '@aperio/shared';
 
+import { selectableRole } from '../a11y/roles';
 import { useThemedStyles, type ThemeColors } from '../theme';
 import { RadioGroup } from './RadioGroup';
 
@@ -144,7 +145,7 @@ export function RecurrenceSelector({
                     <Pressable
                       key={d.rrule}
                       accessible
-                      accessibilityRole="checkbox"
+                      accessibilityRole={selectableRole('checkbox')}
                       accessibilityState={{ checked }}
                       accessibilityLabel={t(`dialogs.event.recurrence.short.${d.key}`)}
                       onPress={() =>

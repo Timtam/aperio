@@ -9,6 +9,7 @@ import type {
   TaskRecurrenceValue,
 } from '@aperio/shared';
 
+import { selectableRole } from '../a11y/roles';
 import { useListFocusManager } from '../a11y/useListFocusManager';
 import { useThemedStyles, type ThemeColors } from '../theme';
 import { RadioGroup } from './RadioGroup';
@@ -154,7 +155,7 @@ export function TaskRecurrenceSelector({
                     <Pressable
                       key={d.iso}
                       accessible
-                      accessibilityRole="checkbox"
+                      accessibilityRole={selectableRole('checkbox')}
                       accessibilityState={{ checked }}
                       accessibilityLabel={t(
                         `dialogs.task.recurrence.short.${d.key}`,

@@ -14,6 +14,7 @@ import {
 
 import type { TaskList } from '@aperio/shared';
 
+import { selectableRole } from '../a11y/roles';
 import { createTaskList } from '../api/client';
 import { useCacheReload } from '../state/cacheObserver';
 import { useTaskStore } from '../state/taskStoreContext';
@@ -152,7 +153,7 @@ export default function ListsScreen() {
                     rowTags.current[list.id] = node ? findNodeHandle(node) : null;
                   }}
                   accessible
-                  accessibilityRole="checkbox"
+                  accessibilityRole={selectableRole('checkbox')}
                   accessibilityState={{ checked: selected }}
                   accessibilityLabel={label}
                   onPress={() => onToggle(list)}

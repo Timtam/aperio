@@ -1,5 +1,6 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { selectableRole } from '../a11y/roles';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
 export interface CheckboxOption {
@@ -9,10 +10,12 @@ export interface CheckboxOption {
 
 /**
  * Accessible multi-select — the checkbox sibling of {@link RadioGroup}. Each
- * option is its own focus stop carrying `accessibilityRole="checkbox"` +
- * `accessibilityState.checked` (TalkBack/VoiceOver read "checked"/"not checked"
- * and announce the change on activation). An optional `hint` follows the legend.
- * Used for the search filters (calendars / task lists / task statuses).
+ * option is its own focus stop; the role comes from {@link selectableRole}
+ * (native `checkbox` on Android, `button` on iOS, which has no checkbox trait)
+ * while `accessibilityState.checked` carries the state — TalkBack/VoiceOver read
+ * "checked"/"not checked" and announce the change on activation. An optional
+ * `hint` follows the legend. Used for the search filters (calendars / task
+ * lists / task statuses).
  */
 export function CheckboxGroup({
   label,
@@ -38,7 +41,7 @@ export function CheckboxGroup({
           <Pressable
             key={opt.value}
             accessible
-            accessibilityRole="checkbox"
+            accessibilityRole={selectableRole('checkbox')}
             accessibilityState={{ checked }}
             accessibilityLabel={opt.label}
             onPress={() => onToggle(opt.value)}

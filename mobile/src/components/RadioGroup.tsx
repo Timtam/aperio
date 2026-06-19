@@ -1,5 +1,6 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { selectableRole } from '../a11y/roles';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
 export interface RadioOption<T extends string | number> {
@@ -10,10 +11,11 @@ export interface RadioOption<T extends string | number> {
 /**
  * Accessible single-select. RN has no native `<select>`; for a screen-reader
  * user the faithful equivalent is a radio group where every option is its own
- * focus stop carrying `accessibilityRole="radio"` + `accessibilityState.selected`
- * (TalkBack/VoiceOver read "selected"/"not selected" and announce the change on
- * activation, so no manual announce is needed). Used for status, priority, the
- * task-list picker and the section picker.
+ * focus stop. The per-option role comes from {@link selectableRole} (native
+ * `radio` on Android, `button` on iOS, which has no radio trait) while
+ * `accessibilityState.selected` carries the choice; TalkBack/VoiceOver announce
+ * the change on activation, so no manual announce is needed. Used for status,
+ * priority, the task-list picker and the section picker.
  */
 export function RadioGroup<T extends string | number>({
   label,
@@ -38,7 +40,7 @@ export function RadioGroup<T extends string | number>({
           <Pressable
             key={opt.value}
             accessible
-            accessibilityRole="radio"
+            accessibilityRole={selectableRole('radio')}
             accessibilityState={{ selected, disabled: !!disabled }}
             accessibilityLabel={opt.label}
             disabled={disabled}
