@@ -20,6 +20,13 @@ export type SyncTone = 'schema_too_old' | 'conflict' | 'error' | 'uploading' | '
 
 const POLL_MS = 30000;
 
+/** Structural equality for the polled status — a fresh-but-identical object
+ *  must NOT trigger a re-render. The shape is small + flat, so a JSON compare
+ *  is both correct and cheap at the 30s cadence. */
+function sameStatus(a: SyncStatus | null, b: SyncStatus | null): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
 function toneOf(status: SyncStatus | null, conflictCount: number): SyncTone {
   if (status?.schema_too_old) return 'schema_too_old';
   if (conflictCount > 0) return 'conflict';
@@ -51,8 +58,12 @@ export function useSyncStatus(): SyncStatusInfo {
   const refresh = useCallback(async () => {
     try {
       const [s, c] = await Promise.all([syncStatus(), syncConflictCount()]);
-      setStatus(s);
-      setConflictCount(c);
+      // Only re-render when something ACTUALLY changed. The 30s poll otherwise
+      // hands React a fresh status object every tick, re-rendering the whole app
+      // shell (and the native nav/tab views) for nothing — which on iOS resets
+      // the VoiceOver cursor mid-navigation (focus "jumps"/blocks every poll).
+      setStatus((prev) => (sameStatus(prev, s) ? prev : s));
+      setConflictCount((prev) => (prev === c ? prev : c));
     } catch {
       // Best-effort — a transient bridge error just keeps the last known state.
     }

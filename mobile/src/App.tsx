@@ -6,7 +6,7 @@ import {
 } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
@@ -338,6 +338,57 @@ function AppContent() {
   // Hide the native tab bar on every drill-down screen (it belongs only on the
   // four tab roots), so VoiceOver can't reach it from a sub-screen's content.
   const [tabBarHidden, setTabBarHidden] = useState(false);
+  // Memoize the navigator so an unrelated app-shell re-render (e.g. the 30s
+  // sync-status poll) doesn't reconcile the native nav/tab views — that
+  // reconciliation resets the VoiceOver cursor mid-navigation. It rebuilds ONLY
+  // when something the tabs actually render changes (language, the sync badge,
+  // tab-bar visibility).
+  const tabBadge = sync.badge != null ? String(sync.badge) : undefined;
+  const tabs = useMemo(
+    () => (
+      <Tab.Navigator initialRouteName="TasksTab" tabBarHidden={tabBarHidden}>
+        <Tab.Screen
+          name="TasksTab"
+          component={TasksStackNav}
+          options={{
+            title: t('views.tasks.title'),
+            tabBarIcon: () => ({ sfSymbol: 'checklist' }),
+          }}
+        />
+        <Tab.Screen
+          name="CalendarTab"
+          component={CalendarStackNav}
+          options={{
+            title: t('mobile.eventsButtonLabel'),
+            tabBarIcon: () => ({ sfSymbol: 'calendar' }),
+          }}
+        />
+        <Tab.Screen
+          name="ContactsTab"
+          component={ContactsStackNav}
+          options={{
+            title: t('sidebar.contactLists'),
+            tabBarIcon: () => ({ sfSymbol: 'person.2' }),
+          }}
+        />
+        <Tab.Screen
+          name="SettingsTab"
+          component={SettingsStackNav}
+          options={{
+            title: t('dialogs.settings.title'),
+            tabBarIcon: () => ({ sfSymbol: 'gearshape' }),
+            // Flag sync issues on the Settings tab (Sync lives under it) with a
+            // badge. The native tab bar exposes no per-tab accessibility label
+            // (unlike the JS bottom tabs), so the spoken sync state now comes
+            // solely from useSyncStatus's live-region announcements of
+            // attention-class transitions, not from the tab's label.
+            tabBarBadge: tabBadge,
+          }}
+        />
+      </Tab.Navigator>
+    ),
+    [t, tabBarHidden, tabBadge],
+  );
   return (
     <>
       {/* Dark status-bar glyphs on the light background, light glyphs on the
@@ -354,46 +405,7 @@ function AppContent() {
               store, so they mount inside the provider; the review modal overlays
               the focused tab when the gate opens it. */}
           <DayStartChecks />
-          <Tab.Navigator initialRouteName="TasksTab" tabBarHidden={tabBarHidden}>
-            <Tab.Screen
-              name="TasksTab"
-              component={TasksStackNav}
-              options={{
-                title: t('views.tasks.title'),
-                tabBarIcon: () => ({ sfSymbol: 'checklist' }),
-              }}
-            />
-            <Tab.Screen
-              name="CalendarTab"
-              component={CalendarStackNav}
-              options={{
-                title: t('mobile.eventsButtonLabel'),
-                tabBarIcon: () => ({ sfSymbol: 'calendar' }),
-              }}
-            />
-            <Tab.Screen
-              name="ContactsTab"
-              component={ContactsStackNav}
-              options={{
-                title: t('sidebar.contactLists'),
-                tabBarIcon: () => ({ sfSymbol: 'person.2' }),
-              }}
-            />
-            <Tab.Screen
-              name="SettingsTab"
-              component={SettingsStackNav}
-              options={{
-                title: t('dialogs.settings.title'),
-                tabBarIcon: () => ({ sfSymbol: 'gearshape' }),
-                // Flag sync issues on the Settings tab (Sync lives under it) with
-                // a badge. The native tab bar exposes no per-tab accessibility
-                // label (unlike the JS bottom tabs), so the spoken sync state now
-                // comes solely from useSyncStatus's live-region announcements of
-                // attention-class transitions, not from the tab's label.
-                tabBarBadge: sync.badge != null ? String(sync.badge) : undefined,
-              }}
-            />
-          </Tab.Navigator>
+          {tabs}
         </TaskStoreProvider>
       </NavigationContainer>
     </>
