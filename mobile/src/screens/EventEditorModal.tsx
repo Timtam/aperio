@@ -136,7 +136,11 @@ export default function EventEditorModal({
             setAllDay(ev.all_day);
             // Editing a single occurrence shows ITS date (the master's start is
             // the first occurrence); keep the master's time-of-day + duration.
-            if (occurrence != null) {
+            // Gate on the freshly-loaded recurrence, not just the route param: if
+            // the series lost its recurrence on another device between list-render
+            // and edit, a stale occurrence param must degrade to a plain
+            // whole-event edit (seed from the master), never move the master.
+            if (occurrence != null && ev.recurrence != null) {
               const occStart = new Date(occurrence);
               const dur = new Date(ev.end).getTime() - new Date(ev.start).getTime();
               const occEnd = new Date(occStart.getTime() + (Number.isFinite(dur) ? dur : 0));
