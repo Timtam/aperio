@@ -102,6 +102,38 @@ export async function applyTaskToggle(
   return nextStatus;
 }
 
+/**
+ * Set `task` to a SPECIFIC status (not a toggle) and cascade — the mobile twin
+ * of the desktop useTaskStatusActions `set`. Used where a surface knows the
+ * exact target state (e.g. the day-start review's "Mark done"). Reads the synced
+ * task-behaviour fresh, resolves cascade/auto-date PER-LIST, plans the status
+ * cascade, and applies every write. A no-op when the planner emits nothing.
+ *
+ * `list` is the task's owning list (for `supports_in_progress`); `allTasks` is
+ * the snapshot the planner walks. The caller refetches + announces afterwards.
+ * Returns the number of OTHER tasks the cascade also touched (writes beyond the
+ * target itself) so the caller can append the canonical "N related tasks also
+ * updated" suffix, matching the desktop status action.
+ */
+export async function setTaskStatusTo(
+  task: Task,
+  status: TaskStatus,
+  list: TaskList | undefined,
+  allTasks: Task[],
+): Promise<number> {
+  const behaviour = await readTaskBehaviour();
+  const canInProgress = canStoreInProgress(list);
+  const eff = effectiveForList(behaviour, task.list_id);
+  const writes = planStatusCascade(task.id, status, allTasks, {
+    cascadeEnabled: eff.cascade,
+    // Auto-date only pins a dateless task entering in_progress (the planner
+    // applies it to such writes only); skip where the provider can't store it.
+    ...(eff.autoDate && canInProgress ? { todayKey: todayIsoKey() } : {}),
+  });
+  await applyStatusWrites(writes, allTasks);
+  return Math.max(0, writes.length - 1);
+}
+
 /** The announce message for a check-off's resulting status. */
 export function statusAnnounce(
   t: (key: string, vars?: Record<string, unknown>) => string,

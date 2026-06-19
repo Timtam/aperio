@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { useSyncTriggers } from './api/syncTriggers';
+import DayStartReviewModal from './components/DayStartReviewModal';
 import { useCacheUpdates } from './state/cacheObserver';
 import { ThemeProvider, useTheme, navigationThemeFor } from './theme';
 import type { RootStackParamList, RootTabParamList } from './navigation/types';
@@ -241,10 +242,11 @@ export default function App() {
 }
 
 /** Runs the day-start checks (it needs the task store, so it lives inside
- *  TaskStoreProvider). Renders nothing. */
-function DayStartChecks(): null {
-  useDayStartChecks();
-  return null;
+ *  TaskStoreProvider) and renders the review modal when the gate opens it. The
+ *  modal overlays whatever tab is focused — it's app-global, not per-stack. */
+function DayStartChecks() {
+  const { reviewOpen, closeReview } = useDayStartChecks();
+  return <DayStartReviewModal visible={reviewOpen} onClose={closeReview} />;
 }
 
 function AppContent() {
@@ -276,8 +278,9 @@ function AppContent() {
       <StatusBar style={theme.mode === 'light' ? 'dark' : 'light'} />
       <NavigationContainer theme={navigationThemeFor(theme)}>
         <TaskStoreProvider>
-          {/* Day-start checks (deadline-pin, …) — needs the task store, so it
-              mounts inside the provider; returns nothing. */}
+          {/* Day-start checks (deadline-pin + the review modal) — need the task
+              store, so they mount inside the provider; the review modal overlays
+              the focused tab when the gate opens it. */}
           <DayStartChecks />
           <Tab.Navigator initialRouteName="TasksTab">
             <Tab.Screen
