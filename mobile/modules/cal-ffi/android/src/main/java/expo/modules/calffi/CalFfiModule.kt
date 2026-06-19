@@ -21,14 +21,37 @@ class CalFfiModule : Module() {
       ?: throw IllegalStateException(
         "CalFfi: no Android application context to resolve the data directory",
       )
-    Host.open(
+    val opened = Host.open(
       File(context.filesDir, "aperio.sqlite").absolutePath,
       AndroidKeychain(context),
     )
+    // Wire the external-cache observer to JS: a finished background refresh /
+    // warm pass calls back here, and we forward it as an Expo event the RN layer
+    // subscribes to (live-update the open view + a polite announcement).
+    opened.setCacheObserver(JsCacheObserver())
+    opened
+  }
+
+  /// Adapts the UniFFI `CacheObserverBridge` callback to Expo events. Fired on a
+  /// background (tokio) thread; `sendEvent` marshals to JS.
+  private inner class JsCacheObserver : uniffi.cal_ffi.CacheObserverBridge {
+    override fun cacheUpdated(payloadJson: String) {
+      this@CalFfiModule.sendEvent("onCacheUpdated", mapOf("payload" to payloadJson))
+    }
+
+    override fun refreshStatus(statusJson: String) {
+      this@CalFfiModule.sendEvent("onCacheRefreshStatus", mapOf("status" to statusJson))
+    }
   }
 
   override fun definition() = ModuleDefinition {
     Name("CalFfi")
+
+    // External-cache push events (the mobile analogue of the desktop's Tauri
+    // cache-updated / cache-refresh-status events). onCacheUpdated carries
+    // { payload: "<CacheUpdatedPayload JSON>" }; onCacheRefreshStatus carries
+    // { status: "<CacheRefreshStatus JSON>" }.
+    Events("onCacheUpdated", "onCacheRefreshStatus")
 
     // Calls the Rust `cal_ffi::parse_attendee` through the UniFFI-generated
     // Kotlin bindings (uniffi/cal_ffi/cal_ffi.kt), backed by libcal_ffi.so.

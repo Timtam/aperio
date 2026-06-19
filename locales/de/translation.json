@@ -1,5 +1,10 @@
 {
   "mobile": {
+    "cacheUpdated": {
+      "calendar": "Kalender aktualisiert",
+      "tasks": "Aufgaben aktualisiert",
+      "contacts": "Kontakte aktualisiert"
+    },
     "tasksHeading": "Aperio – Aufgaben",
     "defaultListName": "Aufgaben",
     "intro": "Offline gespeichert über den geteilten Kern. Wische zu einer Aufgabe und dann nach oben oder unten für Aktionen.",
@@ -223,7 +228,8 @@
     "label": "Externe Daten",
     "refreshing": "Externe Daten werden aktualisiert …",
     "lastUpdated": "Externe Daten aktualisiert: {{time}}",
-    "never": "Externe Daten noch nicht aktualisiert"
+    "never": "Externe Daten noch nicht aktualisiert",
+    "refreshNow": "Externe Daten aktualisieren"
   },
   "syncStatus": {
     "label": "Sync-Status",

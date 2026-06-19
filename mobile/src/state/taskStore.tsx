@@ -12,6 +12,7 @@ import type { ColorLabel, Section, TaskList } from '@aperio/shared';
 
 import { listColorLabels } from '../api/colorLabels';
 import { getSections, listTaskLists } from '../api/client';
+import { useCacheReload } from './cacheObserver';
 import { TaskStoreContext } from './taskStoreContext';
 import {
   reconcileSelectionTracked,
@@ -110,6 +111,15 @@ export function TaskStoreProvider({ children }: { children: ReactNode }) {
       known: prev.known,
     }));
   }, []);
+
+  // Live-update on an external task-cache refresh: re-fetch the list set + bump
+  // dataVersion so the task views (keyed on it via useTasks) re-read. The root
+  // observer already announced it politely.
+  const reloadFromCache = useCallback(() => {
+    invalidateData();
+    void refreshTaskLists().catch(() => {});
+  }, [invalidateData, refreshTaskLists]);
+  useCacheReload('tasks', reloadFromCache);
 
   // Hydrate the persisted selection, THEN run the initial catalog load so the
   // reconciler sees the restored `prev` (faithful to the desktop's synchronous

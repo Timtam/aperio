@@ -20,6 +20,7 @@ import {
   searchContacts,
 } from '../api/contacts';
 import type { RootStackScreenProps } from '../navigation/types';
+import { useCacheReload } from '../state/cacheObserver';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
 // Accessible address-book view — a linear, screen-reader-first list of every
@@ -159,6 +160,11 @@ export default function ContactsScreen({
     void load();
     return unsubscribe;
   }, [navigation, load]);
+
+  // Live-update the browse groups while focused when an external contact-cache
+  // refresh lands (the root observer already announced it politely). An active
+  // search re-runs on focus, not here — the overlay is a transient view.
+  useCacheReload('contacts', load);
 
   // First writable (local-or-not, not read-only) book is the create target.
   const writableListId =

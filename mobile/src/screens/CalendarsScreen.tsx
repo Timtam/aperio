@@ -16,6 +16,7 @@ import type { ColorLabel } from '@aperio/shared';
 import { Calendar, createCalendar, listCalendars } from '../api/calendar';
 import { listColorLabels } from '../api/colorLabels';
 import type { RootStackScreenProps } from '../navigation/types';
+import { useCacheReload } from '../state/cacheObserver';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
 // Calendar catalog: read the calendars (local + external), create a local one,
@@ -76,6 +77,10 @@ export default function CalendarsScreen({
     void load();
     return unsubscribe;
   }, [navigation, load]);
+
+  // Live-update the catalog while focused when an external calendar-cache
+  // refresh lands (the root observer already announced it politely).
+  useCacheReload('calendar', load);
 
   // Move SR focus to the new row once the refreshed catalog re-renders.
   useEffect(() => {

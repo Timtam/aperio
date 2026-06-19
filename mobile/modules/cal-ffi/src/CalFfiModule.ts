@@ -2,7 +2,14 @@ import { NativeModule, requireNativeModule } from 'expo';
 
 import { ParsedAttendee } from './CalFfi.types';
 
-declare class CalFfiModule extends NativeModule<Record<never, never>> {
+/** Native→JS events the module emits (the external-cache push). `payload` /
+ *  `status` are JSON strings (a `CacheUpdatedPayload` / `CacheRefreshStatus`). */
+export type CalFfiModuleEvents = {
+  onCacheUpdated: (event: { payload: string }) => void;
+  onCacheRefreshStatus: (event: { status: string }) => void;
+};
+
+declare class CalFfiModule extends NativeModule<CalFfiModuleEvents> {
   /**
    * Parse an attendee entry (`"Name <email>"` or a bare address) by calling
    * the shared Rust `cal-core` parser through UniFFI. Synchronous.

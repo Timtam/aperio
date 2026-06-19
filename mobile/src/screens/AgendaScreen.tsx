@@ -28,6 +28,7 @@ import {
 import { listColorLabels } from '../api/colorLabels';
 import { CalendarViewSwitcher } from '../components/CalendarViewSwitcher';
 import { resolveEventColor } from '../intl/eventColor';
+import { useCacheReload } from '../state/cacheObserver';
 import { confirmDeleteEvent } from '../state/eventDeleteScope';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useThemedStyles, type ThemeColors } from '../theme';
@@ -166,6 +167,10 @@ export default function AgendaScreen({
     void load();
     return unsubscribe;
   }, [navigation, load]);
+
+  // Live-update while focused when an external calendar-cache refresh lands (the
+  // root observer already announced it politely; this just re-reads the window).
+  useCacheReload('calendar', load);
 
   // Per-day event counts for the accessible day-header labels.
   const dayCounts = useMemo(() => {

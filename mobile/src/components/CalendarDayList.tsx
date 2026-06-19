@@ -53,6 +53,7 @@ import { listColorLabels } from '../api/colorLabels';
 import { resolveEventColor } from '../intl/eventColor';
 import { resolveTaskColor, sectionColorMap } from '../intl/taskColor';
 import type { RootStackParamList } from '../navigation/types';
+import { useCacheReload } from '../state/cacheObserver';
 import { confirmDeleteEvent } from '../state/eventDeleteScope';
 import { applyTaskToggle, statusAnnounce } from '../state/taskToggle';
 import { useThemedStyles, type ThemeColors } from '../theme';
@@ -246,6 +247,12 @@ export function CalendarDayList({
     void load();
     return unsubscribe;
   }, [navigation, load]);
+
+  // Live-update while focused: this view loads BOTH events and tasks per day, so
+  // re-read on either an external calendar- or task-cache refresh (the root
+  // observer already announced it politely; same `load` covers both).
+  useCacheReload('calendar', load);
+  useCacheReload('tasks', load);
 
   // Bucket each day's events + tasks. Completed tasks stay hidden (the desktop's
   // per-list "show completed in calendar" opt-in has no mobile consumer yet —

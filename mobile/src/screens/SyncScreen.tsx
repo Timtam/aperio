@@ -16,6 +16,7 @@ import {
 import {
   acceptRemoteDataset,
   adoptRemoteEncryption,
+  cacheRefreshStatus,
   changeSyncPassphrase,
   configureSyncAdapter,
   disableSyncEncryption,
@@ -23,6 +24,7 @@ import {
   forgetSftpHostKey,
   previewSftpHostKey,
   previewSyncTarget,
+  refreshExternalCache,
   resumeStaleDevice,
   trustSftpHostKey,
   clearSyncLog,
@@ -30,6 +32,7 @@ import {
   syncConflictCount,
   syncNow,
   syncStatus,
+  CacheRefreshStatus,
   HostKeyPreview,
   SyncAdapterConfig,
   SyncDeviceSummary,
@@ -40,6 +43,7 @@ import {
 import { connectSyncOAuth } from '../api/oauth';
 import { RadioGroup } from '../components/RadioGroup';
 import { useThemedStyles, type ThemeColors } from '../theme';
+import CalFfi from '../../modules/cal-ffi';
 
 // Cross-device sync — a full desktop peer (same engine, statically-embedded
 // adapters). This screen exposes the password targets (a local shared folder,
@@ -66,6 +70,10 @@ export default function SyncScreen() {
   const [syncLog, setSyncLog] = useState<SyncLogEntry[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The external-cache warm-pass status (the desktop's cache surface): drives
+  // the "refreshing…" / "last updated" line + the manual refresh button. Loaded
+  // on focus and updated live from the native `onCacheRefreshStatus` event.
+  const [cacheStatus, setCacheStatus] = useState<CacheRefreshStatus | null>(null);
 
   // Which target to configure, plus the per-kind fields. `user`/`password` are
   // shared by WebDAV + FTP (only the active kind's fields are shown).
@@ -153,6 +161,7 @@ export default function SyncScreen() {
       setStatus(await syncStatus());
       setConflictCount(await syncConflictCount().catch(() => 0));
       setSyncLog(await listSyncLog(100).catch(() => []));
+      setCacheStatus(await cacheRefreshStatus().catch(() => null));
     } catch (err) {
       setError(errorMessage(err));
     }
@@ -166,6 +175,37 @@ export default function SyncScreen() {
       void refresh();
     }, [refresh]),
   );
+
+  // Subscribe to the native external-cache warm-pass status WHILE FOCUSED so the
+  // "refreshing…" / "last updated" line follows a pass live (a manual refresh
+  // here, or a background warm). Parse the event's JSON `CacheRefreshStatus`.
+  // Removed on blur/unmount so the listener never leaks.
+  useFocusEffect(
+    useCallback(() => {
+      const sub = CalFfi.addListener('onCacheRefreshStatus', ({ status: json }) => {
+        try {
+          setCacheStatus(JSON.parse(json) as CacheRefreshStatus);
+        } catch {
+          // A malformed payload just leaves the last-known status in place.
+        }
+      });
+      return () => sub.remove();
+    }, []),
+  );
+
+  // Kick an immediate warm pass over every external account (the manual "refresh
+  // now"). Fire-and-forget: the native `onCacheRefreshStatus` subscription above
+  // streams the refreshing→done transition into the status line.
+  const refreshCache = useCallback(async () => {
+    announce(t('cacheRefresh.refreshing'));
+    try {
+      await refreshExternalCache();
+    } catch (err) {
+      const message = errorMessage(err);
+      setError(message);
+      announce(t('mobile.error', { message }));
+    }
+  }, [announce, t]);
 
   // Clear the diagnostic sync log (a confirm — it scrubs only the local history,
   // never any sync data).
@@ -817,6 +857,15 @@ export default function SyncScreen() {
     status?.last_synced_at != null
       ? new Date(status.last_synced_at).toLocaleString()
       : t('mobile.syncNever');
+
+  // The external-cache status line: refreshing now → "last updated …" → "never".
+  const cacheStatusLine = cacheStatus?.refreshing
+    ? t('cacheRefresh.refreshing')
+    : cacheStatus?.last_refreshed_at != null
+      ? t('cacheRefresh.lastUpdated', {
+          time: new Date(cacheStatus.last_refreshed_at).toLocaleString(),
+        })
+      : t('cacheRefresh.never');
 
   // OAuth sign-in button labels (only used when isOAuthKind; cheap t() calls).
   const oauthSignInLabel =
@@ -1745,6 +1794,34 @@ export default function SyncScreen() {
           </Pressable>
         </>
       )}
+
+      {/* External data — explicit controls over the stale-while-revalidate
+          external cache (the desktop's cache surface): a manual "refresh now"
+          plus a live status line. The list views (calendar/tasks/contacts)
+          live-reload + announce on a warm pass via the root cache observer, so
+          this section is the control point, not a duplicate announcer. */}
+      <View style={styles.protocolSection}>
+        <Text style={styles.label} accessibilityRole="header">
+          {t('cacheRefresh.label')}
+        </Text>
+        <Text
+          style={styles.hint}
+          accessibilityRole="text"
+          accessibilityLiveRegion="polite"
+        >
+          {cacheStatusLine}
+        </Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ disabled: cacheStatus?.refreshing === true }}
+          accessibilityLabel={t('cacheRefresh.refreshNow')}
+          disabled={cacheStatus?.refreshing === true}
+          onPress={() => void refreshCache()}
+          style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
+        >
+          <Text style={styles.ghostButtonText}>{t('cacheRefresh.refreshNow')}</Text>
+        </Pressable>
+      </View>
 
       {/* Protocol — recent sync rounds (newest first), the diagnostic log every
           round self-records (mobile has no scheduler). A linear accessible list;

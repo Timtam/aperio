@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { useSyncTriggers } from './api/syncTriggers';
+import { useCacheUpdates } from './state/cacheObserver';
 import { ThemeProvider, useTheme, navigationThemeFor } from './theme';
 import type { RootStackParamList, RootTabParamList } from './navigation/types';
 import { useReminderTriggers } from './reminders/scheduler';
@@ -237,6 +238,11 @@ function AppContent() {
   // foreground + after mutations). The mobile stand-in for the desktop reminder
   // worker; triggers come from the shared core via cal-ffi.
   useReminderTriggers();
+  // External-cache live-update: a background refresh / warm pass pushes
+  // `cache_updated`; this announces it politely + live-reloads the focused view
+  // (the user-chosen behaviour). The bus the screens subscribe to via
+  // useCacheReload is driven here.
+  useCacheUpdates();
   // App-wide sync status: a Settings-tab badge for sighted users + spoken
   // announcements of attention-class transitions (conflict / failure /
   // schema-too-old) for screen-reader users. The data is already bridged.

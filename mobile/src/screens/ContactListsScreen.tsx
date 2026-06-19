@@ -24,6 +24,7 @@ import {
 } from '../api/contacts';
 import { ColorLabelSelect } from '../components/ColorLabelSelect';
 import type { RootStackScreenProps } from '../navigation/types';
+import { useCacheReload } from '../state/cacheObserver';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
 // Address-book management — create, rename, recolour, and delete address books.
@@ -89,6 +90,10 @@ export default function ContactListsScreen({
     void load();
     return unsubscribe;
   }, [navigation, load]);
+
+  // Live-update the book list while focused when an external contact-cache
+  // refresh lands (the root observer already announced it politely).
+  useCacheReload('contacts', load);
 
   // After a create/edit, move screen-reader focus to the affected row once the
   // refreshed list re-renders.

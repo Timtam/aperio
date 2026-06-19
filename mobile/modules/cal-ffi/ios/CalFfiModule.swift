@@ -5,6 +5,21 @@ import Foundation
 // bindings (cal_ffi.swift, compiled into this module) backed by
 // CalFfi.xcframework. Engine reuse: the same cal-core parser the desktop and
 // the Android build use. Mirrors the Android CalFfiModule.
+
+/// Adapts the UniFFI `CacheObserverBridge` callback to Expo events. A finished
+/// background refresh / warm pass calls back here (on a background thread);
+/// `sendEvent` forwards it to JS. Mirrors the Android `JsCacheObserver`.
+private final class JsCacheObserver: CacheObserverBridge {
+  weak var module: CalFfiModule?
+  init(module: CalFfiModule) { self.module = module }
+  func cacheUpdated(payloadJson: String) {
+    module?.sendEvent("onCacheUpdated", ["payload": payloadJson])
+  }
+  func refreshStatus(statusJson: String) {
+    module?.sendEvent("onCacheRefreshStatus", ["status": statusJson])
+  }
+}
+
 public class CalFfiModule: Module {
   // The full on-device engine: accounts + the statically-embedded adapter
   // registry, opened lazily at the app-sandbox database path. Credentials
@@ -18,11 +33,21 @@ public class CalFfiModule: Module {
       create: true
     )
     let dbPath = dir.appendingPathComponent("aperio.sqlite").path
-    return try! Host.open(dbPath: dbPath, keychain: IosKeychain())
+    let opened = try! Host.open(dbPath: dbPath, keychain: IosKeychain())
+    // Forward external-cache refresh callbacks to JS as Expo events (live-update
+    // the open view + a polite announcement). Mirrors the Android module.
+    opened.setCacheObserver(observer: JsCacheObserver(module: self))
+    return opened
   }()
 
   public func definition() -> ModuleDefinition {
     Name("CalFfi")
+
+    // External-cache push events (the mobile analogue of the desktop Tauri
+    // cache-updated / cache-refresh-status events). onCacheUpdated carries
+    // { payload: "<CacheUpdatedPayload JSON>" }; onCacheRefreshStatus carries
+    // { status: "<CacheRefreshStatus JSON>" }.
+    Events("onCacheUpdated", "onCacheRefreshStatus")
 
     Function("parseAttendee") { (entry: String) -> [String: Any?] in
       let parsed = parseAttendee(entry: entry)

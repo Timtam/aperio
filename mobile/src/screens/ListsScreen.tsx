@@ -15,6 +15,7 @@ import {
 import type { TaskList } from '@aperio/shared';
 
 import { createTaskList } from '../api/client';
+import { useCacheReload } from '../state/cacheObserver';
 import { useTaskStore } from '../state/taskStoreContext';
 import { useThemedStyles, type ThemeColors } from '../theme';
 
@@ -55,6 +56,14 @@ export default function ListsScreen() {
     const tag = rowTags.current[id];
     if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
   }, [taskLists]);
+
+  // Live-update the list catalog when an external task-cache refresh lands (the
+  // root observer already announced it politely). Reuses the store's own
+  // catalog reload; fire-and-forget so the hook's reload stays `() => void`.
+  const reloadLists = useCallback(() => {
+    void refreshTaskLists().catch(() => {});
+  }, [refreshTaskLists]);
+  useCacheReload('tasks', reloadLists);
 
   const addList = useCallback(async () => {
     const name = newName.trim();
