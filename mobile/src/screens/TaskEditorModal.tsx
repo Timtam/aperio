@@ -29,6 +29,7 @@ import { TASK_RECURRENCE_DEFAULT, fromBackend, toBackend } from '@aperio/shared'
 
 import { createTask, getTaskById, getTasks, updateTask } from '../api/client';
 import { ColorLabelSelect } from '../components/ColorLabelSelect';
+import { DescriptionLinks } from '../components/DescriptionLinks';
 import { RadioGroup } from '../components/RadioGroup';
 import { RemindersEditor } from '../components/RemindersEditor';
 import { TaskRecurrenceSelector } from '../components/TaskRecurrenceSelector';
@@ -557,6 +558,7 @@ export default function TaskEditorModal({
           numberOfLines={4}
           textAlignVertical="top"
         />
+        <DescriptionLinks text={form.description} />
       </View>
 
       {canRecur && (

@@ -15,6 +15,7 @@ import type { ColorLabel, Reminder } from '@aperio/shared';
 
 import { AttendeesEditor } from '../components/AttendeesEditor';
 import { ColorLabelSelect } from '../components/ColorLabelSelect';
+import { DescriptionLinks } from '../components/DescriptionLinks';
 import { RadioGroup } from '../components/RadioGroup';
 import { RecurrenceSelector } from '../components/RecurrenceSelector';
 import { RemindersEditor } from '../components/RemindersEditor';
@@ -498,6 +499,7 @@ export default function EventEditorModal({
           accessibilityLabel={t('dialogs.event.fields.description')}
           multiline
         />
+        <DescriptionLinks text={description} />
       </View>
 
       {/* Colour — every calendar: a local or colour-capable external calendar
