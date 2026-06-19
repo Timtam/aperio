@@ -2,30 +2,83 @@ import type { TaskList, TaskStatus } from '@aperio/shared';
 
 import { getUserPref, setUserPref } from '../api/prefs';
 
-// The global task-behaviour knobs (Settings → Tasks), SYNCED across the user's
-// devices via the `tasks.*` user-prefs (all §19.2.1 always-sync keys) — the
-// mobile twin of the desktop TaskCascadeProvider's GLOBAL settings. Drives the
-// check-off gesture in TasksScreen + WeekScreen. (Per-list overrides
-// [`tasks.listOverrides`], carry-over, and the day-start trigger are deferred —
-// the latter two feed the day-start review checkers, which mobile doesn't host
-// yet.) Best-effort throughout: a read failure falls back to the desktop
-// defaults; a write failure still applies for this session.
+// The task-behaviour knobs (Settings → Tasks), SYNCED across the user's devices
+// via the `tasks.*` user-prefs (§19.2.1 always-sync keys) — the mobile twin of
+// the desktop TaskCascadeProvider. FIVE globals (check-off mode, status
+// coupling, auto-date, carry-over default, day-start trigger) + a per-list
+// override map (`tasks.listOverrides`). The check-off path reads the EFFECTIVE
+// (per-list-resolved) cascade/auto-date, so a per-list override set on ANY
+// device applies here. carryOverDefault + dayStartTrigger drive the day-start
+// review / deadline-pin checkers. Best-effort: a read failure falls back to the
+// desktop defaults; a write still applies for this session.
 
 export type CheckoffMode = 'toggle' | 'cycle';
+export type CarryOverDefault = 'ask' | 'today' | 'backlog';
+/** When the day-start checkers fire on a long-running app. */
+export type DayStartTrigger = 'app-start' | '00:00' | '06:00' | '08:00' | '12:00';
+
+/** Per-list override of any subset of the knobs; absent fields inherit the
+ *  global default. */
+export interface ListOverrides {
+  cascade?: boolean;
+  autoDate?: boolean;
+  carryOverDefault?: CarryOverDefault;
+}
+
+/** The resolved per-list values (override per field, else global) — all non-null. */
+export interface EffectiveListSettings {
+  cascade: boolean;
+  autoDate: boolean;
+  carryOverDefault: CarryOverDefault;
+}
 
 export interface TaskBehaviour {
-  /** Couple parent/subtask status — when off, the planner does a single-row
-   *  write (no up/down cascade). Default on. */
+  /** Couple parent/subtask status — off ⇒ single-row writes. Default on. */
   cascadeEnabled: boolean;
   /** Pin a dateless task to today when it enters in_progress. Default on. */
   autoDate: boolean;
   /** What a check-off does: flip open↔completed, or cycle through in_progress. */
   checkoffMode: CheckoffMode;
+  /** Day-start action for tasks whose scheduled day passed + still open. */
+  carryOverDefault: CarryOverDefault;
+  /** When the day-start checkers fire. */
+  dayStartTrigger: DayStartTrigger;
+  /** Per-list overrides, keyed by task-list id; absent ⇒ inherit. */
+  listOverrides: Record<string, ListOverrides>;
 }
 
 const CASCADE_KEY = 'tasks.cascadeStatusCoupling';
 const AUTO_DATE_KEY = 'tasks.autoDateOnStart';
 const CHECKOFF_KEY = 'tasks.checkoffMode';
+const CARRY_OVER_KEY = 'tasks.carryOverDefault';
+const DAY_START_TRIGGER_KEY = 'tasks.dayStartTrigger';
+const LIST_OVERRIDES_KEY = 'tasks.listOverrides';
+
+/** The desktop defaults ("do what we've always done"). */
+export const TASK_BEHAVIOUR_DEFAULTS: TaskBehaviour = {
+  cascadeEnabled: true,
+  autoDate: true,
+  checkoffMode: 'toggle',
+  carryOverDefault: 'ask',
+  dayStartTrigger: '00:00',
+  listOverrides: {},
+};
+
+const CARRY_OVER_VALUES: readonly CarryOverDefault[] = ['ask', 'today', 'backlog'];
+export function isCarryOverDefault(v: unknown): v is CarryOverDefault {
+  return typeof v === 'string' && (CARRY_OVER_VALUES as readonly string[]).includes(v);
+}
+
+const DAY_START_VALUES: readonly DayStartTrigger[] = [
+  'app-start',
+  '00:00',
+  '06:00',
+  '08:00',
+  '12:00',
+];
+export function isDayStartTrigger(v: unknown): v is DayStartTrigger {
+  return typeof v === 'string' && (DAY_START_VALUES as readonly string[]).includes(v);
+}
 
 /** Boolean prefs default ON; only the literal `"false"` turns them off (matches
  *  the desktop TaskCascadeProvider hydration). */
@@ -37,21 +90,57 @@ function parseCheckoff(stored: string | null): CheckoffMode {
   return stored === 'cycle' ? 'cycle' : 'toggle';
 }
 
-/** Read the three synced knobs, or the desktop defaults when unset/unreadable. */
+/** Parse + sanitise the listOverrides JSON per-list-per-field so one corrupt
+ *  entry doesn't poison the others (mirrors the desktop hydration). */
+function parseListOverrides(stored: string | null): Record<string, ListOverrides> {
+  if (!stored) return {};
+  try {
+    const parsed = JSON.parse(stored) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const out: Record<string, ListOverrides> = {};
+    for (const [listId, raw] of Object.entries(parsed)) {
+      if (!raw || typeof raw !== 'object') continue;
+      const r = raw as Record<string, unknown>;
+      const entry: ListOverrides = {};
+      if (typeof r.cascade === 'boolean') entry.cascade = r.cascade;
+      if (typeof r.autoDate === 'boolean') entry.autoDate = r.autoDate;
+      if (isCarryOverDefault(r.carryOverDefault)) entry.carryOverDefault = r.carryOverDefault;
+      if (
+        entry.cascade !== undefined ||
+        entry.autoDate !== undefined ||
+        entry.carryOverDefault !== undefined
+      ) {
+        out[listId] = entry;
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/** Read all five synced knobs + the per-list override map, or the desktop
+ *  defaults when unset/unreadable. */
 export async function readTaskBehaviour(): Promise<TaskBehaviour> {
   try {
-    const [cascade, autoDate, checkoff] = await Promise.all([
+    const [cascade, autoDate, checkoff, carryOver, trigger, overrides] = await Promise.all([
       getUserPref(CASCADE_KEY),
       getUserPref(AUTO_DATE_KEY),
       getUserPref(CHECKOFF_KEY),
+      getUserPref(CARRY_OVER_KEY),
+      getUserPref(DAY_START_TRIGGER_KEY),
+      getUserPref(LIST_OVERRIDES_KEY),
     ]);
     return {
       cascadeEnabled: parseBool(cascade),
       autoDate: parseBool(autoDate),
       checkoffMode: parseCheckoff(checkoff),
+      carryOverDefault: isCarryOverDefault(carryOver) ? carryOver : 'ask',
+      dayStartTrigger: isDayStartTrigger(trigger) ? trigger : '00:00',
+      listOverrides: parseListOverrides(overrides),
     };
   } catch {
-    return { cascadeEnabled: true, autoDate: true, checkoffMode: 'toggle' };
+    return { ...TASK_BEHAVIOUR_DEFAULTS };
   }
 }
 
@@ -69,6 +158,51 @@ export const writeAutoDate = (v: boolean): Promise<void> =>
   writeBest(AUTO_DATE_KEY, v ? 'true' : 'false');
 export const writeCheckoffMode = (m: CheckoffMode): Promise<void> =>
   writeBest(CHECKOFF_KEY, m);
+export const writeCarryOverDefault = (v: CarryOverDefault): Promise<void> =>
+  writeBest(CARRY_OVER_KEY, v);
+export const writeDayStartTrigger = (v: DayStartTrigger): Promise<void> =>
+  writeBest(DAY_START_TRIGGER_KEY, v);
+export const writeListOverrides = (map: Record<string, ListOverrides>): Promise<void> =>
+  writeBest(LIST_OVERRIDES_KEY, JSON.stringify(map));
+
+/** Resolve the effective cascade / auto-date / carry-over for `listId`: the
+ *  per-list override wins per field, else the global default. (dayStartTrigger
+ *  is global — a clock-time, not per-list.) */
+export function effectiveForList(b: TaskBehaviour, listId: string): EffectiveListSettings {
+  const o = b.listOverrides[listId];
+  return {
+    cascade: o?.cascade ?? b.cascadeEnabled,
+    autoDate: o?.autoDate ?? b.autoDate,
+    carryOverDefault: o?.carryOverDefault ?? b.carryOverDefault,
+  };
+}
+
+/** A new override map with `listId` set to `override` (undefined fields
+ *  stripped); an all-empty override drops the entry (→ inherit globals). Backs
+ *  the per-list settings UI. */
+export function withListOverride(
+  map: Record<string, ListOverrides>,
+  listId: string,
+  override: ListOverrides,
+): Record<string, ListOverrides> {
+  const trimmed: ListOverrides = {};
+  if (override.cascade !== undefined) trimmed.cascade = override.cascade;
+  if (override.autoDate !== undefined) trimmed.autoDate = override.autoDate;
+  if (override.carryOverDefault !== undefined) {
+    trimmed.carryOverDefault = override.carryOverDefault;
+  }
+  const next = { ...map };
+  if (
+    trimmed.cascade === undefined &&
+    trimmed.autoDate === undefined &&
+    trimmed.carryOverDefault === undefined
+  ) {
+    delete next[listId];
+  } else {
+    next[listId] = trimmed;
+  }
+  return next;
+}
 
 /** Whether the owning provider stores `in_progress` as a distinct state
  *  (`task_capabilities.supports_in_progress`, absent → true). When false, the

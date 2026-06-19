@@ -2,7 +2,12 @@ import { planAncestorRecompute, planStatusCascade, todayIsoKey } from '@aperio/s
 import type { StatusWrite, Task, TaskList, TaskStatus } from '@aperio/shared';
 
 import { updateTask } from '../api/client';
-import { canStoreInProgress, nextCheckoffStatus, readTaskBehaviour } from './taskBehaviour';
+import {
+  canStoreInProgress,
+  effectiveForList,
+  nextCheckoffStatus,
+  readTaskBehaviour,
+} from './taskBehaviour';
 
 /** Apply each planned status write via update_task against `snapshot` (the task
  *  set the planner saw). Preserves an existing completion time, stamps a fresh
@@ -41,10 +46,16 @@ export async function recomputeAncestors(
   snapshot: Task[],
 ): Promise<void> {
   const behaviour = await readTaskBehaviour();
-  if (!behaviour.cascadeEnabled) return;
+  // Resolve cascade/auto-date for the parent's OWN list (subtasks stay in it),
+  // so a per-list override applies; fall back to globals if the parent is gone.
+  const parent = snapshot.find((tk) => tk.id === parentId);
+  const eff = parent
+    ? effectiveForList(behaviour, parent.list_id)
+    : { cascade: behaviour.cascadeEnabled, autoDate: behaviour.autoDate };
+  if (!eff.cascade) return;
   const writes = planAncestorRecompute(parentId, snapshot, {
-    cascadeEnabled: behaviour.cascadeEnabled,
-    ...(behaviour.autoDate ? { todayKey: todayIsoKey() } : {}),
+    cascadeEnabled: eff.cascade,
+    ...(eff.autoDate ? { todayKey: todayIsoKey() } : {}),
   });
   await applyStatusWrites(writes, snapshot);
 }
@@ -75,12 +86,16 @@ export async function applyTaskToggle(
   const canInProgress = canStoreInProgress(list);
   const nextStatus = nextCheckoffStatus(task.status, behaviour.checkoffMode, canInProgress);
   if (nextStatus === task.status) return null;
+  // Cascade + auto-date resolve PER-LIST (override per field, else global), so a
+  // list flagged differently behaves so here too — matching the desktop. The
+  // check-off MODE stays global (it's not per-list).
+  const eff = effectiveForList(behaviour, task.list_id);
   const writes = planStatusCascade(task.id, nextStatus, allTasks, {
-    cascadeEnabled: behaviour.cascadeEnabled,
+    cascadeEnabled: eff.cascade,
     // Auto-date pins a dateless task to today as it enters in_progress (the
     // planner only applies it to such writes). Skip it where the provider can't
     // store in_progress — nothing would persist. Off → omit todayKey entirely.
-    ...(behaviour.autoDate && canInProgress ? { todayKey: todayIsoKey() } : {}),
+    ...(eff.autoDate && canInProgress ? { todayKey: todayIsoKey() } : {}),
   });
   if (writes.length === 0) return null;
   await applyStatusWrites(writes, allTasks);

@@ -8,9 +8,13 @@ import { useTheme, useThemedStyles, type ThemeColors } from '../theme';
 import {
   readTaskBehaviour,
   writeAutoDate,
+  writeCarryOverDefault,
   writeCascadeEnabled,
   writeCheckoffMode,
+  writeDayStartTrigger,
+  type CarryOverDefault,
   type CheckoffMode,
+  type DayStartTrigger,
 } from '../state/taskBehaviour';
 
 // Tasks settings — the global task-behaviour knobs (the mobile twin of the
@@ -65,6 +69,8 @@ export default function TaskSettingsScreen() {
   const [checkoffMode, setCheckoffMode] = useState<CheckoffMode>('toggle');
   const [cascade, setCascade] = useState(true);
   const [autoDate, setAutoDate] = useState(true);
+  const [carryOver, setCarryOver] = useState<CarryOverDefault>('ask');
+  const [dayStart, setDayStart] = useState<DayStartTrigger>('00:00');
 
   // Reflect the stored knobs whenever focused (they may have been set on
   // another device, or just hydrated after this screen first mounted).
@@ -74,6 +80,8 @@ export default function TaskSettingsScreen() {
         setCheckoffMode(b.checkoffMode);
         setCascade(b.cascadeEnabled);
         setAutoDate(b.autoDate);
+        setCarryOver(b.carryOverDefault);
+        setDayStart(b.dayStartTrigger);
       });
     }, []),
   );
@@ -81,6 +89,16 @@ export default function TaskSettingsScreen() {
   const onCheckoffChange = useCallback((next: CheckoffMode) => {
     setCheckoffMode(next);
     void writeCheckoffMode(next);
+  }, []);
+
+  const onCarryOverChange = useCallback((next: CarryOverDefault) => {
+    setCarryOver(next);
+    void writeCarryOverDefault(next);
+  }, []);
+
+  const onDayStartChange = useCallback((next: DayStartTrigger) => {
+    setDayStart(next);
+    void writeDayStartTrigger(next);
   }, []);
 
   const onCascadeToggle = useCallback(() => {
@@ -145,6 +163,40 @@ export default function TaskSettingsScreen() {
         />
         <Text style={styles.hint} accessibilityRole="text">
           {t('dialogs.tasks.autoDate.hint')}
+        </Text>
+      </View>
+
+      <View style={styles.section}>
+        <RadioGroup<CarryOverDefault>
+          label={t('dialogs.tasks.carryOverDefault.heading')}
+          value={carryOver}
+          options={[
+            { value: 'ask', label: t('dialogs.tasks.carryOverDefault.options.ask') },
+            { value: 'today', label: t('dialogs.tasks.carryOverDefault.options.today') },
+            { value: 'backlog', label: t('dialogs.tasks.carryOverDefault.options.backlog') },
+          ]}
+          onChange={onCarryOverChange}
+        />
+        <Text style={styles.hint} accessibilityRole="text">
+          {t('dialogs.tasks.carryOverDefault.hint')}
+        </Text>
+      </View>
+
+      <View style={styles.section}>
+        <RadioGroup<DayStartTrigger>
+          label={t('dialogs.tasks.dayStartTrigger.heading')}
+          value={dayStart}
+          options={[
+            { value: '00:00', label: t('dialogs.tasks.dayStartTrigger.options.midnight') },
+            { value: '06:00', label: t('dialogs.tasks.dayStartTrigger.options.morning0600') },
+            { value: '08:00', label: t('dialogs.tasks.dayStartTrigger.options.morning0800') },
+            { value: '12:00', label: t('dialogs.tasks.dayStartTrigger.options.morning1200') },
+            { value: 'app-start', label: t('dialogs.tasks.dayStartTrigger.options.appStart') },
+          ]}
+          onChange={onDayStartChange}
+        />
+        <Text style={styles.hint} accessibilityRole="text">
+          {t('dialogs.tasks.dayStartTrigger.hint')}
         </Text>
       </View>
     </ScrollView>
