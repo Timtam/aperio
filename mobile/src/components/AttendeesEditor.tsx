@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AccessibilityInfo,
@@ -10,19 +10,27 @@ import {
   View,
 } from 'react-native';
 
+import { formatAttendee } from '@aperio/shared';
+
 import { useListFocusManager } from '../a11y/useListFocusManager';
 import { parseAttendee } from '../api/calendar';
+import { searchContacts, type Contact } from '../api/contacts';
 import { useTheme, useThemedStyles, type ThemeColors } from '../theme';
 
-// Event attendees editor — the mobile analogue of the desktop AttendeePicker,
-// minus the contacts typeahead (that needs the not-yet-bridged contact search).
+// Event attendees editor — the mobile analogue of the desktop AttendeePicker.
 // Attendees are free-form "Name <email>" / bare-email strings (the wire shape);
 // the shared cal-core parser extracts the email (the CN in "Name <email>", else
 // the whole entry — it does NOT validate), so each new entry is then checked for
 // an email shape here and de-duplicated by that email. Screen-reader-first: a
-// labelled add field + button, a list of removable attendees with SR focus moved
-// on add/remove, and a "notify attendees" switch shown only when the calendar
-// can actually invite (RFC-6638 scheduling), matching the desktop's gating.
+// labelled add field + button, a contacts typeahead below it (the SR-natural
+// analogue of the desktop combobox — a list of result BUTTONS, not an
+// aria-activedescendant popup, since TalkBack/VoiceOver have no combobox idiom),
+// a list of removable attendees with SR focus moved on add/remove, and a "notify
+// attendees" switch shown only when the calendar can actually invite (RFC-6638
+// scheduling), matching the desktop's gating.
+
+const SEARCH_DEBOUNCE_MS = 180;
+const MAX_SUGGESTIONS = 8;
 
 /** A pragmatic "looks like an email" check (cal-core's parser does no
  *  validation). Stricter than the desktop picker, which accepts any non-empty
@@ -57,33 +65,102 @@ export function AttendeesEditor({
   const { colors } = useTheme();
   const [input, setInput] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [suggestions, setSuggestions] = useState<Contact[]>([]);
   // Move SR focus to the new/sibling row after add/remove (RN won't on its own).
   const { registerRow, registerAdd, onAdd, onRemove } = useListFocusManager(value.length);
 
-  const add = () => {
-    const entry = input.trim();
-    if (entry === '') return;
-    const email = emailOf(entry);
-    if (!EMAIL_RE.test(email)) {
-      setError(t('dialogs.event.attendees.invalid'));
-      AccessibilityInfo.announceForAccessibility(t('dialogs.event.attendees.invalid'));
-      return;
-    }
-    const lower = email.toLowerCase();
-    if (value.some((a) => emailOf(a).toLowerCase() === lower)) {
+  /** Append an entry: dedupe by email (or the raw string when no email), move
+   *  SR focus to the new row, announce. `validate` gates the email-shape check
+   *  — on for the free-form field, off for a picked contact (trusted). Returns
+   *  whether the field should clear. */
+  const commitEntry = useCallback(
+    (entry: string, validate: boolean): boolean => {
+      const trimmed = entry.trim();
+      if (trimmed === '') return false;
+      const email = emailOf(trimmed);
+      if (validate && !EMAIL_RE.test(email)) {
+        setError(t('dialogs.event.attendees.invalid'));
+        AccessibilityInfo.announceForAccessibility(t('dialogs.event.attendees.invalid'));
+        return false;
+      }
+      const key = (email || trimmed).toLowerCase();
+      if (value.some((a) => (emailOf(a) || a).toLowerCase() === key)) {
+        setError(null);
+        AccessibilityInfo.announceForAccessibility(t('dialogs.event.attendees.alreadyOnList'));
+        return true;
+      }
       setError(null);
+      onAdd();
+      onChange([...value, trimmed]);
+      AccessibilityInfo.announceForAccessibility(
+        t('dialogs.event.attendees.added', { name: trimmed }),
+      );
+      return true;
+    },
+    [value, onChange, onAdd, t],
+  );
+
+  const add = () => {
+    if (commitEntry(input, true)) {
       setInput('');
-      AccessibilityInfo.announceForAccessibility(t('dialogs.event.attendees.alreadyOnList'));
+      setSuggestions([]);
+    }
+  };
+
+  // Pick a contact from the typeahead — formats it to the "Name <email>" wire
+  // shape and commits (no email-shape validation; the contact is trusted).
+  const pickContact = (contact: Contact) => {
+    if (commitEntry(formatAttendee(contact), false)) {
+      setInput('');
+      setSuggestions([]);
+    }
+  };
+
+  // Contacts typeahead — debounced search over the existing bridge, mirroring
+  // the desktop AttendeePicker: filter out already-listed contacts, cap the
+  // list, and announce the result count politely so the user knows suggestions
+  // appeared without it interrupting their typing.
+  const lastAnnounced = useRef<number>(-1);
+  useEffect(() => {
+    const trimmed = input.trim();
+    if (trimmed.length < 1) {
+      setSuggestions([]);
+      lastAnnounced.current = -1;
       return;
     }
-    setError(null);
-    onAdd();
-    onChange([...value, entry]);
-    setInput('');
-    AccessibilityInfo.announceForAccessibility(
-      t('dialogs.event.attendees.added', { name: entry }),
-    );
-  };
+    let cancelled = false;
+    const handle = setTimeout(() => {
+      void searchContacts(trimmed)
+        .then((rows) => {
+          if (cancelled) return;
+          const taken = new Set(value.map((a) => emailOf(a).toLowerCase()));
+          const filtered = rows
+            .filter((c) => {
+              const email = c.emails[0]?.trim().toLowerCase();
+              return !email || !taken.has(email);
+            })
+            .slice(0, MAX_SUGGESTIONS);
+          setSuggestions(filtered);
+          // Announce once per settled result set (the debounce already gates
+          // this to typing pauses), not on every keystroke.
+          if (filtered.length !== lastAnnounced.current) {
+            lastAnnounced.current = filtered.length;
+            if (filtered.length > 0) {
+              AccessibilityInfo.announceForAccessibility(
+                t('dialogs.event.attendees.suggestionsCount', { count: filtered.length }),
+              );
+            }
+          }
+        })
+        .catch(() => {
+          if (!cancelled) setSuggestions([]);
+        });
+    }, SEARCH_DEBOUNCE_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+  }, [input, value, t]);
 
   const remove = (i: number) => {
     const removed = value[i];
@@ -154,6 +231,43 @@ export function AttendeesEditor({
         </Pressable>
       </View>
 
+      {suggestions.length > 0 && (
+        <View
+          accessibilityRole="list"
+          accessibilityLabel={t('dialogs.event.attendees.popupLabel')}
+          style={styles.suggestions}
+        >
+          {suggestions.map((c) => {
+            const email = c.emails[0]?.trim();
+            return (
+              <Pressable
+                key={c.id}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  email
+                    ? t('dialogs.event.attendees.suggestionLabel', {
+                        name: c.display_name,
+                        email,
+                      })
+                    : c.display_name
+                }
+                onPress={() => pickContact(c)}
+                style={({ pressed }) => [styles.suggestion, pressed && styles.pressed]}
+              >
+                <Text style={styles.suggestionName} importantForAccessibility="no">
+                  {c.display_name}
+                </Text>
+                {email != null && (
+                  <Text style={styles.suggestionEmail} importantForAccessibility="no">
+                    {email}
+                  </Text>
+                )}
+              </Pressable>
+            );
+          })}
+        </View>
+      )}
+
       {error != null && (
         <Text style={styles.error} accessibilityRole="text" accessibilityLiveRegion="assertive">
           {error}
@@ -222,6 +336,18 @@ const makeStyles = (c: ThemeColors) =>
       alignItems: 'center',
     },
     addButtonText: { fontSize: 16, fontWeight: '700', color: c.textOnAccent },
+    suggestions: { gap: 6 },
+    suggestion: {
+      gap: 2,
+      paddingVertical: 10,
+      paddingHorizontal: 12,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surfaceAlt,
+    },
+    suggestionName: { fontSize: 16, fontWeight: '600', color: c.textPrimary },
+    suggestionEmail: { fontSize: 14, color: c.textSecondary },
     removeButton: {
       paddingVertical: 8,
       paddingHorizontal: 12,

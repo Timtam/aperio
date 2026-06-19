@@ -1071,7 +1071,11 @@
         "removed": "{{name}} removed.",
         "alreadyOnList": "Already on the attendee list.",
         "add": "Add attendee",
-        "invalid": "Enter a valid email address."
+        "invalid": "Enter a valid email address.",
+        "suggestionLabel": "{{name}}, {{email}}",
+        "suggestionsCount_one": "1 contact suggestion. Activate to add.",
+        "suggestionsCount_other": "{{count}} contact suggestions. Browse and activate to add.",
+        "noSuggestions": "No matching contacts."
       },
       "availability": {
         "check": "Check availability",

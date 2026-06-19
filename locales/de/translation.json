@@ -1071,7 +1071,11 @@
         "removed": "{{name}} entfernt.",
         "alreadyOnList": "Steht bereits auf der Teilnehmerliste.",
         "add": "Teilnehmer hinzufügen",
-        "invalid": "Gib eine gültige E-Mail-Adresse ein."
+        "invalid": "Gib eine gültige E-Mail-Adresse ein.",
+        "suggestionLabel": "{{name}}, {{email}}",
+        "suggestionsCount_one": "1 Kontaktvorschlag. Aktivieren zum Hinzufügen.",
+        "suggestionsCount_other": "{{count}} Kontaktvorschläge. Durchgehen und aktivieren zum Hinzufügen.",
+        "noSuggestions": "Keine passenden Kontakte."
       },
       "availability": {
         "check": "Verfügbarkeit prüfen",

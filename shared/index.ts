@@ -14,3 +14,4 @@ export * from './taskCascade';
 export * from './dayStart';
 export * from './links';
 export * from './planTaskDates';
+export * from './formatAttendee';

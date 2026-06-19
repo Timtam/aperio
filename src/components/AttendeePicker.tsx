@@ -9,10 +9,11 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { formatAttendee } from '@aperio/shared';
+
 import { useAnnouncer } from '../a11y/announcerContext';
 import { searchContacts } from '../api/client';
 import type { Contact } from '../api/types';
-import { formatAttendee } from './formatAttendee';
 
 /**
  * Attendees picker for the EventDialog (DESIGN.md §10.4).
