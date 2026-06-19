@@ -786,6 +786,8 @@ external fun uniffi_cal_ffi_checksum_method_host_accounts_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_add_event_exdate_json(
 ): Short
+external fun uniffi_cal_ffi_checksum_method_host_adopt_local_dataset_json(
+): Short
 external fun uniffi_cal_ffi_checksum_method_host_adopt_remote_encryption_json(
 ): Short
 external fun uniffi_cal_ffi_checksum_method_host_begin_oauth_json(
@@ -1109,6 +1111,8 @@ external fun uniffi_cal_ffi_fn_method_host_accounts_json(`ptr`: Long,uniffi_out_
 ): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_add_event_exdate_json(`ptr`: Long,`id`: RustBuffer.ByValue,`occurrence`: RustBuffer.ByValue,`calendarId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_cal_ffi_fn_method_host_adopt_local_dataset_json(`ptr`: Long,`configJson`: RustBuffer.ByValue,`deviceName`: RustBuffer.ByValue,`passphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_cal_ffi_fn_method_host_adopt_remote_encryption_json(`ptr`: Long,`passphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_cal_ffi_fn_method_host_begin_oauth_json(`ptr`: Long,`pluginId`: RustBuffer.ByValue,`argsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1548,6 +1552,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_add_event_exdate_json() != 10745.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_cal_ffi_checksum_method_host_adopt_local_dataset_json() != 28459.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_cal_ffi_checksum_method_host_adopt_remote_encryption_json() != 12036.toShort()) {
@@ -3046,6 +3053,19 @@ public interface HostInterface {
     fun `addEventExdateJson`(`id`: kotlin.String, `occurrence`: kotlin.String, `calendarId`: kotlin.String?)
     
     /**
+     * "Start fresh" (§19.11) — overwrite the target's `meta.json` so it names
+     * only THIS device, optionally minting end-to-end encryption from a
+     * passphrase, then activate + persist the target. The mobile twin of the
+     * desktop `adopt_local_dataset`; the unified Connect button uses it to
+     * INITIALISE an empty target (and, behind a confirm, to overwrite an
+     * existing one). Unlike `enable_sync_encryption_json` (which always enables
+     * E2E), a blank/whitespace passphrase means a PLAINTEXT fresh dataset, not
+     * an error — matching the desktop adopt semantics. Returns the
+     * OnboardingReport JSON.
+     */
+    fun `adoptLocalDatasetJson`(`configJson`: kotlin.String, `deviceName`: kotlin.String?, `passphrase`: kotlin.String?): kotlin.String
+    
+    /**
      * Adopt encryption a PEER turned on (§19.7): this device was syncing the
      * dataset in PLAINTEXT, a peer enabled E2E, and the next round failed with
      * `encryption_required` (the orchestrator's encryption gate). Pure unlock —
@@ -4138,6 +4158,31 @@ open class Host: Disposable, AutoCloseable, HostInterface
 }
     }
     
+    
+
+    
+    /**
+     * "Start fresh" (§19.11) — overwrite the target's `meta.json` so it names
+     * only THIS device, optionally minting end-to-end encryption from a
+     * passphrase, then activate + persist the target. The mobile twin of the
+     * desktop `adopt_local_dataset`; the unified Connect button uses it to
+     * INITIALISE an empty target (and, behind a confirm, to overwrite an
+     * existing one). Unlike `enable_sync_encryption_json` (which always enables
+     * E2E), a blank/whitespace passphrase means a PLAINTEXT fresh dataset, not
+     * an error — matching the desktop adopt semantics. Returns the
+     * OnboardingReport JSON.
+     */
+    @Throws(StoreException::class)override fun `adoptLocalDatasetJson`(`configJson`: kotlin.String, `deviceName`: kotlin.String?, `passphrase`: kotlin.String?): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(StoreException) { _status ->
+    UniffiLib.uniffi_cal_ffi_fn_method_host_adopt_local_dataset_json(
+        it,
+        FfiConverterString.lower(`configJson`),FfiConverterOptionalString.lower(`deviceName`),FfiConverterOptionalString.lower(`passphrase`),_status)
+}
+    }
+    )
+    }
     
 
     

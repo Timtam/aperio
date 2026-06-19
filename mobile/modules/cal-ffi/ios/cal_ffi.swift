@@ -1048,6 +1048,19 @@ public protocol HostProtocol: AnyObject, Sendable {
     func addEventExdateJson(id: String, occurrence: String, calendarId: String?) throws 
     
     /**
+     * "Start fresh" (§19.11) — overwrite the target's `meta.json` so it names
+     * only THIS device, optionally minting end-to-end encryption from a
+     * passphrase, then activate + persist the target. The mobile twin of the
+     * desktop `adopt_local_dataset`; the unified Connect button uses it to
+     * INITIALISE an empty target (and, behind a confirm, to overwrite an
+     * existing one). Unlike `enable_sync_encryption_json` (which always enables
+     * E2E), a blank/whitespace passphrase means a PLAINTEXT fresh dataset, not
+     * an error — matching the desktop adopt semantics. Returns the
+     * OnboardingReport JSON.
+     */
+    func adoptLocalDatasetJson(configJson: String, deviceName: String?, passphrase: String?) throws  -> String
+    
+    /**
      * Adopt encryption a PEER turned on (§19.7): this device was syncing the
      * dataset in PLAINTEXT, a peer enabled E2E, and the next round failed with
      * `encryption_required` (the orchestrator's encryption gate). Pure unlock —
@@ -2098,6 +2111,28 @@ open func addEventExdateJson(id: String, occurrence: String, calendarId: String?
         FfiConverterOptionString.lower(calendarId),$0
     )
 }
+}
+    
+    /**
+     * "Start fresh" (§19.11) — overwrite the target's `meta.json` so it names
+     * only THIS device, optionally minting end-to-end encryption from a
+     * passphrase, then activate + persist the target. The mobile twin of the
+     * desktop `adopt_local_dataset`; the unified Connect button uses it to
+     * INITIALISE an empty target (and, behind a confirm, to overwrite an
+     * existing one). Unlike `enable_sync_encryption_json` (which always enables
+     * E2E), a blank/whitespace passphrase means a PLAINTEXT fresh dataset, not
+     * an error — matching the desktop adopt semantics. Returns the
+     * OnboardingReport JSON.
+     */
+open func adoptLocalDatasetJson(configJson: String, deviceName: String?, passphrase: String?)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeStoreError_lift) {
+    uniffi_cal_ffi_fn_method_host_adopt_local_dataset_json(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(configJson),
+        FfiConverterOptionString.lower(deviceName),
+        FfiConverterOptionString.lower(passphrase),$0
+    )
+})
 }
     
     /**
@@ -7068,6 +7103,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_add_event_exdate_json() != 10745) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_cal_ffi_checksum_method_host_adopt_local_dataset_json() != 28459) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_cal_ffi_checksum_method_host_adopt_remote_encryption_json() != 12036) {

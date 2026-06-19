@@ -3960,6 +3960,80 @@ impl Host {
         to_json(&report)
     }
 
+    /// "Start fresh" (§19.11) — overwrite the target's `meta.json` so it names
+    /// only THIS device, optionally minting end-to-end encryption from a
+    /// passphrase, then activate + persist the target. The mobile twin of the
+    /// desktop `adopt_local_dataset`; the unified Connect button uses it to
+    /// INITIALISE an empty target (and, behind a confirm, to overwrite an
+    /// existing one). Unlike `enable_sync_encryption_json` (which always enables
+    /// E2E), a blank/whitespace passphrase means a PLAINTEXT fresh dataset, not
+    /// an error — matching the desktop adopt semantics. Returns the
+    /// OnboardingReport JSON.
+    pub fn adopt_local_dataset_json(
+        &self,
+        config_json: String,
+        device_name: Option<String>,
+        passphrase: Option<String>,
+    ) -> Result<String, StoreError> {
+        let req: ConfigureSyncRequest = from_json("sync config", &config_json)?;
+        let plain = self.build_plain_sync_adapter(&req)?;
+        self.runtime
+            .block_on(async { plain.test_connection().await })
+            .map_err(sync_err)?;
+        // Mint v2 E2E material only when a passphrase is given (a fresh DEK + a
+        // KEK derived from the passphrase + fresh params; the wrapped DEK is
+        // recorded in the params written to meta.json) — mirrors
+        // enable_sync_encryption_json's fresh branch. A blank passphrase leaves
+        // the fresh dataset plaintext (the user can enable E2E afterwards).
+        let (key, e2e_params): (Option<[u8; KEY_LEN]>, Option<EncryptionParams>) =
+            match passphrase
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                Some(pp) => {
+                    let mut params = EncryptionParams::fresh();
+                    let kek = derive_key(pp, &params).map_err(sync_err)?;
+                    let dek = fresh_data_key();
+                    let wrapped = wrap_key(&kek, &dek).map_err(sync_err)?;
+                    params.wrapped_data_key = Some(wrapped);
+                    (Some(dek), Some(params))
+                }
+                None => (None, None),
+            };
+        let adapter = wrap_if_encrypted(plain, key);
+        let trimmed = device_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        // Crash-safest order (no concurrent scheduler on mobile): adopt_local
+        // writes the fresh meta.json + registers this device FIRST; only after it
+        // succeeds do we activate, persist, and store the key + flag — so a
+        // mid-failure leaves neither key nor flag set.
+        let report = self
+            .runtime
+            .block_on(async {
+                self.onboarding
+                    .adopt_local(adapter.as_ref(), trimmed, e2e_params)
+                    .await
+            })
+            .map_err(sync_err)?;
+        self.orchestrator.configure(adapter);
+        self.persist_sync_config(&req)?;
+        let shared = self.db.shared();
+        let prefs = UserPrefsRepo::new(&shared);
+        if let Some(k) = key {
+            store_e2e_key(self.secret_store.as_ref(), &k)?;
+            prefs
+                .set(host_core::credential_sync::PREF_E2E_ENABLED, "true")
+                .map_err(storage_err)?;
+        } else {
+            // A plaintext fresh dataset clears any stale E2E flag.
+            let _ = prefs.delete(host_core::credential_sync::PREF_E2E_ENABLED);
+        }
+        to_json(&report)
+    }
+
     /// Rotate the dataset's E2E passphrase (§19.7): verify `old_passphrase`
     /// against the dataset's `meta.json` params (recovering the UNCHANGED data
     /// key), then mint a fresh KEK from `new_passphrase` over a freshly-rotated
