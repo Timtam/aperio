@@ -13,7 +13,14 @@
 // fields are dropped before the bridge call — documented per function.
 
 import CalFfi from '../../modules/cal-ffi';
-import type { Section, Task, TaskList } from '@aperio/shared';
+import type {
+  MemberRight,
+  Section,
+  Task,
+  TaskList,
+  TaskListShare,
+  TaskUser,
+} from '@aperio/shared';
 
 import { scheduleBackgroundPush } from './syncTriggers';
 
@@ -104,10 +111,11 @@ export const getTaskById = async (id: string): Promise<Task | null> => {
 };
 
 /** Create a task. Builds a `cal_core::NewTask` in the serde shape the desktop
- *  also produces: `list_id` is passed positionally and `assignees` is dropped
- *  (the local store doesn't persist them); `resurface_date`/`series_id` are
- *  store-managed (sent null). A recurring task gets a stable series id, and
- *  completing one later spawns its next instance — visible on the next fetch. */
+ *  also produces: `list_id` is passed positionally; `resurface_date`/`series_id`
+ *  are store-managed (sent null). `assignees` rides through to an external
+ *  adapter that supports sharing (§9.7); the local store simply ignores them. A
+ *  recurring task gets a stable series id, and completing one later spawns its
+ *  next instance — visible on the next fetch. */
 export const createTask = async (request: CreateTaskRequest): Promise<Task> => {
   const newTask = {
     title: request.title,
@@ -126,7 +134,7 @@ export const createTask = async (request: CreateTaskRequest): Promise<Task> => {
     color_label: request.color_label,
     reminders: request.reminders,
     sound: request.sound,
-    assignees: [],
+    assignees: request.assignees,
   };
   const created = JSON.parse(
     await CalFfi.createTaskJson(request.list_id, JSON.stringify(newTask)),
@@ -227,4 +235,64 @@ export const deleteSection = async (
 ): Promise<void> => {
   await CalFfi.deleteSection(id, listId);
   scheduleBackgroundPush();
+};
+
+// ── Collaboration: assignees + members/sharing (§9.7) ──────────────────────────
+//
+// Routed Rust-side to the owning external adapter; all degrade to empty/null for
+// local lists and providers without sharing. Member mutations are external-only,
+// so they don't trigger a local sync push (the provider self-syncs).
+
+/** Users assignable to a task in `listId` — its collaborator pool. Empty for
+ *  local lists / providers without sharing. */
+export const taskListMembers = async (listId: string): Promise<TaskUser[]> =>
+  JSON.parse(await CalFfi.taskListMembersJson(listId)) as TaskUser[];
+
+/** The connected account's identity ("me") for `listId`, to mark "assigned to
+ *  me". `null` for local lists / providers without a user concept. */
+export const taskCurrentUser = async (
+  listId: string,
+): Promise<TaskUser | null> =>
+  JSON.parse(await CalFfi.taskCurrentUserJson(listId)) as TaskUser | null;
+
+/** The editable membership/shares of `listId` (with rights + pending state).
+ *  Empty for local / non-manageable backends. */
+export const taskListShares = async (
+  listId: string,
+): Promise<TaskListShare[]> =>
+  JSON.parse(await CalFfi.taskListSharesJson(listId)) as TaskListShare[];
+
+/** Directory search for users to add to `listId` (Vikunja). Empty for backends
+ *  without a directory (Todoist invites by raw email). */
+export const taskSearchUsers = async (
+  listId: string,
+  query: string,
+): Promise<TaskUser[]> =>
+  JSON.parse(await CalFfi.taskSearchUsersJson(listId, query)) as TaskUser[];
+
+/** Add/invite a member. `memberRef` is the provider's add key (Vikunja
+ *  username, Todoist email); `right` is null where the backend has no roles. */
+export const taskAddMember = async (
+  listId: string,
+  memberRef: string,
+  right: MemberRight | null,
+): Promise<void> => {
+  await CalFfi.taskAddMember(listId, memberRef, right);
+};
+
+/** Remove a member from `listId` (`memberRef` = the provider's remove key). */
+export const taskRemoveMember = async (
+  listId: string,
+  memberRef: string,
+): Promise<void> => {
+  await CalFfi.taskRemoveMember(listId, memberRef);
+};
+
+/** Change a member's `right` on `listId` (Vikunja). */
+export const taskSetMemberRight = async (
+  listId: string,
+  memberRef: string,
+  right: MemberRight,
+): Promise<void> => {
+  await CalFfi.taskSetMemberRight(listId, memberRef, right);
 };

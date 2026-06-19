@@ -1181,6 +1181,9 @@
       },
       "assignees": {
         "add": "Add person …",
+        "addNamed": "Add {{name}}",
+        "added": "Added {{name}}",
+        "removed": "Removed {{name}}",
         "remove": "Remove {{name}}",
         "you": "{{name}} (me)"
       },

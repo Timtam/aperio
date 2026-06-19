@@ -24,10 +24,19 @@ import type {
   TaskPriority,
   TaskRecurrenceValue,
   TaskStatus,
+  TaskUser,
 } from '@aperio/shared';
 import { TASK_RECURRENCE_DEFAULT, fromBackend, toBackend } from '@aperio/shared';
 
-import { createTask, getTaskById, getTasks, updateTask } from '../api/client';
+import {
+  createTask,
+  getTaskById,
+  getTasks,
+  taskCurrentUser,
+  taskListMembers,
+  updateTask,
+} from '../api/client';
+import { AssigneePicker } from '../components/AssigneePicker';
 import { ColorLabelSelect } from '../components/ColorLabelSelect';
 import { DescriptionLinks } from '../components/DescriptionLinks';
 import { RadioGroup } from '../components/RadioGroup';
@@ -60,6 +69,7 @@ interface FormState {
   recurrence: TaskRecurrenceValue;
   reminders: Reminder[];
   colorLabel: string; // '' = no colour
+  assignees: TaskUser[]; // empty on local lists / providers without sharing
 }
 
 function buildInitialState(loaded: Task | null, listId: string): FormState {
@@ -78,6 +88,7 @@ function buildInitialState(loaded: Task | null, listId: string): FormState {
       recurrence: { ...TASK_RECURRENCE_DEFAULT },
       reminders: [],
       colorLabel: '',
+      assignees: [],
     };
   }
   return {
@@ -94,6 +105,7 @@ function buildInitialState(loaded: Task | null, listId: string): FormState {
     recurrence: fromBackend(loaded.recurrence),
     reminders: loaded.reminders ?? [],
     colorLabel: loaded.color_label ?? '',
+    assignees: loaded.assignees ?? [],
   };
 }
 
@@ -162,6 +174,11 @@ export default function TaskEditorModal({
   const [loaded, setLoaded] = useState<Task | null>(null);
   const [loading, setLoading] = useState(taskId != null);
   const [error, setError] = useState<string | null>(null);
+  // The selected list's assignable member pool + the connected account's own id
+  // ("me"), for the assignee picker. Both empty/null for local lists and
+  // providers without sharing — the picker is then hidden (§9.7).
+  const [members, setMembers] = useState<TaskUser[]>([]);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   const titleRef = useRef<TextInput | null>(null);
   const scheduledDateRef = useRef<TextInput | null>(null);
@@ -223,6 +240,39 @@ export default function TaskEditorModal({
     }
   }, [form.listId, sectionsByList, loadSections]);
 
+  // Load the selected list's assignable member pool + "me" for the assignee
+  // picker. Both come back empty/null for local lists + providers without
+  // sharing (the picker is then hidden), so this runs for any list; a stale
+  // in-flight result from a previous list is ignored.
+  useEffect(() => {
+    const list = form.listId;
+    if (!list) {
+      setMembers([]);
+      setCurrentUserId(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const [pool, me] = await Promise.all([
+          taskListMembers(list),
+          taskCurrentUser(list),
+        ]);
+        if (cancelled) return;
+        setMembers(pool);
+        setCurrentUserId(me?.id ?? null);
+      } catch {
+        if (!cancelled) {
+          setMembers([]);
+          setCurrentUserId(null);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [form.listId]);
+
   const update = useCallback(
     <K extends keyof FormState>(key: K, value: FormState[K]) =>
       setForm((f) => ({ ...f, [key]: value })),
@@ -234,7 +284,14 @@ export default function TaskEditorModal({
       setForm((f) => {
         const secs = sectionsByList[nextListId] ?? [];
         const keep = secs.some((s) => s.id === f.sectionId);
-        return { ...f, listId: nextListId, sectionId: keep ? f.sectionId : '' };
+        // A different list means a different member pool, so drop the assignees
+        // (the new list's picker re-offers from its own pool).
+        return {
+          ...f,
+          listId: nextListId,
+          sectionId: keep ? f.sectionId : '',
+          assignees: [],
+        };
       });
       if (!(nextListId in sectionsByList)) void loadSections(nextListId);
     },
@@ -371,7 +428,9 @@ export default function TaskEditorModal({
           section_id: canSection ? form.sectionId || null : null,
           color_label: isLocalList ? form.colorLabel || null : null,
           reminders: form.reminders,
-          assignees: [],
+          // Rides through to a sharing-capable external adapter; the local store
+          // ignores it (the picker is hidden for local lists, so it's empty there).
+          assignees: form.assignees,
           sound: null,
         });
         // Adding a subtask can change the parent's derived status (e.g. an open
@@ -385,8 +444,8 @@ export default function TaskEditorModal({
         );
       } else if (loaded != null) {
         // Spread ...loaded so store-managed fields (series_id, resurface_date,
-        // etag, created_at) AND the not-yet-editable ones (recurrence, reminders,
-        // sound, colour, assignees — sub-4b/desktop) round-trip untouched.
+        // etag, created_at) AND the not-yet-editable ones (per-task sound)
+        // round-trip untouched; the edited fields below (incl. assignees) win.
         // Pass loaded.list_id as the previous list so a list-picker change is
         // detected as a cross-list move (create-on-target + delete-from-source)
         // rather than an in-place PATCH at the wrong resource (412/404 external).
@@ -409,6 +468,7 @@ export default function TaskEditorModal({
             deadline_time: dead.time,
             recurrence: canRecur ? toBackend(form.recurrence) : null,
             reminders: form.reminders,
+            assignees: form.assignees,
             description,
             // Local task: the picker drives the colour; external: leave the
             // (override-stamped) value untouched (external colour = later).
@@ -573,6 +633,17 @@ export default function TaskEditorModal({
         value={form.reminders}
         onChange={(reminders) => update('reminders', reminders)}
       />
+
+      {/* Assignees — only when the selected list has an assignable member pool
+          (external, sharing-capable providers). Hidden for local lists. */}
+      {members.length > 0 && (
+        <AssigneePicker
+          members={members}
+          value={form.assignees}
+          currentUserId={currentUserId}
+          onChange={(next) => update('assignees', next)}
+        />
+      )}
 
       <View style={styles.buttons}>
         <Pressable
