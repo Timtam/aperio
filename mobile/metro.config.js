@@ -21,4 +21,17 @@ const localesDir = path.resolve(__dirname, '..', 'locales');
 const sharedDir = path.resolve(__dirname, '..', 'shared');
 config.watchFolders = [...(config.watchFolders ?? []), localesDir, sharedDir];
 
+// @aperio/shared's own files (e.g. shared/links.ts → `linkify-it`, recurrence.ts
+// → `rrule`) import third-party packages that are declared in THIS app's
+// package.json. Because the package is symlinked at the repo root, Metro's
+// hierarchical lookup from shared/*.ts would search the repo-root node_modules
+// (absent on EAS — only mobile/node_modules is installed), so those imports
+// failed the production bundle. Add this project's node_modules as an explicit
+// resolver root so the shared package resolves its deps from where they're
+// actually installed — the standard Expo-monorepo nodeModulesPaths fix.
+config.resolver.nodeModulesPaths = [
+  ...(config.resolver.nodeModulesPaths ?? []),
+  path.resolve(__dirname, 'node_modules'),
+];
+
 module.exports = config;
