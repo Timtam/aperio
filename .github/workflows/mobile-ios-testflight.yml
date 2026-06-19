@@ -1,0 +1,139 @@
+name: Mobile iOS TestFlight
+
+# Full headless iOS pipeline: build the cal-ffi XCFramework on a macOS runner,
+# drop the fresh artifact into the Expo app, then run EAS Build + auto-submit to
+# TestFlight. The only secret needed is EXPO_TOKEN (an Expo access token) — the
+# Apple submit credentials (ASC API key) live on the EAS servers, so no Apple
+# secrets are stored here.
+#
+# This replaces the local "vendor the >100MB libs -> commit-locally -> eas build
+# -> soft-reset" dance: CI rebuilds the framework fresh every run, so the binary
+# never needs to live in git, and there is no committed-tree skew between the
+# Swift bindings and the static lib.
+#
+# Trigger: manual only. From GitHub → Actions → "Mobile iOS TestFlight" → Run
+# workflow, pick the branch to build. NOTE: the "Run workflow" button only shows
+# once this file exists on the DEFAULT branch (main) — that's a GitHub rule for
+# workflow_dispatch — so the file is kept on main too (it never runs on its own).
+# Dispatching against feat/mobile-foundation checks out and builds that branch.
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: EAS build profile
+        default: production
+        type: choice
+        options: [production, preview]
+      submit:
+        description: Auto-submit to TestFlight (production only)
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  # 1) Build the iOS Rust artifact where a Mac is required. Identical to the
+  #    cal-ffi-ios-xcframework workflow's steps; uploaded for the eas job below.
+  xcframework:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Add iOS Rust targets
+        run: rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
+
+      - name: Build cal-ffi static libs (release)
+        run: |
+          cargo build -p cal-ffi --release --target aarch64-apple-ios
+          cargo build -p cal-ffi --release --target aarch64-apple-ios-sim
+          cargo build -p cal-ffi --release --target x86_64-apple-ios
+
+      - name: Generate UniFFI Swift bindings
+        run: |
+          cargo build -p cal-ffi --release
+          cargo run -p cal-ffi --features cli --bin uniffi-bindgen -- \
+            generate --library target/release/libcal_ffi.dylib \
+            --language swift --out-dir target/uniffi-swift
+
+      - name: Assemble framework headers
+        run: |
+          mkdir -p target/xcf-headers
+          cp target/uniffi-swift/cal_ffiFFI.h target/xcf-headers/
+          cp target/uniffi-swift/cal_ffiFFI.modulemap target/xcf-headers/module.modulemap
+
+      - name: Fat simulator static lib
+        run: |
+          mkdir -p target/ios-sim-release
+          lipo -create \
+            target/aarch64-apple-ios-sim/release/libcal_ffi.a \
+            target/x86_64-apple-ios/release/libcal_ffi.a \
+            -output target/ios-sim-release/libcal_ffi.a
+
+      - name: Create XCFramework
+        run: |
+          rm -rf target/CalFfi.xcframework
+          xcodebuild -create-xcframework \
+            -library target/aarch64-apple-ios/release/libcal_ffi.a -headers target/xcf-headers \
+            -library target/ios-sim-release/libcal_ffi.a -headers target/xcf-headers \
+            -output target/CalFfi.xcframework
+
+      - name: Stage artifact (XCFramework + Swift bindings)
+        run: |
+          mkdir -p out
+          cp -R target/CalFfi.xcframework out/
+          cp target/uniffi-swift/cal_ffi.swift out/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cal-ffi-ios
+          path: out/
+          if-no-files-found: error
+
+  # 2) Assemble the app with the fresh framework and run EAS Build. Runs on cheap
+  #    Linux — EAS does the actual iOS compile on its own macOS infra, so this job
+  #    only packages + uploads + waits.
+  eas:
+    needs: xcframework
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Drop the stale committed framework
+        run: rm -rf mobile/modules/cal-ffi/ios/CalFfi.xcframework mobile/modules/cal-ffi/ios/cal_ffi.swift
+
+      - name: Fetch the fresh framework artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: cal-ffi-ios
+          path: mobile/modules/cal-ffi/ios
+
+      - name: Ephemeral commit so EAS captures the fresh framework
+        run: |
+          git -c user.email=ci@aperio.local -c user.name="Aperio CI" add mobile/modules/cal-ffi/ios
+          git -c user.email=ci@aperio.local -c user.name="Aperio CI" commit -m "ci: vendor fresh cal-ffi xcframework [not pushed]" || echo "nothing to commit"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install JS deps
+        working-directory: mobile
+        run: npm ci
+
+      - name: Install eas-cli
+        run: npm i -g eas-cli
+
+      - name: EAS build + submit
+        working-directory: mobile
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          PROFILE="${{ github.event.inputs.profile || 'production' }}"
+          SUBMIT=""
+          if [ "${{ github.event.inputs.submit }}" != "false" ] && [ "$PROFILE" = "production" ]; then
+            SUBMIT="--auto-submit"
+          fi
+          echo "eas build --platform ios --profile $PROFILE $SUBMIT --non-interactive"
+          eas build --platform ios --profile "$PROFILE" $SUBMIT --non-interactive
