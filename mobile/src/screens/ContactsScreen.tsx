@@ -14,10 +14,13 @@ import {
 import {
   Contact,
   ContactList,
+  ContactsSyncStatus,
   deleteContact as apiDeleteContact,
   getContacts,
+  getContactsSyncStatus,
   listContactLists,
   searchContacts,
+  syncContactsNow,
 } from '../api/contacts';
 import type { RootStackScreenProps } from '../navigation/types';
 import { useCacheReload } from '../state/cacheObserver';
@@ -47,13 +50,17 @@ interface Group {
 export default function ContactsScreen({
   navigation,
 }: RootStackScreenProps<'Contacts'>) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const styles = useThemedStyles(makeStyles);
 
   const [groups, setGroups] = useState<Group[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  // Contact-sync status (for the browse-surface "Sync now" + last-synced line —
+  // the desktop surfaces a manual refresh here, not only in Settings).
+  const [syncStatus, setSyncStatus] = useState<ContactsSyncStatus | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   // Host search results (flat Contact[]) while a query is active; null = not
   // searching (browse the loaded groups).
   const [searchResults, setSearchResults] = useState<Contact[] | null>(null);
@@ -155,11 +162,50 @@ export default function ContactsScreen({
     const onFocus = () => {
       void load();
       setRefreshNonce((n) => n + 1);
+      void getContactsSyncStatus().then(setSyncStatus).catch(() => {});
     };
     const unsubscribe = navigation.addListener('focus', onFocus);
     void load();
+    void getContactsSyncStatus().then(setSyncStatus).catch(() => {});
     return unsubscribe;
   }, [navigation, load]);
+
+  // Manual contact sync from the browse surface (desktop parity). Honours the
+  // stored include-read-only pref (managed in Settings); a pass can take a few
+  // seconds, so announce that it started, then reload the groups + status.
+  const refreshNow = useCallback(async () => {
+    if (refreshing || syncStatus?.in_flight) return;
+    setRefreshing(true);
+    const include = syncStatus?.include_read_only_on_sync ?? false;
+    AccessibilityInfo.announceForAccessibility(
+      include
+        ? t('dialogs.settings.contacts.syncStartedFull')
+        : t('dialogs.settings.contacts.syncStarted'),
+    );
+    try {
+      await syncContactsNow(include);
+      await load();
+      setRefreshNonce((n) => n + 1);
+      setSyncStatus(await getContactsSyncStatus());
+    } catch (err) {
+      AccessibilityInfo.announceForAccessibility(
+        t('mobile.error', { message: errorMessage(err) }),
+      );
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refreshing, syncStatus?.in_flight, syncStatus?.include_read_only_on_sync, load, t]);
+
+  const lastSynced = useMemo(() => {
+    if (!syncStatus?.last_synced_at) return t('dialogs.settings.contacts.neverSynced');
+    const d = new Date(syncStatus.last_synced_at);
+    if (Number.isNaN(d.getTime())) return t('dialogs.settings.contacts.neverSynced');
+    const fmt = new Intl.DateTimeFormat(i18n.language, {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    });
+    return t('dialogs.settings.contacts.lastSynced', { time: fmt.format(d) });
+  }, [syncStatus?.last_synced_at, i18n.language, t]);
 
   // Live-update the browse groups while focused when an external contact-cache
   // refresh lands (the root observer already announced it politely). An active
@@ -254,9 +300,27 @@ export default function ContactsScreen({
         >
           <Text style={styles.ghostButtonText}>{t('mobile.manageContactLists')}</Text>
         </Pressable>
-        {/* Contacts settings deliberately live under Settings (not here) — the
-            desktop groups them there; the Settings hub has the entry point. */}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('dialogs.settings.contacts.syncNow')}
+          accessibilityState={{ disabled: refreshing || (syncStatus?.in_flight ?? false) }}
+          disabled={refreshing || (syncStatus?.in_flight ?? false)}
+          onPress={() => void refreshNow()}
+          style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
+        >
+          <Text style={styles.ghostButtonText}>
+            {refreshing || syncStatus?.in_flight
+              ? t('dialogs.settings.contacts.syncing')
+              : t('dialogs.settings.contacts.syncNow')}
+          </Text>
+        </Pressable>
+        {/* Full contacts settings (interval, directories, cache, privacy) live
+            under Settings; the browse surface keeps just the manual refresh. */}
       </View>
+
+      <Text style={styles.lastSynced} accessibilityRole="text">
+        {lastSynced}
+      </Text>
 
       {/* Search is a SUPERSET of browse (local FTS + every provider, incl.
           directories), so the bar shows whenever any book exists — even if
@@ -382,7 +446,13 @@ export default function ContactsScreen({
 const makeStyles = (c: ThemeColors) =>
   StyleSheet.create({
     screen: { flex: 1, backgroundColor: c.background },
-    actionBar: { flexDirection: 'row', gap: 10, padding: 12, alignItems: 'center' },
+    actionBar: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 10,
+      padding: 12,
+      alignItems: 'center',
+    },
     searchBar: { paddingHorizontal: 12, paddingBottom: 8, gap: 6 },
     searchInput: {
       fontSize: 17,
@@ -395,6 +465,7 @@ const makeStyles = (c: ThemeColors) =>
       backgroundColor: c.surface,
     },
     searchCount: { fontSize: 13, color: c.textSecondary },
+    lastSynced: { fontSize: 13, color: c.textSecondary, paddingHorizontal: 12, paddingBottom: 6 },
     primaryButton: {
       flex: 1,
       paddingVertical: 12,
