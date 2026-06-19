@@ -35,25 +35,54 @@ vc-adapter-webex-plugin = { path = "../vc-adapter-webex-plugin", optional = true
 
 [features]
 default = ["static"]
-# Pull in + register all 17 bundled adapter plugins via static linkage.
+
+# Internal marker: enabled by every per-adapter feature below, so
+# `register_all_static` + its imports compile whenever AT LEAST ONE adapter is
+# linked (cargo has no "any-of" cfg, so the adapter features funnel through this).
+registry = []
+
+# Per-adapter selection — link + register exactly the adapters a consumer ships.
+# This is the seam that lets the mobile build (cal-ffi) drop an adapter it does
+# not offer simply by not enabling its feature, the static-link counterpart to
+# the desktop omitting a cdylib from `plugins/bundled/`. `cal-adapter-local` is
+# deliberately absent: it is the hardwired local store, not a bundled plugin.
+caldav = ["registry", "dep:cal-adapter-caldav-plugin"]
+ical = ["registry", "dep:cal-adapter-ical-plugin"]
+google = ["registry", "dep:cal-adapter-google-plugin"]
+microsoft-graph = ["registry", "dep:cal-adapter-microsoft-graph-plugin"]
+ews = ["registry", "dep:cal-adapter-ews-plugin"]
+vikunja = ["registry", "dep:cal-adapter-vikunja-plugin"]
+todoist = ["registry", "dep:cal-adapter-todoist-plugin"]
+sync-local = ["registry", "dep:sync-adapter-local-plugin"]
+sync-webdav = ["registry", "dep:sync-adapter-webdav-plugin"]
+sync-ftp = ["registry", "dep:sync-adapter-ftp-plugin"]
+sync-sftp = ["registry", "dep:sync-adapter-sftp-plugin"]
+sync-dropbox = ["registry", "dep:sync-adapter-dropbox-plugin"]
+sync-googledrive = ["registry", "dep:sync-adapter-googledrive-plugin"]
+vc-zoom = ["registry", "dep:vc-adapter-zoom-plugin"]
+vc-teams = ["registry", "dep:vc-adapter-teams-plugin"]
+vc-meet = ["registry", "dep:vc-adapter-meet-plugin"]
+vc-webex = ["registry", "dep:vc-adapter-webex-plugin"]
+
+# Convenience: link + register ALL 17 bundled adapter plugins (the default).
 static = [
-    "dep:cal-adapter-caldav-plugin",
-    "dep:cal-adapter-ical-plugin",
-    "dep:cal-adapter-google-plugin",
-    "dep:cal-adapter-microsoft-graph-plugin",
-    "dep:cal-adapter-ews-plugin",
-    "dep:cal-adapter-vikunja-plugin",
-    "dep:cal-adapter-todoist-plugin",
-    "dep:sync-adapter-local-plugin",
-    "dep:sync-adapter-webdav-plugin",
-    "dep:sync-adapter-ftp-plugin",
-    "dep:sync-adapter-sftp-plugin",
-    "dep:sync-adapter-dropbox-plugin",
-    "dep:sync-adapter-googledrive-plugin",
-    "dep:vc-adapter-zoom-plugin",
-    "dep:vc-adapter-teams-plugin",
-    "dep:vc-adapter-meet-plugin",
-    "dep:vc-adapter-webex-plugin",
+    "caldav",
+    "ical",
+    "google",
+    "microsoft-graph",
+    "ews",
+    "vikunja",
+    "todoist",
+    "sync-local",
+    "sync-webdav",
+    "sync-ftp",
+    "sync-sftp",
+    "sync-dropbox",
+    "sync-googledrive",
+    "vc-zoom",
+    "vc-teams",
+    "vc-meet",
+    "vc-webex",
 ]
 
 [lints]
