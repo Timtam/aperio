@@ -41,7 +41,9 @@ import { ColorLabelSelect } from '../components/ColorLabelSelect';
 import { DescriptionLinks } from '../components/DescriptionLinks';
 import { RadioGroup } from '../components/RadioGroup';
 import { RemindersEditor } from '../components/RemindersEditor';
+import { SoundSelect } from '../components/SoundSelect';
 import { TaskRecurrenceSelector } from '../components/TaskRecurrenceSelector';
+import { useSoundPref } from '../state/useSoundPref';
 import { useTaskStore } from '../state/taskStoreContext';
 import { recomputeAncestors } from '../state/taskToggle';
 import type { RootStackScreenProps } from '../navigation/types';
@@ -179,6 +181,11 @@ export default function TaskEditorModal({
   // providers without sharing — the picker is then hidden (§9.7).
   const [members, setMembers] = useState<TaskUser[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  // Per-task sound OVERRIDE (§14.4 item level) — a host-local `sound.item.{id}`
+  // pref, NOT the inline Task.sound (which the reminder resolver ignores).
+  // Edit-only: a new task has no id to key the pref on yet, so it inherits the
+  // list/global default until re-edited (matches the desktop).
+  const itemSound = useSoundPref(loaded ? `sound.item.${loaded.id}` : null);
 
   const titleRef = useRef<TextInput | null>(null);
   const scheduledDateRef = useRef<TextInput | null>(null);
@@ -633,6 +640,17 @@ export default function TaskEditorModal({
         value={form.reminders}
         onChange={(reminders) => update('reminders', reminders)}
       />
+
+      {/* Per-task sound override (§14.4 item level) — edit-only (a new task has
+          no id to key the pref on yet; it inherits until re-edited). */}
+      {taskId != null && loaded != null && !itemSound.loading && (
+        <SoundSelect
+          label={t('reminders.sound.label')}
+          value={itemSound.value}
+          allowInherit
+          onChange={(next) => void itemSound.save(next)}
+        />
+      )}
 
       {/* Assignees — only when the selected list has an assignable member pool
           (external, sharing-capable providers). Hidden for local lists. */}

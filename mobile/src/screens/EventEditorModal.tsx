@@ -21,6 +21,7 @@ import { EventRsvp } from '../components/EventRsvp';
 import { RadioGroup } from '../components/RadioGroup';
 import { RecurrenceSelector } from '../components/RecurrenceSelector';
 import { RemindersEditor } from '../components/RemindersEditor';
+import { SoundSelect } from '../components/SoundSelect';
 import {
   addEventExdate,
   Calendar,
@@ -33,6 +34,7 @@ import {
 import { listColorLabels } from '../api/colorLabels';
 import { setEventColor } from '../api/containerColor';
 import type { RootStackScreenProps } from '../navigation/types';
+import { useSoundPref } from '../state/useSoundPref';
 import { useTheme, useThemedStyles, type ThemeColors } from '../theme';
 
 // Create / edit a calendar event. Screen-reader-first: every control is an
@@ -40,7 +42,8 @@ import { useTheme, useThemedStyles, type ThemeColors } from '../theme';
 // RadioGroup; all-day is a switch; date/time are text fields (YYYY-MM-DD /
 // HH:MM) — the reliable SR input, matching the reminders editor. On edit the
 // loaded event is sent back whole with the edits applied, so recurrence /
-// reminders / attendees / sound (not editable here yet) round-trip untouched.
+// reminders / attendees / the inline sound field round-trip untouched (the
+// per-event sound OVERRIDE is a `sound.item.{id}` pref, edited below).
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
@@ -149,6 +152,12 @@ export default function EventEditorModal({
   // invitations (only meaningful on an external calendar with attendees).
   const [attendees, setAttendees] = useState<string[]>([]);
   const [notifyAttendees, setNotifyAttendees] = useState(true);
+  // Per-event sound OVERRIDE (§14.4 item level) — a host-local `sound.item.{id}`
+  // pref, NOT the inline Event.sound (which the reminder resolver ignores). Keyed
+  // by the loaded master id (so it's per-series). Edit-only: a new event has no
+  // id yet, so it inherits the container/global default until re-edited (matches
+  // the desktop, which hides this picker on create).
+  const itemSound = useSoundPref(original ? `sound.item.${original.id}` : null);
 
   useEffect(() => {
     void (async () => {
@@ -582,6 +591,18 @@ export default function EventEditorModal({
       {/* Reminders — relative-to-start / absolute / app-start, the same editor
           as tasks (mode="event" labels the relative kind "Before start"). */}
       <RemindersEditor mode="event" value={reminders} onChange={setReminders} />
+
+      {/* Per-event sound override (§14.4 item level) — edit-only (a new event has
+          no id to key the pref on yet; it inherits until re-edited). */}
+      {editing && original != null && !itemSound.loading && (
+        <SoundSelect
+          label={t('reminders.sound.label')}
+          value={itemSound.value}
+          allowInherit
+          onChange={(next) => void itemSound.save(next)}
+          disabled={saving}
+        />
+      )}
 
       {/* Attendees — free-form people; the notify switch shows only when the
           target calendar can actually invite (advertises RFC-6638 scheduling)

@@ -19,11 +19,20 @@ export interface SoundPrefBinding {
   save: (next: SoundConfig | null) => Promise<void>;
 }
 
-export function useSoundPref(prefKey: string): SoundPrefBinding {
+/** `prefKey` may be `null` (e.g. a per-item key whose item isn't loaded yet, or
+ *  create mode): the binding then holds `null`, isn't loading, and `save` is a
+ *  no-op — so the hook can be called unconditionally (Rules of Hooks) while the
+ *  picker that consumes it stays hidden until a real key exists. */
+export function useSoundPref(prefKey: string | null): SoundPrefBinding {
   const [value, setValue] = useState<SoundConfig | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(prefKey != null);
 
   useEffect(() => {
+    if (prefKey == null) {
+      setValue(null);
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     setLoading(true);
     void getUserPrefJson<SoundConfig>(prefKey)
@@ -43,6 +52,7 @@ export function useSoundPref(prefKey: string): SoundPrefBinding {
 
   const save = useCallback(
     async (next: SoundConfig | null) => {
+      if (prefKey == null) return;
       if (next == null) {
         await deleteUserPref(prefKey);
       } else {
