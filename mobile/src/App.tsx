@@ -31,6 +31,7 @@ import ListEditorModal from './screens/ListEditorModal';
 import ListsScreen from './screens/ListsScreen';
 import LogsScreen from './screens/LogsScreen';
 import MonthScreen from './screens/MonthScreen';
+import PlanTaskModal from './screens/PlanTaskModal';
 import QuickAddTaskModal from './screens/QuickAddTaskModal';
 import RemindersScreen from './screens/RemindersScreen';
 import SearchScreen from './screens/SearchScreen';
@@ -95,6 +96,11 @@ function TasksStackNav() {
         name="TaskEditor"
         component={TaskEditorModal}
         options={{ presentation: 'modal', title: t('mobile.newTaskLabel') }}
+      />
+      <TasksStack.Screen
+        name="PlanTask"
+        component={PlanTaskModal}
+        options={{ presentation: 'modal', title: t('mobile.plan') }}
       />
       <TasksStack.Screen
         name="Search"

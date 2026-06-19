@@ -182,6 +182,14 @@ export default function TasksScreen({
     [navigation],
   );
 
+  // Plan-from-backlog quick scheduler (Today / Tomorrow / Next Monday / custom /
+  // back-to-backlog) — the desktop's Shift+D affordance as a row action.
+  const openPlan = useCallback(
+    (task: Task) =>
+      navigation.navigate('PlanTask', { taskId: task.id, listId: task.list_id }),
+    [navigation],
+  );
+
   const newTask = useCallback(() => {
     // No list at all → send the user to create one first. Otherwise open the
     // quick-add (it resolves its own default list — last-used, else first
@@ -341,6 +349,9 @@ export default function TasksScreen({
         case 'duplicate':
           void duplicate(task);
           break;
+        case 'plan':
+          openPlan(task);
+          break;
         case 'addSubtask':
           addSubtask(task);
           break;
@@ -349,7 +360,7 @@ export default function TasksScreen({
           break;
       }
     },
-    [addSubtask, duplicate, openEditor, removeTask, toggleCollapsed, toggleDone],
+    [addSubtask, duplicate, openEditor, openPlan, removeTask, toggleCollapsed, toggleDone],
   );
 
   const taskLabel = (task: Task, colourName: string | null): string => {
@@ -412,6 +423,7 @@ export default function TasksScreen({
       { name: 'edit', label: t('mobile.rename') },
       { name: 'delete', label: t('mobile.delete') },
       { name: 'duplicate', label: t('mobile.duplicate') },
+      { name: 'plan', label: t('mobile.plan') },
     ];
     // Subtasks ride parent_id on the local store; offer "Add subtask" only for
     // local lists (external subtask support is provider-dependent — deferred).

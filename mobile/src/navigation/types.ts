@@ -34,6 +34,9 @@ export type RootStackParamList = {
   // One-tap task capture (title + optional day + list); "More details …" hands
   // off to TaskEditor. The mobile twin of the desktop QuickAddTaskDialog.
   QuickAdd: undefined;
+  // Plan-from-backlog quick scheduler (Today / Tomorrow / Next Monday / custom /
+  // back-to-backlog). The mobile twin of the desktop PlanTaskDialog.
+  PlanTask: { taskId: string; listId: string };
   Lists: undefined;
   ListEditor: { listId: string };
   // Manage a shared list's membership (§9.7) — only reachable for lists whose

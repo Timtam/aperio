@@ -8,7 +8,8 @@ import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 // edge case in "next Monday").
 
 // The helpers are pure module-scoped utilities — call them directly.
-import * as planTaskHelpers from './planTaskDates';
+// They live in @aperio/shared (reused by the mobile PlanTaskModal).
+import * as planTaskHelpers from '@aperio/shared';
 
 describe('PlanTaskDialog date helpers', () => {
   beforeEach(() => {
