@@ -11,7 +11,13 @@ import {
 } from 'react-native';
 
 import type { ColorLabel, DayOccurrence, MultiDayInfo } from '@aperio/shared';
-import { expandAll, expandToDayOccurrences, localDateKey, seriesIdOf } from '@aperio/shared';
+import {
+  expandAll,
+  expandToDayOccurrences,
+  localDateKey,
+  occurrenceIsoOf,
+  seriesIdOf,
+} from '@aperio/shared';
 
 import {
   Calendar,
@@ -195,6 +201,7 @@ export default function AgendaScreen({
       navigation.navigate('EventEditor', {
         eventId: seriesIdOf(ev),
         calendarId: ev.calendar_id,
+        occurrence: occurrenceIsoOf(ev),
       }),
     [navigation],
   );

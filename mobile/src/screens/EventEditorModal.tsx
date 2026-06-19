@@ -19,6 +19,7 @@ import { RadioGroup } from '../components/RadioGroup';
 import { RecurrenceSelector } from '../components/RecurrenceSelector';
 import { RemindersEditor } from '../components/RemindersEditor';
 import {
+  addEventExdate,
   Calendar,
   CalendarEvent,
   createEvent,
@@ -76,8 +77,12 @@ export default function EventEditorModal({
   navigation,
 }: RootStackScreenProps<'EventEditor'>) {
   const { t } = useTranslation();
-  const { eventId, calendarId } = route.params;
+  const { eventId, calendarId, occurrence } = route.params;
   const editing = eventId != null;
+  // A single occurrence of a recurring series was opened (occurrence = its
+  // instant) — offer the edit scope + seed the dates from the occurrence.
+  const isOccurrence = occurrence != null;
+  const [editScope, setEditScope] = useState<'occurrence' | 'series'>('occurrence');
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -129,12 +134,26 @@ export default function EventEditorModal({
             setTitle(ev.title);
             setCalId(ev.calendar_id);
             setAllDay(ev.all_day);
-            const s = isoToLocalParts(ev.start);
-            const e = isoToLocalParts(ev.end);
-            setStartDate(s.date);
-            setStartTime(s.time);
-            setEndDate(e.date);
-            setEndTime(e.time);
+            // Editing a single occurrence shows ITS date (the master's start is
+            // the first occurrence); keep the master's time-of-day + duration.
+            if (occurrence != null) {
+              const occStart = new Date(occurrence);
+              const dur = new Date(ev.end).getTime() - new Date(ev.start).getTime();
+              const occEnd = new Date(occStart.getTime() + (Number.isFinite(dur) ? dur : 0));
+              const so = isoToLocalParts(occStart.toISOString());
+              const eo = isoToLocalParts(occEnd.toISOString());
+              setStartDate(so.date);
+              setStartTime(so.time);
+              setEndDate(eo.date);
+              setEndTime(eo.time);
+            } else {
+              const s = isoToLocalParts(ev.start);
+              const e = isoToLocalParts(ev.end);
+              setStartDate(s.date);
+              setStartTime(s.time);
+              setEndDate(e.date);
+              setEndTime(e.time);
+            }
             setLocation(ev.location ?? '');
             setDescription(ev.description ?? '');
             setColorLabel(ev.color_label ?? '');
@@ -158,7 +177,7 @@ export default function EventEditorModal({
         setLoading(false);
       }
     })();
-  }, [editing, eventId, t]);
+  }, [editing, eventId, occurrence, t]);
 
   const save = useCallback(async () => {
     const trimmedTitle = title.trim();
@@ -204,6 +223,43 @@ export default function EventEditorModal({
     setError(null);
     setSaving(true);
     try {
+      if (
+        editing &&
+        original != null &&
+        isOccurrence &&
+        occurrence != null &&
+        editScope === 'occurrence' &&
+        original.recurrence != null
+      ) {
+        // "This occurrence only": exclude the original occurrence from the
+        // series (add its instant to the master EXDATE), then create a STANDALONE
+        // event (no recurrence) carrying the edits. Mirrors the desktop
+        // EventDialog single-instance override.
+        await addEventExdate(original.id, occurrence, original.calendar_id);
+        const created = await createEvent({
+          calendar_id: calId,
+          title: trimmedTitle,
+          description: description.trim() || null,
+          location: location.trim() || null,
+          start,
+          end,
+          all_day: allDay,
+          recurrence: null,
+          color_label: colorToSend,
+          reminders,
+          sound: null,
+          attendees,
+          send_invitations: sendInvitations,
+        });
+        if (!isLocalCal) {
+          await setEventColor(created.id, calId, colorCapable ? null : colorToSend);
+        }
+        AccessibilityInfo.announceForAccessibility(
+          t('dialogs.event.occurrenceUpdated', { title: trimmedTitle }),
+        );
+        navigation.goBack();
+        return;
+      }
       if (editing && original != null) {
         // Send the loaded event back whole with the edits applied — preserves
         // recurrence / reminders / attendees / sound / etag.
@@ -269,12 +325,15 @@ export default function EventEditorModal({
     calendars,
     colorLabel,
     description,
+    editScope,
     editing,
     endDate,
     endTime,
+    isOccurrence,
     location,
     navigation,
     notifyAttendees,
+    occurrence,
     original,
     recurrence,
     reminders,
@@ -438,13 +497,31 @@ export default function EventEditorModal({
         disabled={saving}
       />
 
+      {/* Edit scope — only when a single occurrence of a recurring series was
+          opened. "This occurrence only" excludes it + saves a standalone; "Whole
+          series" edits the master (incl. its recurrence rule). */}
+      {isOccurrence && original?.recurrence != null && (
+        <RadioGroup<'occurrence' | 'series'>
+          label={t('dialogs.event.scope.label')}
+          value={editScope}
+          options={[
+            { value: 'occurrence', label: t('dialogs.event.scope.occurrence') },
+            { value: 'series', label: t('dialogs.event.scope.series') },
+          ]}
+          onChange={setEditScope}
+        />
+      )}
+
       {/* Recurrence — RRULE builder (freq / interval / weekly days / monthly
-          mode / end), the same subset as the desktop event dialog. */}
-      <RecurrenceSelector
-        value={recurrence}
-        onChange={setRecurrence}
-        start={recurrenceStartDate(startDate)}
-      />
+          mode / end). Hidden when editing a single occurrence (the standalone
+          it becomes is non-recurring); shown for new events + whole-series edits. */}
+      {!(isOccurrence && editScope === 'occurrence') && (
+        <RecurrenceSelector
+          value={recurrence}
+          onChange={setRecurrence}
+          start={recurrenceStartDate(startDate)}
+        />
+      )}
 
       {/* Reminders — relative-to-start / absolute / app-start, the same editor
           as tasks (mode="event" labels the relative kind "Before start"). */}

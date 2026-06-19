@@ -33,7 +33,14 @@ export type RootStackParamList = {
   Week: { anchor?: string } | undefined;
   Month: { anchor?: string } | undefined;
   Agenda: { anchor?: string } | undefined;
-  EventEditor: { eventId: string | null; calendarId: string };
+  // `occurrence` (an RFC-3339 instant) marks that a single occurrence of a
+  // recurring series was opened — the editor seeds its dates from it and offers
+  // the "this occurrence vs whole series" edit scope.
+  EventEditor: {
+    eventId: string | null;
+    calendarId: string;
+    occurrence?: string | null;
+  };
   Calendars: undefined;
   CalendarEditor: { calendarId: string };
   Sync: undefined;

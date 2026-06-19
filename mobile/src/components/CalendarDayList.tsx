@@ -28,6 +28,7 @@ import {
   localDateKey,
   mergeDayItems,
   multiDayInfo,
+  occurrenceIsoOf,
   prioritySuffix,
   seriesIdOf,
   statusI18nKey,
@@ -284,6 +285,7 @@ export function CalendarDayList({
       navigation.navigate('EventEditor', {
         eventId: seriesIdOf(ev),
         calendarId: ev.calendar_id,
+        occurrence: occurrenceIsoOf(ev),
       }),
     [navigation],
   );

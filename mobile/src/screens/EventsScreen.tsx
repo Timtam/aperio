@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 
 import type { ColorLabel } from '@aperio/shared';
-import { expandAll, seriesIdOf } from '@aperio/shared';
+import { expandAll, occurrenceIsoOf, seriesIdOf } from '@aperio/shared';
 
 import {
   Calendar,
@@ -190,13 +190,14 @@ export default function EventsScreen({ navigation, route }: RootStackScreenProps
   }, [firstCalendarId, navigation]);
 
   // Editing an occurrence edits its underlying SERIES — the expanded row's id
-  // is synthetic (`master@iso`), so resolve the real master id via seriesIdOf.
-  // (Per-occurrence scope — "this occurrence only" — is a later increment.)
+  // is synthetic (`master@iso`), so resolve the real master id via seriesIdOf;
+  // `occurrence` lets the editor offer the "this occurrence vs whole series" scope.
   const editEvent = useCallback(
     (ev: CalendarEvent) =>
       navigation.navigate('EventEditor', {
         eventId: seriesIdOf(ev),
         calendarId: ev.calendar_id,
+        occurrence: occurrenceIsoOf(ev),
       }),
     [navigation],
   );
