@@ -44,7 +44,7 @@ use std::sync::{Arc, Mutex};
 
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
-use cal_adapter_local::{LocalAdapter, SearchFilters};
+use cal_adapter_local::{prepare_fts_query, LocalAdapter, SearchFilters};
 use cal_core::{
     Calendar, CalendarFeature, ColorLabelId, ContactList, ContactsFeature, DateRange, Event,
     NewEvent, TaskList, TasksFeature,
@@ -52,7 +52,7 @@ use cal_core::{
 use host_core::accounts::{AccountsRepo, AdapterKind};
 use host_core::cache::{
     has_snapshot, is_stale, refresh_contacts, refresh_events, refresh_tasks, spawn_item_refresh,
-    CacheObserver, CacheStore, RefreshCoordinator, SyncScope, SWR_TTL_SECS,
+    spawn_refresh, CacheObserver, CacheStore, RefreshCoordinator, SyncScope, SWR_TTL_SECS,
 };
 use host_core::conflicts::{
     ConflictKind, ConflictRecord, ConflictsError, ConflictsRepo, ResolutionChoice,
@@ -661,6 +661,30 @@ impl Host {
         let _ = self
             .cache
             .invalidate(&account, SyncScope::Contacts, list_id);
+    }
+
+    /// Invalidate an account's CALENDAR-listing snapshot after an external
+    /// calendar's listing metadata changes (a provider-side rename), so the next
+    /// `list_calendars_json` re-fetches the catalogue and shows the new name.
+    /// The listing scope has no per-container id (it's the account's whole
+    /// catalogue), so the container key is `""` — same key the listing SWR
+    /// reads/writes. A no-op for the local account (no cache row).
+    fn invalidate_calendars_listing(&self, account: &str) {
+        let _ = self.cache.invalidate(account, SyncScope::Calendars, "");
+    }
+
+    /// Invalidate an account's TASK-LIST-listing snapshot after an external task
+    /// list's listing metadata changes (a provider-side rename). Mirrors
+    /// `invalidate_calendars_listing`.
+    fn invalidate_task_lists_listing(&self, account: &str) {
+        let _ = self.cache.invalidate(account, SyncScope::TaskLists, "");
+    }
+
+    /// Invalidate an account's CONTACT-LIST-listing snapshot after an external
+    /// address book's listing metadata changes (a provider-side rename). Mirrors
+    /// `invalidate_calendars_listing`.
+    fn invalidate_contact_lists_listing(&self, account: &str) {
+        let _ = self.cache.invalidate(account, SyncScope::ContactLists, "");
     }
 
     /// Append one `sync_log` row (best-effort: a logging failure must never sink
@@ -1953,24 +1977,63 @@ impl Host {
             for c in &local {
                 self.registry.note_calendar_route(&c.id, LOCAL_ID);
             }
-            // `list_external_calendars` stamps external routes internally and
-            // swallows per-adapter errors so one dead account can't blank the
-            // whole list.
-            let external = self.registry.list_external_calendars().await;
-
-            let mut calendars: Vec<Calendar> = Vec::with_capacity(local.len() + external.len());
-            let mut accounts: Vec<String> = Vec::with_capacity(local.len() + external.len());
+            let mut calendars: Vec<Calendar> = Vec::with_capacity(local.len());
+            let mut accounts: Vec<String> = Vec::with_capacity(local.len());
             for c in local {
                 accounts.push(LOCAL_ID.to_string());
                 calendars.push(c);
             }
-            for c in external {
-                accounts.push(
-                    self.registry
-                        .account_for_calendar(&c.id)
-                        .unwrap_or_else(|| LOCAL_ID.to_string()),
-                );
-                calendars.push(c);
+
+            // External calendars via SWR, per account: a WARM account serves its
+            // cached catalogue instantly (offline, no PROPFIND/folder-walk gating
+            // the whole UI); a COLD account does a live fetch so its routes are
+            // primed + the first paint isn't empty (no cache-updated push yet to
+            // re-run this listing). Prime routes from whatever we serve, and
+            // background-refresh (which also primes routes + caches) when cold or
+            // stale. Mirrors the desktop external_calendars_swr + the mobile
+            // cold-fallback. Per-adapter errors are swallowed so one dead account
+            // can't blank the whole list.
+            for (account, adapter) in self.registry.snapshot_calendar_adapters() {
+                let state = self
+                    .cache
+                    .get_sync_state(&account, SyncScope::Calendars, "")
+                    .ok()
+                    .flatten();
+                let warm = has_snapshot(&state);
+                let stale = is_stale(&state, SWR_TTL_SECS);
+                let cals = if warm {
+                    self.cache.read_calendars(&account).unwrap_or_default()
+                } else {
+                    adapter.list_calendars().await.unwrap_or_default()
+                };
+                for c in &cals {
+                    self.registry.note_calendar_route(&c.id, &account);
+                }
+                if !warm || stale {
+                    let adapter_bg = Arc::clone(&adapter);
+                    let reg = Arc::clone(&self.registry);
+                    let acc = account.clone();
+                    spawn_refresh(
+                        self.runtime.handle(),
+                        Arc::clone(&self.cache_observer),
+                        Arc::clone(&self.cache),
+                        Arc::clone(&self.coord),
+                        SyncScope::Calendars,
+                        account.clone(),
+                        String::new(),
+                        move || async move { adapter_bg.list_calendars().await },
+                        move |c, list: &[Calendar]| {
+                            for cal in list {
+                                reg.note_calendar_route(&cal.id, &acc);
+                            }
+                            c.replace_calendars(&acc, list)
+                        },
+                    );
+                }
+                for c in cals {
+                    accounts.push(account.clone());
+                    calendars.push(c);
+                }
             }
 
             // Synthetic, read-only birthday calendars (§10.3) from the LOCAL
@@ -2177,16 +2240,34 @@ impl Host {
     /// snapshot-cache half needs the SWR cache the mobile host lacks, so it's
     /// omitted (a known parity gap). `filters_json` is a JSON `SearchFilters`, or
     /// `""` for no filters (default = both kinds, no restrictions).
+    //
+    // External snapshot-cache half (§13.1 — search covers every locally cached
+    // item): the cache now exists, so the FTS mirrors are merged in below, best
+    // effort. (Doc comment left verbatim so the UniFFI per-method checksum stays
+    // identical — no binding regen; see reference_uniffi_docstring_checksum.)
     pub fn search_json(&self, query: String, filters_json: String) -> Result<String, StoreError> {
         let filters: SearchFilters = if filters_json.trim().is_empty() {
             SearchFilters::default()
         } else {
             from_json("filters", &filters_json)?
         };
-        let results = self
+        let mut results = self
             .adapter
             .search(&query, &filters)
             .map_err(map_store_err)?;
+
+        // EXTERNAL snapshot-cache half. Best-effort: an error is swallowed so a
+        // stale cache can't sink the whole search — the local results are always
+        // returned. Empty MATCH string → no cache hits (the FTS helpers no-op).
+        let fts = prepare_fts_query(&query);
+        if !fts.is_empty() {
+            if let Ok(events) = self.cache.search_events_fts(&fts, &filters) {
+                results.events.extend(events);
+            }
+            if let Ok(tasks) = self.cache.search_tasks_fts(&fts, &filters) {
+                results.tasks.extend(tasks);
+            }
+        }
         to_json(&results)
     }
 
@@ -2520,11 +2601,57 @@ impl Host {
         for l in &local {
             self.registry.note_task_list_route(&l.id, LOCAL_ID);
         }
-        // `list_external_task_lists` stamps external routes internally + swallows
-        // per-adapter errors (mirrors `list_external_calendars`).
-        let external = self
-            .runtime
-            .block_on(async { self.registry.list_external_task_lists().await });
+        // External task lists via SWR, per account — same shape as the calendar
+        // listing (see list_calendars_json): a WARM account serves its cached
+        // catalogue instantly (offline, no provider round-trip gating the UI); a
+        // COLD account does a live fetch so its routes are primed + the first
+        // paint isn't empty (no cache-updated push yet to re-run this listing).
+        // Prime routes from whatever we serve, and background-refresh (which also
+        // primes routes + caches) when cold or stale. Per-adapter errors are
+        // swallowed so one dead account can't blank the whole list.
+        let external = self.runtime.block_on(async {
+            let mut out: Vec<TaskList> = Vec::new();
+            for (account, adapter) in self.registry.snapshot_task_adapters() {
+                let state = self
+                    .cache
+                    .get_sync_state(&account, SyncScope::TaskLists, "")
+                    .ok()
+                    .flatten();
+                let warm = has_snapshot(&state);
+                let stale = is_stale(&state, SWR_TTL_SECS);
+                let lists = if warm {
+                    self.cache.read_task_lists(&account).unwrap_or_default()
+                } else {
+                    adapter.list_task_lists().await.unwrap_or_default()
+                };
+                for l in &lists {
+                    self.registry.note_task_list_route(&l.id, &account);
+                }
+                if !warm || stale {
+                    let adapter_bg = Arc::clone(&adapter);
+                    let reg = Arc::clone(&self.registry);
+                    let acc = account.clone();
+                    spawn_refresh(
+                        self.runtime.handle(),
+                        Arc::clone(&self.cache_observer),
+                        Arc::clone(&self.cache),
+                        Arc::clone(&self.coord),
+                        SyncScope::TaskLists,
+                        account.clone(),
+                        String::new(),
+                        move || async move { adapter_bg.list_task_lists().await },
+                        move |c, list: &[TaskList]| {
+                            for l in list {
+                                reg.note_task_list_route(&l.id, &acc);
+                            }
+                            c.replace_task_lists(&acc, list)
+                        },
+                    );
+                }
+                out.extend(lists);
+            }
+            out
+        });
 
         // Snapshot account_id → adapter_kind once so the per-row capability
         // lookup is a cheap map hit (mirrors the desktop). A read failure
@@ -4299,6 +4426,7 @@ impl Host {
             // the next read on every device).
             "contact_list" => {
                 let route = self.route_contact_list(&container_id)?;
+                let is_external = route.is_some();
                 self.runtime
                     .block_on(async {
                         match route {
@@ -4310,7 +4438,17 @@ impl Host {
                             Some(ext) => ext.rename_contact_list(&container_id, trimmed).await,
                         }
                     })
-                    .map_err(map_store_err)
+                    .map_err(map_store_err)?;
+                // An EXTERNAL book's catalogue row now carries the new name at the
+                // source, so the cached contact-list listing is stale — invalidate
+                // it so the next `contact_lists_json` re-fetches the new name. (A
+                // LOCAL book is read live, never cached, so nothing to invalidate.)
+                if is_external {
+                    if let Some(account) = self.registry.account_for_contact_list(&container_id) {
+                        self.invalidate_contact_lists_listing(&account);
+                    }
+                }
+                Ok(())
             }
             // External calendar / task list: push to the provider first, override
             // only on Unsupported.
@@ -4347,9 +4485,22 @@ impl Host {
                 let shared = self.db.shared();
                 let repo = OverridesRepo::new(&shared);
                 match push_result {
-                    // Source accepted it — drop any stale override (non-fatal).
+                    // Source accepted it — drop any stale override (non-fatal) and
+                    // invalidate the cached catalogue so the next listing re-fetches
+                    // the new name (the provider's listing row changed, but the
+                    // cached row still has the old name; the read-time override is
+                    // cleared, so without this the stale cached name would win).
                     Ok(()) => {
                         let _ = repo.clear(&container_id, ck);
+                        match ck {
+                            ContainerKind::Calendar => self.invalidate_calendars_listing(&account),
+                            ContainerKind::TaskList => self.invalidate_task_lists_listing(&account),
+                            // Address books never reach this arm (the source-rename
+                            // path above returns Unsupported for them).
+                            ContainerKind::ContactList => {
+                                self.invalidate_contact_lists_listing(&account)
+                            }
+                        }
                         Ok(())
                     }
                     // Read-only source — the new name can only live as an override.
@@ -4457,7 +4608,55 @@ impl Host {
     pub fn contact_lists_json(&self) -> Result<String, StoreError> {
         let (local, external) = self.runtime.block_on(async {
             let local = self.adapter.list_contact_lists().await;
-            let external = self.registry.list_external_contact_lists().await;
+            // External contact lists via SWR, per account — same shape as the
+            // calendar listing (see list_calendars_json): a WARM account serves
+            // its cached catalogue instantly (offline, no provider round-trip
+            // gating the UI); a COLD account does a live fetch so its routes are
+            // primed + the first paint isn't empty (no cache-updated push yet to
+            // re-run this listing). Prime routes from whatever we serve, and
+            // background-refresh (which also primes routes + caches) when cold or
+            // stale. Per-adapter errors are swallowed so one dead account can't
+            // blank the whole list.
+            let mut external: Vec<ContactList> = Vec::new();
+            for (account, adapter) in self.registry.snapshot_contact_adapters() {
+                let state = self
+                    .cache
+                    .get_sync_state(&account, SyncScope::ContactLists, "")
+                    .ok()
+                    .flatten();
+                let warm = has_snapshot(&state);
+                let stale = is_stale(&state, SWR_TTL_SECS);
+                let lists = if warm {
+                    self.cache.read_contact_lists(&account).unwrap_or_default()
+                } else {
+                    adapter.list_contact_lists().await.unwrap_or_default()
+                };
+                for l in &lists {
+                    self.registry.note_contact_list_route(&l.id, &account);
+                }
+                if !warm || stale {
+                    let adapter_bg = Arc::clone(&adapter);
+                    let reg = Arc::clone(&self.registry);
+                    let acc = account.clone();
+                    spawn_refresh(
+                        self.runtime.handle(),
+                        Arc::clone(&self.cache_observer),
+                        Arc::clone(&self.cache),
+                        Arc::clone(&self.coord),
+                        SyncScope::ContactLists,
+                        account.clone(),
+                        String::new(),
+                        move || async move { adapter_bg.list_contact_lists().await },
+                        move |c, list: &[ContactList]| {
+                            for l in list {
+                                reg.note_contact_list_route(&l.id, &acc);
+                            }
+                            c.replace_contact_lists(&acc, list)
+                        },
+                    );
+                }
+                external.extend(lists);
+            }
             (local, external)
         });
         let local = local.map_err(map_store_err)?;
