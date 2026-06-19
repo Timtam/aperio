@@ -713,6 +713,61 @@ impl Host {
         let _ = self.cache.invalidate(&account, SyncScope::Tasks, list_id);
     }
 
+    /// DESIGN §9.12: a provider doesn't understand backlog / on-demand
+    /// recurrence, so when such a task COMPLETES on an external list Aperio
+    /// spawns the next instance via the same adapter. Idempotent against the
+    /// snapshot cache (the pre-update state): skip a re-save of an already-
+    /// completed task, and skip if the series already has an open instance.
+    /// Best-effort (a failure is swallowed — cal-ffi has no logger; the task is
+    /// already marked done and the next sync still reflects that). Plain
+    /// scheduled recurrence is left to the provider. Mirrors the desktop
+    /// `spawn_external_on_demand`.
+    async fn spawn_external_on_demand(&self, ext: &dyn TasksFeature, completed: &cal_core::Task) {
+        if completed.status != cal_core::TaskStatus::Completed {
+            return;
+        }
+        let Some(rec) = completed.recurrence.as_ref() else {
+            return;
+        };
+        if !cal_core::recurrence_needs_extras(rec) {
+            return;
+        }
+        let account = self
+            .registry
+            .account_for_task_list(&completed.list_id)
+            .unwrap_or_else(|| LOCAL_ID.to_string());
+        let cached = self
+            .cache
+            .read_tasks(&account, &completed.list_id)
+            .unwrap_or_default();
+        let is_open = |s| {
+            matches!(
+                s,
+                cal_core::TaskStatus::Open | cal_core::TaskStatus::InProgress
+            )
+        };
+        // Re-saving an already-completed task must not spawn again.
+        if cached
+            .iter()
+            .any(|t| t.id == completed.id && t.status == cal_core::TaskStatus::Completed)
+        {
+            return;
+        }
+        // A series spawns at most one open instance — if another client already
+        // created the next turn (and it's synced into our cache), do nothing.
+        if let Some(sid) = completed.series_id.as_deref() {
+            if cached.iter().any(|t| {
+                t.id != completed.id && t.series_id.as_deref() == Some(sid) && is_open(t.status)
+            }) {
+                return;
+            }
+        }
+        let Some(next) = cal_core::next_recurrence_instance(completed) else {
+            return;
+        };
+        let _ = ext.create_task(&completed.list_id, next).await;
+    }
+
     /// Invalidate the contacts snapshot for `list_id` after a contact mutation,
     /// so the next read sees it as cold and re-fetches. A no-op for the local
     /// account (no cache row). Mirrors `invalidate_events_cache`.
@@ -3120,10 +3175,16 @@ impl Host {
                 to_json(&updated)
             }
             Some(ext) => {
-                let updated = self
-                    .runtime
-                    .block_on(async { ext.update_task(task).await })
-                    .map_err(map_store_err)?;
+                // Capture the completion intent before `task` moves into the
+                // update — an external on-demand/backlog recurring task that just
+                // completed needs Aperio to spawn its next instance (§9.12).
+                let completed = task.clone();
+                let updated = self.runtime.block_on(async {
+                    let updated = ext.update_task(task).await.map_err(map_store_err)?;
+                    self.spawn_external_on_demand(ext.as_ref(), &completed)
+                        .await;
+                    Ok::<_, StoreError>(updated)
+                })?;
                 self.invalidate_tasks_cache(&updated.list_id);
                 to_json(&updated)
             }
