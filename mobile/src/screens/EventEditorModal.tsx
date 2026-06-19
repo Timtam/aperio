@@ -16,6 +16,7 @@ import type { ColorLabel, Reminder } from '@aperio/shared';
 import { AttendeesEditor } from '../components/AttendeesEditor';
 import { ColorLabelSelect } from '../components/ColorLabelSelect';
 import { DescriptionLinks } from '../components/DescriptionLinks';
+import { EventRsvp } from '../components/EventRsvp';
 import { RadioGroup } from '../components/RadioGroup';
 import { RecurrenceSelector } from '../components/RecurrenceSelector';
 import { RemindersEditor } from '../components/RemindersEditor';
@@ -556,6 +557,14 @@ export default function EventEditorModal({
           (calendars.find((c) => c.id === calId)?.supports_scheduling ?? false)
         }
       />
+
+      {/* RSVP — only meaningful for an existing meeting that carries per-attendee
+          response data (external, scheduling-capable providers); renders nothing
+          otherwise. A successful response closes the editor so the list refetches
+          the new status. */}
+      {editing && original != null && (
+        <EventRsvp event={original} onResponded={() => navigation.goBack()} />
+      )}
 
       <Pressable
         accessibilityRole="button"

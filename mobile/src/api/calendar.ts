@@ -202,3 +202,26 @@ export const addEventExdate = async (
  *  comes back whole as `email`; callers do their own email-shape check. */
 export const parseAttendee = (entry: string): { name: string | null; email: string } =>
   CalFfi.parseAttendee(entry);
+
+// ── RSVP (§7.3) ──────────────────────────────────────────────────────────────
+
+/** The connected account's email for `calendarId` — the RSVP "who am I", used
+ *  to tell an attendee from the organizer. `null` for local/iCal calendars and
+ *  any provider that can't report an identity (which hides the RSVP affordance). */
+export const calendarCurrentUserEmail = async (
+  calendarId: string,
+): Promise<string | null> => CalFfi.calendarCurrentUserEmail(calendarId);
+
+/** RSVP to an invitation: set the connected user's participation `status` on the
+ *  meeting. `sendResponse` also emails the reply to the organizer on a
+ *  scheduling-capable provider. Only valid on external, non-organizer meetings
+ *  (local/unroutable reject). The Host invalidates the event cache, so a refetch
+ *  reflects the new status. External-only, so no local sync push is triggered. */
+export const respondToEvent = async (
+  calendarId: string,
+  eventId: string,
+  status: AttendeeStatus,
+  sendResponse: boolean,
+): Promise<void> => {
+  await CalFfi.respondToEvent(calendarId, eventId, status, sendResponse);
+};
