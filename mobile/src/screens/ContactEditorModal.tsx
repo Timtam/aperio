@@ -1,3 +1,4 @@
+import * as ImagePicker from 'expo-image-picker';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -22,6 +23,7 @@ import {
   getContactPhoto,
   getContacts,
   listContactLists,
+  setContactPhoto,
   updateContact,
 } from '../api/contacts';
 import { RadioGroup } from '../components/RadioGroup';
@@ -36,9 +38,15 @@ import { useTheme, useThemedStyles, type ThemeColors } from '../theme';
 // per-value rows. Postal addresses ARE editable (a dynamic list of structured
 // rows; empty rows drop on save) + birthday. A "distribution list" switch turns
 // the person fields into a members editor (one "Name <email>" / bare email per
-// line), exactly like the desktop. An existing contact's avatar is shown (a real
-// image for sighted users + an accessible alt) and can be removed; setting a NEW
-// photo from the device library (the image picker) is a follow-up.
+// line), exactly like the desktop. The avatar is shown (a real image for sighted
+// users + an accessible alt), can be set from the device photo library (the
+// image picker), and removed; on a new contact the picked photo rides the
+// create.
+
+/** Photo guards — match the desktop ContactDialog (MAX_PHOTO_BYTES /
+ *  ALLOWED_PHOTO_TYPES). */
+const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
+const ALLOWED_PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/gif'];
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -304,7 +312,9 @@ export default function ContactEditorModal({
           notes: note,
           addresses: cleanedAddresses,
           members,
-          photo: null,
+          // A photo picked before saving rides the create (a person only — a
+          // distribution list has no avatar).
+          photo: isGroup ? null : photo,
         });
       }
       announce(t('mobile.saved', { title: name }));
@@ -332,12 +342,17 @@ export default function ContactEditorModal({
     organization,
     original,
     phonesText,
+    photo,
     selectedListId,
     t,
   ]);
 
   const removePhoto = useCallback(async () => {
-    if (original == null) return;
+    // A new (unsaved) contact's picked photo lives only in state — just clear it.
+    if (original == null) {
+      setPhoto(null);
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -353,6 +368,66 @@ export default function ContactEditorModal({
       setBusy(false);
     }
   }, [announce, original, t]);
+
+  // Pick an image from the device library → validate type + size → set it. For
+  // an existing contact it's pushed immediately (setContactPhoto); for a new one
+  // it's held in state and rides the create. A cancel / denied permission is
+  // silent.
+  const pickPhoto = useCallback(async () => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) return;
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: 'images',
+      base64: true,
+      quality: 0.7,
+    });
+    if (result.canceled) return;
+    const asset = result.assets[0];
+    const mime = asset.mimeType ?? 'image/jpeg';
+    if (!ALLOWED_PHOTO_TYPES.includes(mime)) {
+      const m = t('dialogs.contact.photoUnsupportedType');
+      setError(m);
+      announce(m);
+      return;
+    }
+    if (asset.base64 == null) {
+      const m = t('dialogs.contact.photoLoadFailed');
+      setError(m);
+      announce(m);
+      return;
+    }
+    // base64 decodes to ~3/4 of its length in bytes.
+    if (Math.floor((asset.base64.length * 3) / 4) > MAX_PHOTO_BYTES) {
+      const m = t('dialogs.contact.photoTooLarge', {
+        limit: `${MAX_PHOTO_BYTES / (1024 * 1024)} MB`,
+      });
+      setError(m);
+      announce(m);
+      return;
+    }
+    const picked: ContactPhoto = { content_type: mime, data: asset.base64 };
+    if (original != null) {
+      setBusy(true);
+      setError(null);
+      try {
+        await setContactPhoto(original.id, picked, original.list_id);
+        setPhoto(picked);
+        setOriginal({ ...original, has_photo: true });
+        announce(t('dialogs.contact.photoUpdated', { name: original.display_name }));
+      } catch (err) {
+        const message = errorMessage(err);
+        setError(message);
+        announce(t('mobile.error', { message }));
+      } finally {
+        setBusy(false);
+      }
+    } else {
+      // New contact — hold it; it's saved with the create.
+      setPhoto(picked);
+      setError(null);
+      announce(t('dialogs.contact.photoUpdated', { name: displayName.trim() }));
+    }
+  }, [announce, displayName, original, t]);
 
   const addAddress = useCallback(() => {
     addressFocus.onAdd();
@@ -403,26 +478,57 @@ export default function ContactEditorModal({
         />
       </Field>
 
-      {/* Photo — existing contacts only. A real image for sighted users carrying
-          an accessible alt; removable (setting a new one needs the image
-          picker, a follow-up). */}
-      {editing && (
+      {/* Photo — a person's avatar (a distribution list has none). A real image
+          for sighted users carrying an accessible alt; pick from the device
+          library (new + existing) and remove. */}
+      {!isGroup && (
         <View style={styles.field}>
           <Text style={styles.label} accessibilityRole="header">
             {t('dialogs.contact.photoSectionLabel')}
           </Text>
           {photo != null ? (
-            <>
-              <Image
-                source={{ uri: `data:${photo.content_type};base64,${photo.data}` }}
-                style={styles.photo}
-                accessible
-                accessibilityRole="image"
-                accessibilityLabel={t('dialogs.contact.photoAltSet', {
-                  name: original?.display_name ?? displayName,
-                })}
-              />
-              {!viewOnly && (
+            <Image
+              source={{ uri: `data:${photo.content_type};base64,${photo.data}` }}
+              style={styles.photo}
+              accessible
+              accessibilityRole="image"
+              accessibilityLabel={t('dialogs.contact.photoAltSet', {
+                name: original?.display_name ?? displayName,
+              })}
+            />
+          ) : (
+            <Text
+              style={styles.hint}
+              accessibilityLabel={t('dialogs.contact.photoAltNone', {
+                name: original?.display_name ?? displayName,
+              })}
+            >
+              {t('dialogs.contact.photoNone')}
+            </Text>
+          )}
+          {!viewOnly && (
+            <View style={styles.photoActions}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ disabled: busy }}
+                accessibilityLabel={t(
+                  photo != null
+                    ? 'dialogs.contact.photoReplace'
+                    : 'dialogs.contact.photoChoose',
+                )}
+                disabled={busy}
+                onPress={() => void pickPhoto()}
+                style={({ pressed }) => [styles.addButton, pressed && styles.pressed]}
+              >
+                <Text style={styles.addButtonText}>
+                  {t(
+                    photo != null
+                      ? 'dialogs.contact.photoReplace'
+                      : 'dialogs.contact.photoChoose',
+                  )}
+                </Text>
+              </Pressable>
+              {photo != null && (
                 <Pressable
                   accessibilityRole="button"
                   accessibilityState={{ disabled: busy }}
@@ -436,16 +542,7 @@ export default function ContactEditorModal({
                   </Text>
                 </Pressable>
               )}
-            </>
-          ) : (
-            <Text
-              style={styles.hint}
-              accessibilityLabel={t('dialogs.contact.photoAltNone', {
-                name: original?.display_name ?? displayName,
-              })}
-            >
-              {t('dialogs.contact.photoNone')}
-            </Text>
+            </View>
           )}
         </View>
       )}
@@ -764,6 +861,7 @@ const makeStyles = (c: ThemeColors) =>
       borderColor: c.border,
       backgroundColor: c.surfaceAlt,
     },
+    photoActions: { flexDirection: 'row', gap: 10, flexWrap: 'wrap' },
     switchRow: {
       flexDirection: 'row',
       alignItems: 'center',

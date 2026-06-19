@@ -72,7 +72,8 @@ export interface NewContact {
   notes: string | null;
   addresses: ContactAddress[];
   members: unknown[] | null;
-  photo: unknown | null;
+  /** Optional avatar to attach on create (`{content_type, data:<base64>}`). */
+  photo: ContactPhoto | null;
 }
 
 // ── Address books ────────────────────────────────────────────────────────────

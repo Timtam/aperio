@@ -35,7 +35,13 @@
     "owner": "tonirbarth",
     "plugins": [
       "expo-splash-screen",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Aperio accesses your photo library so you can set a contact's photo."
+        }
+      ]
     ]
   }
 }
