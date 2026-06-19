@@ -149,3 +149,57 @@ export const deleteContactPhoto = (
   id: string,
   listId: string | null = null,
 ): Promise<void> => CalFfi.deleteContactPhoto(id, listId);
+
+// ── Contact sync (§10.5) ──────────────────────────────────────────────────────
+//
+// The contact-sync core lives in host-core (shared with the desktop). It warms
+// every external book's listing + per-list caches; the desktop wraps it in a
+// tokio worker loop, mobile drives it from the manual button / foreground (no
+// background loop while suspended). A finished pass fires the native
+// `onContactsSynced` event; the screen seeds its footer from
+// `getContactsSyncStatus` and reconciles on that event. The interval +
+// include-read-only prefs are device-local (a per-device cadence, not synced).
+
+/** Contact-sync status (the `ContactsSyncStatus` wire shape) — the Settings
+ *  footer + the seed for the interval picker / include-read-only toggle. */
+export interface ContactsSyncStatus {
+  /** RFC-3339 of the last successful pass, or null when never synced. */
+  last_synced_at: string | null;
+  interval_minutes: number;
+  in_flight: boolean;
+  include_read_only_on_sync: boolean;
+}
+
+/** Payload of the `onContactsSynced` event (the `ContactsSyncedPayload` shape). */
+export interface ContactsSyncedPayload {
+  last_synced_at: string;
+  succeeded_accounts: string[];
+  failed_accounts: string[];
+}
+
+/** Run one contact-sync pass now (warms every external book's cache).
+ *  `includeReadOnly`: `null` reads the persisted pref (matches the desktop
+ *  manual button); `true`/`false` overrides it. Resolves `false` when a pass
+ *  was already in flight. */
+export const syncContactsNow = (
+  includeReadOnly: boolean | null = null,
+): Promise<boolean> => CalFfi.syncContactsNow(includeReadOnly);
+
+/** The current contact-sync status. */
+export const getContactsSyncStatus = async (): Promise<ContactsSyncStatus> =>
+  JSON.parse(await CalFfi.getContactsSyncStatusJson()) as ContactsSyncStatus;
+
+/** Persist the periodic-sync interval (minutes); the Host clamps to [1, 1440]
+ *  and returns the clamped value. Device-local. */
+export const setContactsSyncInterval = (minutes: number): Promise<number> =>
+  CalFfi.setContactsSyncInterval(minutes);
+
+/** Persist the "also pull read-only directories" toggle. Device-local. */
+export const setContactsIncludeReadOnlyOnSync = (
+  enabled: boolean,
+): Promise<void> => CalFfi.setContactsIncludeReadOnlyOnSync(enabled);
+
+/** Drop every external book's contact cache + reset "last synced" to never.
+ *  Resolves to the number of accounts the invalidate succeeded against. */
+export const clearContactsCache = (): Promise<number> =>
+  CalFfi.clearContactsCache();
